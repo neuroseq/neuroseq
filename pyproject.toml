@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "formozov-project"
+description = "Protoype GUI to edit and run neuron models"
+readme = "README.md"
+license = { text = "NONE" }
+authors = [{ name = "SSC", email = "ssc@iwr.uni-heidelberg.de" }]
+requires-python = ">=3.7"
+dependencies = [
+  "brian2",
+  "numpy",
+  "qtpy",
+    "pyside6",
+]
+dynamic = ["version"]
+
+[project.scripts]
+formozov-project = "formozov_project.__main__:main"
+
+[project.optional-dependencies]
+tests = [
+  "pytest",
+    "pytest-qt",
+  "pytest-randomly",
+]
+
+[tool.setuptools.dynamic]
+version = { attr = "formozov_project.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+extend-include = ["*.ipynb"]
+
+[tool.ruff.lint]
+select = [
+    # pycodestyle
+    "E",
+    # Pyflakes
+    "F",
+    # pyupgrade
+    "UP",
+    # flake8-bugbear
+    "B",
+    # flake8-simplify
+    "SIM",
+    # isort
+    "I",
+]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+force-single-line = true
