@@ -2,14 +2,14 @@
 
 [![CI](https://github.com/ssciwr/formozov-project/actions/workflows/ci.yml/badge.svg)](https://github.com/ssciwr/formozov-project/actions/workflows/ci.yml)
 
-Private repository for the Formozov project.
+Private repository containing the prototype GUI for the [Formozov project](https://github.com/ssciwr/formozov-project-notes).
 
 ## Installation
 
-If you have ssh authentication to github set up you can install directly with pip:
+If you have ssh authentication to github set up you can install directly from this repository with pip:
 
 ```bash
-`pip install git+ssh://git@github.com/ssciwr/formozov-project`
+pip install git+ssh://git@github.com/ssciwr/formozov-project
 ```
 
 Alternatively you can clone the repository and then install it:
