@@ -211,6 +211,8 @@ class B2Model:
     def save_to_h5(self) -> None:
         with h5py.File(Path(self.path, "data.h5"), "w") as h5file:
             for key, value in self.monitors.items():
+                if h5file.get("time") is None:
+                    h5file.create_dataset("time", data=self.monitors[key].t[:])
                 h5file.create_dataset(key, data=value[:])
 
     @classmethod

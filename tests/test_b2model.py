@@ -213,11 +213,21 @@ def test_define_synapse(mfx_parameterized) -> None:
     assert mfx.synapses["Ce"]["synapse"].target == mfx.neuron_subgroups["Pi"]
 
 
-def test_define_monitor() -> None:
-    pass
+def test_define_monitor(mfx_parameterized) -> None:
+    mfx = mfx_parameterized
+
+    assert mfx.monitors == {}
+
+    mfx.define_monitor("Traces_ge", b2.StateMonitor, mfx.neurongroup, "ge", record=True)
+
+    assert "Traces_ge" in mfx.monitors
+    assert mfx.monitors["Traces_ge"].source == mfx.neurongroup
+    assert mfx.monitors["Traces_ge"].record_variables == [
+        "ge",
+    ]
 
 
-def test_save_to_yaml() -> None:
+def test_save_to_yaml(mfx_parameterized) -> None:
     pass
 
 
