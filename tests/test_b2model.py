@@ -30,6 +30,51 @@ def mfx_parameterized(mfx) -> typing.Generator[B2Model, None, None]:
     yield mfx
 
 
+@pytest.fixture()
+def mfx_parameterized_with_synapse(
+    mfx_parameterized,
+) -> typing.Generator[B2Model, None, None]:
+    mfx = mfx_parameterized
+
+    taupre = 20 * b2.ms
+    taupost = taupre
+    gmax = 60 * b2.nS
+    dApre = 6 * b2.nS
+    dApost = -dApre * taupre / taupost * 1.05
+
+    mfx = mfx_parameterized
+    mfx.define_neuron_subgroup("Pe", slice(0, 24))
+    mfx.define_neuron_subgroup("Pi", slice(24, 30))
+
+    mfx.define_parameter("taupre", taupre)
+
+    mfx.define_parameter("taupost", taupost)
+
+    mfx.define_parameter("gmax", gmax)
+
+    mfx.define_parameter("dApre", dApre)
+
+    mfx.define_parameter("dApost", dApost)
+
+    mfx.define_synapse(
+        "Ce",
+        "Pe",
+        "Pi",
+        """we : siemens
+            dApre/dt = -Apre / taupre : siemens (event-driven)
+            dApost/dt = -Apost / taupost : siemens (event-driven)""",
+        on_pre="""ge += we
+                    Apre += dApre
+                    we = clip(we + Apost, -gmax, gmax)""",
+        on_post="""Apost += dApost
+                      we= clip(we + Apre, -gmax, gmax)""",
+        connection_condition="i != j",
+        connection_probability=1.0,
+    )
+
+    yield mfx
+
+
 def test_construction(tmp_path) -> None:
     model = B2Model(tmp_path, loglevel="DEBUG")
 
@@ -227,8 +272,13 @@ def test_define_monitor(mfx_parameterized) -> None:
     ]
 
 
-def test_save_to_yaml(mfx_parameterized) -> None:
-    pass
+def test_save_to_yaml(mfx_parameterized_with_synapse) -> None:
+    mfx = mfx_parameterized_with_synapse
+
+    mfx.save_to_yaml()
+
+    with open(mfx.path / "model.yaml", "r") as f:
+        data = f.save_load()
 
 
 def test_load_from_yaml() -> None:

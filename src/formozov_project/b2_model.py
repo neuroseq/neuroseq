@@ -9,6 +9,7 @@ import brian2 as b2
 import h5py
 import yaml
 
+import formozov_project.yaml_extension as yext 
 
 class B2Model:
     def _set_up_logger(self, loglevel: str) -> None:
