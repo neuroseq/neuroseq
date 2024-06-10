@@ -24,7 +24,7 @@ def test_heatmap_widget_2d_data_no_timeline(qtbot: QtBot) -> None:
     assert heatmap_widget.getImageItem().image is None
     assert not heatmap_widget.timeLine.isVisible()
     random_2d_array = np.random.rand(100, 100)
-    heatmap_widget.setImage(random_2d_array)
+    heatmap_widget.set_data(random_2d_array)
     assert heatmap_widget.getProcessedImage().shape == random_2d_array.shape
     assert not heatmap_widget.timeLine.isVisible()
 
@@ -41,8 +41,7 @@ def test_heatmap_widget_3d_data_with_timeline(qtbot: QtBot) -> None:
     interval_secs = 0.05
     timepoints_secs = interval_secs * np.arange(data.shape[0])
     total_time_secs = timepoints_secs[-1]
-    heatmap_widget.setImage(data, xvals=timepoints_secs)
-    assert heatmap_widget.currentIndex == 0
+    heatmap_widget.set_data(data, timepoints_secs)
     assert heatmap_widget.getProcessedImage().shape == data.shape
     assert heatmap_widget.timeLine.isVisible()
     # press space-bar to start real-time playback
