@@ -40,6 +40,7 @@ class B2Model:
         self.th = None
         self.solver = None
         self.refractory = None
+        self.n = None
 
         self.logger.info("Model creation complete")
 
@@ -66,8 +67,8 @@ class B2Model:
         self.dt = dt
 
     def define_parameter(self, name: str, value: b2.Quantity) -> None:
-        if not isinstance(value, b2.Quantity):
-            raise ValueError("Parameter value must be a Quantity")
+        if not isinstance(value, b2.Quantity) and not isinstance(value, str):
+            raise ValueError("Parameter value must be a Quantity or a string")
 
         self.parameters[name] = value
 
@@ -78,9 +79,13 @@ class B2Model:
         self.solver = method
 
     def define_refractory(self, value: b2.Quantity) -> None:
+        if not isinstance(value, b2.Quantity):
+            raise ValueError("Refractory period must be a Quantity")
         self.refractory = value
 
     def define_neuronnumber(self, n: int) -> None:
+        if not isinstance(n, int):
+            raise ValueError("Neuron number must be an integer")
         self.n = n
 
     def define_neuron_subgroup(self, name: str, idxs: Union[slice, int, List]) -> None:
@@ -141,15 +146,12 @@ class B2Model:
         self.monitors[name] = monitor
 
     def assemble_neurongroup(self) -> None:
-        eqs = b2.Equation(self.equation)
-
-        eqs.check_flags()
+        eqs = b2.Equations(self.equation)
 
         eqs.check_identifiers()
 
-        eqs.check_units()
-
         ng = None
+
         try:
             ng = b2.NeuronGroup(
                 self.n,
