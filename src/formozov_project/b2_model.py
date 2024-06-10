@@ -34,7 +34,7 @@ class B2Model:
         self.parameters: Dict[str, object] = {}
         self.neurongroup: b2.NeuronGroup = None
         self.neuron_subgroups: b2.NeuronGroup = {}
-        self.synapses: b2.Synapses = None
+        self.synapses: Dict[str, b2.Synapses] = {}
         self.monitors: Dict[str, object] = {}
         self.dt = None
         self.th = None
@@ -102,8 +102,8 @@ class B2Model:
         synapse_eqs: str,
         on_pre: str,
         on_post: str,
-        connection_condition: str,
-        connection_probability: float,
+        connection_condition: str = "",
+        connection_probability: float = 0.0,
     ) -> None:
         synapse = None
         try:
@@ -114,13 +114,15 @@ class B2Model:
                 on_pre=on_pre,
                 on_post=on_post,
             )
+
         except Exception as e:
             raise RuntimeError(f"Error in defining synapse {name}: {e}") from e
 
-        try:
-            synapse.connect(connection_condition, p=connection_probability)
-        except Exception as e:
-            raise RuntimeError(f"Error in connecting synapse {name}: {e}") from e
+        if connection_condition != "" and connection_probability > 0.0:
+            try:
+                synapse.connect(connection_condition, p=connection_probability)
+            except Exception as e:
+                raise RuntimeError(f"Error in connecting synapse {name}: {e}") from e
 
         self.synapses[name] = {
             "synapse": synapse,

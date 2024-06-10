@@ -1,4 +1,5 @@
 import logging
+import typing
 
 import brian2 as b2
 import pytest
@@ -6,8 +7,27 @@ from formozov_project.b2_model import B2Model
 
 
 @pytest.fixture()
-def mfx(tmp_path) -> B2Model:
-    return B2Model(tmp_path, loglevel="DEBUG")
+def mfx(tmp_path) -> typing.Generator[B2Model, None, None]:
+    yield B2Model(tmp_path, loglevel="DEBUG")
+
+
+@pytest.fixture
+def mfx_parameterized(mfx) -> typing.Generator[B2Model, None, None]:
+    eq = "dge/dt = -ge*(1./taue): siemens\n"
+    n = 30
+    threshold = "v > 10 * mV"
+    refractory = 5 * b2.ms
+    method = "euler"
+    dt = 0.1 * b2.ms
+    mfx.define_equation(eq)
+    mfx.define_neuronnumber(n)
+    mfx.define_threshold(threshold)
+    mfx.define_refractory(refractory)
+    mfx.define_dt(dt)
+    mfx.define_solver_method(method)
+    mfx.define_parameter("ge", "(randn() * 1.5 + 4) * 10.*nS")
+    mfx.assemble_neurongroup()
+    yield mfx
 
 
 def test_construction(tmp_path) -> None:
@@ -22,7 +42,7 @@ def test_construction(tmp_path) -> None:
     assert model.parameters == {}
     assert model.neurongroup is None
     assert model.neuron_subgroups == {}
-    assert model.synapses is None
+    assert model.synapses == {}
     assert model.monitors == {}
 
 
@@ -137,16 +157,60 @@ def test_assemble_neurongroup(mfx) -> None:
     assert mfx.neurongroup._refractory == ng._refractory
 
 
-def test_define_synapse() -> None:
-    pass
+def test_neuron_subgroup(mfx_parameterized) -> None:
+    mfx = mfx_parameterized
+    assert mfx.neuron_subgroups == {}
+    mfx.define_neuron_subgroup("excitatory", slice(0, 20))
+    mfx.define_neuron_subgroup("inhibitory", slice(20, 30))
+
+    assert list(mfx.neuron_subgroups["excitatory"].indices) == list(range(0, 20))
+    assert list(mfx.neuron_subgroups["inhibitory"].indices) == list(range(20, 30))
+
+    mfx.neurongroup = None
+    with pytest.raises(ValueError, match="Neurongroup not defined yet"):
+        mfx.define_neuron_subgroup("excitatory", slice(0, 20))
 
 
-def test_define_synapse_exception_in_def() -> None:
-    pass
+def test_define_synapse(mfx_parameterized) -> None:
+    taupre = 20 * b2.ms
+    taupost = taupre
+    gmax = 60 * b2.nS
+    dApre = 6 * b2.nS
+    dApost = -dApre * taupre / taupost * 1.05
 
+    mfx = mfx_parameterized
+    mfx.define_neuron_subgroup("Pe", slice(0, 24))
+    mfx.define_neuron_subgroup("Pi", slice(24, 30))
 
-def test_define_synapse_exception_in_connect() -> None:
-    pass
+    mfx.define_parameter("taupre", taupre)
+
+    mfx.define_parameter("taupost", taupost)
+
+    mfx.define_parameter("gmax", gmax)
+
+    mfx.define_parameter("dApre", dApre)
+
+    mfx.define_parameter("dApost", dApost)
+
+    mfx.define_synapse(
+        "Ce",
+        "Pe",
+        "Pi",
+        """we : siemens
+            dApre/dt = -Apre / taupre : siemens (event-driven)
+            dApost/dt = -Apost / taupost : siemens (event-driven)""",
+        on_pre="""ge += we
+                    Apre += dApre
+                    we = clip(we + Apost, -gmax, gmax)""",
+        on_post="""Apost += dApost
+                      we= clip(we + Apre, -gmax, gmax)""",
+        connection_condition="i != j",
+        connection_probability=1.0,
+    )
+
+    assert len(mfx.synapses) == 1
+    assert mfx.synapses["Ce"]["synapse"].source == mfx.neuron_subgroups["Pe"]
+    assert mfx.synapses["Ce"]["synapse"].target == mfx.neuron_subgroups["Pi"]
 
 
 def test_define_monitor() -> None:
