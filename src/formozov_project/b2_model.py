@@ -1,3 +1,4 @@
+import logging
 from logging import Logger
 from pathlib import Path
 from typing import Dict
@@ -9,17 +10,38 @@ import h5py
 import yaml
 
 
-class Model:
+class B2Model:
+    def _set_up_logger(self, loglevel: str) -> None:
+        self.logger = Logger("Model")
+        self.logger.setLevel(loglevel)
+
+        handler = logging.FileHandler(Path(self.path, "logfile.log"))
+        handler.setLevel(loglevel)
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )  # TODO: check how this looks like
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+
     def __init__(self, savepath: str, loglevel: str = "INFO"):
-        self.equation: str = """ """
+        if Path(savepath).exists() is False:
+            raise ValueError(f"Path {savepath} does not exist")
+
+        self.path = savepath
+        self._set_up_logger(loglevel)
+
+        self.equation: str = ""
         self.parameters: Dict[str, object] = {}
         self.neurongroup: b2.NeuronGroup = None
         self.neuron_subgroups: b2.NeuronGroup = {}
         self.synapses: b2.Synapses = None
         self.monitors: Dict[str, object] = {}
-        self.logger = Logger("Model")
-        self.logger.setLevel(loglevel)
-        self.path = savepath
+        self.dt = None
+        self.th = None
+        self.solver = None
+        self.refractory = None
+
+        self.logger.info("Model creation complete")
 
     def define_equation(self, line: str) -> None:
         if ":" not in line:
@@ -29,32 +51,24 @@ class Model:
 
         if "=" not in line:
             raise ValueError(
-                "Equation must have an equal sign that separates variable and equation"
+                "Equation must have an equal sign that separates variable and expression"
             )
 
         self.equation += line + "\n"
 
         e = b2.Equations(self.equation)
 
-        e.check_flags()
-
         e.check_identifiers()
 
-        e.check_units()
-
-        e.check_flags()
-
-    def define_clock(self, clock: b2.Clock) -> None:
-        if self.dt is not None:
-            raise ValueError("dt already defined and cannot be combine with dt")
-        self.clock = clock
-
-    def define_dt(self, dt: float) -> None:
-        if self.clock is not None:
-            raise ValueError("Clock already defined and cannot be combine with clock")
+    def define_dt(self, dt: b2.Quantity) -> None:
+        if not isinstance(dt, b2.Quantity):
+            raise ValueError("dt must be a Quantity")
         self.dt = dt
 
-    def define_parameter(self, name: str, value) -> None:
+    def define_parameter(self, name: str, value: b2.Quantity) -> None:
+        if not isinstance(value, b2.Quantity):
+            raise ValueError("Parameter value must be a Quantity")
+
         self.parameters[name] = value
 
     def define_threshold(self, th: str) -> None:
@@ -63,8 +77,8 @@ class Model:
     def define_solver_method(self, method: str) -> None:
         self.solver = method
 
-    def define_refractory(self, value: float, unit: b2.units.Unit) -> None:
-        self.refractory = value * unit
+    def define_refractory(self, value: b2.Quantity) -> None:
+        self.refractory = value
 
     def define_neuronnumber(self, n: int) -> None:
         self.n = n
@@ -143,7 +157,6 @@ class Model:
                 threshold=self.th,
                 refractory=self.refractory,
                 dt=self.dt,
-                clock=self.clock,
                 method=self.solver,
                 namespace=self.parameters,
             )
