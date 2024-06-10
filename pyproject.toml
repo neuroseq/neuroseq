@@ -13,8 +13,10 @@ dependencies = [
   "brian2",
   "numpy",
   "qtpy",
-    "pyside6",
-    "pyqtgraph",
+  "pyside6",
+  "pyqtgraph",
+  "h5py",
+  "PyYAML"
 ]
 dynamic = ["version"]
 
