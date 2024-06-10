@@ -14,9 +14,10 @@ class HeatmapWidget(pg.ImageView):
     def __init__(
         self,
         data: Optional[np.ndarray] = None,
+        xvals: Optional[np.ndarray] = None,
         parent: Optional[QtWidgets.QWidget] = None,
     ) -> None:
         super().__init__(parent, discreteTimeLine=True)
         self.setPredefinedGradient("viridis")
         if data is not None:
-            self.setImage(data)
+            self.setImage(data, xvals=xvals)

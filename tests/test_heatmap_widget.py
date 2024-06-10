@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from time import perf_counter
+
 import numpy as np
 from formozov_project.heatmap_widget import HeatmapWidget
+from pytest import approx
 from pytestqt.qtbot import QtBot
+from qtpy import QtCore
 
 
 def test_heatmap_widget_no_data(qtbot: QtBot) -> None:
@@ -33,7 +37,18 @@ def test_heatmap_widget_3d_data_with_timeline(qtbot: QtBot) -> None:
     qtbot.waitUntil(lambda: heatmap_widget.isVisible())
     assert not heatmap_widget.timeLine.isVisible()
     assert heatmap_widget.getProcessedImage().shape == data.shape
-    data = np.random.rand(100, 100, 100)
-    heatmap_widget.setImage(data)
+    data = np.random.rand(20, 18, 23)
+    interval_secs = 0.05
+    timepoints_secs = interval_secs * np.arange(data.shape[0])
+    total_time_secs = timepoints_secs[-1]
+    heatmap_widget.setImage(data, xvals=timepoints_secs)
+    assert heatmap_widget.currentIndex == 0
     assert heatmap_widget.getProcessedImage().shape == data.shape
     assert heatmap_widget.timeLine.isVisible()
+    # press space-bar to start real-time playback
+    qtbot.keyPress(heatmap_widget, QtCore.Qt.Key.Key_Space)
+    start_time_secs = perf_counter()
+    qtbot.waitUntil(lambda: heatmap_widget.currentIndex == timepoints_secs.size - 1)
+    elapsed_time_secs = perf_counter() - start_time_secs
+    # timing should be correct within 20%
+    assert elapsed_time_secs == approx(total_time_secs, rel=0.2)
