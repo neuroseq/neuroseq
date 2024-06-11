@@ -116,6 +116,7 @@ def reference_system(reference_parameters, tmp_path):
         threshold=reference_parameters["threshold"],
         refractory=reference_parameters["refractory"],
         method=reference_parameters["method"],
+        namespace=reference_parameters,
     )
     Pe = P[:24]
     Pi = P[24:]
@@ -127,6 +128,7 @@ def reference_system(reference_parameters, tmp_path):
         reference_parameters["ce_eq"],
         on_pre=reference_parameters["on_pre_ce"],
         on_post=reference_parameters["on_post_ce"],
+        namespace=reference_parameters,
     )
 
     # input and output connections?
@@ -135,12 +137,14 @@ def reference_system(reference_parameters, tmp_path):
         Pi,
         reference_parameters["cei_eq"],
         on_pre=reference_parameters["cei_on_pre"],
+        namespace=reference_parameters,
     )
     Cie = b2.Synapses(
         Pi,
         Pe,
         reference_parameters["cie_eq"],
         on_pre=reference_parameters["cie_on_pre"],
+        namespace=reference_parameters,
     )
 
     Ce.connect(reference_parameters["ce_connect"], p=reference_parameters["connect_p"])
@@ -161,4 +165,4 @@ def reference_system(reference_parameters, tmp_path):
 
     b2.run(reference_parameters["tfinal"], report="text")
 
-    yield Traces_v, spikemon, synmon, tmp_path
+    yield Traces_v, spikemon, synmon, reference_parameters, tmp_path

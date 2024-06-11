@@ -68,7 +68,6 @@ class B2Model:
         self.logger.info(f"dt defined: {dt}")
 
     def define_parameter(self, name: str, value: Union[str, b2.Quantity]) -> None:
-        
         self.parameters[name] = value
 
         self.logger.info(f"Parameter defined: {name}")
@@ -113,9 +112,9 @@ class B2Model:
         origin: str,
         target: str,
         synapse_eqs: str,
-        on_pre: str = "",
-        on_post: str = "",
-        connection_condition: str = "",
+        on_pre: str = None,
+        on_post: str = None,
+        connection_condition: str = None,
         connection_probability: float = 0.0,
     ) -> None:
         synapse = None
@@ -135,6 +134,8 @@ class B2Model:
                 on_pre=on_pre,
                 on_post=on_post,
                 name=name,
+                namespace=self.parameters,
+                dt = self.dt,
             )
 
         except Exception as e:
@@ -159,12 +160,12 @@ class B2Model:
         }
 
     def define_monitor(
-        self, name: str, cls, group: str, variable: str, record: bool = True
+        self, name: str, cls, group: str, variable: str= None, record: bool = True
     ) -> None:
         monitor = None
 
         try:
-            monitor = cls(self.network[group], variable, record=record, name=name)
+            monitor = cls(self.network[group], variable, record=record, name=name, )
         except Exception as e:
             raise RuntimeError(f"Error in defining monitor {name}: {e}") from e
         self.network.add(monitor)
@@ -174,6 +175,7 @@ class B2Model:
             "source": group,
             "record": record,
         }
+    
 
     def assemble_neurongroup(self) -> None:
         eqs = b2.Equations(self.equation)
@@ -188,10 +190,10 @@ class B2Model:
                 eqs,
                 threshold=self.th,
                 refractory=self.refractory,
-                dt=self.dt,
                 method=self.solver,
                 namespace=self.parameters,
                 name="neurongroup",
+                dt = self.dt,
             )
 
         except Exception as e:
@@ -217,8 +219,10 @@ class B2Model:
                     h5file.create_dataset("time", data=self.monitors[key].t[:])
                 h5file.create_dataset(key, data=value[:])
 
-    def run_simulation(self, tfinal: float) -> None:
-        self.network.before_run(self.parameters)
+    def run_simulation(self, tfinal: float, seed:int = 123) -> None:
+
+        b2.seed(seed)
+        b2.defaultclock.dt = self.dt
+        self.network.dt = self.dt
         self.network.run(tfinal, report="text", namespace=self.parameters)
-        self.network.after_run(self.parameters)
         # self.save_to_h5()

@@ -295,7 +295,8 @@ def test_define_monitor(mfx_parameterized) -> None:
     ]
 
 
-def test_run_simulation(reference_parameters, tmp_path):
+def test_run_simulation(reference_system):
+    Traces_v, spikemon, synmon, reference_parameters, tmp_path = reference_system
 
     model = B2Model(tmp_path, loglevel="DEBUG")
 
@@ -308,3 +309,46 @@ def test_run_simulation(reference_parameters, tmp_path):
     model.define_refractory(reference_parameters["refractory"])
     model.define_dt(reference_parameters["dt"])
     model.define_solver_method(reference_parameters["method"])
+
+    model.assemble_neurongroup()
+
+    model.define_neuron_subgroup("Pe", slice(0, 24))
+    model.define_neuron_subgroup("Pi", slice(24, 30))
+
+    model.define_synapse(
+        "Ce",
+        "Pe",
+        "Pe",
+        reference_parameters["ce_eq"],
+        on_pre=reference_parameters["on_pre_ce"],
+        on_post=reference_parameters["on_post_ce"],
+        connection_condition=reference_parameters["ce_connect"],
+        connection_probability=reference_parameters["connect_p"],
+    )
+
+    model.define_synapse(
+        "Cei",
+        "Pe",
+        "Pi",
+        reference_parameters["cei_eq"],
+        on_pre=reference_parameters["cei_on_pre"],
+        connection_probability=reference_parameters["connect_p"],
+    )
+
+    model.define_synapse(
+        "Cie",
+        "Pi",
+        "Pe",
+        reference_parameters["cie_eq"],
+        on_pre=reference_parameters["cie_on_pre"],
+        connection_probability=reference_parameters["connect_p"],
+    )
+
+    model.define_monitor("Traces_v", b2.StateMonitor, "neurongroup", "v", record=True)
+    model.define_monitor("spikemon", b2.SpikeMonitor, "neurongroup")
+    model.define_monitor("synmon", b2.StateMonitor, "Ce", "we", record=True)
+
+    model.run_simulation(reference_parameters["tfinal"])
+
+    print(model.network["Traces_v"].t, model.network["Traces_v"].v)
+    print(Traces_v.t, Traces_v.v)
