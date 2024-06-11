@@ -344,11 +344,18 @@ def test_run_simulation(reference_system):
         connection_probability=reference_parameters["connect_p"],
     )
 
+    # FIXME: the initialization is missing I think
     model.define_monitor("Traces_v", b2.StateMonitor, "neurongroup", "v", record=True)
     model.define_monitor("spikemon", b2.SpikeMonitor, "neurongroup")
     model.define_monitor("synmon", b2.StateMonitor, "Ce", "we", record=True)
 
     model.run_simulation(reference_parameters["tfinal"])
 
-    print(model.network["Traces_v"].t, model.network["Traces_v"].v)
-    print(Traces_v.t, Traces_v.v)
+    # print(model.network["Traces_v"].t, model.network["Traces_v"].v)
+    # print(Traces_v.t, Traces_v.v)
+
+    import numpy as np
+    np.testing.assert_array_equal(model.network["Traces_v"].t, Traces_v.t)
+    # np.testing.assert_array_equal(model.network["Traces_v"].v, Traces_v.v)
+    print(Traces_v.v[0][0:20])
+    print(model.network["Traces_v"].v[0][0:20])
