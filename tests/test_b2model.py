@@ -270,20 +270,3 @@ def test_define_monitor(mfx_parameterized) -> None:
     assert mfx.monitors["Traces_ge"].record_variables == [
         "ge",
     ]
-
-
-def test_save_to_yaml(mfx_parameterized_with_synapse) -> None:
-    mfx = mfx_parameterized_with_synapse
-
-    mfx.save_to_yaml()
-
-    with open(mfx.path / "model.yaml", "r") as f:
-        data = f.save_load()
-
-
-def test_load_from_yaml() -> None:
-    pass
-
-
-def test_run_simulation() -> None:
-    pass
