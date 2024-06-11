@@ -16,7 +16,6 @@ dependencies = [
   "pyside6",
   "pyqtgraph",
   "h5py",
-  "PyYAML"
 ]
 dynamic = ["version"]
 

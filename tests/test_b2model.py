@@ -1,3 +1,4 @@
+import itertools
 import logging
 import typing
 
@@ -85,7 +86,8 @@ def test_construction(tmp_path) -> None:
 
     assert model.equation == ""
     assert model.parameters == {}
-    assert model.neurongroup is None
+    assert model.network is not None
+    assert model.network.name == "b2Network"
     assert model.neuron_subgroups == {}
     assert model.synapses == {}
     assert model.monitors == {}
@@ -134,11 +136,6 @@ def test_define_parameter(mfx) -> None:
         "area": 20000 * b2.umetre**2,
     }
 
-    with pytest.raises(
-        ValueError, match="Parameter value must be a Quantity or a string"
-    ):
-        mfx.define_parameter("taue", 5)
-
 
 def test_define_threshold(mfx) -> None:
     assert mfx.th is None
@@ -173,7 +170,7 @@ def test_define_neuron_number(mfx) -> None:
 
 
 def test_assemble_neurongroup(mfx) -> None:
-    eq = "dge/dt = -ge*(1./taue): siemens\n"
+    eq = "dge/dt = -ge*(1./taue): siemens"
     n = 30
     threshold = "v > 10 * mV"
     refractory = 5 * b2.ms
@@ -196,10 +193,17 @@ def test_assemble_neurongroup(mfx) -> None:
         dt=dt,
     )
 
-    assert mfx.neurongroup is None
+    assert mfx.neurongroup == {}
     mfx.assemble_neurongroup()
-    assert mfx.neurongroup.equations == ng.equations
-    assert mfx.neurongroup._refractory == ng._refractory
+    assert mfx.neurongroup["eqs"] == eq + "\n"
+    assert mfx.neurongroup["refractory"] == ng._refractory
+
+    assert len(mfx.network.objects) == 1
+
+    ng = list(mfx.network.objects)[0]
+
+    assert ng.name == "neurongroup"
+    assert ng._N == 30
 
 
 def test_neuron_subgroup(mfx_parameterized) -> None:
@@ -208,11 +212,30 @@ def test_neuron_subgroup(mfx_parameterized) -> None:
     mfx.define_neuron_subgroup("excitatory", slice(0, 20))
     mfx.define_neuron_subgroup("inhibitory", slice(20, 30))
 
-    assert list(mfx.neuron_subgroups["excitatory"].indices) == list(range(0, 20))
-    assert list(mfx.neuron_subgroups["inhibitory"].indices) == list(range(20, 30))
+    assert list(
+        itertools.islice(
+            itertools.count(),
+            mfx.neuron_subgroups["excitatory"]["idx"].start,
+            mfx.neuron_subgroups["excitatory"]["idx"].stop,
+        )
+    ) == list(range(0, 20))
+    assert list(
+        itertools.islice(
+            itertools.count(),
+            mfx.neuron_subgroups["inhibitory"]["idx"].start,
+            mfx.neuron_subgroups["inhibitory"]["idx"].stop,
+        )
+    ) == list(range(20, 30))
 
-    mfx.neurongroup = None
-    with pytest.raises(ValueError, match="Neurongroup not defined yet"):
+    assert (
+        mfx.network[mfx.neuron_subgroups["excitatory"]["name_in_network"]] is not None
+    )
+    assert (
+        mfx.network[mfx.neuron_subgroups["inhibitory"]["name_in_network"]] is not None
+    )
+
+    mfx.network = b2.Network()
+    with pytest.raises(KeyError, match="'No object with name \"neurongroup\" found'"):
         mfx.define_neuron_subgroup("excitatory", slice(0, 20))
 
 
@@ -254,8 +277,8 @@ def test_define_synapse(mfx_parameterized) -> None:
     )
 
     assert len(mfx.synapses) == 1
-    assert mfx.synapses["Ce"]["synapse"].source == mfx.neuron_subgroups["Pe"]
-    assert mfx.synapses["Ce"]["synapse"].target == mfx.neuron_subgroups["Pi"]
+    assert mfx.synapses["Ce"]["origin"] == "Pe"
+    assert mfx.synapses["Ce"]["target"] == "Pi"
 
 
 def test_define_monitor(mfx_parameterized) -> None:
@@ -263,10 +286,25 @@ def test_define_monitor(mfx_parameterized) -> None:
 
     assert mfx.monitors == {}
 
-    mfx.define_monitor("Traces_ge", b2.StateMonitor, mfx.neurongroup, "ge", record=True)
+    mfx.define_monitor("Traces_ge", b2.StateMonitor, "neurongroup", "ge", record=True)
 
     assert "Traces_ge" in mfx.monitors
-    assert mfx.monitors["Traces_ge"].source == mfx.neurongroup
-    assert mfx.monitors["Traces_ge"].record_variables == [
+    assert mfx.network["Traces_ge"].source == mfx.network["neurongroup"]
+    assert mfx.network["Traces_ge"].record_variables == [
         "ge",
     ]
+
+
+def test_run_simulation(reference_parameters, tmp_path):
+
+    model = B2Model(tmp_path, loglevel="DEBUG")
+
+    for key, value in reference_parameters.items():
+        model.define_parameter(key, value)
+
+    model.define_equation(reference_parameters["eqs"])
+    model.define_neuronnumber(reference_parameters["n"])
+    model.define_threshold(reference_parameters["threshold"])
+    model.define_refractory(reference_parameters["refractory"])
+    model.define_dt(reference_parameters["dt"])
+    model.define_solver_method(reference_parameters["method"])

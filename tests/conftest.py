@@ -4,21 +4,22 @@ import pytest
 
 
 @pytest.fixture()
-def reference_system(tmp_path):
-    # this is a version of the basic system from https://github.com/formozov/NBC_with_STDP/blob/main/NBC_large_24E6I_beta_version_COBAHH_mod_STDP_version_stable_w_plasticity_disconnected_inhibition.py
-
+def reference_parameters():
     data = np.array(
         [1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1], dtype="int"
     )
     data_inv = np.array(~np.array(data, dtype="bool"), dtype="int")
-
     tfinal = 2000 * b2.ms
-
-    defaultclock.dt = 0.1 * b2.ms
 
     stim = np.zeros((int(tfinal / b2.ms), 30), dtype="float")
     stim[:, :] = 0
     stim_constant = 300
+    tfinal = 2000 * b2.ms
+    stimulus = b2.TimedArray(stim * b2.nS, dt=1 * b2.ms)
+    stim_inh = np.zeros(int(tfinal / b2.ms), dtype="float")
+    stim_inh[0:500] = 0
+    stim_inh[500:-1] = 0
+    stimulus_inh = b2.TimedArray(stim_inh * b2.nS, dt=1 * b2.ms)
 
     for l in range(3):
         for k in range(20):
@@ -28,41 +29,36 @@ def reference_system(tmp_path):
 
     shift = 20
 
-    stimulus = b2.TimedArray(stim * b2.nS, dt=1 * b2.ms)
-
-    stim_inh = np.zeros(int(tfinal / b2.ms), dtype="float")
-
-    stim_inh[0:500] = 0
-    stim_inh[500:-1] = 0
-
-    stimulus_inh = b2.TimedArray(
-        stim_inh * b2.nS, dt=1 * b2.ms
-    )  # in principle, I can introduce a control of inhibitory neurons and then release them directly (!)
-
     area = 20000 * b2.umetre**2
-    Cm = (1 * b2.ufarad * b2.cm**-2) * area
-    gl = (5e-5 * b2.siemens * b2.cm**-2) * area
 
-    El = -60 * b2.mV
-    EK = -90 * b2.mV
-    ENa = 50 * b2.mV
-    g_na = (100 * b2.msiemens * b2.cm**-2) * area
-    g_kd = (30 * b2.msiemens * b2.cm**-2) * area
-    VT = -63 * b2.mV
-    # Time constants
-    taue = 5 * b2.ms
-    taui = 10 * b2.ms
-    # Reversal potentials
-    Ee = 0 * b2.mV
-    Ei = -80 * b2.mV
+    taupre = 20 * b2.ms
+    taupost = taupre
+    dApre = 6 * b2.nS
 
-    Eiopto = -80 * b2.mV  # −69.5*mV
-    Eeopto = (
-        0 * b2.mV
-    )  # Theoretical Analysis of Low-power Bidirectional Optogenetic Control of High-frequency Neural Codes with Single Spike Resolution
-
-    eqs = b2.Equations(
-        """
+    yield {
+        "n": 30,
+        "tfinal": tfinal,
+        "dt": 0.1 * b2.ms,
+        "stimulus": stimulus,
+        "stimulus_inh": stimulus_inh,
+        "area": area,
+        "Cm": (1 * b2.ufarad * b2.cm**-2) * area,
+        "gl": (5e-5 * b2.siemens * b2.cm**-2) * area,
+        "El": -60 * b2.mV,
+        "EK": -90 * b2.mV,
+        "ENa": 50 * b2.mV,
+        "g_na": (100 * b2.msiemens * b2.cm**-2) * area,
+        "g_kd": (30 * b2.msiemens * b2.cm**-2) * area,
+        "VT": -63 * b2.mV,
+        # Time constants
+        "taue": 5 * b2.ms,
+        "taui": 10 * b2.ms,
+        # Reversal potentials
+        "Ee": 0 * b2.mV,
+        "Ei": -80 * b2.mV,
+        "Eiopto": -80 * b2.mV,  # −69.5*mV
+        "Eeopto": 0 * b2.mV,
+        "eqs": """
     dv/dt = (gl*(El-v)+ge*(Ee-v)+geopto*(Eeopto-v)+gi*(Ei-v)+giopto*(Eiopto-v)-
             g_na*(m*m*m)*h*(v-ENa)-
             g_kd*(n*n*n*n)*(v-EK))/Cm : volt
@@ -79,54 +75,83 @@ def reference_system(tmp_path):
     beta_h = 4./(1+exp((40*mV-v+VT)/(5*mV)))/ms : Hz
     alpha_n = 0.032*(mV**-1)*5*mV/exprel((15*mV-v+VT)/(5*mV))/ms : Hz
     beta_n = .5*exp((10*mV-v+VT)/(40*mV))/ms : Hz
-    """
-    )
+    """,
+        "threshold": "v>-20*mV",
+        "refractory": 3 * b2.ms,
+        "method": "exponential_euler",
+        "taupre": 20 * b2.ms,
+        "taupost": taupre,
+        "gmax": 60 * b2.nS,
+        "dApre": 6 * b2.nS,
+        "dApost": -dApre * taupre / taupost * 1.05,
+        "ce_eq": """we : siemens
+                    dApre/dt = -Apre / taupre : siemens (event-driven)
+                    dApost/dt = -Apost / taupost : siemens (event-driven)""",
+        "on_pre_ce": """ge += we
+                        Apre += dApre
+                        we = clip(we + Apost, -gmax, gmax)""",
+        "on_post_ce": """Apost += dApost
+                        we= clip(we + Apre, -gmax, gmax)""",
+        "cei_eq": """we = 6*nS : siemens""",
+        "cei_on_pre": "ge+=we",
+        "cie_eq": """wi = 67*nS : siemens""",
+        "cie_on_pre": "gi+=wi",
+        "ce_connect": "i != j",
+        "connect_p": 1.0,
+        "seed": 4321,
+        "v": "El + (randn() * 5 - 5)*mV",
+        "ge": "(randn() * 1.5 + 4) * 10.*nS",
+        "gi": "(randn() * 12 + 20) * 10.*nS",
+    }
+
+
+@pytest.fixture()
+def reference_system(reference_parameters, tmp_path):
+    # this is a version of the basic system from https://github.com/formozov/NBC_with_STDP/blob/main/NBC_large_24E6I_beta_version_COBAHH_mod_STDP_version_stable_w_plasticity_disconnected_inhibition.py
+    b2.defaultclock.dt = reference_parameters["dt"]
 
     P = b2.NeuronGroup(
         30,
-        model=eqs,
-        threshold="v>-20*mV",
-        refractory=3 * b2.ms,
-        method="exponential_euler",
+        model=reference_parameters["eqs"],
+        threshold=reference_parameters["threshold"],
+        refractory=reference_parameters["refractory"],
+        method=reference_parameters["method"],
     )
     Pe = P[:24]
     Pi = P[24:]
-
-    taupre = 20 * b2.ms
-    taupost = taupre
-
-    gmax = 60 * b2.nS
-    dApre = 6 * b2.nS
-
-    dApost = -dApre * taupre / taupost * 1.05
 
     # connectivity?
     Ce = b2.Synapses(
         Pe,
         Pe,
-        """we : siemens
-                    dApre/dt = -Apre / taupre : siemens (event-driven)
-                    dApost/dt = -Apost / taupost : siemens (event-driven)""",
-        on_pre="""ge += we
-                        Apre += dApre
-                        we = clip(we + Apost, -gmax, gmax)""",
-        on_post="""Apost += dApost
-                        we= clip(we + Apre, -gmax, gmax)""",
+        reference_parameters["ce_eq"],
+        on_pre=reference_parameters["on_pre_ce"],
+        on_post=reference_parameters["on_post_ce"],
     )
 
     # input and output connections?
-    Cei = b2.Synapses(Pe, Pi, """we = 6*nS : siemens""", on_pre="ge+=we")
-    Cie = b2.Synapses(Pi, Pe, """wi = 67*nS : siemens""", on_pre="gi+=wi")
+    Cei = b2.Synapses(
+        Pe,
+        Pi,
+        reference_parameters["cei_eq"],
+        on_pre=reference_parameters["cei_on_pre"],
+    )
+    Cie = b2.Synapses(
+        Pi,
+        Pe,
+        reference_parameters["cie_eq"],
+        on_pre=reference_parameters["cie_on_pre"],
+    )
 
-    Ce.connect("i != j", p=1)
-    # Ci.connect('i != j',p=1)   # I disconneted inhibition (with 'i !- j there was winner take all machanism in inhibition')
-    Cei.connect(p=1)
-    Cie.connect(p=1)
+    Ce.connect(reference_parameters["ce_connect"], p=reference_parameters["connect_p"])
 
-    b2.seed(4321)
-    P.v = "El + (randn() * 5 - 5)*mV"
-    P.ge = "(randn() * 1.5 + 4) * 10.*nS"
-    Pe.gi = "(randn() * 12 + 20) * 10.*nS"
+    Cei.connect(p=reference_parameters["connect_p"])
+    Cie.connect(p=reference_parameters["connect_p"])
+
+    b2.seed(reference_parameters["seed"])
+    P.v = reference_parameters["v"]
+    P.ge = reference_parameters["ge"]
+    Pe.gi = reference_parameters["gi"]
 
     Traces_v = b2.StateMonitor(P, "v", record=True)
 
@@ -134,6 +159,6 @@ def reference_system(tmp_path):
 
     synmon = b2.StateMonitor(Ce, "we", record=True)
 
-    b2.run(tfinal, report="text")
+    b2.run(reference_parameters["tfinal"], report="text")
 
     yield Traces_v, spikemon, synmon, tmp_path

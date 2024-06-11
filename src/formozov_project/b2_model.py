@@ -6,7 +6,6 @@ from typing import Union
 
 import brian2 as b2
 import h5py
-import yaml
 
 
 class B2Model:
@@ -32,6 +31,7 @@ class B2Model:
         self.equation = ""
         self.parameters = {}
         self.neuron_subgroups = {}
+        self.neurongroup = {}
         self.synapses = {}
         self.monitors = {}
         self.dt = None
@@ -68,9 +68,7 @@ class B2Model:
         self.logger.info(f"dt defined: {dt}")
 
     def define_parameter(self, name: str, value: Union[str, b2.Quantity]) -> None:
-        if not isinstance(value, b2.Quantity) and not isinstance(value, str):
-            raise ValueError("Parameter value must be a Quantity or a string")
-
+        
         self.parameters[name] = value
 
         self.logger.info(f"Parameter defined: {name}")
@@ -99,20 +97,15 @@ class B2Model:
         self.n = n
 
     def define_neuron_subgroup(self, name: str, idxs: Union[slice, int, List]) -> None:
-        if self.self.network["neurongroup"] is None:
-            self.logger.info("ValueError: Neurongroup not defined yet")
-            raise ValueError("Neurongroup not defined yet")
-        else:
-            sng = None
+        sng = None
 
-            if isinstance(idxs, tuple):
-                sng = self.network["neurongroup"][idxs[0] : idxs[1]]
-            else:
-                sng = self.network["neurongroup"][idxs]
-            self.logger.info(f"Neuron subgroup defined: {name}")
-            self.neuron_subgroups[name] = idxs
-            sng.name = name
-            self.network.add(sng)
+        if isinstance(idxs, tuple):
+            sng = self.network["neurongroup"][idxs[0] : idxs[1]]
+        else:
+            sng = self.network["neurongroup"][idxs]
+        self.logger.info(f"Neuron subgroup defined: {name}")
+        self.network.add(sng)
+        self.neuron_subgroups[name] = {"idx": idxs, "name_in_network": sng.name}
 
     def define_synapse(
         self,
@@ -120,17 +113,25 @@ class B2Model:
         origin: str,
         target: str,
         synapse_eqs: str,
-        on_pre: str,
-        on_post: str,
+        on_pre: str = "",
+        on_post: str = "",
         connection_condition: str = "",
         connection_probability: float = 0.0,
     ) -> None:
         synapse = None
+
+        _origin = self.network.__getitem__(
+            self.neuron_subgroups[origin]["name_in_network"]
+        )
+        _target = self.network.__getitem__(
+            self.neuron_subgroups[target]["name_in_network"]
+        )
+
         try:
             synapse = b2.Synapses(
-                self.neuron_subgroups[origin],
-                self.neuron_subgroups[target],
-                synapse_eqs,
+                _origin,
+                target=_target,
+                model=synapse_eqs,
                 on_pre=on_pre,
                 on_post=on_post,
                 name=name,
@@ -158,12 +159,12 @@ class B2Model:
         }
 
     def define_monitor(
-        self, name: str, cls, group: b2.NeuronGroup, variable: str, record: bool = True
+        self, name: str, cls, group: str, variable: str, record: bool = True
     ) -> None:
         monitor = None
 
         try:
-            monitor = cls(group, variable, record=record, name=name)
+            monitor = cls(self.network[group], variable, record=record, name=name)
         except Exception as e:
             raise RuntimeError(f"Error in defining monitor {name}: {e}") from e
         self.network.add(monitor)
@@ -192,6 +193,7 @@ class B2Model:
                 namespace=self.parameters,
                 name="neurongroup",
             )
+
         except Exception as e:
             raise RuntimeError(f"Error in assembling neuron group: {e}") from e
 
@@ -208,21 +210,6 @@ class B2Model:
             "name": "neurongroup",
         }
 
-    def save_to_yaml(self) -> None:
-        data = {
-            "synapses": self.synapses,
-            "neurongroup": self.neurongroup,
-            "neuron_subgroups": self.neuron_subgroups,
-            "monitors": self.monitors,
-            "path": self.path,
-            "solver": self.solver,
-            "dt": self.dt,
-            "refractory": self.refractory,
-            "threshold": self.th,
-        }
-        with open(Path(self.path, "cfg.yaml"), "w") as f:
-            yaml.safe_dump(data, f)
-
     def save_to_h5(self) -> None:
         with h5py.File(Path(self.path, "data.h5"), "w") as h5file:
             for key, value in self.monitors.items():
@@ -231,6 +218,7 @@ class B2Model:
                 h5file.create_dataset(key, data=value[:])
 
     def run_simulation(self, tfinal: float) -> None:
-        self.save_to_yaml()
+        self.network.before_run(self.parameters)
         self.network.run(tfinal, report="text", namespace=self.parameters)
-        self.save_to_h5()
+        self.network.after_run(self.parameters)
+        # self.save_to_h5()
