@@ -17,19 +17,21 @@ class B2Model:
         handler.setLevel(loglevel)
         formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )  # TODO: check how this looks like
+        )
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
 
-    def __init__(self, savepath: str, loglevel: str = "INFO"):
+    def __init__(self, savepath: str, loglevel: str = "INFO", seed: int = 123):
+        b2.seed(seed)
+
         if Path(savepath).exists() is False:
             raise ValueError(f"Path {savepath} does not exist")
 
         self.path = savepath
         self._set_up_logger(loglevel)
-        self.network = b2.Network([], name="b2Network")
+        self.network = b2.Network(name="b2Network")
         self.equation = ""
-        self.parameters = {}
+        self.parameters = None
         self.neuron_subgroups = {}
         self.neurongroup = {}
         self.synapses = {}
@@ -37,7 +39,7 @@ class B2Model:
         self.dt = None
         self.th = None
         self.solver = None
-        self.refractory = None
+        self.refractory = False
         self.n = None
         self.logger.info("Model creation complete")
 
@@ -64,10 +66,14 @@ class B2Model:
         if not isinstance(dt, b2.Quantity):
             raise ValueError("dt must be a Quantity")
         self.dt = dt
-
+        b2.defaultclock.dt = self.dt
+        self.network.dt = self.dt
         self.logger.info(f"dt defined: {dt}")
 
     def define_parameter(self, name: str, value: Union[str, b2.Quantity]) -> None:
+        if self.parameters is None:
+            self.parameters = {}
+
         self.parameters[name] = value
 
         self.logger.info(f"Parameter defined: {name}")
@@ -95,16 +101,23 @@ class B2Model:
         self.logger.info(f"Neuron number defined: {n}")
         self.n = n
 
-    def define_neuron_subgroup(self, name: str, idxs: Union[slice, int, List]) -> None:
+    def define_neuron_subgroup(
+        self, target_name: str, name: str, idxs: Union[slice, int, List]
+    ) -> None:
         sng = None
 
         if isinstance(idxs, tuple):
-            sng = self.network["neurongroup"][idxs[0] : idxs[1]]
+            sng = self.network[target_name][idxs[0] : idxs[1]]
         else:
-            sng = self.network["neurongroup"][idxs]
+            sng = self.network[target_name][idxs]
+
         self.logger.info(f"Neuron subgroup defined: {name}")
         self.network.add(sng)
-        self.neuron_subgroups[name] = {"idx": idxs, "name_in_network": sng.name}
+        self.neuron_subgroups[name] = {
+            "idx": idxs,
+            "name": name,
+            "name_in_network": sng.name,
+        }
 
     def define_synapse(
         self,
@@ -117,7 +130,6 @@ class B2Model:
         connection_condition: str = None,
         connection_probability: float = 0.0,
     ) -> None:
-        synapse = None
 
         _origin = self.network.__getitem__(
             self.neuron_subgroups[origin]["name_in_network"]
@@ -125,6 +137,8 @@ class B2Model:
         _target = self.network.__getitem__(
             self.neuron_subgroups[target]["name_in_network"]
         )
+
+        synapse = None
 
         try:
             synapse = b2.Synapses(
@@ -135,17 +149,16 @@ class B2Model:
                 on_post=on_post,
                 name=name,
                 namespace=self.parameters,
-                dt = self.dt,
+                dt=self.dt,
             )
 
         except Exception as e:
             raise RuntimeError(f"Error in defining synapse {name}: {e}") from e
 
-        if connection_condition != "" and connection_probability > 0.0:
-            try:
-                synapse.connect(connection_condition, p=connection_probability)
-            except Exception as e:
-                raise RuntimeError(f"Error in connecting synapse {name}: {e}") from e
+        try:
+            synapse.connect(connection_condition, p=connection_probability)
+        except Exception as e:
+            raise RuntimeError(f"Error in connecting synapse {name}: {e}") from e
 
         self.network.add(synapse)
 
@@ -160,12 +173,17 @@ class B2Model:
         }
 
     def define_monitor(
-        self, name: str, cls, group: str, variable: str= None, record: bool = True
+        self, name: str, cls, group: str, variable: str = None, record: bool = True
     ) -> None:
         monitor = None
 
         try:
-            monitor = cls(self.network[group], variable, record=record, name=name, )
+            monitor = cls(
+                self.network[group],
+                variable,
+                record=record,
+                name=name,
+            )
         except Exception as e:
             raise RuntimeError(f"Error in defining monitor {name}: {e}") from e
         self.network.add(monitor)
@@ -175,31 +193,30 @@ class B2Model:
             "source": group,
             "record": record,
         }
-    
 
-    def assemble_neurongroup(self) -> None:
-        eqs = b2.Equations(self.equation)
+    def assemble_neurongroup(self, name: str = "neurongroup") -> None:
 
-        eqs.check_identifiers()
-
-        neurongroup = None
+        ng = None
 
         try:
-            neurongroup = b2.NeuronGroup(
+            ng = b2.NeuronGroup(
                 self.n,
-                eqs,
+                self.equation,
                 threshold=self.th,
                 refractory=self.refractory,
                 method=self.solver,
                 namespace=self.parameters,
-                name="neurongroup",
-                dt = self.dt,
+                name=name,
+                dt=self.dt,
             )
 
+            self.network.add(
+                [
+                    ng,
+                ]
+            )
         except Exception as e:
             raise RuntimeError(f"Error in assembling neuron group: {e}") from e
-
-        self.network.add(neurongroup)
 
         self.neurongroup = {
             "n": self.n,
@@ -209,7 +226,7 @@ class B2Model:
             "dt": self.dt,
             "method": self.solver,
             "namespace": self.parameters,
-            "name": "neurongroup",
+            "name": name,
         }
 
     def save_to_h5(self) -> None:
@@ -219,10 +236,10 @@ class B2Model:
                     h5file.create_dataset("time", data=self.monitors[key].t[:])
                 h5file.create_dataset(key, data=value[:])
 
-    def run_simulation(self, tfinal: float, seed:int = 123) -> None:
+    def run_simulation(
+        self,
+        tfinal: float,
+    ) -> None:
 
-        b2.seed(seed)
-        b2.defaultclock.dt = self.dt
-        self.network.dt = self.dt
-        self.network.run(tfinal, report="text", namespace=self.parameters)
+        self.network.run(tfinal, report="text")
         # self.save_to_h5()

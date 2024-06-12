@@ -1,10 +1,13 @@
 import brian2 as b2
-import numpy as np
+import brian2.numpy_ as np
 import pytest
+
+b2.prefs.codegen.target = "cython"
 
 
 @pytest.fixture()
 def reference_parameters():
+    b2.seed(4321)
     data = np.array(
         [1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1], dtype="int"
     )
@@ -103,66 +106,3 @@ def reference_parameters():
         "ge": "(randn() * 1.5 + 4) * 10.*nS",
         "gi": "(randn() * 12 + 20) * 10.*nS",
     }
-
-
-@pytest.fixture()
-def reference_system(reference_parameters, tmp_path):
-    # this is a version of the basic system from https://github.com/formozov/NBC_with_STDP/blob/main/NBC_large_24E6I_beta_version_COBAHH_mod_STDP_version_stable_w_plasticity_disconnected_inhibition.py
-    b2.defaultclock.dt = reference_parameters["dt"]
-
-    P = b2.NeuronGroup(
-        30,
-        model=reference_parameters["eqs"],
-        threshold=reference_parameters["threshold"],
-        refractory=reference_parameters["refractory"],
-        method=reference_parameters["method"],
-        namespace=reference_parameters,
-    )
-    Pe = P[:24]
-    Pi = P[24:]
-
-    # connectivity?
-    Ce = b2.Synapses(
-        Pe,
-        Pe,
-        reference_parameters["ce_eq"],
-        on_pre=reference_parameters["on_pre_ce"],
-        on_post=reference_parameters["on_post_ce"],
-        namespace=reference_parameters,
-    )
-
-    # input and output connections?
-    Cei = b2.Synapses(
-        Pe,
-        Pi,
-        reference_parameters["cei_eq"],
-        on_pre=reference_parameters["cei_on_pre"],
-        namespace=reference_parameters,
-    )
-    Cie = b2.Synapses(
-        Pi,
-        Pe,
-        reference_parameters["cie_eq"],
-        on_pre=reference_parameters["cie_on_pre"],
-        namespace=reference_parameters,
-    )
-
-    Ce.connect(reference_parameters["ce_connect"], p=reference_parameters["connect_p"])
-
-    Cei.connect(p=reference_parameters["connect_p"])
-    Cie.connect(p=reference_parameters["connect_p"])
-
-    b2.seed(reference_parameters["seed"])
-    P.v = reference_parameters["v"]
-    P.ge = reference_parameters["ge"]
-    Pe.gi = reference_parameters["gi"]
-
-    Traces_v = b2.StateMonitor(P, "v", record=True)
-
-    spikemon = b2.SpikeMonitor(P)
-
-    synmon = b2.StateMonitor(Ce, "we", record=True)
-
-    b2.run(reference_parameters["tfinal"], report="text")
-
-    yield Traces_v, spikemon, synmon, reference_parameters, tmp_path
