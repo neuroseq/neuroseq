@@ -148,7 +148,6 @@ class B2Model:
                 on_post=on_post,
                 name=name,
                 namespace=self.parameters,
-                dt=self.dt,
             )
 
         except Exception as e:
@@ -205,13 +204,10 @@ class B2Model:
                 method=self.solver,
                 namespace=self.parameters,
                 name=name,
-                dt=self.dt,
             )
 
             self.network.add(
-                [
-                    ng,
-                ]
+                ng,
             )
         except Exception as e:
             raise RuntimeError(f"Error in assembling neuron group: {e}") from e
@@ -236,7 +232,7 @@ class B2Model:
 
     def run_simulation(
         self,
-        tfinal: float,
+        tfinal: b2.Quantity,
     ) -> None:
         self.network.run(tfinal, report="text")
         # self.save_to_h5()

@@ -20,65 +20,20 @@ def mfx_parameterized(
     mfx, reference_parameters
 ) -> typing.Generator[B2Model, None, None]:
     b2.seed(reference_parameters["seed"])
-
-    eq = "dge/dt = -ge*(1./taue): siemens\n"
     n = 30
-    threshold = "v > 10 * mV"
-    refractory = 5 * b2.ms
-    method = "euler"
+    threshold = "v>-20*mV"
+    refractory = 3 * b2.ms
+    method = "exponential_euler"
     dt = 0.1 * b2.ms
-    mfx.define_equation(eq)
+    mfx.define_equation(reference_parameters["eqs"])
     mfx.define_neuronnumber(n)
     mfx.define_threshold(threshold)
     mfx.define_refractory(refractory)
     mfx.define_dt(dt)
     mfx.define_solver_method(method)
-    mfx.define_parameter("ge", "(randn() * 1.5 + 4) * 10.*nS")
     mfx.assemble_neurongroup("P")
-    yield mfx
 
-
-@pytest.fixture()
-def mfx_parameterized_with_synapse(
-    mfx_parameterized,
-) -> typing.Generator[B2Model, None, None]:
-    taupre = 20 * b2.ms
-    taupost = taupre
-    gmax = 60 * b2.nS
-    dApre = 6 * b2.nS
-    dApost = -dApre * taupre / taupost * 1.05
-
-    mfx = mfx_parameterized
-    mfx.define_neuron_subgroup("P", "Pe", slice(0, 24))
-    mfx.define_neuron_subgroup("P", "Pi", slice(24, 30))
-
-    mfx.define_parameter("taupre", taupre)
-
-    mfx.define_parameter("taupost", taupost)
-
-    mfx.define_parameter("gmax", gmax)
-
-    mfx.define_parameter("dApre", dApre)
-
-    mfx.define_parameter("dApost", dApost)
-
-    mfx.define_synapse(
-        "Ce",
-        "Pe",
-        "Pi",
-        """we : siemens
-            dApre/dt = -Apre / taupre : siemens (event-driven)
-            dApost/dt = -Apost / taupost : siemens (event-driven)""",
-        on_pre="""ge += we
-                    Apre += dApre
-                    we = clip(we + Apost, -gmax, gmax)""",
-        on_post="""Apost += dApost
-                      we= clip(we + Apre, -gmax, gmax)""",
-        connection_condition="i != j",
-        connection_probability=1.0,
-    )
-
-    yield mfx
+    yield mfx, reference_parameters
 
 
 def test_construction(tmp_path) -> None:
@@ -211,7 +166,7 @@ def test_assemble_neurongroup(mfx) -> None:
 
 
 def test_neuron_subgroup(mfx_parameterized) -> None:
-    mfx = mfx_parameterized
+    mfx, _ = mfx_parameterized
     assert mfx.neuron_subgroups == {}
     mfx.define_neuron_subgroup("P", "excitatory", slice(0, 20))
     mfx.define_neuron_subgroup("P", "inhibitory", slice(20, 30))
@@ -250,7 +205,7 @@ def test_define_synapse(mfx_parameterized) -> None:
     dApre = 6 * b2.nS
     dApost = -dApre * taupre / taupost * 1.05
 
-    mfx = mfx_parameterized
+    mfx, _ = mfx_parameterized
     mfx.define_neuron_subgroup("P", "Pe", slice(0, 24))
     mfx.define_neuron_subgroup("P", "Pi", slice(24, 30))
 
@@ -286,7 +241,7 @@ def test_define_synapse(mfx_parameterized) -> None:
 
 
 def test_define_monitor(mfx_parameterized) -> None:
-    mfx = mfx_parameterized
+    mfx, _ = mfx_parameterized
 
     assert mfx.monitors == {}
 
@@ -346,5 +301,3 @@ def test_ornstein_uhlenbeck(tmp_path):
     assert np.allclose(M.t / b2.second, model.network["M"].t / b2.second)
     assert np.allclose(M.y[1], model.network["M"].y[1])
     assert np.allclose(M.y[0], model.network["M"].y[0])
-
-
