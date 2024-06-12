@@ -1,10 +1,12 @@
 import itertools
 import logging
 import typing
+from pathlib import Path
 
 import brian2 as b2
 import numpy as np
 import pytest
+
 from formozov_project.b2_model import B2Model
 
 b2.prefs.codegen.target = "cython"
@@ -34,6 +36,29 @@ def mfx_parameterized(
     mfx.assemble_neurongroup("P")
 
     yield mfx, reference_parameters
+
+
+def ornstein(path):
+    eqs = """
+        tau : second
+        sigma : 1
+        dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
+    """
+
+    model = B2Model(path, seed=4321)
+    model.define_neuronnumber(2)
+    model.define_dt(0.2 * b2.ms)
+    model.define_solver_method("euler")
+    model.define_equation(eqs)
+    model.assemble_neurongroup(name="neurongroup")
+    model.define_monitor("M", b2.StateMonitor, "neurongroup", "y")
+
+    # init
+    model.network["neurongroup"].tau = np.array([1, 0.1]) * b2.second
+    model.network["neurongroup"].sigma = np.array([0.1, 0.31622])
+    model.network["neurongroup"].y = 1
+
+    return model
 
 
 def test_construction(tmp_path) -> None:
@@ -255,26 +280,7 @@ def test_define_monitor(mfx_parameterized) -> None:
 
 
 def test_ornstein_uhlenbeck(tmp_path):
-    eqs = """
-        tau : second
-        sigma : 1
-        dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
-    """
-
-    model = B2Model(tmp_path, seed=4321)
-    model.define_neuronnumber(2)
-    model.define_dt(0.2 * b2.ms)
-    model.define_solver_method("euler")
-    model.define_equation(eqs)
-    model.assemble_neurongroup(name="neurongroup")
-
-    model.define_monitor("M", b2.StateMonitor, "neurongroup", "y")
-
-    # init
-    model.network["neurongroup"].tau = np.array([1, 0.1]) * b2.second
-    model.network["neurongroup"].sigma = np.array([0.1, 0.31622])
-    model.network["neurongroup"].y = 1
-
+    model = ornstein(tmp_path)
     model.run_simulation(10 * b2.second)
 
     b2.seed(4321)
@@ -301,3 +307,41 @@ def test_ornstein_uhlenbeck(tmp_path):
     assert np.allclose(M.t / b2.second, model.network["M"].t / b2.second)
     assert np.allclose(M.y[1], model.network["M"].y[1])
     assert np.allclose(M.y[0], model.network["M"].y[0])
+
+
+def test_hdf5(tmp_path):
+    from pathlib import Path
+    import h5py
+
+    model = ornstein(tmp_path)
+
+    model.run_simulation(10 * b2.second, save=False)
+
+    model.save_to_h5()
+
+    data = None
+    with h5py.File(Path(model.path, "data.h5"), "r") as h5file:
+        data = h5file["y"][:]
+
+    assert np.allclose(data, model.network["M"].y)
+
+
+def test_logger(tmp_path):
+
+    model = ornstein(tmp_path)
+
+    model.run_simulation(10 * b2.second, save=True)
+
+    with open(Path(model.path, "logfile.log"), "r") as file:
+        logs = [line.strip() for line in file.readlines()]
+
+    # bunch of asserts checking that logfile content works as expected
+    assert "Model creation complete" in logs[0]
+    assert "Neuron number defined: 2" in logs[1]
+    assert "dt defined: 200. us" in logs[2]
+    assert "Solver method defined: euler" in logs[3]
+    assert "Equation defined" in logs[4]
+    assert "assembling neurongroup 'neurongroup'" in logs[5]
+    assert "adding monitor 'M'" in logs[6]
+    assert "run the system for 10. s with save = True" in logs[7]
+    assert f"save data to hdf5 at {tmp_path / "data.h5"}" in logs[8]

@@ -45,13 +45,17 @@ class B2Model:
 
     def define_equation(self, line: str) -> None:
         if ":" not in line:
+            message = "Equation must have a colon that separates equation and unit"
+            self.logger.critical(message)
             raise ValueError(
-                "Equation must have a colon that separates equation and unit"
+                message
             )
 
         if "=" not in line:
+            message = "Equation must have an equal sign that separates variable and expression"
+            self.logger.critical(message)
             raise ValueError(
-                "Equation must have an equal sign that separates variable and expression"
+                message
             )
 
         self.equation += line + "\n"
@@ -64,7 +68,9 @@ class B2Model:
 
     def define_dt(self, dt: b2.Quantity) -> None:
         if not isinstance(dt, b2.Quantity):
-            raise ValueError("dt must be a Quantity")
+            message = "dt must be a Quantity"
+            self.logger.critical(message)
+            raise ValueError(message)
         self.dt = dt
         b2.defaultclock.dt = self.dt
         self.network.dt = self.dt
@@ -81,7 +87,9 @@ class B2Model:
 
     def define_threshold(self, th: Union[b2.Quantity, str]) -> None:
         if not isinstance(th, b2.Quantity) and not isinstance(th, str):
-            raise ValueError("threshold value must be a Quantity or a string")
+            message = "threshold value must be a Quantity or a string"
+            self.logger.critical(message)
+            raise ValueError(message)
         self.th = th
         self.logger.info(f"Threshold defined: {th}")
 
@@ -91,13 +99,18 @@ class B2Model:
 
     def define_refractory(self, value: b2.Quantity) -> None:
         if not isinstance(value, b2.Quantity):
-            raise ValueError("Refractory period must be a Quantity")
+            message = "Refractory period must be a Quantity"
+            self.logger.critical(message)
+            raise ValueError(message)
+
         self.refractory = value
         self.logger.info(f"Refractory period defined: {value}")
 
     def define_neuronnumber(self, n: int) -> None:
         if not isinstance(n, int):
-            raise ValueError("Neuron number must be an integer")
+            message = "Neuron number must be an integer"
+            self.logger.critical(message)
+            raise ValueError(message)
         self.logger.info(f"Neuron number defined: {n}")
         self.n = n
 
@@ -151,12 +164,16 @@ class B2Model:
             )
 
         except Exception as e:
-            raise RuntimeError(f"Error in defining synapse {name}: {e}") from e
+            message = f"Error in defining synapse {name}: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
 
         try:
             synapse.connect(connection_condition, p=connection_probability)
         except Exception as e:
-            raise RuntimeError(f"Error in connecting synapse {name}: {e}") from e
+            message = f"Error in connecting synapse {name}: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
 
         self.network.add(synapse)
 
@@ -174,6 +191,7 @@ class B2Model:
         self, name: str, cls, group: str, variable: str = None, record: bool = True
     ) -> None:
         monitor = None
+        self.logger.info(f"adding monitor '{name}'")
 
         try:
             monitor = cls(
@@ -183,7 +201,10 @@ class B2Model:
                 name=name,
             )
         except Exception as e:
-            raise RuntimeError(f"Error in defining monitor {name}: {e}") from e
+            message = f"Error in defining monitor {name}: {e}"
+            self.logger.critcal(message)
+            raise RuntimeError(message) from e
+
         self.network.add(monitor)
         self.monitors[name] = {
             "name": name,
@@ -194,7 +215,7 @@ class B2Model:
 
     def assemble_neurongroup(self, name: str = "neurongroup") -> None:
         ng = None
-
+        self.logger.info(f"assembling neurongroup '{name}'")
         try:
             ng = b2.NeuronGroup(
                 self.n,
@@ -206,11 +227,12 @@ class B2Model:
                 name=name,
             )
 
-            self.network.add(
-                ng,
-            )
         except Exception as e:
-            raise RuntimeError(f"Error in assembling neuron group: {e}") from e
+            message = f"Error in assembling neuron group: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
+        
+        self.network.add(ng)
 
         self.neurongroup = {
             "n": self.n,
@@ -224,15 +246,19 @@ class B2Model:
         }
 
     def save_to_h5(self) -> None:
+        self.logger.info(f"save data to hdf5 at {Path(self.path, "data.h5")}")
+
         with h5py.File(Path(self.path, "data.h5"), "w") as h5file:
             for key, value in self.monitors.items():
-                if h5file.get("time") is None:
-                    h5file.create_dataset("time", data=self.monitors[key].t[:])
-                h5file.create_dataset(key, data=value[:])
+                self.logger.debug(f"save data of monitor {key}")
+                monitor = self.network[key]
+                for v in monitor.record_variables:
+                    h5file.create_dataset(
+                        v, shape=getattr(monitor, v).shape, data=getattr(monitor, v)
+                    )
 
-    def run_simulation(
-        self,
-        tfinal: b2.Quantity,
-    ) -> None:
+    def run_simulation(self, tfinal: b2.Quantity, save: bool = True) -> None:
         self.network.run(tfinal, report="text")
-        # self.save_to_h5()
+        self.logger.info(f"run the system for {tfinal} with save = {save}")
+        if save:
+            self.save_to_h5()
