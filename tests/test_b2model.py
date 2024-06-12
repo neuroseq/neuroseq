@@ -7,6 +7,8 @@ import numpy as np
 import pytest
 from formozov_project.b2_model import B2Model
 
+b2.prefs.codegen.target = "cython"
+
 
 @pytest.fixture()
 def mfx(tmp_path) -> typing.Generator[B2Model, None, None]:
@@ -14,7 +16,11 @@ def mfx(tmp_path) -> typing.Generator[B2Model, None, None]:
 
 
 @pytest.fixture
-def mfx_parameterized(mfx) -> typing.Generator[B2Model, None, None]:
+def mfx_parameterized(
+    mfx, reference_parameters
+) -> typing.Generator[B2Model, None, None]:
+    b2.seed(reference_parameters["seed"])
+
     eq = "dge/dt = -ge*(1./taue): siemens\n"
     n = 30
     threshold = "v > 10 * mV"
@@ -28,7 +34,7 @@ def mfx_parameterized(mfx) -> typing.Generator[B2Model, None, None]:
     mfx.define_dt(dt)
     mfx.define_solver_method(method)
     mfx.define_parameter("ge", "(randn() * 1.5 + 4) * 10.*nS")
-    mfx.assemble_neurongroup()
+    mfx.assemble_neurongroup("P")
     yield mfx
 
 
@@ -36,8 +42,6 @@ def mfx_parameterized(mfx) -> typing.Generator[B2Model, None, None]:
 def mfx_parameterized_with_synapse(
     mfx_parameterized,
 ) -> typing.Generator[B2Model, None, None]:
-    mfx = mfx_parameterized
-
     taupre = 20 * b2.ms
     taupost = taupre
     gmax = 60 * b2.nS
@@ -45,8 +49,8 @@ def mfx_parameterized_with_synapse(
     dApost = -dApre * taupre / taupost * 1.05
 
     mfx = mfx_parameterized
-    mfx.define_neuron_subgroup("Pe", slice(0, 24))
-    mfx.define_neuron_subgroup("Pi", slice(24, 30))
+    mfx.define_neuron_subgroup("P", "Pe", slice(0, 24))
+    mfx.define_neuron_subgroup("P", "Pi", slice(24, 30))
 
     mfx.define_parameter("taupre", taupre)
 
@@ -86,7 +90,7 @@ def test_construction(tmp_path) -> None:
     assert model.logger.handlers[0].baseFilename == str(tmp_path / "logfile.log")
 
     assert model.equation == ""
-    assert model.parameters == {}
+    assert model.parameters == None
     assert model.network is not None
     assert model.network.name == "b2Network"
     assert model.neuron_subgroups == {}
@@ -125,7 +129,7 @@ def test_define_dt(mfx) -> None:
 
 
 def test_define_parameter(mfx) -> None:
-    assert mfx.parameters == {}
+    assert mfx.parameters == None
 
     mfx.define_parameter("taue", 5 * b2.ms)
     mfx.define_parameter("taui", 10 * b2.ms)
@@ -151,7 +155,7 @@ def test_define_solver_method(mfx) -> None:
 
 
 def test_define_refractory(mfx) -> None:
-    assert mfx.refractory is None
+    assert mfx.refractory is False
     mfx.define_refractory(5 * b2.ms)
     assert mfx.refractory == 5 * b2.ms
 
@@ -190,10 +194,11 @@ def test_assemble_neurongroup(mfx) -> None:
         refractory=refractory,
         method=method,
         dt=dt,
+        name="test_ng",
     )
 
     assert mfx.neurongroup == {}
-    mfx.assemble_neurongroup()
+    mfx.assemble_neurongroup("P")
     assert mfx.neurongroup["eqs"] == eq + "\n"
     assert mfx.neurongroup["refractory"] == ng._refractory
 
@@ -201,15 +206,15 @@ def test_assemble_neurongroup(mfx) -> None:
 
     ng = list(mfx.network.objects)[0]
 
-    assert ng.name == "neurongroup"
+    assert ng.name == "P"
     assert ng._N == 30
 
 
 def test_neuron_subgroup(mfx_parameterized) -> None:
     mfx = mfx_parameterized
     assert mfx.neuron_subgroups == {}
-    mfx.define_neuron_subgroup("excitatory", slice(0, 20))
-    mfx.define_neuron_subgroup("inhibitory", slice(20, 30))
+    mfx.define_neuron_subgroup("P", "excitatory", slice(0, 20))
+    mfx.define_neuron_subgroup("P", "inhibitory", slice(20, 30))
 
     assert list(
         itertools.islice(
@@ -234,8 +239,8 @@ def test_neuron_subgroup(mfx_parameterized) -> None:
     )
 
     mfx.network = b2.Network()
-    with pytest.raises(KeyError, match="'No object with name \"neurongroup\" found'"):
-        mfx.define_neuron_subgroup("excitatory", slice(0, 20))
+    with pytest.raises(KeyError, match="'No object with name \"ng\" found'"):
+        mfx.define_neuron_subgroup("ng", "excitatory", slice(0, 20))
 
 
 def test_define_synapse(mfx_parameterized) -> None:
@@ -246,8 +251,8 @@ def test_define_synapse(mfx_parameterized) -> None:
     dApost = -dApre * taupre / taupost * 1.05
 
     mfx = mfx_parameterized
-    mfx.define_neuron_subgroup("Pe", slice(0, 24))
-    mfx.define_neuron_subgroup("Pi", slice(24, 30))
+    mfx.define_neuron_subgroup("P", "Pe", slice(0, 24))
+    mfx.define_neuron_subgroup("P", "Pi", slice(24, 30))
 
     mfx.define_parameter("taupre", taupre)
 
@@ -285,76 +290,61 @@ def test_define_monitor(mfx_parameterized) -> None:
 
     assert mfx.monitors == {}
 
-    mfx.define_monitor("Traces_ge", b2.StateMonitor, "neurongroup", "ge", record=True)
+    mfx.define_monitor("Traces_ge", b2.StateMonitor, "P", "ge", record=True)
 
     assert "Traces_ge" in mfx.monitors
-    assert mfx.network["Traces_ge"].source == mfx.network["neurongroup"]
+    assert mfx.network["Traces_ge"].source == mfx.network["P"]
     assert mfx.network["Traces_ge"].record_variables == [
         "ge",
     ]
 
 
-def test_run_simulation(reference_system):
-    Traces_v, spikemon, synmon, reference_parameters, tmp_path = reference_system
+def test_ornstein_uhlenbeck(tmp_path):
+    eqs = """
+        tau : second
+        sigma : 1
+        dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
+    """
 
-    model = B2Model(tmp_path, loglevel="DEBUG")
+    model = B2Model(tmp_path, seed=4321)
+    model.define_neuronnumber(2)
+    model.define_dt(0.2 * b2.ms)
+    model.define_solver_method("euler")
+    model.define_equation(eqs)
+    model.assemble_neurongroup(name="neurongroup")
 
-    for key, value in reference_parameters.items():
-        model.define_parameter(key, value)
+    model.define_monitor("M", b2.StateMonitor, "neurongroup", "y")
 
-    model.define_equation(reference_parameters["eqs"])
-    model.define_neuronnumber(reference_parameters["n"])
-    model.define_threshold(reference_parameters["threshold"])
-    model.define_refractory(reference_parameters["refractory"])
-    model.define_dt(reference_parameters["dt"])
-    model.define_solver_method(reference_parameters["method"])
+    # init
+    model.network["neurongroup"].tau = np.array([1, 0.1]) * b2.second
+    model.network["neurongroup"].sigma = np.array([0.1, 0.31622])
+    model.network["neurongroup"].y = 1
 
-    model.assemble_neurongroup()
+    model.run_simulation(10 * b2.second)
 
-    model.define_neuron_subgroup("Pe", slice(0, 24))
-    model.define_neuron_subgroup("Pi", slice(24, 30))
-
-    model.define_synapse(
-        "Ce",
-        "Pe",
-        "Pe",
-        reference_parameters["ce_eq"],
-        on_pre=reference_parameters["on_pre_ce"],
-        on_post=reference_parameters["on_post_ce"],
-        connection_condition=reference_parameters["ce_connect"],
-        connection_probability=reference_parameters["connect_p"],
+    b2.seed(4321)
+    N = b2.NeuronGroup(
+        2,
+        """
+        tau : second
+        sigma : 1
+        dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
+        """,
+        method="euler",
     )
 
-    model.define_synapse(
-        "Cei",
-        "Pe",
-        "Pi",
-        reference_parameters["cei_eq"],
-        on_pre=reference_parameters["cei_on_pre"],
-        connection_probability=reference_parameters["connect_p"],
-    )
+    N.tau = np.array([1, 0.1]) * b2.second
+    N.sigma = np.array([0.1, 0.31622])
+    N.y = 1
 
-    model.define_synapse(
-        "Cie",
-        "Pi",
-        "Pe",
-        reference_parameters["cie_eq"],
-        on_pre=reference_parameters["cie_on_pre"],
-        connection_probability=reference_parameters["connect_p"],
-    )
+    M = b2.StateMonitor(N, "y", record=True)
 
-    # model initialization
-    model.network["neurongroup"].v = "El + (randn() * 5 - 5)*mV"
-    model.network["neurongroup"].ge = "(randn() * 1.5 + 4) * 10.*nS"
-    model.network["neurongroup"].gi = "(randn() * 12 + 20) * 10.*nS"
+    network = b2.Network([N, M])
 
-    model.define_monitor("Traces_v", b2.StateMonitor, "neurongroup", "v", record=True)
-    model.define_monitor("spikemon", b2.SpikeMonitor, "neurongroup")
-    model.define_monitor("synmon", b2.StateMonitor, "Ce", "we", record=True)
+    network.run(10 * b2.second)
 
-    model.run_simulation(reference_parameters["tfinal"])
+    assert np.allclose(M.t / b2.second, model.network["M"].t / b2.second)
+    assert np.allclose(M.y[1], model.network["M"].y[1])
+    assert np.allclose(M.y[0], model.network["M"].y[0])
 
-    np.testing.assert_array_equal(model.network["Traces_v"].t, Traces_v.t)
-    np.testing.assert_array_equal(model.network["Traces_v"].v, Traces_v.v)
-    print(Traces_v.v[0][0:20])
-    print(model.network["Traces_v"].v[0][0:20])
+

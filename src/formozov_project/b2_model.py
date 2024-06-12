@@ -130,7 +130,6 @@ class B2Model:
         connection_condition: str = None,
         connection_probability: float = 0.0,
     ) -> None:
-
         _origin = self.network.__getitem__(
             self.neuron_subgroups[origin]["name_in_network"]
         )
@@ -195,7 +194,6 @@ class B2Model:
         }
 
     def assemble_neurongroup(self, name: str = "neurongroup") -> None:
-
         ng = None
 
         try:
@@ -240,6 +238,5 @@ class B2Model:
         self,
         tfinal: float,
     ) -> None:
-
         self.network.run(tfinal, report="text")
         # self.save_to_h5()
