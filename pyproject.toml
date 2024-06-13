@@ -27,6 +27,7 @@ tests = [
   "pytest",
     "pytest-qt",
   "pytest-randomly",
+  "pytest-cov"
 ]
 
 [tool.setuptools.dynamic]
