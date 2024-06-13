@@ -474,7 +474,7 @@ def test_define_monitor(mfx_parameterized) -> None:
 
     assert mfx.monitors == {}
 
-    mfx.define_monitor("Traces_ge", b2.StateMonitor, "P", "ge", record=True)
+    mfx.define_monitor("Traces_ge", b2.StateMonitor, "P", "ge")
 
     assert "Traces_ge" in mfx.monitors
     assert mfx.network["Traces_ge"].source == mfx.network["P"]
