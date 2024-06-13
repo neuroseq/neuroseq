@@ -21,6 +21,17 @@ class B2Model:
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
 
+    def _update_nested_dict(self, original, updates):
+        for key, value in updates.items():
+            if (
+                isinstance(value, dict)
+                and key in original
+                and isinstance(original[key], dict)
+            ):
+                self._update_nested_dict(original[key], value)
+            else:
+                original[key] = value
+
     def __init__(self, savepath: str, loglevel: str = "INFO", seed: int = 123):
         b2.seed(seed)
 
@@ -30,39 +41,34 @@ class B2Model:
         self.path = savepath
         self._set_up_logger(loglevel)
         self.network = b2.Network(name="b2Network")
-        self.equation = ""
         self.parameters = None
         self.neuron_subgroups = {}
-        self.neurongroup = {}
+        self.neurongroups = {}
         self.synapses = {}
         self.monitors = {}
         self.dt = None
-        self.th = None
         self.solver = None
-        self.refractory = False
-        self.n = None
         self.logger.info("Model creation complete")
 
-    def define_equation(self, line: str) -> None:
+    def define_equation(self, name: str, line: str) -> None:
         if ":" not in line:
             message = "Equation must have a colon that separates equation and unit"
             self.logger.critical(message)
-            raise ValueError(
-                message
-            )
+            raise ValueError(message)
 
         if "=" not in line:
             message = "Equation must have an equal sign that separates variable and expression"
             self.logger.critical(message)
-            raise ValueError(
-                message
-            )
+            raise ValueError(message)
 
-        self.equation += line + "\n"
+        if name not in self.neurongroups:
+            self.neurongroups[name] = {}
 
-        e = b2.Equations(self.equation)
+        if "model" in self.neurongroups[name]:
+            self.neurongroups[name]["model"] += line + "\n"
+        else:
+            self.neurongroups[name]["model"] = line + "\n"
 
-        e.check_identifiers()
         self.logger.info("Equation defined")
         self.logger.debug(f"full equation: {line}")
 
@@ -71,6 +77,7 @@ class B2Model:
             message = "dt must be a Quantity"
             self.logger.critical(message)
             raise ValueError(message)
+
         self.dt = dt
         b2.defaultclock.dt = self.dt
         self.network.dt = self.dt
@@ -85,34 +92,64 @@ class B2Model:
         self.logger.info(f"Parameter defined: {name}")
         self.logger.debug(f"Parameter value: {value}")
 
-    def define_threshold(self, th: Union[b2.Quantity, str]) -> None:
+    def define_threshold(self, name: str, th: Union[b2.Quantity, str]) -> None:
         if not isinstance(th, b2.Quantity) and not isinstance(th, str):
             message = "threshold value must be a Quantity or a string"
             self.logger.critical(message)
             raise ValueError(message)
-        self.th = th
+        # self.neurongroups.update({name: {"th": th, }, })
+        self._update_nested_dict(
+            self.neurongroups,
+            {
+                name: {
+                    "th": th,
+                },
+            },
+        )
         self.logger.info(f"Threshold defined: {th}")
 
-    def define_solver_method(self, method: str) -> None:
-        self.solver = method
+    def define_solver_method(self, name: str, method: str) -> None:
+        self._update_nested_dict(
+            self.neurongroups,
+            {
+                name: {
+                    "method": method,
+                },
+            },
+        )
         self.logger.info(f"Solver method defined: {method}")
 
-    def define_refractory(self, value: b2.Quantity) -> None:
+    def define_refractory(self, name: str, value: b2.Quantity) -> None:
         if not isinstance(value, b2.Quantity):
             message = "Refractory period must be a Quantity"
             self.logger.critical(message)
             raise ValueError(message)
 
-        self.refractory = value
+        self._update_nested_dict(
+            self.neurongroups,
+            {
+                name: {
+                    "refractory": value,
+                },
+            },
+        )
         self.logger.info(f"Refractory period defined: {value}")
 
-    def define_neuronnumber(self, n: int) -> None:
+    def define_neuronnumber(self, name: str, n: int) -> None:
         if not isinstance(n, int):
             message = "Neuron number must be an integer"
             self.logger.critical(message)
             raise ValueError(message)
+
         self.logger.info(f"Neuron number defined: {n}")
-        self.n = n
+        self._update_nested_dict(
+            self.neurongroups,
+            {
+                name: {
+                    "n": n,
+                },
+            },
+        )
 
     def define_neuron_subgroup(
         self, target_name: str, name: str, idxs: Union[slice, int, List]
@@ -132,33 +169,125 @@ class B2Model:
             "name_in_network": sng.name,
         }
 
-    def define_synapse(
+    def define_synapse_target(self, name: str, target: str):
+        self.syanpses.update(
+            {
+                name: {
+                    "target": target,
+                }
+            }
+        )
+
+    def define_synapse_origin(self, name: str, origin: str):
+        self.syanpses.update(
+            {
+                name: {
+                    "origin": origin,
+                }
+            }
+        )
+
+    def define_synapse_equation(self, name: str, line: str):
+        if ":" not in line:
+            message = "Equation must have a colon that separates equation and unit"
+            self.logger.critical(message)
+            raise ValueError(message)
+
+        if "=" not in line:
+            message = "Equation must have an equal sign that separates variable and expression"
+            self.logger.critical(message)
+            raise ValueError(message)
+
+        if name not in self.synapses:
+            self.synapses[name] = {}
+
+        if "model" in self.neurongroups[name]:
+            self.synapses[name]["model"] += line + "\n"
+        else:
+            self.synapses[name]["model"] = line + "\n"
+
+    def define_synapse_pre(self, name: str, line: str):
+        if ":" not in line:
+            message = "Equation must have a colon that separates equation and unit"
+            self.logger.critical(message)
+            raise ValueError(message)
+
+        if "=" not in line:
+            message = "Equation must have an equal sign that separates variable and expression"
+            self.logger.critical(message)
+            raise ValueError(message)
+
+        if name not in self.synapses or "on_pre" not in self.synapses[name]:
+            self.synapses.update(
+                {
+                    name: {
+                        "on_pre": line + "\n",
+                    },
+                },
+            )
+        else:
+            self.synapses[name]["on_pre"] += line + "\n"
+
+    def define_synapse_post(self, name: str, line: str):
+        if ":" not in line:
+            message = "Equation must have a colon that separates equation and unit"
+            self.logger.critical(message)
+            raise ValueError(message)
+
+        if "=" not in line:
+            message = "Equation must have an equal sign that separates variable and expression"
+            self.logger.critical(message)
+            raise ValueError(message)
+
+        if name not in self.synapses or "on_post" not in self.synapses[name]:
+            self.synapses.update(
+                {
+                    name: {
+                        "on_post": line + "\n",
+                    },
+                },
+            )
+        else:
+            self.synapses[name]["on_post"] += line + "\n"
+
+    def define_synapse_connection(self, name: str, connection_condition: str):
+        self.syanpses.update(
+            {
+                name: {
+                    "connection_condition": connection_condition,
+                },
+            }
+        )
+
+    def define_synapse_connection_probablitiy(self, name: str, p: float):
+        self.syanpses.update(
+            {
+                name: {
+                    "p": p,
+                },
+            }
+        )
+
+    def assemble_synapse(
         self,
         name: str,
-        origin: str,
-        target: str,
-        synapse_eqs: str,
-        on_pre: str = None,
-        on_post: str = None,
-        connection_condition: str = None,
-        connection_probability: float = 0.0,
     ) -> None:
-        _origin = self.network.__getitem__(
-            self.neuron_subgroups[origin]["name_in_network"]
-        )
-        _target = self.network.__getitem__(
-            self.neuron_subgroups[target]["name_in_network"]
-        )
-
-        synapse = None
-
         try:
+            args = self.synapses[name]
+
+            _origin = self.network.__getitem__(
+                self.neuron_subgroups[args["origin"]]["name_in_network"]
+            )
+            _target = self.network.__getitem__(
+                self.neuron_subgroups[args["target"]]["name_in_network"]
+            )
+
             synapse = b2.Synapses(
                 _origin,
                 target=_target,
-                model=synapse_eqs,
-                on_pre=on_pre,
-                on_post=on_post,
+                model=args["model"],
+                on_pre=args["on_pre"],
+                on_post=args["on_post"],
                 name=name,
                 namespace=self.parameters,
             )
@@ -169,23 +298,13 @@ class B2Model:
             raise RuntimeError(message) from e
 
         try:
-            synapse.connect(connection_condition, p=connection_probability)
+            synapse.connect(args["connection_condition"], p=args["p"])
         except Exception as e:
             message = f"Error in connecting synapse {name}: {e}"
             self.logger.critical(message)
             raise RuntimeError(message) from e
 
         self.network.add(synapse)
-
-        self.synapses[name] = {
-            "origin": origin,
-            "target": target,
-            "connection_condition": connection_condition,
-            "connection_probability": connection_probability,
-            "on_pre": on_pre,
-            "on_post": on_post,
-            "synapse_eqs": synapse_eqs,
-        }
 
     def define_monitor(
         self, name: str, cls, group: str, variable: str = None, record: bool = True
@@ -213,17 +332,31 @@ class B2Model:
             "record": record,
         }
 
-    def assemble_neurongroup(self, name: str = "neurongroup") -> None:
+    def define_reset(self, name: str, reset: str) -> None:
+        self._update_nested_dict(
+            self.neuron_subgroups,
+            {
+                name: {
+                    "reset": reset,
+                },
+            },
+        )
+
+    def assemble_neurongroup(
+        self,
+        name: str = "neurongroup",
+    ) -> None:
         ng = None
         self.logger.info(f"assembling neurongroup '{name}'")
         try:
             ng = b2.NeuronGroup(
-                self.n,
-                self.equation,
-                threshold=self.th,
-                refractory=self.refractory,
-                method=self.solver,
+                self.neurongroups[name].get("n", None),
+                self.neurongroups[name].get("model", None),
+                threshold=self.neurongroups[name].get("th", None),
+                refractory=self.neurongroups[name].get("refractory", None),
+                method=self.neurongroups[name].get("method", None),
                 namespace=self.parameters,
+                reset=self.neurongroups[name].get("reset", None),
                 name=name,
             )
 
@@ -231,19 +364,8 @@ class B2Model:
             message = f"Error in assembling neuron group: {e}"
             self.logger.critical(message)
             raise RuntimeError(message) from e
-        
-        self.network.add(ng)
 
-        self.neurongroup = {
-            "n": self.n,
-            "eqs": self.equation,
-            "threshold": self.th,
-            "refractory": self.refractory,
-            "dt": self.dt,
-            "method": self.solver,
-            "namespace": self.parameters,
-            "name": name,
-        }
+        self.network.add(ng)
 
     def save_to_h5(self) -> None:
         self.logger.info(f"save data to hdf5 at {Path(self.path, "data.h5")}")

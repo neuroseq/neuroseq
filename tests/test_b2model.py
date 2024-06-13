@@ -6,7 +6,6 @@ from pathlib import Path
 import brian2 as b2
 import numpy as np
 import pytest
-
 from formozov_project.b2_model import B2Model
 
 b2.prefs.codegen.target = "cython"
@@ -27,12 +26,12 @@ def mfx_parameterized(
     refractory = 3 * b2.ms
     method = "exponential_euler"
     dt = 0.1 * b2.ms
-    mfx.define_equation(reference_parameters["eqs"])
-    mfx.define_neuronnumber(n)
-    mfx.define_threshold(threshold)
-    mfx.define_refractory(refractory)
+    mfx.define_equation("P", reference_parameters["eqs"])
+    mfx.define_neuronnumber("P", n)
+    mfx.define_threshold("P", threshold)
+    mfx.define_refractory("P", refractory)
     mfx.define_dt(dt)
-    mfx.define_solver_method(method)
+    mfx.define_solver_method("P", method)
     mfx.assemble_neurongroup("P")
 
     yield mfx, reference_parameters
@@ -46,10 +45,10 @@ def ornstein(path):
     """
 
     model = B2Model(path, seed=4321)
-    model.define_neuronnumber(2)
+    model.define_neuronnumber("neurongroup", 2)
     model.define_dt(0.2 * b2.ms)
-    model.define_solver_method("euler")
-    model.define_equation(eqs)
+    model.define_solver_method("neurongroup", "euler")
+    model.define_equation("neurongroup", eqs)
     model.assemble_neurongroup(name="neurongroup")
     model.define_monitor("M", b2.StateMonitor, "neurongroup", "y")
 
@@ -69,8 +68,7 @@ def test_construction(tmp_path) -> None:
     assert model.logger.level == logging.DEBUG
     assert model.logger.handlers[0].baseFilename == str(tmp_path / "logfile.log")
 
-    assert model.equation == ""
-    assert model.parameters == None
+    assert model.parameters is None
     assert model.network is not None
     assert model.network.name == "b2Network"
     assert model.neuron_subgroups == {}
@@ -79,28 +77,26 @@ def test_construction(tmp_path) -> None:
 
 
 def test_define_equation(mfx) -> None:
-    mfx.define_equation("dge/dt = -ge*(1./taue) : siemens")
+    assert mfx.neurongroups == {}
 
-    assert mfx.equation == "dge/dt = -ge*(1./taue) : siemens\n"
+    mfx.define_equation("P", "dge/dt = -ge*(1./taue) : siemens")
 
+    assert mfx.neurongroups["P"]["model"] == "dge/dt = -ge*(1./taue) : siemens\n"
 
-def test_equation_no_unit(mfx) -> None:
     with pytest.raises(
         ValueError, match="Equation must have a colon that separates equation and unit"
     ):
-        mfx.define_equation("dge/dt = -ge*(1./taue)")
+        mfx.define_equation("P", "dge/dt = -ge*(1./taue)")
 
-
-def test_equation_no_variable(mfx) -> None:
     with pytest.raises(
         ValueError,
         match="Equation must have an equal sign that separates variable and expression",
     ):
-        mfx.define_equation("-ge*(1./taue): siemens")
+        mfx.define_equation("P", "-ge*(1./taue): siemens")
 
 
 def test_define_dt(mfx) -> None:
-    assert mfx.dt is None
+    assert mfx.neurongroups == {}
 
     mfx.define_dt(0.1 * b2.ms)
 
@@ -109,7 +105,7 @@ def test_define_dt(mfx) -> None:
 
 
 def test_define_parameter(mfx) -> None:
-    assert mfx.parameters == None
+    assert mfx.parameters is None
 
     mfx.define_parameter("taue", 5 * b2.ms)
     mfx.define_parameter("taui", 10 * b2.ms)
@@ -123,33 +119,33 @@ def test_define_parameter(mfx) -> None:
 
 
 def test_define_threshold(mfx) -> None:
-    assert mfx.th is None
-    mfx.define_threshold("v > 10 * mV")
-    assert mfx.th == "v > 10 * mV"
+    assert mfx.neurongroups == {}
+    mfx.define_threshold("P", "v > 10 * mV")
+    assert mfx.neurongroups["P"]["th"] == "v > 10 * mV"
 
 
 def test_define_solver_method(mfx) -> None:
-    assert mfx.solver is None
-    mfx.define_solver_method("euler")
-    assert mfx.solver == "euler"
+    assert mfx.neurongroups == {}
+    mfx.define_solver_method("P", "euler")
+    assert mfx.neurongroups["P"]["method"] == "euler"
 
 
 def test_define_refractory(mfx) -> None:
-    assert mfx.refractory is False
-    mfx.define_refractory(5 * b2.ms)
-    assert mfx.refractory == 5 * b2.ms
+    assert mfx.neurongroups == {}
+    mfx.define_refractory("P", 5 * b2.ms)
+    assert mfx.neurongroups["P"]["refractory"] == 5 * b2.ms
 
     with pytest.raises(ValueError, match="Refractory period must be a Quantity"):
-        mfx.define_refractory(5)
+        mfx.define_refractory("P", 5)
 
 
 def test_define_neuron_number(mfx) -> None:
-    assert mfx.n is None
-    mfx.define_neuronnumber(100)
-    assert mfx.n == 100
+    assert mfx.neurongroups == {}
+    mfx.define_neuronnumber("P", 100)
+    assert mfx.neurongroups["P"]["n"] == 100
 
     with pytest.raises(ValueError, match="Neuron number must be an integer"):
-        mfx.define_neuronnumber(100.0)
+        mfx.define_neuronnumber("P", 100.0)
 
 
 def test_assemble_neurongroup(mfx) -> None:
@@ -159,12 +155,12 @@ def test_assemble_neurongroup(mfx) -> None:
     refractory = 5 * b2.ms
     method = "euler"
     dt = 0.1 * b2.ms
-    mfx.define_equation(eq)
-    mfx.define_neuronnumber(n)
-    mfx.define_threshold(threshold)
-    mfx.define_refractory(refractory)
+    mfx.define_equation("P", eq)
+    mfx.define_neuronnumber("P", n)
+    mfx.define_threshold("P", threshold)
+    mfx.define_refractory("P", refractory)
     mfx.define_dt(dt)
-    mfx.define_solver_method(method)
+    mfx.define_solver_method("P", method)
     mfx.define_parameter("ge", "(randn() * 1.5 + 4) * 10.*nS")
 
     ng = b2.NeuronGroup(
@@ -177,17 +173,20 @@ def test_assemble_neurongroup(mfx) -> None:
         name="test_ng",
     )
 
-    assert mfx.neurongroup == {}
+    assert mfx.neurongroups["P"] == {
+        "n": n,
+        "th": threshold,
+        "refractory": refractory,
+        "method": method,
+        "model": eq + "\n",
+    }
     mfx.assemble_neurongroup("P")
-    assert mfx.neurongroup["eqs"] == eq + "\n"
-    assert mfx.neurongroup["refractory"] == ng._refractory
-
     assert len(mfx.network.objects) == 1
 
     ng = list(mfx.network.objects)[0]
 
-    assert ng.name == "P"
-    assert ng._N == 30
+    assert mfx.network["P"].name == ng.name
+    assert mfx.network["P"]._N == ng._N
 
 
 def test_neuron_subgroup(mfx_parameterized) -> None:
@@ -309,8 +308,65 @@ def test_ornstein_uhlenbeck(tmp_path):
     assert np.allclose(M.y[0], model.network["M"].y[0])
 
 
+def test_NMDA_model(tmp_path):
+    # https://brian2.readthedocs.io/en/stable/examples/synapses.nonlinear.html
+    a = 1 / (10 * b2.ms)
+    b = 1 / (10 * b2.ms)
+    c = 1 / (10 * b2.ms)
+
+    model = B2Model(tmp_path, seed=4321)
+
+    model.define_reset("v = 0")
+    model.define_neuronnumber(2)
+    model.define_dt()
+    model.define_synapse()
+    model.define_solver_method()
+    model.define_equation()
+    model.define_threshold()
+
+    neuron_input = b2.NeuronGroup(
+        2, "dv/dt = 1/(10*ms) : 1", threshold="v>1", reset="v = 0", method="euler"
+    )
+    neurons = b2.NeuronGroup(
+        1,
+        """dv/dt = (g-v)/(10*ms) : 1
+                                g : 1""",
+        method="exact",
+    )
+    S = b2.Synapses(
+        neuron_input,
+        neurons,
+        """
+                    dg_syn/dt = -a*g_syn+b*x*(1-g_syn) : 1 (clock-driven)
+                    g_post = g_syn : 1 (summed)
+                    dx/dt=-c*x : 1 (clock-driven)
+                    w : 1 # synaptic weight
+                """,
+        on_pre="x += w",
+    )  # NMDA synapses
+
+    S.connect()
+    S.w = [1.0, 10.0]
+    neuron_input.v = [0.0, 0.5]
+
+    M = b2.StateMonitor(
+        S,
+        "g",
+        # If not using standalone mode, this could also simply be
+        record=True,
+    )
+    # record=np.arange(len(neuron_input)*len(neurons)))
+
+    Mn = b2.StateMonitor(neurons, "g", record=0)
+
+    test_network = b2.Network([neuron_input, neuron_input, S, M, Mn])
+
+    test_network.run(1000 * b2.ms)
+
+
 def test_hdf5(tmp_path):
     from pathlib import Path
+
     import h5py
 
     model = ornstein(tmp_path)
@@ -327,12 +383,11 @@ def test_hdf5(tmp_path):
 
 
 def test_logger(tmp_path):
-
     model = ornstein(tmp_path)
 
     model.run_simulation(10 * b2.second, save=True)
 
-    with open(Path(model.path, "logfile.log"), "r") as file:
+    with open(Path(model.path, "logfile.log")) as file:
         logs = [line.strip() for line in file.readlines()]
 
     # bunch of asserts checking that logfile content works as expected
