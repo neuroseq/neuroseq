@@ -14,10 +14,24 @@ class HeatmapWidget(pg.ImageView):
     def __init__(
         self,
         data: Optional[np.ndarray] = None,
-        xvals: Optional[np.ndarray] = None,
+        timestamps: Optional[np.ndarray] = None,
         parent: Optional[QtWidgets.QWidget] = None,
     ) -> None:
         super().__init__(parent, discreteTimeLine=True)
         self.setPredefinedGradient("viridis")
+        self.set_data(data, timestamps)
+
+    def set_data(
+        self,
+        data: Optional[np.ndarray] = None,
+        timestamps: Optional[np.ndarray] = None,
+    ) -> None:
+        self.clear()
         if data is not None:
-            self.setImage(data, xvals=xvals)
+            self.setImage(data, xvals=timestamps)
+
+    def connect_trace_widget(self, trace_widget: pg.PlotWidget) -> None:
+        """Connect the timeline in this widget to the timeline in the TraceWidget."""
+        self.sigTimeChanged.connect(
+            lambda idx, time: trace_widget.timeline.setValue(time)
+        )
