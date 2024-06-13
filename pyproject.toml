@@ -25,9 +25,10 @@ formozov-project = "formozov_project.__main__:main"
 [project.optional-dependencies]
 tests = [
   "pytest",
-    "pytest-qt",
+  "pytest-qt",
   "pytest-randomly",
-  "pytest-cov"
+  "pytest-cov", 
+  "pytest-mock"
 ]
 
 [tool.setuptools.dynamic]

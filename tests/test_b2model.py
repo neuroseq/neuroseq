@@ -6,20 +6,20 @@ from pathlib import Path
 import brian2 as b2
 import numpy as np
 import pytest
-from formozov_project.b2_model import B2Model
+from formozov_project import b2_model
 
 b2.prefs.codegen.target = "cython"
 
 
 @pytest.fixture()
-def mfx(tmp_path) -> typing.Generator[B2Model, None, None]:
-    yield B2Model(tmp_path, loglevel="DEBUG")
+def mfx(tmp_path) -> typing.Generator[b2_model.B2Model, None, None]:
+    yield b2_model.B2Model(tmp_path, loglevel="DEBUG")
 
 
 @pytest.fixture
 def mfx_parameterized(
     mfx, reference_parameters
-) -> typing.Generator[B2Model, None, None]:
+) -> typing.Generator[b2_model.B2Model, None, None]:
     b2.seed(reference_parameters["seed"])
     n = 30
     threshold = "v>-20*mV"
@@ -37,6 +37,55 @@ def mfx_parameterized(
     yield mfx, reference_parameters
 
 
+@pytest.fixture()
+def mfx_with_synapse(mfx_parameterized):
+    taupre = 20 * b2.ms
+    taupost = taupre
+    gmax = 60 * b2.nS
+    dApre = 6 * b2.nS
+    dApost = -dApre * taupre / taupost * 1.05
+
+    mfx, reference_parameters = mfx_parameterized
+    mfx.define_neuron_subgroup("P", "Pe", slice(0, 24))
+    mfx.define_neuron_subgroup("P", "Pi", slice(24, 30))
+
+    mfx.define_parameter("taupre", taupre)
+
+    mfx.define_parameter("taupost", taupost)
+
+    mfx.define_parameter("gmax", gmax)
+
+    mfx.define_parameter("dApre", dApre)
+
+    mfx.define_parameter("dApost", dApost)
+
+    mfx.define_synapse_connection("Ce", "i != j")
+    mfx.define_synapse_connection_probablitiy("Ce", 1.0)
+    mfx.define_synapse_origin("Ce", "Pe")
+    mfx.define_synapse_target("Ce", "Pi")
+    mfx.define_synapse_equation(
+        "Ce",
+        """we : siemens
+            dApre/dt = -Apre / taupre : siemens (event-driven)
+            dApost/dt = -Apost / taupost : siemens (event-driven)""",
+    )
+
+    mfx.define_synapse_pre(
+        "Ce",
+        """ge += we
+                    Apre += dApre
+                    we = clip(we + Apost, -gmax, gmax)""",
+    )
+
+    mfx.define_synapse_post(
+        "Ce",
+        """Apost += dApost
+                      we= clip(we + Apre, -gmax, gmax)""",
+    )
+
+    yield mfx, reference_parameters
+
+
 def ornstein(path):
     eqs = """
         tau : second
@@ -44,7 +93,7 @@ def ornstein(path):
         dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
     """
 
-    model = B2Model(path, seed=4321)
+    model = b2_model.B2Model(path, seed=4321)
     model.define_neuronnumber("neurongroup", 2)
     model.define_dt(0.2 * b2.ms)
     model.define_solver_method("neurongroup", "euler")
@@ -61,7 +110,7 @@ def ornstein(path):
 
 
 def test_construction(tmp_path) -> None:
-    model = B2Model(tmp_path, loglevel="DEBUG")
+    model = b2_model.B2Model(tmp_path, loglevel="DEBUG")
 
     assert model.path == tmp_path
     assert model.logger.name == "Model"
@@ -71,9 +120,11 @@ def test_construction(tmp_path) -> None:
     assert model.parameters is None
     assert model.network is not None
     assert model.network.name == "b2Network"
-    assert model.neuron_subgroups == {}
     assert model.synapses == {}
     assert model.monitors == {}
+
+    with pytest.raises(ValueError, match="Path fakepath does not exist"):
+        b2_model.B2Model("fakepath")
 
 
 def test_define_equation(mfx) -> None:
@@ -95,13 +146,24 @@ def test_define_equation(mfx) -> None:
         mfx.define_equation("P", "-ge*(1./taue): siemens")
 
 
+def test_define_equation_incremental(mfx) -> None:
+
+    mfx.define_equation("P", "dApre/dt = -Apre / taupre : siemens")
+    mfx.define_equation("P", "dApost/dt = -Apost / taupost : siemens")
+
+    e = b2.Equations(mfx.neurongroups["P"]["model"])
+
+    assert set(e.names) == set(["Apre", "Apost"])
+    assert e.parameter_names == set()
+
+
 def test_define_dt(mfx) -> None:
     assert mfx.neurongroups == {}
 
     mfx.define_dt(0.1 * b2.ms)
 
-    with pytest.raises(ValueError, match="dt must be a Quantity"):
-        mfx.define_dt(0.1)
+    assert np.isclose(mfx.dt.base, 0.0001)
+    assert mfx.dt.has_same_dimensions(0.1 * b2.ms)
 
 
 def test_define_parameter(mfx) -> None:
@@ -135,17 +197,11 @@ def test_define_refractory(mfx) -> None:
     mfx.define_refractory("P", 5 * b2.ms)
     assert mfx.neurongroups["P"]["refractory"] == 5 * b2.ms
 
-    with pytest.raises(ValueError, match="Refractory period must be a Quantity"):
-        mfx.define_refractory("P", 5)
-
 
 def test_define_neuron_number(mfx) -> None:
     assert mfx.neurongroups == {}
     mfx.define_neuronnumber("P", 100)
     assert mfx.neurongroups["P"]["n"] == 100
-
-    with pytest.raises(ValueError, match="Neuron number must be an integer"):
-        mfx.define_neuronnumber("P", 100.0)
 
 
 def test_assemble_neurongroup(mfx) -> None:
@@ -170,7 +226,7 @@ def test_assemble_neurongroup(mfx) -> None:
         refractory=refractory,
         method=method,
         dt=dt,
-        name="test_ng",
+        name="P",
     )
 
     assert mfx.neurongroups["P"] == {
@@ -183,43 +239,63 @@ def test_assemble_neurongroup(mfx) -> None:
     mfx.assemble_neurongroup("P")
     assert len(mfx.network.objects) == 1
 
-    ng = list(mfx.network.objects)[0]
-
     assert mfx.network["P"].name == ng.name
     assert mfx.network["P"]._N == ng._N
 
 
+def test_assemble_neurongroup_exception(mocker, mfx):
+
+    with pytest.raises(RuntimeError, match="Error in assembling neuron group N"):
+        mfx.assemble_neurongroup("N")
+
+
 def test_neuron_subgroup(mfx_parameterized) -> None:
     mfx, _ = mfx_parameterized
-    assert mfx.neuron_subgroups == {}
+
     mfx.define_neuron_subgroup("P", "excitatory", slice(0, 20))
     mfx.define_neuron_subgroup("P", "inhibitory", slice(20, 30))
 
     assert list(
         itertools.islice(
             itertools.count(),
-            mfx.neuron_subgroups["excitatory"]["idx"].start,
-            mfx.neuron_subgroups["excitatory"]["idx"].stop,
+            mfx.neurongroups["excitatory"]["idx"].start,
+            mfx.neurongroups["excitatory"]["idx"].stop,
         )
     ) == list(range(0, 20))
+
     assert list(
         itertools.islice(
             itertools.count(),
-            mfx.neuron_subgroups["inhibitory"]["idx"].start,
-            mfx.neuron_subgroups["inhibitory"]["idx"].stop,
+            mfx.neurongroups["inhibitory"]["idx"].start,
+            mfx.neurongroups["inhibitory"]["idx"].stop,
         )
     ) == list(range(20, 30))
 
-    assert (
-        mfx.network[mfx.neuron_subgroups["excitatory"]["name_in_network"]] is not None
-    )
-    assert (
-        mfx.network[mfx.neuron_subgroups["inhibitory"]["name_in_network"]] is not None
-    )
+    print(list(mfx.neurongroups.keys()))
+
+    assert mfx.network[mfx.neurongroups["excitatory"]["name"]] is not None
+    assert mfx.network[mfx.neurongroups["inhibitory"]["name"]] is not None
 
     mfx.network = b2.Network()
     with pytest.raises(KeyError, match="'No object with name \"ng\" found'"):
         mfx.define_neuron_subgroup("ng", "excitatory", slice(0, 20))
+
+
+def test_define_synapse_eq_exceptions(mfx_parameterized):
+    mfx, _ = mfx_parameterized
+
+    with pytest.raises(
+        ValueError,
+        match="Equation must have an equal sign that separates variable and expression",
+    ):
+        mfx.define_synapse_equation(
+            "S", "dApost/dt -Apost / taupost : siemens (event-driven)"
+        )
+
+    with pytest.raises(
+        ValueError, match="Equation must have a colon that separates equation and unit"
+    ):
+        mfx.define_synapse_equation("S", "dApost/dt = -Apost / taupost (event-driven)")
 
 
 def test_define_synapse(mfx_parameterized) -> None:
@@ -243,25 +319,56 @@ def test_define_synapse(mfx_parameterized) -> None:
 
     mfx.define_parameter("dApost", dApost)
 
-    mfx.define_synapse(
+    mfx.define_synapse_connection("Ce", "i != j")
+    mfx.define_synapse_connection_probablitiy("Ce", 1.0)
+    mfx.define_synapse_origin("Ce", "Pe")
+    mfx.define_synapse_target("Ce", "Pi")
+    mfx.define_synapse_equation(
         "Ce",
-        "Pe",
-        "Pi",
         """we : siemens
             dApre/dt = -Apre / taupre : siemens (event-driven)
             dApost/dt = -Apost / taupost : siemens (event-driven)""",
-        on_pre="""ge += we
+    )
+
+    mfx.define_synapse_pre(
+        "Ce",
+        """ge += we
                     Apre += dApre
                     we = clip(we + Apost, -gmax, gmax)""",
-        on_post="""Apost += dApost
-                      we= clip(we + Apre, -gmax, gmax)""",
-        connection_condition="i != j",
-        connection_probability=1.0,
     )
+
+    mfx.define_synapse_post(
+        "Ce",
+        """Apost += dApost
+                      we= clip(we + Apre, -gmax, gmax)""",
+    )
+
+    mfx.assemble_synapse("Ce")
 
     assert len(mfx.synapses) == 1
     assert mfx.synapses["Ce"]["origin"] == "Pe"
     assert mfx.synapses["Ce"]["target"] == "Pi"
+
+
+def test_assemble_synapse_exception(mocker, mfx_with_synapse):
+    mocker.patch(
+        "formozov_project.b2_model.b2.Synapses", side_effect=Exception("fake exception")
+    )
+    mfx, _ = mfx_with_synapse
+
+    with pytest.raises(RuntimeError, match="Error in defining synapse Ce"):
+        mfx.assemble_synapse("Ce")
+
+
+def test_connect_synapse_exception(mocker, mfx_with_synapse):
+    mocker.patch(
+        "formozov_project.b2_model.b2.Synapses.connect",
+        side_effect=Exception("fake exception"),
+    )
+
+    mfx, _ = mfx_with_synapse
+    with pytest.raises(RuntimeError, match="Error in connecting synapse Ce"):
+        mfx.assemble_synapse("Ce")
 
 
 def test_define_monitor(mfx_parameterized) -> None:
@@ -276,6 +383,19 @@ def test_define_monitor(mfx_parameterized) -> None:
     assert mfx.network["Traces_ge"].record_variables == [
         "ge",
     ]
+
+
+def test_define_monitor_exception(mocker, mfx_parameterized) -> None:
+
+    mocker.patch(
+        "formozov_project.b2_model.b2.StateMonitor",
+        side_effect=Exception("fake exception"),
+    )
+
+    mfx, _ = mfx_parameterized
+
+    with pytest.raises(RuntimeError, match="Error in defining monitor M"):
+        mfx.define_monitor("M", b2.StateMonitor, "G", "v")
 
 
 def test_ornstein_uhlenbeck(tmp_path):
@@ -310,29 +430,74 @@ def test_ornstein_uhlenbeck(tmp_path):
 
 def test_NMDA_model(tmp_path):
     # https://brian2.readthedocs.io/en/stable/examples/synapses.nonlinear.html
+
     a = 1 / (10 * b2.ms)
     b = 1 / (10 * b2.ms)
     c = 1 / (10 * b2.ms)
 
-    model = B2Model(tmp_path, seed=4321)
+    model = b2_model.B2Model(tmp_path, seed=4321)
+    # model.define_dt(0.2 * b2.ms)
+    model.define_solver_method("neuron_input", "euler")
 
-    model.define_reset("v = 0")
-    model.define_neuronnumber(2)
-    model.define_dt()
-    model.define_synapse()
-    model.define_solver_method()
-    model.define_equation()
-    model.define_threshold()
+    model.define_parameter("a", a)
+    model.define_parameter("b", b)
+    model.define_parameter("c", c)
 
-    neuron_input = b2.NeuronGroup(
-        2, "dv/dt = 1/(10*ms) : 1", threshold="v>1", reset="v = 0", method="euler"
+    model.define_neuronnumber("neuron_input", 2)
+    model.define_solver_method("neuron_input", "euler")
+    model.define_equation("neuron_input", "dv/dt = 1/(10*ms) : 1")
+    model.define_threshold("neuron_input", "v>1")
+    model.define_reset("neuron_input", "v=0")
+
+    model.define_neuronnumber("neurons", 1)
+    model.define_equation(
+        "neurons",
+        """dv/dt = (g-v)/(10*ms) : 1
+                            g : 1""",
     )
+    model.define_solver_method("neurons", "exact")
+    model.assemble_neurongroup("neurons")
+    model.assemble_neurongroup("neuron_input")
+
+    synapse_eq = """
+        dg_syn/dt = -a*g_syn+b*x*(1-g_syn) : 1 (clock-driven)
+        g_post = g_syn : 1 (summed)
+        dx/dt=-c*x : 1 (clock-driven)
+        w : 1 # synaptic weight
+    """
+
+    model.define_synapse_equation("S", synapse_eq)
+    model.define_synapse_origin("S", "neuron_input")
+    model.define_synapse_target("S", "neurons")
+    model.define_synapse_pre("S", "x += w")
+    model.assemble_synapse("S")
+
+    model.define_monitor("M", b2.StateMonitor, "S", "g")
+    model.define_monitor("Mn", b2.StateMonitor, "neurons", "g")
+
+    model.network["S"].w = [1.0, 10.0]
+    model.network["neuron_input"].v = [0.0, 0.5]
+
+    model.run_simulation(1000 * b2.ms, save=False)
+
+    # test model
+    neuron_input = b2.NeuronGroup(
+        2,
+        "dv/dt = 1/(10*ms) : 1",
+        threshold="v>1",
+        reset="v = 0",
+        method="euler",
+        namespace={"a": a, "b": b, "c": c},
+    )
+
     neurons = b2.NeuronGroup(
         1,
         """dv/dt = (g-v)/(10*ms) : 1
                                 g : 1""",
         method="exact",
+        namespace={"a": a, "b": b, "c": c},
     )
+
     S = b2.Synapses(
         neuron_input,
         neurons,
@@ -343,25 +508,38 @@ def test_NMDA_model(tmp_path):
                     w : 1 # synaptic weight
                 """,
         on_pre="x += w",
+        name="synapses_test",
+        namespace={"a": a, "b": b, "c": c},
     )  # NMDA synapses
 
     S.connect()
+
+    # initilize
     S.w = [1.0, 10.0]
+
     neuron_input.v = [0.0, 0.5]
 
     M = b2.StateMonitor(
         S,
         "g",
+        name="Mtest",
         # If not using standalone mode, this could also simply be
+        # record=np.arange(len(neuron_input) * len(neurons)),
         record=True,
     )
-    # record=np.arange(len(neuron_input)*len(neurons)))
 
-    Mn = b2.StateMonitor(neurons, "g", record=0)
+    Mn = b2.StateMonitor(neurons, "g", name="Mntest", record=0)
 
-    test_network = b2.Network([neuron_input, neuron_input, S, M, Mn])
-
+    test_network = b2.Network(name="testnetwork")
+    test_network.add(neuron_input)
+    test_network.add(neurons)
+    test_network.add(S)
+    test_network.add(M)
+    test_network.add(Mn)
     test_network.run(1000 * b2.ms)
+
+    np.testing.assert_almost_equal(M.g, model.network["M"].g)
+    np.testing.assert_almost_equal(Mn.g, model.network["Mn"].g)
 
 
 def test_hdf5(tmp_path):
@@ -370,6 +548,8 @@ def test_hdf5(tmp_path):
     import h5py
 
     model = ornstein(tmp_path)
+
+    print(model.neurongroups["neurongroup"])
 
     model.run_simulation(10 * b2.second, save=False)
 
@@ -399,4 +579,6 @@ def test_logger(tmp_path):
     assert "assembling neurongroup 'neurongroup'" in logs[5]
     assert "adding monitor 'M'" in logs[6]
     assert "run the system for 10. s with save = True" in logs[7]
-    assert f"save data to hdf5 at {tmp_path / "data.h5"}" in logs[8]
+
+    pathname = tmp_path / "data.h5"
+    assert f"save data to hdf5 at {pathname}" in logs[8]
