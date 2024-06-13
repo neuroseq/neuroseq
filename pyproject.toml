@@ -27,7 +27,7 @@ tests = [
   "pytest",
   "pytest-qt",
   "pytest-randomly",
-  "pytest-cov", 
+  "pytest-cov",
   "pytest-mock"
 ]
 
