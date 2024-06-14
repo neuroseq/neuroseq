@@ -16,7 +16,7 @@ dynamic = ["version"]
 formozov-project = "formozov_project.__main__:main"
 
 [project.optional-dependencies]
-tests = ["pytest", "pytest-qt", "pytest-randomly", "pytest-cov", "pytest-mock"]
+tests = ["pytest", "pytest-qt", "pytest-randomly", "pytest-cov", "pytest-mock", "diff-cover"]
 
 [tool.setuptools.dynamic]
 version = { attr = "formozov_project.__version__" }
@@ -64,4 +64,7 @@ exclude_also = [
   # Don't complain about abstract methods, they aren't run
   "@(abc\\.)?abstractmethod",
 ]
+fail_under = 80
+
+[tool.diff_cover]
 fail_under = 80
