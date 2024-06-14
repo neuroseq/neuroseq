@@ -57,6 +57,42 @@ class B2Model:
             else:
                 original[key] = value
 
+    def _add_equation_to_group(self, group: dict, line: str) -> None:
+        r"""
+        _add_equation_to_group Add an equation to a neurongroup or synapse dictionary that holds arguments to construct the respective objects.
+
+        Parameters
+        ----------
+        group : dict
+            Argument dictionary for constructing a brian2 group object - neurongroup or synapse.
+        line : str
+            An equation of the form v = f(y,x): unit, possibly containing multiple lines for multiple variables.
+
+        Raises
+        ------
+        ValueError
+            When there is no ': unit' block in the line given
+        ValueError
+            When there is no '=' block in the line given
+        """
+        if ":" not in line:
+            message = "Equation must have a colon that separates equation and unit"
+            self.logger.critical(message)
+            raise ValueError(message)
+
+        if "=" not in line:
+            message = "Equation must have an equal sign that separates variable and expression"
+            self.logger.critical(message)
+            raise ValueError(message)
+
+        if "model" in group:
+            group["model"] += line + "\n"
+        else:
+            group["model"] = line + "\n"
+
+        self.logger.info(f"Equation defined for group {group}")
+        self.logger.debug(f"full equation: {line}")
+
     def __init__(self, savepath: str, loglevel: str = "INFO", seed: int = 123):
         """
         __init__ Create a new `B2Model` instance.
@@ -93,10 +129,10 @@ class B2Model:
         self.logger.info("Model creation complete")
 
     def define_equation(self, name: str, line: str) -> None:
-        """
+        r"""
         define_equation Define a model equation for neurongroups.
 
-        An equation always must be of the form dy\dx = f(y,x): unit.
+        An equation always must be of the form dy \ dx = f(y,x): unit.
 
         Parameters
         ----------
@@ -112,26 +148,11 @@ class B2Model:
         ValueError
             When the supplied equation string does not contain a unit element.
         """
-        if ":" not in line:
-            message = "Equation must have a colon that separates equation and unit"
-            self.logger.critical(message)
-            raise ValueError(message)
-
-        if "=" not in line:
-            message = "Equation must have an equal sign that separates variable and expression"
-            self.logger.critical(message)
-            raise ValueError(message)
 
         if name not in self.neurongroups:
             self.neurongroups[name] = {}
 
-        if "model" in self.neurongroups[name]:
-            self.neurongroups[name]["model"] += line + "\n"
-        else:
-            self.neurongroups[name]["model"] = line + "\n"
-
-        self.logger.info("Equation defined")
-        self.logger.debug(f"full equation: {line}")
+        self._add_equation_to_group(self.neurongroups[name], line)
 
     def define_dt(self, dt: b2.Quantity) -> None:
         """
@@ -352,23 +373,11 @@ class B2Model:
         ValueError
             When the `=` is missing in the given expression.
         """
-        if ":" not in line:
-            message = "Equation must have a colon that separates equation and unit"
-            self.logger.critical(message)
-            raise ValueError(message)
-
-        if "=" not in line:
-            message = "Equation must have an equal sign that separates variable and expression"
-            self.logger.critical(message)
-            raise ValueError(message)
 
         if name not in self.synapses:
             self.synapses[name] = {}
 
-        if "model" in self.synapses[name]:
-            self.synapses[name]["model"] += line + "\n"
-        else:
-            self.synapses[name]["model"] = line + "\n"
+        self._add_equation_to_group(self.synapses[name], line)
 
     def define_synapse_pre(self, name: str, line: str) -> None:
         """
