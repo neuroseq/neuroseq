@@ -441,7 +441,7 @@ class B2Model:
 
     def define_synapse_connection_probablitiy(self, name: str, p: float) -> None:
         """
-        define_synapse_connection_probablitiy Define the connection probability for a given synapse called `name`.
+        define_synapse_connection_probability Define the connection probability for a given synapse called `name`.
 
         Parameters
         ----------
