@@ -421,7 +421,7 @@ class B2Model:
     def define_synapse_connection(self, name: str, connection_condition: str) -> None:
         """
         define_synapse_connection Define the connections of a Synapse called `name` as a condition represented as a string.
-        Please refer to the brian2 documentation for more detaisl on how synapses are defined.
+        Please refer to the brian2 documentation for more details on how synapses are defined.
 
         Parameters
         ----------
