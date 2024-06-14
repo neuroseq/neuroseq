@@ -8,6 +8,8 @@ import numpy as np
 import pytest
 from formozov_project import b2_model
 
+from math import isclose, nextafter
+
 b2.prefs.codegen.target = "cython"
 
 
@@ -394,6 +396,26 @@ def test_define_synapse_eq_exceptions(mfx_parameterized):
         ValueError, match="Equation must have a colon that separates equation and unit"
     ):
         mfx.define_synapse_equation("S", "dApost/dt = -Apost / taupost (event-driven)")
+
+
+def test_synapse_connection_prob_numerical(mfx_parameterized) -> None:
+    mfx, _ = mfx_parameterized
+
+    mfx.define_synapse_connection_probablitiy("Ce", 0.5)
+
+    assert isclose(mfx.synapses["Ce"]["p"], 0.5)
+
+    boundary = nextafter(1.0, 2.0)
+    with pytest.raises(
+        ValueError, match="Error, supplied value 1.0000000000000002 is not a probability."
+    ):
+        mfx.define_synapse_connection_probablitiy("Ce", boundary)
+
+    boundary = nextafter(0.0, -1.0)
+    with pytest.raises(
+        ValueError, match="Error, supplied value -5e-324 is not a probability."
+    ):
+        mfx.define_synapse_connection_probablitiy("Ce", boundary)
 
 
 def test_define_synapse(mfx_parameterized) -> None:

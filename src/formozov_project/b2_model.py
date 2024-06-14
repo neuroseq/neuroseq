@@ -5,7 +5,6 @@ from typing import List
 from typing import Union
 from typing import Dict
 
-from numpy import isclose
 import brian2 as b2
 import h5py
 
@@ -450,7 +449,7 @@ class B2Model:
         p : float
             Probability value. Must be in [0, 1]
         """
-        if not (isclose(p, 0.0) or isclose(p, 1.0) or 0.0 < p < 1.0):
+        if not 0.0 <= p <= 1.0:
             raise ValueError(f"Error, supplied value {p} is not a probability.")
 
         self._update_nested_dict(
