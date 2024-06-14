@@ -481,7 +481,7 @@ class B2Model:
         RuntimeError
             When an exception is raised by the underlying brian2 function that builds the synapse
         RuntimeError
-            When an exception is raised by the underlyin brian2 function that creates synapse connections.
+            When an exception is raised by the underlying brian2 function that creates synapse connections.
         """
         args = self.synapses[name]
         origin_id = (
