@@ -1,13 +1,15 @@
 import logging
 from logging import Logger
 from pathlib import Path
-from typing import List
-from typing import Union
+from typing import Any
 from typing import Dict
+from typing import List
+from typing import Optional
+from typing import Type
+from typing import Union
 
 import brian2 as b2
 import h5py
-from sys import stdout
 
 
 class B2Model:
@@ -15,7 +17,9 @@ class B2Model:
     Wrapper class that bundles brian2 capabilities for modelling neuronal networks.
     """
 
-    def _set_up_logger(self, loglevel: str = "INFO", logpath: str = None) -> None:
+    def _set_up_logger(
+        self, loglevel: str = "INFO", logpath: Optional[str] = None
+    ) -> None:
         """
         _set_up_logger set up the logger an instance of `B2Model` uses.
 
@@ -35,7 +39,6 @@ class B2Model:
         self.logger.setLevel(loglevel)
 
         if logpath is not None:
-
             if Path(logpath).is_dir() is False:
                 raise ValueError(f"Path {logpath} does not exist")
 
@@ -106,7 +109,9 @@ class B2Model:
         self.logger.info(f"Equation defined for group {group}")
         self.logger.debug(f"full equation: {line}")
 
-    def __init__(self, logpath: str = None, loglevel: str = "INFO", seed: int = 123):
+    def __init__(
+        self, logpath: Optional[str] = None, loglevel: str = "INFO", seed: int = 123
+    ):
         """
         __init__ Create a new `B2Model` instance.
 
@@ -126,13 +131,12 @@ class B2Model:
         """
         b2.seed(seed)
 
-        self.seed = seed
-        self.logger = None
+        self.seed: int = seed
         self.network = b2.Network(name="b2Network")
-        self.parameters = None
-        self.neurongroups = {}
-        self.synapses = {}
-        self.monitors = {}
+        self.parameters: Optional[Dict[str, Any]] = None
+        self.neurongroups: Dict[str, Dict[str, Any]] = {}
+        self.synapses: Dict[str, Dict[str, Any]] = {}
+        self.monitors: Dict[str, Dict[str, Any]] = {}
         self.dt = None
         self.solver = None
         self._set_up_logger(loglevel=loglevel, logpath=logpath)
@@ -502,17 +506,8 @@ class B2Model:
             When an exception is raised by the underlying brian2 function that creates synapse connections.
         """
         args = self.synapses[name]
-        origin_id = (
-            self.neurongroups[args["origin"]]["name"]
-            if "name" in self.neurongroups[args["origin"]]
-            else args["origin"]
-        )
-
-        target_id = (
-            self.neurongroups[args["target"]]["name"]
-            if "name" in self.neurongroups[args["target"]]
-            else args["target"]
-        )
+        origin_id = self.neurongroups[args["origin"]].get("name", args["origin"])
+        target_id = self.neurongroups[args["target"]].get("name", args["target"])
 
         _origin = self.network.__getitem__(origin_id)
         _target = self.network.__getitem__(target_id)
@@ -545,7 +540,9 @@ class B2Model:
 
         self.network.add(synapse)
 
-    def define_monitor(self, name: str, cls, group: str, variable: str = None) -> None:
+    def define_monitor(
+        self, name: str, cls: Type, group: str, variable: Optional[str] = None
+    ) -> None:
         """
         define_monitor Define a monitor for a variable `variable` in the network element `group`.
 
@@ -677,7 +674,7 @@ class B2Model:
             raise RuntimeError("Error, cannot save data when no monitors are defined")
 
         with h5py.File(pathname, "w") as h5file:
-            for key, value in self.monitors.items():
+            for key in self.monitors:
                 self.logger.debug(f"save data of monitor {key}")
                 monitor = self.network[key]
                 group = h5file.create_group(monitor.name)
@@ -686,7 +683,9 @@ class B2Model:
                         v, shape=getattr(monitor, v).shape, data=getattr(monitor, v)
                     )
 
-    def run_simulation(self, tfinal: b2.Quantity, savepath: str = None) -> None:
+    def run_simulation(
+        self, tfinal: b2.Quantity, savepath: Optional[str] = None
+    ) -> None:
         """
         run_simulation Run the fully defined simulation
 
