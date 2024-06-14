@@ -7,6 +7,7 @@ from typing import Dict
 
 import brian2 as b2
 import h5py
+from sys import stdout
 
 
 class B2Model:
@@ -14,25 +15,37 @@ class B2Model:
     Wrapper class that bundles brian2 capabilities for modelling neuronal networks.
     """
 
-    def _set_up_logger(self, loglevel: str) -> None:
+    def _set_up_logger(self, loglevel: str = "INFO", logpath: str = None) -> None:
         """
-        _set_up_logger Set up the logger an instance of `B2Model` uses.
+        _set_up_logger set up the logger an instance of `B2Model` uses.
 
         Parameters
         ----------
-        loglevel : str
-            Loglevel for the logger to be build.
+        loglevel : str, optional
+            Level of logging output. See the python `logging` documentation for more info, by default "INFO"
+        logpath : str, optional
+            Path to a folder where the logfile should be stored. If not given, will log to console, by default None
+
+        Raises
+        ------
+        ValueError
+            When the given logpath does not exist and is not None.
         """
         self.logger = Logger("Model")
         self.logger.setLevel(loglevel)
 
-        handler = logging.FileHandler(Path(self.path, "logfile.log"))
-        handler.setLevel(loglevel)
-        formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
+        if logpath is not None:
+
+            if Path(logpath).is_dir() is False:
+                raise ValueError(f"Path {logpath} does not exist")
+
+            handler = logging.FileHandler(Path(logpath, "logfile.log"))
+
+            formatter = logging.Formatter(
+                "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            )
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
 
     def _update_nested_dict(self, original: Dict, updates: Dict) -> None:
         """
@@ -93,13 +106,13 @@ class B2Model:
         self.logger.info(f"Equation defined for group {group}")
         self.logger.debug(f"full equation: {line}")
 
-    def __init__(self, savepath: str, loglevel: str = "INFO", seed: int = 123):
+    def __init__(self, logpath: str = None, loglevel: str = "INFO", seed: int = 123):
         """
         __init__ Create a new `B2Model` instance.
 
         Parameters
         ----------
-        savepath : str
+        logpath : str
             Path to save the produced data at in an hdf5 file. Must exist beforehand.
         loglevel : str, optional
             Level of log messages. See the python logging documentation, by default "INFO"
@@ -113,12 +126,8 @@ class B2Model:
         """
         b2.seed(seed)
 
-        if Path(savepath).exists() is False:
-            raise ValueError(f"Path {savepath} does not exist")
-
-        self.path = savepath
         self.seed = seed
-        self._set_up_logger(loglevel)
+        self.logger = None
         self.network = b2.Network(name="b2Network")
         self.parameters = None
         self.neurongroups = {}
@@ -126,6 +135,7 @@ class B2Model:
         self.monitors = {}
         self.dt = None
         self.solver = None
+        self._set_up_logger(loglevel=loglevel, logpath=logpath)
         self.logger.info("Model creation complete")
 
     def define_equation(self, name: str, line: str) -> None:
@@ -638,18 +648,29 @@ class B2Model:
 
         self.network.add(ng)
 
-    def save_to_h5(self) -> None:
+    def save_to_h5(self, path: str) -> None:
         """
         save_to_h5 Save data collected by defined monitor objects to hdf5.
 
         Each Monitor gets a separate group, and each group contains all the data the monitor collected.
 
+        Parameters
+        ----------
+        path : str
+            Path to save the files at.
+
         Raises
         ------
+        ValueError
+            _description_
         RuntimeError
-            When no monitor objects have been defined.
+            _description_
         """
-        pathname = Path(self.path, "data.h5")
+        if Path(path).is_dir() is False:
+            raise ValueError(f"Path {path} does not exist")
+
+        pathname = Path(path, "data.h5")
+
         self.logger.info(f"save data to hdf5 at {pathname}")
 
         if len(self.monitors) == 0:
@@ -665,7 +686,7 @@ class B2Model:
                         v, shape=getattr(monitor, v).shape, data=getattr(monitor, v)
                     )
 
-    def run_simulation(self, tfinal: b2.Quantity, save: bool = True) -> None:
+    def run_simulation(self, tfinal: b2.Quantity, savepath: str = None) -> None:
         """
         run_simulation Run the fully defined simulation
 
@@ -675,10 +696,10 @@ class B2Model:
         ----------
         tfinal : b2.Quantity
             The runtime of the system
-        save : bool, optional
-            Whether or not to save data to hdf immediatelly or only have them in predefined monior objects, by default True
+        savepath : str, optional
+            Path to save the data at, by default None
         """
         self.network.run(tfinal, report="text")
-        self.logger.info(f"run the system for {tfinal} with save = {save}")
-        if save:
-            self.save_to_h5()
+        self.logger.info(f"run the system for {tfinal} with savepath = {savepath}")
+        if savepath is not None:
+            self.save_to_h5(savepath)

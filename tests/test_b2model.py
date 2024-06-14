@@ -2,13 +2,14 @@ import itertools
 import logging
 import typing
 from pathlib import Path
-
-import brian2 as b2
+from math import isclose, nextafter
+import h5py
 import numpy as np
 import pytest
+import brian2 as b2
+
 from formozov_project import b2_model
 
-from math import isclose, nextafter
 
 b2.prefs.codegen.target = "cython"
 
@@ -188,14 +189,14 @@ def mfx_with_synapse(mfx_parameterized):
     yield mfx, reference_parameters
 
 
-def ornstein(path):
+def ornstein(logpath: str = None):
     eqs = """
         tau : second
         sigma : 1
         dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
     """
 
-    model = b2_model.B2Model(path, seed=4321)
+    model = b2_model.B2Model(seed=4321, logpath=logpath)
     model.define_neuronnumber("neurongroup", 2)
     model.define_dt(0.2 * b2.ms)
     model.define_solver_method("neurongroup", "euler")
@@ -212,13 +213,11 @@ def ornstein(path):
 
 
 def test_construction(tmp_path) -> None:
-    model = b2_model.B2Model(tmp_path, loglevel="DEBUG")
+    model = b2_model.B2Model(logpath=tmp_path, loglevel="DEBUG")
 
-    assert model.path == tmp_path
     assert model.logger.name == "Model"
     assert model.logger.level == logging.DEBUG
     assert model.logger.handlers[0].baseFilename == str(tmp_path / "logfile.log")
-
     assert model.parameters is None
     assert model.network is not None
     assert model.network.name == "b2Network"
@@ -407,7 +406,8 @@ def test_synapse_connection_prob_numerical(mfx_parameterized) -> None:
 
     boundary = nextafter(1.0, 2.0)
     with pytest.raises(
-        ValueError, match="Error, supplied value 1.0000000000000002 is not a probability."
+        ValueError,
+        match="Error, supplied value 1.0000000000000002 is not a probability.",
     ):
         mfx.define_synapse_connection_probablitiy("Ce", boundary)
 
@@ -597,7 +597,7 @@ def test_NMDA_model(tmp_path) -> None:
     model.network["S"].w = [1.0, 10.0]
     model.network["neuron_input"].v = [0.0, 0.5]
 
-    model.run_simulation(1000 * b2.ms, save=False)
+    model.run_simulation(1000 * b2.ms)
 
     # test model
     neuron_input = b2.NeuronGroup(
@@ -663,30 +663,45 @@ def test_NMDA_model(tmp_path) -> None:
 
 
 def test_hdf5(tmp_path):
-    from pathlib import Path
-
-    import h5py
 
     model = ornstein(tmp_path)
 
-    model.run_simulation(10 * b2.second, save=False)
+    model.run_simulation(10 * b2.second)
 
-    model.save_to_h5()
+    model.save_to_h5(tmp_path)
 
     data = None
 
-    with h5py.File(Path(model.path, "data.h5"), "r") as h5file:
+    with h5py.File(Path(tmp_path, "data.h5"), "r") as h5file:
         data = h5file["M"]["y"][:]
 
     assert np.allclose(data, model.network["M"].y)
+
+    model = ornstein(tmp_path)
+
+    model.run_simulation(10 * b2.second)
+
+    with pytest.raises(ValueError, match="Path fakepath does not exist"):
+        model.save_to_h5("fakepath")
+
+    model = ornstein(tmp_path)
+
+    model.monitors = {}
+
+    model.run_simulation(10 * b2.second)
+
+    with pytest.raises(
+        RuntimeError, match="Error, cannot save data when no monitors are defined"
+    ):
+        model.save_to_h5(tmp_path)
 
 
 def test_logger(tmp_path):
     model = ornstein(tmp_path)
 
-    model.run_simulation(10 * b2.second, save=True)
+    model.run_simulation(10 * b2.second, savepath=tmp_path)
 
-    with open(Path(model.path, "logfile.log")) as file:
+    with open(Path(model.logger.handlers[0].baseFilename)) as file:
         logs = [line.strip() for line in file.readlines()]
 
     # bunch of asserts checking that logfile content works as expected
@@ -697,7 +712,7 @@ def test_logger(tmp_path):
     assert "Equation defined" in logs[4]
     assert "assembling neurongroup 'neurongroup'" in logs[5]
     assert "adding monitor 'M'" in logs[6]
-    assert "run the system for 10. s with save = True" in logs[7]
+    assert f"run the system for 10. s with savepath = {tmp_path}" in logs[7]
 
     pathname = tmp_path / "data.h5"
     assert f"save data to hdf5 at {pathname}" in logs[8]
