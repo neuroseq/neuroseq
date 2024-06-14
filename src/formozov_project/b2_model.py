@@ -420,7 +420,7 @@ class B2Model:
     def define_synapse_connection(self, name: str, connection_condition: str) -> None:
         """
         define_synapse_connection Define the connections of a Synapse called `name` as a condition represented as a string.
-        Please refer to the brian2 documentation for more detaisl on how synapses are defined.
+        Please refer to the brian2 documentation for more details on how synapses are defined.
 
         Parameters
         ----------
@@ -440,7 +440,7 @@ class B2Model:
 
     def define_synapse_connection_probablitiy(self, name: str, p: float) -> None:
         """
-        define_synapse_connection_probablitiy Define the connection probability for a given synapse called `name`.
+        define_synapse_connection_probability Define the connection probability for a given synapse called `name`.
 
         Parameters
         ----------
@@ -480,7 +480,7 @@ class B2Model:
         RuntimeError
             When an exception is raised by the underlying brian2 function that builds the synapse
         RuntimeError
-            When an exception is raised by the underlyin brian2 function that creates synapse connections.
+            When an exception is raised by the underlying brian2 function that creates synapse connections.
         """
         args = self.synapses[name]
         origin_id = (
