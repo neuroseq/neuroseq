@@ -46,7 +46,7 @@ class TraceWidget(pg.PlotWidget):
             line.sigClicked.connect(lambda item, event, i=index: self.select_trace(i))
             self.traces.append(line)
             self.addItem(line)
-        self.plotItem.getAxis("bottom").setLabel("Time (ms)")
+        self.plotItem.getAxis("bottom").setLabel("Time (s)")
         # set the y-axis to display the trace index
         self.plotItem.getAxis("left").setLabel("Neuron")
         self.plotItem.getAxis("left").setTickSpacing(1, 1)

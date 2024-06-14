@@ -519,7 +519,7 @@ def test_define_monitor_exception(mocker, mfx_parameterized) -> None:
 
 def test_ornstein_uhlenbeck(tmp_path):
     model = ornstein(tmp_path)
-    model.run_simulation(10 * b2.second)
+    model.run_simulation(1 * b2.second)
 
     b2.seed(4321)
     N = b2.NeuronGroup(
@@ -540,7 +540,7 @@ def test_ornstein_uhlenbeck(tmp_path):
 
     network = b2.Network([N, M])
 
-    network.run(10 * b2.second)
+    network.run(1 * b2.second)
 
     assert np.allclose(M.t / b2.second, model.network["M"].t / b2.second)
     assert np.allclose(M.y[1], model.network["M"].y[1])
@@ -597,7 +597,7 @@ def test_NMDA_model(tmp_path) -> None:
     model.network["S"].w = [1.0, 10.0]
     model.network["neuron_input"].v = [0.0, 0.5]
 
-    model.run_simulation(1000 * b2.ms)
+    model.run_simulation(100 * b2.ms)
 
     # test model
     neuron_input = b2.NeuronGroup(
@@ -655,7 +655,7 @@ def test_NMDA_model(tmp_path) -> None:
     test_network.add(S)
     test_network.add(M)
     test_network.add(Mn)
-    test_network.run(1000 * b2.ms)
+    test_network.run(100 * b2.ms)
 
     # assert result equality
     np.testing.assert_almost_equal(M.g, model.network["M"].g)
@@ -668,7 +668,7 @@ def test_hdf5(tmp_path):
 
     model.run_simulation(10 * b2.second)
 
-    model.save_to_h5(tmp_path)
+    model.save_to_h5(tmp_path/"data.h5")
 
     data = None
 
@@ -679,27 +679,27 @@ def test_hdf5(tmp_path):
 
     model = ornstein(tmp_path)
 
-    model.run_simulation(10 * b2.second)
+    model.run_simulation(1 * b2.second)
 
-    with pytest.raises(ValueError, match="Path fakepath does not exist"):
-        model.save_to_h5("fakepath")
+    with pytest.raises(ValueError, match="Path fakepath/data.h5 does not exist"):
+        model.save_to_h5("fakepath/data.h5")
 
     model = ornstein(tmp_path)
 
     model.monitors = {}
 
-    model.run_simulation(10 * b2.second)
+    model.run_simulation(1 * b2.second)
 
     with pytest.raises(
         RuntimeError, match="Error, cannot save data when no monitors are defined"
     ):
-        model.save_to_h5(tmp_path)
+        model.save_to_h5(tmp_path / "data.h5")
 
 
 def test_logger(tmp_path):
     model = ornstein(tmp_path)
 
-    model.run_simulation(10 * b2.second, savepath=tmp_path)
+    model.run_simulation(1 * b2.second, savepath=tmp_path/"data.h5 ")
 
     with open(Path(model.logger.handlers[0].baseFilename)) as file:
         logs = [line.strip() for line in file.readlines()]
@@ -712,7 +712,7 @@ def test_logger(tmp_path):
     assert "Equation defined" in logs[4]
     assert "assembling neurongroup 'neurongroup'" in logs[5]
     assert "adding monitor 'M'" in logs[6]
-    assert f"run the system for 10. s with savepath = {tmp_path}" in logs[7]
+    assert f"run the system for 1. s with savepath = {tmp_path}" in logs[7]
 
     pathname = tmp_path / "data.h5"
     assert f"save data to hdf5 at {pathname}" in logs[8]

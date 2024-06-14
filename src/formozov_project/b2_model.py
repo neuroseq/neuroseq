@@ -663,10 +663,10 @@ class B2Model:
         RuntimeError
             _description_
         """
-        if Path(path).is_dir() is False:
-            raise ValueError(f"Path {path} does not exist")
+        pathname = Path(path)
 
-        pathname = Path(path, "data.h5")
+        if pathname.absolute().parent.is_dir() is False:
+            raise ValueError(f"Path {pathname} does not exist")
 
         self.logger.info(f"save data to hdf5 at {pathname}")
 
