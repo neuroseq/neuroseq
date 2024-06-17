@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import Callable
 import logging
+from typing import Callable
 
 import brian2 as b2
 import numpy as np
+import qtawesome as qta
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
@@ -60,12 +61,27 @@ class Gui(QtWidgets.QMainWindow):
         # add toolbar and menu
         self.toolbar = _create_menu_and_toolbar(self)
         self.addToolBar(self.toolbar)
+        self.setWindowIcon(qta.icon("mdi6.brain"))
 
         # connect widgets
         self.heatmap_widget.connect_trace_widget(self.trace_widget)
         self.trace_widget.connect_heatmap_widget(self.heatmap_widget)
 
         self.btn_new_clicked()
+
+    def _update_data(self) -> None:
+        if len(self.model.network["M"].t) == 0:
+            self.trace_widget.set_data()
+            self.heatmap_widget.set_data()
+            return
+        self.trace_widget.set_data(
+            self.model.network["M"].y, self.model.network["M"].t / b2.second
+        )
+        # for now just display outer product of traces as heatmap data
+        outer = np.array(
+            [np.outer(trace, trace) for trace in self.model.network["M"].y.T]
+        )
+        self.heatmap_widget.set_data(outer, self.model.network["M"].t / b2.second)
 
     def btn_new_clicked(self) -> None:
         self.model = temp_new_model()
@@ -98,9 +114,48 @@ class Gui(QtWidgets.QMainWindow):
     def btn_exit_clicked(self) -> None:
         self.close()
 
-    def btn_simulate_clicked(self) -> None:
-        simulation_time_str, ok = QtWidgets.QInputDialog.getText(self, "Simulate", "Simulation time (s)",
-                                                                 QtWidgets.QLineEdit.Normal, "1.0")
+    def btn_store_checkpoint_clicked(self) -> None:
+        checkpoint, ok = QtWidgets.QInputDialog.getItem(
+            self,
+            "Store simulation checkpoint",
+            "Store the current simulation state as a named checkpoint.\nEnter a new name, or select an existing checkpoint to overwrite:",
+            self.model.checkpoints,
+            current=0,
+            editable=True,
+        )
+        if not ok:
+            return
+        self.model.store(checkpoint)
+
+    def btn_restore_checkpoint_clicked(self) -> None:
+        if len(self.model.checkpoints) == 0:
+            QtWidgets.QMessageBox.information(
+                self,
+                "No simulation checkpoints",
+                "No simulation checkpoints available to restore - try running a simulation first.",
+            )
+            return
+        checkpoint, ok = QtWidgets.QInputDialog.getItem(
+            self,
+            "Restore simulation checkpoint",
+            "Restore simulation checkpoint",
+            self.model.checkpoints,
+            current=0,
+            editable=False,
+        )
+        if not ok:
+            return
+        try:
+            self.model.restore(checkpoint)
+            self._update_data()
+        except ValueError as error:
+            QtWidgets.QMessageBox.critical(self, "Error", f"{error}")
+            return
+
+    def btn_continue_simulation_clicked(self) -> None:
+        simulation_time_str, ok = QtWidgets.QInputDialog.getText(
+            self, "Simulate", "Simulation time (s)", QtWidgets.QLineEdit.Normal, "1.0"
+        )
         if not ok:
             return
         try:
@@ -114,14 +169,7 @@ class Gui(QtWidgets.QMainWindow):
             return
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
         self.model.run_simulation(simulation_time * b2.second)
-        self.trace_widget.set_data(
-            self.model.network["M"].y, self.model.network["M"].t / b2.second
-        )
-        # for now just display outer product of traces as heatmap data
-        outer = np.array(
-            [np.outer(trace, trace) for trace in self.model.network["M"].y.T]
-        )
-        self.heatmap_widget.set_data(outer, self.model.network["M"].t / b2.second)
+        self._update_data()
         QtWidgets.QApplication.restoreOverrideCursor()
 
     def btn_skip_to_start_clicked(self) -> None:
@@ -129,6 +177,7 @@ class Gui(QtWidgets.QMainWindow):
 
     def btn_stop_clicked(self) -> None:
         self.heatmap_widget.play(0)
+        self.btn_skip_to_start_clicked()
 
     def btn_play_clicked(self) -> None:
         self.heatmap_widget.togglePause()
@@ -146,17 +195,17 @@ class Gui(QtWidgets.QMainWindow):
 
 
 def _add_action(
-        name: str,
-        callback: Callable,
-        menu: QtWidgets.QMenu,
-        toolbar: QtWidgets.QToolBar | None = None,
-        shortcut: str | None = None,
-        icon_pixmap: QtWidgets.QStyle.StandardPixmap | None = None,
+    name: str,
+    callback: Callable,
+    menu: QtWidgets.QMenu,
+    toolbar: QtWidgets.QToolBar | None = None,
+    shortcut: str | None = None,
+    icon: QtGui.QIcon | None = None,
 ) -> None:
     action = QtWidgets.QAction(name, menu)
     action.triggered.connect(callback)
-    if icon_pixmap is not None:
-        action.setIcon(menu.style().standardIcon(icon_pixmap))
+    if icon is not None:
+        action.setIcon(icon)
     if shortcut is not None:
         action.setShortcut(QtGui.QKeySequence(shortcut))
     menu.addAction(action)
@@ -174,7 +223,7 @@ def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
         file_menu,
         toolbar,
         "Ctrl+N",
-        QtWidgets.QStyle.SP_FileIcon,
+        qta.icon("mdi6.file"),
     )
     _add_action(
         "&Open",
@@ -182,7 +231,7 @@ def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
         file_menu,
         toolbar,
         "Ctrl+O",
-        QtWidgets.QStyle.SP_DialogOpenButton,
+        qta.icon("mdi6.folder-open"),
     )
     _add_action(
         "&Save",
@@ -190,35 +239,51 @@ def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
         file_menu,
         toolbar,
         "Ctrl+S",
-        QtWidgets.QStyle.SP_DialogSaveButton,
+        qta.icon("mdi6.content-save"),
     )
+    toolbar.addSeparator()
     _add_action(
         "E&xit",
         gui.btn_exit_clicked,
         file_menu,
         None,
         None,
-        QtWidgets.QStyle.SP_DialogCloseButton,
+        qta.icon("mdi6.exit-to-app"),
     )
-    toolbar.addSeparator()
-    experiment_model = menu.addMenu("&Model")
+    experiment_model = menu.addMenu("&Simulate")
     _add_action(
-        "&Simulate",
-        gui.btn_simulate_clicked,
+        "&Continue simulation",
+        gui.btn_continue_simulation_clicked,
         experiment_model,
         toolbar,
         "Ctrl+R",
-        QtWidgets.QStyle.SP_DialogYesButton,
+        qta.icon("mdi6.head"),
+    )
+    _add_action(
+        "&Store simulation checkpoint",
+        gui.btn_store_checkpoint_clicked,
+        experiment_model,
+        toolbar,
+        "Ctrl+Shift+S",
+        qta.icon("mdi6.head-check"),
+    )
+    _add_action(
+        "&Restore simulation checkpoint",
+        gui.btn_restore_checkpoint_clicked,
+        experiment_model,
+        toolbar,
+        "Ctrl+Shift+R",
+        qta.icon("mdi6.head-sync"),
     )
     toolbar.addSeparator()
-    experiment_results = menu.addMenu("&Results")
+    experiment_results = menu.addMenu("&Playback")
     _add_action(
         "&Skip to start",
         gui.btn_skip_to_start_clicked,
         experiment_results,
         toolbar,
         None,
-        QtWidgets.QStyle.SP_MediaSkipBackward,
+        qta.icon("mdi6.skip-previous"),
     )
     _add_action(
         "&Stop",
@@ -226,15 +291,15 @@ def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
         experiment_results,
         toolbar,
         None,
-        QtWidgets.QStyle.SP_MediaStop,
+        qta.icon("mdi6.stop"),
     )
     _add_action(
-        "&Play",
+        "&Play / Pause",
         gui.btn_play_clicked,
         experiment_results,
         toolbar,
         "Space",
-        QtWidgets.QStyle.SP_MediaPlay,
+        qta.icon("mdi6.play-pause"),
     )
     _add_action(
         "&Skip to end",
@@ -242,7 +307,7 @@ def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
         experiment_results,
         toolbar,
         None,
-        QtWidgets.QStyle.SP_MediaSkipForward,
+        qta.icon("mdi6.skip-next"),
     )
     toolbar.addSeparator()
     help_menu = menu.addMenu("&Help")

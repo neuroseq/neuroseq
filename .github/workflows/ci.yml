@@ -20,7 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         os: ["macos-arm64-ssc"]
-        python-version: ["3.10", "3.12"]
+        python-version: ["3.8", "3.12"]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,3 +32,8 @@ jobs:
       - run: uv pip install --system -e .[tests]
       - run: pytest -sv --cov --cov-report=xml
       - run: diff-cover coverage.xml -c pyproject.toml
+  pre-commit:
+    runs-on: "macos-arm64-ssc"
+    steps:
+      - uses: actions/checkout@v4
+      - run: pipx run pre-commit run -a
