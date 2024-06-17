@@ -1,4 +1,4 @@
-from typing import Optional
+from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
@@ -13,9 +13,9 @@ class HeatmapWidget(pg.ImageView):
 
     def __init__(
         self,
-        data: Optional[np.ndarray] = None,
-        timestamps: Optional[np.ndarray] = None,
-        parent: Optional[QtWidgets.QWidget] = None,
+        data: np.ndarray | None = None,
+        timestamps: np.ndarray | None = None,
+        parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent, discreteTimeLine=True)
         self.setPredefinedGradient("viridis")
@@ -23,8 +23,8 @@ class HeatmapWidget(pg.ImageView):
 
     def set_data(
         self,
-        data: Optional[np.ndarray] = None,
-        timestamps: Optional[np.ndarray] = None,
+        data: np.ndarray | None = None,
+        timestamps: np.ndarray | None = None,
     ) -> None:
         self.clear()
         if data is not None:

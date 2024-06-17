@@ -1,21 +1,23 @@
+from __future__ import annotations
+
 import itertools
 import logging
-import typing
 from pathlib import Path
-from math import isclose, nextafter
+from typing import Any
+from typing import cast
+
+import brian2 as b2
 import h5py
 import numpy as np
 import pytest
-import brian2 as b2
-
 from formozov_project import b2_model
-
+from pytest_mock import MockerFixture
 
 b2.prefs.codegen.target = "cython"
 
 
-@pytest.fixture()
-def reference_parameters():
+@pytest.fixture(scope="session")
+def reference_parameters() -> dict[str, Any]:
     data = np.array(
         [1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1], dtype="int"
     )
@@ -32,11 +34,15 @@ def reference_parameters():
     stim_inh[500:-1] = 0
     stimulus_inh = b2.TimedArray(stim_inh * b2.nS, dt=1 * b2.ms)
 
-    for l in range(3):
+    for length in range(3):
         for k in range(20):
-            stim[200 * l + 120 : 200 * l + 121, k + 4] = stim_constant * data[k]
-            stim[200 * l + 118 : 200 * l + 119, k + 4] = stim_constant * data_inv[k]
-        stim[200 * l + 119 : 200 * l + 120, 0] = stim_constant
+            stim[200 * length + 120 : 200 * length + 121, k + 4] = (
+                stim_constant * data[k]
+            )
+            stim[200 * length + 118 : 200 * length + 119, k + 4] = (
+                stim_constant * data_inv[k]
+            )
+        stim[200 * length + 119 : 200 * length + 120, 0] = stim_constant
 
     area = 20000 * b2.umetre**2
 
@@ -44,7 +50,7 @@ def reference_parameters():
     taupost = taupre
     dApre = 6 * b2.nS
 
-    yield {
+    return {
         "n": 30,
         "tfinal": tfinal,
         "dt": 0.1 * b2.ms,
@@ -115,14 +121,14 @@ def reference_parameters():
 
 
 @pytest.fixture()
-def mfx(tmp_path) -> typing.Generator[b2_model.B2Model, None, None]:
-    yield b2_model.B2Model(tmp_path, loglevel="DEBUG")
+def mfx(tmp_path: Path) -> b2_model.B2Model:
+    return b2_model.B2Model(tmp_path, loglevel="DEBUG")
 
 
 @pytest.fixture
 def mfx_parameterized(
-    mfx, reference_parameters
-) -> typing.Generator[b2_model.B2Model, None, None]:
+    mfx: b2_model.B2Model, reference_parameters: dict[str, Any]
+) -> tuple[b2_model.B2Model, dict[str, Any]]:
     b2.seed(reference_parameters["seed"])
     n = 30
     threshold = "v>-20*mV"
@@ -137,11 +143,13 @@ def mfx_parameterized(
     mfx.define_solver_method("P", method)
     mfx.assemble_neurongroup("P")
 
-    yield mfx, reference_parameters
+    return mfx, reference_parameters
 
 
 @pytest.fixture()
-def mfx_with_synapse(mfx_parameterized):
+def mfx_with_synapse(
+    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+) -> tuple[b2_model.B2Model, dict[str, Any]]:
     taupre = 20 * b2.ms
     taupost = taupre
     gmax = 60 * b2.nS
@@ -186,10 +194,10 @@ def mfx_with_synapse(mfx_parameterized):
                       we= clip(we + Apre, -gmax, gmax)""",
     )
 
-    yield mfx, reference_parameters
+    return mfx, reference_parameters
 
 
-def ornstein(logpath: str = None):
+def ornstein(logpath: Path | None = None) -> b2_model.B2Model:
     eqs = """
         tau : second
         sigma : 1
@@ -212,12 +220,13 @@ def ornstein(logpath: str = None):
     return model
 
 
-def test_construction(tmp_path) -> None:
+def test_construction(tmp_path: Path) -> None:
     model = b2_model.B2Model(logpath=tmp_path, loglevel="DEBUG")
 
     assert model.logger.name == "Model"
     assert model.logger.level == logging.DEBUG
-    assert model.logger.handlers[0].baseFilename == str(tmp_path / "logfile.log")
+    handler = cast(logging.FileHandler, model.logger.handlers[0])
+    assert handler.baseFilename == str(tmp_path / "logfile.log")
     assert model.parameters is None
     assert model.network is not None
     assert model.network.name == "b2Network"
@@ -228,7 +237,7 @@ def test_construction(tmp_path) -> None:
         b2_model.B2Model("fakepath")
 
 
-def test_define_equation(mfx) -> None:
+def test_define_equation(mfx: b2_model.B2Model) -> None:
     assert mfx.neurongroups == {}
 
     mfx.define_equation("P", "dge/dt = -ge*(1./taue) : siemens")
@@ -247,7 +256,7 @@ def test_define_equation(mfx) -> None:
         mfx.define_equation("P", "-ge*(1./taue): siemens")
 
 
-def test_define_equation_incremental(mfx) -> None:
+def test_define_equation_incremental(mfx: b2_model.B2Model) -> None:
     mfx.define_equation("P", "dApre/dt = -Apre / taupre : siemens")
     mfx.define_equation("P", "dApost/dt = -Apost / taupost : siemens")
 
@@ -257,16 +266,17 @@ def test_define_equation_incremental(mfx) -> None:
     assert e.parameter_names == set()
 
 
-def test_define_dt(mfx) -> None:
+def test_define_dt(mfx: b2_model.B2Model) -> None:
     assert mfx.neurongroups == {}
 
     mfx.define_dt(0.1 * b2.ms)
 
+    assert mfx.dt is not None
     assert np.isclose(mfx.dt.base, 0.0001)
     assert mfx.dt.has_same_dimensions(0.1 * b2.ms)
 
 
-def test_define_parameter(mfx) -> None:
+def test_define_parameter(mfx: b2_model.B2Model) -> None:
     assert mfx.parameters is None
 
     mfx.define_parameter("taue", 5 * b2.ms)
@@ -280,31 +290,31 @@ def test_define_parameter(mfx) -> None:
     }
 
 
-def test_define_threshold(mfx) -> None:
+def test_define_threshold(mfx: b2_model.B2Model) -> None:
     assert mfx.neurongroups == {}
     mfx.define_threshold("P", "v > 10 * mV")
     assert mfx.neurongroups["P"]["th"] == "v > 10 * mV"
 
 
-def test_define_solver_method(mfx) -> None:
+def test_define_solver_method(mfx: b2_model.B2Model) -> None:
     assert mfx.neurongroups == {}
     mfx.define_solver_method("P", "euler")
     assert mfx.neurongroups["P"]["method"] == "euler"
 
 
-def test_define_refractory(mfx) -> None:
+def test_define_refractory(mfx: b2_model.B2Model) -> None:
     assert mfx.neurongroups == {}
     mfx.define_refractory("P", 5 * b2.ms)
     assert mfx.neurongroups["P"]["refractory"] == 5 * b2.ms
 
 
-def test_define_neuron_number(mfx) -> None:
+def test_define_neuron_number(mfx: b2_model.B2Model) -> None:
     assert mfx.neurongroups == {}
     mfx.define_neuronnumber("P", 100)
     assert mfx.neurongroups["P"]["n"] == 100
 
 
-def test_assemble_neurongroup(mfx) -> None:
+def test_assemble_neurongroup(mfx: b2_model.B2Model) -> None:
     eq = "dge/dt = -ge*(1./taue): siemens"
     n = 30
     threshold = "v > 10 * mV"
@@ -343,12 +353,14 @@ def test_assemble_neurongroup(mfx) -> None:
     assert mfx.network["P"]._N == ng._N
 
 
-def test_assemble_neurongroup_exception(mocker, mfx):
+def test_assemble_neurongroup_exception(mfx: b2_model.B2Model) -> None:
     with pytest.raises(RuntimeError, match="Error in assembling neuron group N"):
         mfx.assemble_neurongroup("N")
 
 
-def test_neuron_subgroup(mfx_parameterized) -> None:
+def test_neuron_subgroup(
+    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+) -> None:
     mfx, _ = mfx_parameterized
 
     mfx.define_neuron_subgroup("P", "excitatory", slice(0, 20))
@@ -380,7 +392,9 @@ def test_neuron_subgroup(mfx_parameterized) -> None:
         mfx.define_neuron_subgroup("ng", "excitatory", slice(0, 20))
 
 
-def test_define_synapse_eq_exceptions(mfx_parameterized):
+def test_define_synapse_eq_exceptions(
+    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+) -> None:
     mfx, _ = mfx_parameterized
 
     with pytest.raises(
@@ -397,28 +411,32 @@ def test_define_synapse_eq_exceptions(mfx_parameterized):
         mfx.define_synapse_equation("S", "dApost/dt = -Apost / taupost (event-driven)")
 
 
-def test_synapse_connection_prob_numerical(mfx_parameterized) -> None:
+def test_synapse_connection_prob_numerical(
+    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+) -> None:
     mfx, _ = mfx_parameterized
 
     mfx.define_synapse_connection_probablitiy("Ce", 0.5)
 
-    assert isclose(mfx.synapses["Ce"]["p"], 0.5)
+    assert np.isclose(mfx.synapses["Ce"]["p"], 0.5)
 
-    boundary = nextafter(1.0, 2.0)
+    boundary = np.nextafter(1.0, 2.0)
     with pytest.raises(
         ValueError,
         match="Error, supplied value 1.0000000000000002 is not a probability.",
     ):
         mfx.define_synapse_connection_probablitiy("Ce", boundary)
 
-    boundary = nextafter(0.0, -1.0)
+    boundary = np.nextafter(0.0, -1.0)
     with pytest.raises(
         ValueError, match="Error, supplied value -5e-324 is not a probability."
     ):
         mfx.define_synapse_connection_probablitiy("Ce", boundary)
 
 
-def test_define_synapse(mfx_parameterized) -> None:
+def test_define_synapse(
+    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+) -> None:
     taupre = 20 * b2.ms
     taupost = taupre
     gmax = 60 * b2.nS
@@ -470,7 +488,9 @@ def test_define_synapse(mfx_parameterized) -> None:
     assert mfx.synapses["Ce"]["target"] == "Pi"
 
 
-def test_assemble_synapse_exception(mocker, mfx_with_synapse):
+def test_assemble_synapse_exception(
+    mocker: MockerFixture, mfx_with_synapse: tuple[b2_model.B2Model, dict[str, Any]]
+) -> None:
     mocker.patch(
         "formozov_project.b2_model.b2.Synapses", side_effect=Exception("fake exception")
     )
@@ -480,7 +500,9 @@ def test_assemble_synapse_exception(mocker, mfx_with_synapse):
         mfx.assemble_synapse("Ce")
 
 
-def test_connect_synapse_exception(mocker, mfx_with_synapse):
+def test_connect_synapse_exception(
+    mocker: MockerFixture, mfx_with_synapse: tuple[b2_model.B2Model, dict[str, Any]]
+) -> None:
     mocker.patch(
         "formozov_project.b2_model.b2.Synapses.connect",
         side_effect=Exception("fake exception"),
@@ -491,7 +513,9 @@ def test_connect_synapse_exception(mocker, mfx_with_synapse):
         mfx.assemble_synapse("Ce")
 
 
-def test_define_monitor(mfx_parameterized) -> None:
+def test_define_monitor(
+    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+) -> None:
     mfx, _ = mfx_parameterized
 
     assert mfx.monitors == {}
@@ -505,7 +529,9 @@ def test_define_monitor(mfx_parameterized) -> None:
     ]
 
 
-def test_define_monitor_exception(mocker, mfx_parameterized) -> None:
+def test_define_monitor_exception(
+    mocker: MockerFixture, mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]]
+) -> None:
     mocker.patch(
         "formozov_project.b2_model.b2.StateMonitor",
         side_effect=Exception("fake exception"),
@@ -517,7 +543,7 @@ def test_define_monitor_exception(mocker, mfx_parameterized) -> None:
         mfx.define_monitor("M", b2.StateMonitor, "G", "v")
 
 
-def test_ornstein_uhlenbeck(tmp_path):
+def test_ornstein_uhlenbeck(tmp_path: Path) -> None:
     model = ornstein(tmp_path)
     model.run_simulation(1 * b2.second)
 
@@ -547,7 +573,7 @@ def test_ornstein_uhlenbeck(tmp_path):
     assert np.allclose(M.y[0], model.network["M"].y[0])
 
 
-def test_NMDA_model(tmp_path) -> None:
+def test_NMDA_model(tmp_path: Path) -> None:
     # https://brian2.readthedocs.io/en/stable/examples/synapses.nonlinear.html
 
     a = 1 / (10 * b2.ms)
@@ -662,13 +688,12 @@ def test_NMDA_model(tmp_path) -> None:
     np.testing.assert_almost_equal(Mn.g, model.network["Mn"].g)
 
 
-def test_hdf5(tmp_path):
-
+def test_hdf5(tmp_path: Path) -> None:
     model = ornstein(tmp_path)
 
     model.run_simulation(10 * b2.second)
 
-    model.save_to_h5(tmp_path/"data.h5")
+    model.save_to_h5(tmp_path / "data.h5")
 
     data = None
 
@@ -696,12 +721,13 @@ def test_hdf5(tmp_path):
         model.save_to_h5(tmp_path / "data.h5")
 
 
-def test_logger(tmp_path):
+def test_logger(tmp_path: Path) -> None:
     model = ornstein(tmp_path)
 
-    model.run_simulation(1 * b2.second, savepath=tmp_path/"data.h5 ")
+    model.run_simulation(1 * b2.second, savepath=tmp_path / "data.h5 ")
 
-    with open(Path(model.logger.handlers[0].baseFilename)) as file:
+    handler = cast(logging.FileHandler, model.logger.handlers[0])
+    with open(Path(handler.baseFilename)) as file:
         logs = [line.strip() for line in file.readlines()]
 
     # bunch of asserts checking that logfile content works as expected
@@ -716,3 +742,38 @@ def test_logger(tmp_path):
 
     pathname = tmp_path / "data.h5"
     assert f"save data to hdf5 at {pathname}" in logs[8]
+
+
+def test_store_restore() -> None:
+    model = ornstein()
+    sim_time = 10 * b2.ms
+    assert len(model.checkpoints) == 0
+    model.run_simulation(sim_time)
+    # default initial state checkpoint is made on first simulation if no other checkpoints are made
+    assert len(model.checkpoints) == 1
+    assert model.network["M"].t[-1] == sim_time - model.dt
+    # restore initial state
+    model.restore(model.checkpoints[0])
+    assert len(model.network["M"].t) == 0
+    # store two new checkpoints
+    model.run_simulation(sim_time)
+    assert model.network["M"].t[-1] == sim_time - model.dt
+    model.store("t1")
+    assert len(model.checkpoints) == 2
+    model.run_simulation(sim_time)
+    assert model.network["M"].t[-1] == 2 * sim_time - model.dt
+    model.store("t2")
+    assert len(model.checkpoints) == 3
+    # restore second checkpoint
+    model.restore("t1")
+    assert model.network["M"].t[-1] == sim_time - model.dt
+    # overwrite existing checkpoint
+    assert len(model.checkpoints) == 3
+    model.store("t2")
+    assert len(model.checkpoints) == 3
+    # restore initial state
+    model.restore(model.checkpoints[0])
+    assert len(model.network["M"].t) == 0
+    # restore non-existing checkpoint
+    with pytest.raises(ValueError, match=".*'idontexist'.*"):
+        model.restore("idontexist")

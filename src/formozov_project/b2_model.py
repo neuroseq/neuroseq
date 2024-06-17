@@ -1,12 +1,9 @@
+from __future__ import annotations
+
 import logging
 from logging import Logger
 from pathlib import Path
 from typing import Any
-from typing import Dict
-from typing import List
-from typing import Optional
-from typing import Type
-from typing import Union
 
 import brian2 as b2
 import h5py
@@ -18,7 +15,7 @@ class B2Model:
     """
 
     def _set_up_logger(
-        self, loglevel: str = "INFO", logpath: Optional[str] = None
+        self, loglevel: str = "INFO", logpath: str | Path | None = None
     ) -> None:
         """
         _set_up_logger set up the logger an instance of `B2Model` uses.
@@ -50,7 +47,7 @@ class B2Model:
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
 
-    def _update_nested_dict(self, original: Dict, updates: Dict) -> None:
+    def _update_nested_dict(self, original: dict, updates: dict) -> None:
         """
         _update_nested_dict Update nested dictionary with another dictionary.
         This helper function is mainly useful to maintain the argument
@@ -58,10 +55,10 @@ class B2Model:
 
         Parameters
         ----------
-        original : Dict
-            Dictionary to be updated
-        updates : Dict
-            Dictionary to update with
+        original : dict
+            dictionary to be updated
+        updates : dict
+            dictionary to update with
         """
         for key, value in updates.items():
             if (
@@ -110,7 +107,10 @@ class B2Model:
         self.logger.debug(f"full equation: {line}")
 
     def __init__(
-        self, logpath: Optional[str] = None, loglevel: str = "INFO", seed: int = 123
+        self,
+        logpath: str | Path | None = None,
+        loglevel: str = "INFO",
+        seed: int = 123,
     ):
         """
         __init__ Create a new `B2Model` instance.
@@ -133,12 +133,13 @@ class B2Model:
 
         self.seed: int = seed
         self.network = b2.Network(name="b2Network")
-        self.parameters: Optional[Dict[str, Any]] = None
-        self.neurongroups: Dict[str, Dict[str, Any]] = {}
-        self.synapses: Dict[str, Dict[str, Any]] = {}
-        self.monitors: Dict[str, Dict[str, Any]] = {}
-        self.dt = None
+        self.parameters: dict[str, Any] | None = None
+        self.neurongroups: dict[str, dict[str, Any]] = {}
+        self.synapses: dict[str, dict[str, Any]] = {}
+        self.monitors: dict[str, dict[str, Any]] = {}
+        self.dt: b2.Quantity | None = None
         self.solver = None
+        self.checkpoints: list[str] = []
         self._set_up_logger(loglevel=loglevel, logpath=logpath)
         self.logger.info("Model creation complete")
 
@@ -182,7 +183,7 @@ class B2Model:
         self.network.dt = self.dt
         self.logger.info(f"dt defined: {dt}")
 
-    def define_parameter(self, name: str, value: Union[str, b2.Quantity]) -> None:
+    def define_parameter(self, name: str, value: str | b2.Quantity) -> None:
         """
         define_parameter Define a parameter for *any* model equation in the network. All elements will get the same set of parameters,
         so make sure to not include doublings. This is *NOT* verified.
@@ -192,7 +193,7 @@ class B2Model:
         name : str
             parameter name
 
-        value : Union[str, b2.Quantity]
+        value : str | b2.Quantity
             value to be used. Can be an expression in the form of a string or a quantity with units.
         """
         if self.parameters is None:
@@ -245,7 +246,7 @@ class B2Model:
         )
         self.logger.info(f"Solver method defined: {method}")
 
-    def define_refractory(self, name: str, value: Union[str, b2.Quantity]) -> None:
+    def define_refractory(self, name: str, value: str | b2.Quantity) -> None:
         """
         define_refractory Define the refractoriness for a neurongroup indicated by name.
 
@@ -253,7 +254,7 @@ class B2Model:
         ----------
         name : str
             Name of the group to add the refractoriness for.
-        value : Union[str, b2.Quantity]
+        value : str | b2.Quantity
             Either a string expression evalutating to the length of the refractory period or the length of the period itself.
         """
         self._update_nested_dict(
@@ -288,7 +289,7 @@ class B2Model:
         self.logger.info(f"Neuron number defined: {n}")
 
     def define_neuron_subgroup(
-        self, target_name: str, identifier: str, idxs: Union[slice, int, List]
+        self, target_name: str, identifier: str, idxs: slice | int | list
     ) -> None:
         """
         define_neuron_subgroup Define a subgroup of a neurongroup as a separate element that can be referred to by name.
@@ -303,7 +304,7 @@ class B2Model:
             automatically determined brian2. This name can be accessed by
             accessing the `neurongroup[identifier]['name']` element of the
             calling instance.
-        idxs : Union[slice, int, List]
+        idxs : slice | int | list
             Indices of the target neurongroup neurons to add to the subgroup.
         """
         sng = None
@@ -541,7 +542,7 @@ class B2Model:
         self.network.add(synapse)
 
     def define_monitor(
-        self, name: str, cls: Type, group: str, variable: Optional[str] = None
+        self, name: str, cls: type, group: str, variable: str | None = None
     ) -> None:
         """
         define_monitor Define a monitor for a variable `variable` in the network element `group`.
@@ -645,7 +646,7 @@ class B2Model:
 
         self.network.add(ng)
 
-    def save_to_h5(self, path: str) -> None:
+    def save_to_h5(self, path: str | Path) -> None:
         """
         save_to_h5 Save data collected by defined monitor objects to hdf5.
 
@@ -688,7 +689,7 @@ class B2Model:
             raise ValueError(message) from e
 
     def run_simulation(
-        self, tfinal: b2.Quantity, savepath: Optional[str] = None
+        self, tfinal: b2.Quantity, savepath: str | Path | None = None
     ) -> None:
         """
         run_simulation Run the fully defined simulation
@@ -702,7 +703,42 @@ class B2Model:
         savepath : str, optional
             Path to save the data at, by default None
         """
+        if len(self.checkpoints) == 0:
+            self.checkpoints.append("Initial state")
+            self.network.store(self.checkpoints[-1])
         self.network.run(tfinal, report="text")
         self.logger.info(f"run the system for {tfinal} with savepath = {savepath}")
         if savepath is not None:
             self.save_to_h5(savepath)
+
+    def store(self, checkpoint: str) -> None:
+        """
+        store Store a named checkpoint of the current network state.
+
+        Parameters
+        ----------
+        checkpoint : str
+            Name of the checkpoint to store. If the name already exists, the checkpoint will be overwritten.
+        """
+        self.logger.info(f"store network state at checkpoint {checkpoint}")
+        self.network.store(checkpoint)
+        if checkpoint not in self.checkpoints:
+            self.checkpoints.append(checkpoint)
+
+    def restore(self, checkpoint: str) -> None:
+        """
+        restore Restore the network to a previously stored named checkpoint.
+
+        Parameters
+        ----------
+        checkpoint : str
+            Name of the checkpoint to restore to.
+        """
+        self.logger.info(f"restore network to checkpoint {checkpoint}")
+        try:
+            self.network.restore(checkpoint)
+        except Exception as e:
+            message = f"Failed to restore checkpoint '{checkpoint}'"
+            self.logger.critical(message)
+            logging.exception(e)
+            raise ValueError(message) from e
