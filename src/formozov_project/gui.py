@@ -15,6 +15,7 @@ from formozov_project import __version__
 from formozov_project.b2_model import B2Model
 from formozov_project.heatmap_widget import HeatmapWidget
 from formozov_project.trace_widget import TraceWidget
+from formozov_project.b2_model_widget import B2ModelWidget
 
 
 def temp_new_model() -> B2Model:
@@ -67,7 +68,7 @@ class Gui(QtWidgets.QMainWindow):
         self.heatmap_widget.connect_trace_widget(self.trace_widget)
         self.trace_widget.connect_heatmap_widget(self.heatmap_widget)
 
-        self.btn_new_clicked()
+        # self.btn_new_clicked()
 
     def _update_data(self) -> None:
         if len(self.model.network["M"].t) == 0:
@@ -87,6 +88,8 @@ class Gui(QtWidgets.QMainWindow):
         self.model = temp_new_model()
         self.trace_widget.set_data()
         self.heatmap_widget.set_data()
+        b2m = B2ModelWidget(self.model, self)
+        b2m.exec()
 
     def btn_open_clicked(self) -> None:
         self.btn_new_clicked()
