@@ -659,19 +659,23 @@ class B2Model:
         Raises
         ------
         ValueError
-            _description_
+            When the given path does not exist
         RuntimeError
-            _description_
+            When no monitors are defined.
         """
         pathname = Path(path)
 
         if pathname.absolute().parent.is_dir() is False:
-            raise ValueError(f"Path {pathname} does not exist")
+            message = f"Path {pathname} does not exist"
+            self.logger.critical(message)
+            raise ValueError(message)
 
         self.logger.info(f"save data to hdf5 at {pathname}")
 
         if len(self.monitors) == 0:
-            raise RuntimeError("Error, cannot save data when no monitors are defined")
+            message = "Error, cannot save data when no monitors are defined"
+            self.logger.critical(message)
+            raise RuntimeError(message)
 
         with h5py.File(pathname, "w") as h5file:
             for key in self.monitors:
