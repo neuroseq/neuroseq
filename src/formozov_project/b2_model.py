@@ -665,11 +665,6 @@ class B2Model:
         """
         pathname = Path(path)
 
-        if pathname.absolute().parent.is_dir() is False:
-            message = f"Path {pathname} does not exist"
-            self.logger.critical(message)
-            raise ValueError(message)
-
         self.logger.info(f"save data to hdf5 at {pathname}")
 
         if len(self.monitors) == 0:
@@ -677,15 +672,20 @@ class B2Model:
             self.logger.critical(message)
             raise RuntimeError(message)
 
-        with h5py.File(pathname, "w") as h5file:
-            for key in self.monitors:
-                self.logger.debug(f"save data of monitor {key}")
-                monitor = self.network[key]
-                group = h5file.create_group(monitor.name)
-                for v in monitor.record_variables:
-                    group.create_dataset(
-                        v, shape=getattr(monitor, v).shape, data=getattr(monitor, v)
-                    )
+        try:
+            with h5py.File(pathname, "w") as h5file:
+                for key in self.monitors:
+                    self.logger.debug(f"save data of monitor {key}")
+                    monitor = self.network[key]
+                    group = h5file.create_group(monitor.name)
+                    for v in monitor.record_variables:
+                        group.create_dataset(
+                            v, shape=getattr(monitor, v).shape, data=getattr(monitor, v)
+                        )
+        except FileNotFoundError as e:
+            message = f"Path {pathname} does not exist"
+            self.logger.critical(message)
+            raise ValueError(message) from e
 
     def run_simulation(
         self, tfinal: b2.Quantity, savepath: Optional[str] = None
