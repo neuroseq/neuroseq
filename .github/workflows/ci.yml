@@ -29,6 +29,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install uv
-      - run: uv pip install --system -e .[tests] --verbose
+      - run: uv pip install --system -e .[tests]
       - run: pytest -sv --cov --cov-report=xml
       - run: diff-cover coverage.xml -c pyproject.toml
