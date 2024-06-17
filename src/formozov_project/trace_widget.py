@@ -1,4 +1,4 @@
-from typing import Optional
+from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
@@ -13,23 +13,23 @@ class TraceWidget(pg.PlotWidget):
 
     def __init__(
         self,
-        traces: Optional[list[np.ndarray]] = None,
-        timestamps: Optional[np.ndarray] = None,
-        parent: Optional[QtWidgets.QWidget] = None,
+        traces: list[np.ndarray] | None = None,
+        timestamps: np.ndarray | None = None,
+        parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.traces: list[pg.PlotDataItem] = []
         self.timeline = pg.InfiniteLine(pos=0, angle=90, movable=True)
         self.timeline.addMarker("v", 1.0)
         self.timeline.addMarker("^", 0.0)
-        self.selected_trace: Optional[int] = None
+        self.selected_trace: int | None = None
         self.getAxis("top").show()
         self.set_data(traces, timestamps)
 
     def set_data(
         self,
-        traces: Optional[list[np.ndarray]] = None,
-        timestamps: Optional[np.ndarray] = None,
+        traces: list[np.ndarray] | None = None,
+        timestamps: np.ndarray | None = None,
     ) -> None:
         self.clear()
         self.traces.clear()

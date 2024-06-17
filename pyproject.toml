@@ -8,8 +8,8 @@ description = "Protoype GUI to edit and run neuron models"
 readme = "README.md"
 license = { text = "NONE" }
 authors = [{ name = "SSC", email = "ssc@iwr.uni-heidelberg.de" }]
-requires-python = ">=3.7"
-dependencies = ["brian2", "numpy", "qtpy", "pyside6", "pyqtgraph", "h5py"]
+requires-python = ">=3.8"
+dependencies = ["brian2", "numpy", "qtpy", "pyside6", "pyqtgraph", "h5py", "qtawesome"]
 dynamic = ["version"]
 
 [project.scripts]
