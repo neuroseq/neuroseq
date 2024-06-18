@@ -58,11 +58,11 @@ class ElementDialog(QtWidgets.QDialog):
         message : str
             Message to display
         """
-        error_dialog = QtWidgets.QMessageBox(self)
-        error_dialog.setIcon(QtWidgets.QMessageBox.Critical)
-        error_dialog.setWindowTitle("Error")
-        error_dialog.setText(message)
-        error_dialog.exec_()
+        self.error_dialog = QtWidgets.QMessageBox(self)
+        self.error_dialog.setIcon(QtWidgets.QMessageBox.Critical)
+        self.error_dialog.setWindowTitle("Error")
+        self.error_dialog.setText(message)
+        self.error_dialog.exec_()
 
     def accept(self) -> None:
         """accept method for the dialog window."""
@@ -548,7 +548,12 @@ class DictionaryWidget(QtWidgets.QWidget):
 
             self.add_dict_to_tree(self.table, dictionary)
 
+
+        ok_button = QtWidgets.QPushButton('OK', self)
+        ok_button.clicked.connect(self.on_ok_clicked)  # Connect button click to custom slot
+
         layout.addWidget(self.table)
+        layout.addWidget(ok_button)
         self.setLayout(layout)
 
     def add_dict_to_tree(
@@ -659,58 +664,58 @@ class B2ModelWidget(ElementDialog):
 
         self.setWindowTitle("Model definition")
         self.show_parameters_button.hide()
-        timestep_title = QtWidgets.QLabel("Timestep", self)
-        timestep = QtWidgets.QLineEdit()
-        timestep_button = QtWidgets.QPushButton("save", self)
+        self.timestep_title = QtWidgets.QLabel("Timestep", self)
+        self.timestep = QtWidgets.QLineEdit()
+        self.timestep_button = QtWidgets.QPushButton("save", self)
 
-        seed = QtWidgets.QLineEdit(self)
-        seed_button = QtWidgets.QPushButton("save", self)
-        seed_title = QtWidgets.QLabel("Random seed")
+        self.seed = QtWidgets.QLineEdit(self)
+        self.seed_button = QtWidgets.QPushButton("save", self)
+        self.seed_title = QtWidgets.QLabel("Random seed")
 
-        add_parameter_button = QtWidgets.QPushButton("Add parameter", self)
-        add_neurongroup_button = QtWidgets.QPushButton("Add neurongroup", self)
-        add_synapse_button = QtWidgets.QPushButton("Add synapse", self)
-        display_system_button = QtWidgets.QPushButton("Display system", self)
+        self.add_parameter_button = QtWidgets.QPushButton("Add parameter", self)
+        self.add_neurongroup_button = QtWidgets.QPushButton("Add neurongroup", self)
+        self.add_synapse_button = QtWidgets.QPushButton("Add synapse", self)
+        self.display_system_button = QtWidgets.QPushButton("Display system", self)
 
         self.layout.addWidget(self.name_title, 1, 1)
         self.layout.addWidget(self.name_entry, 1, 2, 1, 2)
         self.layout.addWidget(self.name_button, 1, 4)
 
-        self.layout.addWidget(timestep_title, 2, 1)
-        self.layout.addWidget(timestep, 2, 2, 1, 2)
-        self.layout.addWidget(timestep_button, 2, 4)
+        self.layout.addWidget(self.timestep_title, 2, 1)
+        self.layout.addWidget(self.timestep, 2, 2, 1, 2)
+        self.layout.addWidget(self.timestep_button, 2, 4)
 
-        self.layout.addWidget(seed_title, 3, 1)
-        self.layout.addWidget(seed, 3, 2, 1, 2)
-        self.layout.addWidget(seed_button, 3, 4)
+        self.layout.addWidget(self.seed_title, 3, 1)
+        self.layout.addWidget(self.seed, 3, 2, 1, 2)
+        self.layout.addWidget(self.seed_button, 3, 4)
 
-        self.layout.addWidget(add_parameter_button, 5, 1)
+        self.layout.addWidget(self.add_parameter_button, 5, 1)
 
         self.layout.addWidget(
-            add_neurongroup_button,
+            self.add_neurongroup_button,
             5,
             2,
         )
 
         self.layout.addWidget(
-            add_synapse_button,
+            self.add_synapse_button,
             5,
             3,
         )
 
-        self.layout.addWidget(display_system_button, 5, 4)
+        self.layout.addWidget(self.display_system_button, 5, 4)
 
         self.layout.addWidget(self.buttonBox, 8, 1, 1, 4, QtCore.Qt.AlignCenter)
 
         # connect signals to slots on the outermost
 
-        add_neurongroup_button.clicked.connect(self.open_add_neurongroup_dialog)
-        add_synapse_button.clicked.connect(self.open_add_synapse_dialog)
-        add_parameter_button.clicked.connect(self.open_add_parameter_dialog)
-        display_system_button.clicked.connect(self.display_system)
+        self.add_neurongroup_button.clicked.connect(self.open_add_neurongroup_dialog)
+        self.add_synapse_button.clicked.connect(self.open_add_synapse_dialog)
+        self.add_parameter_button.clicked.connect(self.open_add_parameter_dialog)
+        self.display_system_button.clicked.connect(self.display_system)
 
-        timestep_button.clicked.connect(self.not_connected)
-        seed_button.clicked.connect(self.not_connected)
+        self.timestep_button.clicked.connect(self.not_connected)
+        self.seed_button.clicked.connect(self.not_connected)
         self.name_button.clicked.connect(self.not_connected)
 
         self.setLayout(self.layout)

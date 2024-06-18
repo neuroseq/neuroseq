@@ -31,7 +31,7 @@ def test_gui_playback(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
     )
     gui.btn_continue_simulation_clicked()
-    n_timesteps = len(gui.model.network["M"].t)
+    n_timesteps = len(gui.models["ornstein_uhlenbeck"].network["M"].t)
     gui.btn_play_clicked()
     qtbot.waitUntil(lambda: gui.heatmap_widget.currentIndex > 0)
     # pause and then continue playback
@@ -80,14 +80,14 @@ def test_gui_checkpoints(
         QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("test", True)
     )
     gui.btn_store_checkpoint_clicked()
-    assert "test" in gui.model.checkpoints
+    assert "test" in gui.models["ornstein_uhlenbeck"].checkpoints
     # simulate
     simulation_time = 0.1
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
     )
     gui.btn_continue_simulation_clicked()
-    assert gui.model.network["M"].t[-1] == approx(simulation_time, rel=1e-2)
+    assert gui.models["ornstein_uhlenbeck"].network["M"].t[-1] == approx(simulation_time, rel=1e-2)
     # restore checkpoint
     gui.btn_restore_checkpoint_clicked()
-    assert len(gui.model.network["M"].t) == 0
+    assert len(gui.models["ornstein_uhlenbeck"].network["M"].t) == 0
