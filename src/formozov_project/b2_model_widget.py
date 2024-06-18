@@ -9,6 +9,15 @@ from qtpy import QtWidgets
 
 from formozov_project.b2_model import B2Model
 
+"""
+TODO:
+- make sure the model dialog does not close unexpectedly
+- make sure the tests run again
+- solve the issue with the fatal python error
+- write all the tests
+- make sure the tests pass
+"""
+
 
 class ElementDialog(QtWidgets.QDialog):
     """
@@ -548,12 +557,7 @@ class DictionaryWidget(QtWidgets.QWidget):
 
             self.add_dict_to_tree(self.table, dictionary)
 
-
-        ok_button = QtWidgets.QPushButton('OK', self)
-        ok_button.clicked.connect(self.on_ok_clicked)  # Connect button click to custom slot
-
         layout.addWidget(self.table)
-        layout.addWidget(ok_button)
         self.setLayout(layout)
 
     def add_dict_to_tree(
@@ -624,6 +628,7 @@ class B2ModelWidget(ElementDialog):
             model_save_dialog.close()
 
         no_button.clicked.connect(discard_and_close)
+
         save_button.clicked.connect(save_and_close)
 
         model_save_dialog.exec()
