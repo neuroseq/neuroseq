@@ -4,7 +4,6 @@ import itertools
 import logging
 from pathlib import Path
 from typing import Any
-from typing import cast
 
 import brian2 as b2
 import h5py
@@ -121,8 +120,8 @@ def reference_parameters() -> dict[str, Any]:
 
 
 @pytest.fixture()
-def mfx(tmp_path: Path) -> b2_model.B2Model:
-    return b2_model.B2Model(tmp_path, loglevel="DEBUG")
+def mfx() -> b2_model.B2Model:
+    return b2_model.B2Model()
 
 
 @pytest.fixture
@@ -197,14 +196,14 @@ def mfx_with_synapse(
     return mfx, reference_parameters
 
 
-def ornstein(logpath: Path | None = None) -> b2_model.B2Model:
+def ornstein() -> b2_model.B2Model:
     eqs = """
         tau : second
         sigma : 1
         dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
     """
 
-    model = b2_model.B2Model(seed=4321, logpath=logpath)
+    model = b2_model.B2Model(seed=4321)
     model.define_neuronnumber("neurongroup", 2)
     model.define_dt(0.2 * b2.ms)
     model.define_solver_method("neurongroup", "euler")
@@ -221,20 +220,12 @@ def ornstein(logpath: Path | None = None) -> b2_model.B2Model:
 
 
 def test_construction(tmp_path: Path) -> None:
-    model = b2_model.B2Model(logpath=tmp_path, loglevel="DEBUG")
-
-    assert model.logger.name == "Model"
-    assert model.logger.level == logging.DEBUG
-    handler = cast(logging.FileHandler, model.logger.handlers[0])
-    assert handler.baseFilename == str(tmp_path / "logfile.log")
+    model = b2_model.B2Model()
     assert model.parameters is None
     assert model.network is not None
     assert model.network.name == "b2Network"
     assert model.synapses == {}
     assert model.monitors == {}
-
-    with pytest.raises(ValueError, match="Path fakepath does not exist"):
-        b2_model.B2Model("fakepath")
 
 
 def test_define_equation(mfx: b2_model.B2Model) -> None:
@@ -544,7 +535,7 @@ def test_define_monitor_exception(
 
 
 def test_ornstein_uhlenbeck(tmp_path: Path) -> None:
-    model = ornstein(tmp_path)
+    model = ornstein()
     model.run_simulation(1 * b2.second)
 
     b2.seed(4321)
@@ -573,14 +564,14 @@ def test_ornstein_uhlenbeck(tmp_path: Path) -> None:
     assert np.allclose(M.y[0], model.network["M"].y[0])
 
 
-def test_NMDA_model(tmp_path: Path) -> None:
+def test_NMDA_model() -> None:
     # https://brian2.readthedocs.io/en/stable/examples/synapses.nonlinear.html
 
     a = 1 / (10 * b2.ms)
     b = 1 / (10 * b2.ms)
     c = 1 / (10 * b2.ms)
 
-    model = b2_model.B2Model(tmp_path, seed=4321)
+    model = b2_model.B2Model(seed=4321)
     # model.define_dt(0.2 * b2.ms)
     model.define_solver_method("neuron_input", "euler")
 
@@ -689,8 +680,7 @@ def test_NMDA_model(tmp_path: Path) -> None:
 
 
 def test_hdf5(tmp_path: Path) -> None:
-    model = ornstein(tmp_path)
-
+    model = ornstein()
     model.run_simulation(10 * b2.second)
 
     model.save_to_h5(tmp_path / "data.h5")
@@ -702,18 +692,10 @@ def test_hdf5(tmp_path: Path) -> None:
 
     assert np.allclose(data, model.network["M"].y)
 
-    model = ornstein(tmp_path)
-
-    model.run_simulation(1 * b2.second)
-
     with pytest.raises(ValueError, match="Path fakepath/data.h5 does not exist"):
         model.save_to_h5("fakepath/data.h5")
 
-    model = ornstein(tmp_path)
-
     model.monitors = {}
-
-    model.run_simulation(1 * b2.second)
 
     with pytest.raises(
         RuntimeError, match="Error, cannot save data when no monitors are defined"
@@ -721,16 +703,13 @@ def test_hdf5(tmp_path: Path) -> None:
         model.save_to_h5(tmp_path / "data.h5")
 
 
-def test_logger(tmp_path: Path) -> None:
-    model = ornstein(tmp_path)
-
+def test_logger(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO, logger="formozov_project.b2_model")
+    model = ornstein()
     model.run_simulation(1 * b2.second, savepath=tmp_path / "data.h5 ")
 
-    handler = cast(logging.FileHandler, model.logger.handlers[0])
-    with open(Path(handler.baseFilename)) as file:
-        logs = [line.strip() for line in file.readlines()]
-
     # bunch of asserts checking that logfile content works as expected
+    logs = [record.message for record in caplog.records]
     assert "Model creation complete" in logs[0]
     assert "Neuron number defined: 2" in logs[1]
     assert "dt defined: 200. us" in logs[2]

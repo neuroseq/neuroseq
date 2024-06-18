@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
-from logging import Logger
 from pathlib import Path
 from typing import Any
+from typing import Callable
 
 import brian2 as b2
 import h5py
@@ -13,39 +13,6 @@ class B2Model:
     """
     Wrapper class that bundles brian2 capabilities for modelling neuronal networks.
     """
-
-    def _set_up_logger(
-        self, loglevel: str = "INFO", logpath: str | Path | None = None
-    ) -> None:
-        """
-        _set_up_logger set up the logger an instance of `B2Model` uses.
-
-        Parameters
-        ----------
-        loglevel : str, optional
-            Level of logging output. See the python `logging` documentation for more info, by default "INFO"
-        logpath : str, optional
-            Path to a folder where the logfile should be stored. If not given, will log to console, by default None
-
-        Raises
-        ------
-        ValueError
-            When the given logpath does not exist and is not None.
-        """
-        self.logger = Logger("Model")
-        self.logger.setLevel(loglevel)
-
-        if logpath is not None:
-            if Path(logpath).is_dir() is False:
-                raise ValueError(f"Path {logpath} does not exist")
-
-            handler = logging.FileHandler(Path(logpath, "logfile.log"))
-
-            formatter = logging.Formatter(
-                "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-            )
-            handler.setFormatter(formatter)
-            self.logger.addHandler(handler)
 
     def _update_nested_dict(self, original: dict, updates: dict) -> None:
         """
@@ -108,8 +75,6 @@ class B2Model:
 
     def __init__(
         self,
-        logpath: str | Path | None = None,
-        loglevel: str = "INFO",
         seed: int = 123,
     ):
         """
@@ -117,17 +82,8 @@ class B2Model:
 
         Parameters
         ----------
-        logpath : str
-            Path to save the produced data at in an hdf5 file. Must exist beforehand.
-        loglevel : str, optional
-            Level of log messages. See the python logging documentation, by default "INFO"
         seed : int, optional
             Seed for the brian2 rng system. Set this to produce a reproducible system, by default 123
-
-        Raises
-        ------
-        ValueError
-            When the supplied path does not exist.
         """
         b2.seed(seed)
 
@@ -140,7 +96,7 @@ class B2Model:
         self.dt: b2.Quantity | None = None
         self.solver = None
         self.checkpoints: list[str] = []
-        self._set_up_logger(loglevel=loglevel, logpath=logpath)
+        self.logger = logging.getLogger(__name__)
         self.logger.info("Model creation complete")
 
     def define_equation(self, name: str, line: str) -> None:
@@ -689,7 +645,10 @@ class B2Model:
             raise ValueError(message) from e
 
     def run_simulation(
-        self, tfinal: b2.Quantity, savepath: str | Path | None = None
+        self,
+        tfinal: b2.Quantity,
+        savepath: str | Path | None = None,
+        report: Callable | None = None,
     ) -> None:
         """
         run_simulation Run the fully defined simulation
@@ -706,7 +665,7 @@ class B2Model:
         if len(self.checkpoints) == 0:
             self.checkpoints.append("Initial state")
             self.network.store(self.checkpoints[-1])
-        self.network.run(tfinal, report="text")
+        self.network.run(tfinal, report=report, report_period=0.5 * b2.second)
         self.logger.info(f"run the system for {tfinal} with savepath = {savepath}")
         if savepath is not None:
             self.save_to_h5(savepath)
