@@ -69,7 +69,7 @@ def standalone_model_app(
     app = None
 
 
-def test_name_def(
+def test_name_def_save_not_implemented(
     standalone_model_app,
     mocker,
 ):
@@ -103,7 +103,7 @@ def test_name_def(
     assert b2w.isVisible()
 
 
-def test_dt_def(standalone_model_app, mocker):
+def test_dt_def_save_not_implemented(standalone_model_app, mocker):
     bot, b2w, _ = standalone_model_app
 
     bot.keyClicks(b2w.timestep, "0.2 ms")
@@ -121,6 +121,35 @@ def test_dt_def(standalone_model_app, mocker):
     assert b2w.error_dialog.isVisible()
 
     # Verify error message box content
+    assert b2w.error_dialog.text() == "Not connected yet!"
+
+    ok_button = b2w.error_dialog.button(QtWidgets.QMessageBox.Ok)
+    bot.mouseClick(ok_button, QtCore.Qt.LeftButton)
+
+    # Ensure the dialog is no longer visible
+    bot.waitUntil(lambda: not b2w.error_dialog.isVisible())
+
+    # Verify main window is still visible
+    assert b2w.isVisible()
+
+
+def test_random_seed_def_save_not_implemented(standalone_model_app, mocker): 
+    bot, b2w, _ = standalone_model_app 
+
+    bot.keyClicks(b2w.seed, "2231")
+
+    assert b2w.seed.text() == "2231"
+
+    mocker.patch.object(
+        B2W.QtWidgets.QMessageBox, "exec_", B2W.QtWidgets.QMessageBox.show
+    )
+
+    bot.mouseClick(b2w.seed_button, QtCore.Qt.LeftButton)
+
+    bot.waitUntil(lambda: b2w.error_dialog.isVisible())
+    
+    assert b2w.error_dialog.isVisible()
+
     assert b2w.error_dialog.text() == "Not connected yet!"
 
     ok_button = b2w.error_dialog.button(QtWidgets.QMessageBox.Ok)
