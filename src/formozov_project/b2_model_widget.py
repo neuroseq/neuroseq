@@ -9,15 +9,6 @@ from qtpy import QtWidgets
 
 from formozov_project.b2_model import B2Model
 
-"""
-TODO:
-- make sure the model dialog does not close unexpectedly
-- make sure the tests run again
-- solve the issue with the fatal python error
-- write all the tests
-- make sure the tests pass
-"""
-
 
 class ModelDialog(QtWidgets.QDialog):
     """
@@ -103,7 +94,7 @@ class ModelDialog(QtWidgets.QDialog):
             line = element.toPlainText()
         except Exception as e:
             self.display_error(f"Error when getting parameter {paramname}: {e}")
-        
+
         element.clear()
 
         try:
@@ -124,6 +115,8 @@ class ModelDialog(QtWidgets.QDialog):
         name = self.name_entry.text()
         if name == "":
             self.display_error("Please enter a name!")
+        elif self.name is not None:
+            self.display_error("A name has already been defined")
         elif name in getattr(self.model, target):
             self.display_error("Name already exists!")
         else:
@@ -131,7 +124,7 @@ class ModelDialog(QtWidgets.QDialog):
             getattr(self.model, target)[name] = {}
             self.name_button.setText("saved")
 
-    def display_parameters(self, target: str) -> None:
+    def display_parameters(self, target: str | dict) -> None:
         """
         Display the parameters of a target member of the model in a new window.
 
@@ -140,14 +133,18 @@ class ModelDialog(QtWidgets.QDialog):
         target : str
             name of the target variable in the model
         """
-        d = getattr(self.model, target).get(self.name, None)
+        if isinstance(target, str):
+            d = getattr(self.model, target).get(self.name, None)
+        else:
+            d = target
+
         window = QtWidgets.QDialog(self)
         layout = QtWidgets.QVBoxLayout(window)
-        dlg = DictionaryWidget(d, self)
-        layout.addWidget(dlg)
-        dlg.setLayout(layout)
+        self.dictwidget = DictionaryWidget(d, window)
+        layout.addWidget(self.dictwidget)
+        self.dictwidget.setLayout(layout)
         window.resize(800, 600)
-        window.exec()
+        window.show()
 
     def not_connected(self) -> None:
         """
@@ -165,12 +162,6 @@ class NeuronGroupDialog(ModelDialog):
     ModelDialog : ModelDialog
         The base class of all dialogs in the b2_model_widget namespace.
     """
-
-    def accept(self) -> None:
-        """
-        Accept the dialog and assemble the Neurongroup in the model. This will only succeed if all necessary parameters are set.
-        Readme: not yet implemented
-        """
 
     def __init__(self, model: B2Model, parent: QtWidgets.QDialog | None = None) -> None:
         """
@@ -324,16 +315,6 @@ class SynapseDialog(ModelDialog):
         The base class of all dialogs in the b2_model_widget namespace.
     """
 
-    def accept(self) -> None:
-        """
-        Accept the dialog and assemble the Synapse in the model. This will only succeed if all necessary parameters are set.
-        """
-        if self.name is None or self.name not in self.model.synapses:
-            self.display_error("Please define a synapse first by giving it a name!")
-        else:
-            self.model.assemble_synapse(self.name)
-            self.done(1)
-
     def __init__(self, model: B2Model, parent: QtWidgets.QDialog | None = None) -> None:
         """
         Create a new SynapseDialog instance and display it in a new window.
@@ -351,42 +332,42 @@ class SynapseDialog(ModelDialog):
 
         self.setWindowTitle("Define a synapse")
 
-        origin_title = QtWidgets.QLabel("Origin", self)
-        origin = QtWidgets.QLineEdit(self)
-        origin_button = QtWidgets.QPushButton("save", self)
+        self.origin_title = QtWidgets.QLabel("Origin", self)
+        self.origin = QtWidgets.QLineEdit(self)
+        self.origin_button = QtWidgets.QPushButton("save", self)
 
-        target_title = QtWidgets.QLabel("Target", self)
-        target = QtWidgets.QLineEdit(self)
-        target_button = QtWidgets.QPushButton("save", self)
+        self.target_title = QtWidgets.QLabel("Target", self)
+        self.target = QtWidgets.QLineEdit(self)
+        self.target_button = QtWidgets.QPushButton("save", self)
 
-        equation_title = QtWidgets.QLabel("Equation", self)
-        equation = QtWidgets.QTextEdit(self)
-        equation_button = QtWidgets.QPushButton("save", self)
+        self.equation_title = QtWidgets.QLabel("Equation", self)
+        self.equation = QtWidgets.QTextEdit(self)
+        self.equation_button = QtWidgets.QPushButton("save", self)
 
-        pre_title = QtWidgets.QLabel("Pre", self)
-        pre = QtWidgets.QTextEdit(self)
-        pre_button = QtWidgets.QPushButton("save", self)
+        self.pre_title = QtWidgets.QLabel("Pre", self)
+        self.pre = QtWidgets.QTextEdit(self)
+        self.pre_button = QtWidgets.QPushButton("save", self)
 
-        post_title = QtWidgets.QLabel("Post", self)
-        post = QtWidgets.QTextEdit(self)
-        post_button = QtWidgets.QPushButton("save", self)
+        self.post_title = QtWidgets.QLabel("Post", self)
+        self.post = QtWidgets.QTextEdit(self)
+        self.post_button = QtWidgets.QPushButton("save", self)
 
-        connect_title = QtWidgets.QLabel("Connection def.", self)
-        connect = QtWidgets.QLineEdit(self)
-        connect_button = QtWidgets.QPushButton("save", self)
+        self.connect_title = QtWidgets.QLabel("Connection def.", self)
+        self.connect = QtWidgets.QLineEdit(self)
+        self.connect_button = QtWidgets.QPushButton("save", self)
 
-        connect_prob_title = QtWidgets.QLabel("Connection prob.", self)
-        connect_prob = QtWidgets.QLineEdit(self)
-        connect_prob_button = QtWidgets.QPushButton("save", self)
+        self.connect_prob_title = QtWidgets.QLabel("Connection prob.", self)
+        self.connect_prob = QtWidgets.QLineEdit(self)
+        self.connect_prob_button = QtWidgets.QPushButton("save", self)
 
         for qle in [
-            origin,
-            target,
-            equation,
-            pre,
-            post,
-            connect,
-            connect_prob,
+            self.origin,
+            self.target,
+            self.equation,
+            self.pre,
+            self.post,
+            self.connect,
+            self.connect_prob,
         ]:
             qle.setMinimumWidth(qle.sizeHint().width() * 2)
 
@@ -394,33 +375,33 @@ class SynapseDialog(ModelDialog):
         self.layout.addWidget(self.name_entry, 1, 2)
         self.layout.addWidget(self.name_button, 1, 3)
 
-        self.layout.addWidget(origin_title, 2, 1)
-        self.layout.addWidget(origin, 2, 2)
-        self.layout.addWidget(origin_button, 2, 3)
+        self.layout.addWidget(self.origin_title, 2, 1)
+        self.layout.addWidget(self.origin, 2, 2)
+        self.layout.addWidget(self.origin_button, 2, 3)
 
-        self.layout.addWidget(target_title, 3, 1)
-        self.layout.addWidget(target, 3, 2)
-        self.layout.addWidget(target_button, 3, 3)
+        self.layout.addWidget(self.target_title, 3, 1)
+        self.layout.addWidget(self.target, 3, 2)
+        self.layout.addWidget(self.target_button, 3, 3)
 
-        self.layout.addWidget(equation_title, 4, 1)
-        self.layout.addWidget(equation, 4, 2)
-        self.layout.addWidget(equation_button, 4, 3)
+        self.layout.addWidget(self.equation_title, 4, 1)
+        self.layout.addWidget(self.equation, 4, 2)
+        self.layout.addWidget(self.equation_button, 4, 3)
 
-        self.layout.addWidget(pre_title, 5, 1)
-        self.layout.addWidget(pre, 5, 2)
-        self.layout.addWidget(pre_button, 5, 3)
+        self.layout.addWidget(self.pre_title, 5, 1)
+        self.layout.addWidget(self.pre, 5, 2)
+        self.layout.addWidget(self.pre_button, 5, 3)
 
-        self.layout.addWidget(post_title, 6, 1)
-        self.layout.addWidget(post, 6, 2)
-        self.layout.addWidget(post_button, 6, 3)
+        self.layout.addWidget(self.post_title, 6, 1)
+        self.layout.addWidget(self.post, 6, 2)
+        self.layout.addWidget(self.post_button, 6, 3)
 
-        self.layout.addWidget(connect_title, 7, 1)
-        self.layout.addWidget(connect, 7, 2)
-        self.layout.addWidget(connect_button, 7, 3)
+        self.layout.addWidget(self.connect_title, 7, 1)
+        self.layout.addWidget(self.connect, 7, 2)
+        self.layout.addWidget(self.connect_button, 7, 3)
 
-        self.layout.addWidget(connect_prob_title, 8, 1)
-        self.layout.addWidget(connect_prob, 8, 2)
-        self.layout.addWidget(connect_prob_button, 8, 3)
+        self.layout.addWidget(self.connect_prob_title, 8, 1)
+        self.layout.addWidget(self.connect_prob, 8, 2)
+        self.layout.addWidget(self.connect_prob_button, 8, 3)
 
         self.layout.addWidget(
             self.show_parameters_button, 9, 1, 1, 3, QtCore.Qt.AlignCenter
@@ -431,13 +412,13 @@ class SynapseDialog(ModelDialog):
         self.setLayout(self.layout)
 
         # connect signals and sockets: TODO
-        origin_button.clicked.connect(self.not_connected)
-        target_button.clicked.connect(self.not_connected)
-        equation_button.clicked.connect(self.not_connected)
-        pre_button.clicked.connect(self.not_connected)
-        post_button.clicked.connect(self.not_connected)
-        connect_button.clicked.connect(self.not_connected)
-        connect_prob_button.clicked.connect(self.not_connected)
+        self.origin_button.clicked.connect(self.not_connected)
+        self.target_button.clicked.connect(self.not_connected)
+        self.equation_button.clicked.connect(self.not_connected)
+        self.pre_button.clicked.connect(self.not_connected)
+        self.post_button.clicked.connect(self.not_connected)
+        self.connect_button.clicked.connect(self.not_connected)
+        self.connect_prob_button.clicked.connect(self.not_connected)
 
         self.name_button.clicked.connect(partial(self.accept_name, "synapses"))
         self.show_parameters_button.clicked.connect(
@@ -530,13 +511,7 @@ class ParameterDialog(ModelDialog):
         """
         d = self.model.parameters if self.model.parameters is not None else {}
 
-        window = QtWidgets.QDialog(self)
-        layout = QtWidgets.QVBoxLayout(window)
-        self.dictwidget = DictionaryWidget(d, self)
-        layout.addWidget(self.dictwidget)
-        self.dictwidget.setLayout(layout)
-        window.resize(800, 600)
-        window.exec_()
+        super().display_parameters(d)
 
 
 class DictionaryWidget(QtWidgets.QWidget):
@@ -624,45 +599,6 @@ class B2ModelWidget(ModelDialog):
     ModelDialog : ModelDialog
         Base class for all dialogs in the b2_model_widget namespace.
     """
-
-    def accept(self) -> None:
-        """
-        Accept the dialoge and open a new dialog window to save the model.
-        """
-        model_save_dialog = QtWidgets.QDialog(self)
-        layout = QtWidgets.QGridLayout(model_save_dialog)
-        text = QtWidgets.QLabel("Do you want to save the model?")
-        save_button = QtWidgets.QPushButton("Yes", model_save_dialog)
-        no_button = QtWidgets.QPushButton("No", model_save_dialog)
-        layout.addWidget(text, 1, 1, 1, 2)
-        layout.addWidget(save_button, 2, 1, 1, 1)
-        layout.addWidget(no_button, 2, 2, 1, 1)
-        model_save_dialog.setLayout(layout)
-
-        def save_and_close() -> None:
-            self.save(self.model_register)
-            model_save_dialog.close()
-
-        def discard_and_close() -> None:
-            self.model = B2Model()
-            model_save_dialog.close()
-
-        no_button.clicked.connect(discard_and_close)
-
-        save_button.clicked.connect(save_and_close)
-
-        model_save_dialog.exec()
-
-        super().accept()
-        self.close()
-
-    def reject(self) -> None:
-        """
-        Reject the dialog and discard the model.
-        """
-        super().reject()
-        self.model = B2Model()
-        self.close()
 
     def __init__(
         self,
@@ -789,22 +725,3 @@ class B2ModelWidget(ModelDialog):
         self.param_dlg = ParameterDialog(self.model, self)
 
         self.param_dlg.exec_()
-
-    def save(self, model_dict: dict | None) -> None:
-        """
-        Save the model into the provided dictionary
-
-        Parameters
-        ----------
-        model_dict : dict | None
-            Dictionary to save the model in
-        """
-        if self.name is None:
-            self.display_error("Please define a name first!")
-
-        elif model_dict is None:
-            self.display_error(
-                "Please provide a model dictionary. This method is yet supported"
-            )
-        else:
-            model_dict["self.name"] = self.model
