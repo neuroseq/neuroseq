@@ -1,162 +1,328 @@
 from __future__ import annotations
-from pytestqt.qtbot import QtBot
-import pytest
-from typing import Type
 
-from qtpy import QtWidgets
-from qtpy import QtCore
-
-
-import numpy as np
-
-import brian2 as b2
-
-from formozov_project.b2_model import B2Model
 import formozov_project.b2_model_widget as B2W
+from formozov_project.b2_model import B2Model
+from pytest import MonkeyPatch
+from pytestqt.qtbot import QtBot
+from qtpy import QtCore
+from qtpy import QtWidgets
 
 
-@pytest.fixture()
-def ornstein_model(tmp_path):
-    eqs = """
-        tau : second
-        sigma : 1
-        dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
-    """
-
-    model = B2Model(seed=4321, logpath=tmp_path)
-    model.define_neuronnumber("neurongroup", 2)
-    model.define_dt(0.2 * b2.ms)
-    model.define_solver_method("neurongroup", "euler")
-    model.define_equation("neurongroup", eqs)
-    model.assemble_neurongroup(name="neurongroup")
-    model.define_monitor("M", b2.StateMonitor, "neurongroup", "y")
-
-    # init
-    model.network["neurongroup"].tau = np.array([1, 0.1]) * b2.second
-    model.network["neurongroup"].sigma = np.array([0.1, 0.31622])
-    model.network["neurongroup"].y = 1
-
-    return model
-
-
-def handle_dialog(window, app):
-    # https://github.com/pytest-dev/pytest-qt/issues/256
-    while window._test_dialog is None:
-        app.processEvents()
-
-
-@pytest.fixture()
-def standalone_model_app(
+def test_name_def_save_not_implemented(
     qtbot: QtBot,
-):
-    modeldict = {}
+    monkeypatch: MonkeyPatch,
+) -> None:
+    b2w = B2W.B2ModelWidget(B2Model(), None, {})
 
-    if not QtWidgets.QApplication.instance():
-        app = QtWidgets.QApplication([])
-    else:
-        app = QtWidgets.QApplication.instance()
+    qtbot.addWidget(b2w)
 
-    b2w = B2W.B2ModelWidget(B2Model(), None, modeldict)
+    b2w.show()
+
+    assert b2w.isVisible()
+
+    qtbot.keyClicks(b2w.name_entry, "modelname")
+    assert b2w.name_entry.text() == "modelname"
+
+    monkeypatch.setattr(
+        B2W.QtWidgets.QMessageBox, "exec_", B2W.QtWidgets.QMessageBox.show
+    )
+
+    qtbot.mouseClick(b2w.name_button, QtCore.Qt.LeftButton)
+
+    # Wait until the error dialog is visible
+    qtbot.waitUntil(b2w.error_dialog.isVisible)
+
+    assert b2w.error_dialog.isVisible()
+    # Verify error message box content
+    assert b2w.error_dialog.text() == "Not connected yet!"
+
+    ok_button = b2w.error_dialog.button(QtWidgets.QMessageBox.Ok)
+    qtbot.mouseClick(ok_button, QtCore.Qt.LeftButton)
+
+    # Ensure the dialog is no longer visible
+    qtbot.waitUntil(lambda: not b2w.error_dialog.isVisible())
+
+    # Verify main window is still visible
+    assert b2w.isVisible()
+
+
+def test_dt_def_save_not_implemented(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
+    b2w = B2W.B2ModelWidget(B2Model(), None, {})
+
+    qtbot.addWidget(b2w)
+
+    b2w.show()
+
+    qtbot.keyClicks(b2w.timestep, "0.2 ms")
+    assert b2w.timestep.text() == "0.2 ms"
+
+    monkeypatch.setattr(
+        B2W.QtWidgets.QMessageBox, "exec_", B2W.QtWidgets.QMessageBox.show
+    )
+
+    qtbot.mouseClick(b2w.timestep_button, QtCore.Qt.LeftButton)
+
+    # Wait until the error dialog is visible
+    qtbot.waitUntil(b2w.error_dialog.isVisible)
+
+    # Verify error message box content
+    assert b2w.error_dialog.text() == "Not connected yet!"
+
+    ok_button = b2w.error_dialog.button(QtWidgets.QMessageBox.Ok)
+    qtbot.mouseClick(ok_button, QtCore.Qt.LeftButton)
+
+    # Ensure the dialog is no longer visible
+    qtbot.waitUntil(lambda: not b2w.error_dialog.isVisible())
+
+    # Verify main window is still visible
+    assert b2w.isVisible()
+
+
+def test_random_seed_def_save_not_implemented(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    b2w = B2W.B2ModelWidget(B2Model(), None, {})
 
     b2w.show()
 
     qtbot.addWidget(b2w)
-    qtbot.waitUntil(lambda: b2w.isVisible())
 
-    yield qtbot, b2w, modeldict
-
-    app.shutdown()
-    app = None
-
-
-def test_name_def_save_not_implemented(
-    standalone_model_app,
-    mocker,
-):
-    bot, b2w, _ = standalone_model_app
-
-    assert b2w.isVisible()
-
-    bot.keyClicks(b2w.name_entry, "modelname")
-    assert b2w.name_entry.text() == "modelname"
-
-    mocker.patch.object(
-        B2W.QtWidgets.QMessageBox, "exec_", B2W.QtWidgets.QMessageBox.show
-    )
-
-    bot.mouseClick(b2w.name_button, QtCore.Qt.LeftButton)
-
-    # Wait until the error dialog is visible
-    bot.waitUntil(lambda: b2w.error_dialog.isVisible())
-
-    assert b2w.error_dialog.isVisible()
-    # Verify error message box content
-    assert b2w.error_dialog.text() == "Not connected yet!"
-
-    ok_button = b2w.error_dialog.button(QtWidgets.QMessageBox.Ok)
-    bot.mouseClick(ok_button, QtCore.Qt.LeftButton)
-
-    # Ensure the dialog is no longer visible
-    bot.waitUntil(lambda: not b2w.error_dialog.isVisible())
-
-    # Verify main window is still visible
-    assert b2w.isVisible()
-
-
-def test_dt_def_save_not_implemented(standalone_model_app, mocker):
-    bot, b2w, _ = standalone_model_app
-
-    bot.keyClicks(b2w.timestep, "0.2 ms")
-    assert b2w.timestep.text() == "0.2 ms"
-
-    mocker.patch.object(
-        B2W.QtWidgets.QMessageBox, "exec_", B2W.QtWidgets.QMessageBox.show
-    )
-
-    bot.mouseClick(b2w.timestep_button, QtCore.Qt.LeftButton)
-
-    # Wait until the error dialog is visible
-    bot.waitUntil(lambda: b2w.error_dialog.isVisible())
-
-    assert b2w.error_dialog.isVisible()
-
-    # Verify error message box content
-    assert b2w.error_dialog.text() == "Not connected yet!"
-
-    ok_button = b2w.error_dialog.button(QtWidgets.QMessageBox.Ok)
-    bot.mouseClick(ok_button, QtCore.Qt.LeftButton)
-
-    # Ensure the dialog is no longer visible
-    bot.waitUntil(lambda: not b2w.error_dialog.isVisible())
-
-    # Verify main window is still visible
-    assert b2w.isVisible()
-
-
-def test_random_seed_def_save_not_implemented(standalone_model_app, mocker): 
-    bot, b2w, _ = standalone_model_app 
-
-    bot.keyClicks(b2w.seed, "2231")
+    qtbot.keyClicks(b2w.seed, "2231")
 
     assert b2w.seed.text() == "2231"
 
-    mocker.patch.object(
+    monkeypatch.setattr(
         B2W.QtWidgets.QMessageBox, "exec_", B2W.QtWidgets.QMessageBox.show
     )
 
-    bot.mouseClick(b2w.seed_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(b2w.seed_button, QtCore.Qt.LeftButton)
 
-    bot.waitUntil(lambda: b2w.error_dialog.isVisible())
-    
+    qtbot.waitUntil(b2w.error_dialog.isVisible)
+
     assert b2w.error_dialog.isVisible()
 
     assert b2w.error_dialog.text() == "Not connected yet!"
 
     ok_button = b2w.error_dialog.button(QtWidgets.QMessageBox.Ok)
-    bot.mouseClick(ok_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(ok_button, QtCore.Qt.LeftButton)
 
     # Ensure the dialog is no longer visible
-    bot.waitUntil(lambda: not b2w.error_dialog.isVisible())
+    qtbot.waitUntil(lambda: not b2w.error_dialog.isVisible())
 
     # Verify main window is still visible
     assert b2w.isVisible()
+
+
+def test_parameterdialog_nothing_defined_errors(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        B2W.QtWidgets.QMessageBox, "exec_", B2W.QtWidgets.QMessageBox.show
+    )
+
+    param_dlg = B2W.ParameterDialog(B2Model())
+
+    qtbot.addWidget(param_dlg)
+
+    param_dlg.show()
+
+    qtbot.mouseClick(param_dlg.name_button, QtCore.Qt.LeftButton)
+
+    qtbot.waitUntil(param_dlg.error_dialog.isVisible)
+
+    assert param_dlg.error_dialog.text() == "Please enter a name!"
+
+    ok_button = param_dlg.error_dialog.button(QtWidgets.QMessageBox.Ok)
+    qtbot.mouseClick(ok_button, QtCore.Qt.LeftButton)
+
+    # Ensure the dialog is no longer visible
+    qtbot.waitUntil(lambda: not param_dlg.error_dialog.isVisible())
+
+    # Verify main window is still visible
+    assert param_dlg.isVisible()
+
+    qtbot.mouseClick(param_dlg.value_button, QtCore.Qt.LeftButton)
+
+    qtbot.waitUntil(param_dlg.error_dialog.isVisible)
+
+    assert (
+        param_dlg.error_dialog.text()
+        == "Please define a parameter first by giving it a name!"
+    )
+
+    ok_button = param_dlg.error_dialog.button(QtWidgets.QMessageBox.Ok)
+    qtbot.mouseClick(ok_button, QtCore.Qt.LeftButton)
+
+    # Ensure the dialog is no longer visible
+    qtbot.waitUntil(lambda: not param_dlg.error_dialog.isVisible())
+
+    assert param_dlg.isVisible()
+
+    # set name, then try to save parameter that hasn´t been defined
+
+    qtbot.keyClicks(param_dlg.name_entry, "param")
+
+    assert param_dlg.name_entry.text() == "param"
+
+    qtbot.mouseClick(param_dlg.name_button, QtCore.Qt.LeftButton)
+
+    qtbot.mouseClick(param_dlg.value_button, QtCore.Qt.LeftButton)
+
+    qtbot.waitUntil(param_dlg.error_dialog.isVisible)
+
+    qtbot.mouseClick(param_dlg.value_button, QtCore.Qt.LeftButton)
+    assert (
+        param_dlg.error_dialog.text()
+        == "Please assign a value or expression before saving!"
+    )
+
+    ok_button = param_dlg.error_dialog.button(QtWidgets.QMessageBox.Ok)
+    qtbot.mouseClick(ok_button, QtCore.Qt.LeftButton)
+
+    # Ensure the dialog is no longer visible
+    qtbot.waitUntil(lambda: not param_dlg.error_dialog.isVisible())
+
+    # nothing is happening
+    assert param_dlg.model.parameters["param"] == {}
+
+
+def test_parameterdialog_enter_fields(qtbot: QtBot) -> None:
+    param_dlg = B2W.ParameterDialog(B2Model())
+
+    qtbot.addWidget(param_dlg)
+
+    param_dlg.show()
+
+    # open dialog
+    qtbot.keyClicks(param_dlg.name_entry, "param")
+
+    assert param_dlg.name_entry.text() == "param"
+
+    assert "param" not in param_dlg.model.parameters
+
+    assert param_dlg.name_button.text() == "save"
+
+    qtbot.mouseClick(param_dlg.name_button, QtCore.Qt.LeftButton)
+
+    assert param_dlg.name_button.text() == "saved"
+
+    assert "param" in param_dlg.model.parameters
+    assert param_dlg.model.parameters["param"] == {}
+
+    qtbot.keyClicks(param_dlg.value_entry, "42")
+
+    assert param_dlg.value_entry.toPlainText() == "42"
+    assert param_dlg.model.parameters["param"] == {}  # nothing has been saved yet
+
+    assert param_dlg.value_button.text() == "save"
+
+    qtbot.mouseClick(param_dlg.value_button, QtCore.Qt.LeftButton)
+
+    assert param_dlg.value_button.text() == "saved"
+
+    assert param_dlg.model.parameters["param"] == "42"  # nothing has been saved yet
+
+
+def test_display_parameters_empty(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
+    param_dlg = B2W.ParameterDialog(B2Model())
+
+    monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec_", B2W.QtWidgets.QDialog.show)
+
+    qtbot.addWidget(param_dlg)
+
+    param_dlg.show()
+
+    qtbot.mouseClick(param_dlg.show_parameters_button, QtCore.Qt.LeftButton)
+
+    qtbot.waitUntil(param_dlg.dictwidget.isVisible)
+
+    assert param_dlg.dictwidget.table.text() == "No parameters defined"
+
+
+def test_display_parameters(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec_", B2W.QtWidgets.QDialog.show)
+
+    parameter_dlg = B2W.ParameterDialog(B2Model())
+
+    qtbot.addWidget(parameter_dlg)
+
+    parameter_dlg.show()
+
+    parameter_dlg.model.parameters = {}
+
+    parameter_dlg.model.parameters["p1"] = 12
+
+    parameter_dlg.model.parameters["p2"] = "v*w : mC"
+
+    qtbot.mouseClick(parameter_dlg.show_parameters_button, QtCore.Qt.LeftButton)
+
+    qtbot.waitUntil(parameter_dlg.dictwidget.isVisible)
+
+    qtbot.keyClick(parameter_dlg.dictwidget, QtCore.Qt.Key_Escape)
+
+    header = parameter_dlg.dictwidget.table.headerItem()
+
+    columns = [
+        header.text(i) for i in range(0, parameter_dlg.dictwidget.table.columnCount())
+    ]
+
+    assert parameter_dlg.dictwidget.table.columnCount() == 2
+    assert columns == ["Key", "Value"]
+    assert parameter_dlg.dictwidget.table.topLevelItemCount() == 2
+
+
+def test_neurondialog_no_name_error(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
+    neuron_dlg = B2W.NeuronGroupDialog(B2Model())
+
+    qtbot.addWidget(neuron_dlg)
+
+    neuron_dlg.show()
+
+    ok_button = neuron_dlg.buttonBox.button(QtWidgets.QDialogButtonBox.Ok)
+
+    monkeypatch.setattr(
+        B2W.QtWidgets.QMessageBox, "exec_", B2W.QtWidgets.QMessageBox.show
+    )
+
+    qtbot.mouseClick(ok_button, QtCore.Qt.LeftButton)
+
+    qtbot.waitUntil(lambda: neuron_dlg.error_dialog.isVisible())
+
+    assert (
+        neuron_dlg.error_dialog.text()
+        == "Please define a neurongroup first by giving it a name!"
+    )
+
+    ok_button = neuron_dlg.error_dialog.button(QtWidgets.QMessageBox.Ok)
+
+    qtbot.mouseClick(ok_button, QtCore.Qt.LeftButton)
+
+    qtbot.waitUntil(lambda: neuron_dlg.error_dialog.isVisible() is False)
+
+
+def test_neurondialog_enter_close(qtbot: QtBot) -> None:
+    neuron_dlg = B2W.NeuronGroupDialog(B2Model())
+
+    qtbot.addWidget(neuron_dlg)
+
+    neuron_dlg.show()
+
+    cancel_button = neuron_dlg.buttonBox.button(QtWidgets.QDialogButtonBox.Cancel)
+
+    qtbot.mouseClick(cancel_button, QtCore.Qt.LeftButton)
+
+    qtbot.waitUntil(lambda: neuron_dlg.isVisible() is False)
+
+
+def test_neurondialog_define_name(qtbot: QtBot) -> None:
+    ndiag = B2W.NeuronGroupDialog(B2Model())
+
+    qtbot.addWidget(ndiag)
+
+    ndiag.show()
+
+    qtbot.keyClicks(ndiag.name_entry, "x")
+
+    assert ndiag.name_entry.text() == "x"
+
+    assert ndiag.name is None

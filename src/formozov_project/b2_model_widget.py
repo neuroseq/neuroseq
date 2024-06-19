@@ -19,7 +19,7 @@ TODO:
 """
 
 
-class ElementDialog(QtWidgets.QDialog):
+class ModelDialog(QtWidgets.QDialog):
     """
     Base class for all dialog windows in the B2ModelWidget.
 
@@ -31,7 +31,7 @@ class ElementDialog(QtWidgets.QDialog):
 
     def __init__(self, model: B2Model, parent: QtWidgets.QDialog | None = None) -> None:
         """
-        Create a new ElementDialog instance.
+        Create a new ModelDialog instance.
 
         Parameters
         ----------
@@ -72,15 +72,6 @@ class ElementDialog(QtWidgets.QDialog):
         self.error_dialog.setWindowTitle("Error")
         self.error_dialog.setText(message)
         self.error_dialog.exec_()
-
-    def accept(self) -> None:
-        """accept method for the dialog window."""
-        self.done(1)
-
-    def reject(self) -> None:
-        """reject method for the dialog window."""
-
-        self.done(0)
 
     def accept_parameter(
         self,
@@ -163,13 +154,13 @@ class ElementDialog(QtWidgets.QDialog):
         self.display_error("Not connected yet!")
 
 
-class NeuronGroupDialog(ElementDialog):
+class NeuronGroupDialog(ModelDialog):
     """
     Dialog window for defining a Neurongroup for a b2model.
 
     Parameters
     ----------
-    ElementDialog : ElementDialog
+    ModelDialog : ModelDialog
         The base class of all dialogs in the b2_model_widget namespace.
     """
 
@@ -178,7 +169,7 @@ class NeuronGroupDialog(ElementDialog):
         Accept the dialog and assemble the Neurongroup in the model. This will only succeed if all necessary parameters are set.
         """
         if self.name is None or self.name not in self.model.neurongroups:
-            self.display_error("Please define a synapse first by giving it a name!")
+            self.display_error("Please define a neurongroup first by giving it a name!")
         else:
             try:
                 self.model.assemble_neurongroup(self.name)
@@ -287,18 +278,49 @@ class NeuronGroupDialog(ElementDialog):
 
         equation_button.clicked.connect(
             partial(
-                self.accept_parameter, equation, "equation", self.model.define_equation
+                self.accept_with_savebutton,
+                equation,
+                "equation",
+                self.model.define_equation,
+                equation_button,
             )
         )
 
+    def accept_with_savebutton(
+        self,
+        element: QtWidgets.QLineEdit | QtWidgets.QTextEdit,
+        name: str,
+        model_callback: Callable,
+        button: QtWidgets.QPushButton,
+        converter: Callable = lambda x: x
+    ) -> None:
+        """
+        Wrapper around `ModelDialgo.accept_parameter` that additionally changes the text in the `button` argument to `saved`. 
 
-class SynapseDialog(ElementDialog):
+        Parameters
+        ----------
+        element : QtWidgets.QLineEdit | QtWidgets.QTextEdit
+            Text input element to read the parameter from to be used
+        name : str
+            Name of the parameter
+        model_callback : Callable
+            Function that defines the parameter in the model
+        button : QtWidgets.QPushButton
+            Button to change text in.
+        converter: Callable 
+            Function to convert types - not implemented yet. 
+        """
+        self.accept_parameter(element, name, model_callback, converter=converter)
+        button.setText("saved")
+
+
+class SynapseDialog(ModelDialog):
     """
     Dialog window for defining a Synapse for a b2model.
 
     Parameters
     ----------
-    ElementDialog : ElementDialog
+    ModelDialog : ModelDialog
         The base class of all dialogs in the b2_model_widget namespace.
     """
 
@@ -423,13 +445,13 @@ class SynapseDialog(ElementDialog):
         )
 
 
-class ParameterDialog(ElementDialog):
+class ParameterDialog(ModelDialog):
     """
     Dialog window for building up the dictionary of parameters for a B2Model instance.
 
     Parameters
     ----------
-    ElementDialog : ElementDialog
+    ModelDialog : ModelDialog
         The base class of all dialogs in the b2_model_widget namespace.
     """
 
@@ -489,6 +511,8 @@ class ParameterDialog(ElementDialog):
         """
         if self.name is None:
             self.display_error("Please define a parameter first by giving it a name!")
+        elif self.value_entry.toPlainText() == "":
+            self.display_error("Please assign a value or expression before saving!")
         else:
             self.accept_parameter(
                 self.value_entry, self.name, self.model.define_parameter
@@ -508,11 +532,11 @@ class ParameterDialog(ElementDialog):
 
         window = QtWidgets.QDialog(self)
         layout = QtWidgets.QVBoxLayout(window)
-        dlg = DictionaryWidget(d, self)
-        layout.addWidget(dlg)
-        dlg.setLayout(layout)
+        self.dictwidget = DictionaryWidget(d, self)
+        layout.addWidget(self.dictwidget)
+        self.dictwidget.setLayout(layout)
         window.resize(800, 600)
-        window.exec()
+        window.exec_()
 
 
 class DictionaryWidget(QtWidgets.QWidget):
@@ -522,7 +546,7 @@ class DictionaryWidget(QtWidgets.QWidget):
     Parameters
     ----------
     QtWidgets : QtWidgets.QWidget
-        Basic QtWidget
+        Basic QtWidget class
     """
 
     def __init__(
@@ -546,12 +570,8 @@ class DictionaryWidget(QtWidgets.QWidget):
             self.table = QtWidgets.QLabel("No parameters defined")
         else:
             self.table = QtWidgets.QTreeWidget(self)
-            self.table.setColumnWidth(
-                0, 400
-            )  # Set the width of the first column to 200 pixels
-            self.table.setColumnWidth(
-                1, 400
-            )  # Set the width of the second column to 200 pixels
+            self.table.setColumnWidth(0, 400)
+            self.table.setColumnWidth(1, 400)
             self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
             self.table.setHeaderLabels(["Key", "Value"])
 
@@ -593,7 +613,7 @@ class DictionaryWidget(QtWidgets.QWidget):
             parent.addChild(item)
 
 
-class B2ModelWidget(ElementDialog):
+class B2ModelWidget(ModelDialog):
     """
     Main widget to define a B2Model instance in a new window.
     This widget contains buttons to add Neurongroups, Synapses, and Parameters to the model.
@@ -601,7 +621,7 @@ class B2ModelWidget(ElementDialog):
 
     Parameters
     ----------
-    ElementDialog : ElementDialog
+    ModelDialog : ModelDialog
         Base class for all dialogs in the b2_model_widget namespace.
     """
 
@@ -641,7 +661,6 @@ class B2ModelWidget(ElementDialog):
         Reject the dialog and discard the model.
         """
         super().reject()
-        print("Rejected model!")
         self.model = B2Model()
         self.close()
 
@@ -751,40 +770,25 @@ class B2ModelWidget(ElementDialog):
         """
         Open a new window to define a neurongroup
         """
-        dlg = NeuronGroupDialog(self.model, self)
+        self.neuron_dlg = NeuronGroupDialog(self.model, self)
 
-        if dlg.exec():
-            print("Success!")
-        else:
-            print("Cancel!")
-
-        dlg.close()
+        self.neuron_dlg.exec_()
 
     def open_add_synapse_dialog(self) -> None:
         """
         Open a new window to define a synapse
         """
-        dlg = SynapseDialog(self.model, self)
+        self.synapse_dlg = SynapseDialog(self.model, self)
 
-        if dlg.exec():
-            print("Success!")
-        else:
-            print("Cancel!")
-
-        dlg.close()
+        self.synapse_dlg.exec_()
 
     def open_add_parameter_dialog(self) -> None:
         """
         Open a new window to define a parameter for the model
         """
-        dlg = ParameterDialog(self.model, self)
+        self.param_dlg = ParameterDialog(self.model, self)
 
-        if dlg.exec():
-            print("Success!")
-        else:
-            print("Cancel!")
-
-        dlg.close()
+        self.param_dlg.exec_()
 
     def save(self, model_dict: dict | None) -> None:
         """
@@ -803,4 +807,4 @@ class B2ModelWidget(ElementDialog):
                 "Please provide a model dictionary. This method is yet supported"
             )
         else:
-            model_dict["self.name"] = self
+            model_dict["self.name"] = self.model
