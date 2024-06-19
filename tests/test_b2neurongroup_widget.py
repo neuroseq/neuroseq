@@ -51,6 +51,12 @@ def test_neurondialog_define_name(qtbot: QtBot, monkeypatch: MonkeyPatch) -> Non
 
     assert ndiag.error_dialog.text() == "A name has already been defined"
 
+    qtbot.mouseClick(
+        ndiag.error_dialog.button(QtWidgets.QMessageBox.Ok), QtCore.Qt.LeftButton
+    )
+
+    assert ndiag.error_dialog.isVisible() is False
+
 
 def test_neurondialog_define_equation(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
     ndiag = B2W.NeuronGroupDialog(B2Model())
