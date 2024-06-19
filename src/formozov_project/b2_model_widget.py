@@ -292,10 +292,10 @@ class NeuronGroupDialog(ModelDialog):
         name: str,
         model_callback: Callable,
         button: QtWidgets.QPushButton,
-        converter: Callable = lambda x: x
+        converter: Callable = lambda x: x,
     ) -> None:
         """
-        Wrapper around `ModelDialgo.accept_parameter` that additionally changes the text in the `button` argument to `saved`. 
+        Wrapper around `ModelDialgo.accept_parameter` that additionally changes the text in the `button` argument to `saved`.
 
         Parameters
         ----------
@@ -307,8 +307,8 @@ class NeuronGroupDialog(ModelDialog):
             Function that defines the parameter in the model
         button : QtWidgets.QPushButton
             Button to change text in.
-        converter: Callable 
-            Function to convert types - not implemented yet. 
+        converter: Callable
+            Function to convert types - not implemented yet.
         """
         self.accept_parameter(element, name, model_callback, converter=converter)
         button.setText("saved")
