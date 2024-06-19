@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import formozov_project.b2_model_widget as B2W
 from formozov_project.b2_model import B2Model
+from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -21,7 +22,7 @@ def test_neurondialog_enter_close(qtbot: QtBot) -> None:
     qtbot.waitUntil(lambda: neuron_dlg.isVisible() is False)
 
 
-def test_neurondialog_define_name(qtbot: QtBot) -> None:
+def test_neurondialog_define_name(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
     ndiag = B2W.NeuronGroupDialog(B2Model())
 
     qtbot.addWidget(ndiag)
@@ -38,13 +39,36 @@ def test_neurondialog_define_name(qtbot: QtBot) -> None:
 
     assert "x" in ndiag.model.neurongroups
 
+    monkeypatch.setattr(
+        B2W.QtWidgets.QMessageBox, "exec_", B2W.QtWidgets.QMessageBox.show
+    )
 
-def test_neurondialog_define_equation(qtbot: QtBot) -> None:
+    qtbot.keyClicks(ndiag.name_entry, "y")
+
+    qtbot.mouseClick(ndiag.name_button, QtCore.Qt.LeftButton)
+
+    qtbot.waitUntil(ndiag.error_dialog.isVisible)
+
+    assert ndiag.error_dialog.text() == "A name has already been defined"
+
+
+def test_neurondialog_define_equation(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
     ndiag = B2W.NeuronGroupDialog(B2Model())
 
     qtbot.addWidget(ndiag)
 
     ndiag.show()
+
+    monkeypatch.setattr(
+        B2W.QtWidgets.QMessageBox, "exec_", B2W.QtWidgets.QMessageBox.show
+    )
+    qtbot.mouseClick(ndiag.equation_button, QtCore.Qt.LeftButton)
+
+    qtbot.waitUntil(ndiag.error_dialog.isVisible)
+
+    assert ndiag.error_dialog.text() == "Please define a name first!"
+
+    ndiag.error_dialog.close()
 
     qtbot.keyClicks(ndiag.name_entry, "x")
     qtbot.mouseClick(ndiag.name_button, QtCore.Qt.LeftButton)

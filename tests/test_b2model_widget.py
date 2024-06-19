@@ -111,3 +111,40 @@ def test_random_seed_def_save_not_implemented(
 
     # Verify main window is still visible
     assert b2w.isVisible()
+
+
+def test_open_module_dialogs(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec_", B2W.QtWidgets.QDialog.show)
+
+    b2w = B2W.B2ModelWidget(B2Model(), None, {})
+
+    b2w.show()
+
+    qtbot.addWidget(b2w)
+
+    qtbot.mouseClick(b2w.add_neurongroup_button, QtCore.Qt.LeftButton)
+
+    qtbot.waitUntil(b2w.neuron_dlg.isVisible)
+
+    b2w.neuron_dlg.close()
+
+    qtbot.waitUntil(lambda: b2w.neuron_dlg.isVisible() is False)
+
+    qtbot.mouseClick(b2w.add_synapse_button, QtCore.Qt.LeftButton)
+
+    qtbot.waitUntil(b2w.synapse_dlg.isVisible)
+    b2w.synapse_dlg.close()
+
+    qtbot.waitUntil(lambda: b2w.synapse_dlg.isVisible() is False)
+
+    qtbot.mouseClick(b2w.add_parameter_button, QtCore.Qt.LeftButton)
+
+    qtbot.waitUntil(b2w.param_dlg.isVisible)
+
+    b2w.param_dlg.close()
+
+    qtbot.waitUntil(lambda: b2w.param_dlg.isVisible() is False)
+
+    qtbot.mouseClick(b2w.display_system_button, QtCore.Qt.LeftButton)
+
+    qtbot.waitUntil(b2w.dictwidget.isVisible)

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from typing import Any
+from typing import cast
+
 import formozov_project.b2_model_widget as B2W
 from formozov_project.b2_model import B2Model
 from pytest import MonkeyPatch
@@ -9,13 +12,13 @@ from qtpy import QtWidgets
 
 
 def test_display_parameters_empty(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec_", B2W.QtWidgets.QDialog.show)
+
     param_dlg = B2W.ParameterDialog(B2Model())
 
-    # monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec_", B2W.QtWidgets.QDialog.show)
+    param_dlg.show()
 
     qtbot.addWidget(param_dlg)
-
-    param_dlg.show()
 
     qtbot.mouseClick(param_dlg.show_parameters_button, QtCore.Qt.LeftButton)
 
@@ -25,13 +28,13 @@ def test_display_parameters_empty(qtbot: QtBot, monkeypatch: MonkeyPatch) -> Non
 
 
 def test_display_parameters(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
-    # monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec_", B2W.QtWidgets.QDialog.show)
+    monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec_", B2W.QtWidgets.QDialog.show)
 
     parameter_dlg = B2W.ParameterDialog(B2Model())
 
-    qtbot.addWidget(parameter_dlg)
-
     parameter_dlg.show()
+
+    qtbot.addWidget(parameter_dlg)
 
     parameter_dlg.model.parameters = {}
 
@@ -126,7 +129,7 @@ def test_parameterdialog_nothing_defined_errors(
     qtbot.waitUntil(lambda: not param_dlg.error_dialog.isVisible())
 
     # nothing is happening
-    assert param_dlg.model.parameters["param"] == {}
+    assert cast(dict[str, Any], param_dlg.model.parameters)["param"] == {}
 
 
 def test_parameterdialog_enter_fields(qtbot: QtBot) -> None:
@@ -141,7 +144,7 @@ def test_parameterdialog_enter_fields(qtbot: QtBot) -> None:
 
     assert param_dlg.name_entry.text() == "param"
 
-    assert "param" not in param_dlg.model.parameters
+    assert "param" not in cast(dict[str, Any], param_dlg.model.parameters)
 
     assert param_dlg.name_button.text() == "save"
 
@@ -149,13 +152,15 @@ def test_parameterdialog_enter_fields(qtbot: QtBot) -> None:
 
     assert param_dlg.name_button.text() == "saved"
 
-    assert "param" in param_dlg.model.parameters
-    assert param_dlg.model.parameters["param"] == {}
+    assert "param" in cast(dict[str, Any], param_dlg.model.parameters)
+    assert cast(dict[str, Any], param_dlg.model.parameters)["param"] == {}
 
     qtbot.keyClicks(param_dlg.value_entry, "42")
 
     assert param_dlg.value_entry.toPlainText() == "42"
-    assert param_dlg.model.parameters["param"] == {}  # nothing has been saved yet
+    assert (
+        cast(dict[str, Any], param_dlg.model.parameters)["param"] == {}
+    )  # nothing has been saved yet
 
     assert param_dlg.value_button.text() == "save"
 
@@ -163,4 +168,6 @@ def test_parameterdialog_enter_fields(qtbot: QtBot) -> None:
 
     assert param_dlg.value_button.text() == "saved"
 
-    assert param_dlg.model.parameters["param"] == "42"  # nothing has been saved yet
+    assert (
+        cast(dict[str, Any], param_dlg.model.parameters)["param"] == "42"
+    )  # nothing has been saved yet

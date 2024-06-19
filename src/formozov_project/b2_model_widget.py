@@ -87,6 +87,7 @@ class ModelDialog(QtWidgets.QDialog):
         """
         if self.name is None:
             self.display_error("Please define a name first!")
+            return
 
         try:
             line = element.text()
@@ -117,14 +118,12 @@ class ModelDialog(QtWidgets.QDialog):
             self.display_error("Please enter a name!")
         elif self.name is not None:
             self.display_error("A name has already been defined")
-        elif name in getattr(self.model, target):
-            self.display_error("Name already exists!")
         else:
             self.name = name
             getattr(self.model, target)[name] = {}
             self.name_button.setText("saved")
 
-    def display_parameters(self, target: str | dict) -> None:
+    def display_parameters(self, target: str | dict[Any, Any]) -> None:
         """
         Display the parameters of a target member of the model in a new window.
 
@@ -144,7 +143,7 @@ class ModelDialog(QtWidgets.QDialog):
         layout.addWidget(self.dictwidget)
         self.dictwidget.setLayout(layout)
         window.resize(800, 600)
-        window.show()
+        window.exec_()
 
     def not_connected(self) -> None:
         """
@@ -286,7 +285,7 @@ class NeuronGroupDialog(ModelDialog):
         converter: Callable = lambda x: x,
     ) -> None:
         """
-        Wrapper around `ModelDialgo.accept_parameter` that additionally changes the text in the `button` argument to `saved`.
+        Wrapper around `ModelDialog.accept_parameter` that additionally changes the text in the `button` argument to `saved`.
 
         Parameters
         ----------
@@ -500,7 +499,7 @@ class ParameterDialog(ModelDialog):
             )
             self.value_button.setText("saved")
 
-    def display_parameters(self, _: str) -> None:
+    def display_parameters(self, _: str | dict[Any, Any]) -> None:
         """
         Display all the parameters in the system in a new window.
 
@@ -694,13 +693,7 @@ class B2ModelWidget(ModelDialog):
         d["seed"] = self.model.seed
         d["name"] = self.name
 
-        window = QtWidgets.QDialog(self)
-        layout = QtWidgets.QVBoxLayout(window)
-        dlg = DictionaryWidget(d, self)
-        layout.addWidget(dlg)
-        dlg.setLayout(layout)
-        window.resize(800, 600)
-        window.exec()
+        super().display_parameters(d)
 
     def open_add_neurongroup_dialog(self) -> None:
         """
