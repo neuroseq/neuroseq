@@ -13,9 +13,9 @@ from qtpy.compat import getsavefilename
 
 from formozov_project import __version__
 from formozov_project.b2_model import B2Model
+from formozov_project.b2_model_widget import B2ModelWidget
 from formozov_project.heatmap_widget import HeatmapWidget
 from formozov_project.trace_widget import TraceWidget
-from formozov_project.b2_model_widget import B2ModelWidget
 
 
 def temp_new_model() -> B2Model:
@@ -44,7 +44,9 @@ def temp_new_model() -> B2Model:
 class Gui(QtWidgets.QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.models = {"ornstein_uhlenbeck": temp_new_model(),}
+        self.models = {
+            "ornstein_uhlenbeck": temp_new_model(),
+        }
         self.setWindowTitle("Formozov Project")
         grid_layout = QtWidgets.QVBoxLayout()
         central_widget = QtWidgets.QWidget()
@@ -76,13 +78,19 @@ class Gui(QtWidgets.QMainWindow):
             self.heatmap_widget.set_data()
             return
         self.trace_widget.set_data(
-            self.models["ornstein_uhlenbeck"].network["M"].y, self.models["ornstein_uhlenbeck"].network["M"].t / b2.second
+            self.models["ornstein_uhlenbeck"].network["M"].y,
+            self.models["ornstein_uhlenbeck"].network["M"].t / b2.second,
         )
         # for now just display outer product of traces as heatmap data
         outer = np.array(
-            [np.outer(trace, trace) for trace in self.models["ornstein_uhlenbeck"].network["M"].y.T]
+            [
+                np.outer(trace, trace)
+                for trace in self.models["ornstein_uhlenbeck"].network["M"].y.T
+            ]
         )
-        self.heatmap_widget.set_data(outer, self.models["ornstein_uhlenbeck"].network["M"].t / b2.second)
+        self.heatmap_widget.set_data(
+            outer, self.models["ornstein_uhlenbeck"].network["M"].t / b2.second
+        )
 
     def btn_new_clicked(self) -> None:
         self.model = temp_new_model()

@@ -87,7 +87,9 @@ def test_gui_checkpoints(
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
     )
     gui.btn_continue_simulation_clicked()
-    assert gui.models["ornstein_uhlenbeck"].network["M"].t[-1] == approx(simulation_time, rel=1e-2)
+    assert gui.models["ornstein_uhlenbeck"].network["M"].t[-1] == approx(
+        simulation_time, rel=1e-2
+    )
     # restore checkpoint
     gui.btn_restore_checkpoint_clicked()
     assert len(gui.models["ornstein_uhlenbeck"].network["M"].t) == 0
