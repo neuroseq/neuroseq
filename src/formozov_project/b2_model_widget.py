@@ -103,6 +103,8 @@ class ModelDialog(QtWidgets.QDialog):
             line = element.toPlainText()
         except Exception as e:
             self.display_error(f"Error when getting parameter {paramname}: {e}")
+        
+        element.clear()
 
         try:
             var = convert(line)
@@ -167,17 +169,8 @@ class NeuronGroupDialog(ModelDialog):
     def accept(self) -> None:
         """
         Accept the dialog and assemble the Neurongroup in the model. This will only succeed if all necessary parameters are set.
+        Readme: not yet implemented
         """
-        if self.name is None or self.name not in self.model.neurongroups:
-            self.display_error("Please define a neurongroup first by giving it a name!")
-        else:
-            try:
-                self.model.assemble_neurongroup(self.name)
-                self.done(1)
-            except Exception as e:
-                self.display_error(
-                    f"Error when assembling Neurongroup {self.name}: {e}"
-                )
 
     def __init__(self, model: B2Model, parent: QtWidgets.QDialog | None = None) -> None:
         """
@@ -194,31 +187,38 @@ class NeuronGroupDialog(ModelDialog):
         super().__init__(model, parent)
         self.setWindowTitle("Define a Neurongroup")
 
-        equation_title = QtWidgets.QLabel("Equation", self)
-        equation = QtWidgets.QTextEdit(self)
-        equation_button = QtWidgets.QPushButton("save", self)
+        self.equation_title = QtWidgets.QLabel("Equation", self)
+        self.equation = QtWidgets.QTextEdit(self)
+        self.equation_button = QtWidgets.QPushButton("save", self)
 
-        threshold_title = QtWidgets.QLabel("Threshold", self)
-        threshold = QtWidgets.QLineEdit(self)
-        threshold_button = QtWidgets.QPushButton("save", self)
+        self.threshold_title = QtWidgets.QLabel("Threshold", self)
+        self.threshold = QtWidgets.QLineEdit(self)
+        self.threshold_button = QtWidgets.QPushButton("save", self)
 
-        reset_title = QtWidgets.QLabel("Reset", self)
-        reset = QtWidgets.QLineEdit(self)
-        reset_button = QtWidgets.QPushButton("save", self)
+        self.reset_title = QtWidgets.QLabel("Reset", self)
+        self.reset = QtWidgets.QLineEdit(self)
+        self.reset_button = QtWidgets.QPushButton("save", self)
 
-        refractory_title = QtWidgets.QLabel("Refractory", self)
-        refractory = QtWidgets.QLineEdit(self)
-        refractory_button = QtWidgets.QPushButton("save", self)
+        self.refractory_title = QtWidgets.QLabel("Refractory", self)
+        self.refractory = QtWidgets.QLineEdit(self)
+        self.refractory_button = QtWidgets.QPushButton("save", self)
 
-        solver = QtWidgets.QLineEdit(self)
-        solver_button = QtWidgets.QPushButton("save", self)
-        solver_title = QtWidgets.QLabel("Solver", self)
+        self.solver = QtWidgets.QLineEdit(self)
+        self.solver_button = QtWidgets.QPushButton("save", self)
+        self.solver_title = QtWidgets.QLabel("Solver", self)
 
-        neuronnumber = QtWidgets.QLineEdit(self)
-        neuronnumber_button = QtWidgets.QPushButton("save", self)
-        neuronnumber_title = QtWidgets.QLabel("Neuronnumber", self)
+        self.neuronnumber = QtWidgets.QLineEdit(self)
+        self.neuronnumber_button = QtWidgets.QPushButton("save", self)
+        self.neuronnumber_title = QtWidgets.QLabel("Neuronnumber", self)
 
-        for qle in [equation, threshold, reset, refractory, solver, neuronnumber]:
+        for qle in [
+            self.equation,
+            self.threshold,
+            self.reset,
+            self.refractory,
+            self.solver,
+            self.neuronnumber,
+        ]:
             qle.setMinimumWidth(qle.sizeHint().width() * 2)
 
         self.layout.addWidget(self.name_title, 1, 1)
@@ -229,29 +229,29 @@ class NeuronGroupDialog(ModelDialog):
         )
         self.layout.addWidget(self.name_button, 1, 3)
 
-        self.layout.addWidget(equation_title, 2, 1)
-        self.layout.addWidget(equation, 2, 2)
-        self.layout.addWidget(equation_button, 2, 3)
+        self.layout.addWidget(self.equation_title, 2, 1)
+        self.layout.addWidget(self.equation, 2, 2)
+        self.layout.addWidget(self.equation_button, 2, 3)
 
-        self.layout.addWidget(threshold_title, 3, 1)
-        self.layout.addWidget(threshold, 3, 2)
-        self.layout.addWidget(threshold_button, 3, 3)
+        self.layout.addWidget(self.threshold_title, 3, 1)
+        self.layout.addWidget(self.threshold, 3, 2)
+        self.layout.addWidget(self.threshold_button, 3, 3)
 
-        self.layout.addWidget(reset_title, 4, 1)
-        self.layout.addWidget(reset, 4, 2)
-        self.layout.addWidget(reset_button, 4, 3)
+        self.layout.addWidget(self.reset_title, 4, 1)
+        self.layout.addWidget(self.reset, 4, 2)
+        self.layout.addWidget(self.reset_button, 4, 3)
 
-        self.layout.addWidget(refractory_title, 5, 1)
-        self.layout.addWidget(refractory, 5, 2)
-        self.layout.addWidget(refractory_button, 5, 3)
+        self.layout.addWidget(self.refractory_title, 5, 1)
+        self.layout.addWidget(self.refractory, 5, 2)
+        self.layout.addWidget(self.refractory_button, 5, 3)
 
-        self.layout.addWidget(solver_title, 6, 1)
-        self.layout.addWidget(solver, 6, 2)
-        self.layout.addWidget(solver_button, 6, 3)
+        self.layout.addWidget(self.solver_title, 6, 1)
+        self.layout.addWidget(self.solver, 6, 2)
+        self.layout.addWidget(self.solver_button, 6, 3)
 
-        self.layout.addWidget(neuronnumber_title, 7, 1)
-        self.layout.addWidget(neuronnumber, 7, 2)
-        self.layout.addWidget(neuronnumber_button, 7, 3)
+        self.layout.addWidget(self.neuronnumber_title, 7, 1)
+        self.layout.addWidget(self.neuronnumber, 7, 2)
+        self.layout.addWidget(self.neuronnumber_button, 7, 3)
 
         self.layout.addWidget(
             self.show_parameters_button, 8, 1, 1, 3, QtCore.Qt.AlignCenter
@@ -267,22 +267,22 @@ class NeuronGroupDialog(ModelDialog):
             partial(self.display_parameters, "neurongroups")
         )
 
-        threshold_button.clicked.connect(self.not_connected)
-        reset_button.clicked.connect(self.not_connected)
-        refractory_button.clicked.connect(self.not_connected)
-        solver_button.clicked.connect(self.not_connected)
-        neuronnumber_button.clicked.connect(self.not_connected)
+        self.threshold_button.clicked.connect(self.not_connected)
+        self.reset_button.clicked.connect(self.not_connected)
+        self.refractory_button.clicked.connect(self.not_connected)
+        self.solver_button.clicked.connect(self.not_connected)
+        self.neuronnumber_button.clicked.connect(self.not_connected)
         self.name_button.clicked.connect(
             partial(self.accept_name, target="neurongroups")
         )
 
-        equation_button.clicked.connect(
+        self.equation_button.clicked.connect(
             partial(
                 self.accept_with_savebutton,
-                equation,
-                "equation",
+                self.equation,
+                "model",
                 self.model.define_equation,
-                equation_button,
+                self.equation_button,
             )
         )
 
@@ -310,7 +310,7 @@ class NeuronGroupDialog(ModelDialog):
         converter: Callable
             Function to convert types - not implemented yet.
         """
-        self.accept_parameter(element, name, model_callback, converter=converter)
+        self.accept_parameter(element, name, model_callback, convert=converter)
         button.setText("saved")
 
 

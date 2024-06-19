@@ -271,35 +271,6 @@ def test_display_parameters(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
     assert parameter_dlg.dictwidget.table.topLevelItemCount() == 2
 
 
-def test_neurondialog_no_name_error(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
-    neuron_dlg = B2W.NeuronGroupDialog(B2Model())
-
-    qtbot.addWidget(neuron_dlg)
-
-    neuron_dlg.show()
-
-    ok_button = neuron_dlg.buttonBox.button(QtWidgets.QDialogButtonBox.Ok)
-
-    monkeypatch.setattr(
-        B2W.QtWidgets.QMessageBox, "exec_", B2W.QtWidgets.QMessageBox.show
-    )
-
-    qtbot.mouseClick(ok_button, QtCore.Qt.LeftButton)
-
-    qtbot.waitUntil(lambda: neuron_dlg.error_dialog.isVisible())
-
-    assert (
-        neuron_dlg.error_dialog.text()
-        == "Please define a neurongroup first by giving it a name!"
-    )
-
-    ok_button = neuron_dlg.error_dialog.button(QtWidgets.QMessageBox.Ok)
-
-    qtbot.mouseClick(ok_button, QtCore.Qt.LeftButton)
-
-    qtbot.waitUntil(lambda: neuron_dlg.error_dialog.isVisible() is False)
-
-
 def test_neurondialog_enter_close(qtbot: QtBot) -> None:
     neuron_dlg = B2W.NeuronGroupDialog(B2Model())
 
@@ -325,4 +296,33 @@ def test_neurondialog_define_name(qtbot: QtBot) -> None:
 
     assert ndiag.name_entry.text() == "x"
 
-    assert ndiag.name is None
+    assert "x" not in ndiag.model.neurongroups
+
+    qtbot.mouseClick(ndiag.name_button, QtCore.Qt.LeftButton)
+
+    assert "x" in ndiag.model.neurongroups
+
+
+def test_neurondialog_define_equation(qtbot: QtBot) -> None:
+    ndiag = B2W.NeuronGroupDialog(B2Model())
+
+    qtbot.addWidget(ndiag)
+
+    ndiag.show()
+
+    qtbot.keyClicks(ndiag.name_entry, "x")
+    qtbot.mouseClick(ndiag.name_button, QtCore.Qt.LeftButton)
+    assert "x" in ndiag.model.neurongroups
+
+    qtbot.keyClicks(ndiag.equation, "dv/dt = -v : mV")
+
+    qtbot.mouseClick(ndiag.equation_button, QtCore.Qt.LeftButton)
+
+    assert ndiag.model.neurongroups["x"]["model"] == "dv/dt = -v : mV\n"
+
+    qtbot.keyClicks(ndiag.equation, "dv/dt = -v : mV")
+    assert ndiag.model.neurongroups["x"]["model"] == "dv/dt = -v : mV\n"
+
+    qtbot.mouseClick(ndiag.equation_button, QtCore.Qt.LeftButton)
+
+    assert ndiag.model.neurongroups["x"]["model"] == "dv/dt = -v : mV\ndv/dt = -v : mV\n"
