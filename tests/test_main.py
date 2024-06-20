@@ -1,35 +1,55 @@
 from __future__ import annotations
 
-import inspect
-import subprocess
-import sys
 from pathlib import Path
+from typing import Any
 
-import formozov_project.__main__ as main
 import pytest
+from click.testing import CliRunner
+from formozov_project.__main__ import main
 
 
-def test_main_log_file(tmp_path: Path) -> None:
-    log_file = tmp_path / "test.log"
-    assert not log_file.exists()
-    main_path = inspect.getfile(main)
-    # ugly hack to test logging: start the app in a subprocess and then kill it after a few seconds
-    # I couldn't prevent pytest / cliRunner from modifying the logging setup in the test
-    # todo: find a better way to test this
-    with pytest.raises(subprocess.TimeoutExpired):
-        subprocess.call(
-            [
-                sys.executable,
-                main_path,
-                "--log-level",
-                "DEBUG",
-                "--log-file",
-                f"{log_file}",
-            ],
-            timeout=5,
-        )
-    assert log_file.exists()
-    with open(log_file) as f:
-        log_file_contents = f.read()
-    assert "DEBUG" in log_file_contents
-    assert str(log_file) in log_file_contents
+class FakeGui:
+    def __init__(self) -> None:
+        pass
+
+    def show(self) -> None:
+        pass
+
+
+class FakeQApplication:
+    def __init__(self, *args: Any) -> None:
+        pass
+
+    def exec(self) -> None:
+        pass
+
+
+@pytest.fixture()
+def cli_runner_fake_gui(monkeypatch: pytest.MonkeyPatch) -> CliRunner:
+    monkeypatch.setattr("formozov_project.__main__.Gui", FakeGui)
+    monkeypatch.setattr(
+        "formozov_project.__main__.QtWidgets.QApplication", FakeQApplication
+    )
+    return CliRunner()
+
+
+@pytest.mark.parametrize("log_level", ["DEBUG", "inFo", "warning", "ERROR", "Critical"])
+def test_main_logging_valid(
+    log_level: str, tmp_path: Path, cli_runner_fake_gui: CliRunner
+) -> None:
+    log_file = str(tmp_path / "test.log")
+    result = cli_runner_fake_gui.invoke(
+        main, ["--log-level", log_level, "--log-file", log_file]
+    )
+    assert log_level.upper() in result.output
+    assert log_file in result.output
+    assert result.exit_code == 0
+
+
+@pytest.mark.parametrize("log_level", ["INVALIDLEVEL", "Warn"])
+def test_main_logging_invalid(
+    log_level: str, tmp_path: Path, cli_runner_fake_gui: CliRunner
+) -> None:
+    result = cli_runner_fake_gui.invoke(main, ["--log-level", log_level])
+    assert "Error" in result.output
+    assert result.exit_code != 0
