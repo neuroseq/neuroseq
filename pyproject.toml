@@ -9,7 +9,7 @@ readme = "README.md"
 license = { text = "NONE" }
 authors = [{ name = "SSC", email = "ssc@iwr.uni-heidelberg.de" }]
 requires-python = ">=3.8"
-dependencies = ["brian2", "numpy", "qtpy", "pyside6", "pyqtgraph", "h5py", "qtawesome"]
+dependencies = ["brian2", "numpy", "qtpy", "pyside6", "pyqtgraph", "h5py", "qtawesome", "click"]
 dynamic = ["version"]
 
 [project.scripts]

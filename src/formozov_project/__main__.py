@@ -1,17 +1,43 @@
 from __future__ import annotations
 
 import logging
+import pathlib
 import sys
 
+import click
 from qtpy import QtWidgets
 
 from formozov_project.gui import Gui
 
 
-def main() -> None:
+@click.command()
+@click.option(
+    "--log-level",
+    default="INFO",
+    type=click.Choice(
+        ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], case_sensitive=False
+    ),
+    help="Log level",
+    show_default=True,
+    show_choices=True,
+)
+@click.option(
+    "--log-file",
+    default=None,
+    type=click.Path(path_type=pathlib.Path, dir_okay=False, writable=True),
+    help="Log to this file instead of the console",
+    show_default=True,
+)
+def main(log_level: str, log_file: pathlib.Path) -> None:
     logging.basicConfig(
-        format="%(levelname)s %(module)s.%(funcName)s.%(lineno)d :: %(message)s"
+        level=log_level,
+        format="%(asctime)s :: %(levelname)s :: %(name)s :: %(funcName)s :: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        filename=log_file,
     )
+    msg = f"Launching GUI with {log_level} logging to {log_file if log_file else 'console'}"
+    click.echo(msg)
+    logging.getLogger(__name__).info(msg)
     app = QtWidgets.QApplication(sys.argv)
     gui = Gui()
     gui.show()

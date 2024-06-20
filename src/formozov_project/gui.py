@@ -26,7 +26,7 @@ def temp_new_model() -> B2Model:
         dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
     """
     n_neurons = 64
-    model = B2Model(seed=4321, logpath=None)
+    model = B2Model(seed=4321)
     model.define_neuronnumber("neurongroup", n_neurons)
     model.define_dt(0.5 * b2.ms)
     model.define_solver_method("neurongroup", "euler")
@@ -44,7 +44,9 @@ def temp_new_model() -> B2Model:
 class Gui(QtWidgets.QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.model = temp_new_model()
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("starting Gui")
+        self.model = B2Model()
 
         self.setWindowTitle("Formozov Project")
         grid_layout = QtWidgets.QVBoxLayout()
@@ -64,7 +66,14 @@ class Gui(QtWidgets.QMainWindow):
         self.toolbar = _create_menu_and_toolbar(self)
         self.addToolBar(self.toolbar)
         self.setWindowIcon(qta.icon("mdi6.brain"))
-
+        # add a modal progress bar dialog while running simulations
+        self.simulation_progress_dialog = QtWidgets.QProgressDialog(
+            "Simulating...", "Abort simulation", 0, 100, self
+        )
+        self.simulation_progress_dialog.setWindowModality(QtGui.Qt.WindowModal)
+        self.simulation_progress_dialog.setAutoClose(True)
+        self.simulation_progress_dialog.setMinimumDuration(200)
+        self.simulation_progress_dialog.reset()
         # connect widgets
         self.heatmap_widget.connect_trace_widget(self.trace_widget)
         self.trace_widget.connect_heatmap_widget(self.heatmap_widget)
@@ -78,11 +87,26 @@ class Gui(QtWidgets.QMainWindow):
             self.model.network["M"].y,
             self.model.network["M"].t / b2.second,
         )
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
         # for now just display outer product of traces as heatmap data
         outer = np.array(
             [np.outer(trace, trace) for trace in self.model.network["M"].y.T]
         )
         self.heatmap_widget.set_data(outer, self.model.network["M"].t / b2.second)
+        QtWidgets.QApplication.restoreOverrideCursor()
+
+    def _update_simulation_progress(
+        self,
+        elapsed: b2.Quantity,
+        completed: b2.Quantity,
+        start: b2.Quantity,
+        duration: b2.Quantity,
+    ) -> None:
+        completed_percent = int(100 * completed)
+        self.logger.info(
+            f"simulating {start} -> {duration} :: {completed_percent}% complete in {elapsed}"
+        )
+        self.simulation_progress_dialog.setValue(completed_percent)
 
     def btn_new_clicked(self) -> None:
         # TODO: this needs to be removed as as the B2ModelWidget is functionally complete
@@ -107,7 +131,7 @@ class Gui(QtWidgets.QMainWindow):
         try:
             self.model.save_to_h5(filename)
         except Exception as e:
-            logging.warning(f"Failed to save file {filename}: {e}")
+            self.logger.warning(f"Failed to save file {filename}: {e}")
             QtWidgets.QMessageBox.critical(
                 self,
                 "File save error",
@@ -172,7 +196,9 @@ class Gui(QtWidgets.QMainWindow):
             )
             return
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
-        self.model.run_simulation(simulation_time * b2.second)
+        self.model.run_simulation(
+            simulation_time * b2.second, report=self._update_simulation_progress
+        )
         self._update_data()
         QtWidgets.QApplication.restoreOverrideCursor()
 
