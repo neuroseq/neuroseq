@@ -56,7 +56,7 @@ class ModelDialog(QtWidgets.QDialog):
 
     def _convert_string_to_quantity(
         self, input: str, valuetype: type = float
-    ) -> str | Quantity:
+    ) -> Quantity:
         """
         Convert string input to brian2 quantities, comprised of value and unit.
 
@@ -68,7 +68,7 @@ class ModelDialog(QtWidgets.QDialog):
             _description_, by default float
         Returns
         -------
-        str | Quantity
+        Quantity
             Brian2 quantity instance corresponding to the input string
         """
 
