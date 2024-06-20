@@ -84,8 +84,11 @@ class ModelDialog(QtWidgets.QDialog):
                 "Quantities must follow the pattern 'value * unit ' or 'value unit'"
             )
 
-        # Split the string into value and unit
-        value, unit = input.split()
+        value, unit = v
+
+        value = value.strip()
+
+        unit = unit.strip()
 
         # Convert the value to float
         converted_value = valuetype(literal_eval(value))
@@ -327,9 +330,9 @@ class NeuronGroupDialog(ModelDialog):
             try:
                 self.model.assemble_neurongroup(name=self.name)
             except Exception as e:
-                raise RuntimeError(
+                self.display_error(
                     f"Error when assembling neurongroup {self.name}: {e}"
-                ) from e
+                )
 
             super().accept()
 
@@ -722,7 +725,6 @@ class B2ModelWidget(ModelDialog):
         self,
         model: B2Model,
         parent: QtWidgets.QDialog | None = None,
-        model_register: dict | None = None,
     ) -> None:
         """
         Create a new instance of the B2ModelWidget and display it in a new window.
@@ -733,12 +735,8 @@ class B2ModelWidget(ModelDialog):
             Model instance to fill with data
         parent : QtWidgets.QDialog | None, optional
             possible parent widget, by default None
-        model_register : dict | None, optional
-            dictionary to store models in, by default None
         """
         super().__init__(model, parent)
-
-        self.model_register = model_register
 
         self.setWindowTitle("Model definition")
         self.show_parameters_button.hide()

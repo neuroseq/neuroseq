@@ -94,3 +94,68 @@ def test_neurondialog_define_equation(qtbot: QtBot, monkeypatch: MonkeyPatch) ->
     assert (
         ndiag.model.neurongroups["x"]["model"] == "dv/dt = -v : mV\ndv/dt = -v : mV\n"
     )
+
+
+def test_neurongroup_assembling(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
+    ndiag = B2W.NeuronGroupDialog(B2Model())
+
+    qtbot.addWidget(ndiag)
+
+    ndiag.show()
+
+    ndiag.model.neurongroups["x"] = {}
+    ndiag.model.neurongroups["x"]["model"] = "dv/dt = -v : volt\n"
+    ndiag.model.neurongroups["x"]["n"] = 64
+    ndiag.name = "x"
+
+    ndiag.accept()
+
+    assert ndiag.model.network["x"].name == "x"
+    assert ndiag.model.network["x"]._N == 64
+
+
+def test_neurongroup_assembling_exceptions(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    ndiag = B2W.NeuronGroupDialog(B2Model())
+
+    qtbot.addWidget(ndiag)
+
+    ndiag.show()
+
+    monkeypatch.setattr(
+        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
+    )
+
+    ndiag.accept()
+    qtbot.waitUntil(ndiag.error_dialog.isVisible)
+    assert (
+        ndiag.error_dialog.text()
+        == "Error, first define a neurongroup by giving it a name"
+    )
+    ndiag.error_dialog.close()
+
+    ndiag.model.neurongroups["x"] = {}
+    ndiag.model.neurongroups["x"]["model"] = "dv/dt = -v : mV\n"
+    ndiag.name = "x"
+
+    ndiag.accept()
+
+    qtbot.waitUntil(ndiag.error_dialog.isVisible)
+    assert (
+        ndiag.error_dialog.text()
+        == "The model equation and the neuronnumber need to be defined"
+    )
+    ndiag.error_dialog.close()
+
+    ndiag.model.neurongroups["x"]["n"] = 64
+
+    ndiag.accept()
+
+    qtbot.waitUntil(ndiag.error_dialog.isVisible)
+
+    assert (
+        ndiag.error_dialog.text()
+        == "Error when assembling neurongroup x: Error in assembling neuron group x: Error parsing the unit specification for variable 'v': Unit specification refers to 'mV', but this is not a base unit. Use 'volt' instead."
+    )
+    ndiag.error_dialog.close()
