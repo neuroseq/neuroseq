@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from ast import literal_eval
 from functools import partial
 from typing import Any
 from typing import Callable
 
+from brian2 import Quantity
+from brian2 import units
 from qtpy import QtCore
 from qtpy import QtWidgets
 
@@ -47,6 +50,74 @@ class ModelDialog(QtWidgets.QDialog):
         self.buttonBox = QtWidgets.QDialogButtonBox(self.qtbtn)
         self.buttonBox.accepted.connect(self.accept)
         self.buttonBox.rejected.connect(self.reject)
+
+    def _convert_string_to_quantity(
+        self, input: str, valuetype: type = None
+    ) -> str | Quantity:
+        """
+        Convert string input to brian2 quantities, comprised of value and unit.
+
+        Parameters
+        ----------
+        input : str
+            String to convert to brian2 quantity. Must be of the form `value * unit` or `value unit`.
+
+        Returns
+        -------
+        str | Quantity
+            Brian2 quantity instance corresponding to the input string
+        """
+
+        # quantity is nparray | scalar * unit
+
+        v = input.split("*")
+
+        if len(v) == 1:
+            v = input.split(" ")
+
+        if len(v) == 1:
+            raise ValueError(
+                "Qunatities must follow the pattern 'value * unit ' or 'value unit'"
+            )
+
+        # Split the string into value and unit
+        value, unit = input.split()
+
+        # Convert the value to float
+        value = valuetype(literal_eval(value))
+
+        # Get the unit from the units module
+        unit = getattr(units, unit)
+
+        # Return the quantity
+        return value * unit
+
+    def _convert_value_optional(
+        self, input: str, valuetype: type = None
+    ) -> str | Quantity:
+        """
+        _summary_
+
+        Parameters
+        ----------
+        input : str
+            _description_
+        valuetype : type, optional
+            _description_, by default None
+
+        Returns
+        -------
+        str | Quantity
+            _description_
+        """
+        try:
+            return self._convert_string_to_quantity(input, valuetype=valuetype)
+        except ValueError:
+            return input
+        except Exception as e:
+            raise RuntimeError(
+                f"An error occured during conversion of a string to a quantity {e}"
+            ) from e
 
     def display_error(self, message: str) -> None:
         """
@@ -104,6 +175,37 @@ class ModelDialog(QtWidgets.QDialog):
         except Exception as e:
             self.display_error(f"Error when saving parameter {paramname}: {e}")
 
+    def accept_parameter_with_savebutton(
+        self,
+        element: QtWidgets.QLineEdit | QtWidgets.QTextEdit,
+        name: str,
+        model_callback: Callable,
+        button: QtWidgets.QPushButton,
+        converter: Callable = lambda x: x,
+        text: str = "saved",
+    ) -> None:
+        """
+        Wrapper around `ModelDialog.accept_parameter` that additionally changes the text in the `button` argument to the argument 'text'.
+
+        Parameters
+        ----------
+        element : QtWidgets.QLineEdit | QtWidgets.QTextEdit
+            Text input element to read the parameter from to be used
+        name : str
+            Name of the parameter
+        model_callback : Callable
+            Function that defines the parameter in the model
+        button : QtWidgets.QPushButton
+            Button to change text in.
+        converter: Callable
+            Function to convert types - not implemented yet.
+        text: str
+            Text to change the button text to
+        """
+        self.accept_parameter(element, name, model_callback, convert=converter)
+        button.setText(text)
+        button.setDown(True)
+
     def accept_name(self, target: str) -> None:
         """
         Accept the name attribute of a derived dialog and add it to the `target` member of the model, e.g., to `neurongroups` or `synapses`.
@@ -122,8 +224,11 @@ class ModelDialog(QtWidgets.QDialog):
             self.name = name
             getattr(self.model, target)[name] = {}
             self.name_button.setText("saved")
+            self.name_button.setDown(True)
 
-    def display_parameters(self, target: str | dict[Any, Any]) -> None:
+    def display_parameters(
+        self, target: str | dict[Any, Any], read_only: bool = False
+    ) -> None:
         """
         Display the parameters of a target member of the model in a new window.
 
@@ -139,7 +244,7 @@ class ModelDialog(QtWidgets.QDialog):
 
         window = QtWidgets.QDialog(self)
         layout = QtWidgets.QVBoxLayout(window)
-        self.dictwidget = DictionaryWidget(d, window)
+        self.dictwidget = DictionaryWidget(d, window, read_only=read_only)
         layout.addWidget(self.dictwidget)
         self.dictwidget.setLayout(layout)
         window.resize(800, 600)
@@ -257,51 +362,74 @@ class NeuronGroupDialog(ModelDialog):
             partial(self.display_parameters, "neurongroups")
         )
 
-        self.threshold_button.clicked.connect(self.not_connected)
-        self.reset_button.clicked.connect(self.not_connected)
-        self.refractory_button.clicked.connect(self.not_connected)
-        self.solver_button.clicked.connect(self.not_connected)
-        self.neuronnumber_button.clicked.connect(self.not_connected)
+        self.threshold_button.clicked.connect(
+            partial(
+                self.accept_parameter_with_savebutton,
+                self.threshold,
+                "threshold",
+                self.model.define_threshold,
+                self.threshold_button,
+                lambda v: v,
+            )
+        )
+
+        self.reset_button.clicked.connect(
+            partial(
+                self.accept_parameter_with_savebutton,
+                self.reset,
+                "reset",
+                self.model.define_reset,
+                self.reset_button,
+                lambda v: v,
+            )
+        )
+
+        self.refractory_button.clicked.connect(
+            partial(
+                self.accept_parameter_with_savebutton,
+                self.refractory,
+                "refractory",
+                self.model.define_refractory,
+                self.refractory_button,
+                self._convert_value_optional,
+            )
+        )
+
+        self.solver_button.clicked.connect(
+            partial(
+                self.accept_parameter_with_savebutton,
+                self.solver,
+                "solver",
+                self.model.define_solver_method,
+                self.solver_button,
+                lambda v: v,
+            )
+        )
+
+        self.neuronnumber_button.clicked.connect(
+            partial(
+                self.accept_parameter_with_savebutton,
+                self.neuronnumber,
+                "neuronnumber",
+                self.model.define_neuronnumber,
+                self.neuronnumber_button,
+                lambda v: int(v),
+            )
+        )
+
         self.name_button.clicked.connect(
             partial(self.accept_name, target="neurongroups")
         )
 
         self.equation_button.clicked.connect(
             partial(
-                self.accept_with_savebutton,
+                self.accept_parameter_with_savebutton,
                 self.equation,
                 "model",
                 self.model.define_equation,
                 self.equation_button,
             )
         )
-
-    def accept_with_savebutton(
-        self,
-        element: QtWidgets.QLineEdit | QtWidgets.QTextEdit,
-        name: str,
-        model_callback: Callable,
-        button: QtWidgets.QPushButton,
-        converter: Callable = lambda x: x,
-    ) -> None:
-        """
-        Wrapper around `ModelDialog.accept_parameter` that additionally changes the text in the `button` argument to `saved`.
-
-        Parameters
-        ----------
-        element : QtWidgets.QLineEdit | QtWidgets.QTextEdit
-            Text input element to read the parameter from to be used
-        name : str
-            Name of the parameter
-        model_callback : Callable
-            Function that defines the parameter in the model
-        button : QtWidgets.QPushButton
-            Button to change text in.
-        converter: Callable
-            Function to convert types - not implemented yet.
-        """
-        self.accept_parameter(element, name, model_callback, convert=converter)
-        button.setText("saved")
 
 
 class SynapseDialog(ModelDialog):
@@ -524,7 +652,10 @@ class DictionaryWidget(QtWidgets.QWidget):
     """
 
     def __init__(
-        self, dictionary: dict, parent: QtWidgets.QDialog | None = None
+        self,
+        dictionary: dict,
+        parent: QtWidgets.QDialog | None = None,
+        read_only: bool = True,
     ) -> None:
         """
         Create a new window to display a dictionary in.
@@ -546,7 +677,8 @@ class DictionaryWidget(QtWidgets.QWidget):
             self.table = QtWidgets.QTreeWidget(self)
             self.table.setColumnWidth(0, 400)
             self.table.setColumnWidth(1, 400)
-            self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+            if read_only:
+                self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
             self.table.setHeaderLabels(["Key", "Value"])
 
             self.add_dict_to_tree(self.table, dictionary)
@@ -693,7 +825,7 @@ class B2ModelWidget(ModelDialog):
         d["seed"] = self.model.seed
         d["name"] = self.name
 
-        super().display_parameters(d)
+        super().display_parameters(d, read_only=False)
 
     def open_add_neurongroup_dialog(self) -> None:
         """
