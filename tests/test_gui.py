@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from formozov_project.gui import Gui
+from formozov_project.gui import temp_new_model
 from pytest import MonkeyPatch
 from pytest import approx
 from pytestqt.qtbot import QtBot
@@ -30,6 +31,7 @@ def test_gui_playback(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
     )
+    gui.model = temp_new_model()
     gui.btn_continue_simulation_clicked()
     n_timesteps = len(gui.model.network["M"].t)
     gui.btn_play_clicked()
@@ -52,6 +54,7 @@ def test_gui_playback(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
 
 def test_gui_save(tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
     gui = Gui()
+    gui.model = temp_new_model()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -79,6 +82,7 @@ def test_gui_checkpoints(
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("test", True)
     )
+    gui.model = temp_new_model()
     gui.btn_store_checkpoint_clicked()
     assert "test" in gui.model.checkpoints
     # simulate
