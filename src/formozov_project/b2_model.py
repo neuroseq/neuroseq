@@ -111,6 +111,7 @@ class B2Model:
         logpath: str | Path | None = None,
         loglevel: str = "INFO",
         seed: int = 123,
+        name: str = "b2Network",
     ):
         """
         __init__ Create a new `B2Model` instance.
@@ -132,7 +133,7 @@ class B2Model:
         b2.seed(seed)
 
         self.seed: int = seed
-        self.network = b2.Network(name="b2Network")
+        self.network = b2.Network(name=name)
         self.parameters: dict[str, Any] | None = None
         self.neurongroups: dict[str, dict[str, Any]] = {}
         self.synapses: dict[str, dict[str, Any]] = {}
@@ -142,6 +143,10 @@ class B2Model:
         self.checkpoints: list[str] = []
         self._set_up_logger(loglevel=loglevel, logpath=logpath)
         self.logger.info("Model creation complete")
+
+    @property
+    def name(self) -> str:
+        return self.network.name
 
     def define_equation(self, name: str, line: str) -> None:
         r"""
@@ -182,6 +187,17 @@ class B2Model:
         b2.defaultclock.dt = self.dt
         self.network.dt = self.dt
         self.logger.info(f"dt defined: {dt}")
+
+    def define_name(self, name: str) -> None:
+        """
+        define_name Define the name of the model
+
+        Parameters
+        ----------
+        name : str
+            Name of the model
+        """
+        self.network.name = self.name
 
     def define_parameter(self, name: str, value: str | b2.Quantity) -> None:
         """
