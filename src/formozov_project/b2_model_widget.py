@@ -165,7 +165,7 @@ class NeuronGroupDialog(ModelDialog):
     def __init__(self, model: B2Model, parent: QtWidgets.QDialog | None = None) -> None:
         """
         Create a new NeuronGroupDialog instance which is displayed in a new window. Creates a table of
-        text fiedls to fill in and buttons to save the data that has been provided into the respective variable of the model.
+        text fields to fill in and buttons to save the data that has been provided into the respective variable of the model.
 
         Parameters
         ----------
