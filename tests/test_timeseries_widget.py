@@ -10,7 +10,7 @@ from qtpy import QtWidgets
 class InvalidWidget(TimeseriesWidget):
     def __init__(
         self,
-        data: list[np.ndarray] | None = None,
+        data: np.ndarray | None = None,
         timestamps: np.ndarray | None = None,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
@@ -22,4 +22,4 @@ def test_timeseries_widget_plot_data_not_implemented(qtbot: QtBot) -> None:
     invalid_widget = InvalidWidget()
     qtbot.addWidget(invalid_widget)
     with pytest.raises(NotImplementedError):
-        invalid_widget.set_data([np.random.rand(5)], np.random.rand(5))
+        invalid_widget.set_data(np.zeros((5, 5)))
