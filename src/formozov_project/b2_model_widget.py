@@ -475,14 +475,16 @@ class SynapseDialog(ModelDialog):
 
     def accept(self) -> None:
         if self.name not in self.model.synapses:
-            self.display_error("Error, first define a neurongroup by giving it a name")
+            self.display_error(
+                "Error, first define a synapse system by giving it a name"
+            )
         elif (
             "model" not in self.model.synapses[self.name]
             or "target" not in self.model.synapses[self.name]
             or "origin" not in self.model.synapses[self.name]
         ):
             self.display_error(
-                "The model equation and the neuronnumber need to be defined"
+                "The model equation and the origin- and target neurongroups need to be defined"
             )
         else:
             try:
