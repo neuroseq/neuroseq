@@ -40,16 +40,18 @@ class ModelDialog(QtWidgets.QDialog):
 
         self.layout = QtWidgets.QGridLayout(self)
 
-        self.name_title = QtWidgets.QLabel("Name", self)
-        self.name_entry = QtWidgets.QLineEdit(self)
-        self.name_button = QtWidgets.QPushButton("save", self)
+        self.name_entry, self.name_button = self.add_text_field("Name")
         self.show_parameters_button = QtWidgets.QPushButton("Show parameters", self)
 
         self.qtbtn = QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
 
+        # do not add these buttonbox immediatelly to the layout, as ok and cancel buttons are typically expected to appear on the last row
+
         self.buttonBox = QtWidgets.QDialogButtonBox(self.qtbtn)
         self.buttonBox.accepted.connect(self.accept)
         self.buttonBox.rejected.connect(self.reject)
+
+        self.setLayout(self.layout)
 
     def _convert_string_to_quantity(
         self, input: str, valuetype: type = None
@@ -119,6 +121,44 @@ class ModelDialog(QtWidgets.QDialog):
                 f"An error occured during conversion of a string to a quantity {e}"
             ) from e
 
+    def add_text_field(
+        self,
+        title: str,
+        textfieltype: type = QtWidgets.QLineEdit,
+        buttontext: str = "save",
+    ) -> tuple[
+        QtWidgets.QTextEdit | QtWidgets.QLineEdit,
+        QtWidgets.QPushButton,
+    ]:
+        """
+        Add an element to the dialog that has, from left to right, a name, a multi- or single line field that allows text input, and a push button displaying a given text.
+
+        Parameters
+        ----------
+        title : str
+            Name of the field, displayed on the leftmost element.
+        textfieltype : type, optional
+            Type of the text input field to have on the second elemnet, by default QtWidgets.QLineEdit
+        buttontext : str, optional
+            Text to display in the rightmost button, by default "save"
+
+        Returns
+        -------
+        tuple[ QtWidgets.QLabel, QtWidgets.QTextEdit | QtWidgets.QLineEdit, QtWidgets.QPushButton, ]
+            titlefield, textfield and button widgets
+        """
+        titlefield = QtWidgets.QLabel(title, self)
+        textfield = textfieltype(self)
+        button = QtWidgets.QPushButton(buttontext, self)
+
+        row = self.layout.rowCount()
+
+        self.layout.addWidget(titlefield, row, 1)
+        self.layout.addWidget(textfield, row, 2)
+        self.layout.addWidget(button, row, 3)
+
+        return textfield, button
+
     def display_error(self, message: str) -> None:
         """
         Display an error message when something goes wrong in the dialog.
@@ -133,7 +173,7 @@ class ModelDialog(QtWidgets.QDialog):
         self.error_dialog.setIcon(QtWidgets.QMessageBox.Critical)
         self.error_dialog.setWindowTitle("Error")
         self.error_dialog.setText(message)
-        self.error_dialog.exec_()
+        self.error_dialog.exec()
 
     def accept_parameter(
         self,
@@ -248,7 +288,7 @@ class ModelDialog(QtWidgets.QDialog):
         layout.addWidget(self.dictwidget)
         self.dictwidget.setLayout(layout)
         window.resize(800, 600)
-        window.exec_()
+        window.exec()
 
     def not_connected(self) -> None:
         """
@@ -270,7 +310,7 @@ class NeuronGroupDialog(ModelDialog):
     def __init__(self, model: B2Model, parent: QtWidgets.QDialog | None = None) -> None:
         """
         Create a new NeuronGroupDialog instance which is displayed in a new window. Creates a table of
-        text fiedls to fill in and buttons to save the data that has been provided into the respective variable of the model.
+        text fields to fill in and buttons to save the data that has been provided into the respective variable of the model.
 
         Parameters
         ----------
@@ -282,29 +322,24 @@ class NeuronGroupDialog(ModelDialog):
         super().__init__(model, parent)
         self.setWindowTitle("Define a Neurongroup")
 
-        self.equation_title = QtWidgets.QLabel("Equation", self)
-        self.equation = QtWidgets.QTextEdit(self)
-        self.equation_button = QtWidgets.QPushButton("save", self)
-
-        self.threshold_title = QtWidgets.QLabel("Threshold", self)
-        self.threshold = QtWidgets.QLineEdit(self)
-        self.threshold_button = QtWidgets.QPushButton("save", self)
-
-        self.reset_title = QtWidgets.QLabel("Reset", self)
-        self.reset = QtWidgets.QLineEdit(self)
-        self.reset_button = QtWidgets.QPushButton("save", self)
-
-        self.refractory_title = QtWidgets.QLabel("Refractory", self)
-        self.refractory = QtWidgets.QLineEdit(self)
-        self.refractory_button = QtWidgets.QPushButton("save", self)
-
-        self.solver = QtWidgets.QLineEdit(self)
-        self.solver_button = QtWidgets.QPushButton("save", self)
-        self.solver_title = QtWidgets.QLabel("Solver", self)
-
-        self.neuronnumber = QtWidgets.QLineEdit(self)
-        self.neuronnumber_button = QtWidgets.QPushButton("save", self)
-        self.neuronnumber_title = QtWidgets.QLabel("Neuronnumber", self)
+        self.equation, self.equation_button = self.add_text_field(
+            "Equation", QtWidgets.QTextEdit
+        )
+        self.threshold, self.threshold_button = self.add_text_field(
+            "Threshold", QtWidgets.QLineEdit
+        )
+        self.reset, self.reset_button = self.add_text_field(
+            "Reset", QtWidgets.QLineEdit
+        )
+        self.refractory, self.refractory_button = self.add_text_field(
+            "Refractory", QtWidgets.QLineEdit
+        )
+        self.solver, self.solver_button = self.add_text_field(
+            "Refractory", QtWidgets.QLineEdit
+        )
+        self.neuronnumber, self.neuronnumber_button = self.add_text_field(
+            "Neuronnumber", QtWidgets.QLineEdit
+        )
 
         for qle in [
             self.equation,
@@ -316,45 +351,13 @@ class NeuronGroupDialog(ModelDialog):
         ]:
             qle.setMinimumWidth(qle.sizeHint().width() * 2)
 
-        self.layout.addWidget(self.name_title, 1, 1)
-        self.layout.addWidget(
-            self.name_entry,
-            1,
-            2,
-        )
-        self.layout.addWidget(self.name_button, 1, 3)
-
-        self.layout.addWidget(self.equation_title, 2, 1)
-        self.layout.addWidget(self.equation, 2, 2)
-        self.layout.addWidget(self.equation_button, 2, 3)
-
-        self.layout.addWidget(self.threshold_title, 3, 1)
-        self.layout.addWidget(self.threshold, 3, 2)
-        self.layout.addWidget(self.threshold_button, 3, 3)
-
-        self.layout.addWidget(self.reset_title, 4, 1)
-        self.layout.addWidget(self.reset, 4, 2)
-        self.layout.addWidget(self.reset_button, 4, 3)
-
-        self.layout.addWidget(self.refractory_title, 5, 1)
-        self.layout.addWidget(self.refractory, 5, 2)
-        self.layout.addWidget(self.refractory_button, 5, 3)
-
-        self.layout.addWidget(self.solver_title, 6, 1)
-        self.layout.addWidget(self.solver, 6, 2)
-        self.layout.addWidget(self.solver_button, 6, 3)
-
-        self.layout.addWidget(self.neuronnumber_title, 7, 1)
-        self.layout.addWidget(self.neuronnumber, 7, 2)
-        self.layout.addWidget(self.neuronnumber_button, 7, 3)
+        row = self.layout.rowCount()
 
         self.layout.addWidget(
-            self.show_parameters_button, 8, 1, 1, 3, QtCore.Qt.AlignCenter
+            self.show_parameters_button, row, 1, 1, 3, QtCore.Qt.AlignCenter
         )
 
-        self.layout.addWidget(self.buttonBox, 9, 1, 1, 4, QtCore.Qt.AlignCenter)
-
-        self.setLayout(self.layout)
+        self.layout.addWidget(self.buttonBox, row + 1, 1, 1, 4, QtCore.Qt.AlignCenter)
 
         # connect signals and sockets:
 
@@ -459,33 +462,27 @@ class SynapseDialog(ModelDialog):
 
         self.setWindowTitle("Define a synapse")
 
-        self.origin_title = QtWidgets.QLabel("Origin", self)
-        self.origin = QtWidgets.QLineEdit(self)
-        self.origin_button = QtWidgets.QPushButton("save", self)
+        self.origin, self.origin_button = self.add_text_field("Origin")
 
-        self.target_title = QtWidgets.QLabel("Target", self)
-        self.target = QtWidgets.QLineEdit(self)
-        self.target_button = QtWidgets.QPushButton("save", self)
+        self.target, self.target_button = self.add_text_field("Target")
 
-        self.equation_title = QtWidgets.QLabel("Equation", self)
-        self.equation = QtWidgets.QTextEdit(self)
-        self.equation_button = QtWidgets.QPushButton("save", self)
+        self.equation, self.equation_button = self.add_text_field(
+            "Equation", textfieltype=QtWidgets.QTextEdit
+        )
 
-        self.pre_title = QtWidgets.QLabel("Pre", self)
-        self.pre = QtWidgets.QTextEdit(self)
-        self.pre_button = QtWidgets.QPushButton("save", self)
+        self.pre, self.pre_button = self.add_text_field(
+            "Pre", textfieltype=QtWidgets.QTextEdit
+        )
 
-        self.post_title = QtWidgets.QLabel("Post", self)
-        self.post = QtWidgets.QTextEdit(self)
-        self.post_button = QtWidgets.QPushButton("save", self)
+        self.post, self.post_button = self.add_text_field(
+            "Post", textfieltype=QtWidgets.QTextEdit
+        )
 
-        self.connect_title = QtWidgets.QLabel("Connection def.", self)
-        self.connect = QtWidgets.QLineEdit(self)
-        self.connect_button = QtWidgets.QPushButton("save", self)
+        self.connect, self.connect_button = self.add_text_field("Connection def.")
 
-        self.connect_prob_title = QtWidgets.QLabel("Connection prob.", self)
-        self.connect_prob = QtWidgets.QLineEdit(self)
-        self.connect_prob_button = QtWidgets.QPushButton("save", self)
+        self.connect_prob, self.connect_prob_button = self.add_text_field(
+            "Connection prob."
+        )
 
         for qle in [
             self.origin,
@@ -498,45 +495,13 @@ class SynapseDialog(ModelDialog):
         ]:
             qle.setMinimumWidth(qle.sizeHint().width() * 2)
 
-        self.layout.addWidget(self.name_title, 1, 1)
-        self.layout.addWidget(self.name_entry, 1, 2)
-        self.layout.addWidget(self.name_button, 1, 3)
-
-        self.layout.addWidget(self.origin_title, 2, 1)
-        self.layout.addWidget(self.origin, 2, 2)
-        self.layout.addWidget(self.origin_button, 2, 3)
-
-        self.layout.addWidget(self.target_title, 3, 1)
-        self.layout.addWidget(self.target, 3, 2)
-        self.layout.addWidget(self.target_button, 3, 3)
-
-        self.layout.addWidget(self.equation_title, 4, 1)
-        self.layout.addWidget(self.equation, 4, 2)
-        self.layout.addWidget(self.equation_button, 4, 3)
-
-        self.layout.addWidget(self.pre_title, 5, 1)
-        self.layout.addWidget(self.pre, 5, 2)
-        self.layout.addWidget(self.pre_button, 5, 3)
-
-        self.layout.addWidget(self.post_title, 6, 1)
-        self.layout.addWidget(self.post, 6, 2)
-        self.layout.addWidget(self.post_button, 6, 3)
-
-        self.layout.addWidget(self.connect_title, 7, 1)
-        self.layout.addWidget(self.connect, 7, 2)
-        self.layout.addWidget(self.connect_button, 7, 3)
-
-        self.layout.addWidget(self.connect_prob_title, 8, 1)
-        self.layout.addWidget(self.connect_prob, 8, 2)
-        self.layout.addWidget(self.connect_prob_button, 8, 3)
+        row = self.layout.rowCount()
 
         self.layout.addWidget(
-            self.show_parameters_button, 9, 1, 1, 3, QtCore.Qt.AlignCenter
+            self.show_parameters_button, row, 1, 1, 3, QtCore.Qt.AlignCenter
         )
 
-        self.layout.addWidget(self.buttonBox, 10, 1, 1, 4, QtCore.Qt.AlignCenter)
-
-        self.setLayout(self.layout)
+        self.layout.addWidget(self.buttonBox, row + 1, 1, 1, 4, QtCore.Qt.AlignCenter)
 
         # connect signals and sockets: TODO
         self.origin_button.clicked.connect(self.not_connected)
@@ -579,23 +544,17 @@ class ParameterDialog(ModelDialog):
         super().__init__(model, parent)
         self.setWindowTitle("Define a parameter")
 
-        value_title = QtWidgets.QLabel("Value", self)
-        self.value_entry = QtWidgets.QTextEdit(self)
-        self.value_button = QtWidgets.QPushButton("save", self)
-
-        self.layout.addWidget(self.name_title, 1, 1)
-        self.layout.addWidget(self.name_entry, 1, 2)
-        self.layout.addWidget(self.name_button, 1, 3)
-
-        self.layout.addWidget(value_title, 2, 1)
-        self.layout.addWidget(self.value_entry, 2, 2)
-        self.layout.addWidget(self.value_button, 2, 3)
-
-        self.layout.addWidget(
-            self.show_parameters_button, 3, 1, 1, 3, QtCore.Qt.AlignCenter
+        self.value_entry, self.value_button = self.add_text_field(
+            "Value", textfieltype=QtWidgets.QTextEdit
         )
 
-        self.layout.addWidget(self.buttonBox, 4, 1, 1, 3, QtCore.Qt.AlignCenter)
+        row = self.layout.rowCount()
+
+        self.layout.addWidget(
+            self.show_parameters_button, row, 1, 1, 3, QtCore.Qt.AlignCenter
+        )
+
+        self.layout.addWidget(self.buttonBox, row + 1, 1, 1, 3, QtCore.Qt.AlignCenter)
 
         self.setLayout(self.layout)
 
@@ -755,48 +714,38 @@ class B2ModelWidget(ModelDialog):
 
         self.setWindowTitle("Model definition")
         self.show_parameters_button.hide()
-        self.timestep_title = QtWidgets.QLabel("Timestep", self)
-        self.timestep = QtWidgets.QLineEdit()
-        self.timestep_button = QtWidgets.QPushButton("save", self)
 
-        self.seed = QtWidgets.QLineEdit(self)
-        self.seed_button = QtWidgets.QPushButton("save", self)
-        self.seed_title = QtWidgets.QLabel("Random seed")
+        self.timestep, self.timestep_button = self.add_text_field(
+            "Timestep",
+        )
+        self.seed, self.seed_button = self.add_text_field(
+            "Random seed",
+        )
 
         self.add_parameter_button = QtWidgets.QPushButton("Add parameter", self)
         self.add_neurongroup_button = QtWidgets.QPushButton("Add neurongroup", self)
         self.add_synapse_button = QtWidgets.QPushButton("Add synapse", self)
         self.display_system_button = QtWidgets.QPushButton("Display system", self)
 
-        self.layout.addWidget(self.name_title, 1, 1)
-        self.layout.addWidget(self.name_entry, 1, 2, 1, 2)
-        self.layout.addWidget(self.name_button, 1, 4)
+        row = self.layout.rowCount()
 
-        self.layout.addWidget(self.timestep_title, 2, 1)
-        self.layout.addWidget(self.timestep, 2, 2, 1, 2)
-        self.layout.addWidget(self.timestep_button, 2, 4)
-
-        self.layout.addWidget(self.seed_title, 3, 1)
-        self.layout.addWidget(self.seed, 3, 2, 1, 2)
-        self.layout.addWidget(self.seed_button, 3, 4)
-
-        self.layout.addWidget(self.add_parameter_button, 5, 1)
+        self.layout.addWidget(self.add_parameter_button, row, 1)
 
         self.layout.addWidget(
             self.add_neurongroup_button,
-            5,
+            row,
             2,
         )
 
         self.layout.addWidget(
             self.add_synapse_button,
-            5,
+            row,
             3,
         )
 
-        self.layout.addWidget(self.display_system_button, 5, 4)
+        self.layout.addWidget(self.display_system_button, row, 4)
 
-        self.layout.addWidget(self.buttonBox, 8, 1, 1, 4, QtCore.Qt.AlignCenter)
+        self.layout.addWidget(self.buttonBox, row + 1, 1, 1, 4, QtCore.Qt.AlignCenter)
 
         # connect signals to slots on the outermost
 
@@ -833,7 +782,7 @@ class B2ModelWidget(ModelDialog):
         """
         self.neuron_dlg = NeuronGroupDialog(self.model, self)
 
-        self.neuron_dlg.exec_()
+        self.neuron_dlg.exec()
 
     def open_add_synapse_dialog(self) -> None:
         """
@@ -841,7 +790,7 @@ class B2ModelWidget(ModelDialog):
         """
         self.synapse_dlg = SynapseDialog(self.model, self)
 
-        self.synapse_dlg.exec_()
+        self.synapse_dlg.exec()
 
     def open_add_parameter_dialog(self) -> None:
         """
@@ -849,4 +798,4 @@ class B2ModelWidget(ModelDialog):
         """
         self.param_dlg = ParameterDialog(self.model, self)
 
-        self.param_dlg.exec_()
+        self.param_dlg.exec()

@@ -43,7 +43,7 @@ def test_synapsedialog_define_name(qtbot: QtBot) -> None:
 def test_synapsedialog_define_equation(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
     sdiag = B2W.SynapseDialog(B2Model())
     monkeypatch.setattr(
-        B2W.QtWidgets.QMessageBox, "exec_", B2W.QtWidgets.QMessageBox.show
+        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
     )
     qtbot.addWidget(sdiag)
 

@@ -24,7 +24,7 @@ def test_name_def_save_not_implemented(
     assert b2w.name_entry.text() == "modelname"
 
     monkeypatch.setattr(
-        B2W.QtWidgets.QMessageBox, "exec_", B2W.QtWidgets.QMessageBox.show
+        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
     )
 
     qtbot.mouseClick(b2w.name_button, QtCore.Qt.LeftButton)
@@ -57,7 +57,7 @@ def test_dt_def_save_not_implemented(qtbot: QtBot, monkeypatch: MonkeyPatch) -> 
     assert b2w.timestep.text() == "0.2 ms"
 
     monkeypatch.setattr(
-        B2W.QtWidgets.QMessageBox, "exec_", B2W.QtWidgets.QMessageBox.show
+        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
     )
 
     qtbot.mouseClick(b2w.timestep_button, QtCore.Qt.LeftButton)
@@ -92,7 +92,7 @@ def test_random_seed_def_save_not_implemented(
     assert b2w.seed.text() == "2231"
 
     monkeypatch.setattr(
-        B2W.QtWidgets.QMessageBox, "exec_", B2W.QtWidgets.QMessageBox.show
+        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
     )
 
     qtbot.mouseClick(b2w.seed_button, QtCore.Qt.LeftButton)
@@ -114,7 +114,7 @@ def test_random_seed_def_save_not_implemented(
 
 
 def test_open_module_dialogs(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec_", B2W.QtWidgets.QDialog.show)
+    monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec", B2W.QtWidgets.QDialog.show)
 
     b2w = B2W.B2ModelWidget(B2Model(), None, {})
 
