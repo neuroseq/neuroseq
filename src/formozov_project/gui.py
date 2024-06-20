@@ -13,6 +13,7 @@ from qtpy.compat import getsavefilename
 
 from formozov_project import __version__
 from formozov_project.b2_model import B2Model
+from formozov_project.b2_model_widget import B2ModelWidget
 from formozov_project.heatmap_widget import HeatmapWidget
 from formozov_project.trace_widget import TraceWidget
 
@@ -46,6 +47,7 @@ class Gui(QtWidgets.QMainWindow):
         self.logger = logging.getLogger(__name__)
         self.logger.info("starting Gui")
         self.model = B2Model()
+
         self.setWindowTitle("Formozov Project")
         grid_layout = QtWidgets.QVBoxLayout()
         central_widget = QtWidgets.QWidget()
@@ -76,15 +78,14 @@ class Gui(QtWidgets.QMainWindow):
         self.heatmap_widget.connect_trace_widget(self.trace_widget)
         self.trace_widget.connect_heatmap_widget(self.heatmap_widget)
 
-        self.btn_new_clicked()
-
     def _update_data(self) -> None:
         if len(self.model.network["M"].t) == 0:
             self.trace_widget.set_data()
             self.heatmap_widget.set_data()
             return
         self.trace_widget.set_data(
-            self.model.network["M"].y, self.model.network["M"].t / b2.second
+            self.model.network["M"].y,
+            self.model.network["M"].t / b2.second,
         )
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
         # for now just display outer product of traces as heatmap data
@@ -108,9 +109,12 @@ class Gui(QtWidgets.QMainWindow):
         self.simulation_progress_dialog.setValue(completed_percent)
 
     def btn_new_clicked(self) -> None:
+        # TODO: this needs to be removed as as the B2ModelWidget is functionally complete
         self.model = temp_new_model()
         self.trace_widget.set_data()
         self.heatmap_widget.set_data()
+        self.b2m = B2ModelWidget(B2Model(), self)
+        self.b2m.exec()
 
     def btn_open_clicked(self) -> None:
         self.btn_new_clicked()
