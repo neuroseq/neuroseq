@@ -6,6 +6,7 @@ from typing import Any
 from typing import Callable
 
 from brian2 import Quantity
+from brian2 import Unit
 from brian2 import units
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -54,7 +55,7 @@ class ModelDialog(QtWidgets.QDialog):
         self.setLayout(self.layout)
 
     def _convert_string_to_quantity(
-        self, input: str, valuetype: type = None
+        self, input: str, valuetype: type = float
     ) -> str | Quantity:
         """
         Convert string input to brian2 quantities, comprised of value and unit.
@@ -63,7 +64,8 @@ class ModelDialog(QtWidgets.QDialog):
         ----------
         input : str
             String to convert to brian2 quantity. Must be of the form `value * unit` or `value unit`.
-
+        valuetype : type, optional
+            _description_, by default float
         Returns
         -------
         str | Quantity
@@ -86,16 +88,16 @@ class ModelDialog(QtWidgets.QDialog):
         value, unit = input.split()
 
         # Convert the value to float
-        value = valuetype(literal_eval(value))
+        converted_value = valuetype(literal_eval(value))
 
         # Get the unit from the units module
-        unit = getattr(units, unit)
+        b2unit: Unit = getattr(units, unit)
 
         # Return the quantity
-        return value * unit
+        return converted_value * b2unit
 
     def _convert_value_optional(
-        self, input: str, valuetype: type = None
+        self, input: str, valuetype: type = float
     ) -> str | Quantity:
         """
         _summary_
@@ -105,7 +107,7 @@ class ModelDialog(QtWidgets.QDialog):
         input : str
             _description_
         valuetype : type, optional
-            _description_, by default None
+            _description_, by default float
 
         Returns
         -------
@@ -307,6 +309,28 @@ class NeuronGroupDialog(ModelDialog):
         The base class of all dialogs in the b2_model_widget namespace.
     """
 
+    def accept(self) -> None:
+        # verify entries
+        if self.name not in self.model.neurongroups:
+            self.display_error("Error, first define a neurongroup by giving it a name")
+        elif (
+            "model" not in self.model.neurongroups[self.name]
+            or "n" not in self.model.neurongroups[self.name]
+        ):
+            self.display_error(
+                "The model equation and the neuronnumber need to be defined"
+            )
+        else:
+            # assemble neurongroup
+            try:
+                self.model.assemble_neurongroup(name=self.name)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Error when assembling neurongroup {self.name}: {e}"
+                ) from e
+
+            super().accept()
+
     def __init__(self, model: B2Model, parent: QtWidgets.QDialog | None = None) -> None:
         """
         Create a new NeuronGroupDialog instance which is displayed in a new window. Creates a table of
@@ -394,7 +418,7 @@ class NeuronGroupDialog(ModelDialog):
                 "refractory",
                 self.model.define_refractory,
                 self.refractory_button,
-                self._convert_value_optional,
+                partial(self._convert_value_optional, type=float),
             )
         )
 
@@ -586,7 +610,9 @@ class ParameterDialog(ModelDialog):
             )
             self.value_button.setText("saved")
 
-    def display_parameters(self, _: str | dict[Any, Any]) -> None:
+    def display_parameters(
+        self, _: str | dict[Any, Any], read_only: bool = True
+    ) -> None:
         """
         Display all the parameters in the system in a new window.
 
@@ -597,7 +623,7 @@ class ParameterDialog(ModelDialog):
         """
         d = self.model.parameters if self.model.parameters is not None else {}
 
-        super().display_parameters(d)
+        super().display_parameters(d, read_only=read_only)
 
 
 class DictionaryWidget(QtWidgets.QWidget):
@@ -747,7 +773,7 @@ class B2ModelWidget(ModelDialog):
 
         self.layout.addWidget(self.buttonBox, row + 1, 1, 1, 4, QtCore.Qt.AlignCenter)
 
-        # connect signals to slots on the outermost
+        # connect signals to slots on the outermost window
 
         self.add_neurongroup_button.clicked.connect(self.open_add_neurongroup_dialog)
         self.add_synapse_button.clicked.connect(self.open_add_synapse_dialog)
