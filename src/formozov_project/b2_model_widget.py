@@ -62,7 +62,7 @@ class ModelDialog(QtWidgets.QDialog):
         self.error_dialog.setIcon(QtWidgets.QMessageBox.Critical)
         self.error_dialog.setWindowTitle("Error")
         self.error_dialog.setText(message)
-        self.error_dialog.exec_()
+        self.error_dialog.exec()
 
     def accept_parameter(
         self,
@@ -143,7 +143,7 @@ class ModelDialog(QtWidgets.QDialog):
         layout.addWidget(self.dictwidget)
         self.dictwidget.setLayout(layout)
         window.resize(800, 600)
-        window.exec_()
+        window.exec()
 
     def not_connected(self) -> None:
         """
@@ -701,7 +701,7 @@ class B2ModelWidget(ModelDialog):
         """
         self.neuron_dlg = NeuronGroupDialog(self.model, self)
 
-        self.neuron_dlg.exec_()
+        self.neuron_dlg.exec()
 
     def open_add_synapse_dialog(self) -> None:
         """
@@ -709,7 +709,7 @@ class B2ModelWidget(ModelDialog):
         """
         self.synapse_dlg = SynapseDialog(self.model, self)
 
-        self.synapse_dlg.exec_()
+        self.synapse_dlg.exec()
 
     def open_add_parameter_dialog(self) -> None:
         """
@@ -717,4 +717,4 @@ class B2ModelWidget(ModelDialog):
         """
         self.param_dlg = ParameterDialog(self.model, self)
 
-        self.param_dlg.exec_()
+        self.param_dlg.exec()

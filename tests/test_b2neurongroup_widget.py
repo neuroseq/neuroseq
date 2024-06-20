@@ -40,7 +40,7 @@ def test_neurondialog_define_name(qtbot: QtBot, monkeypatch: MonkeyPatch) -> Non
     assert "x" in ndiag.model.neurongroups
 
     monkeypatch.setattr(
-        B2W.QtWidgets.QMessageBox, "exec_", B2W.QtWidgets.QMessageBox.show
+        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
     )
 
     qtbot.keyClicks(ndiag.name_entry, "y")
@@ -66,7 +66,7 @@ def test_neurondialog_define_equation(qtbot: QtBot, monkeypatch: MonkeyPatch) ->
     ndiag.show()
 
     monkeypatch.setattr(
-        B2W.QtWidgets.QMessageBox, "exec_", B2W.QtWidgets.QMessageBox.show
+        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
     )
     qtbot.mouseClick(ndiag.equation_button, QtCore.Qt.LeftButton)
 

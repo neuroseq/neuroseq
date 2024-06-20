@@ -13,7 +13,7 @@ from qtpy import QtWidgets
 
 
 def test_display_parameters_empty(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec_", B2W.QtWidgets.QDialog.show)
+    monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec", B2W.QtWidgets.QDialog.show)
 
     param_dlg = B2W.ParameterDialog(B2Model())
 
@@ -29,7 +29,7 @@ def test_display_parameters_empty(qtbot: QtBot, monkeypatch: MonkeyPatch) -> Non
 
 
 def test_display_parameters(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec_", B2W.QtWidgets.QDialog.show)
+    monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec", B2W.QtWidgets.QDialog.show)
 
     parameter_dlg = B2W.ParameterDialog(B2Model())
 
@@ -64,7 +64,7 @@ def test_parameterdialog_nothing_defined_errors(
     qtbot: QtBot, monkeypatch: MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        B2W.QtWidgets.QMessageBox, "exec_", B2W.QtWidgets.QMessageBox.show
+        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
     )
 
     param_dlg = B2W.ParameterDialog(B2Model())
