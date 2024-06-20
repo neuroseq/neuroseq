@@ -81,7 +81,7 @@ class ModelDialog(QtWidgets.QDialog):
 
         if len(v) == 1:
             raise ValueError(
-                "Qunatities must follow the pattern 'value * unit ' or 'value unit'"
+                "Quantities must follow the pattern 'value * unit ' or 'value unit'"
             )
 
         # Split the string into value and unit
@@ -100,19 +100,21 @@ class ModelDialog(QtWidgets.QDialog):
         self, input: str, valuetype: type = float
     ) -> str | Quantity:
         """
-        _summary_
+        Try to convert the input string into a brian2 quantity with a value of type `type` and
+        a unit as given in the string. If that fails, return the raw string.
+        This function is mostly useful where brian2 accepts either a quantity or a string.
 
         Parameters
         ----------
         input : str
-            _description_
+            Inputstring to possibly convert
         valuetype : type, optional
-            _description_, by default float
+            type of the quantities value: int, float, list, np.array etc, by default float
 
         Returns
         -------
         str | Quantity
-            _description_
+            Either the converted quantity if conversion is possible or the input string
         """
         try:
             return self._convert_string_to_quantity(input, valuetype=valuetype)
