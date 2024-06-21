@@ -15,7 +15,7 @@ def test_neurondialog_enter_close(qtbot: QtBot) -> None:
 
     neuron_dlg.show()
 
-    cancel_button = neuron_dlg.buttonBox.button(QtWidgets.QDialogButtonBox.Cancel)
+    cancel_button = neuron_dlg.button_box.button(QtWidgets.QDialogButtonBox.Cancel)
 
     qtbot.mouseClick(cancel_button, QtCore.Qt.LeftButton)
 

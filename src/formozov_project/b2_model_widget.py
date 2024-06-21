@@ -46,7 +46,7 @@ class ModelDialog(QtWidgets.QDialog):
 
         self.qtbtn = QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
 
-        # do not add these buttonbox immediatelly to the layout, as ok and cancel buttons are typically expected to appear on the last row
+        # do not add these button_box immediatelly to the layout, as ok and cancel buttons are typically expected to appear on the last row
 
         self.button_box = QtWidgets.QDialogButtonBox(self.qtbtn)
         self.button_box.accepted.connect(self.accept)
@@ -294,7 +294,7 @@ class ModelDialog(QtWidgets.QDialog):
         self.dictwidget = DictionaryWidget(d, window, read_only=read_only)
         layout.addWidget(self.dictwidget)
         self.dictwidget.setLayout(layout)
-        window.resize(800, 600)
+        window.resize(800, 600)  # FIXME: make this more flexible
         window.exec()
 
     def not_connected(self) -> None:
@@ -364,13 +364,11 @@ class NeuronGroupDialog(ModelDialog):
             "Refractory", QtWidgets.QLineEdit
         )
         self.solver, self.solver_button = self.add_text_field(
-            "Refractory", QtWidgets.QLineEdit
+            "Solver method", QtWidgets.QLineEdit
         )
         self.neuronnumber, self.neuronnumber_button = self.add_text_field(
             "Neuronnumber", QtWidgets.QLineEdit
         )
-
-        self.open_subgroup_button = QtWidgets.QPushButton("Create subgroup", self)
 
         for qle in [
             self.equation,
@@ -384,13 +382,10 @@ class NeuronGroupDialog(ModelDialog):
 
         row = self.layout.rowCount()
 
-        self.parambutton_box = QtWidgets.QHBoxLayout()
-
         # Add the buttons to the layout
-        self.parambutton_box.addWidget(self.show_parameters_button)
-        self.parambutton_box.addWidget(self.open_subgroup_button)
-
-        self.layout.addLayout(self.parambutton_box, row, 1, 1, 4, QtCore.Qt.AlignCenter)
+        self.layout.addWidget(
+            self.show_parameters_button, row, 1, 1, 4, QtCore.Qt.AlignCenter
+        )
 
         self.layout.addWidget(self.button_box, row + 1, 1, 1, 4, QtCore.Qt.AlignCenter)
 
@@ -399,8 +394,6 @@ class NeuronGroupDialog(ModelDialog):
         self.show_parameters_button.clicked.connect(
             partial(self.display_parameters, "neurongroups")
         )
-
-        self.open_subgroup_button.clicked.connect(self.open_subgroup_dialog)
 
         self.threshold_button.clicked.connect(
             partial(
@@ -471,16 +464,6 @@ class NeuronGroupDialog(ModelDialog):
             )
         )
 
-        default_size = self.size()
-
-        self.resize(
-            default_size.width() * 2, default_size.height() * 2
-        )  # Double the width and height
-
-    def open_subgroup_dialog(self) -> None:
-        self.subgroupdialog = NeuronSubgroupDialog(self.model, self)
-        self.subgroupdialog.exec()
-
 
 class NeuronSubgroupDialog(ModelDialog):
     """
@@ -496,16 +479,20 @@ class NeuronSubgroupDialog(ModelDialog):
         """
         Accept the current subgroup definition. Displays error message if false
         """
-        if self.name is None:
-            self.display_error("Error, every neuron subgroup needs a name.")
-
-        try:
-            self.model.define_neuron_subgroup(self.target, self.name, self.subgroup_def)
-            super().accept()
-        except Exception as e:
+        if self.name is None or self.target is None:
             self.display_error(
-                f"Error when defining a neuronsubgroup on target {self.target}: {e}"
+                "Error, every neuron subgroup needs a name and a defined target"
             )
+        else:
+            try:
+                self.model.define_neuron_subgroup(
+                    self.target, self.name, self.subgroup_def
+                )
+                super().accept()
+            except Exception as e:
+                self.display_error(
+                    f"Error when defining a neuronsubgroup on target {self.target}: {e}"
+                )
 
     def __init__(self, model: B2Model, parent: NeuronGroupDialog):
         """
@@ -522,44 +509,63 @@ class NeuronSubgroupDialog(ModelDialog):
         """
         super().__init__(model, parent)
 
-        if self.parent().name is None:
-            self.display_error(
-                "Name the neurongroup first before trying to build a subgroup"
-            )
-        else:
-            self.target = self.parent().name
+        self.target_name = None
+        self.subgroup_def = None
 
-            self.definition, self.definition_button = self.add_text_field(
-                "Equation", QtWidgets.QTextEdit
-            )
+        self.target, self.target_button = self.add_text_field(
+            "Target", QtWidgets.QLineEdit
+        )
 
-            self.name_button.clicked.connect(
-                partial(self.accept_name, target="neurongroups")
-            )
+        self.definition, self.definition_button = self.add_text_field(
+            "Indices", QtWidgets.QLineEdit
+        )
 
-            self.definition_button.clicked.connect(self.get_subgroup_def)
+        row = self.layout.rowCount()
 
-            row = self.layout.rowCount()
+        self.layout.addWidget(
+            self.show_parameters_button, row, 1, 1, 3, QtCore.Qt.AlignCenter
+        )
+        self.layout.addWidget(self.button_box, row + 1, 1, 1, 4, QtCore.Qt.AlignCenter)
 
-            self.layout.addWidget(
-                self.show_parameters_button, row, 1, 1, 3, QtCore.Qt.AlignCenter
-            )
-            self.layout.addWidget(
-                self.button_box, row + 1, 1, 1, 4, QtCore.Qt.AlignCenter
-            )
+        self.name_button.clicked.connect(
+            partial(self.accept_name, target="neurongroups")
+        )
+
+        self.definition_button.clicked.connect(self.get_subgroup_def)
+
+        self.target_button.clicked.connect(self.get_targetname)
+
+        self.show_parameters_button.clicked.connect(
+            partial(self.display_parameters, "neurongroups")
+        )
+
+    def showEvent(self, event):
+        # TODO: this is here to make the window a bit bigger. Is there a better way to do this?
+        # Get the default size
+        default_size = self.size()
+
+        # Set the window size relative to the default size
+        self.resize(
+            default_size.width() * 2, default_size.height() * 1.2
+        )  # Double the width and height
 
     def get_subgroup_def(self) -> None:
         """
         parse the input string of the input field into a suitable type for defining neuronsubgroups
         """
-        subgrp = self.definition.text()
+        subgrp = self.definition.text().strip()
 
         # try to convert text input into one of the suitable type
         try:
-            self.subgroup_def = literal_eval(subgrp)
+            if "slice(" in subgrp:
+                # README: eval is generally insecure, but literal_eval does not support slices.
+                # Perhaps add a custom function in the future to get rid of eval here.
+                self.subgroup_def = eval(subgrp)
+            else:
+                self.subgroup_def = literal_eval(subgrp)
         except Exception as e:
             self.display_error(
-                f"Error when trying to build subgroup {self.name} of neurongroup {self.target}: {e}"
+                f"Error when trying to build subgroup {self.name} of neurongroup {self.target}: {e} with input {subgrp}"
             )
 
         if type(self.subgroup_def) not in [slice, list, int, tuple]:
@@ -568,6 +574,64 @@ class NeuronSubgroupDialog(ModelDialog):
             )
 
         self.definition_button.setDown(True)
+        self.definition_button.setText("saved")
+
+    def get_targetname(self):
+        """
+        Accept the given target name. Check that it corresponds to an existing neurongroup first.
+        """
+        tgt = self.target.text()
+
+        if tgt not in self.model.neurongroups:
+            self.display_error(
+                f"Define the neurongroup first before you define a subgroup for it. {tgt} is not known"
+            )
+        else:
+            self.target_name = tgt
+            self.target_button.setDown()
+            self.target_button.text = "saved"
+
+    def display_parameters(
+        self, target: str | dict[Any, Any], read_only: bool = False
+    ) -> None:
+        """
+        Display the parameters of a target member of the model in a new window.
+
+        Parameters
+        ----------
+        target : str
+            name of the target variable in the model
+        """
+        if isinstance(target, str):
+            d = getattr(self.model, target).get(self.name, None)
+        else:
+            d = target
+
+        window = QtWidgets.QDialog(self)
+        layout = QtWidgets.QVBoxLayout(window)
+        table = QtWidgets.QTableWidget(window)
+        table.setRowCount(3)
+        table.setColumnCount(2)
+
+        for i, (n, v) in enumerate(
+            zip(
+                ["name", "target", "indices"],
+                [self.name, self.target_name, self.subgroup_def],
+            )
+        ):
+            table.setItem(i, 0, QtWidgets.QTableWidgetItem(str(n)))
+            table.setItem(i, 1, QtWidgets.QTableWidgetItem(str(v)))
+
+        layout.addWidget(table)
+
+        default_size = window.size()
+
+        # Set the window size relative to the default size
+        window.resize(
+            default_size.width() * 3, default_size.height() * 6
+        )  # Double the width and height
+
+        window.exec()
 
 
 class SynapseDialog(ModelDialog):
@@ -858,33 +922,41 @@ class B2ModelWidget(ModelDialog):
         self.add_neurongroup_button = QtWidgets.QPushButton("Add neurongroup", self)
         self.add_synapse_button = QtWidgets.QPushButton("Add synapse", self)
         self.display_system_button = QtWidgets.QPushButton("Display system", self)
+        self.add_subgroup_button = QtWidgets.QPushButton("Add neuron subgroup", self)
 
-        row = self.layout.rowCount()
-
-        self.layout.addWidget(self.add_parameter_button, row, 1)
+        self.layout.addWidget(self.add_parameter_button, 1, 4)
 
         self.layout.addWidget(
             self.add_neurongroup_button,
-            row,
             2,
+            4,
         )
+
+        self.layout.addWidget(self.add_subgroup_button, 3, 4)
 
         self.layout.addWidget(
             self.add_synapse_button,
-            row,
-            3,
+            4,
+            4,
         )
 
-        self.layout.addWidget(self.display_system_button, row, 4)
+        self.layout.addWidget(self.display_system_button, 5, 4)
 
-        self.layout.addWidget(self.button_box, row + 1, 1, 1, 4, QtCore.Qt.AlignCenter)
+        self.layout.addWidget(self.button_box, 6, 1, 1, 4, QtCore.Qt.AlignCenter)
+
+        for qle in [
+            self.name_entry,
+            self.timestep,
+            self.seed,
+        ]:
+            qle.setMinimumWidth(qle.sizeHint().width() * 2)
 
         # connect signals to slots on the outermost window
-
         self.add_neurongroup_button.clicked.connect(self.open_add_neurongroup_dialog)
         self.add_synapse_button.clicked.connect(self.open_add_synapse_dialog)
         self.add_parameter_button.clicked.connect(self.open_add_parameter_dialog)
         self.display_system_button.clicked.connect(self.display_system)
+        self.add_subgroup_button.clicked.connect(self.open_subgroup_dialog)
 
         self.timestep_button.clicked.connect(self.not_connected)
         self.seed_button.clicked.connect(self.not_connected)
@@ -931,3 +1003,10 @@ class B2ModelWidget(ModelDialog):
         self.param_dlg = ParameterDialog(self.model, self)
 
         self.param_dlg.exec()
+
+    def open_subgroup_dialog(self) -> None:
+        """
+        Open a new window to define a neuron subgroup for the model
+        """
+        self.subgroupdialog = NeuronSubgroupDialog(self.model, self)
+        self.subgroupdialog.exec()
