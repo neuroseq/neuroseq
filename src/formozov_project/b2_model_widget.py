@@ -326,7 +326,6 @@ class NeuronGroupDialog(ModelDialog):
                 "The model equation and the neuronnumber need to be defined"
             )
         else:
-            # assemble neurongroup
             try:
                 self.model.assemble_neurongroup(name=self.name)
             except Exception as e:
@@ -474,6 +473,28 @@ class SynapseDialog(ModelDialog):
         The base class of all dialogs in the b2_model_widget namespace.
     """
 
+    def accept(self) -> None:
+        if self.name not in self.model.synapses:
+            self.display_error(
+                "Error, first define a synapse system by giving it a name"
+            )
+        elif (
+            "model" not in self.model.synapses[self.name]
+            or "target" not in self.model.synapses[self.name]
+            or "origin" not in self.model.synapses[self.name]
+        ):
+            self.display_error(
+                "The model equation and the origin- and target neurongroups need to be defined"
+            )
+        else:
+            try:
+                self.model.assemble_synapse(name=self.name)
+                super().accept()
+            except Exception as e:
+                self.display_error(
+                    f"Error when assembling neurongroup {self.name}: {e}"
+                )
+
     def __init__(self, model: B2Model, parent: QtWidgets.QDialog | None = None) -> None:
         """
         Create a new SynapseDialog instance and display it in a new window.
@@ -532,14 +553,71 @@ class SynapseDialog(ModelDialog):
 
         self.layout.addWidget(self.buttonBox, row + 1, 1, 1, 4, QtCore.Qt.AlignCenter)
 
-        # connect signals and sockets: TODO
-        self.origin_button.clicked.connect(self.not_connected)
-        self.target_button.clicked.connect(self.not_connected)
-        self.equation_button.clicked.connect(self.not_connected)
-        self.pre_button.clicked.connect(self.not_connected)
-        self.post_button.clicked.connect(self.not_connected)
-        self.connect_button.clicked.connect(self.not_connected)
-        self.connect_prob_button.clicked.connect(self.not_connected)
+        # connect signals and slots
+        self.origin_button.clicked.connect(
+            partial(
+                self.accept_parameter_with_savebutton,
+                self.origin,
+                "origin",
+                self.model.define_synapse_origin,
+                self.origin_button,
+            )
+        )
+        self.target_button.clicked.connect(
+            partial(
+                self.accept_parameter_with_savebutton,
+                self.target,
+                "target",
+                self.model.define_synapse_target,
+                self.target_button,
+            )
+        )
+        self.equation_button.clicked.connect(
+            partial(
+                self.accept_parameter_with_savebutton,
+                self.equation,
+                "equation",
+                self.model.define_synapse_equation,
+                self.equation_button,
+            )
+        )
+        self.pre_button.clicked.connect(
+            partial(
+                self.accept_parameter_with_savebutton,
+                self.pre,
+                "on_pre",
+                self.model.define_synapse_pre,
+                self.pre_button,
+            )
+        )
+        self.post_button.clicked.connect(
+            partial(
+                self.accept_parameter_with_savebutton,
+                self.post,
+                "on_post",
+                self.model.define_synapse_post,
+                self.post_button,
+            )
+        )
+        self.connect_button.clicked.connect(
+            partial(
+                self.accept_parameter_with_savebutton,
+                self.connect,
+                "connection_condition",
+                self.model.define_synapse_connection,
+                self.connect_button,
+            )
+        )
+        self.connect_prob_button.clicked.connect(
+            partial(
+                self.accept_parameter_with_savebutton,
+                self.connect_prob,
+                "connection_probability",
+                self.model.define_synapse_connection_probablitiy,
+                self.connect_prob_button,
+                converter=lambda input: float(input),
+            )
+        )
 
         self.name_button.clicked.connect(partial(self.accept_name, "synapses"))
         self.show_parameters_button.clicked.connect(
