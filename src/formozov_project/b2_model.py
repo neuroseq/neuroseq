@@ -280,14 +280,19 @@ class B2Model:
             Indices of the target neurongroup neurons to add to the subgroup.
         """
         sng = None
-
         if isinstance(idxs, tuple):
             sng = self.network[target_name][idxs[0] : idxs[1]]
         else:
             sng = self.network[target_name][idxs]
 
         self.logger.info(f"Neuron subgroup defined: {identifier}")
-        self.network.add(sng)
+
+        try:
+            self.network.add(sng)
+        except Exception as e:
+            raise RuntimeError(
+                f"Error when adding subgroup {identifier} of neurongroup {target_name}: {e}"
+            ) from e
 
         self._update_nested_dict(
             self.neurongroups,

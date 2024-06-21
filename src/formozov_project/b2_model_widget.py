@@ -479,22 +479,22 @@ class NeuronSubgroupDialog(ModelDialog):
         """
         Accept the current subgroup definition. Displays error message if false
         """
-        if self.name is None or self.target is None:
+        if self.name is None or self.target_name is None:
             self.display_error(
                 "Error, every neuron subgroup needs a name and a defined target"
             )
         else:
             try:
                 self.model.define_neuron_subgroup(
-                    self.target, self.name, self.subgroup_def
+                    self.target_name, self.name, self.subgroup_def
                 )
                 super().accept()
             except Exception as e:
                 self.display_error(
-                    f"Error when defining a neuronsubgroup on target {self.target}: {e}"
+                    f"Error when defining a neuronsubgroup on target {self.target_name}: {e}"
                 )
 
-    def __init__(self, model: B2Model, parent: NeuronGroupDialog):
+    def __init__(self, model: B2Model, parent: QtWidgets.QWidget | None = None):
         """
         Create a new dialog to define a neuronsubgroup of an existing neurongroup. This neurongroup is
         always set to be defined in the parent dialog fo this window.
@@ -504,13 +504,13 @@ class NeuronSubgroupDialog(ModelDialog):
         ----------
         model : B2Model
             Model to define a subgroup for
-        parent :NeuronGroupDialog
-            parent window. Defines the parent neurongroup
+        parent :QtWidgets.QWidget
+            parent window. Defines the parentwindow
         """
         super().__init__(model, parent)
 
-        self.target_name = None
-        self.subgroup_def = None
+        self.target_name: str | None = None
+        self.subgroup_def: int | slice | tuple | list = 0
 
         self.target, self.target_button = self.add_text_field(
             "Target", QtWidgets.QLineEdit
@@ -539,7 +539,7 @@ class NeuronSubgroupDialog(ModelDialog):
             partial(self.display_parameters, "neurongroups")
         )
 
-    def showEvent(self, event):
+    def showEvent(self, event: QtCore.QEvent) -> None:
         # TODO: this is here to make the window a bit bigger. Is there a better way to do this?
         # Get the default size
         default_size = self.size()
@@ -565,18 +565,18 @@ class NeuronSubgroupDialog(ModelDialog):
                 self.subgroup_def = literal_eval(subgrp)
         except Exception as e:
             self.display_error(
-                f"Error when trying to build subgroup {self.name} of neurongroup {self.target}: {e} with input {subgrp}"
+                f"Error when trying to build subgroup {self.name} of neurongroup {self.target_name}: {e} with input {subgrp}"
             )
 
         if type(self.subgroup_def) not in [slice, list, int, tuple]:
             self.display_error(
-                f"subgroup {self.name} of neurongroup {self.target} is defined with a wrong type: {type(self.subgroup_def)}"
+                f"subgroup {self.name} of neurongroup {self.target_name} is defined with a wrong type: {type(self.subgroup_def)}"
             )
 
         self.definition_button.setDown(True)
         self.definition_button.setText("saved")
 
-    def get_targetname(self):
+    def get_targetname(self) -> None:
         """
         Accept the given target name. Check that it corresponds to an existing neurongroup first.
         """
@@ -588,28 +588,23 @@ class NeuronSubgroupDialog(ModelDialog):
             )
         else:
             self.target_name = tgt
-            self.target_button.setDown()
+            self.target_button.setDown(True)
             self.target_button.text = "saved"
 
     def display_parameters(
-        self, target: str | dict[Any, Any], read_only: bool = False
+        self, _: str | dict[Any, Any] | None = None, read_only: bool = False
     ) -> None:
         """
         Display the parameters of a target member of the model in a new window.
 
         Parameters
         ----------
-        target : str
-            name of the target variable in the model
+        target : str dummy
         """
-        if isinstance(target, str):
-            d = getattr(self.model, target).get(self.name, None)
-        else:
-            d = target
 
-        window = QtWidgets.QDialog(self)
-        layout = QtWidgets.QVBoxLayout(window)
-        table = QtWidgets.QTableWidget(window)
+        self.parameterwindow = QtWidgets.QDialog(self)
+        layout = QtWidgets.QVBoxLayout(self.parameterwindow)
+        table = QtWidgets.QTableWidget(self.parameterwindow)
         table.setRowCount(3)
         table.setColumnCount(2)
 
@@ -619,19 +614,27 @@ class NeuronSubgroupDialog(ModelDialog):
                 [self.name, self.target_name, self.subgroup_def],
             )
         ):
-            table.setItem(i, 0, QtWidgets.QTableWidgetItem(str(n)))
-            table.setItem(i, 1, QtWidgets.QTableWidgetItem(str(v)))
+            nameitem = QtWidgets.QTableWidgetItem(str(n))
+            valueitem = QtWidgets.QTableWidgetItem(str(v))
+
+            if read_only:
+                nameitem.setFlags(nameitem.flags() & ~QtCore.Qt.ItemIsEditable)
+                valueitem.setFlags(valueitem.flags() & ~QtCore.Qt.ItemIsEditable)
+
+            table.setItem(i, 0, nameitem)
+            table.setItem(i, 1, valueitem)
 
         layout.addWidget(table)
+        self.parameterwindow.setLayout(layout)
 
-        default_size = window.size()
+        default_size = self.parameterwindow.size()
 
         # Set the window size relative to the default size
-        window.resize(
+        self.parameterwindow.resize(
             default_size.width() * 3, default_size.height() * 6
         )  # Double the width and height
 
-        window.exec()
+        self.parameterwindow.exec()
 
 
 class SynapseDialog(ModelDialog):
