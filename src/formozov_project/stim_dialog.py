@@ -16,13 +16,13 @@ class StimDialog(QtWidgets.QDialog):
 
     def __init__(
         self,
-        stim: np.ndarray | None = None,
+        stims: np.ndarray | None = None,
         dt: float = 1.0,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Edit Stimuli")
-        self.stim = stim.copy() if stim is not None else np.zeros((1, 1))
+        self.stims = stims.copy() if stims is not None else np.zeros((1, 1))
         self.dt = dt
         layout = QtWidgets.QVBoxLayout()
         self.buttonBox = QtWidgets.QDialogButtonBox(
@@ -30,16 +30,17 @@ class StimDialog(QtWidgets.QDialog):
             | QtWidgets.QDialogButtonBox.StandardButton.Cancel
         )
         split_left_right = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
-        self.stim_widget = StimWidget(self.stim, dt=dt)
+        self.stim_widget = StimWidget()
         split_left_right.addWidget(self.stim_widget)
-        self.stim_console_widget = StimConsoleWidget(stim=self.stim)
+        self.stim_console_widget = StimConsoleWidget(stims=self.stims)
         split_left_right.addWidget(self.stim_console_widget)
         layout.addWidget(split_left_right)
         self.setLayout(layout)
         layout.addWidget(self.buttonBox)
-        self.stim_console_widget.stim_updated.connect(self._update_stim)
+        self.stim_console_widget.stims_updated.connect(self._update_stim)
         self.buttonBox.accepted.connect(self.accept)
         self.buttonBox.rejected.connect(self.reject)
+        self._update_stim(self.stims, valid=True)
 
     def _update_stim(self, stim: np.ndarray, valid: bool) -> None:
         self.buttonBox.button(QtWidgets.QDialogButtonBox.StandardButton.Ok).setEnabled(
@@ -47,4 +48,4 @@ class StimDialog(QtWidgets.QDialog):
         )
         if valid:
             self.stim_widget.set_data(stim, dt=self.dt)
-            self.stim = stim
+            self.stims = stim
