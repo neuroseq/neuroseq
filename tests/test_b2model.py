@@ -90,11 +90,14 @@ def test_define_parameter(mfx: b2_model.B2Model) -> None:
     mfx.define_parameter("taue", 5 * b2.ms)
     mfx.define_parameter("taui", 10 * b2.ms)
     mfx.define_parameter("area", 20000 * b2.umetre**2)
+    timed_array = b2.TimedArray(np.random.rand(10, 100) * b2.mS, dt=1 * b2.ms)
+    mfx.define_parameter("stim", timed_array)
 
     assert mfx.parameters == {
         "taue": 5 * b2.ms,
         "taui": 10 * b2.ms,
         "area": 20000 * b2.umetre**2,
+        "stim": timed_array,
     }
 
 

@@ -155,7 +155,9 @@ class B2Model:
         """
         self.network.name = self.name
 
-    def define_parameter(self, name: str, value: str | b2.Quantity) -> None:
+    def define_parameter(
+        self, name: str, value: str | b2.Quantity | b2.TimedArray
+    ) -> None:
         """
         define_parameter Define a parameter for *any* model equation in the network. All elements will get the same set of parameters,
         so make sure to not include doublings. This is *NOT* verified.
@@ -165,8 +167,8 @@ class B2Model:
         name : str
             parameter name
 
-        value : str | b2.Quantity
-            value to be used. Can be an expression in the form of a string or a quantity with units.
+        value : str | b2.Quantity | b2.TimedArray
+            value to be used. Can be an expression in the form of a string or a quantity with units or a TimedArray.
         """
         if self.parameters is None:
             self.parameters = {}
