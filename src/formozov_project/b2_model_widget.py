@@ -906,6 +906,51 @@ class MonitorDialog(ModelDialog):
         except Exception as e:
             self.display_error(f"Error when defining monitor {self.name}: {e}")
 
+    def display_parameters(
+        self, _: str | dict[Any, Any] | None = None, read_only: bool = False
+    ) -> None:
+        """
+        Display the parameters of a target member of the model in a new window.
+
+        Parameters
+        ----------
+        target : str dummy
+        """
+
+        self.parameterwindow = QtWidgets.QDialog(self)
+        layout = QtWidgets.QVBoxLayout(self.parameterwindow)
+        table = QtWidgets.QTableWidget(self.parameterwindow)
+        table.setRowCount(4)
+        table.setColumnCount(2)
+
+        for i, (n, v) in enumerate(
+            zip(
+                ["name", "type", "source", "variable"],
+                [self.name, self.tp, self.src, self.var],
+            )
+        ):
+            nameitem = QtWidgets.QTableWidgetItem(str(n))
+            valueitem = QtWidgets.QTableWidgetItem(str(v))
+
+            if read_only:
+                nameitem.setFlags(nameitem.flags() & ~QtCore.Qt.ItemIsEditable)
+                valueitem.setFlags(valueitem.flags() & ~QtCore.Qt.ItemIsEditable)
+
+            table.setItem(i, 0, nameitem)
+            table.setItem(i, 1, valueitem)
+
+        layout.addWidget(table)
+        self.parameterwindow.setLayout(layout)
+
+        default_size = self.parameterwindow.size()
+
+        # Set the window size relative to the default size
+        self.parameterwindow.resize(
+            default_size.width() * 3, default_size.height() * 6
+        )  # Double the width and height
+
+        self.parameterwindow.exec()
+
 
 class B2ModelWidget(ModelDialog):
     """
