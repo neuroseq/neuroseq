@@ -261,7 +261,7 @@ class B2Model:
         self.logger.info(f"Neuron number defined: {n}")
 
     def define_neuron_subgroup(
-        self, target_name: str, identifier: str, idxs: slice | int | list
+        self, target_name: str, identifier: str, idxs: slice | int | list | tuple
     ) -> None:
         """
         define_neuron_subgroup Define a subgroup of a neurongroup as a separate element that can be referred to by name.
@@ -276,7 +276,7 @@ class B2Model:
             automatically determined brian2. This name can be accessed by
             accessing the `neurongroup[identifier]['name']` element of the
             calling instance.
-        idxs : slice | int | list
+        idxs : slice | int | list |"tuple
             Indices of the target neurongroup neurons to add to the subgroup.
         """
         sng = None
