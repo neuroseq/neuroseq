@@ -489,11 +489,11 @@ class SynapseDialog(ModelDialog):
         else:
             try:
                 self.model.assemble_synapse(name=self.name)
+                super().accept()
             except Exception as e:
                 self.display_error(
                     f"Error when assembling neurongroup {self.name}: {e}"
                 )
-        super().accept()
 
     def __init__(self, model: B2Model, parent: QtWidgets.QDialog | None = None) -> None:
         """
