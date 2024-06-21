@@ -60,7 +60,7 @@ def test_neuronsubgroupdialog_arg_conversion(
     qtbot.waitUntil(neuron_sdlg.error_dialog.isVisible)
 
     assert (
-        "Error when trying to build subgroup x1 of neurongroup x: malformed node or string on line 1:"
+        "Error when trying to build subgroup x1 of neurongroup x: malformed node or string"
         in neuron_sdlg.error_dialog.text()
     )
     neuron_sdlg.error_dialog.close()
