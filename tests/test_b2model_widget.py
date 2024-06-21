@@ -12,7 +12,10 @@ def test_name_def_save_not_implemented(
     qtbot: QtBot,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    b2w = B2W.B2ModelWidget(B2Model(), None, {})
+    b2w = B2W.B2ModelWidget(
+        B2Model(),
+        None,
+    )
 
     qtbot.addWidget(b2w)
 
@@ -47,7 +50,7 @@ def test_name_def_save_not_implemented(
 
 
 def test_dt_def_save_not_implemented(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
-    b2w = B2W.B2ModelWidget(B2Model(), None, {})
+    b2w = B2W.B2ModelWidget(B2Model(), None)
 
     qtbot.addWidget(b2w)
 
@@ -81,7 +84,10 @@ def test_dt_def_save_not_implemented(qtbot: QtBot, monkeypatch: MonkeyPatch) -> 
 def test_random_seed_def_save_not_implemented(
     qtbot: QtBot, monkeypatch: MonkeyPatch
 ) -> None:
-    b2w = B2W.B2ModelWidget(B2Model(), None, {})
+    b2w = B2W.B2ModelWidget(
+        B2Model(),
+        None,
+    )
 
     b2w.show()
 
@@ -116,7 +122,10 @@ def test_random_seed_def_save_not_implemented(
 def test_open_module_dialogs(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec", B2W.QtWidgets.QDialog.show)
 
-    b2w = B2W.B2ModelWidget(B2Model(), None, {})
+    b2w = B2W.B2ModelWidget(
+        B2Model(),
+        None,
+    )
 
     b2w.show()
 
