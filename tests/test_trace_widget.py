@@ -15,12 +15,10 @@ def test_trace_widget_no_data(qtbot: QtBot) -> None:
 
 
 def test_trace_widget_data(qtbot: QtBot) -> None:
-    traces = []
     n_neurons = 20
     n_timestamps = 100
+    traces = np.random.rand(n_neurons, n_timestamps)
     timestamps = np.arange(n_timestamps)
-    for _ in range(n_neurons):
-        traces.append(np.random.rand(n_timestamps))
     trace_widget = TraceWidget(traces=traces, timestamps=timestamps)
     qtbot.addWidget(trace_widget)
     trace_widget.show()
