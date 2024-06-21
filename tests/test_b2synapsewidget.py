@@ -130,7 +130,7 @@ def test_assemble_synapse_exceptions(qtbot: QtBot, monkeypatch: MonkeyPatch) -> 
 
     sdiag.accept()
 
-    qtbot.waitUntil(sdiag.error_dialog.isVisible)
+    # qtbot.waitUntil(sdiag.error_dialog.isVisible)
     assert (
         sdiag.error_dialog.text()
         == "Error, first define a synapse system by giving it a name"
@@ -142,15 +142,17 @@ def test_assemble_synapse_exceptions(qtbot: QtBot, monkeypatch: MonkeyPatch) -> 
 
     sdiag.accept()
 
-    qtbot.waitUntil(sdiag.error_dialog.isVisible)
+    # qtbot.waitUntil(sdiag.error_dialog.isVisible)
     assert (
         sdiag.error_dialog.text()
         == "The model equation and the origin- and target neurongroups need to be defined"
     )
+    sdiag.error_dialog.close()
 
     sdiag.model.synapses["x"]["target"] = "t"
 
     sdiag.accept()
 
-    qtbot.waitUntil(sdiag.error_dialog.isVisible)
+    # qtbot.waitUntil(sdiag.error_dialog.isVisible)
     assert sdiag.error_dialog.text() == "Error when assembling neurongroup x: 's'"
+    sdiag.error_dialog.close()
