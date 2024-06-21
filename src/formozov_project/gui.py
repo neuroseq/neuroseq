@@ -15,6 +15,7 @@ from formozov_project import __version__
 from formozov_project.b2_model import B2Model
 from formozov_project.b2_model_widget import B2ModelWidget
 from formozov_project.heatmap_widget import HeatmapWidget
+from formozov_project.stim_dialog import StimDialog
 from formozov_project.trace_widget import TraceWidget
 
 
@@ -342,4 +343,11 @@ def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
     toolbar.addSeparator()
     help_menu = menu.addMenu("&Help")
     _add_action("&About", gui.about, help_menu)
+    # temporary menu for demo purposes for widgets that are not yet integrated
+    temp_menu = menu.addMenu("&Temp demos")
+    _add_action(
+        "&StimDialog",
+        lambda: StimDialog(stim=np.zeros((64, 100))).exec(),
+        temp_menu,
+    )
     return toolbar

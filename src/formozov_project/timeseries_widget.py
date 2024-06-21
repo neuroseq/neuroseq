@@ -12,13 +12,16 @@ from formozov_project.timeline import Timeline
 class TimeseriesWidget(pg.PlotWidget):
     """A base class for widgets that display a set of timeseries data for a number of neurons, stacked vertically.
 
+    data should be a 2d array, where the first index is the neuron index and the second index is the time index.
+
     _plot_data() must be implemented by subclasses to plot the data.
     """
 
     def __init__(
         self,
-        data: list[np.ndarray] | None = None,
+        data: np.ndarray | None = None,
         timestamps: np.ndarray | None = None,
+        dt: float | None = None,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -28,12 +31,7 @@ class TimeseriesWidget(pg.PlotWidget):
         self.getAxis("top").show()
         self.set_data(data, timestamps)
 
-    def clear(self) -> None:
-        self.neuron_plots.clear()
-        self.selected_neuron = None
-        super().clear()
-
-    def _plot_data(self, data: list[np.ndarray], timestamps: np.ndarray) -> None:
+    def _plot_data(self, data: np.ndarray, timestamps: np.ndarray) -> None:
         """Plot the data for each neuron.
 
         This method should create a plot for each neuron and store them in the self.neuron_plots list.
@@ -45,21 +43,26 @@ class TimeseriesWidget(pg.PlotWidget):
 
     def set_data(
         self,
-        data: list[np.ndarray] | None = None,
+        data: np.ndarray | None = None,
         timestamps: np.ndarray | None = None,
+        dt: float | None = None,
     ) -> None:
+        self.neuron_plots.clear()
+        self.selected_neuron = None
         self.clear()
-        if data is None or len(data) == 0:
+        if data is None or data.shape[0] == 0:
             return
+        if dt is None:
+            dt = 1.0
         if timestamps is None:
-            timestamps = np.arange(data[0].shape[0])
+            timestamps = dt * np.arange(data.shape[1])
         self.plotItem.getAxis("bottom").setLabel("Time (s)")
         # set the y-axis to display the trace index
         self.plotItem.getAxis("left").setLabel("Neuron")
         self.plotItem.getAxis("left").setTickSpacing(1, 1)
         # don't let user zoom/pan outside of the data
         self.setLimits(
-            xMin=timestamps[0], xMax=timestamps[-1], yMin=-0.5, yMax=len(data) - 0.5
+            xMin=timestamps[0], xMax=timestamps[-1], yMin=-0.5, yMax=data.shape[0] - 0.5
         )
         self.addItem(self.timeline)
         self._plot_data(data, timestamps)
