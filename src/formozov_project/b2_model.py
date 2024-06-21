@@ -548,7 +548,13 @@ class B2Model:
             self.logger.critical(message)
             raise RuntimeError(message) from e
 
-        self.network.add(monitor)
+        try:
+            self.network.add(monitor)
+        except Exception as e:
+            message = f"Error in adding monitor {name} to network: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
+
         self.monitors[name] = {
             "name": name,
             "type": cls.__name__,
