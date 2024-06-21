@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ast import literal_eval
 from functools import partial
+from importlib import import_module
 from typing import Any
 from typing import Callable
 from typing import cast
@@ -867,7 +868,7 @@ class MonitorDialog(ModelDialog):
         tptext = self.type.text()
 
         if tptext in ["StateMonitor", "SpikeMonitor"]:
-            self.tp = eval(tptext)
+            self.tp = getattr(import_module("brian2"), tptext)
             self.type_button.setDown(True)
             self.type_button.setText("saved")
         else:

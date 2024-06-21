@@ -60,6 +60,8 @@ def test_monitor_accept_variables(qtbot: QtBot, monkeypatch: MonkeyPatch) -> Non
 
     assert mdlg.error_dialog.text() == "Please define variable first"
 
+    mdlg.error_dialog.close()
+
 
 def test_monitor_accept(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec", B2W.QtWidgets.QDialog.show)
