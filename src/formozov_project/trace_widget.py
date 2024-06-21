@@ -18,14 +18,22 @@ class TraceWidget(TimeseriesWidget):
 
     def __init__(
         self,
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+
+    def set_data(
+        self,
         traces: np.ndarray | None = None,
         timestamps: np.ndarray | None = None,
         dt: float | None = None,
-        parent: QtWidgets.QWidget | None = None,
     ) -> None:
-        super().__init__(traces, timestamps, dt, parent)
+        super()._plot_data(traces, timestamps, dt)
 
-    def _plot_data(self, data: np.ndarray, timestamps: np.ndarray) -> None:
+    def _plot_neuron_data(
+        self, data: list[np.ndarray] | np.ndarray, timestamps: np.ndarray, dt: float
+    ) -> None:
+        assert isinstance(data, np.ndarray)
         trace_norm = 2.0 * np.max(np.abs(data))
         for index, trace in enumerate(data):
             # offset each trace by its index, give each trace a unique color

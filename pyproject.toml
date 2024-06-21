@@ -41,6 +41,8 @@ select = [
   "SIM",
   # isort
   "I",
+  # numpy 2.0 support
+  "NPY201",
 ]
 ignore = ["E501"]
 
