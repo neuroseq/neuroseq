@@ -6,8 +6,6 @@ from typing import Any
 from typing import Callable
 
 from brian2 import Quantity
-from brian2 import SpikeMonitor
-from brian2 import StateMonitor
 from brian2 import Unit
 from brian2 import units
 from qtpy import QtCore
