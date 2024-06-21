@@ -4,6 +4,7 @@ from ast import literal_eval
 from functools import partial
 from typing import Any
 from typing import Callable
+from typing import cast
 
 from brian2 import Quantity
 from brian2 import Unit
@@ -797,7 +798,7 @@ class MonitorDialog(ModelDialog):
         Common baseclass for all model dialogs
     """
 
-    def __init__(self, model: B2Model, parent: QtWidgets.QDialog) -> None:
+    def __init__(self, model: B2Model, parent: QtWidgets.QDialog = None) -> None:
         """
         Open a new dialog to define a monitor
 
@@ -810,9 +811,9 @@ class MonitorDialog(ModelDialog):
         """
         super().__init__(model, parent)
 
-        self.tp = None
-        self.var = None
-        self.src = None
+        self.tp: type | None = None
+        self.var: str | None = None
+        self.src: str | None = None
 
         self.type, self.type_button = self.add_text_field(
             "Type",
@@ -855,7 +856,7 @@ class MonitorDialog(ModelDialog):
 
         self.variable_button.clicked.connect(self.accept_variable)
 
-    def accept_type(self):
+    def accept_type(self) -> None:
         """
         Accept the type input
         """
@@ -872,7 +873,7 @@ class MonitorDialog(ModelDialog):
         else:
             self.display_error(f"Monitor type {tptext} is invalid")
 
-    def accept_source(self):
+    def accept_source(self) -> None:
         """
         Accept the source input
         """
@@ -884,7 +885,7 @@ class MonitorDialog(ModelDialog):
         self.source_button.setText("saved")
         self.source_button.setDown(True)
 
-    def accept_variable(self):
+    def accept_variable(self) -> None:
         """
         Accept the variable input
         """
@@ -896,12 +897,17 @@ class MonitorDialog(ModelDialog):
         self.variable_button.setText("saved")
         self.variable_button.setDown(True)
 
-    def accept(self):
+    def accept(self) -> None:
         """
         Accept the monitor data and define a new monitor in the held model
         """
         try:
-            self.model.define_monitor(self.name, self.tp, self.src, self.var)
+            self.model.define_monitor(
+                cast(str, self.name),
+                cast(type, self.tp),
+                cast(str, self.src),
+                cast(str, self.var),
+            )
             super().accept()
         except Exception as e:
             self.display_error(f"Error when defining monitor {self.name}: {e}")
