@@ -57,20 +57,29 @@ class Gui(QtWidgets.QMainWindow):
         self.trace_widget.connect_heatmap_widget(self.heatmap_widget)
 
     def _update_data(self) -> None:
-        if len(self.model.network["M"].t) == 0:
+        # for now just display the first variable from the first StateMonitor we find
+        state_monitors = [
+            obj
+            for obj in self.model.network.objects
+            if isinstance(obj, b2.StateMonitor)
+        ]
+        if (
+            len(state_monitors) == 0
+            or len(state_monitors[0].t) == 0
+            or len(state_monitors[0].record_variables) == 0
+        ):
             self.trace_widget.set_data()
             self.heatmap_widget.set_data()
             return
-        self.trace_widget.set_data(
-            self.model.network["M"].y,
-            self.model.network["M"].t / b2.second,
-        )
+        monitor = state_monitors[0]
+        variable = monitor.record_variables[0]
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+        timestamps = monitor.t
+        traces = getattr(monitor, variable)
+        self.trace_widget.set_data(traces, timestamps / b2.second)
         # for now just display outer product of traces as heatmap data
-        outer = np.array(
-            [np.outer(trace, trace) for trace in self.model.network["M"].y.T]
-        )
-        self.heatmap_widget.set_data(outer, self.model.network["M"].t / b2.second)
+        outer = np.array([np.outer(trace, trace) for trace in traces.T])
+        self.heatmap_widget.set_data(outer, timestamps / b2.second)
         QtWidgets.QApplication.restoreOverrideCursor()
 
     def _update_simulation_progress(
