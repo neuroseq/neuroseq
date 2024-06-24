@@ -130,6 +130,14 @@ class B2Model:
 
         self._add_equation_to_group(self.neurongroups[name], line)
 
+    def define_init(self, elementname: str, varname: str, value: Any) -> None:
+        try:
+            setattr(self.network[elementname], varname, value)
+        except Exception as e:
+            raise ValueError(
+                f"Error when initializing {varname} or element {elementname} as {value}: {e}"
+            ) from e
+
     def define_dt(self, dt: b2.Quantity) -> None:
         """
         define_dt Define the global timestep for the default clock. currently, All elements of the network use the same clock with the same timestep.

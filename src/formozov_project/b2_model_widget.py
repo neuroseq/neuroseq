@@ -157,7 +157,7 @@ class ModelDialog(QtWidgets.QDialog):
 
         Returns
         -------
-        tuple[ QtWidgets.QLabel, QtWidgets.QTextEdit | QtWidgets.QLineEdit, QtWidgets.QPushButton, ]
+        tuple[QtWidgets.QTextEdit | QtWidgets.QLineEdit, QtWidgets.QPushButton, ]
             titlefield, textfield and button widgets
         """
         titlefield = QtWidgets.QLabel(title, self)
@@ -1136,6 +1136,38 @@ class MonitorDialog(ModelDialog):
         self.parameterwindow.exec()
 
 
+class InitialConditionWidget(ModelDialog):
+    def __init__(self, model: B2Model, parent: QtWidgets.QDialog | None = None) -> None:
+        super().__init__(model, parent)
+
+        self.sourcebutton, self.source = self.add_text_field("Source")
+        self.varbutton, self.variable = self.add_text_field("Variable")
+        self.valuebutton, self.value = self.add_text_field(
+            "Value", type=QtWidgets.QTextEdit
+        )
+
+        self.sourcebutton.click.connect()
+        self.varbutton.click.connect()
+        self.valuebutton.click.connect()
+
+    def display_parameters(
+        self, _: str | dict[Any, Any], read_only: bool = True
+    ) -> None:
+        pass
+
+    def accept_value(self) -> None:
+        """
+        Overridden method to accept the value of a variable in a group and save it in the model.
+        """
+        if self.name is None:
+            self.display_error("Please define a parameter first by giving it a name!")
+        elif self.value_entry.toPlainText() == "":
+            self.display_error("Please assign a value or expression before saving!")
+        else:
+            self.accept_parameter(self.value_entry, self.name, self.model.define_init)
+            self.value_button.setText("saved")
+
+
 class B2ModelWidget(ModelDialog):
     """
     Main widget to define a B2Model instance in a new window.
@@ -1182,6 +1214,7 @@ class B2ModelWidget(ModelDialog):
         self.display_system_button = QtWidgets.QPushButton("Display system", self)
         self.monitor_button = QtWidgets.QPushButton("Add monitor", self)
         self.add_subgroup_button = QtWidgets.QPushButton("Add neuron subgroup", self)
+        self.init_button = QtWidgets.QPushButton("Provide initial conditions", self)
 
         self.layout.addWidget(self.add_parameter_button, 1, 4)
 
@@ -1205,7 +1238,9 @@ class B2ModelWidget(ModelDialog):
 
         self.layout.addWidget(self.monitor_button, 7, 4)
 
-        self.layout.addWidget(self.button_box, 8, 1, 1, 4, QtCore.Qt.AlignCenter)
+        self.layout.addWidget(self.init_button, 8, 4)
+
+        self.layout.addWidget(self.button_box, 9, 1, 1, 4, QtCore.Qt.AlignCenter)
 
         for qle in [
             self.name_entry,
@@ -1226,6 +1261,7 @@ class B2ModelWidget(ModelDialog):
         self.timestep_button.clicked.connect(self.accept_timestep)
         self.seed_button.clicked.connect(self.accept_seed)
         self.name_button.clicked.connect(self.accept_name)
+        self.init_button.clicked.connect(self.open_initial_condition_dialog)
 
         self.setLayout(self.layout)
 
@@ -1358,3 +1394,8 @@ class B2ModelWidget(ModelDialog):
                 self.model.network = Network(name=self.name)
                 self.name_button.setText("saved")
                 self.name_button.setDown(True)
+
+    def open_initial_condition_dialog(self):
+        self.init_widget = InitialConditionWidget(self.model, self)
+
+        self.init_widget.exec()
