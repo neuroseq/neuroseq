@@ -337,7 +337,7 @@ def test_ornstein_uhlenbeck(tmp_path: Path, mfx_ornstein: b2_model.B2Model) -> N
 
     b2.seed(4321)
     N = b2.NeuronGroup(
-        2,
+        5,
         """
         tau : second
         sigma : 1
@@ -346,8 +346,8 @@ def test_ornstein_uhlenbeck(tmp_path: Path, mfx_ornstein: b2_model.B2Model) -> N
         method="euler",
     )
 
-    N.tau = np.array([1, 0.1]) * b2.second
-    N.sigma = np.array([0.1, 0.31622])
+    N.tau = np.array([1, 0.8, 0.6, 0.3, 0.1]) * b2.second
+    N.sigma = np.array([0.1, 0.31622, 0.4, 0.2, 0.88])
     N.y = 1
 
     M = b2.StateMonitor(N, "y", record=True)

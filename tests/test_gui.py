@@ -19,7 +19,9 @@ def test_gui_click_exit(qtbot: QtBot) -> None:
     qtbot.waitUntil(lambda: not gui.isVisible())
 
 
-def test_gui_playback(monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_gui: B2Model) -> None:
+def test_gui_playback(
+    monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_ornstein: B2Model
+) -> None:
     gui = Gui()
     gui.show()
     qtbot.addWidget(gui)
@@ -31,7 +33,7 @@ def test_gui_playback(monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_gui: B2Model) 
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
     )
-    gui.model = mfx_gui
+    gui.model = mfx_ornstein
     gui.btn_continue_simulation_clicked()
     n_timesteps = len(gui.model.network["M"].t)
     gui.btn_play_clicked()
@@ -53,7 +55,7 @@ def test_gui_playback(monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_gui: B2Model) 
 
 
 def test_gui_new(
-    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_gui: B2Model
+    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_ornstein: B2Model
 ) -> None:
     gui = Gui()
     gui.show()
@@ -65,10 +67,10 @@ def test_gui_new(
 
 
 def test_gui_save(
-    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_gui: B2Model
+    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_ornstein: B2Model
 ) -> None:
     gui = Gui()
-    gui.model = mfx_gui
+    gui.model = mfx_ornstein
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -83,7 +85,7 @@ def test_gui_save(
 
 
 def test_gui_checkpoints(
-    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_gui: B2Model
+    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_ornstein: B2Model
 ) -> None:
     gui = Gui()
     gui.show()
@@ -96,7 +98,7 @@ def test_gui_checkpoints(
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("test", True)
     )
-    gui.model = mfx_gui
+    gui.model = mfx_ornstein
     gui.btn_store_checkpoint_clicked()
     assert "test" in gui.model.checkpoints
     # simulate
