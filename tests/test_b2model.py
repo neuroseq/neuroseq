@@ -13,29 +13,6 @@ from formozov_project import b2_model
 from pytest_mock import MockerFixture
 
 
-def ornstein() -> b2_model.B2Model:
-    eqs = """
-        tau : second
-        sigma : 1
-        dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
-    """
-
-    model = b2_model.B2Model(seed=4321)
-    model.define_neuronnumber("neurongroup", 2)
-    model.define_dt(0.2 * b2.ms)
-    model.define_solver_method("neurongroup", "euler")
-    model.define_equation("neurongroup", eqs)
-    model.assemble_neurongroup(name="neurongroup")
-    model.define_monitor("M", b2.StateMonitor, "neurongroup", "y")
-
-    # init
-    model.network["neurongroup"].tau = np.array([1, 0.1]) * b2.second
-    model.network["neurongroup"].sigma = np.array([0.1, 0.31622])
-    model.network["neurongroup"].y = 1
-
-    return model
-
-
 def test_construction(tmp_path: Path) -> None:
     model = b2_model.B2Model()
     assert model.parameters is None
@@ -90,11 +67,14 @@ def test_define_parameter(mfx: b2_model.B2Model) -> None:
     mfx.define_parameter("taue", 5 * b2.ms)
     mfx.define_parameter("taui", 10 * b2.ms)
     mfx.define_parameter("area", 20000 * b2.umetre**2)
+    timed_array = b2.TimedArray(np.random.rand(10, 100) * b2.mS, dt=1 * b2.ms)
+    mfx.define_parameter("stim", timed_array)
 
     assert mfx.parameters == {
         "taue": 5 * b2.ms,
         "taui": 10 * b2.ms,
         "area": 20000 * b2.umetre**2,
+        "stim": timed_array,
     }
 
 
@@ -351,9 +331,9 @@ def test_define_monitor_exception(
         mfx.define_monitor("M", b2.StateMonitor, "G", "v")
 
 
-def test_ornstein_uhlenbeck(tmp_path: Path) -> None:
-    model = ornstein()
-    model.run_simulation(1 * b2.second)
+def test_ornstein_uhlenbeck(tmp_path: Path, mfx_ornstein: b2_model.B2Model) -> None:
+    b2.seed(4321)
+    mfx_ornstein.run_simulation(1 * b2.second)
 
     b2.seed(4321)
     N = b2.NeuronGroup(
@@ -376,9 +356,9 @@ def test_ornstein_uhlenbeck(tmp_path: Path) -> None:
 
     network.run(1 * b2.second)
 
-    assert np.allclose(M.t / b2.second, model.network["M"].t / b2.second)
-    assert np.allclose(M.y[1], model.network["M"].y[1])
-    assert np.allclose(M.y[0], model.network["M"].y[0])
+    assert np.allclose(M.t / b2.second, mfx_ornstein.network["M"].t / b2.second)
+    assert np.allclose(M.y[1], mfx_ornstein.network["M"].y[1])
+    assert np.allclose(M.y[0], mfx_ornstein.network["M"].y[0])
 
 
 def test_NMDA_model() -> None:
@@ -496,80 +476,71 @@ def test_NMDA_model() -> None:
     np.testing.assert_almost_equal(Mn.g, model.network["Mn"].g)
 
 
-def test_hdf5(tmp_path: Path) -> None:
-    model = ornstein()
-    model.run_simulation(10 * b2.second)
+def test_hdf5(tmp_path: Path, mfx_ornstein: b2_model.B2Model) -> None:
+    mfx_ornstein.run_simulation(10 * b2.second)
 
-    model.save_to_h5(tmp_path / "data.h5")
+    mfx_ornstein.save_to_h5(tmp_path / "data.h5")
 
     data = None
 
     with h5py.File(Path(tmp_path, "data.h5"), "r") as h5file:
         data = h5file["M"]["y"][:]
 
-    assert np.allclose(data, model.network["M"].y)
+    assert np.allclose(data, mfx_ornstein.network["M"].y)
 
     with pytest.raises(ValueError, match="Path fakepath/data.h5 does not exist"):
-        model.save_to_h5("fakepath/data.h5")
+        mfx_ornstein.save_to_h5("fakepath/data.h5")
 
-    model.monitors = {}
+    mfx_ornstein.monitors = {}
 
     with pytest.raises(
         RuntimeError, match="Error, cannot save data when no monitors are defined"
     ):
-        model.save_to_h5(tmp_path / "data.h5")
+        mfx_ornstein.save_to_h5(tmp_path / "data.h5")
 
 
-def test_logger(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_logger(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, mfx_ornstein: b2_model.B2Model
+) -> None:
     caplog.set_level(logging.INFO, logger="formozov_project.b2_model")
-    model = ornstein()
-    model.run_simulation(1 * b2.second, savepath=tmp_path / "data.h5 ")
+    mfx_ornstein.run_simulation(1 * b2.second, savepath=tmp_path / "data.h5 ")
 
-    # bunch of asserts checking that logfile content works as expected
     logs = [record.message for record in caplog.records]
-    assert "Model creation complete" in logs[0]
-    assert "Neuron number defined: 2" in logs[1]
-    assert "dt defined: 200. us" in logs[2]
-    assert "Solver method defined: euler" in logs[3]
-    assert "Equation defined" in logs[4]
-    assert "assembling neurongroup 'neurongroup'" in logs[5]
-    assert "adding monitor 'M'" in logs[6]
-    assert f"run the system for 1. s with savepath = {tmp_path}" in logs[7]
+    assert f"run the system for 1. s with savepath = {tmp_path}" in logs[0]
 
     pathname = tmp_path / "data.h5"
-    assert f"save data to hdf5 at {pathname}" in logs[8]
+    assert f"save data to hdf5 at {pathname}" in logs[1]
 
 
-def test_store_restore() -> None:
-    model = ornstein()
+def test_store_restore(mfx_ornstein: b2_model.B2Model) -> None:
     sim_time = 10 * b2.ms
-    assert len(model.checkpoints) == 0
-    model.run_simulation(sim_time)
+    assert len(mfx_ornstein.checkpoints) == 0
+    mfx_ornstein.run_simulation(sim_time)
     # default initial state checkpoint is made on first simulation if no other checkpoints are made
-    assert len(model.checkpoints) == 1
-    assert model.network["M"].t[-1] == sim_time - model.dt
+    assert len(mfx_ornstein.checkpoints) == 1
+    assert mfx_ornstein.network["M"].t[-1] == sim_time - mfx_ornstein.dt
     # restore initial state
-    model.restore(model.checkpoints[0])
-    assert len(model.network["M"].t) == 0
+    mfx_ornstein.restore(mfx_ornstein.checkpoints[0])
+    assert len(mfx_ornstein.network["M"].t) == 0
     # store two new checkpoints
-    model.run_simulation(sim_time)
-    assert model.network["M"].t[-1] == sim_time - model.dt
-    model.store("t1")
-    assert len(model.checkpoints) == 2
-    model.run_simulation(sim_time)
-    assert model.network["M"].t[-1] == 2 * sim_time - model.dt
-    model.store("t2")
-    assert len(model.checkpoints) == 3
+    mfx_ornstein.run_simulation(sim_time)
+    assert mfx_ornstein.network["M"].t[-1] == sim_time - mfx_ornstein.dt
+    mfx_ornstein.store("t1")
+    assert len(mfx_ornstein.checkpoints) == 2
+    mfx_ornstein.run_simulation(sim_time)
+    assert mfx_ornstein.network["M"].t[-1] == 2 * sim_time - mfx_ornstein.dt
+    mfx_ornstein.store("t2")
+    assert len(mfx_ornstein.checkpoints) == 3
     # restore second checkpoint
-    model.restore("t1")
-    assert model.network["M"].t[-1] == sim_time - model.dt
+    mfx_ornstein.restore("t1")
+    assert mfx_ornstein.network["M"].t[-1] == sim_time - mfx_ornstein.dt
     # overwrite existing checkpoint
-    assert len(model.checkpoints) == 3
-    model.store("t2")
-    assert len(model.checkpoints) == 3
+    assert len(mfx_ornstein.checkpoints) == 3
+    mfx_ornstein.store("t2")
+    assert len(mfx_ornstein.checkpoints) == 3
     # restore initial state
-    model.restore(model.checkpoints[0])
-    assert len(model.network["M"].t) == 0
+    mfx_ornstein.restore(mfx_ornstein.checkpoints[0])
+    assert len(mfx_ornstein.network["M"].t) == 0
     # restore non-existing checkpoint
     with pytest.raises(ValueError, match=".*'idontexist'.*"):
-        model.restore("idontexist")
+        mfx_ornstein.restore("idontexist")
