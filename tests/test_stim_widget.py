@@ -43,6 +43,5 @@ def test_stim_widget(qtbot: QtBot) -> None:
     assert stim_widget.selected_neuron == 13
     stim_widget.select_neuron(None)
     assert stim_widget.selected_neuron is None
-    # set empty data to clear plot
-    stim_widget.set_data()
+    stim_widget.clear_data()
     assert len(stim_widget.neuron_plots) == 0

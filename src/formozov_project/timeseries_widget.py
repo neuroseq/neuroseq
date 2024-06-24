@@ -38,6 +38,16 @@ class TimeseriesWidget(pg.PlotWidget):
         self.selected_neuron: int | None = None
         self.getAxis("top").show()
 
+    def clear_data(self) -> None:
+        self.neuron_plots.clear()
+        self.selected_neuron = None
+        self.clear()
+        self.plotItem.getAxis("bottom").setLabel("Time (s)")
+        # set the y-axis to display the trace index
+        self.plotItem.getAxis("left").setLabel("Neuron")
+        self.plotItem.getAxis("left").setTickSpacing(1, 1)
+        self.addItem(self.timeline)
+
     def _plot_neuron_data(
         self, data: list[np.ndarray] | np.ndarray, timestamps: np.ndarray, dt: float
     ) -> None:
@@ -56,9 +66,7 @@ class TimeseriesWidget(pg.PlotWidget):
         timestamps: np.ndarray | None = None,
         dt: float | None = None,
     ) -> None:
-        self.neuron_plots.clear()
-        self.selected_neuron = None
-        self.clear()
+        self.clear_data()
         if data is None:
             return
         n_neurons = data[0].shape[0] if isinstance(data, list) else data.shape[0]
@@ -73,16 +81,10 @@ class TimeseriesWidget(pg.PlotWidget):
             dt = timestamps[1] - timestamps[0] if len(timestamps) > 1 else 1.0
         else:
             timestamps = dt * np.arange(n_timestamps)
-
-        self.plotItem.getAxis("bottom").setLabel("Time (s)")
-        # set the y-axis to display the trace index
-        self.plotItem.getAxis("left").setLabel("Neuron")
-        self.plotItem.getAxis("left").setTickSpacing(1, 1)
         # don't let user zoom/pan outside of the data
         self.setLimits(
             xMin=timestamps[0], xMax=timestamps[-1], yMin=-0.5, yMax=n_neurons - 0.5
         )
-        self.addItem(self.timeline)
         self._plot_neuron_data(data, timestamps, dt)
 
     def mousePressEvent(self, ev: Any) -> None:
