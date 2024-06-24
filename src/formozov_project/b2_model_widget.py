@@ -1008,7 +1008,7 @@ class MonitorDialog(ModelDialog):
             self.show_parameters_button, row, 1, 1, 3, QtCore.Qt.AlignCenter
         )
 
-        self.layout.addWidget(self.buttonBox, row + 1, 1, 1, 4, QtCore.Qt.AlignCenter)
+        self.layout.addWidget(self.button_box, row + 1, 1, 1, 4, QtCore.Qt.AlignCenter)
 
         # connect signals and sockets
         self.show_parameters_button.clicked.connect(
@@ -1196,7 +1196,7 @@ class B2ModelWidget(ModelDialog):
 
         self.layout.addWidget(self.display_system_button, 5, 4)
 
-        self.layout.addWidget(self.monitor_button, 6, 5)
+        self.layout.addWidget(self.monitor_button, 6, 4)
 
         self.layout.addWidget(self.button_box, 7, 1, 1, 4, QtCore.Qt.AlignCenter)
 

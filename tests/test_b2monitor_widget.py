@@ -19,7 +19,7 @@ def test_monitor_enter_close(qtbot: QtBot) -> None:
 
     qtbot.waitUntil(mdlg.isVisible)
 
-    cancel_button = mdlg.buttonBox.button(QtWidgets.QDialogButtonBox.Cancel)
+    cancel_button = mdlg.button_box.button(QtWidgets.QDialogButtonBox.Cancel)
 
     qtbot.mouseClick(cancel_button, QtCore.Qt.LeftButton)
 
