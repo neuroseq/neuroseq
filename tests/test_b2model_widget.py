@@ -27,10 +27,10 @@ def test_name_def(
 
     assert b2w.isVisible()
 
-    qtbot.keyClicks(b2w.name_entry, "modelname")
-    assert b2w.name_entry.text() == "modelname"
+    qtbot.keyClicks(b2w.name_entry, "model_name")
+    assert b2w.name_entry.text() == "model_name"
     b2w.accept_name()
-    assert b2w.model.network.name == "modelname"
+    assert b2w.model.network.name == "model_name"
     assert b2w.name_button.text() == "saved"
     assert b2w.name_button.isDown() is True
 
