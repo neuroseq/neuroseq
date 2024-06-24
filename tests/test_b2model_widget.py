@@ -220,3 +220,24 @@ def test_open_module_dialogs(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
     qtbot.mouseClick(b2w.display_system_button, QtCore.Qt.LeftButton)
 
     qtbot.waitUntil(b2w.dictwidget.isVisible)
+
+
+def test_open_initialization_dialog(
+    qtbot: QtBot,
+) -> None:
+    b2w = B2W.B2ModelWidget(
+        B2Model(),
+        None,
+    )
+
+    b2w.show()
+
+    qtbot.addWidget(b2w)
+
+    qtbot.addWidget(b2w)
+
+    qtbot.mouseClick(b2w.init_button, QtCore.Qt.LeftButton)
+
+    qtbot.waitUntil(b2w.neuron_dlg.isVisible)
+
+    b2w.neuron_dlg.close()

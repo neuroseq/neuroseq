@@ -137,7 +137,7 @@ class ModelDialog(QtWidgets.QDialog):
     def add_text_field(
         self,
         title: str,
-        textfieltype: type = QtWidgets.QLineEdit,
+        textfieldtype: type = QtWidgets.QLineEdit,
         buttontext: str = "save",
     ) -> tuple[
         QtWidgets.QTextEdit | QtWidgets.QLineEdit,
@@ -150,7 +150,7 @@ class ModelDialog(QtWidgets.QDialog):
         ----------
         title : str
             Name of the field, displayed on the leftmost element.
-        textfieltype : type, optional
+        textfieldtype : type, optional
             Type of the text input field to have on the second elemnet, by default QtWidgets.QLineEdit
         buttontext : str, optional
             Text to display in the rightmost button, by default "save"
@@ -161,7 +161,7 @@ class ModelDialog(QtWidgets.QDialog):
             titlefield, textfield and button widgets
         """
         titlefield = QtWidgets.QLabel(title, self)
-        textfield = textfieltype(self)
+        textfield = textfieldtype(self)
         button = QtWidgets.QPushButton(buttontext, self)
 
         row = self.layout.rowCount()
@@ -696,15 +696,15 @@ class SynapseDialog(ModelDialog):
         self.target, self.target_button = self.add_text_field("Target")
 
         self.equation, self.equation_button = self.add_text_field(
-            "Equation", textfieltype=QtWidgets.QTextEdit
+            "Equation", textfieldtype=QtWidgets.QTextEdit
         )
 
         self.pre, self.pre_button = self.add_text_field(
-            "Pre", textfieltype=QtWidgets.QTextEdit
+            "Pre", textfieldtype=QtWidgets.QTextEdit
         )
 
         self.post, self.post_button = self.add_text_field(
-            "Post", textfieltype=QtWidgets.QTextEdit
+            "Post", textfieldtype=QtWidgets.QTextEdit
         )
 
         self.connect, self.connect_button = self.add_text_field("Connection def.")
@@ -831,7 +831,7 @@ class ParameterDialog(ModelDialog):
         self.setWindowTitle("Define a parameter")
 
         self.value_entry, self.value_button = self.add_text_field(
-            "Value", textfieltype=QtWidgets.QTextEdit
+            "Value", textfieldtype=QtWidgets.QTextEdit
         )
 
         row = self.layout.rowCount()
@@ -1137,35 +1137,98 @@ class MonitorDialog(ModelDialog):
 
 
 class InitialConditionWidget(ModelDialog):
+    """
+    InitialConditionWidget A dialog to define initial conditions for
+
+    Parameters
+    ----------
+    ModelDialog : General baseclass for the b2 model widgets
+    """
+
     def __init__(self, model: B2Model, parent: QtWidgets.QDialog | None = None) -> None:
+        """
+        __init__ Create a new dialog for defining an initial condition
+
+        Parameters
+        ----------
+        model : B2Model
+            The model to define the initial condition for
+        parent : QtWidgets.QDialog | None, optional
+            Parent window, by default None
+        """
         super().__init__(model, parent)
 
-        self.sourcebutton, self.source = self.add_text_field("Source")
-        self.varbutton, self.variable = self.add_text_field("Variable")
-        self.valuebutton, self.value = self.add_text_field(
-            "Value", type=QtWidgets.QTextEdit
+        self.params: dict[str, Any] = {}
+        self.source, self.source_button = self.add_text_field("Source")
+        self.var, self.var_button = self.add_text_field("Variable")
+        self.value, self.value_button = self.add_text_field(
+            "Value", textfieldtype=QtWidgets.QTextEdit
         )
 
-        self.sourcebutton.click.connect()
-        self.varbutton.click.connect()
-        self.valuebutton.click.connect()
+        self.layout.itemAt(0).widget().hide()  # name label hiding
+        self.name_entry.hide()
+        self.name_button.hide()
 
-    def display_parameters(
-        self, _: str | dict[Any, Any], read_only: bool = True
-    ) -> None:
-        pass
+        row = self.layout.rowCount()
+
+        self.layout.addWidget(
+            self.show_parameters_button, row, 1, 1, 3, QtCore.Qt.AlignCenter
+        )
+
+        self.layout.addWidget(self.button_box, row + 1, 1, 1, 4, QtCore.Qt.AlignCenter)
+
+        self.show_parameters_button.clicked.connect(
+            partial(self.display_parameters, target=self.params, read_only=False)
+        )
+        self.source_button.clicked.connect(self.accept_source)
+        self.var_button.clicked.connect(self.accept_variable)
+        self.value_button.clicked.connect(self.accept_value)
+
+    def accept(self) -> None:
+        """
+        accept Accept the initial condition. works only if 'source', 'variable' and 'value' are all set.
+        """
+        if any(var not in self.params for var in ["elementname", "varname", "value"]):
+            self.display_error("Cannot define incompletely specified initial condition")
+
+        try:
+            self.model.define_init(**self.params)
+            super().accept()
+        except Exception as e:
+            self.display_error(
+                f"Error when defining initial condition for source {self.params["elementname"]}, variable {self.params["varname"]}, with value {self.params["value"]}: {e}"
+            )
+
+    def accept_source(self) -> None:
+        """
+        accept_source Accept the name of a source group a variable to initialze belongs to.
+        """
+        self.params["elementname"] = self.source.text()
+        self.value_button.setDown(True)
+        self.value_button.setText("saved")
+
+    def accept_variable(self) -> None:
+        """
+        accept_variable Accept a variable to set an initial condition for
+        """
+
+        self.params["varname"] = self.var.text()
+        self.value_button.setDown(True)
+        self.value_button.setText("saved")
 
     def accept_value(self) -> None:
         """
         Overridden method to accept the value of a variable in a group and save it in the model.
         """
-        if self.name is None:
-            self.display_error("Please define a parameter first by giving it a name!")
-        elif self.value_entry.toPlainText() == "":
-            self.display_error("Please assign a value or expression before saving!")
-        else:
-            self.accept_parameter(self.value_entry, self.name, self.model.define_init)
-            self.value_button.setText("saved")
+        # FIXME: the eval here is very insecure and should be replacde with something more restrictive
+        txt = self.value.toPlainText()
+
+        try:
+            self.params["value"] = eval(txt)
+        except Exception as e:
+            self.display_error(f"Error in evaluating value expression {txt}: {e}")
+        self.value_button.setDown(True)
+        self.value_button.setText("saved")
 
 
 class B2ModelWidget(ModelDialog):
@@ -1395,7 +1458,10 @@ class B2ModelWidget(ModelDialog):
                 self.name_button.setText("saved")
                 self.name_button.setDown(True)
 
-    def open_initial_condition_dialog(self):
+    def open_initial_condition_dialog(self) -> None:
+        """
+        open_initial_condition_dialog open a new dialog to add initial conditions
+        """
         self.init_widget = InitialConditionWidget(self.model, self)
 
         self.init_widget.exec()
