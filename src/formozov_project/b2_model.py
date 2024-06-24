@@ -141,7 +141,6 @@ class B2Model:
         """
         self.dt = dt
         b2.defaultclock.dt = self.dt
-        self.network.dt = self.dt
         self.logger.info(f"dt defined: {dt}")
 
     def define_name(self, name: str) -> None:

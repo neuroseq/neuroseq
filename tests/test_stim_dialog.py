@@ -61,6 +61,7 @@ def test_stim_dialog_data(qtbot: QtBot) -> None:
     stim_dialog.stim_console_widget.input.setText("stims = np.random.rand(83, 127)")
     qtbot.keyPress(stim_dialog.stim_console_widget.input, QtCore.Qt.Key.Key_Enter)
     assert stim_dialog.stims.shape == (83, 127)
+
     assert stim_dialog.button_box.button(
         QtWidgets.QDialogButtonBox.StandardButton.Ok
     ).isEnabled()

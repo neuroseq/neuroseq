@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+from typing import cast
+
 import formozov_project.b2_model_widget as B2W
+from brian2 import Quantity
+from brian2 import usecond
 from formozov_project.b2_model import B2Model
+from numpy import isclose
 from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
-from qtpy import QtWidgets
 
 
-def test_name_def_save_not_implemented(
+def test_name_def(
     qtbot: QtBot,
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -23,67 +27,131 @@ def test_name_def_save_not_implemented(
 
     assert b2w.isVisible()
 
-    qtbot.keyClicks(b2w.name_entry, "modelname")
-    assert b2w.name_entry.text() == "modelname"
+    qtbot.keyClicks(b2w.name_entry, "model_name")
+    assert b2w.name_entry.text() == "model_name"
+    b2w.accept_name()
+    assert b2w.model.network.name == "model_name"
+    assert b2w.name_button.text() == "saved"
+    assert b2w.name_button.isDown() is True
+
+
+def test_name_def_exceptions(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    b2w = B2W.B2ModelWidget(
+        B2Model(),
+        None,
+    )
+
+    qtbot.addWidget(b2w)
 
     monkeypatch.setattr(
         B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
     )
 
-    qtbot.mouseClick(b2w.name_button, QtCore.Qt.LeftButton)
+    b2w.name = "thing"
 
-    # Wait until the error dialog is visible
+    # exceptions
+    b2w.name_entry.setText("renaming_not_allowed")
+
+    b2w.accept_name()
+
     qtbot.waitUntil(b2w.error_dialog.isVisible)
 
-    assert b2w.error_dialog.isVisible()
-    # Verify error message box content
-    assert b2w.error_dialog.text() == "Not connected yet!"
+    assert b2w.error_dialog.text() == "Name has already been defined: thing"
 
-    ok_button = b2w.error_dialog.button(QtWidgets.QMessageBox.Ok)
-    qtbot.mouseClick(ok_button, QtCore.Qt.LeftButton)
+    b2w.error_dialog.close()
 
-    # Ensure the dialog is no longer visible
-    qtbot.waitUntil(lambda: not b2w.error_dialog.isVisible())
+    b2w.model = B2Model()
+    b2w.name = None
 
-    # Verify main window is still visible
-    assert b2w.isVisible()
+    b2w.name_entry.setText("")
+
+    b2w.accept_name()
+
+    qtbot.waitUntil(b2w.error_dialog.isVisible)
+
+    assert b2w.error_dialog.text() == "A name must be defined first"
+    b2w.error_dialog.close()
+
+    b2w.model.define_dt(10 * usecond)
+
+    b2w.name_entry.setText("defined_timestep_precludes_renaming")
+
+    b2w.accept_name()
+
+    qtbot.waitUntil(b2w.error_dialog.isVisible)
+    assert (
+        b2w.error_dialog.text()
+        == "Timestep has already been defined in this network, renaming it would reset it, hence is not allowed. Define a name first"
+    )
+    b2w.error_dialog.close()
+
+    b2w.model = B2Model()
+
+    # define a minimal object
+    b2w.name = None
+    b2w.model.define_neuronnumber("x", 3)
+    b2w.model.define_equation("x", "dv/dt = -v: volt")
+    b2w.model.assemble_neurongroup(name="x")
+
+    b2w.accept_name()
+
+    qtbot.waitUntil(b2w.error_dialog.isVisible)
+    assert (
+        b2w.error_dialog.text()
+        == "Properties have already been defined in this network, renaming it would destroy them, hence is not allowed. Define a name first"
+    )
+    b2w.error_dialog.close()
 
 
-def test_dt_def_save_not_implemented(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
+def test_dt_def(qtbot: QtBot) -> None:
     b2w = B2W.B2ModelWidget(B2Model(), None)
 
     qtbot.addWidget(b2w)
 
-    b2w.show()
-
     qtbot.keyClicks(b2w.timestep, "0.2 ms")
-    assert b2w.timestep.text() == "0.2 ms"
+
+    b2w.accept_timestep()
+
+    assert b2w.model.dt is not None
+    assert isclose(cast(Quantity, b2w.model.dt.base), 0.0002)
+    assert b2w.timestep_button.isDown()
+    assert b2w.timestep_button.text() == "saved"
+
+
+def test_dt_def_exceptions(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
+    b2w = B2W.B2ModelWidget(B2Model(), None)
+
+    qtbot.addWidget(b2w)
 
     monkeypatch.setattr(
         B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
     )
+    qtbot.keyClicks(b2w.timestep, "0.2 ms")
 
-    qtbot.mouseClick(b2w.timestep_button, QtCore.Qt.LeftButton)
+    def raise_error(_: str) -> None:
+        raise ValueError("something went wrong")
 
-    # Wait until the error dialog is visible
+    monkeypatch.setattr(b2w, "_convert_string_to_quantity", raise_error)
+
+    b2w.accept_timestep()
+
     qtbot.waitUntil(b2w.error_dialog.isVisible)
 
-    # Verify error message box content
-    assert b2w.error_dialog.text() == "Not connected yet!"
-
-    ok_button = b2w.error_dialog.button(QtWidgets.QMessageBox.Ok)
-    qtbot.mouseClick(ok_button, QtCore.Qt.LeftButton)
-
-    # Ensure the dialog is no longer visible
-    qtbot.waitUntil(lambda: not b2w.error_dialog.isVisible())
-
-    # Verify main window is still visible
-    assert b2w.isVisible()
+    assert (
+        b2w.error_dialog.text()
+        == "Error when trying to convert timestep 0.2 ms: something went wrong"
+    )
+    b2w.error_dialog.close()
 
 
-def test_random_seed_def_save_not_implemented(
-    qtbot: QtBot, monkeypatch: MonkeyPatch
-) -> None:
+def test_random_seed_def(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
+    )
+
     b2w = B2W.B2ModelWidget(
         B2Model(),
         None,
@@ -93,30 +161,25 @@ def test_random_seed_def_save_not_implemented(
 
     qtbot.addWidget(b2w)
 
-    qtbot.keyClicks(b2w.seed, "2231")
+    b2w.seed.setText("2231")
 
-    assert b2w.seed.text() == "2231"
+    b2w.accept_seed()
+    assert b2w.model.seed == 2231
+    assert b2w.seed_button.text() == "saved"
+    assert b2w.seed_button.isDown()
 
-    monkeypatch.setattr(
-        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
-    )
+    b2w.seed.setText("cannot_convert_to_int123")
 
-    qtbot.mouseClick(b2w.seed_button, QtCore.Qt.LeftButton)
+    b2w.accept_seed()
 
     qtbot.waitUntil(b2w.error_dialog.isVisible)
 
-    assert b2w.error_dialog.isVisible()
+    assert (
+        b2w.error_dialog.text()
+        == "Error when trying to convert seed cannot_convert_to_int123: invalid literal for int() with base 10: 'cannot_convert_to_int123'"
+    )
 
-    assert b2w.error_dialog.text() == "Not connected yet!"
-
-    ok_button = b2w.error_dialog.button(QtWidgets.QMessageBox.Ok)
-    qtbot.mouseClick(ok_button, QtCore.Qt.LeftButton)
-
-    # Ensure the dialog is no longer visible
-    qtbot.waitUntil(lambda: not b2w.error_dialog.isVisible())
-
-    # Verify main window is still visible
-    assert b2w.isVisible()
+    b2w.error_dialog.close()
 
 
 def test_open_module_dialogs(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:

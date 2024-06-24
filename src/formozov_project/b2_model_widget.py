@@ -7,9 +7,11 @@ from typing import Any
 from typing import Callable
 from typing import cast
 
+from brian2 import Network
 from brian2 import Quantity
 from brian2 import TimedArray
 from brian2 import Unit
+from brian2 import seed as set_b2_seed
 from brian2 import units
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -1221,9 +1223,9 @@ class B2ModelWidget(ModelDialog):
         self.monitor_button.clicked.connect(self.open_monitor_dialog)
         self.add_subgroup_button.clicked.connect(self.open_subgroup_dialog)
 
-        self.timestep_button.clicked.connect(self.not_connected)
-        self.seed_button.clicked.connect(self.not_connected)
-        self.name_button.clicked.connect(self.not_connected)
+        self.timestep_button.clicked.connect(self.accept_timestep)
+        self.seed_button.clicked.connect(self.accept_seed)
+        self.name_button.clicked.connect(self.accept_name)
 
         self.setLayout(self.layout)
 
@@ -1294,3 +1296,65 @@ class B2ModelWidget(ModelDialog):
         """
         self.subgroupdialog = NeuronSubgroupDialog(self.model, self)
         self.subgroupdialog.exec()
+
+    def accept_timestep(self) -> None:
+        """
+        set the global timestep from text input
+        """
+        txtinput = self.timestep.text()
+
+        dt = None
+        try:
+            dt = self._convert_string_to_quantity(txtinput)
+        except Exception as e:
+            self.display_error(f"Error when trying to convert timestep {txtinput}: {e}")
+
+        if dt is not None:
+            self.model.define_dt(dt)
+            self.timestep_button.setText("saved")
+            self.timestep_button.setDown(True)
+
+    def accept_seed(self) -> None:
+        """
+        set the global random seed
+        """
+        txtinput = self.seed.text()
+
+        seed = None
+        try:
+            seed = int(txtinput)
+        except Exception as e:
+            self.display_error(f"Error when trying to convert seed {txtinput}: {e}")
+
+        if seed is not None:
+            self.model.seed = seed
+            set_b2_seed(seed)
+            self.seed_button.setText("saved")
+            self.seed_button.setDown(True)
+
+    def accept_name(self, _: str = "") -> None:
+        """
+        accept name entry for the model. If a network has already been defined,
+        it cannot be renamed. You have to make sure to give the name first.
+        """
+        txt = self.name_entry.text()
+
+        if txt == "" or txt is None:
+            self.display_error("A name must be defined first")
+        elif self.name is not None:
+            self.display_error(f"Name has already been defined: {self.name}")
+        else:
+            self.name = txt
+
+            if len(self.model.network.objects) > 0:
+                self.display_error(
+                    "Properties have already been defined in this network, renaming it would destroy them, hence is not allowed. Define a name first"
+                )
+            elif self.model.dt is not None:
+                self.display_error(
+                    "Timestep has already been defined in this network, renaming it would reset it, hence is not allowed. Define a name first"
+                )
+            else:
+                self.model.network = Network(name=self.name)
+                self.name_button.setText("saved")
+                self.name_button.setDown(True)
