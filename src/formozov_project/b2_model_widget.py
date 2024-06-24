@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from ast import literal_eval
 from functools import partial
+from importlib import import_module
 from typing import Any
 from typing import Callable
+from typing import cast
 
 from brian2 import Quantity
 from brian2 import Unit
@@ -960,6 +962,176 @@ class DictionaryWidget(QtWidgets.QWidget):
             parent.addChild(item)
 
 
+class MonitorDialog(ModelDialog):
+    """
+    Dialog for defining brian2 monitors
+
+    Parameters
+    ----------
+    ModelDialog :
+        Common baseclass for all model dialogs
+    """
+
+    def __init__(self, model: B2Model, parent: QtWidgets.QDialog = None) -> None:
+        """
+        Open a new dialog to define a monitor
+
+        Parameters
+        ----------
+        model : B2Model
+            The model to define the monitor for
+        parent : QtWidgets.QDialog
+            The parent dialog
+        """
+        super().__init__(model, parent)
+
+        self.tp: type | None = None
+        self.var: str | None = None
+        self.src: str | None = None
+
+        self.type, self.type_button = self.add_text_field(
+            "Type",
+            QtWidgets.QLineEdit,
+        )
+
+        self.source, self.source_button = self.add_text_field(
+            "Source",
+            QtWidgets.QLineEdit,
+        )
+        self.variable, self.variable_button = self.add_text_field(
+            "Variable",
+            QtWidgets.QLineEdit,
+        )
+        row = self.layout.rowCount()
+
+        self.layout.addWidget(
+            self.show_parameters_button, row, 1, 1, 3, QtCore.Qt.AlignCenter
+        )
+
+        self.layout.addWidget(self.button_box, row + 1, 1, 1, 4, QtCore.Qt.AlignCenter)
+
+        # connect signals and sockets
+        self.show_parameters_button.clicked.connect(
+            partial(self.display_parameters, "neurongroups")
+        )
+
+        layout = QtWidgets.QGridLayout()
+
+        self.setLayout(layout)
+        self.setWindowTitle("Define a Neurongroup")
+
+        self.name_button.clicked.connect(
+            partial(self.accept_name, target="neurongroups")
+        )
+
+        self.type_button.clicked.connect(self.accept_type)
+
+        self.source_button.clicked.connect(self.accept_source)
+
+        self.variable_button.clicked.connect(self.accept_variable)
+
+    def accept_type(self) -> None:
+        """
+        Accept the type input
+        """
+
+        if self.type.text() == "":
+            self.display_error("Please define type first")
+
+        tptext = self.type.text()
+
+        if tptext in ["StateMonitor", "SpikeMonitor"]:
+            self.tp = getattr(import_module("brian2"), tptext)
+            self.type_button.setDown(True)
+            self.type_button.setText("saved")
+        else:
+            self.display_error(f"Monitor type {tptext} is invalid")
+
+    def accept_source(self) -> None:
+        """
+        Accept the source input
+        """
+
+        if self.source.text() == "":
+            self.display_error("Please define source first")
+
+        self.src = self.source.text()
+        self.source_button.setText("saved")
+        self.source_button.setDown(True)
+
+    def accept_variable(self) -> None:
+        """
+        Accept the variable input
+        """
+
+        if self.variable.text() == "":
+            self.display_error("Please define variable first")
+
+        self.var = self.variable.text()
+        self.variable_button.setText("saved")
+        self.variable_button.setDown(True)
+
+    def accept(self) -> None:
+        """
+        Accept the monitor data and define a new monitor in the held model
+        """
+        try:
+            self.model.define_monitor(
+                cast(str, self.name),
+                cast(type, self.tp),
+                cast(str, self.src),
+                cast(str, self.var),
+            )
+            super().accept()
+        except Exception as e:
+            self.display_error(f"Error when defining monitor {self.name}: {e}")
+
+    def display_parameters(
+        self, _: str | dict[Any, Any] | None = None, read_only: bool = False
+    ) -> None:
+        """
+        Display the parameters of a target member of the model in a new window.
+
+        Parameters
+        ----------
+        target : str dummy
+        """
+
+        self.parameterwindow = QtWidgets.QDialog(self)
+        layout = QtWidgets.QVBoxLayout(self.parameterwindow)
+        table = QtWidgets.QTableWidget(self.parameterwindow)
+        table.setRowCount(4)
+        table.setColumnCount(2)
+
+        for i, (n, v) in enumerate(
+            zip(
+                ["name", "type", "source", "variable"],
+                [self.name, self.tp, self.src, self.var],
+            )
+        ):
+            nameitem = QtWidgets.QTableWidgetItem(str(n))
+            valueitem = QtWidgets.QTableWidgetItem(str(v))
+
+            if read_only:
+                nameitem.setFlags(nameitem.flags() & ~QtCore.Qt.ItemIsEditable)
+                valueitem.setFlags(valueitem.flags() & ~QtCore.Qt.ItemIsEditable)
+
+            table.setItem(i, 0, nameitem)
+            table.setItem(i, 1, valueitem)
+
+        layout.addWidget(table)
+        self.parameterwindow.setLayout(layout)
+
+        default_size = self.parameterwindow.size()
+
+        # Set the window size relative to the default size
+        self.parameterwindow.resize(
+            default_size.width() * 3, default_size.height() * 6
+        )  # Double the width and height
+
+        self.parameterwindow.exec()
+
+
 class B2ModelWidget(ModelDialog):
     """
     Main widget to define a B2Model instance in a new window.
@@ -1003,6 +1175,7 @@ class B2ModelWidget(ModelDialog):
         self.add_neurongroup_button = QtWidgets.QPushButton("Add neurongroup", self)
         self.add_synapse_button = QtWidgets.QPushButton("Add synapse", self)
         self.display_system_button = QtWidgets.QPushButton("Display system", self)
+        self.monitor_button = QtWidgets.QPushButton("Add monitor", self)
         self.add_subgroup_button = QtWidgets.QPushButton("Add neuron subgroup", self)
 
         self.layout.addWidget(self.add_parameter_button, 1, 4)
@@ -1023,7 +1196,9 @@ class B2ModelWidget(ModelDialog):
 
         self.layout.addWidget(self.display_system_button, 5, 4)
 
-        self.layout.addWidget(self.button_box, 6, 1, 1, 4, QtCore.Qt.AlignCenter)
+        self.layout.addWidget(self.monitor_button, 6, 4)
+
+        self.layout.addWidget(self.button_box, 7, 1, 1, 4, QtCore.Qt.AlignCenter)
 
         for qle in [
             self.name_entry,
@@ -1037,6 +1212,7 @@ class B2ModelWidget(ModelDialog):
         self.add_synapse_button.clicked.connect(self.open_add_synapse_dialog)
         self.add_parameter_button.clicked.connect(self.open_add_parameter_dialog)
         self.display_system_button.clicked.connect(self.display_system)
+        self.monitor_button.clicked.connect(self.open_monitor_dialog)
         self.add_subgroup_button.clicked.connect(self.open_subgroup_dialog)
 
         self.timestep_button.clicked.connect(self.not_connected)
@@ -1084,6 +1260,13 @@ class B2ModelWidget(ModelDialog):
         self.param_dlg = ParameterDialog(self.model, self)
 
         self.param_dlg.exec()
+
+    def open_monitor_dialog(self) -> None:
+        """
+        Open a new window to define a new monitor
+        """
+        self.monitor_dlg = MonitorDialog(self.model, self)
+        self.monitor_dlg.exec()
 
     def open_subgroup_dialog(self) -> None:
         """
