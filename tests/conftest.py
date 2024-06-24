@@ -120,6 +120,54 @@ def mfx() -> b2_model.B2Model:
 
 
 @pytest.fixture
+def mfx_ornstein() -> b2_model.B2Model:
+    eqs = """
+        tau : second
+        sigma : 1
+        dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
+    """
+
+    model = b2_model.B2Model(seed=4321)
+    model.define_neuronnumber("neurongroup", 2)
+    model.define_dt(0.2 * b2.ms)
+    model.define_solver_method("neurongroup", "euler")
+    model.define_equation("neurongroup", eqs)
+    model.assemble_neurongroup(name="neurongroup")
+    model.define_monitor("M", b2.StateMonitor, "neurongroup", "y")
+
+    # init
+    model.network["neurongroup"].tau = np.array([1, 0.1]) * b2.second
+    model.network["neurongroup"].sigma = np.array([0.1, 0.31622])
+    model.network["neurongroup"].y = 1
+
+    return model
+
+
+@pytest.fixture()
+def mfx_gui() -> b2_model.B2Model:
+    """model based on test_b2model/test_ornstein_uhlenbeck to demo GUI features."""
+    eqs = """
+        tau : second
+        sigma : 1
+        dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
+    """
+    n_neurons = 64
+    model = b2_model.B2Model(seed=4321)
+    model.define_neuronnumber("neurongroup", n_neurons)
+    model.define_dt(0.5 * b2.ms)
+    model.define_solver_method("neurongroup", "euler")
+    model.define_equation("neurongroup", eqs)
+    model.assemble_neurongroup(name="neurongroup")
+    model.define_monitor("M", b2.StateMonitor, "neurongroup", "y")
+
+    # init
+    model.network["neurongroup"].tau = np.random.rand(n_neurons) * b2.second
+    model.network["neurongroup"].sigma = 0.5 * np.random.rand(n_neurons)
+    model.network["neurongroup"].y = 0
+    return model
+
+
+@pytest.fixture
 def mfx_parameterized(
     mfx: b2_model.B2Model, reference_parameters: dict[str, Any]
 ) -> tuple[b2_model.B2Model, dict[str, Any]]:

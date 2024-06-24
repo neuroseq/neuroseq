@@ -8,12 +8,14 @@ from typing import Callable
 from typing import cast
 
 from brian2 import Quantity
+from brian2 import TimedArray
 from brian2 import Unit
 from brian2 import units
 from qtpy import QtCore
 from qtpy import QtWidgets
 
 from formozov_project.b2_model import B2Model
+from formozov_project.stim_dialog import StimDialog
 
 
 class ModelDialog(QtWidgets.QDialog):
@@ -1172,6 +1174,7 @@ class B2ModelWidget(ModelDialog):
         )
 
         self.add_parameter_button = QtWidgets.QPushButton("Add parameter", self)
+        self.add_stimuli_button = QtWidgets.QPushButton("Add stimuli", self)
         self.add_neurongroup_button = QtWidgets.QPushButton("Add neurongroup", self)
         self.add_synapse_button = QtWidgets.QPushButton("Add synapse", self)
         self.display_system_button = QtWidgets.QPushButton("Display system", self)
@@ -1180,25 +1183,27 @@ class B2ModelWidget(ModelDialog):
 
         self.layout.addWidget(self.add_parameter_button, 1, 4)
 
+        self.layout.addWidget(self.add_stimuli_button, 2, 4)
+
         self.layout.addWidget(
             self.add_neurongroup_button,
-            2,
+            3,
             4,
         )
 
-        self.layout.addWidget(self.add_subgroup_button, 3, 4)
+        self.layout.addWidget(self.add_subgroup_button, 4, 4)
 
         self.layout.addWidget(
             self.add_synapse_button,
-            4,
+            5,
             4,
         )
 
-        self.layout.addWidget(self.display_system_button, 5, 4)
+        self.layout.addWidget(self.display_system_button, 6, 4)
 
-        self.layout.addWidget(self.monitor_button, 6, 4)
+        self.layout.addWidget(self.monitor_button, 7, 4)
 
-        self.layout.addWidget(self.button_box, 7, 1, 1, 4, QtCore.Qt.AlignCenter)
+        self.layout.addWidget(self.button_box, 8, 1, 1, 4, QtCore.Qt.AlignCenter)
 
         for qle in [
             self.name_entry,
@@ -1208,6 +1213,7 @@ class B2ModelWidget(ModelDialog):
             qle.setMinimumWidth(qle.sizeHint().width() * 2)
 
         # connect signals to slots on the outermost window
+        self.add_stimuli_button.clicked.connect(self.open_add_stimuli_dialog)
         self.add_neurongroup_button.clicked.connect(self.open_add_neurongroup_dialog)
         self.add_synapse_button.clicked.connect(self.open_add_synapse_dialog)
         self.add_parameter_button.clicked.connect(self.open_add_parameter_dialog)
@@ -1236,6 +1242,20 @@ class B2ModelWidget(ModelDialog):
         d["name"] = self.name
 
         super().display_parameters(d, read_only=False)
+
+    def open_add_stimuli_dialog(self) -> None:
+        """
+        Open a new window to define a stimuli array
+        """
+        if self.model.dt is None:
+            self.display_error("Please define a timestep first.")
+            return
+        stim_dialog = StimDialog(None, self.model.dt, self)
+        if stim_dialog.exec():
+            self.model.define_parameter(
+                stim_dialog.name,
+                TimedArray(stim_dialog.stims * stim_dialog.units, self.model.dt),
+            )
 
     def open_add_neurongroup_dialog(self) -> None:
         """
