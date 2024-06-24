@@ -343,11 +343,11 @@ def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
     toolbar.addSeparator()
     help_menu = menu.addMenu("&Help")
     _add_action("&About", gui.about, help_menu)
-    # temporary menu for demo purposes for widgets that are not yet integrated
+    # temporary menu for demo purposes for widgets and dialogs that are not yet integrated
     temp_menu = menu.addMenu("&Temp demos")
     _add_action(
         "&StimDialog",
-        lambda: StimDialog(stim=np.zeros((64, 100))).exec(),
+        lambda: StimDialog(stims=np.zeros((64, 100))).exec(),
         temp_menu,
     )
     return toolbar

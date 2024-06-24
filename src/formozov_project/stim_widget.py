@@ -18,28 +18,36 @@ class StimWidget(TimeseriesWidget):
 
     def __init__(
         self,
-        stim: np.ndarray | None = None,
-        timestamps: np.ndarray | None = None,
-        dt: float | None = None,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
-        super().__init__(stim, timestamps, dt, parent)
+        super().__init__(parent)
 
-    def _plot_data(self, data: np.ndarray, timestamps: np.ndarray) -> None:
-        max_value = np.max(data)
-        if max_value == 0:
-            max_value = 1
-        norm = max_value / 0.95
-        for neuron_index, values in enumerate(data):
+    def set_data(
+        self,
+        stims: np.ndarray | None = None,
+        timestamps: np.ndarray | None = None,
+        dt: float | None = None,
+    ) -> None:
+        super()._plot_data(stims, timestamps, dt)
+
+    def _plot_neuron_data(
+        self, data: list[np.ndarray] | np.ndarray, timestamps: np.ndarray, dt: float
+    ) -> None:
+        assert isinstance(data, np.ndarray)
+        stim_max = np.max(data)
+        if stim_max == 0:
+            stim_max = 1
+        stim_norm = stim_max / 0.95
+        for neuron_index, stim in enumerate(data):
             # vertically offset the data for each neuron by its index
             y_offset = neuron_index - 0.5
             # give each neuron a unique color
             brush = (neuron_index, len(data))
             bar = pg.BarGraphItem(
                 x=timestamps,
-                width=1.0,
+                width=dt,
                 y0=y_offset,
-                y1=y_offset + values / norm,
+                y1=y_offset + stim / stim_norm,
                 pen=None,
                 brush=brush,
             )

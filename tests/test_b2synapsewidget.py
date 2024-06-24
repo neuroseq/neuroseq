@@ -18,7 +18,7 @@ def test_synapsedialog_enter_close(qtbot: QtBot) -> None:
 
     sdiag.show()
 
-    cancel_button = sdiag.buttonBox.button(QtWidgets.QDialogButtonBox.Cancel)
+    cancel_button = sdiag.button_box.button(QtWidgets.QDialogButtonBox.Cancel)
 
     qtbot.mouseClick(cancel_button, QtCore.Qt.LeftButton)
 
