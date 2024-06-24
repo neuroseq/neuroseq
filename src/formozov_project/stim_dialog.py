@@ -57,7 +57,6 @@ class StimDialog(QtWidgets.QDialog):
     def text_name_changed(self, text: str) -> None:
         self.name = text
 
-
     def _update_stims(self, stims: np.ndarray, valid: bool) -> None:
         self.button_box.button(QtWidgets.QDialogButtonBox.StandardButton.Ok).setEnabled(
             valid
