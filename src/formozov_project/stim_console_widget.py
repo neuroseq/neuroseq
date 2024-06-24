@@ -9,20 +9,20 @@ from qtpy import QtWidgets
 
 
 class StimConsoleWidget(ReplWidget):
-    stim_updated = QtCore.Signal(np.ndarray, bool)
+    stims_updated = QtCore.Signal(np.ndarray, bool)
 
     def __init__(
         self,
-        stim: np.ndarray | None,
+        stims: np.ndarray | None,
         parent: QtWidgets.QWidget | None = None,
     ):
         super().__init__(globals=self.namespace, locals=self.namespace, parent=parent)
-        self.namespace_dict = {"np": np, "stim": stim}
+        self.namespace_dict = {"np": np, "stims": stims}
         self._print_intro()
 
     def _print_intro(self) -> None:
         self.output.insertPlainText(
-            "This is a Python console where you can edit the stimuli by modifying the 2-d numpy array 'stim'.\n"
+            "This is a Python console where you can edit the stimuli by modifying the 2-d numpy array 'stims'.\n"
         )
         self.output.insertPlainText(
             "The first index is the neuron index, the second index is the timestamp.\n"
@@ -30,11 +30,11 @@ class StimConsoleWidget(ReplWidget):
         self.output.insertPlainText(
             "Here are some examples you can try entering below:\n\n"
         )
-        self.write(">>> stim = np.ones((2,100))", style="command")
+        self.write(">>> stims = np.ones((2,100))", style="command")
         self.output.insertPlainText("\n")
-        self.write(">>> stim = np.random.randint(2,size=(24,500))", style="command")
+        self.write(">>> stims = np.random.randint(2,size=(24,500))", style="command")
         self.output.insertPlainText("\n")
-        self.write(">>> stim[::2,::10] = 1", style="command")
+        self.write(">>> stims[::2,::10] = 1", style="command")
         self.output.insertPlainText(
             "\n\nNumpy is available as np, and indentation can be done with a single space.\n\n\n"
         )
@@ -42,21 +42,21 @@ class StimConsoleWidget(ReplWidget):
     def namespace(self) -> dict[str, Any]:
         return self.namespace_dict
 
-    def validate_stim(self) -> tuple[bool, str]:
-        stim = self.namespace()["stim"]
-        if stim is None:
+    def validate_stims(self) -> tuple[bool, str]:
+        stims = self.namespace()["stims"]
+        if stims is None:
             return False, "None"
-        if not isinstance(stim, np.ndarray):
-            return False, f"{type(stim)}"
-        if stim.ndim != 2:
-            return False, f"{stim.ndim}d numpy array"
+        if not isinstance(stims, np.ndarray):
+            return False, f"{type(stims)}"
+        if stims.ndim != 2:
+            return False, f"{stims.ndim}d numpy array"
         return True, "2d numpy array"
 
     def runCmd(self, cmd: str) -> None:
         super().runCmd(cmd)
-        stim_is_valid, stim_type = self.validate_stim()
-        if not stim_is_valid:
+        stims_is_valid, stims_type = self.validate_stims()
+        if not stims_is_valid:
             self.output.insertPlainText(
-                f"    Invalid stim array: expected a 2d numpy array, found {stim_type}\n"
+                f"    Invalid stim array: expected a 2d numpy array, found {stims_type}\n"
             )
-        self.stim_updated.emit(self.namespace()["stim"], stim_is_valid)
+        self.stims_updated.emit(self.namespace()["stims"], stims_is_valid)
