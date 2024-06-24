@@ -25,7 +25,7 @@ class StimDialog(QtWidgets.QDialog):
         self.stims = stims.copy() if stims is not None else np.zeros((1, 1))
         self.dt = dt
         layout = QtWidgets.QVBoxLayout()
-        self.button_box = QtWidgets.QDialogButtonBox(
+        self.buttonBox = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok
             | QtWidgets.QDialogButtonBox.StandardButton.Cancel
         )
@@ -44,7 +44,7 @@ class StimDialog(QtWidgets.QDialog):
         self._update_stim(self.stims, valid=True)
 
     def _update_stim(self, stim: np.ndarray, valid: bool) -> None:
-        self.button_box.button(QtWidgets.QDialogButtonBox.StandardButton.Ok).setEnabled(
+        self.buttonBox.button(QtWidgets.QDialogButtonBox.StandardButton.Ok).setEnabled(
             valid
         )
         if valid:
