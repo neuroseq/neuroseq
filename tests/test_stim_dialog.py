@@ -51,7 +51,7 @@ def test_stim_dialog_data(qtbot: QtBot) -> None:
     # set stims to an invalid value: StimWidget not updated, ok button disabled
     stim_dialog.stim_console_widget.input.setText("stims = 5")
     qtbot.keyPress(stim_dialog.stim_console_widget.input, QtCore.Qt.Key.Key_Enter)
-    assert not stim_dialog.buttonBox.button(
+    assert not stim_dialog.button_box.button(
         QtWidgets.QDialogButtonBox.StandardButton.Ok
     ).isEnabled()
     assert len(stim_dialog.stim_widget.neuron_plots) == n_neurons
