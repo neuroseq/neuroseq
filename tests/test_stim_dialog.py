@@ -29,6 +29,7 @@ def test_stim_dialog_data(qtbot: QtBot) -> None:
     qtbot.addWidget(stim_dialog)
     stim_dialog.show()
     qtbot.waitUntil(lambda: stim_dialog.isVisible())
+
     assert stim_dialog.stims is not None
     assert np.allclose(stim_dialog.stims, np.zeros_like(stims))
     assert stim_dialog.buttonBox.button(
@@ -37,6 +38,7 @@ def test_stim_dialog_data(qtbot: QtBot) -> None:
     # set all stimuli to 1: valid stims, StimWidget updated, ok button enabled
     stim_dialog.stim_console_widget.input.setText("stims[:,:] = 1")
     qtbot.keyPress(stim_dialog.stim_console_widget.input, QtCore.Qt.Key.Key_Enter)
+
     assert np.allclose(stim_dialog.stims, np.ones_like(stims))
     assert stim_dialog.buttonBox.button(
         QtWidgets.QDialogButtonBox.StandardButton.Ok
@@ -50,7 +52,7 @@ def test_stim_dialog_data(qtbot: QtBot) -> None:
     # set stims to an invalid value: StimWidget not updated, ok button disabled
     stim_dialog.stim_console_widget.input.setText("stims = 5")
     qtbot.keyPress(stim_dialog.stim_console_widget.input, QtCore.Qt.Key.Key_Enter)
-    assert not stim_dialog.buttonBox.button(
+    assert not stim_dialog.button_box.button(
         QtWidgets.QDialogButtonBox.StandardButton.Ok
     ).isEnabled()
     assert len(stim_dialog.stim_widget.neuron_plots) == n_neurons
@@ -59,8 +61,10 @@ def test_stim_dialog_data(qtbot: QtBot) -> None:
     # assign random valid stim array with different shape, StimWidget updated, ok button enabled
     stim_dialog.stim_console_widget.input.setText("stims = np.random.rand(83, 127)")
     qtbot.keyPress(stim_dialog.stim_console_widget.input, QtCore.Qt.Key.Key_Enter)
+
     assert stim_dialog.stims.shape == (83, 127)
     assert stim_dialog.buttonBox.button(
+
         QtWidgets.QDialogButtonBox.StandardButton.Ok
     ).isEnabled()
     assert len(stim_dialog.stim_widget.neuron_plots) == 83
