@@ -144,6 +144,7 @@ def test_dt_def_exceptions(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
         b2w.error_dialog.text()
         == "Error when trying to convert timestep 0.2 ms: something went wrong"
     )
+    b2w.error_dialog.close()
 
 
 def test_random_seed_def(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
