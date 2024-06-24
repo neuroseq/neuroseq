@@ -11,6 +11,7 @@ from brian2 import Network
 from brian2 import Quantity
 from brian2 import TimedArray
 from brian2 import Unit
+from brian2 import numpy as np
 from brian2 import seed as set_b2_seed
 from brian2 import units
 from qtpy import QtCore
@@ -1158,7 +1159,7 @@ class InitialConditionWidget(ModelDialog):
         """
         super().__init__(model, parent)
 
-        self.params: dict[str, Any] = {}
+        self.params: dict[str, str | Quantity | np.array] = {}
         self.source, self.source_button = self.add_text_field("Source")
         self.var, self.var_button = self.add_text_field("Variable")
         self.value, self.value_button = self.add_text_field(
@@ -1204,8 +1205,8 @@ class InitialConditionWidget(ModelDialog):
         accept_source Accept the name of a source group a variable to initialze belongs to.
         """
         self.params["elementname"] = self.source.text()
-        self.value_button.setDown(True)
-        self.value_button.setText("saved")
+        self.source_button.setDown(True)
+        self.source_button.setText("saved")
 
     def accept_variable(self) -> None:
         """
@@ -1213,8 +1214,8 @@ class InitialConditionWidget(ModelDialog):
         """
 
         self.params["varname"] = self.var.text()
-        self.value_button.setDown(True)
-        self.value_button.setText("saved")
+        self.var_button.setDown(True)
+        self.var_button.setText("saved")
 
     def accept_value(self) -> None:
         """
@@ -1226,6 +1227,7 @@ class InitialConditionWidget(ModelDialog):
         try:
             self.params["value"] = eval(txt)
         except Exception as e:
+            print("txt: ", txt)
             self.display_error(f"Error in evaluating value expression {txt}: {e}")
         self.value_button.setDown(True)
         self.value_button.setText("saved")

@@ -26,6 +26,7 @@ def test_initialization(initdlg: B2W.InitialConditionWidget) -> None:
 
 def test_accept_source(initdlg: B2W.InitialConditionWidget, qtbot: QtBot) -> None:
     qtbot.keyClicks(initdlg.source, "test_source")
+    assert initdlg.source.text() == "test_source"
     qtbot.mouseClick(initdlg.source_button, QtCore.Qt.LeftButton)
     assert initdlg.params["elementname"] == "test_source"
     assert initdlg.source_button.isDown()
@@ -45,7 +46,7 @@ def test_accept_value(
 ) -> None:
     qtbot.keyClicks(initdlg.value, "np.zeros(3)")
     qtbot.mouseClick(initdlg.value_button, QtCore.Qt.LeftButton)
-    assert initdlg.params["value"] == eval("np.zeros(3)")
+    assert all(initdlg.params["value"] == eval("np.zeros(3)"))
     assert initdlg.value_button.text() == "saved"
     assert initdlg.value_button.isDown()
 
@@ -60,6 +61,8 @@ def test_accept_value(
 
     monkeypatch.setattr("builtins.eval", mock_eval_raise_error)
 
+    initdlg.value.clear()
+    qtbot.keyClicks(initdlg.value, "np.zeros(3)")
     qtbot.mouseClick(initdlg.value_button, QtCore.Qt.LeftButton)
     qtbot.waitUntil(initdlg.error_dialog.isVisible)
 
@@ -67,6 +70,8 @@ def test_accept_value(
         initdlg.error_dialog.text()
         == "Error in evaluating value expression np.zeros(3): Mocked error"
     )
+
+    initdlg.error_dialog.close()
 
 
 def test_accept(
