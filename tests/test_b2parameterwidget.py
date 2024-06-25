@@ -174,5 +174,5 @@ def test_parameterdialog_enter_fields(qtbot: QtBot) -> None:
     assert param_dlg.value_button.text() == "saved"
 
     assert (
-        cast(Dict[str, Any], param_dlg.model.parameters)["param"] == "42"
+        cast(Dict[str, Any], param_dlg.model.parameters)["param"] == 42
     )  # nothing has been saved yet

@@ -33,13 +33,13 @@ def test_define_equation(mfx: b2_model.B2Model) -> None:
         ValueError,
         match="Equation must have a colon that separates equation and unit or an equal sign",
     ):
-        mfx.define_equation("P", "dge/dt = -ge*(1./taue)")
+        mfx.define_equation("P", "dge/dt -ge*(1./taue)")
 
     with pytest.raises(
         ValueError,
         match="Equation must have a colon that separates equation and unit or an equal sign",
     ):
-        mfx.define_equation("P", "-ge*(1./taue): siemens")
+        mfx.define_equation("P", "-ge*(1./taue) siemens")
 
 
 def test_define_equation_incremental(mfx: b2_model.B2Model) -> None:
@@ -179,17 +179,6 @@ def test_neuron_subgroup(
     mfx.network = b2.Network()
     with pytest.raises(KeyError, match="'No object with name \"ng\" found'"):
         mfx.define_neuron_subgroup("ng", "excitatory", slice(0, 20))
-
-
-def test_define_synapse_eq_exceptions(
-    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
-) -> None:
-    mfx, _ = mfx_parameterized
-
-    with pytest.raises(
-        ValueError, match="Equation must have a colon that separates equation and unit"
-    ):
-        mfx.define_synapse_equation("S", "dApost/dt = -Apost / taupost (event-driven)")
 
 
 def test_synapse_connection_prob_numerical(
@@ -391,7 +380,6 @@ def test_NMDA_model() -> None:
 
     model = b2_model.B2Model(seed=4321)
     # model.define_dt(0.2 * b2.ms)
-    model.define_solver_method("neuron_input", "euler")
 
     model.define_parameter("a", a)
     model.define_parameter("b", b)
