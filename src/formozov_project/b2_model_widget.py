@@ -1185,20 +1185,27 @@ class InitialConditionWidget(ModelDialog):
         self.var_button.clicked.connect(self.accept_variable)
         self.value_button.clicked.connect(self.accept_value)
 
+        for qle in [
+            self.source,
+            self.var,
+            self.value,
+        ]:
+            qle.setMinimumWidth(qle.sizeHint().width() * 2)
+
     def accept(self) -> None:
         """
         accept Accept the initial condition. works only if 'source', 'variable' and 'value' are all set.
         """
         if any(var not in self.params for var in ["elementname", "varname", "value"]):
             self.display_error("Cannot define incompletely specified initial condition")
-
-        try:
-            self.model.define_init(**self.params)
-            super().accept()
-        except Exception as e:
-            self.display_error(
-                f"Error when defining initial condition for source {self.params["elementname"]}, variable {self.params["varname"]}, with value {self.params["value"]}: {e}"
-            )
+        else:
+            try:
+                self.model.define_init(**self.params)
+                super().accept()
+            except Exception as e:
+                self.display_error(
+                    f'Error when defining initial condition for source {self.params["elementname"]}, variable {self.params["varname"]}, with value {self.params["value"]}: {e}'
+                )
 
     def accept_source(self) -> None:
         """
@@ -1279,7 +1286,7 @@ class B2ModelWidget(ModelDialog):
         self.display_system_button = QtWidgets.QPushButton("Display system", self)
         self.monitor_button = QtWidgets.QPushButton("Add monitor", self)
         self.add_subgroup_button = QtWidgets.QPushButton("Add neuron subgroup", self)
-        self.init_button = QtWidgets.QPushButton("Provide initial conditions", self)
+        self.init_button = QtWidgets.QPushButton("Add initial conditions", self)
 
         self.layout.addWidget(self.add_parameter_button, 1, 4)
 
@@ -1299,11 +1306,11 @@ class B2ModelWidget(ModelDialog):
             4,
         )
 
-        self.layout.addWidget(self.display_system_button, 6, 4)
+        self.layout.addWidget(self.init_button, 6, 4)
 
         self.layout.addWidget(self.monitor_button, 7, 4)
 
-        self.layout.addWidget(self.init_button, 8, 4)
+        self.layout.addWidget(self.display_system_button, 8, 4)
 
         self.layout.addWidget(self.button_box, 9, 1, 1, 4, QtCore.Qt.AlignCenter)
 
