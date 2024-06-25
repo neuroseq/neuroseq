@@ -1012,7 +1012,7 @@ class MonitorDialog(ModelDialog):
 
         # connect signals and sockets
         self.show_parameters_button.clicked.connect(
-            partial(self.display_parameters, "neurongroups")
+            partial(self.display_parameters, "monitors")
         )
 
         layout = QtWidgets.QGridLayout()
@@ -1020,9 +1020,7 @@ class MonitorDialog(ModelDialog):
         self.setLayout(layout)
         self.setWindowTitle("Define a Neurongroup")
 
-        self.name_button.clicked.connect(
-            partial(self.accept_name, target="neurongroups")
-        )
+        self.name_button.clicked.connect(partial(self.accept_name, target="monitors"))
 
         self.type_button.clicked.connect(self.accept_type)
 
