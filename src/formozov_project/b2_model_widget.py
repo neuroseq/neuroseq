@@ -330,12 +330,11 @@ class NeuronGroupDialog(ModelDialog):
         else:
             try:
                 self.model.assemble_neurongroup(name=self.name)
+                super().accept()
             except Exception as e:
                 self.display_error(
                     f"Error when assembling neurongroup {self.name}: {e}"
                 )
-
-            super().accept()
 
     def __init__(self, model: B2Model, parent: QtWidgets.QDialog | None = None) -> None:
         """
@@ -864,7 +863,7 @@ class ParameterDialog(ModelDialog):
             self.display_error("Please assign a value or expression before saving!")
         else:
             self.accept_parameter(
-                self.value_entry, self.name, self.model.define_parameter
+                self.value_entry, self.name, self.model.define_parameter, convert=eval
             )
             self.value_button.setText("saved")
 
@@ -958,6 +957,7 @@ class DictionaryWidget(QtWidgets.QWidget):
                 self.add_dict_to_tree(widget, value, item)
             else:
                 item.setText(1, str(value))
+                item.setFlags(item.flags() | QtCore.Qt.ItemIsEditable)
 
             parent.addChild(item)
 
@@ -1018,7 +1018,7 @@ class MonitorDialog(ModelDialog):
         layout = QtWidgets.QGridLayout()
 
         self.setLayout(layout)
-        self.setWindowTitle("Define a Neurongroup")
+        self.setWindowTitle("Define a Monitor")
 
         self.name_button.clicked.connect(partial(self.accept_name, target="monitors"))
 

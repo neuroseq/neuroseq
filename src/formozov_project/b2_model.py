@@ -55,7 +55,7 @@ class B2Model:
         ValueError
             When there is no '=' block in the line given
         """
-        if ":" not in line or "=" not in line:
+        if ":" not in line and "=" not in line:
             message = "Equation must have a colon that separates equation and unit or an equal sign"
             self.logger.critical(message)
             raise ValueError(message)
