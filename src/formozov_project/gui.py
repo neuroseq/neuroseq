@@ -31,7 +31,7 @@ class Gui(QtWidgets.QMainWindow):
         central_widget = QtWidgets.QWidget()
         central_widget.setLayout(grid_layout)
         # main GUI is left/right split between traces and heatmap
-        split_left_right = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        split_left_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         self.trace_widget = TraceWidget()
         split_left_right.addWidget(self.trace_widget)
         self.heatmap_widget = HeatmapWidget()
@@ -48,7 +48,9 @@ class Gui(QtWidgets.QMainWindow):
         self.simulation_progress_dialog = QtWidgets.QProgressDialog(
             "Simulating...", "Abort simulation", 0, 100, self
         )
-        self.simulation_progress_dialog.setWindowModality(QtGui.Qt.WindowModal)
+        self.simulation_progress_dialog.setWindowModality(
+            QtCore.Qt.WindowModality.WindowModal
+        )
         self.simulation_progress_dialog.setAutoClose(True)
         self.simulation_progress_dialog.setMinimumDuration(200)
         self.simulation_progress_dialog.reset()
@@ -73,7 +75,7 @@ class Gui(QtWidgets.QMainWindow):
             return
         monitor = state_monitors[0]
         variable = monitor.record_variables[0]
-        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
         timestamps = monitor.t
         traces = getattr(monitor, variable)
         self.trace_widget.set_data(traces, timestamps / b2.second)
@@ -168,7 +170,11 @@ class Gui(QtWidgets.QMainWindow):
 
     def btn_continue_simulation_clicked(self) -> None:
         simulation_time_str, ok = QtWidgets.QInputDialog.getText(
-            self, "Simulate", "Simulation time (s)", QtWidgets.QLineEdit.Normal, "1.0"
+            self,
+            "Simulate",
+            "Simulation time (s)",
+            QtWidgets.QLineEdit.EchoMode.Normal,
+            "1.0",
         )
         if not ok:
             return
@@ -181,7 +187,7 @@ class Gui(QtWidgets.QMainWindow):
                 f"Could not parse simulation time '{simulation_time_str}' as a number",
             )
             return
-        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
         self.model.run_simulation(
             simulation_time * b2.second, report=self._update_simulation_progress
         )
