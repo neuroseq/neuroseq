@@ -222,9 +222,9 @@ def test_open_module_dialogs(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
     qtbot.waitUntil(b2w.dictwidget.isVisible)
 
 
-def test_open_initialization_dialog(
-    qtbot: QtBot,
-) -> None:
+def test_open_initialization_dialog(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec", B2W.QtWidgets.QDialog.show)
+
     b2w = B2W.B2ModelWidget(
         B2Model(),
         None,
@@ -238,6 +238,6 @@ def test_open_initialization_dialog(
 
     qtbot.mouseClick(b2w.init_button, QtCore.Qt.LeftButton)
 
-    qtbot.waitUntil(b2w.neuron_dlg.isVisible)
+    qtbot.waitUntil(b2w.init_widget.isVisible)
 
-    b2w.neuron_dlg.close()
+    b2w.init_widget.close()

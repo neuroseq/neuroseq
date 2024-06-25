@@ -84,7 +84,7 @@ def test_accept(
         dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
     """
 
-    initdlg.model.define_neuronnumber("neurongroup", 2)
+    initdlg.model.define_neuronnumber("neurongroup", 5)
     initdlg.model.define_dt(0.2 * ms)
     initdlg.model.define_solver_method("neurongroup", "euler")
     initdlg.model.define_equation("neurongroup", eqs)
@@ -100,7 +100,7 @@ def test_accept(
     initdlg.accept()
 
     # Verify the expected outcome, possibly by mocking model.define_init
-    assert initdlg.model.network["tau"] is not None
+    assert initdlg.model.network["neurongroup"].tau is not None
 
     monkeypatch.setattr(
         B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
