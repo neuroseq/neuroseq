@@ -26,7 +26,7 @@ class ModelDialog(QtWidgets.QDialog):
         General dialog widget from qt.
     """
 
-    def __init__(self, model: B2Model, parent: QtWidgets.QDialog | None = None) -> None:
+    def __init__(self, model: B2Model, parent: QtWidgets.QWidget | None = None) -> None:
         """
         Create a new ModelDialog instance.
 
@@ -46,7 +46,10 @@ class ModelDialog(QtWidgets.QDialog):
         self.name_entry, self.name_button = self.add_text_field("Name")
         self.show_parameters_button = QtWidgets.QPushButton("Show parameters", self)
 
-        self.qtbtn = QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        self.qtbtn = (
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
 
         # do not add these button_box immediatelly to the layout, as ok and cancel buttons are typically expected to appear on the last row
 
@@ -1298,7 +1301,7 @@ class B2ModelWidget(ModelDialog):
     def __init__(
         self,
         model: B2Model,
-        parent: QtWidgets.QDialog | None = None,
+        parent: QtWidgets.QWidget | None = None,
     ) -> None:
         """
         Create a new instance of the B2ModelWidget and display it in a new window.
