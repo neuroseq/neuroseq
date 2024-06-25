@@ -32,7 +32,7 @@ def test_stim_dialog_data(qtbot: QtBot) -> None:
     qtbot.waitUntil(lambda: stim_dialog.isVisible())
     assert stim_dialog.stims is not None
     assert np.allclose(stim_dialog.stims, np.zeros_like(stims))
-    assert stim_dialog.button_box.button(
+    assert not stim_dialog.button_box.button(
         QtWidgets.QDialogButtonBox.StandardButton.Ok
     ).isEnabled()
     # set all stimuli to 1: valid stims, StimWidget updated, ok button enabled

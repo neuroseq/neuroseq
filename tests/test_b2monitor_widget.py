@@ -4,7 +4,6 @@ import formozov_project.b2_model_widget as B2W
 from brian2 import StateMonitor
 from brian2 import ms
 from formozov_project.b2_model import B2Model
-from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -21,14 +20,12 @@ def test_monitor_enter_close(qtbot: QtBot) -> None:
 
     cancel_button = mdlg.button_box.button(QtWidgets.QDialogButtonBox.Cancel)
 
-    qtbot.mouseClick(cancel_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(cancel_button, QtCore.Qt.MouseButton.LeftButton)
 
     qtbot.waitUntil(lambda: mdlg.isVisible() is False)
 
 
-def test_monitor_accept_variables(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec", B2W.QtWidgets.QDialog.show)
-
+def test_monitor_accept_variables(qtbot: QtBot) -> None:
     mdlg = B2W.MonitorDialog(B2Model())
 
     qtbot.addWidget(mdlg)
@@ -63,9 +60,7 @@ def test_monitor_accept_variables(qtbot: QtBot, monkeypatch: MonkeyPatch) -> Non
     mdlg.error_dialog.close()
 
 
-def test_monitor_accept(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec", B2W.QtWidgets.QDialog.show)
-
+def test_monitor_accept(qtbot: QtBot) -> None:
     mdlg = B2W.MonitorDialog(B2Model(seed=4321))
 
     qtbot.addWidget(mdlg)
@@ -97,8 +92,7 @@ def test_monitor_accept(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
     assert mdlg.model.network["M"] is not None
 
 
-def test_monitor_parameterdisplay(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec", B2W.QtWidgets.QDialog.show)
+def test_monitor_parameterdisplay(qtbot: QtBot) -> None:
     mdlg = B2W.MonitorDialog(B2Model(), None)
     qtbot.add_widget(mdlg)
 

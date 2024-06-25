@@ -43,7 +43,7 @@ def test_stim_console_widget_repl(qtbot: QtBot) -> None:
     assert stim_console_widget.namespace()["x"] == 5
     array, valid = signals[-1]
     assert not valid
-    assert array is None
+    assert array.shape == (0,)
     # modify stims array in a valid way
     target_stims = np.ones((5, 20))
     stim_console_widget.input.setText("stims = np.ones((5,20))")
@@ -59,4 +59,4 @@ def test_stim_console_widget_repl(qtbot: QtBot) -> None:
     assert np.allclose(stim_console_widget.namespace()["stims"], target_stims)
     array, valid = signals[-1]
     assert not valid
-    assert np.allclose(array, target_stims)
+    assert array.shape == (0,)

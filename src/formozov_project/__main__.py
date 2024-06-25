@@ -5,6 +5,7 @@ import pathlib
 import sys
 
 import click
+from qtpy import API_NAME
 from qtpy import QtWidgets
 
 from formozov_project.gui import Gui
@@ -35,7 +36,7 @@ def main(log_level: str, log_file: pathlib.Path) -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
         filename=log_file,
     )
-    msg = f"Launching GUI with {log_level} logging to {log_file if log_file else 'console'}"
+    msg = f"Launching {API_NAME} GUI with {log_level} logging to {log_file if log_file else 'console'}"
     click.echo(msg)
     logging.getLogger(__name__).info(msg)
     app = QtWidgets.QApplication(sys.argv)

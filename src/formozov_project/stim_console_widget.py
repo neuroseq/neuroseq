@@ -55,8 +55,10 @@ class StimConsoleWidget(ReplWidget):
     def runCmd(self, cmd: str) -> None:
         super().runCmd(cmd)
         stims_is_valid, stims_type = self.validate_stims()
-        if not stims_is_valid:
+        if stims_is_valid:
+            self.stims_updated.emit(self.namespace()["stims"], stims_is_valid)
+        else:
             self.output.insertPlainText(
                 f"    Invalid stim array: expected a 2d numpy array, found {stims_type}\n"
             )
-        self.stims_updated.emit(self.namespace()["stims"], stims_is_valid)
+            self.stims_updated.emit(np.ndarray(shape=(0,)), stims_is_valid)

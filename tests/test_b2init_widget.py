@@ -32,7 +32,7 @@ def test_initialization(initdlg: B2W.InitialConditionWidget) -> None:
 
 def test_accept_source(initdlg: B2W.InitialConditionWidget, qtbot: QtBot) -> None:
     initdlg.source.setCurrentText("neurongroup2")
-    qtbot.mouseClick(initdlg.source_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(initdlg.source_button, QtCore.Qt.MouseButton.LeftButton)
     assert initdlg.params["elementname"] == "neurongroup2"
     assert initdlg.source_button.isDown()
     assert initdlg.source_button.text() == "saved"
@@ -40,10 +40,10 @@ def test_accept_source(initdlg: B2W.InitialConditionWidget, qtbot: QtBot) -> Non
 
 def test_accept_variable(initdlg: B2W.InitialConditionWidget, qtbot: QtBot) -> None:
     initdlg.source.setCurrentText("neurongroup2")
-    qtbot.mouseClick(initdlg.source_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(initdlg.source_button, QtCore.Qt.MouseButton.LeftButton)
 
     initdlg.var.setCurrentText("y")
-    qtbot.mouseClick(initdlg.var_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(initdlg.var_button, QtCore.Qt.MouseButton.LeftButton)
 
     assert initdlg.var_button.isDown()
     assert initdlg.var_button.text() == "saved"
@@ -54,24 +54,20 @@ def test_accept_value(
     initdlg: B2W.InitialConditionWidget, qtbot: QtBot, monkeypatch: MonkeyPatch
 ) -> None:
     qtbot.keyClicks(initdlg.value, "np.zeros(3)")
-    qtbot.mouseClick(initdlg.value_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(initdlg.value_button, QtCore.Qt.MouseButton.LeftButton)
     assert all(initdlg.params["value"] == eval("np.zeros(3)"))
     assert initdlg.value_button.text() == "saved"
     assert initdlg.value_button.isDown()
 
     initdlg.value.clear()
     qtbot.keyClicks(initdlg.value, "3*ms")
-    qtbot.mouseClick(initdlg.value_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(initdlg.value_button, QtCore.Qt.MouseButton.LeftButton)
 
     assert initdlg.value_button.text() == "saved"
     assert initdlg.value_button.isDown()
     assert initdlg.params["value"] == "3*ms"
 
     qtbot.keyClicks(initdlg.value, "np.zeros(3)")
-
-    monkeypatch.setattr(
-        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
-    )
 
     def mock_eval_raise_error(_: str) -> None:
         raise ValueError("Mocked error")
@@ -80,7 +76,7 @@ def test_accept_value(
 
     initdlg.value.clear()
     qtbot.keyClicks(initdlg.value, "np.zeros(3)")
-    qtbot.mouseClick(initdlg.value_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(initdlg.value_button, QtCore.Qt.MouseButton.LeftButton)
     qtbot.waitUntil(initdlg.error_dialog.isVisible)
 
     assert (
@@ -91,9 +87,7 @@ def test_accept_value(
     initdlg.error_dialog.close()
 
 
-def test_accept(
-    initdlg: B2W.InitialConditionWidget, qtbot: QtBot, monkeypatch: MonkeyPatch
-) -> None:
+def test_accept(initdlg: B2W.InitialConditionWidget, qtbot: QtBot) -> None:
     # define neurongroup
     eqs = """
         tau : second
@@ -118,10 +112,6 @@ def test_accept(
 
     # Verify the expected outcome, possibly by mocking model.define_init
     assert initdlg.model.network["neurongroup3"].tau is not None
-
-    monkeypatch.setattr(
-        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
-    )
 
     del initdlg.params["elementname"]
 

@@ -6,31 +6,26 @@ from typing import cast
 
 import formozov_project.b2_model_widget as B2W
 from formozov_project.b2_model import B2Model
-from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
 
-def test_display_parameters_empty(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec", B2W.QtWidgets.QDialog.show)
-
+def test_display_parameters_empty(qtbot: QtBot) -> None:
     param_dlg = B2W.ParameterDialog(B2Model())
 
     param_dlg.show()
 
     qtbot.addWidget(param_dlg)
 
-    qtbot.mouseClick(param_dlg.show_parameters_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(param_dlg.show_parameters_button, QtCore.Qt.MouseButton.LeftButton)
 
     qtbot.waitUntil(param_dlg.dictwidget.isVisible)
 
     assert param_dlg.dictwidget.table.text() == "No parameters defined"
 
 
-def test_display_parameters(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec", B2W.QtWidgets.QDialog.show)
-
+def test_display_parameters(qtbot: QtBot) -> None:
     parameter_dlg = B2W.ParameterDialog(B2Model())
 
     parameter_dlg.show()
@@ -43,7 +38,9 @@ def test_display_parameters(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
 
     parameter_dlg.model.parameters["p2"] = "v*w : mC"
 
-    qtbot.mouseClick(parameter_dlg.show_parameters_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(
+        parameter_dlg.show_parameters_button, QtCore.Qt.MouseButton.LeftButton
+    )
 
     qtbot.waitUntil(parameter_dlg.dictwidget.isVisible)
 
@@ -60,27 +57,21 @@ def test_display_parameters(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
     assert parameter_dlg.dictwidget.table.topLevelItemCount() == 2
 
 
-def test_parameterdialog_nothing_defined_errors(
-    qtbot: QtBot, monkeypatch: MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
-    )
-
+def test_parameterdialog_nothing_defined_errors(qtbot: QtBot) -> None:
     param_dlg = B2W.ParameterDialog(B2Model())
 
     qtbot.addWidget(param_dlg)
 
     param_dlg.show()
 
-    qtbot.mouseClick(param_dlg.name_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(param_dlg.name_button, QtCore.Qt.MouseButton.LeftButton)
 
     qtbot.waitUntil(param_dlg.error_dialog.isVisible)
 
     assert param_dlg.error_dialog.text() == "Please enter a name!"
 
     ok_button = param_dlg.error_dialog.button(QtWidgets.QMessageBox.Ok)
-    qtbot.mouseClick(ok_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(ok_button, QtCore.Qt.MouseButton.LeftButton)
 
     # Ensure the dialog is no longer visible
     qtbot.waitUntil(lambda: not param_dlg.error_dialog.isVisible())
@@ -88,7 +79,7 @@ def test_parameterdialog_nothing_defined_errors(
     # Verify main window is still visible
     assert param_dlg.isVisible()
 
-    qtbot.mouseClick(param_dlg.value_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(param_dlg.value_button, QtCore.Qt.MouseButton.LeftButton)
 
     qtbot.waitUntil(param_dlg.error_dialog.isVisible)
 
@@ -98,7 +89,7 @@ def test_parameterdialog_nothing_defined_errors(
     )
 
     ok_button = param_dlg.error_dialog.button(QtWidgets.QMessageBox.Ok)
-    qtbot.mouseClick(ok_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(ok_button, QtCore.Qt.MouseButton.LeftButton)
 
     # Ensure the dialog is no longer visible
     qtbot.waitUntil(lambda: not param_dlg.error_dialog.isVisible())
@@ -111,23 +102,25 @@ def test_parameterdialog_nothing_defined_errors(
 
     assert param_dlg.name_entry.text() == "param"
 
-    qtbot.mouseClick(param_dlg.name_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(param_dlg.name_button, QtCore.Qt.MouseButton.LeftButton)
 
-    qtbot.mouseClick(param_dlg.value_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(param_dlg.value_button, QtCore.Qt.MouseButton.LeftButton)
 
     qtbot.waitUntil(param_dlg.error_dialog.isVisible)
     qtbot.mouseClick(
-        param_dlg.error_dialog.button(QtWidgets.QMessageBox.Ok), QtCore.Qt.LeftButton
+        param_dlg.error_dialog.button(QtWidgets.QMessageBox.Ok),
+        QtCore.Qt.MouseButton.LeftButton,
     )
 
-    qtbot.mouseClick(param_dlg.value_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(param_dlg.value_button, QtCore.Qt.MouseButton.LeftButton)
     assert (
         param_dlg.error_dialog.text()
         == "Please assign a value or expression before saving!"
     )
 
     qtbot.mouseClick(
-        param_dlg.error_dialog.button(QtWidgets.QMessageBox.Ok), QtCore.Qt.LeftButton
+        param_dlg.error_dialog.button(QtWidgets.QMessageBox.Ok),
+        QtCore.Qt.MouseButton.LeftButton,
     )
 
     # Ensure the dialog is no longer visible
@@ -153,7 +146,7 @@ def test_parameterdialog_enter_fields(qtbot: QtBot) -> None:
 
     assert param_dlg.name_button.text() == "save"
 
-    qtbot.mouseClick(param_dlg.name_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(param_dlg.name_button, QtCore.Qt.MouseButton.LeftButton)
 
     assert param_dlg.name_button.text() == "saved"
 
@@ -169,7 +162,7 @@ def test_parameterdialog_enter_fields(qtbot: QtBot) -> None:
 
     assert param_dlg.value_button.text() == "save"
 
-    qtbot.mouseClick(param_dlg.value_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(param_dlg.value_button, QtCore.Qt.MouseButton.LeftButton)
 
     assert param_dlg.value_button.text() == "saved"
 
