@@ -21,6 +21,9 @@ class HeatmapWidget(pg.ImageView):
         self.setPredefinedGradient("viridis")
         self.set_data(data, timestamps)
 
+    def clear_data(self) -> None:
+        self.clear()
+
     def set_data(
         self,
         data: np.ndarray | None = None,

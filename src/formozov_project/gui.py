@@ -70,8 +70,8 @@ class Gui(QtWidgets.QMainWindow):
             or len(state_monitors[0].t) == 0
             or len(state_monitors[0].record_variables) == 0
         ):
-            self.trace_widget.set_data()
-            self.heatmap_widget.set_data()
+            self.trace_widget.clear_data()
+            self.heatmap_widget.clear_data()
             return
         monitor = state_monitors[0]
         variable = monitor.record_variables[0]
