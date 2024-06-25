@@ -7,13 +7,8 @@ from typing import Any
 from typing import Callable
 from typing import cast
 
-from brian2 import Network
-from brian2 import Quantity
-from brian2 import TimedArray
-from brian2 import Unit
+import brian2 as b2
 from brian2 import numpy as np
-from brian2 import seed as set_b2_seed
-from brian2 import units
 from qtpy import QtCore
 from qtpy import QtWidgets
 
@@ -63,7 +58,7 @@ class ModelDialog(QtWidgets.QDialog):
 
     def _convert_string_to_quantity(
         self, input: str, valuetype: type = float
-    ) -> Quantity:
+    ) -> b2.Quantity:
         """
         Convert string input to brian2 quantities, comprised of value and unit.
 
@@ -75,7 +70,7 @@ class ModelDialog(QtWidgets.QDialog):
             _description_, by default float
         Returns
         -------
-        Quantity
+        b2.Quantity
             Brian2 quantity instance corresponding to the input string
         """
 
@@ -100,15 +95,15 @@ class ModelDialog(QtWidgets.QDialog):
         # Convert the value to float
         converted_value = valuetype(literal_eval(value))
 
-        # Get the unit from the units module
-        b2unit: Unit = getattr(units, unit)
+        # Get the unit from the b2.units module
+        b2unit: b2.Unit = getattr(b2.units, unit)
 
         # Return the quantity
         return converted_value * b2unit
 
     def _convert_value_optional(
         self, input: str, valuetype: type = float
-    ) -> str | Quantity:
+    ) -> str | b2.Quantity:
         """
         Try to convert the input string into a brian2 quantity with a value of type `type` and
         a unit as given in the string. If that fails, return the raw string.
@@ -123,7 +118,7 @@ class ModelDialog(QtWidgets.QDialog):
 
         Returns
         -------
-        str | Quantity
+        str | b2.Quantity
             Either the converted quantity if conversion is possible or the input string
         """
         try:
@@ -1035,6 +1030,13 @@ class MonitorDialog(ModelDialog):
 
         self.variable_button.clicked.connect(self.accept_variable)
 
+        for qle in [
+            self.type,
+            self.source,
+            self.variable,
+        ]:
+            qle.setMinimumWidth(qle.sizeHint().width() * 2)
+
     def accept_type(self) -> None:
         """
         Accept the type input
@@ -1159,24 +1161,48 @@ class InitialConditionWidget(ModelDialog):
         """
         super().__init__(model, parent)
 
-        self.params: dict[str, str | Quantity | np.array] = {}
-        self.source, self.source_button = self.add_text_field("Source")
-        self.var, self.var_button = self.add_text_field("Variable")
-        self.value, self.value_button = self.add_text_field(
-            "Value", textfieldtype=QtWidgets.QTextEdit
-        )
-
         self.layout.itemAt(0).widget().hide()  # name label hiding
         self.name_entry.hide()
         self.name_button.hide()
 
+        self.params: dict[str, str | b2.Quantity | np.array] = {}
+
+        self.source_name = QtWidgets.QLabel("Source", self)
+        self.source = QtWidgets.QComboBox(self)
+        self.source_button = QtWidgets.QPushButton("save", self)
+
+        # make sure the objects are ordered the same way every time
+        self.source.addItems(
+            sorted([object.name for object in self.model.network.objects])
+        )
+
         row = self.layout.rowCount()
+        self.layout.addWidget(self.source_name, row, 1, 1, 1)
+        self.layout.addWidget(self.source, row, 2, 1, 1)
+        self.layout.addWidget(self.source_button, row, 3, 1, 1)
+
+        row += 1
+
+        self.var_name = QtWidgets.QLabel("Variable", self)
+        self.var = QtWidgets.QComboBox(self)
+        self.var_button = QtWidgets.QPushButton("save", self)
+
+        self.layout.addWidget(self.var_name, row, 1, 1, 1)
+        self.layout.addWidget(self.var, row, 2, 1, 1)
+        self.layout.addWidget(self.var_button, row, 3, 1, 1)
+
+        row += 1
+
+        self.value, self.value_button = self.add_text_field(
+            "Value", textfieldtype=QtWidgets.QTextEdit
+        )
 
         self.layout.addWidget(
             self.show_parameters_button, row, 1, 1, 3, QtCore.Qt.AlignCenter
         )
 
-        self.layout.addWidget(self.button_box, row + 1, 1, 1, 4, QtCore.Qt.AlignCenter)
+        row += 1
+        self.layout.addWidget(self.button_box, row, 1, 1, 4, QtCore.Qt.AlignCenter)
 
         self.show_parameters_button.clicked.connect(
             partial(self.display_parameters, target=self.params, read_only=False)
@@ -1198,6 +1224,13 @@ class InitialConditionWidget(ModelDialog):
         """
         if any(var not in self.params for var in ["elementname", "varname", "value"]):
             self.display_error("Cannot define incompletely specified initial condition")
+        elif (
+            self.params["varname"]
+            not in self.model.network[self.params["elementname"]].variables
+        ):
+            self.display_error(
+                f'Variable name {self.params["varname"]} does not exist in element {self.params["elementname"]}'
+            )
         else:
             try:
                 self.model.define_init(**self.params)
@@ -1211,16 +1244,19 @@ class InitialConditionWidget(ModelDialog):
         """
         accept_source Accept the name of a source group a variable to initialze belongs to.
         """
-        self.params["elementname"] = self.source.text()
+        self.params["elementname"] = self.source.currentText()
+
         self.source_button.setDown(True)
         self.source_button.setText("saved")
+        self.var.addItems(
+            sorted(self.model.network[self.params["elementname"]].variables.keys())
+        )
 
     def accept_variable(self) -> None:
         """
         accept_variable Accept a variable to set an initial condition for
         """
-
-        self.params["varname"] = self.var.text()
+        self.params["varname"] = self.var.currentText()
         self.var_button.setDown(True)
         self.var_button.setText("saved")
 
@@ -1230,12 +1266,19 @@ class InitialConditionWidget(ModelDialog):
         """
         # FIXME: the eval here is very insecure and should be replacde with something more restrictive
         txt = self.value.toPlainText()
-
+        final_value = None
         try:
-            self.params["value"] = eval(txt)
-        except Exception as e:
-            print("txt: ", txt)
-            self.display_error(f"Error in evaluating value expression {txt}: {e}")
+            # try to make expression
+            b2.Expression(txt)
+            final_value = txt
+        except Exception as _:
+            # try to eval code when expression making fails
+            try:
+                final_value = eval(txt)
+            except Exception as e:
+                self.display_error(f"Error in evaluating value expression {txt}: {e}")
+
+        self.params["value"] = final_value
         self.value_button.setDown(True)
         self.value_button.setText("saved")
 
@@ -1345,6 +1388,7 @@ class B2ModelWidget(ModelDialog):
         """
         d: dict[Any, Any] = {}
         d["neurongroups"] = self.model.neurongroups
+        d["monitors"] = self.model.monitors
         d["synapses"] = self.model.synapses
         d["parameters"] = self.model.parameters
         d["timestep"] = self.model.dt
@@ -1364,7 +1408,7 @@ class B2ModelWidget(ModelDialog):
         if stim_dialog.exec():
             self.model.define_parameter(
                 stim_dialog.name,
-                TimedArray(stim_dialog.stims * stim_dialog.units, self.model.dt),
+                b2.TimedArray(stim_dialog.stims * stim_dialog.b2.units, self.model.dt),
             )
 
     def open_add_neurongroup_dialog(self) -> None:
@@ -1436,7 +1480,7 @@ class B2ModelWidget(ModelDialog):
 
         if seed is not None:
             self.model.seed = seed
-            set_b2_seed(seed)
+            b2.seed(seed)
             self.seed_button.setText("saved")
             self.seed_button.setDown(True)
 
@@ -1463,7 +1507,7 @@ class B2ModelWidget(ModelDialog):
                     "Timestep has already been defined in this network, renaming it would reset it, hence is not allowed. Define a name first"
                 )
             else:
-                self.model.network = Network(name=self.name)
+                self.model.network = b2.Network(name=self.name)
                 self.name_button.setText("saved")
                 self.name_button.setDown(True)
 

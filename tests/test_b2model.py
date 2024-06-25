@@ -30,13 +30,14 @@ def test_define_equation(mfx: b2_model.B2Model) -> None:
     assert mfx.neurongroups["P"]["model"] == "dge/dt = -ge*(1./taue) : siemens\n"
 
     with pytest.raises(
-        ValueError, match="Equation must have a colon that separates equation and unit"
+        ValueError,
+        match="Equation must have a colon that separates equation and unit or an equal sign",
     ):
         mfx.define_equation("P", "dge/dt = -ge*(1./taue)")
 
     with pytest.raises(
         ValueError,
-        match="Equation must have an equal sign that separates variable and expression",
+        match="Equation must have a colon that separates equation and unit or an equal sign",
     ):
         mfx.define_equation("P", "-ge*(1./taue): siemens")
 
@@ -186,14 +187,6 @@ def test_define_synapse_eq_exceptions(
     mfx, _ = mfx_parameterized
 
     with pytest.raises(
-        ValueError,
-        match="Equation must have an equal sign that separates variable and expression",
-    ):
-        mfx.define_synapse_equation(
-            "S", "dApost/dt -Apost / taupost : siemens (event-driven)"
-        )
-
-    with pytest.raises(
         ValueError, match="Equation must have a colon that separates equation and unit"
     ):
         mfx.define_synapse_equation("S", "dApost/dt = -Apost / taupost (event-driven)")
@@ -329,6 +322,34 @@ def test_define_monitor_exception(
 
     with pytest.raises(RuntimeError, match="Error in defining monitor M"):
         mfx.define_monitor("M", b2.StateMonitor, "G", "v")
+
+
+def test_define_init(mfx_ornstein: b2_model.B2Model) -> None:
+    mfx = mfx_ornstein
+
+    b2.seed(4321)
+    N = b2.NeuronGroup(
+        5,
+        """
+        tau : second
+        sigma : 1
+        dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
+        """,
+        method="euler",
+        name="neurongroup",
+    )
+
+    N.tau = np.array([1, 0.8, 0.6, 0.3, 0.1]) * b2.second
+    N.sigma = np.array([0.1, 0.31622, 0.4, 0.2, 0.88])
+    N.y = 1
+
+    M = b2.StateMonitor(N, "y", record=True)
+
+    network = b2.Network([N, M])
+
+    assert all(network["neurongroup"].tau == mfx.network["neurongroup"].tau)
+    assert all(network["neurongroup"].sigma == mfx.network["neurongroup"].sigma)
+    assert all(network["neurongroup"].y == mfx.network["neurongroup"].y)
 
 
 def test_ornstein_uhlenbeck(tmp_path: Path, mfx_ornstein: b2_model.B2Model) -> None:

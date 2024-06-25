@@ -135,10 +135,12 @@ def mfx_ornstein() -> b2_model.B2Model:
     model.assemble_neurongroup(name="neurongroup")
     model.define_monitor("M", b2.StateMonitor, "neurongroup", "y")
 
-    # init
-    model.network["neurongroup"].tau = np.array([1, 0.8, 0.6, 0.3, 0.1]) * b2.second
-    model.network["neurongroup"].sigma = np.array([0.1, 0.31622, 0.4, 0.2, 0.88])
-    model.network["neurongroup"].y = 1
+    # initial conditions
+    model.define_init(
+        "neurongroup", "tau", np.array([1, 0.8, 0.6, 0.3, 0.1]) * b2.second
+    )
+    model.define_init("neurongroup", "y", 1)
+    model.define_init("neurongroup", "sigma", np.array([0.1, 0.31622, 0.4, 0.2, 0.88]))
 
     return model
 

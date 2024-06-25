@@ -55,13 +55,8 @@ class B2Model:
         ValueError
             When there is no '=' block in the line given
         """
-        if ":" not in line:
-            message = "Equation must have a colon that separates equation and unit"
-            self.logger.critical(message)
-            raise ValueError(message)
-
-        if "=" not in line:
-            message = "Equation must have an equal sign that separates variable and expression"
+        if ":" not in line or "=" not in line:
+            message = "Equation must have a colon that separates equation and unit or an equal sign"
             self.logger.critical(message)
             raise ValueError(message)
 
@@ -131,6 +126,23 @@ class B2Model:
         self._add_equation_to_group(self.neurongroups[name], line)
 
     def define_init(self, elementname: str, varname: str, value: Any) -> None:
+        """
+        Define initial values for a quantity defined in the network
+
+        Parameters
+        ----------
+        elementname : str
+            The element of the network to define the quantity for
+        varname : str
+            The variable to define the quantity for
+        value : Any
+            The value the quantity should have
+
+        Raises
+        ------
+        ValueError
+            When setting the quantity fails
+        """
         try:
             setattr(self.network[elementname], varname, value)
         except Exception as e:
