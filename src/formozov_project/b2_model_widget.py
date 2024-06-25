@@ -7,12 +7,8 @@ from typing import Any
 from typing import Callable
 from typing import cast
 
-from brian2 import Network
-from brian2 import Quantity
-from brian2 import TimedArray
-from brian2 import Unit
-from brian2 import seed as set_b2_seed
-from brian2 import units
+import brian2 as b2
+from brian2 import numpy as np
 from qtpy import QtCore
 from qtpy import QtWidgets
 
@@ -62,7 +58,7 @@ class ModelDialog(QtWidgets.QDialog):
 
     def _convert_string_to_quantity(
         self, input: str, valuetype: type = float
-    ) -> Quantity:
+    ) -> b2.Quantity:
         """
         Convert string input to brian2 quantities, comprised of value and unit.
 
@@ -74,7 +70,7 @@ class ModelDialog(QtWidgets.QDialog):
             _description_, by default float
         Returns
         -------
-        Quantity
+        b2.Quantity
             Brian2 quantity instance corresponding to the input string
         """
 
@@ -99,15 +95,15 @@ class ModelDialog(QtWidgets.QDialog):
         # Convert the value to float
         converted_value = valuetype(literal_eval(value))
 
-        # Get the unit from the units module
-        b2unit: Unit = getattr(units, unit)
+        # Get the unit from the b2.units module
+        b2unit: b2.Unit = getattr(b2.units, unit)
 
         # Return the quantity
         return converted_value * b2unit
 
     def _convert_value_optional(
         self, input: str, valuetype: type = float
-    ) -> str | Quantity:
+    ) -> str | b2.Quantity:
         """
         Try to convert the input string into a brian2 quantity with a value of type `type` and
         a unit as given in the string. If that fails, return the raw string.
@@ -122,7 +118,7 @@ class ModelDialog(QtWidgets.QDialog):
 
         Returns
         -------
-        str | Quantity
+        str | b2.Quantity
             Either the converted quantity if conversion is possible or the input string
         """
         try:
@@ -137,7 +133,7 @@ class ModelDialog(QtWidgets.QDialog):
     def add_text_field(
         self,
         title: str,
-        textfieltype: type = QtWidgets.QLineEdit,
+        textfieldtype: type = QtWidgets.QLineEdit,
         buttontext: str = "save",
     ) -> tuple[
         QtWidgets.QTextEdit | QtWidgets.QLineEdit,
@@ -150,18 +146,18 @@ class ModelDialog(QtWidgets.QDialog):
         ----------
         title : str
             Name of the field, displayed on the leftmost element.
-        textfieltype : type, optional
+        textfieldtype : type, optional
             Type of the text input field to have on the second elemnet, by default QtWidgets.QLineEdit
         buttontext : str, optional
             Text to display in the rightmost button, by default "save"
 
         Returns
         -------
-        tuple[ QtWidgets.QLabel, QtWidgets.QTextEdit | QtWidgets.QLineEdit, QtWidgets.QPushButton, ]
+        tuple[QtWidgets.QTextEdit | QtWidgets.QLineEdit, QtWidgets.QPushButton, ]
             titlefield, textfield and button widgets
         """
         titlefield = QtWidgets.QLabel(title, self)
-        textfield = textfieltype(self)
+        textfield = textfieldtype(self)
         button = QtWidgets.QPushButton(buttontext, self)
 
         row = self.layout.rowCount()
@@ -696,15 +692,15 @@ class SynapseDialog(ModelDialog):
         self.target, self.target_button = self.add_text_field("Target")
 
         self.equation, self.equation_button = self.add_text_field(
-            "Equation", textfieltype=QtWidgets.QTextEdit
+            "Equation", textfieldtype=QtWidgets.QTextEdit
         )
 
         self.pre, self.pre_button = self.add_text_field(
-            "Pre", textfieltype=QtWidgets.QTextEdit
+            "Pre", textfieldtype=QtWidgets.QTextEdit
         )
 
         self.post, self.post_button = self.add_text_field(
-            "Post", textfieltype=QtWidgets.QTextEdit
+            "Post", textfieldtype=QtWidgets.QTextEdit
         )
 
         self.connect, self.connect_button = self.add_text_field("Connection def.")
@@ -831,7 +827,7 @@ class ParameterDialog(ModelDialog):
         self.setWindowTitle("Define a parameter")
 
         self.value_entry, self.value_button = self.add_text_field(
-            "Value", textfieltype=QtWidgets.QTextEdit
+            "Value", textfieldtype=QtWidgets.QTextEdit
         )
 
         row = self.layout.rowCount()
@@ -1034,6 +1030,13 @@ class MonitorDialog(ModelDialog):
 
         self.variable_button.clicked.connect(self.accept_variable)
 
+        for qle in [
+            self.type,
+            self.source,
+            self.variable,
+        ]:
+            qle.setMinimumWidth(qle.sizeHint().width() * 2)
+
     def accept_type(self) -> None:
         """
         Accept the type input
@@ -1136,6 +1139,150 @@ class MonitorDialog(ModelDialog):
         self.parameterwindow.exec()
 
 
+class InitialConditionWidget(ModelDialog):
+    """
+    InitialConditionWidget A dialog to define initial conditions for
+
+    Parameters
+    ----------
+    ModelDialog : General baseclass for the b2 model widgets
+    """
+
+    def __init__(self, model: B2Model, parent: QtWidgets.QDialog | None = None) -> None:
+        """
+        __init__ Create a new dialog for defining an initial condition
+
+        Parameters
+        ----------
+        model : B2Model
+            The model to define the initial condition for
+        parent : QtWidgets.QDialog | None, optional
+            Parent window, by default None
+        """
+        super().__init__(model, parent)
+
+        self.layout.itemAt(0).widget().hide()  # name label hiding
+        self.name_entry.hide()
+        self.name_button.hide()
+
+        self.params: dict[str, str | b2.Quantity | np.array] = {}
+
+        self.source_name = QtWidgets.QLabel("Source", self)
+        self.source = QtWidgets.QComboBox(self)
+        self.source_button = QtWidgets.QPushButton("save", self)
+
+        # make sure the objects are ordered the same way every time
+        self.source.addItems(
+            sorted([object.name for object in self.model.network.objects])
+        )
+
+        row = self.layout.rowCount()
+        self.layout.addWidget(self.source_name, row, 1, 1, 1)
+        self.layout.addWidget(self.source, row, 2, 1, 1)
+        self.layout.addWidget(self.source_button, row, 3, 1, 1)
+
+        row += 1
+
+        self.var_name = QtWidgets.QLabel("Variable", self)
+        self.var = QtWidgets.QComboBox(self)
+        self.var_button = QtWidgets.QPushButton("save", self)
+
+        self.layout.addWidget(self.var_name, row, 1, 1, 1)
+        self.layout.addWidget(self.var, row, 2, 1, 1)
+        self.layout.addWidget(self.var_button, row, 3, 1, 1)
+
+        row += 1
+
+        self.value, self.value_button = self.add_text_field(
+            "Value", textfieldtype=QtWidgets.QTextEdit
+        )
+
+        self.layout.addWidget(
+            self.show_parameters_button, row, 1, 1, 3, QtCore.Qt.AlignCenter
+        )
+
+        row += 1
+        self.layout.addWidget(self.button_box, row, 1, 1, 4, QtCore.Qt.AlignCenter)
+
+        self.show_parameters_button.clicked.connect(
+            partial(self.display_parameters, target=self.params, read_only=False)
+        )
+        self.source_button.clicked.connect(self.accept_source)
+        self.var_button.clicked.connect(self.accept_variable)
+        self.value_button.clicked.connect(self.accept_value)
+
+        for qle in [
+            self.source,
+            self.var,
+            self.value,
+        ]:
+            qle.setMinimumWidth(qle.sizeHint().width() * 2)
+
+    def accept(self) -> None:
+        """
+        accept Accept the initial condition. works only if 'source', 'variable' and 'value' are all set.
+        """
+        if any(var not in self.params for var in ["elementname", "varname", "value"]):
+            self.display_error("Cannot define incompletely specified initial condition")
+        elif (
+            self.params["varname"]
+            not in self.model.network[self.params["elementname"]].variables
+        ):
+            self.display_error(
+                f'Variable name {self.params["varname"]} does not exist in element {self.params["elementname"]}'
+            )
+        else:
+            try:
+                self.model.define_init(**self.params)
+                super().accept()
+            except Exception as e:
+                self.display_error(
+                    f'Error when defining initial condition for source {self.params["elementname"]}, variable {self.params["varname"]}, with value {self.params["value"]}: {e}'
+                )
+
+    def accept_source(self) -> None:
+        """
+        accept_source Accept the name of a source group a variable to initialze belongs to.
+        """
+        self.params["elementname"] = self.source.currentText()
+
+        self.source_button.setDown(True)
+        self.source_button.setText("saved")
+        self.var.addItems(
+            sorted(self.model.network[self.params["elementname"]].variables.keys())
+        )
+
+    def accept_variable(self) -> None:
+        """
+        accept_variable Accept a variable to set an initial condition for
+        """
+        self.params["varname"] = self.var.currentText()
+        self.var_button.setDown(True)
+        self.var_button.setText("saved")
+
+    def accept_value(self) -> None:
+        """
+        Overridden method to accept the value of a variable in a group and save it in the model.
+        """
+        # FIXME: the eval here is very insecure and should be replacde with something more restrictive
+        txt = self.value.toPlainText()
+        final_value = None
+        try:
+            # try to make expression
+            b2.Expression(txt)
+            final_value = txt
+        except Exception as _:
+            # try to eval code when expression making fails
+            try:
+                final_value = eval(txt)
+            except Exception as e:
+                self.display_error(f"Error in evaluating value expression {txt}: {e}")
+
+        self.params["value"] = final_value
+        self.value_button.setDown(True)
+        self.value_button.setText("saved")
+
+
 class B2ModelWidget(ModelDialog):
     """
     Main widget to define a B2Model instance in a new window.
@@ -1182,6 +1329,7 @@ class B2ModelWidget(ModelDialog):
         self.display_system_button = QtWidgets.QPushButton("Display system", self)
         self.monitor_button = QtWidgets.QPushButton("Add monitor", self)
         self.add_subgroup_button = QtWidgets.QPushButton("Add neuron subgroup", self)
+        self.init_button = QtWidgets.QPushButton("Add initial conditions", self)
 
         self.layout.addWidget(self.add_parameter_button, 1, 4)
 
@@ -1201,11 +1349,13 @@ class B2ModelWidget(ModelDialog):
             4,
         )
 
-        self.layout.addWidget(self.display_system_button, 6, 4)
+        self.layout.addWidget(self.init_button, 6, 4)
 
         self.layout.addWidget(self.monitor_button, 7, 4)
 
-        self.layout.addWidget(self.button_box, 8, 1, 1, 4, QtCore.Qt.AlignCenter)
+        self.layout.addWidget(self.display_system_button, 8, 4)
+
+        self.layout.addWidget(self.button_box, 9, 1, 1, 4, QtCore.Qt.AlignCenter)
 
         for qle in [
             self.name_entry,
@@ -1226,6 +1376,7 @@ class B2ModelWidget(ModelDialog):
         self.timestep_button.clicked.connect(self.accept_timestep)
         self.seed_button.clicked.connect(self.accept_seed)
         self.name_button.clicked.connect(self.accept_name)
+        self.init_button.clicked.connect(self.open_initial_condition_dialog)
 
         self.setLayout(self.layout)
 
@@ -1237,6 +1388,7 @@ class B2ModelWidget(ModelDialog):
         """
         d: dict[Any, Any] = {}
         d["neurongroups"] = self.model.neurongroups
+        d["monitors"] = self.model.monitors
         d["synapses"] = self.model.synapses
         d["parameters"] = self.model.parameters
         d["timestep"] = self.model.dt
@@ -1256,7 +1408,7 @@ class B2ModelWidget(ModelDialog):
         if stim_dialog.exec():
             self.model.define_parameter(
                 stim_dialog.name,
-                TimedArray(stim_dialog.stims * stim_dialog.units, self.model.dt),
+                b2.TimedArray(stim_dialog.stims * stim_dialog.b2.units, self.model.dt),
             )
 
     def open_add_neurongroup_dialog(self) -> None:
@@ -1328,7 +1480,7 @@ class B2ModelWidget(ModelDialog):
 
         if seed is not None:
             self.model.seed = seed
-            set_b2_seed(seed)
+            b2.seed(seed)
             self.seed_button.setText("saved")
             self.seed_button.setDown(True)
 
@@ -1355,6 +1507,14 @@ class B2ModelWidget(ModelDialog):
                     "Timestep has already been defined in this network, renaming it would reset it, hence is not allowed. Define a name first"
                 )
             else:
-                self.model.network = Network(name=self.name)
+                self.model.network = b2.Network(name=self.name)
                 self.name_button.setText("saved")
                 self.name_button.setDown(True)
+
+    def open_initial_condition_dialog(self) -> None:
+        """
+        open_initial_condition_dialog open a new dialog to add initial conditions
+        """
+        self.init_widget = InitialConditionWidget(self.model, self)
+
+        self.init_widget.exec()
