@@ -6,7 +6,7 @@ Private repository containing the prototype GUI for the [Formozov project](https
 
 ## Installation
 
-If you have ssh authentication to github set up you can install directly from this repository with pip:
+If you have ssh authentication to GitHub set up you can install directly from this repository with pip:
 
 ```bash
 pip install git+ssh://git@github.com/ssciwr/formozov-project
@@ -22,7 +22,7 @@ pip install .
 
 ## Use
 
-After installing you should be able to run the following command to launch the GUI:
+After installing, you should be able to run the following command to launch the GUI:
 
 ```bash
 formozov-project
@@ -30,7 +30,7 @@ formozov-project
 
 ## Developer Installation
 
-To do an editable install including test dependencies and pre-commit:
+To do an editable installation including test dependencies and pre-commit:
 
 ```bash
 git clone git@github.com:ssciwr/formozov-project.git
@@ -38,4 +38,20 @@ cd formozov-project
 pip install -e .[tests]
 pip install pre-commit
 pre-commit install
+```
+
+The `-e` (editable install) flag used during installation means that any changes to the source code will be reflected in the installed package without needing to reinstall.
+
+## Developer Use
+
+The GUI is launched the same way as above:
+
+```bash
+formozov-project
+```
+
+To run the test suite:
+
+```bash
+pytest
 ```
