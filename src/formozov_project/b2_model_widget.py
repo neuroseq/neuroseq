@@ -324,6 +324,8 @@ class ModelDialog(QtWidgets.QDialog):
         self.dictwidget.setLayout(layout)
         window.resize(800, 600)  # FIXME: make this more flexible
 
+        window.move(self.x() + self.width(), self.y())
+
         if blocking:
             window.exec()
         else:
