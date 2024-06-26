@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from ast import literal_eval
 from importlib import import_module
+from pathlib import Path
 from typing import Any
 from typing import Callable
 from typing import cast
 
 import brian2 as b2
+import yaml
 from brian2 import numpy as np
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -1306,6 +1308,8 @@ class B2ModelWidget(ModelDialog):
         self.monitor_button = QtWidgets.QPushButton("Add monitor", self)
         self.add_subgroup_button = QtWidgets.QPushButton("Add neuron subgroup", self)
         self.init_button = QtWidgets.QPushButton("Add initial conditions", self)
+        self.save_button = None
+        self.load_button = None
 
         self.layout.addWidget(self.add_parameter_button, 1, 4)
 
@@ -1494,3 +1498,52 @@ class B2ModelWidget(ModelDialog):
         self.init_widget = InitialConditionWidget(self.model, self)
 
         self.init_widget.exec()
+
+    def save_model(self) -> None:
+        """
+        Save all the values given to define a model in a yaml file from which the initial state of the model can be reconstructed at a later point
+        """
+        if all(type(obj) != b2.NeuronGroup for obj in self.model.network.objects):
+            self.display_error(
+                "Cannot save a model without having any neurongroups defined"
+            )
+
+        # construct the system's representation
+        d: dict[str, Any] = {}
+
+        d["neurongroups"] = self.model.neurongroups
+        d["monitors"] = {} if self.model.monitors is None else self.model.monitors
+        d["synapses"] = {} if self.model.synapses is None else self.model.synapses
+        d["parameters"] = {} if self.model.parameters is None else self.model.parameters
+
+        # current timestep and seed
+        d["timestep"] = b2.defaultclock.dt
+        d["seed"] = self.model.seed
+        d["timestep"] = self.model.network.t
+
+        # current state: this includes all the variables for which initial conditions had been defined
+        d["initial_condition"] = self.model.init_vars
+
+        path_to_save = Path(self.save_textfield.text())
+
+        try:
+            with open(path_to_save, "w") as file:
+                yaml.dump(d, file)
+        except Exception as e:
+            self.display_error(f"An error occured while saving a model file {e}")
+
+    def load_model(self) -> None:
+        """
+        Load a model from disk
+        """
+        path = Path(self.load_field.text())
+
+        try:
+            with open(path) as yfile:
+                data = yaml.load(yfile)
+
+            # go through the file and construct all objects in the same order in which the constructionn
+            # dialogs are build
+
+        except Exception as e:
+            self.display_error(f"An error occured while loading a model file: {e}")

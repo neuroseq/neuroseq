@@ -89,6 +89,7 @@ class B2Model:
         self.neurongroups: dict[str, dict[str, Any]] = {}
         self.synapses: dict[str, dict[str, Any]] = {}
         self.monitors: dict[str, dict[str, Any]] = {}
+        self.init_vars: dict[str, dict[str, Any]] = {}
         self.dt: b2.Quantity | None = None
         self.solver = None
         self.checkpoints: list[str] = []
@@ -144,7 +145,13 @@ class B2Model:
             When setting the quantity fails
         """
         try:
+            if elementname not in self.init_vars:
+                self.init_vars[elementname] = {}
+
             setattr(self.network[elementname], varname, value)
+
+            self.init_vars[elementname][varname] = value
+
         except Exception as e:
             raise ValueError(
                 f"Error when initializing {varname} or element {elementname} as {value}: {e}"
