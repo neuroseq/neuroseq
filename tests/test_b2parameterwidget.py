@@ -131,11 +131,18 @@ def test_parameterdialog_nothing_defined_errors(qtbot: QtBot) -> None:
     )
 
     qtbot.mouseClick(param_dlg.value_button, QtCore.Qt.MouseButton.LeftButton)
+
+    qtbot.waitUntil(param_dlg.error_dialog.isVisible)
+
     assert (
         param_dlg.error_dialog.text()
         == "Please assign a value or expression before saving!"
     )
 
+    qtbot.mouseClick(
+        param_dlg.error_dialog.button(QtWidgets.QMessageBox.Ok),
+        QtCore.Qt.MouseButton.LeftButton,
+    )
     param_dlg.name = None
 
     param_dlg.accept()

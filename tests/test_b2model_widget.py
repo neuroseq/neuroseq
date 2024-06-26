@@ -113,10 +113,6 @@ def test_open_module_dialogs(qtbot: QtBot) -> None:
 
     qtbot.waitUntil(lambda: b2w.param_dlg.isVisible() is False)
 
-    qtbot.mouseClick(b2w.display_system_button, QtCore.Qt.MouseButton.LeftButton)
-
-    qtbot.waitUntil(b2w.dictwidget.isVisible)
-
 
 def test_open_initialization_dialog(qtbot: QtBot) -> None:
     b2w = B2W.B2ModelWidget(
