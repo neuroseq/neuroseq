@@ -5,7 +5,6 @@ from typing import Any
 import formozov_project.b2_model_widget as B2W
 from formozov_project import b2_model
 from formozov_project.b2_model import B2Model
-from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -20,7 +19,7 @@ def test_synapsedialog_enter_close(qtbot: QtBot) -> None:
 
     cancel_button = sdiag.button_box.button(QtWidgets.QDialogButtonBox.Cancel)
 
-    qtbot.mouseClick(cancel_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(cancel_button, QtCore.Qt.MouseButton.LeftButton)
 
     qtbot.waitUntil(lambda: sdiag.isVisible() is False)
 
@@ -38,42 +37,39 @@ def test_synapsedialog_define_name(qtbot: QtBot) -> None:
 
     assert "x" not in sdiag.model.synapses
 
-    qtbot.mouseClick(sdiag.name_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(sdiag.name_button, QtCore.Qt.MouseButton.LeftButton)
 
     assert "x" in sdiag.model.synapses
 
 
-def test_synapse_input(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
+def test_synapse_input(qtbot: QtBot) -> None:
     sdiag = B2W.SynapseDialog(B2Model())
-    monkeypatch.setattr(
-        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
-    )
     qtbot.addWidget(sdiag)
     sdiag.show()
 
     qtbot.keyClicks(sdiag.name_entry, "x")
-    qtbot.mouseClick(sdiag.name_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(sdiag.name_button, QtCore.Qt.MouseButton.LeftButton)
 
     qtbot.keyClicks(sdiag.origin, "s")
-    qtbot.mouseClick(sdiag.origin_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(sdiag.origin_button, QtCore.Qt.MouseButton.LeftButton)
 
     qtbot.keyClicks(sdiag.target, "t")
-    qtbot.mouseClick(sdiag.target_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(sdiag.target_button, QtCore.Qt.MouseButton.LeftButton)
 
     qtbot.keyClicks(sdiag.equation, "dv/dt = -v : volt")
-    qtbot.mouseClick(sdiag.equation_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(sdiag.equation_button, QtCore.Qt.MouseButton.LeftButton)
 
     qtbot.keyClicks(sdiag.pre, "a * b: siemens")
-    qtbot.mouseClick(sdiag.pre_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(sdiag.pre_button, QtCore.Qt.MouseButton.LeftButton)
 
     qtbot.keyClicks(sdiag.post, "c * d: siemens")
-    qtbot.mouseClick(sdiag.post_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(sdiag.post_button, QtCore.Qt.MouseButton.LeftButton)
 
     qtbot.keyClicks(sdiag.connect, "s !=  t")
-    qtbot.mouseClick(sdiag.connect_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(sdiag.connect_button, QtCore.Qt.MouseButton.LeftButton)
 
     qtbot.keyClicks(sdiag.connect_prob, "1.0")
-    qtbot.mouseClick(sdiag.connect_prob_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(sdiag.connect_prob_button, QtCore.Qt.MouseButton.LeftButton)
 
     assert sdiag.model.synapses["x"] == {
         "origin": "s",
@@ -108,11 +104,7 @@ def test_assemble_synapse(
     assert sdiag.model.network["Ce"].name == "Ce"
 
 
-def test_assemble_synapse_exceptions(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
-    )
-
+def test_assemble_synapse_exceptions(qtbot: QtBot) -> None:
     sdiag = B2W.SynapseDialog(B2Model())
 
     qtbot.addWidget(sdiag)

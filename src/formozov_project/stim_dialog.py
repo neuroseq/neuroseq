@@ -41,7 +41,7 @@ class StimDialog(QtWidgets.QDialog):
             QtWidgets.QDialogButtonBox.StandardButton.Ok
             | QtWidgets.QDialogButtonBox.StandardButton.Cancel
         )
-        split_left_right = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        split_left_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         self.stim_widget = StimWidget()
         split_left_right.addWidget(self.stim_widget)
         self.stim_console_widget = StimConsoleWidget(stims=self.stims)
@@ -52,7 +52,9 @@ class StimDialog(QtWidgets.QDialog):
         self.stim_console_widget.stims_updated.connect(self._update_stims)
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
-        self._update_stims(self.stims, valid=True)
+        self.button_box.button(QtWidgets.QDialogButtonBox.StandardButton.Ok).setEnabled(
+            False
+        )
 
     def text_name_changed(self, text: str) -> None:
         self.name = text

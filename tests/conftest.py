@@ -6,8 +6,19 @@ import brian2 as b2
 import numpy as np
 import pytest
 from formozov_project import b2_model
+from formozov_project import b2_model_widget
 
 b2.prefs.codegen.target = "cython"
+
+
+# replace all .exec() calls within the b2_model_widget module with .show() to avoid blocking the tests
+@pytest.fixture(autouse=True)
+def patch_b2w_exec_show(monkeypatch: pytest.MonkeyPatch) -> None:
+    for widget in [
+        b2_model_widget.QtWidgets.QDialog,
+        b2_model_widget.QtWidgets.QMessageBox,
+    ]:
+        monkeypatch.setattr(widget, "exec", lambda self: self.show())
 
 
 @pytest.fixture(scope="session")

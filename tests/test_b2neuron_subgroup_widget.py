@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import formozov_project.b2_model_widget as B2W
 from formozov_project.b2_model import B2Model
-from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -19,17 +18,12 @@ def test_neuronsubgroupdialog_enter_close(qtbot: QtBot) -> None:
 
     cancel_button = neuron_sdlg.button_box.button(QtWidgets.QDialogButtonBox.Cancel)
 
-    qtbot.mouseClick(cancel_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(cancel_button, QtCore.Qt.MouseButton.LeftButton)
 
     qtbot.waitUntil(lambda: neuron_sdlg.isVisible() is False)
 
 
-def test_neuronsubgroupdialog_arg_conversion(
-    qtbot: QtBot, monkeypatch: MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
-    )
+def test_neuronsubgroupdialog_arg_conversion(qtbot: QtBot) -> None:
     neuron_sdlg = B2W.NeuronSubgroupDialog(B2Model())
     qtbot.add_widget(neuron_sdlg)
 
@@ -77,10 +71,7 @@ def test_neuronsubgroupdialog_arg_conversion(
     neuron_sdlg.error_dialog.close()
 
 
-def test_neuronsubgroup_targetname(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
-    )
+def test_neuronsubgroup_targetname(qtbot: QtBot) -> None:
     neuron_sdlg = B2W.NeuronSubgroupDialog(B2Model())
     qtbot.add_widget(neuron_sdlg)
 
@@ -109,10 +100,7 @@ def test_neuronsubgroup_targetname(qtbot: QtBot, monkeypatch: MonkeyPatch) -> No
     neuron_sdlg.error_dialog.close()
 
 
-def test_neuronsubgroup_accept(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
-    )
+def test_neuronsubgroup_accept(qtbot: QtBot) -> None:
     neuron_sdlg = B2W.NeuronSubgroupDialog(B2Model())
     qtbot.add_widget(neuron_sdlg)
 
@@ -165,10 +153,7 @@ def test_neuronsubgroup_accept(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
     neuron_sdlg.error_dialog.close()
 
 
-def test_neuronsubgroupdialog_parameterdisplay(
-    qtbot: QtBot, monkeypatch: MonkeyPatch
-) -> None:
-    monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec", B2W.QtWidgets.QDialog.show)
+def test_neuronsubgroupdialog_parameterdisplay(qtbot: QtBot) -> None:
     neuron_sdlg = B2W.NeuronSubgroupDialog(B2Model())
     qtbot.add_widget(neuron_sdlg)
 

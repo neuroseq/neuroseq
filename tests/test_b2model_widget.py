@@ -12,10 +12,7 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 
 
-def test_name_def(
-    qtbot: QtBot,
-    monkeypatch: MonkeyPatch,
-) -> None:
+def test_name_def(qtbot: QtBot) -> None:
     b2w = B2W.B2ModelWidget(
         B2Model(),
         None,
@@ -35,20 +32,13 @@ def test_name_def(
     assert b2w.name_button.isDown() is True
 
 
-def test_name_def_exceptions(
-    qtbot: QtBot,
-    monkeypatch: MonkeyPatch,
-) -> None:
+def test_name_def_exceptions(qtbot: QtBot) -> None:
     b2w = B2W.B2ModelWidget(
         B2Model(),
         None,
     )
 
     qtbot.addWidget(b2w)
-
-    monkeypatch.setattr(
-        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
-    )
 
     b2w.name = "thing"
 
@@ -126,9 +116,6 @@ def test_dt_def_exceptions(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
 
     qtbot.addWidget(b2w)
 
-    monkeypatch.setattr(
-        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
-    )
     qtbot.keyClicks(b2w.timestep, "0.2 ms")
 
     def raise_error(_: str) -> None:
@@ -147,11 +134,7 @@ def test_dt_def_exceptions(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
     b2w.error_dialog.close()
 
 
-def test_random_seed_def(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        B2W.QtWidgets.QMessageBox, "exec", B2W.QtWidgets.QMessageBox.show
-    )
-
+def test_random_seed_def(qtbot: QtBot) -> None:
     b2w = B2W.B2ModelWidget(
         B2Model(),
         None,
@@ -182,9 +165,7 @@ def test_random_seed_def(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
     b2w.error_dialog.close()
 
 
-def test_open_module_dialogs(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec", B2W.QtWidgets.QDialog.show)
-
+def test_open_module_dialogs(qtbot: QtBot) -> None:
     b2w = B2W.B2ModelWidget(
         B2Model(),
         None,
@@ -194,7 +175,7 @@ def test_open_module_dialogs(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
 
     qtbot.addWidget(b2w)
 
-    qtbot.mouseClick(b2w.add_neurongroup_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(b2w.add_neurongroup_button, QtCore.Qt.MouseButton.LeftButton)
 
     qtbot.waitUntil(b2w.neuron_dlg.isVisible)
 
@@ -202,14 +183,14 @@ def test_open_module_dialogs(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
 
     qtbot.waitUntil(lambda: b2w.neuron_dlg.isVisible() is False)
 
-    qtbot.mouseClick(b2w.add_synapse_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(b2w.add_synapse_button, QtCore.Qt.MouseButton.LeftButton)
 
     qtbot.waitUntil(b2w.synapse_dlg.isVisible)
     b2w.synapse_dlg.close()
 
     qtbot.waitUntil(lambda: b2w.synapse_dlg.isVisible() is False)
 
-    qtbot.mouseClick(b2w.add_parameter_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(b2w.add_parameter_button, QtCore.Qt.MouseButton.LeftButton)
 
     qtbot.waitUntil(b2w.param_dlg.isVisible)
 
@@ -217,14 +198,12 @@ def test_open_module_dialogs(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
 
     qtbot.waitUntil(lambda: b2w.param_dlg.isVisible() is False)
 
-    qtbot.mouseClick(b2w.display_system_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(b2w.display_system_button, QtCore.Qt.MouseButton.LeftButton)
 
     qtbot.waitUntil(b2w.dictwidget.isVisible)
 
 
-def test_open_initialization_dialog(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr(B2W.QtWidgets.QDialog, "exec", B2W.QtWidgets.QDialog.show)
-
+def test_open_initialization_dialog(qtbot: QtBot) -> None:
     b2w = B2W.B2ModelWidget(
         B2Model(),
         None,
@@ -236,7 +215,7 @@ def test_open_initialization_dialog(qtbot: QtBot, monkeypatch: MonkeyPatch) -> N
 
     qtbot.addWidget(b2w)
 
-    qtbot.mouseClick(b2w.init_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(b2w.init_button, QtCore.Qt.MouseButton.LeftButton)
 
     qtbot.waitUntil(b2w.init_widget.isVisible)
 

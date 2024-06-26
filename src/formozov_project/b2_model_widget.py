@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from ast import literal_eval
-from functools import partial
 from importlib import import_module
 from typing import Any
 from typing import Callable
@@ -189,7 +188,7 @@ class ModelDialog(QtWidgets.QDialog):
 
     def accept_parameter(
         self,
-        element: QtWidgets.QLineEdit,
+        element: QtWidgets.QLineEdit | QtWidgets.QTextEdit,
         paramname: str,
         model_callback: Callable,
         convert: Callable = lambda x: x,
@@ -199,7 +198,7 @@ class ModelDialog(QtWidgets.QDialog):
 
         Parameters
         ----------
-        element : QtWidgets.QLineEdit
+        element : QtWidgets.QLineEdit | QtWidgets.QTextEdit
             Element to read the parameter value from
         paramname : str
             Name of the parameter in the model
@@ -213,19 +212,23 @@ class ModelDialog(QtWidgets.QDialog):
             return
 
         try:
-            line = element.text()
-        except AttributeError:
-            line = element.toPlainText()
+            line = (
+                element.toPlainText()
+                if isinstance(element, QtWidgets.QTextEdit)
+                else element.text()
+            )
         except Exception as e:
             self.display_error(f"Error when getting parameter {paramname}: {e}")
+            line = None
 
         element.clear()
 
-        try:
-            var = convert(line)
-            model_callback(self.name, var)
-        except Exception as e:
-            self.display_error(f"Error when saving parameter {paramname}: {e}")
+        if line is not None:
+            try:
+                var = convert(line)
+                model_callback(self.name, var)
+            except Exception as e:
+                self.display_error(f"Error when saving parameter {paramname}: {e}")
 
     def accept_parameter_with_savebutton(
         self,
@@ -254,7 +257,7 @@ class ModelDialog(QtWidgets.QDialog):
         text: str
             Text to change the button text to
         """
-        self.accept_parameter(element, name, model_callback, convert=converter)
+        self.accept_parameter(element, name, model_callback, converter)
         button.setText(text)
         button.setDown(True)
 
@@ -395,56 +398,45 @@ class NeuronGroupDialog(ModelDialog):
         # connect signals and sockets:
 
         self.show_parameters_button.clicked.connect(
-            partial(self.display_parameters, "neurongroups")
+            lambda: self.display_parameters("neurongroups")
         )
 
         self.threshold_button.clicked.connect(
-            partial(
-                self.accept_parameter_with_savebutton,
+            lambda: self.accept_parameter_with_savebutton(
                 self.threshold,
                 "threshold",
                 self.model.define_threshold,
                 self.threshold_button,
-                lambda v: v,
             )
         )
 
         self.reset_button.clicked.connect(
-            partial(
-                self.accept_parameter_with_savebutton,
-                self.reset,
-                "reset",
-                self.model.define_reset,
-                self.reset_button,
-                lambda v: v,
+            lambda: self.accept_parameter_with_savebutton(
+                self.reset, "reset", self.model.define_reset, self.reset_button
             )
         )
 
         self.refractory_button.clicked.connect(
-            partial(
-                self.accept_parameter_with_savebutton,
+            lambda: self.accept_parameter_with_savebutton(
                 self.refractory,
                 "refractory",
                 self.model.define_refractory,
                 self.refractory_button,
-                partial(self._convert_value_optional, type=float),
+                self._convert_value_optional,
             )
         )
 
         self.solver_button.clicked.connect(
-            partial(
-                self.accept_parameter_with_savebutton,
+            lambda: self.accept_parameter_with_savebutton(
                 self.solver,
                 "solver",
                 self.model.define_solver_method,
                 self.solver_button,
-                lambda v: v,
             )
         )
 
         self.neuronnumber_button.clicked.connect(
-            partial(
-                self.accept_parameter_with_savebutton,
+            lambda: self.accept_parameter_with_savebutton(
                 self.neuronnumber,
                 "neuronnumber",
                 self.model.define_neuronnumber,
@@ -454,16 +446,12 @@ class NeuronGroupDialog(ModelDialog):
         )
 
         self.name_button.clicked.connect(
-            partial(self.accept_name, target="neurongroups")
+            lambda: self.accept_name(target="neurongroups")
         )
 
         self.equation_button.clicked.connect(
-            partial(
-                self.accept_parameter_with_savebutton,
-                self.equation,
-                "model",
-                self.model.define_equation,
-                self.equation_button,
+            lambda: self.accept_parameter_with_savebutton(
+                self.equation, "model", self.model.define_equation, self.equation_button
             )
         )
 
@@ -531,7 +519,7 @@ class NeuronSubgroupDialog(ModelDialog):
         self.layout.addWidget(self.button_box, row + 1, 1, 1, 4, QtCore.Qt.AlignCenter)
 
         self.name_button.clicked.connect(
-            partial(self.accept_name, target="neurongroups")
+            lambda: self.accept_name(target="neurongroups")
         )
 
         self.definition_button.clicked.connect(self.get_subgroup_def)
@@ -539,7 +527,7 @@ class NeuronSubgroupDialog(ModelDialog):
         self.target_button.clicked.connect(self.get_targetname)
 
         self.show_parameters_button.clicked.connect(
-            partial(self.display_parameters, "neurongroups")
+            lambda: self.display_parameters("neurongroups")
         )
 
     def showEvent(self, event: QtCore.QEvent) -> None:
@@ -549,7 +537,7 @@ class NeuronSubgroupDialog(ModelDialog):
 
         # Set the window size relative to the default size
         self.resize(
-            default_size.width() * 2, default_size.height() * 1.2
+            int(default_size.width() * 2), int(default_size.height() * 1.2)
         )  # Double the width and height
 
     def get_subgroup_def(self) -> None:
@@ -732,8 +720,7 @@ class SynapseDialog(ModelDialog):
 
         # connect signals and slots
         self.origin_button.clicked.connect(
-            partial(
-                self.accept_parameter_with_savebutton,
+            lambda: self.accept_parameter_with_savebutton(
                 self.origin,
                 "origin",
                 self.model.define_synapse_origin,
@@ -741,8 +728,7 @@ class SynapseDialog(ModelDialog):
             )
         )
         self.target_button.clicked.connect(
-            partial(
-                self.accept_parameter_with_savebutton,
+            lambda: self.accept_parameter_with_savebutton(
                 self.target,
                 "target",
                 self.model.define_synapse_target,
@@ -750,8 +736,7 @@ class SynapseDialog(ModelDialog):
             )
         )
         self.equation_button.clicked.connect(
-            partial(
-                self.accept_parameter_with_savebutton,
+            lambda: self.accept_parameter_with_savebutton(
                 self.equation,
                 "equation",
                 self.model.define_synapse_equation,
@@ -759,26 +744,17 @@ class SynapseDialog(ModelDialog):
             )
         )
         self.pre_button.clicked.connect(
-            partial(
-                self.accept_parameter_with_savebutton,
-                self.pre,
-                "on_pre",
-                self.model.define_synapse_pre,
-                self.pre_button,
+            lambda: self.accept_parameter_with_savebutton(
+                self.pre, "on_pre", self.model.define_synapse_pre, self.pre_button
             )
         )
         self.post_button.clicked.connect(
-            partial(
-                self.accept_parameter_with_savebutton,
-                self.post,
-                "on_post",
-                self.model.define_synapse_post,
-                self.post_button,
+            lambda: self.accept_parameter_with_savebutton(
+                self.post, "on_post", self.model.define_synapse_post, self.post_button
             )
         )
         self.connect_button.clicked.connect(
-            partial(
-                self.accept_parameter_with_savebutton,
+            lambda: self.accept_parameter_with_savebutton(
                 self.connect,
                 "connection_condition",
                 self.model.define_synapse_connection,
@@ -786,8 +762,7 @@ class SynapseDialog(ModelDialog):
             )
         )
         self.connect_prob_button.clicked.connect(
-            partial(
-                self.accept_parameter_with_savebutton,
+            lambda: self.accept_parameter_with_savebutton(
                 self.connect_prob,
                 "connection_probability",
                 self.model.define_synapse_connection_probablitiy,
@@ -796,9 +771,9 @@ class SynapseDialog(ModelDialog):
             )
         )
 
-        self.name_button.clicked.connect(partial(self.accept_name, "synapses"))
+        self.name_button.clicked.connect(lambda: self.accept_name("synapses"))
         self.show_parameters_button.clicked.connect(
-            partial(self.display_parameters, "synapses")
+            lambda: self.display_parameters("synapses")
         )
 
 
@@ -846,12 +821,12 @@ class ParameterDialog(ModelDialog):
             qle.setMinimumWidth(qle.sizeHint().width() * 2)
 
         self.show_parameters_button.clicked.connect(
-            partial(self.display_parameters, "parameters")
+            lambda: self.display_parameters("parameters")
         )
 
         self.value_button.clicked.connect(self.accept_value)
 
-        self.name_button.clicked.connect(partial(self.accept_name, target="parameters"))
+        self.name_button.clicked.connect(lambda: self.accept_name(target="parameters"))
 
         if self.model.parameters is None:
             self.model.parameters = {}
@@ -1015,7 +990,7 @@ class MonitorDialog(ModelDialog):
 
         # connect signals and sockets
         self.show_parameters_button.clicked.connect(
-            partial(self.display_parameters, "monitors")
+            lambda: self.display_parameters("monitors")
         )
 
         layout = QtWidgets.QGridLayout()
@@ -1023,7 +998,7 @@ class MonitorDialog(ModelDialog):
         self.setLayout(layout)
         self.setWindowTitle("Define a Monitor")
 
-        self.name_button.clicked.connect(partial(self.accept_name, target="monitors"))
+        self.name_button.clicked.connect(lambda: self.accept_name(target="monitors"))
 
         self.type_button.clicked.connect(self.accept_type)
 
@@ -1206,7 +1181,7 @@ class InitialConditionWidget(ModelDialog):
         self.layout.addWidget(self.button_box, row, 1, 1, 4, QtCore.Qt.AlignCenter)
 
         self.show_parameters_button.clicked.connect(
-            partial(self.display_parameters, target=self.params, read_only=False)
+            lambda: self.display_parameters(target=self.params, read_only=False)
         )
         self.source_button.clicked.connect(self.accept_source)
         self.var_button.clicked.connect(self.accept_variable)
