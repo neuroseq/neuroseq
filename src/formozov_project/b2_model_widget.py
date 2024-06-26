@@ -287,7 +287,9 @@ class ModelDialog(QtWidgets.QDialog):
                 self.name = name
                 getattr(self.model, target)[name] = {}
             else:
-                raise KeyError(f"The name {name} has already been defined in {target}")
+                self.display_error(
+                    f"The name {name} has already been defined in {target}"
+                )
             self.name_button.setText("saved")
             self.name_button.setDown(True)
 
@@ -836,7 +838,7 @@ class ParameterDialog(ModelDialog):
 
         self.value_button.clicked.connect(self.accept_value)
 
-        self.name_button.clicked.connect(self.accept_name)
+        self.name_button.clicked.connect(lambda: self.accept_name("parameters"))
 
         if self.model.parameters is None:
             self.model.parameters = {}
@@ -849,15 +851,6 @@ class ParameterDialog(ModelDialog):
             self.display_error("No valid name has been defined")
         else:
             super().accept()
-
-    def accept_name(self, _: str | None = None) -> None:
-        """
-        override of accept name of `ModelDialog` to not accept name parameter overriding
-        """
-        try:
-            super().accept_name(target="parameters")
-        except Exception as e:
-            self.display_error(f"Could not set parameter: {e}")
 
     def accept_value(self) -> None:
         """
@@ -923,7 +916,7 @@ class DictionaryWidget(QtWidgets.QWidget):
             self.table = QtWidgets.QLabel("No parameters defined")
         else:
             self.table = QtWidgets.QTreeWidget(self)
-            self.table.setColumnWidth(0, 200)
+            self.table.setColumnWidth(0, 300)
             self.table.setColumnWidth(1, 400)
             if read_only:
                 self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)

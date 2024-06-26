@@ -73,6 +73,23 @@ def test_parameterdialog_nothing_defined_errors(qtbot: QtBot) -> None:
     ok_button = param_dlg.error_dialog.button(QtWidgets.QMessageBox.Ok)
     qtbot.mouseClick(ok_button, QtCore.Qt.MouseButton.LeftButton)
 
+    param_dlg.model.define_parameter("x", 1 * B2W.b2.ms)
+
+    param_dlg.name_entry.clear()
+    qtbot.keyClicks(param_dlg.name_entry, "x")
+
+    qtbot.mouseClick(param_dlg.name_button, QtCore.Qt.MouseButton.LeftButton)
+
+    qtbot.waitUntil(param_dlg.error_dialog.isVisible)
+
+    assert (
+        param_dlg.error_dialog.text()
+        == "The name x has already been defined in parameters"
+    )
+
+    ok_button = param_dlg.error_dialog.button(QtWidgets.QMessageBox.Ok)
+    qtbot.mouseClick(ok_button, QtCore.Qt.MouseButton.LeftButton)
+
     # Ensure the dialog is no longer visible
     qtbot.waitUntil(lambda: not param_dlg.error_dialog.isVisible())
 
@@ -97,6 +114,7 @@ def test_parameterdialog_nothing_defined_errors(qtbot: QtBot) -> None:
     assert param_dlg.isVisible()
 
     # set name, then try to save parameter that hasn´t been defined
+    param_dlg.name_entry.clear()
 
     qtbot.keyClicks(param_dlg.name_entry, "param")
 
@@ -117,6 +135,14 @@ def test_parameterdialog_nothing_defined_errors(qtbot: QtBot) -> None:
         param_dlg.error_dialog.text()
         == "Please assign a value or expression before saving!"
     )
+
+    param_dlg.name = None
+
+    param_dlg.accept()
+
+    qtbot.waitUntil(param_dlg.error_dialog.isVisible)
+
+    assert param_dlg.error_dialog.text() == "No valid name has been defined"
 
     qtbot.mouseClick(
         param_dlg.error_dialog.button(QtWidgets.QMessageBox.Ok),
