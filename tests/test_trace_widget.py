@@ -14,7 +14,6 @@ def test_trace_widget(qtbot: QtBot) -> None:
     trace_widget.show()
     qtbot.waitUntil(lambda: trace_widget.isVisible())
     assert len(trace_widget.neuron_plots) == 0
-    assert trace_widget.selected_neuron is None
     n_neurons = 20
     n_timestamps = 100
     dt = 0.0991
@@ -31,8 +30,16 @@ def test_trace_widget(qtbot: QtBot) -> None:
     neuron_plot = cast(pg.PlotDataItem, trace_widget.neuron_plots[0])
     assert len(neuron_plot.xData) == n_timestamps
     assert np.allclose(neuron_plot.xData, timestamps)
-    assert trace_widget.selected_neuron is None
-    trace_widget.select_neuron(14)
-    assert trace_widget.selected_neuron == 14
-    trace_widget.select_neuron(14)
-    assert trace_widget.selected_neuron is None
+    # initially no neurons are selected
+    assert trace_widget.selected_neuron_slice is None
+    assert trace_widget.selected_time_slice is None
+    trace_widget.select_neurons(slice(1, 3), slice(10, 20))
+    # wait for the widget to update
+    qtbot.wait(10)
+    assert trace_widget.selected_neuron_slice == slice(1, 3)
+    assert trace_widget.selected_time_slice == slice(10, 20)
+    # de-selecting neurons reverts to displaying all of them as selected
+    trace_widget.unselect_neurons()
+    qtbot.wait(10)
+    assert trace_widget.selected_neuron_slice is None
+    assert trace_widget.selected_time_slice is None

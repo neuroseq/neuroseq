@@ -9,14 +9,32 @@ readme = "README.md"
 license = { text = "NONE" }
 authors = [{ name = "SSC", email = "ssc@iwr.uni-heidelberg.de" }]
 requires-python = ">=3.8"
-dependencies = ["brian2", "numpy", "qtpy", "pyside6", "pyqtgraph", "h5py", "qtawesome", "click", "PyYAML"]
+dependencies = [
+    "brian2",
+    "numpy",
+    "qtpy",
+    "pyside6",
+    "pyqtgraph",
+    "h5py",
+    "qtawesome",
+    "click",
+    "PyYAML",
+    "typing_extensions"
+]
 dynamic = ["version"]
 
 [project.scripts]
 formozov-project = "formozov_project.__main__:main"
 
 [project.optional-dependencies]
-tests = ["pytest", "pytest-qt", "pytest-randomly", "pytest-cov", "pytest-mock", "diff-cover"]
+tests = [
+    "pytest",
+    "pytest-qt",
+    "pytest-randomly",
+    "pytest-cov",
+    "pytest-mock",
+    "diff-cover"
+]
 
 [tool.setuptools.dynamic]
 version = { attr = "formozov_project.__version__" }
@@ -29,20 +47,20 @@ extend-include = ["*.ipynb"]
 
 [tool.ruff.lint]
 select = [
-  # pycodestyle
-  "E",
-  # Pyflakes
-  "F",
-  # pyupgrade
-  "UP",
-  # flake8-bugbear
-  "B",
-  # flake8-simplify
-  "SIM",
-  # isort
-  "I",
-  # numpy 2.0 support
-  "NPY201",
+    # pycodestyle
+    "E",
+    # Pyflakes
+    "F",
+    # pyupgrade
+    "UP",
+    # flake8-bugbear
+    "B",
+    # flake8-simplify
+    "SIM",
+    # isort
+    "I",
+    # numpy 2.0 support
+    "NPY201",
 ]
 ignore = ["E501"]
 
@@ -56,15 +74,13 @@ source = ["./src/formozov_project"]
 [tool.coverage.report]
 # Regexes for lines to exclude from consideration
 exclude_also = [
-  # Don't complain about missing debug-only code:
-  "def __repr__",
-  "if self\\.debug",
-
-  # Don't complain if non-runnable code isn't run:
-  "if __name__ == .__main__.:",
-
-  # Don't complain about abstract methods, they aren't run
-  "@(abc\\.)?abstractmethod",
+    # Don't complain about missing debug-only code:
+    "def __repr__",
+    "if self\\.debug",
+    # Don't complain if non-runnable code isn't run:
+    "if __name__ == .__main__.:",
+    # Don't complain about abstract methods, they aren't run
+    "@(abc\\.)?abstractmethod",
 ]
 fail_under = 80
 
