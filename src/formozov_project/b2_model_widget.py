@@ -294,7 +294,10 @@ class ModelDialog(QtWidgets.QDialog):
             self.name_button.setDown(True)
 
     def display_parameters(
-        self, target: str | dict[Any, Any], read_only: bool = False
+        self,
+        target: str | dict[Any, Any],
+        read_only: bool = False,
+        blocking: bool = True,
     ) -> None:
         """
         Display the parameters of a target member of the model in a new window.
@@ -303,6 +306,10 @@ class ModelDialog(QtWidgets.QDialog):
         ----------
         target : str
             name of the target variable in the model
+        read_only: bool
+            whether or not the entries should be read only
+        blocking: bool
+            whether the parameter window should be opened as a blocking window or not
         """
         if isinstance(target, str):
             d = getattr(self.model, target).get(self.name, None)
@@ -315,7 +322,11 @@ class ModelDialog(QtWidgets.QDialog):
         layout.addWidget(self.dictwidget)
         self.dictwidget.setLayout(layout)
         window.resize(800, 600)  # FIXME: make this more flexible
-        window.exec()
+
+        if blocking:
+            window.exec()
+        else:
+            window.show()
 
     def not_connected(self) -> None:
         """
@@ -595,14 +606,17 @@ class NeuronSubgroupDialog(ModelDialog):
             self.target_button.text = "saved"
 
     def display_parameters(
-        self, _: str | dict[Any, Any] | None = None, read_only: bool = False
+        self,
+        _: str | dict[Any, Any] | None = None,
+        read_only: bool = False,
+        __: bool = True,
     ) -> None:
         """
         Display the parameters of a target member of the model in a new window.
 
         Parameters
         ----------
-        target : str dummy
+        read_only: bool  whether to have the elements read only or not
         """
 
         self.parameterwindow = QtWidgets.QDialog(self)
@@ -867,7 +881,7 @@ class ParameterDialog(ModelDialog):
             self.value_button.setText("saved")
 
     def display_parameters(
-        self, _: str | dict[Any, Any], read_only: bool = True
+        self, _: str | dict[Any, Any], read_only: bool = False, blocking: bool = True
     ) -> None:
         """
         Display all the parameters in the system in a new window.
@@ -876,10 +890,14 @@ class ParameterDialog(ModelDialog):
         ----------
         _ : str
             dummy for override
+        read_only: bool
+            Whether to have the parameter table read only or not
+        blocking: bool
+            Whether to have the parameter window block the rest of the app or not
         """
         d = self.model.parameters if self.model.parameters is not None else {}
 
-        super().display_parameters(d, read_only=read_only)
+        super().display_parameters(d, read_only=read_only, blocking=blocking)
 
 
 class DictionaryWidget(QtWidgets.QWidget):
@@ -1154,7 +1172,10 @@ class MonitorDialog(ModelDialog):
             self.display_error(f"Error when defining monitor {self.name}: {e}")
 
     def display_parameters(
-        self, _: str | dict[Any, Any] | None = None, read_only: bool = False
+        self,
+        _: str | dict[Any, Any] | None = None,
+        read_only: bool = False,
+        blocking: bool = False,
     ) -> None:
         """
         Display the parameters of a target member of the model in a new window.
@@ -1162,6 +1183,9 @@ class MonitorDialog(ModelDialog):
         Parameters
         ----------
         target : str dummy
+        read_only: bool whether for the elements to be writeable or not
+        blocking: bool whether the window should block until ok is clicked or not
+
         """
 
         self.parameterwindow = QtWidgets.QDialog(self)
@@ -1381,6 +1405,7 @@ class B2ModelWidget(ModelDialog):
         self.params["seed"] = self.model.seed
 
         self.button_layout = QtWidgets.QVBoxLayout()
+
         self.entry_layout = QtWidgets.QGridLayout()
 
         self.layout.itemAt(0).widget().hide()  # name label hiding
@@ -1403,55 +1428,55 @@ class B2ModelWidget(ModelDialog):
         self.add_stimuli_button = QtWidgets.QPushButton("Add stimuli", self)
         self.add_neurongroup_button = QtWidgets.QPushButton("Add neurongroup", self)
         self.add_synapse_button = QtWidgets.QPushButton("Add synapse", self)
-        self.display_system_button = QtWidgets.QPushButton("Display system", self)
         self.monitor_button = QtWidgets.QPushButton("Add monitor", self)
         self.add_subgroup_button = QtWidgets.QPushButton("Add neuron subgroup", self)
         self.init_button = QtWidgets.QPushButton("Add initial conditions", self)
 
-        self.dictwidget = DictionaryWidget(self.params, self)
-        self.entry_layout.addWidget(self.dictwidget, 3, 1, 1, 3)
+        self.button_layout.addStretch()
 
         self.button_layout.addWidget(
             self.add_parameter_button,
             1,
         )
+        self.button_layout.addStretch()
 
         self.button_layout.addWidget(
             self.add_stimuli_button,
             2,
         )
+        self.button_layout.addStretch()
 
         self.button_layout.addWidget(
             self.add_neurongroup_button,
             3,
         )
+        self.button_layout.addStretch()
 
         self.button_layout.addWidget(
             self.add_subgroup_button,
             4,
         )
+        self.button_layout.addStretch()
 
         self.button_layout.addWidget(
             self.add_synapse_button,
             5,
         )
+        self.button_layout.addStretch()
 
         self.button_layout.addWidget(
             self.init_button,
             6,
         )
+        self.button_layout.addStretch()
 
         self.button_layout.addWidget(
             self.monitor_button,
             7,
         )
+        self.button_layout.addStretch()
 
-        self.button_layout.addWidget(
-            self.display_system_button,
-            8,
-        )
-
-        self.layout.addWidget(self.button_box, 9, 1, 1, 4, QtCore.Qt.AlignCenter)
+        self.layout.addWidget(self.button_box, 8, 1, 1, 4, QtCore.Qt.AlignCenter)
 
         for qle in [
             self.name_entry,
@@ -1475,6 +1500,8 @@ class B2ModelWidget(ModelDialog):
         self.layout.addLayout(self.entry_layout, 1, 1)
         self.layout.addLayout(self.button_layout, 1, 2)
         self.setLayout(self.layout)
+
+        self.display_parameters(self.params, blocking=False)
 
     def update_param_display(self, name: str, value: Any) -> None:
         """
