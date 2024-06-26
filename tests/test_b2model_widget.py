@@ -4,96 +4,11 @@ from typing import cast
 
 import formozov_project.b2_model_widget as B2W
 from brian2 import Quantity
-from brian2 import usecond
 from formozov_project.b2_model import B2Model
 from numpy import isclose
 from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
-
-
-def test_name_def(qtbot: QtBot) -> None:
-    b2w = B2W.B2ModelWidget(
-        B2Model(),
-        None,
-    )
-
-    qtbot.addWidget(b2w)
-
-    b2w.show()
-
-    assert b2w.isVisible()
-
-    qtbot.keyClicks(b2w.name_entry, "model_name")
-    assert b2w.name_entry.text() == "model_name"
-    b2w.accept_name()
-    assert b2w.model.network.name == "model_name"
-    assert b2w.name_button.text() == "saved"
-    assert b2w.name_button.isDown() is True
-
-
-def test_name_def_exceptions(qtbot: QtBot) -> None:
-    b2w = B2W.B2ModelWidget(
-        B2Model(),
-        None,
-    )
-
-    qtbot.addWidget(b2w)
-
-    b2w.name = "thing"
-
-    # exceptions
-    b2w.name_entry.setText("renaming_not_allowed")
-
-    b2w.accept_name()
-
-    qtbot.waitUntil(b2w.error_dialog.isVisible)
-
-    assert b2w.error_dialog.text() == "Name has already been defined: thing"
-
-    b2w.error_dialog.close()
-
-    b2w.model = B2Model()
-    b2w.name = None
-
-    b2w.name_entry.setText("")
-
-    b2w.accept_name()
-
-    qtbot.waitUntil(b2w.error_dialog.isVisible)
-
-    assert b2w.error_dialog.text() == "A name must be defined first"
-    b2w.error_dialog.close()
-
-    b2w.model.define_dt(10 * usecond)
-
-    b2w.name_entry.setText("defined_timestep_precludes_renaming")
-
-    b2w.accept_name()
-
-    qtbot.waitUntil(b2w.error_dialog.isVisible)
-    assert (
-        b2w.error_dialog.text()
-        == "Timestep has already been defined in this network, renaming it would reset it, hence is not allowed. Define a name first"
-    )
-    b2w.error_dialog.close()
-
-    b2w.model = B2Model()
-
-    # define a minimal object
-    b2w.name = None
-    b2w.model.define_neuronnumber("x", 3)
-    b2w.model.define_equation("x", "dv/dt = -v: volt")
-    b2w.model.assemble_neurongroup(name="x")
-
-    b2w.accept_name()
-
-    qtbot.waitUntil(b2w.error_dialog.isVisible)
-    assert (
-        b2w.error_dialog.text()
-        == "Properties have already been defined in this network, renaming it would destroy them, hence is not allowed. Define a name first"
-    )
-    b2w.error_dialog.close()
 
 
 def test_dt_def(qtbot: QtBot) -> None:

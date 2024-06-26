@@ -137,6 +137,7 @@ class ModelDialog(QtWidgets.QDialog):
         title: str,
         textfieldtype: type = QtWidgets.QLineEdit,
         buttontext: str = "save",
+        layout: QtWidgets.QGridLayout = None,
     ) -> tuple[
         QtWidgets.QTextEdit | QtWidgets.QLineEdit,
         QtWidgets.QPushButton,
@@ -152,21 +153,27 @@ class ModelDialog(QtWidgets.QDialog):
             Type of the text input field to have on the second elemnet, by default QtWidgets.QLineEdit
         buttontext : str, optional
             Text to display in the rightmost button, by default "save"
+        layout : QtWidgets.QLayout | None
+            The layout to add the buttons to
 
         Returns
         -------
         tuple[QtWidgets.QTextEdit | QtWidgets.QLineEdit, QtWidgets.QPushButton, ]
             titlefield, textfield and button widgets
         """
+
+        if layout is None:
+            layout = self.layout
+
         titlefield = QtWidgets.QLabel(title, self)
         textfield = textfieldtype(self)
         button = QtWidgets.QPushButton(buttontext, self)
 
-        row = self.layout.rowCount()
+        row = layout.rowCount()
 
-        self.layout.addWidget(titlefield, row, 1)
-        self.layout.addWidget(textfield, row, 2)
-        self.layout.addWidget(button, row, 3)
+        layout.addWidget(titlefield, row, 1)
+        layout.addWidget(textfield, row, 2)
+        layout.addWidget(button, row, 3)
 
         return textfield, button
 
@@ -276,8 +283,11 @@ class ModelDialog(QtWidgets.QDialog):
         elif self.name is not None:
             self.display_error("A name has already been defined")
         else:
-            self.name = name
-            getattr(self.model, target)[name] = {}
+            if name not in getattr(self.model, target):
+                self.name = name
+                getattr(self.model, target)[name] = {}
+            else:
+                raise KeyError(f"The name {name} has already been defined in {target}")
             self.name_button.setText("saved")
             self.name_button.setDown(True)
 
@@ -826,10 +836,28 @@ class ParameterDialog(ModelDialog):
 
         self.value_button.clicked.connect(self.accept_value)
 
-        self.name_button.clicked.connect(lambda: self.accept_name(target="parameters"))
+        self.name_button.clicked.connect(self.accept_name)
 
         if self.model.parameters is None:
             self.model.parameters = {}
+
+    def accept(self) -> None:
+        """
+        accept the dialog
+        """
+        if self.name is None:
+            self.display_error("No valid name has been defined")
+        else:
+            super().accept()
+
+    def accept_name(self, _: str | None = None) -> None:
+        """
+        override of accept name of `ModelDialog` to not accept name parameter overriding
+        """
+        try:
+            super().accept_name(target="parameters")
+        except Exception as e:
+            self.display_error(f"Could not set parameter: {e}")
 
     def accept_value(self) -> None:
         """
@@ -895,22 +923,21 @@ class DictionaryWidget(QtWidgets.QWidget):
             self.table = QtWidgets.QLabel("No parameters defined")
         else:
             self.table = QtWidgets.QTreeWidget(self)
-            self.table.setColumnWidth(0, 400)
+            self.table.setColumnWidth(0, 200)
             self.table.setColumnWidth(1, 400)
             if read_only:
                 self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
             self.table.setHeaderLabels(["Key", "Value"])
 
-            self.add_dict_to_tree(self.table, dictionary)
+            self.add_dict_to_tree(dictionary)
 
         layout.addWidget(self.table)
         self.setLayout(layout)
 
     def add_dict_to_tree(
         self,
-        widget: QtWidgets.QTreeWidget,
         dictionary: dict,
-        parent: QtWidgets.QDialog | None = None,
+        parent: QtWidgets.QTreeWidgetItem | None = None,
     ) -> None:
         """
         Recursive function to add possibly nested dictionaries to the tree view.
@@ -921,23 +948,87 @@ class DictionaryWidget(QtWidgets.QWidget):
             TreeWidget to add the dict to.
         dictionary : dict
             Dictionary to add
-        parent : QtWidgets.QDialog | None, optional
+        parent : QtWidgets.QTreeWidgetItem | None, optional
             Parent element in the tree view, by default None
         """
         if parent is None:
-            parent = widget.invisibleRootItem()
+            parent = self.table.invisibleRootItem()
+
+        existing_elements = {
+            parent.child(i).text(0): parent.child(i) for i in range(parent.childCount())
+        }
 
         for key, value in dictionary.items():
-            item = QtWidgets.QTreeWidgetItem()
-            item.setText(0, str(key))
-
-            if isinstance(value, dict):
-                self.add_dict_to_tree(widget, value, item)
+            if str(key) in existing_elements:
+                continue
             else:
-                item.setText(1, str(value))
-                item.setFlags(item.flags() | QtCore.Qt.ItemIsEditable)
+                item = QtWidgets.QTreeWidgetItem()
+                item.setText(0, str(key))
 
-            parent.addChild(item)
+                if isinstance(value, dict):
+                    self.add_dict_to_tree(value, item)
+                else:
+                    item.setText(1, str(value))
+                    item.setFlags(item.flags() | QtCore.Qt.ItemIsEditable)
+
+                parent.addChild(item)
+
+    def _find_item_by_name(
+        self,
+        items: list[QtWidgets.QTreeWidgetItem],
+        name: str,
+    ) -> QtWidgets.QTreeWidgetItem | None:
+        """
+        Find an item in the tree widget by its name. In case of a name appearing
+        twice in the tree, the first item it encounters will be returned.
+
+        Parameters
+        ----------
+        name : str
+            Name to find
+        items: list[QtWidgets.QTreeWidgetItem]
+            list of items to begin the search in
+        Returns
+        -------
+        None | QtWidgets.QTreeWidgetItem
+            None when no the tree is empty or the data as not been found, QTreeWidget that has the name otherwise._
+        """
+        if isinstance(self.table, QtWidgets.QLabel):
+            return None
+        else:
+            # get top level items
+            while len(items) > 0:
+                item = items.pop()
+
+                if item.text(0) == name:
+                    return item
+                else:
+                    for i in range(0, item.childCount()):
+                        items.append(item.child(i))
+
+            return None
+
+    def find_item_by_name(self, name: str) -> QtWidgets.QTreeWidgetItem | None:
+        """
+        find and return an item by its entry in the name column when it is in the treewidget, otherwise return none
+
+        Parameters
+        ----------
+        name : str
+            name to look up
+
+        Returns
+        -------
+        QtWidgets.QTreeWidgetItem | None
+            The retrieved item, or None if the name does not exist
+        """
+        return self._find_item_by_name(
+            [
+                self.table.topLevelItem(i)
+                for i in range(0, self.table.topLevelItemCount())
+            ],
+            name,
+        )
 
 
 class MonitorDialog(ModelDialog):
@@ -1288,14 +1379,31 @@ class B2ModelWidget(ModelDialog):
         """
         super().__init__(model, parent)
 
+        self.params: dict[Any, Any] = {}
+        self.params["neurongroups"] = self.model.neurongroups
+        self.params["monitors"] = self.model.monitors
+        self.params["synapses"] = self.model.synapses
+        self.params["parameters"] = self.model.parameters
+        self.params["timestep"] = self.model.dt
+        self.params["seed"] = self.model.seed
+
+        self.button_layout = QtWidgets.QVBoxLayout()
+        self.entry_layout = QtWidgets.QGridLayout()
+
+        self.layout.itemAt(0).widget().hide()  # name label hiding
+        self.name_entry.hide()
+        self.name_button.hide()
+
         self.setWindowTitle("Model definition")
         self.show_parameters_button.hide()
 
         self.timestep, self.timestep_button = self.add_text_field(
             "Timestep",
+            layout=self.entry_layout,
         )
         self.seed, self.seed_button = self.add_text_field(
             "Random seed",
+            layout=self.entry_layout,
         )
 
         self.add_parameter_button = QtWidgets.QPushButton("Add parameter", self)
@@ -1307,29 +1415,48 @@ class B2ModelWidget(ModelDialog):
         self.add_subgroup_button = QtWidgets.QPushButton("Add neuron subgroup", self)
         self.init_button = QtWidgets.QPushButton("Add initial conditions", self)
 
-        self.layout.addWidget(self.add_parameter_button, 1, 4)
+        self.dictwidget = DictionaryWidget(self.params, self)
+        self.entry_layout.addWidget(self.dictwidget, 3, 1, 1, 3)
 
-        self.layout.addWidget(self.add_stimuli_button, 2, 4)
+        self.button_layout.addWidget(
+            self.add_parameter_button,
+            1,
+        )
 
-        self.layout.addWidget(
+        self.button_layout.addWidget(
+            self.add_stimuli_button,
+            2,
+        )
+
+        self.button_layout.addWidget(
             self.add_neurongroup_button,
             3,
+        )
+
+        self.button_layout.addWidget(
+            self.add_subgroup_button,
             4,
         )
 
-        self.layout.addWidget(self.add_subgroup_button, 4, 4)
-
-        self.layout.addWidget(
+        self.button_layout.addWidget(
             self.add_synapse_button,
             5,
-            4,
         )
 
-        self.layout.addWidget(self.init_button, 6, 4)
+        self.button_layout.addWidget(
+            self.init_button,
+            6,
+        )
 
-        self.layout.addWidget(self.monitor_button, 7, 4)
+        self.button_layout.addWidget(
+            self.monitor_button,
+            7,
+        )
 
-        self.layout.addWidget(self.display_system_button, 8, 4)
+        self.button_layout.addWidget(
+            self.display_system_button,
+            8,
+        )
 
         self.layout.addWidget(self.button_box, 9, 1, 1, 4, QtCore.Qt.AlignCenter)
 
@@ -1345,33 +1472,41 @@ class B2ModelWidget(ModelDialog):
         self.add_neurongroup_button.clicked.connect(self.open_add_neurongroup_dialog)
         self.add_synapse_button.clicked.connect(self.open_add_synapse_dialog)
         self.add_parameter_button.clicked.connect(self.open_add_parameter_dialog)
-        self.display_system_button.clicked.connect(self.display_system)
         self.monitor_button.clicked.connect(self.open_monitor_dialog)
         self.add_subgroup_button.clicked.connect(self.open_subgroup_dialog)
 
         self.timestep_button.clicked.connect(self.accept_timestep)
         self.seed_button.clicked.connect(self.accept_seed)
-        self.name_button.clicked.connect(self.accept_name)
         self.init_button.clicked.connect(self.open_initial_condition_dialog)
 
+        self.layout.addLayout(self.entry_layout, 1, 1)
+        self.layout.addLayout(self.button_layout, 1, 2)
         self.setLayout(self.layout)
 
-    def display_system(self) -> None:
+    def update_param_display(self, name: str, value: Any) -> None:
         """
-        Display the defined system in a tree view in total.
-        Useful for getting an overview over the defined variables
-        or for checking which ones are still missing.
-        """
-        d: dict[Any, Any] = {}
-        d["neurongroups"] = self.model.neurongroups
-        d["monitors"] = self.model.monitors
-        d["synapses"] = self.model.synapses
-        d["parameters"] = self.model.parameters
-        d["timestep"] = self.model.dt
-        d["seed"] = self.model.seed
-        d["name"] = self.name
+        Update the parameter display in the main window
 
-        super().display_parameters(d, read_only=False)
+        Parameters
+        ----------
+        name : str
+            name of the element to update
+        value : Any
+            value to update the element wiht
+        """
+        if isinstance(value, dict):
+            startitem = cast(
+                QtWidgets.QTreeWidgetItem, self.dictwidget.find_item_by_name(name)
+            )
+            if startitem.text(1) == str(None):
+                startitem.setText(1, "")
+            self.dictwidget.add_dict_to_tree(value, startitem)
+        else:
+            item = self.dictwidget.find_item_by_name(name)
+
+            # update a leaf
+            if item is not None:
+                item.setText(1, str(value))
 
     def open_add_stimuli_dialog(self) -> None:
         """
@@ -1393,7 +1528,8 @@ class B2ModelWidget(ModelDialog):
         """
         self.neuron_dlg = NeuronGroupDialog(self.model, self)
 
-        self.neuron_dlg.exec()
+        if self.neuron_dlg.exec():
+            self.update_param_display("neurongroups", self.model.neurongroups)
 
     def open_add_synapse_dialog(self) -> None:
         """
@@ -1401,7 +1537,8 @@ class B2ModelWidget(ModelDialog):
         """
         self.synapse_dlg = SynapseDialog(self.model, self)
 
-        self.synapse_dlg.exec()
+        if self.synapse_dlg.exec():
+            self.update_param_display("synapses", self.model.synapses)
 
     def open_add_parameter_dialog(self) -> None:
         """
@@ -1409,21 +1546,24 @@ class B2ModelWidget(ModelDialog):
         """
         self.param_dlg = ParameterDialog(self.model, self)
 
-        self.param_dlg.exec()
+        if self.param_dlg.exec():
+            self.update_param_display("parameters", self.model.parameters)
 
     def open_monitor_dialog(self) -> None:
         """
         Open a new window to define a new monitor
         """
         self.monitor_dlg = MonitorDialog(self.model, self)
-        self.monitor_dlg.exec()
+        if self.monitor_dlg.exec():
+            self.update_param_display("monitors", self.model.monitors)
 
     def open_subgroup_dialog(self) -> None:
         """
         Open a new window to define a neuron subgroup for the model
         """
         self.subgroupdialog = NeuronSubgroupDialog(self.model, self)
-        self.subgroupdialog.exec()
+        if self.subgroupdialog.exec():
+            self.update_param_display("neurongroups", self.model.neurongroups)
 
     def accept_timestep(self) -> None:
         """
@@ -1441,6 +1581,7 @@ class B2ModelWidget(ModelDialog):
             self.model.define_dt(dt)
             self.timestep_button.setText("saved")
             self.timestep_button.setDown(True)
+            self.update_param_display("timestep", self.model.dt)
 
     def accept_seed(self) -> None:
         """
@@ -1459,33 +1600,7 @@ class B2ModelWidget(ModelDialog):
             b2.seed(seed)
             self.seed_button.setText("saved")
             self.seed_button.setDown(True)
-
-    def accept_name(self, _: str = "") -> None:
-        """
-        accept name entry for the model. If a network has already been defined,
-        it cannot be renamed. You have to make sure to give the name first.
-        """
-        txt = self.name_entry.text()
-
-        if txt == "" or txt is None:
-            self.display_error("A name must be defined first")
-        elif self.name is not None:
-            self.display_error(f"Name has already been defined: {self.name}")
-        else:
-            self.name = txt
-
-            if len(self.model.network.objects) > 0:
-                self.display_error(
-                    "Properties have already been defined in this network, renaming it would destroy them, hence is not allowed. Define a name first"
-                )
-            elif self.model.dt is not None:
-                self.display_error(
-                    "Timestep has already been defined in this network, renaming it would reset it, hence is not allowed. Define a name first"
-                )
-            else:
-                self.model.network = b2.Network(name=self.name)
-                self.name_button.setText("saved")
-                self.name_button.setDown(True)
+            self.update_param_display("seed", self.model.seed)
 
     def open_initial_condition_dialog(self) -> None:
         """
@@ -1493,4 +1608,5 @@ class B2ModelWidget(ModelDialog):
         """
         self.init_widget = InitialConditionWidget(self.model, self)
 
-        self.init_widget.exec()
+        if self.init_widget.exec():
+            pass  # FIXME: not yet implemented: show values of variables
