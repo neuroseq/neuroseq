@@ -987,41 +987,6 @@ class DictionaryWidget(QtWidgets.QWidget):
 
                 parent.addChild(item)
 
-    def _find_item_by_name(
-        self,
-        items: list[QtWidgets.QTreeWidgetItem],
-        name: str,
-    ) -> QtWidgets.QTreeWidgetItem | None:
-        """
-        Find an item in the tree widget by its name. In case of a name appearing
-        twice in the tree, the first item it encounters will be returned.
-
-        Parameters
-        ----------
-        name : str
-            Name to find
-        items: list[QtWidgets.QTreeWidgetItem]
-            list of items to begin the search in
-        Returns
-        -------
-        None | QtWidgets.QTreeWidgetItem
-            None when no the tree is empty or the data as not been found, QTreeWidget that has the name otherwise._
-        """
-        if isinstance(self.table, QtWidgets.QLabel):
-            return None
-        else:
-            # get top level items
-            while len(items) > 0:
-                item = items.pop()
-
-                if item.text(0) == name:
-                    return item
-                else:
-                    for i in range(0, item.childCount()):
-                        items.append(item.child(i))
-
-            return None
-
     def find_item_by_name(self, name: str) -> QtWidgets.QTreeWidgetItem | None:
         """
         find and return an item by its entry in the name column when it is in the treewidget, otherwise return none
@@ -1036,13 +1001,17 @@ class DictionaryWidget(QtWidgets.QWidget):
         QtWidgets.QTreeWidgetItem | None
             The retrieved item, or None if the name does not exist
         """
-        return self._find_item_by_name(
-            [
-                self.table.topLevelItem(i)
-                for i in range(0, self.table.topLevelItemCount())
-            ],
+
+        found_items = self.table.findItems(
             name,
+            QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+            0,
         )
+
+        if len(found_items) > 0:
+            return found_items[0]
+        else:
+            return None
 
 
 class MonitorDialog(ModelDialog):
@@ -1528,9 +1497,11 @@ class B2ModelWidget(ModelDialog):
             value to update the element wiht
         """
         if isinstance(value, dict):
-            startitem = cast(
-                QtWidgets.QTreeWidgetItem, self.dictwidget.find_item_by_name(name)
-            )
+            startitem = self.dictwidget.find_item_by_name(name)
+
+            if startitem is None:
+                return
+
             if startitem.text(1) == str(None):
                 startitem.setText(1, "")
             self.dictwidget.add_dict_to_tree(value, startitem)
