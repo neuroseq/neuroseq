@@ -53,6 +53,7 @@ class ModelDialog(QtWidgets.QDialog):
         # do not add these button_box immediatelly to the layout, as ok and cancel buttons are typically expected to appear on the last row
 
         self.button_box = QtWidgets.QDialogButtonBox(self.qtbtn)
+
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
 
@@ -1496,6 +1497,16 @@ class B2ModelWidget(ModelDialog):
         self.timestep_button.clicked.connect(self.accept_timestep)
         self.seed_button.clicked.connect(self.accept_seed)
         self.init_button.clicked.connect(self.open_initial_condition_dialog)
+
+        # add 'next' button to open the next dialog in the model definition.
+        self.nextButton = QtWidgets.QPushButton("Next")
+
+        # Get a standard icon from the style
+        style = QtWidgets.QApplication.style()
+        icon = style.standardIcon(QtWidgets.QStyle.SP_ArrowRight)
+        self.nextButton.setIcon(icon)
+
+        self.button_box.addButton(self.nextButton, QtWidgets.QDialogButtonBox.ApplyRole)
 
         self.layout.addLayout(self.entry_layout, 1, 1)
         self.layout.addLayout(self.button_layout, 1, 2)
