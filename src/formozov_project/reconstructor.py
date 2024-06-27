@@ -1,9 +1,9 @@
+from importlib import import_module
+from pathlib import Path
 from typing import Any
 
 import brian2 as b2
 import yaml
-
-from formozov_project.b2_model import B2Model
 
 
 class Reconstructor:
@@ -11,7 +11,7 @@ class Reconstructor:
     _summary_
     """
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str | Path) -> None:
         """
         _summary_
 
@@ -25,7 +25,7 @@ class Reconstructor:
 
     def _reconstruct_dynamic_object(
         self,
-        model: B2Model,
+        model: Any,
         assembler: str,
         name: str,
         data_of_group: dict[str, Any],
@@ -59,9 +59,10 @@ class Reconstructor:
             if key not in data_of_group:
                 continue
 
-            if key == "N":
-                # N is stored as an array, but we need it as a scalar
-                data_of_group[key] = data_of_group[key][0]
+            # if key == "N":
+            #     # N is stored as an array, but we need it as a scalar
+            #     print("N", data_of_group[key], len(data_of_group[key]), type(data_of_group[key]))
+            #     data_of_group[key] = data_of_group[key][0]
 
             try:
                 function(name, data_of_group[key])
@@ -76,15 +77,20 @@ class Reconstructor:
             message = f"Error when assembing neurongroup {name}: {e}"
             raise RuntimeError(message) from e
 
+        excluded = [n[0] for n in augmented]
+        excluded.extend(
+            ["n", "dt", "i", "t", "t_in_timesteps"]
+        )  # extend with read-only variables that are implicitly defined
+
         # set object variables
         for key, value in data_of_group.items():
-            if key in augmented:
+            if key in excluded:
                 continue
             else:
                 setattr(model.network[name], key, value)
 
     def reconstruct_neurongroups(
-        self, model: B2Model, name: str, data_of_group: dict[str, Any]
+        self, model: Any, name: str, data_of_group: dict[str, Any]
     ) -> None:
         """
         _summary_
@@ -107,6 +113,7 @@ class Reconstructor:
                     model.define_threshold,
                     model.define_refractory,
                     model.define_reset,
+                    model.define_solver_method,
                 ],
             )
         )
@@ -116,7 +123,7 @@ class Reconstructor:
         )
 
     def reconstruct_synapses(
-        self, model: B2Model, name: str, data_of_group: dict[str, Any]
+        self, model: Any, name: str, data_of_group: dict[str, Any]
     ) -> None:
         """
         _summary_
@@ -158,7 +165,7 @@ class Reconstructor:
         )
 
     def reconstruct_monitors(
-        self, model: B2Model, name: str, data_of_group: dict[str, Any]
+        self, model: Any, name: str, data_of_group: dict[str, Any]
     ) -> None:
         """
         _summary_
@@ -172,14 +179,15 @@ class Reconstructor:
         data_of_group : dict[str, Any]
             _description_
         """
+        monitortype = getattr(import_module("brian2"), data_of_group["type"])
         model.define_monitor(
-            data_of_group[name]["name"],
-            data_of_group[name]["type"],
-            data_of_group[name]["source"],
-            data_of_group[name]["record"],
+            data_of_group["name"],
+            monitortype,
+            data_of_group["source"],
+            data_of_group["variable"],
         )
 
-    def reconstruct(self, model: B2Model) -> None:
+    def reconstruct(self, model: Any) -> None:
         """
         _summary_
 
@@ -194,6 +202,13 @@ class Reconstructor:
             _description_
         """
 
+        model.seed = self.loaded_data["seed"]
+        b2.seed(self.loaded_data["seed"])
+        model.define_dt(self.loaded_data["timestep"])
+
+        # reconstruct parameters, timestep, seed.
+        model.parameters = self.loaded_data["parameters"]
+
         # reconstruct neurongroups
         for n in self.loaded_data["objects"]["neurongroups"]:
             self.reconstruct_neurongroups(model, n, self.loaded_data[n])
@@ -205,11 +220,3 @@ class Reconstructor:
         # reconstruct monitors
         for m in self.loaded_data["objects"]["monitors"]:
             self.reconstruct_monitors(model, m, self.loaded_data[m])
-
-        # reconstruct parameters, timestep, seed.
-        model.parameters = self.loaded_data["parameters"]
-
-        model.define_dt(self.loaded_data["timestep"])
-
-        model.seed = self.loaded_data["seed"]
-        b2.seed(self.loaded_data["seed"])

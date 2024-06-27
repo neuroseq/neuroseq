@@ -173,6 +173,17 @@ class B2Model:
         b2.defaultclock.dt = self.dt
         self.logger.info(f"dt defined: {dt}")
 
+    def define_b2seed(self, seed: int) -> None:
+        """
+        Set the brian2 rng seed to 'seed'. This also regenerates the internal buffer of random numbers when using codegeneration with cython.
+
+        Parameters
+        ----------
+        seed : int
+            The new seed to set
+        """
+        b2.seed(seed)
+
     def define_name(self, name: str) -> None:
         """
         define_name Define the name of the model
@@ -595,7 +606,7 @@ class B2Model:
             "name": name,
             "type": cls.__name__,
             "source": group,
-            "record": True,
+            "variable": variable,
         }
 
     def define_reset(self, name: str, reset: str) -> None:
@@ -760,7 +771,7 @@ class B2Model:
             logging.exception(e)
             raise ValueError(message) from e
 
-    def safe_state(self, filepath: str) -> None:
+    def save_model(self, filepath: str | Path) -> None:
         """
         Save the current state of the network to disk
 
@@ -771,6 +782,9 @@ class B2Model:
         """
         states = self.network.get_states()
         states["current_time"] = self.network.t
+        states["timestep"] = self.dt
+        states["seed"] = self.seed
+
         states["objects"] = {}
         states["objects"]["neurongroups"] = list(self.neurongroups.keys())
         states["objects"]["synapses"] = list(self.synapses.keys())
@@ -800,7 +814,7 @@ class B2Model:
             yaml.dump(states, file)
 
     @classmethod
-    def load_model(cls, filepath: str) -> B2Model:
+    def load_model(cls, filepath: str | Path) -> B2Model:
         """
         _summary_
 
@@ -809,10 +823,9 @@ class B2Model:
         filepath : str
             _description_
         """
-
-        model = cls()
-
         constr = Reconstructor(filepath)
+
+        model = cls(seed=constr.loaded_data["seed"])
 
         constr.reconstruct(model)
 

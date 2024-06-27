@@ -9,6 +9,7 @@ import brian2 as b2
 import h5py
 import numpy as np
 import pytest
+import yaml
 from formozov_project import b2_model
 from pytest_mock import MockerFixture
 
@@ -553,3 +554,82 @@ def test_store_restore(mfx_ornstein: b2_model.B2Model) -> None:
     # restore non-existing checkpoint
     with pytest.raises(ValueError, match=".*'idontexist'.*"):
         mfx_ornstein.restore("idontexist")
+
+
+def test_save_load(mfx_ornstein: b2_model.B2Model, tmp_path: Path) -> None:
+    mfx_ornstein.save_model(tmp_path / "model.yml")
+
+    with open(tmp_path / "model.yml") as file:
+        loaded_data = yaml.load(file, Loader=yaml.UnsafeLoader)
+
+    for k in [
+        "neurongroup",
+        "timestep",
+        "M",
+    ]:
+        assert k in loaded_data
+
+    reconstructed_model = b2_model.B2Model.load_model(tmp_path / "model.yml")
+
+    assert reconstructed_model.seed == mfx_ornstein.seed
+    assert reconstructed_model.dt == mfx_ornstein.dt
+
+    for var in ["dt", "sigma", "tau", "y", "t", "N", "i"]:
+        np.testing.assert_allclose(
+            getattr(reconstructed_model.network["neurongroup"], var),
+            getattr(mfx_ornstein.network["neurongroup"], var),
+            verbose=True,
+        )
+
+    for var in ["N", "t", "y"]:
+        np.testing.assert_allclose(
+            getattr(reconstructed_model.network["M"], var),
+            getattr(mfx_ornstein.network["M"], var),
+            verbose=True,
+        )
+
+    assert reconstructed_model.parameters == mfx_ornstein.parameters
+
+    assert len(reconstructed_model.network.objects) == len(mfx_ornstein.network.objects)
+    np.testing.assert_allclose(
+        mfx_ornstein.network["neurongroup"].tau,
+        reconstructed_model.network["neurongroup"].tau,
+    )
+    np.testing.assert_allclose(
+        mfx_ornstein.network["neurongroup"].sigma,
+        reconstructed_model.network["neurongroup"].sigma,
+    )
+    np.testing.assert_allclose(
+        mfx_ornstein.network["neurongroup"].y,
+        reconstructed_model.network["neurongroup"].y,
+    )
+    np.testing.assert_allclose(
+        mfx_ornstein.network["neurongroup"].t,
+        reconstructed_model.network["neurongroup"].t,
+    )
+    np.testing.assert_allclose(
+        mfx_ornstein.network["M"].t, reconstructed_model.network["M"].t
+    )
+
+    # resetting the seed is necessary, since brian2 has only one global rng (and buffer of cached random numbers),
+    # and if the seed is not reset the second simulation will run with different random numbers and produce different results
+    b2.seed(loaded_data["seed"])
+    mfx_ornstein.run_simulation(1 * b2.second)
+
+    b2.seed(loaded_data["seed"])
+    reconstructed_model.run_simulation(1 * b2.second)
+
+    np.testing.assert_allclose(
+        mfx_ornstein.network["neurongroup"].tau,
+        reconstructed_model.network["neurongroup"].tau,
+    )
+    np.testing.assert_allclose(
+        mfx_ornstein.network["neurongroup"].sigma,
+        reconstructed_model.network["neurongroup"].sigma,
+    )
+    np.testing.assert_allclose(
+        mfx_ornstein.network["M"].y, reconstructed_model.network["M"].y
+    )
+    np.testing.assert_allclose(
+        mfx_ornstein.network["M"].t, reconstructed_model.network["M"].t
+    )
