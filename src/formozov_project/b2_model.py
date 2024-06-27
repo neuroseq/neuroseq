@@ -7,6 +7,9 @@ from typing import Callable
 
 import brian2 as b2
 import h5py
+import yaml
+
+from formozov_project.reconstructor import Reconstructor
 
 
 class B2Model:
@@ -89,7 +92,7 @@ class B2Model:
         self.neurongroups: dict[str, dict[str, Any]] = {}
         self.synapses: dict[str, dict[str, Any]] = {}
         self.monitors: dict[str, dict[str, Any]] = {}
-        self.init_vars: dict[str, dict[str, Any]] = {}
+        # self.init_vars: dict[str, dict[str, Any]] = {}
         self.dt: b2.Quantity | None = None
         self.solver = None
         self.checkpoints: list[str] = []
@@ -145,12 +148,12 @@ class B2Model:
             When setting the quantity fails
         """
         try:
-            if elementname not in self.init_vars:
-                self.init_vars[elementname] = {}
+            # if elementname not in self.init_vars:
+            #     self.init_vars[elementname] = {}
 
             setattr(self.network[elementname], varname, value)
 
-            self.init_vars[elementname][varname] = value
+            # self.init_vars[elementname][varname] = value
 
         except Exception as e:
             raise ValueError(
@@ -756,3 +759,38 @@ class B2Model:
             self.logger.critical(message)
             logging.exception(e)
             raise ValueError(message) from e
+
+    def safe_state(self, filepath: str) -> None:
+        """
+        Save the current state of the network to disk
+
+        Parameters
+        ----------
+        filepath : str
+            path to the yaml file where the current state should be stored
+        """
+        states = self.network.get_states()
+        states["current_time"] = self.network.t
+        states["objects"] = {}
+        states["objects"]["neurongroups"] = list(self.neurongroups.keys())
+        states["objects"]["synapses"] = list(self.synapses.keys())
+        states["objects"]["monitors"] = list(self.monitors.keys())
+
+        states["parameters"] = self.parameters
+
+        with open(filepath, "w") as file:
+            yaml.dump(states, file)
+
+    def load_model(self, filepath: str) -> None:
+        """
+        _summary_
+
+        Parameters
+        ----------
+        filepath : str
+            _description_
+        """
+
+        constr = Reconstructor(filepath)
+
+        self.network = constr.reconstruct(self)
