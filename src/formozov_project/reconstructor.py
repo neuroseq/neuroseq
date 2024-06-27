@@ -78,16 +78,22 @@ class Reconstructor:
             raise RuntimeError(message) from e
 
         excluded = [n[0] for n in augmented]
-        excluded.extend(
-            ["n", "dt", "i", "t", "t_in_timesteps"]
-        )  # extend with read-only variables that are implicitly defined
 
         # set object variables
         for key, value in data_of_group.items():
             if key in excluded:
                 continue
             else:
-                setattr(model.network[name], key, value)
+                try:
+                    setattr(model.network[name], key, value)
+                except Exception as e:
+                    # when the variable is read-only we can except it because it is constructed from others
+                    if "is read-only" in e.message():
+                        continue
+                    else:
+                        raise RuntimeError(
+                            f"Something went wrong when setting attribute {key}: {e}"
+                        ) from e
 
     def reconstruct_neurongroups(
         self, model: Any, name: str, data_of_group: dict[str, Any]
@@ -106,7 +112,7 @@ class Reconstructor:
         """
         augmented = list(
             zip(
-                ["N", "model", "threshold", "refractory", "reset", "method"],
+                ["N", "model", "th", "refractory", "reset", "method"],
                 [
                     model.define_neuronnumber,
                     model.define_equation,
@@ -119,7 +125,11 @@ class Reconstructor:
         )
 
         self._reconstruct_dynamic_object(
-            model, "assemble_neurongroup", name, data_of_group, augmented
+            model,
+            "assemble_neurongroup",
+            name,
+            data_of_group,
+            augmented,
         )
 
     def reconstruct_synapses(
@@ -161,7 +171,11 @@ class Reconstructor:
         )
 
         self._reconstruct_dynamic_object(
-            model, "assemble_synapse", name, data_of_group, augmented
+            model,
+            "assemble_synapse",
+            name,
+            data_of_group,
+            augmented,
         )
 
     def reconstruct_monitors(
@@ -204,7 +218,8 @@ class Reconstructor:
 
         model.seed = self.loaded_data["seed"]
         b2.seed(self.loaded_data["seed"])
-        model.define_dt(self.loaded_data["timestep"])
+        if "timestep" in self.loaded_data:
+            model.define_dt(self.loaded_data["timestep"])
 
         # reconstruct parameters, timestep, seed.
         model.parameters = self.loaded_data["parameters"]

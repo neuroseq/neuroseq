@@ -782,7 +782,10 @@ class B2Model:
         """
         states = self.network.get_states()
         states["current_time"] = self.network.t
-        states["timestep"] = self.dt
+
+        if self.dt is not None:
+            states["timestep"] = self.dt
+
         states["seed"] = self.seed
 
         states["objects"] = {}

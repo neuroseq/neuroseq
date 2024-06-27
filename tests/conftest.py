@@ -157,6 +157,57 @@ def mfx_ornstein() -> b2_model.B2Model:
 
 
 @pytest.fixture
+def mfx_nmda() -> b2_model.B2Model:
+    a = 1 / (10 * b2.ms)
+    b = 1 / (10 * b2.ms)
+    c = 1 / (10 * b2.ms)
+
+    model = b2_model.B2Model(seed=4321)
+    # model.define_dt(0.2 * b2.ms)
+
+    model.define_parameter("a", a)
+    model.define_parameter("b", b)
+    model.define_parameter("c", c)
+
+    model.define_neuronnumber("neuron_input", 2)
+    model.define_solver_method("neuron_input", "euler")
+    model.define_equation("neuron_input", "dv/dt = 1/(10*ms) : 1")
+    model.define_threshold("neuron_input", "v>1")
+    model.define_reset("neuron_input", "v=0")
+
+    model.define_neuronnumber("neurons", 1)
+    model.define_equation(
+        "neurons",
+        """dv/dt = (g-v)/(10*ms) : 1
+                            g : 1""",
+    )
+    model.define_solver_method("neurons", "exact")
+    model.assemble_neurongroup("neurons")
+    model.assemble_neurongroup("neuron_input")
+
+    synapse_eq = """
+        dg_syn/dt = -a*g_syn+b*x*(1-g_syn) : 1 (clock-driven)
+        g_post = g_syn : 1 (summed)
+        dx/dt=-c*x : 1 (clock-driven)
+        w : 1 # synaptic weight
+    """
+
+    model.define_synapse_equation("S", synapse_eq)
+    model.define_synapse_origin("S", "neuron_input")
+    model.define_synapse_target("S", "neurons")
+    model.define_synapse_pre("S", "x += w")
+    model.assemble_synapse("S")
+
+    model.define_monitor("M", b2.StateMonitor, "S", "g")
+    model.define_monitor("Mn", b2.StateMonitor, "neurons", "g")
+
+    model.network["S"].w = [1.0, 10.0]
+    model.network["neuron_input"].v = [0.0, 0.5]
+
+    return model
+
+
+@pytest.fixture
 def mfx_parameterized(
     mfx: b2_model.B2Model, reference_parameters: dict[str, Any]
 ) -> tuple[b2_model.B2Model, dict[str, Any]]:
