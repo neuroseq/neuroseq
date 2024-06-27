@@ -778,10 +778,29 @@ class B2Model:
 
         states["parameters"] = self.parameters
 
+        # FIXME: refactor into function
+        # augment neurongroup data
+        for key, n in self.neurongroups.items():
+            states[key]["method"] = self.solver
+            for k, v in n.items():
+                states[key][k] = v
+
+        # augment synapses
+        for key, s in self.synapses.items():
+            states[key]["method"] = self.solver
+            for k, v in s.items():
+                states[key][k] = v
+
+        # augment monitors
+        for key, d in self.monitors.items():
+            for k, v in d.items():
+                states[key][k] = v
+
         with open(filepath, "w") as file:
             yaml.dump(states, file)
 
-    def load_model(self, filepath: str) -> None:
+    @classmethod
+    def load_model(cls, filepath: str) -> B2Model:
         """
         _summary_
 
@@ -791,6 +810,10 @@ class B2Model:
             _description_
         """
 
+        model = cls()
+
         constr = Reconstructor(filepath)
 
-        self.network = constr.reconstruct(self)
+        constr.reconstruct(model)
+
+        return model
