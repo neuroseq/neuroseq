@@ -556,6 +556,16 @@ class NeuronSubgroupDialog(ModelDialog):
             lambda: self.display_parameters("neurongroups")
         )
 
+    def showEvent(self, event: QtCore.QEvent) -> None:
+        # TODO: this is here to make the window a bit bigger. Is there a better way to do this?
+        # Get the default size
+        default_size = self.size()
+
+        # Set the window size relative to the default size
+        self.resize(
+            int(default_size.width() * 2), int(default_size.height() * 1.2)
+        )  # Double the width and height
+
     def get_subgroup_def(self) -> None:
         """
         parse the input string of the input field into a suitable type for defining neuronsubgroups
@@ -1393,8 +1403,6 @@ class B2ModelWidget(ModelDialog):
         self.monitor_button = QtWidgets.QPushButton("Add monitor", self)
         self.add_subgroup_button = QtWidgets.QPushButton("Add neuron subgroup", self)
         self.init_button = QtWidgets.QPushButton("Add initial conditions", self)
-        self.save_button = None
-        self.load_button = None
 
         self.button_layout.addStretch()
 
@@ -1605,5 +1613,4 @@ class B2ModelWidget(ModelDialog):
         self.init_widget = InitialConditionWidget(self.model, self)
 
         if self.init_widget.exec():
-            # not yet implemented: show values of variables
-            pass
+            pass  # FIXME: not yet implemented: show values of variables
