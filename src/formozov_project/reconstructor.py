@@ -11,8 +11,7 @@ import yaml
 
 class Reconstructor:
     """
-    Class that reconstructs a B2Model from its serialized version. Always creates a new model
-    that has not been run, i.e., at t = 0.
+    Class that reconstructs a B2Model from its serialized version.
     """
 
     def __init__(self, path: str | Path) -> None:
@@ -175,7 +174,7 @@ class Reconstructor:
                     model.define_synapse_post,
                     model.define_synapse_connection,
                     model.define_synapse_connection_probablitiy,
-                    model.define_solver_method,
+                    model.define_synapse_solver_method,
                 ],
             )
         )
@@ -232,14 +231,20 @@ class Reconstructor:
         # reconstruct parameters, timestep, seed.
         model.parameters = self.loaded_data["parameters"]
 
+        print(self.loaded_data["objects"]["neurongroups"])
+        print(self.loaded_data["objects"]["synapses"])
+
         # reconstruct neurongroups
         for n in self.loaded_data["objects"]["neurongroups"]:
+            print("neurongroup: ", n)
             self.reconstruct_neurongroups(model, n, self.loaded_data[n])
 
         # reconstruct synapses
         for s in self.loaded_data["objects"]["synapses"]:
+            print("synapse: ", s)
             self.reconstruct_synapses(model, s, self.loaded_data[s])
 
         # reconstruct monitors
         for m in self.loaded_data["objects"]["monitors"]:
+            print(m)
             self.reconstruct_monitors(model, m, self.loaded_data[m])
