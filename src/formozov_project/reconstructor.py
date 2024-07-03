@@ -65,14 +65,14 @@ class Reconstructor:
             try:
                 function(name, data_of_group[key])
             except Exception as e:
-                message = f"Error when defining {key} for object{name}: {e}"
+                message = f"Error when defining {key} for object {name}: {e}"
                 raise RuntimeError(message) from e
 
         # assemble object
         try:
             getattr(model, assembler)(name)
         except Exception as e:
-            message = f"Error when assembing neurongroup {name}: {e}"
+            message = f"Error when assembing object {name}: {e}"
             raise RuntimeError(message) from e
 
         excluded = [n[0] for n in augmented]
