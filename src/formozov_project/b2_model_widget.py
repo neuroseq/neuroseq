@@ -1604,4 +1604,6 @@ class B2ModelWidget(ModelDialog):
         """
         self.init_widget = InitialConditionWidget(self.model, self)
 
-        self.init_widget.exec()
+        if self.init_widget.exec():
+            # not yet implemented: show values of variables
+            pass

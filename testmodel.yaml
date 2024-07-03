@@ -1,0 +1,271 @@
+M:
+  N: !!python/object/apply:numpy.core.multiarray._reconstruct
+    args:
+      - !!python/name:numpy.ndarray &id001 ""
+      - !!python/tuple
+        - 0
+      - !!binary |
+        Yg==
+    state: !!python/tuple
+      - 1
+      - !!python/tuple []
+      - !!python/object/apply:numpy.dtype &id004
+        args:
+          - i4
+          - false
+          - true
+        state: !!python/tuple
+          - 3
+          - <
+          - null
+          - null
+          - null
+          - -1
+          - -1
+          - 0
+      - false
+      - !!binary |
+        AAAAAA==
+  name: M
+  source: neurongroup
+  t:
+    !!python/object/apply:brian2.units.fundamentalunits.quantity_with_dimensions
+    - !!python/object/apply:numpy.core.multiarray._reconstruct
+      args:
+        - *id001
+        - !!python/tuple
+          - 0
+        - !!binary |
+          Yg==
+      state: !!python/tuple
+        - 1
+        - !!python/tuple
+          - 0
+        - !!python/object/apply:numpy.dtype &id002
+          args:
+            - f8
+            - false
+            - true
+          state: !!python/tuple
+            - 3
+            - <
+            - null
+            - null
+            - null
+            - -1
+            - -1
+            - 0
+        - false
+        - !!binary ""
+    - !!python/object/apply:brian2.units.fundamentalunits.get_or_create_dimension &id003
+      - !!python/tuple
+        - 0
+        - 0
+        - 1
+        - 0
+        - 0
+        - 0
+        - 0
+  type: StateMonitor
+  variable: y
+  y: !!python/object/apply:numpy.core.multiarray._reconstruct
+    args:
+      - *id001
+      - !!python/tuple
+        - 0
+      - !!binary |
+        Yg==
+    state: !!python/tuple
+      - 1
+      - !!python/tuple
+        - 0
+        - 5
+      - *id002
+      - false
+      - !!binary ""
+current_time:
+  !!python/object/apply:brian2.units.fundamentalunits.quantity_with_dimensions
+  - !!python/object/apply:numpy.core.multiarray._reconstruct
+    args:
+      - *id001
+      - !!python/tuple
+        - 0
+      - !!binary |
+        Yg==
+    state: !!python/tuple
+      - 1
+      - !!python/tuple []
+      - *id002
+      - false
+      - !!binary |
+        AAAAAAAAAAA=
+  - *id003
+neurongroup:
+  N: !!python/object/apply:numpy.core.multiarray._reconstruct
+    args:
+      - *id001
+      - !!python/tuple
+        - 0
+      - !!binary |
+        Yg==
+    state: !!python/tuple
+      - 1
+      - !!python/tuple []
+      - !!python/object/apply:numpy.dtype &id005
+        args:
+          - i8
+          - false
+          - true
+        state: !!python/tuple
+          - 3
+          - <
+          - null
+          - null
+          - null
+          - -1
+          - -1
+          - 0
+      - false
+      - !!binary |
+        BQAAAAAAAAA=
+  dt:
+    !!python/object/apply:brian2.units.fundamentalunits.quantity_with_dimensions
+    - !!python/object/apply:numpy.core.multiarray._reconstruct
+      args:
+        - *id001
+        - !!python/tuple
+          - 0
+        - !!binary |
+          Yg==
+      state: !!python/tuple
+        - 1
+        - !!python/tuple []
+        - *id002
+        - false
+        - !!binary |
+          /Knx0k1iQD8=
+    - *id003
+  i: !!python/object/apply:numpy.core.multiarray._reconstruct
+    args:
+      - *id001
+      - !!python/tuple
+        - 0
+      - !!binary |
+        Yg==
+    state: !!python/tuple
+      - 1
+      - !!python/tuple
+        - 5
+      - *id004
+      - false
+      - !!binary |
+        AAAAAAEAAAACAAAAAwAAAAQAAAA=
+  method: euler
+  model:
+    "\n        tau : second\n        sigma : 1\n        dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi\
+    \ : 1\n    \n"
+  n: 5
+  sigma: !!python/object/apply:numpy.core.multiarray._reconstruct
+    args:
+      - *id001
+      - !!python/tuple
+        - 0
+      - !!binary |
+        Yg==
+    state: !!python/tuple
+      - 1
+      - !!python/tuple
+        - 5
+      - *id002
+      - false
+      - !!binary |
+        mpmZmZmZuT/p1JXP8jzUP5qZmZmZmdk/mpmZmZmZyT8pXI/C9SjsPw==
+  t:
+    !!python/object/apply:brian2.units.fundamentalunits.quantity_with_dimensions
+    - !!python/object/apply:numpy.core.multiarray._reconstruct
+      args:
+        - *id001
+        - !!python/tuple
+          - 0
+        - !!binary |
+          Yg==
+      state: !!python/tuple
+        - 1
+        - !!python/tuple []
+        - *id002
+        - false
+        - !!binary |
+          AAAAAAAA8D8=
+    - *id003
+  t_in_timesteps: !!python/object/apply:numpy.core.multiarray._reconstruct
+    args:
+      - *id001
+      - !!python/tuple
+        - 0
+      - !!binary |
+        Yg==
+    state: !!python/tuple
+      - 1
+      - !!python/tuple []
+      - *id005
+      - false
+      - !!binary |
+        0AcAAAAAAAA=
+  tau:
+    !!python/object/apply:brian2.units.fundamentalunits.quantity_with_dimensions
+    - !!python/object/apply:numpy.core.multiarray._reconstruct
+      args:
+        - *id001
+        - !!python/tuple
+          - 0
+        - !!binary |
+          Yg==
+      state: !!python/tuple
+        - 1
+        - !!python/tuple
+          - 5
+        - *id002
+        - false
+        - !!binary |
+          AAAAAAAA8D+amZmZmZnpPzMzMzMzM+M/MzMzMzMz0z+amZmZmZm5Pw==
+    - *id003
+  y: !!python/object/apply:numpy.core.multiarray._reconstruct
+    args:
+      - *id001
+      - !!python/tuple
+        - 0
+      - !!binary |
+        Yg==
+    state: !!python/tuple
+      - 1
+      - !!python/tuple
+        - 5
+      - *id002
+      - false
+      - !!binary |
+        AAAAAAAA8D8AAAAAAADwPwAAAAAAAPA/AAAAAAAA8D8AAAAAAADwPw==
+objects:
+  monitors:
+    - M
+  neurongroups:
+    - neurongroup
+  synapses: []
+parameters: null
+seed: 4321
+timestep:
+  !!python/object/apply:brian2.units.fundamentalunits.quantity_with_dimensions
+  - !!python/object/apply:numpy.core.multiarray._reconstruct
+    args:
+      - *id001
+      - !!python/tuple
+        - 0
+      - !!binary |
+        Yg==
+    state: !!python/tuple
+      - 1
+      - !!python/tuple []
+      - *id002
+      - false
+      - !!binary |
+        /Knx0k1iQD8=
+  - *id003

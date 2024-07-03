@@ -231,20 +231,14 @@ class Reconstructor:
         # reconstruct parameters, timestep, seed.
         model.parameters = self.loaded_data["parameters"]
 
-        print(self.loaded_data["objects"]["neurongroups"])
-        print(self.loaded_data["objects"]["synapses"])
-
         # reconstruct neurongroups
         for n in self.loaded_data["objects"]["neurongroups"]:
-            print("neurongroup: ", n)
             self.reconstruct_neurongroups(model, n, self.loaded_data[n])
 
         # reconstruct synapses
         for s in self.loaded_data["objects"]["synapses"]:
-            print("synapse: ", s)
             self.reconstruct_synapses(model, s, self.loaded_data[s])
 
         # reconstruct monitors
         for m in self.loaded_data["objects"]["monitors"]:
-            print(m)
             self.reconstruct_monitors(model, m, self.loaded_data[m])

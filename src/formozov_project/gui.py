@@ -113,7 +113,8 @@ class Gui(QtWidgets.QMainWindow):
         if filename == "":
             return
         try:
-            self.model = B2Model.load_model(filename)
+            B2Model.load_model(filename)
+
             self.trace_widget.set_data()
             self.heatmap_widget.set_data()
         except Exception as e:

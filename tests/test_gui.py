@@ -103,7 +103,10 @@ def test_gui_save_model(
 
 
 def test_gui_load_model(
-    tmp_path: Path, monkeypatch: MonkeyPatch, mfx_ornstein: B2Model
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    mfx_ornstein: B2Model,
+    qtbot: QtBot,
 ) -> None:
     filename = tmp_path / "testmodel.yaml"
 
@@ -112,11 +115,16 @@ def test_gui_load_model(
     gui.model = mfx_ornstein
     gui.show()
 
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+
     assert filename.exists()
 
     monkeypatch.setattr(
         QtWidgets.QFileDialog, "getOpenFileName", lambda *args: (filename, True)
     )
+
+    gui.btn_open_clicked()
 
     assert "neurongroup" in gui.model.neurongroups
 
