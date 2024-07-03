@@ -1605,29 +1605,3 @@ class B2ModelWidget(ModelDialog):
         self.init_widget = InitialConditionWidget(self.model, self)
 
         self.init_widget.exec()
-
-    def save_model(self) -> None:
-        """
-        Save all the values given to define a model in a yaml file from which the initial state of the model can be reconstructed at a later point
-        """
-        if all(type(obj) != b2.NeuronGroup for obj in self.model.network.objects):
-            self.display_error(
-                "Cannot save a model without having any neurongroups defined"
-            )
-
-        try:
-            self.model.save_model(self.save_textfield.text())
-        except Exception as e:
-            self.display_error(f"An error occured while saving a model file {e}")
-
-    def load_model(self) -> None:
-        """
-        Load a model from disk
-        """
-        path = self.load_field.text()
-
-        try:
-            self.model.load_model(path)
-
-        except Exception as e:
-            self.display_error(f"An error occured while loading a model file: {e}")
