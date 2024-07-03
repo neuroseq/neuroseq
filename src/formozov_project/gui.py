@@ -9,7 +9,6 @@ import qtawesome as qta
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
-from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
 from formozov_project import __version__
@@ -106,25 +105,7 @@ class Gui(QtWidgets.QMainWindow):
             self.heatmap_widget.set_data()
 
     def btn_open_clicked(self) -> None:
-        filename, _ = getopenfilename(
-            self, "Open model file", "model.yaml", "yaml file (*.yaml)"
-        )
-
-        if filename == "":
-            return
-        try:
-            B2Model.load_model(filename)
-
-            self.trace_widget.set_data()
-            self.heatmap_widget.set_data()
-        except Exception as e:
-            self.logger.warning(f"Failed to load model from file {filename}: {e}")
-            QtWidgets.QMessageBox.critical(
-                self,
-                "File loading error",
-                f"Could not reconstruct model from '{filename}': {e}",
-            )
-            return
+        self.btn_new_clicked()
 
     def btn_save_clicked(self) -> None:
         filename, _ = getsavefilename(
@@ -139,28 +120,6 @@ class Gui(QtWidgets.QMainWindow):
             self.model.save_to_h5(filename)
         except Exception as e:
             self.logger.warning(f"Failed to save file {filename}: {e}")
-            QtWidgets.QMessageBox.critical(
-                self,
-                "File save error",
-                f"Could not save file '{filename}': {e}",
-            )
-            return
-
-    def btn_save_model_clicked(self) -> None:
-        filename, _ = getsavefilename(
-            self,
-            "Serialize model state",
-            "model.yaml",
-            "YAML file (*.yaml)",
-        )
-
-        if filename == "":
-            return
-
-        try:
-            self.model.save_model(filename)
-        except Exception as e:
-            self.logger.warning(f"Failed to serialize model state to {filename}: {e}")
             QtWidgets.QMessageBox.critical(
                 self,
                 "File save error",
@@ -303,14 +262,6 @@ def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
         toolbar,
         "Ctrl+S",
         qta.icon("mdi6.content-save"),
-    )
-    _add_action(
-        "&SaveModel",
-        gui.btn_save_model_clicked,
-        file_menu,
-        toolbar,
-        "Ctrl+Shift+S",
-        qta.icon("mdi6.content-save-cog"),
     )
     toolbar.addSeparator()
     _add_action(

@@ -62,7 +62,7 @@ def test_gui_new(
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
     monkeypatch.setattr("formozov_project.gui.B2ModelWidget.exec", lambda *args: True)
-    gui.btn_new_clicked()
+    gui.btn_open_clicked()
     assert gui.model.name == B2Model().name
 
 
@@ -82,53 +82,6 @@ def test_gui_save(
     )
     gui.btn_save_clicked()
     assert filename.exists()
-
-
-def test_gui_save_model(
-    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_ornstein: B2Model
-) -> None:
-    gui = Gui()
-    gui.model = mfx_ornstein
-    gui.show()
-    qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible())
-    filename = tmp_path / "testmodel.yaml"
-    assert not filename.exists()
-
-    monkeypatch.setattr(
-        QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (f"{filename}", True)
-    )
-    gui.btn_save_model_clicked()
-    assert filename.exists()
-
-
-def test_gui_load_model(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-    mfx_ornstein: B2Model,
-    qtbot: QtBot,
-) -> None:
-    filename = tmp_path / "testmodel.yaml"
-
-    mfx_ornstein.save_model(filename)
-    gui = Gui()
-    gui.model = mfx_ornstein
-    gui.show()
-
-    qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible())
-
-    assert filename.exists()
-
-    monkeypatch.setattr(
-        QtWidgets.QFileDialog, "getOpenFileName", lambda *args: (filename, True)
-    )
-
-    gui.btn_open_clicked()
-
-    assert "neurongroup" in gui.model.neurongroups
-
-    gui.close()
 
 
 def test_gui_checkpoints(
