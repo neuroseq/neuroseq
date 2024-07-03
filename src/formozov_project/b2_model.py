@@ -841,12 +841,12 @@ class B2Model:
     @classmethod
     def load_model(cls, filepath: str | Path) -> B2Model:
         """
-        _summary_
+        Load model from file
 
         Parameters
         ----------
         filepath : str
-            _description_
+            path to the model file
         """
         constr = Reconstructor(filepath)
 

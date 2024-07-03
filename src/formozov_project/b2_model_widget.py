@@ -1616,7 +1616,7 @@ class B2ModelWidget(ModelDialog):
             )
 
         try:
-            self.model.safe_state(self.save_textfield.text())
+            self.model.save_model(self.save_textfield.text())
         except Exception as e:
             self.display_error(f"An error occured while saving a model file {e}")
 
