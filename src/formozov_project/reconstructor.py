@@ -54,15 +54,11 @@ class Reconstructor:
         RuntimeError
             _description_
         """
+
         # rebuild the neurongroup
         for key, function in augmented:
             if key not in data_of_group:
                 continue
-
-            # if key == "N":
-            #     # N is stored as an array, but we need it as a scalar
-            #     print("N", data_of_group[key], len(data_of_group[key]), type(data_of_group[key]))
-            #     data_of_group[key] = data_of_group[key][0]
 
             try:
                 function(name, data_of_group[key])
@@ -79,6 +75,13 @@ class Reconstructor:
 
         excluded = [n[0] for n in augmented]
 
+        # there is N and n, one defined by default the other one merely for the record, and we do not need both
+        excluded.extend(
+            [
+                "n",
+            ]
+        )
+
         # set object variables
         for key, value in data_of_group.items():
             if key in excluded:
@@ -86,14 +89,15 @@ class Reconstructor:
             else:
                 try:
                     setattr(model.network[name], key, value)
-                except Exception as e:
+                except TypeError:
                     # when the variable is read-only we can except it because it is constructed from others
-                    if "is read-only" in e.message():
-                        continue
-                    else:
-                        raise RuntimeError(
-                            f"Something went wrong when setting attribute {key}: {e}"
-                        ) from e
+                    # if "is read-only" in str(e):
+                    continue
+                    # else:
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Something went wrong when setting attribute {key}: {e}"
+                    ) from e
 
     def reconstruct_neurongroups(
         self, model: Any, name: str, data_of_group: dict[str, Any]
@@ -157,6 +161,7 @@ class Reconstructor:
                     "on_post",
                     "connection_condition",
                     "p",
+                    "method",
                 ],
                 [
                     model.define_synapse_equation,
@@ -166,6 +171,7 @@ class Reconstructor:
                     model.define_synapse_post,
                     model.define_synapse_connection,
                     model.define_synapse_connection_probablitiy,
+                    model.define_solver_method,
                 ],
             )
         )

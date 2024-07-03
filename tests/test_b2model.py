@@ -342,7 +342,7 @@ def test_define_init(mfx_ornstein: b2_model.B2Model) -> None:
     assert all(network["neurongroup"].y == mfx.network["neurongroup"].y)
 
 
-def test_ornstein_uhlenbeck(tmp_path: Path, mfx_ornstein: b2_model.B2Model) -> None:
+def test_ornstein_uhlenbeck(mfx_ornstein: b2_model.B2Model) -> None:
     b2.seed(4321)
     mfx_ornstein.run_simulation(1 * b2.second)
 
@@ -372,7 +372,7 @@ def test_ornstein_uhlenbeck(tmp_path: Path, mfx_ornstein: b2_model.B2Model) -> N
     assert np.allclose(M.y[0], mfx_ornstein.network["M"].y[0])
 
 
-def test_NMDA_model(mfx_nmda) -> None:
+def test_NMDA_model(mfx_nmda: b2_model.B2Model) -> None:
     # https://brian2.readthedocs.io/en/stable/examples/synapses.nonlinear.html
 
     mfx_nmda.run_simulation(100 * b2.ms)
@@ -384,7 +384,7 @@ def test_NMDA_model(mfx_nmda) -> None:
         threshold="v>1",
         reset="v = 0",
         method="euler",
-        namespace={"a": a, "b": b, "c": c},
+        namespace=mfx_nmda.parameters,
     )
 
     neurons = b2.NeuronGroup(
@@ -392,7 +392,7 @@ def test_NMDA_model(mfx_nmda) -> None:
         """dv/dt = (g-v)/(10*ms) : 1
                                 g : 1""",
         method="exact",
-        namespace={"a": a, "b": b, "c": c},
+        namespace=mfx_nmda.parameters,
     )
 
     S = b2.Synapses(
@@ -406,7 +406,7 @@ def test_NMDA_model(mfx_nmda) -> None:
                 """,
         on_pre="x += w",
         name="synapses_test",
-        namespace={"a": a, "b": b, "c": c},
+        namespace=mfx_nmda.parameters,
     )  # NMDA synapses
 
     S.connect()
@@ -532,8 +532,9 @@ def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
     assert reconstructed_model.seed == mfx_nmda.seed
     assert reconstructed_model.dt == mfx_nmda.dt
 
+    # synapses
     for neurongroupname in ["neuron_input", "neurons"]:
-        for var in ["dt", "v", "t", "N", "i"]:
+        for var in mfx_nmda.network.get_states()[neurongroupname]:
             np.testing.assert_allclose(
                 getattr(reconstructed_model.network[neurongroupname], var),
                 getattr(mfx_nmda.network[neurongroupname], var),
@@ -546,55 +547,35 @@ def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
         verbose=True,
     )
 
-    # for var in ["N", "t", "y"]:
-    #     np.testing.assert_allclose(
-    #         getattr(reconstructed_model.network["M"], var),
-    #         getattr(mfx_nmda.network["M"], var),
-    #         verbose=True,
-    #     )
+    # test synapses
+    for var in mfx_nmda.network.get_states()["S"]:
+        np.testing.assert_allclose(
+            getattr(reconstructed_model.network["S"], var),
+            getattr(mfx_nmda.network["S"], var),
+            verbose=True,
+        )
 
-    # assert reconstructed_model.parameters == mfx_nmda.parameters
+    for name in ["M", "Mn"]:
+        for var in mfx_nmda.network.get_states()[name]:
+            np.testing.assert_allclose(
+                getattr(reconstructed_model.network[name], var),
+                getattr(mfx_nmda.network[name], var),
+                verbose=True,
+            )
 
-    # assert len(reconstructed_model.network.objects) == len(mfx_nmda.network.objects)
-    # np.testing.assert_allclose(
-    #     mfx_nmda.network["neurongroup"].tau,
-    #     reconstructed_model.network["neurongroup"].tau,
-    # )
-    # np.testing.assert_allclose(
-    #     mfx_nmda.network["neurongroup"].sigma,
-    #     reconstructed_model.network["neurongroup"].sigma,
-    # )
-    # np.testing.assert_allclose(
-    #     mfx_nmda.network["neurongroup"].y,
-    #     reconstructed_model.network["neurongroup"].y,
-    # )
-    # np.testing.assert_allclose(
-    #     mfx_nmda.network["neurongroup"].t,
-    #     reconstructed_model.network["neurongroup"].t,
-    # )
-    # np.testing.assert_allclose(
-    #     mfx_nmda.network["M"].t, reconstructed_model.network["M"].t
-    # )
+    assert reconstructed_model.parameters == mfx_nmda.parameters
 
-    # # resetting the seed is necessary, since brian2 has only one global rng (and buffer of cached random numbers),
-    # # and if the seed is not reset the second simulation will run with different random numbers and produce different results
-    # b2.seed(loaded_data["seed"])
-    # mfx_nmda.run_simulation(1 * b2.second)
+    # resetting the seed is necessary, since brian2 has only one global rng (and buffer of cached random numbers),
+    # and if the seed is not reset the second simulation will run with different random numbers and produce different results
+    b2.seed(loaded_data["seed"])
+    mfx_nmda.run_simulation(1 * b2.second)
 
-    # b2.seed(loaded_data["seed"])
-    # reconstructed_model.run_simulation(1 * b2.second)
+    b2.seed(loaded_data["seed"])
+    reconstructed_model.run_simulation(1 * b2.second)
 
-    # np.testing.assert_allclose(
-    #     mfx_nmda.network["neurongroup"].tau,
-    #     reconstructed_model.network["neurongroup"].tau,
-    # )
-    # np.testing.assert_allclose(
-    #     mfx_nmda.network["neurongroup"].sigma,
-    #     reconstructed_model.network["neurongroup"].sigma,
-    # )
-    # np.testing.assert_allclose(
-    #     mfx_nmda.network["M"].y, reconstructed_model.network["M"].y
-    # )
-    # np.testing.assert_allclose(
-    #     mfx_nmda.network["M"].t, reconstructed_model.network["M"].t
-    # )
+    np.testing.assert_allclose(
+        mfx_nmda.network["M"].g, reconstructed_model.network["M"].g
+    )
+    np.testing.assert_allclose(
+        mfx_nmda.network["Mn"].g, reconstructed_model.network["Mn"].g
+    )
