@@ -1,3 +1,4 @@
+import logging
 from importlib import import_module
 from pathlib import Path
 from typing import Any
@@ -8,18 +9,19 @@ import yaml
 
 class Reconstructor:
     """
-    _summary_
+    Class that reconstructs a B2Model from its serialized version
     """
 
     def __init__(self, path: str | Path) -> None:
         """
-        _summary_
+        Construct a new `Reconstructor` object.
 
         Parameters
         ----------
         path : str
-            _description_
+            Path to the yaml file that contains the model
         """
+        self.logger = logging.getLogger(__name__)
         with open(path) as file:
             self.loaded_data = yaml.load(file, Loader=yaml.UnsafeLoader)
 
@@ -32,27 +34,27 @@ class Reconstructor:
         augmented: list[Any],
     ) -> None:
         """
-        _summary_
+        Reconstruct synapses and neurongroups from their respective yaml nodes
 
         Parameters
         ----------
         model : B2Model
-            _description_
+            Model to add the object to
         assembler : str
-            _description_
+            Function to assemble the object with: `assemble_neurongroup` or `assemble_synapse`
         name : str
-            _description_
+            Name of the object to be assembled
         data_of_group : dict[str, Any]
-            _description_
+            The data to reconstruct the model from
         augmented : list[tuple[str, Callable]]
-            _description_
+            List of name, function pairs to set attributes from `data_of_group`.
 
         Raises
         ------
         RuntimeError
-            _description_
+            When something goes wrong in assembling the object
         RuntimeError
-            _description_
+            When something goes wrong in setting an attribute of the assembled object
         """
 
         # rebuild the neurongroup
@@ -90,10 +92,9 @@ class Reconstructor:
                 try:
                     setattr(model.network[name], key, value)
                 except TypeError:
-                    # when the variable is read-only we can except it because it is constructed from others
-                    # if "is read-only" in str(e):
+                    # when the variable is read-only brian2 throws a TypeError.
+                    # We can then continue because the variable is automatically constructed
                     continue
-                    # else:
                 except Exception as e:
                     raise RuntimeError(
                         f"Something went wrong when setting attribute {key}: {e}"
@@ -103,16 +104,16 @@ class Reconstructor:
         self, model: Any, name: str, data_of_group: dict[str, Any]
     ) -> None:
         """
-        _summary_
+        Reconstruct a neurongroup from a yamlnode
 
         Parameters
         ----------
         model : B2Model
-            _description_
+            Model to construct the neurongroup for
         name : str
-            _description_
+            name of the neurongroup to be reconstructed
         data_of_group : dict[str, Any]
-            _description_
+            yaml node that contains the necessary data for reconstruction
         """
         augmented = list(
             zip(
@@ -140,16 +141,16 @@ class Reconstructor:
         self, model: Any, name: str, data_of_group: dict[str, Any]
     ) -> None:
         """
-        _summary_
+        Reconstruct a synapse from a YAML node for a certain model
 
         Parameters
         ----------
         model : B2Model
-            _description_
+            Model to reconstruct the synapse for
         name : str
-            _description_
+            Name of the synapse to be reconstructed
         data_of_group : dict[str, Any]
-            _description_
+            YAML node to write it for
         """
         augmented = list(
             zip(
@@ -188,16 +189,16 @@ class Reconstructor:
         self, model: Any, name: str, data_of_group: dict[str, Any]
     ) -> None:
         """
-        _summary_
+        Reconstruct a monitor for a model from a yaml node
 
         Parameters
         ----------
         model : B2Model
-            _description_
+            Model to reconstruct the monitor for
         name : str
-            _description_
+            Name of the monitor to reconstruct
         data_of_group : dict[str, Any]
-            _description_
+            YAML node to reconstruct the monitor from
         """
         monitortype = getattr(import_module("brian2"), data_of_group["type"])
         model.define_monitor(
@@ -209,21 +210,19 @@ class Reconstructor:
 
     def reconstruct(self, model: Any) -> None:
         """
-        _summary_
+        Reconstruct a B2Model from a yaml node. The model is typically given in a default constructed state
+        as an argument, but this is not mandatory and it can contain other elements or can be modified afterwards
 
         Parameters
         ----------
         model : B2Model
-            _description_
-
-        Returns
-        -------
-        b2.Network
-            _description_
+            Model object to use for reconstruction
         """
 
         model.seed = self.loaded_data["seed"]
+
         b2.seed(self.loaded_data["seed"])
+
         if "timestep" in self.loaded_data:
             model.define_dt(self.loaded_data["timestep"])
 
