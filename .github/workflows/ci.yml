@@ -30,9 +30,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install uv
       - run: uv pip install --system pyside6 pyqt5 pyqt6 -e .[tests]
-      - run: QT_API=pyside6 PYTEST_QT_API=pyside6 pytest -svv --cov --cov-report=xml
-      - run: QT_API=pyqt6 PYTEST_QT_API=pyqt6 pytest -svv
-      - run: QT_API=pyqt5 PYTEST_QT_API=pyqt5 pytest -svv
+      - run: QT_API=pyside6 PYTEST_QT_API=pyside6 pytest -sv --cov --cov-report=xml
+      - run: QT_API=pyqt6 PYTEST_QT_API=pyqt6 pytest -sv
+      - run: QT_API=pyqt5 PYTEST_QT_API=pyqt5 pytest -sv
       - run: diff-cover coverage.xml -c pyproject.toml
   pre-commit:
     runs-on: "macos-arm64-ssc"

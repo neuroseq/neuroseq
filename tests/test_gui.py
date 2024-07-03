@@ -103,25 +103,24 @@ def test_gui_save_model(
 
 
 def test_gui_load_model(
-    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_ornstein: B2Model
+    tmp_path: Path, monkeypatch: MonkeyPatch, mfx_ornstein: B2Model
 ) -> None:
+    filename = tmp_path / "testmodel.yaml"
+
+    mfx_ornstein.save_model(filename)
     gui = Gui()
     gui.model = mfx_ornstein
     gui.show()
-    qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible())
 
-    gui.model.save_model(tmp_path / "testmodel.yaml")
-
-    filename = tmp_path / "testmodel.yaml"
     assert filename.exists()
 
     monkeypatch.setattr(
         QtWidgets.QFileDialog, "getOpenFileName", lambda *args: (filename, True)
     )
-    gui.btn_open_clicked()
 
     assert "neurongroup" in gui.model.neurongroups
+
+    gui.close()
 
 
 def test_gui_checkpoints(

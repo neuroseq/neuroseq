@@ -114,6 +114,8 @@ class Gui(QtWidgets.QMainWindow):
             return
         try:
             self.model = B2Model.load_model(filename)
+            self.trace_widget.set_data()
+            self.heatmap_widget.set_data()
         except Exception as e:
             self.logger.warning(f"Failed to load model from file {filename}: {e}")
             QtWidgets.QMessageBox.critical(
