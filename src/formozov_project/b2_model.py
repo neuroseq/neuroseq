@@ -817,23 +817,14 @@ class B2Model:
 
         states["parameters"] = self.parameters
 
-        # FIXME: refactor into function
-        # augment neurongroup data
-        for key, n in self.neurongroups.items():
-            states[key]["method"] = self.solver
-            for k, v in n.items():
-                states[key][k] = v
+        # augment neurongroups
+        for group in [self.neurongroups, self.synapses, self.monitors]:
+            for key, n in group.items():
+                if "method" in states[key]:
+                    states[key]["method"] = self.solver
 
-        # augment synapses
-        for key, s in self.synapses.items():
-            states[key]["method"] = self.solver
-            for k, v in s.items():
-                states[key][k] = v
-
-        # augment monitors
-        for key, d in self.monitors.items():
-            for k, v in d.items():
-                states[key][k] = v
+                for k, v in n.items():
+                    states[key][k] = v
 
         with open(filepath, "w") as file:
             yaml.dump(states, file)
