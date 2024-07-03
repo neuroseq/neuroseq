@@ -9,7 +9,8 @@ import yaml
 
 class Reconstructor:
     """
-    Class that reconstructs a B2Model from its serialized version
+    Class that reconstructs a B2Model from its serialized version. Always creates a new model
+    that has not been run, i.e., at t = 0.
     """
 
     def __init__(self, path: str | Path) -> None:

@@ -792,26 +792,19 @@ class B2Model:
         states["objects"]["neurongroups"] = list(self.neurongroups.keys())
         states["objects"]["synapses"] = list(self.synapses.keys())
         states["objects"]["monitors"] = list(self.monitors.keys())
-
         states["parameters"] = self.parameters
 
-        # FIXME: refactor into function
-        # augment neurongroup data
-        for key, n in self.neurongroups.items():
-            states[key]["method"] = self.solver
-            for k, v in n.items():
-                states[key][k] = v
+        def augment_datadict(d: dict[str, Any], states: dict[str, Any]) -> None:
+            """augment dicts with additional data from the network object to make reconstruction possible"""
+            for key, n in d.items():
+                if "method" in states[key]:
+                    states[key]["method"] = self.solver
+                for k, v in n.items():
+                    states[key][k] = v
 
-        # augment synapses
-        for key, s in self.synapses.items():
-            states[key]["method"] = self.solver
-            for k, v in s.items():
-                states[key][k] = v
-
-        # augment monitors
-        for key, d in self.monitors.items():
-            for k, v in d.items():
-                states[key][k] = v
+        augment_datadict(self.neurongroups, states)
+        augment_datadict(self.synapses, states)
+        augment_datadict(self.monitors, states)
 
         with open(filepath, "w") as file:
             yaml.dump(states, file)
@@ -819,12 +812,12 @@ class B2Model:
     @classmethod
     def load_model(cls, filepath: str | Path) -> B2Model:
         """
-        _summary_
+        Create a model from a serialization to file
 
         Parameters
         ----------
         filepath : str
-            _description_
+            Path to the yaml file from which to load the model
         """
         constr = Reconstructor(filepath)
 
