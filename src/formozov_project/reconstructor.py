@@ -4,6 +4,7 @@ import logging
 from importlib import import_module
 from pathlib import Path
 from typing import Any
+from typing import Callable
 
 import brian2 as b2
 import yaml
