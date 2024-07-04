@@ -514,7 +514,7 @@ def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
     mfx_nmda.save_model(tmp_path / "model.yml")
 
     with open(tmp_path / "model.yml") as file:
-        loaded_data = yaml.load(file, Loader=yaml.UnsafeLoader)
+        loaded_data = yaml.safe_load(file)
 
     for k in [
         "neurons",

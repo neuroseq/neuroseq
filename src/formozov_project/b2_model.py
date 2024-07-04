@@ -827,7 +827,7 @@ class B2Model:
                     states[key][k] = v
 
         with open(filepath, "w") as file:
-            yaml.dump(states, file)
+            yaml.safe_dump(states, file)
 
     @classmethod
     def load_model(cls, filepath: str | Path) -> B2Model:

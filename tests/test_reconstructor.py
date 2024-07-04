@@ -58,6 +58,7 @@ def test_reconstruct_object_exception_assembler(
 def test_reconstruct_neurongroup(mfx_nmda_serialized: Path) -> None:
     reconstructor = Reconstructor(mfx_nmda_serialized)
     model = B2Model()
+
     reconstructor.reconstruct_neurongroups(
         model, "neurons", reconstructor.loaded_data["neurons"]
     )
