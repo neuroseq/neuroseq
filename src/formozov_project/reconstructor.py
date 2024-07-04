@@ -152,7 +152,7 @@ class Reconstructor:
         name : str
             Name of the synapse to be reconstructed
         data_of_group : dict[str, Any]
-            YAML node to write it for
+            YAML node to reconstruct the synapse from
         """
         augmented = list(
             zip(
