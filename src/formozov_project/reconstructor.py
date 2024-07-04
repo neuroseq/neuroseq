@@ -33,7 +33,7 @@ class Reconstructor:
         assembler: str,
         name: str,
         data_of_group: dict[str, Any],
-        augmented: list[Any],
+        augmented: list[tuple[str, Callable]],
     ) -> None:
         """
         Reconstruct synapses and neurongroups from their respective yaml nodes
