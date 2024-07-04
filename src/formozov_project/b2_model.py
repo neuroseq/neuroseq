@@ -7,6 +7,9 @@ from typing import Callable
 
 import brian2 as b2
 import h5py
+import yaml
+
+from formozov_project.reconstructor import Reconstructor
 
 
 class B2Model:
@@ -89,6 +92,7 @@ class B2Model:
         self.neurongroups: dict[str, dict[str, Any]] = {}
         self.synapses: dict[str, dict[str, Any]] = {}
         self.monitors: dict[str, dict[str, Any]] = {}
+        # self.init_vars: dict[str, dict[str, Any]] = {}
         self.dt: b2.Quantity | None = None
         self.solver = None
         self.checkpoints: list[str] = []
@@ -144,7 +148,13 @@ class B2Model:
             When setting the quantity fails
         """
         try:
+            # if elementname not in self.init_vars:
+            #     self.init_vars[elementname] = {}
+
             setattr(self.network[elementname], varname, value)
+
+            # self.init_vars[elementname][varname] = value
+
         except Exception as e:
             raise ValueError(
                 f"Error when initializing {varname} or element {elementname} as {value}: {e}"
@@ -162,6 +172,17 @@ class B2Model:
         self.dt = dt
         b2.defaultclock.dt = self.dt
         self.logger.info(f"dt defined: {dt}")
+
+    def define_b2seed(self, seed: int) -> None:
+        """
+        Set the brian2 rng seed to 'seed'. This also regenerates the internal buffer of random numbers when using codegeneration with cython.
+
+        Parameters
+        ----------
+        seed : int
+            The new seed to set
+        """
+        b2.seed(seed)
 
     def define_name(self, name: str) -> None:
         """
@@ -237,7 +258,29 @@ class B2Model:
                 },
             },
         )
-        self.logger.info(f"Solver method defined: {method}")
+
+        self.logger.info(f"Solver method defined: {method} for {name}")
+
+    def define_synapse_solver_method(self, name: str, method: str) -> None:
+        """
+        define_solver_method Define the solver method for the synapse indicated by `name`.
+
+        Parameters
+        ----------
+        name : str
+            name of the synapse to define the solver method for
+        method : str
+            name of the method to use. Refer to the brian2 documentation for the currently available set of solvers.
+        """
+        self._update_nested_dict(
+            self.synapses,
+            {
+                name: {
+                    "method": method,
+                },
+            },
+        )
+        self.logger.info(f"Solver method defined: {method} for {name}")
 
     def define_refractory(self, name: str, value: str | b2.Quantity) -> None:
         """
@@ -585,7 +628,7 @@ class B2Model:
             "name": name,
             "type": cls.__name__,
             "source": group,
-            "record": True,
+            "variable": variable,
         }
 
     def define_reset(self, name: str, reset: str) -> None:
@@ -749,3 +792,57 @@ class B2Model:
             self.logger.critical(message)
             logging.exception(e)
             raise ValueError(message) from e
+
+    def save_model(self, filepath: str | Path) -> None:
+        """
+        Save the current state of the network to disk
+
+        Parameters
+        ----------
+        filepath : str
+            path to the yaml file where the current state should be stored
+        """
+        states = self.network.get_states()
+        states["current_time"] = self.network.t
+
+        if self.dt is not None:
+            states["timestep"] = self.dt
+
+        states["seed"] = self.seed
+
+        states["objects"] = {}
+        states["objects"]["neurongroups"] = list(self.neurongroups.keys())
+        states["objects"]["synapses"] = list(self.synapses.keys())
+        states["objects"]["monitors"] = list(self.monitors.keys())
+
+        states["parameters"] = self.parameters
+
+        # augment neurongroups
+        for group in [self.neurongroups, self.synapses, self.monitors]:
+            for key, n in group.items():
+                if "method" in states[key]:
+                    states[key]["method"] = self.solver
+
+                for k, v in n.items():
+                    states[key][k] = v
+
+        with open(filepath, "w") as file:
+            yaml.dump(states, file)
+
+    @classmethod
+    def load_model(cls, filepath: str | Path) -> B2Model:
+        """
+        Load model from file
+
+        Parameters
+        ----------
+        filepath : str
+            path to the model file
+        """
+        constr = Reconstructor(filepath)
+
+        model = cls(seed=constr.loaded_data["seed"])
+
+        constr.reconstruct(model)
+
+        return model

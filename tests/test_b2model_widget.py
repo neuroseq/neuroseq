@@ -124,8 +124,6 @@ def test_open_initialization_dialog(qtbot: QtBot) -> None:
 
     qtbot.addWidget(b2w)
 
-    qtbot.addWidget(b2w)
-
     qtbot.mouseClick(b2w.init_button, QtCore.Qt.MouseButton.LeftButton)
 
     qtbot.waitUntil(b2w.init_widget.isVisible)
