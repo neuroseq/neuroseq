@@ -10,7 +10,7 @@ from typing import cast
 import yaml
 from brian2 import Quantity
 from brian2 import TimedArray
-from brian2 import numpy_ as np
+from brian2 import numpy_
 from brian2 import seed
 
 from formozov_project import yaml_extensions as yext
@@ -19,7 +19,7 @@ from formozov_project import yaml_extensions as yext
 Add representers and constructors to the safe dumpers and loaders of yaml
 """
 yaml.add_representer(Quantity, yext.quantity_representer, Dumper=yaml.SafeDumper)
-yaml.add_representer(np.ndarray, yext.numpy_representer, Dumper=yaml.SafeDumper)
+yaml.add_representer(numpy_.ndarray, yext.numpy_representer, Dumper=yaml.SafeDumper)
 yaml.add_representer(TimedArray, yext.timedarray_representer, Dumper=yaml.SafeDumper)
 
 
