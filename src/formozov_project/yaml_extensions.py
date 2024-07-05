@@ -191,29 +191,3 @@ def numpy_constructor(loader: yaml.SafeLoader, node: Any) -> numpy_.ndarray:
     """
     read_data = loader.construct_sequence(node)
     return numpy_.array(read_data)
-
-
-"""
-Add representers and constructors to the safe dumpers and loaders of yaml
-"""
-yaml.add_representer(Quantity, quantity_representer, Dumper=yaml.SafeDumper)
-yaml.add_representer(numpy_.ndarray, numpy_representer, Dumper=yaml.SafeDumper)
-yaml.add_representer(numpy_.ndarray, numpy_representer, Dumper=yaml.SafeDumper)
-yaml.add_representer(TimedArray, timedarray_representer, Dumper=yaml.SafeDumper)
-
-
-yaml.add_constructor(
-    "!Quantity",
-    quantity_constructor,
-    Loader=yaml.SafeLoader,
-)
-yaml.add_constructor(
-    "!TimedArray",
-    timedarray_constructor,
-    Loader=yaml.SafeLoader,
-)
-yaml.add_constructor(
-    "!Numpy",
-    numpy_constructor,
-    Loader=yaml.SafeLoader,
-)

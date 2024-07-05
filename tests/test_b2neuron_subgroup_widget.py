@@ -27,14 +27,8 @@ def test_neuronsubgroupdialog_arg_conversion(qtbot: QtBot) -> None:
     neuron_sdlg = B2W.NeuronSubgroupDialog(B2Model())
     qtbot.add_widget(neuron_sdlg)
 
-    neuron_sdlg.definition.setText("slice(1, 6, 2)")
-
-    neuron_sdlg.get_subgroup_def()
-
     neuron_sdlg.name = "x1"
     neuron_sdlg.target_name = "x"
-
-    assert neuron_sdlg.subgroup_def == slice(1, 6, 2)
 
     neuron_sdlg.definition.setText("1")
     neuron_sdlg.get_subgroup_def()
@@ -137,9 +131,7 @@ def test_neuronsubgroup_accept(qtbot: QtBot) -> None:
     neuron_sdlg.error_dialog.close()
 
     neuron_sdlg.name = "x1"
-    neuron_sdlg.subgroup_def = slice(
-        1, 6, 3
-    )  # no non-contiguous slices allowd in brian2
+    neuron_sdlg.subgroup_def = (1, 6, 3)  # no non-contiguous slices allowd in brian2
 
     neuron_sdlg.accept()
 
@@ -159,7 +151,7 @@ def test_neuronsubgroupdialog_parameterdisplay(qtbot: QtBot) -> None:
 
     neuron_sdlg.name = "x1"
     neuron_sdlg.target_name = "x"
-    neuron_sdlg.subgroup_def = slice(1, 5, 2)
+    neuron_sdlg.subgroup_def = (1, 5)
 
     neuron_sdlg.display_parameters()
 
@@ -175,4 +167,4 @@ def test_neuronsubgroupdialog_parameterdisplay(qtbot: QtBot) -> None:
     assert table.item(1, 1).text() == "x"
 
     assert table.item(2, 0).text() == "indices"
-    assert table.item(2, 1).text() == "slice(1, 5, 2)"
+    assert table.item(2, 1).text() == "(1, 5)"

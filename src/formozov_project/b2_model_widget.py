@@ -527,7 +527,7 @@ class NeuronSubgroupDialog(ModelDialog):
         super().__init__(model, parent)
 
         self.target_name: str | None = None
-        self.subgroup_def: int | slice | tuple | list = 0
+        self.subgroup_def: int | tuple | list = 0
 
         self.target, self.target_button = self.add_text_field(
             "Target", QtWidgets.QLineEdit
