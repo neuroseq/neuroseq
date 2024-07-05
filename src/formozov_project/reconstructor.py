@@ -130,7 +130,7 @@ class Reconstructor:
                     continue
                 except Exception as e:
                     raise RuntimeError(
-                        f"Something went wrong when setting attribute {key}: {e}"
+                        f"Something went wrong when setting attribute {key} in object {name}: {e}"
                     ) from e
 
     def reconstruct_neurongroups(
