@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import numpy as np
-import pyqtgraph as pg
 from qtpy import QtWidgets
 
+from formozov_project.selectable_line_plot_item import SelectableLinePlotItem
 from formozov_project.timeseries_widget import TimeseriesWidget
 
 
@@ -37,7 +37,7 @@ class TraceWidget(TimeseriesWidget):
         trace_norm = 2.0 * np.max(np.abs(data))
         for index, trace in enumerate(data):
             # offset each trace by its index, give each trace a unique color
-            line = pg.PlotDataItem(
+            line = SelectableLinePlotItem(
                 timestamps, trace / trace_norm + index, pen=(index, len(data))
             )
             self.neuron_plots.append(line)

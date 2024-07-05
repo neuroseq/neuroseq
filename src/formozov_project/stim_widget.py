@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import numpy as np
-import pyqtgraph as pg
 from qtpy import QtWidgets
 
+from formozov_project.selectable_bar_plot_item import SelectableBarPlotItem
 from formozov_project.timeseries_widget import TimeseriesWidget
 
 
@@ -43,8 +43,8 @@ class StimWidget(TimeseriesWidget):
             y_offset = neuron_index - 0.5
             # give each neuron a unique color
             brush = (neuron_index, len(data))
-            bar = pg.BarGraphItem(
-                x=timestamps,
+            bar = SelectableBarPlotItem(
+                x=timestamps + 0.5 * dt,
                 width=dt,
                 y0=y_offset,
                 y1=y_offset + stim / stim_norm,

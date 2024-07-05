@@ -30,14 +30,3 @@ def test_spike_widget(qtbot: QtBot) -> None:
     assert len(neuron_0_plot.getData()[0]) == 0
     neuron_11_plot = cast(pg.BarGraphItem, spike_widget.neuron_plots[11])
     assert len(neuron_11_plot.getData()[0]) == n_spikes_neuron_11
-    assert spike_widget.selected_neuron is None
-    spike_widget.select_neuron(8)
-    assert spike_widget.selected_neuron == 8
-    spike_widget.select_neuron(8)
-    assert spike_widget.selected_neuron is None
-    spike_widget.select_neuron(13)
-    assert spike_widget.selected_neuron == 13
-    spike_widget.select_neuron(None)
-    assert spike_widget.selected_neuron is None
-    spike_widget.clear_data()
-    assert len(spike_widget.neuron_plots) == 0

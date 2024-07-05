@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable
 
 import brian2 as b2
 import numpy as np
 import qtawesome as qta
 from qtpy import QtCore
-from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getsavefilename
 
@@ -17,6 +15,7 @@ from formozov_project.b2_model_widget import B2ModelWidget
 from formozov_project.heatmap_widget import HeatmapWidget
 from formozov_project.stim_dialog import StimDialog
 from formozov_project.trace_widget import TraceWidget
+from formozov_project.utils import add_action
 
 
 class Gui(QtWidgets.QMainWindow):
@@ -216,30 +215,11 @@ class Gui(QtWidgets.QMainWindow):
         )
 
 
-def _add_action(
-    name: str,
-    callback: Callable,
-    menu: QtWidgets.QMenu,
-    toolbar: QtWidgets.QToolBar | None = None,
-    shortcut: str | None = None,
-    icon: QtGui.QIcon | None = None,
-) -> None:
-    action = QtWidgets.QAction(name, menu)
-    action.triggered.connect(callback)
-    if icon is not None:
-        action.setIcon(icon)
-    if shortcut is not None:
-        action.setShortcut(QtGui.QKeySequence(shortcut))
-    menu.addAction(action)
-    if toolbar is not None:
-        toolbar.addAction(action)
-
-
 def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
     menu = gui.menuBar()
     toolbar = QtWidgets.QToolBar()
     file_menu = menu.addMenu("&File")
-    _add_action(
+    add_action(
         "&New",
         gui.btn_new_clicked,
         file_menu,
@@ -247,7 +227,7 @@ def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
         "Ctrl+N",
         qta.icon("mdi6.file"),
     )
-    _add_action(
+    add_action(
         "&Open",
         gui.btn_open_clicked,
         file_menu,
@@ -255,7 +235,7 @@ def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
         "Ctrl+O",
         qta.icon("mdi6.folder-open"),
     )
-    _add_action(
+    add_action(
         "&Save",
         gui.btn_save_clicked,
         file_menu,
@@ -264,7 +244,7 @@ def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
         qta.icon("mdi6.content-save"),
     )
     toolbar.addSeparator()
-    _add_action(
+    add_action(
         "E&xit",
         gui.btn_exit_clicked,
         file_menu,
@@ -273,7 +253,7 @@ def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
         qta.icon("mdi6.exit-to-app"),
     )
     experiment_model = menu.addMenu("&Simulate")
-    _add_action(
+    add_action(
         "&Continue simulation",
         gui.btn_continue_simulation_clicked,
         experiment_model,
@@ -281,7 +261,7 @@ def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
         "Ctrl+R",
         qta.icon("mdi6.head"),
     )
-    _add_action(
+    add_action(
         "&Store simulation checkpoint",
         gui.btn_store_checkpoint_clicked,
         experiment_model,
@@ -289,7 +269,7 @@ def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
         "Ctrl+Shift+S",
         qta.icon("mdi6.head-check"),
     )
-    _add_action(
+    add_action(
         "&Restore simulation checkpoint",
         gui.btn_restore_checkpoint_clicked,
         experiment_model,
@@ -299,7 +279,7 @@ def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
     )
     toolbar.addSeparator()
     experiment_results = menu.addMenu("&Playback")
-    _add_action(
+    add_action(
         "&Skip to start",
         gui.btn_skip_to_start_clicked,
         experiment_results,
@@ -307,7 +287,7 @@ def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
         None,
         qta.icon("mdi6.skip-previous"),
     )
-    _add_action(
+    add_action(
         "&Stop",
         gui.btn_stop_clicked,
         experiment_results,
@@ -315,7 +295,7 @@ def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
         None,
         qta.icon("mdi6.stop"),
     )
-    _add_action(
+    add_action(
         "&Play / Pause",
         gui.btn_play_clicked,
         experiment_results,
@@ -323,7 +303,7 @@ def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
         "Space",
         qta.icon("mdi6.play-pause"),
     )
-    _add_action(
+    add_action(
         "&Skip to end",
         gui.btn_skip_to_end_clicked,
         experiment_results,
@@ -333,10 +313,10 @@ def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
     )
     toolbar.addSeparator()
     help_menu = menu.addMenu("&Help")
-    _add_action("&About", gui.about, help_menu)
+    add_action("&About", gui.about, help_menu)
     # temporary menu for demo purposes for widgets and dialogs that are not yet integrated
     temp_menu = menu.addMenu("&Temp demos")
-    _add_action(
+    add_action(
         "&StimDialog",
         lambda: StimDialog(stims=np.zeros((64, 100))).exec(),
         temp_menu,
