@@ -521,6 +521,7 @@ def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
         "M",
         "Mn",
         "seed",
+        "input_subgroup",
     ]:
         assert k in loaded_data
 

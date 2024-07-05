@@ -198,6 +198,8 @@ def mfx_nmda() -> b2_model.B2Model:
     model.define_synapse_pre("S", "x += w")
     model.assemble_synapse("S")
 
+    model.define_neuron_subgroup("neuron_input", "input_subgroup", 1)
+
     model.define_monitor("M", b2.StateMonitor, "S", "g")
     model.define_monitor("Mn", b2.StateMonitor, "neurons", "g")
 
