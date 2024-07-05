@@ -7,31 +7,36 @@ from typing import Any
 from typing import Callable
 
 import yaml
+from brian2 import Quantity
+from brian2 import TimedArray
+from brian2 import numpy_
 from brian2 import seed
 
-# """
-# Add representers and constructors to the safe dumpers and loaders of yaml
-# """
-# yaml.add_representer(Quantity, yext.quantity_representer, Dumper=yaml.SafeDumper)
-# yaml.add_representer(numpy_.ndarray, yext.numpy_representer, Dumper=yaml.SafeDumper)
-# yaml.add_representer(TimedArray, yext.timedarray_representer, Dumper=yaml.SafeDumper)
+from . import yaml_extensions as yext
+
+"""
+Add representers and constructors to the safe dumpers and loaders of yaml
+"""
+yaml.add_representer(Quantity, yext.quantity_representer, Dumper=yaml.SafeDumper)
+yaml.add_representer(numpy_.ndarray, yext.numpy_representer, Dumper=yaml.SafeDumper)
+yaml.add_representer(TimedArray, yext.timedarray_representer, Dumper=yaml.SafeDumper)
 
 
-# yaml.add_constructor(
-#     "!Quantity",
-#     yext.quantity_constructor,
-#     Loader=yaml.SafeLoader,
-# )
-# yaml.add_constructor(
-#     "!TimedArray",
-#     yext.timedarray_constructor,
-#     Loader=yaml.SafeLoader,
-# )
-# yaml.add_constructor(
-#     "!Numpy",
-#     yext.numpy_constructor,
-#     Loader=yaml.SafeLoader,
-# )
+yaml.add_constructor(
+    "!Quantity",
+    yext.quantity_constructor,
+    Loader=yaml.SafeLoader,
+)
+yaml.add_constructor(
+    "!TimedArray",
+    yext.timedarray_constructor,
+    Loader=yaml.SafeLoader,
+)
+yaml.add_constructor(
+    "!Numpy",
+    yext.numpy_constructor,
+    Loader=yaml.SafeLoader,
+)
 
 
 class Reconstructor:
@@ -164,6 +169,27 @@ class Reconstructor:
             augmented,
         )
 
+    def reconstruct_neuron_subgroup(
+        self, model: Any, name: str, data_of_group: dict[str, Any]
+    ) -> None:
+        """
+        Reconstruct a neuron subgroup from stored data. Requires that the
+        target neurongroup has been construted first
+
+        Parameters
+        ----------
+        model : Any
+            Model to reconstruct the neuron subgroup in
+        name : str
+            Name of the subgroup to be constructed
+        data_of_group : dict[str, Any]
+            dict containing the data to construct the subgroup
+        """
+
+        model.define_neuron_subgroup(
+            data_of_group["target"], name, data_of_group["idx"]
+        )
+
     def reconstruct_synapses(
         self, model: Any, name: str, data_of_group: dict[str, Any]
     ) -> None:
@@ -258,7 +284,12 @@ class Reconstructor:
 
         # reconstruct neurongroups
         for n in self.loaded_data["objects"]["neurongroups"]:
-            self.reconstruct_neurongroups(model, n, self.loaded_data[n])
+            if "idx" not in self.loaded_data[n]:  # reconstruct full groups first...
+                self.reconstruct_neurongroups(model, n, self.loaded_data[n])
+
+        for n in self.loaded_data["objects"]["neurongroups"]:
+            if "idx" in self.loaded_data[n]:  # ... then define the subgroups
+                self.reconstruct_neuron_subgroup(model, n, self.loaded_data[n])
 
         # reconstruct synapses
         for s in self.loaded_data["objects"]["synapses"]:

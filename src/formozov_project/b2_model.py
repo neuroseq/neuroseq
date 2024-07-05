@@ -325,7 +325,7 @@ class B2Model:
         self.logger.info(f"Neuron number defined: {n}")
 
     def define_neuron_subgroup(
-        self, target_name: str, identifier: str, idxs: slice | int | list | tuple
+        self, target_name: str, name: str, idxs: int | list | tuple
     ) -> None:
         """
         define_neuron_subgroup Define a subgroup of a neurongroup as a separate element that can be referred to by name.
@@ -334,37 +334,38 @@ class B2Model:
         ----------
         target_name : str
             Name of the neurongroup the subgroup should be defined for.
-        identifier : str
-            Name that the subgroup should be referred to. Note that the name
-            of the subgroup in the network will be different becasue it is
-            automatically determined brian2. This name can be accessed by
-            accessing the `neurongroup[identifier]['name']` element of the
-            calling instance.
-        idxs : slice | int | list |"tuple
+        name : str
+            Name that the subgroup should be referred to.
+        idxs : int | list | tuple
             Indices of the target neurongroup neurons to add to the subgroup.
+            Tuple and list is expected as (start, stop).
+            Only contiguous ranges are supported.
         """
         sng = None
-        if isinstance(idxs, tuple):
-            sng = self.network[target_name][idxs[0] : idxs[1]]
-        else:
-            sng = self.network[target_name][idxs]
 
-        self.logger.info(f"Neuron subgroup defined: {identifier}")
+        if isinstance(idxs, (tuple, list)):
+            if len(idxs) > 2:
+                raise ValueError("Subgroups have to be contiguous")
+
+            sng = b2.Subgroup(self.network[target_name], idxs[0], idxs[1], name=name)
+        elif isinstance(idxs, int):
+            sng = b2.Subgroup(self.network[target_name], idxs, idxs + 1, name=name)
+
+        self.logger.info(f"Neuron subgroup defined: {name}")
 
         try:
             self.network.add(sng)
         except Exception as e:
             raise RuntimeError(
-                f"Error when adding subgroup {identifier} of neurongroup {target_name}: {e}"
+                f"Error when adding subgroup {name} of neurongroup {target_name}: {e}"
             ) from e
 
         self._update_nested_dict(
             self.neurongroups,
             {
-                identifier: {
+                name: {
                     "idx": idxs,
-                    "name": sng.name,
-                    "identifier": identifier,
+                    "name": name,
                     "target": target_name,
                 }
             },

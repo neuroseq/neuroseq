@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import itertools
 import logging
 from pathlib import Path
 from typing import Any
@@ -154,22 +153,20 @@ def test_neuron_subgroup(
 ) -> None:
     mfx, _ = mfx_parameterized
 
-    mfx.define_neuron_subgroup("P", "excitatory", slice(0, 20))
-    mfx.define_neuron_subgroup("P", "inhibitory", slice(20, 30))
+    mfx.define_neuron_subgroup("P", "excitatory", (0, 20))
+    mfx.define_neuron_subgroup("P", "inhibitory", (20, 30))
 
     assert list(
-        itertools.islice(
-            itertools.count(),
-            mfx.neurongroups["excitatory"]["idx"].start,
-            mfx.neurongroups["excitatory"]["idx"].stop,
+        range(
+            mfx.neurongroups["excitatory"]["idx"][0],
+            mfx.neurongroups["excitatory"]["idx"][1],
         )
     ) == list(range(0, 20))
 
     assert list(
-        itertools.islice(
-            itertools.count(),
-            mfx.neurongroups["inhibitory"]["idx"].start,
-            mfx.neurongroups["inhibitory"]["idx"].stop,
+        range(
+            mfx.neurongroups["inhibitory"]["idx"][0],
+            mfx.neurongroups["inhibitory"]["idx"][1],
         )
     ) == list(range(20, 30))
 
@@ -180,7 +177,7 @@ def test_neuron_subgroup(
 
     mfx.network = b2.Network()
     with pytest.raises(KeyError, match="'No object with name \"ng\" found'"):
-        mfx.define_neuron_subgroup("ng", "excitatory", slice(0, 20))
+        mfx.define_neuron_subgroup("ng", "excitatory", (0, 20))
 
 
 def test_synapse_connection_prob_numerical(
@@ -216,8 +213,8 @@ def test_define_synapse(
     dApost = -dApre * taupre / taupost * 1.05
 
     mfx, _ = mfx_parameterized
-    mfx.define_neuron_subgroup("P", "Pe", slice(0, 24))
-    mfx.define_neuron_subgroup("P", "Pi", slice(24, 30))
+    mfx.define_neuron_subgroup("P", "Pe", (0, 24))
+    mfx.define_neuron_subgroup("P", "Pi", (24, 30))
 
     mfx.define_parameter("taupre", taupre)
 
@@ -525,6 +522,7 @@ def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
         "M",
         "Mn",
         "seed",
+        "input_subgroup",
     ]:
         assert k in loaded_data
 

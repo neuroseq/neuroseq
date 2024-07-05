@@ -66,6 +66,21 @@ def test_reconstruct_neurongroup(mfx_nmda_serialized: Path) -> None:
     assert "neurons" in model.network.get_states()
 
 
+def test_reconstruct_neurongsubgroups(mfx_nmda_serialized: Path) -> None:
+    reconstructor = Reconstructor(mfx_nmda_serialized)
+    model = B2Model()
+
+    reconstructor.reconstruct_neurongroups(
+        model, "neuron_input", reconstructor.loaded_data["neuron_input"]
+    )
+
+    reconstructor.reconstruct_neuron_subgroup(
+        model, "input_subgroup", reconstructor.loaded_data["input_subgroup"]
+    )
+
+    assert "input_subgroup" in model.network.get_states()
+
+
 def test_reconstruct_synapse(mfx_nmda_serialized: Path) -> None:
     reconstructor = Reconstructor(mfx_nmda_serialized)
     model = B2Model()

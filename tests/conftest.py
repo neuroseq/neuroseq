@@ -198,6 +198,8 @@ def mfx_nmda() -> b2_model.B2Model:
     model.define_synapse_pre("S", "x += w")
     model.assemble_synapse("S")
 
+    model.define_neuron_subgroup("neuron_input", "input_subgroup", 1)
+
     model.define_monitor("M", b2.StateMonitor, "S", "g")
     model.define_monitor("Mn", b2.StateMonitor, "neurons", "g")
 
@@ -239,8 +241,8 @@ def mfx_with_synapse(
     dApost = -dApre * taupre / taupost * 1.05
 
     mfx, reference_parameters = mfx_parameterized
-    mfx.define_neuron_subgroup("P", "Pe", slice(0, 24))
-    mfx.define_neuron_subgroup("P", "Pi", slice(24, 30))
+    mfx.define_neuron_subgroup("P", "Pe", (0, 24))
+    mfx.define_neuron_subgroup("P", "Pi", (24, 30))
 
     mfx.define_parameter("taupre", taupre)
 
