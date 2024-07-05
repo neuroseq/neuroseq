@@ -1,6 +1,6 @@
 from pathlib import Path
 
-import numpy as np
+import brian2.numpy_ as np
 import yaml
 from brian2 import TimedArray
 from brian2 import get_dimensions
@@ -8,6 +8,7 @@ from brian2 import metre
 from brian2 import ms
 from brian2 import nS
 from brian2 import second
+from brian2.tests.utils import assert_allclose
 from formozov_project import yaml_extensions  # noqa: F401
 
 
@@ -29,7 +30,7 @@ def test_quantity_yml(tmp_path: Path) -> None:
         get_dimensions(d["a"])._str_representation()
         == get_dimensions(read["a"])._str_representation()
     )
-    np.testing.assert_allclose(np.array(d["a"]), np.array(read["a"]))
+    assert_allclose(np.array(d["a"]), np.array(read["a"]))
 
 
 def test_timed_array_yml(tmp_path: Path) -> None:
@@ -47,7 +48,7 @@ def test_timed_array_yml(tmp_path: Path) -> None:
     with open(tmp_path / "test.yml") as file:
         read = yaml.safe_load(file)
 
-    np.testing.assert_allclose(np.array(d["t"].values), np.array(read["t"].values))
+    assert_allclose(np.array(d["t"].values), np.array(read["t"].values))
     assert (
         get_dimensions(d["t"])._str_representation()
         == get_dimensions(read["t"])._str_representation()
@@ -66,4 +67,4 @@ def test_numpy_yml(tmp_path: Path) -> None:
     with open(tmp_path / "test.yml") as file:
         read = yaml.safe_load(file)
 
-    np.testing.assert_allclose(d["a"], read["a"])
+    assert_allclose(d["a"], read["a"])

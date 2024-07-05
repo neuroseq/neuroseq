@@ -4,7 +4,7 @@ import logging
 import math
 from typing import Any
 
-import numpy as np
+import brian2.numpy_ as np
 import pyqtgraph as pg
 from qtpy import QtCore
 from qtpy import QtGui

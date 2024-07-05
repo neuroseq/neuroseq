@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import numpy as np
+import brian2.numpy_ as np
 import pytest
 from formozov_project.stim_console_widget import StimConsoleWidget
 from pytestqt.qtbot import QtBot

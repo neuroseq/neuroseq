@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import brian2 as b2
-import numpy as np
+import brian2.numpy_ as np
 import pytest
 from formozov_project import b2_model
 from formozov_project import b2_model_widget

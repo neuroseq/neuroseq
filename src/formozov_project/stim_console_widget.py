@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import numpy as np
+import brian2.numpy_ as np
 from pyqtgraph.console.repl_widget import ReplWidget
 from qtpy import QtCore
 from qtpy import QtWidgets

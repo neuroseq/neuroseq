@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import numpy as np
+import brian2.numpy_ as np
 import pytest
 from formozov_project.timeseries_widget import TimeseriesWidget
 from pytestqt.qtbot import QtBot

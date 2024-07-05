@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 import brian2 as b2
-import numpy as np
+import brian2.numpy_ as np
 import qtawesome as qta
 from qtpy import QtCore
 from qtpy import QtWidgets

@@ -6,10 +6,11 @@ from pathlib import Path
 from typing import Any
 
 import brian2 as b2
+import brian2.numpy_ as np
 import h5py
-import numpy as np
 import pytest
 import yaml
+from brian2.tests.utils import assert_allclose
 from formozov_project import b2_model
 from pytest_mock import MockerFixture
 
@@ -436,8 +437,8 @@ def test_NMDA_model(mfx_nmda: b2_model.B2Model) -> None:
     test_network.run(100 * b2.ms)
 
     # assert result equality
-    np.testing.assert_almost_equal(M.g, mfx_nmda.network["M"].g)
-    np.testing.assert_almost_equal(Mn.g, mfx_nmda.network["Mn"].g)
+    assert_allclose(M.g, mfx_nmda.network["M"].g)
+    assert_allclose(Mn.g, mfx_nmda.network["Mn"].g)
 
 
 def test_hdf5(tmp_path: Path, mfx_ornstein: b2_model.B2Model) -> None:
@@ -535,13 +536,13 @@ def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
     # synapses
     for neurongroupname in ["neuron_input", "neurons"]:
         for var in mfx_nmda.network.get_states()[neurongroupname]:
-            np.testing.assert_allclose(
+            assert_allclose(
                 getattr(reconstructed_model.network[neurongroupname], var),
                 getattr(mfx_nmda.network[neurongroupname], var),
                 verbose=True,
             )
 
-    np.testing.assert_allclose(
+    assert_allclose(
         reconstructed_model.network["neurons"].g,
         mfx_nmda.network["neurons"].g,
         verbose=True,
@@ -549,7 +550,7 @@ def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
 
     # test synapses
     for var in mfx_nmda.network.get_states()["S"]:
-        np.testing.assert_allclose(
+        assert_allclose(
             getattr(reconstructed_model.network["S"], var),
             getattr(mfx_nmda.network["S"], var),
             verbose=True,
@@ -557,7 +558,7 @@ def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
 
     for name in ["M", "Mn"]:
         for var in mfx_nmda.network.get_states()[name]:
-            np.testing.assert_allclose(
+            assert_allclose(
                 getattr(reconstructed_model.network[name], var),
                 getattr(mfx_nmda.network[name], var),
                 verbose=True,
@@ -573,9 +574,5 @@ def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
     b2.seed(loaded_data["seed"])
     reconstructed_model.run_simulation(1 * b2.second)
 
-    np.testing.assert_allclose(
-        mfx_nmda.network["M"].g, reconstructed_model.network["M"].g
-    )
-    np.testing.assert_allclose(
-        mfx_nmda.network["Mn"].g, reconstructed_model.network["Mn"].g
-    )
+    assert_allclose(mfx_nmda.network["M"].g, reconstructed_model.network["M"].g)
+    assert_allclose(mfx_nmda.network["Mn"].g, reconstructed_model.network["Mn"].g)
