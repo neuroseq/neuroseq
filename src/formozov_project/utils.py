@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import abc
 from typing import Callable
 
+from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
@@ -25,3 +27,13 @@ def add_action(
         menu.addAction(action)
     if toolbar is not None:
         toolbar.addAction(action)
+
+
+class QtABCMeta(type(QtCore.QObject), abc.ABCMeta):  # type: ignore
+    """Metaclass that allows a class to be both a QObject and an Abstract Base Class.
+
+    Note that pyside6 apparently does not fully support abstract methods in a metaclass,
+    so we also need to provide a fallback NotImplementedError in the abstract methods.
+    """
+
+    pass

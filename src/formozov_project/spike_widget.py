@@ -46,3 +46,9 @@ class SpikeWidget(TimeseriesWidget):
             )
             self.neuron_plots.append(bar)
             self.addItem(bar)
+
+    def _plot_neuron_data(
+        self, data: list[np.ndarray] | np.ndarray, timestamps: np.ndarray, dt: float
+    ) -> None:
+        # since timestamps is a sparse array the plotting logic is different, and is implemented in set_data
+        pass
