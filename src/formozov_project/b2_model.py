@@ -504,6 +504,26 @@ class B2Model:
             },
         )
 
+    def define_synapse_delay(self, name: str, delay: Any) -> None:
+        """
+        Add delay to synapse
+
+        Parameters
+        ----------
+        name : str
+            name of synapse to add delay for
+        delay : Any
+            delay expression
+        """
+        self._update_nested_dict(
+            self.synapses,
+            {
+                name: {
+                    "delay": delay,
+                },
+            },
+        )
+
     def define_synapse_connection_probablitiy(self, name: str, p: float) -> None:
         """
         define_synapse_connection_probability Define the connection probability for a given synapse called `name`.
@@ -563,6 +583,7 @@ class B2Model:
                 model=args.get("model", None),
                 on_pre=args.get("on_pre", None),
                 on_post=args.get("on_post", None),
+                delay=args.get("delay", None),
                 name=name,
                 namespace=self.parameters,
             )
