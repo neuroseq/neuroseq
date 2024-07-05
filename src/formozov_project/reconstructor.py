@@ -169,6 +169,27 @@ class Reconstructor:
             augmented,
         )
 
+    def reconstruct_neuron_subgroup(
+        self, model: Any, name: str, data_of_group: dict[str, Any]
+    ) -> None:
+        """
+        Reconstruct a neuron subgroup from stored data. Requires that the
+        target neurongroup has been construted first
+
+        Parameters
+        ----------
+        model : Any
+            Model to reconstruct the neuron subgroup in
+        name : str
+            Name of the subgroup to be constructed
+        data_of_group : dict[str, Any]
+            dict containing the data to construct the subgroup
+        """
+
+        model.define_neuron_subgroup(
+            data_of_group["target"], name, data_of_group["idx"]
+        )
+
     def reconstruct_synapses(
         self, model: Any, name: str, data_of_group: dict[str, Any]
     ) -> None:
@@ -263,7 +284,12 @@ class Reconstructor:
 
         # reconstruct neurongroups
         for n in self.loaded_data["objects"]["neurongroups"]:
-            self.reconstruct_neurongroups(model, n, self.loaded_data[n])
+            if "idx" not in self.loaded_data[n]:  # reconstruct full groups first...
+                self.reconstruct_neurongroups(model, n, self.loaded_data[n])
+
+        for n in self.loaded_data["objects"]["neurongroups"]:
+            if "idx" in self.loaded_data[n]:  # ... then define the subgroups
+                self.reconstruct_neuron_subgroup(model, n, self.loaded_data[n])
 
         # reconstruct synapses
         for s in self.loaded_data["objects"]["synapses"]:
