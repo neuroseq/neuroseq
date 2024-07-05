@@ -1,6 +1,4 @@
 from typing import Any
-from typing import Callable
-from typing import cast
 
 import yaml
 from brian2 import Quantity
@@ -127,7 +125,7 @@ def numpy_representer(
     return yaml.nodes.SequenceNode(tag="!Numpy", value=node_data, flow_style=False)
 
 
-def quantity_constructor(loader: yaml.SafeLoader, node: yaml.MappingNode) -> Quantity:
+def quantity_constructor(loader: yaml.SafeLoader, node: Any) -> Quantity:
     """
     Reconstruct a brian2 quantity from its serialized representation
 
@@ -150,9 +148,7 @@ def quantity_constructor(loader: yaml.SafeLoader, node: yaml.MappingNode) -> Qua
     return data["value"] * unit
 
 
-def timedarray_constructor(
-    loader: yaml.SafeLoader, node: yaml.MappingNode
-) -> TimedArray:
+def timedarray_constructor(loader: yaml.SafeLoader, node: Any) -> TimedArray:
     """
     Reconstruct a brian2 TimedArray from its serialized representation
 
@@ -177,9 +173,7 @@ def timedarray_constructor(
     )
 
 
-def numpy_constructor(
-    loader: yaml.SafeLoader, node: yaml.SequenceNode
-) -> numpy_.ndarray:
+def numpy_constructor(loader: yaml.SafeLoader, node: Any) -> numpy_.ndarray:
     """
     Reconstruct a numpy array from its serialized representation
 
@@ -210,16 +204,16 @@ yaml.add_representer(TimedArray, timedarray_representer, Dumper=yaml.SafeDumper)
 
 yaml.add_constructor(
     "!Quantity",
-    cast(Callable[[yaml.SafeLoader, yaml.Node], Any], quantity_constructor),
+    quantity_constructor,
     Loader=yaml.SafeLoader,
 )
 yaml.add_constructor(
     "!TimedArray",
-    cast(Callable[[yaml.SafeLoader, yaml.Node], Any], timedarray_constructor),
+    timedarray_constructor,
     Loader=yaml.SafeLoader,
 )
 yaml.add_constructor(
     "!Numpy",
-    cast(Callable[[yaml.SafeLoader, yaml.Node], Any], numpy_constructor),
+    numpy_constructor,
     Loader=yaml.SafeLoader,
 )

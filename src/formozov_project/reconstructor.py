@@ -5,39 +5,33 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any
 from typing import Callable
-from typing import cast
 
 import yaml
-from brian2 import Quantity
-from brian2 import TimedArray
-from brian2 import numpy_
 from brian2 import seed
 
-from formozov_project import yaml_extensions as yext
-
-"""
-Add representers and constructors to the safe dumpers and loaders of yaml
-"""
-yaml.add_representer(Quantity, yext.quantity_representer, Dumper=yaml.SafeDumper)
-yaml.add_representer(numpy_.ndarray, yext.numpy_representer, Dumper=yaml.SafeDumper)
-yaml.add_representer(TimedArray, yext.timedarray_representer, Dumper=yaml.SafeDumper)
+# """
+# Add representers and constructors to the safe dumpers and loaders of yaml
+# """
+# yaml.add_representer(Quantity, yext.quantity_representer, Dumper=yaml.SafeDumper)
+# yaml.add_representer(numpy_.ndarray, yext.numpy_representer, Dumper=yaml.SafeDumper)
+# yaml.add_representer(TimedArray, yext.timedarray_representer, Dumper=yaml.SafeDumper)
 
 
-yaml.add_constructor(
-    "!Quantity",
-    cast(Callable[[yaml.SafeLoader, yaml.Node], Any], yext.quantity_constructor),
-    Loader=yaml.SafeLoader,
-)
-yaml.add_constructor(
-    "!TimedArray",
-    cast(Callable[[yaml.SafeLoader, yaml.Node], Any], yext.timedarray_constructor),
-    Loader=yaml.SafeLoader,
-)
-yaml.add_constructor(
-    "!Numpy",
-    cast(Callable[[yaml.SafeLoader, yaml.Node], Any], yext.numpy_constructor),
-    Loader=yaml.SafeLoader,
-)
+# yaml.add_constructor(
+#     "!Quantity",
+#     yext.quantity_constructor,
+#     Loader=yaml.SafeLoader,
+# )
+# yaml.add_constructor(
+#     "!TimedArray",
+#     yext.timedarray_constructor,
+#     Loader=yaml.SafeLoader,
+# )
+# yaml.add_constructor(
+#     "!Numpy",
+#     yext.numpy_constructor,
+#     Loader=yaml.SafeLoader,
+# )
 
 
 class Reconstructor:
