@@ -817,8 +817,8 @@ class B2Model:
 
         states["parameters"] = self.parameters
 
-        # augment neurongroups
-        for group in [self.neurongroups, self.synapses, self.monitors]:
+        # augment neurongroups and synapses
+        for group in [self.neurongroups, self.synapses]:
             for key, n in group.items():
                 if "method" in states[key]:
                     states[key]["method"] = self.solver
@@ -826,8 +826,15 @@ class B2Model:
                 for k, v in n.items():
                     states[key][k] = v
 
+        # add minimal defining data for monitors to avoid data writing
+        for key, n in self.monitors.items():
+            states[key] = {}
+
+            for k, v in n.items():
+                states[key][k] = v
+
         with open(filepath, "w") as file:
-            yaml.dump(states, file)
+            yaml.safe_dump(states, file)
 
     @classmethod
     def load_model(cls, filepath: str | Path) -> B2Model:

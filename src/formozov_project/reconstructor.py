@@ -6,8 +6,32 @@ from pathlib import Path
 from typing import Any
 from typing import Callable
 
-import brian2 as b2
 import yaml
+from brian2 import seed
+
+# """
+# Add representers and constructors to the safe dumpers and loaders of yaml
+# """
+# yaml.add_representer(Quantity, yext.quantity_representer, Dumper=yaml.SafeDumper)
+# yaml.add_representer(numpy_.ndarray, yext.numpy_representer, Dumper=yaml.SafeDumper)
+# yaml.add_representer(TimedArray, yext.timedarray_representer, Dumper=yaml.SafeDumper)
+
+
+# yaml.add_constructor(
+#     "!Quantity",
+#     yext.quantity_constructor,
+#     Loader=yaml.SafeLoader,
+# )
+# yaml.add_constructor(
+#     "!TimedArray",
+#     yext.timedarray_constructor,
+#     Loader=yaml.SafeLoader,
+# )
+# yaml.add_constructor(
+#     "!Numpy",
+#     yext.numpy_constructor,
+#     Loader=yaml.SafeLoader,
+# )
 
 
 class Reconstructor:
@@ -26,7 +50,7 @@ class Reconstructor:
         """
         self.logger = logging.getLogger(__name__)
         with open(path) as file:
-            self.loaded_data = yaml.load(file, Loader=yaml.UnsafeLoader)
+            self.loaded_data = yaml.safe_load(file)
 
     def _reconstruct_dynamic_object(
         self,
@@ -100,7 +124,7 @@ class Reconstructor:
                     continue
                 except Exception as e:
                     raise RuntimeError(
-                        f"Something went wrong when setting attribute {key}: {e}"
+                        f"Something went wrong when setting attribute {key} in object {name}: {e}"
                     ) from e
 
     def reconstruct_neurongroups(
@@ -224,7 +248,7 @@ class Reconstructor:
 
         model.seed = self.loaded_data["seed"]
 
-        b2.seed(self.loaded_data["seed"])
+        seed(self.loaded_data["seed"])
 
         if "timestep" in self.loaded_data:
             model.define_dt(self.loaded_data["timestep"])
