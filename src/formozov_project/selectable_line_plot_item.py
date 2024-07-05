@@ -12,3 +12,6 @@ class SelectableLinePlotItem(pg.PlotDataItem, SelectableMixin):
 
     def __init__(self, *args: Any, **kargs: Any) -> None:
         super().__init__(*args, **kargs)
+
+    def set_selected_slice(self, selected_slice: slice) -> None:
+        pass
