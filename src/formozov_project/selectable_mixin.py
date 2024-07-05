@@ -2,16 +2,13 @@ from __future__ import annotations
 
 import abc
 
-from qtpy import QtCore
+from formozov_project.utils import QtABCMeta
 
 
-class QtMixinMeta(type(QtCore.QObject), abc.ABCMeta):  # type: ignore
-    pass
-
-
-class SelectableMixin(metaclass=QtMixinMeta):
+class SelectableMixin(metaclass=QtABCMeta):
     """Adds a set_selected_slice method which by default does nothing."""
 
     @abc.abstractmethod
     def set_selected_slice(self, selected_slice: slice) -> None:
-        pass
+        # fallback for pyside6 which apparently does not fully support abstract methods in a metaclass
+        raise NotImplementedError("Subclasses must implement set_selected_slice")

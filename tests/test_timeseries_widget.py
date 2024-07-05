@@ -14,7 +14,9 @@ class InvalidTimeseriesWidget(TimeseriesWidget):
 
 def test_timeseries_widget_plot_data_not_implemented(qtbot: QtBot) -> None:
     # child classes of TimeseriesWidget must implement _plot_neuron_data
-    invalid_timeseries_widget = InvalidTimeseriesWidget()
-    qtbot.addWidget(invalid_timeseries_widget)
-    with pytest.raises(NotImplementedError):
+    with pytest.raises((TypeError, NotImplementedError), match="_plot_neuron_data"):
+        # this line should raise a TypeError due to _plot_neuron_data not being implemented:
+        invalid_timeseries_widget = InvalidTimeseriesWidget()
+        qtbot.addWidget(invalid_timeseries_widget)
+        # pyside6 doesn't support ABC correctly, so we only get a fallback NotImplementedError here:
         invalid_timeseries_widget._plot_data(np.zeros((5, 5)))

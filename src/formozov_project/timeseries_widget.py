@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import abc
 import logging
 import math
 from typing import Any
@@ -15,13 +16,14 @@ from formozov_project.selectable_bar_line_plot_item import SelectableBarLinePlot
 from formozov_project.selectable_bar_plot_item import SelectableBarPlotItem
 from formozov_project.selectable_line_plot_item import SelectableLinePlotItem
 from formozov_project.timeline import Timeline
+from formozov_project.utils import QtABCMeta
 
 SelectablePlotItem: TypeAlias = (
     "SelectableLinePlotItem | SelectableBarPlotItem | SelectableBarLinePlotItem"
 )
 
 
-class TimeseriesWidget(pg.PlotWidget):
+class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
     """A base class for widgets that display a set of timeseries data for a number of neurons, stacked vertically.
 
     data should be a 2d array or list of 2d arrays, where the first index of each
@@ -65,6 +67,7 @@ class TimeseriesWidget(pg.PlotWidget):
         self.plotItem.getAxis("left").setTickSpacing(1, 1)
         self.addItem(self.timeline)
 
+    @abc.abstractmethod
     def _plot_neuron_data(
         self, data: list[np.ndarray] | np.ndarray, timestamps: np.ndarray, dt: float
     ) -> None:
@@ -75,7 +78,8 @@ class TimeseriesWidget(pg.PlotWidget):
         The plotted data should be normalised so that each neuron's data lies in the range [-0.5, 0.5],
         and offset vertically by the neuron's index.
         """
-        raise NotImplementedError
+        # fallback for pyside6 which apparently does not fully support abstract methods in a metaclass
+        raise NotImplementedError("Subclasses must implement _plot_neuron_data")
 
     def _plot_data(
         self,
