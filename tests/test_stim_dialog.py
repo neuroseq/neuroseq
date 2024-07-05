@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import cast
 
 import brian2 as b2
-import numpy as np
+import brian2.numpy_ as np
 import pyqtgraph as pg
 from formozov_project.stim_dialog import StimDialog
 from pytestqt.qtbot import QtBot

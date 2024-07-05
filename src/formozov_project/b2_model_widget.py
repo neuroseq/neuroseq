@@ -7,7 +7,7 @@ from typing import Callable
 from typing import cast
 
 import brian2 as b2
-from brian2 import numpy as np
+import brian2.numpy_ as np
 from qtpy import QtCore
 from qtpy import QtWidgets
 

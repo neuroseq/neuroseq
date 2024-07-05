@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import cast
 
-import numpy as np
+import brian2.numpy_ as np
 import pyqtgraph as pg
 import pytest
 from formozov_project.stim_widget import StimWidget

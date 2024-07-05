@@ -1,5 +1,5 @@
+import brian2.numpy_ as np
 import formozov_project.b2_model_widget as B2W
-import numpy as np
 import pytest
 from brian2 import ms
 from brian2 import second

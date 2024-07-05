@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import numpy as np
+import brian2.numpy_ as np
 import pyqtgraph as pg
 from qtpy import QtWidgets
 

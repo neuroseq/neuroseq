@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import numpy as np
+import brian2.numpy_ as np
 from qtpy import QtWidgets
 
 from formozov_project.selectable_line_plot_item import SelectableLinePlotItem

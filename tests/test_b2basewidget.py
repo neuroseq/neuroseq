@@ -3,8 +3,8 @@ from __future__ import annotations
 from re import escape
 
 import brian2 as b2
+import brian2.numpy_ as np
 import formozov_project.b2_model_widget as B2W
-import numpy as np
 import pytest
 from formozov_project.b2_model import B2Model
 from pytestqt.qtbot import QtBot
