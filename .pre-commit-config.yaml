@@ -2,6 +2,8 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
+      - id: check-yaml
+        exclude: ".*/formozov_project/example_models/.*$"
       - id: end-of-file-fixer
       - id: trailing-whitespace
       - id: requirements-txt-fixer
