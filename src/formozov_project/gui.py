@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import logging
+import queue
+import time
+from threading import Thread
 
 import brian2 as b2
 import brian2.numpy_ as np
 import qtawesome as qta
 from qtpy import QtCore
 from qtpy import QtWidgets
+from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
 from formozov_project import __version__
@@ -23,6 +27,7 @@ class Gui(QtWidgets.QMainWindow):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.logger.info("starting Gui")
+
         self.model = B2Model()
 
         self.setWindowTitle("Formozov Project")
@@ -44,15 +49,14 @@ class Gui(QtWidgets.QMainWindow):
         self.addToolBar(self.toolbar)
         self.setWindowIcon(qta.icon("mdi6.brain"))
         # add a modal progress bar dialog while running simulations
-        self.simulation_progress_dialog = QtWidgets.QProgressDialog(
-            "Simulating...", "Abort simulation", 0, 100, self
+        self.progress_dialog = QtWidgets.QProgressDialog(
+            "Simulating...", "", 0, 100, self
         )
-        self.simulation_progress_dialog.setWindowModality(
-            QtCore.Qt.WindowModality.WindowModal
-        )
-        self.simulation_progress_dialog.setAutoClose(True)
-        self.simulation_progress_dialog.setMinimumDuration(200)
-        self.simulation_progress_dialog.reset()
+        self.progress_dialog.setCancelButton(None)
+        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
+        self.progress_dialog.setAutoClose(True)
+        self.progress_dialog.setMinimumDuration(200)
+        self.progress_dialog.reset()
         # connect widgets
         self.heatmap_widget.connect_trace_widget(self.trace_widget)
         self.trace_widget.connect_heatmap_widget(self.heatmap_widget)
@@ -94,7 +98,8 @@ class Gui(QtWidgets.QMainWindow):
         self.logger.info(
             f"simulating {start} -> {duration} :: {completed_percent}% complete in {elapsed}"
         )
-        self.simulation_progress_dialog.setValue(completed_percent)
+        self.progress_dialog.setLabelText("Simulating...")
+        self.progress_dialog.setValue(completed_percent)
 
     def btn_new_clicked(self) -> None:
         b2m = B2ModelWidget(B2Model(), self)
@@ -104,7 +109,53 @@ class Gui(QtWidgets.QMainWindow):
             self.heatmap_widget.set_data()
 
     def btn_open_clicked(self) -> None:
-        self.btn_new_clicked()
+        filename, _ = getopenfilename(
+            self,
+            "load model",
+            "model.yaml",
+            "yaml file (*.yaml)",
+        )
+
+        if filename == "":
+            return
+
+        def create_model(filepath: str, result: queue.Queue[tuple]) -> None:
+            try:
+                model = B2Model.load_model(filepath)
+            except Exception as e:
+                result.put((None, e))
+                return
+
+            result.put((model, None))
+
+        return_queue: queue.Queue[tuple] = queue.Queue()
+        thread = Thread(target=create_model, args=(filename, return_queue))
+        self.progress_dialog.setValue(0)
+        self.progress_dialog.setLabelText("Loading model...")
+        thread.start()
+        while thread.is_alive():
+            QtWidgets.QApplication.processEvents()
+            time.sleep(0.1)
+        thread.join()
+        self.progress_dialog.setValue(100)
+
+        model, exc = return_queue.get()
+
+        if exc is not None:
+            self.logger.warning(f"Failed to load model from file {filename}: {exc}")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Model construction error",
+                f"Could not load model from file '{filename}': {exc}",
+            )
+        else:
+            self.model = model
+            self.logger.info(f"Model {self.model.name} loaded from {filename}")
+
+            # TODO: add an element into the model loading window to select which parameters of the model to load into the widgets,
+            # as naming conventions should be left to the user
+            self.heatmap_widget.set_data()
+            self.trace_widget.set_data()
 
     def btn_save_clicked(self) -> None:
         filename, _ = getsavefilename(
