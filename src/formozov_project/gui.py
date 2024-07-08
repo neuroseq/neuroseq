@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import time
 from threading import Thread
 
 import brian2 as b2
@@ -19,49 +20,6 @@ from formozov_project.heatmap_widget import HeatmapWidget
 from formozov_project.stim_dialog import StimDialog
 from formozov_project.trace_widget import TraceWidget
 from formozov_project.utils import add_action
-
-
-# README: this needs to be refactored into its own file once it starts growing
-class ModelLoadingDialog(QtWidgets.QWidget):
-    """
-    Dialog for loading a model from File and making the gui wait until it has been fully constructed
-
-    Parameters
-    ----------
-    QtWidgets : QWidget
-        Basic QT wiget type.
-    """
-
-    def __init__(self, path_to_file: str, parent=None):
-        """
-        Create a new ModelLoadingDialog instance
-
-        Parameters
-        ----------
-        path_to_file : str
-            Path to the file in which the model is stored
-        parent : QtWidget, optional
-            parent QtWidget, by default None
-        """
-        super().__init__(parent)
-
-        self.setWindowTitle("Loading model from file")
-        layout = QtWidgets.QVBoxLayout()
-        layout.addWidget(
-            QtWidgets.QLabel(
-                f"please wait while the model is constructed from file {path_to_file}"
-            )
-        )
-
-        pbar = QtWidgets.QProgressBar(self)
-
-        pbar.setRange(0, 10)
-
-        layout.addWidget(pbar)
-
-        self.setLayout(layout)
-
-        self.show()
 
 
 class Gui(QtWidgets.QMainWindow):
@@ -91,15 +49,14 @@ class Gui(QtWidgets.QMainWindow):
         self.addToolBar(self.toolbar)
         self.setWindowIcon(qta.icon("mdi6.brain"))
         # add a modal progress bar dialog while running simulations
-        self.simulation_progress_dialog = QtWidgets.QProgressDialog(
-            "Simulating...", "Abort simulation", 0, 100, self
+        self.progress_dialog = QtWidgets.QProgressDialog(
+            "Simulating...", "", 0, 100, self
         )
-        self.simulation_progress_dialog.setWindowModality(
-            QtCore.Qt.WindowModality.WindowModal
-        )
-        self.simulation_progress_dialog.setAutoClose(True)
-        self.simulation_progress_dialog.setMinimumDuration(200)
-        self.simulation_progress_dialog.reset()
+        self.progress_dialog.setCancelButton(None)
+        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
+        self.progress_dialog.setAutoClose(True)
+        self.progress_dialog.setMinimumDuration(200)
+        self.progress_dialog.reset()
         # connect widgets
         self.heatmap_widget.connect_trace_widget(self.trace_widget)
         self.trace_widget.connect_heatmap_widget(self.heatmap_widget)
@@ -141,7 +98,8 @@ class Gui(QtWidgets.QMainWindow):
         self.logger.info(
             f"simulating {start} -> {duration} :: {completed_percent}% complete in {elapsed}"
         )
-        self.simulation_progress_dialog.setValue(completed_percent)
+        self.progress_dialog.setLabelText("Simulating...")
+        self.progress_dialog.setValue(completed_percent)
 
     def btn_new_clicked(self) -> None:
         b2m = B2ModelWidget(B2Model(), self)
@@ -172,10 +130,14 @@ class Gui(QtWidgets.QMainWindow):
 
         return_queue: queue.Queue[tuple] = queue.Queue()
         thread = Thread(target=create_model, args=(filename, return_queue))
-        busy_window = ModelLoadingDialog(self)
+        self.progress_dialog.setValue(0)
+        self.progress_dialog.setLabelText("Loading model...")
         thread.start()
+        while thread.is_alive():
+            QtWidgets.QApplication.processEvents()
+            time.sleep(0.1)
         thread.join()
-        busy_window.close()
+        self.progress_dialog.setValue(100)
 
         model, exc = return_queue.get()
 
