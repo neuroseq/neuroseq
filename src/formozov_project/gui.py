@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import logging
+from threading import Thread
 
 import brian2 as b2
 import brian2.numpy_ as np
 import qtawesome as qta
+from brian2 import numpy_
 from qtpy import QtCore
 from qtpy import QtWidgets
+from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
 from formozov_project import __version__
@@ -18,11 +21,54 @@ from formozov_project.trace_widget import TraceWidget
 from formozov_project.utils import add_action
 
 
+class ModelLoadingDialog(QtWidgets.QWidget):
+    """
+    Dialog for loading a model from File and making the gui wait until it has been fully constructed
+
+    Parameters
+    ----------
+    QtWidgets : QWidget
+        Basic QT wiget type.
+    """
+
+    def __init__(self, path_to_file: str, parent=None):
+        """
+        Create a new ModelLoadingDialog instance
+
+        Parameters
+        ----------
+        path_to_file : str
+            Path to the file in which the model is stored
+        parent : QtWidget, optional
+            parent QtWidget, by default None
+        """
+        super().__init__(parent)
+
+        self.setWindowTitle("Loading model from file")
+        layout = QtWidgets.QVBoxLayout()
+        layout.addWidget(
+            QtWidgets.QLabel(
+                f"please wait while the model is constructed from file {path_to_file}"
+            )
+        )
+
+        pbar = QtWidgets.QProgressBar(self)
+
+        pbar.setRange(0, 10)
+
+        layout.addWidget(pbar)
+
+        self.setLayout(layout)
+
+        self.show()
+
+
 class Gui(QtWidgets.QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.logger.info("starting Gui")
+
         self.model = B2Model()
 
         self.setWindowTitle("Formozov Project")
@@ -104,7 +150,51 @@ class Gui(QtWidgets.QMainWindow):
             self.heatmap_widget.set_data()
 
     def btn_open_clicked(self) -> None:
-        self.btn_new_clicked()
+        filename, _ = getopenfilename(
+            self,
+            "load model",
+            "model.yaml",
+            "yaml file (*.yaml)",
+        )
+
+        if filename == "":
+            return
+
+        def create_model(filepath: str, result: list[B2Model]) -> None:
+            try:
+                model = B2Model.load_model(filepath)
+                result.append(model)
+            except Exception as e:
+                self.logger.warning(f"Failed to save file {filename}: {e}")
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "File save error",
+                    f"Could not save file '{filename}': {e}",
+                )
+
+        # TODO: this trick with the list is ugly. There should be something better.
+        result: list[B2Model] = []
+        thread = Thread(target=create_model, args=(filename, result))
+
+        busy_window = ModelLoadingDialog(self)
+        thread.start()
+        thread.join()
+        busy_window.close()
+
+        self.logger.info(f"Model {self.model.name} loaded from {filename}")
+
+        self.model = result[0]
+
+        if "stimulus" in self.model.parameters:  # type: ignore
+            stim = self.model.parameters["stimulus"]  # type: ignore
+            self.heatmap_widget.set_data(
+                data=stim.values,
+                timestamps=numpy_.arange(0, stim.values.shape[0], stim.dt),
+            )
+        else:
+            self.logger.info(
+                f"No key 'stimulus' in model {self.model.name} loaded from {filename}"
+            )
 
     def btn_save_clicked(self) -> None:
         filename, _ = getsavefilename(
