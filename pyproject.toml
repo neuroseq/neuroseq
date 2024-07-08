@@ -19,7 +19,8 @@ dependencies = [
     "qtawesome",
     "click",
     "PyYAML",
-    "typing_extensions"
+    "typing_extensions",
+    "importlib-resources"  # backport for 3.8
 ]
 dynamic = ["version"]
 
