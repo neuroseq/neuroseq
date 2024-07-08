@@ -81,7 +81,11 @@ def test_gui_open(
     qtbot.waitUntil(lambda: gui.isVisible())
     import formozov_project
 
-    filename = str(files(formozov_project) / "default_model.yaml")
+    filename = str(
+        Path(str(files(formozov_project)))
+        / Path("example_models")
+        / "default_model.yaml"
+    )
 
     monkeypatch.setattr(
         QtWidgets.QFileDialog, "getOpenFileName", lambda *args: (f"{filename}", True)
