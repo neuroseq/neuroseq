@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from importlib.resources import files
+try:
+    from importlib.resources import files
+except Exception:
+    from importlib_resources import files  # type: ignore
+
 from pathlib import Path
 
 from formozov_project.b2_model import B2Model
