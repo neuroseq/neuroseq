@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from ast import literal_eval
+from collections.abc import Callable
 from importlib import import_module
 from typing import Any
-from typing import Callable
 from typing import cast
 
 import brian2 as b2
@@ -12,7 +12,6 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 from formozov_project.b2_model import B2Model
-from formozov_project.stim_dialog import StimDialog
 
 
 class ModelDialog(QtWidgets.QDialog):
@@ -632,6 +631,7 @@ class NeuronSubgroupDialog(ModelDialog):
             zip(
                 ["name", "target", "indices"],
                 [self.name, self.target_name, self.subgroup_def],
+                strict=True,
             )
         ):
             nameitem = QtWidgets.QTableWidgetItem(str(n))
@@ -1170,6 +1170,7 @@ class MonitorDialog(ModelDialog):
             zip(
                 ["name", "type", "source", "variable"],
                 [self.name, self.tp, self.src, self.var],
+                strict=True,
             )
         ):
             nameitem = QtWidgets.QTableWidgetItem(str(n))
@@ -1397,7 +1398,6 @@ class B2ModelWidget(ModelDialog):
         )
 
         self.add_parameter_button = QtWidgets.QPushButton("Add parameter", self)
-        self.add_stimuli_button = QtWidgets.QPushButton("Add stimuli", self)
         self.add_neurongroup_button = QtWidgets.QPushButton("Add neurongroup", self)
         self.add_synapse_button = QtWidgets.QPushButton("Add synapse", self)
         self.monitor_button = QtWidgets.QPushButton("Add monitor", self)
@@ -1413,42 +1413,36 @@ class B2ModelWidget(ModelDialog):
         self.button_layout.addStretch()
 
         self.button_layout.addWidget(
-            self.add_stimuli_button,
+            self.add_neurongroup_button,
             2,
         )
         self.button_layout.addStretch()
 
         self.button_layout.addWidget(
-            self.add_neurongroup_button,
+            self.add_subgroup_button,
             3,
         )
         self.button_layout.addStretch()
 
         self.button_layout.addWidget(
-            self.add_subgroup_button,
+            self.add_synapse_button,
             4,
         )
         self.button_layout.addStretch()
 
         self.button_layout.addWidget(
-            self.add_synapse_button,
+            self.init_button,
             5,
         )
         self.button_layout.addStretch()
 
         self.button_layout.addWidget(
-            self.init_button,
+            self.monitor_button,
             6,
         )
         self.button_layout.addStretch()
 
-        self.button_layout.addWidget(
-            self.monitor_button,
-            7,
-        )
-        self.button_layout.addStretch()
-
-        self.layout.addWidget(self.button_box, 8, 1, 1, 4, QtCore.Qt.AlignCenter)
+        self.layout.addWidget(self.button_box, 7, 1, 1, 4, QtCore.Qt.AlignCenter)
 
         for qle in [
             self.name_entry,
@@ -1458,7 +1452,6 @@ class B2ModelWidget(ModelDialog):
             qle.setMinimumWidth(qle.sizeHint().width() * 2)
 
         # connect signals to slots on the outermost window
-        self.add_stimuli_button.clicked.connect(self.open_add_stimuli_dialog)
         self.add_neurongroup_button.clicked.connect(self.open_add_neurongroup_dialog)
         self.add_synapse_button.clicked.connect(self.open_add_synapse_dialog)
         self.add_parameter_button.clicked.connect(self.open_add_parameter_dialog)
@@ -1511,20 +1504,6 @@ class B2ModelWidget(ModelDialog):
             # update a leaf
             if item is not None:
                 item.setText(1, str(value))
-
-    def open_add_stimuli_dialog(self) -> None:
-        """
-        Open a new window to define a stimuli array
-        """
-        if self.model.dt is None:
-            self.display_error("Please define a timestep first.")
-            return
-        stim_dialog = StimDialog(None, self.model.dt, self)
-        if stim_dialog.exec():
-            self.model.define_parameter(
-                stim_dialog.name,
-                b2.TimedArray(stim_dialog.stims * stim_dialog.b2.units, self.model.dt),
-            )
 
     def open_add_neurongroup_dialog(self) -> None:
         """

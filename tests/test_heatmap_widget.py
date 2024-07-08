@@ -36,13 +36,13 @@ def test_heatmap_widget_3d_data_with_timeline(qtbot: QtBot) -> None:
     heatmap_widget.show()
     qtbot.waitUntil(lambda: heatmap_widget.isVisible())
     assert not heatmap_widget.timeLine.isVisible()
-    assert heatmap_widget.getProcessedImage().shape == data.shape
-    data = np.random.rand(10, 18, 23)
+    assert heatmap_widget.getProcessedImage().shape == data.T.shape
+    data = np.random.rand(23, 18, 10)
     interval_secs = 0.05
-    timepoints_secs = interval_secs * np.arange(data.shape[0])
+    timepoints_secs = interval_secs * np.arange(data.shape[2])
     total_time_secs = timepoints_secs[-1]
     heatmap_widget.set_data(data, timepoints_secs)
-    assert heatmap_widget.getProcessedImage().shape == data.shape
+    assert heatmap_widget.getProcessedImage().shape == data.T.shape
     assert heatmap_widget.timeLine.isVisible()
     # press space-bar to start real-time playback
     qtbot.keyPress(heatmap_widget, QtCore.Qt.Key.Key_Space)

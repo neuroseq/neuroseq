@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from typing import cast
-
 import formozov_project.b2_model_widget as B2W
-from brian2 import Quantity
 from formozov_project.b2_model import B2Model
 from numpy import isclose
 from pytest import MonkeyPatch
@@ -21,7 +18,7 @@ def test_dt_def(qtbot: QtBot) -> None:
     b2w.accept_timestep()
 
     assert b2w.model.dt is not None
-    assert isclose(cast(Quantity, b2w.model.dt.base), 0.0002)
+    assert isclose(b2w.model.dt.base, 0.0002)
     assert b2w.timestep_button.isDown()
     assert b2w.timestep_button.text() == "saved"
 

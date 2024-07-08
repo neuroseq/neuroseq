@@ -3,14 +3,15 @@ from __future__ import annotations
 import abc
 import logging
 import math
+from enum import Enum
 from typing import Any
+from typing import TypeAlias
 
 import brian2.numpy_ as np
 import pyqtgraph as pg
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
-from typing_extensions import TypeAlias  # needed for Python < 3.10
 
 from formozov_project.selectable_bar_line_plot_item import SelectableBarLinePlotItem
 from formozov_project.selectable_bar_plot_item import SelectableBarPlotItem
@@ -19,8 +20,14 @@ from formozov_project.timeline import Timeline
 from formozov_project.utils import QtABCMeta
 
 SelectablePlotItem: TypeAlias = (
-    "SelectableLinePlotItem | SelectableBarPlotItem | SelectableBarLinePlotItem"
+    SelectableLinePlotItem | SelectableBarPlotItem | SelectableBarLinePlotItem
 )
+
+
+class MouseMode(Enum):
+    NONE = 1
+    SELECT = 2
+    MOVE = 3
 
 
 class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
@@ -32,13 +39,17 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
     Subclasses should call _plot_data() and implement _plot_neuron_data() to plot the data.
     """
 
+    selection_moved = QtCore.Signal(int, int)
+
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.timeline = Timeline()
         self.timeline.setZValue(1e8)
         self.dt = 1.0
-        self.mouse_click_pos: QtCore.QPointF | None = None
+        self.mouse_mode = MouseMode.NONE
+        self.mouse_press_pos: QtCore.QPointF | None = None
+        self.mouse_selected_rect: QtCore.QRectF = QtCore.QRectF()
         self.capture_mouse_events = False
         self.selected_time_slice: slice | None = None
         self.selected_neuron_slice: slice | None = None
@@ -90,8 +101,13 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
         self.clear_data()
         if data is None:
             return
-        n_neurons = data[0].shape[0] if isinstance(data, list) else data.shape[0]
-        n_timestamps = data[0].shape[1] if isinstance(data, list) else data.shape[1]
+        shape = data[0].shape if isinstance(data, list) else data.shape
+        self.logger.debug(f"Plotting data with shape {shape}")
+        if len(shape) != 2:
+            return
+        n_neurons, n_timestamps = shape
+        if n_neurons == 0 or n_timestamps == 0:
+            return
         if isinstance(data, list) and not all(
             d.shape[0] == n_neurons and d.shape[1] == n_timestamps for d in data
         ):
@@ -113,60 +129,80 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
 
     def mousePressEvent(self, ev: Any) -> None:
         if not self.capture_mouse_events:
-            super().mousePressEvent(ev)
-            return
+            return super().mousePressEvent(ev)
         if ev.button() != QtCore.Qt.MouseButton.LeftButton:
             return
-        pos = ev.position()
-        self.mouse_click_pos = pos
+        self.mouse_press_pos = ev.position()
+        if self.roi.isVisible() and self.roi.rect().contains(ev.position()):
+            self.mouse_mode = MouseMode.MOVE
+        else:
+            self.mouse_mode = MouseMode.SELECT
+        self.logger.debug(f"Starting f{self.mouse_mode} from {self.mouse_press_pos}")
 
     def mouseMoveEvent(self, ev: Any) -> None:
         if not self.capture_mouse_events:
-            super().mouseMoveEvent(ev)
-            return
-        if self.mouse_click_pos is None:
+            return super().mouseMoveEvent(ev)
+        if self.mouse_press_pos is None:
             return
         pos = ev.position()
-        x = min(pos.x(), self.mouse_click_pos.x())
-        y = min(pos.y(), self.mouse_click_pos.y())
-        w = abs(pos.x() - self.mouse_click_pos.x())
-        h = abs(pos.y() - self.mouse_click_pos.y())
-        self.roi.setRect(x, y, w, h)
+        delta_pos = pos - self.mouse_press_pos
+        self.logger.debug(f"Delta pos f{delta_pos}")
+        self.logger.debug(
+            f"{self.mouse_selected_rect} -> {self.mouse_selected_rect.translated(delta_pos)}"
+        )
+        if self.mouse_mode == MouseMode.MOVE:
+            self.roi.setRect(self.mouse_selected_rect.translated(delta_pos))
+        elif self.mouse_mode == MouseMode.SELECT:
+            x = min(pos.x(), self.mouse_press_pos.x())
+            y = min(pos.y(), self.mouse_press_pos.y())
+            w = abs(delta_pos.x())
+            h = abs(delta_pos.y())
+            self.roi.setRect(QtCore.QRectF(x, y, w, h))
+        self.logger.debug(f"Updating ROI to f{self.roi.rect()}")
         self.roi.show()
 
     def mouseReleaseEvent(self, ev: Any) -> None:
         if not self.capture_mouse_events:
-            super().mouseReleaseEvent(ev)
-            return
+            return super().mouseReleaseEvent(ev)
         if (
-            self.mouse_click_pos is None
+            self.mouse_press_pos is None
             or ev.button() != QtCore.Qt.MouseButton.LeftButton
         ):
             return
         pos = ev.position()
-        if self.mouse_click_pos == ev.position():
+        if (
+            self.mouse_mode == MouseMode.SELECT
+            and self.mouse_press_pos == ev.position()
+        ):
             self.unselect_neurons()
             self.timeline.setX(self.mapToView(pos).x())
             return
-        self.logger.info(f"pixels: {self.mouse_click_pos} -> {pos}")
-        self.logger.info(
-            f"plot: {self.mapToView(self.mouse_click_pos)} -> {self.mapToView(pos)}"
-        )
-        xa = self.mapToView(self.mouse_click_pos).x() / self.dt
-        xb = self.mapToView(pos).x() / self.dt
-        x0 = max(0, math.ceil(min(xa, xb)))
-        x1 = math.floor(max(xa, xb))
-        ya = self.mapToView(self.mouse_click_pos).y() + 0.5
-        yb = self.mapToView(pos).y() + 0.5
-        y0 = max(0, math.ceil(min(ya, yb)))
-        y1 = math.floor(max(ya, yb))
-        selected_x_slice = slice(x0, x1)
-        selected_y_slice = slice(y0, y1)
-        self.mouse_click_pos = None
-        self.select_neurons(selected_y_slice, selected_x_slice)
+        if self.mouse_mode == MouseMode.SELECT:
+            p0 = self.mapToView(self.roi.rect().topLeft())
+            p1 = self.mapToView(self.roi.rect().bottomRight())
+            x0 = max(0, math.ceil(p0.x() / self.dt))
+            x1 = math.floor(p1.x() / self.dt)
+            y0 = max(0, math.ceil(p1.y() + 0.5))
+            y1 = math.floor(p0.y() + 0.5)
+            selected_x_slice = slice(x0, x1)
+            selected_y_slice = slice(y0, y1)
+            self.logger.debug(
+                f"Selecting neurons {selected_y_slice} and times {selected_x_slice}"
+            )
+            self.select_neurons(selected_y_slice, selected_x_slice)
+        elif self.mouse_mode == MouseMode.MOVE:
+            delta = self.mapToView(pos) - self.mapToView(self.mouse_press_pos)
+            neuron_index_offset = round(delta.y())
+            time_index_offset = round(delta.x() / self.dt)
+            self.logger.debug(
+                f"Selection moved by neuron index offset {neuron_index_offset}, time index offset {time_index_offset}"
+            )
+            self.selection_moved.emit(neuron_index_offset, time_index_offset)
+        self.mouse_press_pos = None
+        self.mouse_mode = MouseMode.NONE
 
     def unselect_neurons(self) -> None:
-        self.mouse_click_pos = None
+        self.mouse_press_pos = None
         self.roi.hide()
         self.selected_time_slice = None
         self.selected_neuron_slice = None
@@ -184,6 +220,7 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
             time_index_slice = slice(0, -1)
         self.selected_time_slice = time_index_slice
         self.selected_neuron_slice = neuron_index_slice
+        self.roi.show()
         self.update_roi()
         for neuron_index, neuron_plot in enumerate(self.neuron_plots):
             if neuron_index_slice.start <= neuron_index < neuron_index_slice.stop:
@@ -199,23 +236,22 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
         ):
             top_left_view = QtCore.QPointF(
                 self.selected_time_slice.start * self.dt,
-                self.selected_neuron_slice.start - 0.5,
+                self.selected_neuron_slice.stop - 0.5,
             )
             # in principle self.mapFromView should be enough here,
             # but the transform doesn't seem to get updated until after the corresponding signal is emitted,
             # so instead we do mapFromView for the underlying ViewBox and add its position inside the PlotItem
-            top_left_pixel = self.plotItem.vb.pos() + self.plotItem.vb.mapFromView(
-                top_left_view
+            self.mouse_selected_rect.setTopLeft(
+                self.plotItem.vb.pos() + self.plotItem.vb.mapFromView(top_left_view)
             )
             bottom_right_view = QtCore.QPointF(
                 self.selected_time_slice.stop * self.dt,
-                self.selected_neuron_slice.stop - 0.5,
+                self.selected_neuron_slice.start - 0.5,
             )
-            bottom_right_pixel = self.plotItem.vb.pos() + self.plotItem.vb.mapFromView(
-                bottom_right_view
+            self.mouse_selected_rect.setBottomRight(
+                self.plotItem.vb.pos() + self.plotItem.vb.mapFromView(bottom_right_view)
             )
-            rect_pixel = QtCore.QRectF(top_left_pixel, bottom_right_pixel)
-            self.roi.setRect(rect_pixel)
+            self.roi.setRect(self.mouse_selected_rect)
 
     def connect_heatmap_widget(self, heatmap_widget: pg.ImageView) -> None:
         """Connect the timeline in this widget to the timeline in the HeatmapWidget."""
