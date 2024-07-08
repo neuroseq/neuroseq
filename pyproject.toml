@@ -20,7 +20,7 @@ dependencies = [
     "click",
     "PyYAML",
     "typing_extensions",
-    "importlib-resources"  # backport for 3.8
+    "importlib-resources", # backport for 3.8
 ]
 dynamic = ["version"]
 
@@ -34,7 +34,7 @@ tests = [
     "pytest-randomly",
     "pytest-cov",
     "pytest-mock",
-    "diff-cover"
+    "diff-cover",
 ]
 
 [tool.setuptools.dynamic]

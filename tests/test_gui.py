@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# python3.8 does not yet have importlib.resources
 try:
     from importlib.resources import files
 except Exception:
