@@ -22,6 +22,156 @@ from formozov_project.trace_widget import TraceWidget
 from formozov_project.utils import add_action
 
 
+# README: this needs to be refactored into its own file once it starts growing
+class ModelLoadingDialog(QtWidgets.QDialog):
+    """
+    Dialog for loading a model from File and making the gui wait until it has been fully constructed
+
+    Parameters
+    ----------
+    QtWidgets : QWidget
+        Basic QT wiget type.
+    """
+
+    def __init__(self, parent=None):
+        """
+        Create a new ModelLoadingDialog instance
+
+        Parameters
+        ----------
+        parent : QtWidget, optional
+            parent QtWidget, by default None
+        """
+        super().__init__(parent)
+        self.parent = parent
+        self.setWindowTitle("Loading model data from file")
+        self.layout = QtWidgets.QGridLayout()
+
+        qtbtn = (
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+
+        self.button_box = QtWidgets.QDialogButtonBox(qtbtn)
+
+        self.button_box.accepted.connect(self.accept)
+
+        self.button_box.rejected.connect(self.reject)
+
+        self.trace_selector_name = QtWidgets.QLabel("Select trace to display", self)
+        self.layout.addWidget(
+            self.trace_selector_name,
+            1,
+            1,
+        )
+
+        self.flattend_states = {}
+        states = parent.model.network.get_states()
+        states["parameters"] = parent.model.parameters
+        self._flatten_dict_recursive(states, "", "", self.flattend_states)
+
+        states["None"] = None  # dummy value where we want nothing
+
+        self.trace_selector = QtWidgets.QComboBox(self)
+        self.layout.addWidget(
+            self.trace_selector,
+            self.layout.rowCount(),
+            1,
+        )
+        self.trace_time_selector = QtWidgets.QComboBox(self)
+        self.layout.addWidget(
+            self.trace_time_selector,
+            self.layout.rowCount(),
+            1,
+        )
+
+        self.heatmap_selector_name = QtWidgets.QLabel("Select heatmap to display", self)
+        self.layout.addWidget(
+            self.heatmap_selector_name, self.layout.rowCount(), 1, 1, 1
+        )
+
+        self.heatmap_selector = QtWidgets.QComboBox(self)
+        self.layout.addWidget(self.heatmap_selector, self.layout.rowCount(), 1, 1, 1)
+        self.heatmap_time_selector = QtWidgets.QComboBox(self)
+        self.layout.addWidget(
+            self.heatmap_time_selector, self.layout.rowCount(), 1, 1, 1
+        )
+
+        self.layout.addWidget(self.button_box, self.layout.rowCount(), 1, 1, 1)
+
+        self.setLayout(self.layout)
+
+        self.heatmap_selector.addItems(sorted(list(self.flattend_states.keys())))
+
+        self.trace_selector.addItems(sorted(list(self.flattend_states.keys())))
+        self.trace_time_selector.addItems(
+            sorted([k for k in self.flattend_states.keys() if ".t" in k] + ["None"])
+        )
+
+        self.heatmap_selector.currentTextChanged.connect(self.select_stim)
+        self.heatmap_time_selector.addItems(
+            sorted([k for k in self.flattend_states.keys() if ".t" in k] + ["None"])
+        )
+
+        self.trace_selector.currentTextChanged.connect(self.select_trace)
+        self.trace_time_selector.currentTextChanged.connect(self.select_trace)
+
+        self.heatmap_selector.currentTextChanged.connect(self.select_trace)
+        self.heatmap_time_selector.currentTextChanged.connect(self.select_trace)
+
+        self.heatmap_data: str | None = None
+        self.heatmap_time: str | None = None
+
+        self.trace_data: str | None = None
+        self.trace_time: str | None = None
+
+        self.show()
+
+    def _flatten_dict_recursive(self, d, k, key, res: dict):
+        if isinstance(d, dict):
+            key += str(k) + "." if k != "" else str(k)
+            for k in d.keys():
+                self._flatten_dict_recursive(d[k], k, key, res)
+        else:
+            key += str(k)
+            res[key] = d
+
+    def _set_element(self, target: str, value: Any) -> None:
+        setattr(self, target, value)
+
+    def select_trace(self) -> None:
+        self._set_element(
+            "trace_data", self.flattend_states[self.trace_selector.currentText()]
+        )
+
+    def select_trace_time(self) -> None:
+        self._set_element(
+            "trace_time", self.flattend_states[self.trace_selector.currentText()]
+        )
+
+    def select_stim(self) -> None:
+        self._set_element(
+            "heatmap_time", self.flattend_states[self.heatmap_selector.currentText()]
+        )
+
+    def select_stim_time(self) -> None:
+        self._set_element(
+            "heatmap_data",
+            self.flattend_states[self.heatmap_time_selector.currentText()],
+        )
+
+    def accept(self) -> None:
+        self.parent.trace_widget.set_data(
+            self.trace_data,
+            self.trace_time,
+        )
+
+        self.parent.heatmap_widget.set_data(
+            self.heatmap_data,
+            self.heatmap_time,
+        )
+
+
 class Gui(QtWidgets.QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -152,10 +302,7 @@ class Gui(QtWidgets.QMainWindow):
             self.model = model
             self.logger.info(f"Model {self.model.name} loaded from {filename}")
 
-            # TODO: add an element into the model loading window to select which parameters of the model to load into the widgets,
-            # as naming conventions should be left to the user
-            self.heatmap_widget.set_data()
-            self.trace_widget.set_data()
+            ModelLoadingDialog(self)
 
     def btn_save_clicked(self) -> None:
         filename, _ = getsavefilename(
