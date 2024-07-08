@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from importlib.resources import files
 from pathlib import Path
 
 from formozov_project.b2_model import B2Model
@@ -62,8 +63,38 @@ def test_gui_new(
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
     monkeypatch.setattr("formozov_project.gui.B2ModelWidget.exec", lambda *args: True)
-    gui.btn_open_clicked()
+    gui.btn_new_clicked()
     assert gui.model.name == B2Model().name
+
+
+def test_gui_open(
+    monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_ornstein: B2Model
+) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    import formozov_project
+
+    filename = str(files(formozov_project) / "default_model.yaml")
+
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog, "getOpenFileName", lambda *args: (f"{filename}", True)
+    )
+
+    assert gui.model.parameters is None
+    assert gui.model.neurongroups == {}
+    assert gui.model.synapses == {}
+    assert gui.model.monitors == {}
+
+    loaded_model = B2Model.load_model(filename)
+
+    gui.btn_open_clicked()
+
+    assert list(gui.model.parameters.keys()) == list(loaded_model.parameters.keys())  # type: ignore
+    assert list(gui.model.neurongroups.keys()) == list(loaded_model.neurongroups.keys())  # type: ignore
+    assert list(gui.model.synapses.keys()) == list(loaded_model.synapses.keys())  # type: ignore
+    assert list(gui.model.parameters.keys()) == list(loaded_model.parameters.keys())  # type: ignore
 
 
 def test_gui_save(

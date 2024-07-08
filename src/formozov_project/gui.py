@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import logging
+import queue
 from threading import Thread
 
 import brian2 as b2
 import brian2.numpy_ as np
 import qtawesome as qta
-from brian2 import numpy_
 from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
@@ -21,6 +21,7 @@ from formozov_project.trace_widget import TraceWidget
 from formozov_project.utils import add_action
 
 
+# README: this needs to be refactored into its own file once it starts growing
 class ModelLoadingDialog(QtWidgets.QWidget):
     """
     Dialog for loading a model from File and making the gui wait until it has been fully constructed
@@ -160,41 +161,39 @@ class Gui(QtWidgets.QMainWindow):
         if filename == "":
             return
 
-        def create_model(filepath: str, result: list[B2Model]) -> None:
+        def create_model(filepath: str, result: queue.Queue[tuple]) -> None:
             try:
                 model = B2Model.load_model(filepath)
-                result.append(model)
             except Exception as e:
-                self.logger.warning(f"Failed to save file {filename}: {e}")
-                QtWidgets.QMessageBox.critical(
-                    self,
-                    "File save error",
-                    f"Could not save file '{filename}': {e}",
-                )
+                result.put((None, e))
+                return
 
-        # TODO: this trick with the list is ugly. There should be something better.
-        result: list[B2Model] = []
-        thread = Thread(target=create_model, args=(filename, result))
+            result.put((model, None))
 
+        return_queue: queue.Queue[tuple] = queue.Queue()
+        thread = Thread(target=create_model, args=(filename, return_queue))
         busy_window = ModelLoadingDialog(self)
         thread.start()
         thread.join()
         busy_window.close()
 
-        self.logger.info(f"Model {self.model.name} loaded from {filename}")
+        model, exc = return_queue.get()
 
-        self.model = result[0]
-
-        if "stimulus" in self.model.parameters:  # type: ignore
-            stim = self.model.parameters["stimulus"]  # type: ignore
-            self.heatmap_widget.set_data(
-                data=stim.values,
-                timestamps=numpy_.arange(0, stim.values.shape[0], stim.dt),
+        if exc is not None:
+            self.logger.warning(f"Failed to load model from file {filename}: {exc}")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Model construction error",
+                f"Could not load model from file '{filename}': {exc}",
             )
         else:
-            self.logger.info(
-                f"No key 'stimulus' in model {self.model.name} loaded from {filename}"
-            )
+            self.model = model
+            self.logger.info(f"Model {self.model.name} loaded from {filename}")
+
+            # TODO: add an element into the model loading window to select which parameters of the model to load into the widgets,
+            # as naming conventions should be left to the user
+            self.heatmap_widget.set_data()
+            self.trace_widget.set_data()
 
     def btn_save_clicked(self) -> None:
         filename, _ = getsavefilename(
