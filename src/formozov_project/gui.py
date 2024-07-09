@@ -17,7 +17,8 @@ from formozov_project import __version__
 from formozov_project.b2_model import B2Model
 from formozov_project.b2_model_widget import B2ModelWidget
 from formozov_project.heatmap_widget import HeatmapWidget
-from formozov_project.model_loading_widget import ModelLoadingDialog
+
+# from formozov_project.model_loading_widget import ModelLoadingDialog
 from formozov_project.stim_dialog import StimDialog
 from formozov_project.trace_widget import TraceWidget
 from formozov_project.utils import add_action
@@ -63,7 +64,7 @@ class Gui(QtWidgets.QMainWindow):
         self.trace_widget.connect_heatmap_widget(self.heatmap_widget)
 
         # loading dialog to hold data, filled in later
-        self.model_loading_dialog: ModelLoadingDialog | None = None
+        # self.model_loading_dialog: ModelLoadingDialog | None = None
 
     def _update_data(self) -> None:
         # for now just display the first variable from the first StateMonitor we find
@@ -156,7 +157,7 @@ class Gui(QtWidgets.QMainWindow):
             self.model = model
             self.logger.info(f"Model {self.model.name} loaded from {filename}")
 
-            self.model_loading_dialog = ModelLoadingDialog(self)
+            # self.model_loading_dialog = ModelLoadingDialog(self)
 
     def btn_save_clicked(self) -> None:
         filename, _ = getsavefilename(
