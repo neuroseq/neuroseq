@@ -49,6 +49,7 @@ class Gui(QtWidgets.QMainWindow):
         self.toolbar = _create_menu_and_toolbar(self)
         self.addToolBar(self.toolbar)
         self.setWindowIcon(qta.icon("mdi6.brain"))
+
         # add a modal progress bar dialog while running simulations
         self.progress_dialog = QtWidgets.QProgressDialog(
             "Simulating...", "", 0, 100, self
@@ -156,7 +157,7 @@ class Gui(QtWidgets.QMainWindow):
             self.model = model
             self.logger.info(f"Model {self.model.name} loaded from {filename}")
 
-            # self.model_loading_dialog = ModelLoadingDialog(self)
+            self.model_loading_dialog = ModelLoadingDialog(self)
 
     def btn_save_clicked(self) -> None:
         filename, _ = getsavefilename(
