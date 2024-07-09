@@ -130,9 +130,26 @@ class ModelLoadingDialog(QtWidgets.QDialog):
 
         self.show()
 
-    def _flatten_dict_recursive(self, d, k, key, res: dict):
+    def _flatten_dict_recursive(
+        self, d: Any, k: Any, key: str, res: dict, link: str = "."
+    ):
+        """
+        Flatten a nested dict into string keys with keys of the format key_level1.key_level2.key_level3
+        if 'link' is given as '.'.
+
+        Parameters
+        ----------
+        d : Any
+            current element of the dict to be flattened
+        k : Any
+            current key of the dict to to be flattend
+        key : str
+
+        res : dict
+            Dict to save flattened data in
+        """
         if isinstance(d, dict):
-            key += str(k) + "." if k != "" else str(k)
+            key += str(k) + link if k != "" else str(k)
             for k in d:
                 self._flatten_dict_recursive(d[k], k, key, res)
         else:
@@ -140,31 +157,56 @@ class ModelLoadingDialog(QtWidgets.QDialog):
             res[key] = d
 
     def _set_element(self, target: str, value: Any) -> None:
+        """
+        Set an element 'target' of the calling instance to 'value' with debug log output.
+
+        Parameters
+        ----------
+        target : str
+            target variable name
+        value : Any
+            value to set the target variable to
+        """
         self.logger.debug(f"Element {target} set to {value}")
         setattr(self, target, value)
 
     def select_trace(self) -> None:
+        """
+        Select a trace time series array to be displayed in a Trace Widget
+        """
         self._set_element(
             "trace_data", self.flattend_states[self.trace_selector.currentText()]
         )
 
     def select_trace_time(self) -> None:
+        """
+        Select a trace time variable to be displayed in a Trace Widget
+        """
         self._set_element(
             "trace_time", self.flattend_states[self.trace_selector.currentText()]
         )
 
     def select_heatmap(self) -> None:
+        """
+        select a heatmap time series to be displayed in a HeatmapWidget
+        """
         self._set_element(
             "heatmap_time", self.flattend_states[self.heatmap_selector.currentText()]
         )
 
     def select_heatmap_time(self) -> None:
+        """
+        Select a heatmap time variable to be displayed in a HeatmapWidget
+        """
         self._set_element(
             "heatmap_data",
             self.flattend_states[self.heatmap_time_selector.currentText()],
         )
 
     def select_stim(self) -> None:
+        """
+        Select the neuron stimulation array to be used with the StimDialog
+        """
         if not isinstance(
             self.flattend_states[self.stim_selector.currentText()], b2.TimedArray
         ):
@@ -182,6 +224,9 @@ class ModelLoadingDialog(QtWidgets.QDialog):
             )
 
     def accept(self) -> None:
+        """
+        Accept the dialog
+        """
         if not isinstance(self.stim_data, b2.TimedArray):
             message = (
                 f"Stimulus data must be a TimedArray, currently selected element {self.stim_selector.currentText()} is of type {type(self.flattend_states[self.stim_selector.currentText()])}",
