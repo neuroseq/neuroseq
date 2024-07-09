@@ -63,7 +63,7 @@ class Gui(QtWidgets.QMainWindow):
         self.trace_widget.connect_heatmap_widget(self.heatmap_widget)
 
         # loading dialog to hold data, filled in later
-        # self.model_loading_dialog: ModelLoadingDialog | None = None
+        self.model_loading_dialog: ModelLoadingDialog | None = None
 
     def _update_data(self) -> None:
         # for now just display the first variable from the first StateMonitor we find
