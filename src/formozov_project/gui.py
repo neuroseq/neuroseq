@@ -17,8 +17,6 @@ from formozov_project import __version__
 from formozov_project.b2_model import B2Model
 from formozov_project.b2_model_widget import B2ModelWidget
 from formozov_project.heatmap_widget import HeatmapWidget
-
-# from formozov_project.model_loading_widget import ModelLoadingDialog
 from formozov_project.stim_dialog import StimDialog
 from formozov_project.trace_widget import TraceWidget
 from formozov_project.utils import add_action
