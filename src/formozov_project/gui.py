@@ -372,7 +372,7 @@ def _create_menu_and_toolbar(gui: Gui) -> QtWidgets.QToolBar:
 
     add_action(
         "&StimDialog",
-        lambda: StimDialog(stims=np.zeros((64, 100)), parent=gui).exec(),
+        lambda: StimDialog(stims=np.zeros((64, 100))).exec(),
         temp_menu,
     )
     return toolbar
