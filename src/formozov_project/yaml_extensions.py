@@ -85,7 +85,12 @@ def timedarray_representer(
         yaml MappingNode representing the TimedArray as a dict containing [values, unit, dt, name]
     """
 
-    values = data.values.item() if data.values.shape == () else data.values.tolist()
+    # values = data.values.item() if data.values.shape == () else data.values.tolist()
+    values = (
+        numpy_.array(data.values).item()
+        if data.values.shape == ()
+        else numpy_.array(data.values).tolist()
+    )
     return dumper.represent_mapping(
         "!TimedArray",
         {
