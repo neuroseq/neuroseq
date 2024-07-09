@@ -321,7 +321,7 @@ class ModelDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(window)
         self.dictwidget = DictionaryWidget(d, window, read_only=read_only)
         layout.addWidget(self.dictwidget)
-        self.dictwidget.setLayout(layout)
+
         window.resize(800, 600)  # FIXME: make this more flexible
 
         window.move(self.x() + self.width(), self.y())
@@ -611,15 +611,11 @@ class NeuronSubgroupDialog(ModelDialog):
     def display_parameters(
         self,
         _: str | dict[Any, Any] | None = None,
-        read_only: bool = False,
         __: bool = True,
     ) -> None:
         """
         Display the parameters of a target member of the model in a new window.
 
-        Parameters
-        ----------
-        read_only: bool  whether to have the elements read only or not
         """
 
         self.parameterwindow = QtWidgets.QDialog(self)
@@ -636,10 +632,6 @@ class NeuronSubgroupDialog(ModelDialog):
         ):
             nameitem = QtWidgets.QTableWidgetItem(str(n))
             valueitem = QtWidgets.QTableWidgetItem(str(v))
-
-            if read_only:
-                nameitem.setFlags(nameitem.flags() & ~QtCore.Qt.ItemIsEditable)
-                valueitem.setFlags(valueitem.flags() & ~QtCore.Qt.ItemIsEditable)
 
             table.setItem(i, 0, nameitem)
             table.setItem(i, 1, valueitem)

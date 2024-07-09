@@ -4,10 +4,13 @@ import logging
 import queue
 import time
 from threading import Thread
+from typing import Any
 
 import brian2 as b2
 import brian2.numpy_ as np
 import qtawesome as qta
+from pyqtgraph.parametertree import Parameter
+from pyqtgraph.parametertree import ParameterTree
 from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
@@ -16,6 +19,7 @@ from qtpy.compat import getsavefilename
 from formozov_project import __version__
 from formozov_project.b2_model import B2Model
 from formozov_project.b2_model_widget import B2ModelWidget
+from formozov_project.b2_model_widget import DictionaryWidget
 from formozov_project.heatmap_widget import HeatmapWidget
 from formozov_project.stim_dialog import StimDialog
 from formozov_project.trace_widget import TraceWidget
@@ -150,12 +154,82 @@ class Gui(QtWidgets.QMainWindow):
             )
         else:
             self.model = model
+
             self.logger.info(f"Model {self.model.name} loaded from {filename}")
 
-            # TODO: add an element into the model loading window to select which parameters of the model to load into the widgets,
-            # as naming conventions should be left to the user
-            self.heatmap_widget.set_data()
-            self.trace_widget.set_data()
+            states = {}
+
+            def get_value(v: Any) -> b2.TimedArray | Any:
+                if isinstance(v, b2.TimedArray):
+                    return {"values": v.values, "dt": v.dt}
+                else:
+                    return v
+
+            # FIXME: modify this to make sure that certain functions are connected
+            # the valueChanged signal of each element.
+
+            # FIXME modify this to make sure that upon change of certain system
+            # elements the whole thing is reassembled
+            # - emit warning whenever the neuronnumber is changed because this
+            #   will probably kill everything. Maybe do not allow it at all
+
+            # TODO: Refactor this thing into a baseclass which can replace the
+            # DictionaryWidget
+
+            def convert_dict_to_params(data, parent_name=""):
+                params = []
+                for key, value in data.items():
+                    param_type = "str"  # Default type
+                    options = {}
+                    if isinstance(value, dict):
+                        child_params = convert_dict_to_params(value, key)
+                        params.append(
+                            {"name": key, "type": "group", "children": child_params}
+                        )
+                    else:
+                        # Determine the parameter type based on value type
+                        if isinstance(value, int):
+                            param_type = "int"
+                        elif isinstance(value, float):
+                            param_type = "float"
+                        elif isinstance(value, bool):
+                            param_type = "bool"
+                        # Add more type checks as necessary
+
+                        param = {"name": key, "type": param_type, "value": value}
+                        param.update(options)
+                        params.append(param)
+                return params
+
+            states["parameters"] = {
+                n: get_value(v) for n, v in self.model.parameters.items()
+            }
+            states["neurongroups"] = {
+                n: self.model.network.get_states()[n] for n in self.model.neurongroups
+            }
+            states["synapses"] = {
+                n: self.model.network.get_states()[n] for n in self.model.synapses
+            } | {
+                n: self.model.network.get_states()[n]
+                for n in self.model.network.get_states()
+                if "pre" in n or "post" in n
+            }
+            states["monitors"] = {
+                n: self.model.network.get_states()[n] for n in self.model.monitors
+            }
+
+            parameter_tree = ParameterTree()
+
+            params = convert_dict_to_params(states)
+            parameter = Parameter.create(name="params", type="group", children=params)
+            parameter_tree.setParameters(parameter, showTop=False)
+
+            window = QtWidgets.QDialog(self)
+            layout = QtWidgets.QVBoxLayout(window)
+            dictwidget = DictionaryWidget(states, read_only=False)
+            layout.addWidget(dictwidget)
+
+            window.exec()
 
     def btn_save_clicked(self) -> None:
         filename, _ = getsavefilename(
