@@ -17,6 +17,14 @@ class B2Model:
     Wrapper class that bundles brian2 capabilities for modelling neuronal networks.
     """
 
+    def _trigger_rebuild(func: callable) -> callable:
+        def do_with_rebuild(self):
+            func(self)
+            self.must_be_rebuilt = True
+
+        return do_with_rebuild
+
+    @_trigger_rebuild
     def _update_nested_dict(self, original: dict, updates: dict) -> None:
         """
         _update_nested_dict Update nested dictionary with another dictionary.
@@ -40,6 +48,7 @@ class B2Model:
             else:
                 original[key] = value
 
+    @_trigger_rebuild
     def _add_equation_to_group(self, group: dict, line: str) -> None:
         r"""
         _add_equation_to_group Add an equation to a neurongroup or synapse dictionary that holds arguments to construct the respective objects.
@@ -96,6 +105,7 @@ class B2Model:
         self.dt: b2.Quantity | None = None
         self.solver = None
         self.checkpoints: list[str] = []
+        self.must_be_rebuilt = False
         self.logger = logging.getLogger(__name__)
         self.logger.info("Model creation complete")
 
@@ -148,12 +158,7 @@ class B2Model:
             When setting the quantity fails
         """
         try:
-            # if elementname not in self.init_vars:
-            #     self.init_vars[elementname] = {}
-
             setattr(self.network[elementname], varname, value)
-
-            # self.init_vars[elementname][varname] = value
 
         except Exception as e:
             raise ValueError(
@@ -195,6 +200,7 @@ class B2Model:
         """
         self.network.name = self.name
 
+    @_trigger_rebuild
     def define_parameter(
         self, name: str, value: str | b2.Quantity | b2.TimedArray
     ) -> None:
@@ -368,7 +374,6 @@ class B2Model:
                     "name": name,
                     "target": target_name,
                 }
-                | self.network.get_states()[name]
             },
         )
 
@@ -548,6 +553,7 @@ class B2Model:
             },
         )
 
+    @_trigger_rebuild
     def assemble_synapse(
         self,
         name: str,
@@ -605,8 +611,7 @@ class B2Model:
 
         self.network.add(synapse)
 
-        self.synapses[name] = self.synapses[name] | self.network.get_states()[name]
-
+    @_trigger_rebuild
     def define_monitor(
         self, name: str, cls: type, group: str, variable: str | None = None
     ) -> None:
@@ -654,7 +659,7 @@ class B2Model:
             "type": cls.__name__,
             "source": group,
             "variable": variable,
-        } | self.network.get_states()[name]
+        }
 
     def define_reset(self, name: str, reset: str) -> None:
         """
@@ -677,6 +682,7 @@ class B2Model:
             },
         )
 
+    @_trigger_rebuild
     def assemble_neurongroup(
         self,
         name: str = "neurongroup",
@@ -717,9 +723,28 @@ class B2Model:
             raise RuntimeError(message) from e
 
         self.network.add(ng)
-        self.neurongroups[name] = (
-            self.neurongroups[name] | self.network.get_states()[name]
-        )
+
+    def assemble_system(self) -> None:
+        self.network = b2.Network(self.name)
+
+        # build neurongroups
+        for n, v in self.neurongroups.items():
+            if "idx" not in v:
+                self.assemble_neurongroup(n)
+
+        # build subgroups
+        for v in self.neurongroups.values():
+            if "idx" in v:
+                self.define_neuron_subgroup(**v)
+
+        # build synapses
+        for s in self.synapses:
+            self.assemble_synapse(s)
+
+        # build monitors
+        for v in self.monitors.values():
+            cls = getattr(b2, v["type"])
+            self.define_monitor(v["name"], cls, v["source"], v["variable"])
 
     def save_to_h5(self, path: str | Path) -> None:
         """
@@ -762,20 +787,6 @@ class B2Model:
             message = f"Path {pathname} does not exist"
             self.logger.critical(message)
             raise ValueError(message) from e
-
-    @classmethod
-    def from_dict(cls, variables: dict[Any, Any]) -> B2Model:
-        """
-        Assemble a new B2Model instance from the components defined in the dictionary
-        """
-
-        constr = Reconstructor(variables)
-
-        model = B2Model()
-
-        constr.reconstruct(model)
-
-        return model
 
     def run_simulation(
         self,

@@ -40,6 +40,19 @@ class EditableParameterTree(ParameterTree):
 
         self.setParameters(self.root, showTop=False)
 
+        self._connect_parameters(self.root)
+
+    def _connect_parameters(self, parameter):
+        parameter.sigValueChanged.connect(self.on_change)
+        parameter.sigNameChanged.connect(self.on_change)
+        # If parameter is a group, recurse through its children
+        if parameter.type() == "group":
+            for child in parameter.children():
+                self._connect_parameters(child)
+
+    def on_change(self):
+        self.model.must_be_rebuild = True
+
     def get_value(v: Any) -> TimedArray | Any:
         if isinstance(v, TimedArray):
             return {"values": v.values, "dt": v.dt}
@@ -82,6 +95,7 @@ class EditableParameterTree(ParameterTree):
                     "syncExpanded": True,
                 }
                 params.append(param)
+
         return params
 
     def contextMenuEvent(self, ev: QtCore.QEvent) -> None:
@@ -227,15 +241,18 @@ class ModelEditorDialog(QtWidgets.QDialog):
         self.setLayout(layout)
 
     def accept(self):
-        if self.model_has_been_edited:
+        print("must be rebuild? ", self.model.must_be_rebuild)
+        if self.model.must_be_rebuild:
             datadict = {
                 "neurongroups": self.model.neurongroups,
                 "synapses": self.model.synapses,
                 "monitors": self.model.monitors,
                 "parameters": self.model.parameters,
-                "timestep": self.model.dt,
                 "seed": self.model.seed,
             }
+
+            if self.model.timestep is not None:
+                datadict["timestep"] = self.model.timestep
 
             constr = Reconstructor(datadict)
 
