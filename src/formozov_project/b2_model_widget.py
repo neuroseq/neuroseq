@@ -296,7 +296,7 @@ class ModelDialog(QtWidgets.QDialog):
 
     def display_parameters(
         self,
-        target: str | dict[Any, Any],
+        target: str | dict[Any, Any] | None,
         read_only: bool = False,
         blocking: bool = True,
     ) -> None:
@@ -609,9 +609,7 @@ class NeuronSubgroupDialog(ModelDialog):
             self.target_button.text = "saved"
 
     def display_parameters(
-        self,
-        _: str | dict[Any, Any] | None = None,
-        __: bool = True,
+        self, _: str | dict[Any, Any] | None = None, __: bool = True, ___: bool = True
     ) -> None:
         """
         Display the parameters of a target member of the model in a new window.
@@ -876,7 +874,10 @@ class ParameterDialog(ModelDialog):
             self.value_button.setText("saved")
 
     def display_parameters(
-        self, _: str | dict[Any, Any], read_only: bool = False, blocking: bool = True
+        self,
+        _: str | dict[Any, Any] | None,
+        read_only: bool = False,
+        blocking: bool = True,
     ) -> None:
         """
         Display all the parameters in the system in a new window.

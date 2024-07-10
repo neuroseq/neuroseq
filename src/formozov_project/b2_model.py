@@ -757,6 +757,36 @@ class B2Model:
             self.logger.critical(message)
             raise ValueError(message) from e
 
+    def assemble_system(self) -> None:
+        """
+        Assemble the whole brian2 network from the defined components
+
+        """
+        self.network = b2.Network(name=self.network.name)  # reuse name given originally
+
+        # assemble neurongroups
+        for n in self.neurongroups:
+            if "idx" not in self.neurongroups[n]:
+                self.assemble_neurongroup(n)
+
+        for n in self.neurongroups:
+            if "idx" in self.neurongroups[n]:
+                self.define_neuron_subgroup(
+                    self.neurongroups[n]["target"], n, self.neurongroups[n]["idx"]
+                )
+
+        for s in self.synapses:
+            self.assemble_synapse(s)
+
+        for m in self.monitors:
+            monitortype = getattr(b2, self.monitors[m]["type"])
+            self.define_monitor(
+                self.monitors[m]["name"],
+                monitortype,
+                self.monitors[m]["source"],
+                self.monitors[m]["variable"],
+            )
+
     def run_simulation(
         self,
         tfinal: b2.Quantity,
