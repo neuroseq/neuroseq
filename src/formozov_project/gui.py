@@ -9,7 +9,6 @@ import brian2 as b2
 import brian2.numpy_ as np
 import qtawesome as qta
 from qtpy import QtCore
-from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
@@ -17,12 +16,8 @@ from qtpy.compat import getsavefilename
 from formozov_project import __version__
 from formozov_project.b2_model import B2Model
 from formozov_project.b2_model_widget import B2ModelWidget
-from formozov_project.b2_model_widget import MonitorDialog
-from formozov_project.b2_model_widget import ParameterDialog
-from formozov_project.b2_model_widget import SynapseDialog
 from formozov_project.heatmap_widget import HeatmapWidget
-from formozov_project.model_editor import EditableNeurongroupTree
-from formozov_project.model_editor import EditableParameterTree
+from formozov_project.model_editor import ModelEditorDialog
 from formozov_project.stim_dialog import StimDialog
 from formozov_project.trace_widget import TraceWidget
 from formozov_project.utils import add_action
@@ -159,74 +154,9 @@ class Gui(QtWidgets.QMainWindow):
 
             self.logger.info(f"Model {self.model.name} loaded from {filename}")
 
-            # FIXME: modify this to make sure that certain functions are connected
-            # the valueChanged signal of each element.
+            mdiag = ModelEditorDialog(self.model, parent=self)
 
-            # FIXME modify this to make sure that upon change of certain system
-            # elements the whole thing is reassembled
-            # - emit warning whenever the neuronnumber is changed because this
-            #   will probably kill everything. Maybe do not allow it at all
-
-            # TODO: Refactor this whole logic into the DictionaryWidget class and
-            # replace the custom logic therein
-
-            # create the parameter trees for the model
-            trees = {
-                "Neurongroups": EditableNeurongroupTree(model=self.model, parent=self),
-                "Synapses": EditableParameterTree(
-                    self.model,
-                    SynapseDialog,
-                    name="synapses",
-                    parent=self,
-                ),
-                "Monitors": EditableParameterTree(
-                    self.model,
-                    MonitorDialog,
-                    name="monitors",
-                    parent=self,
-                ),
-                "Parameters": EditableParameterTree(
-                    self.model,
-                    ParameterDialog,
-                    name="parameters",
-                    parent=self,
-                ),
-            }
-
-            # define the window to display everything
-
-            window = QtWidgets.QDialog(self)
-            layout = QtWidgets.QGridLayout(window)
-
-            btns = (
-                QtWidgets.QDialogButtonBox.StandardButton.Ok
-                | QtWidgets.QDialogButtonBox.StandardButton.Cancel
-            )
-            button_box = QtWidgets.QDialogButtonBox(btns)
-
-            i = 0
-            for k, t in trees.items():
-                nameplate = QtWidgets.QLabel(str(k), parent=window)
-                bold_font = QtGui.QFont()
-                bold_font.setBold(True)
-                nameplate.setFont(bold_font)
-                layout.addWidget(nameplate, 0, i)
-                layout.addWidget(t, 1, i)
-                separator = QtWidgets.QFrame()
-                separator.setFrameShape(QtWidgets.QFrame.VLine)
-                separator.setFrameShadow(QtWidgets.QFrame.Sunken)
-                layout.addWidget(separator, 1, i + 1)
-                i += 2
-
-            layout.addWidget(
-                button_box, layout.rowCount(), 1, 1, 4, QtCore.Qt.AlignCenter
-            )
-
-            # make it such that whenever anything in the networks variables is changed,
-            # the system is reassembled. This does not have to happen for 'parameters',
-            # but for everything else  (neurongroups, synapses, monitors, seed, timestep)
-
-            window.exec()
+            mdiag.exec()
 
     def btn_save_clicked(self) -> None:
         filename, _ = getsavefilename(

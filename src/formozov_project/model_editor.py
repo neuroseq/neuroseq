@@ -7,11 +7,16 @@ from brian2 import TimedArray
 from pyqtgraph.parametertree import Parameter
 from pyqtgraph.parametertree import ParameterTree
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 
 from formozov_project.b2_model import B2Model
+from formozov_project.b2_model_widget import MonitorDialog
 from formozov_project.b2_model_widget import NeuronGroupDialog
 from formozov_project.b2_model_widget import NeuronSubgroupDialog
+from formozov_project.b2_model_widget import ParameterDialog
+from formozov_project.b2_model_widget import SynapseDialog
+from formozov_project.reconstructor import Reconstructor
 
 
 class EditableParameterTree(ParameterTree):
@@ -24,6 +29,7 @@ class EditableParameterTree(ParameterTree):
         showHeader: bool = True,
     ):
         super().__init__(parent=parent, showHeader=showHeader)
+
         self.model = model
         self.dialogtype = item_adder_dialog
         self.logger = logging.getLogger(__name__)
@@ -161,3 +167,82 @@ class EditableNeurongroupTree(EditableParameterTree):
 
                 # update the internal states by
                 self.updateParams(new_name, getattr(self.model, self.name)[new_name])
+
+
+class ModelEditorDialog(QtWidgets.QDialog):
+    def __init__(self, model: B2Model, parent: QtWidgets.QWidget | None = None):
+        super().__init__(parent=parent)
+
+        trees = {
+            "Neurongroups": EditableNeurongroupTree(model, parent=self),
+            "Synapses": EditableParameterTree(
+                model,
+                SynapseDialog,
+                name="synapses",
+                parent=self,
+            ),
+            "Monitors": EditableParameterTree(
+                model,
+                MonitorDialog,
+                name="monitors",
+                parent=self,
+            ),
+            "Parameters": EditableParameterTree(
+                model,
+                ParameterDialog,
+                name="parameters",
+                parent=self,
+            ),
+        }
+        self.model = model
+        self.model_has_been_edited = False
+
+        layout = QtWidgets.QGridLayout()
+
+        btns = (
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        button_box = QtWidgets.QDialogButtonBox(btns)
+
+        i = 0
+        for k, t in trees.items():
+            nameplate = QtWidgets.QLabel(str(k), parent=self)
+            bold_font = QtGui.QFont()
+            bold_font.setBold(True)
+            nameplate.setFont(bold_font)
+            layout.addWidget(nameplate, 0, i)
+            layout.addWidget(t, 1, i)
+            separator = QtWidgets.QFrame()
+            separator.setFrameShape(QtWidgets.QFrame.VLine)
+            separator.setFrameShadow(QtWidgets.QFrame.Sunken)
+            layout.addWidget(separator, 1, i + 1)
+            i += 2
+
+        layout.addWidget(button_box, layout.rowCount(), 1, 1, 4, QtCore.Qt.AlignCenter)
+
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+
+        self.setLayout(layout)
+
+    def accept(self):
+        if self.model_has_been_edited:
+            datadict = {
+                "neurongroups": self.model.neurongroups,
+                "synapses": self.model.synapses,
+                "monitors": self.model.monitors,
+                "parameters": self.model.parameters,
+                "timestep": self.model.dt,
+                "seed": self.model.seed,
+            }
+
+            constr = Reconstructor(datadict)
+
+            new_model = B2Model()
+
+            constr.reconstruct(new_model)
+
+            self.model = new_model
+
+        super().accept()
