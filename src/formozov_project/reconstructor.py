@@ -44,18 +44,22 @@ class Reconstructor:
     Class that reconstructs a B2Model from its serialized version.
     """
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, data_or_path: str | Path | dict[Any, Any]) -> None:
         """
         Construct a new `Reconstructor` object.
 
         Parameters
         ----------
-        path : str
-            Path to the yaml file that contains the model
+        data_or_path : str | Path | dict
+            Path to the yaml file that contains the model or a dictionary containing all the necessary data
         """
         self.logger = logging.getLogger(__name__)
-        with open(path) as file:
-            self.loaded_data = yaml.safe_load(file)
+
+        if isinstance(data_or_path, dict):
+            self.loaded_data = data_or_path
+        else:
+            with open(data_or_path) as file:
+                self.loaded_data = yaml.safe_load(file)
 
     def _reconstruct_dynamic_object(
         self,

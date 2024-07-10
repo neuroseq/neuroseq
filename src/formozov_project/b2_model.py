@@ -368,6 +368,7 @@ class B2Model:
                     "name": name,
                     "target": target_name,
                 }
+                | self.network.get_states()[name]
             },
         )
 
@@ -604,6 +605,8 @@ class B2Model:
 
         self.network.add(synapse)
 
+        self.synapses[name] = self.synapses[name] | self.network.get_states()[name]
+
     def define_monitor(
         self, name: str, cls: type, group: str, variable: str | None = None
     ) -> None:
@@ -651,7 +654,7 @@ class B2Model:
             "type": cls.__name__,
             "source": group,
             "variable": variable,
-        }
+        } | self.network.get_states()[name]
 
     def define_reset(self, name: str, reset: str) -> None:
         """
@@ -714,6 +717,9 @@ class B2Model:
             raise RuntimeError(message) from e
 
         self.network.add(ng)
+        self.neurongroups[name] = (
+            self.neurongroups[name] | self.network.get_states()[name]
+        )
 
     def save_to_h5(self, path: str | Path) -> None:
         """
@@ -757,35 +763,19 @@ class B2Model:
             self.logger.critical(message)
             raise ValueError(message) from e
 
-    def assemble_system(self) -> None:
+    @classmethod
+    def from_dict(cls, variables: dict[Any, Any]) -> B2Model:
         """
-        Assemble the whole brian2 network from the defined components
-
+        Assemble a new B2Model instance from the components defined in the dictionary
         """
-        self.network = b2.Network(name=self.network.name)  # reuse name given originally
 
-        # assemble neurongroups
-        for n in self.neurongroups:
-            if "idx" not in self.neurongroups[n]:
-                self.assemble_neurongroup(n)
+        constr = Reconstructor(variables)
 
-        for n in self.neurongroups:
-            if "idx" in self.neurongroups[n]:
-                self.define_neuron_subgroup(
-                    self.neurongroups[n]["target"], n, self.neurongroups[n]["idx"]
-                )
+        model = B2Model()
 
-        for s in self.synapses:
-            self.assemble_synapse(s)
+        constr.reconstruct(model)
 
-        for m in self.monitors:
-            monitortype = getattr(b2, self.monitors[m]["type"])
-            self.define_monitor(
-                self.monitors[m]["name"],
-                monitortype,
-                self.monitors[m]["source"],
-                self.monitors[m]["variable"],
-            )
+        return model
 
     def run_simulation(
         self,
