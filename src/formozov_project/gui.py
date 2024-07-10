@@ -4,13 +4,10 @@ import logging
 import queue
 import time
 from threading import Thread
-from typing import Any
 
 import brian2 as b2
 import brian2.numpy_ as np
 import qtawesome as qta
-from pyqtgraph.parametertree import Parameter
-from pyqtgraph.parametertree import ParameterTree
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
@@ -20,7 +17,12 @@ from qtpy.compat import getsavefilename
 from formozov_project import __version__
 from formozov_project.b2_model import B2Model
 from formozov_project.b2_model_widget import B2ModelWidget
+from formozov_project.b2_model_widget import MonitorDialog
+from formozov_project.b2_model_widget import ParameterDialog
+from formozov_project.b2_model_widget import SynapseDialog
 from formozov_project.heatmap_widget import HeatmapWidget
+from formozov_project.model_editor import EditableNeurongroupTree
+from formozov_project.model_editor import EditableParameterTree
 from formozov_project.stim_dialog import StimDialog
 from formozov_project.trace_widget import TraceWidget
 from formozov_project.utils import add_action
@@ -157,14 +159,6 @@ class Gui(QtWidgets.QMainWindow):
 
             self.logger.info(f"Model {self.model.name} loaded from {filename}")
 
-            states = {}
-
-            def get_value(v: Any) -> b2.TimedArray | Any:
-                if isinstance(v, b2.TimedArray):
-                    return {"values": v.values, "dt": v.dt}
-                else:
-                    return v
-
             # FIXME: modify this to make sure that certain functions are connected
             # the valueChanged signal of each element.
 
@@ -176,77 +170,30 @@ class Gui(QtWidgets.QMainWindow):
             # TODO: Refactor this whole logic into the DictionaryWidget class and
             # replace the custom logic therein
 
-            def convert_dict_to_params(data, parent_name=""):
-                params = []
-                for key, value in data.items():
-                    param_type = "str"  # Default type
-                    options = {}
-                    if isinstance(value, dict):
-                        child_params = convert_dict_to_params(value, key)
-                        params.append(
-                            {
-                                "name": key,
-                                "type": "group",
-                                "children": child_params,
-                                "expanded": False,
-                                "removable": True,
-                                "renamable": True,
-                                "syncExpanded": True,
-                            }
-                        )
-                    else:
-                        # Determine the parameter type based on value type
-                        if isinstance(value, int):
-                            param_type = "int"
-                        elif isinstance(value, float):
-                            param_type = "float"
-                        elif isinstance(value, bool):
-                            param_type = "bool"
-                        # Add more type checks as necessary
-
-                        param = {
-                            "name": key,
-                            "type": param_type,
-                            "value": value,
-                            "removable": True,
-                            "renamable": True,
-                            "syncExpanded": True,
-                        }
-                        param.update(options)
-                        params.append(param)
-                return params
-
-            def create_paramtree(name: str, statedict: dict) -> ParameterTree:
-                parameter_tree = ParameterTree()
-
-                params = convert_dict_to_params(statedict)
-
-                parameter = Parameter.create(name=name, type="group", children=params)
-
-                parameter_tree.setParameters(parameter, showTop=False)
-
-                return parameter_tree
-
-            states["Parameters"] = {
-                n: get_value(v)
-                for n, v in self.model.parameters.items()  # type: ignore
-            }
-            states["Neurongroups"] = {
-                n: self.model.network.get_states()[n] | self.model.neurongroups[n]
-                for n in self.model.neurongroups
-            }
-            states["Synapses"] = {
-                n: self.model.network.get_states()[n] for n in self.model.synapses
-            } | {
-                n: self.model.network.get_states()[n]
-                for n in self.model.network.get_states()
-                if "pre" in n or "post" in n
-            }
-            states["Monitors"] = {
-                n: self.model.network.get_states()[n] for n in self.model.monitors
+            # create the parameter trees for the model
+            trees = {
+                "Neurongroups": EditableNeurongroupTree(model=self.model, parent=self),
+                "Synapses": EditableParameterTree(
+                    self.model,
+                    SynapseDialog,
+                    name="synapses",
+                    parent=self,
+                ),
+                "Monitors": EditableParameterTree(
+                    self.model,
+                    MonitorDialog,
+                    name="monitors",
+                    parent=self,
+                ),
+                "Parameters": EditableParameterTree(
+                    self.model,
+                    ParameterDialog,
+                    name="parameters",
+                    parent=self,
+                ),
             }
 
-            trees = {k: create_paramtree(k, v) for k, v in states.items()}
+            # define the window to display everything
 
             window = QtWidgets.QDialog(self)
             layout = QtWidgets.QGridLayout(window)
@@ -274,6 +221,11 @@ class Gui(QtWidgets.QMainWindow):
             layout.addWidget(
                 button_box, layout.rowCount(), 1, 1, 4, QtCore.Qt.AlignCenter
             )
+
+            # make it such that whenever anything in the networks variables is changed,
+            # the system is reassembled. This does not have to happen for 'parameters',
+            # but for everything else  (neurongroups, synapses, monitors, seed, timestep)
+
             window.exec()
 
     def btn_save_clicked(self) -> None:
