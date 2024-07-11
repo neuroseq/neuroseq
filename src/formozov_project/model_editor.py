@@ -34,7 +34,7 @@ class EditableParameterTree(ParameterTree):
         self,
         model: B2Model,
         item_adder_dialog: type,
-        name: str,
+        domain_name: str,
         parent: QtWidgets.QWidget | None = None,
         showHeader: bool = True,
     ):
@@ -48,8 +48,8 @@ class EditableParameterTree(ParameterTree):
             model to display a part of
         item_adder_dialog : Dialog to open when right-clicking into empty space.
 
-        name : str
-            Name of the displayed parameter tree
+        domain_name : str
+            Name of the domain of the model to be displayed. One of synapses, parameter, or monitors. Neurongroups are treated in their own subclass
         parent : QtWidgets.QWidget | None, optional
             Parent widget, by default None
         showHeader : bool, optional
@@ -60,10 +60,10 @@ class EditableParameterTree(ParameterTree):
         self.model = model
         self.dialogtype = item_adder_dialog
         self.logger = logging.getLogger(__name__)
-        self.name = name
+        self.name = domain_name
         self.states = getattr(self.model, self.name)
         params = self._convert_dict_to_params(self.states)
-        self.root = Parameter.create(name=name, type="group", children=params)
+        self.root = Parameter.create(name=domain_name, type="group", children=params)
 
         self.setParameters(self.root, showTop=False)
 
@@ -159,6 +159,7 @@ class EditableParameterTree(ParameterTree):
         try:
             object_to_modify[param.name()] = eval(value)
         except SyntaxError:
+            # FIXME: make this save for brian2 stuff. Doesn´t work at the moment
             vals = value.split(" ")
             object_to_modify[param.name()] = eval(vals[0]) * getattr(b2, vals[1])
         except Exception as e:
@@ -333,7 +334,7 @@ class EditableNeurongroupTree(EditableParameterTree):
         super().__init__(
             model=model,
             item_adder_dialog=NeuronGroupDialog,
-            name="neurongroups",
+            domain_name="neurongroups",
             parent=parent,
             showHeader=showHeader,
         )
@@ -406,19 +407,19 @@ class ModelEditorDialog(QtWidgets.QDialog):
             "Synapses": EditableParameterTree(
                 model,
                 SynapseDialog,
-                name="synapses",
+                domain_name="synapses",
                 parent=self,
             ),
             "Monitors": EditableParameterTree(
                 model,
                 MonitorDialog,
-                name="monitors",
+                domain_name="monitors",
                 parent=self,
             ),
             "Parameters": EditableParameterTree(
                 model,
                 ParameterDialog,
-                name="parameters",
+                domain_name="parameters",
                 parent=self,
             ),
         }
