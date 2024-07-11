@@ -44,9 +44,7 @@ class EditableParameterTree(ParameterTree):
         self._connect_parameters(self.root)
 
     def _connect_parameters(self, param):
-        param.sigNameChanged.connect(self._rename)
-
-        if param.type() == "group":
+        if param.type() in "group":
             param.sigChildAdded.connect(self._set_rebuild)
             param.sigChildRemoved.connect(self._set_rebuild)
             for child in param.children():
@@ -60,17 +58,10 @@ class EditableParameterTree(ParameterTree):
         while current_param != self.root:
             path.append(current_param.name())
             current_param = current_param.parent()
-
         return list(reversed(path))
 
     def _set_rebuild(self, *_: Any) -> None:
         self.model.must_be_rebuilt = True
-
-    def _rename(self, param: Parameter, value: Any) -> None:
-        self.model.must_be_rebuilt = True
-
-        # TODO: how to get old name?
-        pass
 
     def _set_param(self, param: Parameter, value: Any) -> None:
         path = self._trace_path_from_leaf(param)
@@ -79,7 +70,15 @@ class EditableParameterTree(ParameterTree):
         for p in path[0:-1]:
             object_to_modify = object_to_modify[p]
 
-        object_to_modify[param.name()] = eval(value)
+        try:
+            object_to_modify[param.name()] = eval(value)
+        except SyntaxError:
+            vals = value.split(" ")
+            object_to_modify[param.name()] = eval(vals[0]) * getattr(b2, vals[1])
+        except Exception as e:
+            message = f"Could not set parameter {param.name()} with value {value}: {e}"
+            self.logger.critical(message)
+            QtWidgets.QMessageBox.critical(message)
 
         self.model.must_be_rebuilt = True
 
@@ -103,7 +102,7 @@ class EditableParameterTree(ParameterTree):
                         "children": child_params,
                         "expanded": False,
                         "removable": True,
-                        "renamable": True,
+                        "renamable": False,
                         "syncExpanded": True,
                     }
                 )
@@ -124,7 +123,7 @@ class EditableParameterTree(ParameterTree):
                     "type": param_type,
                     "value": value,
                     "removable": True,
-                    "renamable": True,
+                    "renamable": False,
                     "syncExpanded": True,
                 }
                 params.append(param)
