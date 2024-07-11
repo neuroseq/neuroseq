@@ -1,11 +1,26 @@
 from __future__ import annotations
 
 import abc
-from typing import Callable
+import functools
+from collections.abc import Callable
+from typing import Any
 
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
+
+
+def with_wait_cursor(func: Callable) -> Callable:
+    """Decorator to show a wait cursor while a function is running."""
+
+    @functools.wraps(func)
+    def with_wait_cursor_wrapper(*args: Any, **kwargs: Any):
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        return_value = func(*args, **kwargs)
+        QtWidgets.QApplication.restoreOverrideCursor()
+        return return_value
+
+    return with_wait_cursor_wrapper
 
 
 def add_action(
@@ -13,6 +28,7 @@ def add_action(
     callback: Callable,
     menu: QtWidgets.QMenu | None = None,
     toolbar: QtWidgets.QToolBar | None = None,
+    widget: QtWidgets.QWidget | None = None,
     shortcut: str | None = None,
     icon: QtGui.QIcon | None = None,
 ) -> None:
@@ -27,6 +43,8 @@ def add_action(
         menu.addAction(action)
     if toolbar is not None:
         toolbar.addAction(action)
+    if widget is not None:
+        widget.addAction(action)
 
 
 class QtABCMeta(type(QtCore.QObject), abc.ABCMeta):  # type: ignore

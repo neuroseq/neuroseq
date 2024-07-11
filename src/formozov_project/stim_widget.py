@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import brian2 as b2
 import brian2.numpy_ as np
 from qtpy import QtWidgets
 
@@ -8,9 +9,7 @@ from formozov_project.timeseries_widget import TimeseriesWidget
 
 
 class StimWidget(TimeseriesWidget):
-    """A widget that displays stimuli timeseries for neurons.
-
-    stim should be a 2d array, where the first index is the neuron index and the second index is the time index.
+    """A widget that displays a brian2.TimedArray stimuli timeseries for neurons.
 
     Assumes that the stimuli are non-negative.
     Applies global normalisation to the displayed stimuli such that the largest stimulus has an amplitude of 0.95.
@@ -22,13 +21,11 @@ class StimWidget(TimeseriesWidget):
     ) -> None:
         super().__init__(parent)
 
-    def set_data(
-        self,
-        stims: np.ndarray | None = None,
-        timestamps: np.ndarray | None = None,
-        dt: float | None = None,
-    ) -> None:
-        super()._plot_data(stims, timestamps, dt)
+    def set_data(self, stims: b2.TimedArray | None = None) -> None:
+        if stims is None:
+            self.clear_data()
+            return
+        super()._plot_data(stims.values.T, dt=stims.dt)
 
     def _plot_neuron_data(
         self, data: list[np.ndarray] | np.ndarray, timestamps: np.ndarray, dt: float

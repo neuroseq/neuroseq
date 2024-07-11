@@ -40,7 +40,7 @@ class StimTraceWidget(TimeseriesWidget):
             max_stim = 1
         stim_norm = max_stim / 0.95
         trace_norm = 2.0 * np.max(np.abs(traces)) if traces is not None else 1.0
-        for neuron_index, [stim, trace] in enumerate(zip(stims, traces)):
+        for neuron_index, [stim, trace] in enumerate(zip(stims, traces, strict=True)):
             # vertically offset the data for each neuron by its index
             y_offset_center = neuron_index
             # give each neuron a unique color

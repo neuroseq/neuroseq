@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-from typing import Dict
-from typing import cast
-
 import formozov_project.b2_model_widget as B2W
 from formozov_project.b2_model import B2Model
 from pytestqt.qtbot import QtBot
@@ -160,7 +156,8 @@ def test_parameterdialog_nothing_defined_errors(qtbot: QtBot) -> None:
     qtbot.waitUntil(lambda: not param_dlg.error_dialog.isVisible())
 
     # nothing is happening
-    assert cast(Dict[str, Any], param_dlg.model.parameters)["param"] == {}
+    assert param_dlg.model.parameters is not None
+    assert param_dlg.model.parameters["param"] == {}
 
 
 def test_parameterdialog_enter_fields(qtbot: QtBot) -> None:
@@ -175,7 +172,8 @@ def test_parameterdialog_enter_fields(qtbot: QtBot) -> None:
 
     assert param_dlg.name_entry.text() == "param"
 
-    assert "param" not in cast(Dict[str, Any], param_dlg.model.parameters)
+    assert param_dlg.model.parameters is not None
+    assert "param" not in param_dlg.model.parameters
 
     assert param_dlg.name_button.text() == "save"
 
@@ -183,15 +181,13 @@ def test_parameterdialog_enter_fields(qtbot: QtBot) -> None:
 
     assert param_dlg.name_button.text() == "saved"
 
-    assert "param" in cast(Dict[str, Any], param_dlg.model.parameters)
-    assert cast(Dict[str, Any], param_dlg.model.parameters)["param"] == {}
+    assert "param" in param_dlg.model.parameters
+    assert param_dlg.model.parameters["param"] == {}
 
     qtbot.keyClicks(param_dlg.value_entry, "42")
 
     assert param_dlg.value_entry.toPlainText() == "42"
-    assert (
-        cast(Dict[str, Any], param_dlg.model.parameters)["param"] == {}
-    )  # nothing has been saved yet
+    assert param_dlg.model.parameters["param"] == {}  # nothing has been saved yet
 
     assert param_dlg.value_button.text() == "save"
 
@@ -199,6 +195,4 @@ def test_parameterdialog_enter_fields(qtbot: QtBot) -> None:
 
     assert param_dlg.value_button.text() == "saved"
 
-    assert (
-        cast(Dict[str, Any], param_dlg.model.parameters)["param"] == 42
-    )  # nothing has been saved yet
+    assert param_dlg.model.parameters["param"] == 42  # nothing has been saved yet

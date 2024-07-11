@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from typing import Callable
 
 import brian2 as b2
 import h5py
@@ -348,7 +348,7 @@ class B2Model:
         """
         sng = None
 
-        if isinstance(idxs, (tuple, list)):
+        if isinstance(idxs, tuple | list):
             if len(idxs) > 2:
                 raise ValueError("Subgroups have to be contiguous")
 
@@ -891,7 +891,9 @@ class B2Model:
             yaml.safe_dump(states, file)
 
     @classmethod
-    def load_model(cls, filepath: str | Path) -> B2Model:
+    def load_model(
+        cls, filepath: str | Path, report: Callable[[int], None] | None = None
+    ) -> B2Model:
         """
         Load model from file
 
@@ -899,11 +901,23 @@ class B2Model:
         ----------
         filepath : str
             path to the model file
+        report : Callable[[int],None], optional
+            function to report progress, receives percentage complete as integer from 0 to 100
         """
+        if report is not None:
+            report(1)
+
         constr = Reconstructor(filepath)
+        if report is not None:
+            report(10)
 
         model = cls(seed=constr.loaded_data["seed"])
+        if report is not None:
+            report(20)
 
-        constr.reconstruct(model)
+        constr.reconstruct(model, report)
+
+        if report is not None:
+            report(100)
 
         return model

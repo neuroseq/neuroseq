@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from importlib import import_module
 from pathlib import Path
 from typing import Any
-from typing import Callable
 
 import yaml
 from brian2 import Quantity
@@ -162,6 +162,7 @@ class Reconstructor:
                     model.define_reset,
                     model.define_solver_method,
                 ],
+                strict=True,
             )
         )
 
@@ -231,6 +232,7 @@ class Reconstructor:
                     model.define_synapse_connection_probablitiy,
                     model.define_synapse_solver_method,
                 ],
+                strict=True,
             )
         )
 
@@ -265,7 +267,9 @@ class Reconstructor:
             data_of_group["variable"],
         )
 
-    def reconstruct(self, model: Any) -> None:
+    def reconstruct(
+        self, model: Any, report: Callable[[int], None] | None = None
+    ) -> None:
         """
         Reconstruct a B2Model from a yaml node. The model is typically given in a default constructed state
         as an argument, but this is not mandatory and it can contain other elements or can be modified afterwards
@@ -274,8 +278,9 @@ class Reconstructor:
         ----------
         model : B2Model
             Model object to use for reconstruction
+        report : Callable[[int],None], optional
+            function to report progress, receives percentage complete as integer from 0 to 100
         """
-
         model.seed = self.loaded_data["seed"]
 
         seed(self.loaded_data["seed"])
@@ -285,20 +290,30 @@ class Reconstructor:
 
         # reconstruct parameters, timestep, seed.
         model.parameters = self.loaded_data["parameters"]
+        if report is not None:
+            report(30)
 
         # reconstruct neurongroups
         for n in self.loaded_data["objects"]["neurongroups"]:
             if "idx" not in self.loaded_data[n]:  # reconstruct full groups first...
                 self.reconstruct_neurongroups(model, n, self.loaded_data[n])
+        if report is not None:
+            report(40)
 
         for n in self.loaded_data["objects"]["neurongroups"]:
             if "idx" in self.loaded_data[n]:  # ... then define the subgroups
                 self.reconstruct_neuron_subgroup(model, n, self.loaded_data[n])
+        if report is not None:
+            report(50)
 
         # reconstruct synapses
         for s in self.loaded_data["objects"]["synapses"]:
             self.reconstruct_synapses(model, s, self.loaded_data[s])
+        if report is not None:
+            report(60)
 
         # reconstruct monitors
         for m in self.loaded_data["objects"]["monitors"]:
             self.reconstruct_monitors(model, m, self.loaded_data[m])
+        if report is not None:
+            report(70)

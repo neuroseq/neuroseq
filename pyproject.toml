@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "formozov-project"
@@ -8,7 +8,7 @@ description = "Protoype GUI to edit and run neuron models"
 readme = "README.md"
 license = { text = "NONE" }
 authors = [{ name = "SSC", email = "ssc@iwr.uni-heidelberg.de" }]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = [
     "brian2",
     "numpy",
@@ -19,8 +19,6 @@ dependencies = [
     "qtawesome",
     "click",
     "PyYAML",
-    "typing_extensions",
-    "importlib-resources", # backport for 3.8
 ]
 dynamic = ["version"]
 
@@ -34,11 +32,12 @@ tests = [
     "pytest-randomly",
     "pytest-cov",
     "pytest-mock",
+    "pytest-xvfb",
     "diff-cover",
 ]
 
-[tool.setuptools.dynamic]
-version = { attr = "formozov_project.__version__" }
+[tool.hatch.version]
+path = "src/formozov_project/__init__.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
