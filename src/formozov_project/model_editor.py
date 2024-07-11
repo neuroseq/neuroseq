@@ -241,22 +241,18 @@ class ModelEditorDialog(QtWidgets.QDialog):
         self.setLayout(layout)
 
     def accept(self):
-        print("must be rebuild? ", self.model.must_be_rebuild)
-        if self.model.must_be_rebuild:
-            datadict = {
-                "neurongroups": self.model.neurongroups,
-                "synapses": self.model.synapses,
-                "monitors": self.model.monitors,
-                "parameters": self.model.parameters,
-                "seed": self.model.seed,
-            }
+        if self.model.must_be_rebuilt:
+            self.logger.info("rebuilding model after change")
+            states = self.model.to_dict()
 
-            if self.model.timestep is not None:
-                datadict["timestep"] = self.model.timestep
+            if self.model.dt is not None:
+                states["timestep"] = self.model.dt
 
-            constr = Reconstructor(datadict)
+            constr = Reconstructor(states)
 
-            new_model = B2Model()
+            # FIXME: this can be a problem when the system shall be continued because
+            # the sequence of random number changes due to brian2 caching them.
+            new_model = B2Model(seed=states["seed"])
 
             constr.reconstruct(new_model)
 

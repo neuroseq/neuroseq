@@ -17,9 +17,9 @@ class B2Model:
     Wrapper class that bundles brian2 capabilities for modelling neuronal networks.
     """
 
-    def _trigger_rebuild(func: callable) -> callable:
-        def do_with_rebuild(self):
-            func(self)
+    def _trigger_rebuild(func: Callable) -> Callable:  # type: ignore
+        def do_with_rebuild(self, *args, **kwargs):
+            func(self, *args, **kwargs)
             self.must_be_rebuilt = True
 
         return do_with_rebuild
@@ -103,7 +103,6 @@ class B2Model:
         self.monitors: dict[str, dict[str, Any]] = {}
         # self.init_vars: dict[str, dict[str, Any]] = {}
         self.dt: b2.Quantity | None = None
-        self.solver = None
         self.checkpoints: list[str] = []
         self.must_be_rebuilt = False
         self.logger = logging.getLogger(__name__)
@@ -846,15 +845,7 @@ class B2Model:
             logging.exception(e)
             raise ValueError(message) from e
 
-    def save_model(self, filepath: str | Path) -> None:
-        """
-        Save the current state of the network to disk
-
-        Parameters
-        ----------
-        filepath : str
-            path to the yaml file where the current state should be stored
-        """
+    def to_dict(self) -> dict[Any, Any]:
         states = self.network.get_states()
         states["current_time"] = self.network.t
 
@@ -873,9 +864,6 @@ class B2Model:
         # augment neurongroups and synapses
         for group in [self.neurongroups, self.synapses]:
             for key, n in group.items():
-                if "method" in states[key]:
-                    states[key]["method"] = self.solver
-
                 for k, v in n.items():
                     states[key][k] = v
 
@@ -885,6 +873,19 @@ class B2Model:
 
             for k, v in n.items():
                 states[key][k] = v
+
+        return states
+
+    def save_model(self, filepath: str | Path) -> None:
+        """
+        Save the current state of the network to disk
+
+        Parameters
+        ----------
+        filepath : str
+            path to the yaml file where the current state should be stored
+        """
+        states = self.to_dict()
 
         with open(filepath, "w") as file:
             yaml.safe_dump(states, file)
