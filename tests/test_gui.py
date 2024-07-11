@@ -40,7 +40,7 @@ def test_gui_playback(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
     )
     gui.load_model(
-        str(files(formozov_project) / "example_models" / "default_model.yaml")
+        str(files(formozov_project) / "example_models" / "default_model.json")
     )
     gui.btn_continue_simulation_clicked()
     n_timesteps = gui.heatmap_widget.tVals.size
@@ -83,7 +83,7 @@ def test_gui_open(
     qtbot.waitUntil(lambda: gui.isVisible())
     import formozov_project
 
-    filename = str(files(formozov_project) / "example_models" / "default_model.yaml")
+    filename = str(files(formozov_project) / "example_models" / "default_model.json")
 
     monkeypatch.setattr(
         QtWidgets.QFileDialog, "getOpenFileName", lambda *args: (f"{filename}", True)

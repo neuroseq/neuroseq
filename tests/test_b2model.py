@@ -8,9 +8,9 @@ import brian2 as b2
 import brian2.numpy_ as np
 import h5py
 import pytest
-import yaml
 from brian2.tests.utils import assert_allclose
 from formozov_project import b2_model
+from formozov_project import b2json
 from pytest_mock import MockerFixture
 
 
@@ -509,10 +509,10 @@ def test_store_restore(mfx_ornstein: b2_model.B2Model) -> None:
 
 
 def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
-    mfx_nmda.save_model(tmp_path / "model.yml")
+    mfx_nmda.save_model(tmp_path / "model.json")
 
-    with open(tmp_path / "model.yml") as file:
-        loaded_data = yaml.safe_load(file)
+    with open(tmp_path / "model.json") as file:
+        loaded_data = b2json.load(file)
 
     for k in [
         "neurons",
@@ -526,7 +526,7 @@ def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
     ]:
         assert k in loaded_data
 
-    reconstructed_model = b2_model.B2Model.load_model(tmp_path / "model.yml")
+    reconstructed_model = b2_model.B2Model.load_model(tmp_path / "model.json")
 
     assert reconstructed_model.seed == mfx_nmda.seed
     assert reconstructed_model.dt == mfx_nmda.dt
