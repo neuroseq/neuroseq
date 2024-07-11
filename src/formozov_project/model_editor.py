@@ -115,8 +115,8 @@ class EditableParameterTree(ParameterTree):
                 elif isinstance(value, bool):
                     param_type = "bool"
                 elif isinstance(value, str):
-                    param_type = "str"
-                # Add more type checks as necessary
+                    param_type = "text" if "\n" in value else "str"
+                # TODO: add quantity parameter type
 
                 param = {
                     "name": key,
