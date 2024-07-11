@@ -4,6 +4,8 @@
 
 Private repository containing the prototype GUI for the [Formozov project](https://github.com/ssciwr/formozov-project-notes).
 
+![screenshot](screenshot.png)
+
 ## Installation
 
 If you have ssh authentication to GitHub set up you can install directly from this repository with pip:
