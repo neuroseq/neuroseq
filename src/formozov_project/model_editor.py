@@ -210,6 +210,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
         }
         self.model = model
         self.model_has_been_edited = False
+        self.logger = logging.getLogger(__name__)
 
         layout = QtWidgets.QGridLayout()
 
