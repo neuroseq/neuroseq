@@ -13,9 +13,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ci:
+  conda-forge:
     runs-on: ${{ matrix.os }}
-    name: "${{ matrix.os }} :: ${{ matrix.python-version }}"
+    name: "${{ matrix.os }} :: conda-forge"
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["macos-arm64-ssc"]
+    defaults:
+      run:
+        shell: bash -leo pipefail {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mamba-org/setup-micromamba@v1
+        with:
+          environment-file: environment.yml
+      - run: pip install . --no-deps
+      - run: pytest -sv
+  pypi:
+    runs-on: ${{ matrix.os }}
+    name: "${{ matrix.os }} :: pypi :: ${{ matrix.python-version }}"
     strategy:
       fail-fast: false
       matrix:
