@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import brian2 as b2  # noqa: F401
 from brian2 import TimedArray
 from pyqtgraph.parametertree import Parameter
 from pyqtgraph.parametertree import ParameterTree
@@ -43,17 +44,44 @@ class EditableParameterTree(ParameterTree):
         self._connect_parameters(self.root)
 
     def _connect_parameters(self, param):
-        for child in param.children():
-            if child.type() == "group":
-                self._connect_parameters(child)
-                child.sigChildAdded.connect(self._on_change)
-                child.sigChildRemoved.connect(self._on_change)
-            else:
-                child.sigValueChanged.connect(self._on_change)
-                child.sigNameChanged.connect(self._on_change)
+        param.sigNameChanged.connect(self._rename)
 
-    def _on_change(self):
-        self.model.must_be_rebuild = True
+        if param.type() == "group":
+            param.sigChildAdded.connect(self._set_rebuild)
+            param.sigChildRemoved.connect(self._set_rebuild)
+            for child in param.children():
+                self._connect_parameters(child)
+        else:
+            param.sigValueChanged.connect(self._set_param)
+
+    def _trace_path_from_leaf(self, param: Parameter) -> list[str]:
+        path = []
+        current_param = param
+        while current_param != self.root:
+            path.append(current_param.name())
+            current_param = current_param.parent()
+
+        return list(reversed(path))
+
+    def _set_rebuild(self, *_: Any) -> None:
+        self.model.must_be_rebuilt = True
+
+    def _rename(self, param: Parameter, value: Any) -> None:
+        self.model.must_be_rebuilt = True
+
+        # TODO: how to get old name?
+        pass
+
+    def _set_param(self, param: Parameter, value: Any) -> None:
+        path = self._trace_path_from_leaf(param)
+
+        object_to_modify = self.states
+        for p in path[0:-1]:
+            object_to_modify = object_to_modify[p]
+
+        object_to_modify[param.name()] = eval(value)
+
+        self.model.must_be_rebuilt = True
 
     def _get_value(self, v: Any) -> TimedArray | Any:
         if isinstance(v, TimedArray):
@@ -87,6 +115,8 @@ class EditableParameterTree(ParameterTree):
                     param_type = "float"
                 elif isinstance(value, bool):
                     param_type = "bool"
+                elif isinstance(value, str):
+                    param_type = "str"
                 # Add more type checks as necessary
 
                 param = {
@@ -155,7 +185,6 @@ class EditableNeurongroupTree(EditableParameterTree):
     def contextMenuEvent(self, ev: QtCore.Event) -> None:
         if self.itemAt(ev.pos()):
             self.logger.info("found item")
-
             super().contextMenuEvent(ev)
         else:
             self.logger.info("no item found here")
@@ -170,6 +199,8 @@ class EditableNeurongroupTree(EditableParameterTree):
 
             old_names = set(getattr(self.model, self.name).keys())
 
+            dialog = None
+
             if action == ng_menu_entry:
                 dialog = NeuronGroupDialog(
                     self.model,
@@ -178,7 +209,7 @@ class EditableNeurongroupTree(EditableParameterTree):
             elif action == nsg_menu_entry:
                 dialog = NeuronSubgroupDialog(self.model)
 
-            if dialog.exec():
+            if dialog is not None and dialog.exec():
                 new_names = set(getattr(self.model, self.name).keys())
                 new_name = list(new_names - old_names)[0]
 

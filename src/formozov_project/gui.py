@@ -28,7 +28,7 @@ class Gui(QtWidgets.QMainWindow):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.logger.info("starting Gui")
-        self.model = None
+        self.model = B2Model()
         self.neurons: dict[str, b2.StateMonitor] = {}
         self.synapses: dict[str, b2.StateMonitor] = {}
         self.setWindowTitle("Formozov Project")
@@ -120,19 +120,29 @@ class Gui(QtWidgets.QMainWindow):
             self.update_model()
 
     def btn_open_clicked(self) -> None:
-        if self.model is None:
-            filename, _ = getopenfilename(
+        filename, _ = getopenfilename(
+            self,
+            "load model",
+            "model.yaml",
+            "yaml file (*.yaml)",
+        )
+        if filename != "":
+            self.load_model(filename)
+
+    def btn_edit_clicked(self) -> None:
+        if not self.model.neurongroups:
+            message = "There is no model to be edited, first open an existing one or define a new one"
+            self.logger.critical(message)
+            QtWidgets.QMessageBox.critical(
                 self,
-                "load model",
-                "model.yaml",
-                "yaml file (*.yaml)",
+                "Model edit error",
+                message,
             )
-            if filename != "":
-                self.load_model(filename)
+        else:
+            mdiag = ModelEditorDialog(self.model, parent=self)
 
-        mdiag = ModelEditorDialog(self.model, parent=self)
-
-        mdiag.exec()
+            if mdiag.exec():
+                self.update_model()
 
     def btn_open_example_model_clicked(self) -> None:
         self.load_model(
@@ -374,6 +384,14 @@ class Gui(QtWidgets.QMainWindow):
             self.toolbar,
             shortcut="Ctrl+S",
             icon=qta.icon("mdi6.content-save"),
+        )
+        add_action(
+            "&Edit",
+            self.btn_edit_clicked,
+            file_menu,
+            self.toolbar,
+            shortcut="Ctrl+E",
+            icon=qta.icon("mdi6.cog-box"),
         )
         self.toolbar.addSeparator()
         add_action(

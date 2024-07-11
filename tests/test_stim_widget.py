@@ -115,7 +115,6 @@ def test_stim_widget_mouse_capture(qtbot: QtBot, stims: b2.TimedArray) -> None:
     t_max = timestamps[-1]
     stim_widget.set_data(stims)
     assert len(stim_widget.neuron_plots) == n_neurons
-    print(stim_widget.size())
     x0 = stim_widget.size().width() // 4
     y0 = stim_widget.size().height() // 4
     x1 = x0 * 2
