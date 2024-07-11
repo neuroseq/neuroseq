@@ -1,18 +1,20 @@
 from __future__ import annotations
 
-# python3.8 does not yet have importlib.resources
-try:
-    from importlib.resources import files
-except Exception:
-    from importlib_resources import files  # type: ignore
-
+from importlib.resources import files
 from pathlib import Path
+from typing import cast
 
+import brian2 as b2
+import formozov_project
+from brian2 import numpy_ as np
+from brian2.tests.utils import assert_allclose
 from formozov_project.b2_model import B2Model
 from formozov_project.gui import Gui
+from formozov_project.selectable_bar_plot_item import SelectableBarPlotItem
 from pytest import MonkeyPatch
 from pytest import approx
 from pytestqt.qtbot import QtBot
+from qtpy import QtCore
 from qtpy import QtWidgets
 
 
@@ -25,9 +27,7 @@ def test_gui_click_exit(qtbot: QtBot) -> None:
     qtbot.waitUntil(lambda: not gui.isVisible())
 
 
-def test_gui_playback(
-    monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_ornstein: B2Model
-) -> None:
+def test_gui_playback(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
     gui = Gui()
     gui.show()
     qtbot.addWidget(gui)
@@ -39,9 +39,11 @@ def test_gui_playback(
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
     )
-    gui.model = mfx_ornstein
+    gui.load_model(
+        str(files(formozov_project) / "example_models" / "default_model.yaml")
+    )
     gui.btn_continue_simulation_clicked()
-    n_timesteps = len(gui.model.network["M"].t)
+    n_timesteps = gui.heatmap_widget.tVals.size
     gui.btn_play_clicked()
     qtbot.waitUntil(lambda: gui.heatmap_widget.currentIndex > 0)
     # pause and then continue playback
@@ -81,11 +83,7 @@ def test_gui_open(
     qtbot.waitUntil(lambda: gui.isVisible())
     import formozov_project
 
-    filename = str(
-        Path(str(files(formozov_project)))
-        / Path("example_models")
-        / "default_model.yaml"
-    )
+    filename = str(files(formozov_project) / "example_models" / "default_model.yaml")
 
     monkeypatch.setattr(
         QtWidgets.QFileDialog, "getOpenFileName", lambda *args: (f"{filename}", True)
@@ -100,10 +98,11 @@ def test_gui_open(
 
     gui.btn_open_clicked()
 
-    assert list(gui.model.parameters.keys()) == list(loaded_model.parameters.keys())  # type: ignore
-    assert list(gui.model.neurongroups.keys()) == list(loaded_model.neurongroups.keys())  # type: ignore
-    assert list(gui.model.synapses.keys()) == list(loaded_model.synapses.keys())  # type: ignore
-    assert list(gui.model.parameters.keys()) == list(loaded_model.parameters.keys())  # type: ignore
+    assert gui.model.parameters is not None
+    assert list(gui.model.parameters.keys()) == list(loaded_model.parameters.keys())
+    assert list(gui.model.neurongroups.keys()) == list(loaded_model.neurongroups.keys())
+    assert list(gui.model.synapses.keys()) == list(loaded_model.synapses.keys())
+    assert list(gui.model.parameters.keys()) == list(loaded_model.parameters.keys())
 
 
 def test_gui_save(
@@ -139,6 +138,7 @@ def test_gui_checkpoints(
         QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("test", True)
     )
     gui.model = mfx_ornstein
+    gui.update_model()
     gui.btn_store_checkpoint_clicked()
     assert "test" in gui.model.checkpoints
     # simulate
@@ -151,3 +151,47 @@ def test_gui_checkpoints(
     # restore checkpoint
     gui.btn_restore_checkpoint_clicked()
     assert len(gui.model.network["M"].t) == 0
+
+
+def test_gui_edit_stim_with_console(qtbot: QtBot, mfx_ornstein: B2Model) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    n_neurons = 20
+    n_timestamps = 100
+    dt = 10 * b2.ms
+    stim = np.zeros((n_timestamps, n_neurons))
+    assert mfx_ornstein.parameters is None
+    mfx_ornstein.parameters = {"stim": b2.TimedArray(stim, dt=dt)}
+    gui.model = mfx_ornstein
+    gui.update_model()
+    # bar plot x-values are the center of the bars, so shifted forwards by 0.5dt compared to timestamps
+    expected_timestamps_array = dt * (np.arange(n_timestamps) + 0.5) / b2.second
+    stim_editor = gui.stim_editor
+    stim_console = gui.stim_console
+    assert stim_editor.stims_dict is not None
+    assert_allclose(stim_editor.stims_dict["stim"].values, stim)
+    # set all stimuli to 1: StimWidget and model stimuli updated
+    stim_console.input.setText("stims['stim'][:,:] = 1")
+    qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
+    stim[:, :] = 1
+    assert_allclose(stim_editor.stims_dict["stim"].values, stim)
+    assert gui.model.parameters is not None
+    assert_allclose(gui.model.parameters["stim"].values, stim)
+    assert len(stim_editor.stim_widget.neuron_plots) == n_neurons
+    neuron_plot = cast(SelectableBarPlotItem, stim_editor.stim_widget.neuron_plots[0])
+    assert len(neuron_plot.getData()[0]) == n_timestamps
+    assert_allclose(neuron_plot.getData()[0], expected_timestamps_array)
+    # set stims to an invalid value: StimWidget and model not updated
+    stim_console.input.setText("stims['stim'] = 5")
+    qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
+    assert len(stim_editor.stim_widget.neuron_plots) == n_neurons
+    assert_allclose(stim_editor.stims_dict["stim"].values, stim)
+    assert_allclose(gui.model.parameters["stim"].values, stim)
+    # assign random valid stim array with different shape, StimWidget and model updated
+    stim_console.input.setText("stims['stim'] = np.random.rand(127, 83)")
+    qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
+    assert stim_editor.stims_dict["stim"].values.shape == (127, 83)
+    assert gui.model.parameters["stim"].values.shape == (127, 83)
+    assert len(stim_editor.stim_widget.neuron_plots) == 83

@@ -31,7 +31,7 @@ class HeatmapWidget(pg.ImageView):
     ) -> None:
         self.clear()
         if data is not None:
-            self.setImage(data, xvals=timestamps)
+            self.setImage(data.T, xvals=timestamps)
 
     def connect_trace_widget(self, trace_widget: pg.PlotWidget) -> None:
         """Connect the timeline in this widget to the timeline in the TraceWidget."""
