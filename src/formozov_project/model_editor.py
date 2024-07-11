@@ -44,11 +44,14 @@ class EditableParameterTree(ParameterTree):
         self._connect_parameters(self.root)
 
     def _connect_parameters(self, param):
-        if param.type() in "group":
+        if param.type() == "group":
             param.sigChildAdded.connect(self._set_rebuild)
             param.sigChildRemoved.connect(self._set_rebuild)
             for child in param.children():
                 self._connect_parameters(child)
+        elif param.type() == "text":
+            # do something that limits the updating of the text in the field. For editing equations, this is important
+            param.sigValueChanged.connect(self._set_textfield)
         else:
             param.sigValueChanged.connect(self._set_param)
 
@@ -63,7 +66,16 @@ class EditableParameterTree(ParameterTree):
     def _set_rebuild(self, *_: Any) -> None:
         self.model.must_be_rebuilt = True
 
+    def _set_textfield(self, param: Parameter, value: str) -> None:
+        self.logger.info(f"setting parameter {param.name()} to value {value}")
+        path = self._trace_path_from_leaf(param)
+        object_to_modify = self.states
+        for p in path[0:-1]:
+            object_to_modify = object_to_modify[p]
+        object_to_modify[param.name()] = value
+
     def _set_param(self, param: Parameter, value: Any) -> None:
+        self.logger.info(f"setting parameter {param.name()} to value {value}")
         path = self._trace_path_from_leaf(param)
 
         object_to_modify = self.states
@@ -76,10 +88,10 @@ class EditableParameterTree(ParameterTree):
             vals = value.split(" ")
             object_to_modify[param.name()] = eval(vals[0]) * getattr(b2, vals[1])
         except Exception as e:
-            message = f"Could not set parameter {param.name()} with value {value}: {e}"
-            self.logger.critical(message)
-            QtWidgets.QMessageBox.critical(message)
-
+            self.logger.critical(
+                f"Could not set parameter {param.name()} with value {value}: {e}, trying to set as string"
+            )
+            object_to_modify[param.name()] = value
         self.model.must_be_rebuilt = True
 
     def _get_value(self, v: Any) -> TimedArray | Any:
@@ -286,10 +298,18 @@ class ModelEditorDialog(QtWidgets.QDialog):
 
             # FIXME: this can be a problem when the system shall be continued because
             # the sequence of random number changes due to brian2 caching them.
-            new_model = B2Model(seed=states["seed"])
+            if self.model.seed != states["seed"]:
+                QtWidgets.QMessageBox.warning(
+                    "The system's random number generator will be reseeded. This potentially can change the results when compared to previous ones"
+                )
+                new_model = B2Model(seed=states["seed"])
 
-            constr.reconstruct(new_model)
-
+            try:
+                constr.reconstruct(new_model)
+            except Exception as e:
+                message = f"Error when rebuilding the model after editing: {e}"
+                self.logger.critical(message)
+                QtWidgets.QMessageBox.critical(message)
             self.model = new_model
 
         super().accept()
