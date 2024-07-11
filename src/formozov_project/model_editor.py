@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import brian2 as b2  # noqa: F401
@@ -138,6 +139,38 @@ class EditableParameterTree(ParameterTree):
             object_to_modify = object_to_modify[p]
         object_to_modify[param.name()] = value
 
+    def _make_quantity(self, quantity_str: str) -> b2.Quantity | str:
+        """
+        Make a quantity from a string representation. When this cannot be successfully be done, the string is returned as is.
+
+        Parameters
+        ----------
+        quantity_str : str
+            string representation of a quantity
+
+        Returns
+        -------
+        b2.Quantity|str
+            either a brian2 quantity or the input string
+        """
+        # extract numerical value via regex. allow for multiple numbers left and right of a '.' and multiple spaces or a '*' between number and unit
+        match = re.match(r"([0-9./]+)[ *]*(\w+)", quantity_str)
+
+        if match:
+            value, unit_str = match.groups()
+
+            # Map the unit string to a Brian2 unit
+            unit = getattr(b2, unit_str)
+            value = eval(value)
+
+            # Create the quantity object
+            quantity_obj = value * unit
+
+            # Output to verify
+            return quantity_obj
+        else:
+            return quantity_str
+
     def _set_param(self, param: Parameter, value: Any) -> None:
         """
         Update a model parameter whenever its corresponding representation in the parameter tree is updated.
@@ -156,17 +189,8 @@ class EditableParameterTree(ParameterTree):
         for p in path[0:-1]:
             object_to_modify = object_to_modify[p]
 
-        try:
-            object_to_modify[param.name()] = eval(value)
-        except SyntaxError:
-            # FIXME: make this save for brian2 stuff. Doesn´t work at the moment
-            vals = value.split(" ")
-            object_to_modify[param.name()] = eval(vals[0]) * getattr(b2, vals[1])
-        except Exception as e:
-            self.logger.critical(
-                f"Could not set parameter {param.name()} with value {value}: {e}, trying to set as string"
-            )
-            object_to_modify[param.name()] = value
+        object_to_modify[param.name()] = self._make_quantity(value)
+
         self.model.must_be_rebuilt = True
 
     def _get_value(self, v: Any) -> dict[str, Any] | Any:

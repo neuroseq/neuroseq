@@ -59,15 +59,13 @@ def test_ptree_edit_b2quantity(mfx_nmda: B2Model, qtbot: QtBot) -> None:
 
     pnode = ptree.root
 
-    print([p.name() for p in pnode])
-
     a_node = pnode.child("a")
 
     with qtbot.waitSignal(a_node.sigValueChanged, timeout=1000, raising=True):
-        a_node.setValue("1/20 ms")
+        a_node.setValue("1/60 ms")
 
-    assert type(ptree.model.parameters["a"]) is b2.Quantity
-    assert ptree.model.parameters["a"] == ((1 / 20) * b2.msecond)
+    assert type(ptree.model.parameters["a"]) is b2.Quantity  # type: ignore
+    assert ptree.model.parameters["a"] == ((1 / 60) * b2.msecond)  # type: ignore
 
 
 # def test_neurontree_add_neurongroup(mfx_nmda: B2Model) -> None:
