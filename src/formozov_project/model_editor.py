@@ -21,6 +21,15 @@ from formozov_project.reconstructor import Reconstructor
 
 
 class EditableParameterTree(ParameterTree):
+    """
+    ParameterTree Subclass with additional context menu entries
+
+    Parameters
+    ----------
+    ParameterTree :
+        pyqtgraph ParameterTree class for pretty-displaying hierarchical parameter trees
+    """
+
     def __init__(
         self,
         model: B2Model,
@@ -29,6 +38,23 @@ class EditableParameterTree(ParameterTree):
         parent: QtWidgets.QWidget | None = None,
         showHeader: bool = True,
     ):
+        """
+        Create a new paramter tree displaying a part of the definition of a B2Model.
+        Editing the parameter tree edits the model class. When something is edited, the model will be rebuild
+
+        Parameters
+        ----------
+        model : B2Model
+            model to display a part of
+        item_adder_dialog : Dialog to open when right-clicking into empty space.
+
+        name : str
+            Name of the displayed parameter tree
+        parent : QtWidgets.QWidget | None, optional
+            Parent widget, by default None
+        showHeader : bool, optional
+            Whether the header node shall be shown or not, by default True
+        """
         super().__init__(parent=parent, showHeader=showHeader)
 
         self.model = model
@@ -43,7 +69,17 @@ class EditableParameterTree(ParameterTree):
 
         self._connect_parameters(self.root)
 
-    def _connect_parameters(self, param):
+    def _connect_parameters(self, param: Parameter) -> None:
+        """
+        connect the signals emitted by the entries of the parameter tree to their respective actions.
+        Whenever something changes (add/delete child node, change value) the model is set to be rebuilt
+        when the dialgo is accepted, and changed parameters are updated.
+
+        Parameters
+        ----------
+        param : Parameter
+            parent paremeter
+        """
         if param.type() == "group":
             param.sigChildAdded.connect(self._set_rebuild)
             param.sigChildRemoved.connect(self._set_rebuild)
@@ -55,7 +91,22 @@ class EditableParameterTree(ParameterTree):
         else:
             param.sigValueChanged.connect(self._set_param)
 
-    def _trace_path_from_leaf(self, param: Parameter) -> list[str]:
+    def _trace_path_from(self, param: Parameter) -> list[str]:
+        """
+        Trace the path in the parametertree from the given node 'param' to the root and record it in reverse order
+        to have a traversible path for getting out the dictionary entry to be updated.
+
+        Parameters
+        ----------
+        param : Parameter
+            parameter to trace the path for
+
+        Returns
+        -------
+        list[str]
+            list of keys from the root to the given parameter. Gives a path to be traversed to get the correct element
+            in the model dict to updated
+        """
         path = []
         current_param = param
         while current_param != self.root:
@@ -64,19 +115,42 @@ class EditableParameterTree(ParameterTree):
         return list(reversed(path))
 
     def _set_rebuild(self, *_: Any) -> None:
+        """
+        Sets the `must_be_rebuilt` flag of the model to true
+        """
         self.model.must_be_rebuilt = True
 
     def _set_textfield(self, param: Parameter, value: str) -> None:
-        self.logger.info(f"setting parameter {param.name()} to value {value}")
-        path = self._trace_path_from_leaf(param)
+        """
+        Called when a textfield is edited in the parametertree, typically when equations are edited.
+        Updates the respective element in the model with the edited text
+
+        Parameters
+        ----------
+        param : Parameter
+            parameter the value of which is edited
+        value : str
+            new value
+        """
+        path = self._trace_path_from(param)
         object_to_modify = self.states
         for p in path[0:-1]:
             object_to_modify = object_to_modify[p]
         object_to_modify[param.name()] = value
 
     def _set_param(self, param: Parameter, value: Any) -> None:
+        """
+        Update a model parameter whenever its corresponding representation in the parameter tree is updated.
+
+        Parameters
+        ----------
+        param : Parameter
+            parameter that has been updated
+        value : Any
+            updated value
+        """
         self.logger.info(f"setting parameter {param.name()} to value {value}")
-        path = self._trace_path_from_leaf(param)
+        path = self._trace_path_from(param)
 
         object_to_modify = self.states
         for p in path[0:-1]:
@@ -94,13 +168,43 @@ class EditableParameterTree(ParameterTree):
             object_to_modify[param.name()] = value
         self.model.must_be_rebuilt = True
 
-    def _get_value(self, v: Any) -> TimedArray | Any:
+    def _get_value(self, v: Any) -> dict[str, Any] | Any:
+        """
+        Modifier function that represents brian2 TimedArrays as dicts with entries [values, dt] and returns
+        everything else as is.
+
+        Parameters
+        ----------
+        v : Any
+            Input value to be represented in the parameter tree
+
+        Returns
+        -------
+        dict[str, Any] | Any
+            Dict when a TimedArray is to be represented, unchanged input otherwise
+        """
         if isinstance(v, TimedArray):
             return {"values": v.values, "dt": v.dt}
         else:
             return v
 
     def _convert_dict_to_params(self, data: dict[Any, Any], key: Any = "") -> list[Any]:
+        """
+        Recursively go through a nested dict and create a hierarchical pyqtgraph Parameter representation of it
+        from which a ParameterTree object can be constructed.
+
+        Parameters
+        ----------
+        data : dict[Any, Any]
+            Possibly nested dict to be represented in the parametertree
+        key : Any, optional
+            Current key of 'data' that is processed. Needed for keeping track of parameter names, by default ""
+
+        Returns
+        -------
+        list[Any]
+            list of Parameter representations that internally define all the parent-child relationships to create the parametertree.
+        """
         params = []
         for key, value in data.items():
             param_type = "str"  # Default type
@@ -143,6 +247,15 @@ class EditableParameterTree(ParameterTree):
         return params
 
     def contextMenuEvent(self, ev: QtCore.QEvent) -> None:
+        """
+        Modified context menu to allow for adding elements through custom dialogs when a right click in a free area occurs
+
+        Parameters
+        ----------
+        ev : QtCore.QEvent
+            Click event to be processed. Will open the standard context menu when an item is hit, and opens a custom dialog
+            given in the callers constructor otherwise.
+        """
         if self.itemAt(ev.pos()):
             super().contextMenuEvent(ev)
         else:
@@ -153,11 +266,18 @@ class EditableParameterTree(ParameterTree):
             if action == action_menu_entry:
                 self.addItem()
 
-    def setParameters(self, params: Any, showTop: bool = False) -> None:
-        super().setParameters(params, showTop=showTop)
-        self.params = params
-
     def updateParams(self, new_name: str, new_data: dict[Any, Any]) -> None:
+        """
+        Update the parameters in the parametertree when a new item is added
+        tot he model through the custom dialog.
+
+        Parameters
+        ----------
+        new_name : str
+            Name of the element to be added
+        new_data : dict[Any, Any]
+            Data dict to be added
+        """
         param = self._convert_dict_to_params(
             {
                 new_name: new_data,
@@ -166,6 +286,10 @@ class EditableParameterTree(ParameterTree):
         self.root.addChildren(param)
 
     def addItem(self) -> None:
+        """
+        Call the custom dialog given in the callers constructor to add custom elements and update
+        the parametertree accordingly
+        """
         # check which name has changed, add this name to the internal dict
         # and to the parameters that are displayed
         old_names = set(getattr(self.model, self.name).keys())
@@ -179,12 +303,33 @@ class EditableParameterTree(ParameterTree):
 
 
 class EditableNeurongroupTree(EditableParameterTree):
+    """
+    Subclass for representing neurongroups and neuronsubgroups in the gui using
+    a pyqtgraph ParameterTree
+
+    Parameters
+    ----------
+    EditableParameterTree : EditableParameterTree
+    """
+
     def __init__(
         self,
         model: B2Model,
         parent: QtWidgets.QWidget | None = None,
         showHeader: bool = True,
     ):
+        """
+        Create a new EditableNeurongroupTree element in the gui
+
+        Parameters
+        ----------
+        model : B2Model
+            Model to represent the neurongroups of
+        parent : QtWidgets.QWidget | None, optional
+            parent widget, by default None
+        showHeader : bool, optional
+            Show the root node title or not, by default True
+        """
         super().__init__(
             model=model,
             item_adder_dialog=NeuronGroupDialog,
@@ -194,12 +339,17 @@ class EditableNeurongroupTree(EditableParameterTree):
         )
 
     def contextMenuEvent(self, ev: QtCore.Event) -> None:
+        """
+        Modify the standard context menu opened upon right click to allow for
+        the addition of neurongroups and neuronsubgroups when a right click occurs in an empty region
+
+        Parameters
+        ----------
+        ev : QtCore.Event Click event to process
+        """
         if self.itemAt(ev.pos()):
-            self.logger.info("found item")
             super().contextMenuEvent(ev)
         else:
-            self.logger.info("no item found here")
-
             menu = QtWidgets.QMenu(self)
 
             ng_menu_entry = menu.addAction("add Neurongroup")
@@ -229,7 +379,26 @@ class EditableNeurongroupTree(EditableParameterTree):
 
 
 class ModelEditorDialog(QtWidgets.QDialog):
+    """
+    Editor dialog for editing the properties of a model using multiple pyqtgraph ParameterTrees.
+
+    Parameters
+    ----------
+    QtWidgets : QtWidgets.QDialog
+        Basic Qt Dialog class
+    """
+
     def __init__(self, model: B2Model, parent: QtWidgets.QWidget | None = None):
+        """
+        Create a new modeleditor instance and tie it to a B2Model instance.
+
+        Parameters
+        ----------
+        model : B2Model
+            Model to edit through the gui
+        parent : QtWidgets.QWidget | None, optional
+            parent widget, by default None
+        """
         super().__init__(parent=parent)
 
         trees = {
@@ -287,6 +456,9 @@ class ModelEditorDialog(QtWidgets.QDialog):
         self.setLayout(layout)
 
     def accept(self):
+        """
+        Accept the current state of the model and rebuilt it if anything has been edited.
+        """
         if self.model.must_be_rebuilt:
             self.logger.info("rebuilding model after change")
             states = self.model.to_dict()

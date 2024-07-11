@@ -391,7 +391,7 @@ class Gui(QtWidgets.QMainWindow):
             file_menu,
             self.toolbar,
             shortcut="Ctrl+E",
-            icon=qta.icon("mdi6.cog-box"),
+            icon=qta.icon("mdi6.cog"),
         )
         self.toolbar.addSeparator()
         add_action(
