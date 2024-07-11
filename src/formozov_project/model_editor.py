@@ -42,18 +42,20 @@ class EditableParameterTree(ParameterTree):
 
         self._connect_parameters(self.root)
 
-    def _connect_parameters(self, parameter):
-        parameter.sigValueChanged.connect(self.on_change)
-        parameter.sigNameChanged.connect(self.on_change)
-        # If parameter is a group, recurse through its children
-        if parameter.type() == "group":
-            for child in parameter.children():
+    def _connect_parameters(self, param):
+        for child in param.children():
+            if child.type() == "group":
                 self._connect_parameters(child)
+                child.sigChildAdded.connect(self._on_change)
+                child.sigChildRemoved.connect(self._on_change)
+            else:
+                child.sigValueChanged.connect(self._on_change)
+                child.sigNameChanged.connect(self._on_change)
 
-    def on_change(self):
+    def _on_change(self):
         self.model.must_be_rebuild = True
 
-    def get_value(v: Any) -> TimedArray | Any:
+    def _get_value(self, v: Any) -> TimedArray | Any:
         if isinstance(v, TimedArray):
             return {"values": v.values, "dt": v.dt}
         else:
@@ -63,6 +65,7 @@ class EditableParameterTree(ParameterTree):
         params = []
         for key, value in data.items():
             param_type = "str"  # Default type
+            value = self._get_value(value)
             if isinstance(value, dict):
                 child_params = self._convert_dict_to_params(value, key)
                 params.append(

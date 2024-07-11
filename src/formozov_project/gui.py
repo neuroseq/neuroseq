@@ -28,7 +28,7 @@ class Gui(QtWidgets.QMainWindow):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.logger.info("starting Gui")
-        self.model = B2Model()
+        self.model = None
         self.neurons: dict[str, b2.StateMonitor] = {}
         self.synapses: dict[str, b2.StateMonitor] = {}
         self.setWindowTitle("Formozov Project")
@@ -120,14 +120,19 @@ class Gui(QtWidgets.QMainWindow):
             self.update_model()
 
     def btn_open_clicked(self) -> None:
-        filename, _ = getopenfilename(
-            self,
-            "load model",
-            "model.yaml",
-            "yaml file (*.yaml)",
-        )
-        if filename != "":
-            self.load_model(filename)
+        if self.model is None:
+            filename, _ = getopenfilename(
+                self,
+                "load model",
+                "model.yaml",
+                "yaml file (*.yaml)",
+            )
+            if filename != "":
+                self.load_model(filename)
+
+        mdiag = ModelEditorDialog(self.model, parent=self)
+
+        mdiag.exec()
 
     def btn_open_example_model_clicked(self) -> None:
         self.load_model(
@@ -146,9 +151,6 @@ class Gui(QtWidgets.QMainWindow):
             self.model = model
             self.logger.info(f"Model {self.model.name} loaded from {filename}")
 
-            mdiag = ModelEditorDialog(self.model, parent=self)
-
-            mdiag.exec()
         except Exception as e:
             self.logger.warning(f"Failed to load model from file {filename}: {e}")
             QtWidgets.QMessageBox.critical(
