@@ -108,7 +108,7 @@ class Reconstructor:
         try:
             getattr(model, assembler)(name)
         except Exception as e:
-            message = f"Error when assembing object {name}: {e}"
+            message = f"Error when assembling object {name}: {e}"
             raise RuntimeError(message) from e
 
         excluded = [n[0] for n in augmented]
@@ -153,8 +153,9 @@ class Reconstructor:
         """
         augmented = list(
             zip(
-                ["N", "model", "th", "refractory", "reset", "method"],
+                ["N", "n", "model", "th", "refractory", "reset", "method"],
                 [
+                    model.define_neuronnumber,
                     model.define_neuronnumber,
                     model.define_equation,
                     model.define_threshold,

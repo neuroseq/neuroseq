@@ -70,6 +70,9 @@ class EditableParameterTree(ParameterTree):
 
         self._connect_parameters(self.root)
 
+        self.add_item_action = QtWidgets.QAction(f"add {self.name}")
+        self.add_item_action.triggered.connect(self.add_item)
+
     def _connect_parameters(self, param: Parameter) -> None:
         """
         connect the signals emitted by the entries of the parameter tree to their respective actions.
@@ -285,13 +288,10 @@ class EditableParameterTree(ParameterTree):
             super().contextMenuEvent(ev)
         else:
             menu = QtWidgets.QMenu(self)
-            action_menu_entry = menu.addAction(f"add {self.name}")
-            action = menu.exec(self.mapToGlobal(ev.pos()))
+            menu.addAction(self.add_item_action)
+            menu.exec(self.mapToGlobal(ev.pos()))
 
-            if action == action_menu_entry:
-                self.addItem()
-
-    def updateParams(self, new_name: str, new_data: dict[Any, Any]) -> None:
+    def update_params(self, new_name: str, new_data: dict[Any, Any]) -> None:
         """
         Update the parameters in the parametertree when a new item is added
         tot he model through the custom dialog.
@@ -310,21 +310,23 @@ class EditableParameterTree(ParameterTree):
         )
         self.root.addChildren(param)
 
-    def addItem(self) -> None:
+    def add_item(self) -> None:
         """
         Call the custom dialog given in the callers constructor to add custom elements and update
         the parametertree accordingly
         """
+
         # check which name has changed, add this name to the internal dict
         # and to the parameters that are displayed
         old_names = set(getattr(self.model, self.name).keys())
-        dialog = self.dialogtype(self.model)
+        self.dialog = self.dialogtype(self.model)
 
         # update the internal states by
-        if dialog.exec():
+        if self.dialog.exec():
             new_names = set(getattr(self.model, self.name).keys())
+
             new_name = list(new_names - old_names)[0]
-            self.updateParams(new_name, getattr(self.model, self.name)[new_name])
+            self.update_params(new_name, getattr(self.model, self.name)[new_name])
 
 
 class EditableNeurongroupTree(EditableParameterTree):
@@ -363,6 +365,23 @@ class EditableNeurongroupTree(EditableParameterTree):
             showHeader=showHeader,
         )
 
+        self.add_neurongroup_action = self.add_item_action
+        self.add_neurongroup_action.setText("add Neurongroup")
+
+        self.add_neuronsubgroup_action = QtWidgets.QAction("add Neuron subgroup")
+        self.add_neuronsubgroup_action.triggered.connect(self._add_neuronsubgroup)
+
+    def _add_neuronsubgroup(self) -> None:
+        """open neuron subgroup definition dialog and update the displayed parameters"""
+        old_names = set(getattr(self.model, self.name).keys())
+        self.dialog = NeuronSubgroupDialog(self.model)
+
+        # update the internal states by
+        if self.dialog.exec():
+            new_names = set(getattr(self.model, self.name).keys())
+            new_name = list(new_names - old_names)[0]
+            self.update_params(new_name, getattr(self.model, self.name)[new_name])
+
     def contextMenuEvent(self, ev: QtCore.Event) -> None:
         """
         Modify the standard context menu opened upon right click to allow for
@@ -377,30 +396,11 @@ class EditableNeurongroupTree(EditableParameterTree):
         else:
             menu = QtWidgets.QMenu(self)
 
-            ng_menu_entry = menu.addAction("add Neurongroup")
+            menu.addAction(self.add_neurongroup_action)
 
-            nsg_menu_entry = menu.addAction("add Neuron subgroup")
+            menu.addAction(self.add_neuronsubgroup_action)
 
-            action = menu.exec(self.mapToGlobal(ev.pos()))
-
-            old_names = set(getattr(self.model, self.name).keys())
-
-            dialog = None
-
-            if action == ng_menu_entry:
-                dialog = NeuronGroupDialog(
-                    self.model,
-                )
-
-            elif action == nsg_menu_entry:
-                dialog = NeuronSubgroupDialog(self.model)
-
-            if dialog is not None and dialog.exec():
-                new_names = set(getattr(self.model, self.name).keys())
-                new_name = list(new_names - old_names)[0]
-
-                # update the internal states by
-                self.updateParams(new_name, getattr(self.model, self.name)[new_name])
+            menu.exec(self.mapToGlobal(ev.pos()))
 
 
 class ModelEditorDialog(QtWidgets.QDialog):
@@ -448,7 +448,6 @@ class ModelEditorDialog(QtWidgets.QDialog):
             ),
         }
         self.model = model
-        self.model_has_been_edited = False
         self.logger = logging.getLogger(__name__)
 
         layout = QtWidgets.QGridLayout()
@@ -497,16 +496,19 @@ class ModelEditorDialog(QtWidgets.QDialog):
             # the sequence of random number changes due to brian2 caching them.
             if self.model.seed != states["seed"]:
                 QtWidgets.QMessageBox.warning(
-                    "The system's random number generator will be reseeded. This potentially can change the results when compared to previous ones"
+                    self,
+                    "Model rng warning"
+                    "The system's random number generator will be reseeded. This potentially can change the results when compared to previous ones",
                 )
-                new_model = B2Model(seed=states["seed"])
+            new_model = B2Model(seed=states["seed"])
 
             try:
                 constr.reconstruct(new_model)
             except Exception as e:
                 message = f"Error when rebuilding the model after editing: {e}"
                 self.logger.critical(message)
-                QtWidgets.QMessageBox.critical(message)
+                QtWidgets.QMessageBox.critical(self, "Model rebuilding error", message)
             self.model = new_model
+            self.model.must_be_rebuilt = False
 
         super().accept()

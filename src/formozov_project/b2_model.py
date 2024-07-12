@@ -723,28 +723,6 @@ class B2Model:
 
         self.network.add(ng)
 
-    def assemble_system(self) -> None:
-        self.network = b2.Network(self.name)
-
-        # build neurongroups
-        for n, v in self.neurongroups.items():
-            if "idx" not in v:
-                self.assemble_neurongroup(n)
-
-        # build subgroups
-        for v in self.neurongroups.values():
-            if "idx" in v:
-                self.define_neuron_subgroup(**v)
-
-        # build synapses
-        for s in self.synapses:
-            self.assemble_synapse(s)
-
-        # build monitors
-        for v in self.monitors.values():
-            cls = getattr(b2, v["type"])
-            self.define_monitor(v["name"], cls, v["source"], v["variable"])
-
     def save_to_h5(self, path: str | Path) -> None:
         """
         save_to_h5 Save data collected by defined monitor objects to hdf5.
@@ -858,18 +836,20 @@ class B2Model:
         states["objects"]["neurongroups"] = list(self.neurongroups.keys())
         states["objects"]["synapses"] = list(self.synapses.keys())
         states["objects"]["monitors"] = list(self.monitors.keys())
-
         states["parameters"] = self.parameters
 
         # augment neurongroups and synapses
         for group in [self.neurongroups, self.synapses]:
             for key, n in group.items():
+                if key not in states:
+                    states[key] = {}
                 for k, v in n.items():
                     states[key][k] = v
 
         # add minimal defining data for monitors to avoid data writing
         for key, n in self.monitors.items():
-            states[key] = {}
+            if key not in states:
+                states[key] = {}
 
             for k, v in n.items():
                 states[key][k] = v
