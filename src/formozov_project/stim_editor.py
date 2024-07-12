@@ -7,6 +7,8 @@ import brian2.numpy_ as np
 import qtawesome as qta
 from qtpy import QtCore
 from qtpy import QtWidgets
+from qtpy.compat import getopenfilename
+from qtpy.compat import getsavefilename
 
 from formozov_project.b2_model import B2Model
 from formozov_project.stim_widget import StimWidget
@@ -132,6 +134,63 @@ class StimEditor(QtWidgets.QWidget):
         self.stim_widget.set_data(self.current_stim)
         self.stim_widget.select_neurons(self.copy_neuron_slice, new_time_slice)
 
+    def save_selected_stim(self) -> None:
+        if (
+            self.current_stim is None
+            or self.stim_widget.selected_time_slice is None
+            or self.stim_widget.selected_neuron_slice is None
+        ):
+            return
+        filename, _ = getsavefilename(
+            self,
+            "Save stim selection",
+            "stim.npy",
+            "NumPy npy file (*.npy)",
+        )
+        if filename == "":
+            return
+        arr = self.current_stim.values[
+            self.stim_widget.selected_time_slice, self.stim_widget.selected_neuron_slice
+        ]
+        self.logger.info(f"Saving {arr.shape} stim selection to file {filename}")
+        try:
+            np.save(filename, arr, allow_pickle=False, fix_imports=False)
+        except Exception as e:
+            msg = f"Error saving stim selection to file: {e}"
+            self.logger.error(msg)
+            QtWidgets.QMessageBox.critical(self, "Error", msg)
+
+    def load_selected_stim(self) -> None:
+        if self.current_stim is None:
+            return
+        filename, _ = getopenfilename(
+            self,
+            "Load stim selection",
+            "stim.npy",
+            "NumPy npy file (*.npy)",
+        )
+        if filename == "":
+            return
+        try:
+            arr = np.load(filename, allow_pickle=False, fix_imports=False)
+            self.logger.info(f"Loaded {arr.shape} stim selection from file {filename}")
+            if arr.ndim > 2:
+                raise ValueError("Loaded array has wrong shape")
+            if arr.shape[0] > self.current_stim.values.shape[0]:
+                raise ValueError("Loaded array has too many time points")
+            if arr.ndim == 2 and arr.shape[1] > self.current_stim.values.shape[1]:
+                raise ValueError("Loaded array has too many neurons")
+            time_offset = int(self.stim_widget.timeline.x() / self.current_stim.dt)
+            new_time_slice = slice(time_offset, time_offset + arr.shape[0])
+            new_neuron_slice = slice(0, arr.shape[1])
+            self.current_stim.values[new_time_slice, new_neuron_slice] = arr
+            self.stim_widget.set_data(self.current_stim)
+            self.stim_widget.select_neurons(new_neuron_slice, new_time_slice)
+        except Exception as e:
+            msg = f"Error loading stim selection from file: {e}"
+            self.logger.error(msg)
+            QtWidgets.QMessageBox.critical(self, "Error", msg)
+
     def delete_selected_stim(self) -> None:
         if self.current_stim is None:
             return
@@ -213,6 +272,24 @@ class StimEditor(QtWidgets.QWidget):
             self,
             shortcut="Ctrl+V",
             icon=qta.icon("mdi6.content-paste"),
+        )
+        add_action(
+            "Save to file",
+            self.save_selected_stim,
+            menu,
+            self.toolbar,
+            self,
+            shortcut="Ctrl+Shift+S",
+            icon=qta.icon("mdi6.content-save"),
+        )
+        add_action(
+            "Load from file",
+            self.load_selected_stim,
+            menu,
+            self.toolbar,
+            self,
+            shortcut="Ctrl+Shift+O",
+            icon=qta.icon("mdi6.folder-open"),
         )
         add_action(
             "Delete",
