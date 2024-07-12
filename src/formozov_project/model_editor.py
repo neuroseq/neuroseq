@@ -38,6 +38,7 @@ class EditableParameterTree(ParameterTree):
         domain_name: str,
         parent: QtWidgets.QWidget | None = None,
         showHeader: bool = True,
+        list_items: dict[str, Any] | None = None,
     ):
         """
         Create a new paramter tree displaying a part of the definition of a B2Model.
@@ -58,11 +59,16 @@ class EditableParameterTree(ParameterTree):
         """
         super().__init__(parent=parent, showHeader=showHeader)
 
+        if list_items is None:
+            list_items = {}
+
         self.model = model
         self.dialogtype = item_adder_dialog
         self.logger = logging.getLogger(__name__)
         self.name = domain_name
         self.states = getattr(self.model, self.name)
+        self.list_items = list_items
+
         params = self._convert_dict_to_params(self.states)
         self.root = Parameter.create(name=domain_name, type="group", children=params)
 
@@ -94,6 +100,14 @@ class EditableParameterTree(ParameterTree):
             param.sigValueChanged.connect(self._set_textfield)
         else:
             param.sigValueChanged.connect(self._set_param)
+
+    def _update_list_param(
+        self,
+        param: Parameter,
+    ) -> None:
+        new_list = self.list_items[param.name()]["callback"]()
+
+        param.setLimits(new_list)
 
     def _trace_path_from(self, param: Parameter) -> list[str]:
         """
@@ -255,6 +269,8 @@ class EditableParameterTree(ParameterTree):
             value = self._get_value(value)
             if isinstance(value, dict):
                 child_params = self._convert_dict_to_params(value, key)
+
+                # FIXME: this thing needs a + button for some things with an activated list to choose from for some of those in turn
                 params.append(
                     {
                         "name": key,
@@ -276,7 +292,6 @@ class EditableParameterTree(ParameterTree):
                     param_type = "bool"
                 elif isinstance(value, str):
                     param_type = "text" if "\n" in value else "str"
-                # TODO: add quantity parameter type
 
                 param = {
                     "name": key,
@@ -286,6 +301,11 @@ class EditableParameterTree(ParameterTree):
                     "renamable": False,
                     "syncExpanded": True,
                 }
+
+                if key in list(self.list_items.keys()):
+                    param["type"] = "list"
+                    param["limits"] = self.list_items[key]["callback"]()
+
                 params.append(param)
 
         return params
@@ -345,6 +365,108 @@ class EditableParameterTree(ParameterTree):
             self.update_params(new_name, getattr(self.model, self.name)[new_name])
 
 
+class EditableSynapseTree(EditableParameterTree):
+    def __init__(
+        self,
+        model: B2Model,
+        parent: QtWidgets.QWidget | None = None,
+        showHeader: bool = True,
+    ):
+        super().__init__(
+            model,
+            parent=parent,
+            item_adder_dialog=SynapseDialog,
+            showHeader=showHeader,
+            domain_name="synapses",
+            list_items={
+                "method": {
+                    "callback": lambda: ["euler", "exponential_euler", "exact"],
+                },
+                "origin": {
+                    "callback": self._update_neurongroup_list,
+                },
+                "target": {
+                    "callback": self._update_neurongroup_list,
+                },
+            },
+        )
+
+    def _update_neurongroup_list(self) -> list[str]:
+        """
+        update the currently available list of neurongroups
+
+        Returns
+        -------
+        list[str]
+            list of neurongroups to choose from
+        """
+        return list(self.model.neurongroups.keys())
+
+
+class EditableMonitorTree(EditableParameterTree):
+    def __init__(
+        self,
+        model: B2Model,
+        parent: QtWidgets.QWidget | None = None,
+        showHeader: bool = True,
+    ):
+        super().__init__(
+            model,
+            parent=parent,
+            item_adder_dialog=MonitorDialog,
+            showHeader=showHeader,
+            domain_name="monitors",
+            list_items={},
+        )
+
+        self.list_items = {
+            "type": {
+                "callback": lambda: [b2.StateMonitor, b2.SpikeMonitor],
+            },
+            "source": {
+                "callback": self._update_object_list,
+            },
+            "variable": {
+                "callback": self._get_variable_list,
+            },
+        }
+
+        params = self._convert_dict_to_params(self.states)
+        self.root = Parameter.create(name="monitors", type="group", children=params)
+
+        self.setParameters(self.root, showTop=False)
+
+        self._connect_parameters(self.root)
+
+    def _update_object_list(self) -> list[str]:
+        """
+        update the currently available list of objects to monitor
+
+        Returns
+        -------
+        list[str]
+            list of synapses to choose from
+        """
+        return [
+            n
+            for n in self.model.neurongroups
+            if "idx" not in self.model.neurongroups[n]
+        ] + list(self.model.synapses.keys())
+
+    def _get_variable_list(self) -> list[str]:
+        """
+        get the list of variables from the currently selected element to monitor
+
+        Returns
+        -------
+        list[str]
+            list of variables to monitor
+        """
+        if self.current_active is not None:
+            print(self.current_active.name())
+        return []
+
+
 class EditableNeurongroupTree(EditableParameterTree):
     """
     Subclass for representing neurongroups and neuronsubgroups in the gui using
@@ -379,6 +501,14 @@ class EditableNeurongroupTree(EditableParameterTree):
             domain_name="neurongroups",
             parent=parent,
             showHeader=showHeader,
+            list_items={
+                "method": {
+                    "callback": lambda: ["euler", "exponential_euler", "exact"],
+                },
+                "target": {
+                    "callback": self._update_neurongroup_list,
+                },
+            },
         )
 
         self.add_neurongroup_action = self.add_item_action
@@ -397,6 +527,21 @@ class EditableNeurongroupTree(EditableParameterTree):
             new_names = set(getattr(self.model, self.name).keys())
             new_name = list(new_names - old_names)[0]
             self.update_params(new_name, getattr(self.model, self.name)[new_name])
+
+    def _update_neurongroup_list(self) -> list[str]:
+        """
+        update the currently available list of neurongroups
+
+        Returns
+        -------
+        list[str]
+            list of neurongroups to choose from
+        """
+        return [
+            n
+            for n in self.model.neurongroups
+            if "idx" not in self.model.neurongroups[n]
+        ]
 
     def contextMenuEvent(self, ev: QtCore.Event) -> None:
         """
@@ -444,16 +589,12 @@ class ModelEditorDialog(QtWidgets.QDialog):
 
         trees = {
             "Neurongroups": EditableNeurongroupTree(model, parent=self),
-            "Synapses": EditableParameterTree(
+            "Synapses": EditableSynapseTree(
                 model,
-                SynapseDialog,
-                domain_name="synapses",
                 parent=self,
             ),
-            "Monitors": EditableParameterTree(
+            "Monitors": EditableMonitorTree(
                 model,
-                MonitorDialog,
-                domain_name="monitors",
                 parent=self,
             ),
             "Parameters": EditableParameterTree(
