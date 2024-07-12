@@ -170,8 +170,6 @@ def test_neuron_subgroup(
         )
     ) == list(range(20, 30))
 
-    print(list(mfx.neurongroups.keys()))
-
     assert mfx.network[mfx.neurongroups["excitatory"]["name"]] is not None
     assert mfx.network[mfx.neurongroups["inhibitory"]["name"]] is not None
 

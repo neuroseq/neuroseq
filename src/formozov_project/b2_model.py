@@ -17,6 +17,14 @@ class B2Model:
     Wrapper class that bundles brian2 capabilities for modelling neuronal networks.
     """
 
+    def _trigger_rebuild(func: Callable) -> Callable:  # type: ignore
+        def do_with_rebuild(self, *args, **kwargs):
+            func(self, *args, **kwargs)
+            self.must_be_rebuilt = True
+
+        return do_with_rebuild
+
+    @_trigger_rebuild
     def _update_nested_dict(self, original: dict, updates: dict) -> None:
         """
         _update_nested_dict Update nested dictionary with another dictionary.
@@ -40,6 +48,7 @@ class B2Model:
             else:
                 original[key] = value
 
+    @_trigger_rebuild
     def _add_equation_to_group(self, group: dict, line: str) -> None:
         r"""
         _add_equation_to_group Add an equation to a neurongroup or synapse dictionary that holds arguments to construct the respective objects.
@@ -94,8 +103,8 @@ class B2Model:
         self.monitors: dict[str, dict[str, Any]] = {}
         # self.init_vars: dict[str, dict[str, Any]] = {}
         self.dt: b2.Quantity | None = None
-        self.solver = None
         self.checkpoints: list[str] = []
+        self.must_be_rebuilt = False
         self.logger = logging.getLogger(__name__)
         self.logger.info("Model creation complete")
 
@@ -148,12 +157,7 @@ class B2Model:
             When setting the quantity fails
         """
         try:
-            # if elementname not in self.init_vars:
-            #     self.init_vars[elementname] = {}
-
             setattr(self.network[elementname], varname, value)
-
-            # self.init_vars[elementname][varname] = value
 
         except Exception as e:
             raise ValueError(
@@ -195,6 +199,7 @@ class B2Model:
         """
         self.network.name = self.name
 
+    @_trigger_rebuild
     def define_parameter(
         self, name: str, value: str | b2.Quantity | b2.TimedArray
     ) -> None:
@@ -547,6 +552,7 @@ class B2Model:
             },
         )
 
+    @_trigger_rebuild
     def assemble_synapse(
         self,
         name: str,
@@ -604,6 +610,7 @@ class B2Model:
 
         self.network.add(synapse)
 
+    @_trigger_rebuild
     def define_monitor(
         self, name: str, cls: type, group: str, variable: str | None = None
     ) -> None:
@@ -674,6 +681,7 @@ class B2Model:
             },
         )
 
+    @_trigger_rebuild
     def assemble_neurongroup(
         self,
         name: str = "neurongroup",
@@ -815,15 +823,7 @@ class B2Model:
             logging.exception(e)
             raise ValueError(message) from e
 
-    def save_model(self, filepath: str | Path) -> None:
-        """
-        Save the current state of the network to disk
-
-        Parameters
-        ----------
-        filepath : str
-            path to the json file where the current state should be stored
-        """
+    def to_dict(self) -> dict[Any, Any]:
         states = self.network.get_states()
         states["current_time"] = self.network.t
 
@@ -836,24 +836,36 @@ class B2Model:
         states["objects"]["neurongroups"] = list(self.neurongroups.keys())
         states["objects"]["synapses"] = list(self.synapses.keys())
         states["objects"]["monitors"] = list(self.monitors.keys())
-
         states["parameters"] = self.parameters
 
         # augment neurongroups and synapses
         for group in [self.neurongroups, self.synapses]:
             for key, n in group.items():
-                if "method" in states[key]:
-                    states[key]["method"] = self.solver
-
+                if key not in states:
+                    states[key] = {}
                 for k, v in n.items():
                     states[key][k] = v
 
         # add minimal defining data for monitors to avoid data writing
         for key, n in self.monitors.items():
-            states[key] = {}
+            if key not in states:
+                states[key] = {}
 
             for k, v in n.items():
                 states[key][k] = v
+
+        return states
+
+    def save_model(self, filepath: str | Path) -> None:
+        """
+        Save the current state of the network to disk
+
+        Parameters
+        ----------
+        filepath : str
+            path to the yaml file where the current state should be stored
+        """
+        states = self.to_dict()
 
         with open(filepath, "w") as file:
             b2json.dump(states, file)

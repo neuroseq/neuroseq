@@ -295,7 +295,7 @@ class ModelDialog(QtWidgets.QDialog):
 
     def display_parameters(
         self,
-        target: str | dict[Any, Any],
+        target: str | dict[Any, Any] | None,
         read_only: bool = False,
         blocking: bool = True,
     ) -> None:
@@ -320,7 +320,7 @@ class ModelDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(window)
         self.dictwidget = DictionaryWidget(d, window, read_only=read_only)
         layout.addWidget(self.dictwidget)
-        self.dictwidget.setLayout(layout)
+
         window.resize(800, 600)  # FIXME: make this more flexible
 
         window.move(self.x() + self.width(), self.y())
@@ -608,17 +608,11 @@ class NeuronSubgroupDialog(ModelDialog):
             self.target_button.text = "saved"
 
     def display_parameters(
-        self,
-        _: str | dict[Any, Any] | None = None,
-        read_only: bool = False,
-        __: bool = True,
+        self, _: str | dict[Any, Any] | None = None, __: bool = True, ___: bool = True
     ) -> None:
         """
         Display the parameters of a target member of the model in a new window.
 
-        Parameters
-        ----------
-        read_only: bool  whether to have the elements read only or not
         """
 
         self.parameterwindow = QtWidgets.QDialog(self)
@@ -636,10 +630,6 @@ class NeuronSubgroupDialog(ModelDialog):
         ):
             nameitem = QtWidgets.QTableWidgetItem(str(n))
             valueitem = QtWidgets.QTableWidgetItem(str(v))
-
-            if read_only:
-                nameitem.setFlags(nameitem.flags() & ~QtCore.Qt.ItemIsEditable)
-                valueitem.setFlags(valueitem.flags() & ~QtCore.Qt.ItemIsEditable)
 
             table.setItem(i, 0, nameitem)
             table.setItem(i, 1, valueitem)
@@ -884,7 +874,10 @@ class ParameterDialog(ModelDialog):
             self.value_button.setText("saved")
 
     def display_parameters(
-        self, _: str | dict[Any, Any], read_only: bool = False, blocking: bool = True
+        self,
+        _: str | dict[Any, Any] | None,
+        read_only: bool = False,
+        blocking: bool = True,
     ) -> None:
         """
         Display all the parameters in the system in a new window.

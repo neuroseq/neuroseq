@@ -15,6 +15,7 @@ from formozov_project import __version__
 from formozov_project.b2_model import B2Model
 from formozov_project.b2_model_widget import B2ModelWidget
 from formozov_project.heatmap_widget import HeatmapWidget
+from formozov_project.model_editor import ModelEditorDialog
 from formozov_project.stim_console import StimConsole
 from formozov_project.stim_editor import StimEditor
 from formozov_project.trace_widget import TraceWidget
@@ -128,6 +129,21 @@ class Gui(QtWidgets.QMainWindow):
         if filename != "":
             self.load_model(filename)
 
+    def btn_edit_clicked(self) -> None:
+        if not self.model.neurongroups:
+            message = "There is no model to be edited, first open an existing one or define a new one"
+            self.logger.critical(message)
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Model edit error",
+                message,
+            )
+        else:
+            mdiag = ModelEditorDialog(self.model, parent=self)
+
+            if mdiag.exec():
+                self.update_model()
+
     def btn_open_example_model_clicked(self) -> None:
         self.load_model(
             str(
@@ -144,6 +160,7 @@ class Gui(QtWidgets.QMainWindow):
             model = B2Model.load_model(filename, report=self._update_load_progress)
             self.model = model
             self.logger.info(f"Model {self.model.name} loaded from {filename}")
+
         except Exception as e:
             self.logger.warning(f"Failed to load model from file {filename}: {e}")
             QtWidgets.QMessageBox.critical(
@@ -367,6 +384,14 @@ class Gui(QtWidgets.QMainWindow):
             self.toolbar,
             shortcut="Ctrl+S",
             icon=qta.icon("mdi6.content-save"),
+        )
+        add_action(
+            "&Edit",
+            self.btn_edit_clicked,
+            file_menu,
+            self.toolbar,
+            shortcut="Ctrl+E",
+            icon=qta.icon("mdi6.cog"),
         )
         self.toolbar.addSeparator()
         add_action(

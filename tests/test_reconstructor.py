@@ -13,7 +13,7 @@ def mfx_nmda_serialized(tmp_path: Path, mfx_nmda: B2Model) -> Generator:
     yield tmp_path / "testmodel.json"
 
 
-def raise_error(s: B2Model, name: str, line: str) -> None:
+def raise_error(s: B2Model, name: str) -> None:
     raise ValueError("Mocked error")
 
 
@@ -49,7 +49,7 @@ def test_reconstruct_object_exception_assembler(
     reconstructor = Reconstructor(mfx_nmda_serialized)
     model = B2Model()
 
-    with pytest.raises(RuntimeError, match="Error when assembing object neurons"):
+    with pytest.raises(RuntimeError, match="Error when assembling object neurons"):
         reconstructor.reconstruct_neurongroups(
             model, "neurons", reconstructor.loaded_data["neurons"]
         )
