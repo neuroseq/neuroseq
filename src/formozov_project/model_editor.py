@@ -184,7 +184,6 @@ class EditableParameterTree(ParameterTree):
                     )
                     ok = False
 
-            # Output to verify
             return (quantity_obj, ok)
         else:
             return (quantity_str, ok)
