@@ -123,8 +123,8 @@ class Gui(QtWidgets.QMainWindow):
         filename, _ = getopenfilename(
             self,
             "load model",
-            "model.yaml",
-            "yaml file (*.yaml)",
+            "model.json",
+            "json file (*.json)",
         )
         if filename != "":
             self.load_model(filename)
@@ -149,7 +149,7 @@ class Gui(QtWidgets.QMainWindow):
             str(
                 resources.files("formozov_project")
                 / "example_models"
-                / "default_model.yaml"
+                / "default_model.json"
             )
         )
 

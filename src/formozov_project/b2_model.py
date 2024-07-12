@@ -7,8 +7,8 @@ from typing import Any
 
 import brian2 as b2
 import h5py
-import yaml
 
+from formozov_project import b2json
 from formozov_project.reconstructor import Reconstructor
 
 
@@ -868,7 +868,7 @@ class B2Model:
         states = self.to_dict()
 
         with open(filepath, "w") as file:
-            yaml.safe_dump(states, file)
+            b2json.dump(states, file)
 
     @classmethod
     def load_model(
