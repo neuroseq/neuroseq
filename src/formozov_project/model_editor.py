@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 import brian2 as b2  # noqa: F401
+import qtawesome as qta
 from brian2 import TimedArray
 from pyqtgraph.parametertree import Parameter
 from pyqtgraph.parametertree import ParameterTree
@@ -63,13 +64,17 @@ class EditableParameterTree(ParameterTree):
         self.logger = logging.getLogger(__name__)
         self.name = domain_name
         self.states = getattr(self.model, self.name)
-        params = self._convert_dict_to_params(self.states)
+
+        params = []
+
+        if self.states:
+            params = self._convert_dict_to_params(self.states)
+
         self.root = Parameter.create(name=domain_name, type="group", children=params)
 
         self.setParameters(self.root, showTop=False)
 
         self._connect_parameters(self.root)
-
         self.add_item_action = QtWidgets.QAction(f"add {self.name}")
         self.add_item_action.triggered.connect(self.add_item)
 
@@ -318,7 +323,12 @@ class EditableParameterTree(ParameterTree):
 
         # check which name has changed, add this name to the internal dict
         # and to the parameters that are displayed
-        old_names = set(getattr(self.model, self.name).keys())
+
+        if getattr(self.model, self.name):
+            old_names = set(getattr(self.model, self.name).keys())
+        else:
+            old_names = set([])
+
         self.dialog = self.dialogtype(self.model)
 
         # update the internal states by
@@ -461,18 +471,30 @@ class ModelEditorDialog(QtWidgets.QDialog):
         i = 0
         for k, t in trees.items():
             nameplate = QtWidgets.QLabel(str(k), parent=self)
+            plusbutton = QtWidgets.QPushButton(None, self)
+            plusbutton.setIcon(qta.icon("mdi6.plus"))
+            plusbutton.clicked.connect(t.add_item)
+
             bold_font = QtGui.QFont()
             bold_font.setBold(True)
             nameplate.setFont(bold_font)
             layout.addWidget(nameplate, 0, i)
-            layout.addWidget(t, 1, i)
+            layout.addWidget(plusbutton, 1, i)
+            layout.addWidget(t, 2, i)
             separator = QtWidgets.QFrame()
             separator.setFrameShape(QtWidgets.QFrame.VLine)
             separator.setFrameShadow(QtWidgets.QFrame.Sunken)
-            layout.addWidget(separator, 1, i + 1)
+            layout.addWidget(separator, 0, i + 1, 3, 1)
             i += 2
 
-        layout.addWidget(button_box, layout.rowCount(), 1, 1, 4, QtCore.Qt.AlignCenter)
+        layout.addWidget(
+            button_box,
+            layout.rowCount(),
+            1,
+            1,
+            layout.columnCount(),
+            QtCore.Qt.AlignCenter,
+        )
 
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)

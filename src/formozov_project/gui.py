@@ -13,7 +13,6 @@ from qtpy.compat import getsavefilename
 
 from formozov_project import __version__
 from formozov_project.b2_model import B2Model
-from formozov_project.b2_model_widget import B2ModelWidget
 from formozov_project.heatmap_widget import HeatmapWidget
 from formozov_project.model_editor import ModelEditorDialog
 from formozov_project.stim_console import StimConsole
@@ -114,7 +113,7 @@ class Gui(QtWidgets.QMainWindow):
         self.progress_dialog.setValue(completed_percent)
 
     def btn_new_clicked(self) -> None:
-        b2m = B2ModelWidget(B2Model(), self)
+        b2m = ModelEditorDialog(B2Model(), self)
         if b2m.exec():
             self.model = b2m.model
             self.update_model()
@@ -130,19 +129,19 @@ class Gui(QtWidgets.QMainWindow):
             self.load_model(filename)
 
     def btn_edit_clicked(self) -> None:
-        if not self.model.neurongroups:
-            message = "There is no model to be edited, first open an existing one or define a new one"
-            self.logger.critical(message)
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Model edit error",
-                message,
-            )
-        else:
-            mdiag = ModelEditorDialog(self.model, parent=self)
+        # if not self.model:
+        #     message = "There is no model to be edited, first open an existing one or define a new one"
+        #     self.logger.critical(message)
+        #     QtWidgets.QMessageBox.critical(
+        #         self,
+        #         "Model edit error",
+        #         message,
+        #     )
+        # else:
+        mdiag = ModelEditorDialog(self.model, parent=self)
 
-            if mdiag.exec():
-                self.update_model()
+        if mdiag.exec():
+            self.update_model()
 
     def btn_open_example_model_clicked(self) -> None:
         self.load_model(
