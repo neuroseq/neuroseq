@@ -6,37 +6,9 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any
 
-import yaml
-from brian2 import Quantity
-from brian2 import TimedArray
-from brian2 import numpy_
 from brian2 import seed
 
-from . import yaml_extensions as yext
-
-"""
-Add representers and constructors to the safe dumpers and loaders of yaml
-"""
-yaml.add_representer(Quantity, yext.quantity_representer, Dumper=yaml.SafeDumper)
-yaml.add_representer(numpy_.ndarray, yext.numpy_representer, Dumper=yaml.SafeDumper)
-yaml.add_representer(TimedArray, yext.timedarray_representer, Dumper=yaml.SafeDumper)
-
-
-yaml.add_constructor(
-    "!Quantity",
-    yext.quantity_constructor,
-    Loader=yaml.SafeLoader,
-)
-yaml.add_constructor(
-    "!TimedArray",
-    yext.timedarray_constructor,
-    Loader=yaml.SafeLoader,
-)
-yaml.add_constructor(
-    "!Numpy",
-    yext.numpy_constructor,
-    Loader=yaml.SafeLoader,
-)
+from formozov_project import b2json
 
 
 class Reconstructor:
@@ -51,11 +23,11 @@ class Reconstructor:
         Parameters
         ----------
         path : str
-            Path to the yaml file that contains the model
+            Path to the json file that contains the model
         """
         self.logger = logging.getLogger(__name__)
         with open(path) as file:
-            self.loaded_data = yaml.safe_load(file)
+            self.loaded_data = b2json.load(file)
 
     def _reconstruct_dynamic_object(
         self,
@@ -66,7 +38,7 @@ class Reconstructor:
         augmented: list[tuple[str, Callable]],
     ) -> None:
         """
-        Reconstruct synapses and neurongroups from their respective yaml nodes
+        Reconstruct synapses and neurongroups from their respective json nodes
 
         Parameters
         ----------
@@ -136,7 +108,7 @@ class Reconstructor:
         self, model: Any, name: str, data_of_group: dict[str, Any]
     ) -> None:
         """
-        Reconstruct a neurongroup from a yamlnode
+        Reconstruct a neurongroup from a jsonnode
 
         Parameters
         ----------
@@ -145,7 +117,7 @@ class Reconstructor:
         name : str
             name of the neurongroup to be reconstructed
         data_of_group : dict[str, Any]
-            yaml node that contains the necessary data for reconstruction
+            json node that contains the necessary data for reconstruction
         """
         augmented = list(
             zip(
@@ -195,7 +167,7 @@ class Reconstructor:
         self, model: Any, name: str, data_of_group: dict[str, Any]
     ) -> None:
         """
-        Reconstruct a synapse from a YAML node for a certain model
+        Reconstruct a synapse from a json node for a certain model
 
         Parameters
         ----------
@@ -204,7 +176,7 @@ class Reconstructor:
         name : str
             Name of the synapse to be reconstructed
         data_of_group : dict[str, Any]
-            YAML node to reconstruct the synapse from
+            json node to reconstruct the synapse from
         """
         augmented = list(
             zip(
@@ -244,7 +216,7 @@ class Reconstructor:
         self, model: Any, name: str, data_of_group: dict[str, Any]
     ) -> None:
         """
-        Reconstruct a monitor for a model from a yaml node
+        Reconstruct a monitor for a model from a json node
 
         Parameters
         ----------
@@ -253,7 +225,7 @@ class Reconstructor:
         name : str
             Name of the monitor to reconstruct
         data_of_group : dict[str, Any]
-            YAML node to reconstruct the monitor from
+            json node to reconstruct the monitor from
         """
         monitortype = getattr(import_module("brian2"), data_of_group["type"])
         model.define_monitor(
@@ -267,7 +239,7 @@ class Reconstructor:
         self, model: Any, report: Callable[[int], None] | None = None
     ) -> None:
         """
-        Reconstruct a B2Model from a yaml node. The model is typically given in a default constructed state
+        Reconstruct a B2Model from a json node. The model is typically given in a default constructed state
         as an argument, but this is not mandatory and it can contain other elements or can be modified afterwards
 
         Parameters

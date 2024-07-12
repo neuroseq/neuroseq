@@ -9,8 +9,8 @@ from pytest import MonkeyPatch
 
 @pytest.fixture()
 def mfx_nmda_serialized(tmp_path: Path, mfx_nmda: B2Model) -> Generator:
-    mfx_nmda.save_model(tmp_path / "testmodel.yaml")
-    yield tmp_path / "testmodel.yaml"
+    mfx_nmda.save_model(tmp_path / "testmodel.json")
+    yield tmp_path / "testmodel.json"
 
 
 def raise_error(s: B2Model, name: str, line: str) -> None:

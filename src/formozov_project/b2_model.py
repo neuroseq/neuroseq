@@ -7,8 +7,8 @@ from typing import Any
 
 import brian2 as b2
 import h5py
-import yaml
 
+from formozov_project import b2json
 from formozov_project.reconstructor import Reconstructor
 
 
@@ -822,7 +822,7 @@ class B2Model:
         Parameters
         ----------
         filepath : str
-            path to the yaml file where the current state should be stored
+            path to the json file where the current state should be stored
         """
         states = self.network.get_states()
         states["current_time"] = self.network.t
@@ -856,7 +856,7 @@ class B2Model:
                 states[key][k] = v
 
         with open(filepath, "w") as file:
-            yaml.safe_dump(states, file)
+            b2json.dump(states, file)
 
     @classmethod
     def load_model(

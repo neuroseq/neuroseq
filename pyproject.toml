@@ -18,7 +18,6 @@ dependencies = [
     "h5py",
     "qtawesome",
     "click",
-    "PyYAML",
 ]
 dynamic = ["version"]
 
