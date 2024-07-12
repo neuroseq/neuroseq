@@ -142,7 +142,7 @@ class EditableParameterTree(ParameterTree):
             object_to_modify = object_to_modify[p]
         object_to_modify[param.name()] = value
 
-    def _make_quantity(self, quantity_str: str) -> b2.Quantity | str:
+    def _make_quantity(self, quantity_str: str) -> tuple[b2.Quantity | str, bool]:
         """
         Make a quantity from a string representation. When this cannot be successfully be done, the string is returned as is.
 
@@ -158,21 +158,36 @@ class EditableParameterTree(ParameterTree):
         """
         # extract numerical value via regex. allow for multiple numbers left and right of a '.' and multiple spaces or a '*' between number and unit
         match = re.match(r"([0-9./]+)[ *]*(\w+)", quantity_str)
-
+        ok = True
         if match:
             value, unit_str = match.groups()
 
             # Map the unit string to a Brian2 unit
-            unit = getattr(b2, unit_str)
-            value = eval(value)
+            try:
+                unit = getattr(b2, unit_str)
+            except Exception as e:
+                message = f"Error when interpreting unit string: {e}"
+                self.logger.critical(message)
+                QtWidgets.QMessageBox.critical(self, "Quantity parsing error", message)
+                ok = False
 
-            # Create the quantity object
-            quantity_obj = value * unit
+            if ok:
+                try:
+                    v = eval(value)
+                    # Create the quantity object
+                    quantity_obj = v * unit
+                except Exception as e:
+                    message = f"Error when interpreting numerical quantity string: {e}"
+                    self.logger.critical(message)
+                    QtWidgets.QMessageBox.critical(
+                        self, "Quantity parsing error", message
+                    )
+                    ok = False
 
             # Output to verify
-            return quantity_obj
+            return (quantity_obj, ok)
         else:
-            return quantity_str
+            return (quantity_str, ok)
 
     def _set_param(self, param: Parameter, value: Any) -> None:
         """
@@ -192,9 +207,11 @@ class EditableParameterTree(ParameterTree):
         for p in path[0:-1]:
             object_to_modify = object_to_modify[p]
 
-        object_to_modify[param.name()] = self._make_quantity(value)
+        q, ok = self._make_quantity(value)
 
-        self.model.must_be_rebuilt = True
+        if ok:
+            object_to_modify[param.name()] = q
+            self.model.must_be_rebuilt = True
 
     def _get_value(self, v: Any) -> dict[str, Any] | Any:
         """
@@ -502,13 +519,18 @@ class ModelEditorDialog(QtWidgets.QDialog):
                 )
             new_model = B2Model(seed=states["seed"])
 
+            model_ok = True
             try:
                 constr.reconstruct(new_model)
             except Exception as e:
                 message = f"Error when rebuilding the model after editing: {e}"
                 self.logger.critical(message)
                 QtWidgets.QMessageBox.critical(self, "Model rebuilding error", message)
-            self.model = new_model
-            self.model.must_be_rebuilt = False
+                model_ok = False
 
-        super().accept()
+            if model_ok:
+                self.model = new_model
+                self.model.must_be_rebuilt = False
+                super().accept()
+        else:
+            super().accept()
