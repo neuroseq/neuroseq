@@ -6,15 +6,36 @@ from formozov_project.b2_model_widget import NeuronGroupDialog
 from formozov_project.b2_model_widget import NeuronSubgroupDialog
 from formozov_project.b2_model_widget import ParameterDialog
 from formozov_project.b2_model_widget import SynapseDialog
+from formozov_project.model_editor import EagerQComboBox
 from formozov_project.model_editor import EditableNeurongroupTree
 from formozov_project.model_editor import EditableParameterTree
+from formozov_project.model_editor import EditableSynapseTree
 from formozov_project.model_editor import ModelEditorDialog
 from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
+from qtpy import QtCore
+
+
+def test_EagerComboBox(qtbot: QtBot) -> None:
+    widget = EagerQComboBox()
+    signal_emitted = False
+
+    def on_clicked():
+        nonlocal signal_emitted
+        signal_emitted = True
+
+    widget.clicked.connect(on_clicked)
+
+    assert signal_emitted is False
+
+    qtbot.mousePress(
+        widget, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, QtCore.QPoint(10, 10)
+    )
+    assert signal_emitted is True
 
 
 def test_etree_constr(mfx_nmda: B2Model, qtbot: QtBot) -> None:
-    stree = EditableParameterTree(mfx_nmda, SynapseDialog, "synapses")
+    stree = EditableSynapseTree(mfx_nmda)
     qtbot.addWidget(stree)
 
     assert stree.states == mfx_nmda.synapses
@@ -25,6 +46,8 @@ def test_etree_constr(mfx_nmda: B2Model, qtbot: QtBot) -> None:
 
     synapsenode = stree.root.children()[0]
 
+    listnodes = ["method", "origin", "target"]
+
     for p in synapsenode.children():
         assert p.name() in [
             "origin",
@@ -32,6 +55,9 @@ def test_etree_constr(mfx_nmda: B2Model, qtbot: QtBot) -> None:
             "model",
             "on_pre",
         ]
+
+        if p.name() in listnodes:
+            assert p.type() == "updatinglist"
 
 
 def test_etree_edit_item(mfx_nmda: B2Model, qtbot: QtBot) -> None:
@@ -168,6 +194,24 @@ def test_neurontree_add_neurongroup(
     )
     qtbot.addWidget(ntree)
 
+    # add synpase tree to assure later that the data has been updated
+    stree = EditableSynapseTree(mfx_nmda)
+    qtbot.addWidget(stree)
+
+    assert stree.states == mfx_nmda.synapses
+
+    # get out the origin subwidget
+
+    origin = stree.findItems(
+        "origin",
+        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+        0,
+    )[0]
+
+    all_names = [origin.widget.itemText(i) for i in range(origin.widget.count())]
+
+    assert set(all_names) == set(["neurons", "neuron_input", "input_subgroup"])
+
     assert ntree.states == mfx_nmda.neurongroups
 
     ntree.add_item()
@@ -177,6 +221,11 @@ def test_neurontree_add_neurongroup(
     assert ntree.b2model.neurongroups["p1"]["th"] == "v < -10 mV"
     assert ntree.b2model.neurongroups["p1"]["method"] == "euler"
     assert ntree.b2model.neurongroups["p1"]["n"] == 25
+
+    # trigger mousePressEvent so the system updates
+    origin._update_list()
+    all_names = [origin.widget.itemText(i) for i in range(origin.widget.count())]
+    assert set(all_names) == set(["neurons", "neuron_input", "p1", "input_subgroup"])
 
 
 def test_modeldialog(mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
