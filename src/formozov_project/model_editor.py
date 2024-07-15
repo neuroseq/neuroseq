@@ -2,15 +2,23 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from typing import Any
 
 import brian2 as b2  # noqa: F401
 from brian2 import TimedArray
 from pyqtgraph.parametertree import Parameter
 from pyqtgraph.parametertree import ParameterTree
+from pyqtgraph.parametertree import registerParameterItemType
+from pyqtgraph.parametertree import registerParameterType
+from pyqtgraph.parametertree.parameterTypes import ListParameter
+from pyqtgraph.parametertree.parameterTypes import ListParameterItem
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
+from qtpy.QtCore import QEvent
+from qtpy.QtCore import Signal
+from qtpy.QtWidgets import QComboBox
 
 from formozov_project.b2_model import B2Model
 from formozov_project.b2_model_widget import MonitorDialog
@@ -19,6 +27,70 @@ from formozov_project.b2_model_widget import NeuronSubgroupDialog
 from formozov_project.b2_model_widget import ParameterDialog
 from formozov_project.b2_model_widget import SynapseDialog
 from formozov_project.reconstructor import Reconstructor
+
+
+# derive a new combobox which has a 'clicked' signal
+class EagerQComboBox(QComboBox):
+    clicked = Signal()
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None):
+        super().__init__(parent)
+
+    # find a way to emit the 'clicked' signal here
+    def mousePressEvent(self, event: QEvent) -> None:
+        self.clicked.emit()
+        super().mousePressEvent(event)
+
+
+class UpdatingListParameterItem(ListParameterItem):
+    def __init__(self, param: Parameter, depth: Any, update: Callable):
+        self.update = update
+        super().__init__(param, depth)
+        self._update_list()
+
+    def makeWidget(self):
+        # this is a copy of the base class function, but with the EagerComboBox
+        # instead of the normal QComboBox
+        w = EagerQComboBox()
+        w.setMaximumHeight(20)  ## set to match height of spin box and line edit
+        w.sigChanged = w.currentIndexChanged
+        w.value = self.value
+        w.setValue = self.setValue
+        self.widget = w  ## needs to be set before limits are changed
+
+        # we also need to reconnect the signal
+        self.widget.clicked.connect(self._update_list)
+
+        self.limitsChanged(self.param, self.update())
+        if len(self.forward) > 0 and self.param.hasValue():
+            self.setValue(self.param.value())
+        return w
+
+    def _update_list(self) -> None:
+        self.limitsChanged(self.param, self.update())
+
+
+class UpdatingListParameter(ListParameter):
+    itemClass = UpdatingListParameterItem
+
+    def __init__(self, update: Callable | None = None, **opts):
+        if update is None:
+            self.update = lambda: self.param.value()
+        else:
+            self.update = update
+        super().__init__(**opts)
+
+    def makeTreeItem(self, depth: Any) -> UpdatingListParameterItem:
+        itemClass = self.itemClass
+        paramitem = itemClass(self, depth, self.update)
+
+        return paramitem
+
+
+registerParameterType("updatinglist", UpdatingListParameter)
+registerParameterItemType(
+    "updatinglistitem", UpdatingListParameterItem, UpdatingListParameter
+)
 
 
 class EditableParameterTree(ParameterTree):
@@ -33,7 +105,7 @@ class EditableParameterTree(ParameterTree):
 
     def __init__(
         self,
-        model: B2Model,
+        b2model: B2Model,
         item_adder_dialog: type,
         domain_name: str,
         parent: QtWidgets.QWidget | None = None,
@@ -42,16 +114,16 @@ class EditableParameterTree(ParameterTree):
     ):
         """
         Create a new paramter tree displaying a part of the definition of a B2Model.
-        Editing the parameter tree edits the model class. When something is edited, the model will be rebuild
+        Editing the parameter tree edits the b2model class. When something is edited, the b2model will be rebuild
 
         Parameters
         ----------
-        model : B2Model
-            model to display a part of
+        b2model : B2Model
+            b2model to display a part of
         item_adder_dialog : Dialog to open when right-clicking into empty space.
 
         domain_name : str
-            Name of the domain of the model to be displayed. One of synapses, parameter, or monitors. Neurongroups are treated in their own subclass
+            Name of the domain of the b2model to be displayed. One of synapses, parameter, or monitors. Neurongroups are treated in their own subclass
         parent : QtWidgets.QWidget | None, optional
             Parent widget, by default None
         showHeader : bool, optional
@@ -62,11 +134,11 @@ class EditableParameterTree(ParameterTree):
         if list_items is None:
             list_items = {}
 
-        self.model = model
+        self.b2model = b2model
         self.dialogtype = item_adder_dialog
         self.logger = logging.getLogger(__name__)
         self.name = domain_name
-        self.states = getattr(self.model, self.name)
+        self.states = getattr(self.b2model, self.name)
         self.list_items = list_items
 
         params = self._convert_dict_to_params(self.states)
@@ -88,6 +160,7 @@ class EditableParameterTree(ParameterTree):
         Parameters
         ----------
         param : Parameter
+
             parent paremeter
         """
         if param.type() == "group":
@@ -100,14 +173,6 @@ class EditableParameterTree(ParameterTree):
             param.sigValueChanged.connect(self._set_textfield)
         else:
             param.sigValueChanged.connect(self._set_param)
-
-    def _update_list_param(
-        self,
-        param: Parameter,
-    ) -> None:
-        new_list = self.list_items[param.name()]["callback"]()
-
-        param.setLimits(new_list)
 
     def _trace_path_from(self, param: Parameter) -> list[str]:
         """
@@ -136,7 +201,7 @@ class EditableParameterTree(ParameterTree):
         """
         Sets the `must_be_rebuilt` flag of the model to true
         """
-        self.model.must_be_rebuilt = True
+        self.b2model.must_be_rebuilt = True
 
     def _set_textfield(self, param: Parameter, value: str) -> None:
         """
@@ -224,7 +289,7 @@ class EditableParameterTree(ParameterTree):
 
         if ok:
             object_to_modify[param.name()] = q
-            self.model.must_be_rebuilt = True
+            self.b2model.must_be_rebuilt = True
 
     def _get_value(self, v: Any) -> dict[str, Any] | Any:
         """
@@ -302,9 +367,11 @@ class EditableParameterTree(ParameterTree):
                     "syncExpanded": True,
                 }
 
+                # need 'limits' for the underlying ListParameter and 'element' for the custom class
                 if key in list(self.list_items.keys()):
-                    param["type"] = "list"
-                    param["limits"] = self.list_items[key]["callback"]()
+                    param["type"] = "updatinglist"
+                    param["limits"] = self.list_items[key]["update_from"]()
+                    param["update"] = self.list_items[key]["update_from"]
 
                 params.append(param)
 
@@ -354,64 +421,57 @@ class EditableParameterTree(ParameterTree):
 
         # check which name has changed, add this name to the internal dict
         # and to the parameters that are displayed
-        old_names = set(getattr(self.model, self.name).keys())
-        self.dialog = self.dialogtype(self.model)
+        old_names = set(getattr(self.b2model, self.name).keys())
+        self.dialog = self.dialogtype(self.b2model)
 
         # update the internal states by
         if self.dialog.exec():
-            new_names = set(getattr(self.model, self.name).keys())
+            new_names = set(getattr(self.b2model, self.name).keys())
 
             new_name = list(new_names - old_names)[0]
-            self.update_params(new_name, getattr(self.model, self.name)[new_name])
+            self.update_params(new_name, getattr(self.b2model, self.name)[new_name])
 
 
 class EditableSynapseTree(EditableParameterTree):
     def __init__(
         self,
-        model: B2Model,
+        b2model: B2Model,
         parent: QtWidgets.QWidget | None = None,
         showHeader: bool = True,
     ):
         super().__init__(
-            model,
+            b2model,
             parent=parent,
             item_adder_dialog=SynapseDialog,
             showHeader=showHeader,
             domain_name="synapses",
             list_items={
                 "method": {
-                    "callback": lambda: ["euler", "exponential_euler", "exact"],
+                    "update_from": lambda: [
+                        "euler",
+                        "exponential_euler",
+                        "exact",
+                    ],  # methods are static, so we can give a list
                 },
                 "origin": {
-                    "callback": self._update_neurongroup_list,
+                    "update_from": lambda: list(self.b2model.neurongroups.keys()),
                 },
                 "target": {
-                    "callback": self._update_neurongroup_list,
+                    "update_from": lambda: list(self.b2model.neurongroups.keys()),
                 },
             },
         )
-
-    def _update_neurongroup_list(self) -> list[str]:
-        """
-        update the currently available list of neurongroups
-
-        Returns
-        -------
-        list[str]
-            list of neurongroups to choose from
-        """
-        return list(self.model.neurongroups.keys())
 
 
 class EditableMonitorTree(EditableParameterTree):
     def __init__(
         self,
-        model: B2Model,
+        b2model: B2Model,
         parent: QtWidgets.QWidget | None = None,
         showHeader: bool = True,
     ):
         super().__init__(
-            model,
+            b2model,
             parent=parent,
             item_adder_dialog=MonitorDialog,
             showHeader=showHeader,
@@ -421,13 +481,13 @@ class EditableMonitorTree(EditableParameterTree):
 
         self.list_items = {
             "type": {
-                "callback": lambda: [b2.StateMonitor, b2.SpikeMonitor],
+                "update_from": lambda: [b2.StateMonitor, b2.SpikeMonitor],
             },
             "source": {
-                "callback": self._update_object_list,
+                "update_from": self._update_object_list,
             },
             "variable": {
-                "callback": self._get_variable_list,
+                "update_from": self._update_object_list,
             },
         }
 
@@ -449,9 +509,9 @@ class EditableMonitorTree(EditableParameterTree):
         """
         return [
             n
-            for n in self.model.neurongroups
-            if "idx" not in self.model.neurongroups[n]
-        ] + list(self.model.synapses.keys())
+            for n in self.b2model.neurongroups
+            if "idx" not in self.b2model.neurongroups[n]
+        ] + list(self.b2model.synapses.keys())
 
     def _get_variable_list(self) -> list[str]:
         """
@@ -479,7 +539,7 @@ class EditableNeurongroupTree(EditableParameterTree):
 
     def __init__(
         self,
-        model: B2Model,
+        b2model: B2Model,
         parent: QtWidgets.QWidget | None = None,
         showHeader: bool = True,
     ):
@@ -488,7 +548,7 @@ class EditableNeurongroupTree(EditableParameterTree):
 
         Parameters
         ----------
-        model : B2Model
+        b2model : B2Model
             Model to represent the neurongroups of
         parent : QtWidgets.QWidget | None, optional
             parent widget, by default None
@@ -496,17 +556,17 @@ class EditableNeurongroupTree(EditableParameterTree):
             Show the root node title or not, by default True
         """
         super().__init__(
-            model=model,
+            b2model=b2model,
             item_adder_dialog=NeuronGroupDialog,
             domain_name="neurongroups",
             parent=parent,
             showHeader=showHeader,
             list_items={
                 "method": {
-                    "callback": lambda: ["euler", "exponential_euler", "exact"],
+                    "update_from": lambda: ["euler", "exponential_euler", "exact"],
                 },
                 "target": {
-                    "callback": self._update_neurongroup_list,
+                    "update_from": self._update_neurongroup_list,
                 },
             },
         )
@@ -519,14 +579,14 @@ class EditableNeurongroupTree(EditableParameterTree):
 
     def _add_neuronsubgroup(self) -> None:
         """open neuron subgroup definition dialog and update the displayed parameters"""
-        old_names = set(getattr(self.model, self.name).keys())
-        self.dialog = NeuronSubgroupDialog(self.model)
+        old_names = set(getattr(self.b2model, self.name).keys())
+        self.dialog = NeuronSubgroupDialog(self.b2model)
 
         # update the internal states by
         if self.dialog.exec():
-            new_names = set(getattr(self.model, self.name).keys())
+            new_names = set(getattr(self.b2model, self.name).keys())
             new_name = list(new_names - old_names)[0]
-            self.update_params(new_name, getattr(self.model, self.name)[new_name])
+            self.update_params(new_name, getattr(self.b2model, self.name)[new_name])
 
     def _update_neurongroup_list(self) -> list[str]:
         """
@@ -539,8 +599,8 @@ class EditableNeurongroupTree(EditableParameterTree):
         """
         return [
             n
-            for n in self.model.neurongroups
-            if "idx" not in self.model.neurongroups[n]
+            for n in self.b2model.neurongroups
+            if "idx" not in self.b2model.neurongroups[n]
         ]
 
     def contextMenuEvent(self, ev: QtCore.Event) -> None:
@@ -574,13 +634,13 @@ class ModelEditorDialog(QtWidgets.QDialog):
         Basic Qt Dialog class
     """
 
-    def __init__(self, model: B2Model, parent: QtWidgets.QWidget | None = None):
+    def __init__(self, b2model: B2Model, parent: QtWidgets.QWidget | None = None):
         """
         Create a new modeleditor instance and tie it to a B2Model instance.
 
         Parameters
         ----------
-        model : B2Model
+        b2model : B2Model
             Model to edit through the gui
         parent : QtWidgets.QWidget | None, optional
             parent widget, by default None
@@ -588,23 +648,23 @@ class ModelEditorDialog(QtWidgets.QDialog):
         super().__init__(parent=parent)
 
         trees = {
-            "Neurongroups": EditableNeurongroupTree(model, parent=self),
+            "Neurongroups": EditableNeurongroupTree(b2model, parent=self),
             "Synapses": EditableSynapseTree(
-                model,
+                b2model,
                 parent=self,
             ),
             "Monitors": EditableMonitorTree(
-                model,
+                b2model,
                 parent=self,
             ),
             "Parameters": EditableParameterTree(
-                model,
+                b2model,
                 ParameterDialog,
                 domain_name="parameters",
                 parent=self,
             ),
         }
-        self.model = model
+        self.b2model = b2model
         self.logger = logging.getLogger(__name__)
 
         layout = QtWidgets.QGridLayout()
@@ -640,18 +700,18 @@ class ModelEditorDialog(QtWidgets.QDialog):
         """
         Accept the current state of the model and rebuilt it if anything has been edited.
         """
-        if self.model.must_be_rebuilt:
+        if self.b2model.must_be_rebuilt:
             self.logger.info("rebuilding model after change")
-            states = self.model.to_dict()
+            states = self.b2model.to_dict()
 
-            if self.model.dt is not None:
-                states["timestep"] = self.model.dt
+            if self.b2model.dt is not None:
+                states["timestep"] = self.b2model.dt
 
             constr = Reconstructor(states)
 
             # FIXME: this can be a problem when the system shall be continued because
             # the sequence of random number changes due to brian2 caching them.
-            if self.model.seed != states["seed"]:
+            if self.b2model.seed != states["seed"]:
                 QtWidgets.QMessageBox.warning(
                     self,
                     "Model rng warning"
@@ -669,8 +729,8 @@ class ModelEditorDialog(QtWidgets.QDialog):
                 model_ok = False
 
             if model_ok:
-                self.model = new_model
-                self.model.must_be_rebuilt = False
+                self.b2model = new_model
+                self.b2model.must_be_rebuilt = False
                 super().accept()
         else:
             super().accept()
