@@ -28,14 +28,17 @@ class SpikeWidget(TimeseriesWidget):
         n_timesteps: int,
     ) -> None:
         self.clear_data()
-        self.setLimits(xMin=0, xMax=n_timesteps * dt, yMin=-0.5, yMax=n_neurons - 0.5)
-        for neuron_index in range(n_neurons):
+        self.n_neurons = n_neurons
+        self.setLimits(
+            xMin=0, xMax=n_timesteps * dt, yMin=-0.5, yMax=self.n_neurons - 0.5
+        )
+        for neuron_index in range(self.n_neurons):
             # filter the spikes for this neuron
             spikes = spike_times[spike_indices == neuron_index]
             # vertically offset the data for each neuron by its index
             y_offset = neuron_index - 0.5
             # give each neuron a unique color
-            brush = (neuron_index, n_neurons)
+            brush = (neuron_index, self.n_neurons)
             bar = SelectableBarPlotItem(
                 x=spikes + 0.5 * dt,
                 width=dt,

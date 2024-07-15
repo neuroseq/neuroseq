@@ -54,6 +54,8 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
         self.selected_time_slice: slice | None = None
         self.selected_neuron_slice: slice | None = None
         self.neuron_plots: list[SelectablePlotItem] = []
+        self.n_neurons = 0
+        self.n_timestamps = 0
         self.getAxis("top").show()
         self.roi = QtWidgets.QGraphicsRectItem(0, 0, 0, 0)
         self.roi.setPen(QtGui.QColor(255, 255, 255, 100))
@@ -68,6 +70,8 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
 
     def clear_data(self) -> None:
         self.neuron_plots.clear()
+        self.n_neurons = 0
+        self.n_timestamps = 0
         self.unselect_neurons()
         self.clear()
         for ax_label in ["top", "bottom"]:
@@ -105,11 +109,12 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
         self.logger.debug(f"Plotting data with shape {shape}")
         if len(shape) != 2:
             return
-        n_neurons, n_timestamps = shape
-        if n_neurons == 0 or n_timestamps == 0:
+        self.n_neurons, self.n_timestamps = shape
+        if self.n_neurons == 0 or self.n_timestamps == 0:
             return
         if isinstance(data, list) and not all(
-            d.shape[0] == n_neurons and d.shape[1] == n_timestamps for d in data
+            d.shape[0] == self.n_neurons and d.shape[1] == self.n_timestamps
+            for d in data
         ):
             raise ValueError("All data arrays must have the same shape")
         if timestamps is not None:
@@ -117,13 +122,13 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
             self.dt = timestamps[1] - timestamps[0] if len(timestamps) > 1 else 1.0
         else:
             self.dt = dt if dt is not None else 1.0
-            timestamps = self.dt * np.arange(n_timestamps)
+            timestamps = self.dt * np.arange(self.n_timestamps)
         # don't let user zoom/pan outside of the data
         self.setLimits(
             xMin=timestamps[0],
             xMax=timestamps[-1] + self.dt,
             yMin=-0.5,
-            yMax=n_neurons - 0.5,
+            yMax=self.n_neurons - 0.5,
         )
         self._plot_neuron_data(data, timestamps, self.dt)
 
@@ -215,15 +220,23 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
         time_index_slice: slice | None = None,
     ) -> None:
         if neuron_index_slice is None:
-            neuron_index_slice = slice(0, -1)
+            neuron_index_slice = slice(0, self.n_neurons)
         if time_index_slice is None:
-            time_index_slice = slice(0, -1)
+            time_index_slice = slice(0, self.n_timestamps)
+        if neuron_index_slice.stop is None:
+            neuron_index_slice = slice(neuron_index_slice.start, self.n_neurons)
+        if time_index_slice.stop is None:
+            time_index_slice = slice(time_index_slice.start, self.n_timestamps)
         self.selected_time_slice = time_index_slice
         self.selected_neuron_slice = neuron_index_slice
         self.roi.show()
         self.update_roi()
         for neuron_index, neuron_plot in enumerate(self.neuron_plots):
-            if neuron_index_slice.start <= neuron_index < neuron_index_slice.stop:
+            if (
+                neuron_index >= neuron_index_slice.start
+                and neuron_index_slice.stop is None
+                or neuron_index < neuron_index_slice.stop
+            ):
                 neuron_plot.set_selected_slice(time_index_slice)
             else:
                 neuron_plot.set_selected_slice(slice(0, 0))

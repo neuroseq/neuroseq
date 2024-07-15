@@ -88,14 +88,14 @@ def test_stim_widget_no_mouse_capture(qtbot: QtBot, stims: b2.TimedArray) -> Non
     assert stim_widget.selected_time_slice is None
     # a missing slice argument should default to the full range
     stim_widget.select_neurons(time_index_slice=slice(1, 3))
-    assert stim_widget.selected_neuron_slice == slice(0, -1)
+    assert stim_widget.selected_neuron_slice == slice(0, n_neurons)
     assert stim_widget.selected_time_slice == slice(1, 3)
     stim_widget.select_neurons(neuron_index_slice=slice(1, 3))
     assert stim_widget.selected_neuron_slice == slice(1, 3)
-    assert stim_widget.selected_time_slice == slice(0, -1)
+    assert stim_widget.selected_time_slice == slice(0, n_timestamps)
     stim_widget.select_neurons()
-    assert stim_widget.selected_neuron_slice == slice(0, -1)
-    assert stim_widget.selected_time_slice == slice(0, -1)
+    assert stim_widget.selected_neuron_slice == slice(0, n_neurons)
+    assert stim_widget.selected_time_slice == slice(0, n_timestamps)
 
 
 @pytest.mark.skipif(
