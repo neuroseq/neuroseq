@@ -31,24 +31,77 @@ from formozov_project.reconstructor import Reconstructor
 
 # derive a new combobox which has a 'clicked' signal
 class EagerQComboBox(QComboBox):
+    """
+    Subclass of QtWidgets.QComboBox that emits a signal when it is clicked.
+    Parameters
+    ----------
+    QComboBox :
+        Qt's basic dropdown list widget
+    """
+
     clicked = Signal()
 
     def __init__(self, parent: QtWidgets.QWidget | None = None):
+        """
+        Create a new EagerQCombobox instance which emits 'clicked' signals whenever the 'mousePressEvent' occurs on the widget.
+
+        Parameters
+        ----------
+        parent : QtWidgets.QWidget | None, optional
+            parent widget, by default None
+        """
         super().__init__(parent)
 
     # find a way to emit the 'clicked' signal here
     def mousePressEvent(self, event: QEvent) -> None:
+        """
+        Override fo the mousePressEvent event handler of QComboBox that emits the 'clicked' signal.
+
+        Parameters
+        ----------
+        event : QEvent
+            Incoming event
+        """
         self.clicked.emit()
         super().mousePressEvent(event)
 
 
 class UpdatingListParameterItem(ListParameterItem):
+    """
+    Represent an UpdatingListParameter in such a way that it is immediatelly updated when a parameter in the element to be updated changes
+
+    Parameters
+    ----------
+    ListParameterItem : Non-autoupdating baseclass from pyqtgraph
+    """
+
     def __init__(self, param: Parameter, depth: Any, update: Callable):
+        """
+        Create a new UpdatingListParameterItem instance that updates the displayed parameter list automatically via the passed 'update' callback function
+
+        Parameters
+        ----------
+        param : Parameter
+            Parameter to display
+        depth : Any
+            depth in the hiearchy
+        update : Callable
+            Function that returns a list of strings to be used as options
+        """
         self.update = update
         super().__init__(param, depth)
         self._update_list()
 
-    def makeWidget(self):
+    def makeWidget(self) -> EagerQComboBox:
+        """
+        Override of ListParameterItem.makeWidget that uses the EagerQComboBox to allow for instant updating of the
+        available list of options when the widget is clicked.
+
+        Returns
+        -------
+        EagerQComboBox
+            The updated combobox widget
+        """
         # this is a copy of the base class function, but with the EagerComboBox
         # instead of the normal QComboBox
         w = EagerQComboBox()
@@ -71,9 +124,27 @@ class UpdatingListParameterItem(ListParameterItem):
 
 
 class UpdatingListParameter(ListParameter):
+    """
+    Subclass fo pyqtgraph.ListParameter to use with UpdatingListParameterItem to have an automatically updating parameter display
+
+    Parameters
+    ----------
+    ListParameter :
+        non-autoupdating Baseclass from pyqtgraph
+    """
+
     itemClass = UpdatingListParameterItem
 
     def __init__(self, update: Callable | None = None, **opts):
+        """
+        Create a new UpdatingListParameter instance. This extends the passed keyword arguments with the 'update' kwarg,
+        which expects a callabel that returns an updated list of parameters and is passed to the parameteritem representation
+
+        Parameters
+        ----------
+        update : Callable | None, optional
+            update callback, by default None
+        """
         if update is None:
             self.update = lambda: self.param.value()
         else:
@@ -81,6 +152,20 @@ class UpdatingListParameter(ListParameter):
         super().__init__(**opts)
 
     def makeTreeItem(self, depth: Any) -> UpdatingListParameterItem:
+        """
+        Override of the ListParameter.makeTreeItem to use `UpdatingListParameterItem`
+        instead of the normal ListParameterItem function.
+
+        Parameters
+        ----------
+        depth : Any
+            depth in the parametertree
+
+        Returns
+        -------
+        UpdatingListParameterItem
+            New gui representation of the calling parameter
+        """
         itemClass = self.itemClass
         paramitem = itemClass(self, depth, self.update)
 
