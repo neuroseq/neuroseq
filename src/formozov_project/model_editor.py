@@ -321,6 +321,8 @@ class EditableParameterTree(ParameterTree):
         b2.Quantity|str
             either a brian2 quantity or the input string
         """
+        print("quantity: ", quantity_str, type(quantity_str))
+
         # extract numerical value via regex. allow for multiple numbers left and right of a '.' and multiple spaces or a '*' between number and unit
         match = re.match(r"([0-9./]+)[ *]*(\w+)", quantity_str)
         ok = True
@@ -364,7 +366,9 @@ class EditableParameterTree(ParameterTree):
         value : Any
             updated value
         """
-        self.logger.debug(f"setting parameter {param.name()} to value {value}")
+        self.logger.info(
+            f"setting parameter {param.name()} to value {value} of type {type(value)}"
+        )
         path = self._trace_path_from(param)
 
         object_to_modify = self.states
@@ -608,7 +612,7 @@ class EditableMonitorTree(EditableParameterTree):
                 "update_from": self._update_object_list,
             },
             "variable": {
-                "update_from": self._update_object_list,
+                "update_from": self._update_element_list,
             },
         }
 
@@ -636,6 +640,23 @@ class EditableMonitorTree(EditableParameterTree):
 
         self.logger.debug("updating available object list for monitors to {lst}")
         return lst
+
+    def _update_element_list(self) -> list[str]:
+        # find element corresponding to the currently selected element in the 'source' box
+        element = self.findItems(
+            "source",
+            QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+            0,
+        )[0].widget
+
+        try:
+            element_name = element.text()
+        except Exception:
+            element_name = element.currentText()
+
+        values = list(self.b2model.network[element_name].get_states().keys())
+
+        return values
 
 
 class EditableNeurongroupTree(EditableParameterTree):
