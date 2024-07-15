@@ -172,6 +172,7 @@ class UpdatingListParameter(ListParameter):
         return paramitem
 
 
+# register the new types with the parametertree implementation
 registerParameterType("updatinglist", UpdatingListParameter)
 registerParameterItemType(
     "updatinglistitem", UpdatingListParameterItem, UpdatingListParameter
@@ -363,7 +364,7 @@ class EditableParameterTree(ParameterTree):
         value : Any
             updated value
         """
-        self.logger.info(f"setting parameter {param.name()} to value {value}")
+        self.logger.debug(f"setting parameter {param.name()} to value {value}")
         path = self._trace_path_from(param)
 
         object_to_modify = self.states
@@ -518,12 +519,28 @@ class EditableParameterTree(ParameterTree):
 
 
 class EditableSynapseTree(EditableParameterTree):
+    """
+    Subclass for displaying an auto-updating tree of synapse definitions
+    """
+
     def __init__(
         self,
         b2model: B2Model,
         parent: QtWidgets.QWidget | None = None,
         showHeader: bool = True,
     ):
+        """
+        Create a new EditableSynapseTree to represent the synapse definitions of a b2 model
+
+        Parameters
+        ----------
+        b2model : B2Model
+            model to represent the synapses for
+        parent : QtWidgets.QWidget | None, optional
+            parent widget, by default None
+        showHeader : bool, optional
+            Whether to show header name, by default True
+        """
         super().__init__(
             b2model,
             parent=parent,
@@ -549,12 +566,28 @@ class EditableSynapseTree(EditableParameterTree):
 
 
 class EditableMonitorTree(EditableParameterTree):
+    """
+    Subclass for displaying an autoupdating tree of monitor definitions.
+    """
+
     def __init__(
         self,
         b2model: B2Model,
         parent: QtWidgets.QWidget | None = None,
         showHeader: bool = True,
     ):
+        """
+        Create a new EditableMonitorTree instance
+
+        Parameters
+        ----------
+        b2model : B2Model
+            model for which the monitor definitions should be represented
+        parent : QtWidgets.QWidget | None, optional
+            parent widget, by default None
+        showHeader : bool, optional
+            Whether the header should be defined here, by default True
+        """
         super().__init__(
             b2model,
             parent=parent,
@@ -566,7 +599,10 @@ class EditableMonitorTree(EditableParameterTree):
 
         self.list_items = {
             "type": {
-                "update_from": lambda: [b2.StateMonitor, b2.SpikeMonitor],
+                "update_from": lambda: [
+                    b2.StateMonitor.__name__,
+                    b2.SpikeMonitor.__name__,
+                ],
             },
             "source": {
                 "update_from": self._update_object_list,
@@ -592,34 +628,20 @@ class EditableMonitorTree(EditableParameterTree):
         list[str]
             list of synapses to choose from
         """
-        return [
+        lst = [
             n
             for n in self.b2model.neurongroups
             if "idx" not in self.b2model.neurongroups[n]
         ] + list(self.b2model.synapses.keys())
 
-    def _get_variable_list(self) -> list[str]:
-        """
-        get the list of variables from the currently selected element to monitor
-
-        Returns
-        -------
-        list[str]
-            list of variables to monitor
-        """
-        if self.current_active is not None:
-            print(self.current_active.name())
-        return []
+        self.logger.debug("updating available object list for monitors to {lst}")
+        return lst
 
 
 class EditableNeurongroupTree(EditableParameterTree):
     """
     Subclass for representing neurongroups and neuronsubgroups in the gui using
     a pyqtgraph ParameterTree
-
-    Parameters
-    ----------
-    EditableParameterTree : EditableParameterTree
     """
 
     def __init__(
@@ -786,7 +808,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
         Accept the current state of the model and rebuilt it if anything has been edited.
         """
         if self.b2model.must_be_rebuilt:
-            self.logger.info("rebuilding model after change")
+            self.logger.debug("rebuilding model after change")
             states = self.b2model.to_dict()
 
             if self.b2model.dt is not None:
