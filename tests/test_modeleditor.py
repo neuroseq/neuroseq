@@ -46,13 +46,13 @@ def test_etree_edit_item(mfx_nmda: B2Model, qtbot: QtBot) -> None:
     with qtbot.waitSignal(normal.sigValueChanged, timeout=1000, raising=True):
         normal.setValue("other")
 
-    assert stree.model.synapses["S"]["target"] == "other"
+    assert stree.b2model.synapses["S"]["target"] == "other"
 
     # edit textfield parameter
     with qtbot.waitSignal(textfield.sigValueChanged, timeout=1000, raising=True):
         textfield.setValue("dv/dt = -v: 1")
 
-    assert stree.model.synapses["S"]["model"] == "dv/dt = -v: 1"
+    assert stree.b2model.synapses["S"]["model"] == "dv/dt = -v: 1"
 
 
 def test_tree_add_element(
@@ -76,7 +76,7 @@ def test_tree_add_element(
 
     ptree.add_item()
 
-    assert ptree.model.parameters["p"] == 2  # type: ignore
+    assert ptree.b2model.parameters["p"] == 2  # type: ignore
 
 
 def test_ptree_edit_b2quantity(mfx_nmda: B2Model, qtbot: QtBot) -> None:
@@ -90,8 +90,8 @@ def test_ptree_edit_b2quantity(mfx_nmda: B2Model, qtbot: QtBot) -> None:
     with qtbot.waitSignal(a_node.sigValueChanged, timeout=1000, raising=True):
         a_node.setValue("1/60 ms")
 
-    assert type(ptree.model.parameters["a"]) is b2.Quantity  # type: ignore
-    assert ptree.model.parameters["a"] == ((1 / 60) * b2.msecond)  # type: ignore
+    assert type(ptree.b2model.parameters["a"]) is b2.Quantity  # type: ignore
+    assert ptree.b2model.parameters["a"] == ((1 / 60) * b2.msecond)  # type: ignore
 
 
 def test_neurontree_add_neuronsubgroup(
@@ -119,10 +119,10 @@ def test_neurontree_add_neuronsubgroup(
 
     ntree._add_neuronsubgroup()
 
-    assert "sub" in ntree.model.neurongroups
-    assert ntree.model.neurongroups["sub"]["name"] == "sub"
-    assert ntree.model.neurongroups["sub"]["target"] == "neuron_input"
-    assert ntree.model.neurongroups["sub"]["idx"] == (1, 2)
+    assert "sub" in ntree.b2model.neurongroups
+    assert ntree.b2model.neurongroups["sub"]["name"] == "sub"
+    assert ntree.b2model.neurongroups["sub"]["target"] == "neuron_input"
+    assert ntree.b2model.neurongroups["sub"]["idx"] == (1, 2)
 
 
 def test_neurontree_add_neurongroup(
@@ -172,25 +172,25 @@ def test_neurontree_add_neurongroup(
 
     ntree.add_item()
 
-    assert "p1" in ntree.model.neurongroups
-    assert ntree.model.neurongroups["p1"]["model"] == "dv/dt = -v : siemens\n"
-    assert ntree.model.neurongroups["p1"]["th"] == "v < -10 mV"
-    assert ntree.model.neurongroups["p1"]["method"] == "euler"
-    assert ntree.model.neurongroups["p1"]["n"] == 25
+    assert "p1" in ntree.b2model.neurongroups
+    assert ntree.b2model.neurongroups["p1"]["model"] == "dv/dt = -v : siemens\n"
+    assert ntree.b2model.neurongroups["p1"]["th"] == "v < -10 mV"
+    assert ntree.b2model.neurongroups["p1"]["method"] == "euler"
+    assert ntree.b2model.neurongroups["p1"]["n"] == 25
 
 
 def test_modeldialog(mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
     diag = ModelEditorDialog(mfx_nmda)
     qtbot.addWidget(diag)
-    assert diag.model.must_be_rebuilt is False
+    assert diag.b2model.must_be_rebuilt is False
 
-    diag.model.define_neuronnumber("p1", 25)
-    diag.model.define_solver_method("p1", "euler")
-    diag.model.define_equation("p1", "dv/dt=-v: 1")
+    diag.b2model.define_neuronnumber("p1", 25)
+    diag.b2model.define_solver_method("p1", "euler")
+    diag.b2model.define_equation("p1", "dv/dt=-v: 1")
 
-    assert diag.model.must_be_rebuilt is True
+    assert diag.b2model.must_be_rebuilt is True
     diag.accept()
 
-    assert "p1" in diag.model.neurongroups
+    assert "p1" in diag.b2model.neurongroups
 
-    assert "p1" in diag.model.network.get_states()
+    assert "p1" in diag.b2model.network.get_states()
