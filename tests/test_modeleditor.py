@@ -42,7 +42,7 @@ def test_make_quantity(
     qtbot.addWidget(stree)
 
     assert stree._make_quantity("10 ms")[0] == 10 * b2.ms
-    assert stree._make_quantity("1/ 10 * siemens")[0] == 1 / 10 * b2.siemens
+    assert stree._make_quantity("(1/10) * second")[0] == 1 / 10 * b2.second
     assert stree._make_quantity("mumbochumbo")[0] == "mumbochumbo"
 
 

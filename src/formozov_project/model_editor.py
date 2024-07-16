@@ -321,8 +321,10 @@ class EditableParameterTree(ParameterTree):
             either a brian2 quantity or the input string
         """
         # extract numerical value via regex. allow for multiple numbers left and right of a '.' and multiple spaces or a '*' between number and unit
-        match = re.match(r"([0-9./]+)[ *]*(\w+)", quantity_str)
+        pattern = r"([\(\)0-9./\*]+)\s*\*?\s*(\w+)"
+        match = re.match(pattern, quantity_str)
         ok = True
+        quantity_obj = None
         if match:
             value, unit_str = match.groups()
 
