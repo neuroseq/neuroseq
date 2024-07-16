@@ -320,8 +320,6 @@ class EditableParameterTree(ParameterTree):
         b2.Quantity|str
             either a brian2 quantity or the input string
         """
-        print("quantity: ", quantity_str, type(quantity_str))
-
         # extract numerical value via regex. allow for multiple numbers left and right of a '.' and multiple spaces or a '*' between number and unit
         match = re.match(r"([0-9./]+)[ *]*(\w+)", quantity_str)
         ok = True
@@ -640,7 +638,7 @@ class EditableMonitorTree(EditableParameterTree):
         self.logger.debug("updating available object list for monitors to {lst}")
         return lst
 
-    def _make_selection_list(self, typename: str, varname: str) -> list[str]:
+    def _make_selection_list(self, typename: str, sourcename: str) -> list[str]:
         """
         Make a list of available parameters for monitoring depeding on the type of monitor and the element of the network selected to be monitored
 
@@ -648,7 +646,7 @@ class EditableMonitorTree(EditableParameterTree):
         ----------
         typename : str
             Name of the Monitortype. Either `StatMonitor` or `SpikeMonitor`
-        varname : str
+        sourcename : str
             Name of the network element to monitor which provides the variables
 
         Returns
@@ -660,11 +658,11 @@ class EditableMonitorTree(EditableParameterTree):
         # if none are given for the respective monitor, which gives the set of
         # selectable variables
         if typename == "StateMonitor":
-            return list(self.b2model.network[varname].equations.names) + [
+            return list(self.b2model.network[sourcename].equations.names) + [
                 "True",
             ]  # True means that everything is recorded. Allowed for StateMonitor
         elif typename == "SpikeMonitor":
-            return list(self.b2model.network[varname].variables.keys()) + [
+            return list(self.b2model.network[sourcename].variables.keys()) + [
                 "None",
             ]  # None is allowed for spikemonitor
         else:

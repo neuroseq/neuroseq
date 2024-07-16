@@ -7,6 +7,7 @@ from formozov_project.b2_model_widget import NeuronSubgroupDialog
 from formozov_project.b2_model_widget import ParameterDialog
 from formozov_project.b2_model_widget import SynapseDialog
 from formozov_project.model_editor import EagerQComboBox
+from formozov_project.model_editor import EditableMonitorTree
 from formozov_project.model_editor import EditableNeurongroupTree
 from formozov_project.model_editor import EditableParameterTree
 from formozov_project.model_editor import EditableSynapseTree
@@ -32,6 +33,17 @@ def test_EagerComboBox(qtbot: QtBot) -> None:
         widget, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, QtCore.QPoint(10, 10)
     )
     assert signal_emitted is True
+
+
+def test_make_quantity(
+    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    stree = EditableSynapseTree(mfx_nmda)
+    qtbot.addWidget(stree)
+
+    assert stree._make_quantity("10 ms")[0] == 10 * b2.ms
+    assert stree._make_quantity("1/ 10 * siemens")[0] == 1 / 10 * b2.siemens
+    assert stree._make_quantity("mumbochumbo")[0] == "mumbochumbo"
 
 
 def test_etree_constr(mfx_nmda: B2Model, qtbot: QtBot) -> None:
@@ -198,10 +210,11 @@ def test_neurontree_add_neurongroup(
     stree = EditableSynapseTree(mfx_nmda)
     qtbot.addWidget(stree)
 
-    assert stree.states == mfx_nmda.synapses
+    mtree = EditableMonitorTree(mfx_nmda)
+    qtbot.addWidget(mtree)
+    assert mtree.states == mfx_nmda.monitors
 
-    # get out the origin subwidget
-
+    # get out the origin subwidget for synapses
     origin = stree.findItems(
         "origin",
         QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
@@ -214,6 +227,51 @@ def test_neurontree_add_neurongroup(
 
     assert ntree.states == mfx_nmda.neurongroups
 
+    # get the variables widget for the monitor and check that it is filled as it should
+    mn_item = mtree.findItems(
+        "Mn",
+        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+        0,
+    )[0]
+
+    typename = mn_item.child(1).value()
+    source = mn_item.child(2).value()
+    var_selection = mn_item.child(3)
+    variables = mtree._make_selection_list(typename, source)
+
+    # make expected list of selectable items
+    vs = []
+    for obj in mtree.b2model.network.objects:
+        if isinstance(obj, b2.StateMonitor | b2.EventMonitor):
+            continue
+        else:
+            vs.extend(list(obj.equations.names) + list(obj.variables.keys()))
+
+    vs = list(set(vs)) + [
+        "None",
+    ]
+
+    entries = [
+        var_selection.widget.itemText(i) for i in range(0, var_selection.widget.count())
+    ]
+
+    assert set(vs) == set(entries)
+
+    assert set(variables) == set(
+        list(mtree.b2model.network["neurons"].equations.names)
+        + [
+            "True",
+        ]
+    )
+
+    variables = mtree._make_selection_list("SpikeMonitor", source)
+    assert set(variables) == set(
+        list(mtree.b2model.network["neurons"].variables)
+        + [
+            "None",
+        ]
+    )
+
     ntree.add_item()
 
     assert "p1" in ntree.b2model.neurongroups
@@ -222,10 +280,22 @@ def test_neurontree_add_neurongroup(
     assert ntree.b2model.neurongroups["p1"]["method"] == "euler"
     assert ntree.b2model.neurongroups["p1"]["n"] == 25
 
-    # trigger mousePressEvent so the system updates
+    # trigger list update for synapse origin
     origin._update_list()
     all_names = [origin.widget.itemText(i) for i in range(origin.widget.count())]
     assert set(all_names) == set(["neurons", "neuron_input", "p1", "input_subgroup"])
+
+    var_selection.setSelected(True)
+    assert var_selection.isSelected()
+
+    updated_list = mtree._update_element_list()
+
+    assert set(updated_list) == set(
+        list(mtree.b2model.network["neurons"].equations.names)
+        + [
+            "True",
+        ]
+    )
 
 
 def test_modeldialog(mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
