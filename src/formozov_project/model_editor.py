@@ -90,7 +90,6 @@ class UpdatingListParameterItem(ListParameterItem):
         """
         self.update = update
         super().__init__(param, depth)
-        self._update_list()
 
     def makeWidget(self) -> EagerQComboBox:
         """
@@ -439,15 +438,17 @@ class EditableParameterTree(ParameterTree):
                 )
             else:
                 # Determine the parameter type based on value type
-                if isinstance(value, int):
-                    param_type = "int"
-                elif isinstance(value, float):
+                if isinstance(
+                    value, int | float
+                ):  # make numbers to float to be consistent with python conversions
                     param_type = "float"
                 elif isinstance(value, bool):
                     param_type = "bool"
                 elif isinstance(value, str):
                     param_type = "text" if "\n" in value else "str"
-
+                elif value is None:
+                    param_type = "str"
+                    value = str(value)
                 param = {
                     "name": key,
                     "type": param_type,
@@ -598,23 +599,21 @@ class EditableMonitorTree(EditableParameterTree):
             item_adder_dialog=MonitorDialog,
             showHeader=showHeader,
             domain_name="monitors",
-            list_items={},
+            list_items={
+                "type": {
+                    "update_from": lambda: [
+                        b2.StateMonitor.__name__,
+                        b2.SpikeMonitor.__name__,
+                    ],
+                },
+                "source": {
+                    "update_from": self._update_object_list,
+                },
+                "variable": {
+                    "update_from": self._update_element_list,
+                },
+            },
         )
-
-        self.list_items = {
-            "type": {
-                "update_from": lambda: [
-                    b2.StateMonitor.__name__,
-                    b2.SpikeMonitor.__name__,
-                ],
-            },
-            "source": {
-                "update_from": self._update_object_list,
-            },
-            "variable": {
-                "update_from": self._update_element_list,
-            },
-        }
 
         params = self._convert_dict_to_params(self.states)
         self.root = Parameter.create(name="monitors", type="group", children=params)
@@ -641,22 +640,86 @@ class EditableMonitorTree(EditableParameterTree):
         self.logger.debug("updating available object list for monitors to {lst}")
         return lst
 
+    def _make_selection_list(self, typename: str, varname: str) -> list[str]:
+        """
+        Make a list of available parameters for monitoring depeding on the type of monitor and the element of the network selected to be monitored
+
+        Parameters
+        ----------
+        typename : str
+            Name of the Monitortype. Either `StatMonitor` or `SpikeMonitor`
+        varname : str
+            Name of the network element to monitor which provides the variables
+
+        Returns
+        -------
+        list[str]
+            list of variables with which the selectable dropdown for 'variable' will be updated
+        """
+        # the below is taken from how brian2 internally fills variables to monitor
+        # if none are given for the respective monitor, which gives the set of
+        # selectable variables
+        if typename == "StateMonitor":
+            return list(self.b2model.network[varname].equations.names) + [
+                "True",
+            ]  # True means that everything is recorded. Allowed for StateMonitor
+        elif typename == "SpikeMonitor":
+            return list(self.b2model.network[varname].variables.keys()) + [
+                "None",
+            ]  # None is allowed for spikemonitor
+        else:
+            message = f"Unknonw monitor type {typename}"
+            self.logger.critical(message)
+            return []
+
     def _update_element_list(self) -> list[str]:
-        # find element corresponding to the currently selected element in the 'source' box
-        element = self.findItems(
-            "source",
-            QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
-            0,
-        )[0].widget
+        """
+        Update the list of selectable variables in the 'variable' dropdown menu
+        based on the selected monitor and the selected source network element.
 
-        try:
-            element_name = element.text()
-        except Exception:
-            element_name = element.currentText()
+        Returns
+        -------
+        list[str]
+            list of selectable variables to monitor
+        """
+        selected_items = self.selectedItems()
 
-        values = list(self.b2model.network[element_name].get_states().keys())
+        if len(selected_items) > 0:
+            # find the parent groupitem, then get out the type of monitor and the monitored network element,
+            # then construct list of selectable elements from them
+            self.logger.info("selected item found")
+            selected = selected_items[0]
 
-        return values
+            parent = selected.parent()
+
+            typename = parent.child(1)
+            source = parent.child(2)
+
+            try:
+                self.logger.debug("making varialbes as intended")
+                return self._make_selection_list(typename.value(), source.value())
+            except Exception as e:
+                self.logger.critical(
+                    f"Something went wrong while forming selection for monitored element {source.text(0)}: {e}"
+                )
+                vars = list(self.b2model.network[source.value()].get_states().keys())
+
+            return vars
+        else:
+            self.logger.debug("no selected item found, make full list of variables")
+            # when we have no selected items, we make a big list of everything that's available since we don´t yet
+            # know which one it will be, and we need a list that contains the actually selected one in the
+            # underlying monitor definition in order to display it correctly
+            vars = []
+            for obj in self.b2model.network.objects:
+                if isinstance(obj, b2.StateMonitor | b2.EventMonitor):
+                    continue
+                else:
+                    vars.extend(list(obj.equations.names) + list(obj.variables.keys()))
+
+            return list(set(vars)) + [
+                "None",
+            ]
 
 
 class EditableNeurongroupTree(EditableParameterTree):
