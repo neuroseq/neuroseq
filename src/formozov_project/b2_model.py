@@ -329,52 +329,100 @@ class B2Model:
         )
         self.logger.info(f"Neuron number defined: {n}")
 
-    def define_neuron_subgroup(
-        self, target_name: str, name: str, idxs: int | list | tuple
-    ) -> None:
+    def define_neuron_subgroup_target(self, name: str, target_name: str) -> None:
         """
-        define_neuron_subgroup Define a subgroup of a neurongroup as a separate element that can be referred to by name.
+        Define the target neurongroup for a neuron subgroup called name
 
         Parameters
         ----------
-        target_name : str
-            Name of the neurongroup the subgroup should be defined for.
         name : str
-            Name that the subgroup should be referred to.
-        idxs : int | list | tuple
-            Indices of the target neurongroup neurons to add to the subgroup.
-            Tuple and list is expected as (start, stop).
-            Only contiguous ranges are supported.
-        """
-        sng = None
+            name of the subgroup for which to define the target
+        target_name : str
+            name of the target neurongroup to make a subgroup from
 
+        Raises
+        ------
+        ValueError
+            When the target_name argument does not exist in the neurongroups that are known to the model
+        """
+        if target_name not in self.neurongroups:
+            raise ValueError(
+                f"Error, target {target_name} could not be found in neurongroups"
+            )
+
+        self.logger.info(f"defining target {target_name} for neuron subgroup {name}")
+        if name not in self.neurongroups:
+            self.neurongroups[name] = {"name": name}
+
+        self._update_nested_dict(
+            self.neurongroups[name],
+            {
+                "target": target_name,
+            },
+        )
+
+    def define_neuron_subgroup_idxs(self, name: str, idxs: int | list | tuple) -> None:
+        """
+        Define the indices in a neurongroup for a neuron subgroup called 'name'.
+
+        Raises
+        ------
+        ValueError
+            When noncontiguous indices are passed
+        """
+        self.logger.info(f"defining indices {idxs} for neuron subgroup {name}")
         if isinstance(idxs, tuple | list):
             if len(idxs) > 2:
                 raise ValueError("Subgroups have to be contiguous")
-
-            sng = b2.Subgroup(self.network[target_name], idxs[0], idxs[1], name=name)
+            start = idxs[0]
+            stop = idxs[1]
         elif isinstance(idxs, int):
-            sng = b2.Subgroup(self.network[target_name], idxs, idxs + 1, name=name)
+            start = (idxs,)
+            stop = idxs + 1
+
+        if name not in self.neurongroups:
+            self.neurongroups[name] = {
+                "name": name,
+            }
+
+        self._update_nested_dict(
+            self.neurongroups[name], {"start": start, "stop": stop}
+        )
+
+    @_trigger_rebuild
+    def assemble_neuronsubgroup(
+        self,
+        name: str,
+    ) -> None:
+        """
+        assemble_neuronsubgroup Define a subgroup of a neurongroup as a separate element that can be referred to by name.
+
+        Parameters
+        ----------
+        name : str
+            Name that the subgroup should be referred to.
+        """
+        sng = None
+        try:
+            sng = b2.Subgroup(
+                self.neurongroups[name]["target"],
+                self.neurongroups[name]["start"],
+                self.neurongroups[name]["stop"],
+                name=self.neurongroups[name]["name"],
+            )
+        except Exception as e:
+            message = f"Error when trying to create a neuronsubgroup {name}: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
 
         self.logger.info(f"Neuron subgroup defined: {name}")
 
         try:
             self.network.add(sng)
         except Exception as e:
-            raise RuntimeError(
-                f"Error when adding subgroup {name} of neurongroup {target_name}: {e}"
-            ) from e
-
-        self._update_nested_dict(
-            self.neurongroups,
-            {
-                name: {
-                    "idx": idxs,
-                    "name": name,
-                    "target": target_name,
-                }
-            },
-        )
+            message = f"Error when adding subgroup {name}: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
 
     def define_synapse_target(self, name: str, target: str) -> None:
         """
@@ -610,21 +658,94 @@ class B2Model:
 
         self.network.add(synapse)
 
+    def define_monitor_type(self, name: str, cls: type) -> None:
+        """
+        Define the type of a monitor. Can be 'StateMonitor' or 'SpikeMonitor' at the moment.
+
+        Parameters
+        ----------
+        name : str
+            name of the monitor to define the type for
+        cls : type
+            type to use
+        """
+        if name not in self.monitors:
+            self.monitors[name] = {
+                "name": name,
+            }
+
+        self._update_nested_dict(
+            self.monitors,
+            {
+                name: {
+                    "type": cls.__name__,
+                }
+            },
+        )
+
+    def define_monitor_source(self, name: str, source: str) -> None:
+        """
+        Define the source member of the neuron network to monitor variables for
+
+        Parameters
+        ----------
+        name : str
+            name of the monitor
+        source : str
+            Member of the network to monitor variables for
+        """
+        if name not in self.monitors:
+            self.monitors[name] = {
+                "name": name,
+            }
+
+        self._update_nested_dict(
+            self.monitors,
+            {
+                name: {
+                    "source": source,
+                }
+            },
+        )
+
+    def define_monitor_variable(self, name: str, variable: str | None) -> None:
+        """
+        define the variable a monitor can be attached to. Can be a string , None (for spikemonitors) or True (for a StateMonitor).
+        When True, all variables are recorded. This may take up a lot of memory
+
+        Parameters
+        ----------
+        name : str
+            name of the monitor to define the variable for
+        variable : str | None
+            Variable name
+        """
+        if name not in self.monitors:
+            self.monitors[name] = {
+                "name": name,
+            }
+
+        self._update_nested_dict(
+            self.monitors,
+            {
+                name: {
+                    "variable": variable,
+                }
+            },
+        )
+
     @_trigger_rebuild
-    def define_monitor(
-        self, name: str, cls: type, group: str, variable: str | None = None
+    def assemble_monitor(
+        self,
+        name: str,
     ) -> None:
         """
-        define_monitor Define a monitor for a variable `variable` in the network element `group`.
+        assemble_monitor Assemble a new monitor from predefined elements
 
         Parameters
         ----------
         name : str
             Name of the monitor as referred to in the governing network.
-        group : str
-            Name of the element of the network the monitor should grab data from.
-        variable : str, optional
-            Variable of the `group` to monitor, by default None
 
         Raises
         ------
@@ -635,11 +756,11 @@ class B2Model:
         self.logger.info(f"adding monitor '{name}'")
 
         try:
-            monitor = cls(
-                self.network[group],
-                variable,
+            monitor = eval(self.monitors[name]["type"])(
+                self.network[self.monitors[name]["group"]],
+                self.monitors[name]["variable"],
                 record=True,
-                name=name,
+                name=self.monitors[name]["name"],
             )
         except Exception as e:
             message = f"Error in defining monitor {name}: {e}"
@@ -652,13 +773,6 @@ class B2Model:
             message = f"Error in adding monitor {name} to network: {e}"
             self.logger.critical(message)
             raise RuntimeError(message) from e
-
-        self.monitors[name] = {
-            "name": name,
-            "type": cls.__name__,
-            "source": group,
-            "variable": variable,
-        }
 
     def define_reset(self, name: str, reset: str) -> None:
         """
