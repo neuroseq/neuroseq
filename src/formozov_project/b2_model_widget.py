@@ -42,7 +42,6 @@ class ModelDialog(QtWidgets.QDialog):
         self.layout = QtWidgets.QGridLayout(self)
 
         self.name_entry, self.name_button = self.add_text_field("Name")
-        self.show_parameters_button = QtWidgets.QPushButton("Show parameters", self)
 
         self.qtbtn = (
             QtWidgets.QDialogButtonBox.StandardButton.Ok
@@ -394,9 +393,22 @@ class NeuronGroupDialog(ModelDialog):
         self.refractory, self.refractory_button = self.add_text_field(
             "Refractory", QtWidgets.QLineEdit
         )
-        self.solver, self.solver_button = self.add_text_field(
-            "Solver method", QtWidgets.QLineEdit
+
+        self.solver = QtWidgets.QComboBox(self)
+        self.solver.addItems(["euler", "exponential_euler", "exact"])
+        solver_name = QtWidgets.QLabel("solver", self)
+        row = self.layout.rowCount()
+        self.layout.addWidget(
+            solver_name,
+            row,
+            1,
         )
+        self.layout.addWidget(
+            self.solver,
+            row,
+            2,
+        )
+
         self.neuronnumber, self.neuronnumber_button = self.add_text_field(
             "Neuronnumber", QtWidgets.QLineEdit
         )
@@ -414,17 +426,10 @@ class NeuronGroupDialog(ModelDialog):
         row = self.layout.rowCount()
 
         # Add the buttons to the layout
-        self.layout.addWidget(
-            self.show_parameters_button, row, 1, 1, 4, QtCore.Qt.AlignCenter
-        )
 
-        self.layout.addWidget(self.button_box, row + 1, 1, 1, 4, QtCore.Qt.AlignCenter)
+        self.layout.addWidget(self.button_box, row, 1, 1, 4, QtCore.Qt.AlignCenter)
 
         # connect signals and sockets:
-
-        self.show_parameters_button.clicked.connect(
-            lambda: self.display_parameters("neurongroups")
-        )
 
         self.threshold_button.clicked.connect(
             lambda: self.accept_parameter_with_savebutton(
@@ -451,12 +456,9 @@ class NeuronGroupDialog(ModelDialog):
             )
         )
 
-        self.solver_button.clicked.connect(
-            lambda: self.accept_parameter_with_savebutton(
-                self.solver,
-                "solver",
-                self.model.define_solver_method,
-                self.solver_button,
+        self.solver.currentTextChanged.connect(
+            lambda: self.accept_parameter(
+                self.solver, "method", model.define_solver_method
             )
         )
 
@@ -538,9 +540,6 @@ class NeuronSubgroupDialog(ModelDialog):
 
         row = self.layout.rowCount()
 
-        self.layout.addWidget(
-            self.show_parameters_button, row, 1, 1, 3, QtCore.Qt.AlignCenter
-        )
         self.layout.addWidget(self.button_box, row + 1, 1, 1, 4, QtCore.Qt.AlignCenter)
 
         self.name_button.clicked.connect(
@@ -550,10 +549,6 @@ class NeuronSubgroupDialog(ModelDialog):
         self.definition_button.clicked.connect(self.get_subgroup_def)
 
         self.target_button.clicked.connect(self.get_targetname)
-
-        self.show_parameters_button.clicked.connect(
-            lambda: self.display_parameters("neurongroups")
-        )
 
     def showEvent(self, event: QtCore.QEvent) -> None:
         # TODO: this is here to make the window a bit bigger. Is there a better way to do this?
@@ -731,10 +726,6 @@ class SynapseDialog(ModelDialog):
 
         row = self.layout.rowCount()
 
-        self.layout.addWidget(
-            self.show_parameters_button, row, 1, 1, 3, QtCore.Qt.AlignCenter
-        )
-
         self.layout.addWidget(self.button_box, row + 1, 1, 1, 4, QtCore.Qt.AlignCenter)
 
         # connect signals and slots
@@ -791,9 +782,6 @@ class SynapseDialog(ModelDialog):
         )
 
         self.name_button.clicked.connect(lambda: self.accept_name("synapses"))
-        self.show_parameters_button.clicked.connect(
-            lambda: self.display_parameters("synapses")
-        )
 
 
 class ParameterDialog(ModelDialog):
@@ -828,20 +816,12 @@ class ParameterDialog(ModelDialog):
 
         row = self.layout.rowCount()
 
-        self.layout.addWidget(
-            self.show_parameters_button, row, 1, 1, 3, QtCore.Qt.AlignCenter
-        )
-
-        self.layout.addWidget(self.button_box, row + 1, 1, 1, 3, QtCore.Qt.AlignCenter)
+        self.layout.addWidget(self.button_box, row, 1, 1, 3, QtCore.Qt.AlignCenter)
 
         self.setLayout(self.layout)
 
         for qle in [self.name_entry, self.value_entry]:
             qle.setMinimumWidth(qle.sizeHint().width() * 2)
-
-        self.show_parameters_button.clicked.connect(
-            lambda: self.display_parameters("parameters")
-        )
 
         self.value_button.clicked.connect(self.accept_value)
 
@@ -1247,16 +1227,9 @@ class InitialConditionWidget(ModelDialog):
             "Value", textfieldtype=QtWidgets.QTextEdit
         )
 
-        self.layout.addWidget(
-            self.show_parameters_button, row, 1, 1, 3, QtCore.Qt.AlignCenter
-        )
-
         row += 1
         self.layout.addWidget(self.button_box, row, 1, 1, 4, QtCore.Qt.AlignCenter)
 
-        self.show_parameters_button.clicked.connect(
-            lambda: self.display_parameters(target=self.params, read_only=False)
-        )
         self.source_button.clicked.connect(self.accept_source)
         self.var_button.clicked.connect(self.accept_variable)
         self.value_button.clicked.connect(self.accept_value)
@@ -1379,7 +1352,6 @@ class B2ModelWidget(ModelDialog):
         self.name_button.hide()
 
         self.setWindowTitle("Model definition")
-        self.show_parameters_button.hide()
 
         self.timestep, self.timestep_button = self.add_text_field(
             "Timestep",

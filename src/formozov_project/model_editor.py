@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 import brian2 as b2  # noqa: F401
+import qtawesome as qta
 from brian2 import TimedArray
 from pyqtgraph.parametertree import Parameter
 from pyqtgraph.parametertree import ParameterTree
@@ -868,17 +869,28 @@ class ModelEditorDialog(QtWidgets.QDialog):
 
         i = 0
         for k, t in trees.items():
+            plusbutton = QtWidgets.QPushButton(None, self)
+            plusbutton.setIcon(qta.icon("mdi6.plus"))
+            plusbutton.clicked.connect(t.add_item)
+
             nameplate = QtWidgets.QLabel(str(k), parent=self)
             bold_font = QtGui.QFont()
             bold_font.setBold(True)
             nameplate.setFont(bold_font)
             layout.addWidget(nameplate, 0, i)
-            layout.addWidget(t, 1, i)
+            layout.addWidget(plusbutton, 0, i + 1)
+            layout.addWidget(
+                t,
+                1,
+                i,
+                1,
+                2,
+            )
             separator = QtWidgets.QFrame()
             separator.setFrameShape(QtWidgets.QFrame.VLine)
             separator.setFrameShadow(QtWidgets.QFrame.Sunken)
-            layout.addWidget(separator, 1, i + 1)
-            i += 2
+            layout.addWidget(separator, 1, i + 2)
+            i += 3
 
         layout.addWidget(button_box, layout.rowCount(), 1, 1, 4, QtCore.Qt.AlignCenter)
 
