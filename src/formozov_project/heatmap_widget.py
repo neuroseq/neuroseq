@@ -33,8 +33,10 @@ class HeatmapWidget(pg.ImageView):
         if data is not None:
             self.setImage(data.T, xvals=timestamps)
 
-    def connect_trace_widget(self, trace_widget: pg.PlotWidget) -> None:
-        """Connect the timeline in this widget to the timeline in the TraceWidget."""
+    def connect_timeseries_widget_timeline(
+        self, timeseries_widget: pg.PlotWidget
+    ) -> None:
+        """Connect the timeline in this widget to the timeline in the TimeseriesWidget."""
         self.sigTimeChanged.connect(
-            lambda idx, time: trace_widget.timeline.setValue(time)
+            lambda idx, time: timeseries_widget.timeline.setValue(time)
         )

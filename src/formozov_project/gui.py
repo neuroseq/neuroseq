@@ -16,6 +16,7 @@ from formozov_project.b2_model import B2Model
 from formozov_project.b2_model_widget import B2ModelWidget
 from formozov_project.heatmap_widget import HeatmapWidget
 from formozov_project.model_editor import ModelEditorDialog
+from formozov_project.spike_widget import SpikeWidget
 from formozov_project.stim_console import StimConsole
 from formozov_project.stim_editor import StimEditor
 from formozov_project.trace_widget import TraceWidget
@@ -29,8 +30,9 @@ class Gui(QtWidgets.QMainWindow):
         self.logger = logging.getLogger(__name__)
         self.logger.info("starting Gui")
         self.model = B2Model()
-        self.neurons: dict[str, b2.StateMonitor] = {}
-        self.synapses: dict[str, b2.StateMonitor] = {}
+        self.neurons: dict[str, tuple[b2.StateMonitor, str]] = {}
+        self.synapses: dict[str, tuple[b2.StateMonitor, str]] = {}
+        self.spikes: dict[str, b2.SpikeMonitor] = {}
         self.setWindowTitle("Formozov Project")
         self._create_menus_and_toolbar()
         self.addToolBar(self.toolbar)
@@ -38,27 +40,36 @@ class Gui(QtWidgets.QMainWindow):
         grid_layout = QtWidgets.QVBoxLayout()
         central_widget = QtWidgets.QWidget()
         central_widget.setLayout(grid_layout)
-        # left/right split between traces and heatmap
+        # left/right splitters between simulation output plots
         split_left_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
-        # traces on left
+        # traces
         self.trace_widget_parent = QtWidgets.QWidget()
-        left_layout = QtWidgets.QVBoxLayout()
-        self.trace_widget_parent.setLayout(left_layout)
+        trace_widget_layout = QtWidgets.QVBoxLayout()
+        self.trace_widget_parent.setLayout(trace_widget_layout)
         self.cmb_neuron = QtWidgets.QComboBox()
-        left_layout.addWidget(self.cmb_neuron)
+        trace_widget_layout.addWidget(self.cmb_neuron)
         self.trace_widget = TraceWidget()
-        left_layout.addWidget(self.trace_widget)
+        trace_widget_layout.addWidget(self.trace_widget)
         split_left_right.addWidget(self.trace_widget_parent)
-        # heatmap on right
+        # spikes
+        self.spike_widget_parent = QtWidgets.QWidget()
+        spike_widget_layout = QtWidgets.QVBoxLayout()
+        self.spike_widget_parent.setLayout(spike_widget_layout)
+        self.cmb_spike = QtWidgets.QComboBox()
+        spike_widget_layout.addWidget(self.cmb_spike)
+        self.spike_widget = SpikeWidget()
+        spike_widget_layout.addWidget(self.spike_widget)
+        split_left_right.addWidget(self.spike_widget_parent)
+        # heatmaps
         self.heatmap_widget_parent = QtWidgets.QWidget()
-        right_layout = QtWidgets.QVBoxLayout()
-        self.heatmap_widget_parent.setLayout(right_layout)
+        heatmap_widget_layout = QtWidgets.QVBoxLayout()
+        self.heatmap_widget_parent.setLayout(heatmap_widget_layout)
         self.cmb_synapse = QtWidgets.QComboBox()
-        right_layout.addWidget(self.cmb_synapse)
+        heatmap_widget_layout.addWidget(self.cmb_synapse)
         self.heatmap_widget = HeatmapWidget()
-        right_layout.addWidget(self.heatmap_widget)
+        heatmap_widget_layout.addWidget(self.heatmap_widget)
         split_left_right.addWidget(self.heatmap_widget_parent)
-        split_left_right.setSizes([3000, 2000])
+        split_left_right.setSizes([1000, 1000, 1000])
         # main vertical splitter layout
         split_vertical = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.stim_editor = StimEditor(menu=self.menu_stimuli)
@@ -70,27 +81,23 @@ class Gui(QtWidgets.QMainWindow):
         self.setCentralWidget(central_widget)
         self._create_actions()
         self.resize(800, 600)
-        # add a modal progress bar dialog while running simulations
-        self.progress_dialog = QtWidgets.QProgressDialog(
-            "Simulating...", "", 0, 100, self
-        )
-        self.progress_dialog.setCancelButton(None)
-        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
-        self.progress_dialog.setAutoClose(True)
-        self.progress_dialog.setMinimumDuration(10)
-        self.progress_dialog.reset()
+        self._create_progressbar()
         # connect widgets
-        self.heatmap_widget.connect_trace_widget(self.trace_widget)
+        self.heatmap_widget.connect_timeseries_widget_timeline(self.trace_widget)
         self.trace_widget.connect_heatmap_widget(self.heatmap_widget)
+        self.heatmap_widget.connect_timeseries_widget_timeline(self.spike_widget)
+        self.spike_widget.connect_heatmap_widget(self.heatmap_widget)
         self.stim_console.sig_stims_values_dict_updated.connect(
             self.stim_editor.update_stims_values
         )
         self.cmb_neuron.currentTextChanged.connect(self.set_neuron)
         self.cmb_synapse.currentTextChanged.connect(self.set_synapse)
+        self.cmb_spike.currentTextChanged.connect(self.set_spike)
 
     def _update_data(self) -> None:
         self.set_neuron(self.cmb_neuron.currentText())
         self.set_synapse(self.cmb_synapse.currentText())
+        self.set_spike(self.cmb_spike.currentText())
 
     def _update_simulation_progress(
         self,
@@ -143,6 +150,7 @@ class Gui(QtWidgets.QMainWindow):
             mdiag = ModelEditorDialog(self.model, parent=self)
 
             if mdiag.exec():
+                self.model = mdiag.b2model
                 self.update_model()
 
     def btn_open_example_model_clicked(self) -> None:
@@ -177,32 +185,40 @@ class Gui(QtWidgets.QMainWindow):
         self.trace_widget.clear_data()
         self.stim_editor.set_model(self.model)
         self.cmb_neuron.clear()
+        self.neurons.clear()
         self.cmb_synapse.clear()
+        self.synapses.clear()
+        self.cmb_spike.clear()
+        self.spikes.clear()
         if self.model is not None:
             self.stim_editor.set_model(self.model)
             self.stim_console.set_stims(self.stim_editor.stims_dict)
-            self.neurons = {
-                f"{m.source.name} / {m.record_variables[0]}": m
-                for m in self.model.network.objects
-                if isinstance(m, b2.StateMonitor)
-                and isinstance(m.source, b2.NeuronGroup)
-            }
-            self.logger.info(f"traces: {self.neurons}")
-            self.synapses = {
-                f"{m.source.name} / {m.record_variables[0]}": m
-                for m in self.model.network.objects
-                if isinstance(m, b2.StateMonitor) and isinstance(m.source, b2.Synapses)
-            }
-            self.logger.info(f"synapses: {self.synapses}")
+            for m in self.model.network.objects:
+                if isinstance(m, b2.StateMonitor):
+                    dct = (
+                        self.neurons
+                        if isinstance(m.source, b2.NeuronGroup)
+                        else self.synapses
+                        if isinstance(m.source, b2.Synapses)
+                        else None
+                    )
+                    if dct is not None:
+                        for var in m.record_variables:
+                            dct[f"{m.source.name} / {var}"] = (m, var)
+                elif isinstance(m, b2.SpikeMonitor):
+                    self.spikes[f"{m.source.name}"] = m
+            self.logger.debug(f"neurons: {self.neurons}")
+            self.logger.debug(f"synapses: {self.synapses}")
+            self.logger.debug(f"spikes: {self.spikes}")
             self.cmb_neuron.addItems(list(self.neurons.keys()))
             self.cmb_synapse.addItems(list(self.synapses.keys()))
+            self.cmb_spike.addItems(list(self.spikes.keys()))
 
     @with_wait_cursor
     def set_neuron(self, neuron_name: str) -> None:
         if neuron_name not in self.neurons:
             return
-        monitor = self.neurons[neuron_name]
-        variable = monitor.record_variables[0]
+        monitor, variable = self.neurons[neuron_name]
         timestamps = monitor.t / b2.second
         if timestamps.shape[0] == 0:
             self.trace_widget.clear_data()
@@ -217,10 +233,9 @@ class Gui(QtWidgets.QMainWindow):
     def set_synapse(self, synapse_name: str) -> None:
         if synapse_name not in self.synapses:
             return
-        monitor = self.synapses[synapse_name]
+        monitor, variable = self.synapses[synapse_name]
         synapse_group = monitor.source
         neuron_group = synapse_group.source
-        variable = monitor.record_variables[0]
         values = getattr(monitor, variable)
         matrix = np.zeros((neuron_group.N, neuron_group.N, values.shape[1]))
         n_timestamps = values.shape[1]
@@ -234,6 +249,24 @@ class Gui(QtWidgets.QMainWindow):
             f"Displaying {synapse_name} in HeatmapWidget: {timestamps.shape} timestamps, {matrix.shape} data"
         )
         self.heatmap_widget.set_data(matrix, timestamps)
+
+    @with_wait_cursor
+    def set_spike(self, spike_name: str) -> None:
+        if spike_name not in self.spikes:
+            return
+        monitor = self.spikes[spike_name]
+        spikes = monitor.i
+        timestamps = monitor.t / b2.second
+        dt = monitor.clock.dt / b2.second
+        n_neurons = monitor.source.N
+        n_timesteps = int(monitor.clock.t / monitor.clock.dt)
+        if timestamps.shape[0] == 0:
+            self.spike_widget.clear_data()
+            return
+        self.logger.info(
+            f"Displaying {spike_name} in SpikeWidget: {timestamps.shape} timestamps, {spikes.shape} data"
+        )
+        self.spike_widget.set_data(spikes, timestamps, dt, n_neurons, n_timesteps)
 
     def btn_save_clicked(self) -> None:
         filename, _ = getsavefilename(
@@ -349,6 +382,16 @@ class Gui(QtWidgets.QMainWindow):
             f"Formozov Project\n\nVersion {__version__}\n\n"
             + "https://github.com/ssciwr/formozov-project",
         )
+
+    def _create_progressbar(self) -> None:
+        self.progress_dialog = QtWidgets.QProgressDialog(
+            "Simulating...", "", 0, 100, self
+        )
+        self.progress_dialog.setCancelButton(None)
+        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
+        self.progress_dialog.setAutoClose(True)
+        self.progress_dialog.setMinimumDuration(10)
+        self.progress_dialog.reset()
 
     def _create_menus_and_toolbar(self) -> None:
         menu = self.menuBar()
@@ -469,8 +512,9 @@ class Gui(QtWidgets.QMainWindow):
         )
         self.toolbar.addSeparator()
         for name, widget, icon in [
-            ("&Stimuli", self.stim_editor, "format-line-style"),
+            ("&Stimuli", self.stim_editor, "chart-timeline"),
             ("&Traces", self.trace_widget_parent, "chart-line"),
+            ("&Spikes", self.spike_widget_parent, "chart-scatter-plot"),
             ("&Heatmap", self.heatmap_widget_parent, "data-matrix"),
             ("&Console", self.stim_console, "console"),
         ]:
