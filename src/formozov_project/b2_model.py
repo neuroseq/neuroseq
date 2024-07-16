@@ -101,7 +101,7 @@ class B2Model:
         self.neurongroups: dict[str, dict[str, Any]] = {}
         self.synapses: dict[str, dict[str, Any]] = {}
         self.monitors: dict[str, dict[str, Any]] = {}
-        # self.init_vars: dict[str, dict[str, Any]] = {}
+        self.initials: dict[str, dict[str, Any]] = {}
         self.dt: b2.Quantity | None = None
         self.checkpoints: list[str] = []
         self.must_be_rebuilt = False
@@ -138,31 +138,20 @@ class B2Model:
 
         self._add_equation_to_group(self.neurongroups[name], line)
 
-    def define_init(self, elementname: str, varname: str, value: Any) -> None:
+    def define_init(self, name: str, varname: str, value: Any) -> None:
         """
-        Define initial values for a quantity defined in the network
+        Define the initial condition of the variable 'varname' in the network element called 'name' and set it to 'value
 
         Parameters
         ----------
-        elementname : str
-            The element of the network to define the quantity for
+        name : str
+            Name of the network element to set the initial condition for
         varname : str
-            The variable to define the quantity for
+            variable in the network element to set
         value : Any
-            The value the quantity should have
-
-        Raises
-        ------
-        ValueError
-            When setting the quantity fails
+            value to set the variable to
         """
-        try:
-            setattr(self.network[elementname], varname, value)
-
-        except Exception as e:
-            raise ValueError(
-                f"Error when initializing {varname} or element {elementname} as {value}: {e}"
-            ) from e
+        self.initials[name] = {"name": name, "varname": varname, "value": value}
 
     def define_dt(self, dt: b2.Quantity) -> None:
         """
@@ -837,6 +826,29 @@ class B2Model:
 
         self.network.add(ng)
 
+    def assemble_initials(self, name: str) -> None:
+        """
+        _summary_
+
+        Parameters
+        ----------
+        name : str
+            _description_
+
+        Raises
+        ------
+        ValueError
+            _description_
+        """
+        for d in self.initials[name]:
+            try:
+                setattr(self.network[name], d["varname"], d["value"])
+
+            except Exception as e:
+                raise ValueError(
+                    f"Error when initializing {d["varname"]} of element {name} as {d["value"]}: {e}"
+                ) from e
+
     def save_to_h5(self, path: str | Path) -> None:
         """
         save_to_h5 Save data collected by defined monitor objects to hdf5.
@@ -879,6 +891,114 @@ class B2Model:
             self.logger.critical(message)
             raise ValueError(message) from e
 
+    def assemble_network(self) -> None:
+        """
+        Assemble the network from its predefined components
+        """
+        for n in self.neurongroups:
+            if "idx" not in self.neurongroups[n]:
+                self.assemble_neurongroup(n)
+
+        for n in self.neurongroups:
+            if "idx" in self.neurongroups[n]:
+                self.assemble_neuronsubgroup(n)
+
+        for s in self.synapses:
+            self.assemble_synapse(s)
+
+        for i in self.initials:
+            self.assemble_initials(i)
+
+        for m in self.monitors:
+            self.assemble_monitor(m)
+
+    def get_model_definition(self) -> dict[str, Any]:
+        return {
+            "neurongroups": self.neurongroups,
+            "synapses": self.synapses,
+            "monitors": self.monitors,
+            "parameters": self.parameters,
+            "initial_conditions": self.initials,
+        }
+
+    def get_current_element_state(
+        self,
+        name: str,
+        read_only_variables: bool = False,
+        subexpressions: bool = False,
+        vars: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Get the current internal states of a network element. This is different from
+        the definitions done by the `B2Model` class and contain a lot more information
+        about brian2 internals
+
+        Parameters
+        ----------
+        name : str
+            name of the element to get the internal state from
+        read_only_variables : bool, optional
+            whether to include read-only variables, by default False
+        subexpressions : bool, optional
+            whether to include subexpressions, by default False
+        vars : list[str] | None, optional
+            list of variables to display. lists all if None, by default None
+
+        Returns
+        -------
+        dict[str, Any]
+            dictionary which represents the internal state of the requested variable in the brian2 network
+
+        Raises
+        ------
+        AttributeError
+            When the network has not yet been assembled
+        AttributeError
+            When the network does not contain an element called 'name'.
+        """
+        if name not in self.network.objects:
+            raise AttributeError(f"Error, name {name} not in network")
+
+        return self.network[name].get_states(
+            read_only_variables=read_only_variables,
+            subexpressions=subexpressions,
+            vars=vars,
+        )
+
+    def get_current_network_state(
+        self,
+        read_only_variables: bool = False,
+        subexpressions: bool = False,
+        vars: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Get the current internal state of the underlying brian2 network
+
+        Parameters
+        ----------
+        read_only_variables : bool, optional
+            whether to include read-only variables, by default False
+        subexpressions : bool, optional
+            whether to include subexpressions, by default False
+        vars : list[str] | None, optional
+            list of variables to display. lists all if None, by default None
+
+        Returns
+        -------
+        dict[str, Any]
+            Dictionary representing the internal state of the network, including a lot of brian2 internals
+
+        Raises
+        ------
+        AttributeError
+            When the network has not yet been assembled
+        """
+        return self.network.get_states(
+            read_only_variables=read_only_variables,
+            subexpressions=subexpressions,
+            vars=vars,
+        )
+
     def run_simulation(
         self,
         tfinal: b2.Quantity,
@@ -900,7 +1020,12 @@ class B2Model:
         if len(self.checkpoints) == 0:
             self.checkpoints.append("Initial state")
             self.network.store(self.checkpoints[-1])
-        self.network.run(tfinal, report=report, report_period=0.5 * b2.second)
+        self.network.run(
+            tfinal,
+            report=report,
+            report_period=0.5 * b2.second,
+            namespace=self.parameters,
+        )
         self.logger.info(f"run the system for {tfinal} with savepath = {savepath}")
         if savepath is not None:
             self.save_to_h5(savepath)

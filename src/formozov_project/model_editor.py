@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Callable
 from typing import Any
 
@@ -27,6 +26,7 @@ from formozov_project.b2_model_widget import NeuronSubgroupDialog
 from formozov_project.b2_model_widget import ParameterDialog
 from formozov_project.b2_model_widget import SynapseDialog
 from formozov_project.reconstructor import Reconstructor
+from formozov_project.reconstructor import utils
 
 
 # derive a new combobox which has a 'clicked' signal
@@ -320,39 +320,16 @@ class EditableParameterTree(ParameterTree):
         b2.Quantity|str
             either a brian2 quantity or the input string
         """
-        # extract numerical value via regex. allow for multiple numbers left and right of a '.' and multiple spaces or a '*' between number and unit
-        pattern = r"([\(\)0-9./\*]+)\s*\*?\s*(\w+)"
-        match = re.match(pattern, quantity_str)
-        ok = True
-        quantity_obj = None
-        if match:
-            value, unit_str = match.groups()
 
-            # Map the unit string to a Brian2 unit
-            try:
-                unit = getattr(b2, unit_str)
-            except Exception as e:
-                message = f"Error when interpreting unit string: {e}"
-                self.logger.critical(message)
-                QtWidgets.QMessageBox.critical(self, "Quantity parsing error", message)
-                ok = False
+        try:
+            quantity_obj, ok = utils.parse_quantity(quantity_str)
+        except Exception as e:
+            message = f"Error when interpreting unit string: {e}"
+            self.logger.critical(message)
+            QtWidgets.QMessageBox.critical(self, "Quantity parsing error", message)
+            ok = False
 
-            if ok:
-                try:
-                    v = eval(value)
-                    # Create the quantity object
-                    quantity_obj = v * unit
-                except Exception as e:
-                    message = f"Error when interpreting numerical quantity string: {e}"
-                    self.logger.critical(message)
-                    QtWidgets.QMessageBox.critical(
-                        self, "Quantity parsing error", message
-                    )
-                    ok = False
-
-            return (quantity_obj, ok)
-        else:
-            return (quantity_str, ok)
+        return (quantity_obj, ok)
 
     def _set_param(self, param: Parameter, value: Any) -> None:
         """
