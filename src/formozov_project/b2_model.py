@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -25,25 +26,6 @@ class B2Model:
 
         return do_with_rebuild
 
-    # this wrapper is only there to be able to decorate the function and not have to
-    # write decorators everywhere
-    @_trigger_rebuild
-    def _update_nested_dict(self, original: dict, updates: dict) -> None:
-        """
-        _update_nested_dict Update nested dictionary with another dictionary.
-        This helper function is mainly useful to maintain the argument
-        dictionaries for the different network elements.
-
-        Parameters
-        ----------
-        original : dict
-            dictionary to be updated
-        updates : dict
-            dictionary to update with
-        """
-        utils.update_nested_dict(original, updates)
-
-    @_trigger_rebuild
     def _add_equation_to_group(self, group: dict, line: str) -> None:
         r"""
         _add_equation_to_group Add an equation to a neurongroup or synapse dictionary that holds arguments to construct the respective objects.
@@ -107,6 +89,7 @@ class B2Model:
     def name(self) -> str:
         return self.network.name
 
+    @_trigger_rebuild
     def define_equation(self, name: str, line: str) -> None:
         r"""
         define_equation Define a model equation for neurongroups.
@@ -133,6 +116,7 @@ class B2Model:
 
         self._add_equation_to_group(self.neurongroups[name], line)
 
+    @_trigger_rebuild
     def define_init(self, name: str, varname: str, value: Any) -> None:
         """
         Define the initial condition of the variable 'varname' in the network element called 'name' and set it to 'value
@@ -148,6 +132,7 @@ class B2Model:
         """
         self.initials[name] = {"name": name, "varname": varname, "value": value}
 
+    @_trigger_rebuild
     def define_dt(self, dt: b2.Quantity) -> None:
         """
         define_dt Define the global timestep for the default clock. currently, All elements of the network use the same clock with the same timestep.
@@ -207,6 +192,7 @@ class B2Model:
         self.logger.info(f"Parameter defined: {name}")
         self.logger.debug(f"Parameter value: {value}")
 
+    @_trigger_rebuild
     def define_threshold(self, name: str, th: str) -> None:
         """
         define_threshold Define the threshold for the neurongroup given by `name`.
@@ -218,7 +204,7 @@ class B2Model:
         th : str
             Threshold expression as a string.
         """
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.neurongroups,
             {
                 name: {
@@ -228,6 +214,7 @@ class B2Model:
         )
         self.logger.info(f"Threshold defined: {th}")
 
+    @_trigger_rebuild
     def define_solver_method(self, name: str, method: str) -> None:
         """
         define_solver_method Define the solver method for the neurongroup indicated by `name`.
@@ -239,7 +226,7 @@ class B2Model:
         method : str
             name of the method to use. Refer to the brian2 documentation for the currently available set of solvers.
         """
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.neurongroups,
             {
                 name: {
@@ -250,6 +237,7 @@ class B2Model:
 
         self.logger.info(f"Solver method defined: {method} for {name}")
 
+    @_trigger_rebuild
     def define_synapse_solver_method(self, name: str, method: str) -> None:
         """
         define_solver_method Define the solver method for the synapse indicated by `name`.
@@ -261,7 +249,7 @@ class B2Model:
         method : str
             name of the method to use. Refer to the brian2 documentation for the currently available set of solvers.
         """
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.synapses,
             {
                 name: {
@@ -271,6 +259,7 @@ class B2Model:
         )
         self.logger.info(f"Solver method defined: {method} for {name}")
 
+    @_trigger_rebuild
     def define_refractory(self, name: str, value: str | b2.Quantity) -> None:
         """
         define_refractory Define the refractoriness for a neurongroup indicated by name.
@@ -282,7 +271,7 @@ class B2Model:
         value : str | b2.Quantity
             Either a string expression evalutating to the length of the refractory period or the length of the period itself.
         """
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.neurongroups,
             {
                 name: {
@@ -292,6 +281,7 @@ class B2Model:
         )
         self.logger.info(f"Refractory period defined: {value}")
 
+    @_trigger_rebuild
     def define_neuronnumber(self, name: str, n: int) -> None:
         """
         define_neuronnumber Define the number of neurons in a group indicated by name.
@@ -303,7 +293,7 @@ class B2Model:
         n : int
             Number of neurons the neurongroup should have.
         """
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.neurongroups,
             {
                 name: {
@@ -313,6 +303,7 @@ class B2Model:
         )
         self.logger.info(f"Neuron number defined: {n}")
 
+    @_trigger_rebuild
     def define_neuron_subgroup_target(self, name: str, target_name: str) -> None:
         """
         Define the target neurongroup for a neuron subgroup called name
@@ -338,13 +329,14 @@ class B2Model:
         if name not in self.neurongroups:
             self.neurongroups[name] = {"name": name}
 
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.neurongroups[name],
             {
                 "target": target_name,
             },
         )
 
+    @_trigger_rebuild
     def define_neuron_subgroup_idxs(self, name: str, idxs: int | list | tuple) -> None:
         """
         Define the indices in a neurongroup for a neuron subgroup called 'name'.
@@ -369,7 +361,7 @@ class B2Model:
                 "name": name,
             }
 
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.neurongroups[name], {"start": start, "stop": stop}
         )
 
@@ -408,6 +400,7 @@ class B2Model:
             self.logger.critical(message)
             raise RuntimeError(message) from e
 
+    @_trigger_rebuild
     def define_synapse_target(self, name: str, target: str) -> None:
         """
         define_synapse_target Define the target neurongroup for a synapse called 'name'.
@@ -419,7 +412,7 @@ class B2Model:
         target : str
             Name of the target neurongroup to use with the synapse.
         """
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.synapses,
             {
                 name: {
@@ -428,6 +421,7 @@ class B2Model:
             },
         )
 
+    @_trigger_rebuild
     def define_synapse_origin(self, name: str, origin: str) -> None:
         """
         define_synapse_origin Define the origin neurongroup for a synapse called 'name'.
@@ -439,7 +433,7 @@ class B2Model:
         target : str
             Name of the origin neurongroup to use with the synapse.
         """
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.synapses,
             {
                 name: {
@@ -448,6 +442,7 @@ class B2Model:
             },
         )
 
+    @_trigger_rebuild
     def define_synapse_equation(self, name: str, line: str) -> None:
         """
         define_synapse_equation Define a line in the model equation for a synapse called `synapse`, or the full equation all at once.
@@ -473,6 +468,7 @@ class B2Model:
 
         self._add_equation_to_group(self.synapses[name], line)
 
+    @_trigger_rebuild
     def define_synapse_pre(self, name: str, line: str) -> None:
         """
         define_synapse_pre Define the code that is executed on each synapse receiving a presynaptic spike as a string expression.
@@ -485,7 +481,7 @@ class B2Model:
             String representation of the code to use.
         """
         if name not in self.synapses or "on_pre" not in self.synapses[name]:
-            self._update_nested_dict(
+            utils.update_nested_dict(
                 self.synapses,
                 {
                     name: {
@@ -496,6 +492,7 @@ class B2Model:
         else:
             self.synapses[name]["on_pre"] += line + "\n"
 
+    @_trigger_rebuild
     def define_synapse_post(self, name: str, line: str) -> None:
         """
         define_synapse_post Add code to a synapse called `name` that shall run
@@ -509,7 +506,7 @@ class B2Model:
             String representation of the code to add.
         """
         if name not in self.synapses or "on_post" not in self.synapses[name]:
-            self._update_nested_dict(
+            utils.update_nested_dict(
                 self.synapses,
                 {
                     name: {
@@ -520,6 +517,7 @@ class B2Model:
         else:
             self.synapses[name]["on_post"] += line + "\n"
 
+    @_trigger_rebuild
     def define_synapse_connection(self, name: str, connection_condition: str) -> None:
         """
         define_synapse_connection Define the connections of a Synapse called `name` as a condition represented as a string.
@@ -532,7 +530,7 @@ class B2Model:
         connection_condition : str
             String representaion of the connection condition.
         """
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.synapses,
             {
                 name: {
@@ -541,6 +539,7 @@ class B2Model:
             },
         )
 
+    @_trigger_rebuild
     def define_synapse_delay(self, name: str, delay: Any) -> None:
         """
         Add delay to synapse
@@ -552,7 +551,7 @@ class B2Model:
         delay : Any
             delay expression
         """
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.synapses,
             {
                 name: {
@@ -561,6 +560,7 @@ class B2Model:
             },
         )
 
+    @_trigger_rebuild
     def define_synapse_connection_probablitiy(self, name: str, p: float) -> None:
         """
         define_synapse_connection_probability Define the connection probability for a given synapse called `name`.
@@ -575,7 +575,7 @@ class B2Model:
         if not 0.0 <= p <= 1.0:
             raise ValueError(f"Error, supplied value {p} is not a probability.")
 
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.synapses,
             {
                 name: {
@@ -642,6 +642,7 @@ class B2Model:
 
         self.network.add(synapse)
 
+    @_trigger_rebuild
     def define_monitor_type(self, name: str, cls: type) -> None:
         """
         Define the type of a monitor. Can be 'StateMonitor' or 'SpikeMonitor' at the moment.
@@ -658,7 +659,7 @@ class B2Model:
                 "name": name,
             }
 
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.monitors,
             {
                 name: {
@@ -667,6 +668,7 @@ class B2Model:
             },
         )
 
+    @_trigger_rebuild
     def define_monitor_source(self, name: str, source: str) -> None:
         """
         Define the source member of the neuron network to monitor variables for
@@ -683,7 +685,7 @@ class B2Model:
                 "name": name,
             }
 
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.monitors,
             {
                 name: {
@@ -692,6 +694,7 @@ class B2Model:
             },
         )
 
+    @_trigger_rebuild
     def define_monitor_variable(self, name: str, variable: str | None) -> None:
         """
         define the variable a monitor can be attached to. Can be a string , None (for spikemonitors) or True (for a StateMonitor).
@@ -709,7 +712,7 @@ class B2Model:
                 "name": name,
             }
 
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.monitors,
             {
                 name: {
@@ -758,6 +761,7 @@ class B2Model:
             self.logger.critical(message)
             raise RuntimeError(message) from e
 
+    @_trigger_rebuild
     def define_reset(self, name: str, reset: str) -> None:
         """
         define_reset Define the `reset` parameter for a neurongroup indicated by `name`.
@@ -770,7 +774,7 @@ class B2Model:
             The reset parameter for the neurongroup. Have a look at the brian2 documentation for
             the `NeuronGroup` class for more details.
         """
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.neurongroups,
             {
                 name: {
@@ -892,8 +896,10 @@ class B2Model:
 
     def assemble_network(self) -> None:
         """
-        Assemble the network from its predefined components
+        Assemble the network from its predefined components.
         """
+        self.network = b2.Network(name=self.name)
+
         for n in self.neurongroups:
             if "idx" not in self.neurongroups[n]:
                 self.assemble_neurongroup(n)
@@ -911,6 +917,8 @@ class B2Model:
         for m in self.monitors:
             self.assemble_monitor(m)
 
+        self.must_be_rebuilt = False
+
     def get_model_definition(self) -> dict[str, Any]:
         """
         Return the entire model definition as a dictionary.
@@ -924,11 +932,11 @@ class B2Model:
             Has entries for 'neurongroups', 'synapses', 'monitors', 'parameters' and 'initial_conditions'
         """
         return {
-            "neurongroups": self.neurongroups,
-            "synapses": self.synapses,
-            "monitors": self.monitors,
-            "parameters": self.parameters,
-            "initial_conditions": self.initials,
+            "neurongroups": deepcopy(self.neurongroups),
+            "synapses": deepcopy(self.synapses),
+            "monitors": deepcopy(self.monitors),
+            "parameters": deepcopy(self.parameters),
+            "initial_conditions": deepcopy(self.initials),
         }
 
     def _get_current_element_state(
