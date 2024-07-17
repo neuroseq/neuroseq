@@ -315,7 +315,10 @@ def test_define_monitor(
 
     assert mfx.monitors == {}
 
-    mfx.define_monitor("Traces_ge", b2.StateMonitor, "P", "ge")
+    mfx.define_monitor_type("Traces_ge", b2.StateMonitor)
+    mfx.define_monitor_variable("Traces_ge", "ge")
+    mfx.define_monitor_source("Traces_ge", "P")
+    mfx.assemble_monitor("Traces_ge")
 
     assert "Traces_ge" in mfx.monitors
     assert mfx.network["Traces_ge"].source == mfx.network["P"]
