@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from ast import literal_eval
 from collections.abc import Callable
-from importlib import import_module
 from typing import Any
 
 import brian2 as b2
@@ -1030,7 +1029,7 @@ class MonitorDialog(ModelDialog):
         """
         super().__init__(model, parent)
 
-        self.tp: type | None = None
+        self.tp: str | None = None
         self.var: str | None = None
         self.src: str | None = None
 
@@ -1090,12 +1089,10 @@ class MonitorDialog(ModelDialog):
 
         tptext = self.type.text()
 
-        if tptext in ["StateMonitor", "SpikeMonitor"]:
-            self.tp = getattr(import_module("brian2"), tptext)
-            self.type_button.setDown(True)
-            self.type_button.setText("saved")
-        else:
+        if tptext not in ["StateMonitor", "SpikeMonitor"]:
             self.display_error(f"Monitor type {tptext} is invalid")
+        else:
+            self.tp = tptext
 
     def accept_source(self) -> None:
         """
@@ -1126,10 +1123,14 @@ class MonitorDialog(ModelDialog):
         Accept the monitor data and define a new monitor in the held model
         """
         try:
+            self.model.define_monitor_source(self.name, self.src)
+            self.model.define_monitor_type(self.name, self.tp)
+            self.model.define_monitor_variable(self.name, self.var)
             self.model.assemble_monitor(self.name)
 
             super().accept()
         except Exception as e:
+            del self.model.monitors[self.name]  # type: ignore
             self.display_error(f"Error when defining monitor {self.name}: {e}")
 
     def display_parameters(

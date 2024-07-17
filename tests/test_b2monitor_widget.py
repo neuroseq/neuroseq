@@ -85,7 +85,7 @@ def test_monitor_accept(qtbot: QtBot) -> None:
     mdlg.name = "M"
     mdlg.src = "neurongroup"
     mdlg.var = "y"
-    mdlg.tp = StateMonitor
+    mdlg.tp = "StateMonitor"
 
     mdlg.accept()
 
