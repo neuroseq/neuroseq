@@ -162,10 +162,11 @@ class Reconstructor:
         data_of_group : dict[str, Any]
             dict containing the data to construct the subgroup
         """
-
-        model.define_neuron_subgroup(
-            data_of_group["target"], name, data_of_group["idx"]
+        model.define_neuron_subgroup_target(name, data_of_group["target"])
+        model.define_neuron_subgroup_idxs(
+            name, [data_of_group["start"], data_of_group["stop"]]
         )
+        model.assemble_neuronsubgroup(name)
 
     def reconstruct_synapses(
         self, model: Any, name: str, data_of_group: dict[str, Any]
@@ -267,13 +268,17 @@ class Reconstructor:
 
         # reconstruct neurongroups
         for n in self.loaded_data["objects"]["neurongroups"]:
-            if "idx" not in self.loaded_data[n]:  # reconstruct full groups first...
+            if all(
+                k not in self.loaded_data[n] for k in ["start", "stop"]
+            ):  # reconstruct full groups first...
                 self.reconstruct_neurongroups(model, n, self.loaded_data[n])
         if report is not None:
             report(40)
 
         for n in self.loaded_data["objects"]["neurongroups"]:
-            if "idx" in self.loaded_data[n]:  # ... then define the subgroups
+            if all(
+                k in self.loaded_data[n] for k in ["start", "stop"]
+            ):  # ... then define the subgroups
                 self.reconstruct_neuron_subgroup(model, n, self.loaded_data[n])
         if report is not None:
             report(50)

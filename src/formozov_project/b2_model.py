@@ -130,7 +130,15 @@ class B2Model:
         value : Any
             value to set the variable to
         """
-        self.initials[name] = {"name": name, "varname": varname, "value": value}
+        if name not in self.initials:
+            self.initials[name] = {}
+
+        utils.update_nested_dict(
+            self.initials[name],
+            {
+                varname: value,
+            },
+        )
 
     @_trigger_rebuild
     def define_dt(self, dt: b2.Quantity) -> None:
@@ -353,7 +361,7 @@ class B2Model:
             start = idxs[0]
             stop = idxs[1]
         elif isinstance(idxs, int):
-            start = (idxs,)
+            start = idxs
             stop = idxs + 1
 
         if name not in self.neurongroups:
@@ -666,7 +674,7 @@ class B2Model:
             raise RuntimeError(message) from e
 
     @_trigger_rebuild
-    def define_monitor_type(self, name: str, cls: type) -> None:
+    def define_monitor_type(self, name: str, classname: str) -> None:
         """
         Define the type of a monitor. Can be 'StateMonitor' or 'SpikeMonitor' at the moment.
 
@@ -674,8 +682,8 @@ class B2Model:
         ----------
         name : str
             name of the monitor to define the type for
-        cls : type
-            type to use
+        classname : str
+            name of the type to use in brian2
         """
         if name not in self.monitors:
             self.monitors[name] = {
@@ -686,7 +694,7 @@ class B2Model:
             self.monitors,
             {
                 name: {
-                    "type": cls,
+                    "type": classname,
                 }
             },
         )
@@ -769,7 +777,7 @@ class B2Model:
         self.logger.info(f"adding monitor '{name}'")
 
         try:
-            monitor = self.monitors[name]["type"](
+            monitor = getattr(b2, self.monitors[name]["type"])(
                 self.network[self.monitors[name]["source"]],
                 self.monitors[name]["variable"],
                 record=True,
@@ -872,7 +880,7 @@ class B2Model:
             raise RuntimeError(message) from e
 
     @_trigger_rebuild
-    def assemble_initials(self, name: str) -> None:
+    def assemble_initials(self) -> None:
         """
         Set all the initial conditions that have been defined via 'define_init' for a certain element of the network.
 
@@ -886,17 +894,19 @@ class B2Model:
         ValueError
             When something goes wrong during assignment of the initial condition to the variable given
         """
-        try:
-            setattr(
-                self.network[name],
-                self.initials[name]["varname"],
-                self.initials[name]["value"],
-            )
+        for name in self.initials:
+            for k, v in self.initials[name].items():
+                try:
+                    setattr(
+                        self.network[name],
+                        k,
+                        v,
+                    )
 
-        except Exception as e:
-            raise ValueError(
-                f"Error when initializing {self.initials[name]["varname"]} of element {name} as {self.initials[name]["value"]}: {e}"
-            ) from e
+                except Exception as e:
+                    raise ValueError(
+                        f"Error when initializing {k} of element {name} as {v}: {e}"
+                    ) from e
 
     def save_to_h5(self, path: str | Path) -> None:
         """
@@ -947,11 +957,11 @@ class B2Model:
         self.network = b2.Network(name=self.name)
 
         for n in self.neurongroups:
-            if "idx" not in self.neurongroups[n]:
+            if all(k not in self.neurongroups[n] for k in ["start", "stop"]):
                 self.assemble_neurongroup(n)
 
         for n in self.neurongroups:
-            if "idx" in self.neurongroups[n]:
+            if all(k in self.neurongroups[n] for k in ["start", "stop"]):
                 self.assemble_neuronsubgroup(n)
 
         for s in self.synapses:

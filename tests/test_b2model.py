@@ -315,7 +315,7 @@ def test_define_monitor(
 
     assert mfx.monitors == {}
 
-    mfx.define_monitor_type("Traces_ge", b2.StateMonitor)
+    mfx.define_monitor_type("Traces_ge", "StateMonitor")
     mfx.define_monitor_variable("Traces_ge", "ge")
     mfx.define_monitor_source("Traces_ge", "P")
     mfx.assemble_monitor("Traces_ge")
@@ -337,8 +337,11 @@ def test_define_monitor_exception(
 
     mfx, _ = mfx_parameterized
 
-    with pytest.raises(RuntimeError, match="Error in defining monitor M"):
-        mfx.define_monitor("M", b2.StateMonitor, "G", "v")
+    mfx.define_monitor_type("Traces_ge", "StateMonitor")
+    mfx.define_monitor_variable("Traces_ge", "ge")
+    mfx.define_monitor_source("Traces_ge", "P")
+    with pytest.raises(RuntimeError, match="Error in defining monitor Traces_ge"):
+        mfx.assemble_monitor("Traces_ge")
 
 
 def test_define_init(mfx_ornstein: b2_model.B2Model) -> None:

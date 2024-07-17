@@ -144,7 +144,11 @@ def mfx_ornstein() -> b2_model.B2Model:
     model.define_solver_method("neurongroup", "euler")
     model.define_equation("neurongroup", eqs)
     model.assemble_neurongroup(name="neurongroup")
-    model.define_monitor("M", b2.StateMonitor, "neurongroup", "y")
+
+    model.define_monitor_source("M", "neurongroup")
+    model.define_monitor_type("M", "StateMonitor")
+    model.define_monitor_variable("M", "y")
+    model.assemble_monitor("M")
 
     # initial conditions
     model.define_init(
@@ -152,6 +156,8 @@ def mfx_ornstein() -> b2_model.B2Model:
     )
     model.define_init("neurongroup", "y", 1)
     model.define_init("neurongroup", "sigma", np.array([0.1, 0.31622, 0.4, 0.2, 0.88]))
+    model.assemble_initials()
+
     model.must_be_rebuilt = False
 
     return model
@@ -199,13 +205,22 @@ def mfx_nmda() -> b2_model.B2Model:
     model.define_synapse_pre("S", "x += w")
     model.assemble_synapse("S")
 
-    model.define_neuron_subgroup("neuron_input", "input_subgroup", 1)
+    model.define_neuron_subgroup_idxs("input_subgroup", 1)
+    model.define_neuron_subgroup_target("input_subgroup", "neuron_input")
 
-    model.define_monitor("M", b2.StateMonitor, "S", "g")
-    model.define_monitor("Mn", b2.StateMonitor, "neurons", "g")
+    model.define_monitor_source("M", "S")
+    model.define_monitor_type("M", "StateMonitor")
+    model.define_monitor_variable("M", "g")
 
-    model.network["S"].w = [1.0, 10.0]
-    model.network["neuron_input"].v = [0.0, 0.5]
+    model.define_monitor_source("Mn", "neurons")
+    model.define_monitor_type("Mn", "StateMonitor")
+    model.define_monitor_variable("Mn", "g")
+    model.assemble_monitor("M")
+    model.assemble_monitor("Mn")
+
+    model.define_init("S", "w", [1.0, 10.0])
+    model.define_init("neuron_input", "v", [0.0, 0.5])
+    model.assemble_initials()
 
     model.must_be_rebuilt = False
     return model
