@@ -747,6 +747,7 @@ class EditableNeurongroupTree(EditableParameterTree):
     def _add_neuronsubgroup(self) -> None:
         """open neuron subgroup definition dialog and update the displayed parameters"""
         old_names = set(getattr(self.b2model, self.name).keys())
+
         self.dialog = NeuronSubgroupDialog(self.b2model)
 
         # update the internal states by

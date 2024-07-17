@@ -41,7 +41,7 @@ def test_monitor_accept_variables(qtbot: QtBot) -> None:
     mdlg.source.setText("P")
 
     mdlg.accept_type()
-    assert mdlg.tp == StateMonitor
+    assert mdlg.tp == "StateMonitor"
 
     mdlg.accept_source()
     assert mdlg.src == "P"

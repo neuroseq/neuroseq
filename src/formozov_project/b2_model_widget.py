@@ -283,7 +283,7 @@ class ModelDialog(QtWidgets.QDialog):
         else:
             if name not in getattr(self.model, target):
                 self.name = name
-                getattr(self.model, target)[name] = {}
+                getattr(self.model, target)[name] = {"name": name}
             else:
                 self.display_error(
                     f"The name {name} has already been defined in {target}"
@@ -493,6 +493,7 @@ class NeuronSubgroupDialog(ModelDialog):
         """
         Accept the current subgroup definition. Displays error message if false
         """
+
         if self.name is None or self.target_name is None:
             self.display_error(
                 "Error, every neuron subgroup needs a name and a defined target"
