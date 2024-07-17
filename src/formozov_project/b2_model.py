@@ -9,6 +9,7 @@ import brian2 as b2
 import h5py
 
 from formozov_project import b2json
+from formozov_project import utils
 from formozov_project.reconstructor import Reconstructor
 
 
@@ -24,6 +25,8 @@ class B2Model:
 
         return do_with_rebuild
 
+    # this wrapper is only there to be able to decorate the function and not have to
+    # write decorators everywhere
     @_trigger_rebuild
     def _update_nested_dict(self, original: dict, updates: dict) -> None:
         """
@@ -38,15 +41,7 @@ class B2Model:
         updates : dict
             dictionary to update with
         """
-        for key, value in updates.items():
-            if (
-                isinstance(value, dict)
-                and key in original
-                and isinstance(original[key], dict)
-            ):
-                self._update_nested_dict(original[key], value)
-            else:
-                original[key] = value
+        utils.update_nested_dict(original, updates)
 
     @_trigger_rebuild
     def _add_equation_to_group(self, group: dict, line: str) -> None:
@@ -826,19 +821,20 @@ class B2Model:
 
         self.network.add(ng)
 
+    @_trigger_rebuild
     def assemble_initials(self, name: str) -> None:
         """
-        _summary_
+        Set all the initial conditions that have been defined via 'define_init' for a certain element of the network.
 
         Parameters
         ----------
         name : str
-            _description_
+            name of the element of the network for which to define an initial condition.
 
         Raises
         ------
         ValueError
-            _description_
+            When something goes wrong during assignment of the initial condition to the variable given
         """
         try:
             setattr(
@@ -916,6 +912,17 @@ class B2Model:
             self.assemble_monitor(m)
 
     def get_model_definition(self) -> dict[str, Any]:
+        """
+        Return the entire model definition as a dictionary.
+        This returns a copy of the definition, i.e., the model
+        definition cannot be edited via the returned object
+
+        Returns
+        -------
+        dict[str, Any]
+            Copy of the entire model definition.
+            Has entries for 'neurongroups', 'synapses', 'monitors', 'parameters' and 'initial_conditions'
+        """
         return {
             "neurongroups": self.neurongroups,
             "synapses": self.synapses,
@@ -976,28 +983,28 @@ class B2Model:
         vars: list[str] | None = None,
     ) -> dict[str, Any]:
         """
-        _summary_
+        Get the current state of a defined neurongroup of the neuronnetwork as a dictionary
 
         Parameters
         ----------
         name : str
-            _description_
+            name of the neurongroup to get the state for
         read_only_variables : bool, optional
-            _description_, by default False
+            whether to include read-only variables or not, by default False
         subexpressions : bool, optional
-            _description_, by default False
+            whether to include subexpressions, by default False
         vars : list[str] | None, optional
-            _description_, by default None
+            list of variables to include. If 'None', all are included, by default None
 
         Returns
         -------
         dict[str, Any]
-            _description_
+            dictionary containing the current state of the neurongroup 'name'.
 
         Raises
         ------
         KeyError
-            _description_
+            When 'name' does not refer to an existing neurongroup.
         """
         if name not in self.neurongroups:
             raise KeyError(f"Error, name {name} not in neurongroups")
@@ -1017,28 +1024,29 @@ class B2Model:
         vars: list[str] | None = None,
     ) -> dict[str, Any]:
         """
-        _summary_
+        Get the current state of a defined synapse of the neuronnetwork as a dictionary
 
         Parameters
         ----------
         name : str
-            _description_
+            name of the synapse to get the state for
         read_only_variables : bool, optional
-            _description_, by default False
+            whether to include read-only variables or not, by default False
         subexpressions : bool, optional
-            _description_, by default False
+            whether to include subexpressions, by default False
         vars : list[str] | None, optional
-            _description_, by default None
+            list of variables to include. If 'None', all are included, by default None
+
 
         Returns
         -------
         dict[str, Any]
-            _description_
+            dictionary containing the current state of the synapse 'name'.
 
         Raises
         ------
         KeyError
-            _description_
+            When 'name' does not refer to an existing synapse.
         """
         if name not in self.synapses:
             raise KeyError(f"Error, name {name} not in synapses")
@@ -1058,31 +1066,33 @@ class B2Model:
         vars: list[str] | None = None,
     ) -> dict[str, Any]:
         """
-        _summary_
+        Get the current state of a defined monitor of the neuronnetwork as a dictionary
 
         Parameters
         ----------
         name : str
-            _description_
+            name of the monitor to get the state for
         read_only_variables : bool, optional
-            _description_, by default False
+            whether to include read-only variables or not, by default False
         subexpressions : bool, optional
-            _description_, by default False
+            whether to include subexpressions, by default False
         vars : list[str] | None, optional
-            _description_, by default None
+            list of variables to include. If 'None', all are included, by default None
 
         Returns
         -------
         dict[str, Any]
-            _description_
+            dictionary containing the current state of the monitor 'name'.
 
         Raises
         ------
         KeyError
-            _description_
+            When 'name' does not refer to an existing monitor.
         """
         if name not in self.monitors:
-            raise KeyError(f"Error, name {name} not in monitors")
+            raise KeyError(
+                f"Error, name {name} not in monitors. Did you define and assemble them? "
+            )
 
         return self._get_current_element_state(
             name,
@@ -1197,6 +1207,11 @@ class B2Model:
         savepath : str, optional
             Path to save the data at, by default None
         """
+
+        if self.must_be_rebuilt:
+            self.network = b2.Network(name=self.network.name)
+            self.assemble_network()
+
         if len(self.checkpoints) == 0:
             self.checkpoints.append("Initial state")
             self.network.store(self.checkpoints[-1])

@@ -110,3 +110,26 @@ def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:
         return (quantity_obj, ok)
     else:
         return (quantity_str, ok)
+
+
+def update_nested_dict(original: dict[Any, Any], updates: Any) -> None:
+    """
+    update_nested_dict Update nested dictionary with another dictionary. Paths within dictionaries
+    are assumed to be unique. Violation of this premise can result in unpredictable behavior
+
+    Parameters
+    ----------
+    original : dict
+        dictionary to be updated
+    updates : dict
+        dictionary to update with
+    """
+    for key, value in updates.items():
+        if (
+            isinstance(value, dict)
+            and key in original
+            and isinstance(original[key], dict)
+        ):
+            update_nested_dict(original[key], value)
+        else:
+            original[key] = value
