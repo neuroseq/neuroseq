@@ -632,8 +632,6 @@ class B2Model:
             When something goes wrong while building the monitor
         """
         monitor = None
-        self.logger.info(f"adding monitor '{name}'")
-
         try:
             monitor = cls(
                 self.network[group],
@@ -647,6 +645,9 @@ class B2Model:
             raise RuntimeError(message) from e
 
         try:
+            self.logger.info(
+                f"adding {cls.__name__} with name '{name}', source '{group}' and variable '{variable}'"
+            )
             self.network.add(monitor)
         except Exception as e:
             message = f"Error in adding monitor {name} to network: {e}"
