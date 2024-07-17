@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from importlib.resources import files
 from pathlib import Path
 from typing import cast
 
 import brian2 as b2
-import formozov_project
 from brian2 import numpy_ as np
 from brian2.tests.utils import assert_allclose
 from formozov_project.b2_model import B2Model
@@ -27,21 +25,31 @@ def test_gui_click_exit(qtbot: QtBot) -> None:
     qtbot.waitUntil(lambda: not gui.isVisible())
 
 
-def test_gui_playback(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
+def test_gui_simulate_and_playback(
+    monkeypatch: MonkeyPatch, qtbot: QtBot, default_model_path: Path
+) -> None:
     gui = Gui()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
     assert gui.heatmap_widget.currentIndex == 0
     assert gui.trace_widget.timeline.getXPos() == approx(0)
+    assert gui.cmb_synapse.count() == 0
+    assert gui.cmb_neuron.count() == 0
+    assert gui.cmb_spike.count() == 0
     simulation_time = 0.1
     # mock getText to return the desired simulation time
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
     )
-    gui.load_model(
-        str(files(formozov_project) / "example_models" / "default_model.json")
-    )
+    gui.load_model(default_model_path)
+    qtbot.wait(10)
+    assert gui.cmb_synapse.count() == 1
+    assert gui.cmb_synapse.itemText(0) == "Ce / we"
+    assert gui.cmb_neuron.count() == 1
+    assert gui.cmb_neuron.itemText(0) == "P / v"
+    assert gui.cmb_spike.count() == 1
+    assert gui.cmb_spike.itemText(0) == "P"
     gui.btn_continue_simulation_clicked()
     n_timesteps = gui.heatmap_widget.tVals.size
     gui.btn_play_clicked()
@@ -51,20 +59,22 @@ def test_gui_playback(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
     gui.btn_play_clicked()
     qtbot.waitUntil(lambda: gui.heatmap_widget.currentIndex == n_timesteps - 1)
     assert gui.trace_widget.timeline.getXPos() == approx(simulation_time, rel=1e-2)
+    assert gui.spike_widget.timeline.getXPos() == approx(simulation_time, rel=1e-2)
     gui.btn_skip_to_start_clicked()
     assert gui.trace_widget.timeline.getXPos() == approx(0)
+    assert gui.spike_widget.timeline.getXPos() == approx(0)
     assert gui.heatmap_widget.currentIndex == 0
     gui.btn_skip_to_end_clicked()
     assert gui.trace_widget.timeline.getXPos() == approx(simulation_time, rel=1e-2)
+    assert gui.spike_widget.timeline.getXPos() == approx(simulation_time, rel=1e-2)
     assert gui.heatmap_widget.currentIndex == n_timesteps - 1
     gui.btn_stop_clicked()
     assert gui.trace_widget.timeline.getXPos() == approx(0)
+    assert gui.spike_widget.timeline.getXPos() == approx(0)
     assert gui.heatmap_widget.currentIndex == 0
 
 
-def test_gui_new(
-    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_ornstein: B2Model
-) -> None:
+def test_gui_new(tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
     gui = Gui()
     gui.show()
     qtbot.addWidget(gui)
@@ -75,18 +85,16 @@ def test_gui_new(
 
 
 def test_gui_open(
-    monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_ornstein: B2Model
+    monkeypatch: MonkeyPatch, qtbot: QtBot, default_model_path: Path
 ) -> None:
     gui = Gui()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
-    import formozov_project
-
-    filename = str(files(formozov_project) / "example_models" / "default_model.json")
-
     monkeypatch.setattr(
-        QtWidgets.QFileDialog, "getOpenFileName", lambda *args: (f"{filename}", True)
+        QtWidgets.QFileDialog,
+        "getOpenFileName",
+        lambda *args: (f"{default_model_path}", True),
     )
 
     assert gui.model.parameters is None
@@ -94,7 +102,7 @@ def test_gui_open(
     assert gui.model.synapses == {}
     assert gui.model.monitors == {}
 
-    loaded_model = B2Model.load_model(filename)
+    loaded_model = B2Model.load_model(default_model_path)
 
     gui.btn_open_clicked()
 
@@ -102,18 +110,19 @@ def test_gui_open(
     assert list(gui.model.parameters.keys()) == list(loaded_model.parameters.keys())
     assert list(gui.model.neurongroups.keys()) == list(loaded_model.neurongroups.keys())
     assert list(gui.model.synapses.keys()) == list(loaded_model.synapses.keys())
-    assert list(gui.model.parameters.keys()) == list(loaded_model.parameters.keys())
+    assert list(gui.model.monitors.keys()) == list(loaded_model.monitors.keys())
 
 
 def test_gui_save(
     tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_ornstein: B2Model
 ) -> None:
     gui = Gui()
-    gui.model = mfx_ornstein
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
-    filename = tmp_path / "test.h5"
+    gui.update_model(mfx_ornstein)
+    qtbot.wait(10)
+    filename = tmp_path / "test.json"
     assert not filename.exists()
     # mock getSaveFileName to return the desired filename
     monkeypatch.setattr(
@@ -121,24 +130,73 @@ def test_gui_save(
     )
     gui.btn_save_clicked()
     assert filename.exists()
+    loaded_model = B2Model.load_model(filename)
+    assert mfx_ornstein.neurongroups.keys() == loaded_model.neurongroups.keys()
+    assert mfx_ornstein.synapses.keys() == loaded_model.synapses.keys()
+    assert mfx_ornstein.monitors.keys() == loaded_model.monitors.keys()
 
 
-def test_gui_checkpoints(
+def test_gui_export(
     tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_ornstein: B2Model
 ) -> None:
     gui = Gui()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
-    # mock information dialog box (with no checkpoints message) to do nothing
-    monkeypatch.setattr(QtWidgets.QMessageBox, "information", lambda *args: None)
+    gui.update_model(mfx_ornstein)
+    qtbot.wait(10)
+    filename = tmp_path / "test.h5"
+    assert not filename.exists()
+    # mock getSaveFileName to return the desired filename
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (f"{filename}", True)
+    )
+    gui.btn_export_clicked()
+    assert filename.exists()
+
+
+def test_gui_export_empty_model(
+    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list
+) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    filename = tmp_path / "test.h5"
+    assert not filename.exists()
+    assert len(qmessagebox_calls) == 0
+    # mock getSaveFileName to return the desired filename
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (f"{filename}", True)
+    )
+    gui.btn_export_clicked()
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "critical"
+    assert "export error" in qmessagebox_calls[0]["title"].lower()
+    assert not filename.exists()
+
+
+def test_gui_checkpoints(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    qtbot: QtBot,
+    mfx_ornstein: B2Model,
+    qmessagebox_calls: list,
+) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    assert len(qmessagebox_calls) == 0
     gui.btn_restore_checkpoint_clicked()
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "information"
+    assert "no simulation checkpoints" in qmessagebox_calls[0]["title"].lower()
     # create a checkpoint - mock getItem to return the desired checkpoint name
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("test", True)
     )
-    gui.model = mfx_ornstein
-    gui.update_model()
+    gui.update_model(mfx_ornstein)
     gui.btn_store_checkpoint_clicked()
     assert "test" in gui.model.checkpoints
     # simulate
@@ -164,8 +222,7 @@ def test_gui_edit_stim_with_console(qtbot: QtBot, mfx_ornstein: B2Model) -> None
     stim = np.zeros((n_timestamps, n_neurons))
     assert mfx_ornstein.parameters is None
     mfx_ornstein.parameters = {"stim": b2.TimedArray(stim, dt=dt)}
-    gui.model = mfx_ornstein
-    gui.update_model()
+    gui.update_model(mfx_ornstein)
     # bar plot x-values are the center of the bars, so shifted forwards by 0.5dt compared to timestamps
     expected_timestamps_array = dt * (np.arange(n_timestamps) + 0.5) / b2.second
     stim_editor = gui.stim_editor
