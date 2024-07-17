@@ -840,14 +840,17 @@ class B2Model:
         ValueError
             _description_
         """
-        for d in self.initials[name]:
-            try:
-                setattr(self.network[name], d["varname"], d["value"])
+        try:
+            setattr(
+                self.network[name],
+                self.initials[name]["varname"],
+                self.initials[name]["value"],
+            )
 
-            except Exception as e:
-                raise ValueError(
-                    f"Error when initializing {d["varname"]} of element {name} as {d["value"]}: {e}"
-                ) from e
+        except Exception as e:
+            raise ValueError(
+                f"Error when initializing {self.initials[name]["varname"]} of element {name} as {self.initials[name]["value"]}: {e}"
+            ) from e
 
     def save_to_h5(self, path: str | Path) -> None:
         """
@@ -921,7 +924,7 @@ class B2Model:
             "initial_conditions": self.initials,
         }
 
-    def get_current_element_state(
+    def _get_current_element_state(
         self,
         name: str,
         read_only_variables: bool = False,
@@ -964,6 +967,183 @@ class B2Model:
             subexpressions=subexpressions,
             vars=vars,
         )
+
+    def get_current_neurongroup_state(
+        self,
+        name: str,
+        read_only_variables: bool = False,
+        subexpressions: bool = False,
+        vars: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """
+        _summary_
+
+        Parameters
+        ----------
+        name : str
+            _description_
+        read_only_variables : bool, optional
+            _description_, by default False
+        subexpressions : bool, optional
+            _description_, by default False
+        vars : list[str] | None, optional
+            _description_, by default None
+
+        Returns
+        -------
+        dict[str, Any]
+            _description_
+
+        Raises
+        ------
+        KeyError
+            _description_
+        """
+        if name not in self.neurongroups:
+            raise KeyError(f"Error, name {name} not in neurongroups")
+
+        return self._get_current_element_state(
+            name,
+            read_only_variables=read_only_variables,
+            subexpressions=subexpressions,
+            vars=vars,
+        )
+
+    def get_current_synapse_state(
+        self,
+        name: str,
+        read_only_variables: bool = False,
+        subexpressions: bool = False,
+        vars: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """
+        _summary_
+
+        Parameters
+        ----------
+        name : str
+            _description_
+        read_only_variables : bool, optional
+            _description_, by default False
+        subexpressions : bool, optional
+            _description_, by default False
+        vars : list[str] | None, optional
+            _description_, by default None
+
+        Returns
+        -------
+        dict[str, Any]
+            _description_
+
+        Raises
+        ------
+        KeyError
+            _description_
+        """
+        if name not in self.synapses:
+            raise KeyError(f"Error, name {name} not in synapses")
+
+        return self._get_current_element_state(
+            name,
+            read_only_variables=read_only_variables,
+            subexpressions=subexpressions,
+            vars=vars,
+        )
+
+    def get_current_monitor_state(
+        self,
+        name: str,
+        read_only_variables: bool = False,
+        subexpressions: bool = False,
+        vars: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """
+        _summary_
+
+        Parameters
+        ----------
+        name : str
+            _description_
+        read_only_variables : bool, optional
+            _description_, by default False
+        subexpressions : bool, optional
+            _description_, by default False
+        vars : list[str] | None, optional
+            _description_, by default None
+
+        Returns
+        -------
+        dict[str, Any]
+            _description_
+
+        Raises
+        ------
+        KeyError
+            _description_
+        """
+        if name not in self.monitors:
+            raise KeyError(f"Error, name {name} not in monitors")
+
+        return self._get_current_element_state(
+            name,
+            read_only_variables=read_only_variables,
+            subexpressions=subexpressions,
+            vars=vars,
+        )
+
+    def get_variables_of(
+        self,
+        name: str,
+    ) -> list[str] | None:
+        """
+        Get the set of variables defined in the network element 'name'.
+
+        Parameters
+        ----------
+        name : str
+            Name of object to get variables for
+
+        Returns
+        -------
+        list[str] | None
+            List of variables of the element 'name'.
+        """
+
+        try:
+            return list(self.network[name].variables.keys())
+        except Exception as e:
+            raise RuntimeError(
+                f"Error, something went wrong when getting variables for {name}: {e} "
+            ) from e
+
+    def get_equation_variables_of(
+        self,
+        name: str,
+    ) -> list[str] | None:
+        """
+        Get equation variables for
+
+        Parameters
+        ----------
+        name : str
+            Name of object to get variables for
+
+        Returns
+        -------
+        list[str]
+            List of variables defined in the equations for the element 'name'.
+        """
+        if name not in self.synapses and name not in self.neurongroups:
+            raise KeyError(
+                f"Error, name {name} is neither synapse nor neurongroup and hence does not have equations to get variables from"
+            )
+
+        try:
+            return list(self.network[name].equations.names)
+        except Exception as e:
+            raise RuntimeError(
+                f"Error, something went wrong when getting equation variables for {name}: {e}"
+            ) from e
 
     def get_current_network_state(
         self,
