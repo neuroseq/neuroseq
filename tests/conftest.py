@@ -243,8 +243,14 @@ def mfx_with_synapse(
     dApost = -dApre * taupre / taupost * 1.05
 
     mfx, reference_parameters = mfx_parameterized
-    mfx.define_neuron_subgroup("P", "Pe", (0, 24))
-    mfx.define_neuron_subgroup("P", "Pi", (24, 30))
+    mfx.define_neuron_subgroup_target("Pe", "P")
+    mfx.define_neuron_subgroup_idxs("Pe", (0, 24))
+
+    mfx.define_neuron_subgroup_target("Pi", "P")
+    mfx.define_neuron_subgroup_idxs("Pi", (24, 30))
+
+    mfx.assemble_neuronsubgroup("Pe")
+    mfx.assemble_neuronsubgroup("Pi")
 
     mfx.define_parameter("taupre", taupre)
 

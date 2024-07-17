@@ -381,10 +381,10 @@ class B2Model:
         sng = None
         try:
             sng = b2.Subgroup(
-                self.neurongroups[name]["target"],
+                self.network[self.neurongroups[name]["target"]],
                 self.neurongroups[name]["start"],
                 self.neurongroups[name]["stop"],
-                name=self.neurongroups[name]["name"],
+                name=name,
             )
         except Exception as e:
             message = f"Error when trying to create a neuronsubgroup {name}: {e}"
@@ -1196,6 +1196,77 @@ class B2Model:
             subexpressions=subexpressions,
             vars=vars,
         )
+
+    def get_network_objects(self) -> set[Any]:
+        """
+        Return the set of currently defined objects in the model
+
+        Returns
+        -------
+        set[Any]
+            The network objects
+        """
+        return self.network.objects
+
+    def _remove_object(self, name: str) -> None:
+        """
+        Remove an object from the neuron network model
+
+        Parameters
+        ----------
+        name : str
+            name of object to be removed
+        """
+
+        self.network.remove(self.network[name])
+
+    def remove_neurongroup(self, name: str) -> None:
+        """
+        Remove a neurongroup from the network
+
+        Parameters
+        ----------
+        name : str
+            name of the neurongroup to remove
+        """
+        if name not in self.neurongroups:
+            raise KeyError(
+                f"Error when removing object {name}: no neurongroup of that name exists"
+            )
+
+        self._remove_object(name)
+
+    def remove_synapse(self, name: str) -> None:
+        """
+        Remove a synapse from the network
+
+        Parameters
+        ----------
+        name : str
+            name of the synapse to remove
+        """
+        if name not in self.synapses:
+            raise KeyError(
+                f"Error when removing object {name}: no synapse of that name exists"
+            )
+
+        self._remove_object(name)
+
+    def remove_monitor(self, name: str) -> None:
+        """
+        Remove a monitor from the network
+
+        Parameters
+        ----------
+        name : str
+            name of the synapse to remove
+        """
+        if name not in self.monitors:
+            raise KeyError(
+                f"Error when removing object {name}: no monitor of that name exists"
+            )
+
+        self._remove_object(name)
 
     def run_simulation(
         self,

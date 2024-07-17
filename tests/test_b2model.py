@@ -143,6 +143,33 @@ def test_assemble_neurongroup(mfx: b2_model.B2Model) -> None:
     assert mfx.network["P"]._N == ng._N
 
 
+def test_remove_neurongroup(mfx: b2_model.B2Model) -> None:
+    eq = "dge/dt = -ge*(1./taue): siemens"
+    n = 30
+    method = "euler"
+    dt = 0.1 * b2.ms
+
+    mfx.define_equation("P", eq)
+
+    mfx.define_neuronnumber("P", n)
+
+    mfx.define_dt(dt)
+
+    mfx.define_solver_method("P", method)
+
+    mfx.define_parameter("ge", "(randn() * 1.5 + 4) * 10.*nS")
+
+    mfx.assemble_neurongroup("P")
+
+    assert mfx.network["P"].name == "P"
+    assert mfx.network["P"]._N == 30
+
+    mfx.remove_neurongroup("P")
+
+    with pytest.raises(KeyError, match='No object with name "P" found'):
+        assert mfx.network["P"] is None
+
+
 def test_assemble_neurongroup_exception(mfx: b2_model.B2Model) -> None:
     with pytest.raises(RuntimeError, match="Error in assembling neuron group N"):
         mfx.assemble_neurongroup("N")
@@ -152,30 +179,24 @@ def test_neuron_subgroup(
     mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
 ) -> None:
     mfx, _ = mfx_parameterized
+    assert "excitatory" not in mfx.neurongroups
+    mfx.define_neuron_subgroup_target("excitatory", "P")
+    mfx.define_neuron_subgroup_idxs("excitatory", (0, 20))
+    assert mfx.neurongroups["excitatory"]["target"] == "P"
+    assert mfx.neurongroups["excitatory"]["start"] == 0
+    assert mfx.neurongroups["excitatory"]["stop"] == 20
 
-    mfx.define_neuron_subgroup("P", "excitatory", (0, 20))
-    mfx.define_neuron_subgroup("P", "inhibitory", (20, 30))
-
-    assert list(
-        range(
-            mfx.neurongroups["excitatory"]["idx"][0],
-            mfx.neurongroups["excitatory"]["idx"][1],
-        )
-    ) == list(range(0, 20))
-
-    assert list(
-        range(
-            mfx.neurongroups["inhibitory"]["idx"][0],
-            mfx.neurongroups["inhibitory"]["idx"][1],
-        )
-    ) == list(range(20, 30))
-
+    mfx.assemble_neuronsubgroup("excitatory")
     assert mfx.network[mfx.neurongroups["excitatory"]["name"]] is not None
-    assert mfx.network[mfx.neurongroups["inhibitory"]["name"]] is not None
 
     mfx.network = b2.Network()
-    with pytest.raises(KeyError, match="'No object with name \"ng\" found'"):
-        mfx.define_neuron_subgroup("ng", "excitatory", (0, 20))
+    mfx.define_neuron_subgroup_target("ng", "P")
+    mfx.define_neuron_subgroup_idxs("ng", (0, 20))
+
+    with pytest.raises(
+        RuntimeError, match="Error when trying to create a neuronsubgroup ng:"
+    ):
+        mfx.assemble_neuronsubgroup("ng")
 
 
 def test_synapse_connection_prob_numerical(
@@ -211,8 +232,15 @@ def test_define_synapse(
     dApost = -dApre * taupre / taupost * 1.05
 
     mfx, _ = mfx_parameterized
-    mfx.define_neuron_subgroup("P", "Pe", (0, 24))
-    mfx.define_neuron_subgroup("P", "Pi", (24, 30))
+
+    mfx.define_neuron_subgroup_target("Pe", "P")
+    mfx.define_neuron_subgroup_idxs("Pe", (0, 24))
+
+    mfx.define_neuron_subgroup_target("Pi", "P")
+    mfx.define_neuron_subgroup_idxs("Pi", (24, 30))
+
+    mfx.assemble_neuronsubgroup("Pe")
+    mfx.assemble_neuronsubgroup("Pi")
 
     mfx.define_parameter("taupre", taupre)
 
