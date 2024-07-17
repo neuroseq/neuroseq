@@ -393,6 +393,14 @@ class B2Model:
 
         self.logger.info(f"Neuron subgroup defined: {name}")
 
+        if any(obj.name == name for obj in self.network.objects):
+            try:
+                self.network.remove(sng)
+            except Exception as e:
+                message = f"Error when remogin existing subgroup {name}: {e}"
+                self.logger.critical(message)
+                raise RuntimeError(message) from e
+
         try:
             self.network.add(sng)
         except Exception as e:
@@ -640,7 +648,22 @@ class B2Model:
             self.logger.critical(message)
             raise RuntimeError(message) from e
 
-        self.network.add(synapse)
+        if any(obj.name == name for obj in self.network.objects):
+            try:
+                self.network.remove(self.network[name])
+            except Exception as e:
+                message = (
+                    f"Error when removing existing synapse {name} from the network: {e}"
+                )
+                self.logger.critical(message)
+                raise RuntimeError(message) from e
+
+        try:
+            self.network.add(synapse)
+        except Exception as e:
+            message = f"Error when adding {name} to the network: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
 
     @_trigger_rebuild
     def define_monitor_type(self, name: str, cls: type) -> None:
@@ -663,7 +686,7 @@ class B2Model:
             self.monitors,
             {
                 name: {
-                    "type": cls.__name__,
+                    "type": cls,
                 }
             },
         )
@@ -727,7 +750,8 @@ class B2Model:
         name: str,
     ) -> None:
         """
-        assemble_monitor Assemble a new monitor from predefined elements
+        assemble_monitor Assemble a new monitor from predefined elements. When a monitor exists that
+        in the network that has the same name, it is removed and replaced by the newly assembled one
 
         Parameters
         ----------
@@ -737,14 +761,16 @@ class B2Model:
         Raises
         ------
         RuntimeError
+            When something goes wrong while removing a monitor of the same name that is to be replaced with a new definition
+        RuntimeError
             When something goes wrong while building the monitor
         """
         monitor = None
         self.logger.info(f"adding monitor '{name}'")
 
         try:
-            monitor = eval(self.monitors[name]["type"])(
-                self.network[self.monitors[name]["group"]],
+            monitor = self.monitors[name]["type"](
+                self.network[self.monitors[name]["source"]],
                 self.monitors[name]["variable"],
                 record=True,
                 name=self.monitors[name]["name"],
@@ -753,6 +779,14 @@ class B2Model:
             message = f"Error in defining monitor {name}: {e}"
             self.logger.critical(message)
             raise RuntimeError(message) from e
+
+        if any(obj.name == name for obj in self.network.objects):
+            try:
+                self.network.remove(self.network[name])
+            except Exception as e:
+                message = f"Error while removing monitor {name} from network: {e}"
+                self.logger.critical(message)
+                raise RuntimeError(message) from e
 
         try:
             self.network.add(monitor)
@@ -790,7 +824,7 @@ class B2Model:
     ) -> None:
         """
         assemble_neurongroup Assemble a neurongroup called `name` from its set of predefined values.
-
+        When a neurongroup of the same name already exists in the network, it will be removed and replaced with the newly assembled one.
         You need to define the respective variables first via the `define_*` functions.
 
         Parameters
@@ -817,13 +851,25 @@ class B2Model:
                 reset=self.neurongroups[name].get("reset", None),
                 name=name,
             )
-
         except Exception as e:
             message = f"Error in assembling neuron group {name}: {e}"
             self.logger.critical(message)
             raise RuntimeError(message) from e
 
-        self.network.add(ng)
+        if any(obj.name == name for obj in self.network.objects):
+            try:
+                self.network.remove(self.network[name])
+            except Exception as e:
+                message = f"Error when removing neuron group {name} from network: {e}"
+                self.logger.critical(message)
+                raise RuntimeError(message) from e
+
+        try:
+            self.network.add(ng)
+        except Exception as e:
+            message = f"Error when adding new neuron group {name} to network: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
 
     @_trigger_rebuild
     def assemble_initials(self, name: str) -> None:
