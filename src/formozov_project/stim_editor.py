@@ -38,6 +38,7 @@ class StimEditor(QtWidgets.QWidget):
         top_horizontal_layout.addWidget(self.cmb_stim)
         layout.addLayout(top_horizontal_layout)
         self.stim_widget = StimWidget()
+        self.stim_widget.capture_mouse_events = True
         layout.addWidget(self.stim_widget)
         self.toolbar = QtWidgets.QToolBar()
         self.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.ActionsContextMenu)
@@ -92,13 +93,12 @@ class StimEditor(QtWidgets.QWidget):
             self.current_stim = self.stims_dict[stim_name]
             self.stim_widget.set_data(self.current_stim)
 
-    def toggle_edit_stims(self) -> None:
-        editing_enabled = not self.stim_widget.capture_mouse_events
-        if not editing_enabled:
+    def toggle_edit_stims(self, enabled: bool) -> None:
+        if not enabled:
             self.stim_widget.unselect_neurons()
-        self.stim_widget.capture_mouse_events = editing_enabled
+        self.stim_widget.capture_mouse_events = enabled
         for action in self.toolbar.actions()[1:]:
-            action.setEnabled(editing_enabled)
+            action.setEnabled(enabled)
 
     def copy_selected_stim(self) -> None:
         if (
@@ -243,9 +243,8 @@ class StimEditor(QtWidgets.QWidget):
             self,
             shortcut="Ctrl+E",
             icon=qta.icon("mdi6.playlist-edit"),
+            checkable=True,
         )
-        self.toolbar.actions()[0].setCheckable(True)
-        self.toolbar.actions()[0].setChecked(False)
         add_action(
             "Copy",
             self.copy_selected_stim,
@@ -336,5 +335,3 @@ class StimEditor(QtWidgets.QWidget):
             shortcut="Ctrl+Right",
             icon=qta.icon("mdi6.arrow-right"),
         )
-        for action in self.toolbar.actions()[1:]:
-            action.setEnabled(False)

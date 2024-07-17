@@ -41,23 +41,23 @@ class Gui(QtWidgets.QMainWindow):
         # left/right split between traces and heatmap
         split_left_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         # traces on left
-        left_parent_widget = QtWidgets.QWidget()
+        self.trace_widget_parent = QtWidgets.QWidget()
         left_layout = QtWidgets.QVBoxLayout()
-        left_parent_widget.setLayout(left_layout)
+        self.trace_widget_parent.setLayout(left_layout)
         self.cmb_neuron = QtWidgets.QComboBox()
         left_layout.addWidget(self.cmb_neuron)
         self.trace_widget = TraceWidget()
         left_layout.addWidget(self.trace_widget)
-        split_left_right.addWidget(left_parent_widget)
+        split_left_right.addWidget(self.trace_widget_parent)
         # heatmap on right
-        right_parent_widget = QtWidgets.QWidget()
+        self.heatmap_widget_parent = QtWidgets.QWidget()
         right_layout = QtWidgets.QVBoxLayout()
-        right_parent_widget.setLayout(right_layout)
+        self.heatmap_widget_parent.setLayout(right_layout)
         self.cmb_synapse = QtWidgets.QComboBox()
         right_layout.addWidget(self.cmb_synapse)
         self.heatmap_widget = HeatmapWidget()
         right_layout.addWidget(self.heatmap_widget)
-        split_left_right.addWidget(right_parent_widget)
+        split_left_right.addWidget(self.heatmap_widget_parent)
         split_left_right.setSizes([3000, 2000])
         # main vertical splitter layout
         split_vertical = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
@@ -68,6 +68,7 @@ class Gui(QtWidgets.QMainWindow):
         split_vertical.addWidget(self.stim_console)
         grid_layout.addWidget(split_vertical)
         self.setCentralWidget(central_widget)
+        self._create_actions()
         self.resize(800, 600)
         # add a modal progress bar dialog while running simulations
         self.progress_dialog = QtWidgets.QProgressDialog(
@@ -352,11 +353,18 @@ class Gui(QtWidgets.QMainWindow):
     def _create_menus_and_toolbar(self) -> None:
         menu = self.menuBar()
         self.toolbar = QtWidgets.QToolBar()
-        file_menu = menu.addMenu("&File")
+        self.menu_file = menu.addMenu("&File")
+        self.menu_playback = menu.addMenu("&Playback")
+        self.menu_stimuli = menu.addMenu("&Stimuli")
+        self.menu_simulate = menu.addMenu("&Simulate")
+        self.menu_view = menu.addMenu("&View")
+        self.menu_help = menu.addMenu("&Help")
+
+    def _create_actions(self) -> None:
         add_action(
             "&New",
             self.btn_new_clicked,
-            file_menu,
+            self.menu_file,
             self.toolbar,
             shortcut="Ctrl+N",
             icon=qta.icon("mdi6.file"),
@@ -364,7 +372,7 @@ class Gui(QtWidgets.QMainWindow):
         add_action(
             "Open &example model",
             self.btn_open_example_model_clicked,
-            file_menu,
+            self.menu_file,
             self.toolbar,
             shortcut="Ctrl+Shift+O",
             icon=qta.icon("mdi6.file-document"),
@@ -372,7 +380,7 @@ class Gui(QtWidgets.QMainWindow):
         add_action(
             "&Open",
             self.btn_open_clicked,
-            file_menu,
+            self.menu_file,
             self.toolbar,
             shortcut="Ctrl+O",
             icon=qta.icon("mdi6.folder-open"),
@@ -380,7 +388,7 @@ class Gui(QtWidgets.QMainWindow):
         add_action(
             "&Save",
             self.btn_save_clicked,
-            file_menu,
+            self.menu_file,
             self.toolbar,
             shortcut="Ctrl+S",
             icon=qta.icon("mdi6.content-save"),
@@ -388,26 +396,24 @@ class Gui(QtWidgets.QMainWindow):
         add_action(
             "&Edit",
             self.btn_edit_clicked,
-            file_menu,
+            self.menu_file,
             self.toolbar,
             shortcut="Ctrl+E",
             icon=qta.icon("mdi6.cog"),
         )
-        self.toolbar.addSeparator()
         add_action(
             "E&xit",
             self.btn_exit_clicked,
-            file_menu,
+            self.menu_file,
             None,
             shortcut=None,
             icon=qta.icon("mdi6.exit-to-app"),
         )
-        self.menu_stimuli = menu.addMenu("&Stimuli")
-        experiment_model = menu.addMenu("&Simulate")
+        self.toolbar.addSeparator()
         add_action(
             "&Continue simulation",
             self.btn_continue_simulation_clicked,
-            experiment_model,
+            self.menu_simulate,
             self.toolbar,
             shortcut="Ctrl+R",
             icon=qta.icon("mdi6.head"),
@@ -415,7 +421,7 @@ class Gui(QtWidgets.QMainWindow):
         add_action(
             "&Store simulation checkpoint",
             self.btn_store_checkpoint_clicked,
-            experiment_model,
+            self.menu_simulate,
             self.toolbar,
             shortcut="Ctrl+Shift+S",
             icon=qta.icon("mdi6.head-check"),
@@ -423,17 +429,16 @@ class Gui(QtWidgets.QMainWindow):
         add_action(
             "&Restore simulation checkpoint",
             self.btn_restore_checkpoint_clicked,
-            experiment_model,
+            self.menu_simulate,
             self.toolbar,
             shortcut="Ctrl+Shift+R",
             icon=qta.icon("mdi6.head-sync"),
         )
         self.toolbar.addSeparator()
-        experiment_results = menu.addMenu("&Playback")
         add_action(
             "&Skip to start",
             self.btn_skip_to_start_clicked,
-            experiment_results,
+            self.menu_playback,
             self.toolbar,
             shortcut=None,
             icon=qta.icon("mdi6.skip-previous"),
@@ -441,7 +446,7 @@ class Gui(QtWidgets.QMainWindow):
         add_action(
             "&Stop",
             self.btn_stop_clicked,
-            experiment_results,
+            self.menu_playback,
             self.toolbar,
             shortcut=None,
             icon=qta.icon("mdi6.stop"),
@@ -449,7 +454,7 @@ class Gui(QtWidgets.QMainWindow):
         add_action(
             "&Play / Pause",
             self.btn_play_clicked,
-            experiment_results,
+            self.menu_playback,
             self.toolbar,
             shortcut="Space",
             icon=qta.icon("mdi6.play-pause"),
@@ -457,11 +462,24 @@ class Gui(QtWidgets.QMainWindow):
         add_action(
             "&Skip to end",
             self.btn_skip_to_end_clicked,
-            experiment_results,
+            self.menu_playback,
             self.toolbar,
             shortcut=None,
             icon=qta.icon("mdi6.skip-next"),
         )
         self.toolbar.addSeparator()
-        help_menu = menu.addMenu("&Help")
-        add_action("&About", self.about, help_menu)
+        for name, widget, icon in [
+            ("&Stimuli", self.stim_editor, "format-line-style"),
+            ("&Traces", self.trace_widget_parent, "chart-line"),
+            ("&Heatmap", self.heatmap_widget_parent, "data-matrix"),
+            ("&Console", self.stim_console, "console"),
+        ]:
+            add_action(
+                f"Show {name}",
+                lambda toggled, w=widget: w.setVisible(toggled),
+                self.menu_view,
+                self.toolbar,
+                icon=qta.icon(f"mdi6.{icon}"),
+                checkable=True,
+            )
+        add_action("&About", self.about, self.menu_help)
