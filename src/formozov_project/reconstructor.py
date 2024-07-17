@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -232,13 +231,10 @@ class Reconstructor:
         data_of_group : dict[str, Any]
             json node to reconstruct the monitor from
         """
-        monitortype = getattr(import_module("brian2"), data_of_group["type"])
-        model.define_monitor(
-            data_of_group["name"],
-            monitortype,
-            data_of_group["source"],
-            data_of_group["variable"],
-        )
+        model.define_monitor_type(data_of_group["name"], data_of_group["type"])
+        model.define_monitor_source(data_of_group["name"], data_of_group["source"])
+        model.define_monitor_variable(data_of_group["name"], data_of_group["variable"])
+        model.assemble_monitor(data_of_group["name"])
 
     def reconstruct(
         self, model: Any, report: Callable[[int], None] | None = None
