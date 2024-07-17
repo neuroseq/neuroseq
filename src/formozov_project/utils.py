@@ -59,7 +59,7 @@ class QtABCMeta(type(QtCore.QObject), abc.ABCMeta):  # type: ignore
     pass
 
 
-def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:
+def parse_string_to_quantity(quantity_str: str) -> tuple[b2.Quantity | str, bool]:
     """
     Parse a string into a brian2 quantity or return it if that is not possible. Quantities can be of the from
     number * unit.

@@ -19,14 +19,13 @@ from qtpy.QtCore import QEvent
 from qtpy.QtCore import Signal
 from qtpy.QtWidgets import QComboBox
 
+from formozov_project import utils
 from formozov_project.b2_model import B2Model
 from formozov_project.b2_model_widget import MonitorDialog
 from formozov_project.b2_model_widget import NeuronGroupDialog
 from formozov_project.b2_model_widget import NeuronSubgroupDialog
 from formozov_project.b2_model_widget import ParameterDialog
 from formozov_project.b2_model_widget import SynapseDialog
-from formozov_project.reconstructor import Reconstructor
-from formozov_project.reconstructor import utils
 
 
 # derive a new combobox which has a 'clicked' signal
@@ -322,7 +321,7 @@ class EditableParameterTree(ParameterTree):
         """
 
         try:
-            quantity_obj, ok = utils.parse_quantity(quantity_str)
+            quantity_obj, ok = utils.parse_string_to_quantity(quantity_str)
         except Exception as e:
             message = f"Error when interpreting unit string: {e}"
             self.logger.critical(message)
@@ -870,26 +869,10 @@ class ModelEditorDialog(QtWidgets.QDialog):
         """
         if self.b2model.must_be_rebuilt:
             self.logger.debug("rebuilding model after change")
-            states = self.b2model.to_dict()
-
-            if self.b2model.dt is not None:
-                states["timestep"] = self.b2model.dt
-
-            constr = Reconstructor(states)
-
-            # FIXME: this can be a problem when the system shall be continued because
-            # the sequence of random number changes due to brian2 caching them.
-            if self.b2model.seed != states["seed"]:
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "Model rng warning"
-                    "The system's random number generator will be reseeded. This potentially can change the results when compared to previous ones",
-                )
-            new_model = B2Model(seed=states["seed"])
 
             model_ok = True
             try:
-                constr.reconstruct(new_model)
+                self.b2model.assemble_network()
             except Exception as e:
                 message = f"Error when rebuilding the model after editing: {e}"
                 self.logger.critical(message)
@@ -897,8 +880,6 @@ class ModelEditorDialog(QtWidgets.QDialog):
                 model_ok = False
 
             if model_ok:
-                self.b2model = new_model
-                self.b2model.must_be_rebuilt = False
                 super().accept()
         else:
             super().accept()

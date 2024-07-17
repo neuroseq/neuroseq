@@ -4,7 +4,6 @@ from ast import literal_eval
 from collections.abc import Callable
 from importlib import import_module
 from typing import Any
-from typing import cast
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -501,9 +500,7 @@ class NeuronSubgroupDialog(ModelDialog):
             )
         else:
             try:
-                self.model.define_neuron_subgroup(
-                    self.target_name, self.name, self.subgroup_def
-                )
+                self.model.assemble_neuronsubgroup(self.name)
                 super().accept()
             except Exception as e:
                 self.display_error(
@@ -1126,12 +1123,8 @@ class MonitorDialog(ModelDialog):
         Accept the monitor data and define a new monitor in the held model
         """
         try:
-            self.model.define_monitor(
-                cast(str, self.name),
-                cast(type, self.tp),
-                cast(str, self.src),
-                cast(str, self.var),
-            )
+            self.model.assemble_monitor(self.name)
+
             super().accept()
         except Exception as e:
             self.display_error(f"Error when defining monitor {self.name}: {e}")
