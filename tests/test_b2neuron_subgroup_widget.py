@@ -131,7 +131,7 @@ def test_neuronsubgroup_accept(qtbot: QtBot) -> None:
     neuron_sdlg.error_dialog.close()
 
     neuron_sdlg.name = "x1"
-    neuron_sdlg.subgroup_def = (1, 6, 3)  # no non-contiguous slices allowd in brian2
+    neuron_sdlg.subgroup_def = (1, 6, 3)  # no non-contiguous slices allowed in brian2
 
     neuron_sdlg.accept()
 
@@ -141,6 +141,8 @@ def test_neuronsubgroup_accept(qtbot: QtBot) -> None:
         neuron_sdlg.error_dialog.text()
         == "Error when defining a neuronsubgroup on target x: Subgroups have to be contiguous"
     )
+
+    assert "x1" not in neuron_sdlg.model.neurongroups
 
     neuron_sdlg.error_dialog.close()
 

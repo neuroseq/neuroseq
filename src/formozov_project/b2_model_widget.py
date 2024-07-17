@@ -19,7 +19,7 @@ class ModelDialog(QtWidgets.QDialog):
 
     Parameters
     ----------
-    QtWidgets : QtWidgets.QDialog
+    QtWidgets : QtWidgets.QDialogN
         General dialog widget from qt.
     """
 
@@ -500,9 +500,12 @@ class NeuronSubgroupDialog(ModelDialog):
             )
         else:
             try:
+                self.model.define_neuron_subgroup_target(self.name, self.target_name)
+                self.model.define_neuron_subgroup_idxs(self.name, self.subgroup_def)
                 self.model.assemble_neuronsubgroup(self.name)
                 super().accept()
             except Exception as e:
+                del self.model.neurongroups[self.name]  # delete erroneous definition
                 self.display_error(
                     f"Error when defining a neuronsubgroup on target {self.target_name}: {e}"
                 )
