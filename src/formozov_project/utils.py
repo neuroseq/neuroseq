@@ -88,7 +88,6 @@ def parse_string_to_quantity(quantity_str: str) -> tuple[b2.Quantity | str, bool
     quantity_obj = None
     if match:
         value, unit_str = match.groups()
-
         # Map the unit string to a Brian2 unit
         try:
             unit = getattr(b2, unit_str)
@@ -104,7 +103,7 @@ def parse_string_to_quantity(quantity_str: str) -> tuple[b2.Quantity | str, bool
             except Exception as e:
                 ok = False
                 raise RuntimeError(
-                    f"Error when interpreting numerical quantity string: {e}"
+                    f"Error when interpreting numerical string: {e}"
                 ) from e
 
         return (quantity_obj, ok)
