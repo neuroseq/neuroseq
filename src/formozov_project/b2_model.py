@@ -1005,7 +1005,9 @@ class B2Model:
 
         if any(obj.name == name for obj in self.network.objects):
             try:
-                self.network.remove(self.network[name])
+                self.network.remove(
+                    self.network[name]
+                )  # cannot use self._remove_object because we still need the intermediat definition
             except Exception as e:
                 message = f"Error when removing neuron group {name} from network: {e}"
                 self.logger.critical(message)

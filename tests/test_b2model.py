@@ -104,7 +104,7 @@ def test_define_neuron_number(mfx: b2_model.B2Model) -> None:
     assert mfx.neurongroups["P"]["n"] == 100
 
 
-def test_assemble_neurongroup(mfx: b2_model.B2Model) -> None:
+def test_assemble_erase_redefine_neurongroup(mfx: b2_model.B2Model) -> None:
     eq = "dge/dt = -ge*(1./taue): siemens"
     n = 30
     threshold = "v > 10 * mV"
@@ -141,6 +141,17 @@ def test_assemble_neurongroup(mfx: b2_model.B2Model) -> None:
 
     assert mfx.network["P"].name == ng.name
     assert mfx.network["P"]._N == ng._N
+    print(list(mfx.neurongroups.keys()))
+
+    mfx.define_neuronnumber("P", 60)
+    mfx.define_threshold("P", "v > 20 * mV")
+    mfx.assemble_neurongroup("P")
+    assert mfx.network["P"].events["spike"] == "v > 20 * mV"
+    assert mfx.network["P"]._N == 60
+
+    print(list(mfx.neurongroups.keys()))
+    mfx.erase_neurongroup("P")
+    assert "P" not in mfx.network.objects
 
 
 def test_assemble_neurongroup_exception(mfx: b2_model.B2Model) -> None:
