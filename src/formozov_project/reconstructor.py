@@ -233,7 +233,10 @@ class Reconstructor:
         """
         model.define_monitor_type(data_of_group["name"], data_of_group["type"])
         model.define_monitor_source(data_of_group["name"], data_of_group["source"])
-        model.define_monitor_variable(data_of_group["name"], data_of_group["variable"])
+
+        model.define_monitor_variable(
+            data_of_group["name"], data_of_group.get("variable")
+        )
 
         model.assemble_monitor(data_of_group["name"])
 
@@ -293,6 +296,9 @@ class Reconstructor:
             report(70)
 
         model.initials = self.loaded_data["initials"]
-        model.assemble_all_initial_conditions()
+
+        for n in model.initials:
+            model.assemble_initial_conditions(n)
+
         if report is not None:
             report(85)

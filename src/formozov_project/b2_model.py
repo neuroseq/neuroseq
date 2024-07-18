@@ -918,7 +918,7 @@ class B2Model:
         try:
             monitor = getattr(b2, self.monitors[name]["type"])(
                 self.network[self.monitors[name]["source"]],
-                self.monitors[name]["variable"],
+                self.monitors[name].get("variable", None),
                 record=True,
                 name=self.monitors[name]["name"],
             )
@@ -1043,7 +1043,7 @@ class B2Model:
                 f"Error when initializing {key} of element {name} as {self.initials[name][key]}: {e}"
             ) from e
 
-    def assemble_all_initial_conditions(self) -> None:
+    def assemble_initial_conditions(self, name: str) -> None:
         """
         Set all the initial conditions that have been defined via 'define_init'.
 
@@ -1057,9 +1057,8 @@ class B2Model:
         ValueError
             When something goes wrong during assignment of the initial condition to the variable given
         """
-        for name in self.initials:
-            for k in self.initials[name]:
-                self.assemble_inital_condition(name, k)
+        for k in self.initials[name]:
+            self.assemble_inital_condition(name, k)
 
     def save_to_h5(self, path: str | Path) -> None:
         """
@@ -1123,7 +1122,8 @@ class B2Model:
         for m in self.monitors:
             self.assemble_monitor(m)
 
-        self.assemble_all_initial_conditions()
+        for n in self.initials:
+            self.assemble_initial_conditions(n)
 
         self.must_be_rebuilt = False
 

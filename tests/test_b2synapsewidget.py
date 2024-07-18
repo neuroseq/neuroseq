@@ -72,6 +72,7 @@ def test_synapse_input(qtbot: QtBot) -> None:
     qtbot.mouseClick(sdiag.connect_prob_button, QtCore.Qt.MouseButton.LeftButton)
 
     assert sdiag.model.synapses["x"] == {
+        "name": "x",
         "origin": "s",
         "target": "t",
         "model": "dv/dt = -v : volt\n",

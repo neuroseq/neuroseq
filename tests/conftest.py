@@ -157,7 +157,9 @@ def mfx_ornstein() -> b2_model.B2Model:
     model.define_init("neurongroup", "y", 1)
     model.define_init("neurongroup", "sigma", np.array([0.1, 0.31622, 0.4, 0.2, 0.88]))
 
-    model.assemble_all_initial_conditions()
+    for n in model.initials:
+        model.assemble_initial_conditions(n)
+
     model.must_be_rebuilt = False
 
     return model
@@ -222,7 +224,8 @@ def mfx_nmda() -> b2_model.B2Model:
     model.define_init("S", "w", [1.0, 10.0])
     model.define_init("neuron_input", "v", [0.0, 0.5])
 
-    model.assemble_all_initial_conditions()
+    for n in model.initials:
+        model.assemble_initial_conditions(n)
 
     model.must_be_rebuilt = False
     return model
