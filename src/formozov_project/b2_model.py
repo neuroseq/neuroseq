@@ -1127,12 +1127,51 @@ class B2Model:
         self.must_be_rebuilt = False
 
     def get_neurongroup(self, name: str) -> dict[str, Any]:
+        """
+        Get a object from the neuron network
+
+        Parameters
+        ----------
+        name : str
+            Name of object to get from network
+
+        Returns
+        -------
+        dict[str, Any]
+            dictionary returning the definition and the neuron object
+        """
         return {"definition": self.neurongroups[name], "object": self.network[name]}
 
     def get_synapse(self, name: str) -> dict[str, Any]:
+        """
+        Get a object from the neuron network
+
+        Parameters
+        ----------
+        name : str
+            Name of object to get from network
+
+        Returns
+        -------
+        dict[str, Any]
+            dictionary returning the definition and the synapse object
+        """
         return {"definition": self.synapses[name], "object": self.network[name]}
 
     def get_monitor(self, name: str) -> dict[str, Any]:
+        """
+        Get a object from the neuron network
+
+        Parameters
+        ----------
+        name : str
+            Name of object to get from network
+
+        Returns
+        -------
+        dict[str, Any]
+            dictionary returning the definition and the monitor object
+        """
         return {"definition": self.monitors[name], "object": self.network[name]}
 
     def get_model_definition(self) -> dict[str, Any]:
