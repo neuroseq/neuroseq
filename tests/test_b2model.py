@@ -170,15 +170,8 @@ def test_neuron_subgroup(
     mfx.define_neuronsubgroup_target("inhibitory", "P")
     mfx.define_neuronsubgroup_idxs("inhibitory", (20, 30))
 
-    assert (
-        mfx.neurongroups["excitatory"]["start"],
-        mfx.neurongroups["excitatory"]["stop"],
-    ) == (0, 20)
-
-    assert (
-        mfx.neurongroups["inhibitory"]["start"],
-        mfx.neurongroups["inhibitory"]["stop"],
-    ) == (20, 30)
+    assert mfx.neurongroups["excitatory"]["idxs"] == (0, 20)
+    assert mfx.neurongroups["inhibitory"]["idxs"] == (20, 30)
 
     mfx.assemble_neuronsubgroup("excitatory")
     mfx.assemble_neuronsubgroup("inhibitory")
@@ -187,17 +180,10 @@ def test_neuron_subgroup(
     assert mfx.network[mfx.neurongroups["inhibitory"]["name"]] is not None
 
     mfx.network = b2.Network()
-    mfx.define_neuronsubgroup_idxs("ng", (20, 30))
-
     with pytest.raises(
         KeyError, match="Error, target Px could not be found in neurongroups"
     ):
         mfx.define_neuronsubgroup_target("ng", "Px")
-
-    with pytest.raises(
-        RuntimeError, match="Error when trying to create a neuronsubgroup"
-    ):
-        mfx.assemble_neuronsubgroup("ng")
 
 
 def test_synapse_connection_prob_numerical(

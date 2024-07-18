@@ -358,23 +358,10 @@ class B2Model:
             When noncontiguous indices are passed
         """
         self.logger.info(f"defining indices {idxs} for neuron subgroup {name}")
-        if isinstance(idxs, tuple | list):
-            if len(idxs) > 2:
-                raise ValueError("Subgroups have to be contiguous")
-            start = idxs[0]
-            stop = idxs[1]
-        elif isinstance(idxs, int):
-            start = idxs
-            stop = idxs + 1
-
         if name not in self.neurongroups:
-            self.neurongroups[name] = {
-                "name": name,
-            }
+            self.neurongroups[name] = {"name": name}
 
-        utils.update_nested_dict(
-            self.neurongroups[name], {"start": start, "stop": stop}
-        )
+        utils.update_nested_dict(self.neurongroups[name], {"idxs": idxs})
 
     @_trigger_rebuild
     def assemble_neuronsubgroup(
@@ -390,11 +377,21 @@ class B2Model:
             Name that the subgroup should be referred to.
         """
         sng = None
+
+        if isinstance(self.neurongroups[name]["idxs"], tuple | list):
+            if len(self.neurongroups[name]["idxs"]) > 2:
+                raise ValueError("Subgroups have to be contiguous")
+            start = self.neurongroups[name]["idxs"][0]
+            stop = self.neurongroups[name]["idxs"][1]
+        elif isinstance(self.neurongroups[name]["idxs"], int):
+            start = self.neurongroups[name]["idxs"]
+            stop = self.neurongroups[name]["idxs"] + 1
+
         try:
             sng = b2.Subgroup(
                 self.network[self.neurongroups[name]["target"]],
-                self.neurongroups[name]["start"],
-                self.neurongroups[name]["stop"],
+                start,
+                stop,
                 name=name,
             )
         except Exception as e:
@@ -1111,11 +1108,11 @@ class B2Model:
         self.network = b2.Network(name=self.name)
 
         for n in self.neurongroups:
-            if all(k not in self.neurongroups[n] for k in ["start", "stop"]):
+            if "idxs" not in self.neurongroups[n]:
                 self.assemble_neurongroup(n)
 
         for n in self.neurongroups:
-            if all(k in self.neurongroups[n] for k in ["start", "stop"]):
+            if "idxs" in self.neurongroups[n]:
                 self.assemble_neuronsubgroup(n)
 
         for s in self.synapses:
