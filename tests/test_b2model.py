@@ -395,7 +395,7 @@ def test_ornstein_uhlenbeck(mfx_ornstein: b2_model.B2Model) -> None:
 
 def test_NMDA_model(mfx_nmda: b2_model.B2Model) -> None:
     # https://brian2.readthedocs.io/en/stable/examples/synapses.nonlinear.html
-
+    b2.seed(4321)
     mfx_nmda.run_simulation(100 * b2.ms)
 
     # test model
@@ -454,6 +454,10 @@ def test_NMDA_model(mfx_nmda: b2_model.B2Model) -> None:
     test_network.add(S)
     test_network.add(M)
     test_network.add(Mn)
+
+    assert_allclose(S.w, mfx_nmda.network["S"].w)
+    assert_allclose(neuron_input.v, mfx_nmda.network["neuron_input"].v)
+
     test_network.run(100 * b2.ms)
 
     # assert result equality
