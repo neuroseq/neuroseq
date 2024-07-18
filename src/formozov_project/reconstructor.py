@@ -294,5 +294,7 @@ class Reconstructor:
         for n in model.initials:
             model.assemble_initial_conditions(n)
 
+        model.must_be_rebuilt = False
+
         if report is not None:
             report(85)

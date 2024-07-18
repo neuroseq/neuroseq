@@ -1126,6 +1126,15 @@ class B2Model:
 
         self.must_be_rebuilt = False
 
+    def get_neurongroup(self, name: str) -> dict[str, Any]:
+        return {"definition": self.neurongroups[name], "object": self.network[name]}
+
+    def get_synapse(self, name: str) -> dict[str, Any]:
+        return {"definition": self.synapses[name], "object": self.network[name]}
+
+    def get_monitor(self, name: str) -> dict[str, Any]:
+        return {"definition": self.monitors[name], "object": self.network[name]}
+
     def get_model_definition(self) -> dict[str, Any]:
         """
         Return the entire model definition as a dictionary.
@@ -1143,184 +1152,8 @@ class B2Model:
             "synapses": deepcopy(self.synapses),
             "monitors": deepcopy(self.monitors),
             "parameters": deepcopy(self.parameters),
-            "initial_conditions": deepcopy(self.initials),
+            "initials": deepcopy(self.initials),
         }
-
-    def _get_current_element_state(
-        self,
-        name: str,
-        read_only_variables: bool = False,
-        subexpressions: bool = False,
-        vars: list[str] | None = None,
-    ) -> dict[str, Any]:
-        """
-        Get the current internal states of a network element. This is different from
-        the definitions done by the `B2Model` class and contain a lot more information
-        about brian2 internals
-
-        Parameters
-        ----------
-        name : str
-            name of the element to get the internal state from
-        read_only_variables : bool, optional
-            whether to include read-only variables, by default False
-        subexpressions : bool, optional
-            whether to include subexpressions, by default False
-        vars : list[str] | None, optional
-            list of variables to display. lists all if None, by default None
-
-        Returns
-        -------
-        dict[str, Any]
-            dictionary which represents the internal state of the requested variable in the brian2 network
-
-        Raises
-        ------
-        AttributeError
-            When the network has not yet been assembled
-        AttributeError
-            When the network does not contain an element called 'name'.
-        """
-        if name not in self.network.objects:
-            raise AttributeError(f"Error, name {name} not in network")
-
-        return self.network[name].get_states(
-            read_only_variables=read_only_variables,
-            subexpressions=subexpressions,
-            vars=vars,
-        )
-
-    def get_object_list(self) -> set[Any]:
-        """
-        Get the list of objects of the system
-        """
-        return self.network.objects
-
-    def get_current_neurongroup_state(
-        self,
-        name: str,
-        read_only_variables: bool = False,
-        subexpressions: bool = False,
-        vars: list[str] | None = None,
-    ) -> dict[str, Any]:
-        """
-        Get the current state of a defined neurongroup of the neuronnetwork as a dictionary
-
-        Parameters
-        ----------
-        name : str
-            name of the neurongroup to get the state for
-        read_only_variables : bool, optional
-            whether to include read-only variables or not, by default False
-        subexpressions : bool, optional
-            whether to include subexpressions, by default False
-        vars : list[str] | None, optional
-            list of variables to include. If 'None', all are included, by default None
-
-        Returns
-        -------
-        dict[str, Any]
-            dictionary containing the current state of the neurongroup 'name'.
-
-        Raises
-        ------
-        KeyError
-            When 'name' does not refer to an existing neurongroup.
-        """
-        if name not in self.neurongroups:
-            raise KeyError(f"Error, name {name} not in neurongroups")
-
-        return self._get_current_element_state(
-            name,
-            read_only_variables=read_only_variables,
-            subexpressions=subexpressions,
-            vars=vars,
-        )
-
-    def get_current_synapse_state(
-        self,
-        name: str,
-        read_only_variables: bool = False,
-        subexpressions: bool = False,
-        vars: list[str] | None = None,
-    ) -> dict[str, Any]:
-        """
-        Get the current state of a defined synapse of the neuronnetwork as a dictionary
-
-        Parameters
-        ----------
-        name : str
-            name of the synapse to get the state for
-        read_only_variables : bool, optional
-            whether to include read-only variables or not, by default False
-        subexpressions : bool, optional
-            whether to include subexpressions, by default False
-        vars : list[str] | None, optional
-            list of variables to include. If 'None', all are included, by default None
-
-
-        Returns
-        -------
-        dict[str, Any]
-            dictionary containing the current state of the synapse 'name'.
-
-        Raises
-        ------
-        KeyError
-            When 'name' does not refer to an existing synapse.
-        """
-        if name not in self.synapses:
-            raise KeyError(f"Error, name {name} not in synapses")
-
-        return self._get_current_element_state(
-            name,
-            read_only_variables=read_only_variables,
-            subexpressions=subexpressions,
-            vars=vars,
-        )
-
-    def get_current_monitor_state(
-        self,
-        name: str,
-        read_only_variables: bool = False,
-        subexpressions: bool = False,
-        vars: list[str] | None = None,
-    ) -> dict[str, Any]:
-        """
-        Get the current state of a defined monitor of the neuronnetwork as a dictionary
-
-        Parameters
-        ----------
-        name : str
-            name of the monitor to get the state for
-        read_only_variables : bool, optional
-            whether to include read-only variables or not, by default False
-        subexpressions : bool, optional
-            whether to include subexpressions, by default False
-        vars : list[str] | None, optional
-            list of variables to include. If 'None', all are included, by default None
-
-        Returns
-        -------
-        dict[str, Any]
-            dictionary containing the current state of the monitor 'name'.
-
-        Raises
-        ------
-        KeyError
-            When 'name' does not refer to an existing monitor.
-        """
-        if name not in self.monitors:
-            raise KeyError(
-                f"Error, name {name} not in monitors. Did you define and assemble them? "
-            )
-
-        return self._get_current_element_state(
-            name,
-            read_only_variables=read_only_variables,
-            subexpressions=subexpressions,
-            vars=vars,
-        )
 
     def get_variables_of(
         self,
