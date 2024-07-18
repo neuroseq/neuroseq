@@ -273,8 +273,6 @@ class Reconstructor:
 
         for n in self.loaded_data["objects"]["neurongroups"]:
             if "idxs" in self.loaded_data[n]:  # ... then define the subgroups
-                print("thing sub: ", n, list(self.loaded_data[n].keys()))
-
                 self.reconstruct_neuron_subgroup(model, n, self.loaded_data[n])
         if report is not None:
             report(50)

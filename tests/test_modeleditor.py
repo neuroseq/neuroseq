@@ -160,8 +160,7 @@ def test_neurontree_add_neuronsubgroup(
     assert "sub" in ntree.b2model.neurongroups
     assert ntree.b2model.neurongroups["sub"]["name"] == "sub"
     assert ntree.b2model.neurongroups["sub"]["target"] == "neuron_input"
-    assert ntree.b2model.neurongroups["sub"]["start"] == 1
-    assert ntree.b2model.neurongroups["sub"]["stop"] == 2
+    assert ntree.b2model.neurongroups["sub"]["idxs"] == (1, 2)
 
 
 def test_neurontree_add_neurongroup(
