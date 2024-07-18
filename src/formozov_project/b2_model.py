@@ -405,7 +405,7 @@ class B2Model:
             try:
                 self.network.remove(sng)
             except Exception as e:
-                message = f"Error when remogin existing subgroup {name}: {e}"
+                message = f"Error when removing existing subgroup {name}: {e}"
                 self.logger.critical(message)
                 raise RuntimeError(message) from e
 

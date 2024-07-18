@@ -11,6 +11,7 @@ import pytest
 from brian2.tests.utils import assert_allclose
 from formozov_project import b2_model
 from formozov_project import b2json
+from pytest import MonkeyPatch
 from pytest_mock import MockerFixture
 
 
@@ -161,6 +162,7 @@ def test_assemble_neurongroup_exception(mfx: b2_model.B2Model) -> None:
 
 def test_neuron_subgroup(
     mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+    monkeypatch: MonkeyPatch,
 ) -> None:
     mfx, _ = mfx_parameterized
 
@@ -178,6 +180,67 @@ def test_neuron_subgroup(
 
     assert mfx.network[mfx.neurongroups["excitatory"]["name"]] is not None
     assert mfx.network[mfx.neurongroups["inhibitory"]["name"]] is not None
+
+
+def test_neuron_subgroup_remove_exception(
+    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+    monkeypatch: MonkeyPatch,
+) -> None:
+    mfx, _ = mfx_parameterized
+    mfx.define_neuronsubgroup_target("excitatory", "P")
+    mfx.define_neuronsubgroup_idxs("excitatory", (0, 20))
+    mfx.assemble_neuronsubgroup("excitatory")
+
+    def do_raise(name: Any) -> None:
+        raise RuntimeError("dummy")
+
+    monkeypatch.setattr(b2.Network, "remove", do_raise)
+
+    with pytest.raises(
+        RuntimeError, match="Error when removing existing subgroup excitatory:"
+    ):
+        mfx.assemble_neuronsubgroup("excitatory")
+
+
+def test_neuron_subgroup_add_exception(
+    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+    monkeypatch: MonkeyPatch,
+) -> None:
+    mfx, _ = mfx_parameterized
+    mfx.define_neuronsubgroup_target("excitatory", "P")
+    mfx.define_neuronsubgroup_idxs("excitatory", (0, 20))
+
+    def do_raise(name: Any) -> None:
+        raise RuntimeError("dummy")
+
+    monkeypatch.setattr(b2.Network, "add", do_raise)
+
+    with pytest.raises(RuntimeError, match="Error when adding subgroup"):
+        mfx.assemble_neuronsubgroup("excitatory")
+
+
+def test_neuron_subgroup_creation_exception(
+    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]], monkeypatch: MonkeyPatch
+) -> None:
+    mfx, _ = mfx_parameterized
+    mfx.define_neuronsubgroup_target("excitatory", "P")
+    mfx.define_neuronsubgroup_idxs("excitatory", (0, 20))
+
+    def do_raise(*_, **__) -> None:
+        raise RuntimeError("dummy")
+
+    monkeypatch.setattr(b2, "Subgroup", do_raise)
+
+    with pytest.raises(
+        RuntimeError, match="Error when trying to create a neuronsubgroup"
+    ):
+        mfx.assemble_neuronsubgroup("excitatory")
+
+
+def test_neuron_subgroup_wrong_group(
+    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+) -> None:
+    mfx, _ = mfx_parameterized
 
     mfx.network = b2.Network()
     with pytest.raises(
