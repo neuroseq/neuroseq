@@ -568,6 +568,7 @@ def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
         mfx_nmda.network["neurons"].g,
         verbose=True,
     )
+    assert_allclose(mfx_nmda.network["S"].g, reconstructed_model.network["S"].g)
 
     # test synapses
     for var in mfx_nmda.network.get_states()["S"]:

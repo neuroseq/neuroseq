@@ -1043,7 +1043,7 @@ class B2Model:
                 f"Error when initializing {key} of element {name} as {self.initials[name][key]}: {e}"
             ) from e
 
-    def assemble_initials(self) -> None:
+    def assemble_all_initial_conditions(self) -> None:
         """
         Set all the initial conditions that have been defined via 'define_init'.
 
@@ -1123,7 +1123,7 @@ class B2Model:
         for m in self.monitors:
             self.assemble_monitor(m)
 
-        self.assemble_initials()
+        self.assemble_all_initial_conditions()
 
         self.must_be_rebuilt = False
 
@@ -1567,6 +1567,7 @@ class B2Model:
         states["objects"]["synapses"] = list(self.synapses.keys())
         states["objects"]["monitors"] = list(self.monitors.keys())
         states["parameters"] = self.parameters
+        states["initials"] = self.initials
 
         # augment neurongroups and synapses
         for group in [self.neurongroups, self.synapses]:

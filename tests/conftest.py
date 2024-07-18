@@ -219,8 +219,10 @@ def mfx_nmda() -> b2_model.B2Model:
     model.define_monitor_variable("Mn", "g")
     model.assemble_monitor("Mn")
 
-    model.network["S"].w = [1.0, 10.0]
-    model.network["neuron_input"].v = [0.0, 0.5]
+    model.define_init("S", "w", [1.0, 10.0])
+    model.define_init("neuron_input", "v", [1.0, 10.0])
+
+    model.assemble_all_initial_conditions()
 
     model.must_be_rebuilt = False
     return model
