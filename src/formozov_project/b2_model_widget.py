@@ -505,7 +505,6 @@ class NeuronSubgroupDialog(ModelDialog):
                 self.model.assemble_neuronsubgroup(self.name)
                 super().accept()
             except Exception as e:
-                del self.model.neurongroups[self.name]  # delete erroneous definition
                 self.display_error(
                     f"Error when defining a neuronsubgroup on target {self.target_name}: {e}"
                 )

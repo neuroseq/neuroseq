@@ -16,7 +16,10 @@ from formozov_project.reconstructor import Reconstructor
 
 class B2Model:
     """
-    Wrapper class that bundles brian2 capabilities for modelling neuronal networks.
+    Wrapper class that bundles brian2 capabilities for modelling neuronal networks. This creates a dict-based intermediate represenation
+    of the model. All function attributes that start with `define_` act on this intermediate representation and add elements to it,
+    all function attributes that are called `delete_` delete elements from it. Function attributes starting with `assemble_` create
+    elements in the underlying brian2 network from the intermediate dict, while attributes starting with `erase_` remove them again.
     """
 
     def _trigger_rebuild(func: Callable) -> Callable:  # type: ignore
@@ -458,6 +461,142 @@ class B2Model:
             },
         )
 
+    def _delete_dict_element(
+        self, dictionary: dict[Any, Any], groupname: str, varname: str
+    ) -> None:
+        """
+        Delete an element 'varname' in the subdict behind the 'groupname' key in the dictionary.
+        Intended to use with the `neurongroups`, `synapses` or `parameters`members of this class.
+        Parameters
+        ----------
+        dictionary : dict[Any, Any]
+            dictionary to modify
+        groupname : str
+            name of the subdictionary
+        varname : str
+            element name to remove
+        """
+        try:
+            del dictionary[groupname][varname]
+        except Exception as e:
+            raise KeyError(f"Error when deleting {varname} in {groupname}: {e}") from e
+
+    @_trigger_rebuild
+    def delete_neurongroup(self, name: str) -> None:
+        """
+        delete a neurongroup definition from the intermediate dict
+
+        Parameters
+        ----------
+        name : str
+            Name of the neurongroup to delete from the intermediat dict
+        """
+        del self.neurongroups[name]
+
+    @_trigger_rebuild
+    def delete_synapse(self, name: str) -> None:
+        """
+        delete a synapse definition from the intermediate dict
+
+        Parameters
+        ----------
+        name : str
+            Name of the synapse to delete from the intermediat dict
+        """
+        del self.synapses[name]
+
+    @_trigger_rebuild
+    def delete_monitor(self, name: str) -> None:
+        """
+        delete a monitor definition from the intermediate dict
+
+        Parameters
+        ----------
+        name : str
+            Name of the monitor to delete from the intermediat dict
+        """
+        del self.monitors[name]
+
+    @_trigger_rebuild
+    def delete_neurongroup_element(self, groupname: str, varname: str) -> None:
+        """
+        Delete an element form the definition of a neurongroup. Note that if it has been assembled already,
+        you have to remove it using `remove_neurongroup` and redefine it completetly.
+
+        Parameters
+        ----------
+        groupname : str
+            name of the neurongroup for which a parameter should be deleted
+        varname : str
+            variable name that should be deleted
+        """
+        self._delete_dict_element(self.neurongroups, groupname, varname)
+
+    @_trigger_rebuild
+    def delete_syanpse_element(self, groupname: str, varname: str) -> None:
+        """
+        Delete an element form the definition of a synapse. Note that if it has been assembled already,
+        you have to remove it using `remove_synapse` and redefine it completetly.
+
+        Parameters
+        ----------
+        groupname : str
+            name of the synapse for which a parameter should be deleted
+        varname : str
+            variable name that should be deleted
+        """
+        self._delete_dict_element(self.synapses, groupname, varname)
+
+    @_trigger_rebuild
+    def delete_monitor_element(self, groupname: str, varname: str) -> None:
+        """
+        Delete an element form the definition of a monitor. Note that if it has been assembled already,
+        you have to remove it using `remove_monitor` and redefine it completetly.
+
+        Parameters
+        ----------
+        groupname : str
+            name of the monitor for which a parameter should be deleted
+        varname : str
+            variable name that should be deleted
+        """
+        self._delete_dict_element(self.monitors, groupname, varname)
+
+    def delete_parameter(self, name: str) -> None:
+        """
+        Delete a parameter from the set of parameters currently available
+
+        Parameters
+        ----------
+        name : str
+            name of the parameter to remove
+        """
+        try:
+            del self.parameters[name]  # type: ignore
+        except Exception as e:
+            raise KeyError(f"Error when deleting {name}: {e}") from e
+
+    def erase_initial_condition(self, name: str) -> None:
+        """
+        Delete an element `name` from the initial condition dictionary. Note that if
+        initial conditions have already been defined, you have to redefine it in the
+        network.
+
+        Parameters
+        ----------
+        name : str
+            Name of the initial condition to remove
+
+        Raises
+        ------
+        KeyError
+            When `name` is not in the initial condition dictionary
+        """
+        try:
+            del self.initials[name]
+        except Exception as e:
+            raise KeyError(f"Error when deleting {name}: {e}") from e
+
     @_trigger_rebuild
     def define_synapse_equation(self, name: str, line: str) -> None:
         """
@@ -879,10 +1018,34 @@ class B2Model:
             self.logger.critical(message)
             raise RuntimeError(message) from e
 
-    @_trigger_rebuild
+    def assemble_inital_condition(self, name: str, key: str) -> None:
+        """
+        Apply the initial condition identified by `key` to the network element called `name`.
+        The element to set the initial condition for must be assembled first.
+
+        Parameters
+        ----------
+        name : str
+            name of network element to set the initial condition for, e.g., name of a neurongroup
+        key : str
+            name of the initial condition as defined by `define_init`.
+
+        Raises
+        ------
+        ValueError
+            When something goes wrong during the initial condition assignment.
+        """
+        try:
+            setattr(self.network[name], key, self.initials[key])
+
+        except Exception as e:
+            raise ValueError(
+                f"Error when initializing {key} of element {name} as {self.initials[key]}: {e}"
+            ) from e
+
     def assemble_initials(self) -> None:
         """
-        Set all the initial conditions that have been defined via 'define_init' for a certain element of the network.
+        Set all the initial conditions that have been defined via 'define_init'.
 
         Parameters
         ----------
@@ -895,18 +1058,8 @@ class B2Model:
             When something goes wrong during assignment of the initial condition to the variable given
         """
         for name in self.initials:
-            for k, v in self.initials[name].items():
-                try:
-                    setattr(
-                        self.network[name],
-                        k,
-                        v,
-                    )
-
-                except Exception as e:
-                    raise ValueError(
-                        f"Error when initializing {k} of element {name} as {v}: {e}"
-                    ) from e
+            for k in self.initials[name]:
+                self.assemble_inital_condition(name, k)
 
     def save_to_h5(self, path: str | Path) -> None:
         """
@@ -967,11 +1120,10 @@ class B2Model:
         for s in self.synapses:
             self.assemble_synapse(s)
 
-        for i in self.initials:
-            self.assemble_initials(i)
-
         for m in self.monitors:
             self.assemble_monitor(m)
+
+        self.assemble_initials()
 
         self.must_be_rebuilt = False
 
@@ -1276,7 +1428,7 @@ class B2Model:
 
         self.network.remove(self.network[name])
 
-    def remove_neurongroup(self, name: str) -> None:
+    def erase_neurongroup(self, name: str) -> None:
         """
         Remove a neurongroup from the network
 
@@ -1290,9 +1442,10 @@ class B2Model:
                 f"Error when removing object {name}: no neurongroup of that name exists"
             )
 
+        del self.neurongroups[name]
         self._remove_object(name)
 
-    def remove_synapse(self, name: str) -> None:
+    def erase_synapse(self, name: str) -> None:
         """
         Remove a synapse from the network
 
@@ -1306,9 +1459,10 @@ class B2Model:
                 f"Error when removing object {name}: no synapse of that name exists"
             )
 
+        del self.synapses[name]
         self._remove_object(name)
 
-    def remove_monitor(self, name: str) -> None:
+    def erase_monitor(self, name: str) -> None:
         """
         Remove a monitor from the network
 
@@ -1322,6 +1476,7 @@ class B2Model:
                 f"Error when removing object {name}: no monitor of that name exists"
             )
 
+        del self.monitors[name]
         self._remove_object(name)
 
     def run_simulation(
