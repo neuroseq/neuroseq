@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -9,12 +10,16 @@ import brian2 as b2
 import h5py
 
 from formozov_project import b2json
+from formozov_project import utils
 from formozov_project.reconstructor import Reconstructor
 
 
 class B2Model:
     """
-    Wrapper class that bundles brian2 capabilities for modelling neuronal networks.
+    Wrapper class that bundles brian2 capabilities for modelling neuronal networks. This creates a dict-based intermediate represenation
+    of the model. All function attributes that start with `define_` act on this intermediate representation and add elements to it,
+    all function attributes that are called `delete_` delete elements from it. Function attributes starting with `assemble_` create
+    elements in the underlying brian2 network from the intermediate dict, while attributes starting with `erase_` remove them again.
     """
 
     def _trigger_rebuild(func: Callable) -> Callable:  # type: ignore
@@ -24,31 +29,6 @@ class B2Model:
 
         return do_with_rebuild
 
-    @_trigger_rebuild
-    def _update_nested_dict(self, original: dict, updates: dict) -> None:
-        """
-        _update_nested_dict Update nested dictionary with another dictionary.
-        This helper function is mainly useful to maintain the argument
-        dictionaries for the different network elements.
-
-        Parameters
-        ----------
-        original : dict
-            dictionary to be updated
-        updates : dict
-            dictionary to update with
-        """
-        for key, value in updates.items():
-            if (
-                isinstance(value, dict)
-                and key in original
-                and isinstance(original[key], dict)
-            ):
-                self._update_nested_dict(original[key], value)
-            else:
-                original[key] = value
-
-    @_trigger_rebuild
     def _add_equation_to_group(self, group: dict, line: str) -> None:
         r"""
         _add_equation_to_group Add an equation to a neurongroup or synapse dictionary that holds arguments to construct the respective objects.
@@ -101,7 +81,7 @@ class B2Model:
         self.neurongroups: dict[str, dict[str, Any]] = {}
         self.synapses: dict[str, dict[str, Any]] = {}
         self.monitors: dict[str, dict[str, Any]] = {}
-        # self.init_vars: dict[str, dict[str, Any]] = {}
+        self.initials: dict[str, dict[str, Any]] = {}
         self.dt: b2.Quantity | None = None
         self.checkpoints: list[str] = []
         self.must_be_rebuilt = False
@@ -112,6 +92,7 @@ class B2Model:
     def name(self) -> str:
         return self.network.name
 
+    @_trigger_rebuild
     def define_equation(self, name: str, line: str) -> None:
         r"""
         define_equation Define a model equation for neurongroups.
@@ -138,32 +119,31 @@ class B2Model:
 
         self._add_equation_to_group(self.neurongroups[name], line)
 
-    def define_init(self, elementname: str, varname: str, value: Any) -> None:
+    @_trigger_rebuild
+    def define_init(self, name: str, varname: str, value: Any) -> None:
         """
-        Define initial values for a quantity defined in the network
+        Define the initial condition of the variable 'varname' in the network element called 'name' and set it to 'value
 
         Parameters
         ----------
-        elementname : str
-            The element of the network to define the quantity for
+        name : str
+            Name of the network element to set the initial condition for
         varname : str
-            The variable to define the quantity for
+            variable in the network element to set
         value : Any
-            The value the quantity should have
-
-        Raises
-        ------
-        ValueError
-            When setting the quantity fails
+            value to set the variable to
         """
-        try:
-            setattr(self.network[elementname], varname, value)
+        if name not in self.initials:
+            self.initials[name] = {}
 
-        except Exception as e:
-            raise ValueError(
-                f"Error when initializing {varname} or element {elementname} as {value}: {e}"
-            ) from e
+        utils.update_nested_dict(
+            self.initials[name],
+            {
+                varname: value,
+            },
+        )
 
+    @_trigger_rebuild
     def define_dt(self, dt: b2.Quantity) -> None:
         """
         define_dt Define the global timestep for the default clock. currently, All elements of the network use the same clock with the same timestep.
@@ -223,6 +203,7 @@ class B2Model:
         self.logger.info(f"Parameter defined: {name}")
         self.logger.debug(f"Parameter value: {value}")
 
+    @_trigger_rebuild
     def define_threshold(self, name: str, th: str) -> None:
         """
         define_threshold Define the threshold for the neurongroup given by `name`.
@@ -234,7 +215,7 @@ class B2Model:
         th : str
             Threshold expression as a string.
         """
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.neurongroups,
             {
                 name: {
@@ -244,6 +225,7 @@ class B2Model:
         )
         self.logger.info(f"Threshold defined: {th}")
 
+    @_trigger_rebuild
     def define_solver_method(self, name: str, method: str) -> None:
         """
         define_solver_method Define the solver method for the neurongroup indicated by `name`.
@@ -255,7 +237,7 @@ class B2Model:
         method : str
             name of the method to use. Refer to the brian2 documentation for the currently available set of solvers.
         """
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.neurongroups,
             {
                 name: {
@@ -266,6 +248,7 @@ class B2Model:
 
         self.logger.info(f"Solver method defined: {method} for {name}")
 
+    @_trigger_rebuild
     def define_synapse_solver_method(self, name: str, method: str) -> None:
         """
         define_solver_method Define the solver method for the synapse indicated by `name`.
@@ -277,7 +260,7 @@ class B2Model:
         method : str
             name of the method to use. Refer to the brian2 documentation for the currently available set of solvers.
         """
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.synapses,
             {
                 name: {
@@ -287,6 +270,7 @@ class B2Model:
         )
         self.logger.info(f"Solver method defined: {method} for {name}")
 
+    @_trigger_rebuild
     def define_refractory(self, name: str, value: str | b2.Quantity) -> None:
         """
         define_refractory Define the refractoriness for a neurongroup indicated by name.
@@ -298,7 +282,7 @@ class B2Model:
         value : str | b2.Quantity
             Either a string expression evalutating to the length of the refractory period or the length of the period itself.
         """
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.neurongroups,
             {
                 name: {
@@ -308,6 +292,7 @@ class B2Model:
         )
         self.logger.info(f"Refractory period defined: {value}")
 
+    @_trigger_rebuild
     def define_neuronnumber(self, name: str, n: int) -> None:
         """
         define_neuronnumber Define the number of neurons in a group indicated by name.
@@ -319,7 +304,7 @@ class B2Model:
         n : int
             Number of neurons the neurongroup should have.
         """
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.neurongroups,
             {
                 name: {
@@ -329,53 +314,112 @@ class B2Model:
         )
         self.logger.info(f"Neuron number defined: {n}")
 
-    def define_neuron_subgroup(
-        self, target_name: str, name: str, idxs: int | list | tuple
-    ) -> None:
+    @_trigger_rebuild
+    def define_neuronsubgroup_target(self, name: str, target_name: str) -> None:
         """
-        define_neuron_subgroup Define a subgroup of a neurongroup as a separate element that can be referred to by name.
+        Define the target neurongroup for a neuron subgroup called name
 
         Parameters
         ----------
-        target_name : str
-            Name of the neurongroup the subgroup should be defined for.
         name : str
-            Name that the subgroup should be referred to.
-        idxs : int | list | tuple
-            Indices of the target neurongroup neurons to add to the subgroup.
-            Tuple and list is expected as (start, stop).
-            Only contiguous ranges are supported.
-        """
-        sng = None
+            name of the subgroup for which to define the target
+        target_name : str
+            name of the target neurongroup to make a subgroup from
 
+        Raises
+        ------
+        ValueError
+            When the target_name argument does not exist in the neurongroups that are known to the model
+        """
+        if target_name not in self.neurongroups:
+            raise KeyError(
+                f"Error, target {target_name} could not be found in neurongroups"
+            )
+
+        self.logger.info(f"defining target {target_name} for neuron subgroup {name}")
+        if name not in self.neurongroups:
+            self.neurongroups[name] = {"name": name}
+
+        utils.update_nested_dict(
+            self.neurongroups[name],
+            {
+                "target": target_name,
+            },
+        )
+
+    @_trigger_rebuild
+    def define_neuronsubgroup_idxs(self, name: str, idxs: int | list | tuple) -> None:
+        """
+        Define the indices in a neurongroup for a neuron subgroup called 'name'.
+
+        Raises
+        ------
+        ValueError
+            When noncontiguous indices are passed
+        """
+        self.logger.info(f"defining indices {idxs} for neuron subgroup {name}")
         if isinstance(idxs, tuple | list):
             if len(idxs) > 2:
                 raise ValueError("Subgroups have to be contiguous")
-
-            sng = b2.Subgroup(self.network[target_name], idxs[0], idxs[1], name=name)
+            start = idxs[0]
+            stop = idxs[1]
         elif isinstance(idxs, int):
-            sng = b2.Subgroup(self.network[target_name], idxs, idxs + 1, name=name)
+            start = idxs
+            stop = idxs + 1
+
+        if name not in self.neurongroups:
+            self.neurongroups[name] = {
+                "name": name,
+            }
+
+        utils.update_nested_dict(
+            self.neurongroups[name], {"start": start, "stop": stop}
+        )
+
+    @_trigger_rebuild
+    def assemble_neuronsubgroup(
+        self,
+        name: str,
+    ) -> None:
+        """
+        assemble_neuronsubgroup Define a subgroup of a neurongroup as a separate element that can be referred to by name.
+
+        Parameters
+        ----------
+        name : str
+            Name that the subgroup should be referred to.
+        """
+        sng = None
+        try:
+            sng = b2.Subgroup(
+                self.network[self.neurongroups[name]["target"]],
+                self.neurongroups[name]["start"],
+                self.neurongroups[name]["stop"],
+                name=name,
+            )
+        except Exception as e:
+            message = f"Error when trying to create a neuronsubgroup {name}: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
 
         self.logger.info(f"Neuron subgroup defined: {name}")
+
+        if any(obj.name == name for obj in self.network.objects):
+            try:
+                self.network.remove(sng)
+            except Exception as e:
+                message = f"Error when remogin existing subgroup {name}: {e}"
+                self.logger.critical(message)
+                raise RuntimeError(message) from e
 
         try:
             self.network.add(sng)
         except Exception as e:
-            raise RuntimeError(
-                f"Error when adding subgroup {name} of neurongroup {target_name}: {e}"
-            ) from e
+            message = f"Error when adding subgroup {name}: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
 
-        self._update_nested_dict(
-            self.neurongroups,
-            {
-                name: {
-                    "idx": idxs,
-                    "name": name,
-                    "target": target_name,
-                }
-            },
-        )
-
+    @_trigger_rebuild
     def define_synapse_target(self, name: str, target: str) -> None:
         """
         define_synapse_target Define the target neurongroup for a synapse called 'name'.
@@ -387,7 +431,7 @@ class B2Model:
         target : str
             Name of the target neurongroup to use with the synapse.
         """
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.synapses,
             {
                 name: {
@@ -396,6 +440,7 @@ class B2Model:
             },
         )
 
+    @_trigger_rebuild
     def define_synapse_origin(self, name: str, origin: str) -> None:
         """
         define_synapse_origin Define the origin neurongroup for a synapse called 'name'.
@@ -407,7 +452,7 @@ class B2Model:
         target : str
             Name of the origin neurongroup to use with the synapse.
         """
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.synapses,
             {
                 name: {
@@ -416,6 +461,143 @@ class B2Model:
             },
         )
 
+    def _delete_dict_element(
+        self, dictionary: dict[Any, Any], groupname: str, varname: str
+    ) -> None:
+        """
+        Delete an element 'varname' in the subdict behind the 'groupname' key in the dictionary.
+        Intended to use with the `neurongroups`, `synapses` or `parameters`members of this class.
+        Parameters
+        ----------
+        dictionary : dict[Any, Any]
+            dictionary to modify
+        groupname : str
+            name of the subdictionary
+        varname : str
+            element name to remove
+        """
+        try:
+            del dictionary[groupname][varname]
+        except Exception as e:
+            raise KeyError(f"Error when deleting {varname} in {groupname}: {e}") from e
+
+    @_trigger_rebuild
+    def delete_neurongroup(self, name: str) -> None:
+        """
+        delete a neurongroup definition from the intermediate dict
+
+        Parameters
+        ----------
+        name : str
+            Name of the neurongroup to delete from the intermediat dict
+        """
+        del self.neurongroups[name]
+
+    @_trigger_rebuild
+    def delete_synapse(self, name: str) -> None:
+        """
+        delete a synapse definition from the intermediate dict
+
+        Parameters
+        ----------
+        name : str
+            Name of the synapse to delete from the intermediat dict
+        """
+        del self.synapses[name]
+
+    @_trigger_rebuild
+    def delete_monitor(self, name: str) -> None:
+        """
+        delete a monitor definition from the intermediate dict
+
+        Parameters
+        ----------
+        name : str
+            Name of the monitor to delete from the intermediat dict
+        """
+        del self.monitors[name]
+
+    @_trigger_rebuild
+    def delete_neurongroup_element(self, groupname: str, varname: str) -> None:
+        """
+        Delete an element form the definition of a neurongroup. Note that if it has been assembled already,
+        you have to remove it using `remove_neurongroup` and redefine it completetly.
+
+        Parameters
+        ----------
+        groupname : str
+            name of the neurongroup for which a parameter should be deleted
+        varname : str
+            variable name that should be deleted
+        """
+        self._delete_dict_element(self.neurongroups, groupname, varname)
+
+    @_trigger_rebuild
+    def delete_syanpse_element(self, groupname: str, varname: str) -> None:
+        """
+        Delete an element form the definition of a synapse. Note that if it has been assembled already,
+        you have to remove it using `remove_synapse` and redefine it completetly.
+
+        Parameters
+        ----------
+        groupname : str
+            name of the synapse for which a parameter should be deleted
+        varname : str
+            variable name that should be deleted
+        """
+        self._delete_dict_element(self.synapses, groupname, varname)
+
+    @_trigger_rebuild
+    def delete_monitor_element(self, groupname: str, varname: str) -> None:
+        """
+        Delete an element form the definition of a monitor. Note that if it has been assembled already,
+        you have to remove it using `remove_monitor` and redefine it completetly.
+
+        Parameters
+        ----------
+        groupname : str
+            name of the monitor for which a parameter should be deleted
+        varname : str
+            variable name that should be deleted
+        """
+        self._delete_dict_element(self.monitors, groupname, varname)
+
+    def delete_parameter(self, name: str) -> None:
+        """
+        Delete a parameter from the set of parameters currently available
+
+        Parameters
+        ----------
+        name : str
+            name of the parameter to remove
+        """
+        try:
+            del self.parameters[name]  # type: ignore
+        except Exception as e:
+            raise KeyError(f"Error when deleting {name}: {e}") from e
+
+    def delete_initial_condition(self, name: str) -> None:
+        """
+        Delete an element `name` from the initial condition dictionary. Note that if
+        initial conditions have already been defined, you have to redefine it in the
+        network.
+
+        Parameters
+        ----------
+        name : str
+            Name of the initial condition to remove
+
+        Raises
+        ------
+        KeyError
+            When `name` is not in the initial condition dictionary
+        """
+        try:
+            del self.initials[name]
+        except Exception as e:
+            raise KeyError(f"Error when deleting {name}: {e}") from e
+
+    @_trigger_rebuild
     def define_synapse_equation(self, name: str, line: str) -> None:
         """
         define_synapse_equation Define a line in the model equation for a synapse called `synapse`, or the full equation all at once.
@@ -441,6 +623,7 @@ class B2Model:
 
         self._add_equation_to_group(self.synapses[name], line)
 
+    @_trigger_rebuild
     def define_synapse_pre(self, name: str, line: str) -> None:
         """
         define_synapse_pre Define the code that is executed on each synapse receiving a presynaptic spike as a string expression.
@@ -453,7 +636,7 @@ class B2Model:
             String representation of the code to use.
         """
         if name not in self.synapses or "on_pre" not in self.synapses[name]:
-            self._update_nested_dict(
+            utils.update_nested_dict(
                 self.synapses,
                 {
                     name: {
@@ -464,6 +647,7 @@ class B2Model:
         else:
             self.synapses[name]["on_pre"] += line + "\n"
 
+    @_trigger_rebuild
     def define_synapse_post(self, name: str, line: str) -> None:
         """
         define_synapse_post Add code to a synapse called `name` that shall run
@@ -477,7 +661,7 @@ class B2Model:
             String representation of the code to add.
         """
         if name not in self.synapses or "on_post" not in self.synapses[name]:
-            self._update_nested_dict(
+            utils.update_nested_dict(
                 self.synapses,
                 {
                     name: {
@@ -488,6 +672,7 @@ class B2Model:
         else:
             self.synapses[name]["on_post"] += line + "\n"
 
+    @_trigger_rebuild
     def define_synapse_connection(self, name: str, connection_condition: str) -> None:
         """
         define_synapse_connection Define the connections of a Synapse called `name` as a condition represented as a string.
@@ -500,7 +685,7 @@ class B2Model:
         connection_condition : str
             String representaion of the connection condition.
         """
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.synapses,
             {
                 name: {
@@ -509,6 +694,7 @@ class B2Model:
             },
         )
 
+    @_trigger_rebuild
     def define_synapse_delay(self, name: str, delay: Any) -> None:
         """
         Add delay to synapse
@@ -520,7 +706,7 @@ class B2Model:
         delay : Any
             delay expression
         """
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.synapses,
             {
                 name: {
@@ -529,6 +715,7 @@ class B2Model:
             },
         )
 
+    @_trigger_rebuild
     def define_synapse_connection_probablitiy(self, name: str, p: float) -> None:
         """
         define_synapse_connection_probability Define the connection probability for a given synapse called `name`.
@@ -543,7 +730,7 @@ class B2Model:
         if not 0.0 <= p <= 1.0:
             raise ValueError(f"Error, supplied value {p} is not a probability.")
 
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.synapses,
             {
                 name: {
@@ -608,59 +795,154 @@ class B2Model:
             self.logger.critical(message)
             raise RuntimeError(message) from e
 
-        self.network.add(synapse)
+        if any(obj.name == name for obj in self.network.objects):
+            try:
+                self.network.remove(self.network[name])
+            except Exception as e:
+                message = (
+                    f"Error when removing existing synapse {name} from the network: {e}"
+                )
+                self.logger.critical(message)
+                raise RuntimeError(message) from e
+
+        try:
+            self.network.add(synapse)
+        except Exception as e:
+            message = f"Error when adding {name} to the network: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
 
     @_trigger_rebuild
-    def define_monitor(
-        self, name: str, cls: type, group: str, variable: str | None = None
+    def define_monitor_type(self, name: str, classname: str) -> None:
+        """
+        Define the type of a monitor. Can be 'StateMonitor' or 'SpikeMonitor' at the moment.
+
+        Parameters
+        ----------
+        name : str
+            name of the monitor to define the type for
+        classname : str
+            name of the type to use in brian2
+        """
+        if name not in self.monitors:
+            self.monitors[name] = {
+                "name": name,
+            }
+
+        utils.update_nested_dict(
+            self.monitors,
+            {
+                name: {
+                    "type": classname,
+                }
+            },
+        )
+
+    @_trigger_rebuild
+    def define_monitor_source(self, name: str, source: str) -> None:
+        """
+        Define the source member of the neuron network to monitor variables for
+
+        Parameters
+        ----------
+        name : str
+            name of the monitor
+        source : str
+            Member of the network to monitor variables for
+        """
+        if name not in self.monitors:
+            self.monitors[name] = {
+                "name": name,
+            }
+
+        utils.update_nested_dict(
+            self.monitors,
+            {
+                name: {
+                    "source": source,
+                }
+            },
+        )
+
+    @_trigger_rebuild
+    def define_monitor_variable(self, name: str, variable: str | None) -> None:
+        """
+        define the variable a monitor can be attached to. Can be a string , None (for spikemonitors) or True (for a StateMonitor).
+        When True, all variables are recorded. This may take up a lot of memory
+
+        Parameters
+        ----------
+        name : str
+            name of the monitor to define the variable for
+        variable : str | None
+            Variable name
+        """
+        if name not in self.monitors:
+            self.monitors[name] = {
+                "name": name,
+            }
+
+        utils.update_nested_dict(
+            self.monitors,
+            {
+                name: {
+                    "variable": variable,
+                }
+            },
+        )
+
+    @_trigger_rebuild
+    def assemble_monitor(
+        self,
+        name: str,
     ) -> None:
         """
-        define_monitor Define a monitor for a variable `variable` in the network element `group`.
+        assemble_monitor Assemble a new monitor from predefined elements. When a monitor exists that
+        in the network that has the same name, it is removed and replaced by the newly assembled one
 
         Parameters
         ----------
         name : str
             Name of the monitor as referred to in the governing network.
-        group : str
-            Name of the element of the network the monitor should grab data from.
-        variable : str, optional
-            Variable of the `group` to monitor, by default None
 
         Raises
         ------
         RuntimeError
+            When something goes wrong while removing a monitor of the same name that is to be replaced with a new definition
+        RuntimeError
             When something goes wrong while building the monitor
         """
         monitor = None
+        self.logger.info(f"adding monitor '{name}'")
+
         try:
-            monitor = cls(
-                self.network[group],
-                variable,
+            monitor = getattr(b2, self.monitors[name]["type"])(
+                self.network[self.monitors[name]["source"]],
+                self.monitors[name]["variable"],
                 record=True,
-                name=name,
+                name=self.monitors[name]["name"],
             )
         except Exception as e:
             message = f"Error in defining monitor {name}: {e}"
             self.logger.critical(message)
             raise RuntimeError(message) from e
 
+        if any(obj.name == name for obj in self.network.objects):
+            try:
+                self.network.remove(self.network[name])
+            except Exception as e:
+                message = f"Error while removing monitor {name} from network: {e}"
+                self.logger.critical(message)
+                raise RuntimeError(message) from e
+
         try:
-            self.logger.info(
-                f"adding {cls.__name__} with name '{name}', source '{group}' and variable '{variable}'"
-            )
             self.network.add(monitor)
         except Exception as e:
             message = f"Error in adding monitor {name} to network: {e}"
             self.logger.critical(message)
             raise RuntimeError(message) from e
 
-        self.monitors[name] = {
-            "name": name,
-            "type": cls.__name__,
-            "source": group,
-            "variable": variable,
-        }
-
+    @_trigger_rebuild
     def define_reset(self, name: str, reset: str) -> None:
         """
         define_reset Define the `reset` parameter for a neurongroup indicated by `name`.
@@ -673,7 +955,7 @@ class B2Model:
             The reset parameter for the neurongroup. Have a look at the brian2 documentation for
             the `NeuronGroup` class for more details.
         """
-        self._update_nested_dict(
+        utils.update_nested_dict(
             self.neurongroups,
             {
                 name: {
@@ -689,7 +971,7 @@ class B2Model:
     ) -> None:
         """
         assemble_neurongroup Assemble a neurongroup called `name` from its set of predefined values.
-
+        When a neurongroup of the same name already exists in the network, it will be removed and replaced with the newly assembled one.
         You need to define the respective variables first via the `define_*` functions.
 
         Parameters
@@ -716,13 +998,68 @@ class B2Model:
                 reset=self.neurongroups[name].get("reset", None),
                 name=name,
             )
-
         except Exception as e:
             message = f"Error in assembling neuron group {name}: {e}"
             self.logger.critical(message)
             raise RuntimeError(message) from e
 
-        self.network.add(ng)
+        if any(obj.name == name for obj in self.network.objects):
+            try:
+                self.network.remove(self.network[name])
+            except Exception as e:
+                message = f"Error when removing neuron group {name} from network: {e}"
+                self.logger.critical(message)
+                raise RuntimeError(message) from e
+
+        try:
+            self.network.add(ng)
+        except Exception as e:
+            message = f"Error when adding new neuron group {name} to network: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
+
+    def assemble_inital_condition(self, name: str, key: str) -> None:
+        """
+        Apply the initial condition identified by `key` to the network element called `name`.
+        The element to set the initial condition for must be assembled first.
+
+        Parameters
+        ----------
+        name : str
+            name of network element to set the initial condition for, e.g., name of a neurongroup
+        key : str
+            name of the initial condition as defined by `define_init`.
+
+        Raises
+        ------
+        ValueError
+            When something goes wrong during the initial condition assignment.
+        """
+        try:
+            setattr(self.network[name], key, self.initials[name][key])
+
+        except Exception as e:
+            raise ValueError(
+                f"Error when initializing {key} of element {name} as {self.initials[name][key]}: {e}"
+            ) from e
+
+    def assemble_initials(self) -> None:
+        """
+        Set all the initial conditions that have been defined via 'define_init'.
+
+        Parameters
+        ----------
+        name : str
+            name of the element of the network for which to define an initial condition.
+
+        Raises
+        ------
+        ValueError
+            When something goes wrong during assignment of the initial condition to the variable given
+        """
+        for name in self.initials:
+            for k in self.initials[name]:
+                self.assemble_inital_condition(name, k)
 
     def save_to_h5(self, path: str | Path) -> None:
         """
@@ -766,6 +1103,388 @@ class B2Model:
             self.logger.critical(message)
             raise ValueError(message) from e
 
+    def assemble_network(self) -> None:
+        """
+        Assemble the network from its predefined components.
+        """
+        self.network = b2.Network(name=self.name)
+
+        for n in self.neurongroups:
+            if all(k not in self.neurongroups[n] for k in ["start", "stop"]):
+                self.assemble_neurongroup(n)
+
+        for n in self.neurongroups:
+            if all(k in self.neurongroups[n] for k in ["start", "stop"]):
+                self.assemble_neuronsubgroup(n)
+
+        for s in self.synapses:
+            self.assemble_synapse(s)
+
+        for m in self.monitors:
+            self.assemble_monitor(m)
+
+        self.assemble_initials()
+
+        self.must_be_rebuilt = False
+
+    def get_model_definition(self) -> dict[str, Any]:
+        """
+        Return the entire model definition as a dictionary.
+        This returns a copy of the definition, i.e., the model
+        definition cannot be edited via the returned object
+
+        Returns
+        -------
+        dict[str, Any]
+            Copy of the entire model definition.
+            Has entries for 'neurongroups', 'synapses', 'monitors', 'parameters' and 'initial_conditions'
+        """
+        return {
+            "neurongroups": deepcopy(self.neurongroups),
+            "synapses": deepcopy(self.synapses),
+            "monitors": deepcopy(self.monitors),
+            "parameters": deepcopy(self.parameters),
+            "initial_conditions": deepcopy(self.initials),
+        }
+
+    def _get_current_element_state(
+        self,
+        name: str,
+        read_only_variables: bool = False,
+        subexpressions: bool = False,
+        vars: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Get the current internal states of a network element. This is different from
+        the definitions done by the `B2Model` class and contain a lot more information
+        about brian2 internals
+
+        Parameters
+        ----------
+        name : str
+            name of the element to get the internal state from
+        read_only_variables : bool, optional
+            whether to include read-only variables, by default False
+        subexpressions : bool, optional
+            whether to include subexpressions, by default False
+        vars : list[str] | None, optional
+            list of variables to display. lists all if None, by default None
+
+        Returns
+        -------
+        dict[str, Any]
+            dictionary which represents the internal state of the requested variable in the brian2 network
+
+        Raises
+        ------
+        AttributeError
+            When the network has not yet been assembled
+        AttributeError
+            When the network does not contain an element called 'name'.
+        """
+        if name not in self.network.objects:
+            raise AttributeError(f"Error, name {name} not in network")
+
+        return self.network[name].get_states(
+            read_only_variables=read_only_variables,
+            subexpressions=subexpressions,
+            vars=vars,
+        )
+
+    def get_object_list(self) -> set[Any]:
+        """
+        Get the list of objects of the system
+        """
+        return self.network.objects
+
+    def get_current_neurongroup_state(
+        self,
+        name: str,
+        read_only_variables: bool = False,
+        subexpressions: bool = False,
+        vars: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Get the current state of a defined neurongroup of the neuronnetwork as a dictionary
+
+        Parameters
+        ----------
+        name : str
+            name of the neurongroup to get the state for
+        read_only_variables : bool, optional
+            whether to include read-only variables or not, by default False
+        subexpressions : bool, optional
+            whether to include subexpressions, by default False
+        vars : list[str] | None, optional
+            list of variables to include. If 'None', all are included, by default None
+
+        Returns
+        -------
+        dict[str, Any]
+            dictionary containing the current state of the neurongroup 'name'.
+
+        Raises
+        ------
+        KeyError
+            When 'name' does not refer to an existing neurongroup.
+        """
+        if name not in self.neurongroups:
+            raise KeyError(f"Error, name {name} not in neurongroups")
+
+        return self._get_current_element_state(
+            name,
+            read_only_variables=read_only_variables,
+            subexpressions=subexpressions,
+            vars=vars,
+        )
+
+    def get_current_synapse_state(
+        self,
+        name: str,
+        read_only_variables: bool = False,
+        subexpressions: bool = False,
+        vars: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Get the current state of a defined synapse of the neuronnetwork as a dictionary
+
+        Parameters
+        ----------
+        name : str
+            name of the synapse to get the state for
+        read_only_variables : bool, optional
+            whether to include read-only variables or not, by default False
+        subexpressions : bool, optional
+            whether to include subexpressions, by default False
+        vars : list[str] | None, optional
+            list of variables to include. If 'None', all are included, by default None
+
+
+        Returns
+        -------
+        dict[str, Any]
+            dictionary containing the current state of the synapse 'name'.
+
+        Raises
+        ------
+        KeyError
+            When 'name' does not refer to an existing synapse.
+        """
+        if name not in self.synapses:
+            raise KeyError(f"Error, name {name} not in synapses")
+
+        return self._get_current_element_state(
+            name,
+            read_only_variables=read_only_variables,
+            subexpressions=subexpressions,
+            vars=vars,
+        )
+
+    def get_current_monitor_state(
+        self,
+        name: str,
+        read_only_variables: bool = False,
+        subexpressions: bool = False,
+        vars: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Get the current state of a defined monitor of the neuronnetwork as a dictionary
+
+        Parameters
+        ----------
+        name : str
+            name of the monitor to get the state for
+        read_only_variables : bool, optional
+            whether to include read-only variables or not, by default False
+        subexpressions : bool, optional
+            whether to include subexpressions, by default False
+        vars : list[str] | None, optional
+            list of variables to include. If 'None', all are included, by default None
+
+        Returns
+        -------
+        dict[str, Any]
+            dictionary containing the current state of the monitor 'name'.
+
+        Raises
+        ------
+        KeyError
+            When 'name' does not refer to an existing monitor.
+        """
+        if name not in self.monitors:
+            raise KeyError(
+                f"Error, name {name} not in monitors. Did you define and assemble them? "
+            )
+
+        return self._get_current_element_state(
+            name,
+            read_only_variables=read_only_variables,
+            subexpressions=subexpressions,
+            vars=vars,
+        )
+
+    def get_variables_of(
+        self,
+        name: str,
+    ) -> list[str] | None:
+        """
+        Get the set of variables defined in the network element 'name'.
+
+        Parameters
+        ----------
+        name : str
+            Name of object to get variables for
+
+        Returns
+        -------
+        list[str] | None
+            List of variables of the element 'name'.
+        """
+
+        try:
+            return list(self.network[name].variables.keys())
+        except Exception as e:
+            raise RuntimeError(
+                f"Error, something went wrong when getting variables for {name}: {e} "
+            ) from e
+
+    def get_equation_variables_of(
+        self,
+        name: str,
+    ) -> list[str] | None:
+        """
+        Get equation variables for
+
+        Parameters
+        ----------
+        name : str
+            Name of object to get variables for
+
+        Returns
+        -------
+        list[str]
+            List of variables defined in the equations for the element 'name'.
+        """
+        if name not in self.synapses and name not in self.neurongroups:
+            raise KeyError(
+                f"Error, name {name} is neither synapse nor neurongroup and hence does not have equations to get variables from"
+            )
+
+        try:
+            return list(self.network[name].equations.names)
+        except Exception as e:
+            raise RuntimeError(
+                f"Error, something went wrong when getting equation variables for {name}: {e}"
+            ) from e
+
+    def get_current_network_state(
+        self,
+        read_only_variables: bool = False,
+        subexpressions: bool = False,
+        vars: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Get the current internal state of the underlying brian2 network
+
+        Parameters
+        ----------
+        read_only_variables : bool, optional
+            whether to include read-only variables, by default False
+        subexpressions : bool, optional
+            whether to include subexpressions, by default False
+        vars : list[str] | None, optional
+            list of variables to display. lists all if None, by default None
+
+        Returns
+        -------
+        dict[str, Any]
+            Dictionary representing the internal state of the network, including a lot of brian2 internals
+
+        Raises
+        ------
+        AttributeError
+            When the network has not yet been assembled
+        """
+        return self.network.get_states(
+            read_only_variables=read_only_variables,
+            subexpressions=subexpressions,
+            vars=vars,
+        )
+
+    def get_network_objects(self) -> set[Any]:
+        """
+        Return the set of currently defined objects in the model
+
+        Returns
+        -------
+        set[Any]
+            The network objects
+        """
+        return self.network.objects
+
+    def _remove_object(self, name: str) -> None:
+        """
+        Remove an object from the neuron network model
+
+        Parameters
+        ----------
+        name : str
+            name of object to be removed
+        """
+
+        self.network.remove(self.network[name])
+
+    def erase_neurongroup(self, name: str) -> None:
+        """
+        Remove a neurongroup from the network
+
+        Parameters
+        ----------
+        name : str
+            name of the neurongroup to remove
+        """
+        if name not in self.neurongroups:
+            raise KeyError(
+                f"Error when removing object {name}: no neurongroup of that name exists"
+            )
+
+        del self.neurongroups[name]
+        self._remove_object(name)
+
+    def erase_synapse(self, name: str) -> None:
+        """
+        Remove a synapse from the network
+
+        Parameters
+        ----------
+        name : str
+            name of the synapse to remove
+        """
+        if name not in self.synapses:
+            raise KeyError(
+                f"Error when removing object {name}: no synapse of that name exists"
+            )
+
+        del self.synapses[name]
+        self._remove_object(name)
+
+    def erase_monitor(self, name: str) -> None:
+        """
+        Remove a monitor from the network
+
+        Parameters
+        ----------
+        name : str
+            name of the synapse to remove
+        """
+        if name not in self.monitors:
+            raise KeyError(
+                f"Error when removing object {name}: no monitor of that name exists"
+            )
+
+        del self.monitors[name]
+        self._remove_object(name)
+
     def run_simulation(
         self,
         tfinal: b2.Quantity,
@@ -784,10 +1503,20 @@ class B2Model:
         savepath : str, optional
             Path to save the data at, by default None
         """
+
+        if self.must_be_rebuilt:
+            self.network = b2.Network(name=self.network.name)
+            self.assemble_network()
+
         if len(self.checkpoints) == 0:
             self.checkpoints.append("Initial state")
             self.network.store(self.checkpoints[-1])
-        self.network.run(tfinal, report=report, report_period=0.5 * b2.second)
+        self.network.run(
+            tfinal,
+            report=report,
+            report_period=0.5 * b2.second,
+            namespace=self.parameters,
+        )
         self.logger.info(f"run the system for {tfinal} with savepath = {savepath}")
         if savepath is not None:
             self.save_to_h5(savepath)

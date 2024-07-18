@@ -153,29 +153,40 @@ def test_neuron_subgroup(
 ) -> None:
     mfx, _ = mfx_parameterized
 
-    mfx.define_neuron_subgroup("P", "excitatory", (0, 20))
-    mfx.define_neuron_subgroup("P", "inhibitory", (20, 30))
+    mfx.define_neuronsubgroup_target("excitatory", "P")
+    mfx.define_neuronsubgroup_idxs("excitatory", (0, 20))
 
-    assert list(
-        range(
-            mfx.neurongroups["excitatory"]["idx"][0],
-            mfx.neurongroups["excitatory"]["idx"][1],
-        )
-    ) == list(range(0, 20))
+    mfx.define_neuronsubgroup_target("inhibitory", "P")
+    mfx.define_neuronsubgroup_idxs("inhibitory", (20, 30))
 
-    assert list(
-        range(
-            mfx.neurongroups["inhibitory"]["idx"][0],
-            mfx.neurongroups["inhibitory"]["idx"][1],
-        )
-    ) == list(range(20, 30))
+    assert (
+        mfx.neurongroups["excitatory"]["start"],
+        mfx.neurongroups["excitatory"]["stop"],
+    ) == (0, 20)
+
+    assert (
+        mfx.neurongroups["inhibitory"]["start"],
+        mfx.neurongroups["inhibitory"]["stop"],
+    ) == (20, 30)
+
+    mfx.assemble_neuronsubgroup("excitatory")
+    mfx.assemble_neuronsubgroup("inhibitory")
 
     assert mfx.network[mfx.neurongroups["excitatory"]["name"]] is not None
     assert mfx.network[mfx.neurongroups["inhibitory"]["name"]] is not None
 
     mfx.network = b2.Network()
-    with pytest.raises(KeyError, match="'No object with name \"ng\" found'"):
-        mfx.define_neuron_subgroup("ng", "excitatory", (0, 20))
+    mfx.define_neuronsubgroup_idxs("ng", (20, 30))
+
+    with pytest.raises(
+        KeyError, match="Error, target Px could not be found in neurongroups"
+    ):
+        mfx.define_neuronsubgroup_target("ng", "Px")
+
+    with pytest.raises(
+        RuntimeError, match="Error when trying to create a neuronsubgroup"
+    ):
+        mfx.assemble_neuronsubgroup("ng")
 
 
 def test_synapse_connection_prob_numerical(
@@ -211,8 +222,15 @@ def test_define_synapse(
     dApost = -dApre * taupre / taupost * 1.05
 
     mfx, _ = mfx_parameterized
-    mfx.define_neuron_subgroup("P", "Pe", (0, 24))
-    mfx.define_neuron_subgroup("P", "Pi", (24, 30))
+
+    mfx.define_neuronsubgroup_target("Pe", "P")
+    mfx.define_neuronsubgroup_idxs("Pe", (0, 24))
+
+    mfx.define_neuronsubgroup_target("Pi", "P")
+    mfx.define_neuronsubgroup_idxs("Pi", (0, 24))
+
+    mfx.assemble_neuronsubgroup("Pi")
+    mfx.assemble_neuronsubgroup("Pe")
 
     mfx.define_parameter("taupre", taupre)
 
@@ -287,7 +305,11 @@ def test_define_monitor(
 
     assert mfx.monitors == {}
 
-    mfx.define_monitor("Traces_ge", b2.StateMonitor, "P", "ge")
+    mfx.define_monitor_source("Traces_ge", "P")
+    mfx.define_monitor_type("Traces_ge", "StateMonitor")
+    mfx.define_monitor_variable("Traces_ge", "ge")
+
+    mfx.assemble_monitor("Traces_ge")
 
     assert "Traces_ge" in mfx.monitors
     assert mfx.network["Traces_ge"].source == mfx.network["P"]
@@ -307,7 +329,10 @@ def test_define_monitor_exception(
     mfx, _ = mfx_parameterized
 
     with pytest.raises(RuntimeError, match="Error in defining monitor M"):
-        mfx.define_monitor("M", b2.StateMonitor, "G", "v")
+        mfx.define_monitor_source("M", "G")
+        mfx.define_monitor_type("M", "StateMonitor")
+        mfx.define_monitor_variable("M", "v")
+        mfx.assemble_monitor("M")
 
 
 def test_define_init(mfx_ornstein: b2_model.B2Model) -> None:
