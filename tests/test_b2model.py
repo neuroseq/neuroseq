@@ -525,6 +525,82 @@ def test_NMDA_model(mfx_nmda: b2_model.B2Model) -> None:
     assert_allclose(Mn.g, mfx_nmda.network["Mn"].g)
 
 
+def test_assemble_network_and_erase(mfx_nmda) -> None:
+    a = 1 / (10 * b2.ms)
+    b = 1 / (10 * b2.ms)
+    c = 1 / (10 * b2.ms)
+
+    model = b2_model.B2Model(seed=4321)
+    # model.define_dt(0.2 * b2.ms)
+
+    model.define_parameter("a", a)
+    model.define_parameter("b", b)
+    model.define_parameter("c", c)
+
+    model.define_neuronnumber("neuron_input", 2)
+    model.define_solver_method("neuron_input", "euler")
+    model.define_equation("neuron_input", "dv/dt = 1/(10*ms) : 1")
+    model.define_threshold("neuron_input", "v>1")
+    model.define_reset("neuron_input", "v=0")
+
+    model.define_neuronnumber("neurons", 1)
+    model.define_equation(
+        "neurons",
+        """dv/dt = (g-v)/(10*ms) : 1
+                            g : 1""",
+    )
+    model.define_solver_method("neurons", "exact")
+
+    synapse_eq = """
+        dg_syn/dt = -a*g_syn+b*x*(1-g_syn) : 1 (clock-driven)
+        g_post = g_syn : 1 (summed)
+        dx/dt=-c*x : 1 (clock-driven)
+        w : 1 # synaptic weight
+    """
+
+    model.define_synapse_equation("S", synapse_eq)
+    model.define_synapse_origin("S", "neuron_input")
+    model.define_synapse_target("S", "neurons")
+    model.define_synapse_pre("S", "x += w")
+
+    model.define_neuronsubgroup_target("input_subgroup", "neuron_input")
+    model.define_neuronsubgroup_idxs("input_subgroup", 1)
+
+    model.define_monitor_source("M", "S")
+    model.define_monitor_type("M", "StateMonitor")
+    model.define_monitor_variable("M", "g")
+
+    model.define_monitor_source("Mn", "neurons")
+    model.define_monitor_type("Mn", "StateMonitor")
+    model.define_monitor_variable("Mn", "g")
+
+    model.define_init("S", "w", [1.0, 10.0])
+    model.define_init("neuron_input", "v", [0.0, 0.5])
+
+    model.assemble_network()
+
+    assert model.neurongroups == mfx_nmda.neurongroups
+    assert model.synapses == mfx_nmda.synapses
+    assert model.monitors == mfx_nmda.monitors
+    assert model.parameters == mfx_nmda.parameters
+
+    assert sorted(list(model.network.get_states().keys())) == sorted(
+        list(mfx_nmda.network.get_states().keys())
+    )
+
+    assert "M" in [o.name for o in model.get_network_objects()]
+    assert "neuron_input" in [o.name for o in model.get_network_objects()]
+    assert "S" in [o.name for o in model.get_network_objects()]
+
+    model.erase_monitor("M")
+    model.erase_neurongroup("neuron_input")
+    model.erase_synapse("S")
+
+    assert "M" not in [o.name for o in model.get_network_objects()]
+    assert "neuron_input" not in [o.name for o in model.get_network_objects()]
+    assert "S" not in [o.name for o in model.get_network_objects()]
+
+
 def test_hdf5(tmp_path: Path, mfx_ornstein: b2_model.B2Model) -> None:
     mfx_ornstein.run_simulation(10 * b2.second)
 
