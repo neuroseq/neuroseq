@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from ast import literal_eval
 from collections.abc import Callable
-from importlib import import_module
 from typing import Any
-from typing import cast
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -285,7 +283,9 @@ class ModelDialog(QtWidgets.QDialog):
         else:
             if name not in getattr(self.model, target):
                 self.name = name
-                getattr(self.model, target)[name] = {}
+                getattr(self.model, target)[name] = {
+                    "name": name,
+                }
             else:
                 self.display_error(
                     f"The name {name} has already been defined in {target}"
@@ -1031,7 +1031,7 @@ class MonitorDialog(ModelDialog):
         """
         super().__init__(model, parent)
 
-        self.tp: type | None = None
+        self.tp: str | None = None
         self.var: str | None = None
         self.src: str | None = None
 
