@@ -315,7 +315,7 @@ class B2Model:
         self.logger.info(f"Neuron number defined: {n}")
 
     @_trigger_rebuild
-    def define_neuron_subgroup_target(self, name: str, target_name: str) -> None:
+    def define_neuronsubgroup_target(self, name: str, target_name: str) -> None:
         """
         Define the target neurongroup for a neuron subgroup called name
 
@@ -348,7 +348,7 @@ class B2Model:
         )
 
     @_trigger_rebuild
-    def define_neuron_subgroup_idxs(self, name: str, idxs: int | list | tuple) -> None:
+    def define_neuronsubgroup_idxs(self, name: str, idxs: int | list | tuple) -> None:
         """
         Define the indices in a neurongroup for a neuron subgroup called 'name'.
 

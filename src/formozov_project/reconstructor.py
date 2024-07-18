@@ -145,7 +145,7 @@ class Reconstructor:
             augmented,
         )
 
-    def reconstruct_neuron_subgroup(
+    def reconstruct_neuronsubgroup(
         self, model: Any, name: str, data_of_group: dict[str, Any]
     ) -> None:
         """
@@ -161,10 +161,11 @@ class Reconstructor:
         data_of_group : dict[str, Any]
             dict containing the data to construct the subgroup
         """
-        model.define_neuron_subgroup_target(name, data_of_group["target"])
-        model.define_neuron_subgroup_idxs(
+        model.define_neuronsubgroup_target(name, data_of_group["target"])
+        model.define_neuronsubgroup_idxs(
             name, [data_of_group["start"], data_of_group["stop"]]
         )
+
         model.assemble_neuronsubgroup(name)
 
     def reconstruct_synapses(
@@ -231,10 +232,10 @@ class Reconstructor:
         data_of_group : dict[str, Any]
             json node to reconstruct the monitor from
         """
-        model.define_monitor_type(data_of_group["name"], data_of_group["type"])
-        model.define_monitor_source(data_of_group["name"], data_of_group["source"])
-        model.define_monitor_variable(data_of_group["name"], data_of_group["variable"])
-        model.assemble_monitor(data_of_group["name"])
+        model.define_monitor_type(name, data_of_group["type"])
+        model.define_monitor_source(name, data_of_group["source"])
+        model.define_monitor_variable(name, data_of_group["variable"])
+        model.assemble_monitor(name)
 
     def reconstruct(
         self, model: Any, report: Callable[[int], None] | None = None
@@ -265,7 +266,7 @@ class Reconstructor:
         # reconstruct neurongroups
         for n in self.loaded_data["objects"]["neurongroups"]:
             if all(
-                k not in self.loaded_data[n] for k in ["start", "stop"]
+                x not in self.loaded_data[n] for x in ["start", "stop"]
             ):  # reconstruct full groups first...
                 self.reconstruct_neurongroups(model, n, self.loaded_data[n])
         if report is not None:
@@ -273,9 +274,9 @@ class Reconstructor:
 
         for n in self.loaded_data["objects"]["neurongroups"]:
             if all(
-                k in self.loaded_data[n] for k in ["start", "stop"]
+                x in self.loaded_data[n] for x in ["start", "stop"]
             ):  # ... then define the subgroups
-                self.reconstruct_neuron_subgroup(model, n, self.loaded_data[n])
+                self.reconstruct_neuronsubgroup(model, n, self.loaded_data[n])
         if report is not None:
             report(50)
 
