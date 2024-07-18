@@ -576,7 +576,7 @@ class B2Model:
         except Exception as e:
             raise KeyError(f"Error when deleting {name}: {e}") from e
 
-    def erase_initial_condition(self, name: str) -> None:
+    def delete_initial_condition(self, name: str) -> None:
         """
         Delete an element `name` from the initial condition dictionary. Note that if
         initial conditions have already been defined, you have to redefine it in the
@@ -1036,11 +1036,11 @@ class B2Model:
             When something goes wrong during the initial condition assignment.
         """
         try:
-            setattr(self.network[name], key, self.initials[key])
+            setattr(self.network[name], key, self.initials[name][key])
 
         except Exception as e:
             raise ValueError(
-                f"Error when initializing {key} of element {name} as {self.initials[key]}: {e}"
+                f"Error when initializing {key} of element {name} as {self.initials[name][key]}: {e}"
             ) from e
 
     def assemble_initials(self) -> None:
@@ -1190,6 +1190,12 @@ class B2Model:
             subexpressions=subexpressions,
             vars=vars,
         )
+
+    def get_object_list(self) -> set[Any]:
+        """
+        Get the list of objects of the system
+        """
+        return self.network.objects
 
     def get_current_neurongroup_state(
         self,

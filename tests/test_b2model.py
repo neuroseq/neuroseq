@@ -164,7 +164,7 @@ def test_remove_neurongroup(mfx: b2_model.B2Model) -> None:
     assert mfx.network["P"].name == "P"
     assert mfx.network["P"]._N == 30
 
-    mfx.remove_neurongroup("P")
+    mfx.erase_neurongroup("P")
 
     with pytest.raises(KeyError, match='No object with name "P" found'):
         assert mfx.network["P"] is None

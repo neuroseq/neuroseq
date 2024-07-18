@@ -142,7 +142,8 @@ def test_neuronsubgroup_accept(qtbot: QtBot) -> None:
         == "Error when defining a neuronsubgroup on target x: Subgroups have to be contiguous"
     )
 
-    assert "x1" not in neuron_sdlg.model.neurongroups
+    assert "x1" in neuron_sdlg.model.neurongroups
+    assert "x1" not in neuron_sdlg.model.network.objects
 
     neuron_sdlg.error_dialog.close()
 
