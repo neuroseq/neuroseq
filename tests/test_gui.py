@@ -256,3 +256,46 @@ def test_gui_edit_stim_with_console(qtbot: QtBot, mfx_ornstein: B2Model) -> None
     assert stim_editor.stims_dict["stim"].values.shape == (127, 83)
     assert gui.model.parameters["stim"].values.shape == (127, 83)
     assert len(stim_editor.stim_widget.neuron_plots) == 83
+
+
+def test_gui_link_axes(
+    qtbot: QtBot, monkeypatch: MonkeyPatch, default_model_path: Path
+) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    stim_widget_viewbox = gui.stim_editor.stim_widget.getPlotItem().getViewBox()
+    spike_widget_viewbox = gui.spike_widget.getPlotItem().getViewBox()
+    trace_widget_viewbox = gui.trace_widget.getPlotItem().getViewBox()
+    # initially both X and Y axes are linked to the stim widget viewbox
+    assert spike_widget_viewbox.state["linkedViews"][0]() == stim_widget_viewbox
+    assert spike_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
+    assert trace_widget_viewbox.state["linkedViews"][0]() == stim_widget_viewbox
+    assert trace_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
+    gui.link_x_axes(False)
+    assert spike_widget_viewbox.state["linkedViews"][0] is None
+    assert spike_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
+    assert trace_widget_viewbox.state["linkedViews"][0] is None
+    assert trace_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
+    gui.link_y_axes(False)
+    assert spike_widget_viewbox.state["linkedViews"][0] is None
+    assert spike_widget_viewbox.state["linkedViews"][1] is None
+    assert trace_widget_viewbox.state["linkedViews"][0] is None
+    assert trace_widget_viewbox.state["linkedViews"][1] is None
+    gui.link_y_axes(True)
+    assert spike_widget_viewbox.state["linkedViews"][0] is None
+    assert spike_widget_viewbox.state["linkedViews"][1] is not None
+    assert spike_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
+    assert trace_widget_viewbox.state["linkedViews"][0] is None
+    assert trace_widget_viewbox.state["linkedViews"][1] is not None
+    assert trace_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
+    gui.link_x_axes(True)
+    assert spike_widget_viewbox.state["linkedViews"][0] is not None
+    assert spike_widget_viewbox.state["linkedViews"][0]() == stim_widget_viewbox
+    assert spike_widget_viewbox.state["linkedViews"][1] is not None
+    assert spike_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
+    assert trace_widget_viewbox.state["linkedViews"][0] is not None
+    assert trace_widget_viewbox.state["linkedViews"][0]() == stim_widget_viewbox
+    assert trace_widget_viewbox.state["linkedViews"][1] is not None
+    assert trace_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
