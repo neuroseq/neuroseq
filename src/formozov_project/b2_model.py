@@ -594,7 +594,7 @@ class B2Model:
         try:
             del self.initials[name][varname]
         except Exception as e:
-            raise KeyError(f"Error when deleting {name}: {e}") from e
+            raise KeyError(f"Error when deleting {varname} in {name}: {e}") from e
 
     @_trigger_rebuild
     def define_synapse_equation(self, name: str, line: str) -> None:
@@ -1006,7 +1006,7 @@ class B2Model:
             try:
                 self.network.remove(
                     self.network[name]
-                )  # cannot use self._remove_object because we still need the intermediat definition
+                )  # cannot use self._erase_object because we still need the intermediat definition
             except Exception as e:
                 message = f"Error when removing neuron group {name} from network: {e}"
                 self.logger.critical(message)
@@ -1128,6 +1128,9 @@ class B2Model:
 
         self.must_be_rebuilt = False
 
+    def _get_element(self, name: str, dct: dict[str, Any]) -> dict[str, Any]:
+        return {"definition": dct[name], "object": self.network[name]}
+
     def get_neurongroup(self, name: str) -> dict[str, Any]:
         """
         Get a object from the neuron network
@@ -1142,7 +1145,7 @@ class B2Model:
         dict[str, Any]
             dictionary returning the definition and the neuron object
         """
-        return {"definition": self.neurongroups[name], "object": self.network[name]}
+        return self._get_element(name, self.neurongroups)
 
     def get_synapse(self, name: str) -> dict[str, Any]:
         """
@@ -1158,7 +1161,7 @@ class B2Model:
         dict[str, Any]
             dictionary returning the definition and the synapse object
         """
-        return {"definition": self.synapses[name], "object": self.network[name]}
+        return self._get_element(name, self.synapses)
 
     def get_monitor(self, name: str) -> dict[str, Any]:
         """
@@ -1174,7 +1177,7 @@ class B2Model:
         dict[str, Any]
             dictionary returning the definition and the monitor object
         """
-        return {"definition": self.monitors[name], "object": self.network[name]}
+        return self._get_element(name, self.monitors)
 
     def get_model_definition(self) -> dict[str, Any]:
         """
@@ -1215,13 +1218,13 @@ class B2Model:
         """
 
         try:
-            return list(self.network[name].variables.keys())
+            return list(self.network[name].variables)
         except Exception as e:
             raise RuntimeError(
                 f"Error, something went wrong when getting variables for {name}: {e} "
             ) from e
 
-    def get_equation_variables_of(
+    def get_equation_names_of(
         self,
         name: str,
     ) -> list[str] | None:
@@ -1295,7 +1298,7 @@ class B2Model:
         """
         return self.network.objects
 
-    def _remove_object(self, name: str) -> None:
+    def _erase_object(self, name: str) -> None:
         """
         Remove an object from the neuron network model
 
@@ -1322,7 +1325,7 @@ class B2Model:
             )
 
         del self.neurongroups[name]
-        self._remove_object(name)
+        self._erase_object(name)
 
     def erase_synapse(self, name: str) -> None:
         """
@@ -1339,7 +1342,7 @@ class B2Model:
             )
 
         del self.synapses[name]
-        self._remove_object(name)
+        self._erase_object(name)
 
     def erase_monitor(self, name: str) -> None:
         """
@@ -1356,7 +1359,7 @@ class B2Model:
             )
 
         del self.monitors[name]
-        self._remove_object(name)
+        self._erase_object(name)
 
     def run_simulation(
         self,

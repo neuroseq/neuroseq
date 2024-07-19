@@ -161,7 +161,6 @@ def test_assemble_neurongroup_exception(mfx: b2_model.B2Model) -> None:
 
 def test_neuron_subgroup(
     mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
-    monkeypatch: MonkeyPatch,
 ) -> None:
     mfx, _ = mfx_parameterized
 
@@ -545,6 +544,9 @@ def test_NMDA_model_delete(mfx_nmda: b2_model.B2Model) -> None:
     mfx_nmda.delete_init("S", "w")
     assert "w" not in mfx_nmda.initials["S"]
 
+    with pytest.raises(KeyError, match="Error when deleting w in S"):
+        mfx_nmda.delete_init("S", "w")
+
     assert "neuron_input" in mfx_nmda.neurongroups
     mfx_nmda.delete_neurongroup("neuron_input")
     assert "neuron_input" not in mfx_nmda.neurongroups
@@ -552,6 +554,16 @@ def test_NMDA_model_delete(mfx_nmda: b2_model.B2Model) -> None:
     assert "S" in mfx_nmda.synapses
     mfx_nmda.delete_synapse("S")
     assert "S" not in mfx_nmda.synapses
+
+    with pytest.raises(KeyError, match="Error when deleting X in neurons"):
+        mfx_nmda.delete_neurongroup_element("neurons", "X")
+
+    assert "a" in mfx_nmda.parameters  # type: ignore
+    mfx_nmda.delete_parameter("a")
+    assert "a" not in mfx_nmda.parameters  # type: ignore
+
+    with pytest.raises(KeyError, match="Error when deleting x"):
+        mfx_nmda.delete_parameter("x")
 
 
 def test_assemble_network_and_erase(mfx_nmda) -> None:
@@ -628,6 +640,16 @@ def test_assemble_network_and_erase(mfx_nmda) -> None:
     assert "M" not in [o.name for o in model.get_network_objects()]
     assert "neuron_input" not in [o.name for o in model.get_network_objects()]
     assert "S" not in [o.name for o in model.get_network_objects()]
+
+    nrg = model.get_neurongroup("neurons")
+
+    assert nrg["definition"] == model.neurongroups["neurons"]
+    assert nrg["object"] is model.network["neurons"]
+
+    assert model.get_variables_of("neurons") == list(model.network["neurons"].variables)
+    assert model.get_equation_names_of("neurons") == list(
+        model.network["neurons"].equations.names
+    )
 
 
 def test_hdf5(tmp_path: Path, mfx_ornstein: b2_model.B2Model) -> None:
