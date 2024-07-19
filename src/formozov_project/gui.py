@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from importlib import resources
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -21,6 +20,7 @@ from formozov_project.stim_console import StimConsole
 from formozov_project.stim_editor import StimEditor
 from formozov_project.trace_widget import TraceWidget
 from formozov_project.utils import add_action
+from formozov_project.utils import example_models_path
 from formozov_project.utils import with_wait_cursor
 
 
@@ -124,8 +124,7 @@ class Gui(QtWidgets.QMainWindow):
     def btn_new_clicked(self) -> None:
         b2m = B2ModelWidget(B2Model(), self)
         if b2m.exec():
-            self.model = b2m.model
-            self.update_model()
+            self.update_model(b2m.model)
 
     def btn_open_clicked(self) -> None:
         filename, _ = getopenfilename(
@@ -136,6 +135,46 @@ class Gui(QtWidgets.QMainWindow):
         )
         if filename != "":
             self.load_model(filename)
+
+    def btn_save_clicked(self) -> None:
+        filename, _ = getsavefilename(
+            self,
+            "Save model",
+            "model.json",
+            "json file (*.json)",
+        )
+        if filename == "":
+            return
+        try:
+            self.model.save_model(filename)
+        except Exception as e:
+            self.logger.warning(f"Failed to save file {filename}: {e}")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "File save error",
+                f"Could not save file '{filename}': {e}",
+            )
+            return
+
+    def btn_export_clicked(self) -> None:
+        filename, _ = getsavefilename(
+            self,
+            "Export results",
+            "data.h5",
+            "hdf5 file (*.h5)",
+        )
+        if filename == "":
+            return
+        try:
+            self.model.save_to_h5(filename)
+        except Exception as e:
+            self.logger.warning(f"Failed to export to file {filename}: {e}")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Export error",
+                f"Could not export to file '{filename}': {e}",
+            )
+            return
 
     def btn_edit_clicked(self) -> None:
         if not self.model.neurongroups:
@@ -148,27 +187,19 @@ class Gui(QtWidgets.QMainWindow):
             )
         else:
             mdiag = ModelEditorDialog(self.model, parent=self)
-
             if mdiag.exec():
-                self.model = mdiag.b2model
-                self.update_model()
+                self.update_model(mdiag.b2model)
 
     def btn_open_example_model_clicked(self) -> None:
-        self.load_model(
-            str(
-                resources.files("formozov_project")
-                / "example_models"
-                / "default_model.json"
-            )
-        )
+        self.load_model(str(example_models_path / "default_model.json"))
 
     @with_wait_cursor
     def load_model(self, filename: str) -> None:
         try:
             self.progress_dialog.setLabelText("Loading model...")
             model = B2Model.load_model(filename, report=self._update_load_progress)
-            self.model = model
             self.logger.info(f"Model {self.model.name} loaded from {filename}")
+            self.update_model(model)
 
         except Exception as e:
             self.logger.warning(f"Failed to load model from file {filename}: {e}")
@@ -178,9 +209,9 @@ class Gui(QtWidgets.QMainWindow):
                 f"Could not load model from file '{filename}': {e}",
             )
             return
-        self.update_model()
 
-    def update_model(self) -> None:
+    def update_model(self, model: B2Model) -> None:
+        self.model = model
         self.heatmap_widget.clear_data()
         self.trace_widget.clear_data()
         self.stim_editor.set_model(self.model)
@@ -191,7 +222,6 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_spike.clear()
         self.spikes.clear()
         if self.model is not None:
-            self.stim_editor.set_model(self.model)
             self.stim_console.set_stims(self.stim_editor.stims_dict)
             for m in self.model.network.objects:
                 if isinstance(m, b2.StateMonitor):
@@ -267,26 +297,6 @@ class Gui(QtWidgets.QMainWindow):
             f"Displaying {spike_name} in SpikeWidget: {timestamps.shape} timestamps, {spikes.shape} data"
         )
         self.spike_widget.set_data(spikes, timestamps, dt, n_neurons, n_timesteps)
-
-    def btn_save_clicked(self) -> None:
-        filename, _ = getsavefilename(
-            self,
-            "Save results",
-            "data.h5",
-            "hdf5 file (*.h5)",
-        )
-        if filename == "":
-            return
-        try:
-            self.model.save_to_h5(filename)
-        except Exception as e:
-            self.logger.warning(f"Failed to save file {filename}: {e}")
-            QtWidgets.QMessageBox.critical(
-                self,
-                "File save error",
-                f"Could not save file '{filename}': {e}",
-            )
-            return
 
     def btn_exit_clicked(self) -> None:
         self.close()
@@ -435,6 +445,14 @@ class Gui(QtWidgets.QMainWindow):
             self.toolbar,
             shortcut="Ctrl+S",
             icon=qta.icon("mdi6.content-save"),
+        )
+        add_action(
+            "&Export",
+            self.btn_export_clicked,
+            self.menu_file,
+            self.toolbar,
+            shortcut="Ctrl+Shift+E",
+            icon=qta.icon("mdi6.content-save-move"),
         )
         add_action(
             "&Edit",

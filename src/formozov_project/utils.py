@@ -4,12 +4,26 @@ import abc
 import functools
 import re
 from collections.abc import Callable
+from importlib import resources
 from typing import Any
 
 import brian2 as b2
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
+
+import formozov_project
+
+example_models_path = resources.files(formozov_project) / "example_models"
+
+
+def init_brian2_logging(log_level: str = "ERROR") -> None:
+    b2.prefs["logging"]["console_log_level"] = log_level
+    b2.prefs["logging"]["display_brian_error_message"] = False
+    b2.prefs["logging"]["file_log"] = False
+    b2.prefs["logging"]["save_script"] = False
+    b2.prefs["logging"]["std_redirection"] = False
+    b2.BrianLogger.initialize()
 
 
 def with_wait_cursor(func: Callable) -> Callable:
