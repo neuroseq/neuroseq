@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -162,10 +161,9 @@ class Reconstructor:
         data_of_group : dict[str, Any]
             dict containing the data to construct the subgroup
         """
-
-        model.define_neuron_subgroup(
-            data_of_group["target"], name, data_of_group["idx"]
-        )
+        model.define_neuronsubgroup_target(name, data_of_group["target"])
+        model.define_neuronsubgroup_idxs(name, (data_of_group["idxs"]))
+        model.assemble_neuronsubgroup(name)
 
     def reconstruct_synapses(
         self, model: Any, name: str, data_of_group: dict[str, Any]
@@ -231,13 +229,14 @@ class Reconstructor:
         data_of_group : dict[str, Any]
             json node to reconstruct the monitor from
         """
-        monitortype = getattr(import_module("brian2"), data_of_group["type"])
-        model.define_monitor(
-            data_of_group["name"],
-            monitortype,
-            data_of_group["source"],
-            data_of_group["variable"],
+        model.define_monitor_type(data_of_group["name"], data_of_group["type"])
+        model.define_monitor_source(data_of_group["name"], data_of_group["source"])
+
+        model.define_monitor_variable(
+            data_of_group["name"], data_of_group.get("variable")
         )
+
+        model.assemble_monitor(data_of_group["name"])
 
     def reconstruct(
         self, model: Any, report: Callable[[int], None] | None = None
@@ -267,13 +266,13 @@ class Reconstructor:
 
         # reconstruct neurongroups
         for n in self.loaded_data["objects"]["neurongroups"]:
-            if "idx" not in self.loaded_data[n]:  # reconstruct full groups first...
+            if "idxs" not in self.loaded_data[n]:  # reconstruct full groups first...
                 self.reconstruct_neurongroups(model, n, self.loaded_data[n])
         if report is not None:
             report(40)
 
         for n in self.loaded_data["objects"]["neurongroups"]:
-            if "idx" in self.loaded_data[n]:  # ... then define the subgroups
+            if "idxs" in self.loaded_data[n]:  # ... then define the subgroups
                 self.reconstruct_neuron_subgroup(model, n, self.loaded_data[n])
         if report is not None:
             report(50)
@@ -289,3 +288,13 @@ class Reconstructor:
             self.reconstruct_monitors(model, m, self.loaded_data[m])
         if report is not None:
             report(70)
+
+        model.initials = self.loaded_data["initials"]
+
+        for n in model.initials:
+            model.assemble_initial_conditions(n)
+
+        model.must_be_rebuilt = False
+
+        if report is not None:
+            report(85)

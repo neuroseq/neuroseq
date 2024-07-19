@@ -157,7 +157,9 @@ def test_parameterdialog_nothing_defined_errors(qtbot: QtBot) -> None:
 
     # nothing is happening
     assert param_dlg.model.parameters is not None
-    assert param_dlg.model.parameters["param"] == {}
+    assert param_dlg.model.parameters["param"] == {
+        "name": "param",
+    }
 
 
 def test_parameterdialog_enter_fields(qtbot: QtBot) -> None:
@@ -182,12 +184,16 @@ def test_parameterdialog_enter_fields(qtbot: QtBot) -> None:
     assert param_dlg.name_button.text() == "saved"
 
     assert "param" in param_dlg.model.parameters
-    assert param_dlg.model.parameters["param"] == {}
+    assert param_dlg.model.parameters["param"] == {
+        "name": "param",
+    }
 
     qtbot.keyClicks(param_dlg.value_entry, "42")
 
     assert param_dlg.value_entry.toPlainText() == "42"
-    assert param_dlg.model.parameters["param"] == {}  # nothing has been saved yet
+    assert param_dlg.model.parameters["param"] == {
+        "name": "param",
+    }  # nothing has been saved yet
 
     assert param_dlg.value_button.text() == "save"
 

@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from ast import literal_eval
 from collections.abc import Callable
-from importlib import import_module
 from typing import Any
-from typing import cast
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -285,7 +283,9 @@ class ModelDialog(QtWidgets.QDialog):
         else:
             if name not in getattr(self.model, target):
                 self.name = name
-                getattr(self.model, target)[name] = {}
+                getattr(self.model, target)[name] = {
+                    "name": name,
+                }
             else:
                 self.display_error(
                     f"The name {name} has already been defined in {target}"
@@ -501,9 +501,10 @@ class NeuronSubgroupDialog(ModelDialog):
             )
         else:
             try:
-                self.model.define_neuron_subgroup(
-                    self.target_name, self.name, self.subgroup_def
-                )
+                self.model.define_neuronsubgroup_target(self.name, self.target_name)
+                self.model.define_neuronsubgroup_idxs(self.name, self.subgroup_def)
+                self.model.assemble_neuronsubgroup(self.name)
+
                 super().accept()
             except Exception as e:
                 self.display_error(
@@ -1030,7 +1031,7 @@ class MonitorDialog(ModelDialog):
         """
         super().__init__(model, parent)
 
-        self.tp: type | None = None
+        self.tp: str | None = None
         self.var: str | None = None
         self.src: str | None = None
 
@@ -1060,9 +1061,6 @@ class MonitorDialog(ModelDialog):
             lambda: self.display_parameters("monitors")
         )
 
-        layout = QtWidgets.QGridLayout()
-
-        self.setLayout(layout)
         self.setWindowTitle("Define a Monitor")
 
         self.name_button.clicked.connect(lambda: self.accept_name(target="monitors"))
@@ -1091,7 +1089,7 @@ class MonitorDialog(ModelDialog):
         tptext = self.type.text()
 
         if tptext in ["StateMonitor", "SpikeMonitor"]:
-            self.tp = getattr(import_module("brian2"), tptext)
+            self.tp = tptext
             self.type_button.setDown(True)
             self.type_button.setText("saved")
         else:
@@ -1126,12 +1124,10 @@ class MonitorDialog(ModelDialog):
         Accept the monitor data and define a new monitor in the held model
         """
         try:
-            self.model.define_monitor(
-                cast(str, self.name),
-                cast(type, self.tp),
-                cast(str, self.src),
-                cast(str, self.var),
-            )
+            self.model.define_monitor_source(self.name, self.src)
+            self.model.define_monitor_type(self.name, self.tp)
+            self.model.define_monitor_variable(self.name, self.var)
+            self.model.assemble_monitor(self.name)
             super().accept()
         except Exception as e:
             self.display_error(f"Error when defining monitor {self.name}: {e}")
@@ -1283,7 +1279,11 @@ class InitialConditionWidget(ModelDialog):
             )
         else:
             try:
-                self.model.define_init(**self.params)
+                self.model.define_init(
+                    self.params["elementname"],
+                    self.params["varname"],
+                    self.params["value"],
+                )
                 super().accept()
             except Exception as e:
                 self.display_error(

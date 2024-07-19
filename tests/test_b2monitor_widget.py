@@ -41,7 +41,7 @@ def test_monitor_accept_variables(qtbot: QtBot) -> None:
     mdlg.source.setText("P")
 
     mdlg.accept_type()
-    assert mdlg.tp == StateMonitor
+    assert mdlg.tp == "StateMonitor"
 
     mdlg.accept_source()
     assert mdlg.src == "P"
@@ -85,7 +85,7 @@ def test_monitor_accept(qtbot: QtBot) -> None:
     mdlg.name = "M"
     mdlg.src = "neurongroup"
     mdlg.var = "y"
-    mdlg.tp = StateMonitor
+    mdlg.tp = "StateMonitor"
 
     mdlg.accept()
 

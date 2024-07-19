@@ -692,8 +692,8 @@ class EditableMonitorTree(EditableParameterTree):
 
             parent = selected.parent()
 
-            typename = parent.child(1)
-            source = parent.child(2)
+            source = parent.child(1)
+            typename = parent.child(2)
 
             try:
                 self.logger.debug("making varialbes as intended")

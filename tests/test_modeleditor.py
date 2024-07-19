@@ -160,7 +160,7 @@ def test_neurontree_add_neuronsubgroup(
     assert "sub" in ntree.b2model.neurongroups
     assert ntree.b2model.neurongroups["sub"]["name"] == "sub"
     assert ntree.b2model.neurongroups["sub"]["target"] == "neuron_input"
-    assert ntree.b2model.neurongroups["sub"]["idx"] == (1, 2)
+    assert ntree.b2model.neurongroups["sub"]["idxs"] == (1, 2)
 
 
 def test_neurontree_add_neurongroup(
@@ -210,6 +210,7 @@ def test_neurontree_add_neurongroup(
     stree = EditableSynapseTree(mfx_nmda)
     qtbot.addWidget(stree)
 
+    # add monitor tree to make sure that the update system for dropdown menus works
     mtree = EditableMonitorTree(mfx_nmda)
     qtbot.addWidget(mtree)
     assert mtree.states == mfx_nmda.monitors
@@ -234,8 +235,8 @@ def test_neurontree_add_neurongroup(
         0,
     )[0]
 
-    typename = mn_item.child(1).value()
-    source = mn_item.child(2).value()
+    source = mn_item.child(1).value()
+    typename = mn_item.child(2).value()
     var_selection = mn_item.child(3)
     variables = mtree._make_selection_list(typename, source)
 

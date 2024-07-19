@@ -11,6 +11,7 @@ import pytest
 from brian2.tests.utils import assert_allclose
 from formozov_project import b2_model
 from formozov_project import b2json
+from pytest import MonkeyPatch
 from pytest_mock import MockerFixture
 
 
@@ -104,7 +105,7 @@ def test_define_neuron_number(mfx: b2_model.B2Model) -> None:
     assert mfx.neurongroups["P"]["n"] == 100
 
 
-def test_assemble_neurongroup(mfx: b2_model.B2Model) -> None:
+def test_assemble_erase_redefine_neurongroup(mfx: b2_model.B2Model) -> None:
     eq = "dge/dt = -ge*(1./taue): siemens"
     n = 30
     threshold = "v > 10 * mV"
@@ -141,6 +142,16 @@ def test_assemble_neurongroup(mfx: b2_model.B2Model) -> None:
 
     assert mfx.network["P"].name == ng.name
     assert mfx.network["P"]._N == ng._N
+    print(list(mfx.neurongroups.keys()))
+
+    mfx.define_neuronnumber("P", 60)
+    mfx.define_threshold("P", "v > 20 * mV")
+    mfx.assemble_neurongroup("P")
+    assert mfx.network["P"].events["spike"] == "v > 20 * mV"
+    assert mfx.network["P"]._N == 60
+
+    mfx.erase_neurongroup("P")
+    assert "P" not in mfx.network.objects
 
 
 def test_assemble_neurongroup_exception(mfx: b2_model.B2Model) -> None:
@@ -153,29 +164,87 @@ def test_neuron_subgroup(
 ) -> None:
     mfx, _ = mfx_parameterized
 
-    mfx.define_neuron_subgroup("P", "excitatory", (0, 20))
-    mfx.define_neuron_subgroup("P", "inhibitory", (20, 30))
+    mfx.define_neuronsubgroup_target("excitatory", "P")
+    mfx.define_neuronsubgroup_idxs("excitatory", (0, 20))
 
-    assert list(
-        range(
-            mfx.neurongroups["excitatory"]["idx"][0],
-            mfx.neurongroups["excitatory"]["idx"][1],
-        )
-    ) == list(range(0, 20))
+    mfx.define_neuronsubgroup_target("inhibitory", "P")
+    mfx.define_neuronsubgroup_idxs("inhibitory", (20, 30))
 
-    assert list(
-        range(
-            mfx.neurongroups["inhibitory"]["idx"][0],
-            mfx.neurongroups["inhibitory"]["idx"][1],
-        )
-    ) == list(range(20, 30))
+    assert mfx.neurongroups["excitatory"]["idxs"] == (0, 20)
+    assert mfx.neurongroups["inhibitory"]["idxs"] == (20, 30)
+
+    mfx.assemble_neuronsubgroup("excitatory")
+    mfx.assemble_neuronsubgroup("inhibitory")
 
     assert mfx.network[mfx.neurongroups["excitatory"]["name"]] is not None
     assert mfx.network[mfx.neurongroups["inhibitory"]["name"]] is not None
 
+
+def test_neuron_subgroup_remove_exception(
+    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+    monkeypatch: MonkeyPatch,
+) -> None:
+    mfx, _ = mfx_parameterized
+    mfx.define_neuronsubgroup_target("excitatory", "P")
+    mfx.define_neuronsubgroup_idxs("excitatory", (0, 20))
+    mfx.assemble_neuronsubgroup("excitatory")
+
+    def do_raise(name: Any) -> None:
+        raise RuntimeError("dummy")
+
+    monkeypatch.setattr(b2.Network, "remove", do_raise)
+
+    with pytest.raises(
+        RuntimeError, match="Error when removing existing subgroup excitatory:"
+    ):
+        mfx.assemble_neuronsubgroup("excitatory")
+
+
+def test_neuron_subgroup_add_exception(
+    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+    monkeypatch: MonkeyPatch,
+) -> None:
+    mfx, _ = mfx_parameterized
+    mfx.define_neuronsubgroup_target("excitatory", "P")
+    mfx.define_neuronsubgroup_idxs("excitatory", (0, 20))
+
+    def do_raise(name: Any) -> None:
+        raise RuntimeError("dummy")
+
+    monkeypatch.setattr(b2.Network, "add", do_raise)
+
+    with pytest.raises(RuntimeError, match="Error when adding subgroup"):
+        mfx.assemble_neuronsubgroup("excitatory")
+
+
+def test_neuron_subgroup_creation_exception(
+    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]], monkeypatch: MonkeyPatch
+) -> None:
+    mfx, _ = mfx_parameterized
+    mfx.define_neuronsubgroup_target("excitatory", "P")
+    mfx.define_neuronsubgroup_idxs("excitatory", (0, 20))
+
+    def do_raise(*_, **__) -> None:
+        raise RuntimeError("dummy")
+
+    monkeypatch.setattr(b2, "Subgroup", do_raise)
+
+    with pytest.raises(
+        RuntimeError, match="Error when trying to create a neuronsubgroup"
+    ):
+        mfx.assemble_neuronsubgroup("excitatory")
+
+
+def test_neuron_subgroup_wrong_group(
+    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+) -> None:
+    mfx, _ = mfx_parameterized
+
     mfx.network = b2.Network()
-    with pytest.raises(KeyError, match="'No object with name \"ng\" found'"):
-        mfx.define_neuron_subgroup("ng", "excitatory", (0, 20))
+    with pytest.raises(
+        KeyError, match="Error, target Px could not be found in neurongroups"
+    ):
+        mfx.define_neuronsubgroup_target("ng", "Px")
 
 
 def test_synapse_connection_prob_numerical(
@@ -211,8 +280,15 @@ def test_define_synapse(
     dApost = -dApre * taupre / taupost * 1.05
 
     mfx, _ = mfx_parameterized
-    mfx.define_neuron_subgroup("P", "Pe", (0, 24))
-    mfx.define_neuron_subgroup("P", "Pi", (24, 30))
+
+    mfx.define_neuronsubgroup_target("Pe", "P")
+    mfx.define_neuronsubgroup_idxs("Pe", (0, 24))
+
+    mfx.define_neuronsubgroup_target("Pi", "P")
+    mfx.define_neuronsubgroup_idxs("Pi", (0, 24))
+
+    mfx.assemble_neuronsubgroup("Pi")
+    mfx.assemble_neuronsubgroup("Pe")
 
     mfx.define_parameter("taupre", taupre)
 
@@ -287,7 +363,11 @@ def test_define_monitor(
 
     assert mfx.monitors == {}
 
-    mfx.define_monitor("Traces_ge", b2.StateMonitor, "P", "ge")
+    mfx.define_monitor_source("Traces_ge", "P")
+    mfx.define_monitor_type("Traces_ge", "StateMonitor")
+    mfx.define_monitor_variable("Traces_ge", "ge")
+
+    mfx.assemble_monitor("Traces_ge")
 
     assert "Traces_ge" in mfx.monitors
     assert mfx.network["Traces_ge"].source == mfx.network["P"]
@@ -307,7 +387,10 @@ def test_define_monitor_exception(
     mfx, _ = mfx_parameterized
 
     with pytest.raises(RuntimeError, match="Error in defining monitor M"):
-        mfx.define_monitor("M", b2.StateMonitor, "G", "v")
+        mfx.define_monitor_source("M", "G")
+        mfx.define_monitor_type("M", "StateMonitor")
+        mfx.define_monitor_variable("M", "v")
+        mfx.assemble_monitor("M")
 
 
 def test_define_init(mfx_ornstein: b2_model.B2Model) -> None:
@@ -370,7 +453,7 @@ def test_ornstein_uhlenbeck(mfx_ornstein: b2_model.B2Model) -> None:
 
 def test_NMDA_model(mfx_nmda: b2_model.B2Model) -> None:
     # https://brian2.readthedocs.io/en/stable/examples/synapses.nonlinear.html
-
+    b2.seed(4321)
     mfx_nmda.run_simulation(100 * b2.ms)
 
     # test model
@@ -429,11 +512,144 @@ def test_NMDA_model(mfx_nmda: b2_model.B2Model) -> None:
     test_network.add(S)
     test_network.add(M)
     test_network.add(Mn)
+
+    assert_allclose(S.w, mfx_nmda.network["S"].w)
+    assert_allclose(neuron_input.v, mfx_nmda.network["neuron_input"].v)
+
     test_network.run(100 * b2.ms)
 
     # assert result equality
     assert_allclose(M.g, mfx_nmda.network["M"].g)
     assert_allclose(Mn.g, mfx_nmda.network["Mn"].g)
+
+
+def test_NMDA_model_delete(mfx_nmda: b2_model.B2Model) -> None:
+    assert "n" in mfx_nmda.neurongroups["neuron_input"]
+    mfx_nmda.delete_neurongroup_element("neuron_input", "n")
+    assert "n" not in mfx_nmda.neurongroups["neuron_input"]
+
+    assert "on_pre" in mfx_nmda.synapses["S"]
+    mfx_nmda.delete_synapse_element("S", "on_pre")
+    assert "on_pre" not in mfx_nmda.synapses["S"]
+
+    assert "source" in mfx_nmda.monitors["Mn"]
+    mfx_nmda.delete_monitor_element("Mn", "source")
+    assert "source" not in mfx_nmda.monitors["Mn"]
+
+    assert "Mn" in mfx_nmda.monitors
+    mfx_nmda.delete_monitor("Mn")
+    assert "Mn" not in mfx_nmda.monitors
+
+    assert "w" in mfx_nmda.initials["S"]
+    mfx_nmda.delete_init("S", "w")
+    assert "w" not in mfx_nmda.initials["S"]
+
+    with pytest.raises(KeyError, match="Error when deleting w in S"):
+        mfx_nmda.delete_init("S", "w")
+
+    assert "neuron_input" in mfx_nmda.neurongroups
+    mfx_nmda.delete_neurongroup("neuron_input")
+    assert "neuron_input" not in mfx_nmda.neurongroups
+
+    assert "S" in mfx_nmda.synapses
+    mfx_nmda.delete_synapse("S")
+    assert "S" not in mfx_nmda.synapses
+
+    with pytest.raises(KeyError, match="Error when deleting X in neurons"):
+        mfx_nmda.delete_neurongroup_element("neurons", "X")
+
+    assert "a" in mfx_nmda.parameters  # type: ignore
+    mfx_nmda.delete_parameter("a")
+    assert "a" not in mfx_nmda.parameters  # type: ignore
+
+    with pytest.raises(KeyError, match="Error when deleting x"):
+        mfx_nmda.delete_parameter("x")
+
+
+def test_assemble_network_and_erase(mfx_nmda) -> None:
+    a = 1 / (10 * b2.ms)
+    b = 1 / (10 * b2.ms)
+    c = 1 / (10 * b2.ms)
+
+    model = b2_model.B2Model(seed=4321)
+    # model.define_dt(0.2 * b2.ms)
+
+    model.define_parameter("a", a)
+    model.define_parameter("b", b)
+    model.define_parameter("c", c)
+
+    model.define_neuronnumber("neuron_input", 2)
+    model.define_solver_method("neuron_input", "euler")
+    model.define_equation("neuron_input", "dv/dt = 1/(10*ms) : 1")
+    model.define_threshold("neuron_input", "v>1")
+    model.define_reset("neuron_input", "v=0")
+
+    model.define_neuronnumber("neurons", 1)
+    model.define_equation(
+        "neurons",
+        """dv/dt = (g-v)/(10*ms) : 1
+                            g : 1""",
+    )
+    model.define_solver_method("neurons", "exact")
+
+    synapse_eq = """
+        dg_syn/dt = -a*g_syn+b*x*(1-g_syn) : 1 (clock-driven)
+        g_post = g_syn : 1 (summed)
+        dx/dt=-c*x : 1 (clock-driven)
+        w : 1 # synaptic weight
+    """
+
+    model.define_synapse_equation("S", synapse_eq)
+    model.define_synapse_origin("S", "neuron_input")
+    model.define_synapse_target("S", "neurons")
+    model.define_synapse_pre("S", "x += w")
+
+    model.define_neuronsubgroup_target("input_subgroup", "neuron_input")
+    model.define_neuronsubgroup_idxs("input_subgroup", 1)
+
+    model.define_monitor_source("M", "S")
+    model.define_monitor_type("M", "StateMonitor")
+    model.define_monitor_variable("M", "g")
+
+    model.define_monitor_source("Mn", "neurons")
+    model.define_monitor_type("Mn", "StateMonitor")
+    model.define_monitor_variable("Mn", "g")
+
+    model.define_init("S", "w", [1.0, 10.0])
+    model.define_init("neuron_input", "v", [0.0, 0.5])
+
+    model.assemble_network()
+
+    assert model.neurongroups == mfx_nmda.neurongroups
+    assert model.synapses == mfx_nmda.synapses
+    assert model.monitors == mfx_nmda.monitors
+    assert model.parameters == mfx_nmda.parameters
+
+    assert sorted(list(model.network.get_states().keys())) == sorted(
+        list(mfx_nmda.network.get_states().keys())
+    )
+
+    assert "M" in [o.name for o in model.get_network_objects()]
+    assert "neuron_input" in [o.name for o in model.get_network_objects()]
+    assert "S" in [o.name for o in model.get_network_objects()]
+
+    model.erase_monitor("M")
+    model.erase_neurongroup("neuron_input")
+    model.erase_synapse("S")
+
+    assert "M" not in [o.name for o in model.get_network_objects()]
+    assert "neuron_input" not in [o.name for o in model.get_network_objects()]
+    assert "S" not in [o.name for o in model.get_network_objects()]
+
+    nrg = model.get_neurongroup("neurons")
+
+    assert nrg["definition"] == model.neurongroups["neurons"]
+    assert nrg["object"] is model.network["neurons"]
+
+    assert model.get_variables_of("neurons") == list(model.network["neurons"].variables)
+    assert model.get_equation_names_of("neurons") == list(
+        model.network["neurons"].equations.names
+    )
 
 
 def test_hdf5(tmp_path: Path, mfx_ornstein: b2_model.B2Model) -> None:
@@ -543,6 +759,7 @@ def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
         mfx_nmda.network["neurons"].g,
         verbose=True,
     )
+    assert_allclose(mfx_nmda.network["S"].g, reconstructed_model.network["S"].g)
 
     # test synapses
     for var in mfx_nmda.network.get_states()["S"]:
