@@ -739,6 +739,28 @@ class B2Model:
         )
 
     @_trigger_rebuild
+    def define_reset(self, name: str, reset: str) -> None:
+        """
+        define_reset Define the `reset` parameter for a neurongroup indicated by `name`.
+
+        Parameters
+        ----------
+        name : str
+            Name of the neurongroup to define the reset parameter for.
+        reset : str
+            The reset parameter for the neurongroup. Have a look at the brian2 documentation for
+            the `NeuronGroup` class for more details.
+        """
+        utils.update_nested_dict(
+            self.neurongroups,
+            {
+                name: {
+                    "reset": reset,
+                },
+            },
+        )
+
+    @_trigger_rebuild
     def assemble_synapse(
         self,
         name: str,
@@ -942,28 +964,6 @@ class B2Model:
             raise RuntimeError(message) from e
 
     @_trigger_rebuild
-    def define_reset(self, name: str, reset: str) -> None:
-        """
-        define_reset Define the `reset` parameter for a neurongroup indicated by `name`.
-
-        Parameters
-        ----------
-        name : str
-            Name of the neurongroup to define the reset parameter for.
-        reset : str
-            The reset parameter for the neurongroup. Have a look at the brian2 documentation for
-            the `NeuronGroup` class for more details.
-        """
-        utils.update_nested_dict(
-            self.neurongroups,
-            {
-                name: {
-                    "reset": reset,
-                },
-            },
-        )
-
-    @_trigger_rebuild
     def assemble_neurongroup(
         self,
         name: str = "neurongroup",
@@ -1061,6 +1061,31 @@ class B2Model:
         for k in self.initials[name]:
             self.assemble_inital_condition(name, k)
 
+    def assemble_network(self) -> None:
+        """
+        Assemble the network from its predefined components.
+        """
+        self.network = b2.Network(name=self.name)
+
+        for n in self.neurongroups:
+            if "idxs" not in self.neurongroups[n]:
+                self.assemble_neurongroup(n)
+
+        for n in self.neurongroups:
+            if "idxs" in self.neurongroups[n]:
+                self.assemble_neuronsubgroup(n)
+
+        for s in self.synapses:
+            self.assemble_synapse(s)
+
+        for m in self.monitors:
+            self.assemble_monitor(m)
+
+        for n in self.initials:
+            self.assemble_initial_conditions(n)
+
+        self.must_be_rebuilt = False
+
     def save_to_h5(self, path: str | Path) -> None:
         """
         save_to_h5 Save data collected by defined monitor objects to hdf5.
@@ -1102,31 +1127,6 @@ class B2Model:
             message = f"Path {pathname} does not exist"
             self.logger.critical(message)
             raise ValueError(message) from e
-
-    def assemble_network(self) -> None:
-        """
-        Assemble the network from its predefined components.
-        """
-        self.network = b2.Network(name=self.name)
-
-        for n in self.neurongroups:
-            if "idxs" not in self.neurongroups[n]:
-                self.assemble_neurongroup(n)
-
-        for n in self.neurongroups:
-            if "idxs" in self.neurongroups[n]:
-                self.assemble_neuronsubgroup(n)
-
-        for s in self.synapses:
-            self.assemble_synapse(s)
-
-        for m in self.monitors:
-            self.assemble_monitor(m)
-
-        for n in self.initials:
-            self.assemble_initial_conditions(n)
-
-        self.must_be_rebuilt = False
 
     def _get_element(self, name: str, dct: dict[str, Any]) -> dict[str, Any]:
         return {"definition": dct[name], "object": self.network[name]}
