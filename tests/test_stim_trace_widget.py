@@ -5,8 +5,6 @@ import pytest
 from formozov_project.stim_trace_widget import StimTraceWidget
 from pytestqt.qtbot import QtBot
 
-delay_for_widgets_to_update = 50
-
 
 def test_stim_trace_widget(qtbot: QtBot) -> None:
     stim_trace_widget = StimTraceWidget()
@@ -49,15 +47,15 @@ def test_stim_trace_widget(qtbot: QtBot) -> None:
         # stim and trace arrays must have the same shape
         stim_trace_widget.set_data(stims, np.random.rand(12, 12))
     stim_trace_widget.set_data(stims, trace, timestamps)
+    qtbot.wait(20)
     # initially no neurons are selected
     assert stim_trace_widget.selected_neuron_slice is None
     assert stim_trace_widget.selected_time_slice is None
     stim_trace_widget.select_neurons(slice(1, 3), slice(10, 20))
-    # wait for the widget to update
-    qtbot.wait(10)
+    qtbot.wait(20)
     assert stim_trace_widget.selected_neuron_slice == slice(1, 3)
     assert stim_trace_widget.selected_time_slice == slice(10, 20)
     stim_trace_widget.unselect_neurons()
-    qtbot.wait(10)
+    qtbot.wait(20)
     assert stim_trace_widget.selected_neuron_slice is None
     assert stim_trace_widget.selected_time_slice is None

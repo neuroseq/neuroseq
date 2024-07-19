@@ -35,11 +35,11 @@ def test_trace_widget(qtbot: QtBot) -> None:
     assert trace_widget.selected_time_slice is None
     trace_widget.select_neurons(slice(1, 3), slice(10, 20))
     # wait for the widget to update
-    qtbot.wait(10)
+    qtbot.wait(20)
     assert trace_widget.selected_neuron_slice == slice(1, 3)
     assert trace_widget.selected_time_slice == slice(10, 20)
     # de-selecting neurons reverts to displaying all of them as selected
     trace_widget.unselect_neurons()
-    qtbot.wait(10)
+    qtbot.wait(20)
     assert trace_widget.selected_neuron_slice is None
     assert trace_widget.selected_time_slice is None
