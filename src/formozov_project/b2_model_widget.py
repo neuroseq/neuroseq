@@ -1282,7 +1282,7 @@ class InitialConditionWidget(ModelDialog):
                 self.model.define_init(
                     self.params["elementname"],
                     self.params["varname"],
-                    self.param["value"],
+                    self.params["value"],
                 )
                 super().accept()
             except Exception as e:
