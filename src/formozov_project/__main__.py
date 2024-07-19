@@ -9,6 +9,7 @@ from qtpy import API_NAME
 from qtpy import QtWidgets
 
 from formozov_project.gui import Gui
+from formozov_project.utils import init_brian2_logging
 
 
 @click.command()
@@ -30,6 +31,7 @@ from formozov_project.gui import Gui
     show_default=True,
 )
 def main(log_level: str, log_file: pathlib.Path) -> None:
+    init_brian2_logging()
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s :: %(levelname)s :: %(name)s :: %(funcName)s :: %(message)s",

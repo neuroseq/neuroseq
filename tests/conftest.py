@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pathlib
+from collections.abc import Callable
 from typing import Any
 
 import brian2 as b2
@@ -7,6 +9,9 @@ import brian2.numpy_ as np
 import pytest
 from formozov_project import b2_model
 from formozov_project import b2_model_widget
+from formozov_project.utils import example_models_path
+from formozov_project.utils import init_brian2_logging
+from qtpy import QtWidgets
 
 b2.prefs.codegen.target = "cython"
 
@@ -19,6 +24,38 @@ def patch_b2w_exec_show(monkeypatch: pytest.MonkeyPatch) -> None:
         b2_model_widget.QtWidgets.QMessageBox,
     ]:
         monkeypatch.setattr(widget, "exec", lambda self: self.show())
+
+
+@pytest.fixture()
+def qmessagebox_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
+    # create a list to store any QMessageBox calls that are made
+    calls = []
+
+    def _make_callback(name: str) -> Callable:
+        # this function has the same calling interface as the qmessagebox static methods like information()
+        def _mock(parent: Any, title: str, text: str) -> None:
+            # but instead of displaying the message box it just appends the supplied arguments to the calls list
+            calls.append({"name": name, "title": title, "text": text})
+
+        return _mock
+
+    for method_name in ["information", "warning", "critical"]:
+        # mock QMessageBox static method `name` with our callback
+        monkeypatch.setattr(
+            QtWidgets.QMessageBox, method_name, _make_callback(method_name)
+        )
+
+    return calls
+
+
+@pytest.fixture(autouse=True)
+def reduce_brian2_logging_verbosity() -> None:
+    init_brian2_logging()
+
+
+@pytest.fixture(scope="session")
+def default_model_path() -> pathlib.Path:
+    return pathlib.Path(str(example_models_path / "default_model.json"))
 
 
 @pytest.fixture(scope="session")
