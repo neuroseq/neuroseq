@@ -46,6 +46,7 @@ def test_gui_simulate_and_playback(
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
     )
+    qtbot.wait(delay_after_update_model_call_in_ms)
     gui.load_model(default_model_path)
     qtbot.wait(delay_after_update_model_call_in_ms)
     assert gui.cmb_synapse.count() == 1
