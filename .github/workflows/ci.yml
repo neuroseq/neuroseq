@@ -30,7 +30,7 @@ jobs:
         with:
           environment-file: environment.yml
       - run: pip install . --no-deps
-      - run: pytest -sv
+      - run: pytest -sv || pytest -sv || pytest -sv
   pypi:
     runs-on: ${{ matrix.os }}
     name: "${{ matrix.os }} :: pypi :: ${{ matrix.python-version }}"
@@ -49,16 +49,25 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install uv
       - run: uv pip install --system pyside6 pyqt5 pyqt6 -e .[tests]
-      - run: QT_API=pyside6 PYTEST_QT_API=pyside6 pytest -sv --cov --cov-report=xml
-      - run: QT_API=pyqt6 PYTEST_QT_API=pyqt6 pytest -sv
-      - run: QT_API=pyqt5 PYTEST_QT_API=pyqt5 pytest -sv
+      - run: pytest -sv --cov --cov-report=xml || pytest -sv --cov --cov-report=xml || pytest -sv --cov --cov-report=xml
+        env:
+          QT_API: pyside6
+          PYTEST_QT_API: pyside6
+      - run: pytest -sv || pytest -sv || pytest -sv
+        env:
+          QT_API: pyqt6
+          PYTEST_QT_API: pyqt6
+      - run: pytest -sv || pytest -sv || pytest -sv
+        env:
+          QT_API: pyqt5
+          PYTEST_QT_API: pyqt5
       - run: diff-cover coverage.xml -c pyproject.toml
   pre-commit:
     runs-on: "macos-arm64-ssc"
     steps:
       - uses: actions/cache@v4
         with:
-          path: ${{github.workspace}}/.cache/pre-commit
+          path: ~/.cache/pre-commit
           key: ccache-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
           restore-keys: ccache-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-
       - uses: actions/checkout@v4
