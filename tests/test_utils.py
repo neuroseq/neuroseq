@@ -70,3 +70,18 @@ def test_update_nested_dict() -> None:
         3: "hello",
         "m": 66,
     }
+
+
+def test_shuffle_index_small_n() -> None:
+    assert utils.shuffle_index(0, 1) == (0, 1)
+    assert utils.shuffle_index(0, 2) == (0, 2)
+    assert utils.shuffle_index(1, 2) == (1, 2)
+
+
+@pytest.mark.parametrize("n", [3, 7, 20, 100, 2000, 2001])
+def test_shuffle_index(n: int) -> None:
+    ordered_indices = list(range(n))
+    shuffled_indices = [utils.shuffle_index(i, n)[0] for i in ordered_indices]
+    assert len(shuffled_indices) == n
+    assert shuffled_indices != ordered_indices
+    assert sorted(shuffled_indices) == ordered_indices

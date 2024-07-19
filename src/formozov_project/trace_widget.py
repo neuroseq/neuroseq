@@ -5,6 +5,7 @@ from qtpy import QtWidgets
 
 from formozov_project.selectable_line_plot_item import SelectableLinePlotItem
 from formozov_project.timeseries_widget import TimeseriesWidget
+from formozov_project.utils import shuffle_index
 
 
 class TraceWidget(TimeseriesWidget):
@@ -38,7 +39,9 @@ class TraceWidget(TimeseriesWidget):
         for index, trace in enumerate(data):
             # offset each trace by its index, give each trace a unique color
             line = SelectableLinePlotItem(
-                timestamps, trace / trace_norm + index, pen=(index, len(data))
+                timestamps,
+                trace / trace_norm + index,
+                pen=shuffle_index(index, len(data)),
             )
             self.neuron_plots.append(line)
             self.addItem(line)

@@ -7,6 +7,7 @@ from formozov_project.selectable_bar_line_plot_item import SelectableBarLinePlot
 from formozov_project.selectable_bar_plot_item import SelectableBarPlotItem
 from formozov_project.selectable_line_plot_item import SelectableLinePlotItem
 from formozov_project.timeseries_widget import TimeseriesWidget
+from formozov_project.utils import shuffle_index
 
 
 class StimTraceWidget(TimeseriesWidget):
@@ -44,7 +45,7 @@ class StimTraceWidget(TimeseriesWidget):
             # vertically offset the data for each neuron by its index
             y_offset_center = neuron_index
             # give each neuron a unique color
-            brush = (neuron_index, len(stims))
+            brush = shuffle_index(neuron_index, len(stims))
             bar = SelectableBarPlotItem(
                 x=timestamps,
                 width=dt,

@@ -17,6 +17,16 @@ import formozov_project
 example_models_path = resources.files(formozov_project) / "example_models"
 
 
+def shuffle_index(i: int, n: int) -> tuple[int, int]:
+    """Deterministic shuffling of the index i in a list of length n.
+
+    Returns a tuple (j, n) where j is the shuffled index and n is the length of the list.
+    """
+    assert 0 <= i < n
+    m = 415343
+    return i * m % n, n
+
+
 def init_brian2_logging(log_level: str = "ERROR") -> None:
     b2.prefs["logging"]["console_log_level"] = log_level
     b2.prefs["logging"]["display_brian_error_message"] = False

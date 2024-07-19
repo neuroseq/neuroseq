@@ -5,6 +5,7 @@ from qtpy import QtWidgets
 
 from formozov_project.selectable_bar_plot_item import SelectableBarPlotItem
 from formozov_project.timeseries_widget import TimeseriesWidget
+from formozov_project.utils import shuffle_index
 
 
 class SpikeWidget(TimeseriesWidget):
@@ -38,7 +39,7 @@ class SpikeWidget(TimeseriesWidget):
             # vertically offset the data for each neuron by its index
             y_offset = neuron_index - 0.5
             # give each neuron a unique color
-            brush = (neuron_index, self.n_neurons)
+            brush = shuffle_index(neuron_index, self.n_neurons)
             bar = SelectableBarPlotItem(
                 x=spikes + 0.5 * dt,
                 width=dt,
