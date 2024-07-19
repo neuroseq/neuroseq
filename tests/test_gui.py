@@ -15,6 +15,10 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+# no obvious signal to wait for after the model is updated to know when the GUI is ready,
+# so for now we just wait for a fixed time
+delay_after_update_model_call_in_ms = 50
+
 
 def test_gui_click_exit(qtbot: QtBot) -> None:
     gui = Gui()
@@ -43,7 +47,7 @@ def test_gui_simulate_and_playback(
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
     )
     gui.load_model(default_model_path)
-    qtbot.wait(10)
+    qtbot.wait(delay_after_update_model_call_in_ms)
     assert gui.cmb_synapse.count() == 1
     assert gui.cmb_synapse.itemText(0) == "Ce / we"
     assert gui.cmb_neuron.count() == 1
@@ -121,7 +125,7 @@ def test_gui_save(
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
     gui.update_model(mfx_ornstein)
-    qtbot.wait(10)
+    qtbot.wait(delay_after_update_model_call_in_ms)
     filename = tmp_path / "test.json"
     assert not filename.exists()
     # mock getSaveFileName to return the desired filename
@@ -144,7 +148,7 @@ def test_gui_export(
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
     gui.update_model(mfx_ornstein)
-    qtbot.wait(10)
+    qtbot.wait(delay_after_update_model_call_in_ms)
     filename = tmp_path / "test.h5"
     assert not filename.exists()
     # mock getSaveFileName to return the desired filename

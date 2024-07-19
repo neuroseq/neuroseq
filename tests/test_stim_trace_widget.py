@@ -5,6 +5,8 @@ import pytest
 from formozov_project.stim_trace_widget import StimTraceWidget
 from pytestqt.qtbot import QtBot
 
+delay_for_widgets_to_update = 50
+
 
 def test_stim_trace_widget(qtbot: QtBot) -> None:
     stim_trace_widget = StimTraceWidget()
