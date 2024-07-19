@@ -27,6 +27,7 @@ from formozov_project.b2_model_widget import NeuronSubgroupDialog
 from formozov_project.b2_model_widget import ParameterDialog
 from formozov_project.b2_model_widget import SynapseDialog
 from formozov_project.reconstructor import Reconstructor
+from formozov_project.utils import parse_string_to_quantity
 
 
 # derive a new combobox which has a 'clicked' signal
@@ -306,54 +307,6 @@ class EditableParameterTree(ParameterTree):
             object_to_modify = object_to_modify[p]
         object_to_modify[param.name()] = value
 
-    def _make_quantity(self, quantity_str: str) -> tuple[b2.Quantity | str, bool]:
-        """
-        Make a quantity from a string representation. When this cannot be successfully be done, the string is returned as is.
-
-        Parameters
-        ----------
-        quantity_str : str
-            string representation of a quantity
-
-        Returns
-        -------
-        b2.Quantity|str
-            either a brian2 quantity or the input string
-        """
-        # extract numerical value via regex. allow for multiple numbers left and right of a '.' and multiple spaces or a '*' between number and unit
-        pattern = r"([\(\)0-9./\*]+)\s*\*?\s*(\w+)"
-        match = re.match(pattern, quantity_str)
-        ok = True
-        quantity_obj = None
-        if match:
-            value, unit_str = match.groups()
-
-            # Map the unit string to a Brian2 unit
-            try:
-                unit = getattr(b2, unit_str)
-            except Exception as e:
-                message = f"Error when interpreting unit string: {e}"
-                self.logger.critical(message)
-                QtWidgets.QMessageBox.critical(self, "Quantity parsing error", message)
-                ok = False
-
-            if ok:
-                try:
-                    v = eval(value)
-                    # Create the quantity object
-                    quantity_obj = v * unit
-                except Exception as e:
-                    message = f"Error when interpreting numerical quantity string: {e}"
-                    self.logger.critical(message)
-                    QtWidgets.QMessageBox.critical(
-                        self, "Quantity parsing error", message
-                    )
-                    ok = False
-
-            return (quantity_obj, ok)
-        else:
-            return (quantity_str, ok)
-
     def _set_param(self, param: Parameter, value: Any) -> None:
         """
         Update a model parameter whenever its corresponding representation in the parameter tree is updated.
@@ -365,19 +318,19 @@ class EditableParameterTree(ParameterTree):
         value : Any
             updated value
         """
-        self.logger.info(
-            f"setting parameter {param.name()} to value {value} of type {type(value)}"
-        )
-        path = self._trace_path_from(param)
+        path = self._trace_path_from(param) 
 
         object_to_modify = self.states
         for p in path[0:-1]:
             object_to_modify = object_to_modify[p]
 
-        q, ok = self._make_quantity(value)
+        q, ok = parse_string_to_quantity(value)
 
+        self.logger.info(
+            f"setting parameter {param.name()} to value {value} of type {type(q)}"
+        )
         if ok:
-            object_to_modify[param.name()] = q
+            object_to_modify[param.name()] = q 
             self.b2model.must_be_rebuilt = True
 
     def _get_value(self, v: Any) -> dict[str, Any] | Any:

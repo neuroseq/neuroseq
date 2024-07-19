@@ -104,6 +104,7 @@ def parse_string_to_quantity(quantity_str: str) -> tuple[b2.Quantity | str, bool
     match = re.match(pattern, quantity_str)
     ok = True
     quantity_obj = None
+    print("match: ", match)
     if match:
         value, unit_str = match.groups()
         # Map the unit string to a Brian2 unit

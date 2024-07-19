@@ -18,8 +18,7 @@ class B2Model:
     """
     Wrapper class that bundles brian2 capabilities for modelling neuronal networks. This creates a dict-based intermediate represenation
     of the model. All function attributes that start with `define_` act on this intermediate representation and add elements to it,
-    all function attributes that are called `delete_` delete elements from it. Function attributes starting with `assemble_` create
-    elements in the underlying brian2 network from the intermediate dict, while attributes starting with `erase_` remove them again.
+    all function attributes that are called `delete_` delete elements from it.
     """
 
     def _trigger_rebuild(func: Callable) -> Callable:  # type: ignore
@@ -59,6 +58,262 @@ class B2Model:
 
         self.logger.info(f"Equation defined for group {group}")
         self.logger.debug(f"full equation: {line}")
+
+    @_trigger_rebuild
+    def _assemble_neuronsubgroup(
+        self,
+        name: str,
+    ) -> None:
+        """
+        assemble_neuronsubgroup Define a subgroup of a neurongroup as a separate element that can be referred to by name.
+
+        Parameters
+        ----------
+        name : str
+            Name that the subgroup should be referred to.
+        """
+        sng = None
+
+        if isinstance(self.neurongroups[name]["idxs"], tuple | list):
+            if len(self.neurongroups[name]["idxs"]) > 2:
+                raise ValueError("Subgroups have to be contiguous")
+            start = self.neurongroups[name]["idxs"][0]
+            stop = self.neurongroups[name]["idxs"][1]
+        elif isinstance(self.neurongroups[name]["idxs"], int):
+            start = self.neurongroups[name]["idxs"]
+            stop = self.neurongroups[name]["idxs"] + 1
+
+        try:
+            sng = b2.Subgroup(
+                self.network[self.neurongroups[name]["target"]],
+                start,
+                stop,
+                name=name,
+            )
+        except Exception as e:
+            message = f"Error when trying to create a neuronsubgroup {name}: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
+
+        self.logger.info(f"Neuron subgroup defined: {name}")
+
+        if any(obj.name == name for obj in self.network.objects):
+            try:
+                self.network.remove(sng)
+            except Exception as e:
+                message = f"Error when removing existing subgroup {name}: {e}"
+                self.logger.critical(message)
+                raise RuntimeError(message) from e
+
+        try:
+            self.network.add(sng)
+        except Exception as e:
+            message = f"Error when adding subgroup {name}: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
+
+    @_trigger_rebuild
+    def _assemble_synapse(
+        self,
+        name: str,
+    ) -> None:
+        """
+        assemble_synapse Assemble a synapse called `name` from its set of predefined values.
+
+        You need to define the respective variables first via the `define_synapse_*` functions.
+
+        Parameters
+        ----------
+        name : str, optional
+            How the Synapse should be named in the network
+
+        Raises
+        ------
+        RuntimeError
+            When an exception is raised by the underlying brian2 function that builds the synapse
+        RuntimeError
+            When an exception is raised by the underlying brian2 function that creates synapse connections.
+        """
+        args = self.synapses[name]
+        origin_id = self.neurongroups[args["origin"]].get("name", args["origin"])
+        target_id = self.neurongroups[args["target"]].get("name", args["target"])
+
+        _origin = self.network.__getitem__(origin_id)
+        _target = self.network.__getitem__(target_id)
+
+        synapse = None
+        try:
+            synapse = b2.Synapses(
+                _origin,
+                target=_target,
+                model=args.get("model", None),
+                on_pre=args.get("on_pre", None),
+                on_post=args.get("on_post", None),
+                delay=args.get("delay", None),
+                name=name,
+                namespace=self.parameters,
+            )
+
+        except Exception as e:
+            message = f"Error in defining synapse {name}: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
+
+        try:
+            synapse.connect(
+                args.get("connection_condition", None), p=args.get("p", 1.0)
+            )
+        except Exception as e:
+            message = f"Error in connecting synapse {name}: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
+
+        if any(obj.name == name for obj in self.network.objects):
+            try:
+                self.network.remove(self.network[name])
+            except Exception as e:
+                message = (
+                    f"Error when removing existing synapse {name} from the network: {e}"
+                )
+                self.logger.critical(message)
+                raise RuntimeError(message) from e
+
+        try:
+            self.network.add(synapse)
+        except Exception as e:
+            message = f"Error when adding {name} to the network: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
+
+    @_trigger_rebuild
+    def _assemble_monitor(
+        self,
+        name: str,
+    ) -> None:
+        """
+        assemble_monitor Assemble a new monitor from predefined elements. When a monitor exists that
+        in the network that has the same name, it is removed and replaced by the newly assembled one
+
+        Parameters
+        ----------
+        name : str
+            Name of the monitor as referred to in the governing network.
+
+        Raises
+        ------
+        RuntimeError
+            When something goes wrong while removing a monitor of the same name that is to be replaced with a new definition
+        RuntimeError
+            When something goes wrong while building the monitor
+        """
+        monitor = None
+        self.logger.info(f"adding monitor '{name}'")
+
+        try:
+            monitor = getattr(b2, self.monitors[name]["type"])(
+                self.network[self.monitors[name]["source"]],
+                self.monitors[name].get("variable", None),
+                record=True,
+                name=self.monitors[name]["name"],
+            )
+        except Exception as e:
+            message = f"Error in defining monitor {name}: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
+
+        if any(obj.name == name for obj in self.network.objects):
+            try:
+                self.network.remove(self.network[name])
+            except Exception as e:
+                message = f"Error while removing monitor {name} from network: {e}"
+                self.logger.critical(message)
+                raise RuntimeError(message) from e
+
+        try:
+            self.network.add(monitor)
+        except Exception as e:
+            message = f"Error in adding monitor {name} to network: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
+
+    @_trigger_rebuild
+    def _assemble_neurongroup(
+        self,
+        name: str = "neurongroup",
+    ) -> None:
+        """
+        assemble_neurongroup Assemble a neurongroup called `name` from its set of predefined values.
+        When a neurongroup of the same name already exists in the network, it will be removed and replaced with the newly assembled one.
+        You need to define the respective variables first via the `define_*` functions.
+
+        Parameters
+        ----------
+        name : str, optional
+            How the NeuronGroup should be named in the network, by default "neurongroup"
+
+        Raises
+        ------
+        RuntimeError
+            When building the neurongroup was not successful, e.g., because of missing parameters.
+        """
+
+        ng = None
+        self.logger.info(f"assembling neurongroup '{name}'")
+        try:
+            ng = b2.NeuronGroup(
+                self.neurongroups[name].get("n", None),
+                self.neurongroups[name].get("model", None),
+                threshold=self.neurongroups[name].get("th", None),
+                refractory=self.neurongroups[name].get("refractory", False),
+                method=self.neurongroups[name].get("method", None),
+                namespace=self.parameters,
+                reset=self.neurongroups[name].get("reset", None),
+                name=name,
+            )
+        except Exception as e:
+            message = f"Error in assembling neuron group {name}: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
+
+        if any(obj.name == name for obj in self.network.objects):
+            try:
+                self.network.remove(
+                    self.network[name]
+                )  # cannot use self._erase_object because we still need the intermediat definition
+            except Exception as e:
+                message = f"Error when removing neuron group {name} from network: {e}"
+                self.logger.critical(message)
+                raise RuntimeError(message) from e
+
+        try:
+            self.network.add(ng)
+        except Exception as e:
+            message = f"Error when adding new neuron group {name} to network: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
+
+    def _assemble_initial_conditions(self, name: str) -> None:
+        """
+        Set all the initial conditions that have been defined via 'define_init'.
+
+        Parameters
+        ----------
+        name : str
+            name of the element of the network for which to define an initial condition.
+
+        Raises
+        ------
+        ValueError
+            When something goes wrong during assignment of the initial condition to the variable given
+        """
+        for key in self.initials[name]:
+            try:
+                setattr(self.network[name], key, self.initials[name][key])
+
+            except Exception as e:
+                raise ValueError(
+                    f"Error when initializing {key} of element {name} as {self.initials[name][key]}: {e}"
+                ) from e
 
     def __init__(
         self,
@@ -364,59 +619,6 @@ class B2Model:
         utils.update_nested_dict(self.neurongroups[name], {"idxs": idxs})
 
     @_trigger_rebuild
-    def assemble_neuronsubgroup(
-        self,
-        name: str,
-    ) -> None:
-        """
-        assemble_neuronsubgroup Define a subgroup of a neurongroup as a separate element that can be referred to by name.
-
-        Parameters
-        ----------
-        name : str
-            Name that the subgroup should be referred to.
-        """
-        sng = None
-
-        if isinstance(self.neurongroups[name]["idxs"], tuple | list):
-            if len(self.neurongroups[name]["idxs"]) > 2:
-                raise ValueError("Subgroups have to be contiguous")
-            start = self.neurongroups[name]["idxs"][0]
-            stop = self.neurongroups[name]["idxs"][1]
-        elif isinstance(self.neurongroups[name]["idxs"], int):
-            start = self.neurongroups[name]["idxs"]
-            stop = self.neurongroups[name]["idxs"] + 1
-
-        try:
-            sng = b2.Subgroup(
-                self.network[self.neurongroups[name]["target"]],
-                start,
-                stop,
-                name=name,
-            )
-        except Exception as e:
-            message = f"Error when trying to create a neuronsubgroup {name}: {e}"
-            self.logger.critical(message)
-            raise RuntimeError(message) from e
-
-        self.logger.info(f"Neuron subgroup defined: {name}")
-
-        if any(obj.name == name for obj in self.network.objects):
-            try:
-                self.network.remove(sng)
-            except Exception as e:
-                message = f"Error when removing existing subgroup {name}: {e}"
-                self.logger.critical(message)
-                raise RuntimeError(message) from e
-
-        try:
-            self.network.add(sng)
-        except Exception as e:
-            message = f"Error when adding subgroup {name}: {e}"
-            self.logger.critical(message)
-            raise RuntimeError(message) from e
-
-    @_trigger_rebuild
     def define_synapse_target(self, name: str, target: str) -> None:
         """
         define_synapse_target Define the target neurongroup for a synapse called 'name'.
@@ -490,6 +692,9 @@ class B2Model:
         """
         del self.neurongroups[name]
 
+        if name in (obj.name for obj in self.network.objects):
+            self.network.remove(name)
+
     @_trigger_rebuild
     def delete_synapse(self, name: str) -> None:
         """
@@ -502,6 +707,9 @@ class B2Model:
         """
         del self.synapses[name]
 
+        if name in (obj.name for obj in self.network.objects):
+            self.network.remove(name)
+
     @_trigger_rebuild
     def delete_monitor(self, name: str) -> None:
         """
@@ -513,6 +721,9 @@ class B2Model:
             Name of the monitor to delete from the intermediat dict
         """
         del self.monitors[name]
+
+        if name in (obj.name for obj in self.network.objects):
+            self.network.remove(name)
 
     @_trigger_rebuild
     def delete_neurongroup_element(self, groupname: str, varname: str) -> None:
@@ -761,79 +972,6 @@ class B2Model:
         )
 
     @_trigger_rebuild
-    def assemble_synapse(
-        self,
-        name: str,
-    ) -> None:
-        """
-        assemble_synapse Assemble a synapse called `name` from its set of predefined values.
-
-        You need to define the respective variables first via the `define_synapse_*` functions.
-
-        Parameters
-        ----------
-        name : str, optional
-            How the Synapse should be named in the network
-
-        Raises
-        ------
-        RuntimeError
-            When an exception is raised by the underlying brian2 function that builds the synapse
-        RuntimeError
-            When an exception is raised by the underlying brian2 function that creates synapse connections.
-        """
-        args = self.synapses[name]
-        origin_id = self.neurongroups[args["origin"]].get("name", args["origin"])
-        target_id = self.neurongroups[args["target"]].get("name", args["target"])
-
-        _origin = self.network.__getitem__(origin_id)
-        _target = self.network.__getitem__(target_id)
-
-        synapse = None
-        try:
-            synapse = b2.Synapses(
-                _origin,
-                target=_target,
-                model=args.get("model", None),
-                on_pre=args.get("on_pre", None),
-                on_post=args.get("on_post", None),
-                delay=args.get("delay", None),
-                name=name,
-                namespace=self.parameters,
-            )
-
-        except Exception as e:
-            message = f"Error in defining synapse {name}: {e}"
-            self.logger.critical(message)
-            raise RuntimeError(message) from e
-
-        try:
-            synapse.connect(
-                args.get("connection_condition", None), p=args.get("p", 1.0)
-            )
-        except Exception as e:
-            message = f"Error in connecting synapse {name}: {e}"
-            self.logger.critical(message)
-            raise RuntimeError(message) from e
-
-        if any(obj.name == name for obj in self.network.objects):
-            try:
-                self.network.remove(self.network[name])
-            except Exception as e:
-                message = (
-                    f"Error when removing existing synapse {name} from the network: {e}"
-                )
-                self.logger.critical(message)
-                raise RuntimeError(message) from e
-
-        try:
-            self.network.add(synapse)
-        except Exception as e:
-            message = f"Error when adding {name} to the network: {e}"
-            self.logger.critical(message)
-            raise RuntimeError(message) from e
-
-    @_trigger_rebuild
     def define_monitor_type(self, name: str, classname: str) -> None:
         """
         Define the type of a monitor. Can be 'StateMonitor' or 'SpikeMonitor' at the moment.
@@ -912,155 +1050,6 @@ class B2Model:
             },
         )
 
-    @_trigger_rebuild
-    def assemble_monitor(
-        self,
-        name: str,
-    ) -> None:
-        """
-        assemble_monitor Assemble a new monitor from predefined elements. When a monitor exists that
-        in the network that has the same name, it is removed and replaced by the newly assembled one
-
-        Parameters
-        ----------
-        name : str
-            Name of the monitor as referred to in the governing network.
-
-        Raises
-        ------
-        RuntimeError
-            When something goes wrong while removing a monitor of the same name that is to be replaced with a new definition
-        RuntimeError
-            When something goes wrong while building the monitor
-        """
-        monitor = None
-        self.logger.info(f"adding monitor '{name}'")
-
-        try:
-            monitor = getattr(b2, self.monitors[name]["type"])(
-                self.network[self.monitors[name]["source"]],
-                self.monitors[name].get("variable", None),
-                record=True,
-                name=self.monitors[name]["name"],
-            )
-        except Exception as e:
-            message = f"Error in defining monitor {name}: {e}"
-            self.logger.critical(message)
-            raise RuntimeError(message) from e
-
-        if any(obj.name == name for obj in self.network.objects):
-            try:
-                self.network.remove(self.network[name])
-            except Exception as e:
-                message = f"Error while removing monitor {name} from network: {e}"
-                self.logger.critical(message)
-                raise RuntimeError(message) from e
-
-        try:
-            self.network.add(monitor)
-        except Exception as e:
-            message = f"Error in adding monitor {name} to network: {e}"
-            self.logger.critical(message)
-            raise RuntimeError(message) from e
-
-    @_trigger_rebuild
-    def assemble_neurongroup(
-        self,
-        name: str = "neurongroup",
-    ) -> None:
-        """
-        assemble_neurongroup Assemble a neurongroup called `name` from its set of predefined values.
-        When a neurongroup of the same name already exists in the network, it will be removed and replaced with the newly assembled one.
-        You need to define the respective variables first via the `define_*` functions.
-
-        Parameters
-        ----------
-        name : str, optional
-            How the NeuronGroup should be named in the network, by default "neurongroup"
-
-        Raises
-        ------
-        RuntimeError
-            When building the neurongroup was not successful, e.g., because of missing parameters.
-        """
-
-        ng = None
-        self.logger.info(f"assembling neurongroup '{name}'")
-        try:
-            ng = b2.NeuronGroup(
-                self.neurongroups[name].get("n", None),
-                self.neurongroups[name].get("model", None),
-                threshold=self.neurongroups[name].get("th", None),
-                refractory=self.neurongroups[name].get("refractory", False),
-                method=self.neurongroups[name].get("method", None),
-                namespace=self.parameters,
-                reset=self.neurongroups[name].get("reset", None),
-                name=name,
-            )
-        except Exception as e:
-            message = f"Error in assembling neuron group {name}: {e}"
-            self.logger.critical(message)
-            raise RuntimeError(message) from e
-
-        if any(obj.name == name for obj in self.network.objects):
-            try:
-                self.network.remove(
-                    self.network[name]
-                )  # cannot use self._erase_object because we still need the intermediat definition
-            except Exception as e:
-                message = f"Error when removing neuron group {name} from network: {e}"
-                self.logger.critical(message)
-                raise RuntimeError(message) from e
-
-        try:
-            self.network.add(ng)
-        except Exception as e:
-            message = f"Error when adding new neuron group {name} to network: {e}"
-            self.logger.critical(message)
-            raise RuntimeError(message) from e
-
-    def assemble_inital_condition(self, name: str, key: str) -> None:
-        """
-        Apply the initial condition identified by `key` to the network element called `name`.
-        The element to set the initial condition for must be assembled first.
-
-        Parameters
-        ----------
-        name : str
-            name of network element to set the initial condition for, e.g., name of a neurongroup
-        key : str
-            name of the initial condition as defined by `define_init`.
-
-        Raises
-        ------
-        ValueError
-            When something goes wrong during the initial condition assignment.
-        """
-        try:
-            setattr(self.network[name], key, self.initials[name][key])
-
-        except Exception as e:
-            raise ValueError(
-                f"Error when initializing {key} of element {name} as {self.initials[name][key]}: {e}"
-            ) from e
-
-    def assemble_initial_conditions(self, name: str) -> None:
-        """
-        Set all the initial conditions that have been defined via 'define_init'.
-
-        Parameters
-        ----------
-        name : str
-            name of the element of the network for which to define an initial condition.
-
-        Raises
-        ------
-        ValueError
-            When something goes wrong during assignment of the initial condition to the variable given
-        """
-        for k in self.initials[name]:
-            self.assemble_inital_condition(name, k)
-
     def assemble_network(self) -> None:
         """
         Assemble the network from its predefined components.
@@ -1069,20 +1058,20 @@ class B2Model:
 
         for n in self.neurongroups:
             if "idxs" not in self.neurongroups[n]:
-                self.assemble_neurongroup(n)
+                self._assemble_neurongroup(n)
 
         for n in self.neurongroups:
             if "idxs" in self.neurongroups[n]:
-                self.assemble_neuronsubgroup(n)
+                self._assemble_neuronsubgroup(n)
 
         for s in self.synapses:
-            self.assemble_synapse(s)
+            self._assemble_synapse(s)
 
         for m in self.monitors:
-            self.assemble_monitor(m)
+            self._assemble_monitor(m)
 
         for n in self.initials:
-            self.assemble_initial_conditions(n)
+            self._assemble_initial_conditions(n)
 
         self.must_be_rebuilt = False
 
@@ -1297,69 +1286,6 @@ class B2Model:
             The network objects
         """
         return self.network.objects
-
-    def _erase_object(self, name: str) -> None:
-        """
-        Remove an object from the neuron network model
-
-        Parameters
-        ----------
-        name : str
-            name of object to be removed
-        """
-
-        self.network.remove(self.network[name])
-
-    def erase_neurongroup(self, name: str) -> None:
-        """
-        Remove a neurongroup from the network
-
-        Parameters
-        ----------
-        name : str
-            name of the neurongroup to remove
-        """
-        if name not in self.neurongroups:
-            raise KeyError(
-                f"Error when removing object {name}: no neurongroup of that name exists"
-            )
-
-        del self.neurongroups[name]
-        self._erase_object(name)
-
-    def erase_synapse(self, name: str) -> None:
-        """
-        Remove a synapse from the network
-
-        Parameters
-        ----------
-        name : str
-            name of the synapse to remove
-        """
-        if name not in self.synapses:
-            raise KeyError(
-                f"Error when removing object {name}: no synapse of that name exists"
-            )
-
-        del self.synapses[name]
-        self._erase_object(name)
-
-    def erase_monitor(self, name: str) -> None:
-        """
-        Remove a monitor from the network
-
-        Parameters
-        ----------
-        name : str
-            name of the synapse to remove
-        """
-        if name not in self.monitors:
-            raise KeyError(
-                f"Error when removing object {name}: no monitor of that name exists"
-            )
-
-        del self.monitors[name]
-        self._erase_object(name)
 
     def run_simulation(
         self,
