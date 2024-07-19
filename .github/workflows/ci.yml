@@ -56,5 +56,10 @@ jobs:
   pre-commit:
     runs-on: "macos-arm64-ssc"
     steps:
+      - uses: actions/cache@v4
+        with:
+          path: ${{github.workspace}}/.cache/pre-commit
+          key: ccache-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: ccache-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-
       - uses: actions/checkout@v4
       - run: pipx run pre-commit run -a
