@@ -13,7 +13,7 @@ from formozov_project.utils import example_models_path
 from formozov_project.utils import init_brian2_logging
 from qtpy import QtWidgets
 
-b2.prefs.codegen.target = "cython"
+b2.prefs.codegen.target = "numpy"
 
 
 # replace all .exec() calls within the b2_model_widget module with .show() to avoid blocking the tests
