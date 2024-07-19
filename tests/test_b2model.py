@@ -150,7 +150,6 @@ def test_assemble_erase_redefine_neurongroup(mfx: b2_model.B2Model) -> None:
     assert mfx.network["P"].events["spike"] == "v > 20 * mV"
     assert mfx.network["P"]._N == 60
 
-    print(list(mfx.neurongroups.keys()))
     mfx.erase_neurongroup("P")
     assert "P" not in mfx.network.objects
 
@@ -523,6 +522,36 @@ def test_NMDA_model(mfx_nmda: b2_model.B2Model) -> None:
     # assert result equality
     assert_allclose(M.g, mfx_nmda.network["M"].g)
     assert_allclose(Mn.g, mfx_nmda.network["Mn"].g)
+
+
+def test_NMDA_model_delete(mfx_nmda: b2_model.B2Model) -> None:
+    assert "n" in mfx_nmda.neurongroups["neuron_input"]
+    mfx_nmda.delete_neurongroup_element("neuron_input", "n")
+    assert "n" not in mfx_nmda.neurongroups["neuron_input"]
+
+    assert "on_pre" in mfx_nmda.synapses["S"]
+    mfx_nmda.delete_synapse_element("S", "on_pre")
+    assert "on_pre" not in mfx_nmda.synapses["S"]
+
+    assert "source" in mfx_nmda.monitors["Mn"]
+    mfx_nmda.delete_monitor_element("Mn", "source")
+    assert "source" not in mfx_nmda.monitors["Mn"]
+
+    assert "Mn" in mfx_nmda.monitors
+    mfx_nmda.delete_monitor("Mn")
+    assert "Mn" not in mfx_nmda.monitors
+
+    assert "w" in mfx_nmda.initials["S"]
+    mfx_nmda.delete_init("S", "w")
+    assert "w" not in mfx_nmda.initials["S"]
+
+    assert "neuron_input" in mfx_nmda.neurongroups
+    mfx_nmda.delete_neurongroup("neuron_input")
+    assert "neuron_input" not in mfx_nmda.neurongroups
+
+    assert "S" in mfx_nmda.synapses
+    mfx_nmda.delete_synapse("S")
+    assert "S" not in mfx_nmda.synapses
 
 
 def test_assemble_network_and_erase(mfx_nmda) -> None:

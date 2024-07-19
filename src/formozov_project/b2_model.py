@@ -530,7 +530,7 @@ class B2Model:
         self._delete_dict_element(self.neurongroups, groupname, varname)
 
     @_trigger_rebuild
-    def delete_syanpse_element(self, groupname: str, varname: str) -> None:
+    def delete_synapse_element(self, groupname: str, varname: str) -> None:
         """
         Delete an element form the definition of a synapse. Note that if it has been assembled already,
         you have to remove it using `remove_synapse` and redefine it completetly.
@@ -573,7 +573,7 @@ class B2Model:
         except Exception as e:
             raise KeyError(f"Error when deleting {name}: {e}") from e
 
-    def delete_initial_condition(self, name: str) -> None:
+    def delete_init(self, name: str, varname: str) -> None:
         """
         Delete an element `name` from the initial condition dictionary. Note that if
         initial conditions have already been defined, you have to redefine it in the
@@ -582,15 +582,17 @@ class B2Model:
         Parameters
         ----------
         name : str
-            Name of the initial condition to remove
+            Name of the network element to remove an initial condition for
 
+        varname: str
+            Name of the variable to remove
         Raises
         ------
         KeyError
             When `name` is not in the initial condition dictionary
         """
         try:
-            del self.initials[name]
+            del self.initials[name][varname]
         except Exception as e:
             raise KeyError(f"Error when deleting {name}: {e}") from e
 
