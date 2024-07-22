@@ -22,9 +22,7 @@ delay_after_update_model_call_in_ms = 50
 
 
 @pytest.mark.screenshot
-def test_update_screenshot(
-    monkeypatch: MonkeyPatch, qtbot: QtBot, default_model_path: Path
-) -> None:
+def test_update_screenshot(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
     gui = Gui()
     gui.show()
     qtbot.addWidget(gui)
@@ -35,8 +33,6 @@ def test_update_screenshot(
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
     )
-    qtbot.wait(delay_after_update_model_call_in_ms)
-    gui.load_model(default_model_path)
     qtbot.wait(delay_after_update_model_call_in_ms)
     gui.btn_continue_simulation_clicked()
     qtbot.wait(delay_after_update_model_call_in_ms)
@@ -63,18 +59,14 @@ def test_gui_simulate_and_playback(
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
     assert gui.heatmap_widget.currentIndex == 0
     assert gui.trace_widget.timeline.getXPos() == approx(0)
-    assert gui.cmb_synapse.count() == 0
-    assert gui.cmb_neuron.count() == 0
-    assert gui.cmb_spike.count() == 0
     simulation_time = 0.1
     # mock getText to return the desired simulation time
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
     )
-    qtbot.wait(delay_after_update_model_call_in_ms)
-    gui.load_model(default_model_path)
     qtbot.wait(delay_after_update_model_call_in_ms)
     assert gui.cmb_synapse.count() == 1
     assert gui.cmb_synapse.itemText(0) == "Ce / we"
@@ -111,6 +103,7 @@ def test_gui_new(tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot) -> None
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
+    assert gui.model.name == B2Model().name
     monkeypatch.setattr("formozov_project.gui.B2ModelWidget.exec", lambda *args: True)
     gui.btn_new_clicked()
     assert gui.model.name == B2Model().name
@@ -129,12 +122,8 @@ def test_gui_open(
         lambda *args: (f"{default_model_path}", True),
     )
 
-    assert gui.model.parameters is None
-    assert gui.model.neurongroups == {}
-    assert gui.model.synapses == {}
-    assert gui.model.monitors == {}
-
     loaded_model = B2Model.load_model(default_model_path)
+    assert loaded_model.parameters is not None
 
     gui.btn_open_clicked()
 
@@ -152,6 +141,7 @@ def test_gui_save(
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
     gui.update_model(mfx_ornstein)
     qtbot.wait(delay_after_update_model_call_in_ms)
     filename = tmp_path / "test.json"
@@ -175,6 +165,7 @@ def test_gui_export(
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
     gui.update_model(mfx_ornstein)
     qtbot.wait(delay_after_update_model_call_in_ms)
     filename = tmp_path / "test.h5"
@@ -194,6 +185,7 @@ def test_gui_export_empty_model(
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
+    gui.update_model(B2Model())
     filename = tmp_path / "test.h5"
     assert not filename.exists()
     assert len(qmessagebox_calls) == 0

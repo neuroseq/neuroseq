@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import abc
 import functools
+import pathlib
 import re
 from collections.abc import Callable
 from importlib import resources
@@ -14,7 +15,9 @@ from qtpy import QtWidgets
 
 import formozov_project
 
-example_models_path = resources.files(formozov_project) / "example_models"
+example_models_path = (
+    pathlib.Path(str(resources.files(formozov_project))) / "example_models"
+)
 
 
 def shuffle_index(i: int, n: int) -> tuple[int, int]:
