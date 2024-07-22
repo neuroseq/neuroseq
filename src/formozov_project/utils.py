@@ -61,7 +61,7 @@ def add_action(
     shortcut: str | None = None,
     icon: QtGui.QIcon | None = None,
     checkable: bool = False,
-) -> None:
+) -> QtWidgets.QAction:
     parent = menu or toolbar
     action = QtWidgets.QAction(name, parent)
     action.setCheckable(checkable)
@@ -78,6 +78,7 @@ def add_action(
         toolbar.addAction(action)
     if widget is not None:
         widget.addAction(action)
+    return action
 
 
 class QtABCMeta(type(QtCore.QObject), abc.ABCMeta):  # type: ignore
