@@ -126,7 +126,7 @@ def test_stim_widget_mouse_capture(qtbot: QtBot, stims: b2.TimedArray) -> None:
 
     # mouse click sets timeline position
     stim_widget.setFocus()
-    qtbot.wait(10)
+    qtbot.wait(20)
     assert stim_widget.timeline.x() == 0
     qtbot.mouseClick(
         stim_widget.viewport(),

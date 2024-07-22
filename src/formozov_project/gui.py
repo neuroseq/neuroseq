@@ -82,6 +82,8 @@ class Gui(QtWidgets.QMainWindow):
         self._create_actions()
         self.resize(800, 600)
         self._create_progressbar()
+        self.link_x_axes(True)
+        self.link_y_axes(True)
         # connect widgets
         self.heatmap_widget.connect_timeseries_widget_timeline(self.trace_widget)
         self.trace_widget.connect_heatmap_widget(self.heatmap_widget)
@@ -385,6 +387,16 @@ class Gui(QtWidgets.QMainWindow):
     def btn_skip_to_end_clicked(self) -> None:
         self.heatmap_widget.setCurrentIndex(self.heatmap_widget.nframes() - 1)
 
+    def link_x_axes(self, checked: bool) -> None:
+        link_target = self.stim_editor.stim_widget if checked else None
+        for widget in [self.trace_widget, self.spike_widget]:
+            widget.setXLink(link_target)
+
+    def link_y_axes(self, checked: bool) -> None:
+        link_target = self.stim_editor.stim_widget if checked else None
+        for widget in [self.trace_widget, self.spike_widget]:
+            widget.setYLink(link_target)
+
     def about(self) -> None:
         QtWidgets.QMessageBox.about(
             self,
@@ -544,4 +556,20 @@ class Gui(QtWidgets.QMainWindow):
                 icon=qta.icon(f"mdi6.{icon}"),
                 checkable=True,
             )
+        add_action(
+            "Link X axes",
+            self.link_x_axes,
+            self.menu_view,
+            self.toolbar,
+            icon=qta.icon("mdi6.arrow-horizontal-lock"),
+            checkable=True,
+        )
+        add_action(
+            "Link Y axes",
+            self.link_y_axes,
+            self.menu_view,
+            self.toolbar,
+            icon=qta.icon("mdi6.arrow-vertical-lock"),
+            checkable=True,
+        )
         add_action("&About", self.about, self.menu_help)

@@ -21,7 +21,7 @@ def test_quantity_conversion(qtbot: QtBot) -> None:
 
     quantity = wdgt._convert_string_to_quantity(value, int)
 
-    assert type(quantity) == b2.Quantity
+    assert isinstance(quantity, b2.Quantity)
     assert quantity == 3 * b2.volt
 
     wrong = "42 x"
