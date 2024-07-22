@@ -208,6 +208,7 @@ class Gui(QtWidgets.QMainWindow):
 
     def update_model(self, model: B2Model) -> None:
         self.model = model
+        self.stim_console.set_model(self.model)
         self.continue_simulation_action.setText("&Run simulation")
         self.heatmap_widget.clear_data()
         self.trace_widget.clear_data()
