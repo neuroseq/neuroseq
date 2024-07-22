@@ -20,31 +20,30 @@ class StimEditor(QtWidgets.QWidget):
 
     def __init__(
         self,
+        cmb_stim: QtWidgets.QComboBox,
+        toolbar: QtWidgets.QToolBar,
         menu: QtWidgets.QMenu | None = None,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
+        self.toolbar = toolbar
         self.model: B2Model | None = None
+        self.cmb_stim = cmb_stim
         self.current_stim: b2.TimedArray | None = None
         self.stims_dict: dict[str, b2.TimedArray] = {}
         self.copy_time_slice = slice(0, 0)
         self.copy_neuron_slice = slice(0, 0)
         self.copy_values = np.zeros((0, 0))
-        layout = QtWidgets.QVBoxLayout()
-        # horizontal row of widgets for name, units, dt
-        top_horizontal_layout = QtWidgets.QHBoxLayout()
-        self.cmb_stim = QtWidgets.QComboBox()
-        top_horizontal_layout.addWidget(self.cmb_stim)
-        layout.addLayout(top_horizontal_layout)
+        layout = QtWidgets.QHBoxLayout()
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
         self.stim_widget = StimWidget()
         self.stim_widget.capture_mouse_events = True
         layout.addWidget(self.stim_widget)
-        self.toolbar = QtWidgets.QToolBar()
-        self.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.ActionsContextMenu)
-        layout.addWidget(self.toolbar)
         self.setLayout(layout)
-        self._add_actions(menu)
+        self.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.ActionsContextMenu)
+        self._add_actions(self.toolbar, menu)
         self.cmb_stim.currentTextChanged.connect(self.select_stim)
         self.stim_widget.selection_moved.connect(self.move_selected_stim)
 
@@ -234,12 +233,12 @@ class StimEditor(QtWidgets.QWidget):
     def move_selected_stim_right(self) -> None:
         self.move_selected_stim(time_index_offset=1)
 
-    def _add_actions(self, menu: QtWidgets.QMenu) -> None:
+    def _add_actions(self, toolbar: QtWidgets.QToolBar, menu: QtWidgets.QMenu) -> None:
         add_action(
             "Toggle edit mode",
             self.toggle_edit_stims,
             menu,
-            self.toolbar,
+            toolbar,
             self,
             shortcut="Ctrl+E",
             icon=qta.icon("mdi6.playlist-edit"),
@@ -249,7 +248,7 @@ class StimEditor(QtWidgets.QWidget):
             "Copy",
             self.copy_selected_stim,
             menu,
-            self.toolbar,
+            toolbar,
             self,
             shortcut="Ctrl+C",
             icon=qta.icon("mdi6.content-copy"),
@@ -258,7 +257,7 @@ class StimEditor(QtWidgets.QWidget):
             "Cut",
             self.cut_selected_stim,
             menu,
-            self.toolbar,
+            toolbar,
             self,
             shortcut="Ctrl+X",
             icon=qta.icon("mdi6.content-cut"),
@@ -267,7 +266,7 @@ class StimEditor(QtWidgets.QWidget):
             "Paste",
             self.paste_selected_stim,
             menu,
-            self.toolbar,
+            toolbar,
             self,
             shortcut="Ctrl+V",
             icon=qta.icon("mdi6.content-paste"),
@@ -276,7 +275,7 @@ class StimEditor(QtWidgets.QWidget):
             "Save to file",
             self.save_selected_stim,
             menu,
-            self.toolbar,
+            toolbar,
             self,
             shortcut="Ctrl+Shift+S",
             icon=qta.icon("mdi6.content-save"),
@@ -285,7 +284,7 @@ class StimEditor(QtWidgets.QWidget):
             "Load from file",
             self.load_selected_stim,
             menu,
-            self.toolbar,
+            toolbar,
             self,
             shortcut="Ctrl+Shift+O",
             icon=qta.icon("mdi6.folder-open"),
@@ -294,7 +293,7 @@ class StimEditor(QtWidgets.QWidget):
             "Delete",
             self.delete_selected_stim,
             menu,
-            self.toolbar,
+            toolbar,
             self,
             shortcut="Delete",
             icon=qta.icon("mdi6.delete"),
@@ -303,7 +302,7 @@ class StimEditor(QtWidgets.QWidget):
             "Move up",
             self.move_selected_stim_up,
             menu,
-            self.toolbar,
+            toolbar,
             self,
             shortcut="Ctrl+Up",
             icon=qta.icon("mdi6.arrow-up"),
@@ -312,7 +311,7 @@ class StimEditor(QtWidgets.QWidget):
             "Move down",
             self.move_selected_stim_down,
             menu,
-            self.toolbar,
+            toolbar,
             self,
             shortcut="Ctrl+Down",
             icon=qta.icon("mdi6.arrow-down"),
@@ -321,7 +320,7 @@ class StimEditor(QtWidgets.QWidget):
             "Move left",
             self.move_selected_stim_left,
             menu,
-            self.toolbar,
+            toolbar,
             self,
             shortcut="Ctrl+Left",
             icon=qta.icon("mdi6.arrow-left"),
@@ -330,7 +329,7 @@ class StimEditor(QtWidgets.QWidget):
             "Move right",
             self.move_selected_stim_right,
             menu,
-            self.toolbar,
+            toolbar,
             self,
             shortcut="Ctrl+Right",
             icon=qta.icon("mdi6.arrow-right"),

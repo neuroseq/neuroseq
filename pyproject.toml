@@ -40,6 +40,7 @@ path = "src/formozov_project/__init__.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["screenshot"]
 
 [tool.ruff]
 extend-include = ["*.ipynb"]

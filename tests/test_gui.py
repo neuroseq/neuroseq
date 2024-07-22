@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import cast
 
 import brian2 as b2
+import pytest
 from brian2 import numpy_ as np
 from brian2.tests.utils import assert_allclose
 from formozov_project.b2_model import B2Model
@@ -18,6 +19,32 @@ from qtpy import QtWidgets
 # no obvious signal to wait for after the model is updated to know when the GUI is ready,
 # so for now we just wait for a fixed time
 delay_after_update_model_call_in_ms = 50
+
+
+@pytest.mark.screenshot
+def test_update_screenshot(
+    monkeypatch: MonkeyPatch, qtbot: QtBot, default_model_path: Path
+) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    gui.resize(1600, 1200)
+    simulation_time = 2.0
+    # mock getText to return the desired simulation time
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
+    )
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    gui.load_model(default_model_path)
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    gui.btn_continue_simulation_clicked()
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    gui.btn_play_clicked()
+    qtbot.waitUntil(
+        lambda: gui.heatmap_widget.currentIndex == gui.heatmap_widget.tVals.size - 1
+    )
+    gui.grab().save("screenshot.png")
 
 
 def test_gui_click_exit(qtbot: QtBot) -> None:
