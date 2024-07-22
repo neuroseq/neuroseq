@@ -368,6 +368,9 @@ class B2Model:
     def name(self) -> str:
         return self.network.name
 
+    def set_rebuilt(self, value: bool) -> None:
+        self.must_be_rebuilt = value
+
     @_trigger_rebuild
     def define_equation(self, name: str, line: str) -> None:
         r"""

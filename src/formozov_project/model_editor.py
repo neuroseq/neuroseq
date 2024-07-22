@@ -237,9 +237,6 @@ class EditableParameterTree(ParameterTree):
         self.add_item_action = QtWidgets.QAction(f"add {self.name}")
         self.add_item_action.triggered.connect(self.add_item)
 
-    def _set_rebuilt(self):
-        self.model.must_be_rebuilt = True
-
     def _connect_parameters(self, param: Parameter, funcs: dict[Any, Any]) -> None:
         """
         connect the signals emitted by the entries of the parameter tree to their respective actions.
@@ -253,9 +250,9 @@ class EditableParameterTree(ParameterTree):
         """
         if param.type() == "group":
             # FIXME: not sure what to do here.
-            param.sigChildAdded.connect(self._set_rebuilt)
-            param.sigAddNew.connect(lambda: None)
-            param.sigChildRemoved.connect(self._set_rebuilt)
+            param.sigChildAdded.connect(lambda: self.b2model.set_rebuilt(True))
+            param.sigAddNew.connect(lambda: self.b2model.set_rebuilt(True))
+            param.sigChildRemoved.connect(lambda: self.b2model.set_rebuilt(True))
             # param.sigNameChanged.connect(funcs["rename"])
             for child in param.children():
                 if child.name in funcs:
@@ -314,7 +311,11 @@ class EditableParameterTree(ParameterTree):
             param_type = "str"  # Default type
             value = self._get_value(value)
             if isinstance(value, dict):
-                child_params = self._convert_dict_to_params(value, key, functions[key])
+                child_params = self._convert_dict_to_params(
+                    value,
+                    functions[key],
+                    key,
+                )
 
                 # FIXME: this thing needs a + button for some things with an activated list to choose from for some of those in turn
                 params.append(
@@ -391,11 +392,11 @@ class EditableParameterTree(ParameterTree):
         new_data : dict[Any, Any]
             Data dict to be added
         """
-        # FIXME: use stored node elements
         param = self._convert_dict_to_params(
             {
                 new_name: new_data,
-            }
+            },
+            self.functions,
         )
         self.root.addChildren(param)
 
@@ -408,7 +409,6 @@ class EditableParameterTree(ParameterTree):
         # check which name has changed, add this name to the internal dict
         # and to the parameters that are displayed
 
-        # FIXME: use stored function elements
         old_names = set(getattr(self.b2model, self.name).keys())
         self.dialog = self.dialogtype(self.b2model)
 
@@ -417,7 +417,13 @@ class EditableParameterTree(ParameterTree):
             new_names = set(getattr(self.b2model, self.name).keys())
 
             new_name = list(new_names - old_names)[0]
-            self.update_params(new_name, getattr(self.b2model, self.name)[new_name])
+            param = self._convert_dict_to_params(
+                {
+                    new_name: getattr(self.b2model, self.name)[new_name],
+                },
+                self.functions,
+            )
+            self.root.addChildren(param)
 
 
 class EditableSynapseTree(EditableParameterTree):
@@ -666,7 +672,13 @@ class EditableNeurongroupTree(EditableParameterTree):
         if self.dialog.exec():
             new_names = set(getattr(self.b2model, self.name).keys())
             new_name = list(new_names - old_names)[0]
-            self.update_params(new_name, getattr(self.b2model, self.name)[new_name])
+            param = self._convert_dict_to_params(
+                {
+                    new_name: getattr(self.b2model, self.name)[new_name],
+                },
+                self.functions,
+            )
+            self.root.addChildren(param)
 
     def _update_neurongroup_list(self) -> list[str]:
         """
