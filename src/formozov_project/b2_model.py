@@ -337,6 +337,13 @@ class B2Model:
         self.synapses: dict[str, dict[str, Any]] = {}
         self.monitors: dict[str, dict[str, Any]] = {}
         self.initials: dict[str, dict[str, Any]] = {}
+        self.functions: dict[str, Any] = {
+            "neurongroups": {},
+            "synapses": {},
+            "initials": {},
+            "parameters": {},
+            "monitors": {},
+        }
         self.dt: b2.Quantity | None = None
         self.checkpoints: list[str] = []
         self.must_be_rebuilt = False
@@ -371,6 +378,15 @@ class B2Model:
 
         if name not in self.neurongroups:
             self.neurongroups[name] = {}
+            self.functions["neurongroups"][name] = {}
+
+        self.functions["neurongroups"][name]["model"] = {
+            "add": lambda e: self.define_equation(name, e),
+            "delete": lambda: self.delete_neurongroup_element(name, "model"),
+            "modify": lambda e: self._modify_dict_element(
+                self.neurongroups[name], "model", e
+            ),
+        }
 
         self._add_equation_to_group(self.neurongroups[name], line)
 
@@ -390,6 +406,15 @@ class B2Model:
         """
         if name not in self.initials:
             self.initials[name] = {}
+            self.functions["initials"][name] = {}
+
+        self.functions["initials"][name][varname] = {
+            "add": lambda v: self.define_init(name, v),
+            "delete": lambda: self.delete_init(name, varname),
+            "modify": lambda v: self._modify_dict_element(
+                self.initials[name], varname, v
+            ),
+        }
 
         utils.update_nested_dict(
             self.initials[name],
@@ -410,6 +435,7 @@ class B2Model:
         """
         self.dt = dt
         b2.defaultclock.dt = self.dt
+
         self.logger.info(f"dt defined: {dt}")
 
     def define_b2seed(self, seed: int) -> None:
@@ -453,10 +479,50 @@ class B2Model:
         if self.parameters is None:
             self.parameters = {}
 
+        self.functions["parameters"][name] = {
+            "add": lambda p: self.define_parameter(name, p),
+            "delete": lambda: self.delete_parameter(name),
+            "modify": lambda p: self._modify_dict_element(self.parameters, name, p),
+        }
+
         self.parameters[name] = value
 
         self.logger.info(f"Parameter defined: {name}")
         self.logger.debug(f"Parameter value: {value}")
+
+    @_trigger_rebuild
+    def define_reset(self, name: str, reset: str) -> None:
+        """
+        define_reset Define the `reset` parameter for a neurongroup indicated by `name`.
+
+        Parameters
+        ----------
+        name : str
+            Name of the neurongroup to define the reset parameter for.
+        reset : str
+            The reset parameter for the neurongroup. Have a look at the brian2 documentation for
+            the `NeuronGroup` class for more details.
+        """
+        if name not in self.neurongroups:
+            self.neurongroups[name] = {}
+            self.functions["neurongroups"][name] = {}
+
+        self.functions["neurongroups"][name]["reset"] = {
+            "add": lambda r: self.define_reset(name, r),
+            "delete": lambda: self.delete_neurongroup_element(name, "reset"),
+            "modify": lambda r: self._modify_dict_element(
+                self.neurongroups[name], "reset", r
+            ),
+        }
+
+        utils.update_nested_dict(
+            self.neurongroups,
+            {
+                name: {
+                    "reset": reset,
+                },
+            },
+        )
 
     @_trigger_rebuild
     def define_threshold(self, name: str, th: str) -> None:
@@ -470,6 +536,18 @@ class B2Model:
         th : str
             Threshold expression as a string.
         """
+        if name not in self.neurongroups:
+            self.neurongroups[name] = {}
+            self.functions["neurongroups"][name] = {}
+
+        self.functions["neurongroups"][name]["th"] = {
+            "add": lambda t: self.define_threshold(name, t),
+            "delete": lambda: self.delete_neurongroup_element(name, "th"),
+            "modify": lambda t: self._modify_dict_element(
+                self.neurongroups[name], "th", t
+            ),
+        }
+
         utils.update_nested_dict(
             self.neurongroups,
             {
@@ -492,6 +570,19 @@ class B2Model:
         method : str
             name of the method to use. Refer to the brian2 documentation for the currently available set of solvers.
         """
+
+        if name not in self.neurongroups:
+            self.neurongroups[name] = {}
+            self.functions["neurongroups"][name] = {}
+
+        self.functions["neurongroups"][name]["method"] = {
+            "add": lambda t: self.define_threshold(name, t),
+            "delete": lambda: self.delete_neurongroup_element(name, "th"),
+            "modify": lambda t: self._modify_dict_element(
+                self.neurongroups[name], "th", t
+            ),
+        }
+
         utils.update_nested_dict(
             self.neurongroups,
             {
@@ -501,28 +592,6 @@ class B2Model:
             },
         )
 
-        self.logger.info(f"Solver method defined: {method} for {name}")
-
-    @_trigger_rebuild
-    def define_synapse_solver_method(self, name: str, method: str) -> None:
-        """
-        define_solver_method Define the solver method for the synapse indicated by `name`.
-
-        Parameters
-        ----------
-        name : str
-            name of the synapse to define the solver method for
-        method : str
-            name of the method to use. Refer to the brian2 documentation for the currently available set of solvers.
-        """
-        utils.update_nested_dict(
-            self.synapses,
-            {
-                name: {
-                    "method": method,
-                },
-            },
-        )
         self.logger.info(f"Solver method defined: {method} for {name}")
 
     @_trigger_rebuild
@@ -537,6 +606,18 @@ class B2Model:
         value : str | b2.Quantity
             Either a string expression evalutating to the length of the refractory period or the length of the period itself.
         """
+        if name not in self.neurongroups:
+            self.neurongroups[name] = {}
+            self.functions["neurongroups"][name] = {}
+
+        self.functions["neurongroups"][name]["refractory"] = {
+            "add": lambda r: self.define_refractory(name, r),
+            "delete": lambda: self.delete_neurongroup_element(name, "refractory"),
+            "modify": lambda r: self._modify_dict_element(
+                self.neurongroups[name], "refractory", r
+            ),
+        }
+
         utils.update_nested_dict(
             self.neurongroups,
             {
@@ -559,6 +640,18 @@ class B2Model:
         n : int
             Number of neurons the neurongroup should have.
         """
+        if name not in self.neurongroups:
+            self.neurongroups[name] = {}
+            self.functions["neurongroups"][name] = {}
+
+        self.functions["neurongroups"][name]["neuronnumber"] = {
+            "add": lambda n: self.define_neuronnumber(name, n),
+            "delete": lambda: self.delete_neurongroup_element(name, "neuronnumber"),
+            "modify": lambda n: self._modify_dict_element(
+                self.neurongroups[name], "neuronnumber", n
+            ),
+        }
+
         utils.update_nested_dict(
             self.neurongroups,
             {
@@ -592,8 +685,21 @@ class B2Model:
             )
 
         self.logger.info(f"defining target {target_name} for neuron subgroup {name}")
+
         if name not in self.neurongroups:
             self.neurongroups[name] = {"name": name}
+
+        if name not in self.neurongroups:
+            self.neurongroups[name] = {}
+            self.functions["neurongroups"][name] = {}
+
+        self.functions["neurongroups"][name]["target"] = {
+            "add": lambda tgt: self.define_neuronsubgroup_target(name, tgt),
+            "delete": lambda: self.delete_neurongroup_element(name, "target"),
+            "modify": lambda tgt: self._modify_dict_element(
+                self.neurongroups[name], "target", tgt
+            ),
+        }
 
         utils.update_nested_dict(
             self.neurongroups[name],
@@ -613,10 +719,64 @@ class B2Model:
             When noncontiguous indices are passed
         """
         self.logger.info(f"defining indices {idxs} for neuron subgroup {name}")
+
+        if name not in self.neurongroups:
+            self.neurongroups[name] = {"name": name}
+
+        if name not in self.neurongroups:
+            self.neurongroups[name] = {}
+            self.functions["neurongroups"][name] = {}
+
+        self.functions["neurongroups"][name]["idxs"] = {
+            "add": lambda idxs: self.define_neuronsubgroup_idxs(name, idxs),
+            "delete": lambda: self.delete_neurongroup_element(name, "idxs"),
+            "modify": lambda idxs: self._modify_dict_element(
+                self.neurongroups[name], "idxs", idxs
+            ),
+        }
+
         if name not in self.neurongroups:
             self.neurongroups[name] = {"name": name}
 
         utils.update_nested_dict(self.neurongroups[name], {"idxs": idxs})
+
+    # synapses
+    @_trigger_rebuild
+    def define_synapse_solver_method(self, name: str, method: str) -> None:
+        """
+        define_solver_method Define the solver method for the synapse indicated by `name`.
+
+        Parameters
+        ----------
+        name : str
+            name of the synapse to define the solver method for
+        method : str
+            name of the method to use. Refer to the brian2 documentation for the currently available set of solvers.
+        """
+
+        if name not in self.synapses:
+            self.synapses[name] = {"name": name}
+
+        if name not in self.synapses:
+            self.synapses[name] = {}
+            self.functions["synapses"][name] = {}
+
+        self.functions["synapses"][name]["method"] = {
+            "add": lambda m: self.define_synapse_solver_method(name, m),
+            "delete": lambda: self.delete_synapse_element(name, "method"),
+            "modify": lambda m: self._modify_dict_element(
+                self.synapses[name], "method", m
+            ),
+        }
+        utils.update_nested_dict(
+            self.synapses,
+            {
+                name: {
+                    "method": method,
+                },
+            },
+        )
+        self.logger.info(f"Solver method defined: {method} for {name}")
 
     @_trigger_rebuild
     def define_synapse_target(self, name: str, target: str) -> None:
@@ -630,6 +790,18 @@ class B2Model:
         target : str
             Name of the target neurongroup to use with the synapse.
         """
+        if name not in self.synapses:
+            self.synapses[name] = {}
+            self.functions["synapses"][name] = {}
+
+        self.functions["synapses"][name]["target"] = {
+            "add": lambda t: self.define_synapse_target(name, t),
+            "delete": lambda: self.delete_synapse_element(name, "target"),
+            "modify": lambda t: self._modify_dict_element(
+                self.synapses[name], "target", t
+            ),
+        }
+
         utils.update_nested_dict(
             self.synapses,
             {
@@ -651,6 +823,18 @@ class B2Model:
         target : str
             Name of the origin neurongroup to use with the synapse.
         """
+        if name not in self.synapses:
+            self.synapses[name] = {}
+            self.functions["synapses"][name] = {}
+
+        self.functions["synapses"][name]["origin"] = {
+            "add": lambda o: self.define_synapse_origin(name, o),
+            "delete": lambda: self.delete_synapse_element(name, "origin"),
+            "modify": lambda o: self._modify_dict_element(
+                self.synapses[name], "origin", o
+            ),
+        }
+
         utils.update_nested_dict(
             self.synapses,
             {
@@ -660,6 +844,236 @@ class B2Model:
             },
         )
 
+    @_trigger_rebuild
+    def define_synapse_equation(self, name: str, line: str) -> None:
+        """
+        define_synapse_equation Define a line in the model equation for a synapse called `synapse`, or the full equation all at once.
+        Have a look at the brian2 documentation for syanpses for more details.
+
+        Parameters
+        ----------
+        name : str
+            name of the synapse to add the equation to.
+        line : str
+            string expression for the model equation to be added. Must be of the form  v = f(x,y) : unit
+
+        Raises
+        ------
+        ValueError
+            When the `: unit` element is missing in the given expression.
+        ValueError
+            When the `=` is missing in the given expression.
+        """
+        if name not in self.synapses:
+            self.synapses[name] = {}
+            self.functions["synapses"][name] = {}
+
+        self.functions["synapses"][name]["model"] = {
+            "add": lambda eq: self.define_synapse_equation(name, eq),
+            "delete": lambda: self.delete_synapse_element(name, "model"),
+            "modify": lambda eq: self._modify_dict_element(
+                self.synapses[name], "model", eq
+            ),
+        }
+
+        self._add_equation_to_group(self.synapses[name], line)
+
+    @_trigger_rebuild
+    def define_synapse_pre(self, name: str, line: str) -> None:
+        """
+        define_synapse_pre Define the code that is executed on each synapse receiving a presynaptic spike as a string expression.
+
+        Parameters
+        ----------
+        name : str
+            Name of the synapse to add presynaptic code for.
+        line : str
+            String representation of the code to use.
+        """
+        if name not in self.synapses:
+            self.synapses[name] = {}
+            self.functions["synapses"][name] = {}
+
+        self.functions["synapses"][name]["on_pre"] = {
+            "add": lambda eq: self.define_synapse_pre(name, eq),
+            "delete": lambda: self.delete_synapse_element(name, "on_pre"),
+            "modify": lambda eq: self._modify_dict_element(
+                self.synapses[name], "on_pre", eq
+            ),
+        }
+
+        if name not in self.synapses or "on_pre" not in self.synapses[name]:
+            utils.update_nested_dict(
+                self.synapses,
+                {
+                    name: {
+                        "on_pre": line + "\n",
+                    },
+                },
+            )
+        else:
+            self.synapses[name]["on_pre"] += line + "\n"
+
+    @_trigger_rebuild
+    def define_synapse_post(self, name: str, line: str) -> None:
+        """
+        define_synapse_post Add code to a synapse called `name` that shall run
+        when a postsynaptic neuron fired a spike.
+
+        Parameters
+        ----------
+        name : str
+            name of the synapse to add post-synaptic code to.
+        line : str
+            String representation of the code to add.
+        """
+        if name not in self.synapses:
+            self.synapses[name] = {}
+            self.functions["synapses"][name] = {}
+
+        self.functions["synapses"][name]["on_post"] = {
+            "add": lambda eq: self.define_synapse_post(name, eq),
+            "delete": lambda: self.delete_synapse_element(name, "on_post"),
+            "modify": lambda eq: self._modify_dict_element(
+                self.synapses[name], "on_post", eq
+            ),
+        }
+
+        if name not in self.synapses or "on_post" not in self.synapses[name]:
+            utils.update_nested_dict(
+                self.synapses,
+                {
+                    name: {
+                        "on_post": line + "\n",
+                    },
+                },
+            )
+        else:
+            self.synapses[name]["on_post"] += line + "\n"
+
+    @_trigger_rebuild
+    def define_synapse_connection(self, name: str, connection_condition: str) -> None:
+        """
+        define_synapse_connection Define the connections of a Synapse called `name` as a condition represented as a string.
+        Please refer to the brian2 documentation for more details on how synapses are defined.
+
+        Parameters
+        ----------
+        name : str
+            Name of the synapse to add the connection condition to.
+        connection_condition : str
+            String representaion of the connection condition.
+        """
+        if name not in self.synapses:
+            self.synapses[name] = {}
+            self.functions["synapses"][name] = {}
+
+        self.functions["synapses"][name]["connection_condition"] = {
+            "add": lambda c: self.define_synapse_connection(name, c),
+            "delete": lambda: self.delete_synapse_element(name, "connection_condition"),
+            "modify": lambda c: self._modify_dict_element(
+                self.synapses[name], "connection_condition", c
+            ),
+        }
+
+        utils.update_nested_dict(
+            self.synapses,
+            {
+                name: {
+                    "connection_condition": connection_condition,
+                },
+            },
+        )
+
+    @_trigger_rebuild
+    def define_synapse_delay(self, name: str, delay: Any) -> None:
+        """
+        Add delay to synapse
+
+        Parameters
+        ----------
+        name : str
+            name of synapse to add delay for
+        delay : Any
+            delay expression
+        """
+        if name not in self.synapses:
+            self.synapses[name] = {}
+            self.functions["synapses"][name] = {}
+
+        self.functions["synapses"][name]["delay"] = {
+            "add": lambda c: self.define_synapse_delay(name, c),
+            "delete": lambda: self.delete_synapse_element(name, "delay"),
+            "modify": lambda c: self._modify_dict_element(
+                self.synapses[name], "delay", c
+            ),
+        }
+
+        utils.update_nested_dict(
+            self.synapses,
+            {
+                name: {
+                    "delay": delay,
+                },
+            },
+        )
+
+    @_trigger_rebuild
+    def define_synapse_connection_probablitiy(self, name: str, p: float) -> None:
+        """
+        define_synapse_connection_probability Define the connection probability for a given synapse called `name`.
+
+        Parameters
+        ----------
+        name : str Name of the synapse to define the connection probability for.
+
+        p : float
+            Probability value. Must be in [0, 1]
+        """
+        if not 0.0 <= p <= 1.0:
+            raise ValueError(f"Error, supplied value {p} is not a probability.")
+
+        if name not in self.synapses:
+            self.synapses[name] = {}
+            self.functions["synapses"][name] = {}
+
+        self.functions["synapses"][name]["p"] = {
+            "add": lambda p: self.define_synapse_connection_probablitiy(name, p),
+            "delete": lambda: self.delete_synapse_element(name, "p"),
+            "modify": lambda p: self._modify_dict_element(self.synapses[name], "p", p),
+        }
+
+        utils.update_nested_dict(
+            self.synapses,
+            {
+                name: {
+                    "p": p,
+                },
+            },
+        )
+
+    # modifications
+    def _modify_dict_element(
+        self, dictionary: dict[Any, Any], key: str, value: Any
+    ) -> None:
+        """
+        _modify_dict_element modify an elemnet of 'dictionary' programmatically. Mainly used for assignments in lambdas
+
+        Parameters
+        ----------
+        dictionary : dict[Any, Any]
+            Dict to modify
+        key : str
+            key in dictionary to assign
+        value : Any
+            value to assign to dictionary[key]
+        """
+        try:
+            dictionary[key] = value
+        except Exception as e:
+            raise RuntimeError(f"Error when modifying {key}: {e}") from e
+
+    # deletions
     def _delete_dict_element(
         self, dictionary: dict[Any, Any], groupname: str, varname: str
     ) -> None:
@@ -678,7 +1092,9 @@ class B2Model:
         try:
             del dictionary[groupname][varname]
         except Exception as e:
-            raise KeyError(f"Error when deleting {varname} in {groupname}: {e}") from e
+            raise RuntimeError(
+                f"Error when deleting {varname} in {groupname}: {e}"
+            ) from e
 
     @_trigger_rebuild
     def delete_neurongroup(self, name: str) -> None:
@@ -806,170 +1222,6 @@ class B2Model:
             del self.initials[name][varname]
         except Exception as e:
             raise KeyError(f"Error when deleting {varname} in {name}: {e}") from e
-
-    @_trigger_rebuild
-    def define_synapse_equation(self, name: str, line: str) -> None:
-        """
-        define_synapse_equation Define a line in the model equation for a synapse called `synapse`, or the full equation all at once.
-        Have a look at the brian2 documentation for syanpses for more details.
-
-        Parameters
-        ----------
-        name : str
-            name of the synapse to add the equation to.
-        line : str
-            string expression for the model equation to be added. Must be of the form  v = f(x,y) : unit
-
-        Raises
-        ------
-        ValueError
-            When the `: unit` element is missing in the given expression.
-        ValueError
-            When the `=` is missing in the given expression.
-        """
-
-        if name not in self.synapses:
-            self.synapses[name] = {}
-
-        self._add_equation_to_group(self.synapses[name], line)
-
-    @_trigger_rebuild
-    def define_synapse_pre(self, name: str, line: str) -> None:
-        """
-        define_synapse_pre Define the code that is executed on each synapse receiving a presynaptic spike as a string expression.
-
-        Parameters
-        ----------
-        name : str
-            Name of the synapse to add presynaptic code for.
-        line : str
-            String representation of the code to use.
-        """
-        if name not in self.synapses or "on_pre" not in self.synapses[name]:
-            utils.update_nested_dict(
-                self.synapses,
-                {
-                    name: {
-                        "on_pre": line + "\n",
-                    },
-                },
-            )
-        else:
-            self.synapses[name]["on_pre"] += line + "\n"
-
-    @_trigger_rebuild
-    def define_synapse_post(self, name: str, line: str) -> None:
-        """
-        define_synapse_post Add code to a synapse called `name` that shall run
-        when a postsynaptic neuron fired a spike.
-
-        Parameters
-        ----------
-        name : str
-            name of the synapse to add post-synaptic code to.
-        line : str
-            String representation of the code to add.
-        """
-        if name not in self.synapses or "on_post" not in self.synapses[name]:
-            utils.update_nested_dict(
-                self.synapses,
-                {
-                    name: {
-                        "on_post": line + "\n",
-                    },
-                },
-            )
-        else:
-            self.synapses[name]["on_post"] += line + "\n"
-
-    @_trigger_rebuild
-    def define_synapse_connection(self, name: str, connection_condition: str) -> None:
-        """
-        define_synapse_connection Define the connections of a Synapse called `name` as a condition represented as a string.
-        Please refer to the brian2 documentation for more details on how synapses are defined.
-
-        Parameters
-        ----------
-        name : str
-            Name of the synapse to add the connection condition to.
-        connection_condition : str
-            String representaion of the connection condition.
-        """
-        utils.update_nested_dict(
-            self.synapses,
-            {
-                name: {
-                    "connection_condition": connection_condition,
-                },
-            },
-        )
-
-    @_trigger_rebuild
-    def define_synapse_delay(self, name: str, delay: Any) -> None:
-        """
-        Add delay to synapse
-
-        Parameters
-        ----------
-        name : str
-            name of synapse to add delay for
-        delay : Any
-            delay expression
-        """
-        utils.update_nested_dict(
-            self.synapses,
-            {
-                name: {
-                    "delay": delay,
-                },
-            },
-        )
-
-    @_trigger_rebuild
-    def define_synapse_connection_probablitiy(self, name: str, p: float) -> None:
-        """
-        define_synapse_connection_probability Define the connection probability for a given synapse called `name`.
-
-        Parameters
-        ----------
-        name : str Name of the synapse to define the connection probability for.
-
-        p : float
-            Probability value. Must be in [0, 1]
-        """
-        if not 0.0 <= p <= 1.0:
-            raise ValueError(f"Error, supplied value {p} is not a probability.")
-
-        utils.update_nested_dict(
-            self.synapses,
-            {
-                name: {
-                    "p": p,
-                },
-            },
-        )
-
-    @_trigger_rebuild
-    def define_reset(self, name: str, reset: str) -> None:
-        """
-        define_reset Define the `reset` parameter for a neurongroup indicated by `name`.
-
-        Parameters
-        ----------
-        name : str
-            Name of the neurongroup to define the reset parameter for.
-        reset : str
-            The reset parameter for the neurongroup. Have a look at the brian2 documentation for
-            the `NeuronGroup` class for more details.
-        """
-        utils.update_nested_dict(
-            self.neurongroups,
-            {
-                name: {
-                    "reset": reset,
-                },
-            },
-        )
 
     @_trigger_rebuild
     def define_monitor_type(self, name: str, classname: str) -> None:
