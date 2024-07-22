@@ -105,7 +105,7 @@ def test_neuronsubgroup_accept(qtbot: QtBot) -> None:
     neuron_sdlg.target_name = "x"
     neuron_sdlg.subgroup_def = 1
 
-    neuron_sdlg.model.assemble_neurongroup("x")
+    neuron_sdlg.model._assemble_neurongroup("x")
 
     assert neuron_sdlg.model.network["x"] is not None
 

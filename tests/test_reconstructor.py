@@ -45,7 +45,7 @@ def test_reconstruct_object_exception_property_def(
 def test_reconstruct_object_exception_assembler(
     mfx_nmda_serialized: Path, monkeypatch: MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(B2Model, "assemble_neurongroup", raise_error)
+    monkeypatch.setattr(B2Model, "_assemble_neurongroup", raise_error)
     reconstructor = Reconstructor(mfx_nmda_serialized)
     model = B2Model()
 

@@ -16,7 +16,7 @@ def initdlg(qtbot: QtBot, mfx_ornstein: B2W.B2Model) -> B2W.InitialConditionWidg
     mfx_ornstein.define_equation(
         "neurongroup2", "dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1"
     )
-    mfx_ornstein.assemble_neurongroup(name="neurongroup2")
+    mfx_ornstein._assemble_neurongroup(name="neurongroup2")
 
     dialog = B2W.InitialConditionWidget(mfx_ornstein)
     qtbot.addWidget(dialog)
@@ -99,7 +99,7 @@ def test_accept(initdlg: B2W.InitialConditionWidget, qtbot: QtBot) -> None:
     initdlg.model.define_dt(0.2 * ms)
     initdlg.model.define_solver_method("neurongroup3", "euler")
     initdlg.model.define_equation("neurongroup3", eqs)
-    initdlg.model.assemble_neurongroup(name="neurongroup3")
+    initdlg.model._assemble_neurongroup(name="neurongroup3")
 
     # define params
 

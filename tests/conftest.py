@@ -180,12 +180,12 @@ def mfx_ornstein() -> b2_model.B2Model:
     model.define_dt(0.5 * b2.ms)
     model.define_solver_method("neurongroup", "euler")
     model.define_equation("neurongroup", eqs)
-    model.assemble_neurongroup(name="neurongroup")
+    model._assemble_neurongroup(name="neurongroup")
 
     model.define_monitor_source("M", "neurongroup")
     model.define_monitor_type("M", "StateMonitor")
     model.define_monitor_variable("M", "y")
-    model.assemble_monitor("M")
+    model._assemble_monitor("M")
 
     # initial conditions
     model.define_init(
@@ -195,7 +195,7 @@ def mfx_ornstein() -> b2_model.B2Model:
     model.define_init("neurongroup", "sigma", np.array([0.1, 0.31622, 0.4, 0.2, 0.88]))
 
     for n in model.initials:
-        model.assemble_initial_conditions(n)
+        model._assemble_initial_conditions(n)
 
     model.must_be_rebuilt = False
 
@@ -228,8 +228,8 @@ def mfx_nmda() -> b2_model.B2Model:
                             g : 1""",
     )
     model.define_solver_method("neurons", "exact")
-    model.assemble_neurongroup("neurons")
-    model.assemble_neurongroup("neuron_input")
+    model._assemble_neurongroup("neurons")
+    model._assemble_neurongroup("neuron_input")
 
     synapse_eq = """
         dg_syn/dt = -a*g_syn+b*x*(1-g_syn) : 1 (clock-driven)
@@ -242,27 +242,27 @@ def mfx_nmda() -> b2_model.B2Model:
     model.define_synapse_origin("S", "neuron_input")
     model.define_synapse_target("S", "neurons")
     model.define_synapse_pre("S", "x += w")
-    model.assemble_synapse("S")
+    model._assemble_synapse("S")
 
     model.define_neuronsubgroup_target("input_subgroup", "neuron_input")
     model.define_neuronsubgroup_idxs("input_subgroup", 1)
-    model.assemble_neuronsubgroup("input_subgroup")
+    model._assemble_neuronsubgroup("input_subgroup")
 
     model.define_monitor_source("M", "S")
     model.define_monitor_type("M", "StateMonitor")
     model.define_monitor_variable("M", "g")
-    model.assemble_monitor("M")
+    model._assemble_monitor("M")
 
     model.define_monitor_source("Mn", "neurons")
     model.define_monitor_type("Mn", "StateMonitor")
     model.define_monitor_variable("Mn", "g")
-    model.assemble_monitor("Mn")
+    model._assemble_monitor("Mn")
 
     model.define_init("S", "w", [1.0, 10.0])
     model.define_init("neuron_input", "v", [0.0, 0.5])
 
     for n in model.initials:
-        model.assemble_initial_conditions(n)
+        model._assemble_initial_conditions(n)
 
     model.must_be_rebuilt = False
     return model
@@ -284,7 +284,7 @@ def mfx_parameterized(
     mfx.define_refractory("P", refractory)
     mfx.define_dt(dt)
     mfx.define_solver_method("P", method)
-    mfx.assemble_neurongroup("P")
+    mfx._assemble_neurongroup("P")
 
     return mfx, reference_parameters
 
@@ -307,8 +307,8 @@ def mfx_with_synapse(
     mfx.define_neuronsubgroup_target("Pi", "P")
     mfx.define_neuronsubgroup_idxs("Pi", (0, 24))
 
-    mfx.assemble_neuronsubgroup("Pi")
-    mfx.assemble_neuronsubgroup("Pe")
+    mfx._assemble_neuronsubgroup("Pi")
+    mfx._assemble_neuronsubgroup("Pe")
 
     mfx.define_parameter("taupre", taupre)
 

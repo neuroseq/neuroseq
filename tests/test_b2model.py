@@ -137,7 +137,7 @@ def test_assemble_erase_redefine_neurongroup(mfx: b2_model.B2Model) -> None:
         "method": method,
         "model": eq + "\n",
     }
-    mfx.assemble_neurongroup("P")
+    mfx._assemble_neurongroup("P")
     assert len(mfx.network.objects) == 1
 
     assert mfx.network["P"].name == ng.name
@@ -146,7 +146,7 @@ def test_assemble_erase_redefine_neurongroup(mfx: b2_model.B2Model) -> None:
 
     mfx.define_neuronnumber("P", 60)
     mfx.define_threshold("P", "v > 20 * mV")
-    mfx.assemble_neurongroup("P")
+    mfx._assemble_neurongroup("P")
     assert mfx.network["P"].events["spike"] == "v > 20 * mV"
     assert mfx.network["P"]._N == 60
 
@@ -156,7 +156,7 @@ def test_assemble_erase_redefine_neurongroup(mfx: b2_model.B2Model) -> None:
 
 def test_assemble_neurongroup_exception(mfx: b2_model.B2Model) -> None:
     with pytest.raises(RuntimeError, match="Error in assembling neuron group N"):
-        mfx.assemble_neurongroup("N")
+        mfx._assemble_neurongroup("N")
 
 
 def test_neuron_subgroup(
@@ -173,8 +173,8 @@ def test_neuron_subgroup(
     assert mfx.neurongroups["excitatory"]["idxs"] == (0, 20)
     assert mfx.neurongroups["inhibitory"]["idxs"] == (20, 30)
 
-    mfx.assemble_neuronsubgroup("excitatory")
-    mfx.assemble_neuronsubgroup("inhibitory")
+    mfx._assemble_neuronsubgroup("excitatory")
+    mfx._assemble_neuronsubgroup("inhibitory")
 
     assert mfx.network[mfx.neurongroups["excitatory"]["name"]] is not None
     assert mfx.network[mfx.neurongroups["inhibitory"]["name"]] is not None
@@ -187,7 +187,7 @@ def test_neuron_subgroup_remove_exception(
     mfx, _ = mfx_parameterized
     mfx.define_neuronsubgroup_target("excitatory", "P")
     mfx.define_neuronsubgroup_idxs("excitatory", (0, 20))
-    mfx.assemble_neuronsubgroup("excitatory")
+    mfx._assemble_neuronsubgroup("excitatory")
 
     def do_raise(name: Any) -> None:
         raise RuntimeError("dummy")
@@ -197,7 +197,7 @@ def test_neuron_subgroup_remove_exception(
     with pytest.raises(
         RuntimeError, match="Error when removing existing subgroup excitatory:"
     ):
-        mfx.assemble_neuronsubgroup("excitatory")
+        mfx._assemble_neuronsubgroup("excitatory")
 
 
 def test_neuron_subgroup_add_exception(
@@ -214,7 +214,7 @@ def test_neuron_subgroup_add_exception(
     monkeypatch.setattr(b2.Network, "add", do_raise)
 
     with pytest.raises(RuntimeError, match="Error when adding subgroup"):
-        mfx.assemble_neuronsubgroup("excitatory")
+        mfx._assemble_neuronsubgroup("excitatory")
 
 
 def test_neuron_subgroup_creation_exception(
@@ -232,7 +232,7 @@ def test_neuron_subgroup_creation_exception(
     with pytest.raises(
         RuntimeError, match="Error when trying to create a neuronsubgroup"
     ):
-        mfx.assemble_neuronsubgroup("excitatory")
+        mfx._assemble_neuronsubgroup("excitatory")
 
 
 def test_neuron_subgroup_wrong_group(
@@ -287,8 +287,8 @@ def test_define_synapse(
     mfx.define_neuronsubgroup_target("Pi", "P")
     mfx.define_neuronsubgroup_idxs("Pi", (0, 24))
 
-    mfx.assemble_neuronsubgroup("Pi")
-    mfx.assemble_neuronsubgroup("Pe")
+    mfx._assemble_neuronsubgroup("Pi")
+    mfx._assemble_neuronsubgroup("Pe")
 
     mfx.define_parameter("taupre", taupre)
 
@@ -324,7 +324,7 @@ def test_define_synapse(
                       we= clip(we + Apre, -gmax, gmax)""",
     )
 
-    mfx.assemble_synapse("Ce")
+    mfx._assemble_synapse("Ce")
 
     assert len(mfx.synapses) == 1
     assert mfx.synapses["Ce"]["origin"] == "Pe"
@@ -340,7 +340,7 @@ def test_assemble_synapse_exception(
     mfx, _ = mfx_with_synapse
 
     with pytest.raises(RuntimeError, match="Error in defining synapse Ce"):
-        mfx.assemble_synapse("Ce")
+        mfx._assemble_synapse("Ce")
 
 
 def test_connect_synapse_exception(
@@ -353,7 +353,7 @@ def test_connect_synapse_exception(
 
     mfx, _ = mfx_with_synapse
     with pytest.raises(RuntimeError, match="Error in connecting synapse Ce"):
-        mfx.assemble_synapse("Ce")
+        mfx._assemble_synapse("Ce")
 
 
 def test_define_monitor(
@@ -367,7 +367,7 @@ def test_define_monitor(
     mfx.define_monitor_type("Traces_ge", "StateMonitor")
     mfx.define_monitor_variable("Traces_ge", "ge")
 
-    mfx.assemble_monitor("Traces_ge")
+    mfx._assemble_monitor("Traces_ge")
 
     assert "Traces_ge" in mfx.monitors
     assert mfx.network["Traces_ge"].source == mfx.network["P"]
@@ -390,7 +390,7 @@ def test_define_monitor_exception(
         mfx.define_monitor_source("M", "G")
         mfx.define_monitor_type("M", "StateMonitor")
         mfx.define_monitor_variable("M", "v")
-        mfx.assemble_monitor("M")
+        mfx._assemble_monitor("M")
 
 
 def test_define_init(mfx_ornstein: b2_model.B2Model) -> None:

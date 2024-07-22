@@ -360,7 +360,7 @@ class NeuronGroupDialog(ModelDialog):
             )
         else:
             try:
-                self.model.assemble_neurongroup(name=self.name)
+                self.model._assemble_neurongroup(name=self.name)
                 super().accept()
             except Exception as e:
                 self.display_error(
@@ -503,7 +503,7 @@ class NeuronSubgroupDialog(ModelDialog):
             try:
                 self.model.define_neuronsubgroup_target(self.name, self.target_name)
                 self.model.define_neuronsubgroup_idxs(self.name, self.subgroup_def)
-                self.model.assemble_neuronsubgroup(self.name)
+                self.model._assemble_neuronsubgroup(self.name)
 
                 super().accept()
             except Exception as e:
@@ -1127,7 +1127,7 @@ class MonitorDialog(ModelDialog):
             self.model.define_monitor_source(self.name, self.src)
             self.model.define_monitor_type(self.name, self.tp)
             self.model.define_monitor_variable(self.name, self.var)
-            self.model.assemble_monitor(self.name)
+            self.model._assemble_monitor(self.name)
             super().accept()
         except Exception as e:
             self.display_error(f"Error when defining monitor {self.name}: {e}")

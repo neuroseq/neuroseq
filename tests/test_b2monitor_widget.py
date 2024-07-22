@@ -79,7 +79,7 @@ def test_monitor_accept(qtbot: QtBot) -> None:
     mdlg.model.define_dt(0.2 * ms)
     mdlg.model.define_solver_method("neurongroup", "euler")
     mdlg.model.define_equation("neurongroup", eqs)
-    mdlg.model.assemble_neurongroup(name="neurongroup")
+    mdlg.model._assemble_neurongroup(name="neurongroup")
 
     # define the same monitor as in the b2 model test
     mdlg.name = "M"

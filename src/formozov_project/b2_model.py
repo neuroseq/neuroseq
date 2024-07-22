@@ -74,7 +74,7 @@ class B2Model:
         name: str,
     ) -> None:
         """
-        assemble_neuronsubgroup Define a subgroup of a neurongroup as a separate element that can be referred to by name.
+        _assemble_neuronsubgroup Define a subgroup of a neurongroup as a separate element that can be referred to by name.
 
         Parameters
         ----------
@@ -200,7 +200,7 @@ class B2Model:
         name: str,
     ) -> None:
         """
-        assemble_monitor Assemble a new monitor from predefined elements. When a monitor exists that
+        _assemble_monitor Assemble a new monitor from predefined elements. When a monitor exists that
         in the network that has the same name, it is removed and replaced by the newly assembled one
 
         Parameters
