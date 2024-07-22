@@ -86,6 +86,10 @@ class Gui(QtWidgets.QMainWindow):
         self.load_model(str(filename))
 
     def _update_data(self) -> None:
+        if self.model.network.t > 0:
+            self.continue_simulation_action.setText("&Continue simulation")
+        else:
+            self.continue_simulation_action.setText("&Run simulation")
         self.set_neuron(self.cmb_neuron.currentText())
         self.set_synapse(self.cmb_synapse.currentText())
         self.set_spike(self.cmb_spike.currentText())
@@ -204,6 +208,7 @@ class Gui(QtWidgets.QMainWindow):
 
     def update_model(self, model: B2Model) -> None:
         self.model = model
+        self.continue_simulation_action.setText("&Run simulation")
         self.heatmap_widget.clear_data()
         self.trace_widget.clear_data()
         self.stim_editor.set_model(self.model)
@@ -494,8 +499,8 @@ class Gui(QtWidgets.QMainWindow):
     def _create_actions_simulate(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
     ) -> None:
-        add_action(
-            "&Continue simulation",
+        self.continue_simulation_action = add_action(
+            "&Run simulation",
             self.btn_continue_simulation_clicked,
             menu,
             toolbar,

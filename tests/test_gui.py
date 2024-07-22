@@ -62,6 +62,8 @@ def test_gui_simulate_and_playback(
     qtbot.wait(delay_after_update_model_call_in_ms)
     assert gui.heatmap_widget.currentIndex == 0
     assert gui.trace_widget.timeline.getXPos() == approx(0)
+    assert "run" in gui.continue_simulation_action.text().lower()
+    assert "continue" not in gui.continue_simulation_action.text().lower()
     simulation_time = 0.1
     # mock getText to return the desired simulation time
     monkeypatch.setattr(
@@ -82,6 +84,8 @@ def test_gui_simulate_and_playback(
     gui.btn_play_clicked()
     gui.btn_play_clicked()
     qtbot.waitUntil(lambda: gui.heatmap_widget.currentIndex == n_timesteps - 1)
+    assert "run" not in gui.continue_simulation_action.text().lower()
+    assert "continue" in gui.continue_simulation_action.text().lower()
     assert gui.trace_widget.timeline.getXPos() == approx(simulation_time, rel=1e-2)
     assert gui.spike_widget.timeline.getXPos() == approx(simulation_time, rel=1e-2)
     gui.btn_skip_to_start_clicked()
@@ -211,6 +215,8 @@ def test_gui_checkpoints(
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
+    assert "run" in gui.continue_simulation_action.text().lower()
+    assert "continue" not in gui.continue_simulation_action.text().lower()
     assert len(qmessagebox_calls) == 0
     gui.btn_restore_checkpoint_clicked()
     assert len(qmessagebox_calls) == 1
@@ -229,9 +235,13 @@ def test_gui_checkpoints(
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
     )
     gui.btn_continue_simulation_clicked()
+    assert "run" not in gui.continue_simulation_action.text().lower()
+    assert "continue" in gui.continue_simulation_action.text().lower()
     assert gui.model.network["M"].t[-1] == approx(simulation_time, rel=1e-2)
     # restore checkpoint
     gui.btn_restore_checkpoint_clicked()
+    assert "run" in gui.continue_simulation_action.text().lower()
+    assert "continue" not in gui.continue_simulation_action.text().lower()
     assert len(gui.model.network["M"].t) == 0
 
 
