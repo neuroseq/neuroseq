@@ -47,7 +47,7 @@ class Reconstructor:
         model : B2Model
             Model to add the object to
         assembler : str
-            Function to assemble the object with: `_assemble_neurongroup` or `assemble_synapse`
+            Function to assemble the object with: `_assemble_neurongroup` or `_assemble_synapse`
         name : str
             Name of the object to be assembled
         data_of_group : dict[str, Any]
@@ -161,8 +161,15 @@ class Reconstructor:
         data_of_group : dict[str, Any]
             dict containing the data to construct the subgroup
         """
+        print("reconstruct neuron subgroup: ")
+
+        print("define target")
         model.define_neuronsubgroup_target(name, data_of_group["target"])
+        
+        print("define idxs")
         model.define_neuronsubgroup_idxs(name, (data_of_group["idxs"]))
+
+        print("assemble neurongroup")
         model._assemble_neuronsubgroup(name)
 
     def reconstruct_synapses(
@@ -208,7 +215,7 @@ class Reconstructor:
 
         self._reconstruct_dynamic_object(
             model,
-            "assemble_synapse",
+            "_assemble_synapse",
             name,
             data_of_group,
             augmented,

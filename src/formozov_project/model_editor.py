@@ -223,14 +223,20 @@ class EditableParameterTree(ParameterTree):
         self.logger = logging.getLogger(__name__)
         self.name = domain_name
         self.states = getattr(self.b2model, self.name)
+        self.functions = self.b2model.functions[self.name]
+
+        print(self.name)
+        print(self.states)
+        print(self.functions)
+
         self.list_items = list_items
 
-        params = self._convert_dict_to_params(self.states)
+        params = self._convert_dict_to_params(self.states, self.functions)
         self.root = Parameter.create(name=domain_name, type="group", children=params)
 
         self.setParameters(self.root, showTop=False)
 
-        self._connect_parameters(self.root)
+        self._connect_parameters(self.root, self.functions)
 
         self.add_item_action = QtWidgets.QAction(f"add {self.name}")
         self.add_item_action.triggered.connect(self.add_item)
@@ -238,7 +244,7 @@ class EditableParameterTree(ParameterTree):
     def _set_rebuilt(self):
         self.model.must_be_rebuilt = True
 
-    def _connect_parameters(self, param: Parameter, params: dict[Any, Any]) -> None:
+    def _connect_parameters(self, param: Parameter, funcs: dict[Any, Any]) -> None:
         """
         connect the signals emitted by the entries of the parameter tree to their respective actions.
         Whenever something changes (add/delete child node, change value) the model is set to be rebuilt
@@ -250,17 +256,19 @@ class EditableParameterTree(ParameterTree):
             parent paremeter
         """
         if param.type() == "group":
-            # TODO: not sure what to do here.
+            print("group: ", param.name(), list(funcs.keys()))
+            # FIXME: not sure what to do here.
             param.sigChildAdded.connect(self._set_rebuilt)
             param.sigAddNew.connect(lambda: None)
             param.sigChildRemoved.connect(self._set_rebuilt)
-            param.sigNameChanged.connect(params["functions"]["rename"])
+            # param.sigNameChanged.connect(funcs["rename"])
             for child in param.children():
-                self._connect_parameters(child, params[param.name()])
+                self._connect_parameters(child, funcs[child.name()])
         else:
-            param.sigValueChanged.connect(params["functions"]["modify"])
-            param.sigRemoved.connect(params["functions"]["delete"])
-            param.sigNameChanged.connect(params["functions"]["rename"])
+            print("value: ", param.name(), list(funcs.keys()))
+            param.sigValueChanged.connect(funcs["modify"])
+            param.sigRemoved.connect(funcs["delete"])
+            param.sigNameChanged.connect(funcs["rename"])
 
     def _get_value(self, v: Any) -> dict[str, Any] | Any:
         """

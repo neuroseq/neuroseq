@@ -673,7 +673,7 @@ class SynapseDialog(ModelDialog):
             )
         else:
             try:
-                self.model.assemble_synapse(name=self.name)
+                self.model._assemble_synapse(name=self.name)
                 super().accept()
             except Exception as e:
                 self.display_error(

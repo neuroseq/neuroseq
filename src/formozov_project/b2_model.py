@@ -81,6 +81,7 @@ class B2Model:
         name : str
             Name that the subgroup should be referred to.
         """
+        print("assembling subgroup: ", name)
         sng = None
 
         if isinstance(self.neurongroups[name]["idxs"], tuple | list):
@@ -92,34 +93,36 @@ class B2Model:
             start = self.neurongroups[name]["idxs"]
             stop = self.neurongroups[name]["idxs"] + 1
 
-        try:
-            sng = b2.Subgroup(
-                self.network[self.neurongroups[name]["target"]],
-                start,
-                stop,
-                name=name,
-            )
-        except Exception as e:
-            message = f"Error when trying to create a neuronsubgroup {name}: {e}"
-            self.logger.critical(message)
-            raise RuntimeError(message) from e
+        # try:
+        print("making subgroup")
+        sng = b2.Subgroup(
+            self.network[self.neurongroups[name]["target"]],
+            start,
+            stop,
+            name=name,
+        )
+        # except Exception as e:
+        #     message = f"Error when trying to create a neuronsubgroup {name}: {e}"
+        #     self.logger.critical(message)
+        #     raise RuntimeError(message) from e
 
         self.logger.info(f"Neuron subgroup defined: {name}")
 
-        if any(obj.name == name for obj in self.network.objects):
-            try:
-                self.network.remove(sng)
-            except Exception as e:
-                message = f"Error when removing existing subgroup {name}: {e}"
-                self.logger.critical(message)
-                raise RuntimeError(message) from e
+        # if any(obj.name == name for obj in self.network.objects):
+        # try:
+        #     self.network.remove(sng)
+        # except Exception as e:
+        #     message = f"Error when removing existing subgroup {name}: {e}"
+        #     self.logger.critical(message)
+        #     raise RuntimeError(message) from e
 
-        try:
-            self.network.add(sng)
-        except Exception as e:
-            message = f"Error when adding subgroup {name}: {e}"
-            self.logger.critical(message)
-            raise RuntimeError(message) from e
+        # try:
+        print("adding subgroup")
+        self.network.add(sng)
+        # except Exception as e:
+        #     message = f"Error when adding subgroup {name}: {e}"
+        #     self.logger.critical(message)
+        #     raise RuntimeError(message) from e
 
     @_trigger_rebuild
     def _assemble_synapse(
@@ -514,6 +517,7 @@ class B2Model:
         """
         if name not in self.neurongroups:
             self.neurongroups[name] = {}
+        if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {}
 
         self.functions["neurongroups"][name]["reset"] = {
@@ -547,6 +551,7 @@ class B2Model:
         """
         if name not in self.neurongroups:
             self.neurongroups[name] = {}
+        if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {}
 
         self.functions["neurongroups"][name]["th"] = {
@@ -582,6 +587,7 @@ class B2Model:
 
         if name not in self.neurongroups:
             self.neurongroups[name] = {}
+        if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {}
 
         self.functions["neurongroups"][name]["method"] = {
@@ -617,6 +623,7 @@ class B2Model:
         """
         if name not in self.neurongroups:
             self.neurongroups[name] = {}
+        if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {}
 
         self.functions["neurongroups"][name]["refractory"] = {
@@ -651,6 +658,7 @@ class B2Model:
         """
         if name not in self.neurongroups:
             self.neurongroups[name] = {}
+        if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {}
 
         self.functions["neurongroups"][name]["neuronnumber"] = {
@@ -696,10 +704,9 @@ class B2Model:
         self.logger.info(f"defining target {target_name} for neuron subgroup {name}")
 
         if name not in self.neurongroups:
-            self.neurongroups[name] = {"name": name}
-
-        if name not in self.neurongroups:
             self.neurongroups[name] = {}
+
+        if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {}
 
         self.functions["neurongroups"][name]["target"] = {
@@ -734,6 +741,7 @@ class B2Model:
 
         if name not in self.neurongroups:
             self.neurongroups[name] = {}
+        if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {}
 
         self.functions["neurongroups"][name]["idxs"] = {
@@ -768,6 +776,7 @@ class B2Model:
 
         if name not in self.synapses:
             self.synapses[name] = {}
+        if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {}
 
         self.functions["synapses"][name]["method"] = {
@@ -801,8 +810,8 @@ class B2Model:
         """
         if name not in self.synapses:
             self.synapses[name] = {}
+        if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {}
-
         self.functions["synapses"][name]["target"] = {
             "add": lambda t: self.define_synapse_target(name, t),
             "delete": lambda: self.delete_synapse_element(name, "target"),
@@ -834,8 +843,8 @@ class B2Model:
         """
         if name not in self.synapses:
             self.synapses[name] = {}
+        if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {}
-
         self.functions["synapses"][name]["origin"] = {
             "add": lambda o: self.define_synapse_origin(name, o),
             "delete": lambda: self.delete_synapse_element(name, "origin"),
@@ -875,8 +884,8 @@ class B2Model:
         """
         if name not in self.synapses:
             self.synapses[name] = {}
+        if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {}
-
         self.functions["synapses"][name]["model"] = {
             "add": lambda eq: self.define_synapse_equation(name, eq),
             "delete": lambda: self.delete_synapse_element(name, "model"),
@@ -901,8 +910,8 @@ class B2Model:
         """
         if name not in self.synapses:
             self.synapses[name] = {}
+        if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {}
-
         self.functions["synapses"][name]["on_pre"] = {
             "add": lambda eq: self.define_synapse_pre(name, eq),
             "delete": lambda: self.delete_synapse_element(name, "on_pre"),
@@ -938,8 +947,8 @@ class B2Model:
         """
         if name not in self.synapses:
             self.synapses[name] = {}
+        if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {}
-
         self.functions["synapses"][name]["on_post"] = {
             "add": lambda eq: self.define_synapse_post(name, eq),
             "delete": lambda: self.delete_synapse_element(name, "on_post"),
@@ -975,8 +984,8 @@ class B2Model:
         """
         if name not in self.synapses:
             self.synapses[name] = {}
+        if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {}
-
         self.functions["synapses"][name]["connection_condition"] = {
             "add": lambda c: self.define_synapse_connection(name, c),
             "delete": lambda: self.delete_synapse_element(name, "connection_condition"),
@@ -1008,8 +1017,8 @@ class B2Model:
         """
         if name not in self.synapses:
             self.synapses[name] = {}
+        if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {}
-
         self.functions["synapses"][name]["delay"] = {
             "add": lambda c: self.define_synapse_delay(name, c),
             "delete": lambda: self.delete_synapse_element(name, "delay"),
@@ -1044,8 +1053,8 @@ class B2Model:
 
         if name not in self.synapses:
             self.synapses[name] = {}
+        if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {}
-
         self.functions["synapses"][name]["p"] = {
             "add": lambda p: self.define_synapse_connection_probablitiy(name, p),
             "delete": lambda: self.delete_synapse_element(name, "p"),
@@ -1773,11 +1782,12 @@ class B2Model:
         constr = Reconstructor(filepath)
         if report is not None:
             report(10)
-
+        print("loading model")
         model = cls(seed=constr.loaded_data["seed"])
         if report is not None:
             report(20)
 
+        print("done")
         constr.reconstruct(model, report)
 
         if report is not None:
