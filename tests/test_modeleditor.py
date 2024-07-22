@@ -279,7 +279,7 @@ def test_neurontree_add_neurongroup(
     assert ntree.b2model.neurongroups["p1"]["model"] == "dv/dt = -v : siemens\n"
     assert ntree.b2model.neurongroups["p1"]["th"] == "v < -10 mV"
     assert ntree.b2model.neurongroups["p1"]["method"] == "euler"
-    assert ntree.b2model.neurongroups["p1"]["n"] == 25
+    assert ntree.b2model.neurongroups["p1"]["neuronnumber"] == 25
 
     # trigger list update for synapse origin
     origin._update_list()

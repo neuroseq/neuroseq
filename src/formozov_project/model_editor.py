@@ -225,10 +225,6 @@ class EditableParameterTree(ParameterTree):
         self.states = getattr(self.b2model, self.name)
         self.functions = self.b2model.functions[self.name]
 
-        print(self.name)
-        print(self.states)
-        print(self.functions)
-
         self.list_items = list_items
 
         params = self._convert_dict_to_params(self.states, self.functions)
@@ -248,7 +244,7 @@ class EditableParameterTree(ParameterTree):
         """
         connect the signals emitted by the entries of the parameter tree to their respective actions.
         Whenever something changes (add/delete child node, change value) the model is set to be rebuilt
-        when the dialgo is accepted, and changed parameters are updated.
+        when the dialog is accepted, and changed parameters are updated.
 
         Parameters
         ----------
@@ -256,19 +252,23 @@ class EditableParameterTree(ParameterTree):
             parent paremeter
         """
         if param.type() == "group":
-            print("group: ", param.name(), list(funcs.keys()))
             # FIXME: not sure what to do here.
             param.sigChildAdded.connect(self._set_rebuilt)
             param.sigAddNew.connect(lambda: None)
             param.sigChildRemoved.connect(self._set_rebuilt)
             # param.sigNameChanged.connect(funcs["rename"])
             for child in param.children():
-                self._connect_parameters(child, funcs[child.name()])
+                if child.name in funcs:
+                    self._connect_parameters(child, funcs[child.name()])
+                else:
+                    pass
         else:
-            print("value: ", param.name(), list(funcs.keys()))
-            param.sigValueChanged.connect(funcs["modify"])
-            param.sigRemoved.connect(funcs["delete"])
-            param.sigNameChanged.connect(funcs["rename"])
+            if param.name() == "name":
+                pass
+            else:
+                param.sigValueChanged.connect(funcs["modify"])
+                param.sigRemoved.connect(funcs["delete"])
+            # param.sigNameChanged.connect(funcs["rename"])
 
     def _get_value(self, v: Any) -> dict[str, Any] | Any:
         """
@@ -382,7 +382,7 @@ class EditableParameterTree(ParameterTree):
     def update_params(self, new_name: str, new_data: dict[Any, Any]) -> None:
         """
         Update the parameters in the parametertree when a new item is added
-        tot he model through the custom dialog.
+        to the model through the custom dialog.
 
         Parameters
         ----------
@@ -391,6 +391,7 @@ class EditableParameterTree(ParameterTree):
         new_data : dict[Any, Any]
             Data dict to be added
         """
+        # FIXME: use stored node elements
         param = self._convert_dict_to_params(
             {
                 new_name: new_data,
@@ -406,6 +407,8 @@ class EditableParameterTree(ParameterTree):
 
         # check which name has changed, add this name to the internal dict
         # and to the parameters that are displayed
+
+        # FIXME: use stored function elements
         old_names = set(getattr(self.b2model, self.name).keys())
         self.dialog = self.dialogtype(self.b2model)
 
@@ -509,13 +512,6 @@ class EditableMonitorTree(EditableParameterTree):
             },
         )
 
-        params = self._convert_dict_to_params(self.states)
-        self.root = Parameter.create(name="monitors", type="group", children=params)
-
-        self.setParameters(self.root, showTop=False)
-
-        self._connect_parameters(self.root)
-
     def _update_object_list(self) -> list[str]:
         """
         update the currently available list of objects to monitor
@@ -585,9 +581,8 @@ class EditableMonitorTree(EditableParameterTree):
             selected = selected_items[0]
 
             parent = selected.parent()
-
-            source = parent.child(1)
-            typename = parent.child(2)
+            typename = parent.child(1)
+            source = parent.child(2)
 
             try:
                 self.logger.debug("making varialbes as intended")

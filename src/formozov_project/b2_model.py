@@ -60,11 +60,16 @@ class B2Model:
         self.logger.debug(f"full equation: {line}")
 
     def _copy_dict_element(
-        self, dictionary: dict[Any, Any], source: Any, target: Any
+        self, dictionary: dict[Any, Any] | None, source: Any, target: Any
     ) -> None:
         """
         Copy a dict element to another key. This copies data, so use with caution
         """
+        if dictionary is None:
+            raise ValueError(
+                f"Error, dictionary to copy an element from {source} to {target} is None"
+            )
+
         dictionary[target] = deepcopy(dictionary[source])
         del dictionary[source]
 
@@ -81,7 +86,6 @@ class B2Model:
         name : str
             Name that the subgroup should be referred to.
         """
-        print("assembling subgroup: ", name)
         sng = None
 
         if isinstance(self.neurongroups[name]["idxs"], tuple | list):
@@ -93,36 +97,34 @@ class B2Model:
             start = self.neurongroups[name]["idxs"]
             stop = self.neurongroups[name]["idxs"] + 1
 
-        # try:
-        print("making subgroup")
-        sng = b2.Subgroup(
-            self.network[self.neurongroups[name]["target"]],
-            start,
-            stop,
-            name=name,
-        )
-        # except Exception as e:
-        #     message = f"Error when trying to create a neuronsubgroup {name}: {e}"
-        #     self.logger.critical(message)
-        #     raise RuntimeError(message) from e
+        try:
+            sng = b2.Subgroup(
+                self.network[self.neurongroups[name]["target"]],
+                start,
+                stop,
+                name=name,
+            )
+        except Exception as e:
+            message = f"Error when trying to create a neuronsubgroup {name}: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
 
         self.logger.info(f"Neuron subgroup defined: {name}")
 
-        # if any(obj.name == name for obj in self.network.objects):
-        # try:
-        #     self.network.remove(sng)
-        # except Exception as e:
-        #     message = f"Error when removing existing subgroup {name}: {e}"
-        #     self.logger.critical(message)
-        #     raise RuntimeError(message) from e
+        if any(obj.name == name for obj in self.network.objects):
+            try:
+                self.network.remove(sng)
+            except Exception as e:
+                message = f"Error when removing existing subgroup {name}: {e}"
+                self.logger.critical(message)
+                raise RuntimeError(message) from e
 
-        # try:
-        print("adding subgroup")
-        self.network.add(sng)
-        # except Exception as e:
-        #     message = f"Error when adding subgroup {name}: {e}"
-        #     self.logger.critical(message)
-        #     raise RuntimeError(message) from e
+        try:
+            self.network.add(sng)
+        except Exception as e:
+            message = f"Error when adding subgroup {name}: {e}"
+            self.logger.critical(message)
+            raise RuntimeError(message) from e
 
     @_trigger_rebuild
     def _assemble_synapse(
@@ -273,7 +275,7 @@ class B2Model:
         self.logger.info(f"assembling neurongroup '{name}'")
         try:
             ng = b2.NeuronGroup(
-                self.neurongroups[name].get("n", None),
+                self.neurongroups[name].get("neuronnumber", None),
                 self.neurongroups[name].get("model", None),
                 threshold=self.neurongroups[name].get("th", None),
                 refractory=self.neurongroups[name].get("refractory", False),
@@ -673,7 +675,7 @@ class B2Model:
             self.neurongroups,
             {
                 name: {
-                    "n": n,
+                    "neuronnumber": n,
                 },
             },
         )
@@ -1320,11 +1322,12 @@ class B2Model:
             self.monitors[name] = {
                 "name": name,
             }
+        if name not in self.functions["monitors"]:
             self.functions["monitors"][name] = {}
 
-        self.functions["monitors"][name]["p"] = {
+        self.functions["monitors"][name]["type"] = {
             "add": lambda tp: self.define_monitor_type(name, tp),
-            "delete": lambda: self.delete_monitor_element(name, "p"),
+            "delete": lambda: self.delete_monitor_element(name, "type"),
             "modify": lambda tp: self._modify_dict_element(
                 self.monitors[name], "type", tp
             ),
@@ -1355,9 +1358,10 @@ class B2Model:
             self.monitors[name] = {
                 "name": name,
             }
+        if name not in self.functions["monitors"]:
             self.functions["monitors"][name] = {}
 
-        self.functions["monitors"][name]["p"] = {
+        self.functions["monitors"][name]["source"] = {
             "add": lambda src: self.define_monitor_source(name, src),
             "delete": lambda: self.delete_monitor_element(name, "source"),
             "modify": lambda src: self._modify_dict_element(
@@ -1391,9 +1395,10 @@ class B2Model:
             self.monitors[name] = {
                 "name": name,
             }
+        if name not in self.functions["monitors"]:
             self.functions["monitors"][name] = {}
 
-        self.functions["monitors"][name]["p"] = {
+        self.functions["monitors"][name]["variable"] = {
             "add": lambda var: self.define_monitor_variable(name, var),
             "delete": lambda: self.delete_monitor_element(name, "variable"),
             "modify": lambda var: self._modify_dict_element(
@@ -1782,12 +1787,11 @@ class B2Model:
         constr = Reconstructor(filepath)
         if report is not None:
             report(10)
-        print("loading model")
+
         model = cls(seed=constr.loaded_data["seed"])
         if report is not None:
             report(20)
 
-        print("done")
         constr.reconstruct(model, report)
 
         if report is not None:

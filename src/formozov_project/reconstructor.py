@@ -123,7 +123,7 @@ class Reconstructor:
         """
         augmented = list(
             zip(
-                ["N", "n", "model", "th", "refractory", "reset", "method"],
+                ["N", "neuronnumber", "model", "th", "refractory", "reset", "method"],
                 [
                     model.define_neuronnumber,
                     model.define_neuronnumber,
@@ -161,15 +161,10 @@ class Reconstructor:
         data_of_group : dict[str, Any]
             dict containing the data to construct the subgroup
         """
-        print("reconstruct neuron subgroup: ")
-
-        print("define target")
         model.define_neuronsubgroup_target(name, data_of_group["target"])
-        
-        print("define idxs")
+
         model.define_neuronsubgroup_idxs(name, (data_of_group["idxs"]))
 
-        print("assemble neurongroup")
         model._assemble_neuronsubgroup(name)
 
     def reconstruct_synapses(
@@ -242,7 +237,12 @@ class Reconstructor:
         model.define_monitor_variable(
             data_of_group["name"], data_of_group.get("variable")
         )
-
+        print(
+            "monitor system: ",
+            data_of_group,
+            ",",
+            model.monitors[data_of_group["name"]],
+        )
         model._assemble_monitor(data_of_group["name"])
 
     def reconstruct(
@@ -267,7 +267,9 @@ class Reconstructor:
             model.define_dt(self.loaded_data["timestep"])
 
         # reconstruct parameters, timestep, seed.
-        model.parameters = self.loaded_data["parameters"]
+        for k, v in self.loaded_data["parameters"].items():
+            model.define_parameter(k, v)
+
         if report is not None:
             report(30)
 

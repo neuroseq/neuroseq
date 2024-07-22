@@ -98,7 +98,7 @@ def test_neurongroup_assembling(qtbot: QtBot) -> None:
 
     ndiag.model.neurongroups["x"] = {}
     ndiag.model.neurongroups["x"]["model"] = "dv/dt = -v : volt\n"
-    ndiag.model.neurongroups["x"]["n"] = 64
+    ndiag.model.neurongroups["x"]["neuronnumber"] = 64
     ndiag.name = "x"
 
     ndiag.accept()
@@ -135,7 +135,7 @@ def test_neurongroup_assembling_exceptions(qtbot: QtBot) -> None:
     )
     ndiag.error_dialog.close()
 
-    ndiag.model.neurongroups["x"]["n"] = 64
+    ndiag.model.neurongroups["x"]["neuronnumber"] = 64
 
     ndiag.accept()
 

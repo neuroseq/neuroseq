@@ -102,7 +102,7 @@ def test_define_refractory(mfx: b2_model.B2Model) -> None:
 def test_define_neuron_number(mfx: b2_model.B2Model) -> None:
     assert mfx.neurongroups == {}
     mfx.define_neuronnumber("P", 100)
-    assert mfx.neurongroups["P"]["n"] == 100
+    assert mfx.neurongroups["P"]["neuronnumber"] == 100
 
 
 def test_assemble_erase_redefine_neurongroup(mfx: b2_model.B2Model) -> None:
@@ -131,7 +131,7 @@ def test_assemble_erase_redefine_neurongroup(mfx: b2_model.B2Model) -> None:
     )
 
     assert mfx.neurongroups["P"] == {
-        "n": n,
+        "neuronnumber": n,
         "th": threshold,
         "refractory": refractory,
         "method": method,
@@ -524,9 +524,9 @@ def test_NMDA_model(mfx_nmda: b2_model.B2Model) -> None:
 
 
 def test_NMDA_model_delete(mfx_nmda: b2_model.B2Model) -> None:
-    assert "n" in mfx_nmda.neurongroups["neuron_input"]
-    mfx_nmda.delete_neurongroup_element("neuron_input", "n")
-    assert "n" not in mfx_nmda.neurongroups["neuron_input"]
+    assert "neuronnumber" in mfx_nmda.neurongroups["neuron_input"]
+    mfx_nmda.delete_neurongroup_element("neuron_input", "neuronnumber")
+    assert "neuronnumber" not in mfx_nmda.neurongroups["neuron_input"]
 
     assert "on_pre" in mfx_nmda.synapses["S"]
     mfx_nmda.delete_synapse_element("S", "on_pre")

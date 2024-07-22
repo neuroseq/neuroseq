@@ -100,7 +100,7 @@ def test_neuronsubgroup_accept(qtbot: QtBot) -> None:
 
     neuron_sdlg.model.neurongroups["x"] = {}
     neuron_sdlg.model.neurongroups["x"]["model"] = "dv/dt = -v : volt\n"
-    neuron_sdlg.model.neurongroups["x"]["n"] = 64
+    neuron_sdlg.model.neurongroups["x"]["neuronnumber"] = 64
     neuron_sdlg.name = "x1"
     neuron_sdlg.target_name = "x"
     neuron_sdlg.subgroup_def = 1

@@ -353,7 +353,7 @@ class NeuronGroupDialog(ModelDialog):
             self.display_error("Error, first define a neurongroup by giving it a name")
         elif (
             "model" not in self.model.neurongroups[self.name]
-            or "n" not in self.model.neurongroups[self.name]
+            or "neuronnumber" not in self.model.neurongroups[self.name]
         ):
             self.display_error(
                 "The model equation and the neuronnumber need to be defined"
