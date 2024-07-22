@@ -34,50 +34,35 @@ class Gui(QtWidgets.QMainWindow):
         self.synapses: dict[str, tuple[b2.StateMonitor, str]] = {}
         self.spikes: dict[str, b2.SpikeMonitor] = {}
         self.setWindowTitle("Formozov Project")
-        self._create_menus_and_toolbar()
-        self.addToolBar(self.toolbar)
+        self._create_menus_and_toolbars()
         self.setWindowIcon(qta.icon("mdi6.brain"))
-        grid_layout = QtWidgets.QVBoxLayout()
+        main_horizontal_layout = QtWidgets.QHBoxLayout()
         central_widget = QtWidgets.QWidget()
-        central_widget.setLayout(grid_layout)
-        # left/right splitters between simulation output plots
+        central_widget.setLayout(main_horizontal_layout)
+        # vertical toolbar for stim editing on the left
+        self.toolbar_stim_editor = QtWidgets.QToolBar()
+        self.toolbar_stim_editor.setOrientation(QtCore.Qt.Orientation.Vertical)
+        main_horizontal_layout.addWidget(self.toolbar_stim_editor)
+        # left/right splitters between heatmap and console
         split_left_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
-        # traces
-        self.trace_widget_parent = QtWidgets.QWidget()
-        trace_widget_layout = QtWidgets.QVBoxLayout()
-        self.trace_widget_parent.setLayout(trace_widget_layout)
-        self.cmb_neuron = QtWidgets.QComboBox()
-        trace_widget_layout.addWidget(self.cmb_neuron)
-        self.trace_widget = TraceWidget()
-        trace_widget_layout.addWidget(self.trace_widget)
-        split_left_right.addWidget(self.trace_widget_parent)
-        # spikes
-        self.spike_widget_parent = QtWidgets.QWidget()
-        spike_widget_layout = QtWidgets.QVBoxLayout()
-        self.spike_widget_parent.setLayout(spike_widget_layout)
-        self.cmb_spike = QtWidgets.QComboBox()
-        spike_widget_layout.addWidget(self.cmb_spike)
-        self.spike_widget = SpikeWidget()
-        spike_widget_layout.addWidget(self.spike_widget)
-        split_left_right.addWidget(self.spike_widget_parent)
-        # heatmaps
-        self.heatmap_widget_parent = QtWidgets.QWidget()
-        heatmap_widget_layout = QtWidgets.QVBoxLayout()
-        self.heatmap_widget_parent.setLayout(heatmap_widget_layout)
-        self.cmb_synapse = QtWidgets.QComboBox()
-        heatmap_widget_layout.addWidget(self.cmb_synapse)
         self.heatmap_widget = HeatmapWidget()
-        heatmap_widget_layout.addWidget(self.heatmap_widget)
-        split_left_right.addWidget(self.heatmap_widget_parent)
-        split_left_right.setSizes([1000, 1000, 1000])
+        split_left_right.addWidget(self.heatmap_widget)
+        self.stim_console = StimConsole()
+        split_left_right.addWidget(self.stim_console)
+        split_left_right.setSizes([1000, 1000])
         # main vertical splitter layout
         split_vertical = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
-        self.stim_editor = StimEditor(menu=self.menu_stimuli)
+        self.stim_editor = StimEditor(
+            cmb_stim=self.cmb_stim, toolbar=self.toolbar_stim_editor
+        )
         split_vertical.addWidget(self.stim_editor)
+        self.trace_widget = TraceWidget()
+        split_vertical.addWidget(self.trace_widget)
+        self.spike_widget = SpikeWidget()
+        split_vertical.addWidget(self.spike_widget)
+        # heatmap / console
         split_vertical.addWidget(split_left_right)
-        self.stim_console = StimConsole()
-        split_vertical.addWidget(self.stim_console)
-        grid_layout.addWidget(split_vertical)
+        main_horizontal_layout.addWidget(split_vertical)
         self.setCentralWidget(central_widget)
         self._create_actions()
         self.resize(800, 600)
@@ -415,161 +400,208 @@ class Gui(QtWidgets.QMainWindow):
         self.progress_dialog.setMinimumDuration(10)
         self.progress_dialog.reset()
 
-    def _create_menus_and_toolbar(self) -> None:
+    def _create_menus_and_toolbars(self) -> None:
         menu = self.menuBar()
-        self.toolbar = QtWidgets.QToolBar()
         self.menu_file = menu.addMenu("&File")
-        self.menu_playback = menu.addMenu("&Playback")
-        self.menu_stimuli = menu.addMenu("&Stimuli")
+        self.toolbar_file = QtWidgets.QToolBar("File")
+        self.addToolBar(self.toolbar_file)
         self.menu_simulate = menu.addMenu("&Simulate")
+        self.toolbar_simulate = QtWidgets.QToolBar("Simulate")
+        self.addToolBar(self.toolbar_simulate)
+        self.menu_playback = menu.addMenu("&Playback")
+        self.toolbar_playback = QtWidgets.QToolBar("Playback")
+        self.addToolBar(self.toolbar_playback)
         self.menu_view = menu.addMenu("&View")
+        self.toolbar_view = QtWidgets.QToolBar("View")
+        self.addToolBar(self.toolbar_view)
+        self.toolbar_data = QtWidgets.QToolBar("Data")
+        self.addToolBar(self.toolbar_data)
         self.menu_help = menu.addMenu("&Help")
+        self._create_actions_data(toolbar=self.toolbar_data, menu=None)
 
     def _create_actions(self) -> None:
+        self._create_actions_file(self.menu_file, self.toolbar_file)
+        self._create_actions_simulate(self.menu_simulate, self.toolbar_simulate)
+        self._create_actions_playback(self.menu_playback, self.toolbar_playback)
+        self._create_actions_view(self.menu_view, self.toolbar_view)
+        self._create_actions_help(menu=self.menu_help, toolbar=None)
+
+    def _create_actions_file(
+        self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
+    ) -> None:
         add_action(
             "&New",
             self.btn_new_clicked,
-            self.menu_file,
-            self.toolbar,
+            menu,
+            toolbar,
             shortcut="Ctrl+N",
             icon=qta.icon("mdi6.file"),
         )
         add_action(
             "Open &example model",
             self.btn_open_example_model_clicked,
-            self.menu_file,
-            self.toolbar,
+            menu,
+            toolbar,
             shortcut="Ctrl+Shift+O",
             icon=qta.icon("mdi6.file-document"),
         )
         add_action(
             "&Open",
             self.btn_open_clicked,
-            self.menu_file,
-            self.toolbar,
+            menu,
+            toolbar,
             shortcut="Ctrl+O",
             icon=qta.icon("mdi6.folder-open"),
         )
         add_action(
             "&Save",
             self.btn_save_clicked,
-            self.menu_file,
-            self.toolbar,
+            menu,
+            toolbar,
             shortcut="Ctrl+S",
             icon=qta.icon("mdi6.content-save"),
         )
         add_action(
             "&Export",
             self.btn_export_clicked,
-            self.menu_file,
-            self.toolbar,
+            menu,
+            toolbar,
             shortcut="Ctrl+Shift+E",
             icon=qta.icon("mdi6.content-save-move"),
         )
         add_action(
             "&Edit",
             self.btn_edit_clicked,
-            self.menu_file,
-            self.toolbar,
+            menu,
+            toolbar,
             shortcut="Ctrl+E",
             icon=qta.icon("mdi6.cog"),
         )
         add_action(
             "E&xit",
             self.btn_exit_clicked,
-            self.menu_file,
+            menu,
             None,
             shortcut=None,
             icon=qta.icon("mdi6.exit-to-app"),
         )
-        self.toolbar.addSeparator()
+
+    def _create_actions_simulate(
+        self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
+    ) -> None:
         add_action(
             "&Continue simulation",
             self.btn_continue_simulation_clicked,
-            self.menu_simulate,
-            self.toolbar,
+            menu,
+            toolbar,
             shortcut="Ctrl+R",
             icon=qta.icon("mdi6.head"),
         )
         add_action(
             "&Store simulation checkpoint",
             self.btn_store_checkpoint_clicked,
-            self.menu_simulate,
-            self.toolbar,
+            menu,
+            toolbar,
             shortcut="Ctrl+Shift+S",
             icon=qta.icon("mdi6.head-check"),
         )
         add_action(
             "&Restore simulation checkpoint",
             self.btn_restore_checkpoint_clicked,
-            self.menu_simulate,
-            self.toolbar,
+            menu,
+            toolbar,
             shortcut="Ctrl+Shift+R",
             icon=qta.icon("mdi6.head-sync"),
         )
-        self.toolbar.addSeparator()
+
+    def _create_actions_playback(
+        self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
+    ) -> None:
         add_action(
             "&Skip to start",
             self.btn_skip_to_start_clicked,
-            self.menu_playback,
-            self.toolbar,
+            menu,
+            toolbar,
             shortcut=None,
             icon=qta.icon("mdi6.skip-previous"),
         )
         add_action(
             "&Stop",
             self.btn_stop_clicked,
-            self.menu_playback,
-            self.toolbar,
+            menu,
+            toolbar,
             shortcut=None,
             icon=qta.icon("mdi6.stop"),
         )
         add_action(
             "&Play / Pause",
             self.btn_play_clicked,
-            self.menu_playback,
-            self.toolbar,
+            menu,
+            toolbar,
             shortcut="Space",
             icon=qta.icon("mdi6.play-pause"),
         )
         add_action(
             "&Skip to end",
             self.btn_skip_to_end_clicked,
-            self.menu_playback,
-            self.toolbar,
+            menu,
+            toolbar,
             shortcut=None,
             icon=qta.icon("mdi6.skip-next"),
         )
-        self.toolbar.addSeparator()
+
+    def _create_actions_view(
+        self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
+    ) -> None:
         for name, widget, icon in [
             ("&Stimuli", self.stim_editor, "chart-timeline"),
-            ("&Traces", self.trace_widget_parent, "chart-line"),
-            ("&Spikes", self.spike_widget_parent, "chart-scatter-plot"),
-            ("&Heatmap", self.heatmap_widget_parent, "data-matrix"),
+            ("&Traces", self.trace_widget, "chart-line"),
+            ("&Spikes", self.spike_widget, "chart-scatter-plot"),
+            ("&Heatmap", self.heatmap_widget, "data-matrix"),
             ("&Console", self.stim_console, "console"),
         ]:
             add_action(
                 f"Show {name}",
                 lambda toggled, w=widget: w.setVisible(toggled),
-                self.menu_view,
-                self.toolbar,
+                menu,
+                toolbar,
                 icon=qta.icon(f"mdi6.{icon}"),
                 checkable=True,
             )
         add_action(
             "Link X axes",
             self.link_x_axes,
-            self.menu_view,
-            self.toolbar,
+            menu,
+            toolbar,
             icon=qta.icon("mdi6.arrow-horizontal-lock"),
             checkable=True,
         )
         add_action(
             "Link Y axes",
             self.link_y_axes,
-            self.menu_view,
-            self.toolbar,
+            menu,
+            toolbar,
             icon=qta.icon("mdi6.arrow-vertical-lock"),
             checkable=True,
         )
-        add_action("&About", self.about, self.menu_help)
+
+    def _create_actions_help(
+        self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
+    ) -> None:
+        add_action("&About", self.about, menu)
+
+    def _create_actions_data(
+        self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
+    ) -> None:
+        self.cmb_stim = QtWidgets.QComboBox()
+        toolbar.addWidget(QtWidgets.QLabel("  Stim data: "))
+        toolbar.addWidget(self.cmb_stim)
+        self.cmb_neuron = QtWidgets.QComboBox()
+        toolbar.addWidget(QtWidgets.QLabel("  Neuron data: "))
+        toolbar.addWidget(self.cmb_neuron)
+        self.cmb_spike = QtWidgets.QComboBox()
+        toolbar.addWidget(QtWidgets.QLabel("  Spike data: "))
+        toolbar.addWidget(self.cmb_spike)
+        self.cmb_synapse = QtWidgets.QComboBox()
+        toolbar.addWidget(QtWidgets.QLabel("  Synapse data: "))
+        toolbar.addWidget(self.cmb_synapse)

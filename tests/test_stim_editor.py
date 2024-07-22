@@ -13,7 +13,9 @@ from qtpy import QtWidgets
 
 
 def test_stim_editor_no_data(qtbot: QtBot) -> None:
-    stim_editor = StimEditor()
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    stim_editor = StimEditor(cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
     stim_editor.show()
     qtbot.waitUntil(lambda: stim_editor.isVisible())
@@ -32,7 +34,9 @@ def test_stim_editor_edit_mode_actions(
     timed_array.values[2:7, 1:3] = selection
     model = B2Model()
     model.parameters = {"a": timed_array, "irrelevant": 4}
-    stim_editor = StimEditor()
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    stim_editor = StimEditor(cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
     stim_editor.show()
     qtbot.waitUntil(lambda: stim_editor.isVisible())

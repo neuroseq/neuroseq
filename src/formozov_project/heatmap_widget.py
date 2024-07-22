@@ -18,6 +18,8 @@ class HeatmapWidget(pg.ImageView):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent, discreteTimeLine=True)
+        self.ui.roiBtn.hide()
+        self.ui.menuBtn.hide()
         self.setPredefinedGradient("viridis")
         self.set_data(data, timestamps)
 
