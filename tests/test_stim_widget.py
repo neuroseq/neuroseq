@@ -150,9 +150,21 @@ def test_stim_widget_mouse_capture(qtbot: QtBot, stims: b2.TimedArray) -> None:
     assert stim_widget.selected_neuron_slice is None
 
     # mouse drag selects neurons
+    selection_made_signals: list[tuple[slice, slice]] = []
+    stim_widget.selection_made.connect(
+        lambda neuron_index, time_index: selection_made_signals.append(
+            (neuron_index, time_index)
+        )
+    )
+    assert selection_made_signals == []
+
     mouse_click_and_drag(
         qtbot, stim_widget, QtCore.QPoint(x0, y0), QtCore.QPoint(x2, y2)
     )
+    assert len(selection_made_signals) == 1
+    assert selection_made_signals[0][0] == stim_widget.selected_neuron_slice
+    assert selection_made_signals[0][1] == stim_widget.selected_time_slice
+
     assert stim_widget.selected_time_slice is not None
     assert stim_widget.selected_time_slice.start > 0
     assert (

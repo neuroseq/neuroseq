@@ -39,6 +39,7 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
     Subclasses should call _plot_data() and implement _plot_neuron_data() to plot the data.
     """
 
+    selection_made = QtCore.Signal(slice, slice)
     selection_moved = QtCore.Signal(int, int)
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
@@ -151,10 +152,6 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
             return
         pos = ev.position()
         delta_pos = pos - self.mouse_press_pos
-        self.logger.debug(f"Delta pos f{delta_pos}")
-        self.logger.debug(
-            f"{self.mouse_selected_rect} -> {self.mouse_selected_rect.translated(delta_pos)}"
-        )
         if self.mouse_mode == MouseMode.MOVE:
             self.roi.setRect(self.mouse_selected_rect.translated(delta_pos))
         elif self.mouse_mode == MouseMode.SELECT:
@@ -163,7 +160,6 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
             w = abs(delta_pos.x())
             h = abs(delta_pos.y())
             self.roi.setRect(QtCore.QRectF(x, y, w, h))
-        self.logger.debug(f"Updating ROI to f{self.roi.rect()}")
         self.roi.show()
 
     def mouseReleaseEvent(self, ev: Any) -> None:
@@ -189,12 +185,13 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
             x1 = math.floor(p1.x() / self.dt)
             y0 = max(0, math.ceil(p1.y() + 0.5))
             y1 = math.floor(p0.y() + 0.5)
-            selected_x_slice = slice(x0, x1)
-            selected_y_slice = slice(y0, y1)
+            selected_x_slice = slice(min(x0, x1), max(x0, x1))
+            selected_y_slice = slice(min(y0, y1), max(y0, y1))
             self.logger.debug(
                 f"Selecting neurons {selected_y_slice} and times {selected_x_slice}"
             )
             self.select_neurons(selected_y_slice, selected_x_slice)
+            self.selection_made.emit(selected_y_slice, selected_x_slice)
         elif self.mouse_mode == MouseMode.MOVE:
             delta = self.mapToView(pos) - self.mapToView(self.mouse_press_pos)
             neuron_index_offset = round(delta.y())
@@ -229,12 +226,14 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
             time_index_slice = slice(time_index_slice.start, self.n_timestamps)
         self.selected_time_slice = time_index_slice
         self.selected_neuron_slice = neuron_index_slice
+        self.logger.debug(
+            f"Selecting neurons {neuron_index_slice} and times {time_index_slice}"
+        )
         self.roi.show()
         self.update_roi()
         for neuron_index, neuron_plot in enumerate(self.neuron_plots):
-            if (
-                neuron_index >= neuron_index_slice.start
-                and neuron_index_slice.stop is None
+            if neuron_index >= neuron_index_slice.start and (
+                neuron_index_slice.stop is None
                 or neuron_index < neuron_index_slice.stop
             ):
                 neuron_plot.set_selected_slice(time_index_slice)
