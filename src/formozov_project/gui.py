@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import pathlib
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -25,7 +26,7 @@ from formozov_project.utils import with_wait_cursor
 
 
 class Gui(QtWidgets.QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, filename: pathlib.Path | str | None = None) -> None:
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.logger.info("starting Gui")
@@ -80,6 +81,9 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_neuron.currentTextChanged.connect(self.set_neuron)
         self.cmb_synapse.currentTextChanged.connect(self.set_synapse)
         self.cmb_spike.currentTextChanged.connect(self.set_spike)
+        if filename is None:
+            filename = example_models_path / "default_model.json"
+        self.load_model(str(filename))
 
     def _update_data(self) -> None:
         self.set_neuron(self.cmb_neuron.currentText())
@@ -195,6 +199,7 @@ class Gui(QtWidgets.QMainWindow):
                 "Model construction error",
                 f"Could not load model from file '{filename}': {e}",
             )
+            self.progress_dialog.reset()
             return
 
     def update_model(self, model: B2Model) -> None:
