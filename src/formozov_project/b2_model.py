@@ -59,6 +59,15 @@ class B2Model:
         self.logger.info(f"Equation defined for group {group}")
         self.logger.debug(f"full equation: {line}")
 
+    def _copy_dict_element(
+        self, dictionary: dict[Any, Any], source: Any, target: Any
+    ) -> None:
+        """
+        Copy a dict element to another key. This copies data, so use with caution
+        """
+        dictionary[target] = deepcopy(dictionary[source])
+        del dictionary[source]
+
     @_trigger_rebuild
     def _assemble_neuronsubgroup(
         self,
@@ -118,7 +127,7 @@ class B2Model:
         name: str,
     ) -> None:
         """
-        assemble_synapse Assemble a synapse called `name` from its set of predefined values.
+        _assemble_neurongroup Assemble a synapse called `name` from its set of predefined values.
 
         You need to define the respective variables first via the `define_synapse_*` functions.
 
@@ -242,7 +251,7 @@ class B2Model:
         name: str = "neurongroup",
     ) -> None:
         """
-        assemble_neurongroup Assemble a neurongroup called `name` from its set of predefined values.
+        _assemble_neurongroup Assemble a neurongroup called `name` from its set of predefined values.
         When a neurongroup of the same name already exists in the network, it will be removed and replaced with the newly assembled one.
         You need to define the respective variables first via the `define_*` functions.
 
@@ -1073,6 +1082,62 @@ class B2Model:
         except Exception as e:
             raise RuntimeError(f"Error when modifying {key}: {e}") from e
 
+    def rename_neurongroup(self, name: str, new_name: str) -> None:
+        """
+        rename_neurongroup Rename a neurongroup
+
+        Parameters
+        ----------
+        name : str
+            old name
+        new_name : str
+            new name
+        """
+        self._copy_dict_element(self.neurongroups, name, new_name)
+        self._copy_dict_element(self.functions["neurongroups"], name, new_name)
+
+    def rename_synapse(self, name: str, new_name: str) -> None:
+        """
+        Rename a synapse
+
+        Parameters
+        ----------
+        name : str
+            old name
+        new_name : str
+            new name
+        """
+        self._copy_dict_element(self.synapses, name, new_name)
+        self._copy_dict_element(self.functions["synapses"], name, new_name)
+
+    def rename_parameter(self, name: str, new_name: str) -> None:
+        """
+        Rename a monitor
+
+        Parameters
+        ----------
+        name : str
+            old name
+        new_name : str
+            new name
+        """
+        self._copy_dict_element(self.parameters, name, new_name)
+        self._copy_dict_element(self.functions["parameters"], name, new_name)
+
+    def rename_monitor(self, name: str, new_name: str) -> None:
+        """
+        Rename a monitor
+
+        Parameters
+        ----------
+        name : str
+            old name
+        new_name : str
+            new name
+        """
+        self._copy_dict_element(self.monitors, name, new_name)
+        self._copy_dict_element(self.functions["monitors"], name, new_name)
+
     # deletions
     def _delete_dict_element(
         self, dictionary: dict[Any, Any], groupname: str, varname: str
@@ -1154,7 +1219,9 @@ class B2Model:
         varname : str
             variable name that should be deleted
         """
+
         self._delete_dict_element(self.neurongroups, groupname, varname)
+        self._delete_dict_element(self.functions["neurongroups"], groupname, varname)
 
     @_trigger_rebuild
     def delete_synapse_element(self, groupname: str, varname: str) -> None:
@@ -1170,6 +1237,7 @@ class B2Model:
             variable name that should be deleted
         """
         self._delete_dict_element(self.synapses, groupname, varname)
+        self._delete_dict_element(self.functions["synapses"], groupname, varname)
 
     @_trigger_rebuild
     def delete_monitor_element(self, groupname: str, varname: str) -> None:
@@ -1185,6 +1253,7 @@ class B2Model:
             variable name that should be deleted
         """
         self._delete_dict_element(self.monitors, groupname, varname)
+        self._delete_dict_element(self.functions["monitors"], groupname, varname)
 
     def delete_parameter(self, name: str) -> None:
         """
@@ -1197,6 +1266,7 @@ class B2Model:
         """
         try:
             del self.parameters[name]  # type: ignore
+            del self.functions["parameters"][name]
         except Exception as e:
             raise KeyError(f"Error when deleting {name}: {e}") from e
 
@@ -1220,9 +1290,11 @@ class B2Model:
         """
         try:
             del self.initials[name][varname]
+            del self.functions["initials"][name][varname]
         except Exception as e:
             raise KeyError(f"Error when deleting {varname} in {name}: {e}") from e
 
+    # monitor
     @_trigger_rebuild
     def define_monitor_type(self, name: str, classname: str) -> None:
         """
@@ -1239,6 +1311,15 @@ class B2Model:
             self.monitors[name] = {
                 "name": name,
             }
+            self.functions["monitors"][name] = {}
+
+        self.functions["monitors"][name]["p"] = {
+            "add": lambda tp: self.define_monitor_type(name, tp),
+            "delete": lambda: self.delete_monitor_element(name, "p"),
+            "modify": lambda tp: self._modify_dict_element(
+                self.monitors[name], "type", tp
+            ),
+        }
 
         utils.update_nested_dict(
             self.monitors,
@@ -1265,6 +1346,15 @@ class B2Model:
             self.monitors[name] = {
                 "name": name,
             }
+            self.functions["monitors"][name] = {}
+
+        self.functions["monitors"][name]["p"] = {
+            "add": lambda src: self.define_monitor_source(name, src),
+            "delete": lambda: self.delete_monitor_element(name, "source"),
+            "modify": lambda src: self._modify_dict_element(
+                self.monitors[name], "source", src
+            ),
+        }
 
         utils.update_nested_dict(
             self.monitors,
@@ -1292,7 +1382,15 @@ class B2Model:
             self.monitors[name] = {
                 "name": name,
             }
+            self.functions["monitors"][name] = {}
 
+        self.functions["monitors"][name]["p"] = {
+            "add": lambda var: self.define_monitor_variable(name, var),
+            "delete": lambda: self.delete_monitor_element(name, "variable"),
+            "modify": lambda var: self._modify_dict_element(
+                self.monitors[name], "variable", var
+            ),
+        }
         utils.update_nested_dict(
             self.monitors,
             {

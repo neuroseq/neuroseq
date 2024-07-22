@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Callable
 from typing import Any
 
@@ -27,7 +26,6 @@ from formozov_project.b2_model_widget import NeuronSubgroupDialog
 from formozov_project.b2_model_widget import ParameterDialog
 from formozov_project.b2_model_widget import SynapseDialog
 from formozov_project.reconstructor import Reconstructor
-from formozov_project.utils import parse_string_to_quantity
 
 
 # derive a new combobox which has a 'clicked' signal
@@ -237,7 +235,10 @@ class EditableParameterTree(ParameterTree):
         self.add_item_action = QtWidgets.QAction(f"add {self.name}")
         self.add_item_action.triggered.connect(self.add_item)
 
-    def _connect_parameters(self, param: Parameter) -> None:
+    def _set_rebuilt(self):
+        self.model.must_be_rebuilt = True
+
+    def _connect_parameters(self, param: Parameter, params: dict[Any, Any]) -> None:
         """
         connect the signals emitted by the entries of the parameter tree to their respective actions.
         Whenever something changes (add/delete child node, change value) the model is set to be rebuilt
@@ -246,92 +247,20 @@ class EditableParameterTree(ParameterTree):
         Parameters
         ----------
         param : Parameter
-
             parent paremeter
         """
         if param.type() == "group":
-            param.sigChildAdded.connect(self._set_rebuild)
-            param.sigChildRemoved.connect(self._set_rebuild)
+            # TODO: not sure what to do here.
+            param.sigChildAdded.connect(self._set_rebuilt)
+            param.sigAddNew.connect(lambda: None)
+            param.sigChildRemoved.connect(self._set_rebuilt)
+            param.sigNameChanged.connect(params["functions"]["rename"])
             for child in param.children():
-                self._connect_parameters(child)
-        elif param.type() == "text":
-            # do something that limits the updating of the text in the field. For editing equations, this is important
-            param.sigValueChanged.connect(self._set_textfield)
+                self._connect_parameters(child, params[param.name()])
         else:
-            param.sigValueChanged.connect(self._set_param)
-
-    def _trace_path_from(self, param: Parameter) -> list[str]:
-        """
-        Trace the path in the parametertree from the given node 'param' to the root and record it in reverse order
-        to have a traversible path for getting out the dictionary entry to be updated.
-
-        Parameters
-        ----------
-        param : Parameter
-            parameter to trace the path for
-
-        Returns
-        -------
-        list[str]
-            list of keys from the root to the given parameter. Gives a path to be traversed to get the correct element
-            in the model dict to updated
-        """
-        path = []
-        current_param = param
-        while current_param != self.root:
-            path.append(current_param.name())
-            current_param = current_param.parent()
-        return list(reversed(path))
-
-    def _set_rebuild(self, *_: Any) -> None:
-        """
-        Sets the `must_be_rebuilt` flag of the model to true
-        """
-        self.b2model.must_be_rebuilt = True
-
-    def _set_textfield(self, param: Parameter, value: str) -> None:
-        """
-        Called when a textfield is edited in the parametertree, typically when equations are edited.
-        Updates the respective element in the model with the edited text
-
-        Parameters
-        ----------
-        param : Parameter
-            parameter the value of which is edited
-        value : str
-            new value
-        """
-        path = self._trace_path_from(param)
-        object_to_modify = self.states
-        for p in path[0:-1]:
-            object_to_modify = object_to_modify[p]
-        object_to_modify[param.name()] = value
-
-    def _set_param(self, param: Parameter, value: Any) -> None:
-        """
-        Update a model parameter whenever its corresponding representation in the parameter tree is updated.
-
-        Parameters
-        ----------
-        param : Parameter
-            parameter that has been updated
-        value : Any
-            updated value
-        """
-        path = self._trace_path_from(param) 
-
-        object_to_modify = self.states
-        for p in path[0:-1]:
-            object_to_modify = object_to_modify[p]
-
-        q, ok = parse_string_to_quantity(value)
-
-        self.logger.info(
-            f"setting parameter {param.name()} to value {value} of type {type(q)}"
-        )
-        if ok:
-            object_to_modify[param.name()] = q 
-            self.b2model.must_be_rebuilt = True
+            param.sigValueChanged.connect(params["functions"]["modify"])
+            param.sigRemoved.connect(params["functions"]["delete"])
+            param.sigNameChanged.connect(params["functions"]["rename"])
 
     def _get_value(self, v: Any) -> dict[str, Any] | Any:
         """
@@ -353,7 +282,9 @@ class EditableParameterTree(ParameterTree):
         else:
             return v
 
-    def _convert_dict_to_params(self, data: dict[Any, Any], key: Any = "") -> list[Any]:
+    def _convert_dict_to_params(
+        self, data: dict[Any, Any], functions: dict[Any, Any], key: Any = ""
+    ) -> list[Any]:
         """
         Recursively go through a nested dict and create a hierarchical pyqtgraph Parameter representation of it
         from which a ParameterTree object can be constructed.
@@ -375,7 +306,7 @@ class EditableParameterTree(ParameterTree):
             param_type = "str"  # Default type
             value = self._get_value(value)
             if isinstance(value, dict):
-                child_params = self._convert_dict_to_params(value, key)
+                child_params = self._convert_dict_to_params(value, key, functions[key])
 
                 # FIXME: this thing needs a + button for some things with an activated list to choose from for some of those in turn
                 params.append(
@@ -387,6 +318,7 @@ class EditableParameterTree(ParameterTree):
                         "removable": True,
                         "renamable": False,
                         "syncExpanded": True,
+                        "functions": functions,
                     }
                 )
             else:
@@ -409,6 +341,7 @@ class EditableParameterTree(ParameterTree):
                     "removable": True,
                     "renamable": False,
                     "syncExpanded": True,
+                    "functions": functions,
                 }
 
                 # need 'limits' for the underlying ListParameter and 'element' for the custom class
