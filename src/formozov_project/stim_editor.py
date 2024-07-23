@@ -31,6 +31,7 @@ class StimEditor(QtWidgets.QWidget):
         self.model: B2Model | None = None
         self.cmb_stim = cmb_stim
         self.current_stim: b2.TimedArray | None = None
+        self.draw_stim_value = 1.0
         self.stims_dict: dict[str, b2.TimedArray] = {}
         self.copy_time_slice = slice(0, 0)
         self.copy_neuron_slice = slice(0, 0)
@@ -46,6 +47,7 @@ class StimEditor(QtWidgets.QWidget):
         self._add_actions(self.toolbar, menu)
         self.cmb_stim.currentTextChanged.connect(self.select_stim)
         self.stim_widget.selection_moved.connect(self.move_selected_stim)
+        self.stim_widget.selection_made.connect(self.draw_selected_stim)
 
     def set_model(self, model: B2Model) -> None:
         self.model = model
@@ -91,13 +93,22 @@ class StimEditor(QtWidgets.QWidget):
         if stim_name in self.stims_dict:
             self.current_stim = self.stims_dict[stim_name]
             self.stim_widget.set_data(self.current_stim)
+            self.draw_stim_value = np.max(self.current_stim.values)
+            if self.draw_stim_value == 0:
+                self.draw_stim_value = 1
 
-    def toggle_edit_stims(self, enabled: bool) -> None:
-        if not enabled:
-            self.stim_widget.unselect_neurons()
-        self.stim_widget.capture_mouse_events = enabled
-        for action in self.toolbar.actions()[1:]:
-            action.setEnabled(enabled)
+    def toggle_draw_stims(self, enabled: bool) -> None:
+        self.logger.debug(f"Draw stims {'enabled' if enabled else 'disabled'}")
+
+    def draw_selected_stim(self, neuron_slice: slice, time_slice: slice) -> None:
+        if not self.action_toggle_draw.isChecked():
+            return
+        if self.current_stim is None:
+            return
+        self.logger.debug(f"Draw stim for neurons {neuron_slice} and time {time_slice}")
+        self.current_stim.values[time_slice, neuron_slice] = self.draw_stim_value
+        self.stim_widget.set_data(self.current_stim)
+        self.stim_widget.select_neurons(neuron_slice, time_slice)
 
     def copy_selected_stim(self) -> None:
         if (
@@ -234,16 +245,17 @@ class StimEditor(QtWidgets.QWidget):
         self.move_selected_stim(time_index_offset=1)
 
     def _add_actions(self, toolbar: QtWidgets.QToolBar, menu: QtWidgets.QMenu) -> None:
-        add_action(
-            "Toggle edit mode",
-            self.toggle_edit_stims,
+        self.action_toggle_draw = add_action(
+            "Toggle draw mode",
+            self.toggle_draw_stims,
             menu,
             toolbar,
             self,
-            shortcut="Ctrl+E",
-            icon=qta.icon("mdi6.playlist-edit"),
+            shortcut="Ctrl+D",
+            icon=qta.icon("mdi6.playlist-plus"),
             checkable=True,
         )
+        self.action_toggle_draw.setChecked(False)
         add_action(
             "Copy",
             self.copy_selected_stim,
