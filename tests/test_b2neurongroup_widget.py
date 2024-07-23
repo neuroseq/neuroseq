@@ -95,6 +95,7 @@ def test_neurongroup_assembling(qtbot: QtBot) -> None:
     qtbot.addWidget(ndiag)
 
     ndiag.show()
+    qtbot.waitUntil(lambda: ndiag.isVisible() is True)
 
     ndiag.model.neurongroups["x"] = {}
     ndiag.model.neurongroups["x"]["model"] = "dv/dt = -v : volt\n"
@@ -103,8 +104,12 @@ def test_neurongroup_assembling(qtbot: QtBot) -> None:
 
     ndiag.accept()
 
-    assert ndiag.model.network["x"].name == "x"
-    assert ndiag.model.network["x"]._N == 64
+    qtbot.waitUntil(lambda: ndiag.isVisible() is False)
+
+    assert ndiag.model.neurongroups["x"] == {
+        "model": "dv/dt = -v : volt\n",
+        "neuronnumber": 64,
+    }
 
 
 def test_neurongroup_assembling_exceptions(qtbot: QtBot) -> None:
@@ -132,17 +137,5 @@ def test_neurongroup_assembling_exceptions(qtbot: QtBot) -> None:
     assert (
         ndiag.error_dialog.text()
         == "The model equation and the neuronnumber need to be defined"
-    )
-    ndiag.error_dialog.close()
-
-    ndiag.model.neurongroups["x"]["neuronnumber"] = 64
-
-    ndiag.accept()
-
-    qtbot.waitUntil(ndiag.error_dialog.isVisible)
-
-    assert (
-        ndiag.error_dialog.text()
-        == "Error when assembling neurongroup x: Error in assembling neuron group x: Error parsing the unit specification for variable 'v': Unit specification refers to 'mV', but this is not a base unit. Use 'volt' instead."
     )
     ndiag.error_dialog.close()

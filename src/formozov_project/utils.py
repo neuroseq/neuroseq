@@ -87,7 +87,7 @@ class QtABCMeta(type(QtCore.QObject), abc.ABCMeta):  # type: ignore
     pass
 
 
-def parse_string_to_quantity(quantity_str: str) -> tuple[b2.Quantity | str, bool]:
+def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:
     """
     Parse a string into a brian2 quantity or return it if that is not possible. Quantities can be of the from
     number * unit.
@@ -112,7 +112,6 @@ def parse_string_to_quantity(quantity_str: str) -> tuple[b2.Quantity | str, bool
     # extract numerical value via regex. allow for multiple numbers left and right of a '.' and multiple spaces or a '*' between number and unit
     pattern = r"([\(\)0-9./\*]+)\s*\*?\s*(\w+)"
     match = re.match(pattern, quantity_str)
-    ok = True
     quantity_obj = None
     if match:
         value, unit_str = match.groups()
@@ -121,22 +120,18 @@ def parse_string_to_quantity(quantity_str: str) -> tuple[b2.Quantity | str, bool
             unit = getattr(b2, unit_str)
         except Exception as e:
             message = f"Error when interpreting unit string: {e}"
-            ok = False
             raise RuntimeError(message) from e
-        if ok:
-            try:
-                v = eval(value)
-                # Create the quantity object
-                quantity_obj = v * unit
-            except Exception as e:
-                ok = False
-                raise RuntimeError(
-                    f"Error when interpreting numerical string: {e}"
-                ) from e
 
-        return (quantity_obj, ok)
+        try:
+            v = eval(value)
+            # Create the quantity object
+            quantity_obj = v * unit
+        except Exception as e:
+            raise RuntimeError(f"Error when interpreting numerical string: {e}") from e
+
+        return quantity_obj
     else:
-        return (quantity_str, ok)
+        return quantity_str
 
 
 def update_nested_dict(original: dict[Any, Any], updates: Any) -> None:

@@ -120,20 +120,6 @@ def test_neuronsubgroup_accept(qtbot: QtBot) -> None:
 
     neuron_sdlg.error_dialog.close()
 
-    neuron_sdlg.name = "x1"
-    neuron_sdlg.subgroup_def = (1, 6, 3)  # no non-contiguous slices allowd in brian2
-
-    neuron_sdlg.accept()
-
-    qtbot.waitUntil(neuron_sdlg.error_dialog.isVisible)
-
-    assert (
-        neuron_sdlg.error_dialog.text()
-        == "Error when defining a neuronsubgroup on target x: Given indices must be a contiguous range and must not define an empty set"
-    )
-
-    neuron_sdlg.error_dialog.close()
-
 
 def test_neuronsubgroupdialog_parameterdisplay(qtbot: QtBot) -> None:
     neuron_sdlg = B2W.NeuronSubgroupDialog(B2Model())

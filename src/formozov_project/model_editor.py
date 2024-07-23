@@ -26,6 +26,7 @@ from formozov_project.b2_model_widget import NeuronSubgroupDialog
 from formozov_project.b2_model_widget import ParameterDialog
 from formozov_project.b2_model_widget import SynapseDialog
 from formozov_project.reconstructor import Reconstructor
+from formozov_project.utils import parse_string_to_quantity
 
 
 # derive a new combobox which has a 'clicked' signal
@@ -265,7 +266,9 @@ class EditableParameterTree(ParameterTree):
                 else:
                     pass
         else:
-            param.sigValueChanged.connect(lambda p: funcs["modify"](p.value()))
+            param.sigValueChanged.connect(
+                lambda p: funcs["modify"](parse_string_to_quantity(p.value()))
+            )
             param.sigRemoved.connect(funcs["delete"])
             param.sigNameChanged.connect(lambda p: funcs["rename"](p.name()))
 
@@ -586,33 +589,44 @@ class EditableMonitorTree(EditableParameterTree):
             self.logger.info("selected item found")
             selected = selected_items[0]
 
+            # get the type and source widgets independent of the ordering of the children
             parent = selected.parent()
-            typename = parent.child(1)
-            source = parent.child(2)
-
+            typename = [
+                parent.child(c)
+                for c in range(0, parent.childCount())
+                if parent.child(c).text(0) == "type"
+            ][0]
+            source = [
+                parent.child(c)
+                for c in range(0, parent.childCount())
+                if parent.child(c).text(0) == "source"
+            ][0]
+            varnames = []
             try:
-                self.logger.debug("making varialbes as intended")
-                return self._make_selection_list(typename.value(), source.value())
+                varnames = self._make_selection_list(typename.value(), source.value())
             except Exception as e:
                 self.logger.critical(
                     f"Something went wrong while forming selection for monitored element {source.text(0)}: {e}"
                 )
-                vars = list(self.b2model.network[source.value()].get_states().keys())
-
-            return vars
+                varnames = list(
+                    self.b2model.network[source.value()].get_states().keys()
+                )
+            return varnames
         else:
             self.logger.debug("no selected item found, make full list of variables")
             # when we have no selected items, we make a big list of everything that's available since we don´t yet
             # know which one it will be, and we need a list that contains the actually selected one in the
             # underlying monitor definition in order to display it correctly
-            vars = []
+            varnames = []
             for obj in self.b2model.network.objects:
                 if isinstance(obj, b2.StateMonitor | b2.EventMonitor):
                     continue
                 else:
-                    vars.extend(list(obj.equations.names) + list(obj.variables.keys()))
+                    varnames.extend(
+                        list(obj.equations.names) + list(obj.variables.keys())
+                    )
 
-            return list(set(vars)) + [
+            return list(set(varnames)) + [
                 "None",
             ]
 

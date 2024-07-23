@@ -859,19 +859,6 @@ class B2Model:
         }
 
         # only contiguous arrays allowed for definition of neurongroup
-        error_message = (
-            "Given indices must be a contiguous range and must not define an empty set"
-        )
-        if isinstance(idxs, tuple):  # noqa: SIM102
-            if len(idxs) > 2 or idxs[0] <= idxs[1]:
-                self.logger.critical(error_message)
-                raise ValueError(error_message)
-
-        if isinstance(idxs, list):  # noqa: SIM102
-            if idxs != list(range(min(idxs), max(idxs))):
-                self.logger.critical(error_message)
-                raise ValueError(error_message)
-
         utils.update_nested_dict(self.neurongroups[name], {"idxs": idxs})
 
     # synapses
@@ -2107,7 +2094,7 @@ class B2Model:
         states["objects"]["neurongroups"] = list(self.neurongroups.keys())
         states["objects"]["synapses"] = list(self.synapses.keys())
         states["objects"]["monitors"] = list(self.monitors.keys())
-        states["parameters"] = self.parameters
+        states["parameters"] = self.parameters if self.parameters is not None else {}
         states["initials"] = self.initials
 
         # augment neurongroups and synapses

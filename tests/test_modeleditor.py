@@ -35,17 +35,6 @@ def test_EagerComboBox(qtbot: QtBot) -> None:
     assert signal_emitted is True
 
 
-def test_make_quantity(
-    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch
-) -> None:
-    stree = EditableSynapseTree(mfx_nmda)
-    qtbot.addWidget(stree)
-
-    assert stree._make_quantity("10 ms")[0] == 10 * b2.ms
-    assert stree._make_quantity("(1/10) * second")[0] == 1 / 10 * b2.second
-    assert stree._make_quantity("mumbochumbo")[0] == "mumbochumbo"
-
-
 def test_etree_constr(mfx_nmda: B2Model, qtbot: QtBot) -> None:
     stree = EditableSynapseTree(mfx_nmda)
     qtbot.addWidget(stree)
@@ -126,10 +115,10 @@ def test_ptree_edit_b2quantity(mfx_nmda: B2Model, qtbot: QtBot) -> None:
     a_node = pnode.child("a")
 
     with qtbot.waitSignal(a_node.sigValueChanged, timeout=1000, raising=True):
-        a_node.setValue("1/60 ms")
+        a_node.setValue("1/60 * ms")
 
-    assert type(ptree.b2model.parameters["a"]) is b2.Quantity  # type: ignore
     assert ptree.b2model.parameters["a"] == ((1 / 60) * b2.msecond)  # type: ignore
+    assert type(ptree.b2model.parameters["a"]) is b2.Quantity  # type: ignore
 
 
 def test_neurontree_add_neuronsubgroup(
@@ -258,12 +247,7 @@ def test_neurontree_add_neurongroup(
 
     assert set(vs) == set(entries)
 
-    assert set(variables) == set(
-        list(mtree.b2model.network["neurons"].equations.names)
-        + [
-            "True",
-        ]
-    )
+    assert set(variables) == set(list(mtree.b2model.network["neurons"].equations.names))
 
     variables = mtree._make_selection_list("SpikeMonitor", source)
     assert set(variables) == set(
@@ -293,9 +277,6 @@ def test_neurontree_add_neurongroup(
 
     assert set(updated_list) == set(
         list(mtree.b2model.network["neurons"].equations.names)
-        + [
-            "True",
-        ]
     )
 
 
