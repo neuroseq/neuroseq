@@ -560,7 +560,9 @@ class EditableMonitorTree(EditableParameterTree):
         if typename == "StateMonitor":
             return list(self.b2model.network[sourcename].equations.names)
         elif typename == "SpikeMonitor":
-            return list(self.b2model.network[sourcename].variables.keys())
+            return list(self.b2model.network[sourcename].variables.keys()) + [
+                "None",
+            ]  # None is allowed for spikemonitor
         else:
             message = f"Unknonw monitor type {typename}"
             self.logger.critical(message)
