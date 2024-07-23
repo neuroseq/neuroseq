@@ -59,6 +59,17 @@ class B2Model:
         self.logger.info(f"Equation defined for group {group}")
         self.logger.debug(f"full equation: {line}")
 
+    @_trigger_rebuild
+    def _move_dict_element(
+        self, dictionary: dict[Any, Any], source: Any, target: Any
+    ) -> None:
+        """
+        Move a dict element to another key. This copies data, so use with caution.
+        """
+        self._copy_dict_element(dictionary, source, target)
+        del dictionary[source]
+
+    @_trigger_rebuild
     def _copy_dict_element(
         self, dictionary: dict[Any, Any] | None, source: Any, target: Any
     ) -> None:
@@ -71,7 +82,6 @@ class B2Model:
             )
 
         dictionary[target] = deepcopy(dictionary[source])
-        del dictionary[source]
 
     @_trigger_rebuild
     def _assemble_neuronsubgroup(
@@ -329,6 +339,51 @@ class B2Model:
                     f"Error when initializing {key} of element {name} as {self.initials[name][key]}: {e}"
                 ) from e
 
+    # modifications
+    def _modify_dict_element(
+        self, dictionary: dict[Any, Any], key: str, value: Any
+    ) -> None:
+        """
+        _modify_dict_element modify an elemnet of 'dictionary' programmatically. Mainly used for assignments in lambdas
+
+        Parameters
+        ----------
+        dictionary : dict[Any, Any]
+            Dict to modify
+        key : str
+            key in dictionary to assign
+        value : Any
+            value to assign to dictionary[key]
+        """
+        try:
+            dictionary[key] = value
+        except Exception as e:
+            raise RuntimeError(f"Error when modifying {key}: {e}") from e
+
+    # deletions
+    def _delete_dict_element(
+        self, dictionary: dict[Any, Any], groupname: str, varname: str
+    ) -> None:
+        """
+        Delete an element 'varname' in the subdict behind the 'groupname' key in the dictionary.
+        Intended to use with the `neurongroups`, `synapses` or `parameters`members of this class.
+        Parameters
+        ----------
+        dictionary : dict[Any, Any]
+            dictionary to modify
+        groupname : str
+            name of the subdictionary
+        varname : str
+            element name to remove
+        """
+        print("deleting element: ", groupname, varname)
+        try:
+            del dictionary[groupname][varname]
+        except Exception as e:
+            raise RuntimeError(
+                f"Error when deleting {varname} in {groupname}: {e}"
+            ) from e
+
     def __init__(
         self,
         seed: int = 123,
@@ -372,42 +427,6 @@ class B2Model:
         self.must_be_rebuilt = value
 
     @_trigger_rebuild
-    def define_equation(self, name: str, line: str) -> None:
-        r"""
-        define_equation Define a model equation for neurongroups.
-
-        An equation always must be of the form dy \ dx = f(y,x): unit.
-
-        Parameters
-        ----------
-        name : str
-            Name of the neurongroup this model equation should be added to.
-        line : str
-            String representation of the equation to be used.
-
-        Raises
-        ------
-        ValueError
-            When the supplied equation string does not contain an equality sign.
-        ValueError
-            When the supplied equation string does not contain a unit element.
-        """
-
-        if name not in self.neurongroups:
-            self.neurongroups[name] = {}
-            self.functions["neurongroups"][name] = {}
-
-        self.functions["neurongroups"][name]["model"] = {
-            "add": lambda e: self.define_equation(name, e),
-            "delete": lambda: self.delete_neurongroup_element(name, "model"),
-            "modify": lambda e: self._modify_dict_element(
-                self.neurongroups[name], "model", e
-            ),
-        }
-
-        self._add_equation_to_group(self.neurongroups[name], line)
-
-    @_trigger_rebuild
     def define_init(self, name: str, varname: str, value: Any) -> None:
         """
         Define the initial condition of the variable 'varname' in the network element called 'name' and set it to 'value
@@ -423,14 +442,19 @@ class B2Model:
         """
         if name not in self.initials:
             self.initials[name] = {}
-            self.functions["initials"][name] = {}
+            self.functions["initials"][name] = {
+                "rename": lambda n: self.rename_init(name, n),
+                "delete": lambda: self.delete_init(name),
+                "copy": lambda n: self.copy_init(name, n),
+            }
 
         self.functions["initials"][name][varname] = {
             "add": lambda v: self.define_init(name, v),
-            "delete": lambda: self.delete_init(name, varname),
+            "delete": lambda: self.delete_init_element(name, varname),
             "modify": lambda v: self._modify_dict_element(
                 self.initials[name], varname, v
             ),
+            "copy": lambda n: self.copy_init_element(name, varname, n),
         }
 
         utils.update_nested_dict(
@@ -500,12 +524,58 @@ class B2Model:
             "add": lambda p: self.define_parameter(name, p),
             "delete": lambda: self.delete_parameter(name),
             "modify": lambda p: self._modify_dict_element(self.parameters, name, p),
+            "rename": lambda n: self._move_dict_element(self.parameters, name, n),
+            "copy": lambda n: self._copy_dict_element(self.parameters, name, n),
         }
 
         self.parameters[name] = value
 
         self.logger.info(f"Parameter defined: {name}")
         self.logger.debug(f"Parameter value: {value}")
+
+    # neurongroups
+
+    @_trigger_rebuild
+    def define_equation(self, name: str, line: str) -> None:
+        r"""
+        define_equation Define a model equation for neurongroups.
+
+        An equation always must be of the form dy \ dx = f(y,x): unit.
+
+        Parameters
+        ----------
+        name : str
+            Name of the neurongroup this model equation should be added to.
+        line : str
+            String representation of the equation to be used.
+
+        Raises
+        ------
+        ValueError
+            When the supplied equation string does not contain an equality sign.
+        ValueError
+            When the supplied equation string does not contain a unit element.
+        """
+
+        if name not in self.neurongroups:
+            self.neurongroups[name] = {}
+
+        if name not in self.functions["neurongroups"]:
+            self.functions["neurongroups"][name] = {
+                "rename": lambda n: self.rename_neurongroup(name, n),
+                "delete": lambda: self.delete_neurongroup(name),
+                "copy": lambda n: self.copy_neurongroup(name, n),
+            }
+
+        self.functions["neurongroups"][name]["model"] = {
+            "add": lambda e: self.define_equation(name, e),
+            "delete": lambda: self.delete_neurongroup_element(name, "model"),
+            "modify": lambda e: self._modify_dict_element(
+                self.neurongroups[name], "model", e
+            ),
+        }
+
+        self._add_equation_to_group(self.neurongroups[name], line)
 
     @_trigger_rebuild
     def define_reset(self, name: str, reset: str) -> None:
@@ -523,7 +593,11 @@ class B2Model:
         if name not in self.neurongroups:
             self.neurongroups[name] = {}
         if name not in self.functions["neurongroups"]:
-            self.functions["neurongroups"][name] = {}
+            self.functions["neurongroups"][name] = {
+                "rename": lambda n: self.rename_neurongroup(name, n),
+                "delete": lambda: self.delete_neurongroup(name),
+                "copy": lambda n: self.copy_neurongroup(name, n),
+            }
 
         self.functions["neurongroups"][name]["reset"] = {
             "add": lambda r: self.define_reset(name, r),
@@ -557,8 +631,11 @@ class B2Model:
         if name not in self.neurongroups:
             self.neurongroups[name] = {}
         if name not in self.functions["neurongroups"]:
-            self.functions["neurongroups"][name] = {}
-
+            self.functions["neurongroups"][name] = {
+                "rename": lambda n: self.rename_neurongroup(name, n),
+                "delete": lambda: self.delete_neurongroup(name),
+                "copy": lambda n: self.copy_neurongroup(name, n),
+            }
         self.functions["neurongroups"][name]["th"] = {
             "add": lambda t: self.define_threshold(name, t),
             "delete": lambda: self.delete_neurongroup_element(name, "th"),
@@ -593,8 +670,11 @@ class B2Model:
         if name not in self.neurongroups:
             self.neurongroups[name] = {}
         if name not in self.functions["neurongroups"]:
-            self.functions["neurongroups"][name] = {}
-
+            self.functions["neurongroups"][name] = {
+                "rename": lambda n: self.rename_neurongroup(name, n),
+                "delete": lambda: self.delete_neurongroup(name),
+                "copy": lambda n: self.copy_neurongroup(name, n),
+            }
         self.functions["neurongroups"][name]["method"] = {
             "add": lambda t: self.define_threshold(name, t),
             "delete": lambda: self.delete_neurongroup_element(name, "th"),
@@ -629,8 +709,11 @@ class B2Model:
         if name not in self.neurongroups:
             self.neurongroups[name] = {}
         if name not in self.functions["neurongroups"]:
-            self.functions["neurongroups"][name] = {}
-
+            self.functions["neurongroups"][name] = {
+                "rename": lambda n: self.rename_neurongroup(name, n),
+                "delete": lambda: self.delete_neurongroup(name),
+                "copy": lambda n: self.copy_neurongroup(name, n),
+            }
         self.functions["neurongroups"][name]["refractory"] = {
             "add": lambda r: self.define_refractory(name, r),
             "delete": lambda: self.delete_neurongroup_element(name, "refractory"),
@@ -664,8 +747,11 @@ class B2Model:
         if name not in self.neurongroups:
             self.neurongroups[name] = {}
         if name not in self.functions["neurongroups"]:
-            self.functions["neurongroups"][name] = {}
-
+            self.functions["neurongroups"][name] = {
+                "rename": lambda n: self.rename_neurongroup(name, n),
+                "delete": lambda: self.delete_neurongroup(name),
+                "copy": lambda n: self.copy_neurongroup(name, n),
+            }
         self.functions["neurongroups"][name]["neuronnumber"] = {
             "add": lambda n: self.define_neuronnumber(name, n),
             "delete": lambda: self.delete_neurongroup_element(name, "neuronnumber"),
@@ -709,11 +795,14 @@ class B2Model:
         self.logger.info(f"defining target {target_name} for neuron subgroup {name}")
 
         if name not in self.neurongroups:
-            self.neurongroups[name] = {}
+            self.neurongroups[name] = {"name": name}
 
         if name not in self.functions["neurongroups"]:
-            self.functions["neurongroups"][name] = {}
-
+            self.functions["neurongroups"][name] = {
+                "rename": lambda n: self.rename_neurongroup(name, n),
+                "delete": lambda: self.delete_neurongroup(name),
+                "copy": lambda n: self.copy_neurongroup(name, n),
+            }
         self.functions["neurongroups"][name]["target"] = {
             "add": lambda tgt: self.define_neuronsubgroup_target(name, tgt),
             "delete": lambda: self.delete_neurongroup_element(name, "target"),
@@ -744,11 +833,12 @@ class B2Model:
         if name not in self.neurongroups:
             self.neurongroups[name] = {"name": name}
 
-        if name not in self.neurongroups:
-            self.neurongroups[name] = {}
         if name not in self.functions["neurongroups"]:
-            self.functions["neurongroups"][name] = {}
-
+            self.functions["neurongroups"][name] = {
+                "rename": lambda n: self.rename_neurongroup(name, n),
+                "delete": lambda: self.delete_neurongroup(name),
+                "copy": lambda n: self.copy_neurongroup(name, n),
+            }
         self.functions["neurongroups"][name]["idxs"] = {
             "add": lambda idxs: self.define_neuronsubgroup_idxs(name, idxs),
             "delete": lambda: self.delete_neurongroup_element(name, "idxs"),
@@ -779,10 +869,12 @@ class B2Model:
         if name not in self.synapses:
             self.synapses[name] = {"name": name}
 
-        if name not in self.synapses:
-            self.synapses[name] = {}
         if name not in self.functions["synapses"]:
-            self.functions["synapses"][name] = {}
+            self.functions["synapses"][name] = {
+                "rename": lambda n: self.rename_synapse(name, n),
+                "delete": lambda: self.delete_synapse(name),
+                "copy": lambda n: self.copy_synapse(name, n),
+            }
 
         self.functions["synapses"][name]["method"] = {
             "add": lambda m: self.define_synapse_solver_method(name, m),
@@ -816,7 +908,12 @@ class B2Model:
         if name not in self.synapses:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
-            self.functions["synapses"][name] = {}
+            self.functions["synapses"][name] = {
+                "rename": lambda n: self.rename_synapse(name, n),
+                "delete": lambda: self.delete_synapse(name),
+                "copy": lambda n: self.copy_synapse(name, n),
+            }
+
         self.functions["synapses"][name]["target"] = {
             "add": lambda t: self.define_synapse_target(name, t),
             "delete": lambda: self.delete_synapse_element(name, "target"),
@@ -849,7 +946,11 @@ class B2Model:
         if name not in self.synapses:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
-            self.functions["synapses"][name] = {}
+            self.functions["synapses"][name] = {
+                "rename": lambda n: self.rename_synapse(name, n),
+                "delete": lambda: self.delete_synapse(name),
+                "copy": lambda n: self.copy_synapse(name, n),
+            }
         self.functions["synapses"][name]["origin"] = {
             "add": lambda o: self.define_synapse_origin(name, o),
             "delete": lambda: self.delete_synapse_element(name, "origin"),
@@ -890,7 +991,11 @@ class B2Model:
         if name not in self.synapses:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
-            self.functions["synapses"][name] = {}
+            self.functions["synapses"][name] = {
+                "rename": lambda n: self.rename_synapse(name, n),
+                "delete": lambda: self.delete_synapse(name),
+                "copy": lambda n: self.copy_synapse(name, n),
+            }
         self.functions["synapses"][name]["model"] = {
             "add": lambda eq: self.define_synapse_equation(name, eq),
             "delete": lambda: self.delete_synapse_element(name, "model"),
@@ -916,7 +1021,11 @@ class B2Model:
         if name not in self.synapses:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
-            self.functions["synapses"][name] = {}
+            self.functions["synapses"][name] = {
+                "rename": lambda n: self.rename_synapse(name, n),
+                "delete": lambda: self.delete_synapse(name),
+                "copy": lambda n: self.copy_synapse(name, n),
+            }
         self.functions["synapses"][name]["on_pre"] = {
             "add": lambda eq: self.define_synapse_pre(name, eq),
             "delete": lambda: self.delete_synapse_element(name, "on_pre"),
@@ -953,7 +1062,11 @@ class B2Model:
         if name not in self.synapses:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
-            self.functions["synapses"][name] = {}
+            self.functions["synapses"][name] = {
+                "rename": lambda n: self.rename_synapse(name, n),
+                "delete": lambda: self.delete_synapse(name),
+                "copy": lambda n: self.copy_synapse(name, n),
+            }
         self.functions["synapses"][name]["on_post"] = {
             "add": lambda eq: self.define_synapse_post(name, eq),
             "delete": lambda: self.delete_synapse_element(name, "on_post"),
@@ -990,7 +1103,11 @@ class B2Model:
         if name not in self.synapses:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
-            self.functions["synapses"][name] = {}
+            self.functions["synapses"][name] = {
+                "rename": lambda n: self.rename_synapse(name, n),
+                "delete": lambda: self.delete_synapse(name),
+                "copy": lambda n: self.copy_synapse(name, n),
+            }
         self.functions["synapses"][name]["connection_condition"] = {
             "add": lambda c: self.define_synapse_connection(name, c),
             "delete": lambda: self.delete_synapse_element(name, "connection_condition"),
@@ -1023,7 +1140,11 @@ class B2Model:
         if name not in self.synapses:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
-            self.functions["synapses"][name] = {}
+            self.functions["synapses"][name] = {
+                "rename": lambda n: self.rename_synapse(name, n),
+                "delete": lambda: self.delete_synapse(name),
+                "copy": lambda n: self.copy_synapse(name, n),
+            }
         self.functions["synapses"][name]["delay"] = {
             "add": lambda c: self.define_synapse_delay(name, c),
             "delete": lambda: self.delete_synapse_element(name, "delay"),
@@ -1059,7 +1180,11 @@ class B2Model:
         if name not in self.synapses:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
-            self.functions["synapses"][name] = {}
+            self.functions["synapses"][name] = {
+                "rename": lambda n: self.rename_synapse(name, n),
+                "delete": lambda: self.delete_synapse(name),
+                "copy": lambda n: self.copy_synapse(name, n),
+            }
         self.functions["synapses"][name]["p"] = {
             "add": lambda p: self.define_synapse_connection_probablitiy(name, p),
             "delete": lambda: self.delete_synapse_element(name, "p"),
@@ -1075,27 +1200,6 @@ class B2Model:
             },
         )
 
-    # modifications
-    def _modify_dict_element(
-        self, dictionary: dict[Any, Any], key: str, value: Any
-    ) -> None:
-        """
-        _modify_dict_element modify an elemnet of 'dictionary' programmatically. Mainly used for assignments in lambdas
-
-        Parameters
-        ----------
-        dictionary : dict[Any, Any]
-            Dict to modify
-        key : str
-            key in dictionary to assign
-        value : Any
-            value to assign to dictionary[key]
-        """
-        try:
-            dictionary[key] = value
-        except Exception as e:
-            raise RuntimeError(f"Error when modifying {key}: {e}") from e
-
     def rename_neurongroup(self, name: str, new_name: str) -> None:
         """
         rename_neurongroup Rename a neurongroup
@@ -1107,8 +1211,8 @@ class B2Model:
         new_name : str
             new name
         """
-        self._copy_dict_element(self.neurongroups, name, new_name)
-        self._copy_dict_element(self.functions["neurongroups"], name, new_name)
+        self._move_dict_element(self.neurongroups, name, new_name)
+        self._move_dict_element(self.functions["neurongroups"], name, new_name)
 
     def rename_synapse(self, name: str, new_name: str) -> None:
         """
@@ -1121,8 +1225,8 @@ class B2Model:
         new_name : str
             new name
         """
-        self._copy_dict_element(self.synapses, name, new_name)
-        self._copy_dict_element(self.functions["synapses"], name, new_name)
+        self._move_dict_element(self.synapses, name, new_name)
+        self._move_dict_element(self.functions["synapses"], name, new_name)
 
     def rename_parameter(self, name: str, new_name: str) -> None:
         """
@@ -1135,8 +1239,8 @@ class B2Model:
         new_name : str
             new name
         """
-        self._copy_dict_element(self.parameters, name, new_name)
-        self._copy_dict_element(self.functions["parameters"], name, new_name)
+        self._move_dict_element(self.parameters, name, new_name)
+        self._move_dict_element(self.functions["parameters"], name, new_name)
 
     def rename_monitor(self, name: str, new_name: str) -> None:
         """
@@ -1149,31 +1253,218 @@ class B2Model:
         new_name : str
             new name
         """
+        self._move_dict_element(self.monitors, name, new_name)
+        self._move_dict_element(self.functions["monitors"], name, new_name)
+
+    def rename_init(self, name: str, new_name: str) -> None:
+        """
+        Rename a initials
+
+        Parameters
+        ----------
+        name : str
+            old name
+        new_name : str
+            new name
+        """
+        self._move_dict_element(self.initials, name, new_name)
+        self._move_dict_element(self.functions["initials"], name, new_name)
+
+    def rename_init_element(
+        self, name: str, old_element_name, new_element_name: str
+    ) -> None:
+        """
+        Rename a initials
+
+        Parameters
+        ----------
+        name : str
+            old name
+        new_name : str
+            new name
+        """
+        self._move_dict_element(self.initials[name], old_element_name, new_element_name)
+        self._move_dict_element(
+            self.functions["initials"][name], old_element_name, new_element_name
+        )
+
+    def rename_neurongroup_element(
+        self, name: str, old_element_name: str, new_element_name: str
+    ) -> None:
+        self._move_dict_element(
+            self.neurongroups[name], old_element_name, new_element_name
+        )
+        self._move_dict_element(
+            self.functions["neurongroups"][name], old_element_name, new_element_name
+        )
+
+    def rename_synapse_element(
+        self, name: str, old_element_name: str, new_element_name: str
+    ) -> None:
+        self._move_dict_element(self.synapses[name], old_element_name, new_element_name)
+        self._move_dict_element(
+            self.functions["synapses"][name], old_element_name, new_element_name
+        )
+
+    def rename_monitor_element(
+        self, name: str, old_element_name: str, new_element_name: str
+    ) -> None:
+        self._move_dict_element(self.monitors[name], old_element_name, new_element_name)
+        self._move_dict_element(
+            self.functions["monitors"][name], old_element_name, new_element_name
+        )
+
+    def copy_neurongroup(self, name: str, new_name: str) -> None:
+        """
+        Copy a neurongroup
+
+        Parameters
+        ----------
+        name : str
+            old name
+        new_name : str
+            new name
+        """
+        self._copy_dict_element(self.neurongroups, name, new_name)
+        self._copy_dict_element(self.functions["neurongroups"], name, new_name)
+
+    def copy_synapse(self, name: str, new_name: str) -> None:
+        """
+        Copy a synapse
+
+        Parameters
+        ----------
+        name : str
+            old name
+        new_name : str
+            new name
+        """
+        self._copy_dict_element(self.synapses, name, new_name)
+        self._copy_dict_element(self.functions["synapses"], name, new_name)
+
+    def copy_parameter(self, name: str, new_name: str) -> None:
+        """
+        Copy a monitor
+
+        Parameters
+        ----------
+        name : str
+            old name
+        new_name : str
+            new name
+        """
+        self._copy_dict_element(self.parameters, name, new_name)
+        self._copy_dict_element(self.functions["parameters"], name, new_name)
+
+    def copy_init(self, name: str, new_name: str) -> None:
+        """
+        Copy an initial condition and rename it
+
+        Parameters
+        ----------
+        name : str
+            name of source
+        new_name : str
+            name of ocpy
+        """
+        self._copy_dict_element(self.initials, name, new_name)
+        self._copy_dict_element(self.functions["initials"], name, new_name)
+
+    def copy_monitor(self, name: str, new_name: str) -> None:
+        """
+        Copy a monitor
+
+        Parameters
+        ----------
+        name : str
+            old name
+        new_name : str
+            new name
+        """
         self._copy_dict_element(self.monitors, name, new_name)
         self._copy_dict_element(self.functions["monitors"], name, new_name)
 
-    # deletions
-    def _delete_dict_element(
-        self, dictionary: dict[Any, Any], groupname: str, varname: str
+    def copy_neurongroup_element(
+        self, name: str, old_element_name: str, new_element_name: str
     ) -> None:
         """
-        Delete an element 'varname' in the subdict behind the 'groupname' key in the dictionary.
-        Intended to use with the `neurongroups`, `synapses` or `parameters`members of this class.
+        _summary_
+
         Parameters
         ----------
-        dictionary : dict[Any, Any]
-            dictionary to modify
-        groupname : str
-            name of the subdictionary
-        varname : str
-            element name to remove
+        name : str
+            _description_
+        old_element_name : str
+            _description_
+        new_element_name : str
+            _description_
         """
-        try:
-            del dictionary[groupname][varname]
-        except Exception as e:
-            raise RuntimeError(
-                f"Error when deleting {varname} in {groupname}: {e}"
-            ) from e
+        self._copy_dict_element(
+            self.neurongroups[name], old_element_name, new_element_name
+        )
+        self._copy_dict_element(
+            self.functions["neurongroups"][name], old_element_name, new_element_name
+        )
+
+    def copy_synapse_element(
+        self, name: str, old_element_name: str, new_element_name: str
+    ) -> None:
+        """
+        _summary_
+
+        Parameters
+        ----------
+        name : str
+            _description_
+        old_element_name : str
+            _description_
+        new_element_name : str
+            _description_
+        """
+        self._copy_dict_element(self.synapses[name], old_element_name, new_element_name)
+        self._copy_dict_element(
+            self.functions["synapses"][name], old_element_name, new_element_name
+        )
+
+    def copy_monitor_element(
+        self, name: str, old_element_name: str, new_element_name: str
+    ) -> None:
+        """
+        _summary_
+
+        Parameters
+        ----------
+        name : str
+            _description_
+        old_element_name : str
+            _description_
+        new_element_name : str
+            _description_
+        """
+        self._copy_dict_element(self.monitors[name], old_element_name, new_element_name)
+        self._copy_dict_element(
+            self.functions["monitors"][name], old_element_name, new_element_name
+        )
+
+    def copy_init_element(
+        self, name: str, old_element_name: str, new_element_name: str
+    ) -> None:
+        """
+        _summary_
+
+        Parameters
+        ----------
+        name : str
+            _description_
+        old_element_name : str
+            _description_
+        new_element_name : str
+            _description_
+        """
+        self._copy_dict_element(self.initials[name], old_element_name, new_element_name)
+        self._copy_dict_element(
+            self.functions["initials"][name], old_element_name, new_element_name
+        )
 
     @_trigger_rebuild
     def delete_neurongroup(self, name: str) -> None:
@@ -1186,6 +1477,7 @@ class B2Model:
             Name of the neurongroup to delete from the intermediat dict
         """
         del self.neurongroups[name]
+        del self.functions["neurongroups"][name]
 
         if name in (obj.name for obj in self.network.objects):
             self.network.remove(name)
@@ -1200,7 +1492,9 @@ class B2Model:
         name : str
             Name of the synapse to delete from the intermediat dict
         """
+        print("deleting synapse:", name)
         del self.synapses[name]
+        del self.functions["synapses"][name]
 
         if name in (obj.name for obj in self.network.objects):
             self.network.remove(name)
@@ -1215,10 +1509,12 @@ class B2Model:
         name : str
             Name of the monitor to delete from the intermediat dict
         """
+        print("deleting monitor: ", name)
         del self.monitors[name]
+        del self.functions["monitors"][name]
 
         if name in (obj.name for obj in self.network.objects):
-            self.network.remove(name)
+            self.network.remove(self.network[name])
 
     @_trigger_rebuild
     def delete_neurongroup_element(self, groupname: str, varname: str) -> None:
@@ -1284,9 +1580,35 @@ class B2Model:
         except Exception as e:
             raise KeyError(f"Error when deleting {name}: {e}") from e
 
-    def delete_init(self, name: str, varname: str) -> None:
+    def delete_init(self, name: str) -> None:
         """
         Delete an element `name` from the initial condition dictionary. Note that if
+        initial conditions have already been defined, you have to redefine it in the
+        network.
+
+        Parameters
+        ----------
+        name : str
+            Name of the network element to remove an initial condition for
+
+        varname: str
+            Name of the variable to remove
+        Raises
+        ------
+        KeyError
+            When `name` is not in the initial condition dictionary
+        """
+        try:
+            del self.initials[name]
+            del self.functions["initials"][name]
+        except Exception as e:
+            raise KeyError(
+                f"Error when deleting initial conditions of group {name}: {e}"
+            ) from e
+
+    def delete_init_element(self, name: str, varname: str) -> None:
+        """
+        Delete an element `varname` from the initial condition dictionary. Note that if
         initial conditions have already been defined, you have to redefine it in the
         network.
 
@@ -1306,7 +1628,9 @@ class B2Model:
             del self.initials[name][varname]
             del self.functions["initials"][name][varname]
         except Exception as e:
-            raise KeyError(f"Error when deleting {varname} in {name}: {e}") from e
+            raise KeyError(
+                f"Error when deleting initial conditions {varname} of group {name}: {e}"
+            ) from e
 
     # monitor
     @_trigger_rebuild
@@ -1326,7 +1650,11 @@ class B2Model:
                 "name": name,
             }
         if name not in self.functions["monitors"]:
-            self.functions["monitors"][name] = {}
+            self.functions["monitors"][name] = {
+                "rename": lambda n: self.rename_monitor(name, n),
+                "delete": lambda: self.delete_monitor(name),
+                "copy": lambda n: self.copy_monitor(name, n),
+            }
 
         self.functions["monitors"][name]["type"] = {
             "add": lambda tp: self.define_monitor_type(name, tp),
@@ -1362,7 +1690,11 @@ class B2Model:
                 "name": name,
             }
         if name not in self.functions["monitors"]:
-            self.functions["monitors"][name] = {}
+            self.functions["monitors"][name] = {
+                "rename": lambda n: self.rename_monitor(name, n),
+                "delete": lambda: self.delete_monitor(name),
+                "copy": lambda n: self.copy_monitor(name, n),
+            }
 
         self.functions["monitors"][name]["source"] = {
             "add": lambda src: self.define_monitor_source(name, src),
@@ -1399,7 +1731,11 @@ class B2Model:
                 "name": name,
             }
         if name not in self.functions["monitors"]:
-            self.functions["monitors"][name] = {}
+            self.functions["monitors"][name] = {
+                "rename": lambda n: self.rename_monitor(name, n),
+                "delete": lambda: self.delete_monitor(name),
+                "copy": lambda n: self.copy_monitor(name, n),
+            }
 
         self.functions["monitors"][name]["variable"] = {
             "add": lambda var: self.define_monitor_variable(name, var),

@@ -253,19 +253,20 @@ class EditableParameterTree(ParameterTree):
             param.sigChildAdded.connect(lambda: self.b2model.set_rebuilt(True))
             param.sigAddNew.connect(lambda: self.b2model.set_rebuilt(True))
             param.sigChildRemoved.connect(lambda: self.b2model.set_rebuilt(True))
-            # param.sigNameChanged.connect(funcs["rename"])
+
+            if all(f in funcs for f in ["delete", "rename"]):
+                # the outermost nodes (neurongroups, initials, synapses) cannot be modified and have no slots, hence this check
+                param.sigRemoved.connect(funcs["delete"])
+                param.sigNameChanged.connect(funcs["rename"])
+
             for child in param.children():
-                if child.name in funcs:
+                if child.name() in funcs:
                     self._connect_parameters(child, funcs[child.name()])
                 else:
                     pass
         else:
-            if param.name() == "name":
-                pass
-            else:
-                param.sigValueChanged.connect(funcs["modify"])
-                param.sigRemoved.connect(funcs["delete"])
-            # param.sigNameChanged.connect(funcs["rename"])
+            param.sigValueChanged.connect(lambda p: funcs["modify"](p.value()))
+            param.sigRemoved.connect(funcs["delete"])
 
     def _get_value(self, v: Any) -> dict[str, Any] | Any:
         """
@@ -323,9 +324,9 @@ class EditableParameterTree(ParameterTree):
                         "name": key,
                         "type": "group",
                         "children": child_params,
-                        "expanded": False,
+                        "expanded": True,
                         "removable": True,
-                        "renamable": False,
+                        "renamable": True,
                         "syncExpanded": True,
                         "functions": functions,
                     }

@@ -237,12 +237,7 @@ class Reconstructor:
         model.define_monitor_variable(
             data_of_group["name"], data_of_group.get("variable")
         )
-        print(
-            "monitor system: ",
-            data_of_group,
-            ",",
-            model.monitors[data_of_group["name"]],
-        )
+
         model._assemble_monitor(data_of_group["name"])
 
     def reconstruct(
