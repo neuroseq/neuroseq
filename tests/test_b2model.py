@@ -142,7 +142,6 @@ def test_assemble_erase_redefine_neurongroup(mfx: b2_model.B2Model) -> None:
 
     assert mfx.network["P"].name == ng.name
     assert mfx.network["P"]._N == ng._N
-    print(list(mfx.neurongroups.keys()))
 
     mfx.define_neuronnumber("P", 60)
     mfx.define_threshold("P", "v > 20 * mV")
