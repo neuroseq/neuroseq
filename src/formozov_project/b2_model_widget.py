@@ -359,13 +359,7 @@ class NeuronGroupDialog(ModelDialog):
                 "The model equation and the neuronnumber need to be defined"
             )
         else:
-            try:
-                self.model._assemble_neurongroup(name=self.name)
-                super().accept()
-            except Exception as e:
-                self.display_error(
-                    f"Error when assembling neurongroup {self.name}: {e}"
-                )
+            super().accept()
 
     def __init__(self, model: B2Model, parent: QtWidgets.QDialog | None = None) -> None:
         """
@@ -503,7 +497,6 @@ class NeuronSubgroupDialog(ModelDialog):
             try:
                 self.model.define_neuronsubgroup_target(self.name, self.target_name)
                 self.model.define_neuronsubgroup_idxs(self.name, self.subgroup_def)
-                self.model._assemble_neuronsubgroup(self.name)
 
                 super().accept()
             except Exception as e:
@@ -673,7 +666,6 @@ class SynapseDialog(ModelDialog):
             )
         else:
             try:
-                self.model._assemble_synapse(name=self.name)
                 super().accept()
             except Exception as e:
                 self.display_error(
@@ -1127,7 +1119,6 @@ class MonitorDialog(ModelDialog):
             self.model.define_monitor_source(self.name, self.src)
             self.model.define_monitor_type(self.name, self.tp)
             self.model.define_monitor_variable(self.name, self.var)
-            self.model._assemble_monitor(self.name)
             super().accept()
         except Exception as e:
             self.display_error(f"Error when defining monitor {self.name}: {e}")
@@ -1586,3 +1577,10 @@ class B2ModelWidget(ModelDialog):
 
         if self.init_widget.exec():
             pass  # FIXME: not yet implemented: show values of variables
+
+    def accept(self) -> None:
+        try:
+            self.model.assemble_network()
+            super().accept()
+        except Exception as e:
+            self.display_error(f"Error when assembling neurongroup {self.name}: {e}")

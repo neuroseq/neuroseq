@@ -803,7 +803,7 @@ class B2Model:
         self.logger.info(f"defining target {target_name} for neuron subgroup {name}")
 
         if name not in self.neurongroups:
-            self.neurongroups[name] = {"name": name}
+            self.neurongroups[name] = {}
 
         if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {
@@ -840,7 +840,7 @@ class B2Model:
         self.logger.info(f"defining indices {idxs} for neuron subgroup {name}")
 
         if name not in self.neurongroups:
-            self.neurongroups[name] = {"name": name}
+            self.neurongroups[name] = {}
 
         if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {
@@ -858,7 +858,7 @@ class B2Model:
         }
 
         if name not in self.neurongroups:
-            self.neurongroups[name] = {"name": name}
+            self.neurongroups[name] = {}
 
         utils.update_nested_dict(self.neurongroups[name], {"idxs": idxs})
 
@@ -877,7 +877,7 @@ class B2Model:
         """
 
         if name not in self.synapses:
-            self.synapses[name] = {"name": name}
+            self.synapses[name] = {}
 
         if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {

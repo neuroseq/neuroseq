@@ -92,15 +92,16 @@ class Reconstructor:
 
         # set object variables
         for key, value in data_of_group.items():
+            # check if there is a setter method
             if key in excluded:
                 continue
             else:
+                element = getattr(model.network[name], key)
+                if not isinstance(element, property) or element.fset is None:
+                    continue
+
                 try:
                     setattr(model.network[name], key, value)
-                except TypeError:
-                    # when the variable is read-only brian2 throws a TypeError.
-                    # We can then continue because the variable is automatically constructed
-                    continue
                 except Exception as e:
                     raise RuntimeError(
                         f"Something went wrong when setting attribute {key} in object {name}: {e}"
