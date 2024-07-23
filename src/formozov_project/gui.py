@@ -213,6 +213,7 @@ class Gui(QtWidgets.QMainWindow):
         self.heatmap_widget.clear_data()
         self.trace_widget.clear_data()
         self.stim_editor.set_model(self.model)
+        self.stim_editor.action_toggle_draw.setChecked(False)
         self.cmb_neuron.clear()
         self.neurons.clear()
         self.cmb_synapse.clear()
