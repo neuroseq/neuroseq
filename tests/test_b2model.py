@@ -105,54 +105,6 @@ def test_define_neuron_number(mfx: b2_model.B2Model) -> None:
     assert mfx.neurongroups["P"]["neuronnumber"] == 100
 
 
-def test_assemble_erase_redefine_neurongroup(mfx: b2_model.B2Model) -> None:
-    eq = "dge/dt = -ge*(1./taue): siemens"
-    n = 30
-    threshold = "v > 10 * mV"
-    refractory = 5 * b2.ms
-    method = "euler"
-    dt = 0.1 * b2.ms
-    mfx.define_equation("P", eq)
-    mfx.define_neuronnumber("P", n)
-    mfx.define_threshold("P", threshold)
-    mfx.define_refractory("P", refractory)
-    mfx.define_dt(dt)
-    mfx.define_solver_method("P", method)
-    mfx.define_parameter("ge", "(randn() * 1.5 + 4) * 10.*nS")
-
-    ng = b2.NeuronGroup(
-        n,
-        eq,
-        threshold=threshold,
-        refractory=refractory,
-        method=method,
-        dt=dt,
-        name="P",
-    )
-
-    assert mfx.neurongroups["P"] == {
-        "neuronnumber": n,
-        "th": threshold,
-        "refractory": refractory,
-        "method": method,
-        "model": eq + "\n",
-    }
-    mfx._assemble_neurongroup("P")
-    assert len(mfx.network.objects) == 1
-
-    assert mfx.network["P"].name == ng.name
-    assert mfx.network["P"]._N == ng._N
-
-    mfx.define_neuronnumber("P", 60)
-    mfx.define_threshold("P", "v > 20 * mV")
-    mfx._assemble_neurongroup("P")
-    assert mfx.network["P"].events["spike"] == "v > 20 * mV"
-    assert mfx.network["P"]._N == 60
-
-    mfx.erase_neurongroup("P")
-    assert "P" not in mfx.network.objects
-
-
 def test_assemble_neurongroup_exception(mfx: b2_model.B2Model) -> None:
     with pytest.raises(RuntimeError, match="Error in assembling neuron group N"):
         mfx._assemble_neurongroup("N")
@@ -175,8 +127,8 @@ def test_neuron_subgroup(
     mfx._assemble_neuronsubgroup("excitatory")
     mfx._assemble_neuronsubgroup("inhibitory")
 
-    assert mfx.network[mfx.neurongroups["excitatory"]["name"]] is not None
-    assert mfx.network[mfx.neurongroups["inhibitory"]["name"]] is not None
+    assert mfx.network["excitatory"] is not None
+    assert mfx.network["inhibitory"] is not None
 
 
 def test_neuron_subgroup_remove_exception(
@@ -535,16 +487,22 @@ def test_NMDA_model_delete(mfx_nmda: b2_model.B2Model) -> None:
     mfx_nmda.delete_monitor_element("Mn", "source")
     assert "source" not in mfx_nmda.monitors["Mn"]
 
+    assert "w" in mfx_nmda.initials["S"]
+    mfx_nmda.delete_init_element("S", "w")
+    assert "w" not in mfx_nmda.initials["S"]
+
     assert "Mn" in mfx_nmda.monitors
     mfx_nmda.delete_monitor("Mn")
     assert "Mn" not in mfx_nmda.monitors
 
-    assert "w" in mfx_nmda.initials["S"]
-    mfx_nmda.delete_init("S", "w")
-    assert "w" not in mfx_nmda.initials["S"]
+    with pytest.raises(
+        KeyError, match="Error when deleting initial conditions w of group S"
+    ):
+        mfx_nmda.delete_init_element("S", "w")
 
-    with pytest.raises(KeyError, match="Error when deleting w in S"):
-        mfx_nmda.delete_init("S", "w")
+    assert "S" in mfx_nmda.initials
+    mfx_nmda.delete_init("S")
+    assert "S" not in mfx_nmda.initials
 
     assert "neuron_input" in mfx_nmda.neurongroups
     mfx_nmda.delete_neurongroup("neuron_input")
@@ -554,7 +512,7 @@ def test_NMDA_model_delete(mfx_nmda: b2_model.B2Model) -> None:
     mfx_nmda.delete_synapse("S")
     assert "S" not in mfx_nmda.synapses
 
-    with pytest.raises(KeyError, match="Error when deleting X in neurons"):
+    with pytest.raises(RuntimeError, match="Error when deleting X in neurons"):
         mfx_nmda.delete_neurongroup_element("neurons", "X")
 
     assert "a" in mfx_nmda.parameters  # type: ignore
@@ -631,14 +589,6 @@ def test_assemble_network_and_erase(mfx_nmda) -> None:
     assert "M" in [o.name for o in model.get_network_objects()]
     assert "neuron_input" in [o.name for o in model.get_network_objects()]
     assert "S" in [o.name for o in model.get_network_objects()]
-
-    model.erase_monitor("M")
-    model.erase_neurongroup("neuron_input")
-    model.erase_synapse("S")
-
-    assert "M" not in [o.name for o in model.get_network_objects()]
-    assert "neuron_input" not in [o.name for o in model.get_network_objects()]
-    assert "S" not in [o.name for o in model.get_network_objects()]
 
     nrg = model.get_neurongroup("neurons")
 

@@ -301,9 +301,7 @@ class B2Model:
 
         if any(obj.name == name for obj in self.network.objects):
             try:
-                self.network.remove(
-                    self.network[name]
-                )  # cannot use self._erase_object because we still need the intermediat definition
+                self.network.remove(self.network[name])
             except Exception as e:
                 message = f"Error when removing neuron group {name} from network: {e}"
                 self.logger.critical(message)
@@ -832,10 +830,13 @@ class B2Model:
         """
         Define the indices in a neurongroup for a neuron subgroup called 'name'.
 
-        Raises
-        ------
-        ValueError
-            When noncontiguous indices are passed
+        Parameters
+        ----------
+        name : str
+            name of subgroup to define the subgroup indices in the target neurongroup for
+        idxs : int | list | tuple
+            Indices of subgroup. if 'int' the index of a neuron, if 'list' a list of indices of neurons,
+            if tuple, a (start, stop) range equivalent to range(start, stop).
         """
         self.logger.info(f"defining indices {idxs} for neuron subgroup {name}")
 
@@ -857,8 +858,19 @@ class B2Model:
             "rename": lambda n: self.rename_neurongroup_element(name, "idxs", n),
         }
 
-        if name not in self.neurongroups:
-            self.neurongroups[name] = {}
+        # only contiguous arrays allowed for definition of neurongroup
+        error_message = (
+            "Given indices must be a contiguous range and must not define an empty set"
+        )
+        if isinstance(idxs, tuple):  # noqa: SIM102
+            if len(idxs) > 2 or idxs[0] <= idxs[1]:
+                self.logger.critical(error_message)
+                raise ValueError(error_message)
+
+        if isinstance(idxs, list):  # noqa: SIM102
+            if idxs != list(range(min(idxs), max(idxs))):
+                self.logger.critical(error_message)
+                raise ValueError(error_message)
 
         utils.update_nested_dict(self.neurongroups[name], {"idxs": idxs})
 
@@ -1502,7 +1514,7 @@ class B2Model:
         del self.functions["neurongroups"][name]
 
         if name in (obj.name for obj in self.network.objects):
-            self.network.remove(name)
+            self.network.remove(self.network[name])
 
     @_trigger_rebuild
     def delete_synapse(self, name: str) -> None:
@@ -1518,7 +1530,7 @@ class B2Model:
         del self.functions["synapses"][name]
 
         if name in (obj.name for obj in self.network.objects):
-            self.network.remove(name)
+            self.network.remove(self.network[name])
 
     @_trigger_rebuild
     def delete_monitor(self, name: str) -> None:

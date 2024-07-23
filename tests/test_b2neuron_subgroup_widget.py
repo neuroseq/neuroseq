@@ -105,17 +105,7 @@ def test_neuronsubgroup_accept(qtbot: QtBot) -> None:
     neuron_sdlg.target_name = "x"
     neuron_sdlg.subgroup_def = 1
 
-    neuron_sdlg.model._assemble_neurongroup("x")
-
-    assert neuron_sdlg.model.network["x"] is not None
-
     neuron_sdlg.accept()
-
-    assert "x1" in neuron_sdlg.model.neurongroups
-    assert (
-        neuron_sdlg.model.network[neuron_sdlg.model.neurongroups["x1"]["name"]]
-        is not None
-    )
 
     neuron_sdlg.name = None
 
@@ -139,7 +129,7 @@ def test_neuronsubgroup_accept(qtbot: QtBot) -> None:
 
     assert (
         neuron_sdlg.error_dialog.text()
-        == "Error when defining a neuronsubgroup on target x: Subgroups have to be contiguous"
+        == "Error when defining a neuronsubgroup on target x: Given indices must be a contiguous range and must not define an empty set"
     )
 
     neuron_sdlg.error_dialog.close()

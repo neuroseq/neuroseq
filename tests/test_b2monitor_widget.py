@@ -89,7 +89,12 @@ def test_monitor_accept(qtbot: QtBot) -> None:
 
     mdlg.accept()
 
-    assert mdlg.model.network["M"] is not None
+    assert mdlg.model.monitors["M"] == {
+        "name": "M",
+        "type": "StateMonitor",
+        "source": "neurongroup",
+        "variable": "y",
+    }
 
 
 def test_monitor_parameterdisplay(qtbot: QtBot) -> None:
