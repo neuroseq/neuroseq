@@ -30,6 +30,35 @@ After installing, you should be able to run the following command to launch the 
 formozov-project
 ```
 
+## GUI Console
+
+The GUI console is a text box at the bottom of the GUI that can be used to run Python code.
+The code is executed in the same Python environment as the GUI, with the following variables made available:
+
+- `np`: numpy
+- `b2`: brian2
+- `stims`: a dict of stimuli, each of which is a 2d numpy array
+- `model`: a class that defines the entire model
+
+The console also has a history feature, which can be accessed by pressing the up and down arrow keys.
+
+### Stimuli editing
+
+The main purpose of the console is to allow users to modify the numpy arrays of stimuli using numpy and Python code.
+Any changes you make to the stimuli will be checked for validity, and if valid then they will updated in the model and the changes will be displayed in the GUI.
+If the changes are invalid, then an error message will be displayed in the console, and the model will not be modified.
+
+### Model editing
+
+It is also possible to modify other aspects of the model using the console, by interacting with the `model` object.
+Try `help(model)` to see what methods and attributes are available.
+
+### brian2 objects
+
+The underlying brian2 network is available at `model.network`, so for example you can get a list of StateMonitors with
+`[m for m in model.network.objects if isinstance(m, b2.StateMonitor)]`
+Note that these objects should not be directly modified using the console, as it will cause the GUI and `model` to become out of sync with the underlying brian2 model.
+
 ## Developer Installation
 
 To do an editable installation including test dependencies and pre-commit:
