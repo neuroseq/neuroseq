@@ -485,6 +485,16 @@ def test_synapse_connection_prob_numerical(
         mfx.define_synapse_connection_probablitiy("Ce", boundary)
 
 
+def test_define_synapse_delay(
+    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+) -> None:
+    mfx, _ = mfx_parameterized
+
+    mfx.define_synapse_delay("Ce", 1e-3 * b2.second)
+
+    assert mfx.synapses["Ce"]["delay"] == 1e-3 * b2.second
+
+
 def test_define_synapse(
     mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
 ) -> None:
@@ -538,13 +548,14 @@ def test_define_synapse(
         """Apost += dApost
                       we= clip(we + Apre, -gmax, gmax)""",
     )
+    mfx.define_synapse_solver_method("Ce", "exponential_euler")
 
     mfx._assemble_synapse("Ce")
 
     assert len(mfx.synapses) == 1
     assert mfx.synapses["Ce"]["origin"] == "Pe"
     assert mfx.synapses["Ce"]["target"] == "Pi"
-
+    assert mfx.synapses["Ce"]["method"] == "exponential_euler"
     ce = mfx.network["Ce"]
 
     # test removal and reassembly
@@ -811,7 +822,7 @@ def test_NMDA_model_delete(mfx_nmda: b2_model.B2Model) -> None:
         mfx_nmda.delete_init("X")
 
 
-def test_assemble_network(mfx_nmda) -> None:
+def test_assemble_network(mfx_nmda, monkeypatch: MonkeyPatch) -> None:
     a = 1 / (10 * b2.ms)
     b = 1 / (10 * b2.ms)
     c = 1 / (10 * b2.ms)
@@ -887,6 +898,23 @@ def test_assemble_network(mfx_nmda) -> None:
     assert model.get_equation_names_of("neurons") == list(
         model.network["neurons"].equations.names
     )
+
+    with pytest.raises(
+        KeyError,
+        match="Error, name X is neither synapse nor neurongroup and hence does not have equations to get variables from",
+    ):
+        model.get_equation_names_of("X")
+
+    def raise_error(x: Any) -> None:
+        raise RuntimeError("Dummy")
+
+    monkeypatch.setattr(b2.Network, "__getattribute__", raise_error)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Error, something went wrong when getting equation variables for neurons",
+    ):
+        model.get_equation_names_of("neurons")
 
 
 def test_hdf5(tmp_path: Path, mfx_ornstein: b2_model.B2Model) -> None:

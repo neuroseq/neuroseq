@@ -75,6 +75,8 @@ def test_etree_edit_item(mfx_nmda: B2Model, qtbot: QtBot) -> None:
 
     assert stree.b2model.synapses["S"]["target"] == "other"
 
+    assert normal.value() == "other"
+
     # edit textfield parameter
     with qtbot.waitSignal(textfield.sigValueChanged, timeout=1000, raising=True):
         textfield.setValue("dv/dt = -v: 1")
