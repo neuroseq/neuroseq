@@ -212,14 +212,14 @@ def test_copy_init_element(mfx_nmda: b2_model.B2Model) -> None:
 
 
 def test_copy_parameter(mfx_nmda: b2_model.B2Model) -> None:
-    assert "a" in mfx_nmda.parameters
-    assert "x" not in mfx_nmda.parameters
+    assert "a" in mfx_nmda.parameters  # type: ignore
+    assert "x" not in mfx_nmda.parameters  # type: ignore
 
     mfx_nmda.copy_parameter("a", "x")
-    assert "a" in mfx_nmda.parameters
-    assert "x" in mfx_nmda.parameters
+    assert "a" in mfx_nmda.parameters  # type: ignore
+    assert "x" in mfx_nmda.parameters  # type: ignore
 
-    assert mfx_nmda.parameters["a"] == mfx_nmda.parameters["x"]
+    assert mfx_nmda.parameters["a"] == mfx_nmda.parameters["x"]  # type: ignore
     assert (
         mfx_nmda.functions["parameters"]["a"] == mfx_nmda.functions["parameters"]["x"]
     )
@@ -258,18 +258,18 @@ def test_rename_synapse(mfx_nmda: b2_model.B2Model) -> None:
 
 
 def test_rename_parameter(mfx_nmda: b2_model.B2Model) -> None:
-    assert "a" in mfx_nmda.parameters
-    test_data = deepcopy(mfx_nmda.parameters["a"])
+    assert "a" in mfx_nmda.parameters  # type: ignore
+    test_data = deepcopy(mfx_nmda.parameters["a"])  # type: ignore
     test_function_data = deepcopy(mfx_nmda.functions["parameters"]["a"])
 
     mfx_nmda.rename_parameter("a", "renamed")
-    assert "a" not in mfx_nmda.parameters
+    assert "a" not in mfx_nmda.parameters  # type: ignore
     assert "a" not in mfx_nmda.functions["parameters"]
 
-    assert "renamed" in mfx_nmda.parameters
+    assert "renamed" in mfx_nmda.parameters  # type: ignore
     assert "renamed" in mfx_nmda.functions["parameters"]
 
-    assert mfx_nmda.parameters["renamed"] == test_data
+    assert mfx_nmda.parameters["renamed"] == test_data  # type: ignore
     assert mfx_nmda.functions["parameters"]["renamed"] == test_function_data
 
 
@@ -545,6 +545,14 @@ def test_define_synapse(
     assert mfx.synapses["Ce"]["origin"] == "Pe"
     assert mfx.synapses["Ce"]["target"] == "Pi"
 
+    ce = mfx.network["Ce"]
+
+    # test removal and reassembly
+    mfx.define_synapse_connection_probablitiy("Ce", 0.5)
+    mfx._assemble_synapse("Ce")
+    assert ce is not mfx.network["Ce"]
+    assert mfx.synapses["Ce"]["p"] == 0.5
+
 
 def test_assemble_synapse_exception(
     mocker: MockerFixture, mfx_with_synapse: tuple[b2_model.B2Model, dict[str, Any]]
@@ -705,7 +713,7 @@ def test_NMDA_model(mfx_nmda: b2_model.B2Model) -> None:
 
     S.connect()
 
-    # initilize
+    # initialize
     S.w = [1.0, 10.0]
 
     neuron_input.v = [0.0, 0.5]
@@ -737,27 +745,38 @@ def test_NMDA_model(mfx_nmda: b2_model.B2Model) -> None:
     assert_allclose(M.g, mfx_nmda.network["M"].g)
     assert_allclose(Mn.g, mfx_nmda.network["Mn"].g)
 
+    mfx_nmda.must_be_rebuilt = True
+    mfx_nmda.run_simulation(100 * b2.ms)
+    assert (
+        mfx_nmda.must_be_rebuilt is False
+    )  # false indicate that the model has been rebuild
+
 
 def test_NMDA_model_delete(mfx_nmda: b2_model.B2Model) -> None:
     assert "neuronnumber" in mfx_nmda.neurongroups["neuron_input"]
     mfx_nmda.delete_neurongroup_element("neuron_input", "neuronnumber")
     assert "neuronnumber" not in mfx_nmda.neurongroups["neuron_input"]
+    assert "neuronnumber" not in mfx_nmda.functions["neurongroups"]["neuron_input"]
 
     assert "on_pre" in mfx_nmda.synapses["S"]
     mfx_nmda.delete_synapse_element("S", "on_pre")
     assert "on_pre" not in mfx_nmda.synapses["S"]
+    assert "on_pre" not in mfx_nmda.functions["synapses"]["S"]
 
     assert "source" in mfx_nmda.monitors["Mn"]
     mfx_nmda.delete_monitor_element("Mn", "source")
     assert "source" not in mfx_nmda.monitors["Mn"]
+    assert "source" not in mfx_nmda.functions["monitors"]["Mn"]
 
     assert "w" in mfx_nmda.initials["S"]
     mfx_nmda.delete_init_element("S", "w")
     assert "w" not in mfx_nmda.initials["S"]
+    assert "w" not in mfx_nmda.functions["initials"]["S"]
 
     assert "Mn" in mfx_nmda.monitors
     mfx_nmda.delete_monitor("Mn")
     assert "Mn" not in mfx_nmda.monitors
+    assert "Mn" not in mfx_nmda.functions["monitors"]
 
     with pytest.raises(
         KeyError, match="Error when deleting initial conditions w of group S"
@@ -786,8 +805,13 @@ def test_NMDA_model_delete(mfx_nmda: b2_model.B2Model) -> None:
     with pytest.raises(KeyError, match="Error when deleting x"):
         mfx_nmda.delete_parameter("x")
 
+    with pytest.raises(
+        KeyError, match="Error when deleting initial conditions for group X"
+    ):
+        mfx_nmda.delete_init("X")
 
-def test_assemble_network_and_erase(mfx_nmda) -> None:
+
+def test_assemble_network(mfx_nmda) -> None:
     a = 1 / (10 * b2.ms)
     b = 1 / (10 * b2.ms)
     c = 1 / (10 * b2.ms)

@@ -1622,7 +1622,7 @@ class B2Model:
             del self.functions["initials"][name]
         except Exception as e:
             raise KeyError(
-                f"Error when deleting initial conditions of group {name}: {e}"
+                f"Error when deleting initial conditions for group {name}: {e}"
             ) from e
 
     def delete_init_element(self, name: str, varname: str) -> None:
