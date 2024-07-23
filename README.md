@@ -45,8 +45,18 @@ The console also has a history feature, which can be accessed by pressing the up
 ### Stimuli editing
 
 The main purpose of the console is to allow users to modify the numpy arrays of stimuli using numpy and Python code.
-Any changes you make to the stimuli will be checked for validity, and if valid then they will updated in the model and the changes will be displayed in the GUI.
-If the changes are invalid, then an error message will be displayed in the console, and the model will not be modified.
+Any changes you make to the stimuli will be checked for validity, and if valid then they will updated in the model and the changes will be displayed in the GUI, e.g.
+
+```python
+>>> stims['stimulus'] = np.random.randint(2,size=(500, 24))
+```
+
+If the changes are invalid, then an error message will be displayed in the console, and the model will not be modified, e.g.
+
+```python
+>>> stims['stimulus'] = np.random.randint(2,size=(5, 5, 5))
+    Invalid stims: expected dict[str, 1d or 2d numpy array], found dict with 3d numpy array for key 'stimulus'
+```
 
 ### Model editing
 
@@ -55,8 +65,19 @@ Try `help(model)` to see what methods and attributes are available.
 
 ### brian2 objects
 
-The underlying brian2 network is available at `model.network`, so for example you can get a list of StateMonitors with
-`[m for m in model.network.objects if isinstance(m, b2.StateMonitor)]`
+The objects from the underlying brian2 model can also be accessed. For example, you can get a list of monitors with
+
+```python
+>>> model.monitors.keys()
+dict_keys(['Traces_v', 'spikemon', 'synmon'])
+```
+
+And you can then get the underlying brian2 monitor object with e.g.
+
+```python
+>>> monitor = model.get_monitor('Traces_v')['object']
+```
+
 Note that these objects should not be directly modified using the console, as it will cause the GUI and `model` to become out of sync with the underlying brian2 model.
 
 ## Developer Installation
