@@ -257,7 +257,7 @@ class EditableParameterTree(ParameterTree):
             if all(f in funcs for f in ["delete", "rename"]):
                 # the outermost nodes (neurongroups, initials, synapses) cannot be modified and have no slots, hence this check
                 param.sigRemoved.connect(funcs["delete"])
-                param.sigNameChanged.connect(funcs["rename"])
+                param.sigNameChanged.connect(lambda p: funcs["rename"](p.name()))
 
             for child in param.children():
                 if child.name() in funcs:
@@ -267,6 +267,7 @@ class EditableParameterTree(ParameterTree):
         else:
             param.sigValueChanged.connect(lambda p: funcs["modify"](p.value()))
             param.sigRemoved.connect(funcs["delete"])
+            param.sigNameChanged.connect(lambda p: funcs["rename"](p.name()))
 
     def _get_value(self, v: Any) -> dict[str, Any] | Any:
         """
@@ -349,7 +350,7 @@ class EditableParameterTree(ParameterTree):
                     "type": param_type,
                     "value": value,
                     "removable": True,
-                    "renamable": False,
+                    "renamable": True,
                     "syncExpanded": True,
                     "functions": functions,
                 }
@@ -557,13 +558,9 @@ class EditableMonitorTree(EditableParameterTree):
         # if none are given for the respective monitor, which gives the set of
         # selectable variables
         if typename == "StateMonitor":
-            return list(self.b2model.network[sourcename].equations.names) + [
-                "True",
-            ]  # True means that everything is recorded. Allowed for StateMonitor
+            return list(self.b2model.network[sourcename].equations.names)
         elif typename == "SpikeMonitor":
-            return list(self.b2model.network[sourcename].variables.keys()) + [
-                "None",
-            ]  # None is allowed for spikemonitor
+            return list(self.b2model.network[sourcename].variables.keys())
         else:
             message = f"Unknonw monitor type {typename}"
             self.logger.critical(message)

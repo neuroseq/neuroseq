@@ -376,7 +376,6 @@ class B2Model:
         varname : str
             element name to remove
         """
-        print("deleting element: ", groupname, varname)
         try:
             del dictionary[groupname][varname]
         except Exception as e:
@@ -455,6 +454,7 @@ class B2Model:
                 self.initials[name], varname, v
             ),
             "copy": lambda n: self.copy_init_element(name, varname, n),
+            "rename": lambda n: self.rename_init_element(name, varname, n),
         }
 
         utils.update_nested_dict(
@@ -524,8 +524,8 @@ class B2Model:
             "add": lambda p: self.define_parameter(name, p),
             "delete": lambda: self.delete_parameter(name),
             "modify": lambda p: self._modify_dict_element(self.parameters, name, p),
-            "rename": lambda n: self._move_dict_element(self.parameters, name, n),
-            "copy": lambda n: self._copy_dict_element(self.parameters, name, n),
+            "rename": lambda n: self.rename_parameter(name, n),
+            "copy": lambda n: self.copy_parameter(name, n),
         }
 
         self.parameters[name] = value
@@ -573,6 +573,7 @@ class B2Model:
             "modify": lambda e: self._modify_dict_element(
                 self.neurongroups[name], "model", e
             ),
+            "rename": lambda n: self.rename_neurongroup_element(name, "model", n),
         }
 
         self._add_equation_to_group(self.neurongroups[name], line)
@@ -605,6 +606,7 @@ class B2Model:
             "modify": lambda r: self._modify_dict_element(
                 self.neurongroups[name], "reset", r
             ),
+            "rename": lambda n: self.rename_neurongroup_element(name, "reset", n),
         }
 
         utils.update_nested_dict(
@@ -642,6 +644,7 @@ class B2Model:
             "modify": lambda t: self._modify_dict_element(
                 self.neurongroups[name], "th", t
             ),
+            "rename": lambda n: self.rename_neurongroup_element(name, "th", n),
         }
 
         utils.update_nested_dict(
@@ -681,6 +684,7 @@ class B2Model:
             "modify": lambda t: self._modify_dict_element(
                 self.neurongroups[name], "th", t
             ),
+            "rename": lambda n: self.rename_neurongroup_element(name, "method", n),
         }
 
         utils.update_nested_dict(
@@ -720,6 +724,7 @@ class B2Model:
             "modify": lambda r: self._modify_dict_element(
                 self.neurongroups[name], "refractory", r
             ),
+            "rename": lambda n: self.rename_neurongroup_element(name, "refractory", n),
         }
 
         utils.update_nested_dict(
@@ -757,6 +762,9 @@ class B2Model:
             "delete": lambda: self.delete_neurongroup_element(name, "neuronnumber"),
             "modify": lambda n: self._modify_dict_element(
                 self.neurongroups[name], "neuronnumber", n
+            ),
+            "rename": lambda n: self.rename_neurongroup_element(
+                name, "neuronnumber", n
             ),
         }
 
@@ -809,6 +817,7 @@ class B2Model:
             "modify": lambda tgt: self._modify_dict_element(
                 self.neurongroups[name], "target", tgt
             ),
+            "rename": lambda n: self.rename_neurongroup_element(name, "target", n),
         }
 
         utils.update_nested_dict(
@@ -845,6 +854,7 @@ class B2Model:
             "modify": lambda idxs: self._modify_dict_element(
                 self.neurongroups[name], "idxs", idxs
             ),
+            "rename": lambda n: self.rename_neurongroup_element(name, "idxs", n),
         }
 
         if name not in self.neurongroups:
@@ -882,6 +892,7 @@ class B2Model:
             "modify": lambda m: self._modify_dict_element(
                 self.synapses[name], "method", m
             ),
+            "rename": lambda n: self.rename_synapse_element(name, "method", n),
         }
         utils.update_nested_dict(
             self.synapses,
@@ -920,6 +931,7 @@ class B2Model:
             "modify": lambda t: self._modify_dict_element(
                 self.synapses[name], "target", t
             ),
+            "rename": lambda n: self.rename_synapse_element(name, "target", n),
         }
 
         utils.update_nested_dict(
@@ -957,6 +969,7 @@ class B2Model:
             "modify": lambda o: self._modify_dict_element(
                 self.synapses[name], "origin", o
             ),
+            "rename": lambda n: self.rename_synapse_element(name, "origin", n),
         }
 
         utils.update_nested_dict(
@@ -1002,6 +1015,7 @@ class B2Model:
             "modify": lambda eq: self._modify_dict_element(
                 self.synapses[name], "model", eq
             ),
+            "rename": lambda n: self.rename_synapse_element(name, "model", n),
         }
 
         self._add_equation_to_group(self.synapses[name], line)
@@ -1032,6 +1046,7 @@ class B2Model:
             "modify": lambda eq: self._modify_dict_element(
                 self.synapses[name], "on_pre", eq
             ),
+            "rename": lambda n: self.rename_synapse_element(name, "on_pre", n),
         }
 
         if name not in self.synapses or "on_pre" not in self.synapses[name]:
@@ -1073,6 +1088,7 @@ class B2Model:
             "modify": lambda eq: self._modify_dict_element(
                 self.synapses[name], "on_post", eq
             ),
+            "rename": lambda n: self.rename_synapse_element(name, "on_post", n),
         }
 
         if name not in self.synapses or "on_post" not in self.synapses[name]:
@@ -1114,6 +1130,9 @@ class B2Model:
             "modify": lambda c: self._modify_dict_element(
                 self.synapses[name], "connection_condition", c
             ),
+            "rename": lambda n: self.rename_synapse_element(
+                name, "connection_condition", n
+            ),
         }
 
         utils.update_nested_dict(
@@ -1151,6 +1170,7 @@ class B2Model:
             "modify": lambda c: self._modify_dict_element(
                 self.synapses[name], "delay", c
             ),
+            "rename": lambda n: self.rename_synapse_element(name, "delay", n),
         }
 
         utils.update_nested_dict(
@@ -1189,6 +1209,7 @@ class B2Model:
             "add": lambda p: self.define_synapse_connection_probablitiy(name, p),
             "delete": lambda: self.delete_synapse_element(name, "p"),
             "modify": lambda p: self._modify_dict_element(self.synapses[name], "p", p),
+            "rename": lambda n: self.rename_synapse_element(name, "p", n),
         }
 
         utils.update_nested_dict(
@@ -1253,6 +1274,7 @@ class B2Model:
         new_name : str
             new name
         """
+        self.monitors[name]["name"] = new_name
         self._move_dict_element(self.monitors, name, new_name)
         self._move_dict_element(self.functions["monitors"], name, new_name)
 
@@ -1492,7 +1514,6 @@ class B2Model:
         name : str
             Name of the synapse to delete from the intermediat dict
         """
-        print("deleting synapse:", name)
         del self.synapses[name]
         del self.functions["synapses"][name]
 
@@ -1509,7 +1530,6 @@ class B2Model:
         name : str
             Name of the monitor to delete from the intermediat dict
         """
-        print("deleting monitor: ", name)
         del self.monitors[name]
         del self.functions["monitors"][name]
 
@@ -1662,6 +1682,7 @@ class B2Model:
             "modify": lambda tp: self._modify_dict_element(
                 self.monitors[name], "type", tp
             ),
+            "rename": lambda n: self.rename_monitor_element(name, "type", n),
         }
 
         utils.update_nested_dict(
@@ -1702,6 +1723,7 @@ class B2Model:
             "modify": lambda src: self._modify_dict_element(
                 self.monitors[name], "source", src
             ),
+            "rename": lambda n: self.rename_monitor_element(name, "source", n),
         }
 
         utils.update_nested_dict(
@@ -1743,7 +1765,9 @@ class B2Model:
             "modify": lambda var: self._modify_dict_element(
                 self.monitors[name], "variable", var
             ),
+            "rename": lambda n: self.rename_monitor_element(name, "variable", n),
         }
+
         utils.update_nested_dict(
             self.monitors,
             {
