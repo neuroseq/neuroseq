@@ -442,7 +442,6 @@ class B2Model:
             self.functions["initials"][name] = {
                 "rename": lambda n: self.rename_init(name, n),
                 "delete": lambda: self.delete_init(name),
-                "copy": lambda n: self.copy_init(name, n),
             }
 
         self.functions["initials"][name][varname] = {
@@ -451,7 +450,6 @@ class B2Model:
             "modify": lambda v: self._modify_dict_element(
                 self.initials[name], varname, v
             ),
-            "copy": lambda n: self.copy_init_element(name, varname, n),
             "rename": lambda n: self.rename_init_element(name, varname, n),
         }
 
@@ -523,7 +521,6 @@ class B2Model:
             "delete": lambda: self.delete_parameter(name),
             "modify": lambda p: self._modify_dict_element(self.parameters, name, p),
             "rename": lambda n: self.rename_parameter(name, n),
-            "copy": lambda n: self.copy_parameter(name, n),
         }
 
         self.parameters[name] = value
@@ -562,7 +559,6 @@ class B2Model:
             self.functions["neurongroups"][name] = {
                 "rename": lambda n: self.rename_neurongroup(name, n),
                 "delete": lambda: self.delete_neurongroup(name),
-                "copy": lambda n: self.copy_neurongroup(name, n),
             }
 
         self.functions["neurongroups"][name]["model"] = {
@@ -595,7 +591,6 @@ class B2Model:
             self.functions["neurongroups"][name] = {
                 "rename": lambda n: self.rename_neurongroup(name, n),
                 "delete": lambda: self.delete_neurongroup(name),
-                "copy": lambda n: self.copy_neurongroup(name, n),
             }
 
         self.functions["neurongroups"][name]["reset"] = {
@@ -634,7 +629,6 @@ class B2Model:
             self.functions["neurongroups"][name] = {
                 "rename": lambda n: self.rename_neurongroup(name, n),
                 "delete": lambda: self.delete_neurongroup(name),
-                "copy": lambda n: self.copy_neurongroup(name, n),
             }
         self.functions["neurongroups"][name]["th"] = {
             "add": lambda t: self.define_threshold(name, t),
@@ -674,7 +668,6 @@ class B2Model:
             self.functions["neurongroups"][name] = {
                 "rename": lambda n: self.rename_neurongroup(name, n),
                 "delete": lambda: self.delete_neurongroup(name),
-                "copy": lambda n: self.copy_neurongroup(name, n),
             }
         self.functions["neurongroups"][name]["method"] = {
             "add": lambda t: self.define_threshold(name, t),
@@ -714,7 +707,6 @@ class B2Model:
             self.functions["neurongroups"][name] = {
                 "rename": lambda n: self.rename_neurongroup(name, n),
                 "delete": lambda: self.delete_neurongroup(name),
-                "copy": lambda n: self.copy_neurongroup(name, n),
             }
         self.functions["neurongroups"][name]["refractory"] = {
             "add": lambda r: self.define_refractory(name, r),
@@ -753,7 +745,6 @@ class B2Model:
             self.functions["neurongroups"][name] = {
                 "rename": lambda n: self.rename_neurongroup(name, n),
                 "delete": lambda: self.delete_neurongroup(name),
-                "copy": lambda n: self.copy_neurongroup(name, n),
             }
         self.functions["neurongroups"][name]["neuronnumber"] = {
             "add": lambda n: self.define_neuronnumber(name, n),
@@ -807,7 +798,6 @@ class B2Model:
             self.functions["neurongroups"][name] = {
                 "rename": lambda n: self.rename_neurongroup(name, n),
                 "delete": lambda: self.delete_neurongroup(name),
-                "copy": lambda n: self.copy_neurongroup(name, n),
             }
         self.functions["neurongroups"][name]["target"] = {
             "add": lambda tgt: self.define_neuronsubgroup_target(name, tgt),
@@ -847,7 +837,6 @@ class B2Model:
             self.functions["neurongroups"][name] = {
                 "rename": lambda n: self.rename_neurongroup(name, n),
                 "delete": lambda: self.delete_neurongroup(name),
-                "copy": lambda n: self.copy_neurongroup(name, n),
             }
         self.functions["neurongroups"][name]["idxs"] = {
             "add": lambda idxs: self.define_neuronsubgroup_idxs(name, idxs),
@@ -882,7 +871,6 @@ class B2Model:
             self.functions["synapses"][name] = {
                 "rename": lambda n: self.rename_synapse(name, n),
                 "delete": lambda: self.delete_synapse(name),
-                "copy": lambda n: self.copy_synapse(name, n),
             }
 
         self.functions["synapses"][name]["method"] = {
@@ -921,7 +909,6 @@ class B2Model:
             self.functions["synapses"][name] = {
                 "rename": lambda n: self.rename_synapse(name, n),
                 "delete": lambda: self.delete_synapse(name),
-                "copy": lambda n: self.copy_synapse(name, n),
             }
 
         self.functions["synapses"][name]["target"] = {
@@ -960,7 +947,6 @@ class B2Model:
             self.functions["synapses"][name] = {
                 "rename": lambda n: self.rename_synapse(name, n),
                 "delete": lambda: self.delete_synapse(name),
-                "copy": lambda n: self.copy_synapse(name, n),
             }
         self.functions["synapses"][name]["origin"] = {
             "add": lambda o: self.define_synapse_origin(name, o),
@@ -1006,7 +992,6 @@ class B2Model:
             self.functions["synapses"][name] = {
                 "rename": lambda n: self.rename_synapse(name, n),
                 "delete": lambda: self.delete_synapse(name),
-                "copy": lambda n: self.copy_synapse(name, n),
             }
         self.functions["synapses"][name]["model"] = {
             "add": lambda eq: self.define_synapse_equation(name, eq),
@@ -1037,7 +1022,6 @@ class B2Model:
             self.functions["synapses"][name] = {
                 "rename": lambda n: self.rename_synapse(name, n),
                 "delete": lambda: self.delete_synapse(name),
-                "copy": lambda n: self.copy_synapse(name, n),
             }
         self.functions["synapses"][name]["on_pre"] = {
             "add": lambda eq: self.define_synapse_pre(name, eq),
@@ -1079,7 +1063,6 @@ class B2Model:
             self.functions["synapses"][name] = {
                 "rename": lambda n: self.rename_synapse(name, n),
                 "delete": lambda: self.delete_synapse(name),
-                "copy": lambda n: self.copy_synapse(name, n),
             }
         self.functions["synapses"][name]["on_post"] = {
             "add": lambda eq: self.define_synapse_post(name, eq),
@@ -1121,7 +1104,6 @@ class B2Model:
             self.functions["synapses"][name] = {
                 "rename": lambda n: self.rename_synapse(name, n),
                 "delete": lambda: self.delete_synapse(name),
-                "copy": lambda n: self.copy_synapse(name, n),
             }
         self.functions["synapses"][name]["connection_condition"] = {
             "add": lambda c: self.define_synapse_connection(name, c),
@@ -1161,7 +1143,6 @@ class B2Model:
             self.functions["synapses"][name] = {
                 "rename": lambda n: self.rename_synapse(name, n),
                 "delete": lambda: self.delete_synapse(name),
-                "copy": lambda n: self.copy_synapse(name, n),
             }
         self.functions["synapses"][name]["delay"] = {
             "add": lambda c: self.define_synapse_delay(name, c),
@@ -1202,7 +1183,6 @@ class B2Model:
             self.functions["synapses"][name] = {
                 "rename": lambda n: self.rename_synapse(name, n),
                 "delete": lambda: self.delete_synapse(name),
-                "copy": lambda n: self.copy_synapse(name, n),
             }
         self.functions["synapses"][name]["p"] = {
             "add": lambda p: self.define_synapse_connection_probablitiy(name, p),
@@ -1333,158 +1313,6 @@ class B2Model:
         self._move_dict_element(self.monitors[name], old_element_name, new_element_name)
         self._move_dict_element(
             self.functions["monitors"][name], old_element_name, new_element_name
-        )
-
-    def copy_neurongroup(self, name: str, new_name: str) -> None:
-        """
-        Copy a neurongroup
-
-        Parameters
-        ----------
-        name : str
-            old name
-        new_name : str
-            new name
-        """
-        self._copy_dict_element(self.neurongroups, name, new_name)
-        self._copy_dict_element(self.functions["neurongroups"], name, new_name)
-
-    def copy_synapse(self, name: str, new_name: str) -> None:
-        """
-        Copy a synapse
-
-        Parameters
-        ----------
-        name : str
-            old name
-        new_name : str
-            new name
-        """
-        self._copy_dict_element(self.synapses, name, new_name)
-        self._copy_dict_element(self.functions["synapses"], name, new_name)
-
-    def copy_parameter(self, name: str, new_name: str) -> None:
-        """
-        Copy a monitor
-
-        Parameters
-        ----------
-        name : str
-            old name
-        new_name : str
-            new name
-        """
-        self._copy_dict_element(self.parameters, name, new_name)
-        self._copy_dict_element(self.functions["parameters"], name, new_name)
-
-    def copy_init(self, name: str, new_name: str) -> None:
-        """
-        Copy an initial condition and rename it
-
-        Parameters
-        ----------
-        name : str
-            name of source
-        new_name : str
-            name of ocpy
-        """
-        self._copy_dict_element(self.initials, name, new_name)
-        self._copy_dict_element(self.functions["initials"], name, new_name)
-
-    def copy_monitor(self, name: str, new_name: str) -> None:
-        """
-        Copy a monitor
-
-        Parameters
-        ----------
-        name : str
-            old name
-        new_name : str
-            new name
-        """
-        self._copy_dict_element(self.monitors, name, new_name)
-        self._copy_dict_element(self.functions["monitors"], name, new_name)
-
-    def copy_neurongroup_element(
-        self, name: str, old_element_name: str, new_element_name: str
-    ) -> None:
-        """
-        _summary_
-
-        Parameters
-        ----------
-        name : str
-            _description_
-        old_element_name : str
-            _description_
-        new_element_name : str
-            _description_
-        """
-        self._copy_dict_element(
-            self.neurongroups[name], old_element_name, new_element_name
-        )
-        self._copy_dict_element(
-            self.functions["neurongroups"][name], old_element_name, new_element_name
-        )
-
-    def copy_synapse_element(
-        self, name: str, old_element_name: str, new_element_name: str
-    ) -> None:
-        """
-        _summary_
-
-        Parameters
-        ----------
-        name : str
-            _description_
-        old_element_name : str
-            _description_
-        new_element_name : str
-            _description_
-        """
-        self._copy_dict_element(self.synapses[name], old_element_name, new_element_name)
-        self._copy_dict_element(
-            self.functions["synapses"][name], old_element_name, new_element_name
-        )
-
-    def copy_monitor_element(
-        self, name: str, old_element_name: str, new_element_name: str
-    ) -> None:
-        """
-        _summary_
-
-        Parameters
-        ----------
-        name : str
-            _description_
-        old_element_name : str
-            _description_
-        new_element_name : str
-            _description_
-        """
-        self._copy_dict_element(self.monitors[name], old_element_name, new_element_name)
-        self._copy_dict_element(
-            self.functions["monitors"][name], old_element_name, new_element_name
-        )
-
-    def copy_init_element(
-        self, name: str, old_element_name: str, new_element_name: str
-    ) -> None:
-        """
-        _summary_
-
-        Parameters
-        ----------
-        name : str
-            _description_
-        old_element_name : str
-            _description_
-        new_element_name : str
-            _description_
-        """
-        self._copy_dict_element(self.initials[name], old_element_name, new_element_name)
-        self._copy_dict_element(
-            self.functions["initials"][name], old_element_name, new_element_name
         )
 
     @_trigger_rebuild
@@ -1672,7 +1500,6 @@ class B2Model:
             self.functions["monitors"][name] = {
                 "rename": lambda n: self.rename_monitor(name, n),
                 "delete": lambda: self.delete_monitor(name),
-                "copy": lambda n: self.copy_monitor(name, n),
             }
 
         self.functions["monitors"][name]["type"] = {
@@ -1713,7 +1540,6 @@ class B2Model:
             self.functions["monitors"][name] = {
                 "rename": lambda n: self.rename_monitor(name, n),
                 "delete": lambda: self.delete_monitor(name),
-                "copy": lambda n: self.copy_monitor(name, n),
             }
 
         self.functions["monitors"][name]["source"] = {
@@ -1755,7 +1581,6 @@ class B2Model:
             self.functions["monitors"][name] = {
                 "rename": lambda n: self.rename_monitor(name, n),
                 "delete": lambda: self.delete_monitor(name),
-                "copy": lambda n: self.copy_monitor(name, n),
             }
 
         self.functions["monitors"][name]["variable"] = {
