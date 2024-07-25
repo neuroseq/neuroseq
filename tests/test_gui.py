@@ -382,3 +382,27 @@ def test_gui_synapse_ram_limit(
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "critical"
     assert "invalid input" in qmessagebox_calls[0]["title"].lower()
+
+
+def test_gui_brian2_backend(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    assert b2.prefs.codegen.target == "numpy"
+    # mock getItem to return the desired backend choice
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("cython", True)
+    )
+    gui.btn_set_brian2_backend()
+    assert b2.prefs.codegen.target == "cython"
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("numpy", True)
+    )
+    gui.btn_set_brian2_backend()
+    assert b2.prefs.codegen.target == "numpy"
+    # check it also works if the initial value is somehow invalid
+    gui.settings.brian2_backend = "invalid"
+    gui.btn_set_brian2_backend()
+    assert b2.prefs.codegen.target == "numpy"
