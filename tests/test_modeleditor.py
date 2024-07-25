@@ -12,6 +12,7 @@ from formozov_project.model_editor import EditableNeurongroupTree
 from formozov_project.model_editor import EditableParameterTree
 from formozov_project.model_editor import EditableSynapseTree
 from formozov_project.model_editor import ModelEditorDialog
+from formozov_project.reconstructor import Reconstructor
 from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
@@ -154,6 +155,38 @@ def test_neurontree_add_neuronsubgroup(
     assert ntree.b2model.neurongroups["sub"]["idxs"] == (1, 2)
 
 
+def test_rename_tree_element(
+    mfx_nmda: B2Model, qtbot: QtBot, qmessagebox_calls: list
+) -> None:
+    ptree = EditableParameterTree(mfx_nmda, ParameterDialog, "parameters")
+    qtbot.addWidget(ptree)
+
+    pnode = ptree.root
+
+    a_node = pnode.child("a")
+
+    with qtbot.waitSignal(a_node.sigNameChanged, timeout=1000, raising=True):
+        a_node.setName("x")
+
+    item = a_node.makeTreeItem(0)
+
+    assert item.text(0) == "x"
+
+    assert "x" in ptree.b2model.parameters  # type: ignore
+    assert "a" not in ptree.b2model.parameters  # type: ignore
+
+    with qtbot.waitSignal(a_node.sigNameChanged, timeout=1000, raising=True):
+        a_node.setName("2332x")
+
+    assert qmessagebox_calls == [
+        {
+            "name": "critical",
+            "text": "An error occured: The name 2332x is not a valid python identifier",
+            "title": "Error",
+        },
+    ]
+
+
 def test_neurontree_add_neurongroup(
     mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch
 ) -> None:
@@ -282,18 +315,75 @@ def test_neurontree_add_neurongroup(
     )
 
 
-def test_modeldialog(mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
+def test_modeldialog_accept(
+    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+) -> None:
     diag = ModelEditorDialog(mfx_nmda)
     qtbot.addWidget(diag)
     assert diag.b2model.must_be_rebuilt is False
+    specs = mfx_nmda.get_model_definition()
+    assert diag.backup == specs
+    assert diag.functions_backup == mfx_nmda.functions
 
     diag.b2model.define_neuronnumber("p1", 25)
     diag.b2model.define_solver_method("p1", "euler")
     diag.b2model.define_equation("p1", "dv/dt=-v: 1")
 
     assert diag.b2model.must_be_rebuilt is True
+
     diag.accept()
 
     assert "p1" in diag.b2model.neurongroups
+    assert "p1" in [obj.name for obj in diag.b2model.network.objects]
 
-    assert "p1" in diag.b2model.network.get_states()
+    def raise_error(_, __):
+        raise RuntimeError("dummy")
+
+    monkeypatch.setattr(Reconstructor, "reconstruct", raise_error)
+    diag.b2model.define_neuronnumber("p1", 35)
+
+    diag.accept()
+
+    assert qmessagebox_calls == [
+        {
+            "name": "critical",
+            "text": "Error when rebuilding the model after editing: " "dummy",
+            "title": "Model rebuilding error",
+        },
+    ]
+
+
+def test_modeldialog_reject(
+    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+) -> None:
+    diag = ModelEditorDialog(mfx_nmda)
+    qtbot.add_widget(diag)
+    specs = mfx_nmda.get_model_definition()
+    assert diag.backup == specs
+    assert diag.functions_backup == mfx_nmda.functions
+
+    diag.b2model.delete_monitor("Mn")
+
+    assert "Mn" not in diag.b2model.monitors
+    assert "Mn" in [obj.name for obj in diag.b2model.network.objects]
+
+    diag.reject()
+
+    assert "Mn" in diag.b2model.monitors
+    assert "Mn" in [obj.name for obj in diag.b2model.network.objects]
+
+    def raise_error(_, __):
+        raise RuntimeError("dummy")
+
+    monkeypatch.setattr(B2Model, "define_b2seed", raise_error)
+
+    diag.reject()
+
+    assert qmessagebox_calls == [
+        {
+            "name": "critical",
+            "text": "Error when reassigning the model after editing has been rejected: "
+            "dummy",
+            "title": "Model specification error",
+        },
+    ]

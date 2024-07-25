@@ -66,7 +66,11 @@ class B2Model:
         """
         Move a dict element to another key. This copies data, so use with caution.
         """
-        self._copy_dict_element(dictionary, source, target)
+        try:
+            self._copy_dict_element(dictionary, source, target)
+        except Exception as e:
+            raise e
+
         del dictionary[source]
 
     @_trigger_rebuild
@@ -81,7 +85,13 @@ class B2Model:
                 f"Error, dictionary to copy an element from {source} to {target} is None"
             )
 
+        if target.isidentifier() is False:
+            raise ValueError(f"The name {target} is not a valid python identifier")
+
         dictionary[target] = deepcopy(dictionary[source])
+
+        if "name" in dictionary[target]:
+            dictionary[target]["name"] = target
 
     @_trigger_rebuild
     def _assemble_neuronsubgroup(
@@ -90,7 +100,7 @@ class B2Model:
     ) -> None:
         """
         _assemble_neuronsubgroup Define a subgroup of a neurongroup as a separate element that can be referred to by name.
-
+        Overrides any existing group named 'name' in the network.
         Parameters
         ----------
         name : str
@@ -145,7 +155,7 @@ class B2Model:
         _assemble_neurongroup Assemble a synapse called `name` from its set of predefined values.
 
         You need to define the respective variables first via the `define_synapse_*` functions.
-
+        Overrides any existing group named 'name' in the network.
         Parameters
         ----------
         name : str, optional
@@ -217,7 +227,7 @@ class B2Model:
         """
         _assemble_monitor Assemble a new monitor from predefined elements. When a monitor exists that
         in the network that has the same name, it is removed and replaced by the newly assembled one
-
+        Overrides any existing group named 'name' in the network.
         Parameters
         ----------
         name : str
@@ -269,7 +279,7 @@ class B2Model:
         _assemble_neurongroup Assemble a neurongroup called `name` from its set of predefined values.
         When a neurongroup of the same name already exists in the network, it will be removed and replaced with the newly assembled one.
         You need to define the respective variables first via the `define_*` functions.
-
+        Overrides any existing group named 'name' in the network.
         Parameters
         ----------
         name : str, optional
@@ -317,7 +327,7 @@ class B2Model:
     def _assemble_initial_conditions(self, name: str) -> None:
         """
         Set all the initial conditions that have been defined via 'define_init'.
-
+        Overrides any existing initial conditions named 'name' in the network.
         Parameters
         ----------
         name : str
@@ -1253,6 +1263,10 @@ class B2Model:
         new_name : str
             new name
         """
+        self.logger.info(
+            f"rename monitor names: {name}, {new_name}, {list(self.monitors.keys())}"
+        )
+
         self.monitors[name]["name"] = new_name
         self._move_dict_element(self.monitors, name, new_name)
         self._move_dict_element(self.functions["monitors"], name, new_name)
@@ -1328,9 +1342,6 @@ class B2Model:
         del self.neurongroups[name]
         del self.functions["neurongroups"][name]
 
-        if name in (obj.name for obj in self.network.objects):
-            self.network.remove(self.network[name])
-
     @_trigger_rebuild
     def delete_synapse(self, name: str) -> None:
         """
@@ -1343,9 +1354,6 @@ class B2Model:
         """
         del self.synapses[name]
         del self.functions["synapses"][name]
-
-        if name in (obj.name for obj in self.network.objects):
-            self.network.remove(self.network[name])
 
     @_trigger_rebuild
     def delete_monitor(self, name: str) -> None:
@@ -1360,14 +1368,10 @@ class B2Model:
         del self.monitors[name]
         del self.functions["monitors"][name]
 
-        if name in (obj.name for obj in self.network.objects):
-            self.network.remove(self.network[name])
-
     @_trigger_rebuild
     def delete_neurongroup_element(self, groupname: str, varname: str) -> None:
         """
-        Delete an element form the definition of a neurongroup. Note that if it has been assembled already,
-        you have to remove it using `remove_neurongroup` and redefine it completetly.
+        Delete an element form the definition of a neurongroup.
 
         Parameters
         ----------
@@ -1383,8 +1387,7 @@ class B2Model:
     @_trigger_rebuild
     def delete_synapse_element(self, groupname: str, varname: str) -> None:
         """
-        Delete an element form the definition of a synapse. Note that if it has been assembled already,
-        you have to remove it using `remove_synapse` and redefine it completetly.
+        Delete an element form the definition of a synapse.
 
         Parameters
         ----------
@@ -1399,8 +1402,8 @@ class B2Model:
     @_trigger_rebuild
     def delete_monitor_element(self, groupname: str, varname: str) -> None:
         """
-        Delete an element form the definition of a monitor. Note that if it has been assembled already,
-        you have to remove it using `remove_monitor` and redefine it completetly.
+        Delete an element form the definition of a monitor.
+
 
         Parameters
         ----------
@@ -1737,6 +1740,8 @@ class B2Model:
             "monitors": deepcopy(self.monitors),
             "parameters": deepcopy(self.parameters),
             "initials": deepcopy(self.initials),
+            "seed": self.seed,
+            "timestep": self.dt,
         }
 
     def get_variables_of(

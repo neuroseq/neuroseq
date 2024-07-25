@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from copy import deepcopy
 from typing import Any
 
 import brian2 as b2  # noqa: F401
@@ -238,6 +239,28 @@ class EditableParameterTree(ParameterTree):
         self.add_item_action = QtWidgets.QAction(f"add {self.name}")
         self.add_item_action.triggered.connect(self.add_item)
 
+    def _signal_with_errormessage(self, signal: Callable, *args: Any) -> None:
+        """
+        Call the function 'signal' with arguments '*args' and display an error message box
+        when it fails with an exception. This function acts as a wrapper around qt slots
+        to make possibly occuring errors visible
+
+        Parameters
+        ----------
+        signal : callable
+            Function to call. A qt slot that is to be called with the output from a signal.
+
+        Returns
+        -------
+        Any
+            Any return value from the slot
+        """
+        try:
+            signal(*args)
+        except Exception as e:
+            message = f"An error occured: {e}"
+            QtWidgets.QMessageBox.critical(self, "Error", message)
+
     def _connect_parameters(self, param: Parameter, funcs: dict[Any, Any]) -> None:
         """
         connect the signals emitted by the entries of the parameter tree to their respective actions.
@@ -250,15 +273,18 @@ class EditableParameterTree(ParameterTree):
             parent paremeter
         """
         if param.type() == "group":
-            # FIXME: not sure what to do here.
             param.sigChildAdded.connect(lambda: self.b2model.set_rebuilt(True))
             param.sigAddNew.connect(lambda: self.b2model.set_rebuilt(True))
             param.sigChildRemoved.connect(lambda: self.b2model.set_rebuilt(True))
 
             if all(f in funcs for f in ["delete", "rename"]):
                 # the outermost nodes (neurongroups, initials, synapses) cannot be modified and have no slots, hence this check
-                param.sigRemoved.connect(funcs["delete"])
-                param.sigNameChanged.connect(lambda p: funcs["rename"](p.name()))
+                param.sigRemoved.connect(
+                    lambda: self._signal_with_errormessage(funcs["delete"])
+                )
+                param.sigNameChanged.connect(
+                    lambda p: self._signal_with_errormessage(funcs["rename"], p.name())
+                )
 
             for child in param.children():
                 if child.name() in funcs:
@@ -267,10 +293,16 @@ class EditableParameterTree(ParameterTree):
                     pass
         else:
             param.sigValueChanged.connect(
-                lambda p: funcs["modify"](parse_string_to_quantity(p.value()))
+                lambda p: self._signal_with_errormessage(
+                    funcs["modify"], parse_string_to_quantity(p.value())
+                )
             )
-            param.sigRemoved.connect(funcs["delete"])
-            param.sigNameChanged.connect(lambda p: funcs["rename"](p.name()))
+            param.sigRemoved.connect(
+                lambda: self._signal_with_errormessage(funcs["delete"])
+            )
+            param.sigNameChanged.connect(
+                lambda p: self._signal_with_errormessage(funcs["rename"], p.name())
+            )
 
     def _get_value(self, v: Any) -> dict[str, Any] | Any:
         """
@@ -771,6 +803,10 @@ class ModelEditorDialog(QtWidgets.QDialog):
             ),
         }
         self.b2model = b2model
+
+        self.backup = self.b2model.get_model_definition()
+        self.functions_backup = deepcopy(self.b2model.functions)
+
         self.logger = logging.getLogger(__name__)
 
         layout = QtWidgets.QGridLayout()
@@ -806,6 +842,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
         """
         Accept the current state of the model and rebuilt it if anything has been edited.
         """
+        self.logger.info("accepted model editions")
         if self.b2model.must_be_rebuilt:
             self.logger.debug("rebuilding model after change")
             states = self.b2model.to_dict()
@@ -817,6 +854,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
 
             # FIXME: this can be a problem when the system shall be continued because
             # the sequence of random number changes due to brian2 caching them.
+            # Warning is only a stopcap until further specification
             if self.b2model.seed != states["seed"]:
                 QtWidgets.QMessageBox.warning(
                     self,
@@ -840,3 +878,37 @@ class ModelEditorDialog(QtWidgets.QDialog):
                 super().accept()
         else:
             super().accept()
+
+    def reject(self):
+        """
+        Reject the edited model specification and restore the original state
+        """
+        self.logger.info("Edited model specification not accepted, restoring")
+
+        if self.b2model.seed != self.backup["seed"]:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Model rng warning"
+                "The system's random number generator will be reseeded. This potentially can change the results when compared to previous ones",
+            )
+
+        try:
+            # reset the specification to the backup values
+            self.b2model.neurongroups = self.backup["neurongroups"]
+            self.b2model.synapses = self.backup["synapses"]
+            self.b2model.monitors = self.backup["monitors"]
+            self.b2model.parameters = self.backup["parameters"]
+            self.b2model.initials = self.backup["initials"]
+            self.b2model.functions = self.functions_backup
+            self.b2model.define_b2seed(self.backup["seed"])
+            if self.backup["timestep"] is not None:
+                self.b2model.define_dt(self.backup["timestep"])
+            self.b2model.assemble_network()  # keep underlying network in sync
+        except Exception as e:
+            message = (
+                f"Error when reassigning the model after editing has been rejected: {e}"
+            )
+            self.logger.critical(message)
+            QtWidgets.QMessageBox.critical(self, "Model specification error", message)
+
+        super().reject()
