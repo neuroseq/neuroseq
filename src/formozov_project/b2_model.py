@@ -182,6 +182,7 @@ class B2Model:
                 on_pre=args.get("on_pre", None),
                 on_post=args.get("on_post", None),
                 delay=args.get("delay", None),
+                dt=args.get("dt", b2.defaultclock.dt),
                 name=name,
                 namespace=self.parameters,
             )
@@ -247,6 +248,9 @@ class B2Model:
                 self.monitors[name].get("variable", None),
                 record=True,
                 name=self.monitors[name]["name"],
+                dt=self.monitors[name].get(
+                    "dt", self.network[self.monitors[name]["source"]].dt
+                ),  # set to source dt when no timestep is given --> max resolution
             )
         except Exception as e:
             message = f"Error in defining monitor {name}: {e}"
@@ -300,6 +304,7 @@ class B2Model:
                 method=self.neurongroups[name].get("method", None),
                 namespace=self.parameters,
                 reset=self.neurongroups[name].get("reset", None),
+                dt=self.neurongroups[name].get("dt", b2.defaultclock.dt),
                 name=name,
             )
         except Exception as e:
@@ -440,7 +445,6 @@ class B2Model:
                 "element_removed": lambda: self.set_rebuilt(True),
             },
         }
-        self.dt: b2.Quantity | None = None
         self.checkpoints: list[str] = []
         self.must_be_rebuilt = False
         self.logger = logging.getLogger(__name__)
@@ -491,21 +495,6 @@ class B2Model:
                 varname: value,
             },
         )
-
-    @_trigger_rebuild
-    def define_dt(self, dt: b2.Quantity) -> None:
-        """
-        define_dt Define the global timestep for the default clock. currently, All elements of the network use the same clock with the same timestep.
-
-        Parameters
-        ----------
-        dt : b2.Quantity
-            timestep to be used. Must be given as value * unit.
-        """
-        self.dt = dt
-        b2.defaultclock.dt = self.dt
-
-        self.logger.info(f"dt defined: {dt}")
 
     def define_b2seed(self, seed: int) -> None:
         """
@@ -560,6 +549,40 @@ class B2Model:
         self.logger.debug(f"Parameter value: {value}")
 
     # neurongroups
+
+    @_trigger_rebuild
+    def define_dt(self, name: str, dt: b2.Quantity) -> None:
+        """
+        define_dt Define the timeste for the neurongroup called 'name'.
+
+        Parameters
+        ----------
+        dt : b2.Quantity
+            timestep to be used. Must be given as value * unit.
+        """
+        if name not in self.neurongroups:
+            self.neurongroups[name] = {}
+
+        if name not in self.functions["neurongroups"]:
+            self.functions["neurongroups"][name] = {
+                "rename": lambda n: self.rename_neurongroup(name, n),
+                "delete": lambda: self.delete_neurongroup(name),
+                "element_added": lambda: self.set_rebuilt(True),
+                "element_removed": lambda: self.set_rebuilt(True),
+            }
+
+        self.functions["neurongroups"][name]["dt"] = {
+            "add": lambda e: self.define_equation(name, e),
+            "delete": lambda: self.delete_neurongroup_element(name, "dt"),
+            "modify": lambda e: self._modify_dict_element_with_rebuild(
+                self.neurongroups[name], "dt", e
+            ),
+            "rename": lambda n: self.rename_neurongroup_element(name, "dt", n),
+        }
+
+        self.neurongroups[name]["dt"] = dt
+
+        self.logger.info(f"dt defined: {dt} for neurongroup {name}")
 
     @_trigger_rebuild
     def define_equation(self, name: str, line: str) -> None:
@@ -898,6 +921,40 @@ class B2Model:
         utils.update_nested_dict(self.neurongroups[name], {"idxs": idxs})
 
     # synapses
+    @_trigger_rebuild
+    def define_synapse_dt(self, name: str, dt: b2.Quantity) -> None:
+        """
+        define_synapse_dt Define the timestep for the synapse 'name'.
+
+        Parameters
+        ----------
+        dt : b2.Quantity
+            timestep to be used. Must be given as value * unit.
+        """
+        if name not in self.synapses:
+            self.synapses[name] = {}
+
+        if name not in self.functions["synapses"]:
+            self.functions["synapses"][name] = {
+                "rename": lambda n: self.rename_synapse(name, n),
+                "delete": lambda: self.delete_synapse(name),
+                "element_added": lambda: self.set_rebuilt(True),
+                "element_removed": lambda: self.set_rebuilt(True),
+            }
+
+        self.functions["synapses"][name]["dt"] = {
+            "add": lambda m: self.define_synapse_dt(name, m),
+            "delete": lambda: self.delete_synapse_element(name, "dt"),
+            "modify": lambda m: self._modify_dict_element_with_rebuild(
+                self.synapses[name], "dt", m
+            ),
+            "rename": lambda n: self.rename_synapse_element(name, "dt", n),
+        }
+
+        self.synapses[name]["dt"] = dt
+
+        self.logger.info(f"dt defined: {dt} for synapse {name}")
+
     @_trigger_rebuild
     def define_synapse_solver_method(self, name: str, method: str) -> None:
         """
@@ -1677,6 +1734,48 @@ class B2Model:
             },
         )
 
+    @_trigger_rebuild
+    def define_monitor_dt(self, name: str, dt: b2.Quantity) -> None:
+        """
+        define_monitor_dt Define the timestep for the monitor 'name'.
+
+        Parameters
+        ----------
+        dt : b2.Quantity
+            timestep to be used. Must be given as value * unit.
+        """
+        if name not in self.monitors:
+            self.monitors[name] = {
+                "name": name,
+            }
+        if name not in self.functions["monitors"]:
+            self.functions["monitors"][name] = {
+                "rename": lambda n: self.rename_monitor(name, n),
+                "delete": lambda: self.delete_monitor(name),
+                "element_added": lambda: 1,  # do nothing
+                "element_removed": lambda: 1,  # do nothing
+            }
+
+        self.functions["monitors"][name]["dt"] = {
+            "add": lambda var: self.define_monitor_variable(name, var),
+            "delete": lambda: self.delete_monitor_element(name, "dt"),
+            "modify": lambda var: self._modify_dict_element_with_rebuild(
+                self.monitors[name], "dt", var
+            ),
+            "rename": lambda n: self.rename_monitor_element(name, "dt", n),
+        }
+
+        utils.update_nested_dict(
+            self.monitors,
+            {
+                name: {
+                    "dt": dt,
+                }
+            },
+        )
+
+        self.logger.info(f"dt defined: {dt} for monitor {name}")
+
     def assemble_network(self) -> None:
         """
         Assemble the network from its predefined components.
@@ -1814,7 +1913,6 @@ class B2Model:
             "parameters": deepcopy(self.parameters),
             "initials": deepcopy(self.initials),
             "seed": self.seed,
-            "timestep": self.dt,
         }
 
     def get_variables_of(
@@ -1987,9 +2085,6 @@ class B2Model:
     def to_dict(self) -> dict[Any, Any]:
         states = self.network.get_states()
         states["current_time"] = self.network.t
-
-        if self.dt is not None:
-            states["timestep"] = self.dt
 
         states["seed"] = self.seed
 

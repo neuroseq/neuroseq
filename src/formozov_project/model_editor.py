@@ -857,8 +857,6 @@ class ModelEditorDialog(QtWidgets.QDialog):
             self.b2model.initials = self.backup["initials"]
             self.b2model.functions = self.functions_backup
             self.b2model.define_b2seed(self.backup["seed"])
-            if self.backup["timestep"] is not None:
-                self.b2model.define_dt(self.backup["timestep"])
             self.b2model.assemble_network()  # keep underlying network in sync
         except Exception as e:
             message = f"Error when restoring old model: {e}"
