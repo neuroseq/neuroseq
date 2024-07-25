@@ -413,7 +413,7 @@ class B2Model:
 
         self.seed: int = seed
         self.network = b2.Network(name=name)
-        self.parameters: dict[str, Any] | None = None
+        self.parameters: dict[str, Any] = {}
         self.neurongroups: dict[str, dict[str, Any]] = {}
         self.synapses: dict[str, dict[str, Any]] = {}
         self.monitors: dict[str, dict[str, Any]] = {}
@@ -432,8 +432,8 @@ class B2Model:
                 "element_removed": lambda: self.set_rebuilt(True),
             },
             "parameters": {
-                "element_added": lambda: 1,  # do nothing
-                "element_removed": lambda: 1,  # do nothing
+                "element_added": lambda: None,  # do nothing
+                "element_removed": lambda: None,  # do nothing
             },
             "monitors": {
                 "element_added": lambda: self.set_rebuilt(True),
@@ -544,14 +544,14 @@ class B2Model:
         value : str | b2.Quantity | b2.TimedArray
             value to be used. Can be an expression in the form of a string or a quantity with units or a TimedArray.
         """
-        if self.parameters is None:
-            self.parameters = {}
 
         self.functions["parameters"][name] = {
-            "add": lambda p: self.define_parameter(name, p),
-            "delete": lambda: self.delete_parameter(name),
-            "modify": lambda p: self._modify_dict_element(self.parameters, name, p),
-            "rename": lambda n: self.rename_parameter(name, n),
+            "add": lambda p, _name=name: self.define_parameter(_name, p),
+            "delete": lambda _name=name: self.delete_parameter(_name),
+            "modify": lambda p, _name=name: self._modify_dict_element(
+                self.parameters, _name, p
+            ),
+            "rename": lambda n, _name=name: self.rename_parameter(_name, n),
         }
 
         self.parameters[name] = value
@@ -1612,8 +1612,8 @@ class B2Model:
             self.functions["monitors"][name] = {
                 "rename": lambda n: self.rename_monitor(name, n),
                 "delete": lambda: self.delete_monitor(name),
-                "element_added": lambda: 1,  # do nothing
-                "element_removed": lambda: 1,  # do nothing
+                "element_added": lambda: None,  # do nothing
+                "element_removed": lambda: None,  # do nothing
             }
 
         self.functions["monitors"][name]["source"] = {
@@ -1655,8 +1655,8 @@ class B2Model:
             self.functions["monitors"][name] = {
                 "rename": lambda n: self.rename_monitor(name, n),
                 "delete": lambda: self.delete_monitor(name),
-                "element_added": lambda: 1,  # do nothing
-                "element_removed": lambda: 1,  # do nothing
+                "element_added": lambda: None,  # do nothing
+                "element_removed": lambda: None,  # do nothing
             }
 
         self.functions["monitors"][name]["variable"] = {
@@ -1997,7 +1997,7 @@ class B2Model:
         states["objects"]["neurongroups"] = list(self.neurongroups.keys())
         states["objects"]["synapses"] = list(self.synapses.keys())
         states["objects"]["monitors"] = list(self.monitors.keys())
-        states["parameters"] = self.parameters if self.parameters is not None else {}
+        states["parameters"] = self.parameters
         states["initials"] = self.initials
 
         # augment neurongroups and synapses

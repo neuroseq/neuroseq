@@ -255,7 +255,7 @@ def test_gui_edit_stim_with_console(qtbot: QtBot, mfx_ornstein: B2Model) -> None
     n_timestamps = 100
     dt = 10 * b2.ms
     stim = np.zeros((n_timestamps, n_neurons))
-    assert mfx_ornstein.parameters is None
+    assert mfx_ornstein.parameters == {}
     mfx_ornstein.parameters = {"stim": b2.TimedArray(stim, dt=dt)}
     gui.update_model(mfx_ornstein)
     # bar plot x-values are the center of the bars, so shifted forwards by 0.5dt compared to timestamps

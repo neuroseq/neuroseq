@@ -18,7 +18,7 @@ from pytest_mock import MockerFixture
 
 def test_construction(tmp_path: Path) -> None:
     model = b2_model.B2Model()
-    assert model.parameters is None
+    assert model.parameters == {}
     assert model.network is not None
     assert model.network.name == "b2Network"
     assert model.synapses == {}
@@ -75,8 +75,7 @@ def test_define_dt(mfx: b2_model.B2Model) -> None:
 
 
 def test_define_parameter(mfx: b2_model.B2Model) -> None:
-    assert mfx.parameters is None
-
+    assert mfx.parameters == {}
     mfx.define_parameter("taue", 5 * b2.ms)
     mfx.define_parameter("taui", 10 * b2.ms)
     mfx.define_parameter("area", 20000 * b2.umetre**2)
