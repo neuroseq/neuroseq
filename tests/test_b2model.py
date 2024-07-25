@@ -123,7 +123,7 @@ def test_rename_neurongroup(mfx_nmda: b2_model.B2Model) -> None:
     assert "neurons" in mfx_nmda.neurongroups
     test_data = deepcopy(mfx_nmda.neurongroups["neurons"])
 
-    mfx_nmda.functions["neurongroups"]["neurons"]["rename"].rename("renamed")
+    mfx_nmda.functions["neurongroups"]["neurons"]["rename"]("renamed")
     assert "neurons" not in mfx_nmda.neurongroups
     assert "neurons" not in mfx_nmda.functions["neurongroups"]
 
@@ -142,7 +142,7 @@ def test_rename_synapse(mfx_nmda: b2_model.B2Model) -> None:
     assert "S" in mfx_nmda.synapses
     test_data = deepcopy(mfx_nmda.synapses["S"])
 
-    mfx_nmda.functions["synapses"]["S"]["rename"].rename("renamed")
+    mfx_nmda.functions["synapses"]["S"]["rename"]("renamed")
 
     assert "S" not in mfx_nmda.synapses
     assert "S" not in mfx_nmda.functions["synapses"]
@@ -180,7 +180,7 @@ def test_rename_monitor(mfx_nmda: b2_model.B2Model) -> None:
     test_data = deepcopy(mfx_nmda.monitors["M"])
     test_data["name"] = "renamed"
 
-    mfx_nmda.functions["monitors"]["M"]["rename"].rename("renamed")
+    mfx_nmda.functions["monitors"]["M"]["rename"]("renamed")
     assert "M" not in mfx_nmda.monitors
     assert "M" not in mfx_nmda.functions["monitors"]
 
@@ -199,7 +199,7 @@ def test_rename_init(mfx_nmda: b2_model.B2Model) -> None:
     assert "S" in mfx_nmda.initials
     test_data = deepcopy(mfx_nmda.initials["S"])
 
-    mfx_nmda.functions["initials"]["S"]["rename"].rename("renamed")
+    mfx_nmda.functions["initials"]["S"]["rename"]("renamed")
 
     assert "S" not in mfx_nmda.initials
     assert "S" not in mfx_nmda.functions["initials"]
