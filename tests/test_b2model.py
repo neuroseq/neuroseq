@@ -31,6 +31,15 @@ def test_define_equation(mfx: b2_model.B2Model) -> None:
     mfx.define_equation("P", "dge/dt = -ge*(1./taue) : siemens")
 
     assert mfx.neurongroups["P"]["model"] == "dge/dt = -ge*(1./taue) : siemens\n"
+    assert all(
+        f in mfx.functions["neurongroups"]["P"]
+        for f in ["rename", "delete", "element_added", "element_removed"]
+    )
+
+    assert all(
+        f in mfx.functions["neurongroups"]["P"]["model"]
+        for f in ["add", "delete", "modify", "rename"]
+    )
 
     with pytest.raises(
         ValueError,

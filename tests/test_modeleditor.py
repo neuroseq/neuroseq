@@ -12,7 +12,6 @@ from formozov_project.model_editor import EditableNeurongroupTree
 from formozov_project.model_editor import EditableParameterTree
 from formozov_project.model_editor import EditableSynapseTree
 from formozov_project.model_editor import ModelEditorDialog
-from formozov_project.reconstructor import Reconstructor
 from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
@@ -36,7 +35,9 @@ def test_EagerComboBox(qtbot: QtBot) -> None:
     assert signal_emitted is True
 
 
-def test_etree_constr(mfx_nmda: B2Model, qtbot: QtBot) -> None:
+def test_etree_constr(
+    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+) -> None:
     stree = EditableSynapseTree(mfx_nmda)
     qtbot.addWidget(stree)
 
@@ -103,10 +104,12 @@ def test_tree_add_element(
 
     ptree = EditableParameterTree(mfx_nmda, ParameterDialog, "parameters")
     qtbot.addWidget(ptree)
+    assert ptree.b2model.must_be_rebuilt is False
 
     ptree.add_item()
 
     assert ptree.b2model.parameters["p"] == 2  # type: ignore
+    assert ptree.b2model.must_be_rebuilt is False
 
 
 def test_ptree_edit_b2quantity(mfx_nmda: B2Model, qtbot: QtBot) -> None:
@@ -122,6 +125,7 @@ def test_ptree_edit_b2quantity(mfx_nmda: B2Model, qtbot: QtBot) -> None:
 
     assert ptree.b2model.parameters["a"] == ((1 / 60) * b2.msecond)  # type: ignore
     assert type(ptree.b2model.parameters["a"]) is b2.Quantity  # type: ignore
+    assert ptree.b2model.must_be_rebuilt is False
 
 
 def test_neurontree_add_neuronsubgroup(
@@ -153,6 +157,7 @@ def test_neurontree_add_neuronsubgroup(
     assert ntree.b2model.neurongroups["sub"]["name"] == "sub"
     assert ntree.b2model.neurongroups["sub"]["target"] == "neuron_input"
     assert ntree.b2model.neurongroups["sub"]["idxs"] == (1, 2)
+    assert ntree.b2model.must_be_rebuilt is True
 
 
 def test_rename_tree_element(
@@ -160,6 +165,7 @@ def test_rename_tree_element(
 ) -> None:
     ptree = EditableParameterTree(mfx_nmda, ParameterDialog, "parameters")
     qtbot.addWidget(ptree)
+    assert ptree.b2model.must_be_rebuilt is False
 
     pnode = ptree.root
 
@@ -174,6 +180,7 @@ def test_rename_tree_element(
 
     assert "x" in ptree.b2model.parameters  # type: ignore
     assert "a" not in ptree.b2model.parameters  # type: ignore
+    assert ptree.b2model.must_be_rebuilt is False
 
     with qtbot.waitSignal(a_node.sigNameChanged, timeout=1000, raising=True):
         a_node.setName("2332x")
@@ -187,7 +194,7 @@ def test_rename_tree_element(
     ]
 
 
-def test_neurontree_add_neurongroup(
+def test_neurontree_add_neurongroup_list_update(
     mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch
 ) -> None:
     def exec_ndiag(ndiag: NeuronSubgroupDialog) -> Any:
@@ -299,6 +306,7 @@ def test_neurontree_add_neurongroup(
     assert ntree.b2model.neurongroups["p1"]["th"] == "v < -10 mV"
     assert ntree.b2model.neurongroups["p1"]["method"] == "euler"
     assert ntree.b2model.neurongroups["p1"]["neuronnumber"] == 25
+    assert ntree.b2model.must_be_rebuilt is True
 
     # trigger list update for synapse origin
     origin._update_list()
@@ -336,21 +344,19 @@ def test_modeldialog_accept(
     assert "p1" in diag.b2model.neurongroups
     assert "p1" in [obj.name for obj in diag.b2model.network.objects]
 
-    def raise_error(_, __):
+    def raise_error(_):
         raise RuntimeError("dummy")
 
-    monkeypatch.setattr(Reconstructor, "reconstruct", raise_error)
+    monkeypatch.setattr(B2Model, "assemble_network", raise_error)
     diag.b2model.define_neuronnumber("p1", 35)
 
     diag.accept()
 
-    assert qmessagebox_calls == [
-        {
-            "name": "critical",
-            "text": "Error when rebuilding the model after editing: " "dummy",
-            "title": "Model rebuilding error",
-        },
-    ]
+    assert qmessagebox_calls[0] == {
+        "name": "critical",
+        "text": "Error when rebuilding the model after editing: dummy",
+        "title": "Model rebuilding error",
+    }
 
 
 def test_modeldialog_reject(
@@ -382,8 +388,7 @@ def test_modeldialog_reject(
     assert qmessagebox_calls == [
         {
             "name": "critical",
-            "text": "Error when reassigning the model after editing has been rejected: "
-            "dummy",
+            "text": "Error when restoring old model: dummy",
             "title": "Model specification error",
         },
     ]

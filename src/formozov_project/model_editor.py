@@ -26,7 +26,6 @@ from formozov_project.b2_model_widget import NeuronGroupDialog
 from formozov_project.b2_model_widget import NeuronSubgroupDialog
 from formozov_project.b2_model_widget import ParameterDialog
 from formozov_project.b2_model_widget import SynapseDialog
-from formozov_project.reconstructor import Reconstructor
 from formozov_project.utils import parse_string_to_quantity
 
 
@@ -234,12 +233,17 @@ class EditableParameterTree(ParameterTree):
 
         self.setParameters(self.root, showTop=False)
 
-        self._connect_parameters(self.root, self.functions)
+        try:
+            self._connect_parameters(self.root, self.functions)
+        except Exception as e:
+            message = f"Error when reading model definition: {e}"
+            self.logger.critical(message)
+            QtWidgets.QMessageBox.critical(self, "Model definition error", message)
 
         self.add_item_action = QtWidgets.QAction(f"add {self.name}")
         self.add_item_action.triggered.connect(self.add_item)
 
-    def _calll_with_errormessage(self, signal: Callable, *args: Any) -> Any:
+    def _call_with_errormessage(self, signal: Callable, *args: Any) -> Any:
         """
         Call the function 'signal' with arguments '*args' and display an error message box
         when it fails with an exception. This function mostly acts as a wrapper around qt slots
@@ -274,17 +278,16 @@ class EditableParameterTree(ParameterTree):
             parent paremeter
         """
         if param.type() == "group":
-            param.sigChildAdded.connect(lambda: self.b2model.set_rebuilt(True))
-            param.sigAddNew.connect(lambda: self.b2model.set_rebuilt(True))
-            param.sigChildRemoved.connect(lambda: self.b2model.set_rebuilt(True))
+            param.sigChildAdded.connect(lambda: funcs["element_added"])
+            param.sigAddNew.connect(lambda: funcs["element_added"])
+            param.sigChildRemoved.connect(lambda: funcs["element_removed"])
 
             if all(f in funcs for f in ["delete", "rename"]):
-                # the outermost nodes (neurongroups, initials, synapses) cannot be modified and have no slots, hence this check
                 param.sigRemoved.connect(
-                    lambda: self._calll_with_errormessage(funcs["delete"])
+                    lambda: self._call_with_errormessage(funcs["delete"])
                 )
                 param.sigNameChanged.connect(
-                    lambda p: self._calll_with_errormessage(funcs["rename"], p.name())
+                    lambda p: self._call_with_errormessage(funcs["rename"], p.name())
                 )
 
             for child in param.children():
@@ -294,16 +297,16 @@ class EditableParameterTree(ParameterTree):
                     pass
         else:
             param.sigValueChanged.connect(
-                lambda p: self._calll_with_errormessage(
+                lambda p: self._call_with_errormessage(
                     funcs["modify"],
-                    self._calll_with_errormessage(parse_string_to_quantity, p.value()),
+                    self._call_with_errormessage(parse_string_to_quantity, p.value()),
                 )
             )
             param.sigRemoved.connect(
-                lambda: self._calll_with_errormessage(funcs["delete"])
+                lambda: self._call_with_errormessage(funcs["delete"])
             )
             param.sigNameChanged.connect(
-                lambda p: self._calll_with_errormessage(funcs["rename"], p.name())
+                lambda p: self._call_with_errormessage(funcs["rename"], p.name())
             )
 
     def _get_value(self, v: Any) -> dict[str, Any] | Any:
@@ -840,46 +843,46 @@ class ModelEditorDialog(QtWidgets.QDialog):
 
         self.setLayout(layout)
 
+    def _restore_old_model(self):
+        """
+        Restore the old model before editing when the edited stuff has been rejected or
+        something goes wrong
+        """
+        try:
+            # reset the specification to the backup values
+            self.b2model.neurongroups = self.backup["neurongroups"]
+            self.b2model.synapses = self.backup["synapses"]
+            self.b2model.monitors = self.backup["monitors"]
+            self.b2model.parameters = self.backup["parameters"]
+            self.b2model.initials = self.backup["initials"]
+            self.b2model.functions = self.functions_backup
+            self.b2model.define_b2seed(self.backup["seed"])
+            if self.backup["timestep"] is not None:
+                self.b2model.define_dt(self.backup["timestep"])
+            self.b2model.assemble_network()  # keep underlying network in sync
+        except Exception as e:
+            message = f"Error when restoring old model: {e}"
+            self.logger.critical(message)
+            QtWidgets.QMessageBox.critical(self, "Model specification error", message)
+
     def accept(self):
         """
         Accept the current state of the model and rebuilt it if anything has been edited.
         """
-        self.logger.info("accepted model editions")
+        self.logger.info(f"accept model editions {self.b2model.must_be_rebuilt}")
         if self.b2model.must_be_rebuilt:
-            self.logger.debug("rebuilding model after change")
-            states = self.b2model.to_dict()
+            self.logger.info("rebuilding model after change")
 
-            if self.b2model.dt is not None:
-                states["timestep"] = self.b2model.dt
-
-            constr = Reconstructor(states)
-
-            # FIXME: this can be a problem when the system shall be continued because
-            # the sequence of random number changes due to brian2 caching them.
-            # Warning is only a stopcap until further specification
-            if self.b2model.seed != states["seed"]:
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "Model rng warning"
-                    "The system's random number generator will be reseeded. This potentially can change the results when compared to previous ones",
-                )
-            new_model = B2Model(seed=states["seed"])
-
-            model_ok = True
             try:
-                constr.reconstruct(new_model)
+                self.b2model.assemble_network()  # keep underlying network in sync
+                self.b2model.must_be_rebuilt = False
             except Exception as e:
                 message = f"Error when rebuilding the model after editing: {e}"
                 self.logger.critical(message)
                 QtWidgets.QMessageBox.critical(self, "Model rebuilding error", message)
-                model_ok = False
+                self._restore_old_model()
 
-            if model_ok:
-                self.b2model = new_model
-                self.b2model.must_be_rebuilt = False
-                super().accept()
-        else:
-            super().accept()
+        super().accept()
 
     def reject(self):
         """
@@ -894,23 +897,5 @@ class ModelEditorDialog(QtWidgets.QDialog):
                 "The system's random number generator will be reseeded. This potentially can change the results when compared to previous ones",
             )
 
-        try:
-            # reset the specification to the backup values
-            self.b2model.neurongroups = self.backup["neurongroups"]
-            self.b2model.synapses = self.backup["synapses"]
-            self.b2model.monitors = self.backup["monitors"]
-            self.b2model.parameters = self.backup["parameters"]
-            self.b2model.initials = self.backup["initials"]
-            self.b2model.functions = self.functions_backup
-            self.b2model.define_b2seed(self.backup["seed"])
-            if self.backup["timestep"] is not None:
-                self.b2model.define_dt(self.backup["timestep"])
-            self.b2model.assemble_network()  # keep underlying network in sync
-        except Exception as e:
-            message = (
-                f"Error when reassigning the model after editing has been rejected: {e}"
-            )
-            self.logger.critical(message)
-            QtWidgets.QMessageBox.critical(self, "Model specification error", message)
-
+        self._restore_old_model()
         super().reject()
