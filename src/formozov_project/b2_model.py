@@ -1107,7 +1107,7 @@ class B2Model:
             }
 
         element_modifier = self.Modifier(
-            "origin",
+            "target",
             self.synapses[name],
             self.functions["synapses"][name],
             lambda: self.set_rebuilt(True),
@@ -1551,6 +1551,7 @@ class B2Model:
             self.pdict[new_name] = self.pdict.pop(used_old_name)
             self.fdict[new_name] = self.fdict.pop(used_old_name)
             self.with_rebuilt()
+            print("renaming: ", used_old_name, self.old_name, new_name)
 
             if "name" in self.pdict[new_name]:
                 self.pdict[new_name]["name"] = new_name
