@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import formozov_project.b2_model_widget as B2W
+from brian2 import ms
 from formozov_project import b2_model
 from formozov_project.b2_model import B2Model
 from pytestqt.qtbot import QtBot
@@ -71,6 +72,9 @@ def test_synapse_input(qtbot: QtBot) -> None:
     qtbot.keyClicks(sdiag.connect_prob, "1.0")
     qtbot.mouseClick(sdiag.connect_prob_button, QtCore.Qt.MouseButton.LeftButton)
 
+    qtbot.keyClicks(sdiag.dt, "1.0 * ms")
+    qtbot.mouseClick(sdiag.timestep_button, QtCore.Qt.MouseButton.LeftButton)
+
     assert sdiag.model.synapses["x"] == {
         "name": "x",
         "origin": "s",
@@ -80,6 +84,7 @@ def test_synapse_input(qtbot: QtBot) -> None:
         "on_post": "c * d: siemens\n",
         "connection_condition": "s !=  t",
         "p": 1.0,
+        "dt": 1.0 * ms,
     }
 
 

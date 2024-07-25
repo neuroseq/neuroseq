@@ -68,7 +68,7 @@ def test_reconstruct_neurongroup(mfx_nmda_serialized: Path) -> None:
 
     assert "neurons" in model.network.get_states()
     assert model.network["neurons"].dt == 0.1 * b2.ms
-    assert model.neurongroups["neuros"]["dt"] == 0.1 * b2.ms
+    assert model.neurongroups["neurons"]["dt"] == 0.1 * b2.ms
 
 
 def test_reconstruct_neurongsubgroups(mfx_nmda_serialized: Path) -> None:
@@ -100,6 +100,7 @@ def test_reconstruct_synapse(mfx_nmda_serialized: Path) -> None:
     assert "S" in model.network.get_states()
     assert model.network["S"].dt == 0.2 * b2.ms
     assert model.synapses["S"]["dt"] == 0.2 * b2.ms
+
 
 def test_reconstruct_monitor(mfx_nmda_serialized: Path) -> None:
     reconstructor = Reconstructor(mfx_nmda_serialized)

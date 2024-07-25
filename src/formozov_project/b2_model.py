@@ -243,17 +243,25 @@ class B2Model:
         self.logger.info(f"adding monitor '{name}'")
 
         try:
-            monitor = getattr(
-                b2, self.monitors[name]["type"]
-            )(
-                self.network[self.monitors[name]["source"]],
-                self.monitors[name].get("variable", None),
-                record=True,
-                name=self.monitors[name]["name"],
-                dt=self.monitors[name].get(
-                    "dt", self.network[self.monitors[name]["source"]].clock.dt
-                ),  # set to source dt when no timestep is given --> max resolution. Also, .dt gives a VariableView, which needs to be converted to a value again
-            )
+            monitortype = getattr(b2, self.monitors[name]["type"])
+
+            if monitortype is b2.StateMonitor:
+                monitor = monitortype(
+                    self.network[self.monitors[name]["source"]],
+                    self.monitors[name].get("variable", None),
+                    record=True,
+                    name=self.monitors[name]["name"],
+                    dt=self.monitors[name].get(
+                        "dt", self.network[self.monitors[name]["source"]].clock.dt
+                    ),  # set to source dt when no timestep is given --> max resolution. Also, .dt gives a VariableView, which needs to be converted to a value again
+                )
+            else:
+                monitor = monitortype(
+                    self.network[self.monitors[name]["source"]],
+                    self.monitors[name].get("variable", None),
+                    record=True,
+                    name=self.monitors[name]["name"],
+                )
         except Exception as e:
             message = f"Error in defining monitor {name}: {e}"
             self.logger.critical(message)
