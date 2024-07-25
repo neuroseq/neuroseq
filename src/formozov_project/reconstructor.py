@@ -124,7 +124,16 @@ class Reconstructor:
         """
         augmented = list(
             zip(
-                ["N", "neuronnumber", "model", "th", "refractory", "reset", "method"],
+                [
+                    "N",
+                    "neuronnumber",
+                    "model",
+                    "th",
+                    "refractory",
+                    "reset",
+                    "method",
+                    "dt",
+                ],
                 [
                     model.define_neuronnumber,
                     model.define_neuronnumber,
@@ -133,6 +142,7 @@ class Reconstructor:
                     model.define_refractory,
                     model.define_reset,
                     model.define_solver_method,
+                    model.define_dt,
                 ],
                 strict=True,
             )
@@ -164,7 +174,10 @@ class Reconstructor:
         """
         model.define_neuronsubgroup_target(name, data_of_group["target"])
 
-        model.define_neuronsubgroup_idxs(name, (data_of_group["idxs"]))
+        model.define_neuronsubgroup_idxs(name, data_of_group["idxs"])
+
+        if "dt" in data_of_group:
+            model.define_dt(name, data_of_group["dt"])
 
         model._assemble_neuronsubgroup(name)
 
@@ -194,6 +207,7 @@ class Reconstructor:
                     "connection_condition",
                     "p",
                     "method",
+                    "dt",
                 ],
                 [
                     model.define_synapse_equation,
@@ -204,6 +218,7 @@ class Reconstructor:
                     model.define_synapse_connection,
                     model.define_synapse_connection_probablitiy,
                     model.define_synapse_solver_method,
+                    model.define_synapse_dt,
                 ],
                 strict=True,
             )
@@ -234,10 +249,12 @@ class Reconstructor:
         """
         model.define_monitor_type(data_of_group["name"], data_of_group["type"])
         model.define_monitor_source(data_of_group["name"], data_of_group["source"])
-
         model.define_monitor_variable(
             data_of_group["name"], data_of_group.get("variable")
         )
+
+        if "dt" in data_of_group:
+            model.define_monitor_dt(data_of_group["name"], data_of_group["dt"])
 
         model._assemble_monitor(data_of_group["name"])
 
@@ -258,9 +275,6 @@ class Reconstructor:
         model.seed = self.loaded_data["seed"]
 
         seed(self.loaded_data["seed"])
-
-        if "timestep" in self.loaded_data:
-            model.define_dt(self.loaded_data["timestep"])
 
         # reconstruct parameters, timestep, seed.
         for k, v in self.loaded_data["parameters"].items():

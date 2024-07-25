@@ -1,6 +1,7 @@
 from collections.abc import Generator
 from pathlib import Path
 
+import brian2 as b2
 import pytest
 from formozov_project.b2_model import B2Model
 from formozov_project.reconstructor import Reconstructor
@@ -9,6 +10,8 @@ from pytest import MonkeyPatch
 
 @pytest.fixture()
 def mfx_nmda_serialized(tmp_path: Path, mfx_nmda: B2Model) -> Generator:
+    mfx_nmda.define_dt("neurons", 0.1 * b2.ms)
+    mfx_nmda.define_synapse_dt("S", 0.2 * b2.ms)
     mfx_nmda.save_model(tmp_path / "testmodel.json")
     yield tmp_path / "testmodel.json"
 
@@ -64,6 +67,8 @@ def test_reconstruct_neurongroup(mfx_nmda_serialized: Path) -> None:
     )
 
     assert "neurons" in model.network.get_states()
+    assert model.network["neurons"].dt == 0.1 * b2.ms
+    assert model.neurongroups["neuros"]["dt"] == 0.1 * b2.ms
 
 
 def test_reconstruct_neurongsubgroups(mfx_nmda_serialized: Path) -> None:
@@ -93,7 +98,8 @@ def test_reconstruct_synapse(mfx_nmda_serialized: Path) -> None:
     reconstructor.reconstruct_synapses(model, "S", reconstructor.loaded_data["S"])
 
     assert "S" in model.network.get_states()
-
+    assert model.network["S"].dt == 0.2 * b2.ms
+    assert model.synapses["S"]["dt"] == 0.2 * b2.ms
 
 def test_reconstruct_monitor(mfx_nmda_serialized: Path) -> None:
     reconstructor = Reconstructor(mfx_nmda_serialized)

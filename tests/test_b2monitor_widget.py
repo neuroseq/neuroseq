@@ -76,7 +76,7 @@ def test_monitor_accept(qtbot: QtBot) -> None:
     """
 
     mdlg.model.define_neuronnumber("neurongroup", 2)
-    mdlg.model.define_dt(0.2 * ms)
+    mdlg.model.define_dt("neurongroup", 0.2 * ms)
     mdlg.model.define_solver_method("neurongroup", "euler")
     mdlg.model.define_equation("neurongroup", eqs)
     mdlg.model._assemble_neurongroup(name="neurongroup")
