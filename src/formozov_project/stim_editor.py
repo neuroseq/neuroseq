@@ -227,6 +227,14 @@ class StimEditor(QtWidgets.QWidget):
             self.stim_widget.selected_time_slice.start + time_index_offset,
             self.stim_widget.selected_time_slice.stop + time_index_offset,
         )
+        if (
+            new_neuron_slice.start < 0
+            or new_neuron_slice.stop > self.stim_widget.n_neurons
+            or new_time_slice.start < 0
+            or new_time_slice.stop > self.stim_widget.n_timestamps
+        ):
+            self.stim_widget.unselect_neurons()
+            return
         self.cut_selected_stim()
         self.current_stim.values[new_time_slice, new_neuron_slice] = self.copy_values
         self.stim_widget.set_data(self.current_stim)

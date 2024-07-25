@@ -63,6 +63,12 @@ def test_stim_editor_actions(
     # move a slice right
     stim_editor.move_selected_stim_right()
     assert np.allclose(stim_editor.current_stim.values[2:7, 1:3], selection)
+    # invalid moves are ignored, and all neurons are deselected
+    stim_editor.move_selected_stim(99, 27)
+    assert stim_editor.stim_widget.selected_neuron_slice is None
+    assert stim_editor.stim_widget.selected_time_slice is None
+    assert np.allclose(stim_editor.current_stim.values[2:7, 1:3], selection)
+    stim_editor.stim_widget.select_neurons(slice(1, 3), slice(2, 7))
     # copy a slice
     stim_editor.copy_selected_stim()
     assert np.allclose(stim_editor.current_stim.values[2:7, 1:3], selection)
