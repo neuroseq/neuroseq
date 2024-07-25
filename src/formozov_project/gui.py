@@ -29,6 +29,7 @@ from formozov_project.utils import with_wait_cursor
 @dataclass
 class GuiSettings:
     max_ram_synapse_plot_matrix: int = 256
+    brian2_backend: str = "cython"
 
 
 class Gui(QtWidgets.QMainWindow):
@@ -417,6 +418,26 @@ class Gui(QtWidgets.QMainWindow):
             return
         self._update_data()
 
+    def btn_set_brian2_backend(self) -> None:
+        backends = ["cython", "numpy"]
+        try:
+            current_backend_index = backends.index(self.settings.brian2_backend)
+        except ValueError:
+            current_backend_index = 0
+        new_backend, ok = QtWidgets.QInputDialog.getItem(
+            self,
+            "Brian2 backend",
+            "Choose the Brian2 backend for simulations",
+            backends,
+            current_backend_index,
+            editable=False,
+        )
+        if not ok:
+            return
+        self.logger.info(f"Setting Brian2 backend to {new_backend}")
+        b2.prefs.codegen.target = new_backend
+        self.settings.brian2_backend = new_backend
+
     def about(self) -> None:
         QtWidgets.QMessageBox.about(
             self,
@@ -625,6 +646,7 @@ class Gui(QtWidgets.QMainWindow):
     def _create_actions_settings(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
     ) -> None:
+        add_action("&Brian2 simulation backend", self.btn_set_brian2_backend, menu)
         add_action(
             "&Synapse matrix RAM limit", self.btn_max_ram_synapse_plot_matrix, menu
         )
