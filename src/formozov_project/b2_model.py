@@ -470,7 +470,12 @@ class B2Model:
         if name not in self.initials:
             self.initials[name] = {}
             self.functions["initials"][name] = {
-                "rename": lambda n: self.rename_init(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.initials,
+                    self.functions["initials"],
+                    lambda: self.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_init(name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
@@ -482,7 +487,12 @@ class B2Model:
             "modify": lambda v: self._modify_dict_element(
                 self.initials[name], varname, v
             ),
-            "rename": lambda n: self.rename_init_element(name, varname, n),
+            "rename": self.Renamer(
+                varname,
+                self.initials[name],
+                self.functions["initials"][name],
+                lambda: self.set_rebuilt(True),
+            ),
         }
 
         utils.update_nested_dict(
@@ -551,7 +561,12 @@ class B2Model:
             "modify": lambda p, _name=name: self._modify_dict_element(
                 self.parameters, _name, p
             ),
-            "rename": lambda n, _name=name: self.rename_parameter(_name, n),
+            "rename": self.Renamer(
+                name,
+                self.parameters,
+                self.functions["parameters"],
+                lambda _model=self: _model.set_rebuilt(False),
+            ),
         }
 
         self.parameters[name] = value
@@ -588,7 +603,12 @@ class B2Model:
 
         if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {
-                "rename": lambda n: self.rename_neurongroup(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.neurongroups,
+                    self.functions["neurongroups"],
+                    lambda: self.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_neurongroup(name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
@@ -600,7 +620,12 @@ class B2Model:
             "modify": lambda e: self._modify_dict_element_with_rebuild(
                 self.neurongroups[name], "model", e
             ),
-            "rename": lambda n: self.rename_neurongroup_element(name, "model", n),
+            "rename": self.Renamer(
+                "model",
+                self.neurongroups[name],
+                self.functions["neurongroups"][name],
+                lambda: self.set_rebuilt(True),
+            ),
         }
 
         self._add_equation_to_group(self.neurongroups[name], line)
@@ -622,7 +647,12 @@ class B2Model:
             self.neurongroups[name] = {}
         if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {
-                "rename": lambda n: self.rename_neurongroup(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.neurongroups,
+                    self.functions["neurongroups"],
+                    lambda: self.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_neurongroup(name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
@@ -634,7 +664,12 @@ class B2Model:
             "modify": lambda r: self._modify_dict_element_with_rebuild(
                 self.neurongroups[name], "reset", r
             ),
-            "rename": lambda n: self.rename_neurongroup_element(name, "reset", n),
+            "rename": self.Renamer(
+                "reset",
+                self.neurongroups[name],
+                self.functions["neurongroups"][name],
+                lambda: self.set_rebuilt(True),
+            ),
         }
 
         utils.update_nested_dict(
@@ -662,7 +697,12 @@ class B2Model:
             self.neurongroups[name] = {}
         if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {
-                "rename": lambda n: self.rename_neurongroup(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.neurongroups,
+                    self.functions["neurongroups"],
+                    lambda: self.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_neurongroup(name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
@@ -673,7 +713,12 @@ class B2Model:
             "modify": lambda t: self._modify_dict_element_with_rebuild(
                 self.neurongroups[name], "th", t
             ),
-            "rename": lambda n: self.rename_neurongroup_element(name, "th", n),
+            "rename": self.Renamer(
+                "th",
+                self.neurongroups[name],
+                self.functions["neurongroups"][name],
+                lambda: self.set_rebuilt(True),
+            ),
         }
 
         utils.update_nested_dict(
@@ -703,18 +748,28 @@ class B2Model:
             self.neurongroups[name] = {}
         if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {
-                "rename": lambda n: self.rename_neurongroup(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.neurongroups,
+                    self.functions["neurongroups"],
+                    lambda: self.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_neurongroup(name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
         self.functions["neurongroups"][name]["method"] = {
             "add": lambda t: self.define_threshold(name, t),
-            "delete": lambda: self.delete_neurongroup_element(name, "th"),
+            "delete": lambda: self.delete_neurongroup_element(name, "method"),
             "modify": lambda t: self._modify_dict_element_with_rebuild(
-                self.neurongroups[name], "th", t
+                self.neurongroups[name], "method", t
             ),
-            "rename": lambda n: self.rename_neurongroup_element(name, "method", n),
+            "rename": self.Renamer(
+                "method",
+                self.neurongroups[name],
+                self.functions["neurongroups"][name],
+                lambda: self.set_rebuilt(True),
+            ),
         }
 
         utils.update_nested_dict(
@@ -744,7 +799,12 @@ class B2Model:
             self.neurongroups[name] = {}
         if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {
-                "rename": lambda n: self.rename_neurongroup(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.neurongroups,
+                    self.functions["neurongroups"],
+                    lambda: self.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_neurongroup(name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
@@ -755,7 +815,12 @@ class B2Model:
             "modify": lambda r: self._modify_dict_element_with_rebuild(
                 self.neurongroups[name], "refractory", r
             ),
-            "rename": lambda n: self.rename_neurongroup_element(name, "refractory", n),
+            "rename": self.Renamer(
+                "refractory",
+                self.neurongroups[name],
+                self.functions["neurongroups"][name],
+                lambda: self.set_rebuilt(True),
+            ),
         }
 
         utils.update_nested_dict(
@@ -784,7 +849,12 @@ class B2Model:
             self.neurongroups[name] = {}
         if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {
-                "rename": lambda n: self.rename_neurongroup(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.neurongroups,
+                    self.functions["neurongroups"],
+                    lambda: self.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_neurongroup(name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
@@ -795,8 +865,11 @@ class B2Model:
             "modify": lambda n: self._modify_dict_element_with_rebuild(
                 self.neurongroups[name], "neuronnumber", n
             ),
-            "rename": lambda n: self.rename_neurongroup_element(
-                name, "neuronnumber", n
+            "rename": self.Renamer(
+                "neuronnumber",
+                self.neurongroups[name],
+                self.functions["neurongroups"][name],
+                lambda: self.set_rebuilt(True),
             ),
         }
 
@@ -839,7 +912,12 @@ class B2Model:
 
         if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {
-                "rename": lambda n: self.rename_neurongroup(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.neurongroups,
+                    self.functions["neurongroups"],
+                    lambda: self.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_neurongroup(name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
@@ -850,7 +928,12 @@ class B2Model:
             "modify": lambda tgt: self._modify_dict_element_with_rebuild(
                 self.neurongroups[name], "target", tgt
             ),
-            "rename": lambda n: self.rename_neurongroup_element(name, "target", n),
+            "rename": self.Renamer(
+                "target",
+                self.neurongroups[name],
+                self.functions["neurongroups"][name],
+                lambda: self.set_rebuilt(True),
+            ),
         }
 
         utils.update_nested_dict(
@@ -880,7 +963,12 @@ class B2Model:
 
         if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {
-                "rename": lambda n: self.rename_neurongroup(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.neurongroups,
+                    self.functions["neurongroups"],
+                    lambda: self.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_neurongroup(name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
@@ -891,7 +979,12 @@ class B2Model:
             "modify": lambda idxs: self._modify_dict_element_with_rebuild(
                 self.neurongroups[name], "idxs", idxs
             ),
-            "rename": lambda n: self.rename_neurongroup_element(name, "idxs", n),
+            "rename": self.Renamer(
+                "idxs",
+                self.neurongroups[name],
+                self.functions["neurongroups"][name],
+                lambda: self.set_rebuilt(True),
+            ),
         }
 
         # only contiguous arrays allowed for definition of neurongroup
@@ -916,7 +1009,12 @@ class B2Model:
 
         if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {
-                "rename": lambda n: self.rename_synapse(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.synapses,
+                    self.functions["synapses"],
+                    lambda: self.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_synapse(name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
@@ -928,7 +1026,12 @@ class B2Model:
             "modify": lambda m: self._modify_dict_element_with_rebuild(
                 self.synapses[name], "method", m
             ),
-            "rename": lambda n: self.rename_synapse_element(name, "method", n),
+            "rename": self.Renamer(
+                "method",
+                self.synapses[name],
+                self.functions["synapses"][name],
+                lambda: self.set_rebuilt(True),
+            ),
         }
         utils.update_nested_dict(
             self.synapses,
@@ -956,7 +1059,12 @@ class B2Model:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {
-                "rename": lambda n: self.rename_synapse(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.synapses,
+                    self.functions["synapses"],
+                    lambda: self.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_synapse(name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
@@ -968,7 +1076,12 @@ class B2Model:
             "modify": lambda t: self._modify_dict_element_with_rebuild(
                 self.synapses[name], "target", t
             ),
-            "rename": lambda n: self.rename_synapse_element(name, "target", n),
+            "rename": self.Renamer(
+                "target",
+                self.synapses[name],
+                self.functions["synapses"][name],
+                lambda: self.set_rebuilt(True),
+            ),
         }
 
         utils.update_nested_dict(
@@ -996,7 +1109,12 @@ class B2Model:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {
-                "rename": lambda n: self.rename_synapse(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.synapses,
+                    self.functions["synapses"],
+                    lambda: self.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_synapse(name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
@@ -1007,7 +1125,12 @@ class B2Model:
             "modify": lambda o: self._modify_dict_element_with_rebuild(
                 self.synapses[name], "origin", o
             ),
-            "rename": lambda n: self.rename_synapse_element(name, "origin", n),
+            "rename": self.Renamer(
+                "origin",
+                self.synapses[name],
+                self.functions["synapses"][name],
+                lambda: self.set_rebuilt(True),
+            ),
         }
 
         utils.update_nested_dict(
@@ -1043,7 +1166,12 @@ class B2Model:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {
-                "rename": lambda n: self.rename_synapse(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.synapses,
+                    self.functions["synapses"],
+                    lambda: self.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_synapse(name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
@@ -1054,7 +1182,12 @@ class B2Model:
             "modify": lambda eq: self._modify_dict_element_with_rebuild(
                 self.synapses[name], "model", eq
             ),
-            "rename": lambda n: self.rename_synapse_element(name, "model", n),
+            "rename": self.Renamer(
+                "model",
+                self.synapses[name],
+                self.functions["synapses"][name],
+                lambda: self.set_rebuilt(True),
+            ),
         }
 
         self._add_equation_to_group(self.synapses[name], line)
@@ -1075,7 +1208,12 @@ class B2Model:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {
-                "rename": lambda n: self.rename_synapse(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.synapses,
+                    self.functions["synapses"],
+                    lambda: self.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_synapse(name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
@@ -1086,7 +1224,12 @@ class B2Model:
             "modify": lambda eq: self._modify_dict_element_with_rebuild(
                 self.synapses[name], "on_pre", eq
             ),
-            "rename": lambda n: self.rename_synapse_element(name, "on_pre", n),
+            "rename": self.Renamer(
+                "on_pre",
+                self.synapses[name],
+                self.functions["synapses"][name],
+                lambda: self.set_rebuilt(True),
+            ),
         }
 
         if name not in self.synapses or "on_pre" not in self.synapses[name]:
@@ -1118,7 +1261,12 @@ class B2Model:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {
-                "rename": lambda n: self.rename_synapse(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.synapses,
+                    self.functions["synapses"],
+                    lambda: self.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_synapse(name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
@@ -1129,7 +1277,12 @@ class B2Model:
             "modify": lambda eq: self._modify_dict_element_with_rebuild(
                 self.synapses[name], "on_post", eq
             ),
-            "rename": lambda n: self.rename_synapse_element(name, "on_post", n),
+            "rename": self.Renamer(
+                "on_post",
+                self.synapses[name],
+                self.functions["synapses"][name],
+                lambda: self.set_rebuilt(True),
+            ),
         }
 
         if name not in self.synapses or "on_post" not in self.synapses[name]:
@@ -1161,7 +1314,12 @@ class B2Model:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {
-                "rename": lambda n: self.rename_synapse(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.synapses,
+                    self.functions["synapses"],
+                    lambda: self.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_synapse(name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
@@ -1172,8 +1330,11 @@ class B2Model:
             "modify": lambda c: self._modify_dict_element_with_rebuild(
                 self.synapses[name], "connection_condition", c
             ),
-            "rename": lambda n: self.rename_synapse_element(
-                name, "connection_condition", n
+            "rename": self.Renamer(
+                "connection_condition",
+                self.synapses[name],
+                self.functions["synapses"][name],
+                lambda: self.set_rebuilt(True),
             ),
         }
 
@@ -1202,7 +1363,12 @@ class B2Model:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {
-                "rename": lambda n: self.rename_synapse(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.synapses,
+                    self.functions["synapses"],
+                    lambda: self.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_synapse(name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
@@ -1213,7 +1379,12 @@ class B2Model:
             "modify": lambda c: self._modify_dict_element_with_rebuild(
                 self.synapses[name], "delay", c
             ),
-            "rename": lambda n: self.rename_synapse_element(name, "delay", n),
+            "rename": self.Renamer(
+                "delay",
+                self.synapses[name],
+                self.functions["synapses"][name],
+                lambda: self.set_rebuilt(True),
+            ),
         }
 
         utils.update_nested_dict(
@@ -1244,7 +1415,12 @@ class B2Model:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {
-                "rename": lambda n: self.rename_synapse(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.synapses,
+                    self.functions["synapses"],
+                    lambda: self.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_synapse(name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
@@ -1255,7 +1431,12 @@ class B2Model:
             "modify": lambda p: self._modify_dict_element_with_rebuild(
                 self.synapses[name], "p", p
             ),
-            "rename": lambda n: self.rename_synapse_element(name, "p", n),
+            "rename": self.Renamer(
+                "p",
+                self.synapses[name],
+                self.functions["synapses"][name],
+                lambda: self.set_rebuilt(True),
+            ),
         }
 
         utils.update_nested_dict(
@@ -1267,132 +1448,49 @@ class B2Model:
             },
         )
 
-    @_trigger_rebuild
-    def rename_neurongroup(self, name: str, new_name: str) -> None:
-        """
-        rename_neurongroup Rename a neurongroup
+    class Renamer:
+        "Stateful functor for renaming elements in a dict successively while keeping track of the old name"
 
-        Parameters
-        ----------
-        name : str
-            old name
-        new_name : str
-            new name
-        """
-        self._move_dict_element(self.neurongroups, name, new_name)
-        self._move_dict_element(self.functions["neurongroups"], name, new_name)
+        def __init__(
+            self, old_name: str, pdict: dict, fdict: dict, with_rebuilt: Callable
+        ):
+            """
+            _summary_
 
-    @_trigger_rebuild
-    def rename_synapse(self, name: str, new_name: str) -> None:
-        """
-        Rename a synapse
+            Parameters
+            ----------
+            old_name : str
+                _description_
+            pdict : dict
+                _description_
+            fdict : dict
+                _description_
+            with_rebuilt : Callable
+                _description_
+            """
+            self.old_name = old_name
+            self.pdict = pdict
+            self.fdict = fdict
+            self.with_rebuilt = with_rebuilt
 
-        Parameters
-        ----------
-        name : str
-            old name
-        new_name : str
-            new name
-        """
-        self._move_dict_element(self.synapses, name, new_name)
-        self._move_dict_element(self.functions["synapses"], name, new_name)
+        def __call__(self, new_name: str) -> None:
+            """
+            _summary_
 
-    def rename_parameter(self, name: str, new_name: str) -> None:
-        """
-        Rename a monitor
+            Parameters
+            ----------
+            new_name : str
+                _description_
 
-        Parameters
-        ----------
-        name : str
-            old name
-        new_name : str
-            new name
-        """
-        self._move_dict_element(self.parameters, name, new_name)  # type: ignore
-        self._move_dict_element(self.functions["parameters"], name, new_name)
+            """
+            used_old_name = self.old_name
+            self.old_name = new_name
+            self.pdict[new_name] = self.pdict.pop(used_old_name)
+            self.fdict[new_name] = self.fdict.pop(used_old_name)
+            self.with_rebuilt()
 
-    @_trigger_rebuild
-    def rename_monitor(self, name: str, new_name: str) -> None:
-        """
-        Rename a monitor
-
-        Parameters
-        ----------
-        name : str
-            old name
-        new_name : str
-            new name
-        """
-        self.logger.info(
-            f"rename monitor names: {name}, {new_name}, {list(self.monitors.keys())}"
-        )
-
-        self.monitors[name]["name"] = new_name
-        self._move_dict_element(self.monitors, name, new_name)
-        self._move_dict_element(self.functions["monitors"], name, new_name)
-
-    @_trigger_rebuild
-    def rename_init(self, name: str, new_name: str) -> None:
-        """
-        Rename a initials
-
-        Parameters
-        ----------
-        name : str
-            old name
-        new_name : str
-            new name
-        """
-        self._move_dict_element(self.initials, name, new_name)
-        self._move_dict_element(self.functions["initials"], name, new_name)
-
-    @_trigger_rebuild
-    def rename_init_element(
-        self, name: str, old_element_name, new_element_name: str
-    ) -> None:
-        """
-        Rename a initials
-
-        Parameters
-        ----------
-        name : str
-            old name
-        new_name : str
-            new name
-        """
-        self._move_dict_element(self.initials[name], old_element_name, new_element_name)
-        self._move_dict_element(
-            self.functions["initials"][name], old_element_name, new_element_name
-        )
-
-    @_trigger_rebuild
-    def rename_neurongroup_element(
-        self, name: str, old_element_name: str, new_element_name: str
-    ) -> None:
-        self._move_dict_element(
-            self.neurongroups[name], old_element_name, new_element_name
-        )
-        self._move_dict_element(
-            self.functions["neurongroups"][name], old_element_name, new_element_name
-        )
-
-    @_trigger_rebuild
-    def rename_synapse_element(
-        self, name: str, old_element_name: str, new_element_name: str
-    ) -> None:
-        self._move_dict_element(self.synapses[name], old_element_name, new_element_name)
-        self._move_dict_element(
-            self.functions["synapses"][name], old_element_name, new_element_name
-        )
-
-    @_trigger_rebuild
-    def rename_monitor_element(
-        self, name: str, old_element_name: str, new_element_name: str
-    ) -> None:
-        self._move_dict_element(self.monitors[name], old_element_name, new_element_name)
-        self._move_dict_element(
-            self.functions["monitors"][name], old_element_name, new_element_name
-        )
+            if "name" in self.pdict[new_name]:
+                self.pdict[new_name]["name"] = new_name
 
     @_trigger_rebuild
     def delete_neurongroup(self, name: str) -> None:
@@ -1568,7 +1666,12 @@ class B2Model:
             }
         if name not in self.functions["monitors"]:
             self.functions["monitors"][name] = {
-                "rename": lambda n: self.rename_monitor(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.monitors,
+                    self.functions["monitors"],
+                    lambda _model=self: _model.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_monitor(name),
                 "element_added": lambda: self.set_rebuilt(True),  # do nothing
                 "element_removed": lambda: self.set_rebuilt(True),
@@ -1580,7 +1683,12 @@ class B2Model:
             "modify": lambda tp: self._modify_dict_element_with_rebuild(
                 self.monitors[name], "type", tp
             ),
-            "rename": lambda n: self.rename_monitor_element(name, "type", n),
+            "rename": self.Renamer(
+                "type",
+                self.monitors[name],
+                self.functions["monitors"][name],
+                lambda _model=self: _model.set_rebuilt(True),
+            ),
         }
 
         utils.update_nested_dict(
@@ -1610,7 +1718,12 @@ class B2Model:
             }
         if name not in self.functions["monitors"]:
             self.functions["monitors"][name] = {
-                "rename": lambda n: self.rename_monitor(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.monitors,
+                    self.functions["monitors"],
+                    lambda _model=self: _model.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_monitor(name),
                 "element_added": lambda: None,  # do nothing
                 "element_removed": lambda: None,  # do nothing
@@ -1622,7 +1735,12 @@ class B2Model:
             "modify": lambda src: self._modify_dict_element_with_rebuild(
                 self.monitors[name], "source", src
             ),
-            "rename": lambda n: self.rename_monitor_element(name, "source", n),
+            "rename": self.Renamer(
+                "source",
+                self.monitors[name],
+                self.functions["monitors"][name],
+                lambda _model=self: _model.set_rebuilt(True),
+            ),
         }
 
         utils.update_nested_dict(
@@ -1653,7 +1771,12 @@ class B2Model:
             }
         if name not in self.functions["monitors"]:
             self.functions["monitors"][name] = {
-                "rename": lambda n: self.rename_monitor(name, n),
+                "rename": self.Renamer(
+                    name,
+                    self.monitors,
+                    self.functions["monitors"],
+                    lambda _model=self: _model.set_rebuilt(True),
+                ),
                 "delete": lambda: self.delete_monitor(name),
                 "element_added": lambda: None,  # do nothing
                 "element_removed": lambda: None,  # do nothing
@@ -1665,7 +1788,12 @@ class B2Model:
             "modify": lambda var: self._modify_dict_element_with_rebuild(
                 self.monitors[name], "variable", var
             ),
-            "rename": lambda n: self.rename_monitor_element(name, "variable", n),
+            "rename": self.Renamer(
+                "variable",
+                self.monitors[name],
+                self.functions["monitors"][name],
+                lambda _model=self: _model.set_rebuilt(True),
+            ),
         }
 
         utils.update_nested_dict(
