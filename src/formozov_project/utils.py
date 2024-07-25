@@ -110,26 +110,33 @@ def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:
         When something goes wrong during evaluation of the unit part of the input quantity string
     """
     # extract numerical value via regex. allow for multiple numbers left and right of a '.' and multiple spaces or a '*' between number and unit
-    pattern = r"([\(\)0-9./\*]+)\s*\*?\s*(\w+)"
+    pattern = r"([\(\)\d./\*]+)\s*\*?\s*(\w*)"
     match = re.match(pattern, quantity_str)
     quantity_obj = None
     if match:
         value, unit_str = match.groups()
-        # Map the unit string to a Brian2 unit
-        try:
-            unit = getattr(b2, unit_str)
-        except Exception as e:
-            message = f"Error when interpreting unit string: {e}"
-            raise RuntimeError(message) from e
+
+        v = None
+        unit = None
 
         try:
             v = eval(value)
             # Create the quantity object
-            quantity_obj = v * unit
         except Exception as e:
             raise RuntimeError(f"Error when interpreting numerical string: {e}") from e
 
-        return quantity_obj
+        if unit_str != "":
+            # Map the unit string to a Brian2 unit
+            try:
+                unit = getattr(b2, unit_str)
+            except Exception as e:
+                message = f"Error when interpreting unit string: {e}"
+                raise RuntimeError(message) from e
+
+            quantity_obj = v * unit
+            return quantity_obj
+        else:
+            return v
     else:
         return quantity_str
 

@@ -239,11 +239,12 @@ class EditableParameterTree(ParameterTree):
         self.add_item_action = QtWidgets.QAction(f"add {self.name}")
         self.add_item_action.triggered.connect(self.add_item)
 
-    def _signal_with_errormessage(self, signal: Callable, *args: Any) -> None:
+    def _calll_with_errormessage(self, signal: Callable, *args: Any) -> Any:
         """
         Call the function 'signal' with arguments '*args' and display an error message box
-        when it fails with an exception. This function acts as a wrapper around qt slots
-        to make possibly occuring errors visible
+        when it fails with an exception. This function mostly acts as a wrapper around qt slots
+        to make possibly occuring errors visible. Alternatively it can be used to make exceptions
+        visible in the gui
 
         Parameters
         ----------
@@ -256,7 +257,7 @@ class EditableParameterTree(ParameterTree):
             Any return value from the slot
         """
         try:
-            signal(*args)
+            return signal(*args)
         except Exception as e:
             message = f"An error occured: {e}"
             QtWidgets.QMessageBox.critical(self, "Error", message)
@@ -280,10 +281,10 @@ class EditableParameterTree(ParameterTree):
             if all(f in funcs for f in ["delete", "rename"]):
                 # the outermost nodes (neurongroups, initials, synapses) cannot be modified and have no slots, hence this check
                 param.sigRemoved.connect(
-                    lambda: self._signal_with_errormessage(funcs["delete"])
+                    lambda: self._calll_with_errormessage(funcs["delete"])
                 )
                 param.sigNameChanged.connect(
-                    lambda p: self._signal_with_errormessage(funcs["rename"], p.name())
+                    lambda p: self._calll_with_errormessage(funcs["rename"], p.name())
                 )
 
             for child in param.children():
@@ -293,15 +294,16 @@ class EditableParameterTree(ParameterTree):
                     pass
         else:
             param.sigValueChanged.connect(
-                lambda p: self._signal_with_errormessage(
-                    funcs["modify"], parse_string_to_quantity(p.value())
+                lambda p: self._calll_with_errormessage(
+                    funcs["modify"],
+                    self._calll_with_errormessage(parse_string_to_quantity, p.value()),
                 )
             )
             param.sigRemoved.connect(
-                lambda: self._signal_with_errormessage(funcs["delete"])
+                lambda: self._calll_with_errormessage(funcs["delete"])
             )
             param.sigNameChanged.connect(
-                lambda p: self._signal_with_errormessage(funcs["rename"], p.name())
+                lambda p: self._calll_with_errormessage(funcs["rename"], p.name())
             )
 
     def _get_value(self, v: Any) -> dict[str, Any] | Any:
