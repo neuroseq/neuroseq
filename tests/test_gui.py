@@ -227,6 +227,7 @@ def test_gui_checkpoints(
         QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("test", True)
     )
     gui.update_model(mfx_ornstein)
+    qtbot.wait(delay_after_update_model_call_in_ms)
     gui.btn_store_checkpoint_clicked()
     assert "test" in gui.model.checkpoints
     # simulate
@@ -329,3 +330,55 @@ def test_gui_link_axes(
     assert trace_widget_viewbox.state["linkedViews"][0]() == stim_widget_viewbox
     assert trace_widget_viewbox.state["linkedViews"][1] is not None
     assert trace_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
+
+
+def test_gui_synapse_ram_limit(
+    monkeypatch: MonkeyPatch,
+    qtbot: QtBot,
+    qmessagebox_calls: list,
+) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    assert gui.heatmap_widget.currentIndex == 0
+    simulation_time = 0.1
+    # mock getText to return the desired simulation time
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
+    )
+    gui.btn_continue_simulation_clicked()
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    n_timesteps = gui.heatmap_widget.tVals.size
+    assert n_timesteps == 1000
+    # 1 MB RAM limit
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("1", True))
+    gui.btn_max_ram_synapse_plot_matrix()
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    n_timesteps = gui.heatmap_widget.tVals.size
+    assert n_timesteps == 334
+    # 2 MB RAM limit
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("2", True))
+    gui.btn_max_ram_synapse_plot_matrix()
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    n_timesteps = gui.heatmap_widget.tVals.size
+    assert n_timesteps == 500
+    # 0 MB RAM limit == unlimited
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0", True))
+    gui.btn_max_ram_synapse_plot_matrix()
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    n_timesteps = gui.heatmap_widget.tVals.size
+    assert n_timesteps == 1000
+    # invalid string displays error message
+    assert len(qmessagebox_calls) == 0
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getText", lambda *args: ("imnotanumber!", True)
+    )
+    gui.btn_max_ram_synapse_plot_matrix()
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    n_timesteps = gui.heatmap_widget.tVals.size
+    assert n_timesteps == 1000
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "critical"
+    assert "invalid input" in qmessagebox_calls[0]["title"].lower()

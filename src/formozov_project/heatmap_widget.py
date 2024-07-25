@@ -11,17 +11,11 @@ class HeatmapWidget(pg.ImageView):
     see https://pyqtgraph.readthedocs.io/en/latest/api_reference/widgets/imageview.html
     """
 
-    def __init__(
-        self,
-        data: np.ndarray | None = None,
-        timestamps: np.ndarray | None = None,
-        parent: QtWidgets.QWidget | None = None,
-    ) -> None:
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent, discreteTimeLine=True)
         self.ui.roiBtn.hide()
         self.ui.menuBtn.hide()
         self.setPredefinedGradient("viridis")
-        self.set_data(data, timestamps)
 
     def clear_data(self) -> None:
         self.clear()

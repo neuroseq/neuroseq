@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 import pathlib
+from dataclasses import dataclass
 
 import brian2 as b2
-import brian2.numpy_ as np
 import qtawesome as qta
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -21,8 +21,14 @@ from formozov_project.stim_console import StimConsole
 from formozov_project.stim_editor import StimEditor
 from formozov_project.trace_widget import TraceWidget
 from formozov_project.utils import add_action
+from formozov_project.utils import construct_synapse_matrix
 from formozov_project.utils import example_models_path
 from formozov_project.utils import with_wait_cursor
+
+
+@dataclass
+class GuiSettings:
+    max_ram_synapse_plot_matrix: int = 256
 
 
 class Gui(QtWidgets.QMainWindow):
@@ -30,6 +36,7 @@ class Gui(QtWidgets.QMainWindow):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.logger.info("starting Gui")
+        self.settings = GuiSettings()
         self.model = B2Model()
         self.neurons: dict[str, tuple[b2.StateMonitor, str]] = {}
         self.synapses: dict[str, tuple[b2.StateMonitor, str]] = {}
@@ -252,7 +259,7 @@ class Gui(QtWidgets.QMainWindow):
         if timestamps.shape[0] == 0:
             self.trace_widget.clear_data()
             return
-        traces = getattr(monitor, variable)
+        traces = monitor.variables[variable].get_value().T
         self.logger.info(
             f"Displaying {neuron_name} in TraceWidget: {timestamps.shape} timestamps, {traces.shape} data"
         )
@@ -263,17 +270,12 @@ class Gui(QtWidgets.QMainWindow):
         if synapse_name not in self.synapses:
             return
         monitor, variable = self.synapses[synapse_name]
-        synapse_group = monitor.source
-        neuron_group = synapse_group.source
-        values = getattr(monitor, variable)
-        matrix = np.zeros((neuron_group.N, neuron_group.N, values.shape[1]))
-        n_timestamps = values.shape[1]
-        if n_timestamps == 0:
+        matrix, timestamps = construct_synapse_matrix(
+            monitor, variable, self.settings.max_ram_synapse_plot_matrix
+        )
+        if matrix.size == 0:
             self.heatmap_widget.clear_data()
             return
-        for i, j, value in zip(synapse_group.i, synapse_group.j, values, strict=True):
-            matrix[i, j, :] = value
-        timestamps = monitor.t / b2.second
         self.logger.info(
             f"Displaying {synapse_name} in HeatmapWidget: {timestamps.shape} timestamps, {matrix.shape} data"
         )
@@ -284,7 +286,7 @@ class Gui(QtWidgets.QMainWindow):
         if spike_name not in self.spikes:
             return
         monitor = self.spikes[spike_name]
-        spikes = monitor.i
+        spikes = monitor.variables["i"].get_value().T
         timestamps = monitor.t / b2.second
         dt = monitor.clock.dt / b2.second
         n_neurons = monitor.source.N
@@ -394,6 +396,27 @@ class Gui(QtWidgets.QMainWindow):
         for widget in [self.trace_widget, self.spike_widget]:
             widget.setYLink(link_target)
 
+    def btn_max_ram_synapse_plot_matrix(self) -> None:
+        new_max_ram, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "RAM limit",
+            "RAM limit in MB for synapse matrix plot (0 for no limit)",
+            QtWidgets.QLineEdit.EchoMode.Normal,
+            f"{self.settings.max_ram_synapse_plot_matrix}",
+        )
+        if not ok:
+            return
+        try:
+            self.settings.max_ram_synapse_plot_matrix = max(0, int(new_max_ram))
+        except ValueError:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Invalid input",
+                f"Could not parse RAM limit '{new_max_ram}' as a number",
+            )
+            return
+        self._update_data()
+
     def about(self) -> None:
         QtWidgets.QMessageBox.about(
             self,
@@ -428,6 +451,7 @@ class Gui(QtWidgets.QMainWindow):
         self.addToolBar(self.toolbar_view)
         self.toolbar_data = QtWidgets.QToolBar("Data")
         self.addToolBar(self.toolbar_data)
+        self.menu_settings = menu.addMenu("&Settings")
         self.menu_help = menu.addMenu("&Help")
         self._create_actions_data(toolbar=self.toolbar_data, menu=None)
 
@@ -436,6 +460,7 @@ class Gui(QtWidgets.QMainWindow):
         self._create_actions_simulate(self.menu_simulate, self.toolbar_simulate)
         self._create_actions_playback(self.menu_playback, self.toolbar_playback)
         self._create_actions_view(self.menu_view, self.toolbar_view)
+        self._create_actions_settings(menu=self.menu_settings, toolbar=None)
         self._create_actions_help(menu=self.menu_help, toolbar=None)
 
     def _create_actions_file(
@@ -595,6 +620,13 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             icon=qta.icon("mdi6.arrow-vertical-lock"),
             checkable=True,
+        )
+
+    def _create_actions_settings(
+        self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
+    ) -> None:
+        add_action(
+            "&Synapse matrix RAM limit", self.btn_max_ram_synapse_plot_matrix, menu
         )
 
     def _create_actions_help(
