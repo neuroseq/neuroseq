@@ -2,19 +2,69 @@ from __future__ import annotations
 
 import abc
 import functools
+import logging
+import pathlib
 import re
 from collections.abc import Callable
 from importlib import resources
 from typing import Any
 
 import brian2 as b2
+import brian2.numpy_ as np
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
 import formozov_project
 
-example_models_path = resources.files(formozov_project) / "example_models"
+example_models_path = (
+    pathlib.Path(str(resources.files(formozov_project))) / "example_models"
+)
+
+
+def get_downsample_factor(
+    n_floats: int, max_ram_mb: int, bits_per_float: int = 64
+) -> int:
+    """Calculate the downsample factor for a given number of floats and maximum allowed RAM usage in MB."""
+    if n_floats < 0 or max_ram_mb <= 0:
+        return 1
+    mb_in_bits = 1024 * 1024 * 8
+    ram_mb = n_floats * bits_per_float // mb_in_bits
+    return 1 + ram_mb // max_ram_mb
+
+
+def construct_synapse_matrix(
+    monitor: b2.StateMonitor, variable: str, max_ram_mb: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Constructs NxNxt timeseries of synapse matrices and timestamps from a Brian2 StateMonitor of synapse variables.
+
+    Automatically downsamples the data if it exceeds the maximum RAM limit.
+    """
+    synapse_group = monitor.source
+    neuron_group = synapse_group.source
+    values = monitor.variables[variable].get_value().T
+    n_timestamps = values.shape[1]
+    if n_timestamps == 0:
+        return np.array([]), np.array([])
+    n_floats = neuron_group.N * neuron_group.N * n_timestamps
+    downsample_factor = get_downsample_factor(n_floats, max_ram_mb, bits_per_float=32)
+    if downsample_factor > 1:
+        logging.info(
+            f"Downsampling {neuron_group.N}x{neuron_group.N}x{n_timestamps} matrix by factor {downsample_factor} due to max RAM limit of {max_ram_mb} MB"
+        )
+    matrix = np.zeros(
+        (neuron_group.N, neuron_group.N, values[0, ::downsample_factor].shape[0]),
+        dtype=np.float32,
+    )
+    for i, j, value in zip(
+        synapse_group.i,
+        synapse_group.j,
+        values[:, ::downsample_factor],
+        strict=True,
+    ):
+        matrix[i, j, :] = value
+    timestamps = (monitor.t / b2.second)[::downsample_factor]
+    return matrix, timestamps
 
 
 def shuffle_index(i: int, n: int) -> tuple[int, int]:
@@ -58,7 +108,7 @@ def add_action(
     shortcut: str | None = None,
     icon: QtGui.QIcon | None = None,
     checkable: bool = False,
-) -> None:
+) -> QtWidgets.QAction:
     parent = menu or toolbar
     action = QtWidgets.QAction(name, parent)
     action.setCheckable(checkable)
@@ -75,6 +125,7 @@ def add_action(
         toolbar.addAction(action)
     if widget is not None:
         widget.addAction(action)
+    return action
 
 
 class QtABCMeta(type(QtCore.QObject), abc.ABCMeta):  # type: ignore

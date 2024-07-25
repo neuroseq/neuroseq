@@ -30,7 +30,8 @@ from formozov_project.utils import init_brian2_logging
     help="Log to this file instead of the console",
     show_default=True,
 )
-def main(log_level: str, log_file: pathlib.Path) -> None:
+@click.argument("filename", required=False)
+def main(log_level: str, log_file: pathlib.Path, filename: str | None) -> None:
     init_brian2_logging()
     logging.basicConfig(
         level=log_level,
@@ -42,7 +43,7 @@ def main(log_level: str, log_file: pathlib.Path) -> None:
     click.echo(msg)
     logging.getLogger(__name__).info(msg)
     app = QtWidgets.QApplication(sys.argv)
-    gui = Gui()
+    gui = Gui(filename=filename)
     gui.show()
     app.exec()
 

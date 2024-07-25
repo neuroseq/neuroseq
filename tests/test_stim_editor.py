@@ -13,7 +13,9 @@ from qtpy import QtWidgets
 
 
 def test_stim_editor_no_data(qtbot: QtBot) -> None:
-    stim_editor = StimEditor()
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    stim_editor = StimEditor(cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
     stim_editor.show()
     qtbot.waitUntil(lambda: stim_editor.isVisible())
@@ -21,7 +23,7 @@ def test_stim_editor_no_data(qtbot: QtBot) -> None:
     qtbot.waitUntil(lambda: not stim_editor.isVisible())
 
 
-def test_stim_editor_edit_mode_actions(
+def test_stim_editor_actions(
     qtbot: QtBot, monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
     n_neurons = 10
@@ -32,10 +34,13 @@ def test_stim_editor_edit_mode_actions(
     timed_array.values[2:7, 1:3] = selection
     model = B2Model()
     model.parameters = {"a": timed_array, "irrelevant": 4}
-    stim_editor = StimEditor()
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    stim_editor = StimEditor(cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
     stim_editor.show()
     qtbot.waitUntil(lambda: stim_editor.isVisible())
+    assert not stim_editor.action_toggle_draw.isChecked()
     assert len(stim_editor.stims_dict) == 0
     stim_editor.set_model(model)
     assert "a" in stim_editor.stims_dict
@@ -58,6 +63,12 @@ def test_stim_editor_edit_mode_actions(
     # move a slice right
     stim_editor.move_selected_stim_right()
     assert np.allclose(stim_editor.current_stim.values[2:7, 1:3], selection)
+    # invalid moves are ignored, and all neurons are deselected
+    stim_editor.move_selected_stim(99, 27)
+    assert stim_editor.stim_widget.selected_neuron_slice is None
+    assert stim_editor.stim_widget.selected_time_slice is None
+    assert np.allclose(stim_editor.current_stim.values[2:7, 1:3], selection)
+    stim_editor.stim_widget.select_neurons(slice(1, 3), slice(2, 7))
     # copy a slice
     stim_editor.copy_selected_stim()
     assert np.allclose(stim_editor.current_stim.values[2:7, 1:3], selection)
@@ -120,3 +131,13 @@ def test_stim_editor_edit_mode_actions(
     assert np.allclose(stim_editor.current_stim.values[5:10, 0:2], selection)
     assert len(error_messages) == 3
     assert "too many neurons" in error_messages[-1]
+    # draw stim is ignored if draw mode is not active
+    stim_editor.action_toggle_draw.setChecked(False)
+    stim_editor.draw_selected_stim(slice(0, 5), slice(0, 5))
+    assert np.allclose(stim_editor.current_stim.values[0:5, 0:5], np.zeros((5, 5)))
+    # drawn stimuli have magnitude of the maximum value of the existing stimuli
+    stim_editor.action_toggle_draw.setChecked(True)
+    stim_editor.draw_selected_stim(slice(0, 5), slice(0, 5))
+    assert np.allclose(
+        stim_editor.current_stim.values[0:5, 0:5], np.max(selection) * np.ones((5, 5))
+    )

@@ -87,3 +87,20 @@ def test_shuffle_index(n: int) -> None:
     assert len(shuffled_indices) == n
     assert shuffled_indices != ordered_indices
     assert sorted(shuffled_indices) == ordered_indices
+
+
+def test_get_downsample_factor_valid() -> None:
+    assert utils.get_downsample_factor(100, 1) == 1
+    assert utils.get_downsample_factor(1024 * 1024 - 1, 4, bits_per_float=32) == 1
+    assert utils.get_downsample_factor(1024 * 1024, 4, bits_per_float=32) == 2
+    assert utils.get_downsample_factor(1024 * 1024 - 1, 8) == 1
+    assert utils.get_downsample_factor(1024 * 1024, 8) == 2
+    assert utils.get_downsample_factor(2 * 1024 * 1024, 8) == 3
+    assert utils.get_downsample_factor(1024 * 1024 * 1024, 8) == 1025
+
+
+def test_get_downsample_factor_invalid() -> None:
+    assert utils.get_downsample_factor(-5, 8) == 1
+    assert utils.get_downsample_factor(500, 0) == 1
+    assert utils.get_downsample_factor(100, -2) == 1
+    assert utils.get_downsample_factor(-5, -2) == 1

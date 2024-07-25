@@ -8,6 +8,8 @@ from pyqtgraph.console.repl_widget import ReplWidget
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+from formozov_project.b2_model import B2Model
+
 
 class StimConsole(ReplWidget):
     sig_stims_values_dict_updated = QtCore.Signal(dict)  # dict[str, np.ndarray]
@@ -17,9 +19,11 @@ class StimConsole(ReplWidget):
         parent: QtWidgets.QWidget | None = None,
     ):
         super().__init__(globals=self.namespace, locals=self.namespace, parent=parent)
-        self.namespace_dict = {
+        self.namespace_dict: dict[str, Any] = {
             "np": np,
+            "b2": b2,
             "stims": None,
+            "model": None,
         }
         self._print_intro()
 
@@ -47,6 +51,9 @@ class StimConsole(ReplWidget):
 
     def set_stims(self, stims: dict[str, b2.TimedArray]) -> None:
         self.namespace_dict["stims"] = {k: v.values.copy() for k, v in stims.items()}
+
+    def set_model(self, model: B2Model) -> None:
+        self.namespace_dict["model"] = model
 
     def namespace(self) -> dict[str, Any]:
         return self.namespace_dict

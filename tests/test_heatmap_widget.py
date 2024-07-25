@@ -31,10 +31,11 @@ def test_heatmap_widget_2d_data_no_timeline(qtbot: QtBot) -> None:
 
 def test_heatmap_widget_3d_data_with_timeline(qtbot: QtBot) -> None:
     data = np.random.rand(47, 51)
-    heatmap_widget = HeatmapWidget(data)
+    heatmap_widget = HeatmapWidget()
     qtbot.addWidget(heatmap_widget)
     heatmap_widget.show()
     qtbot.waitUntil(lambda: heatmap_widget.isVisible())
+    heatmap_widget.set_data(data)
     assert not heatmap_widget.timeLine.isVisible()
     assert heatmap_widget.getProcessedImage().shape == data.T.shape
     data = np.random.rand(23, 18, 10)

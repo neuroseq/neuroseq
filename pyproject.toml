@@ -26,12 +26,14 @@ formozov-project = "formozov_project.__main__:main"
 
 [project.optional-dependencies]
 tests = [
+    "memray",
     "pytest",
     "pytest-qt",
     "pytest-randomly",
     "pytest-cov",
     "pytest-mock",
     "pytest-xvfb",
+    "pytest-memray",
     "diff-cover",
 ]
 
@@ -40,6 +42,10 @@ path = "src/formozov_project/__init__.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["screenshot"]
+log_cli = "true"
+log_cli_level = "DEBUG"
+
 
 [tool.ruff]
 extend-include = ["*.ipynb"]

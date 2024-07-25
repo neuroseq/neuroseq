@@ -12,6 +12,10 @@ class SelectableLinePlotItem(pg.PlotDataItem, SelectableMixin):
 
     def __init__(self, *args: Any, **kargs: Any) -> None:
         super().__init__(*args, **kargs)
+        self.setDownsampling(auto=True, method="subsample")
+        # note: it would likely make sense to also do setClipToView(True) here,
+        # but this results in AttributeError: autoRangeEnabled, so not doing this for now.
+        self.setSkipFiniteCheck(True)
 
     def set_selected_slice(self, selected_slice: slice) -> None:
         pass

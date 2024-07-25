@@ -16,6 +16,26 @@ from qtpy import QtWidgets
 b2.prefs.codegen.target = "numpy"
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--update-screenshot",
+        action="store_true",
+        default=False,
+        help="Update screenshot.png",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--update-screenshot"):
+        for item in items:
+            if "screenshot" not in item.keywords:
+                item.add_marker(pytest.mark.skip(reason="Updating screenshot"))
+    else:
+        for item in items:
+            if "screenshot" in item.keywords:
+                item.add_marker(pytest.mark.skip(reason="Skipping screenshot update"))
+
+
 # replace all .exec() calls within the b2_model_widget module with .show() to avoid blocking the tests
 @pytest.fixture(autouse=True)
 def patch_b2w_exec_show(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -55,7 +75,7 @@ def reduce_brian2_logging_verbosity() -> None:
 
 @pytest.fixture(scope="session")
 def default_model_path() -> pathlib.Path:
-    return pathlib.Path(str(example_models_path / "default_model.json"))
+    return example_models_path / "default_model.json"
 
 
 @pytest.fixture(scope="session")

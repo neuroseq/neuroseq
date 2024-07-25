@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import cast
 
 import brian2 as b2
+import pytest
 from brian2 import numpy_ as np
 from brian2.tests.utils import assert_allclose
 from formozov_project.b2_model import B2Model
@@ -18,6 +19,28 @@ from qtpy import QtWidgets
 # no obvious signal to wait for after the model is updated to know when the GUI is ready,
 # so for now we just wait for a fixed time
 delay_after_update_model_call_in_ms = 50
+
+
+@pytest.mark.screenshot
+def test_update_screenshot(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    gui.resize(1600, 1200)
+    simulation_time = 2.0
+    # mock getText to return the desired simulation time
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
+    )
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    gui.btn_continue_simulation_clicked()
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    gui.btn_play_clicked()
+    qtbot.waitUntil(
+        lambda: gui.heatmap_widget.currentIndex == gui.heatmap_widget.tVals.size - 1
+    )
+    gui.grab().save("screenshot.png")
 
 
 def test_gui_click_exit(qtbot: QtBot) -> None:
@@ -36,18 +59,16 @@ def test_gui_simulate_and_playback(
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
     assert gui.heatmap_widget.currentIndex == 0
     assert gui.trace_widget.timeline.getXPos() == approx(0)
-    assert gui.cmb_synapse.count() == 0
-    assert gui.cmb_neuron.count() == 0
-    assert gui.cmb_spike.count() == 0
+    assert "run" in gui.continue_simulation_action.text().lower()
+    assert "continue" not in gui.continue_simulation_action.text().lower()
     simulation_time = 0.1
     # mock getText to return the desired simulation time
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
     )
-    qtbot.wait(delay_after_update_model_call_in_ms)
-    gui.load_model(default_model_path)
     qtbot.wait(delay_after_update_model_call_in_ms)
     assert gui.cmb_synapse.count() == 1
     assert gui.cmb_synapse.itemText(0) == "Ce / we"
@@ -63,6 +84,8 @@ def test_gui_simulate_and_playback(
     gui.btn_play_clicked()
     gui.btn_play_clicked()
     qtbot.waitUntil(lambda: gui.heatmap_widget.currentIndex == n_timesteps - 1)
+    assert "run" not in gui.continue_simulation_action.text().lower()
+    assert "continue" in gui.continue_simulation_action.text().lower()
     assert gui.trace_widget.timeline.getXPos() == approx(simulation_time, rel=1e-2)
     assert gui.spike_widget.timeline.getXPos() == approx(simulation_time, rel=1e-2)
     gui.btn_skip_to_start_clicked()
@@ -84,6 +107,7 @@ def test_gui_new(tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot) -> None
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
+    assert gui.model.name == B2Model().name
     monkeypatch.setattr("formozov_project.gui.B2ModelWidget.exec", lambda *args: True)
     gui.btn_new_clicked()
     assert gui.model.name == B2Model().name
@@ -102,12 +126,8 @@ def test_gui_open(
         lambda *args: (f"{default_model_path}", True),
     )
 
-    assert gui.model.parameters is None
-    assert gui.model.neurongroups == {}
-    assert gui.model.synapses == {}
-    assert gui.model.monitors == {}
-
     loaded_model = B2Model.load_model(default_model_path)
+    assert loaded_model.parameters is not None
 
     gui.btn_open_clicked()
 
@@ -125,6 +145,7 @@ def test_gui_save(
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
     gui.update_model(mfx_ornstein)
     qtbot.wait(delay_after_update_model_call_in_ms)
     filename = tmp_path / "test.json"
@@ -148,6 +169,7 @@ def test_gui_export(
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
     gui.update_model(mfx_ornstein)
     qtbot.wait(delay_after_update_model_call_in_ms)
     filename = tmp_path / "test.h5"
@@ -167,6 +189,7 @@ def test_gui_export_empty_model(
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
+    gui.update_model(B2Model())
     filename = tmp_path / "test.h5"
     assert not filename.exists()
     assert len(qmessagebox_calls) == 0
@@ -192,6 +215,8 @@ def test_gui_checkpoints(
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
+    assert "run" in gui.continue_simulation_action.text().lower()
+    assert "continue" not in gui.continue_simulation_action.text().lower()
     assert len(qmessagebox_calls) == 0
     gui.btn_restore_checkpoint_clicked()
     assert len(qmessagebox_calls) == 1
@@ -202,6 +227,7 @@ def test_gui_checkpoints(
         QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("test", True)
     )
     gui.update_model(mfx_ornstein)
+    qtbot.wait(delay_after_update_model_call_in_ms)
     gui.btn_store_checkpoint_clicked()
     assert "test" in gui.model.checkpoints
     # simulate
@@ -210,9 +236,13 @@ def test_gui_checkpoints(
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
     )
     gui.btn_continue_simulation_clicked()
+    assert "run" not in gui.continue_simulation_action.text().lower()
+    assert "continue" in gui.continue_simulation_action.text().lower()
     assert gui.model.network["M"].t[-1] == approx(simulation_time, rel=1e-2)
     # restore checkpoint
     gui.btn_restore_checkpoint_clicked()
+    assert "run" in gui.continue_simulation_action.text().lower()
+    assert "continue" not in gui.continue_simulation_action.text().lower()
     assert len(gui.model.network["M"].t) == 0
 
 
@@ -300,3 +330,55 @@ def test_gui_link_axes(
     assert trace_widget_viewbox.state["linkedViews"][0]() == stim_widget_viewbox
     assert trace_widget_viewbox.state["linkedViews"][1] is not None
     assert trace_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
+
+
+def test_gui_synapse_ram_limit(
+    monkeypatch: MonkeyPatch,
+    qtbot: QtBot,
+    qmessagebox_calls: list,
+) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    assert gui.heatmap_widget.currentIndex == 0
+    simulation_time = 0.1
+    # mock getText to return the desired simulation time
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
+    )
+    gui.btn_continue_simulation_clicked()
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    n_timesteps = gui.heatmap_widget.tVals.size
+    assert n_timesteps == 1000
+    # 1 MB RAM limit
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("1", True))
+    gui.btn_max_ram_synapse_plot_matrix()
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    n_timesteps = gui.heatmap_widget.tVals.size
+    assert n_timesteps == 334
+    # 2 MB RAM limit
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("2", True))
+    gui.btn_max_ram_synapse_plot_matrix()
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    n_timesteps = gui.heatmap_widget.tVals.size
+    assert n_timesteps == 500
+    # 0 MB RAM limit == unlimited
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0", True))
+    gui.btn_max_ram_synapse_plot_matrix()
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    n_timesteps = gui.heatmap_widget.tVals.size
+    assert n_timesteps == 1000
+    # invalid string displays error message
+    assert len(qmessagebox_calls) == 0
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getText", lambda *args: ("imnotanumber!", True)
+    )
+    gui.btn_max_ram_synapse_plot_matrix()
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    n_timesteps = gui.heatmap_widget.tVals.size
+    assert n_timesteps == 1000
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "critical"
+    assert "invalid input" in qmessagebox_calls[0]["title"].lower()
