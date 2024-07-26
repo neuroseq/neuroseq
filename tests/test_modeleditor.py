@@ -35,18 +35,9 @@ def test_EagerComboBox(qtbot: QtBot) -> None:
     assert signal_emitted is True
 
 
-def test_make_quantity(
-    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch
+def test_etree_constr(
+    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
 ) -> None:
-    stree = EditableSynapseTree(mfx_nmda)
-    qtbot.addWidget(stree)
-
-    assert stree._make_quantity("10 ms")[0] == 10 * b2.ms
-    assert stree._make_quantity("(1/10) * second")[0] == 1 / 10 * b2.second
-    assert stree._make_quantity("mumbochumbo")[0] == "mumbochumbo"
-
-
-def test_etree_constr(mfx_nmda: B2Model, qtbot: QtBot) -> None:
     stree = EditableSynapseTree(mfx_nmda)
     qtbot.addWidget(stree)
 
@@ -86,6 +77,8 @@ def test_etree_edit_item(mfx_nmda: B2Model, qtbot: QtBot) -> None:
 
     assert stree.b2model.synapses["S"]["target"] == "other"
 
+    assert normal.value() == "other"
+
     # edit textfield parameter
     with qtbot.waitSignal(textfield.sigValueChanged, timeout=1000, raising=True):
         textfield.setValue("dv/dt = -v: 1")
@@ -111,10 +104,12 @@ def test_tree_add_element(
 
     ptree = EditableParameterTree(mfx_nmda, ParameterDialog, "parameters")
     qtbot.addWidget(ptree)
+    assert ptree.b2model.must_be_rebuilt is False
 
     ptree.add_item()
 
     assert ptree.b2model.parameters["p"] == 2  # type: ignore
+    assert ptree.b2model.must_be_rebuilt is False
 
 
 def test_ptree_edit_b2quantity(mfx_nmda: B2Model, qtbot: QtBot) -> None:
@@ -126,10 +121,11 @@ def test_ptree_edit_b2quantity(mfx_nmda: B2Model, qtbot: QtBot) -> None:
     a_node = pnode.child("a")
 
     with qtbot.waitSignal(a_node.sigValueChanged, timeout=1000, raising=True):
-        a_node.setValue("1/60 ms")
+        a_node.setValue("1/60 * ms")
 
-    assert type(ptree.b2model.parameters["a"]) is b2.Quantity  # type: ignore
     assert ptree.b2model.parameters["a"] == ((1 / 60) * b2.msecond)  # type: ignore
+    assert type(ptree.b2model.parameters["a"]) is b2.Quantity  # type: ignore
+    assert ptree.b2model.must_be_rebuilt is False
 
 
 def test_neurontree_add_neuronsubgroup(
@@ -161,9 +157,44 @@ def test_neurontree_add_neuronsubgroup(
     assert ntree.b2model.neurongroups["sub"]["name"] == "sub"
     assert ntree.b2model.neurongroups["sub"]["target"] == "neuron_input"
     assert ntree.b2model.neurongroups["sub"]["idxs"] == (1, 2)
+    assert ntree.b2model.must_be_rebuilt is True
 
 
-def test_neurontree_add_neurongroup(
+def test_rename_tree_element(
+    mfx_nmda: B2Model, qtbot: QtBot, qmessagebox_calls: list
+) -> None:
+    ptree = EditableParameterTree(mfx_nmda, ParameterDialog, "parameters")
+    qtbot.addWidget(ptree)
+    assert ptree.b2model.must_be_rebuilt is False
+
+    pnode = ptree.root
+
+    a_node = pnode.child("a")
+
+    with qtbot.waitSignal(a_node.sigNameChanged, timeout=1000, raising=True):
+        a_node.setName("x")
+
+    item = a_node.makeTreeItem(0)
+
+    assert item.text(0) == "x"
+
+    assert "x" in ptree.b2model.parameters  # type: ignore
+    assert "a" not in ptree.b2model.parameters  # type: ignore
+    assert ptree.b2model.must_be_rebuilt is False
+
+    with qtbot.waitSignal(a_node.sigNameChanged, timeout=1000, raising=True):
+        a_node.setName("2332x")
+
+    assert qmessagebox_calls == [
+        {
+            "name": "critical",
+            "text": "An error occured: The name 2332x is not a valid python identifier",
+            "title": "Error",
+        },
+    ]
+
+
+def test_neurontree_add_neurongroup_list_update(
     mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch
 ) -> None:
     def exec_ndiag(ndiag: NeuronSubgroupDialog) -> Any:
@@ -258,12 +289,7 @@ def test_neurontree_add_neurongroup(
 
     assert set(vs) == set(entries)
 
-    assert set(variables) == set(
-        list(mtree.b2model.network["neurons"].equations.names)
-        + [
-            "True",
-        ]
-    )
+    assert set(variables) == set(list(mtree.b2model.network["neurons"].equations.names))
 
     variables = mtree._make_selection_list("SpikeMonitor", source)
     assert set(variables) == set(
@@ -279,7 +305,8 @@ def test_neurontree_add_neurongroup(
     assert ntree.b2model.neurongroups["p1"]["model"] == "dv/dt = -v : siemens\n"
     assert ntree.b2model.neurongroups["p1"]["th"] == "v < -10 mV"
     assert ntree.b2model.neurongroups["p1"]["method"] == "euler"
-    assert ntree.b2model.neurongroups["p1"]["n"] == 25
+    assert ntree.b2model.neurongroups["p1"]["neuronnumber"] == 25
+    assert ntree.b2model.must_be_rebuilt is True
 
     # trigger list update for synapse origin
     origin._update_list()
@@ -293,24 +320,75 @@ def test_neurontree_add_neurongroup(
 
     assert set(updated_list) == set(
         list(mtree.b2model.network["neurons"].equations.names)
-        + [
-            "True",
-        ]
     )
 
 
-def test_modeldialog(mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
+def test_modeldialog_accept(
+    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+) -> None:
     diag = ModelEditorDialog(mfx_nmda)
     qtbot.addWidget(diag)
     assert diag.b2model.must_be_rebuilt is False
+    specs = mfx_nmda.get_model_definition()
+    assert diag.backup == specs
+    assert diag.functions_backup == mfx_nmda.functions
 
     diag.b2model.define_neuronnumber("p1", 25)
     diag.b2model.define_solver_method("p1", "euler")
     diag.b2model.define_equation("p1", "dv/dt=-v: 1")
 
     assert diag.b2model.must_be_rebuilt is True
+
     diag.accept()
 
     assert "p1" in diag.b2model.neurongroups
+    assert "p1" in [obj.name for obj in diag.b2model.network.objects]
 
-    assert "p1" in diag.b2model.network.get_states()
+    def raise_error(_):
+        raise RuntimeError("dummy")
+
+    monkeypatch.setattr(B2Model, "assemble_network", raise_error)
+    diag.b2model.define_neuronnumber("p1", 35)
+
+    diag.accept()
+
+    assert qmessagebox_calls[0] == {
+        "name": "critical",
+        "text": "Error when rebuilding the model after editing: dummy",
+        "title": "Model rebuilding error",
+    }
+
+
+def test_modeldialog_reject(
+    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+) -> None:
+    diag = ModelEditorDialog(mfx_nmda)
+    qtbot.add_widget(diag)
+    specs = mfx_nmda.get_model_definition()
+    assert diag.backup == specs
+    assert diag.functions_backup == mfx_nmda.functions
+
+    diag.b2model.delete_monitor("Mn")
+
+    assert "Mn" not in diag.b2model.monitors
+    assert "Mn" in [obj.name for obj in diag.b2model.network.objects]
+
+    diag.reject()
+
+    assert "Mn" in diag.b2model.monitors
+    assert "Mn" in [obj.name for obj in diag.b2model.network.objects]
+
+    def raise_error(_, __):
+        raise RuntimeError("dummy")
+
+    monkeypatch.setattr(B2Model, "define_b2seed", raise_error)
+
+    diag.reject()
+
+    assert qmessagebox_calls == [
+        {
+            "name": "critical",
+            "text": "Error when restoring old model: dummy",
+            "title": "Model specification error",
+        },
+    ]

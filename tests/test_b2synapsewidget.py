@@ -83,7 +83,7 @@ def test_synapse_input(qtbot: QtBot) -> None:
     }
 
 
-def test_assemble_synapse(
+def test_accept_synapse(
     qtbot: QtBot, mfx_with_synapse: tuple[b2_model.B2Model, dict[str, Any]]
 ) -> None:
     model, _ = mfx_with_synapse
@@ -102,10 +102,10 @@ def test_assemble_synapse(
 
     # assertion that the network has an object of name "Ce" with internal name "Ce" is enough to
     # assert that assembly was successful
-    assert sdiag.model.network["Ce"].name == "Ce"
+    assert sdiag.model.synapses["Ce"] is not None
 
 
-def test_assemble_synapse_exceptions(qtbot: QtBot) -> None:
+def test_accept_synapse_exceptions(qtbot: QtBot) -> None:
     sdiag = B2W.SynapseDialog(B2Model())
 
     qtbot.addWidget(sdiag)
@@ -140,12 +140,4 @@ def test_assemble_synapse_exceptions(qtbot: QtBot) -> None:
         sdiag.error_dialog.text()
         == "The model equation and the origin- and target neurongroups need to be defined"
     )
-    sdiag.error_dialog.close()
-
-    sdiag.model.synapses["x"]["target"] = "t"
-
-    sdiag.accept()
-
-    # qtbot.waitUntil(sdiag.error_dialog.isVisible)
-    assert sdiag.error_dialog.text() == "Error when assembling neurongroup x: 's'"
     sdiag.error_dialog.close()

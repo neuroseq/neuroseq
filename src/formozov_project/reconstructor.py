@@ -47,7 +47,7 @@ class Reconstructor:
         model : B2Model
             Model to add the object to
         assembler : str
-            Function to assemble the object with: `assemble_neurongroup` or `assemble_synapse`
+            Function to assemble the object with: `_assemble_neurongroup` or `_assemble_synapse`
         name : str
             Name of the object to be assembled
         data_of_group : dict[str, Any]
@@ -92,15 +92,16 @@ class Reconstructor:
 
         # set object variables
         for key, value in data_of_group.items():
+            # check if there is a setter method
             if key in excluded:
                 continue
             else:
+                element = getattr(model.network[name], key)
+                if not isinstance(element, property) or element.fset is None:
+                    continue
+
                 try:
                     setattr(model.network[name], key, value)
-                except TypeError:
-                    # when the variable is read-only brian2 throws a TypeError.
-                    # We can then continue because the variable is automatically constructed
-                    continue
                 except Exception as e:
                     raise RuntimeError(
                         f"Something went wrong when setting attribute {key} in object {name}: {e}"
@@ -123,7 +124,7 @@ class Reconstructor:
         """
         augmented = list(
             zip(
-                ["N", "n", "model", "th", "refractory", "reset", "method"],
+                ["N", "neuronnumber", "model", "th", "refractory", "reset", "method"],
                 [
                     model.define_neuronnumber,
                     model.define_neuronnumber,
@@ -139,7 +140,7 @@ class Reconstructor:
 
         self._reconstruct_dynamic_object(
             model,
-            "assemble_neurongroup",
+            "_assemble_neurongroup",
             name,
             data_of_group,
             augmented,
@@ -162,8 +163,10 @@ class Reconstructor:
             dict containing the data to construct the subgroup
         """
         model.define_neuronsubgroup_target(name, data_of_group["target"])
+
         model.define_neuronsubgroup_idxs(name, (data_of_group["idxs"]))
-        model.assemble_neuronsubgroup(name)
+
+        model._assemble_neuronsubgroup(name)
 
     def reconstruct_synapses(
         self, model: Any, name: str, data_of_group: dict[str, Any]
@@ -208,7 +211,7 @@ class Reconstructor:
 
         self._reconstruct_dynamic_object(
             model,
-            "assemble_synapse",
+            "_assemble_synapse",
             name,
             data_of_group,
             augmented,
@@ -236,7 +239,7 @@ class Reconstructor:
             data_of_group["name"], data_of_group.get("variable")
         )
 
-        model.assemble_monitor(data_of_group["name"])
+        model._assemble_monitor(data_of_group["name"])
 
     def reconstruct(
         self, model: Any, report: Callable[[int], None] | None = None
@@ -260,7 +263,9 @@ class Reconstructor:
             model.define_dt(self.loaded_data["timestep"])
 
         # reconstruct parameters, timestep, seed.
-        model.parameters = self.loaded_data["parameters"]
+        for k, v in self.loaded_data["parameters"].items():
+            model.define_parameter(k, v)
+
         if report is not None:
             report(30)
 
@@ -292,7 +297,7 @@ class Reconstructor:
         model.initials = self.loaded_data["initials"]
 
         for n in model.initials:
-            model.assemble_initial_conditions(n)
+            model._assemble_initial_conditions(n)
 
         model.must_be_rebuilt = False
 

@@ -100,22 +100,12 @@ def test_neuronsubgroup_accept(qtbot: QtBot) -> None:
 
     neuron_sdlg.model.neurongroups["x"] = {}
     neuron_sdlg.model.neurongroups["x"]["model"] = "dv/dt = -v : volt\n"
-    neuron_sdlg.model.neurongroups["x"]["n"] = 64
+    neuron_sdlg.model.neurongroups["x"]["neuronnumber"] = 64
     neuron_sdlg.name = "x1"
     neuron_sdlg.target_name = "x"
     neuron_sdlg.subgroup_def = 1
 
-    neuron_sdlg.model.assemble_neurongroup("x")
-
-    assert neuron_sdlg.model.network["x"] is not None
-
     neuron_sdlg.accept()
-
-    assert "x1" in neuron_sdlg.model.neurongroups
-    assert (
-        neuron_sdlg.model.network[neuron_sdlg.model.neurongroups["x1"]["name"]]
-        is not None
-    )
 
     neuron_sdlg.name = None
 
@@ -126,20 +116,6 @@ def test_neuronsubgroup_accept(qtbot: QtBot) -> None:
     assert (
         neuron_sdlg.error_dialog.text()
         == "Error, every neuron subgroup needs a name and a defined target"
-    )
-
-    neuron_sdlg.error_dialog.close()
-
-    neuron_sdlg.name = "x1"
-    neuron_sdlg.subgroup_def = (1, 6, 3)  # no non-contiguous slices allowd in brian2
-
-    neuron_sdlg.accept()
-
-    qtbot.waitUntil(neuron_sdlg.error_dialog.isVisible)
-
-    assert (
-        neuron_sdlg.error_dialog.text()
-        == "Error when defining a neuronsubgroup on target x: Subgroups have to be contiguous"
     )
 
     neuron_sdlg.error_dialog.close()

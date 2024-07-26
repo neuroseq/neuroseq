@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Callable
+from copy import deepcopy
 from typing import Any
 
 import brian2 as b2  # noqa: F401
@@ -26,7 +26,7 @@ from formozov_project.b2_model_widget import NeuronGroupDialog
 from formozov_project.b2_model_widget import NeuronSubgroupDialog
 from formozov_project.b2_model_widget import ParameterDialog
 from formozov_project.b2_model_widget import SynapseDialog
-from formozov_project.reconstructor import Reconstructor
+from formozov_project.utils import parse_string_to_quantity
 
 
 # derive a new combobox which has a 'clicked' signal
@@ -224,161 +224,90 @@ class EditableParameterTree(ParameterTree):
         self.logger = logging.getLogger(__name__)
         self.name = domain_name
         self.states = getattr(self.b2model, self.name)
+        self.functions = self.b2model.functions[self.name]
+
         self.list_items = list_items
 
-        params = self._convert_dict_to_params(self.states)
+        params = self._convert_dict_to_params(self.states, self.functions)
         self.root = Parameter.create(name=domain_name, type="group", children=params)
 
         self.setParameters(self.root, showTop=False)
 
-        self._connect_parameters(self.root)
+        try:
+            self._connect_parameters(self.root, self.functions)
+        except Exception as e:
+            message = f"Error when reading model definition: {e}"
+            self.logger.critical(message)
+            QtWidgets.QMessageBox.critical(self, "Model definition error", message)
 
         self.add_item_action = QtWidgets.QAction(f"add {self.name}")
         self.add_item_action.triggered.connect(self.add_item)
 
-    def _connect_parameters(self, param: Parameter) -> None:
+    def _call_with_errormessage(self, signal: Callable, *args: Any) -> Any:
+        """
+        Call the function 'signal' with arguments '*args' and display an error message box
+        when it fails with an exception. This function mostly acts as a wrapper around qt slots
+        to make possibly occuring errors visible. Alternatively it can be used to make exceptions
+        visible in the gui
+
+        Parameters
+        ----------
+        signal : callable
+            Function to call. A qt slot that is to be called with the output from a signal.
+
+        Returns
+        -------
+        Any
+            Any return value from the slot
+        """
+        try:
+            return signal(*args)
+        except Exception as e:
+            message = f"An error occured: {e}"
+            QtWidgets.QMessageBox.critical(self, "Error", message)
+
+    def _connect_parameters(self, param: Parameter, funcs: dict[Any, Any]) -> None:
         """
         connect the signals emitted by the entries of the parameter tree to their respective actions.
         Whenever something changes (add/delete child node, change value) the model is set to be rebuilt
-        when the dialgo is accepted, and changed parameters are updated.
+        when the dialog is accepted, and changed parameters are updated.
 
         Parameters
         ----------
         param : Parameter
-
             parent paremeter
         """
         if param.type() == "group":
-            param.sigChildAdded.connect(self._set_rebuild)
-            param.sigChildRemoved.connect(self._set_rebuild)
+            param.sigChildAdded.connect(funcs["element_added"])
+            param.sigAddNew.connect(funcs["element_added"])
+            param.sigChildRemoved.connect(funcs["element_removed"])
+
+            if all(f in funcs for f in ["delete", "rename"]):
+                param.sigRemoved.connect(
+                    lambda: self._call_with_errormessage(funcs["delete"])
+                )
+                param.sigNameChanged.connect(
+                    lambda p: self._call_with_errormessage(funcs["rename"], p.name())
+                )
+
             for child in param.children():
-                self._connect_parameters(child)
-        elif param.type() == "text":
-            # do something that limits the updating of the text in the field. For editing equations, this is important
-            param.sigValueChanged.connect(self._set_textfield)
+                if child.name() in funcs:
+                    self._connect_parameters(child, funcs[child.name()])
+                else:
+                    pass
         else:
-            param.sigValueChanged.connect(self._set_param)
-
-    def _trace_path_from(self, param: Parameter) -> list[str]:
-        """
-        Trace the path in the parametertree from the given node 'param' to the root and record it in reverse order
-        to have a traversible path for getting out the dictionary entry to be updated.
-
-        Parameters
-        ----------
-        param : Parameter
-            parameter to trace the path for
-
-        Returns
-        -------
-        list[str]
-            list of keys from the root to the given parameter. Gives a path to be traversed to get the correct element
-            in the model dict to updated
-        """
-        path = []
-        current_param = param
-        while current_param != self.root:
-            path.append(current_param.name())
-            current_param = current_param.parent()
-        return list(reversed(path))
-
-    def _set_rebuild(self, *_: Any) -> None:
-        """
-        Sets the `must_be_rebuilt` flag of the model to true
-        """
-        self.b2model.must_be_rebuilt = True
-
-    def _set_textfield(self, param: Parameter, value: str) -> None:
-        """
-        Called when a textfield is edited in the parametertree, typically when equations are edited.
-        Updates the respective element in the model with the edited text
-
-        Parameters
-        ----------
-        param : Parameter
-            parameter the value of which is edited
-        value : str
-            new value
-        """
-        path = self._trace_path_from(param)
-        object_to_modify = self.states
-        for p in path[0:-1]:
-            object_to_modify = object_to_modify[p]
-        object_to_modify[param.name()] = value
-
-    def _make_quantity(self, quantity_str: str) -> tuple[b2.Quantity | str, bool]:
-        """
-        Make a quantity from a string representation. When this cannot be successfully be done, the string is returned as is.
-
-        Parameters
-        ----------
-        quantity_str : str
-            string representation of a quantity
-
-        Returns
-        -------
-        b2.Quantity|str
-            either a brian2 quantity or the input string
-        """
-        # extract numerical value via regex. allow for multiple numbers left and right of a '.' and multiple spaces or a '*' between number and unit
-        pattern = r"([\(\)0-9./\*]+)\s*\*?\s*(\w+)"
-        match = re.match(pattern, quantity_str)
-        ok = True
-        quantity_obj = None
-        if match:
-            value, unit_str = match.groups()
-
-            # Map the unit string to a Brian2 unit
-            try:
-                unit = getattr(b2, unit_str)
-            except Exception as e:
-                message = f"Error when interpreting unit string: {e}"
-                self.logger.critical(message)
-                QtWidgets.QMessageBox.critical(self, "Quantity parsing error", message)
-                ok = False
-
-            if ok:
-                try:
-                    v = eval(value)
-                    # Create the quantity object
-                    quantity_obj = v * unit
-                except Exception as e:
-                    message = f"Error when interpreting numerical quantity string: {e}"
-                    self.logger.critical(message)
-                    QtWidgets.QMessageBox.critical(
-                        self, "Quantity parsing error", message
-                    )
-                    ok = False
-
-            return (quantity_obj, ok)
-        else:
-            return (quantity_str, ok)
-
-    def _set_param(self, param: Parameter, value: Any) -> None:
-        """
-        Update a model parameter whenever its corresponding representation in the parameter tree is updated.
-
-        Parameters
-        ----------
-        param : Parameter
-            parameter that has been updated
-        value : Any
-            updated value
-        """
-        self.logger.info(
-            f"setting parameter {param.name()} to value {value} of type {type(value)}"
-        )
-        path = self._trace_path_from(param)
-
-        object_to_modify = self.states
-        for p in path[0:-1]:
-            object_to_modify = object_to_modify[p]
-
-        q, ok = self._make_quantity(value)
-
-        if ok:
-            object_to_modify[param.name()] = q
-            self.b2model.must_be_rebuilt = True
+            param.sigValueChanged.connect(
+                lambda p: self._call_with_errormessage(
+                    funcs["modify"],
+                    self._call_with_errormessage(parse_string_to_quantity, p.value()),
+                )
+            )
+            param.sigRemoved.connect(
+                lambda: self._call_with_errormessage(funcs["delete"])
+            )
+            param.sigNameChanged.connect(
+                lambda p: self._call_with_errormessage(funcs["rename"], p.name())
+            )
 
     def _get_value(self, v: Any) -> dict[str, Any] | Any:
         """
@@ -400,7 +329,9 @@ class EditableParameterTree(ParameterTree):
         else:
             return v
 
-    def _convert_dict_to_params(self, data: dict[Any, Any], key: Any = "") -> list[Any]:
+    def _convert_dict_to_params(
+        self, data: dict[Any, Any], functions: dict[Any, Any], key: Any = ""
+    ) -> list[Any]:
         """
         Recursively go through a nested dict and create a hierarchical pyqtgraph Parameter representation of it
         from which a ParameterTree object can be constructed.
@@ -422,7 +353,11 @@ class EditableParameterTree(ParameterTree):
             param_type = "str"  # Default type
             value = self._get_value(value)
             if isinstance(value, dict):
-                child_params = self._convert_dict_to_params(value, key)
+                child_params = self._convert_dict_to_params(
+                    value,
+                    functions[key],
+                    key,
+                )
 
                 # FIXME: this thing needs a + button for some things with an activated list to choose from for some of those in turn
                 params.append(
@@ -430,10 +365,11 @@ class EditableParameterTree(ParameterTree):
                         "name": key,
                         "type": "group",
                         "children": child_params,
-                        "expanded": False,
+                        "expanded": True,
                         "removable": True,
-                        "renamable": False,
+                        "renamable": True,
                         "syncExpanded": True,
+                        "functions": functions,
                     }
                 )
             else:
@@ -454,8 +390,9 @@ class EditableParameterTree(ParameterTree):
                     "type": param_type,
                     "value": value,
                     "removable": True,
-                    "renamable": False,
+                    "renamable": True,
                     "syncExpanded": True,
+                    "functions": functions,
                 }
 
                 # need 'limits' for the underlying ListParameter and 'element' for the custom class
@@ -488,7 +425,7 @@ class EditableParameterTree(ParameterTree):
     def update_params(self, new_name: str, new_data: dict[Any, Any]) -> None:
         """
         Update the parameters in the parametertree when a new item is added
-        tot he model through the custom dialog.
+        to the model through the custom dialog.
 
         Parameters
         ----------
@@ -500,7 +437,8 @@ class EditableParameterTree(ParameterTree):
         param = self._convert_dict_to_params(
             {
                 new_name: new_data,
-            }
+            },
+            self.functions,
         )
         self.root.addChildren(param)
 
@@ -512,6 +450,7 @@ class EditableParameterTree(ParameterTree):
 
         # check which name has changed, add this name to the internal dict
         # and to the parameters that are displayed
+
         old_names = set(getattr(self.b2model, self.name).keys())
         self.dialog = self.dialogtype(self.b2model)
 
@@ -520,7 +459,13 @@ class EditableParameterTree(ParameterTree):
             new_names = set(getattr(self.b2model, self.name).keys())
 
             new_name = list(new_names - old_names)[0]
-            self.update_params(new_name, getattr(self.b2model, self.name)[new_name])
+            param = self._convert_dict_to_params(
+                {
+                    new_name: getattr(self.b2model, self.name)[new_name],
+                },
+                self.functions,
+            )
+            self.root.addChildren(param)
 
 
 class EditableSynapseTree(EditableParameterTree):
@@ -615,13 +560,6 @@ class EditableMonitorTree(EditableParameterTree):
             },
         )
 
-        params = self._convert_dict_to_params(self.states)
-        self.root = Parameter.create(name="monitors", type="group", children=params)
-
-        self.setParameters(self.root, showTop=False)
-
-        self._connect_parameters(self.root)
-
     def _update_object_list(self) -> list[str]:
         """
         update the currently available list of objects to monitor
@@ -660,9 +598,7 @@ class EditableMonitorTree(EditableParameterTree):
         # if none are given for the respective monitor, which gives the set of
         # selectable variables
         if typename == "StateMonitor":
-            return list(self.b2model.network[sourcename].equations.names) + [
-                "True",
-            ]  # True means that everything is recorded. Allowed for StateMonitor
+            return list(self.b2model.network[sourcename].equations.names)
         elif typename == "SpikeMonitor":
             return list(self.b2model.network[sourcename].variables.keys()) + [
                 "None",
@@ -690,34 +626,44 @@ class EditableMonitorTree(EditableParameterTree):
             self.logger.info("selected item found")
             selected = selected_items[0]
 
+            # get the type and source widgets independent of the ordering of the children
             parent = selected.parent()
-
-            source = parent.child(1)
-            typename = parent.child(2)
-
+            typename = [
+                parent.child(c)
+                for c in range(0, parent.childCount())
+                if parent.child(c).text(0) == "type"
+            ][0]
+            source = [
+                parent.child(c)
+                for c in range(0, parent.childCount())
+                if parent.child(c).text(0) == "source"
+            ][0]
+            varnames = []
             try:
-                self.logger.debug("making varialbes as intended")
-                return self._make_selection_list(typename.value(), source.value())
+                varnames = self._make_selection_list(typename.value(), source.value())
             except Exception as e:
                 self.logger.critical(
                     f"Something went wrong while forming selection for monitored element {source.text(0)}: {e}"
                 )
-                vars = list(self.b2model.network[source.value()].get_states().keys())
-
-            return vars
+                varnames = list(
+                    self.b2model.network[source.value()].get_states().keys()
+                )
+            return varnames
         else:
             self.logger.debug("no selected item found, make full list of variables")
             # when we have no selected items, we make a big list of everything that's available since we don´t yet
             # know which one it will be, and we need a list that contains the actually selected one in the
             # underlying monitor definition in order to display it correctly
-            vars = []
+            varnames = []
             for obj in self.b2model.network.objects:
                 if isinstance(obj, b2.StateMonitor | b2.EventMonitor):
                     continue
                 else:
-                    vars.extend(list(obj.equations.names) + list(obj.variables.keys()))
+                    varnames.extend(
+                        list(obj.equations.names) + list(obj.variables.keys())
+                    )
 
-            return list(set(vars)) + [
+            return list(set(varnames)) + [
                 "None",
             ]
 
@@ -777,7 +723,13 @@ class EditableNeurongroupTree(EditableParameterTree):
         if self.dialog.exec():
             new_names = set(getattr(self.b2model, self.name).keys())
             new_name = list(new_names - old_names)[0]
-            self.update_params(new_name, getattr(self.b2model, self.name)[new_name])
+            param = self._convert_dict_to_params(
+                {
+                    new_name: getattr(self.b2model, self.name)[new_name],
+                },
+                self.functions,
+            )
+            self.root.addChildren(param)
 
     def _update_neurongroup_list(self) -> list[str]:
         """
@@ -856,6 +808,10 @@ class ModelEditorDialog(QtWidgets.QDialog):
             ),
         }
         self.b2model = b2model
+
+        self.backup = self.b2model.get_model_definition()
+        self.functions_backup = deepcopy(self.b2model.functions)
+
         self.logger = logging.getLogger(__name__)
 
         layout = QtWidgets.QGridLayout()
@@ -887,41 +843,59 @@ class ModelEditorDialog(QtWidgets.QDialog):
 
         self.setLayout(layout)
 
+    def _restore_old_model(self):
+        """
+        Restore the old model before editing when the edited stuff has been rejected or
+        something goes wrong
+        """
+        try:
+            # reset the specification to the backup values
+            self.b2model.neurongroups = self.backup["neurongroups"]
+            self.b2model.synapses = self.backup["synapses"]
+            self.b2model.monitors = self.backup["monitors"]
+            self.b2model.parameters = self.backup["parameters"]
+            self.b2model.initials = self.backup["initials"]
+            self.b2model.functions = self.functions_backup
+            self.b2model.define_b2seed(self.backup["seed"])
+            if self.backup["timestep"] is not None:
+                self.b2model.define_dt(self.backup["timestep"])
+            self.b2model.assemble_network()  # keep underlying network in sync
+        except Exception as e:
+            message = f"Error when restoring old model: {e}"
+            self.logger.critical(message)
+            QtWidgets.QMessageBox.critical(self, "Model specification error", message)
+
     def accept(self):
         """
         Accept the current state of the model and rebuilt it if anything has been edited.
         """
+        self.logger.info(f"accept model editions {self.b2model.must_be_rebuilt}")
         if self.b2model.must_be_rebuilt:
-            self.logger.debug("rebuilding model after change")
-            states = self.b2model.to_dict()
+            self.logger.info("rebuilding model after change")
 
-            if self.b2model.dt is not None:
-                states["timestep"] = self.b2model.dt
-
-            constr = Reconstructor(states)
-
-            # FIXME: this can be a problem when the system shall be continued because
-            # the sequence of random number changes due to brian2 caching them.
-            if self.b2model.seed != states["seed"]:
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "Model rng warning"
-                    "The system's random number generator will be reseeded. This potentially can change the results when compared to previous ones",
-                )
-            new_model = B2Model(seed=states["seed"])
-
-            model_ok = True
             try:
-                constr.reconstruct(new_model)
+                self.b2model.assemble_network()  # keep underlying network in sync
+                self.b2model.must_be_rebuilt = False
             except Exception as e:
                 message = f"Error when rebuilding the model after editing: {e}"
                 self.logger.critical(message)
                 QtWidgets.QMessageBox.critical(self, "Model rebuilding error", message)
-                model_ok = False
+                self._restore_old_model()
 
-            if model_ok:
-                self.b2model = new_model
-                self.b2model.must_be_rebuilt = False
-                super().accept()
-        else:
-            super().accept()
+        super().accept()
+
+    def reject(self):
+        """
+        Reject the edited model specification and restore the original state
+        """
+        self.logger.info("Edited model specification not accepted, restoring")
+
+        if self.b2model.seed != self.backup["seed"]:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Model rng warning"
+                "The system's random number generator will be reseeded. This potentially can change the results when compared to previous ones",
+            )
+
+        self._restore_old_model()
+        super().reject()
