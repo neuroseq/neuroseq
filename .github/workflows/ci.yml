@@ -49,15 +49,15 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install uv
       - run: uv pip install --system pyside6 pyqt5 pyqt6 -e .[tests]
-      - run: pytest -sv --cov --cov-report=xml || pytest -sv --cov --cov-report=xml || pytest -sv --cov --cov-report=xml
+      - run: pytest -v --cov --cov-report=xml || pytest -v --cov --cov-report=xml || pytest -v --cov --cov-report=xml
         env:
           QT_API: pyside6
           PYTEST_QT_API: pyside6
-      - run: pytest -sv || pytest -sv || pytest -sv
+      - run: pytest -v || pytest -v || pytest -v
         env:
           QT_API: pyqt6
           PYTEST_QT_API: pyqt6
-      - run: pytest -sv || pytest -sv || pytest -sv
+      - run: pytest -v || pytest -v || pytest -v
         env:
           QT_API: pyqt5
           PYTEST_QT_API: pyqt5
