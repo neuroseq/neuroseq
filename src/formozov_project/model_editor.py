@@ -377,17 +377,8 @@ class EditableParameterTree(ParameterTree):
                 )
             else:
                 # Determine the parameter type based on value type
-                if isinstance(
-                    value, int | float
-                ):  # make numbers to float to be consistent with python conversions
-                    param_type = "float"
-                elif isinstance(value, bool):
-                    param_type = "bool"
-                elif isinstance(value, str):
-                    param_type = "text" if "\n" in value else "str"
-                elif value is None:
-                    param_type = "str"
-                    value = str(value)
+                param_type = "str"
+                value = str(value)
                 param = {
                     "name": key,
                     "type": param_type,
