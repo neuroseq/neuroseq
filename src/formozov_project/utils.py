@@ -172,7 +172,6 @@ def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:
         try:
             v = eval(value)
             # Create the quantity object
-
             if unit_str != "":
                 # Map the unit string to a Brian2 unit
                 unit = getattr(b2, unit_str)

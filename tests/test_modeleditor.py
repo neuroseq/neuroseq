@@ -427,3 +427,20 @@ def test_monitordialog_with_run(
     mfx_nmda.run_simulation(1 * b2.second)
 
     assert mfx_nmda.network["M"].g.shape[1] == 10
+
+
+def test_initial_conditions(
+    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+) -> None:
+    diag = ModelEditorDialog(mfx_nmda)
+    qtbot.add_widget(diag)
+
+    # get the initial condition tree
+
+    # modify an existing element
+
+    # add a new elemnet -> strin expression
+
+    # add a new elemnet -> numpy based brian2 quantity
+
+    # add a new element -> scalar brian2 quantity

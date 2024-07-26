@@ -22,6 +22,10 @@ def test_quantity_parser() -> None:
 
     assert utils.parse_string_to_quantity("x*y") == "x*y"
 
+    a = utils.parse_string_to_quantity("np.array([1,2,3])*b2.ms")
+    assert all(a == [1, 2, 3] * b2.ms)  # type: ignore
+
+    assert utils.parse_string_to_quantity("np.zeros(3)*ms") == "np.zeros(3)*ms"
     assert (
         utils.parse_string_to_quantity("1/(10) * Mx") == "1/(10) * Mx"
     )  # this is wrong because no such unit exists and such input will break the model
