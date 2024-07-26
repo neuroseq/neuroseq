@@ -1728,6 +1728,7 @@ class B2Model:
         Assemble the network from its predefined components.
         """
         self.network = b2.Network(name=self.name)
+        self.checkpoints.clear()
 
         for n in self.neurongroups:
             if "idxs" not in self.neurongroups[n]:
