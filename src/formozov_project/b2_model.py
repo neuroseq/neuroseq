@@ -304,6 +304,7 @@ class B2Model:
             self.logger.critical(message)
             raise RuntimeError(message) from e
 
+    @_trigger_rebuild
     def _assemble_initial_conditions(self, name: str) -> None:
         """
         Set all the initial conditions that have been defined via 'define_init'.
