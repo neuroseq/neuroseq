@@ -127,8 +127,6 @@ class B2Model:
             self.logger.critical(message)
             raise RuntimeError(message) from e
 
-        self.logger.info(f"Neuron subgroup defined: {name}")
-
         if any(obj.name == name for obj in self.network.objects):
             try:
                 self.network.remove(sng)
@@ -143,6 +141,7 @@ class B2Model:
             message = f"Error when adding subgroup {name}: {e}"
             self.logger.critical(message)
             raise RuntimeError(message) from e
+        self.logger.info(f"Neuron subgroup defined: {name}")
 
     @_trigger_rebuild
     def _assemble_synapse(
