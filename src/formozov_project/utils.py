@@ -189,7 +189,11 @@ def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:
         else:
             return v
     else:
-        return quantity_str
+        try:
+            quantity = eval(quantity_str)
+            return quantity
+        except Exception as _:
+            return quantity_str
 
 
 def update_nested_dict(original: dict[Any, Any], updates: Any) -> None:

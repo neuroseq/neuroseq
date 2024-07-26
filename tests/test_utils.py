@@ -18,6 +18,10 @@ def test_quantity_parser() -> None:
 
     assert utils.parse_string_to_quantity("35") == 35
 
+    assert utils.parse_string_to_quantity("[3, 10]") == [3, 10]
+
+    assert utils.parse_string_to_quantity("x*y") == "x*y"
+
     with pytest.raises(RuntimeError, match="Error when interpreting unit string"):
         utils.parse_string_to_quantity("1/(10) * Mx")
 
