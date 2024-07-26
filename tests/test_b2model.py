@@ -640,6 +640,43 @@ def test_ornstein_uhlenbeck(mfx_ornstein: b2_model.B2Model) -> None:
     assert np.allclose(M.y[0], mfx_ornstein.network["M"].y[0])
 
 
+def test_ornstein_uhlenbeck_other_dt() -> None:
+    eqs = """
+        tau : second
+        sigma : 1
+        dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
+    """
+    model = b2_model.B2Model(seed=4321)
+    model.define_neuronnumber("neurongroup", 5)
+    model.define_dt("neurongroup", 125 * b2.ms)
+    model.define_dt("neurongroup", 0.5 * b2.ms)
+    model.define_solver_method("neurongroup", "euler")
+    model.define_equation("neurongroup", eqs)
+    model._assemble_neurongroup(name="neurongroup")
+
+    model.define_monitor_source("M", "neurongroup")
+    model.define_monitor_type("M", "StateMonitor")
+    model.define_monitor_variable("M", "y")
+    model.define_monitor_dt("M", 250 * b2.ms)
+    model._assemble_monitor("M")
+
+    # initial conditions
+    model.define_init(
+        "neurongroup", "tau", np.array([1, 0.8, 0.6, 0.3, 0.1]) * b2.second
+    )
+    model.define_init("neurongroup", "y", 1)
+    model.define_init("neurongroup", "sigma", np.array([0.1, 0.31622, 0.4, 0.2, 0.88]))
+
+    for n in model.initials:
+        model._assemble_initial_conditions(n)
+
+    model.must_be_rebuilt = False
+
+    model.run_simulation(5 * b2.second)
+
+    assert model.network["M"].y.shape == (5, 20)
+
+
 def test_NMDA_model(mfx_nmda: b2_model.B2Model) -> None:
     # https://brian2.readthedocs.io/en/stable/examples/synapses.nonlinear.html
     b2.seed(4321)

@@ -255,8 +255,12 @@ class Reconstructor:
 
         if "dt" in data_of_group:
             model.define_monitor_dt(data_of_group["name"], data_of_group["dt"])
-
-        model._assemble_monitor(data_of_group["name"])
+            model._assemble_monitor(data_of_group["name"])
+        else:
+            model._assemble_monitor(data_of_group["name"])
+            model.define_monitor_dt(
+                data_of_group["name"], model.network[data_of_group["name"]].clock.dt
+            )  # define the timestep from the clock of the constructed monitor to expose it in the intermediate representation
 
     def reconstruct(
         self, model: Any, report: Callable[[int], None] | None = None

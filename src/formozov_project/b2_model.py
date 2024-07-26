@@ -595,20 +595,31 @@ class B2Model:
             self.neurongroups[name] = {}
 
         if name not in self.functions["neurongroups"]:
+            modifier = self.Modifier(
+                name,
+                self.neurongroups,
+                self.functions["neurongroups"],
+                lambda: self.set_rebuilt(True),
+            )
             self.functions["neurongroups"][name] = {
-                "rename": lambda n: self.rename_neurongroup(name, n),
-                "delete": lambda: self.delete_neurongroup(name),
+                "rename": modifier.rename,
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
 
+        element_modifier = self.Modifier(
+            "dt",
+            self.neurongroups[name],
+            self.functions["neurongroups"][name],
+            lambda: self.set_rebuilt(True),
+        )
+
         self.functions["neurongroups"][name]["dt"] = {
             "add": lambda e: self.define_equation(name, e),
-            "delete": lambda: self.delete_neurongroup_element(name, "dt"),
-            "modify": lambda e: self._modify_dict_element_with_rebuild(
-                self.neurongroups[name], "dt", e
-            ),
-            "rename": lambda n: self.rename_neurongroup_element(name, "dt", n),
+            "delete": element_modifier.delete,
+            "modify": element_modifier.modify,
+            "rename": element_modifier.rename,
         }
 
         self.neurongroups[name]["dt"] = dt
@@ -1056,20 +1067,29 @@ class B2Model:
             self.synapses[name] = {}
 
         if name not in self.functions["synapses"]:
+            modifier = self.Modifier(
+                name,
+                self.synapses,
+                self.functions["synapses"],
+                lambda: self.set_rebuilt(True),
+            )
             self.functions["synapses"][name] = {
-                "rename": lambda n: self.rename_synapse(name, n),
-                "delete": lambda: self.delete_synapse(name),
+                "rename": modifier.rename,
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
-
+        element_modifier = self.Modifier(
+            "dt",
+            self.synapses[name],
+            self.functions["synapses"][name],
+            lambda: self.set_rebuilt(True),
+        )
         self.functions["synapses"][name]["dt"] = {
-            "add": lambda m: self.define_synapse_dt(name, m),
-            "delete": lambda: self.delete_synapse_element(name, "dt"),
-            "modify": lambda m: self._modify_dict_element_with_rebuild(
-                self.synapses[name], "dt", m
-            ),
-            "rename": lambda n: self.rename_synapse_element(name, "dt", n),
+            "add": lambda m: self.define_synapse_solver_method(name, m),
+            "delete": element_modifier.delete,
+            "rename": element_modifier.rename,
+            "modify": element_modifier.modify,
         }
 
         self.synapses[name]["dt"] = dt
@@ -1723,21 +1743,34 @@ class B2Model:
             self.monitors[name] = {
                 "name": name,
             }
+
         if name not in self.functions["monitors"]:
+            modifier = self.Modifier(
+                name,
+                self.monitors,
+                self.functions["monitors"],
+                lambda _model=self: _model.set_rebuilt(True),
+            )
+
             self.functions["monitors"][name] = {
-                "rename": lambda n: self.rename_monitor(name, n),
-                "delete": lambda: self.delete_monitor(name),
-                "element_added": lambda: 1,  # do nothing
-                "element_removed": lambda: 1,  # do nothing
+                "rename": modifier.rename,
+                "delete": modifier.delete,
+                "element_added": lambda: self.set_rebuilt(True),  # do nothing
+                "element_removed": lambda: self.set_rebuilt(True),
             }
+
+        element_modifier = self.Modifier(
+            "dt",
+            self.monitors[name],
+            self.functions["monitors"][name],
+            lambda _model=self: _model.set_rebuilt(True),
+        )
 
         self.functions["monitors"][name]["dt"] = {
             "add": lambda var: self.define_monitor_variable(name, var),
-            "delete": lambda: self.delete_monitor_element(name, "dt"),
-            "modify": lambda var: self._modify_dict_element_with_rebuild(
-                self.monitors[name], "dt", var
-            ),
-            "rename": lambda n: self.rename_monitor_element(name, "dt", n),
+            "delete": element_modifier.delete,
+            "rename": element_modifier.rename,
+            "modify": element_modifier.modify,
         }
 
         utils.update_nested_dict(
