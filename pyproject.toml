@@ -43,7 +43,7 @@ path = "src/formozov_project/__init__.py"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["screenshot"]
-log_cli = "false"
+log_cli = "true"
 log_cli_level = "DEBUG"
 
 
