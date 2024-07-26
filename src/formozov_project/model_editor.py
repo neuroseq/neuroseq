@@ -21,6 +21,7 @@ from qtpy.QtCore import Signal
 from qtpy.QtWidgets import QComboBox
 
 from formozov_project.b2_model import B2Model
+from formozov_project.b2_model_widget import InitialConditionDialog
 from formozov_project.b2_model_widget import MonitorDialog
 from formozov_project.b2_model_widget import NeuronGroupDialog
 from formozov_project.b2_model_widget import NeuronSubgroupDialog
@@ -800,6 +801,9 @@ class ModelEditorDialog(QtWidgets.QDialog):
                 domain_name="parameters",
                 parent=self,
             ),
+            "Initial conditions": EditableParameterTree(
+                b2model, InitialConditionDialog, domain_name="initials", parent=self
+            ),
         }
         self.b2model = b2model
 
@@ -830,7 +834,14 @@ class ModelEditorDialog(QtWidgets.QDialog):
             layout.addWidget(separator, 1, i + 1)
             i += 2
 
-        layout.addWidget(button_box, layout.rowCount(), 1, 1, 4, QtCore.Qt.AlignCenter)
+        layout.addWidget(
+            button_box,
+            layout.rowCount(),
+            1,
+            1,
+            layout.columnCount(),
+            QtCore.Qt.AlignCenter,
+        )
 
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)

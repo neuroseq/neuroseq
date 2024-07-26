@@ -489,6 +489,7 @@ class B2Model:
         value : Any
             value to set the variable to
         """
+        self.logger.info(f"defining initial condition for {name}, {varname}, {value}")
         if name not in self.initials:
             self.initials[name] = {}
             modifier = self.Modifier(

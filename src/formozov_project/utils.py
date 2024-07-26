@@ -169,30 +169,27 @@ def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:
 
         v = None
         unit = None
-
         try:
             v = eval(value)
             # Create the quantity object
-        except Exception as e:
-            raise RuntimeError(f"Error when interpreting numerical string: {e}") from e
 
-        if unit_str != "":
-            # Map the unit string to a Brian2 unit
-            try:
+            if unit_str != "":
+                # Map the unit string to a Brian2 unit
                 unit = getattr(b2, unit_str)
-            except Exception as e:
-                message = f"Error when interpreting unit string: {e}"
-                raise RuntimeError(message) from e
-
-            quantity_obj = v * unit
-
-            return quantity_obj
-        else:
-            return v
+                quantity_obj = v * unit
+                return quantity_obj
+            else:
+                return v
+        except Exception:
+            q = None
+            try:
+                q = eval(quantity_str)
+            except Exception as _:
+                q = quantity_str
+            return q
     else:
         try:
             quantity = eval(quantity_str)
-
             return quantity
         except Exception as _:
             return quantity_str

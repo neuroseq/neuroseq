@@ -1225,9 +1225,9 @@ class MonitorDialog(ModelDialog):
         self.parameterwindow.exec()
 
 
-class InitialConditionWidget(ModelDialog):
+class InitialConditionDialog(ModelDialog):
     """
-    InitialConditionWidget A dialog to define initial conditions for
+    InitialConditionDialog A dialog to define initial conditions for
 
     Parameters
     ----------
@@ -1597,7 +1597,7 @@ class B2ModelWidget(ModelDialog):
         """
         open_initial_condition_dialog open a new dialog to add initial conditions
         """
-        self.init_widget = InitialConditionWidget(self.model, self)
+        self.init_widget = InitialConditionDialog(self.model, self)
 
         if self.init_widget.exec():
             pass  # FIXME: not yet implemented: show values of variables

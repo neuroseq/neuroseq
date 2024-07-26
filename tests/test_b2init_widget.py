@@ -9,7 +9,7 @@ from qtpy import QtCore
 
 
 @pytest.fixture
-def initdlg(qtbot: QtBot, mfx_ornstein: B2W.B2Model) -> B2W.InitialConditionWidget:
+def initdlg(qtbot: QtBot, mfx_ornstein: B2W.B2Model) -> B2W.InitialConditionDialog:
     mfx_ornstein.define_neuronnumber("neurongroup2", 5)
     mfx_ornstein.define_dt("neurongroup2", 0.5 * ms)
     mfx_ornstein.define_solver_method("neurongroup2", "euler")
@@ -18,19 +18,19 @@ def initdlg(qtbot: QtBot, mfx_ornstein: B2W.B2Model) -> B2W.InitialConditionWidg
     )
     mfx_ornstein._assemble_neurongroup(name="neurongroup2")
 
-    dialog = B2W.InitialConditionWidget(mfx_ornstein)
+    dialog = B2W.InitialConditionDialog(mfx_ornstein)
     qtbot.addWidget(dialog)
     return dialog
 
 
-def test_initialization(initdlg: B2W.InitialConditionWidget) -> None:
+def test_initialization(initdlg: B2W.InitialConditionDialog) -> None:
     assert initdlg.source is not None
     assert initdlg.var is not None
     assert initdlg.value is not None
     assert initdlg.params == {}
 
 
-def test_accept_source(initdlg: B2W.InitialConditionWidget, qtbot: QtBot) -> None:
+def test_accept_source(initdlg: B2W.InitialConditionDialog, qtbot: QtBot) -> None:
     initdlg.source.setCurrentText("neurongroup2")
     qtbot.mouseClick(initdlg.source_button, QtCore.Qt.MouseButton.LeftButton)
     assert initdlg.params["elementname"] == "neurongroup2"
@@ -38,7 +38,7 @@ def test_accept_source(initdlg: B2W.InitialConditionWidget, qtbot: QtBot) -> Non
     assert initdlg.source_button.text() == "saved"
 
 
-def test_accept_variable(initdlg: B2W.InitialConditionWidget, qtbot: QtBot) -> None:
+def test_accept_variable(initdlg: B2W.InitialConditionDialog, qtbot: QtBot) -> None:
     initdlg.source.setCurrentText("neurongroup2")
     qtbot.mouseClick(initdlg.source_button, QtCore.Qt.MouseButton.LeftButton)
 
@@ -51,7 +51,7 @@ def test_accept_variable(initdlg: B2W.InitialConditionWidget, qtbot: QtBot) -> N
 
 
 def test_accept_value(
-    initdlg: B2W.InitialConditionWidget, qtbot: QtBot, monkeypatch: MonkeyPatch
+    initdlg: B2W.InitialConditionDialog, qtbot: QtBot, monkeypatch: MonkeyPatch
 ) -> None:
     qtbot.keyClicks(initdlg.value, "np.zeros(3)")
     qtbot.mouseClick(initdlg.value_button, QtCore.Qt.MouseButton.LeftButton)
@@ -87,7 +87,7 @@ def test_accept_value(
     initdlg.error_dialog.close()
 
 
-def test_accept(initdlg: B2W.InitialConditionWidget, qtbot: QtBot) -> None:
+def test_accept(initdlg: B2W.InitialConditionDialog, qtbot: QtBot) -> None:
     # define neurongroup
     eqs = """
         tau : second
