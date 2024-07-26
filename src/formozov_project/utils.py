@@ -108,12 +108,13 @@ def add_action(
     shortcut: str | None = None,
     icon: QtGui.QIcon | None = None,
     checkable: bool = False,
+    is_checked: bool = False,
 ) -> QtWidgets.QAction:
     parent = menu or toolbar
     action = QtWidgets.QAction(name, parent)
     action.setCheckable(checkable)
     if checkable:
-        action.setChecked(True)
+        action.setChecked(is_checked)
     action.triggered.connect(callback)
     if icon is not None:
         action.setIcon(icon)

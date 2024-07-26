@@ -39,6 +39,8 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
     Subclasses should call _plot_data() and implement _plot_neuron_data() to plot the data.
     """
 
+    # these signals emit indices or slices of indices, neurons first and then times
+    mouse_clicked = QtCore.Signal(int, int)
     selection_made = QtCore.Signal(slice, slice)
     selection_moved = QtCore.Signal(int, int)
 
@@ -140,6 +142,7 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
         self.mouse_press_pos = ev.position()
         if self.roi.isVisible() and self.roi.rect().contains(ev.position()):
             self.mouse_mode = MouseMode.MOVE
+            self.setCursor(QtCore.Qt.CursorShape.OpenHandCursor)
         else:
             self.mouse_mode = MouseMode.SELECT
         self.logger.debug(f"Starting f{self.mouse_mode} from {self.mouse_press_pos}")
@@ -162,6 +165,8 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
         self.roi.show()
 
     def mouseReleaseEvent(self, ev: Any) -> None:
+        if self.cursor().shape() == QtCore.Qt.CursorShape.OpenHandCursor:
+            self.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
         if ev.modifiers() != QtCore.Qt.KeyboardModifier.ControlModifier:
             return super().mouseReleaseEvent(ev)
         if (
@@ -175,7 +180,10 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
             and self.mouse_press_pos == ev.position()
         ):
             self.unselect_neurons()
-            self.timeline.setX(self.mapToView(pos).x())
+            p = self.mapToView(pos)
+            self.mouse_clicked.emit(
+                math.floor(p.y() + 0.5), math.floor(p.x() / self.dt)
+            )
             return
         if self.mouse_mode == MouseMode.SELECT:
             p0 = self.mapToView(self.roi.rect().topLeft())

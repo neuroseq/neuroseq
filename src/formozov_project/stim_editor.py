@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import math
+from enum import Enum
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -13,6 +15,11 @@ from qtpy.compat import getsavefilename
 from formozov_project.b2_model import B2Model
 from formozov_project.stim_widget import StimWidget
 from formozov_project.utils import add_action
+
+
+class DrawMode(Enum):
+    REGION = 1
+    SINGLE_STIM = 2
 
 
 class StimEditor(QtWidgets.QWidget):
@@ -31,6 +38,7 @@ class StimEditor(QtWidgets.QWidget):
         self.model: B2Model | None = None
         self.cmb_stim = cmb_stim
         self.current_stim: b2.TimedArray | None = None
+        self.draw_mode = DrawMode.REGION
         self.draw_stim_value = 1.0
         self.stims_dict: dict[str, b2.TimedArray] = {}
         self.copy_time_slice = slice(0, 0)
@@ -45,8 +53,9 @@ class StimEditor(QtWidgets.QWidget):
         self.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.ActionsContextMenu)
         self._add_actions(self.toolbar, menu)
         self.cmb_stim.currentTextChanged.connect(self.select_stim)
+        self.stim_widget.mouse_clicked.connect(self.stim_widget_mouse_clicked)
         self.stim_widget.selection_moved.connect(self.move_selected_stim)
-        self.stim_widget.selection_made.connect(self.draw_selected_stim)
+        self.stim_widget.selection_made.connect(self.stim_widget_selection_made)
 
     def set_model(self, model: B2Model) -> None:
         self.model = model
@@ -97,16 +106,61 @@ class StimEditor(QtWidgets.QWidget):
 
     def toggle_draw_stims(self, enabled: bool) -> None:
         self.logger.debug(f"Draw stims {'enabled' if enabled else 'disabled'}")
+        if enabled:
+            self.stim_widget.setCursor(QtCore.Qt.CursorShape.CrossCursor)
+        else:
+            self.stim_widget.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
+        for action in self.actions_draw:
+            action.setEnabled(enabled)
+        for action in self.actions_edit:
+            action.setEnabled(not enabled)
 
-    def draw_selected_stim(self, neuron_slice: slice, time_slice: slice) -> None:
-        if not self.action_toggle_draw.isChecked():
-            return
+    def draw_mode_updated(self, draw_mode: DrawMode) -> None:
+        self.logger.debug(f"Draw mode updated: {draw_mode}")
+        self.draw_mode = draw_mode
+
+    def draw_stim_region(self, neuron_slice: slice, time_slice: slice) -> None:
         if self.current_stim is None:
             return
         self.logger.debug(f"Draw stim for neurons {neuron_slice} and time {time_slice}")
         self.current_stim.values[time_slice, neuron_slice] = self.draw_stim_value
         self.stim_widget.set_data(self.current_stim)
         self.stim_widget.select_neurons(neuron_slice, time_slice)
+
+    def stim_widget_selection_made(
+        self, neuron_slice: slice, time_slice: slice
+    ) -> None:
+        self.logger.debug(
+            f"Selection made: neuron slice {neuron_slice}, time slice {time_slice}"
+        )
+        if self.action_toggle_draw.isChecked() and self.draw_mode == DrawMode.REGION:
+            self.draw_stim_region(neuron_slice, time_slice)
+
+    def stim_widget_mouse_clicked(self, neuron_index: int, time_index: int) -> None:
+        self.logger.debug(f"Mouse clicked: neuron {neuron_index}, time {time_index}")
+        if self.current_stim is None:
+            return
+        if self.action_toggle_draw.isChecked():
+            if self.draw_mode != DrawMode.SINGLE_STIM:
+                return
+            neuron_slice = slice(neuron_index, neuron_index + 1)
+            time_length_s = 0.001
+            time_slice = slice(
+                time_index,
+                math.floor(time_index + time_length_s / self.current_stim.dt),
+            )
+            self.logger.debug(f"Time slice: {time_slice}")
+            if (
+                neuron_slice.start < 0
+                or neuron_slice.stop > self.stim_widget.n_neurons
+                or time_slice.start < 0
+                or time_slice.stop > self.stim_widget.n_timestamps
+            ):
+                return
+            self.draw_stim_region(neuron_slice, time_slice)
+        else:
+            self.stim_widget.unselect_neurons()
+            self.stim_widget.timeline.setX(time_index * self.current_stim.dt)
 
     def copy_selected_stim(self) -> None:
         if (
@@ -258,97 +312,150 @@ class StimEditor(QtWidgets.QWidget):
             toolbar,
             self,
             shortcut="Ctrl+D",
-            icon=qta.icon("mdi6.playlist-plus"),
+            icon=qta.icon("mdi6.cursor-default-gesture"),
             checkable=True,
+            is_checked=False,
         )
-        self.action_toggle_draw.setChecked(False)
-        add_action(
-            "Copy",
-            self.copy_selected_stim,
-            menu,
-            toolbar,
-            self,
-            shortcut="Ctrl+C",
-            icon=qta.icon("mdi6.content-copy"),
+        self.toolbar.addSeparator()
+        self.actions_draw = []
+        self.actions_draw.append(
+            add_action(
+                "Stimulus region",
+                lambda: self.draw_mode_updated(DrawMode.REGION),
+                menu,
+                toolbar,
+                self,
+                icon=qta.icon("mdi6.select"),
+                checkable=True,
+                is_checked=True,
+            )
         )
-        add_action(
-            "Cut",
-            self.cut_selected_stim,
-            menu,
-            toolbar,
-            self,
-            shortcut="Ctrl+X",
-            icon=qta.icon("mdi6.content-cut"),
+        self.actions_draw.append(
+            add_action(
+                "Single 1ms stimulus",
+                lambda: self.draw_mode_updated(DrawMode.SINGLE_STIM),
+                menu,
+                toolbar,
+                self,
+                icon=qta.icon("mdi6.pencil"),
+                checkable=True,
+                is_checked=False,
+            )
         )
-        add_action(
-            "Paste",
-            self.paste_selected_stim,
-            menu,
-            toolbar,
-            self,
-            shortcut="Ctrl+V",
-            icon=qta.icon("mdi6.content-paste"),
+        self.actions_draw_group = QtWidgets.QActionGroup(self)
+        self.actions_draw_group.setExclusive(True)
+        self.toolbar.addSeparator()
+        for action in self.actions_draw:
+            self.actions_draw_group.addAction(action)
+            action.setEnabled(False)
+        self.actions_edit = []
+        self.actions_edit.append(
+            add_action(
+                "Copy",
+                self.copy_selected_stim,
+                menu,
+                toolbar,
+                self,
+                shortcut="Ctrl+C",
+                icon=qta.icon("mdi6.content-copy"),
+            )
         )
-        add_action(
-            "Save to file",
-            self.save_selected_stim,
-            menu,
-            toolbar,
-            self,
-            shortcut="Ctrl+Shift+S",
-            icon=qta.icon("mdi6.content-save"),
+        self.actions_edit.append(
+            add_action(
+                "Cut",
+                self.cut_selected_stim,
+                menu,
+                toolbar,
+                self,
+                shortcut="Ctrl+X",
+                icon=qta.icon("mdi6.content-cut"),
+            )
         )
-        add_action(
-            "Load from file",
-            self.load_selected_stim,
-            menu,
-            toolbar,
-            self,
-            shortcut="Ctrl+Shift+O",
-            icon=qta.icon("mdi6.folder-open"),
+        self.actions_edit.append(
+            add_action(
+                "Paste",
+                self.paste_selected_stim,
+                menu,
+                toolbar,
+                self,
+                shortcut="Ctrl+V",
+                icon=qta.icon("mdi6.content-paste"),
+            )
         )
-        add_action(
-            "Delete",
-            self.delete_selected_stim,
-            menu,
-            toolbar,
-            self,
-            shortcut="Delete",
-            icon=qta.icon("mdi6.delete"),
+        self.actions_edit.append(
+            add_action(
+                "Save to file",
+                self.save_selected_stim,
+                menu,
+                toolbar,
+                self,
+                shortcut="Ctrl+Shift+S",
+                icon=qta.icon("mdi6.content-save"),
+            )
         )
-        add_action(
-            "Move up",
-            self.move_selected_stim_up,
-            menu,
-            toolbar,
-            self,
-            shortcut="Ctrl+Up",
-            icon=qta.icon("mdi6.arrow-up"),
+        self.actions_edit.append(
+            add_action(
+                "Load from file",
+                self.load_selected_stim,
+                menu,
+                toolbar,
+                self,
+                shortcut="Ctrl+Shift+O",
+                icon=qta.icon("mdi6.folder-open"),
+            )
         )
-        add_action(
-            "Move down",
-            self.move_selected_stim_down,
-            menu,
-            toolbar,
-            self,
-            shortcut="Ctrl+Down",
-            icon=qta.icon("mdi6.arrow-down"),
+        self.actions_edit.append(
+            add_action(
+                "Delete",
+                self.delete_selected_stim,
+                menu,
+                toolbar,
+                self,
+                shortcut="Delete",
+                icon=qta.icon("mdi6.delete"),
+            )
         )
-        add_action(
-            "Move left",
-            self.move_selected_stim_left,
-            menu,
-            toolbar,
-            self,
-            shortcut="Ctrl+Left",
-            icon=qta.icon("mdi6.arrow-left"),
+        self.actions_edit.append(
+            add_action(
+                "Move up",
+                self.move_selected_stim_up,
+                menu,
+                toolbar,
+                self,
+                shortcut="Ctrl+Up",
+                icon=qta.icon("mdi6.arrow-up"),
+            )
         )
-        add_action(
-            "Move right",
-            self.move_selected_stim_right,
-            menu,
-            toolbar,
-            self,
-            shortcut="Ctrl+Right",
-            icon=qta.icon("mdi6.arrow-right"),
+        self.actions_edit.append(
+            add_action(
+                "Move down",
+                self.move_selected_stim_down,
+                menu,
+                toolbar,
+                self,
+                shortcut="Ctrl+Down",
+                icon=qta.icon("mdi6.arrow-down"),
+            )
+        )
+        self.actions_edit.append(
+            add_action(
+                "Move left",
+                self.move_selected_stim_left,
+                menu,
+                toolbar,
+                self,
+                shortcut="Ctrl+Left",
+                icon=qta.icon("mdi6.arrow-left"),
+            )
+        )
+        self.actions_edit.append(
+            add_action(
+                "Move right",
+                self.move_selected_stim_right,
+                menu,
+                toolbar,
+                self,
+                shortcut="Ctrl+Right",
+                icon=qta.icon("mdi6.arrow-right"),
+            )
         )

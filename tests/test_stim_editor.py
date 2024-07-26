@@ -6,8 +6,10 @@ import brian2 as b2
 import brian2.numpy_ as np
 from brian2.tests.utils import assert_allclose
 from formozov_project.b2_model import B2Model
+from formozov_project.stim_editor import DrawMode
 from formozov_project.stim_editor import StimEditor
 from pytest import MonkeyPatch
+from pytest import approx
 from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
@@ -28,7 +30,7 @@ def test_stim_editor_actions(
 ) -> None:
     n_neurons = 10
     n_timestamps = 20
-    dt = 10 * b2.ms
+    dt = 0.5 * b2.ms
     timed_array = b2.TimedArray(np.ones((n_timestamps, n_neurons)), dt=dt)
     selection = np.random.randint(3, size=(5, 2))
     timed_array.values[2:7, 1:3] = selection
@@ -131,13 +133,35 @@ def test_stim_editor_actions(
     assert np.allclose(stim_editor.current_stim.values[5:10, 0:2], selection)
     assert len(error_messages) == 3
     assert "too many neurons" in error_messages[-1]
-    # draw stim is ignored if draw mode is not active
+    # selection doesn't draw stim if draw mode is not active
     stim_editor.action_toggle_draw.setChecked(False)
-    stim_editor.draw_selected_stim(slice(0, 5), slice(0, 5))
+    stim_editor.stim_widget_selection_made(slice(0, 5), slice(0, 5))
     assert np.allclose(stim_editor.current_stim.values[0:5, 0:5], np.zeros((5, 5)))
-    # drawn stimuli have magnitude of the maximum value of the existing stimuli
+    # selection is drawn if draw mode is active with mode REGION
     stim_editor.action_toggle_draw.setChecked(True)
-    stim_editor.draw_selected_stim(slice(0, 5), slice(0, 5))
+    stim_editor.draw_mode_updated(DrawMode.REGION)
+    stim_editor.stim_widget_selection_made(slice(0, 5), slice(0, 5))
+    # drawn stimuli have magnitude of the maximum value of the existing stimuli
+    new_stim_value = np.max(selection)
     assert np.allclose(
-        stim_editor.current_stim.values[0:5, 0:5], np.max(selection) * np.ones((5, 5))
+        stim_editor.current_stim.values[0:5, 0:5], new_stim_value * np.ones((5, 5))
     )
+    # 1ms stim is drawn at mouse click location if draw mode is active with mode SINGLE_STIM
+    stim_editor.action_toggle_draw.setChecked(True)
+    stim_editor.draw_mode_updated(DrawMode.SINGLE_STIM)
+    # 1ms is two timesteps in the current stim
+    assert stim_editor.current_stim.values[18, 8] == approx(0)
+    assert stim_editor.current_stim.values[19, 8] == approx(0)
+    assert stim_editor.current_stim.values[16, 7] == approx(0)
+    assert stim_editor.current_stim.values[17, 7] == approx(0)
+    stim_editor.stim_widget_mouse_clicked(8, 18)
+    # drawn stimuli have magnitude of the maximum value of the existing stimuli
+    assert stim_editor.current_stim.values[18, 8] == approx(new_stim_value)
+    assert stim_editor.current_stim.values[19, 8] == approx(new_stim_value)
+    assert stim_editor.current_stim.values[16, 7] == approx(0)
+    assert stim_editor.current_stim.values[17, 7] == approx(0)
+    stim_editor.stim_widget_mouse_clicked(7, 16)
+    assert stim_editor.current_stim.values[18, 8] == approx(new_stim_value)
+    assert stim_editor.current_stim.values[19, 8] == approx(new_stim_value)
+    assert stim_editor.current_stim.values[16, 7] == approx(new_stim_value)
+    assert stim_editor.current_stim.values[17, 7] == approx(new_stim_value)
