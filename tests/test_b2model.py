@@ -859,6 +859,8 @@ def test_hdf5(tmp_path: Path, mfx_ornstein: b2_model.B2Model) -> None:
 
     data = None
 
+    assert len(mfx_ornstein.checkpoints) > 0
+
     with h5py.File(Path(tmp_path, "data.h5"), "r") as h5file:
         data = h5file["M"]["y"][:]
 
@@ -873,6 +875,10 @@ def test_hdf5(tmp_path: Path, mfx_ornstein: b2_model.B2Model) -> None:
         RuntimeError, match="Error, cannot save data when no monitors are defined"
     ):
         mfx_ornstein.save_to_h5(tmp_path / "data.h5")
+
+    mfx_ornstein.assemble_network()
+
+    assert len(mfx_ornstein.checkpoints) == 0
 
 
 def test_logger(
