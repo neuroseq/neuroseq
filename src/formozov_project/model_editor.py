@@ -278,7 +278,6 @@ class EditableParameterTree(ParameterTree):
             parent paremeter
         """
         if param.type() == "group":
-            print(list(funcs.keys()), param)
             if all(
                 f in list(funcs.keys()) for f in ["element_added", "element_removed"]
             ):
