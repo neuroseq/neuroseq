@@ -278,9 +278,12 @@ class EditableParameterTree(ParameterTree):
             parent paremeter
         """
         if param.type() == "group":
-            param.sigChildAdded.connect(funcs["element_added"])
-            param.sigAddNew.connect(funcs["element_added"])
-            param.sigChildRemoved.connect(funcs["element_removed"])
+            if all(
+                f in list(funcs.keys()) for f in ["element_added", "element_removed"]
+            ):
+                param.sigChildAdded.connect(funcs["element_added"])
+                param.sigAddNew.connect(funcs["element_added"])
+                param.sigChildRemoved.connect(funcs["element_removed"])
 
             if all(f in funcs for f in ["delete", "rename"]):
                 param.sigRemoved.connect(

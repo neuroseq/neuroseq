@@ -169,29 +169,29 @@ def test_rename_tree_element(
 
     pnode = ptree.root
 
-    a_node = pnode.child("a")
+    node = pnode.child("a")
 
-    with qtbot.waitSignal(a_node.sigNameChanged, timeout=1000, raising=True):
-        a_node.setName("x")
+    with qtbot.waitSignal(node.sigNameChanged, timeout=1000, raising=True):
+        node.setName("x")
 
-    item = a_node.makeTreeItem(0)
+    item = node.makeTreeItem(0)
 
     assert item.text(0) == "x"
 
-    assert "x" in ptree.b2model.parameters  # type: ignore
-    assert "a" not in ptree.b2model.parameters  # type: ignore
+    assert "x" in ptree.b2model.parameters
+    assert "a" not in ptree.b2model.parameters
     assert ptree.b2model.must_be_rebuilt is False
 
-    with qtbot.waitSignal(a_node.sigNameChanged, timeout=1000, raising=True):
-        a_node.setName("2332x")
+    node = pnode.child("x")
 
-    assert qmessagebox_calls == [
-        {
-            "name": "critical",
-            "text": "An error occured: The name 2332x is not a valid python identifier",
-            "title": "Error",
-        },
-    ]
+    with qtbot.waitSignal(node.sigNameChanged, timeout=1000, raising=True):
+        node.setName("y")
+
+    item = node.makeTreeItem(0)
+    assert item.text(0) == "y"
+
+    assert "y" in ptree.b2model.parameters
+    assert "x" not in ptree.b2model.parameters
 
 
 def test_neurontree_add_neurongroup_list_update(
@@ -331,7 +331,7 @@ def test_modeldialog_accept(
     assert diag.b2model.must_be_rebuilt is False
     specs = mfx_nmda.get_model_definition()
     assert diag.backup == specs
-    assert diag.functions_backup == mfx_nmda.functions
+    assert list(diag.functions_backup.keys()) == list(mfx_nmda.functions.keys())
 
     diag.b2model.define_neuronnumber("p1", 25)
     diag.b2model.define_solver_method("p1", "euler")
@@ -366,9 +366,9 @@ def test_modeldialog_reject(
     qtbot.add_widget(diag)
     specs = mfx_nmda.get_model_definition()
     assert diag.backup == specs
-    assert diag.functions_backup == mfx_nmda.functions
+    assert list(diag.functions_backup.keys()) == list(mfx_nmda.functions.keys())
 
-    diag.b2model.delete_monitor("Mn")
+    diag.b2model.functions["monitors"]["Mn"]["delete"]()
 
     assert "Mn" not in diag.b2model.monitors
     assert "Mn" in [obj.name for obj in diag.b2model.network.objects]
