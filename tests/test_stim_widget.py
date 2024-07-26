@@ -11,9 +11,22 @@ from formozov_project.stim_widget import StimWidget
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtGui
+from qtpy.QtTest import QTest
 
 
-def mouse_click_and_drag(
+def mouse_ctrl_click(
+    qtbot: QtBot, widget: QtGui.QWidget, pos: QtCore.QPoint, delay_ms=10
+) -> None:
+    qtbot.wait(delay_ms)
+    qtbot.mouseClick(
+        widget.viewport(),
+        QtCore.Qt.MouseButton.LeftButton,
+        QtCore.Qt.KeyboardModifier.ControlModifier,
+        pos=pos,
+    )
+
+
+def mouse_ctrl_click_and_drag(
     qtbot: QtBot,
     widget: QtGui.QWidget,
     start: QtCore.QPoint,
@@ -27,6 +40,7 @@ def mouse_click_and_drag(
     qtbot.mousePress(
         widget.viewport(),
         QtCore.Qt.MouseButton.LeftButton,
+        QtCore.Qt.KeyboardModifier.ControlModifier,
         pos=start,
     )
     n_points = intermediate_points + 2
@@ -36,9 +50,21 @@ def mouse_click_and_drag(
         strict=True,
     ):
         qtbot.wait(delay_ms)
-        qtbot.mouseMove(widget.viewport(), pos=QtCore.QPoint(int(x), int(y)))
+        QTest.mouseEvent(
+            QTest.MouseAction.MouseMove,
+            widget.viewport(),
+            QtCore.Qt.MouseButton.NoButton,
+            QtCore.Qt.KeyboardModifier.ControlModifier,
+            QtCore.QPoint(int(x), int(y)),
+            0,
+        )
     qtbot.wait(delay_ms)
-    qtbot.mouseRelease(widget.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=end)
+    qtbot.mouseRelease(
+        widget.viewport(),
+        QtCore.Qt.MouseButton.LeftButton,
+        QtCore.Qt.KeyboardModifier.ControlModifier,
+        pos=end,
+    )
     qtbot.wait(delay_ms)
 
 
@@ -55,7 +81,7 @@ def stims() -> b2.TimedArray:
     return b2.TimedArray(stim.T, dt=dt * b2.second)
 
 
-def test_stim_widget_no_mouse_capture(qtbot: QtBot, stims: b2.TimedArray) -> None:
+def test_stim_widget_no_ctrl_key(qtbot: QtBot, stims: b2.TimedArray) -> None:
     stim_widget = StimWidget()
     qtbot.addWidget(stim_widget)
     stim_widget.show()
@@ -99,13 +125,12 @@ def test_stim_widget_no_mouse_capture(qtbot: QtBot, stims: b2.TimedArray) -> Non
 
 
 @pytest.mark.skipif(
-    qtpy.QT5,
-    reason="click&drag doesn't work on CI with PyQt5 (works on CI with PyQt6/PySide6, and locally with PyQt5)",
+    not qtpy.PYSIDE6,
+    reason="click&drag with ctrl key uses mouseEvent to be able to add the ctrl key modifier, which is apparently only provided by qtest in pyside6",
 )
-def test_stim_widget_mouse_capture(qtbot: QtBot, stims: b2.TimedArray) -> None:
+def test_stim_widget_mouse_with_ctrl_key(qtbot: QtBot, stims: b2.TimedArray) -> None:
     stim_widget = StimWidget()
     qtbot.addWidget(stim_widget)
-    stim_widget.capture_mouse_events = True
     stim_widget.show()
     qtbot.waitUntil(lambda: stim_widget.isVisible())
     assert len(stim_widget.neuron_plots) == 0
@@ -128,23 +153,11 @@ def test_stim_widget_mouse_capture(qtbot: QtBot, stims: b2.TimedArray) -> None:
     stim_widget.setFocus()
     qtbot.wait(20)
     assert stim_widget.timeline.x() == 0
-    qtbot.mouseClick(
-        stim_widget.viewport(),
-        QtCore.Qt.MouseButton.LeftButton,
-        pos=QtCore.QPoint(x0, y0),
-    )
+    mouse_ctrl_click(qtbot, stim_widget, QtCore.QPoint(x0, y0))
     assert 0 < stim_widget.timeline.x() / t_max < 0.4
-    qtbot.mouseClick(
-        stim_widget.viewport(),
-        QtCore.Qt.MouseButton.LeftButton,
-        pos=QtCore.QPoint(x1, y0),
-    )
+    mouse_ctrl_click(qtbot, stim_widget, QtCore.QPoint(x1, y0))
     assert 0.3 < stim_widget.timeline.x() / t_max < 0.7
-    qtbot.mouseClick(
-        stim_widget.viewport(),
-        QtCore.Qt.MouseButton.LeftButton,
-        pos=QtCore.QPoint(x2, y1),
-    )
+    mouse_ctrl_click(qtbot, stim_widget, QtCore.QPoint(x2, y1))
     assert 0.6 < stim_widget.timeline.x() / t_max < 1.0
     assert stim_widget.selected_time_slice is None
     assert stim_widget.selected_neuron_slice is None
@@ -158,7 +171,7 @@ def test_stim_widget_mouse_capture(qtbot: QtBot, stims: b2.TimedArray) -> None:
     )
     assert selection_made_signals == []
 
-    mouse_click_and_drag(
+    mouse_ctrl_click_and_drag(
         qtbot, stim_widget, QtCore.QPoint(x0, y0), QtCore.QPoint(x2, y2)
     )
     assert len(selection_made_signals) == 1
@@ -189,7 +202,7 @@ def test_stim_widget_mouse_capture(qtbot: QtBot, stims: b2.TimedArray) -> None:
     )
     assert selection_moved_signals == []
     # drag up and to the left
-    mouse_click_and_drag(
+    mouse_ctrl_click_and_drag(
         qtbot, stim_widget, QtCore.QPoint(x1, y1), QtCore.QPoint(x0, y0)
     )
     assert len(selection_moved_signals) == 1

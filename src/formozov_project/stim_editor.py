@@ -40,7 +40,6 @@ class StimEditor(QtWidgets.QWidget):
         layout.setSpacing(0)
         layout.setContentsMargins(0, 0, 0, 0)
         self.stim_widget = StimWidget()
-        self.stim_widget.capture_mouse_events = True
         layout.addWidget(self.stim_widget)
         self.setLayout(layout)
         self.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.ActionsContextMenu)
@@ -72,7 +71,6 @@ class StimEditor(QtWidgets.QWidget):
         self.select_stim(self.cmb_stim.currentText())
 
     def update_stims_values(self, stims_values_dict: dict[str, np.ndarray]) -> None:
-        self.logger.debug(stims_values_dict)
         if self.model is None or self.model.parameters is None:
             return
         for name, array_values in stims_values_dict.items():

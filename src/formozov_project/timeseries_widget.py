@@ -51,7 +51,6 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
         self.mouse_mode = MouseMode.NONE
         self.mouse_press_pos: QtCore.QPointF | None = None
         self.mouse_selected_rect: QtCore.QRectF = QtCore.QRectF()
-        self.capture_mouse_events = False
         self.selected_time_slice: slice | None = None
         self.selected_neuron_slice: slice | None = None
         self.neuron_plots: list[SelectablePlotItem] = []
@@ -134,7 +133,7 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
         self._plot_neuron_data(data, timestamps, self.dt)
 
     def mousePressEvent(self, ev: Any) -> None:
-        if not self.capture_mouse_events:
+        if ev.modifiers() != QtCore.Qt.KeyboardModifier.ControlModifier:
             return super().mousePressEvent(ev)
         if ev.button() != QtCore.Qt.MouseButton.LeftButton:
             return
@@ -146,7 +145,7 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
         self.logger.debug(f"Starting f{self.mouse_mode} from {self.mouse_press_pos}")
 
     def mouseMoveEvent(self, ev: Any) -> None:
-        if not self.capture_mouse_events:
+        if ev.modifiers() != QtCore.Qt.KeyboardModifier.ControlModifier:
             return super().mouseMoveEvent(ev)
         if self.mouse_press_pos is None:
             return
@@ -163,7 +162,7 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
         self.roi.show()
 
     def mouseReleaseEvent(self, ev: Any) -> None:
-        if not self.capture_mouse_events:
+        if ev.modifiers() != QtCore.Qt.KeyboardModifier.ControlModifier:
             return super().mouseReleaseEvent(ev)
         if (
             self.mouse_press_pos is None
