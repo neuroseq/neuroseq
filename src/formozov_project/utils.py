@@ -185,14 +185,33 @@ def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:
                 raise RuntimeError(message) from e
 
             quantity_obj = v * unit
+            print(
+                "value that is given: ",
+                quantity_str,
+                "value that is returned: ",
+                quantity_obj,
+            )
             return quantity_obj
         else:
+            print("value that is given: ", quantity_str, "value that is returned: ", v)
             return v
     else:
         try:
             quantity = eval(quantity_str)
+            print(
+                "value that is given: ",
+                quantity_str,
+                "value that is returned: ",
+                quantity,
+            )
             return quantity
         except Exception as _:
+            print(
+                "value that is given: ",
+                quantity_str,
+                "value that is returned: ",
+                quantity_str,
+            )
             return quantity_str
 
 
