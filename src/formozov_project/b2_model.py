@@ -416,6 +416,31 @@ class B2Model:
             del self.fdict[self.current_name]
             self.with_rebuilt()
 
+    class GroupModifier(Modifier):
+        def __init__(
+            self,
+            current_name: str,
+            pdict: dict,
+            fdict: dict,
+            with_rebuilt: Callable,
+            element_adder: Callable,
+        ):
+            super().__init__(
+                current_name,
+                pdict,
+                fdict,
+                with_rebuilt,
+            )
+            self.element_adder = element_adder
+
+        def add_element(self, value: Any) -> None:
+            self.element_adder(self.current_name, value)
+
+        def delete_element(self, name: str) -> None:
+            del self.pdict[self.current_name][name]
+            del self.fdict[self.current_name][name]
+            self.with_rebuilt()
+
     def __init__(
         self,
         seed: int = 123,
@@ -487,20 +512,22 @@ class B2Model:
             value to set the variable to
         """
         self.logger.info(f"defining initial condition for {name}, {varname}, {value}")
+
         if name not in self.initials:
             self.initials[name] = {}
-            modifier = self.Modifier(
+            modifier = self.GroupModifier(
                 name,
                 self.initials,
                 self.functions["initials"],
                 lambda: self.set_rebuilt(True),
+                self.define_init,
             )
 
             self.functions["initials"][name] = {
                 "rename": modifier.rename,
                 "delete": modifier.delete,
-                "element_added": lambda: self.set_rebuilt(True),
-                "element_removed": lambda: self.set_rebuilt(True),
+                "element_added": modifier.add_element,
+                "element_removed": modifier.delete_element,
             }
 
         element_modifier = self.Modifier(
@@ -509,9 +536,7 @@ class B2Model:
             self.functions["initials"][name],
             lambda: self.set_rebuilt(True),
         )
-
         self.functions["initials"][name][varname] = {
-            "add": lambda v: self.define_init(name, v),
             "delete": element_modifier.delete,
             "modify": element_modifier.modify,
             "rename": element_modifier.rename,

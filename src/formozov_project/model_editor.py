@@ -267,6 +267,22 @@ class EditableParameterTree(ParameterTree):
             message = f"An error occured: {e}"
             QtWidgets.QMessageBox.critical(self, "Error", message)
 
+    def _child_added_adaptor(
+        self,
+        node: Parameter,
+        child: Parameter,
+        _: int,
+        setter: Callable = lambda _: None,
+    ) -> None:
+        print("adding element")
+        print(node.name())
+        print(child.name())
+
+        value = parse_string_to_quantity(child.value())
+
+        print(child.value(), type(child.value()))
+        print(value, type(value))
+
     def _connect_parameters(self, param: Parameter, funcs: dict[Any, Any]) -> None:
         """
         connect the signals emitted by the entries of the parameter tree to their respective actions.
@@ -282,9 +298,7 @@ class EditableParameterTree(ParameterTree):
             if all(
                 f in list(funcs.keys()) for f in ["element_added", "element_removed"]
             ):
-                # FIXME: some of these are problematic or wrong
-                param.sigChildAdded.connect(funcs["element_added"])
-                param.sigAddNew.connect(funcs["element_added"])
+                param.sigChildAdded.connect(self._child_added_adaptor)
                 param.sigChildRemoved.connect(funcs["element_removed"])
 
             if all(f in funcs for f in ["delete", "rename"]):
