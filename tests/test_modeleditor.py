@@ -436,8 +436,13 @@ def test_initial_conditions(
     qtbot.add_widget(diag)
 
     # get the initial condition tree
+    children = diag.findChildren(
+        EditableParameterTree,
+    )
 
     # modify an existing element
+    assert len(children) == 5
+    assert children[-1].name == "initials"
 
     # add a new elemnet -> strin expression
 
