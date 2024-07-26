@@ -470,17 +470,17 @@ class B2Model:
         if name not in self.initials:
             self.initials[name] = {}
             self.functions["initials"][name] = {
-                "rename": lambda n: self.rename_init(name, n),
-                "delete": lambda: self.delete_init(name),
+                "rename": lambda n, _name=name: self.rename_init(_name, n),
+                "delete": lambda _name=name: self.delete_init(_name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
 
         self.functions["initials"][name][varname] = {
-            "add": lambda v: self.define_init(name, v),
-            "delete": lambda: self.delete_init_element(name, varname),
-            "modify": lambda v: self._modify_dict_element(
-                self.initials[name], varname, v
+            "add": lambda v, _name=name: self.define_init(_name, v),
+            "delete": lambda _name=name: self.delete_init_element(_name, varname),
+            "modify": lambda v, _name=name: self._modify_dict_element(
+                self.initials[_name], varname, v
             ),
             "rename": lambda n: self.rename_init_element(name, varname, n),
         }
@@ -588,19 +588,23 @@ class B2Model:
 
         if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {
-                "rename": lambda n: self.rename_neurongroup(name, n),
-                "delete": lambda: self.delete_neurongroup(name),
+                "rename": lambda n, _name=name: self.rename_neurongroup(_name, n),
+                "delete": lambda _name=name: self.delete_neurongroup(_name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
 
         self.functions["neurongroups"][name]["model"] = {
-            "add": lambda e: self.define_equation(name, e),
-            "delete": lambda: self.delete_neurongroup_element(name, "model"),
-            "modify": lambda e: self._modify_dict_element_with_rebuild(
-                self.neurongroups[name], "model", e
+            "add": lambda e, _name=name: self.define_equation(_name, e),
+            "delete": lambda _name=name: self.delete_neurongroup_element(
+                _name, "model"
             ),
-            "rename": lambda n: self.rename_neurongroup_element(name, "model", n),
+            "modify": lambda e, _name=name: self._modify_dict_element_with_rebuild(
+                self.neurongroups[_name], "model", e
+            ),
+            "rename": lambda n, _name=name: self.rename_neurongroup_element(
+                _name, "model", n
+            ),
         }
 
         self._add_equation_to_group(self.neurongroups[name], line)
@@ -622,19 +626,23 @@ class B2Model:
             self.neurongroups[name] = {}
         if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {
-                "rename": lambda n: self.rename_neurongroup(name, n),
-                "delete": lambda: self.delete_neurongroup(name),
+                "rename": lambda n, _name=name: self.rename_neurongroup(_name, n),
+                "delete": lambda _name=name: self.delete_neurongroup(_name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
 
         self.functions["neurongroups"][name]["reset"] = {
-            "add": lambda r: self.define_reset(name, r),
-            "delete": lambda: self.delete_neurongroup_element(name, "reset"),
-            "modify": lambda r: self._modify_dict_element_with_rebuild(
-                self.neurongroups[name], "reset", r
+            "add": lambda r, _name=name: self.define_reset(_name, r),
+            "delete": lambda _name=name: self.delete_neurongroup_element(
+                _name, "reset"
             ),
-            "rename": lambda n: self.rename_neurongroup_element(name, "reset", n),
+            "modify": lambda r, _name=name: self._modify_dict_element_with_rebuild(
+                self.neurongroups[_name], "reset", r
+            ),
+            "rename": lambda n, _name=name: self.rename_neurongroup_element(
+                _name, "reset", n
+            ),
         }
 
         utils.update_nested_dict(
@@ -662,18 +670,20 @@ class B2Model:
             self.neurongroups[name] = {}
         if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {
-                "rename": lambda n: self.rename_neurongroup(name, n),
-                "delete": lambda: self.delete_neurongroup(name),
+                "rename": lambda n, _name=name: self.rename_neurongroup(_name, n),
+                "delete": lambda _name=name: self.delete_neurongroup(_name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
         self.functions["neurongroups"][name]["th"] = {
-            "add": lambda t: self.define_threshold(name, t),
-            "delete": lambda: self.delete_neurongroup_element(name, "th"),
-            "modify": lambda t: self._modify_dict_element_with_rebuild(
-                self.neurongroups[name], "th", t
+            "add": lambda t, _name=name: self.define_threshold(_name, t),
+            "delete": lambda _name=name: self.delete_neurongroup_element(_name, "th"),
+            "modify": lambda t, _name=name: self._modify_dict_element_with_rebuild(
+                self.neurongroups[_name], "th", t
             ),
-            "rename": lambda n: self.rename_neurongroup_element(name, "th", n),
+            "rename": lambda n, _name=name: self.rename_neurongroup_element(
+                _name, "th", n
+            ),
         }
 
         utils.update_nested_dict(
@@ -703,18 +713,20 @@ class B2Model:
             self.neurongroups[name] = {}
         if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {
-                "rename": lambda n: self.rename_neurongroup(name, n),
-                "delete": lambda: self.delete_neurongroup(name),
+                "rename": lambda n, _name=name: self.rename_neurongroup(_name, n),
+                "delete": lambda _name=name: self.delete_neurongroup(_name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
         self.functions["neurongroups"][name]["method"] = {
-            "add": lambda t: self.define_threshold(name, t),
-            "delete": lambda: self.delete_neurongroup_element(name, "th"),
-            "modify": lambda t: self._modify_dict_element_with_rebuild(
-                self.neurongroups[name], "th", t
+            "add": lambda t, _name=name: self.define_threshold(_name, t),
+            "delete": lambda _name=name: self.delete_neurongroup_element(_name, "th"),
+            "modify": lambda t, _name=name: self._modify_dict_element_with_rebuild(
+                self.neurongroups[_name], "th", t
             ),
-            "rename": lambda n: self.rename_neurongroup_element(name, "method", n),
+            "rename": lambda n, _name=name: self.rename_neurongroup_element(
+                _name, "method", n
+            ),
         }
 
         utils.update_nested_dict(
@@ -744,18 +756,22 @@ class B2Model:
             self.neurongroups[name] = {}
         if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {
-                "rename": lambda n: self.rename_neurongroup(name, n),
-                "delete": lambda: self.delete_neurongroup(name),
+                "rename": lambda n, _name=name: self.rename_neurongroup(_name, n),
+                "delete": lambda _name=name: self.delete_neurongroup(_name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
         self.functions["neurongroups"][name]["refractory"] = {
             "add": lambda r: self.define_refractory(name, r),
-            "delete": lambda: self.delete_neurongroup_element(name, "refractory"),
-            "modify": lambda r: self._modify_dict_element_with_rebuild(
-                self.neurongroups[name], "refractory", r
+            "delete": lambda _name=name: self.delete_neurongroup_element(
+                _name, "refractory"
             ),
-            "rename": lambda n: self.rename_neurongroup_element(name, "refractory", n),
+            "modify": lambda r, _name=name: self._modify_dict_element_with_rebuild(
+                self.neurongroups[_name], "refractory", r
+            ),
+            "rename": lambda n, _name=name: self.rename_neurongroup_element(
+                _name, "refractory", n
+            ),
         }
 
         utils.update_nested_dict(
@@ -784,19 +800,21 @@ class B2Model:
             self.neurongroups[name] = {}
         if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {
-                "rename": lambda n: self.rename_neurongroup(name, n),
-                "delete": lambda: self.delete_neurongroup(name),
+                "rename": lambda n, _name=name: self.rename_neurongroup(_name, n),
+                "delete": lambda _name=name: self.delete_neurongroup(_name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
         self.functions["neurongroups"][name]["neuronnumber"] = {
-            "add": lambda n: self.define_neuronnumber(name, n),
-            "delete": lambda: self.delete_neurongroup_element(name, "neuronnumber"),
-            "modify": lambda n: self._modify_dict_element_with_rebuild(
-                self.neurongroups[name], "neuronnumber", n
+            "add": lambda n, _name=name: self.define_neuronnumber(_name, n),
+            "delete": lambda _name=name: self.delete_neurongroup_element(
+                _name, "neuronnumber"
             ),
-            "rename": lambda n: self.rename_neurongroup_element(
-                name, "neuronnumber", n
+            "modify": lambda n, _name=name: self._modify_dict_element_with_rebuild(
+                self.neurongroups[_name], "neuronnumber", n
+            ),
+            "rename": lambda n, _name=name: self.rename_neurongroup_element(
+                _name, "neuronnumber", n
             ),
         }
 
@@ -839,18 +857,24 @@ class B2Model:
 
         if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {
-                "rename": lambda n: self.rename_neurongroup(name, n),
-                "delete": lambda: self.delete_neurongroup(name),
+                "rename": lambda n, _name=name: self.rename_neurongroup(_name, n),
+                "delete": lambda _name=name: self.delete_neurongroup(_name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
         self.functions["neurongroups"][name]["target"] = {
-            "add": lambda tgt: self.define_neuronsubgroup_target(name, tgt),
-            "delete": lambda: self.delete_neurongroup_element(name, "target"),
-            "modify": lambda tgt: self._modify_dict_element_with_rebuild(
-                self.neurongroups[name], "target", tgt
+            "add": lambda tgt, _name=name: self.define_neuronsubgroup_target(
+                _name, tgt
             ),
-            "rename": lambda n: self.rename_neurongroup_element(name, "target", n),
+            "delete": lambda _name=name: self.delete_neurongroup_element(
+                _name, "target"
+            ),
+            "modify": lambda tgt, _name=name: self._modify_dict_element_with_rebuild(
+                self.neurongroups[_name], "target", tgt
+            ),
+            "rename": lambda n, _name=name: self.rename_neurongroup_element(
+                _name, "target", n
+            ),
         }
 
         utils.update_nested_dict(
@@ -880,18 +904,22 @@ class B2Model:
 
         if name not in self.functions["neurongroups"]:
             self.functions["neurongroups"][name] = {
-                "rename": lambda n: self.rename_neurongroup(name, n),
-                "delete": lambda: self.delete_neurongroup(name),
+                "rename": lambda n, _name=name: self.rename_neurongroup(_name, n),
+                "delete": lambda _name=name: self.delete_neurongroup(_name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
         self.functions["neurongroups"][name]["idxs"] = {
-            "add": lambda idxs: self.define_neuronsubgroup_idxs(name, idxs),
-            "delete": lambda: self.delete_neurongroup_element(name, "idxs"),
-            "modify": lambda idxs: self._modify_dict_element_with_rebuild(
-                self.neurongroups[name], "idxs", idxs
+            "add": lambda idxs, _name=name: self.define_neuronsubgroup_idxs(
+                _name, idxs
             ),
-            "rename": lambda n: self.rename_neurongroup_element(name, "idxs", n),
+            "delete": lambda _name=name: self.delete_neurongroup_element(_name, "idxs"),
+            "modify": lambda idxs, _name=name: self._modify_dict_element_with_rebuild(
+                self.neurongroups[_name], "idxs", idxs
+            ),
+            "rename": lambda n, _name=name: self.rename_neurongroup_element(
+                _name, "idxs", n
+            ),
         }
 
         # only contiguous arrays allowed for definition of neurongroup
@@ -916,19 +944,21 @@ class B2Model:
 
         if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {
-                "rename": lambda n: self.rename_synapse(name, n),
-                "delete": lambda: self.delete_synapse(name),
+                "rename": lambda n, _name=name: self.rename_synapse(_name, n),
+                "delete": lambda _name=name: self.delete_synapse(_name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
 
         self.functions["synapses"][name]["method"] = {
-            "add": lambda m: self.define_synapse_solver_method(name, m),
-            "delete": lambda: self.delete_synapse_element(name, "method"),
-            "modify": lambda m: self._modify_dict_element_with_rebuild(
-                self.synapses[name], "method", m
+            "add": lambda m, _name=name: self.define_synapse_solver_method(_name, m),
+            "delete": lambda _name=name: self.delete_synapse_element(_name, "method"),
+            "modify": lambda m, _name=name: self._modify_dict_element_with_rebuild(
+                self.synapses[_name], "method", m
             ),
-            "rename": lambda n: self.rename_synapse_element(name, "method", n),
+            "rename": lambda n, _name=name: self.rename_synapse_element(
+                _name, "method", n
+            ),
         }
         utils.update_nested_dict(
             self.synapses,
@@ -956,19 +986,21 @@ class B2Model:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {
-                "rename": lambda n: self.rename_synapse(name, n),
-                "delete": lambda: self.delete_synapse(name),
+                "rename": lambda n, _name=name: self.rename_synapse(_name, n),
+                "delete": lambda _name=name: self.delete_synapse(_name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
 
         self.functions["synapses"][name]["target"] = {
-            "add": lambda t: self.define_synapse_target(name, t),
-            "delete": lambda: self.delete_synapse_element(name, "target"),
-            "modify": lambda t: self._modify_dict_element_with_rebuild(
-                self.synapses[name], "target", t
+            "add": lambda t, _name=name: self.define_synapse_target(_name, t),
+            "delete": lambda _name=name: self.delete_synapse_element(_name, "target"),
+            "modify": lambda t, _name=name: self._modify_dict_element_with_rebuild(
+                self.synapses[_name], "target", t
             ),
-            "rename": lambda n: self.rename_synapse_element(name, "target", n),
+            "rename": lambda n, _name=name: self.rename_synapse_element(
+                _name, "target", n
+            ),
         }
 
         utils.update_nested_dict(
@@ -996,18 +1028,20 @@ class B2Model:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {
-                "rename": lambda n: self.rename_synapse(name, n),
-                "delete": lambda: self.delete_synapse(name),
+                "rename": lambda n, _name=name: self.rename_synapse(_name, n),
+                "delete": lambda _name=name: self.delete_synapse(_name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
         self.functions["synapses"][name]["origin"] = {
-            "add": lambda o: self.define_synapse_origin(name, o),
-            "delete": lambda: self.delete_synapse_element(name, "origin"),
-            "modify": lambda o: self._modify_dict_element_with_rebuild(
-                self.synapses[name], "origin", o
+            "add": lambda o, _name=name: self.define_synapse_origin(_name, o),
+            "delete": lambda _name=name: self.delete_synapse_element(_name, "origin"),
+            "modify": lambda o, _name=name: self._modify_dict_element_with_rebuild(
+                self.synapses[_name], "origin", o
             ),
-            "rename": lambda n: self.rename_synapse_element(name, "origin", n),
+            "rename": lambda n, _name=name: self.rename_synapse_element(
+                _name, "origin", n
+            ),
         }
 
         utils.update_nested_dict(
@@ -1043,18 +1077,20 @@ class B2Model:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {
-                "rename": lambda n: self.rename_synapse(name, n),
-                "delete": lambda: self.delete_synapse(name),
+                "rename": lambda n, _name=name: self.rename_synapse(_name, n),
+                "delete": lambda _name=name: self.delete_synapse(_name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
         self.functions["synapses"][name]["model"] = {
-            "add": lambda eq: self.define_synapse_equation(name, eq),
-            "delete": lambda: self.delete_synapse_element(name, "model"),
-            "modify": lambda eq: self._modify_dict_element_with_rebuild(
-                self.synapses[name], "model", eq
+            "add": lambda eq, _name=name: self.define_synapse_equation(_name, eq),
+            "delete": lambda _name=name: self.delete_synapse_element(_name, "model"),
+            "modify": lambda eq, _name=name: self._modify_dict_element_with_rebuild(
+                self.synapses[_name], "model", eq
             ),
-            "rename": lambda n: self.rename_synapse_element(name, "model", n),
+            "rename": lambda n, _name=name: self.rename_synapse_element(
+                _name, "model", n
+            ),
         }
 
         self._add_equation_to_group(self.synapses[name], line)
@@ -1075,18 +1111,20 @@ class B2Model:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {
-                "rename": lambda n: self.rename_synapse(name, n),
-                "delete": lambda: self.delete_synapse(name),
+                "rename": lambda n, _name=name: self.rename_synapse(_name, n),
+                "delete": lambda _name=name: self.delete_synapse(_name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
         self.functions["synapses"][name]["on_pre"] = {
-            "add": lambda eq: self.define_synapse_pre(name, eq),
-            "delete": lambda: self.delete_synapse_element(name, "on_pre"),
-            "modify": lambda eq: self._modify_dict_element_with_rebuild(
-                self.synapses[name], "on_pre", eq
+            "add": lambda eq, _name=name: self.define_synapse_pre(_name, eq),
+            "delete": lambda _name=name: self.delete_synapse_element(_name, "on_pre"),
+            "modify": lambda eq, _name=name: self._modify_dict_element_with_rebuild(
+                self.synapses[_name], "on_pre", eq
             ),
-            "rename": lambda n: self.rename_synapse_element(name, "on_pre", n),
+            "rename": lambda n, _name=name: self.rename_synapse_element(
+                _name, "on_pre", n
+            ),
         }
 
         if name not in self.synapses or "on_pre" not in self.synapses[name]:
@@ -1118,18 +1156,20 @@ class B2Model:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {
-                "rename": lambda n: self.rename_synapse(name, n),
-                "delete": lambda: self.delete_synapse(name),
+                "rename": lambda n, _name=name: self.rename_synapse(_name, n),
+                "delete": lambda _name=name: self.delete_synapse(_name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
         self.functions["synapses"][name]["on_post"] = {
-            "add": lambda eq: self.define_synapse_post(name, eq),
-            "delete": lambda: self.delete_synapse_element(name, "on_post"),
-            "modify": lambda eq: self._modify_dict_element_with_rebuild(
-                self.synapses[name], "on_post", eq
+            "add": lambda eq, _name=name: self.define_synapse_post(_name, eq),
+            "delete": lambda _name=name: self.delete_synapse_element(_name, "on_post"),
+            "modify": lambda eq, _name=name: self._modify_dict_element_with_rebuild(
+                self.synapses[_name], "on_post", eq
             ),
-            "rename": lambda n: self.rename_synapse_element(name, "on_post", n),
+            "rename": lambda n, _name=name: self.rename_synapse_element(
+                _name, "on_post", n
+            ),
         }
 
         if name not in self.synapses or "on_post" not in self.synapses[name]:
@@ -1161,19 +1201,21 @@ class B2Model:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {
-                "rename": lambda n: self.rename_synapse(name, n),
-                "delete": lambda: self.delete_synapse(name),
+                "rename": lambda n, _name=name: self.rename_synapse(_name, n),
+                "delete": lambda _name=name: self.delete_synapse(_name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
         self.functions["synapses"][name]["connection_condition"] = {
-            "add": lambda c: self.define_synapse_connection(name, c),
-            "delete": lambda: self.delete_synapse_element(name, "connection_condition"),
-            "modify": lambda c: self._modify_dict_element_with_rebuild(
-                self.synapses[name], "connection_condition", c
+            "add": lambda c, _name=name: self.define_synapse_connection(_name, c),
+            "delete": lambda _name=name: self.delete_synapse_element(
+                _name, "connection_condition"
             ),
-            "rename": lambda n: self.rename_synapse_element(
-                name, "connection_condition", n
+            "modify": lambda c, _name=name: self._modify_dict_element_with_rebuild(
+                self.synapses[_name], "connection_condition", c
+            ),
+            "rename": lambda n, _name=name: self.rename_synapse_element(
+                _name, "connection_condition", n
             ),
         }
 
@@ -1202,18 +1244,20 @@ class B2Model:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {
-                "rename": lambda n: self.rename_synapse(name, n),
-                "delete": lambda: self.delete_synapse(name),
+                "rename": lambda n, _name=name: self.rename_synapse(_name, n),
+                "delete": lambda _name=name: self.delete_synapse(_name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
         self.functions["synapses"][name]["delay"] = {
-            "add": lambda c: self.define_synapse_delay(name, c),
-            "delete": lambda: self.delete_synapse_element(name, "delay"),
-            "modify": lambda c: self._modify_dict_element_with_rebuild(
-                self.synapses[name], "delay", c
+            "add": lambda c, _name=name: self.define_synapse_delay(_name, c),
+            "delete": lambda _name=name: self.delete_synapse_element(_name, "delay"),
+            "modify": lambda c, _name=name: self._modify_dict_element_with_rebuild(
+                self.synapses[_name], "delay", c
             ),
-            "rename": lambda n: self.rename_synapse_element(name, "delay", n),
+            "rename": lambda n, _name=name: self.rename_synapse_element(
+                _name, "delay", n
+            ),
         }
 
         utils.update_nested_dict(
@@ -1244,18 +1288,20 @@ class B2Model:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
             self.functions["synapses"][name] = {
-                "rename": lambda n: self.rename_synapse(name, n),
-                "delete": lambda: self.delete_synapse(name),
+                "rename": lambda n, _name=name: self.rename_synapse(_name, n),
+                "delete": lambda _name=name: self.delete_synapse(_name),
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
         self.functions["synapses"][name]["p"] = {
-            "add": lambda p: self.define_synapse_connection_probablitiy(name, p),
-            "delete": lambda: self.delete_synapse_element(name, "p"),
-            "modify": lambda p: self._modify_dict_element_with_rebuild(
-                self.synapses[name], "p", p
+            "add": lambda p, _name=name: self.define_synapse_connection_probablitiy(
+                _name, p
             ),
-            "rename": lambda n: self.rename_synapse_element(name, "p", n),
+            "delete": lambda _name=name: self.delete_synapse_element(_name, "p"),
+            "modify": lambda p, _name=name: self._modify_dict_element_with_rebuild(
+                self.synapses[_name], "p", p
+            ),
+            "rename": lambda n, _name=name: self.rename_synapse_element(_name, "p", n),
         }
 
         utils.update_nested_dict(
