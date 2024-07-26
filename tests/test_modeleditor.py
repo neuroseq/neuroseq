@@ -12,6 +12,7 @@ from formozov_project.model_editor import EditableNeurongroupTree
 from formozov_project.model_editor import EditableParameterTree
 from formozov_project.model_editor import EditableSynapseTree
 from formozov_project.model_editor import ModelEditorDialog
+from pyqtgraph.parametertree import Parameter
 from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
@@ -444,7 +445,48 @@ def test_initial_conditions(
     assert len(children) == 5
     assert children[-1].name == "initials"
 
-    # add a new elemnet -> strin expression
+    init = children[-1]
+
+    # model.define_init("S", "w", [1.0, 10.0])
+    # model.define_init("neuron_input", "v", [0.0, 0.5])
+    s_w = init.findItems(
+        "w",
+        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+        0,
+    )[0]
+
+    s = init.findItems(
+        "S",
+        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+        0,
+    )[0]
+
+    with qtbot.waitSignal(s_w.param.sigValueChanged, timeout=1000, raising=True):
+        s_w.param.setValue("w*randn()+1.5")
+
+    assert diag.b2model.initials["S"]["w"] == "w*randn()+1.5"
+
+    with qtbot.waitSignal(s_w.param.sigValueChanged, timeout=1000, raising=True):
+        s_w.param.setValue("[10.0, 1.0]")
+
+    assert diag.b2model.initials["S"]["w"] == [10.0, 1.0]
+
+    # add a new elemnet -> string expression
+    with qtbot.waitSignal(s.param.sigChildAdded, timeout=1000, raising=True):
+        child_parameter = Parameter.create(
+            **{
+                "name": "new_thing",
+                "value": [1, 2, 3],
+                "renameable": True,
+                "removable": True,
+                "default": [1, 2, 3],
+                "type": "str",
+            }
+        )
+
+        s.param.addChild(child_parameter)
+
+    assert diag.b2model.initials["S"]["new_thing"] == [1, 2, 3]
 
     # add a new elemnet -> numpy based brian2 quantity
 

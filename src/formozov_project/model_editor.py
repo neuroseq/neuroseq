@@ -282,6 +282,7 @@ class EditableParameterTree(ParameterTree):
             if all(
                 f in list(funcs.keys()) for f in ["element_added", "element_removed"]
             ):
+                # FIXME: some of these are problematic or wrong
                 param.sigChildAdded.connect(funcs["element_added"])
                 param.sigAddNew.connect(funcs["element_added"])
                 param.sigChildRemoved.connect(funcs["element_removed"])
