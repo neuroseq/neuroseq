@@ -256,6 +256,14 @@ def test_rename_neurongroup_element_with_modification(
 
     assert mfx_nmda.neurongroups["neurons"]["renamed"] == "dv/dt=-v:1"
 
+    assert "renamed" in mfx_nmda.functions["neurongroups"]["neurons"]
+    assert "renamed" in mfx_nmda.neurongroups["neurons"]
+
+    mfx_nmda.functions["neurongroups"]["neurons"]["renamed"]["delete"]()
+
+    assert "renamed" not in mfx_nmda.functions["neurongroups"]["neurons"]
+    assert "renamed" not in mfx_nmda.neurongroups["neurons"]
+
 
 def test_rename_synapse_element(mfx_nmda: b2_model.B2Model) -> None:
     assert "model" in mfx_nmda.synapses["S"]
@@ -700,61 +708,41 @@ def test_NMDA_model(mfx_nmda: b2_model.B2Model) -> None:
 
 def test_NMDA_model_delete(mfx_nmda: b2_model.B2Model) -> None:
     assert "neuronnumber" in mfx_nmda.neurongroups["neuron_input"]
-    mfx_nmda.delete_neurongroup_element("neuron_input", "neuronnumber")
+    mfx_nmda.functions["neurongroups"]["neuron_input"]["neuronnumber"]["delete"]()
     assert "neuronnumber" not in mfx_nmda.neurongroups["neuron_input"]
     assert "neuronnumber" not in mfx_nmda.functions["neurongroups"]["neuron_input"]
 
     assert "on_pre" in mfx_nmda.synapses["S"]
-    mfx_nmda.delete_synapse_element("S", "on_pre")
+    mfx_nmda.functions["synapses"]["S"]["on_pre"]["delete"]()
     assert "on_pre" not in mfx_nmda.synapses["S"]
     assert "on_pre" not in mfx_nmda.functions["synapses"]["S"]
 
     assert "source" in mfx_nmda.monitors["Mn"]
-    mfx_nmda.delete_monitor_element("Mn", "source")
+    mfx_nmda.functions["monitors"]["Mn"]["source"]["delete"]()
     assert "source" not in mfx_nmda.monitors["Mn"]
     assert "source" not in mfx_nmda.functions["monitors"]["Mn"]
 
     assert "w" in mfx_nmda.initials["S"]
-    mfx_nmda.delete_init_element("S", "w")
+    mfx_nmda.functions["initials"]["S"]["w"]["delete"]()
     assert "w" not in mfx_nmda.initials["S"]
     assert "w" not in mfx_nmda.functions["initials"]["S"]
 
     assert "Mn" in mfx_nmda.monitors
-    mfx_nmda.delete_monitor("Mn")
+    mfx_nmda.functions["monitors"]["Mn"]["delete"]()
     assert "Mn" not in mfx_nmda.monitors
     assert "Mn" not in mfx_nmda.functions["monitors"]
 
-    with pytest.raises(
-        KeyError, match="Error when deleting initial conditions w of group S"
-    ):
-        mfx_nmda.delete_init_element("S", "w")
-
-    assert "S" in mfx_nmda.initials
-    mfx_nmda.delete_init("S")
-    assert "S" not in mfx_nmda.initials
-
     assert "neuron_input" in mfx_nmda.neurongroups
-    mfx_nmda.delete_neurongroup("neuron_input")
+    mfx_nmda.functions["neurongroups"]["neuron_input"]["delete"]()
     assert "neuron_input" not in mfx_nmda.neurongroups
 
     assert "S" in mfx_nmda.synapses
-    mfx_nmda.delete_synapse("S")
+    mfx_nmda.functions["synapses"]["S"]["delete"]()
     assert "S" not in mfx_nmda.synapses
 
-    with pytest.raises(RuntimeError, match="Error when deleting X in neurons"):
-        mfx_nmda.delete_neurongroup_element("neurons", "X")
-
     assert "a" in mfx_nmda.parameters  # type: ignore
-    mfx_nmda.delete_parameter("a")
+    mfx_nmda.functions["parameters"]["a"]["delete"]()
     assert "a" not in mfx_nmda.parameters  # type: ignore
-
-    with pytest.raises(KeyError, match="Error when deleting x"):
-        mfx_nmda.delete_parameter("x")
-
-    with pytest.raises(
-        KeyError, match="Error when deleting initial conditions for group X"
-    ):
-        mfx_nmda.delete_init("X")
 
 
 def test_assemble_network(mfx_nmda, monkeypatch: MonkeyPatch) -> None:

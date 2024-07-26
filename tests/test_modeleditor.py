@@ -368,7 +368,7 @@ def test_modeldialog_reject(
     assert diag.backup == specs
     assert list(diag.functions_backup.keys()) == list(mfx_nmda.functions.keys())
 
-    diag.b2model.delete_monitor("Mn")
+    diag.b2model.functions["monitors"]["Mn"]["delete"]()
 
     assert "Mn" not in diag.b2model.monitors
     assert "Mn" in [obj.name for obj in diag.b2model.network.objects]

@@ -59,38 +59,6 @@ class B2Model:
         self.logger.info(f"Equation defined for group {group}")
         self.logger.debug(f"full equation: {line}")
 
-    def _move_dict_element(
-        self, dictionary: dict[Any, Any], source: Any, target: Any
-    ) -> None:
-        """
-        Move a dict element to another key. This copies data, so use with caution.
-        """
-        try:
-            self._copy_dict_element(dictionary, source, target)
-        except Exception as e:
-            raise e
-
-        del dictionary[source]
-
-    def _copy_dict_element(
-        self, dictionary: dict[Any, Any] | None, source: Any, target: Any
-    ) -> None:
-        """
-        Copy a dict element to another key. This copies data, so use with caution
-        """
-        if dictionary is None:
-            raise ValueError(
-                f"Error, dictionary to copy an element from {source} to {target} is None"
-            )
-
-        if target.isidentifier() is False:
-            raise ValueError(f"The name {target} is not a valid python identifier")
-
-        dictionary[target] = deepcopy(dictionary[source])
-
-        if "name" in dictionary[target]:
-            dictionary[target]["name"] = target
-
     @_trigger_rebuild
     def _assemble_neuronsubgroup(
         self,
@@ -344,34 +312,6 @@ class B2Model:
                     f"Error when initializing {key} of element {name} as {self.initials[name][key]}: {e}"
                 ) from e
 
-    # modifications
-    def _modify_dict_element(
-        self, dictionary: dict[Any, Any], key: str, value: Any
-    ) -> None:
-        """
-        _modify_dict_element modify an elemnet of 'dictionary' programmatically. Mainly used for assignments in lambdas
-
-        Parameters
-        ----------
-        dictionary : dict[Any, Any]
-            Dict to modify
-        key : str
-            key in dictionary to assign
-        value : Any
-            value to assign to dictionary[key]
-        """
-        self.logger.info(f"modifying element {key} from {dictionary[key]} to {value}")
-        try:
-            dictionary[key] = value
-        except Exception as e:
-            raise RuntimeError(f"Error when modifying {key}: {e}") from e
-
-    @_trigger_rebuild
-    def _modify_dict_element_with_rebuild(
-        self, dictionary: dict[Any, Any], key: str, value: Any
-    ) -> None:
-        self._modify_dict_element(dictionary, key, value)
-
     # deletions
     def _delete_dict_element(
         self, dictionary: dict[Any, Any], groupname: str, varname: str
@@ -394,6 +334,71 @@ class B2Model:
             raise RuntimeError(
                 f"Error when deleting {varname} in {groupname}: {e}"
             ) from e
+
+    # stateful class for modifying, renaming and deleting dictionary elements in arbitrary order
+    class Modifier:
+        "Stateful functor for renaming elements in a dict successively while keeping track of the old name"
+
+        def __init__(
+            self, current_name: str, pdict: dict, fdict: dict, with_rebuilt: Callable
+        ):
+            """
+            Create a new modifier instance
+
+            Parameters
+            ----------
+            current_name : str
+                _description_
+            pdict : dict
+                _description_
+            fdict : dict
+                _description_
+            with_rebuilt : Callable
+                _description_
+            """
+            self.current_name = current_name
+            self.pdict = pdict
+            self.fdict = fdict
+            self.with_rebuilt = with_rebuilt
+
+        def rename(self, new_name: str) -> None:
+            """
+            Rename the element the caller is bound to to 'new_name' from the currently held 'current_name'
+
+            Parameters
+            ----------
+            new_name : str
+                New name of the element
+
+            """
+            used_old_name = self.current_name
+            self.current_name = new_name
+            self.pdict[new_name] = self.pdict.pop(used_old_name)
+            self.fdict[new_name] = self.fdict.pop(used_old_name)
+            self.with_rebuilt()
+
+            if "name" in self.pdict[new_name]:
+                self.pdict[new_name]["name"] = new_name
+
+        def modify(self, value: str) -> None:
+            """
+            Modify the element the caller is bound to.
+
+            Parameters
+            ----------
+            value : str
+                value to set the element to
+            """
+            self.pdict[self.current_name] = value
+            self.with_rebuilt()
+
+        def delete(self) -> None:
+            """
+            Delete the element behind the currently held name
+            """
+            del self.pdict[self.current_name]
+            del self.fdict[self.current_name]
+            self.with_rebuilt()
 
     def __init__(
         self,
@@ -476,9 +481,8 @@ class B2Model:
             )
 
             self.functions["initials"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_init(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
@@ -492,8 +496,7 @@ class B2Model:
 
         self.functions["initials"][name][varname] = {
             "add": lambda v: self.define_init(name, v),
-            "delete": lambda: self.delete_init_element(name, varname),
-            "modifier": element_modifier,
+            "delete": element_modifier.delete,
             "modify": element_modifier.modify,
             "rename": element_modifier.rename,
         }
@@ -567,8 +570,7 @@ class B2Model:
 
         self.functions["parameters"][name] = {
             "add": lambda p, _name=name: self.define_parameter(_name, p),
-            "delete": lambda _name=name: self.delete_parameter(_name),
-            "modifier": element_modifier,
+            "delete": element_modifier.delete,
             "modify": element_modifier.modify,
             "rename": element_modifier.rename,
         }
@@ -613,9 +615,8 @@ class B2Model:
                 lambda: self.set_rebuilt(True),
             )
             self.functions["neurongroups"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_neurongroup(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
@@ -629,8 +630,7 @@ class B2Model:
 
         self.functions["neurongroups"][name]["model"] = {
             "add": lambda e: self.define_equation(name, e),
-            "delete": lambda: self.delete_neurongroup_element(name, "model"),
-            "modifier": element_modifier,
+            "delete": element_modifier.delete,
             "modify": element_modifier.modify,
             "rename": element_modifier.rename,
         }
@@ -660,9 +660,8 @@ class B2Model:
                 lambda: self.set_rebuilt(True),
             )
             self.functions["neurongroups"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_neurongroup(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
@@ -676,8 +675,7 @@ class B2Model:
 
         self.functions["neurongroups"][name]["reset"] = {
             "add": lambda r: self.define_reset(name, r),
-            "delete": lambda: self.delete_neurongroup_element(name, "reset"),
-            "modifier": element_modifier,
+            "delete": element_modifier.delete,
             "modify": element_modifier.modify,
             "rename": element_modifier.rename,
         }
@@ -713,9 +711,8 @@ class B2Model:
                 lambda: self.set_rebuilt(True),
             )
             self.functions["neurongroups"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_neurongroup(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
@@ -729,8 +726,7 @@ class B2Model:
 
         self.functions["neurongroups"][name]["th"] = {
             "add": lambda t: self.define_threshold(name, t),
-            "delete": lambda: self.delete_neurongroup_element(name, "th"),
-            "modifier": element_modifier,
+            "delete": element_modifier.delete,
             "modify": element_modifier.modify,
             "rename": element_modifier.rename,
         }
@@ -768,9 +764,8 @@ class B2Model:
                 lambda: self.set_rebuilt(True),
             )
             self.functions["neurongroups"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_neurongroup(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
@@ -784,8 +779,7 @@ class B2Model:
 
         self.functions["neurongroups"][name]["method"] = {
             "add": lambda t: self.define_threshold(name, t),
-            "delete": lambda: self.delete_neurongroup_element(name, "method"),
-            "modifier": element_modifier,
+            "delete": element_modifier.delete,
             "modify": element_modifier.modify,
             "rename": element_modifier.rename,
         }
@@ -823,9 +817,8 @@ class B2Model:
                 lambda: self.set_rebuilt(True),
             )
             self.functions["neurongroups"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_neurongroup(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
@@ -838,8 +831,7 @@ class B2Model:
 
         self.functions["neurongroups"][name]["refractory"] = {
             "add": lambda r: self.define_refractory(name, r),
-            "delete": lambda: self.delete_neurongroup_element(name, "refractory"),
-            "modifier": element_modifier,
+            "delete": element_modifier.delete,
             "modify": element_modifier.modify,
             "rename": element_modifier.rename,
         }
@@ -877,9 +869,8 @@ class B2Model:
                 lambda: self.set_rebuilt(True),
             )
             self.functions["neurongroups"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_neurongroup(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
@@ -891,8 +882,7 @@ class B2Model:
         )
         self.functions["neurongroups"][name]["neuronnumber"] = {
             "add": lambda n: self.define_neuronnumber(name, n),
-            "delete": lambda: self.delete_neurongroup_element(name, "neuronnumber"),
-            "modifier": element_modifier,
+            "delete": element_modifier.delete,
             "modify": element_modifier.modify,
             "rename": element_modifier.rename,
         }
@@ -942,9 +932,8 @@ class B2Model:
                 lambda: self.set_rebuilt(True),
             )
             self.functions["neurongroups"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_neurongroup(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
@@ -958,8 +947,7 @@ class B2Model:
 
         self.functions["neurongroups"][name]["target"] = {
             "add": lambda tgt: self.define_neuronsubgroup_target(name, tgt),
-            "delete": lambda: self.delete_neurongroup_element(name, "target"),
-            "modifier": element_modifier,
+            "delete": element_modifier.delete,
             "modify": element_modifier.modify,
             "rename": element_modifier.rename,
         }
@@ -997,9 +985,8 @@ class B2Model:
                 lambda: self.set_rebuilt(True),
             )
             self.functions["neurongroups"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_neurongroup(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
@@ -1013,8 +1000,7 @@ class B2Model:
 
         self.functions["neurongroups"][name]["idxs"] = {
             "add": lambda idxs: self.define_neuronsubgroup_idxs(name, idxs),
-            "delete": lambda: self.delete_neurongroup_element(name, "idxs"),
-            "modifier": element_modifier,
+            "delete": element_modifier.delete,
             "modify": element_modifier.modify,
             "rename": element_modifier.rename,
         }
@@ -1047,9 +1033,8 @@ class B2Model:
                 lambda: self.set_rebuilt(True),
             )
             self.functions["synapses"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_synapse(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
@@ -1061,8 +1046,7 @@ class B2Model:
         )
         self.functions["synapses"][name]["method"] = {
             "add": lambda m: self.define_synapse_solver_method(name, m),
-            "delete": lambda: self.delete_synapse_element(name, "method"),
-            "modifier": element_modifier,
+            "delete": element_modifier.delete,
             "rename": element_modifier.rename,
             "modify": element_modifier.modify,
         }
@@ -1098,9 +1082,8 @@ class B2Model:
                 lambda: self.set_rebuilt(True),
             )
             self.functions["synapses"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_synapse(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
@@ -1114,8 +1097,7 @@ class B2Model:
 
         self.functions["synapses"][name]["target"] = {
             "add": lambda t: self.define_synapse_target(name, t),
-            "delete": lambda: self.delete_synapse_element(name, "target"),
-            "modifier": element_modifier,
+            "delete": element_modifier.delete,
             "rename": element_modifier.rename,
             "modify": element_modifier.modify,
         }
@@ -1151,9 +1133,8 @@ class B2Model:
                 lambda: self.set_rebuilt(True),
             )
             self.functions["synapses"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_synapse(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
@@ -1167,8 +1148,7 @@ class B2Model:
 
         self.functions["synapses"][name]["origin"] = {
             "add": lambda o: self.define_synapse_origin(name, o),
-            "delete": lambda: self.delete_synapse_element(name, "origin"),
-            "modifier": element_modifier,
+            "delete": element_modifier.delete,
             "rename": element_modifier.rename,
             "modify": element_modifier.modify,
         }
@@ -1212,9 +1192,8 @@ class B2Model:
                 lambda: self.set_rebuilt(True),
             )
             self.functions["synapses"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_synapse(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
@@ -1227,7 +1206,7 @@ class B2Model:
 
         self.functions["synapses"][name]["model"] = {
             "add": lambda eq: self.define_synapse_equation(name, eq),
-            "delete": lambda: self.delete_synapse_element(name, "model"),
+            "delete": element_modifier.delete,
             "rename": element_modifier.rename,
             "modify": element_modifier.modify,
         }
@@ -1256,9 +1235,8 @@ class B2Model:
                 lambda: self.set_rebuilt(True),
             )
             self.functions["synapses"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_synapse(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
@@ -1272,8 +1250,7 @@ class B2Model:
 
         self.functions["synapses"][name]["on_pre"] = {
             "add": lambda eq: self.define_synapse_pre(name, eq),
-            "delete": lambda: self.delete_synapse_element(name, "on_pre"),
-            "modifier": element_modifier,
+            "delete": element_modifier.delete,
             "rename": element_modifier.rename,
             "modify": element_modifier.modify,
         }
@@ -1313,9 +1290,8 @@ class B2Model:
                 lambda: self.set_rebuilt(True),
             )
             self.functions["synapses"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_synapse(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
@@ -1329,8 +1305,7 @@ class B2Model:
 
         self.functions["synapses"][name]["on_post"] = {
             "add": lambda eq: self.define_synapse_post(name, eq),
-            "delete": lambda: self.delete_synapse_element(name, "on_post"),
-            "modifier": element_modifier,
+            "delete": element_modifier.delete,
             "rename": element_modifier.rename,
             "modify": element_modifier.modify,
         }
@@ -1370,9 +1345,8 @@ class B2Model:
                 lambda: self.set_rebuilt(True),
             )
             self.functions["synapses"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_synapse(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
@@ -1386,8 +1360,7 @@ class B2Model:
 
         self.functions["synapses"][name]["connection_condition"] = {
             "add": lambda c: self.define_synapse_connection(name, c),
-            "delete": lambda: self.delete_synapse_element(name, "connection_condition"),
-            "modifier": element_modifier,
+            "delete": element_modifier.delete,
             "rename": element_modifier.rename,
             "modify": element_modifier.modify,
         }
@@ -1423,9 +1396,8 @@ class B2Model:
                 lambda: self.set_rebuilt(True),
             )
             self.functions["synapses"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_synapse(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
@@ -1439,8 +1411,7 @@ class B2Model:
 
         self.functions["synapses"][name]["delay"] = {
             "add": lambda c: self.define_synapse_delay(name, c),
-            "delete": lambda: self.delete_synapse_element(name, "delay"),
-            "modifier": element_modifier,
+            "delete": element_modifier.delete,
             "rename": element_modifier.rename,
             "modify": element_modifier.modify,
         }
@@ -1479,9 +1450,8 @@ class B2Model:
                 lambda: self.set_rebuilt(True),
             )
             self.functions["synapses"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_synapse(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
@@ -1495,8 +1465,7 @@ class B2Model:
 
         self.functions["synapses"][name]["p"] = {
             "add": lambda p: self.define_synapse_connection_probablitiy(name, p),
-            "delete": lambda: self.delete_synapse_element(name, "p"),
-            "modifier": element_modifier,
+            "delete": element_modifier.delete,
             "rename": element_modifier.rename,
             "modify": element_modifier.modify,
         }
@@ -1509,209 +1478,6 @@ class B2Model:
                 },
             },
         )
-
-    class Modifier:
-        "Stateful functor for renaming elements in a dict successively while keeping track of the old name"
-
-        def __init__(
-            self, old_name: str, pdict: dict, fdict: dict, with_rebuilt: Callable
-        ):
-            """
-            _summary_
-
-            Parameters
-            ----------
-            old_name : str
-                _description_
-            pdict : dict
-                _description_
-            fdict : dict
-                _description_
-            with_rebuilt : Callable
-                _description_
-            """
-            self.old_name = old_name
-            self.pdict = pdict
-            self.fdict = fdict
-            self.with_rebuilt = with_rebuilt
-
-        def rename(self, new_name: str) -> None:
-            """
-            _summary_
-
-            Parameters
-            ----------
-            new_name : str
-                _description_
-
-            """
-            used_old_name = self.old_name
-            self.old_name = new_name
-            self.pdict[new_name] = self.pdict.pop(used_old_name)
-            self.fdict[new_name] = self.fdict.pop(used_old_name)
-            self.with_rebuilt()
-
-            if "name" in self.pdict[new_name]:
-                self.pdict[new_name]["name"] = new_name
-
-        def modify(self, value: str) -> None:
-            self.pdict[self.old_name] = value
-            self.with_rebuilt()
-
-    @_trigger_rebuild
-    def delete_neurongroup(self, name: str) -> None:
-        """
-        delete a neurongroup definition from the intermediate dict
-
-        Parameters
-        ----------
-        name : str
-            Name of the neurongroup to delete from the intermediat dict
-        """
-        del self.neurongroups[name]
-        del self.functions["neurongroups"][name]
-
-    @_trigger_rebuild
-    def delete_synapse(self, name: str) -> None:
-        """
-        delete a synapse definition from the intermediate dict
-
-        Parameters
-        ----------
-        name : str
-            Name of the synapse to delete from the intermediat dict
-        """
-        del self.synapses[name]
-        del self.functions["synapses"][name]
-
-    @_trigger_rebuild
-    def delete_monitor(self, name: str) -> None:
-        """
-        delete a monitor definition from the intermediate dict
-
-        Parameters
-        ----------
-        name : str
-            Name of the monitor to delete from the intermediat dict
-        """
-        del self.monitors[name]
-        del self.functions["monitors"][name]
-
-    @_trigger_rebuild
-    def delete_neurongroup_element(self, groupname: str, varname: str) -> None:
-        """
-        Delete an element form the definition of a neurongroup.
-
-        Parameters
-        ----------
-        groupname : str
-            name of the neurongroup for which a parameter should be deleted
-        varname : str
-            variable name that should be deleted
-        """
-
-        self._delete_dict_element(self.neurongroups, groupname, varname)
-        self._delete_dict_element(self.functions["neurongroups"], groupname, varname)
-
-    @_trigger_rebuild
-    def delete_synapse_element(self, groupname: str, varname: str) -> None:
-        """
-        Delete an element form the definition of a synapse.
-
-        Parameters
-        ----------
-        groupname : str
-            name of the synapse for which a parameter should be deleted
-        varname : str
-            variable name that should be deleted
-        """
-        self._delete_dict_element(self.synapses, groupname, varname)
-        self._delete_dict_element(self.functions["synapses"], groupname, varname)
-
-    @_trigger_rebuild
-    def delete_monitor_element(self, groupname: str, varname: str) -> None:
-        """
-        Delete an element form the definition of a monitor.
-
-
-        Parameters
-        ----------
-        groupname : str
-            name of the monitor for which a parameter should be deleted
-        varname : str
-            variable name that should be deleted
-        """
-        self._delete_dict_element(self.monitors, groupname, varname)
-        self._delete_dict_element(self.functions["monitors"], groupname, varname)
-
-    def delete_parameter(self, name: str) -> None:
-        """
-        Delete a parameter from the set of parameters currently available
-
-        Parameters
-        ----------
-        name : str
-            name of the parameter to remove
-        """
-        try:
-            del self.parameters[name]
-            del self.functions["parameters"][name]
-        except Exception as e:
-            raise KeyError(f"Error when deleting {name}: {e}") from e
-
-    @_trigger_rebuild
-    def delete_init(self, name: str) -> None:
-        """
-        Delete an element `name` from the initial condition dictionary. Note that if
-        initial conditions have already been defined, you have to redefine it in the
-        network.
-
-        Parameters
-        ----------
-        name : str
-            Name of the network element to remove an initial condition for
-
-        varname: str
-            Name of the variable to remove
-        Raises
-        ------
-        KeyError
-            When `name` is not in the initial condition dictionary
-        """
-        try:
-            del self.initials[name]
-            del self.functions["initials"][name]
-        except Exception as e:
-            raise KeyError(
-                f"Error when deleting initial conditions for group {name}: {e}"
-            ) from e
-
-    @_trigger_rebuild
-    def delete_init_element(self, name: str, varname: str) -> None:
-        """
-        Delete an element `varname` from the initial condition dictionary. Note that if
-        initial conditions have already been defined, you have to redefine it in the
-        network.
-
-        Parameters
-        ----------
-        name : str
-            Name of the network element to remove an initial condition for
-
-        varname: str
-            Name of the variable to remove
-        Raises
-        ------
-        KeyError
-            When `name` is not in the initial condition dictionary
-        """
-        try:
-            del self.initials[name][varname]
-            del self.functions["initials"][name][varname]
-        except Exception as e:
-            raise KeyError(
-                f"Error when deleting initial conditions {varname} of group {name}: {e}"
-            ) from e
 
     # monitor
     @_trigger_rebuild
@@ -1739,9 +1505,8 @@ class B2Model:
             )
 
             self.functions["monitors"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_monitor(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),  # do nothing
                 "element_removed": lambda: self.set_rebuilt(True),
             }
@@ -1755,8 +1520,7 @@ class B2Model:
 
         self.functions["monitors"][name]["type"] = {
             "add": lambda tp: self.define_monitor_type(name, tp),
-            "delete": lambda: self.delete_monitor_element(name, "type"),
-            "modifier": element_modifier,
+            "delete": element_modifier.delete,
             "rename": element_modifier.rename,
             "modify": element_modifier.modify,
         }
@@ -1795,25 +1559,23 @@ class B2Model:
             )
 
             self.functions["monitors"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_monitor(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),  # do nothing
                 "element_removed": lambda: self.set_rebuilt(True),
             }
 
+        element_modifier = self.Modifier(
+            "source",
+            self.monitors[name],
+            self.functions["monitors"][name],
+            lambda _model=self: _model.set_rebuilt(True),
+        )
         self.functions["monitors"][name]["source"] = {
             "add": lambda src: self.define_monitor_source(name, src),
-            "delete": lambda: self.delete_monitor_element(name, "source"),
-            "modify": lambda src: self._modify_dict_element_with_rebuild(
-                self.monitors[name], "source", src
-            ),
-            "rename": self.Modifier(
-                "source",
-                self.monitors[name],
-                self.functions["monitors"][name],
-                lambda _model=self: _model.set_rebuilt(True),
-            ),
+            "delete": element_modifier.delete,
+            "rename": element_modifier.rename,
+            "modify": element_modifier.modify,
         }
 
         utils.update_nested_dict(
@@ -1851,25 +1613,24 @@ class B2Model:
             )
 
             self.functions["monitors"][name] = {
-                "modifier": modifier,
                 "rename": modifier.rename,
-                "delete": lambda: self.delete_monitor(name),
+                "delete": modifier.delete,
                 "element_added": lambda: self.set_rebuilt(True),  # do nothing
                 "element_removed": lambda: self.set_rebuilt(True),
             }
 
+        element_modifier = self.Modifier(
+            "variable",
+            self.monitors[name],
+            self.functions["monitors"][name],
+            lambda _model=self: _model.set_rebuilt(True),
+        )
+
         self.functions["monitors"][name]["variable"] = {
             "add": lambda var: self.define_monitor_variable(name, var),
-            "delete": lambda: self.delete_monitor_element(name, "variable"),
-            "modify": lambda var: self._modify_dict_element_with_rebuild(
-                self.monitors[name], "variable", var
-            ),
-            "rename": self.Modifier(
-                "variable",
-                self.monitors[name],
-                self.functions["monitors"][name],
-                lambda _model=self: _model.set_rebuilt(True),
-            ),
+            "delete": element_modifier.delete,
+            "rename": element_modifier.rename,
+            "modify": element_modifier.modify,
         }
 
         utils.update_nested_dict(
