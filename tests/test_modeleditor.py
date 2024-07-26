@@ -417,12 +417,12 @@ def test_monitordialog_with_run(
     mfx_nmda.assemble_network()
 
     with qtbot.waitSignal(dtparam.param.sigValueChanged, timeout=1000, raising=True):
-        dtparam.setText(1.0, "100*ms")
+        dtparam.param.setValue("100 * ms")
 
     assert mfx_nmda.monitors["M"]["dt"] == 100 * b2.ms
-    assert mfx_nmda.network["M"].clock.dt == 100 * b2.ms
 
-    diag.accept()
+    mfx_nmda.assemble_network()
+    assert mfx_nmda.network["M"].clock.dt == 100 * b2.ms
 
     mfx_nmda.run_simulation(1 * b2.second)
 
