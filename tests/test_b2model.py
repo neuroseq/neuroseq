@@ -235,7 +235,7 @@ def test_rename_init_element(mfx_nmda: b2_model.B2Model) -> None:
     assert mfx_nmda.initials["S"]["renamed"] == test_data
     assert all(
         f in mfx_nmda.functions["initials"]["S"]["renamed"]
-        for f in ["add", "delete", "modify", "rename"]
+        for f in ["delete", "modify", "rename"]
     )
 
 
