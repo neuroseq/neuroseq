@@ -520,7 +520,7 @@ class B2Model:
                 self.initials,
                 self.functions["initials"],
                 lambda: self.set_rebuilt(True),
-                self.define_init,
+                lambda n, v: self.define_init(n, v),
             )
 
             self.functions["initials"][name] = {
