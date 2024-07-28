@@ -1,6 +1,7 @@
 from typing import Any
 
 import brian2 as b2
+from brian2 import _numpy as np
 from formozov_project.b2_model import B2Model
 from formozov_project.b2_model_widget import NeuronGroupDialog
 from formozov_project.b2_model_widget import NeuronSubgroupDialog
@@ -492,5 +493,17 @@ def test_initial_conditions(
     assert diag.b2model.initials["S"]["new_thing"] == [1, 2, 3]
 
     # add a new elemnet -> numpy based brian2 quantity
+    child_parameter["value"] = np.array([[1, 2, 3], [2, 4, 5]])
+    child_parameter["name"] = "numpy_new_thing"
+    with qtbot.waitSignal(s.param.sigChildAdded, timeout=1000, raising=True):
+        s.param.addChild(child_parameter)
+
+    assert diag.b2model.initials["S"]["new_thing"] == np.array([[1, 2, 3], [2, 4, 5]])
 
     # add a new element -> scalar brian2 quantity
+    child_parameter["name"] = "scalar_new_thing"
+    child_parameter["value"] = 3.2
+    with qtbot.waitSignal(s.param.sigChildAdded, timeout=1000, raising=True):
+        s.param.addChild(child_parameter)
+
+    assert diag.b2model.initials["S"]["new_thing"] == 3.2
