@@ -471,6 +471,10 @@ def test_initial_conditions(
 
     assert diag.b2model.initials["S"]["w"] == [10.0, 1.0]
 
+    with qtbot.waitSignal(s_w.param.sigValueChanged, timeout=1000, raising=True):
+        s_w.param.setValue("3")
+    assert diag.b2model.initials["S"]["w"] == 3
+
     # # add a new elemnet -> string expression
     child_parameter = Parameter.create(
         **{
