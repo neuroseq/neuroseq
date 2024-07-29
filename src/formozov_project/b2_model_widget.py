@@ -1163,14 +1163,8 @@ class MonitorDialog(ModelDialog):
 
             if self.timestep:
                 if self.tp == "StateMonitor":
-                    print(
-                        "defining timestep: ",
-                        self.timestep,
-                        self.tp,
-                    )
                     self.model.define_monitor_dt(self.name, self.timestep)
                 else:
-                    print("not working: ", self.timestep, self.tp)
                     self.display_error(
                         "Error, timestep can only be defined for StateMonitor"
                     )
