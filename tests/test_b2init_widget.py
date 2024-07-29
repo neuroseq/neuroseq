@@ -38,11 +38,11 @@ def test_accept_source(initdlg: B2W.InitialConditionDialog, qtbot: QtBot) -> Non
     assert initdlg.source_button.text() == "saved"
 
 
-def test_accept_variable(initdlg: B2W.InitialConditionDialog, qtbot: QtBot) -> None:
+def test_accept_variable(initdlg: B2W.InitialConditionWidget, qtbot: QtBot) -> None:
     initdlg.source.setCurrentText("neurongroup2")
     qtbot.mouseClick(initdlg.source_button, QtCore.Qt.MouseButton.LeftButton)
 
-    initdlg.var.setText("y")
+    initdlg.var.setCurrentText("y")
     qtbot.mouseClick(initdlg.var_button, QtCore.Qt.MouseButton.LeftButton)
 
     assert initdlg.var_button.isDown()
