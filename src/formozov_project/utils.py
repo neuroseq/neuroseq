@@ -22,6 +22,14 @@ example_models_path = (
 )
 
 
+def timed_array_with_new_data(
+    timed_array: b2.TimedArray, new_data: np.ndarray
+) -> b2.TimedArray:
+    return b2.TimedArray(
+        b2.Quantity(new_data, timed_array.dim), timed_array.dt * b2.second
+    )
+
+
 def get_downsample_factor(
     n_floats: int, max_ram_mb: int, bits_per_float: int = 64
 ) -> int:
