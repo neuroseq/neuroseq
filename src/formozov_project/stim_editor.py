@@ -15,6 +15,7 @@ from qtpy.compat import getsavefilename
 from formozov_project.b2_model import B2Model
 from formozov_project.stim_widget import StimWidget
 from formozov_project.utils import add_action
+from formozov_project.utils import timed_array_with_new_data
 
 
 class DrawMode(Enum):
@@ -89,9 +90,8 @@ class StimEditor(QtWidgets.QWidget):
                 )
             else:
                 old_timed_array = self.model.parameters[name]
-                self.model.parameters[name] = b2.TimedArray(
-                    b2.Quantity(array_values, old_timed_array.dim),
-                    old_timed_array.dt * b2.second,
+                self.model.parameters[name] = timed_array_with_new_data(
+                    old_timed_array, array_values
                 )
         self.set_model(self.model)
 
