@@ -1161,12 +1161,13 @@ class MonitorDialog(ModelDialog):
             self.model.define_monitor_type(self.name, self.tp)
             self.model.define_monitor_variable(self.name, self.var)
 
-            if self.timestep and self.tp == "StateMonitor":
-                self.model.define_monitor_dt(self.name, self.timestep)
-            else:
-                self.display_error(
-                    "Error, timestep can only be defined for StateMonitor"
-                )
+            if self.timestep:
+                if self.tp == "StateMonitor":
+                    self.model.define_monitor_dt(self.name, self.timestep)
+                else:
+                    self.display_error(
+                        "Error, timestep can only be defined for StateMonitor"
+                    )
 
             super().accept()
         except Exception as e:
