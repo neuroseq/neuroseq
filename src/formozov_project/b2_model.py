@@ -628,7 +628,6 @@ class B2Model:
         self.logger.debug(f"Parameter value: {value}")
 
     # neurongroups
-
     @_trigger_rebuild
     def define_dt(self, name: str, dt: b2.Quantity) -> None:
         """
@@ -643,17 +642,19 @@ class B2Model:
             self.neurongroups[name] = {}
 
         if name not in self.functions["neurongroups"]:
-            modifier = self.Modifier(
+            modifier = self.GroupModifier(
                 name,
                 self.neurongroups,
                 self.functions["neurongroups"],
-                lambda: self.set_rebuilt(True),
+                with_rebuilt=lambda: self.set_rebuilt(True),
+                element_adder=lambda _, __, ___: self.set_rebuilt(True),
             )
+
             self.functions["neurongroups"][name] = {
                 "rename": modifier.rename,
                 "delete": modifier.delete,
-                "element_added": lambda *_: self.set_rebuilt(True),
-                "element_removed": lambda *_: self.set_rebuilt(True),
+                "element_added": modifier.add_element,
+                "element_removed": modifier.delete_element,
             }
 
         element_modifier = self.Modifier(
@@ -700,17 +701,19 @@ class B2Model:
             self.neurongroups[name] = {}
 
         if name not in self.functions["neurongroups"]:
-            modifier = self.Modifier(
+            modifier = self.GroupModifier(
                 name,
                 self.neurongroups,
                 self.functions["neurongroups"],
-                lambda: self.set_rebuilt(True),
+                with_rebuilt=lambda: self.set_rebuilt(True),
+                element_adder=lambda _, __, ___: self.set_rebuilt(True),
             )
+
             self.functions["neurongroups"][name] = {
                 "rename": modifier.rename,
                 "delete": modifier.delete,
-                "element_added": lambda *_: self.set_rebuilt(True),
-                "element_removed": lambda *_: self.set_rebuilt(True),
+                "element_added": modifier.add_element,
+                "element_removed": modifier.delete_element,
             }
 
         element_modifier = self.Modifier(
@@ -745,17 +748,19 @@ class B2Model:
         if name not in self.neurongroups:
             self.neurongroups[name] = {}
         if name not in self.functions["neurongroups"]:
-            modifier = self.Modifier(
+            modifier = self.GroupModifier(
                 name,
                 self.neurongroups,
                 self.functions["neurongroups"],
-                lambda: self.set_rebuilt(True),
+                with_rebuilt=lambda: self.set_rebuilt(True),
+                element_adder=lambda _, __, ___: self.set_rebuilt(True),
             )
+
             self.functions["neurongroups"][name] = {
                 "rename": modifier.rename,
                 "delete": modifier.delete,
-                "element_added": lambda *_: self.set_rebuilt(True),
-                "element_removed": lambda *_: self.set_rebuilt(True),
+                "element_added": modifier.add_element,
+                "element_removed": modifier.delete_element,
             }
 
         element_modifier = self.Modifier(
@@ -796,17 +801,19 @@ class B2Model:
         if name not in self.neurongroups:
             self.neurongroups[name] = {}
         if name not in self.functions["neurongroups"]:
-            modifier = self.Modifier(
+            modifier = self.GroupModifier(
                 name,
                 self.neurongroups,
                 self.functions["neurongroups"],
-                lambda: self.set_rebuilt(True),
+                with_rebuilt=lambda: self.set_rebuilt(True),
+                element_adder=lambda _, __, ___: self.set_rebuilt(True),
             )
+
             self.functions["neurongroups"][name] = {
                 "rename": modifier.rename,
                 "delete": modifier.delete,
-                "element_added": lambda *_: self.set_rebuilt(True),
-                "element_removed": lambda *_: self.set_rebuilt(True),
+                "element_added": modifier.add_element,
+                "element_removed": modifier.delete_element,
             }
 
         element_modifier = self.Modifier(
@@ -849,17 +856,19 @@ class B2Model:
         if name not in self.neurongroups:
             self.neurongroups[name] = {}
         if name not in self.functions["neurongroups"]:
-            modifier = self.Modifier(
+            modifier = self.GroupModifier(
                 name,
                 self.neurongroups,
                 self.functions["neurongroups"],
-                lambda: self.set_rebuilt(True),
+                with_rebuilt=lambda: self.set_rebuilt(True),
+                element_adder=lambda _, __, ___: self.set_rebuilt(True),
             )
+
             self.functions["neurongroups"][name] = {
                 "rename": modifier.rename,
                 "delete": modifier.delete,
-                "element_added": lambda *_: self.set_rebuilt(True),
-                "element_removed": lambda *_: self.set_rebuilt(True),
+                "element_added": modifier.add_element,
+                "element_removed": modifier.delete_element,
             }
 
         element_modifier = self.Modifier(
@@ -902,17 +911,19 @@ class B2Model:
         if name not in self.neurongroups:
             self.neurongroups[name] = {}
         if name not in self.functions["neurongroups"]:
-            modifier = self.Modifier(
+            modifier = self.GroupModifier(
                 name,
                 self.neurongroups,
                 self.functions["neurongroups"],
-                lambda: self.set_rebuilt(True),
+                with_rebuilt=lambda: self.set_rebuilt(True),
+                element_adder=lambda _, __, ___: self.set_rebuilt(True),
             )
+
             self.functions["neurongroups"][name] = {
                 "rename": modifier.rename,
                 "delete": modifier.delete,
-                "element_added": lambda *_: self.set_rebuilt(True),
-                "element_removed": lambda *_: self.set_rebuilt(True),
+                "element_added": modifier.add_element,
+                "element_removed": modifier.delete_element,
             }
         element_modifier = self.Modifier(
             "refractory",
@@ -954,17 +965,19 @@ class B2Model:
             self.neurongroups[name] = {}
 
         if name not in self.functions["neurongroups"]:
-            modifier = self.Modifier(
+            modifier = self.GroupModifier(
                 name,
                 self.neurongroups,
                 self.functions["neurongroups"],
-                lambda: self.set_rebuilt(True),
+                with_rebuilt=lambda: self.set_rebuilt(True),
+                element_adder=lambda _, __, ___: self.set_rebuilt(True),
             )
+
             self.functions["neurongroups"][name] = {
                 "rename": modifier.rename,
                 "delete": modifier.delete,
-                "element_added": lambda *_: self.set_rebuilt(True),
-                "element_removed": lambda *_: self.set_rebuilt(True),
+                "element_added": modifier.add_element,
+                "element_removed": modifier.delete_element,
             }
         element_modifier = self.Modifier(
             "neuronnumber",
@@ -1017,17 +1030,19 @@ class B2Model:
             self.neurongroups[name] = {}
 
         if name not in self.functions["neurongroups"]:
-            modifier = self.Modifier(
+            modifier = self.GroupModifier(
                 name,
                 self.neurongroups,
                 self.functions["neurongroups"],
-                lambda: self.set_rebuilt(True),
+                with_rebuilt=lambda: self.set_rebuilt(True),
+                element_adder=lambda _, __, ___: self.set_rebuilt(True),
             )
+
             self.functions["neurongroups"][name] = {
                 "rename": modifier.rename,
                 "delete": modifier.delete,
-                "element_added": lambda *_: self.set_rebuilt(True),
-                "element_removed": lambda *_: self.set_rebuilt(True),
+                "element_added": modifier.add_element,
+                "element_removed": modifier.delete_element,
             }
 
         element_modifier = self.Modifier(
@@ -1070,17 +1085,19 @@ class B2Model:
             self.neurongroups[name] = {}
 
         if name not in self.functions["neurongroups"]:
-            modifier = self.Modifier(
+            modifier = self.GroupModifier(
                 name,
                 self.neurongroups,
                 self.functions["neurongroups"],
-                lambda: self.set_rebuilt(True),
+                with_rebuilt=lambda: self.set_rebuilt(True),
+                element_adder=lambda _, __, ___: self.set_rebuilt(True),
             )
+
             self.functions["neurongroups"][name] = {
                 "rename": modifier.rename,
                 "delete": modifier.delete,
-                "element_added": lambda *_: self.set_rebuilt(True),
-                "element_removed": lambda *_: self.set_rebuilt(True),
+                "element_added": modifier.add_element,
+                "element_removed": modifier.delete_element,
             }
 
         element_modifier = self.Modifier(
