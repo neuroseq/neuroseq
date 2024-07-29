@@ -405,9 +405,6 @@ class B2Model:
             value : str
                 value to set the element to
             """
-            print(
-                "modifying: ", self.current_name, self.pdict[self.current_name], value
-            )
             self.pdict[self.current_name] = value
             self.with_rebuilt()
 
@@ -1598,7 +1595,7 @@ class B2Model:
             self.functions["monitors"][name] = {
                 "rename": modifier.rename,
                 "delete": modifier.delete,
-                "element_added": lambda: self.set_rebuilt(True),  # do nothing
+                "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
 
@@ -1652,7 +1649,7 @@ class B2Model:
             self.functions["monitors"][name] = {
                 "rename": modifier.rename,
                 "delete": modifier.delete,
-                "element_added": lambda: self.set_rebuilt(True),  # do nothing
+                "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
 
@@ -1706,7 +1703,7 @@ class B2Model:
             self.functions["monitors"][name] = {
                 "rename": modifier.rename,
                 "delete": modifier.delete,
-                "element_added": lambda: self.set_rebuilt(True),  # do nothing
+                "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
 
@@ -1759,7 +1756,7 @@ class B2Model:
             self.functions["monitors"][name] = {
                 "rename": modifier.rename,
                 "delete": modifier.delete,
-                "element_added": lambda: self.set_rebuilt(True),  # do nothing
+                "element_added": lambda: self.set_rebuilt(True),
                 "element_removed": lambda: self.set_rebuilt(True),
             }
 
