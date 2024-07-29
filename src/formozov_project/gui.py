@@ -625,6 +625,7 @@ class Gui(QtWidgets.QMainWindow):
                 toolbar,
                 icon=qta.icon(f"mdi6.{icon}"),
                 checkable=True,
+                is_checked=True,
             )
         add_action(
             "Link X axes",
@@ -633,6 +634,7 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             icon=qta.icon("mdi6.arrow-horizontal-lock"),
             checkable=True,
+            is_checked=True,
         )
         add_action(
             "Link Y axes",
@@ -641,6 +643,7 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             icon=qta.icon("mdi6.arrow-vertical-lock"),
             checkable=True,
+            is_checked=True,
         )
 
     def _create_actions_settings(
