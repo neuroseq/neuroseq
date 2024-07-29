@@ -30,6 +30,7 @@ from formozov_project.utils import with_wait_cursor
 class GuiSettings:
     max_ram_synapse_plot_matrix: int = 256
     brian2_backend: str = "cython"
+    stim_padding_secs: int = 5
 
 
 class Gui(QtWidgets.QMainWindow):
@@ -98,6 +99,7 @@ class Gui(QtWidgets.QMainWindow):
             self.continue_simulation_action.setText("&Continue simulation")
         else:
             self.continue_simulation_action.setText("&Run simulation")
+        self.stim_editor.set_model(self.model)
         self.set_neuron(self.cmb_neuron.currentText())
         self.set_synapse(self.cmb_synapse.currentText())
         self.set_spike(self.cmb_spike.currentText())
@@ -362,7 +364,9 @@ class Gui(QtWidgets.QMainWindow):
             return
         try:
             self.model.run_simulation(
-                simulation_time * b2.second, report=self._update_simulation_progress
+                simulation_time * b2.second,
+                report=self._update_simulation_progress,
+                timed_array_padding_seconds=self.settings.stim_padding_secs,
             )
         except Exception as e:
             QtWidgets.QMessageBox.critical(
@@ -397,7 +401,7 @@ class Gui(QtWidgets.QMainWindow):
         for widget in [self.trace_widget, self.spike_widget]:
             widget.setYLink(link_target)
 
-    def btn_max_ram_synapse_plot_matrix(self) -> None:
+    def choose_max_ram_synapse_plot_matrix(self) -> None:
         new_max_ram, ok = QtWidgets.QInputDialog.getText(
             self,
             "RAM limit",
@@ -418,7 +422,7 @@ class Gui(QtWidgets.QMainWindow):
             return
         self._update_data()
 
-    def btn_set_brian2_backend(self) -> None:
+    def choose_brian2_backend(self) -> None:
         backends = ["cython", "numpy"]
         try:
             current_backend_index = backends.index(self.settings.brian2_backend)
@@ -437,6 +441,29 @@ class Gui(QtWidgets.QMainWindow):
         self.logger.info(f"Setting Brian2 backend to {new_backend}")
         b2.prefs.codegen.target = new_backend
         self.settings.brian2_backend = new_backend
+
+    def choose_stim_padding_secs(self) -> None:
+        new_padding_secs, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "Stimulus padding",
+            "Number of seconds of padding for stimuli beyond simulation time",
+            QtWidgets.QLineEdit.EchoMode.Normal,
+            f"{self.settings.max_ram_synapse_plot_matrix}",
+        )
+        if not ok:
+            return
+        try:
+            self.settings.stim_padding_secs = max(0, int(new_padding_secs))
+        except ValueError:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Invalid input",
+                f"Could not parse padding '{new_padding_secs}' as a number",
+            )
+            return
+        self.logger.info(
+            f"Setting stimulus padding to {self.settings.stim_padding_secs}s"
+        )
 
     def about(self) -> None:
         QtWidgets.QMessageBox.about(
@@ -625,6 +652,7 @@ class Gui(QtWidgets.QMainWindow):
                 toolbar,
                 icon=qta.icon(f"mdi6.{icon}"),
                 checkable=True,
+                is_checked=True,
             )
         add_action(
             "Link X axes",
@@ -633,6 +661,7 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             icon=qta.icon("mdi6.arrow-horizontal-lock"),
             checkable=True,
+            is_checked=True,
         )
         add_action(
             "Link Y axes",
@@ -641,14 +670,15 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             icon=qta.icon("mdi6.arrow-vertical-lock"),
             checkable=True,
+            is_checked=True,
         )
 
     def _create_actions_settings(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
     ) -> None:
-        add_action("&Brian2 simulation backend", self.btn_set_brian2_backend, menu)
+        add_action("&Brian2 simulation backend", self.choose_brian2_backend, menu)
         add_action(
-            "&Synapse matrix RAM limit", self.btn_max_ram_synapse_plot_matrix, menu
+            "&Synapse matrix RAM limit", self.choose_max_ram_synapse_plot_matrix, menu
         )
 
     def _create_actions_help(
