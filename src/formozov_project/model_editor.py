@@ -226,7 +226,7 @@ class EditableParameterTree(ParameterTree):
         self.name = domain_name
         self.states = getattr(self.b2model, self.name)
         self.functions = self.b2model.functions[self.name]
-
+        self.domain_name = domain_name
         self.list_items = list_items
 
         params = self._convert_dict_to_params(self.states, self.functions)
@@ -242,7 +242,9 @@ class EditableParameterTree(ParameterTree):
             QtWidgets.QMessageBox.critical(self, "Model definition error", message)
 
         self.add_item_action = QtWidgets.QAction(f"add {self.name}")
-        self.add_item_action.triggered.connect(self._add_item)
+        # self.add_item_action.triggered.connect(self._node_added)
+
+        self.root.sigTreeStateChanged.connect(self._node_added)
 
     def _call_with_errormessage(self, signal: Callable, *args: Any) -> Any:
         """
@@ -280,17 +282,6 @@ class EditableParameterTree(ParameterTree):
         param : Parameter
             parent paremeter
         """
-
-        # def childadded_slot(parent, child, idx):
-        #     print("child added: ", parent.name(), child.name(), idx)
-        #     funcs["element_added"](
-        #                 parent.name(),
-        #                 child.name(),
-        #                 self._call_with_errormessage(
-        #                     parse_string_to_quantity, child.value()
-        #                 ),
-        #             )
-
         if param.type() == "group":
             if all(
                 f in list(funcs.keys()) for f in ["element_added", "element_removed"]
@@ -424,36 +415,32 @@ class EditableParameterTree(ParameterTree):
 
         return params
 
-    def _add_item(
+    def _node_added(
         self,
     ) -> None:
         """
         Call the custom dialog given in the callers constructor to add custom elements and update
         the parametertree accordingly
         """
+        self.clear()
 
-        # check which name has changed, add this name to the internal dict
-        # and to the parameters that are displayed
+        # Recreate the tree with updated parameters
+        params = self._convert_dict_to_params(self.states, self.functions)
+        self.root = Parameter.create(
+            name=self.domain_name, type="group", children=params
+        )
 
-        old_names = set(getattr(self.b2model, self.name).keys())
-        self.dialog = self.dialogtype(self.b2model)
+        self.setParameters(self.root, showTop=False)
 
-        # update the internal states by
-        # FIXME: this needs to be done recursively -> rebuild from root node upwards
-        if self.dialog.exec():
-            new_names = set(getattr(self.b2model, self.name).keys())
-            print("trigger add item: ", old_names, new_names)
+        try:
+            self._connect_parameters(self.root, self.functions)
+        except Exception as e:
+            message = f"Error when reading model definition: {e}"
+            self.logger.critical(message)
+            QtWidgets.QMessageBox.critical(self, "Model definition error", message)
 
-            additional_names = list(new_names - old_names)
-            if len(additional_names) > 0:
-                new_name = additional_names[0]
-                param = self._convert_dict_to_params(
-                    {
-                        new_name: getattr(self.b2model, self.name)[new_name],
-                    },
-                    self.functions,
-                )
-                self.root.addChildren(param)
+        # Reconnect the signal
+        self.root.sigTreeStateChanged.connect(self._node_added)
 
     def contextMenuEvent(self, ev: QtCore.QEvent) -> None:
         """

@@ -1272,13 +1272,13 @@ class InitialConditionDialog(ModelDialog):
 
         row += 1
 
-        self.var_name = QtWidgets.QLabel("Variable", self)
-        self.var = QtWidgets.QComboBox(self)
-        self.var_button = QtWidgets.QPushButton("save", self)
+        # self.var_name = QtWidgets.QLabel("Variable", self)
+        # self.var = QtWidgets.QComboBox(self)
+        # self.var_button = QtWidgets.QPushButton("save", self)
 
-        self.layout.addWidget(self.var_name, row, 1, 1, 1)
-        self.layout.addWidget(self.var, row, 2, 1, 1)
-        self.layout.addWidget(self.var_button, row, 3, 1, 1)
+        self.var, self.var_button = self.add_text_field(
+            "Variable", textfieldtype=QtWidgets.QLineEdit
+        )
 
         row += 1
 
@@ -1313,13 +1313,6 @@ class InitialConditionDialog(ModelDialog):
         """
         if any(var not in self.params for var in ["elementname", "varname", "value"]):
             self.display_error("Cannot define incompletely specified initial condition")
-        elif (
-            self.params["varname"]
-            not in self.model.network[self.params["elementname"]].variables
-        ):
-            self.display_error(
-                f'Variable name {self.params["varname"]} does not exist in element {self.params["elementname"]}'
-            )
         else:
             try:
                 self.model.define_init(
@@ -1343,15 +1336,12 @@ class InitialConditionDialog(ModelDialog):
         self.source_button.setText("saved")
         # FIXME: make sure this uses the variables defined in the equations of the system
         # even if it is not yet assembled.
-        self.var.addItems(
-            sorted(self.model.network[self.params["elementname"]].variables.keys())
-        )
 
     def accept_variable(self) -> None:
         """
         accept_variable Accept a variable to set an initial condition for
         """
-        self.params["varname"] = self.var.currentText()
+        self.params["varname"] = self.var.text()
         self.var_button.setDown(True)
         self.var_button.setText("saved")
 
