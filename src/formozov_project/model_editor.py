@@ -242,7 +242,9 @@ class EditableParameterTree(ParameterTree):
             QtWidgets.QMessageBox.critical(self, "Model definition error", message)
 
         self.add_item_action = QtWidgets.QAction(f"add {self.name}")
-        # self.add_item_action.triggered.connect(self._node_added)
+        self.add_item_action.triggered.connect(
+            lambda: self.dialogtype(self.b2model, self).exec()
+        )
 
         self.root.sigTreeStateChanged.connect(self._node_added)
 
