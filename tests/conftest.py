@@ -197,7 +197,7 @@ def mfx_ornstein() -> b2_model.B2Model:
 
     model = b2_model.B2Model(seed=4321)
     model.define_neuronnumber("neurongroup", 5)
-    model.define_dt(0.5 * b2.ms)
+    model.define_dt("neurongroup", 0.5 * b2.ms)
     model.define_solver_method("neurongroup", "euler")
     model.define_equation("neurongroup", eqs)
     model._assemble_neurongroup(name="neurongroup")
@@ -229,7 +229,6 @@ def mfx_nmda() -> b2_model.B2Model:
     c = 1 / (10 * b2.ms)
 
     model = b2_model.B2Model(seed=4321)
-    # model.define_dt(0.2 * b2.ms)
 
     model.define_parameter("a", a)
     model.define_parameter("b", b)
@@ -302,7 +301,7 @@ def mfx_parameterized(
     mfx.define_neuronnumber("P", n)
     mfx.define_threshold("P", threshold)
     mfx.define_refractory("P", refractory)
-    mfx.define_dt(dt)
+    mfx.define_dt("P", dt)
     mfx.define_solver_method("P", method)
     mfx._assemble_neurongroup("P")
 

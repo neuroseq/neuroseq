@@ -382,6 +382,9 @@ class B2Model:
             value : str
                 value to set the element to
             """
+            print(
+                "modifying: ", self.current_name, self.pdict[self.current_name], value
+            )
             self.pdict[self.current_name] = value
             self.with_rebuilt()
 

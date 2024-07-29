@@ -377,17 +377,8 @@ class EditableParameterTree(ParameterTree):
                 )
             else:
                 # Determine the parameter type based on value type
-                if isinstance(
-                    value, int | float
-                ):  # make numbers to float to be consistent with python conversions
-                    param_type = "float"
-                elif isinstance(value, bool):
-                    param_type = "bool"
-                elif isinstance(value, str):
-                    param_type = "text" if "\n" in value else "str"
-                elif value is None:
-                    param_type = "str"
-                    value = str(value)
+                param_type = "str"
+                value = str(value)
                 param = {
                     "name": key,
                     "type": param_type,
@@ -860,8 +851,6 @@ class ModelEditorDialog(QtWidgets.QDialog):
             self.b2model.initials = self.backup["initials"]
             self.b2model.functions = self.functions_backup
             self.b2model.define_b2seed(self.backup["seed"])
-            if self.backup["timestep"] is not None:
-                self.b2model.define_dt(self.backup["timestep"])
             self.b2model.assemble_network()  # keep underlying network in sync
         except Exception as e:
             message = f"Error when restoring old model: {e}"

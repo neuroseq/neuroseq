@@ -392,3 +392,38 @@ def test_modeldialog_reject(
             "title": "Model specification error",
         },
     ]
+
+
+def test_monitordialog_with_run(
+    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+):
+    mfx_nmda.define_monitor_dt("M", 200 * b2.ms)
+    mfx_nmda.assemble_network()
+    assert mfx_nmda.monitors["M"]["dt"] == 200 * b2.ms
+
+    diag = EditableMonitorTree(mfx_nmda)
+
+    m = diag.findItems(
+        "M",
+        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+        0,
+    )[0]
+
+    mfx_nmda.run_simulation(1 * b2.second)
+
+    assert mfx_nmda.network["M"].g.shape[1] == 5
+    dtparam = m.child(4)
+
+    mfx_nmda.assemble_network()
+
+    with qtbot.waitSignal(dtparam.param.sigValueChanged, timeout=1000, raising=True):
+        dtparam.param.setValue("100 * ms")
+
+    assert mfx_nmda.monitors["M"]["dt"] == 100 * b2.ms
+
+    mfx_nmda.assemble_network()
+    assert mfx_nmda.network["M"].clock.dt == 100 * b2.ms
+
+    mfx_nmda.run_simulation(1 * b2.second)
+
+    assert mfx_nmda.network["M"].g.shape[1] == 10
