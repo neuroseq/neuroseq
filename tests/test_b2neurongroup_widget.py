@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import formozov_project.b2_model_widget as B2W
+from brian2 import ms
 from formozov_project.b2_model import B2Model
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
@@ -89,6 +90,35 @@ def test_neurondialog_define_equation(qtbot: QtBot) -> None:
     )
 
 
+def test_neurondialog_define_dt(qtbot: QtBot) -> None:
+    ndiag = B2W.NeuronGroupDialog(B2Model())
+
+    qtbot.addWidget(ndiag)
+
+    ndiag.show()
+
+    qtbot.keyClicks(ndiag.name_entry, "x")
+
+    assert ndiag.name_entry.text() == "x"
+
+    assert "x" not in ndiag.model.neurongroups
+
+    qtbot.mouseClick(ndiag.name_button, QtCore.Qt.MouseButton.LeftButton)
+
+    assert "x" in ndiag.model.neurongroups
+
+    qtbot.keyClicks(ndiag.dt, "0.1*ms")
+
+    assert ndiag.dt.text() == "0.1*ms"
+
+    assert "dt" not in ndiag.model.neurongroups["x"]
+
+    qtbot.mouseClick(ndiag.timestep_button, QtCore.Qt.MouseButton.LeftButton)
+
+    assert "dt" in ndiag.model.neurongroups["x"]
+    assert ndiag.model.neurongroups["x"]["dt"] == 0.1 * ms
+
+
 def test_neurongroup_assembling(qtbot: QtBot) -> None:
     ndiag = B2W.NeuronGroupDialog(B2Model())
 
@@ -100,6 +130,7 @@ def test_neurongroup_assembling(qtbot: QtBot) -> None:
     ndiag.model.neurongroups["x"] = {}
     ndiag.model.neurongroups["x"]["model"] = "dv/dt = -v : volt\n"
     ndiag.model.neurongroups["x"]["neuronnumber"] = 64
+    ndiag.model.neurongroups["x"]["dt"] = 0.1 * ms
     ndiag.name = "x"
 
     ndiag.accept()
@@ -109,6 +140,7 @@ def test_neurongroup_assembling(qtbot: QtBot) -> None:
     assert ndiag.model.neurongroups["x"] == {
         "model": "dv/dt = -v : volt\n",
         "neuronnumber": 64,
+        "dt": 0.1 * ms,
     }
 
 

@@ -394,6 +394,9 @@ class NeuronGroupDialog(ModelDialog):
         self.neuronnumber, self.neuronnumber_button = self.add_text_field(
             "Neuronnumber", QtWidgets.QLineEdit
         )
+        self.dt, self.timestep_button = self.add_text_field(
+            "timestep", QtWidgets.QLineEdit
+        )
 
         for qle in [
             self.equation,
@@ -402,6 +405,7 @@ class NeuronGroupDialog(ModelDialog):
             self.refractory,
             self.solver,
             self.neuronnumber,
+            self.dt,
         ]:
             qle.setMinimumWidth(qle.sizeHint().width() * 2)
 
@@ -461,6 +465,16 @@ class NeuronGroupDialog(ModelDialog):
                 self.model.define_neuronnumber,
                 self.neuronnumber_button,
                 lambda v: int(v),
+            )
+        )
+
+        self.timestep_button.clicked.connect(
+            lambda: self.accept_parameter_with_savebutton(
+                self.dt,
+                "dt",
+                self.model.define_dt,
+                self.timestep_button,
+                self._convert_string_to_quantity,
             )
         )
 
@@ -711,6 +725,8 @@ class SynapseDialog(ModelDialog):
             "Connection prob."
         )
 
+        self.dt, self.timestep_button = self.add_text_field("timestep")
+
         for qle in [
             self.origin,
             self.target,
@@ -719,6 +735,7 @@ class SynapseDialog(ModelDialog):
             self.post,
             self.connect,
             self.connect_prob,
+            self.dt,
         ]:
             qle.setMinimumWidth(qle.sizeHint().width() * 2)
 
@@ -782,7 +799,15 @@ class SynapseDialog(ModelDialog):
                 converter=lambda input: float(input),
             )
         )
-
+        self.timestep_button.clicked.connect(
+            lambda: self.accept_parameter_with_savebutton(
+                self.dt,
+                "timestep",
+                self.model.define_synapse_dt,
+                self.timestep_button,
+                converter=self._convert_string_to_quantity,
+            )
+        )
         self.name_button.clicked.connect(lambda: self.accept_name("synapses"))
         self.show_parameters_button.clicked.connect(
             lambda: self.display_parameters("synapses")
@@ -1026,6 +1051,7 @@ class MonitorDialog(ModelDialog):
         self.tp: str | None = None
         self.var: str | None = None
         self.src: str | None = None
+        self.timestep: b2.Quantity | None = None
 
         self.type, self.type_button = self.add_text_field(
             "Type",
@@ -1040,6 +1066,11 @@ class MonitorDialog(ModelDialog):
             "Variable",
             QtWidgets.QLineEdit,
         )
+
+        self.dt, self.timestep_button = self.add_text_field(
+            "timestep", QtWidgets.QLineEdit
+        )
+
         row = self.layout.rowCount()
 
         self.layout.addWidget(
@@ -1063,11 +1094,9 @@ class MonitorDialog(ModelDialog):
 
         self.variable_button.clicked.connect(self.accept_variable)
 
-        for qle in [
-            self.type,
-            self.source,
-            self.variable,
-        ]:
+        self.timestep_button.clicked.connect(self.accept_dt)
+
+        for qle in [self.type, self.source, self.variable, self.dt]:
             qle.setMinimumWidth(qle.sizeHint().width() * 2)
 
     def accept_type(self) -> None:
@@ -1111,6 +1140,18 @@ class MonitorDialog(ModelDialog):
         self.variable_button.setText("saved")
         self.variable_button.setDown(True)
 
+    def accept_dt(self) -> None:
+        """
+        Accept the variable input
+        """
+
+        if self.dt.text() == "":
+            self.display_error("Please define dt first")
+
+        self.timestep = self._convert_string_to_quantity(self.dt.text())
+        self.timestep_button.setText("saved")
+        self.timestep_button.setDown(True)
+
     def accept(self) -> None:
         """
         Accept the monitor data and define a new monitor in the held model
@@ -1119,6 +1160,15 @@ class MonitorDialog(ModelDialog):
             self.model.define_monitor_source(self.name, self.src)
             self.model.define_monitor_type(self.name, self.tp)
             self.model.define_monitor_variable(self.name, self.var)
+
+            if self.timestep:
+                if self.tp == "StateMonitor":
+                    self.model.define_monitor_dt(self.name, self.timestep)
+                else:
+                    self.display_error(
+                        "Error, timestep can only be defined for StateMonitor"
+                    )
+
             super().accept()
         except Exception as e:
             self.display_error(f"Error when defining monitor {self.name}: {e}")
@@ -1148,8 +1198,8 @@ class MonitorDialog(ModelDialog):
 
         for i, (n, v) in enumerate(
             zip(
-                ["name", "type", "source", "variable"],
-                [self.name, self.tp, self.src, self.var],
+                ["name", "type", "source", "variable", "timestep"],
+                [self.name, self.tp, self.src, self.var, self.dt],
                 strict=True,
             )
         ):
@@ -1358,7 +1408,6 @@ class B2ModelWidget(ModelDialog):
         self.params["monitors"] = self.model.monitors
         self.params["synapses"] = self.model.synapses
         self.params["parameters"] = self.model.parameters
-        self.params["timestep"] = self.model.dt
         self.params["seed"] = self.model.seed
 
         self.button_layout = QtWidgets.QVBoxLayout()
@@ -1372,10 +1421,6 @@ class B2ModelWidget(ModelDialog):
         self.setWindowTitle("Model definition")
         self.show_parameters_button.hide()
 
-        self.timestep, self.timestep_button = self.add_text_field(
-            "Timestep",
-            layout=self.entry_layout,
-        )
         self.seed, self.seed_button = self.add_text_field(
             "Random seed",
             layout=self.entry_layout,
@@ -1430,7 +1475,6 @@ class B2ModelWidget(ModelDialog):
 
         for qle in [
             self.name_entry,
-            self.timestep,
             self.seed,
         ]:
             qle.setMinimumWidth(qle.sizeHint().width() * 2)
@@ -1442,7 +1486,6 @@ class B2ModelWidget(ModelDialog):
         self.monitor_button.clicked.connect(self.open_monitor_dialog)
         self.add_subgroup_button.clicked.connect(self.open_subgroup_dialog)
 
-        self.timestep_button.clicked.connect(self.accept_timestep)
         self.seed_button.clicked.connect(self.accept_seed)
         self.init_button.clicked.connect(self.open_initial_condition_dialog)
 
@@ -1531,24 +1574,6 @@ class B2ModelWidget(ModelDialog):
         self.subgroupdialog = NeuronSubgroupDialog(self.model, self)
         if self.subgroupdialog.exec():
             self.update_param_display("neurongroups", self.model.neurongroups)
-
-    def accept_timestep(self) -> None:
-        """
-        set the global timestep from text input
-        """
-        txtinput = self.timestep.text()
-
-        dt = None
-        try:
-            dt = self._convert_string_to_quantity(txtinput)
-        except Exception as e:
-            self.display_error(f"Error when trying to convert timestep {txtinput}: {e}")
-
-        if dt is not None:
-            self.model.define_dt(dt)
-            self.timestep_button.setText("saved")
-            self.timestep_button.setDown(True)
-            self.update_param_display("timestep", self.model.dt)
 
     def accept_seed(self) -> None:
         """

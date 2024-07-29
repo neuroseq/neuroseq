@@ -11,7 +11,7 @@ from qtpy import QtCore
 @pytest.fixture
 def initdlg(qtbot: QtBot, mfx_ornstein: B2W.B2Model) -> B2W.InitialConditionWidget:
     mfx_ornstein.define_neuronnumber("neurongroup2", 5)
-    mfx_ornstein.define_dt(0.5 * ms)
+    mfx_ornstein.define_dt("neurongroup2", 0.5 * ms)
     mfx_ornstein.define_solver_method("neurongroup2", "euler")
     mfx_ornstein.define_equation(
         "neurongroup2", "dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1"
@@ -96,7 +96,7 @@ def test_accept(initdlg: B2W.InitialConditionWidget, qtbot: QtBot) -> None:
     """
 
     initdlg.model.define_neuronnumber("neurongroup3", 5)
-    initdlg.model.define_dt(0.2 * ms)
+    initdlg.model.define_dt("neurongroup3", 0.2 * ms)
     initdlg.model.define_solver_method("neurongroup3", "euler")
     initdlg.model.define_equation("neurongroup3", eqs)
     initdlg.model._assemble_neurongroup(name="neurongroup3")

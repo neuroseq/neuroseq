@@ -40,6 +40,8 @@ def test_monitor_accept_variables(qtbot: QtBot) -> None:
 
     mdlg.source.setText("P")
 
+    mdlg.dt.setText("0.1*ms")
+
     mdlg.accept_type()
     assert mdlg.tp == "StateMonitor"
 
@@ -48,6 +50,9 @@ def test_monitor_accept_variables(qtbot: QtBot) -> None:
 
     mdlg.accept_variable()
     assert mdlg.var == "var"
+
+    mdlg.accept_dt()
+    assert mdlg.timestep == 0.1 * ms
 
     mdlg.variable.setText("")
 
@@ -76,7 +81,7 @@ def test_monitor_accept(qtbot: QtBot) -> None:
     """
 
     mdlg.model.define_neuronnumber("neurongroup", 2)
-    mdlg.model.define_dt(0.2 * ms)
+    mdlg.model.define_dt("neurongroup", 0.2 * ms)
     mdlg.model.define_solver_method("neurongroup", "euler")
     mdlg.model.define_equation("neurongroup", eqs)
     mdlg.model._assemble_neurongroup(name="neurongroup")

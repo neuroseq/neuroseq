@@ -66,12 +66,19 @@ def test_define_equation_incremental(mfx: b2_model.B2Model) -> None:
 
 def test_define_dt(mfx: b2_model.B2Model) -> None:
     assert mfx.neurongroups == {}
+    standard_dt = b2.defaultclock.dt
 
-    mfx.define_dt(0.1 * b2.ms)
+    mfx.define_dt("neurons", 0.1 * b2.ms)
+    mfx.define_synapse_dt("S", 0.75 * b2.ms)
+    mfx.define_monitor_dt("M", 10 * b2.ms)
 
-    assert mfx.dt is not None
-    assert np.isclose(mfx.dt.base, 0.0001)
-    assert mfx.dt.has_same_dimensions(0.1 * b2.ms)
+    assert b2.defaultclock.dt == standard_dt
+    assert np.isclose(mfx.neurongroups["neurons"]["dt"].base, 0.0001)
+    assert mfx.neurongroups["neurons"]["dt"].has_same_dimensions(0.1 * b2.ms)
+    assert np.isclose(mfx.synapses["S"]["dt"].base, 0.00075)
+    assert mfx.synapses["S"]["dt"].has_same_dimensions(0.75 * b2.ms)
+    assert np.isclose(mfx.monitors["M"]["dt"].base, 0.01)
+    assert mfx.monitors["M"]["dt"].has_same_dimensions(0.01 * b2.second)
 
 
 def test_define_parameter(mfx: b2_model.B2Model) -> None:
@@ -611,13 +618,18 @@ def test_ornstein_uhlenbeck(mfx_ornstein: b2_model.B2Model) -> None:
         dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
         """,
         method="euler",
+        dt=mfx_ornstein.neurongroups["neurongroup"]["dt"],
     )
 
     N.tau = np.array([1, 0.8, 0.6, 0.3, 0.1]) * b2.second
     N.sigma = np.array([0.1, 0.31622, 0.4, 0.2, 0.88])
     N.y = 1
 
-    M = b2.StateMonitor(N, "y", record=True)
+    M = b2.StateMonitor(
+        N,
+        "y",
+        record=True,
+    )
 
     network = b2.Network([N, M])
 
@@ -626,6 +638,43 @@ def test_ornstein_uhlenbeck(mfx_ornstein: b2_model.B2Model) -> None:
     assert np.allclose(M.t / b2.second, mfx_ornstein.network["M"].t / b2.second)
     assert np.allclose(M.y[1], mfx_ornstein.network["M"].y[1])
     assert np.allclose(M.y[0], mfx_ornstein.network["M"].y[0])
+
+
+def test_ornstein_uhlenbeck_other_dt() -> None:
+    eqs = """
+        tau : second
+        sigma : 1
+        dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
+    """
+    model = b2_model.B2Model(seed=4321)
+    model.define_neuronnumber("neurongroup", 5)
+    model.define_dt("neurongroup", 125 * b2.ms)
+    model.define_dt("neurongroup", 0.5 * b2.ms)
+    model.define_solver_method("neurongroup", "euler")
+    model.define_equation("neurongroup", eqs)
+    model._assemble_neurongroup(name="neurongroup")
+
+    model.define_monitor_source("M", "neurongroup")
+    model.define_monitor_type("M", "StateMonitor")
+    model.define_monitor_variable("M", "y")
+    model.define_monitor_dt("M", 250 * b2.ms)
+    model._assemble_monitor("M")
+
+    # initial conditions
+    model.define_init(
+        "neurongroup", "tau", np.array([1, 0.8, 0.6, 0.3, 0.1]) * b2.second
+    )
+    model.define_init("neurongroup", "y", 1)
+    model.define_init("neurongroup", "sigma", np.array([0.1, 0.31622, 0.4, 0.2, 0.88]))
+
+    for n in model.initials:
+        model._assemble_initial_conditions(n)
+
+    model.must_be_rebuilt = False
+
+    model.run_simulation(5 * b2.second)
+
+    assert model.network["M"].y.shape == (5, 20)
 
 
 def test_NMDA_model(mfx_nmda: b2_model.B2Model) -> None:
@@ -751,7 +800,6 @@ def test_assemble_network(mfx_nmda, monkeypatch: MonkeyPatch) -> None:
     c = 1 / (10 * b2.ms)
 
     model = b2_model.B2Model(seed=4321)
-    # model.define_dt(0.2 * b2.ms)
 
     model.define_parameter("a", a)
     model.define_parameter("b", b)
@@ -888,22 +936,34 @@ def test_store_restore(mfx_ornstein: b2_model.B2Model) -> None:
     mfx_ornstein.run_simulation(sim_time)
     # default initial state checkpoint is made on first simulation if no other checkpoints are made
     assert len(mfx_ornstein.checkpoints) == 1
-    assert mfx_ornstein.network["M"].t[-1] == sim_time - mfx_ornstein.dt
+    assert (
+        mfx_ornstein.network["M"].t[-1]
+        == sim_time - mfx_ornstein.neurongroups["neurongroup"]["dt"]
+    )
     # restore initial state
     mfx_ornstein.restore(mfx_ornstein.checkpoints[0])
     assert len(mfx_ornstein.network["M"].t) == 0
     # store two new checkpoints
     mfx_ornstein.run_simulation(sim_time)
-    assert mfx_ornstein.network["M"].t[-1] == sim_time - mfx_ornstein.dt
+    assert (
+        mfx_ornstein.network["M"].t[-1]
+        == sim_time - mfx_ornstein.neurongroups["neurongroup"]["dt"]
+    )
     mfx_ornstein.store("t1")
     assert len(mfx_ornstein.checkpoints) == 2
     mfx_ornstein.run_simulation(sim_time)
-    assert mfx_ornstein.network["M"].t[-1] == 2 * sim_time - mfx_ornstein.dt
+    assert (
+        mfx_ornstein.network["M"].t[-1]
+        == 2 * sim_time - mfx_ornstein.neurongroups["neurongroup"]["dt"]
+    )
     mfx_ornstein.store("t2")
     assert len(mfx_ornstein.checkpoints) == 3
     # restore second checkpoint
     mfx_ornstein.restore("t1")
-    assert mfx_ornstein.network["M"].t[-1] == sim_time - mfx_ornstein.dt
+    assert (
+        mfx_ornstein.network["M"].t[-1]
+        == sim_time - mfx_ornstein.neurongroups["neurongroup"]["dt"]
+    )
     # overwrite existing checkpoint
     assert len(mfx_ornstein.checkpoints) == 3
     mfx_ornstein.store("t2")
@@ -937,7 +997,7 @@ def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
     reconstructed_model = b2_model.B2Model.load_model(tmp_path / "model.json")
 
     assert reconstructed_model.seed == mfx_nmda.seed
-    assert reconstructed_model.dt == mfx_nmda.dt
+    assert reconstructed_model.network["neurons"].dt == mfx_nmda.network["neurons"].dt
 
     # synapses
     for neurongroupname in ["neuron_input", "neurons"]:
