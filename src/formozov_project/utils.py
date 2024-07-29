@@ -185,14 +185,12 @@ def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:
                 raise RuntimeError(message) from e
 
             quantity_obj = v * unit
-
             return quantity_obj
         else:
             return v
     else:
         try:
             quantity = eval(quantity_str)
-
             return quantity
         except Exception as _:
             return quantity_str
