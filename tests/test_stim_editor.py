@@ -33,6 +33,7 @@ def test_stim_editor_actions(
     dt = 0.5 * b2.ms
     timed_array = b2.TimedArray(np.ones((n_timestamps, n_neurons)), dt=dt)
     selection = np.random.randint(3, size=(5, 2))
+    selection_inverted = 2 - selection
     timed_array.values[2:7, 1:3] = selection
     model = B2Model()
     model.parameters = {"a": timed_array, "irrelevant": 4}
@@ -79,7 +80,15 @@ def test_stim_editor_actions(
     assert np.allclose(
         stim_editor.current_stim.values[2:7, 1:3], np.zeros_like(selection)
     )
+    # paste an inverted slice into empty region starting at timeslice 10
+    stim_editor.stim_widget.select_neurons(slice(1, 3), slice(10, 15))
+    stim_editor.delete_selected_stim()
+    stim_editor.stim_widget.timeline.setX(0.5 * n_timestamps * dt / b2.second)
+    stim_editor.paste_selected_stim(invert=True)
+    assert np.allclose(stim_editor.current_stim.values[10:15, 1:3], selection_inverted)
     # paste a slice into empty region starting at timeslice 10
+    stim_editor.stim_widget.select_neurons(slice(1, 3), slice(10, 15))
+    stim_editor.delete_selected_stim()
     stim_editor.stim_widget.timeline.setX(0.5 * n_timestamps * dt / b2.second)
     assert np.allclose(
         stim_editor.current_stim.values[10:15, 1:3], np.zeros_like(selection)

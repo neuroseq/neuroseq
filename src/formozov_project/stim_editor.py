@@ -150,12 +150,7 @@ class StimEditor(QtWidgets.QWidget):
                 math.floor(time_index + time_length_s / self.current_stim.dt),
             )
             self.logger.debug(f"Time slice: {time_slice}")
-            if (
-                neuron_slice.start < 0
-                or neuron_slice.stop > self.stim_widget.n_neurons
-                or time_slice.start < 0
-                or time_slice.stop > self.stim_widget.n_timestamps
-            ):
+            if not self._is_valid_slice(neuron_slice, time_slice):
                 return
             self.draw_stim_region(neuron_slice, time_slice)
         else:
@@ -179,7 +174,7 @@ class StimEditor(QtWidgets.QWidget):
         self.copy_selected_stim()
         self.delete_selected_stim()
 
-    def paste_selected_stim(self) -> None:
+    def paste_selected_stim(self, invert=False) -> None:
         if self.current_stim is None:
             return
         time_offset = (
@@ -190,9 +185,17 @@ class StimEditor(QtWidgets.QWidget):
             self.copy_time_slice.start + time_offset,
             self.copy_time_slice.stop + time_offset,
         )
-        self.current_stim.values[new_time_slice, self.copy_neuron_slice] = (
-            self.copy_values
-        )
+        new_neuron_slice = self.copy_neuron_slice
+        if not self._is_valid_slice(new_neuron_slice, new_time_slice):
+            return
+        if invert:
+            max_value = np.max(self.copy_values)
+            if max_value == 0:
+                max_value = self.draw_stim_value
+            new_values = max_value - self.copy_values
+        else:
+            new_values = self.copy_values
+        self.current_stim.values[new_time_slice, self.copy_neuron_slice] = new_values
         self.stim_widget.set_data(self.current_stim)
         self.stim_widget.select_neurons(self.copy_neuron_slice, new_time_slice)
 
@@ -279,12 +282,7 @@ class StimEditor(QtWidgets.QWidget):
             self.stim_widget.selected_time_slice.start + time_index_offset,
             self.stim_widget.selected_time_slice.stop + time_index_offset,
         )
-        if (
-            new_neuron_slice.start < 0
-            or new_neuron_slice.stop > self.stim_widget.n_neurons
-            or new_time_slice.start < 0
-            or new_time_slice.stop > self.stim_widget.n_timestamps
-        ):
+        if not self._is_valid_slice(new_neuron_slice, new_time_slice):
             self.stim_widget.unselect_neurons()
             return
         self.cut_selected_stim()
@@ -303,6 +301,14 @@ class StimEditor(QtWidgets.QWidget):
 
     def move_selected_stim_right(self) -> None:
         self.move_selected_stim(time_index_offset=1)
+
+    def _is_valid_slice(self, neuron_slice: slice, time_slice: slice) -> bool:
+        return (
+            neuron_slice.start >= 0
+            and neuron_slice.stop <= self.stim_widget.n_neurons
+            and time_slice.start >= 0
+            and time_slice.stop <= self.stim_widget.n_timestamps
+        )
 
     def _add_actions(self, toolbar: QtWidgets.QToolBar, menu: QtWidgets.QMenu) -> None:
         self.action_toggle_draw = add_action(
@@ -380,6 +386,17 @@ class StimEditor(QtWidgets.QWidget):
                 self,
                 shortcut="Ctrl+V",
                 icon=qta.icon("mdi6.content-paste"),
+            )
+        )
+        self.actions_edit.append(
+            add_action(
+                "Paste inverted",
+                lambda: self.paste_selected_stim(invert=True),
+                menu,
+                toolbar,
+                self,
+                shortcut="Ctrl+Shift+V",
+                icon=qta.icon("fa.paste"),
             )
         )
         self.actions_edit.append(
