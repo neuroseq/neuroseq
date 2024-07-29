@@ -1259,7 +1259,10 @@ class InitialConditionDialog(ModelDialog):
 
         # make sure the objects are ordered the same way every time
         self.source.addItems(
-            sorted([object.name for object in self.model.network.objects])
+            # sorted([object.name for object in self.model.network.objects])
+            sorted(
+                list(self.model.neurongroups.keys()) + list(self.model.synapses.keys())
+            )
         )
 
         row = self.layout.rowCount()
@@ -1338,6 +1341,8 @@ class InitialConditionDialog(ModelDialog):
 
         self.source_button.setDown(True)
         self.source_button.setText("saved")
+        # FIXME: make sure this uses the variables defined in the equations of the system
+        # even if it is not yet assembled.
         self.var.addItems(
             sorted(self.model.network[self.params["elementname"]].variables.keys())
         )

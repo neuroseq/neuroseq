@@ -138,7 +138,7 @@ class QtABCMeta(type(QtCore.QObject), abc.ABCMeta):  # type: ignore
     pass
 
 
-def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:
+def parse_string_to_quantity(quantity_str: str | None) -> b2.Quantity | str | None:
     """
     Parse a string into a brian2 quantity or return it if that is not possible. Quantities can be of the from
     number * unit.
@@ -160,6 +160,9 @@ def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:
     RuntimeError
         When something goes wrong during evaluation of the unit part of the input quantity string
     """
+    if quantity_str is None:
+        return None
+
     # extract numerical value via regex. allow for multiple numbers left and right of a '.' and multiple spaces or a '*' between number and unit
     pattern = r"([\(\)\d./\*]+)\s*\*?\s*(\w*)"
     match = re.match(pattern, quantity_str)

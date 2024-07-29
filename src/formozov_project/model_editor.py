@@ -242,7 +242,7 @@ class EditableParameterTree(ParameterTree):
             QtWidgets.QMessageBox.critical(self, "Model definition error", message)
 
         self.add_item_action = QtWidgets.QAction(f"add {self.name}")
-        self.add_item_action.triggered.connect(self.add_item)
+        self.add_item_action.triggered.connect(self._add_item)
 
     def _call_with_errormessage(self, signal: Callable, *args: Any) -> Any:
         """
@@ -262,26 +262,12 @@ class EditableParameterTree(ParameterTree):
             Any return value from the slot
         """
         try:
-            return signal(*args)
+            v = signal(*args)
+            return v
         except Exception as e:
             message = f"An error occured: {e}"
+            self.logger.critical(message)
             QtWidgets.QMessageBox.critical(self, "Error", message)
-
-    def _child_added_adaptor(
-        self,
-        node: Parameter,
-        child: Parameter,
-        _: int,
-        setter: Callable = lambda _: None,
-    ) -> None:
-        print("adding element")
-        print(node.name())
-        print(child.name())
-
-        value = parse_string_to_quantity(child.value())
-
-        print(child.value(), type(child.value()))
-        print(value, type(value))
 
     def _connect_parameters(self, param: Parameter, funcs: dict[Any, Any]) -> None:
         """
@@ -294,12 +280,35 @@ class EditableParameterTree(ParameterTree):
         param : Parameter
             parent paremeter
         """
+
+        # def childadded_slot(parent, child, idx):
+        #     print("child added: ", parent.name(), child.name(), idx)
+        #     funcs["element_added"](
+        #                 parent.name(),
+        #                 child.name(),
+        #                 self._call_with_errormessage(
+        #                     parse_string_to_quantity, child.value()
+        #                 ),
+        #             )
+
         if param.type() == "group":
             if all(
                 f in list(funcs.keys()) for f in ["element_added", "element_removed"]
             ):
-                param.sigChildAdded.connect(self._child_added_adaptor)
-                param.sigChildRemoved.connect(funcs["element_removed"])
+                param.sigChildAdded.connect(
+                    lambda parent, child, __: funcs["element_added"](
+                        parent.name(),
+                        child.name(),
+                        self._call_with_errormessage(
+                            parse_string_to_quantity, child.value()
+                        ),
+                    )
+                    # childadded_slot
+                )
+
+                param.sigChildRemoved.connect(
+                    lambda _, child: funcs["element_removed"](child.name())
+                )
 
             if all(f in funcs for f in ["delete", "rename"]):
                 param.sigRemoved.connect(
@@ -415,6 +424,37 @@ class EditableParameterTree(ParameterTree):
 
         return params
 
+    def _add_item(
+        self,
+    ) -> None:
+        """
+        Call the custom dialog given in the callers constructor to add custom elements and update
+        the parametertree accordingly
+        """
+
+        # check which name has changed, add this name to the internal dict
+        # and to the parameters that are displayed
+
+        old_names = set(getattr(self.b2model, self.name).keys())
+        self.dialog = self.dialogtype(self.b2model)
+
+        # update the internal states by
+        # FIXME: this needs to be done recursively -> rebuild from root node upwards
+        if self.dialog.exec():
+            new_names = set(getattr(self.b2model, self.name).keys())
+            print("trigger add item: ", old_names, new_names)
+
+            additional_names = list(new_names - old_names)
+            if len(additional_names) > 0:
+                new_name = additional_names[0]
+                param = self._convert_dict_to_params(
+                    {
+                        new_name: getattr(self.b2model, self.name)[new_name],
+                    },
+                    self.functions,
+                )
+                self.root.addChildren(param)
+
     def contextMenuEvent(self, ev: QtCore.QEvent) -> None:
         """
         Modified context menu to allow for adding elements through custom dialogs when a right click in a free area occurs
@@ -431,51 +471,6 @@ class EditableParameterTree(ParameterTree):
             menu = QtWidgets.QMenu(self)
             menu.addAction(self.add_item_action)
             menu.exec(self.mapToGlobal(ev.pos()))
-
-    def update_params(self, new_name: str, new_data: dict[Any, Any]) -> None:
-        """
-        Update the parameters in the parametertree when a new item is added
-        to the model through the custom dialog.
-
-        Parameters
-        ----------
-        new_name : str
-            Name of the element to be added
-        new_data : dict[Any, Any]
-            Data dict to be added
-        """
-        param = self._convert_dict_to_params(
-            {
-                new_name: new_data,
-            },
-            self.functions,
-        )
-        self.root.addChildren(param)
-
-    def add_item(self) -> None:
-        """
-        Call the custom dialog given in the callers constructor to add custom elements and update
-        the parametertree accordingly
-        """
-
-        # check which name has changed, add this name to the internal dict
-        # and to the parameters that are displayed
-
-        old_names = set(getattr(self.b2model, self.name).keys())
-        self.dialog = self.dialogtype(self.b2model)
-
-        # update the internal states by
-        if self.dialog.exec():
-            new_names = set(getattr(self.b2model, self.name).keys())
-
-            new_name = list(new_names - old_names)[0]
-            param = self._convert_dict_to_params(
-                {
-                    new_name: getattr(self.b2model, self.name)[new_name],
-                },
-                self.functions,
-            )
-            self.root.addChildren(param)
 
 
 class EditableSynapseTree(EditableParameterTree):

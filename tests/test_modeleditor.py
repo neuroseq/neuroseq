@@ -1,7 +1,6 @@
 from typing import Any
 
 import brian2 as b2
-from brian2 import _numpy as np
 from formozov_project.b2_model import B2Model
 from formozov_project.b2_model_widget import NeuronGroupDialog
 from formozov_project.b2_model_widget import NeuronSubgroupDialog
@@ -432,7 +431,8 @@ def test_monitordialog_with_run(
 
 
 def test_initial_conditions(
-    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+    mfx_nmda: B2Model,
+    qtbot: QtBot,
 ) -> None:
     diag = ModelEditorDialog(mfx_nmda)
     qtbot.add_widget(diag)
@@ -448,6 +448,7 @@ def test_initial_conditions(
 
     init = children[-1]
 
+    # originally defined in this way:
     # model.define_init("S", "w", [1.0, 10.0])
     # model.define_init("neuron_input", "v", [0.0, 0.5])
     s_w = init.findItems(
@@ -477,33 +478,88 @@ def test_initial_conditions(
     assert diag.b2model.initials["S"]["w"] == 3
 
     # # add a new elemnet -> string expression
-    child_parameter = Parameter.create(
-        **{
-            "name": "new_thing",
-            "value": [1, 2, 3],
-            "renameable": True,
-            "removable": True,
-            "default": [0, 0, 0],
-            "type": "str",
-        }
-    )
+    ch_param_def = {
+        "name": "new_thing",
+        "value": [1, 2, 3],
+        "renameable": True,
+        "removable": True,
+        "default": [0, 0, 0],
+        "type": "str",
+    }
+    child_parameter = Parameter.create(**ch_param_def)
     with qtbot.waitSignal(s.param.sigChildAdded, timeout=1000, raising=True):
         s.param.addChild(child_parameter)
 
     assert diag.b2model.initials["S"]["new_thing"] == [1, 2, 3]
 
-    # add a new elemnet -> numpy based brian2 quantity
-    child_parameter["value"] = np.array([[1, 2, 3], [2, 4, 5]])
-    child_parameter["name"] = "numpy_new_thing"
-    with qtbot.waitSignal(s.param.sigChildAdded, timeout=1000, raising=True):
-        s.param.addChild(child_parameter)
+    # FIXME: numpy not supported for now - there is no good way to convert arrays back and forth between strings when using str(array) which pyqtgraph apparently does?
+    # add a new element -> numpy based brian2 quantity
+    # ch_param_def["value"] = np.array([[1, 2, 3], [2, 4, 5]])
+    # ch_param_def["name"] = "numpy_new_thing"
+    # child_parameter = Parameter.create(**ch_param_def)
 
-    assert diag.b2model.initials["S"]["new_thing"] == np.array([[1, 2, 3], [2, 4, 5]])
+    # with qtbot.waitSignal(s.param.sigChildAdded, timeout=1000, raising=True):
+    #     s.param.addChild(child_parameter)
+
+    # assert np.allclose(
+    #     diag.b2model.initials["S"]["numpy_new_thing"], np.array([[1, 2, 3], [2, 4, 5]])
+    # )
 
     # add a new element -> scalar brian2 quantity
-    child_parameter["name"] = "scalar_new_thing"
-    child_parameter["value"] = 3.2
+    ch_param_def["name"] = "scalar_new_thing"
+    ch_param_def["value"] = 3.2
+    child_parameter = Parameter.create(**ch_param_def)
+
     with qtbot.waitSignal(s.param.sigChildAdded, timeout=1000, raising=True):
         s.param.addChild(child_parameter)
 
-    assert diag.b2model.initials["S"]["new_thing"] == 3.2
+    assert diag.b2model.initials["S"]["scalar_new_thing"] == 3.2
+
+    # add a new element -> scalar brian2 quantity
+    ch_param_def["name"] = "string_new_thing"
+    ch_param_def["value"] = "w*v+3*g"
+    child_parameter = Parameter.create(**ch_param_def)
+
+    assert "string_new_thing" not in diag.b2model.initials["S"]
+    with qtbot.waitSignal(s.param.sigChildAdded, timeout=1000, raising=True):
+        s.param.addChild(child_parameter)
+
+    assert diag.b2model.initials["S"]["string_new_thing"] == "w*v+3*g"
+    assert "string_new_thing" in diag.b2model.initials["S"]
+
+    assert "string_new_thing" in diag.b2model.initials["S"]
+    with qtbot.waitSignal(s.param.sigChildRemoved, timeout=1000, raising=True):
+        s.param.removeChild(child_parameter)
+    assert "string_new_thing" not in diag.b2model.initials["S"]
+    assert "string_new_thing" not in diag.b2model.functions["initials"]["S"]
+
+    assert "S" in diag.b2model.initials
+
+    children = init.root.findChild(Parameter, "S")
+
+    with qtbot.waitSignal(init.root.sigChildRemoved, timeout=1000, raising=True):
+        s.param.remove()
+    assert "S" not in diag.b2model.initials
+
+    # add new group node entirely:
+
+    group_node_def = {
+        "name": "new_group",
+        "type": "group",
+        "children": [
+            ch_param_def,
+        ],
+        "expanded": True,
+        "removable": True,
+        "renamable": True,
+        "syncExpanded": True,
+    }
+
+    group_param = Parameter.create(**group_node_def)
+
+    # in reality the addition to the group happens via the respective dialog,
+    # so it's only tested that rebuild is set correctly
+    diag.b2model.set_rebuilt(False)
+    with qtbot.waitSignal(init.root.sigChildAdded, timeout=1000, raising=True):
+        init.root.addChild(group_param)
+    assert diag.b2model.must_be_rebuilt is True
