@@ -6,6 +6,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
+from typing import NoReturn
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -29,6 +30,11 @@ class B2Model:
             self.must_be_rebuilt = True
 
         return do_with_rebuild
+
+    def _handle_exception(self, e: Exception, message: str) -> NoReturn:
+        self.logger.critical(message)
+        self.logger.exception(e)
+        raise RuntimeError(message) from e
 
     def _add_equation_to_group(self, group: dict, line: str) -> None:
         r"""
@@ -93,24 +99,22 @@ class B2Model:
                 name=name,
             )
         except Exception as e:
-            message = f"Error when trying to create a neuronsubgroup {name}: {e}"
-            self.logger.critical(message)
-            raise RuntimeError(message) from e
+            self._handle_exception(
+                e, f"Error when trying to create a neuronsubgroup {name}: {e}"
+            )
 
         if any(obj.name == name for obj in self.network.objects):
             try:
                 self.network.remove(sng)
             except Exception as e:
-                message = f"Error when removing existing subgroup {name}: {e}"
-                self.logger.critical(message)
-                raise RuntimeError(message) from e
+                self._handle_exception(
+                    e, f"Error when removing existing subgroup {name}: {e}"
+                )
 
         try:
             self.network.add(sng)
         except Exception as e:
-            message = f"Error when adding subgroup {name}: {e}"
-            self.logger.critical(message)
-            raise RuntimeError(message) from e
+            self._handle_exception(e, f"Error when adding subgroup {name}: {e}")
         self.logger.info(f"Neuron subgroup defined: {name}")
 
     @_trigger_rebuild
@@ -157,35 +161,28 @@ class B2Model:
             )
 
         except Exception as e:
-            message = f"Error in defining synapse {name}: {e}"
-            self.logger.critical(message)
-            raise RuntimeError(message) from e
+            self._handle_exception(e, f"Error in defining synapse {name}: {e}")
 
         try:
             synapse.connect(
                 args.get("connection_condition", None), p=args.get("p", 1.0)
             )
         except Exception as e:
-            message = f"Error in connecting synapse {name}: {e}"
-            self.logger.critical(message)
-            raise RuntimeError(message) from e
+            self._handle_exception(e, f"Error in connecting synapse {name}: {e}")
 
         if any(obj.name == name for obj in self.network.objects):
             try:
                 self.network.remove(self.network[name])
             except Exception as e:
-                message = (
-                    f"Error when removing existing synapse {name} from the network: {e}"
+                self._handle_exception(
+                    e,
+                    f"Error when removing existing synapse {name} from the network: {e}",
                 )
-                self.logger.critical(message)
-                raise RuntimeError(message) from e
 
         try:
             self.network.add(synapse)
         except Exception as e:
-            message = f"Error when adding {name} to the network: {e}"
-            self.logger.critical(message)
-            raise RuntimeError(message) from e
+            self._handle_exception(e, f"Error when adding {name} to the network: {e}")
 
     @_trigger_rebuild
     def _assemble_monitor(
@@ -232,24 +229,20 @@ class B2Model:
                     name=self.monitors[name]["name"],
                 )
         except Exception as e:
-            message = f"Error in defining monitor {name}: {e}"
-            self.logger.critical(message)
-            raise RuntimeError(message) from e
+            self._handle_exception(e, f"Error in defining monitor {name}: {e}")
 
         if any(obj.name == name for obj in self.network.objects):
             try:
                 self.network.remove(self.network[name])
             except Exception as e:
-                message = f"Error while removing monitor {name} from network: {e}"
-                self.logger.critical(message)
-                raise RuntimeError(message) from e
+                self._handle_exception(
+                    e, f"Error while removing monitor {name} from network: {e}"
+                )
 
         try:
             self.network.add(monitor)
         except Exception as e:
-            message = f"Error in adding monitor {name} to network: {e}"
-            self.logger.critical(message)
-            raise RuntimeError(message) from e
+            self._handle_exception(e, f"Error in adding monitor {name} to network: {e}")
 
     @_trigger_rebuild
     def _assemble_neurongroup(
@@ -287,24 +280,22 @@ class B2Model:
                 name=name,
             )
         except Exception as e:
-            message = f"Error in assembling neuron group {name}: {e}"
-            self.logger.critical(message)
-            raise RuntimeError(message) from e
+            self._handle_exception(e, f"Error in assembling neuron group {name}: {e}")
 
         if any(obj.name == name for obj in self.network.objects):
             try:
                 self.network.remove(self.network[name])
             except Exception as e:
-                message = f"Error when removing neuron group {name} from network: {e}"
-                self.logger.critical(message)
-                raise RuntimeError(message) from e
+                self._handle_exception(
+                    e, f"Error when removing neuron group {name} from network: {e}"
+                )
 
         try:
             self.network.add(ng)
         except Exception as e:
-            message = f"Error when adding new neuron group {name} to network: {e}"
-            self.logger.critical(message)
-            raise RuntimeError(message) from e
+            self._handle_exception(
+                e, f"Error when adding new neuron group {name} to network: {e}"
+            )
 
     @_trigger_rebuild
     def _assemble_initial_conditions(self, name: str) -> None:
@@ -326,6 +317,7 @@ class B2Model:
                 setattr(self.network[name], key, self.initials[name][key])
 
             except Exception as e:
+                self.logger.exception(e)
                 raise ValueError(
                     f"Error when initializing {key} of element {name} as {self.initials[name][key]}: {e}"
                 ) from e
@@ -349,9 +341,9 @@ class B2Model:
         try:
             del dictionary[groupname][varname]
         except Exception as e:
-            raise RuntimeError(
-                f"Error when deleting {varname} in {groupname}: {e}"
-            ) from e
+            self._handle_exception(
+                e, f"Error when deleting {varname} in {groupname}: {e}"
+            )
 
     # stateful class for modifying, renaming and deleting dictionary elements in arbitrary order
     class Modifier:
@@ -408,6 +400,7 @@ class B2Model:
                 value to set the element to
             """
             self.pdict[self.current_name] = value
+            logging.critical(f"Modified {self.current_name} to {value}")
             self.with_rebuilt()
 
         def delete(self) -> None:
@@ -472,7 +465,7 @@ class B2Model:
         return self.network.name
 
     def set_rebuilt(self, value: bool) -> None:
-        self.must_be_rebuilt = value
+        self.must_be_rebuilt = value or self.must_be_rebuilt
 
     @_trigger_rebuild
     def define_init(self, name: str, varname: str, value: Any) -> None:
@@ -1950,9 +1943,9 @@ class B2Model:
         try:
             return list(self.network[name].variables)
         except Exception as e:
-            raise RuntimeError(
-                f"Error, something went wrong when getting variables for {name}: {e} "
-            ) from e
+            self._handle_exception(
+                e, f"Error, something went wrong when getting variables for {name}: {e}"
+            )
 
     def get_equation_names_of(
         self,
@@ -1979,9 +1972,10 @@ class B2Model:
         try:
             return list(self.network[name].equations.names)
         except Exception as e:
-            raise RuntimeError(
-                f"Error, something went wrong when getting equation variables for {name}: {e}"
-            ) from e
+            self._handle_exception(
+                e,
+                f"Error, something went wrong when getting equation variables for {name}: {e}",
+            )
 
     def get_current_network_state(
         self,
@@ -2097,7 +2091,6 @@ class B2Model:
         savepath : str, optional
             Path to save the data at, by default None
         """
-
         if self.must_be_rebuilt:
             self.network = b2.Network(name=self.network.name)
             self.assemble_network()
@@ -2146,7 +2139,7 @@ class B2Model:
         except Exception as e:
             message = f"Failed to restore checkpoint '{checkpoint}'"
             self.logger.critical(message)
-            logging.exception(e)
+            self.logger.exception(e)
             raise ValueError(message) from e
 
     def to_dict(self) -> dict[Any, Any]:
