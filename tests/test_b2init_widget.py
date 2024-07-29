@@ -42,7 +42,7 @@ def test_accept_variable(initdlg: B2W.InitialConditionDialog, qtbot: QtBot) -> N
     initdlg.source.setCurrentText("neurongroup2")
     qtbot.mouseClick(initdlg.source_button, QtCore.Qt.MouseButton.LeftButton)
 
-    initdlg.var.setCurrentText("y")
+    initdlg.var.setText("y")
     qtbot.mouseClick(initdlg.var_button, QtCore.Qt.MouseButton.LeftButton)
 
     assert initdlg.var_button.isDown()

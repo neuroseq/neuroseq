@@ -107,7 +107,7 @@ def test_tree_add_element(
     qtbot.addWidget(ptree)
     assert ptree.b2model.must_be_rebuilt is False
 
-    ptree.add_item()
+    ptree._node_added()
 
     assert ptree.b2model.parameters["p"] == 2  # type: ignore
     assert ptree.b2model.must_be_rebuilt is False
@@ -300,7 +300,7 @@ def test_neurontree_add_neurongroup_list_update(
         ]
     )
 
-    ntree.add_item()
+    ntree._node_added()
 
     assert "p1" in ntree.b2model.neurongroups
     assert ntree.b2model.neurongroups["p1"]["model"] == "dv/dt = -v : siemens\n"
