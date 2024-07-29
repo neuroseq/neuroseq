@@ -1272,13 +1272,9 @@ class InitialConditionDialog(ModelDialog):
 
         row += 1
 
-        # self.var_name = QtWidgets.QLabel("Variable", self)
-        # self.var = QtWidgets.QComboBox(self)
-        # self.var_button = QtWidgets.QPushButton("save", self)
-
-        self.var, self.var_button = self.add_text_field(
-            "Variable", textfieldtype=QtWidgets.QLineEdit
-        )
+        self.var_name = QtWidgets.QLabel("Variable", self)
+        self.var = QtWidgets.QComboBox(self)
+        self.var_button = QtWidgets.QPushButton("save", self)
 
         row += 1
 
