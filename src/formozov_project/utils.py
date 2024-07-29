@@ -22,6 +22,14 @@ example_models_path = (
 )
 
 
+def timed_array_with_new_data(
+    timed_array: b2.TimedArray, new_data: np.ndarray
+) -> b2.TimedArray:
+    return b2.TimedArray(
+        b2.Quantity(new_data, timed_array.dim), timed_array.dt * b2.second
+    )
+
+
 def get_downsample_factor(
     n_floats: int, max_ram_mb: int, bits_per_float: int = 64
 ) -> int:
@@ -108,12 +116,13 @@ def add_action(
     shortcut: str | None = None,
     icon: QtGui.QIcon | None = None,
     checkable: bool = False,
+    is_checked: bool = False,
 ) -> QtWidgets.QAction:
     parent = menu or toolbar
     action = QtWidgets.QAction(name, parent)
     action.setCheckable(checkable)
     if checkable:
-        action.setChecked(True)
+        action.setChecked(is_checked)
     action.triggered.connect(callback)
     if icon is not None:
         action.setIcon(icon)

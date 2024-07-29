@@ -22,6 +22,14 @@ cd formozov-project
 pip install .
 ```
 
+### How to install cython on Windows
+
+To speed up simulations with cython on Windows one will need an installation of the Microsoft Visual C++ 14.0 or higher.
+
+See for further instructions on installation: https://stackoverflow.com/questions/60322655/how-to-use-cython-on-windows-10-with-python-3-8
+
+Visual Studio 2022 is available here: [https://learn.microsoft.com/en-us/visualstudio/releases/2022/release-notes#17.10.5](https://visualstudio.microsoft.com/)
+
 ## Use
 
 After installing, you should be able to run the following command to launch the GUI:

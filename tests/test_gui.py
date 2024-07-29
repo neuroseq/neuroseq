@@ -354,19 +354,19 @@ def test_gui_synapse_ram_limit(
     assert n_timesteps == 1000
     # 1 MB RAM limit
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("1", True))
-    gui.btn_max_ram_synapse_plot_matrix()
+    gui.choose_max_ram_synapse_plot_matrix()
     qtbot.wait(delay_after_update_model_call_in_ms)
     n_timesteps = gui.heatmap_widget.tVals.size
     assert n_timesteps == 334
     # 2 MB RAM limit
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("2", True))
-    gui.btn_max_ram_synapse_plot_matrix()
+    gui.choose_max_ram_synapse_plot_matrix()
     qtbot.wait(delay_after_update_model_call_in_ms)
     n_timesteps = gui.heatmap_widget.tVals.size
     assert n_timesteps == 500
     # 0 MB RAM limit == unlimited
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0", True))
-    gui.btn_max_ram_synapse_plot_matrix()
+    gui.choose_max_ram_synapse_plot_matrix()
     qtbot.wait(delay_after_update_model_call_in_ms)
     n_timesteps = gui.heatmap_widget.tVals.size
     assert n_timesteps == 1000
@@ -375,7 +375,7 @@ def test_gui_synapse_ram_limit(
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getText", lambda *args: ("imnotanumber!", True)
     )
-    gui.btn_max_ram_synapse_plot_matrix()
+    gui.choose_max_ram_synapse_plot_matrix()
     qtbot.wait(delay_after_update_model_call_in_ms)
     n_timesteps = gui.heatmap_widget.tVals.size
     assert n_timesteps == 1000
@@ -395,14 +395,38 @@ def test_gui_brian2_backend(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("cython", True)
     )
-    gui.btn_set_brian2_backend()
+    gui.choose_brian2_backend()
     assert b2.prefs.codegen.target == "cython"
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("numpy", True)
     )
-    gui.btn_set_brian2_backend()
+    gui.choose_brian2_backend()
     assert b2.prefs.codegen.target == "numpy"
     # check it also works if the initial value is somehow invalid
     gui.settings.brian2_backend = "invalid"
-    gui.btn_set_brian2_backend()
+    gui.choose_brian2_backend()
     assert b2.prefs.codegen.target == "numpy"
+
+
+def test_gui_stim_padding(
+    monkeypatch: MonkeyPatch,
+    qtbot: QtBot,
+    qmessagebox_calls: list,
+) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    assert gui.heatmap_widget.currentIndex == 0
+    # set 10secs of stim padding
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("10", True))
+    gui.choose_stim_padding_secs()
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    # simulate 0.1s
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.1", True))
+    gui.btn_continue_simulation_clicked()
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    # should have ~0.1 secs of simulation data, and ~10.1 secs of stim array data with dt=0.1ms
+    assert gui.heatmap_widget.tVals[-1] == approx(0.1, rel=1e-2)
+    assert gui.stim_editor.stim_widget.n_timestamps == 10100
