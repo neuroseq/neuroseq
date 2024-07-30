@@ -1086,3 +1086,41 @@ def test_timed_array_padding(mfx_ornstein: b2_model.B2Model) -> None:
     assert np.allclose(new_timed_array.values[0:100, 0:10], timed_array.values)
     assert np.max(new_timed_array.values[0:100, 10:]) == pytest.approx(0)
     assert np.max(new_timed_array.values[100:, :]) == pytest.approx(0)
+
+
+def test_assemble_network_add_exceptions(
+    mocker: MockerFixture, default_model_path
+) -> None:
+    model = b2_model.B2Model.load_model(default_model_path)
+    mocker.patch(
+        "formozov_project.b2_model.b2.Network.add",
+        side_effect=Exception("fake exception"),
+    )
+
+    with pytest.raises(RuntimeError, match=".*adding.*"):
+        model._assemble_synapse("Ce")
+
+    with pytest.raises(RuntimeError, match=".*adding.*"):
+        model._assemble_monitor("Traces_v")
+
+    with pytest.raises(RuntimeError, match=".*adding.*"):
+        model._assemble_neurongroup("P")
+
+
+def test_assemble_network_remove_exceptions(
+    mocker: MockerFixture, default_model_path
+) -> None:
+    model = b2_model.B2Model.load_model(default_model_path)
+    mocker.patch(
+        "formozov_project.b2_model.b2.Network.remove",
+        side_effect=Exception("fake exception"),
+    )
+
+    with pytest.raises(RuntimeError, match=".*removing.*"):
+        model._assemble_synapse("Ce")
+
+    with pytest.raises(RuntimeError, match=".*removing.*"):
+        model._assemble_monitor("Traces_v")
+
+    with pytest.raises(RuntimeError, match=".*removing.*"):
+        model._assemble_neurongroup("P")
