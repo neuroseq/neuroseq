@@ -14,6 +14,7 @@ from qtpy.compat import getsavefilename
 
 from formozov_project.b2_model import B2Model
 from formozov_project.stim_widget import StimWidget
+from formozov_project.timed_array_modifer import TimedArrayModifier
 from formozov_project.utils import add_action
 from formozov_project.utils import timed_array_with_new_data
 
@@ -38,10 +39,10 @@ class StimEditor(QtWidgets.QWidget):
         self.toolbar = toolbar
         self.model: B2Model | None = None
         self.cmb_stim = cmb_stim
-        self.current_stim: b2.TimedArray | None = None
+        self.current_stim_modifier: TimedArrayModifier | None = None
         self.draw_mode = DrawMode.REGION
         self.draw_stim_value = 1.0
-        self.stims_dict: dict[str, b2.TimedArray] = {}
+        self.stims_dict: dict[str, TimedArrayModifier] = {}
         self.copy_time_slice = slice(0, 0)
         self.copy_neuron_slice = slice(0, 0)
         self.copy_values = np.zeros((0, 0))
@@ -63,7 +64,7 @@ class StimEditor(QtWidgets.QWidget):
         self.stims_dict = {}
         if self.model is not None and self.model.parameters is not None:
             self.stims_dict = {
-                k: v
+                k: TimedArrayModifier(v)
                 for k, v in self.model.parameters.items()
                 if isinstance(v, b2.TimedArray)
             }
@@ -73,14 +74,14 @@ class StimEditor(QtWidgets.QWidget):
         self.stim_widget.setEnabled(have_stims)
         self.cmb_stim.setEnabled(have_stims)
         if not have_stims:
-            self.current_stim = None
+            self.current_stim_modifier = None
             return
         self.logger.info(f"stims: {self.stims_dict}")
         self.cmb_stim.addItems(list(self.stims_dict.keys()))
         self.cmb_stim.setCurrentIndex(0)
         self.select_stim(self.cmb_stim.currentText())
 
-    def update_stims_values(self, stims_values_dict: dict[str, np.ndarray]) -> None:
+    def update_stim_values_dict(self, stims_values_dict: dict[str, np.ndarray]) -> None:
         if self.model is None or self.model.parameters is None:
             return
         for name, array_values in stims_values_dict.items():
@@ -95,14 +96,24 @@ class StimEditor(QtWidgets.QWidget):
                 )
         self.set_model(self.model)
 
+    def _stim_values_updated(self) -> None:
+        if self.current_stim_modifier is None:
+            self.action_undo.setEnabled(False)
+            self.action_redo.setEnabled(False)
+            return
+        self.action_undo.setEnabled(self.current_stim_modifier.can_undo())
+        self.action_redo.setEnabled(self.current_stim_modifier.can_redo())
+        self.stim_widget.set_data(self.current_stim_modifier.timed_array)
+
     def select_stim(self, stim_name: str) -> None:
         self.logger.debug(f"Selected stim: {stim_name}")
         if stim_name in self.stims_dict:
-            self.current_stim = self.stims_dict[stim_name]
-            self.stim_widget.set_data(self.current_stim)
-            self.draw_stim_value = np.max(self.current_stim.values)
+            self.current_stim_modifier = self.stims_dict[stim_name]
+            self.stim_widget.set_data(self.current_stim_modifier.timed_array)
+            self.draw_stim_value = np.max(self.current_stim_modifier.timed_array.values)
             if self.draw_stim_value == 0:
                 self.draw_stim_value = 1
+            self._stim_values_updated()
 
     def toggle_draw_stims(self, enabled: bool) -> None:
         self.logger.debug(f"Draw stims {'enabled' if enabled else 'disabled'}")
@@ -120,11 +131,11 @@ class StimEditor(QtWidgets.QWidget):
         self.draw_mode = draw_mode
 
     def draw_stim_region(self, neuron_slice: slice, time_slice: slice) -> None:
-        if self.current_stim is None:
+        if self.current_stim_modifier is None:
             return
         self.logger.debug(f"Draw stim for neurons {neuron_slice} and time {time_slice}")
-        self.current_stim.values[time_slice, neuron_slice] = self.draw_stim_value
-        self.stim_widget.set_data(self.current_stim)
+        self.current_stim_modifier.do(neuron_slice, time_slice, self.draw_stim_value)
+        self._stim_values_updated()
         self.stim_widget.select_neurons(neuron_slice, time_slice)
 
     def stim_widget_selection_made(
@@ -138,7 +149,7 @@ class StimEditor(QtWidgets.QWidget):
 
     def stim_widget_mouse_clicked(self, neuron_index: int, time_index: int) -> None:
         self.logger.debug(f"Mouse clicked: neuron {neuron_index}, time {time_index}")
-        if self.current_stim is None:
+        if self.current_stim_modifier is None:
             return
         if self.action_toggle_draw.isChecked():
             if self.draw_mode != DrawMode.SINGLE_STIM:
@@ -147,7 +158,10 @@ class StimEditor(QtWidgets.QWidget):
             time_length_s = 0.001
             time_slice = slice(
                 time_index,
-                math.floor(time_index + time_length_s / self.current_stim.dt),
+                math.floor(
+                    time_index
+                    + time_length_s / self.current_stim_modifier.timed_array.dt
+                ),
             )
             self.logger.debug(f"Time slice: {time_slice}")
             if not self._is_valid_slice(neuron_slice, time_slice):
@@ -155,18 +169,20 @@ class StimEditor(QtWidgets.QWidget):
             self.draw_stim_region(neuron_slice, time_slice)
         else:
             self.stim_widget.unselect_neurons()
-            self.stim_widget.timeline.setX(time_index * self.current_stim.dt)
+            self.stim_widget.timeline.setX(
+                time_index * self.current_stim_modifier.timed_array.dt
+            )
 
     def copy_selected_stim(self) -> None:
         if (
-            self.current_stim is None
+            self.current_stim_modifier is None
             or self.stim_widget.selected_time_slice is None
             or self.stim_widget.selected_neuron_slice is None
         ):
             return
         self.copy_time_slice = self.stim_widget.selected_time_slice
         self.copy_neuron_slice = self.stim_widget.selected_neuron_slice
-        self.copy_values = self.current_stim.values[
+        self.copy_values = self.current_stim_modifier.timed_array.values[
             self.stim_widget.selected_time_slice, self.stim_widget.selected_neuron_slice
         ].copy()
 
@@ -175,10 +191,13 @@ class StimEditor(QtWidgets.QWidget):
         self.delete_selected_stim()
 
     def paste_selected_stim(self, invert=False) -> None:
-        if self.current_stim is None:
+        if self.current_stim_modifier is None:
             return
         time_offset = (
-            int(self.stim_widget.timeline.x() / self.current_stim.dt)
+            int(
+                self.stim_widget.timeline.x()
+                / self.current_stim_modifier.timed_array.dt
+            )
             - self.copy_time_slice.start
         )
         new_time_slice = slice(
@@ -195,13 +214,25 @@ class StimEditor(QtWidgets.QWidget):
             new_values = max_value - self.copy_values
         else:
             new_values = self.copy_values
-        self.current_stim.values[new_time_slice, self.copy_neuron_slice] = new_values
-        self.stim_widget.set_data(self.current_stim)
+        self.current_stim_modifier.do(new_neuron_slice, new_time_slice, new_values)
+        self._stim_values_updated()
         self.stim_widget.select_neurons(self.copy_neuron_slice, new_time_slice)
+
+    def undo(self) -> None:
+        if self.current_stim_modifier is None:
+            return
+        self.current_stim_modifier.undo()
+        self._stim_values_updated()
+
+    def redo(self) -> None:
+        if self.current_stim_modifier is None:
+            return
+        self.current_stim_modifier.redo()
+        self._stim_values_updated()
 
     def save_selected_stim(self) -> None:
         if (
-            self.current_stim is None
+            self.current_stim_modifier is None
             or self.stim_widget.selected_time_slice is None
             or self.stim_widget.selected_neuron_slice is None
         ):
@@ -214,7 +245,7 @@ class StimEditor(QtWidgets.QWidget):
         )
         if filename == "":
             return
-        arr = self.current_stim.values[
+        arr = self.current_stim_modifier.timed_array.values[
             self.stim_widget.selected_time_slice, self.stim_widget.selected_neuron_slice
         ]
         self.logger.info(f"Saving {arr.shape} stim selection to file {filename}")
@@ -226,7 +257,7 @@ class StimEditor(QtWidgets.QWidget):
             QtWidgets.QMessageBox.critical(self, "Error", msg)
 
     def load_selected_stim(self) -> None:
-        if self.current_stim is None:
+        if self.current_stim_modifier is None:
             return
         filename, _ = getopenfilename(
             self,
@@ -241,15 +272,22 @@ class StimEditor(QtWidgets.QWidget):
             self.logger.info(f"Loaded {arr.shape} stim selection from file {filename}")
             if arr.ndim > 2:
                 raise ValueError("Loaded array has wrong shape")
-            if arr.shape[0] > self.current_stim.values.shape[0]:
+            if arr.shape[0] > self.current_stim_modifier.timed_array.values.shape[0]:
                 raise ValueError("Loaded array has too many time points")
-            if arr.ndim == 2 and arr.shape[1] > self.current_stim.values.shape[1]:
+            if (
+                arr.ndim == 2
+                and arr.shape[1]
+                > self.current_stim_modifier.timed_array.values.shape[1]
+            ):
                 raise ValueError("Loaded array has too many neurons")
-            time_offset = int(self.stim_widget.timeline.x() / self.current_stim.dt)
+            time_offset = int(
+                self.stim_widget.timeline.x()
+                / self.current_stim_modifier.timed_array.dt
+            )
             new_time_slice = slice(time_offset, time_offset + arr.shape[0])
             new_neuron_slice = slice(0, arr.shape[1])
-            self.current_stim.values[new_time_slice, new_neuron_slice] = arr
-            self.stim_widget.set_data(self.current_stim)
+            self.current_stim_modifier.do(new_neuron_slice, new_time_slice, arr)
+            self._stim_values_updated()
             self.stim_widget.select_neurons(new_neuron_slice, new_time_slice)
         except Exception as e:
             msg = f"Error loading stim selection from file: {e}"
@@ -257,19 +295,24 @@ class StimEditor(QtWidgets.QWidget):
             QtWidgets.QMessageBox.critical(self, "Error", msg)
 
     def delete_selected_stim(self) -> None:
-        if self.current_stim is None:
+        if (
+            self.current_stim_modifier is None
+            or self.stim_widget.selected_neuron_slice is None
+            or self.stim_widget.selected_time_slice is None
+        ):
             return
-        self.current_stim.values[
-            self.stim_widget.selected_time_slice, self.stim_widget.selected_neuron_slice
-        ] = 0
-        self.stim_widget.unselect_neurons()
-        self.stim_widget.set_data(self.current_stim)
+        self.current_stim_modifier.do(
+            self.stim_widget.selected_neuron_slice,
+            self.stim_widget.selected_time_slice,
+            0,
+        )
+        self._stim_values_updated()
 
     def move_selected_stim(
         self, neuron_index_offset: int = 0, time_index_offset: int = 0
     ) -> None:
         if (
-            self.current_stim is None
+            self.current_stim_modifier is None
             or self.stim_widget.selected_neuron_slice is None
             or self.stim_widget.selected_time_slice is None
         ):
@@ -286,8 +329,10 @@ class StimEditor(QtWidgets.QWidget):
             self.stim_widget.unselect_neurons()
             return
         self.cut_selected_stim()
-        self.current_stim.values[new_time_slice, new_neuron_slice] = self.copy_values
-        self.stim_widget.set_data(self.current_stim)
+        self.current_stim_modifier.do(
+            new_neuron_slice, new_time_slice, self.copy_values
+        )
+        self._stim_values_updated()
         self.stim_widget.select_neurons(new_neuron_slice, new_time_slice)
 
     def move_selected_stim_up(self) -> None:
@@ -323,6 +368,27 @@ class StimEditor(QtWidgets.QWidget):
             is_checked=False,
         )
         self.toolbar.addSeparator()
+        self.action_undo = add_action(
+            "Undo",
+            self.undo,
+            menu,
+            toolbar,
+            self,
+            shortcut="Ctrl+Z",
+            icon=qta.icon("mdi6.undo"),
+        )
+        self.action_undo.setEnabled(False)
+        self.action_redo = add_action(
+            "Redo",
+            self.redo,
+            menu,
+            toolbar,
+            self,
+            shortcut="Ctrl+Shift+Z",
+            icon=qta.icon("mdi6.redo"),
+        )
+        self.action_redo.setEnabled(False)
+        self.toolbar.addSeparator()
         self.actions_draw = []
         self.actions_draw.append(
             add_action(
@@ -355,6 +421,17 @@ class StimEditor(QtWidgets.QWidget):
             self.actions_draw_group.addAction(action)
             action.setEnabled(False)
         self.actions_edit = []
+        self.actions_edit.append(
+            add_action(
+                "Select all",
+                lambda: self.stim_widget.select_neurons(None, None),
+                menu,
+                toolbar,
+                self,
+                shortcut="Ctrl+A",
+                icon=qta.icon("mdi6.select-all"),
+            )
+        )
         self.actions_edit.append(
             add_action(
                 "Copy",
