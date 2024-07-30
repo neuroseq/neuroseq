@@ -493,6 +493,10 @@ class B2Model:
                 lambda n, vn, v: self.define_init(n, vn, v),
             )
 
+            self.functions["initials"][name]["add"] = lambda n, vn, v: self.define_init(
+                n, vn, v
+            )
+
         element_modifier = self.Modifier(
             varname,
             self.initials[name],

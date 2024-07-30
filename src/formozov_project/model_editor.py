@@ -267,6 +267,13 @@ class EditableParameterTree(ParameterTree):
                     lambda p: self._call_with_errormessage(funcs["rename"], p.name())
                 )
 
+            if "add" in funcs:
+                param.sigChildAdded(
+                    lambda parent, new_child, _: self._call_with_errormessage(
+                        funcs["add"], parent.name(), new_child.name(), new_child.value()
+                    )
+                )
+
             for child in param.children():
                 if child.name() in funcs:
                     self._connect_parameters(child, funcs[child.name()])
@@ -745,6 +752,12 @@ class ModelEditorDialog(QtWidgets.QDialog):
                 b2model,
                 domain_name="parameters",
                 default_creator=b2model.define_default_parameter,
+                parent=self,
+            ),
+            "Initial Conditions": EditableParameterTree(
+                b2model,
+                domain_name="initials",
+                default_creator=b2model.define_default_init,
                 parent=self,
             ),
         }

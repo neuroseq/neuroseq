@@ -312,9 +312,9 @@ class Reconstructor:
         if report is not None:
             report(70)
 
-        model.initials = self.loaded_data["initials"]
-
-        for n in model.initials:
+        for n, init in self.loaded_data["initials"].items():
+            for k, v in init.items():
+                model.define_init(n, k, v)
             model._assemble_initial_conditions(n)
 
         model.must_be_rebuilt = False
