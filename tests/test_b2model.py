@@ -1131,15 +1131,18 @@ def test_default_group_addition(mfx_ornstein) -> None:
 
 
 def test_modify_remove_group(mfx_ornstein) -> None:
-    mfx_ornstein.define_default_neurongroup()
-    mfx_ornstein.define_default_synapse()
-    mfx_ornstein.define_default_monitor()
+    mfx_ornstein.functions["neurongroups"]["element_added"]()
+    mfx_ornstein.functions["synapses"]["element_added"]()
+    mfx_ornstein.functions["monitors"]["element_added"]()
+    mfx_ornstein.functions["parameters"]["element_added"]()
+    mfx_ornstein.functions["initials"]["element_added"]()
 
     assert "new_neurongroup" in mfx_ornstein.neurongroups
     mfx_ornstein.functions["neurongroups"]["new_neurongroup"]["rename"]("A")
     assert "new_neurongroup" not in mfx_ornstein.neurongroups
     assert "A" in mfx_ornstein.neurongroups
-    mfx_ornstein.define_neuronnumber("A", 33)
+    assert mfx_ornstein.neurongroups["A"]["neuronnumber"] == 0
+    mfx_ornstein.functions["neurongroups"]["A"]["neuronnumber"]["modify"](33)
     assert mfx_ornstein.neurongroups["A"]["neuronnumber"] == 33
     mfx_ornstein.functions["neurongroups"]["element_removed"]("A")
     assert "A" not in mfx_ornstein.neurongroups
@@ -1148,16 +1151,38 @@ def test_modify_remove_group(mfx_ornstein) -> None:
     mfx_ornstein.functions["synapses"]["new_synapse"]["rename"]("S")
     assert "new_synapse" not in mfx_ornstein.synapses
     assert "S" in mfx_ornstein.synapses
-    mfx_ornstein.define_synapse_connection("S", "i!=j")
     assert mfx_ornstein.synapses["S"]["connection_condition"] == "i!=j"
+    mfx_ornstein.functions["synapses"]["S"]["connection_condition"]["modify"]("i==j")
+    assert mfx_ornstein.synapses["S"]["connection_condition"] == "i==j"
     mfx_ornstein.functions["synapses"]["element_removed"]("S")
     assert "S" not in mfx_ornstein.synapses
 
     assert "new_monitor" in mfx_ornstein.monitors
     mfx_ornstein.functions["monitors"]["new_monitor"]["rename"]("M")
     assert "new_monitor" not in mfx_ornstein.monitors
-    mfx_ornstein.define_monitor_source("M", "neurongroup")
+    mfx_ornstein.functions["monitors"]["M"]["source"]["modify"]("neurongroup")
     assert mfx_ornstein.monitors["M"]["source"] == "neurongroup"
     assert "M" in mfx_ornstein.monitors
     mfx_ornstein.functions["monitors"]["element_removed"]("M")
     assert "M" not in mfx_ornstein.monitors
+
+    assert "new_parameter" in mfx_ornstein.parameters
+    mfx_ornstein.functions["parameters"]["new_parameter"]["rename"]("X")
+    assert "new_parameter" not in mfx_ornstein.parameters
+    assert "X" in mfx_ornstein.parameters
+    assert mfx_ornstein.parameters["X"] is None
+    mfx_ornstein.functions["parameters"]["X"]["modify"](3)
+    assert mfx_ornstein.parameters["X"] == 3
+
+    assert "group" in mfx_ornstein.initials
+    assert "value" in mfx_ornstein.initials["group"]
+    mfx_ornstein.functions["initials"]["group"]["rename"]("P")
+    assert "group" not in mfx_ornstein.initials
+    assert "P" in mfx_ornstein.initials
+    assert mfx_ornstein.initials["P"]["value"] is None
+    mfx_ornstein.functions["initials"]["P"]["value"]["rename"]("v")
+    assert "value" not in mfx_ornstein.initials["P"]
+    assert "v" in mfx_ornstein.initials["P"]
+
+    mfx_ornstein.functions["initials"]["P"]["v"]["modify"](3)
+    assert mfx_ornstein.initials["P"]["v"] == 3

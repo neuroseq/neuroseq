@@ -394,7 +394,7 @@ class B2Model:
             self.fdict[new_name] = self.fdict.pop(used_old_name)
             self.with_rebuilt()
 
-            if "name" in self.pdict[new_name]:
+            if self.pdict[new_name] and "name" in self.pdict[new_name]:
                 self.pdict[new_name]["name"] = new_name
 
         def modify(self, value: str) -> None:
