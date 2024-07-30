@@ -72,20 +72,20 @@ class B2Model:
         name: str,
         group_class: str,
         with_rebuilt: Callable,
-        element_adder: Callable,
+        element_adder: Callable = lambda *_, **__: None,
     ) -> None:
         modifier = self.Modifier(
             name,
             getattr(self, group_class),
             self.functions[group_class],
             with_rebuilt=with_rebuilt,
+            elemnet_adder=element_adder,
         )
 
         self.functions[group_class][name] = {
             "rename": modifier.rename,
             "delete": modifier.delete,
-            #         "element_added": modifier.add_element,
-            #         "element_removed": modifier.delete_element,
+            "element_added": modifier.add,
         }
 
     @_trigger_rebuild
@@ -359,25 +359,13 @@ class B2Model:
             pdict: dict[Any, Any],
             fdict: dict[Any, Any],
             with_rebuilt: Callable,
+            elemnet_adder: Callable = lambda *_, **__: None,
         ):
-            """
-            _summary_
-
-            Parameters
-            ----------
-            current_name : str
-                _description_
-            pdict : dict[Any, Any]
-                _description_
-            fdict : dict[Any, Any]
-                _description_
-            with_rebuilt : Callable
-                _description_
-            """
             self.current_name = current_name
             self.pdict = pdict
             self.fdict = fdict
             self.with_rebuilt = with_rebuilt
+            self.element_adder = elemnet_adder
 
         def rename(self, new_name: str) -> None:
             """
@@ -420,6 +408,12 @@ class B2Model:
             del self.pdict[self.current_name]
             del self.fdict[self.current_name]
             self.with_rebuilt()
+
+        def add(self, *args, **kwargs) -> None:
+            """
+            add a new element if the held pdict is a nested dict
+            """
+            self.element_adder(*args, **kwargs)
 
     def __init__(
         self,
