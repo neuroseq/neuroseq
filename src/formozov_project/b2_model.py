@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import brian2 as b2
+import brian2.numpy_ as np
 import h5py
 
 from formozov_project import b2json
@@ -1689,6 +1691,8 @@ class B2Model:
         self.network = b2.Network(name=self.name)
         self.checkpoints.clear()
 
+        self._make_timed_arrays_valid()
+
         for n in self.neurongroups:
             if "idxs" not in self.neurongroups[n]:
                 self._assemble_neurongroup(n)
@@ -1920,6 +1924,56 @@ class B2Model:
             The network objects
         """
         return self.network.objects
+
+    def _make_timed_arrays_valid(self):
+        """
+        Ensure any TimedArrays have the correct shape
+
+        For now, we just ensure that they have at least as many neurons as the largest NeuronGroup
+        """
+        min_neurons = 0
+        for neuron_group in self.neurongroups.values():
+            min_neurons = max(min_neurons, neuron_group.get("neuronnumber", 0))
+        for name, timed_array in self.parameters.items():
+            if isinstance(timed_array, b2.TimedArray) and timed_array.values.ndim > 1:
+                n_neurons = timed_array.values.shape[1]
+                if n_neurons < min_neurons:
+                    self.logger.info(
+                        f"Increasing neurons in TimedArray {name} from {n_neurons} to {min_neurons}"
+                    )
+                    new_array = np.pad(
+                        timed_array.values,
+                        pad_width=((0, 0), (0, min_neurons - n_neurons)),
+                    )
+                    new_timed_array = utils.timed_array_with_new_data(
+                        timed_array, new_array
+                    )
+                    self.define_parameter(name, new_timed_array)
+
+    def _pad_timed_arrays(self, padding_seconds):
+        """
+        Pad any TimedArrays with zeros up to simulation time + padding_seconds
+        """
+        sim_time_secs = self.network.t / b2.second
+        for name, timed_array in self.parameters.items():
+            if isinstance(timed_array, b2.TimedArray) and timed_array.values.ndim > 1:
+                n_timestamps = timed_array.values.shape[0]
+                array_time_secs = timed_array.dt * n_timestamps
+                padding_required_seqs = (
+                    sim_time_secs + padding_seconds - array_time_secs
+                )
+                if padding_required_seqs > 0:
+                    n_pad = math.ceil(padding_required_seqs / timed_array.dt)
+                    new_array = np.pad(
+                        timed_array.values, pad_width=((0, n_pad), (0, 0))
+                    )
+                    self.logger.info(
+                        f"Adding {padding_required_seqs}s padding to {name}: {timed_array.values.shape} -> {new_array.shape}"
+                    )
+                    new_timed_array = utils.timed_array_with_new_data(
+                        timed_array, new_array
+                    )
+                    self.define_parameter(name, new_timed_array)
 
     def run_simulation(
         self,
