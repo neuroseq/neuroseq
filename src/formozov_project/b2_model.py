@@ -406,7 +406,9 @@ class B2Model:
             value : str
                 value to set the element to
             """
-            self.pdict[self.current_name] = value
+            self.pdict[self.current_name] = (
+                value  # FIXME: make this use functions instead of element setter
+            )
             self.with_rebuilt()
 
         def delete(self) -> None:
@@ -466,7 +468,6 @@ class B2Model:
             """
             Add an element to the intermediate representation node of the caller
             """
-            print("add element")
             self.element_adder(*args, **kwargs)
             self.with_rebuilt()
 
@@ -483,6 +484,11 @@ class B2Model:
             del self.pdict[self.current_name][name]
             del self.fdict[self.current_name][name]
             self.with_rebuilt()
+
+    @_trigger_rebuild
+    def _delete_dict_element(self, name: str, key: Any) -> None:
+        del getattr(self, name)[key]
+        del self.functions[name][key]
 
     def __init__(
         self,
@@ -509,24 +515,26 @@ class B2Model:
 
         self.functions: dict[str, Any] = {
             "neurongroups": {
-                "element_added": lambda *_: self.set_rebuilt(True),
-                "element_removed": lambda *_: self.set_rebuilt(True),
+                "element_added": lambda: self.define_default_neurongroup(),
+                "element_removed": lambda n: self._delete_dict_element(
+                    "neurongroups", n
+                ),
             },
             "synapses": {
-                "element_added": lambda *_: self.set_rebuilt(True),
-                "element_removed": lambda *_: self.set_rebuilt(True),
+                "element_added": lambda: self.define_default_synapse(),
+                "element_removed": lambda n: self._delete_dict_element("synapses", n),
             },
             "initials": {
-                "element_added": lambda *_: self.set_rebuilt(True),
-                "element_removed": lambda *_: self.set_rebuilt(True),
+                "element_added": lambda: self.define_default_init(),
+                "element_removed": lambda n: self._delete_dict_element("initials", n),
             },
             "parameters": {
-                "element_added": lambda: None,  # do nothing
-                "element_removed": lambda: None,  # do nothing
+                "element_added": lambda: self.define_default_parameter(),
+                "element_removed": lambda n: self._delete_dict_element("parameters", n),
             },
             "monitors": {
-                "element_added": lambda *_: self.set_rebuilt(True),
-                "element_removed": lambda *_: self.set_rebuilt(True),
+                "element_added": lambda: self.define_default_monitor(),
+                "element_removed": lambda n: self._delete_dict_element("monitors", n),
             },
         }
         self.checkpoints: list[str] = []
@@ -586,6 +594,10 @@ class B2Model:
             },
         )
 
+    @_trigger_rebuild
+    def define_default_init(self) -> None:
+        self.define_init("group", "value", None)
+
     def define_b2seed(self, seed: int) -> None:
         """
         Set the brian2 rng seed to 'seed'. This also regenerates the internal buffer of random numbers when using codegeneration with cython.
@@ -642,7 +654,39 @@ class B2Model:
         self.logger.info(f"Parameter defined: {name}")
         self.logger.debug(f"Parameter value: {value}")
 
+    def define_default_parameter(self) -> None:
+        self.define_parameter("new_parameter", None)
+
     # neurongroups
+    @_trigger_rebuild
+    def define_default_neurongroup(self) -> None:
+        name = "new_neurongroup"
+        if name not in self.neurongroups:
+            self.neurongroups[name] = {}
+
+        if name not in self.functions["neurongroups"]:
+            self._add_group_modifier(
+                name,
+                "neurongroups",
+                lambda: self.set_rebuilt(True),
+                lambda _, __, ___: self.set_rebuilt(True),
+            )
+
+        for definition, arg in zip(
+            [
+                self.define_neuronnumber,
+                self.define_equation,
+                self.define_solver_method,
+                self.define_dt,
+                self.define_reset,
+                self.define_threshold,
+                self.define_refractory,
+            ],
+            [0, "dv/dt=0:1", "euler", 10 * b2.ms, "0", "0", "0"],
+            strict=True,
+        ):
+            definition(name, arg)
+
     @_trigger_rebuild
     def define_dt(self, name: str, dt: b2.Quantity) -> None:
         """
@@ -1053,6 +1097,49 @@ class B2Model:
         utils.update_nested_dict(self.neurongroups[name], {"idxs": idxs})
 
     # synapses
+    @_trigger_rebuild
+    def define_default_synapse(self) -> None:
+        name = "new_synapse"
+        if name not in self.synapses:
+            self.synapses[name] = {}
+
+        if name not in self.functions["synapses"]:
+            self._add_group_modifier(
+                name,
+                "synapses",
+                lambda: self.set_rebuilt(True),
+                lambda _, __, ___: self.set_rebuilt(True),
+            )
+
+        for definition, arg in zip(
+            [
+                self.define_synapse_origin,
+                self.define_synapse_target,
+                self.define_synapse_equation,
+                self.define_synapse_solver_method,
+                self.define_synapse_dt,
+                self.define_synapse_delay,
+                self.define_synapse_connection,
+                self.define_synapse_connection_probablitiy,
+                self.define_synapse_pre,
+                self.define_synapse_post,
+            ],
+            [
+                "origin",
+                "target",
+                "dv/dt=0:1",
+                "euler",
+                10 * b2.ms,
+                0 * b2.ms,
+                "i!=j",
+                0.0,
+                "x=y",
+                "x=y",
+            ],
+            strict=True,
+        ):
+            definition(name, arg)
+
     @_trigger_rebuild
     def define_synapse_dt(self, name: str, dt: b2.Quantity) -> None:
         """
@@ -1499,6 +1586,32 @@ class B2Model:
         )
 
     # monitor
+    @_trigger_rebuild
+    def define_default_monitor(self) -> None:
+        name = "new_monitor"
+        if name not in self.monitors:
+            self.monitors[name] = {}
+
+        if name not in self.functions["monitors"]:
+            self._add_group_modifier(
+                name,
+                "monitors",
+                lambda: self.set_rebuilt(True),
+                lambda _, __, ___: self.set_rebuilt(True),
+            )
+
+        for definition, arg in zip(
+            [
+                self.define_monitor_type,
+                self.define_monitor_source,
+                self.define_monitor_variable,
+                self.define_monitor_dt,
+            ],
+            ["StateMonitor", "source", "variable", None],
+            strict=True,
+        ):
+            definition(name, arg)
+
     @_trigger_rebuild
     def define_monitor_type(self, name: str, classname: str) -> None:
         """

@@ -1087,3 +1087,77 @@ def test_timed_array_padding(mfx_ornstein: b2_model.B2Model) -> None:
     assert np.allclose(new_timed_array.values[0:100, 0:10], timed_array.values)
     assert np.max(new_timed_array.values[0:100, 10:]) == pytest.approx(0)
     assert np.max(new_timed_array.values[100:, :]) == pytest.approx(0)
+
+
+def test_default_group_addition(mfx_ornstein) -> None:
+    mfx_ornstein.define_default_neurongroup()
+    assert mfx_ornstein.neurongroups["new_neurongroup"] == {
+        "neuronnumber": 0,
+        "model": "dv/dt=0:1\n",
+        "method": "euler",
+        "dt": 10 * b2.ms,
+        "reset": "0",
+        "th": "0",
+        "refractory": "0",
+    }
+
+    mfx_ornstein.define_default_synapse()
+    assert mfx_ornstein.synapses["new_synapse"] == {
+        "origin": "origin",
+        "target": "target",
+        "model": "dv/dt=0:1\n",
+        "method": "euler",
+        "dt": 10 * b2.ms,
+        "delay": 0 * b2.ms,
+        "connection_condition": "i!=j",
+        "p": 0.0,
+        "on_pre": "x=y\n",
+        "on_post": "x=y\n",
+    }
+
+    mfx_ornstein.define_default_monitor()
+    assert mfx_ornstein.monitors["new_monitor"] == {
+        "type": "StateMonitor",
+        "source": "source",
+        "variable": "variable",
+        "dt": None,
+    }
+
+    mfx_ornstein.define_default_parameter()
+    assert mfx_ornstein.parameters["new_parameter"] is None
+
+    mfx_ornstein.define_default_init()
+    assert mfx_ornstein.initials["group"]["value"] is None
+
+
+def test_modify_remove_group(mfx_ornstein) -> None:
+    mfx_ornstein.define_default_neurongroup()
+    mfx_ornstein.define_default_synapse()
+    mfx_ornstein.define_default_monitor()
+
+    assert "new_neurongroup" in mfx_ornstein.neurongroups
+    mfx_ornstein.functions["neurongroups"]["new_neurongroup"]["rename"]("A")
+    assert "new_neurongroup" not in mfx_ornstein.neurongroups
+    assert "A" in mfx_ornstein.neurongroups
+    mfx_ornstein.define_neuronnumber("A", 33)
+    assert mfx_ornstein.neurongroups["A"]["neuronnumber"] == 33
+    mfx_ornstein.functions["neurongroups"]["element_removed"]("A")
+    assert "A" not in mfx_ornstein.neurongroups
+
+    assert "new_synapse" in mfx_ornstein.synapses
+    mfx_ornstein.functions["synapses"]["new_synapse"]["rename"]("S")
+    assert "new_synapse" not in mfx_ornstein.synapses
+    assert "S" in mfx_ornstein.synapses
+    mfx_ornstein.define_synapse_connection("S", "i!=j")
+    assert mfx_ornstein.synapses["S"]["connection_condition"] == "i!=j"
+    mfx_ornstein.functions["synapses"]["element_removed"]("S")
+    assert "S" not in mfx_ornstein.synapses
+
+    assert "new_monitor" in mfx_ornstein.monitors
+    mfx_ornstein.functions["monitors"]["new_monitor"]["rename"]("M")
+    assert "new_monitor" not in mfx_ornstein.monitors
+    mfx_ornstein.define_monitor_source("M", "neurongroup")
+    assert mfx_ornstein.monitors["M"]["source"] == "neurongroup"
+    assert "M" in mfx_ornstein.monitors
+    mfx_ornstein.functions["monitors"]["element_removed"]("M")
+    assert "M" not in mfx_ornstein.monitors
