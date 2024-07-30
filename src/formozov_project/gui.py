@@ -13,7 +13,6 @@ from qtpy.compat import getsavefilename
 
 from formozov_project import __version__
 from formozov_project.b2_model import B2Model
-from formozov_project.b2_model_widget import B2ModelWidget
 from formozov_project.heatmap_widget import HeatmapWidget
 from formozov_project.model_editor import ModelEditorDialog
 from formozov_project.spike_widget import SpikeWidget
@@ -127,9 +126,7 @@ class Gui(QtWidgets.QMainWindow):
         self.progress_dialog.setValue(completed_percent)
 
     def btn_new_clicked(self) -> None:
-        b2m = B2ModelWidget(B2Model(), self)
-        if b2m.exec():
-            self.update_model(b2m.model)
+        self.load_model(str(example_models_path / "default_model.json"))
 
     def btn_open_clicked(self) -> None:
         filename, _ = getopenfilename(
@@ -194,9 +191,6 @@ class Gui(QtWidgets.QMainWindow):
             mdiag = ModelEditorDialog(self.model, parent=self)
             if mdiag.exec():
                 self.update_model(mdiag.b2model)
-
-    def btn_open_example_model_clicked(self) -> None:
-        self.load_model(str(example_models_path / "default_model.json"))
 
     @with_wait_cursor
     def load_model(self, filename: str) -> None:
@@ -523,15 +517,7 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.file"),
         )
         add_action(
-            "Open &example model",
-            self.btn_open_example_model_clicked,
-            menu,
-            toolbar,
-            shortcut="Ctrl+Shift+O",
-            icon=qta.icon("mdi6.file-document"),
-        )
-        add_action(
-            "&Open",
+            "&Open model",
             self.btn_open_clicked,
             menu,
             toolbar,
@@ -539,7 +525,7 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.folder-open"),
         )
         add_action(
-            "&Save",
+            "&Save model",
             self.btn_save_clicked,
             menu,
             toolbar,
@@ -547,7 +533,7 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.content-save"),
         )
         add_action(
-            "&Export",
+            "&Export data",
             self.btn_export_clicked,
             menu,
             toolbar,
@@ -555,7 +541,7 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.content-save-move"),
         )
         add_action(
-            "&Edit",
+            "&Edit model",
             self.btn_edit_clicked,
             menu,
             toolbar,

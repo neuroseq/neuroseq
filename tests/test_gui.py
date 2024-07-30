@@ -102,15 +102,25 @@ def test_gui_simulate_and_playback(
     assert gui.heatmap_widget.currentIndex == 0
 
 
-def test_gui_new(tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
+def test_gui_new(
+    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, default_model_path: Path
+) -> None:
     gui = Gui()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
-    assert gui.model.name == B2Model().name
-    monkeypatch.setattr("formozov_project.gui.B2ModelWidget.exec", lambda *args: True)
+    default_model = B2Model.load_model(default_model_path)
+    # GUI loads default model if no model file is provided:
+    assert gui.model.parameters.keys() == default_model.parameters.keys()
+    assert gui.model.neurongroups.keys() == default_model.neurongroups.keys()
+    assert gui.model.synapses.keys() == default_model.synapses.keys()
+    assert gui.model.monitors.keys() == default_model.monitors.keys()
+    # File -> New also loads the default model:
     gui.btn_new_clicked()
-    assert gui.model.name == B2Model().name
+    assert gui.model.parameters.keys() == default_model.parameters.keys()
+    assert gui.model.neurongroups.keys() == default_model.neurongroups.keys()
+    assert gui.model.synapses.keys() == default_model.synapses.keys()
+    assert gui.model.monitors.keys() == default_model.monitors.keys()
 
 
 def test_gui_open(
