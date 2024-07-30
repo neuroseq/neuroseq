@@ -6,11 +6,14 @@ from copy import deepcopy
 from typing import Any
 
 import brian2 as b2  # noqa: F401
+import qtawesome as qta
 from brian2 import TimedArray
 from pyqtgraph.parametertree import Parameter
 from pyqtgraph.parametertree import ParameterTree
 from pyqtgraph.parametertree import registerParameterItemType
 from pyqtgraph.parametertree import registerParameterType
+from pyqtgraph.parametertree.parameterTypes import GroupParameter
+from pyqtgraph.parametertree.parameterTypes import GroupParameterItem
 from pyqtgraph.parametertree.parameterTypes import ListParameter
 from pyqtgraph.parametertree.parameterTypes import ListParameterItem
 from qtpy import QtCore
@@ -166,10 +169,46 @@ class UpdatingListParameter(ListParameter):
         return paramitem
 
 
+class ExtendibleGroupParameterItem(GroupParameterItem):
+    def __init__(self, param: Parameter, depth: int):
+        super().__init__(param, depth)
+
+        # Create a button and add it to the layout
+        self.button = QtWidgets.QPushButton("Add Item")
+        self.button.clicked.connect(self.add_new_item)
+        icon = qta.icon("mdi6.plus")
+        self.button.setIcon(icon)
+
+        # Insert the button into the layout
+        self.layoutWidget.layout().insertWidget(1, self.button)
+
+    def add_new_item(self):
+        new_param = Parameter.create(
+            name=f"New Item {len(self.param.children())}", type="str", value="value"
+        )
+        self.param.addChild(new_param)
+
+
+class ExtendibleGroupParameter(GroupParameter):
+    itemClass = ExtendibleGroupParameterItem
+
+    def __init__(self, **opts):
+        super().__init__(**opts)
+
+    def makeTreeItem(self, depth):
+        itemClass = self.itemClass
+        paramitem = itemClass(self, depth)
+        return paramitem
+
+
 # register the new types with the parametertree implementation
 registerParameterType("updatinglist", UpdatingListParameter)
 registerParameterItemType(
     "updatinglistitem", UpdatingListParameterItem, UpdatingListParameter
+)
+registerParameterType("extendiblegroup", ExtendibleGroupParameter)
+registerParameterItemType(
+    "extendiblegroupitem", ExtendibleGroupParameterItem, ExtendibleGroupParameter
 )
 
 
@@ -258,7 +297,7 @@ class EditableParameterTree(ParameterTree):
         param : Parameter
             parent paremeter
         """
-        if param.type() == "group":
+        if param.type() == "extendiblegroup":
             if all(f in funcs for f in ["delete", "rename"]):
                 param.sigRemoved.connect(
                     lambda: self._call_with_errormessage(funcs["delete"])
@@ -268,7 +307,7 @@ class EditableParameterTree(ParameterTree):
                 )
 
             if "add" in funcs:
-                param.sigChildAdded(
+                param.sigChildAdded.connect(
                     lambda parent, new_child, _: self._call_with_errormessage(
                         funcs["add"], parent.name(), new_child.name(), new_child.value()
                     )
@@ -278,6 +317,7 @@ class EditableParameterTree(ParameterTree):
                 if child.name() in funcs:
                     self._connect_parameters(child, funcs[child.name()])
                 else:
+                    print("passing over: ", child.name())
                     pass
         else:
             param.sigValueChanged.connect(
@@ -346,7 +386,7 @@ class EditableParameterTree(ParameterTree):
                 params.append(
                     {
                         "name": key,
-                        "type": "group",
+                        "type": "extendiblegroup",
                         "children": child_params,
                         "expanded": False,
                         "removable": True,
@@ -388,7 +428,7 @@ class EditableParameterTree(ParameterTree):
             self._convert_dict_to_params, self.states, self.functions
         )
         self.root = self._call_with_errormessage(
-            Parameter.create, name=self.name, type="group", children=params
+            Parameter.create, name=self.name, type="extendiblegroup", children=params
         )
         self.setParameters(self.root, showTop=False)
 
@@ -713,6 +753,10 @@ class EditableNeurongroupTree(EditableParameterTree):
             menu.addAction(self.add_neuronsubgroup_action)
 
             menu.exec(self.mapToGlobal(ev.pos()))
+
+
+class EditableInitialconditionTree(EditableParameterTree):
+    pass
 
 
 class ModelEditorDialog(QtWidgets.QDialog):
