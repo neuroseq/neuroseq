@@ -404,9 +404,6 @@ class B2Model:
             value : str
                 value to set the element to
             """
-            print(
-                "modifying: ", self.current_name, self.pdict[self.current_name], value
-            )
             self.pdict[self.current_name] = value
             self.with_rebuilt()
 
@@ -1929,6 +1926,7 @@ class B2Model:
         tfinal: b2.Quantity,
         savepath: str | Path | None = None,
         report: Callable | None = None,
+        timed_array_padding_seconds: int | None = None,
     ) -> None:
         """
         run_simulation Run the fully defined simulation
@@ -1957,6 +1955,8 @@ class B2Model:
             namespace=self.parameters,
         )
         self.logger.info(f"run the system for {tfinal} with savepath = {savepath}")
+        if timed_array_padding_seconds is not None:
+            self._pad_timed_arrays(timed_array_padding_seconds)
         if savepath is not None:
             self.save_to_h5(savepath)
 
