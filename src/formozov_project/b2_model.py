@@ -74,19 +74,18 @@ class B2Model:
         with_rebuilt: Callable,
         element_adder: Callable,
     ) -> None:
-        modifier = self.GroupModifier(
+        modifier = self.Modifier(
             name,
             getattr(self, group_class),
             self.functions[group_class],
             with_rebuilt=with_rebuilt,
-            element_adder=lambda _, __, ___: self.set_rebuilt(True),
         )
 
         self.functions[group_class][name] = {
             "rename": modifier.rename,
             "delete": modifier.delete,
-            "element_added": modifier.add_element,
-            "element_removed": modifier.delete_element,
+            #         "element_added": modifier.add_element,
+            #         "element_removed": modifier.delete_element,
         }
 
     @_trigger_rebuild
@@ -145,7 +144,7 @@ class B2Model:
         name: str,
     ) -> None:
         """
-        _assemble_neurongroup Assemble a synapse called `name` from its set of predefined values.
+        _assemble_synapse Assemble a synapse called `name` from its set of predefined values.
 
         You need to define the respective variables first via the `define_synapse_*` functions.
         Overrides any existing group named 'name' in the network.
@@ -205,6 +204,7 @@ class B2Model:
             self.network.add(synapse)
         except Exception as e:
             self._handle_exception(e, f"Error when adding {name} to the network: {e}")
+        self.logger.info(f"Synapse defined: {name}")
 
     @_trigger_rebuild
     def _assemble_monitor(
@@ -344,38 +344,32 @@ class B2Model:
                     f"Error when initializing {key} of element {name} as {self.initials[name][key]}: {e}"
                 ) from e
 
-    # deletions
+    @_trigger_rebuild
     def _delete_dict_element(self, name: str, key: Any) -> None:
-        """
-        Delete an element 'key' in the  dict attribute `name` of the caller
-        ----------
-        name : str
-            name of the dictionary attribute of the caller to remove the `key` from
-        key : str
-            element name to remove
-        """
-        try:
-            del getattr(self, name)[key]
-        except Exception as e:
-            self._handle_exception(e, f"Error when deleting {name}: {e}")
+        del getattr(self, name)[key]
+        del self.functions[name][key]
 
     # stateful class for modifying, renaming and deleting dictionary elements in arbitrary order
     class Modifier:
         "Stateful functor for renaming elements in a dict successively while keeping track of the old name"
 
         def __init__(
-            self, current_name: str, pdict: dict, fdict: dict, with_rebuilt: Callable
+            self,
+            current_name: str,
+            pdict: dict[Any, Any],
+            fdict: dict[Any, Any],
+            with_rebuilt: Callable,
         ):
             """
-            Create a new modifier instance
+            _summary_
 
             Parameters
             ----------
             current_name : str
                 _description_
-            pdict : dict
+            pdict : dict[Any, Any]
                 _description_
-            fdict : dict
+            fdict : dict[Any, Any]
                 _description_
             with_rebuilt : Callable
                 _description_
@@ -400,9 +394,9 @@ class B2Model:
             self.pdict[new_name] = self.pdict.pop(used_old_name)
             self.fdict[new_name] = self.fdict.pop(used_old_name)
             self.with_rebuilt()
-
             if self.pdict[new_name] and "name" in self.pdict[new_name]:
                 self.pdict[new_name]["name"] = new_name
+            logging.critical(f"Renamed {used_old_name} to {new_name}")
 
         def modify(self, value: str) -> None:
             """
@@ -414,7 +408,9 @@ class B2Model:
                 value to set the element to
             """
             self.pdict[self.current_name] = value
-            logging.critical(f"Modified {self.current_name} to {value}")
+            logging.critical(
+                f"Modified {self.current_name} to {value}, in id: {id(self.pdict)}"
+            )
             self.with_rebuilt()
 
         def delete(self) -> None:
@@ -423,72 +419,6 @@ class B2Model:
             """
             del self.pdict[self.current_name]
             del self.fdict[self.current_name]
-            self.with_rebuilt()
-
-    class GroupModifier(Modifier):
-        """
-        GroupModifier A specialized class for modifying elements of the intermediate
-                      representation which are themselves dictionary elements.
-                      Provides functions for adding and removing elements in addition
-                      to addition, removal or change of the node itself.
-
-        Parameters
-        ----------
-        Modifier
-            Base class that is used for all nodes that have not subnodes themselves.
-        """
-
-        def __init__(
-            self,
-            current_name: str,
-            pdict: dict,
-            fdict: dict,
-            with_rebuilt: Callable = lambda: None,
-            element_adder: Callable = lambda _, __: None,
-        ):
-            """
-            Create a new Groupmodifier instance
-
-            Parameters
-            ----------
-            current_name : str
-                Current name of the node the modififer is to manage
-            pdict : dict
-                dictionary of values that is to be managed
-            fdict : dict
-                function dict to be managed that has all the modification functions
-            with_rebuilt : Callable, optional
-                Function to say whether the system should be rebuilt or not, by default lambda:None
-            element_adder : Callable, optional
-                Function to add an element to the intermediate representation node that the caller manages, by default lambda_
-            """
-            super().__init__(
-                current_name,
-                pdict,
-                fdict,
-                with_rebuilt,
-            )
-            self.element_adder = element_adder
-
-        def add_element(self, *args, **kwargs) -> None:
-            """
-            Add an element to the intermediate representation node of the caller
-            """
-            self.element_adder(*args, **kwargs)
-            self.with_rebuilt()
-
-        def delete_element(self, name: str) -> None:
-            """
-            Delete an element from the intermediate representation node of the callser
-
-            Parameters
-            ----------
-            name : str
-                name to delete
-            """
-            print("delete element")
-            del self.pdict[self.current_name][name]
-            del self.fdict[self.current_name][name]
             self.with_rebuilt()
 
     def __init__(
@@ -515,28 +445,15 @@ class B2Model:
         self.initials: dict[str, dict[str, Any]] = {}
 
         self.functions: dict[str, Any] = {
-            "neurongroups": {
-                "element_added": lambda: self.define_default_neurongroup(),
-                "element_removed": lambda n: self._delete_dict_element(
-                    "neurongroups", n
-                ),
-            },
-            "synapses": {
-                "element_added": lambda: self.define_default_synapse(),
-                "element_removed": lambda n: self._delete_dict_element("synapses", n),
-            },
-            "initials": {
-                "element_added": lambda: self.define_default_init(),
-                "element_removed": lambda n: self._delete_dict_element("initials", n),
-            },
+            "neurongroups": {},
+            "synapses": {},
+            "initials": {},
             "parameters": {
-                "element_added": lambda: self.define_default_parameter(),
-                "element_removed": lambda n: self._delete_dict_element("parameters", n),
+                "element_removed": lambda _, n: self._delete_dict_element(
+                    "parameters", n
+                )
             },
-            "monitors": {
-                "element_added": lambda: self.define_default_monitor(),
-                "element_removed": lambda n: self._delete_dict_element("monitors", n),
-            },
+            "monitors": {},
         }
         self.checkpoints: list[str] = []
         self.must_be_rebuilt = False
@@ -673,20 +590,30 @@ class B2Model:
                 lambda _, __, ___: self.set_rebuilt(True),
             )
 
-        for definition, arg in zip(
-            [
-                self.define_neuronnumber,
-                self.define_equation,
-                self.define_solver_method,
-                self.define_dt,
-                self.define_reset,
-                self.define_threshold,
-                self.define_refractory,
-            ],
-            [0, "dv/dt=0:1", "euler", 10 * b2.ms, "0", "0", "0"],
-            strict=True,
-        ):
-            definition(name, arg)
+        self.define_neuronnumber(name, 0)
+        self.define_equation(name, "dv/dt=0:1")
+        self.define_solver_method(name, "euler")
+        self.define_dt(name, 10 * b2.ms)
+        self.define_reset(name, "0")
+        self.define_threshold(name, "0")
+        self.define_refractory(name, "0")
+
+    @_trigger_rebuild
+    def define_default_neuronsubgroup(self) -> None:
+        name = "new_neuronsubgroup"
+        if name not in self.neurongroups:
+            self.neurongroups[name] = {}
+
+        if name not in self.functions["neurongroups"]:
+            self._add_group_modifier(
+                name,
+                "neurongroups",
+                lambda: self.set_rebuilt(True),
+                lambda _, __, ___: self.set_rebuilt(True),
+            )
+
+        self.define_neuronsubgroup_target(name, "unknown")
+        self.define_neuronsubgroup_idxs(name, [0, 1])
 
     @_trigger_rebuild
     def define_dt(self, name: str, dt: b2.Quantity) -> None:
@@ -764,6 +691,12 @@ class B2Model:
             self.neurongroups[name],
             self.functions["neurongroups"][name],
             lambda: self.set_rebuilt(True),
+        )
+        print(
+            "in class: ",
+            id(self.neurongroups[name]),
+            "in modifier: ",
+            id(element_modifier.pdict),
         )
 
         self.functions["neurongroups"][name]["model"] = {
@@ -990,6 +923,13 @@ class B2Model:
             "rename": element_modifier.rename,
         }
 
+        print(
+            "in class: ",
+            id(self.neurongroups[name]),
+            "in modifier: ",
+            id(element_modifier.pdict),
+        )
+
         utils.update_nested_dict(
             self.neurongroups,
             {
@@ -1017,11 +957,6 @@ class B2Model:
         ValueError
             When the target_name argument does not exist in the neurongroups that are known to the model
         """
-        if target_name not in self.neurongroups:
-            raise KeyError(
-                f"Error, target {target_name} could not be found in neurongroups"
-            )
-
         self.logger.info(f"defining target {target_name} for neuron subgroup {name}")
 
         if name not in self.neurongroups:
@@ -1112,34 +1047,46 @@ class B2Model:
                 lambda _, __, ___: self.set_rebuilt(True),
             )
 
-        for definition, arg in zip(
-            [
-                self.define_synapse_origin,
-                self.define_synapse_target,
-                self.define_synapse_equation,
-                self.define_synapse_solver_method,
-                self.define_synapse_dt,
-                self.define_synapse_delay,
-                self.define_synapse_connection,
-                self.define_synapse_connection_probablitiy,
-                self.define_synapse_pre,
-                self.define_synapse_post,
-            ],
-            [
-                "origin",
-                "target",
-                "dv/dt=0:1",
-                "euler",
-                10 * b2.ms,
-                0 * b2.ms,
-                "i!=j",
-                0.0,
-                "x=y",
-                "x=y",
-            ],
-            strict=True,
-        ):
-            definition(name, arg)
+        self.define_synapse_origin(
+            name,
+            "origin",
+        )
+        self.define_synapse_target(
+            name,
+            "target",
+        )
+        self.define_synapse_equation(
+            name,
+            "dv/dt=0:1",
+        )
+        self.define_synapse_solver_method(
+            name,
+            "euler",
+        )
+        self.define_synapse_dt(
+            name,
+            10 * b2.ms,
+        )
+        self.define_synapse_delay(
+            name,
+            0 * b2.ms,
+        )
+        self.define_synapse_connection(
+            name,
+            "i!=j",
+        )
+        self.define_synapse_connection_probablitiy(
+            name,
+            0.0,
+        )
+        self.define_synapse_pre(
+            name,
+            "x=y",
+        )
+        self.define_synapse_post(
+            name,
+            "x=y",
+        )
 
     @_trigger_rebuild
     def define_synapse_dt(self, name: str, dt: b2.Quantity) -> None:
@@ -1601,17 +1548,13 @@ class B2Model:
                 lambda _, __, ___: self.set_rebuilt(True),
             )
 
-        for definition, arg in zip(
-            [
-                self.define_monitor_type,
-                self.define_monitor_source,
-                self.define_monitor_variable,
-                self.define_monitor_dt,
-            ],
-            ["StateMonitor", "source", "variable", None],
-            strict=True,
-        ):
-            definition(name, arg)
+        self.define_monitor_type(
+            name,
+            "StateMonitor",
+        )
+        self.define_monitor_source(name, "source")
+        self.define_monitor_variable(name, "variable")
+        self.define_monitor_dt(name, None)
 
     @_trigger_rebuild
     def define_monitor_type(self, name: str, classname: str) -> None:

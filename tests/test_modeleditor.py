@@ -1,11 +1,5 @@
-from typing import Any
-
 import brian2 as b2
 from formozov_project.b2_model import B2Model
-from formozov_project.b2_model_widget import NeuronGroupDialog
-from formozov_project.b2_model_widget import NeuronSubgroupDialog
-from formozov_project.b2_model_widget import ParameterDialog
-from formozov_project.b2_model_widget import SynapseDialog
 from formozov_project.model_editor import EagerQComboBox
 from formozov_project.model_editor import EditableMonitorTree
 from formozov_project.model_editor import EditableNeurongroupTree
@@ -64,7 +58,7 @@ def test_etree_constr(
 
 
 def test_etree_edit_item(mfx_nmda: B2Model, qtbot: QtBot) -> None:
-    stree = EditableParameterTree(mfx_nmda, SynapseDialog, "synapses")
+    stree = EditableParameterTree(mfx_nmda, "synapses", mfx_nmda.define_default_synapse)
     qtbot.addWidget(stree)
 
     synapsenode = stree.root.children()[0]
@@ -86,34 +80,248 @@ def test_etree_edit_item(mfx_nmda: B2Model, qtbot: QtBot) -> None:
     assert stree.b2model.synapses["S"]["model"] == "dv/dt = -v: 1"
 
 
-def test_tree_add_element(
-    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch
+def test_tree_add_new_parameter(
+    mfx_nmda: B2Model,
+    qtbot: QtBot,
 ) -> None:
-    monkeypatch.setattr(EditableParameterTree, "itemAt", lambda _, __: None)
-    # patch the itemAt function to make sure we get the item adder dialog
-
-    def exec_pdiag(pdiag: ParameterDialog) -> Any:
-        pdiag.name_entry.setText("p")
-        pdiag.value_entry.setText("2")
-        pdiag.accept_name("parameters")
-        pdiag.accept_value()
-        pdiag.accept()
-        return True
-
-    monkeypatch.setattr(ParameterDialog, "exec", exec_pdiag)
-
-    ptree = EditableParameterTree(mfx_nmda, ParameterDialog, "parameters")
+    ptree = EditableParameterTree(
+        mfx_nmda, "parameters", mfx_nmda.define_default_parameter
+    )
     qtbot.addWidget(ptree)
-    assert ptree.b2model.must_be_rebuilt is False
 
-    ptree.add_item()
+    assert (
+        len(
+            ptree.findItems(
+                "new_parameter",
+                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+                0,
+            )
+        )
+        == 0
+    )
 
-    assert ptree.b2model.parameters["p"] == 2  # type: ignore
-    assert ptree.b2model.must_be_rebuilt is False
+    assert "new_parameter" not in mfx_nmda.parameters
+    ptree._add_item()
+    assert "new_parameter" in mfx_nmda.parameters
+
+    assert mfx_nmda.parameters["new_parameter"] is None
+
+    assert (
+        len(
+            ptree.findItems(
+                "new_parameter",
+                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+                0,
+            )
+        )
+        == 1
+    )
+
+
+def test_tree_add_new_neurongroups(mfx_nmda, qtbot: QtBot) -> None:
+    ntree = EditableNeurongroupTree(
+        mfx_nmda,
+    )
+    qtbot.addWidget(ntree)
+
+    assert (
+        len(
+            ntree.findItems(
+                "new_neurongroup",
+                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+                0,
+            )
+        )
+        == 0
+    )
+
+    assert "new_neurongroup" not in mfx_nmda.neurongroups
+    ntree._add_item()
+    assert "new_neurongroup" in mfx_nmda.neurongroups
+    assert (
+        len(
+            ntree.findItems(
+                "new_neurongroup",
+                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+                0,
+            )
+        )
+        == 1
+    )
+
+    assert (
+        len(
+            ntree.findItems(
+                "new_neuronsubgroup",
+                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+                0,
+            )
+        )
+        == 0
+    )
+    assert "new_neuronsubgroup" not in mfx_nmda.neurongroups
+    ntree._add_neuronsubgroup()
+
+    assert (
+        len(
+            ntree.findItems(
+                "new_neuronsubgroup",
+                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+                1,
+            )
+        )
+        == 0
+    )
+    assert "new_neuronsubgroup" in mfx_nmda.neurongroups
+
+
+def test_tree_add_new_synapses(mfx_nmda, qtbot: QtBot) -> None:
+    ntree = EditableSynapseTree(
+        mfx_nmda,
+    )
+    qtbot.addWidget(ntree)
+
+    assert (
+        len(
+            ntree.findItems(
+                "new_synapse",
+                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+                0,
+            )
+        )
+        == 0
+    )
+
+    assert "new_synapse" not in mfx_nmda.synapses
+    ntree._add_item()
+    assert "new_synapse" in mfx_nmda.synapses
+    assert (
+        len(
+            ntree.findItems(
+                "new_synapse",
+                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+                0,
+            )
+        )
+        == 1
+    )
+
+
+def test_tree_add_new_monitor(mfx_nmda, qtbot: QtBot) -> None:
+    ntree = EditableMonitorTree(
+        mfx_nmda,
+    )
+    qtbot.addWidget(ntree)
+
+    assert (
+        len(
+            ntree.findItems(
+                "new_monitor",
+                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+                0,
+            )
+        )
+        == 0
+    )
+
+    assert "new_monitor" not in mfx_nmda.monitors
+    ntree._add_item()
+    assert "new_monitor" in mfx_nmda.monitors
+    assert (
+        len(
+            ntree.findItems(
+                "new_monitor",
+                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+                0,
+            )
+        )
+        == 1
+    )
+
+
+def test_delete_neurongroup(mfx_nmda, qtbot: QtBot) -> None:
+    # send delete signal -> then check that group is gone
+    ntree = EditableNeurongroupTree(mfx_nmda)
+    qtbot.add_widget(ntree)
+
+    # find neurongroup element with name 'neurongroup
+    assert "neurons" in mfx_nmda.neurongroups
+
+    ng = ntree.findItems(
+        "neurons",
+        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+        0,
+    )[0]
+    with qtbot.waitSignal(ng.param.sigRemoved, timeout=1000, raising=True):
+        ng.param.remove()
+
+    assert "neurons" not in mfx_nmda.neurongroups
+
+
+def test_delete_neurongroup_element(mfx_nmda, qtbot: QtBot) -> None:
+    # send delete signal -> then check that group is gone
+    ntree = EditableNeurongroupTree(mfx_nmda)
+    qtbot.add_widget(ntree)
+
+    # find neurongroup element with name 'neurongroup
+    assert "neuronnumber" in mfx_nmda.neurongroups["neurons"]
+
+    ngs = ntree.findItems(
+        "neuronnumber",
+        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+        0,
+    )
+
+    ng = [p.param for p in ngs if p.parent().param.name() == "neurons"][0]
+
+    with qtbot.waitSignal(ng.sigRemoved, timeout=1000, raising=True):
+        ng.remove()
+
+    assert "neuronnumber" not in mfx_nmda.neurongroups["neurons"]
+
+
+def test_delete_synapse(mfx_nmda, qtbot: QtBot) -> None:
+    ntree = EditableSynapseTree(mfx_nmda)
+    qtbot.add_widget(ntree)
+
+    # find neurongroup element with name 'neurongroup
+    assert "S" in mfx_nmda.synapses
+
+    ng = ntree.findItems(
+        "S",
+        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+        0,
+    )[0]
+    with qtbot.waitSignal(ng.param.sigRemoved, timeout=1000, raising=True):
+        ng.param.remove()
+
+    assert "S" not in mfx_nmda.synapses
+
+
+def test_delete_synapse_element(mfx_nmda, qtbot: QtBot) -> None:
+    pass
+
+
+def test_delete_monitor(mfx_nmda, qtbot: QtBot) -> None:
+    pass
+
+
+def test_delete_parameter(mfx_nmda, qtbot: QtBot) -> None:
+    pass
+
+
+def test_delete_monitor_element(mfx_nmda, qtbot: QtBot) -> None:
+    pass
+
+
+def test_delete_parameter_element(mfx_nmda, qtbot: QtBot) -> None:
+    pass
 
 
 def test_ptree_edit_b2quantity(mfx_nmda: B2Model, qtbot: QtBot) -> None:
-    ptree = EditableParameterTree(mfx_nmda, ParameterDialog, "parameters")
+    ptree = EditableParameterTree(
+        mfx_nmda, "parameters", mfx_nmda.define_default_parameter
+    )
     qtbot.addWidget(ptree)
 
     pnode = ptree.root
@@ -128,42 +336,10 @@ def test_ptree_edit_b2quantity(mfx_nmda: B2Model, qtbot: QtBot) -> None:
     assert ptree.b2model.must_be_rebuilt is False
 
 
-def test_neurontree_add_neuronsubgroup(
-    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch
-) -> None:
-    def exec_ndiag(ndiag: NeuronSubgroupDialog) -> Any:
-        ndiag.name_entry.setText("sub")
-        ndiag.target.setText("neuron_input")
-        ndiag.definition.setText("(1,2)")
-        ndiag.get_targetname()
-        ndiag.get_subgroup_def()
-        ndiag.accept_name(target="neurongroups")
-        ndiag.accept()
-        return True
-
-    monkeypatch.setattr(NeuronSubgroupDialog, "exec", exec_ndiag)
-
-    ntree = EditableNeurongroupTree(
-        mfx_nmda,
+def test_rename_tree_element(mfx_nmda: B2Model, qtbot: QtBot) -> None:
+    ptree = EditableParameterTree(
+        mfx_nmda, "parameters", mfx_nmda.define_default_parameter
     )
-
-    qtbot.addWidget(ntree)
-
-    assert ntree.states == mfx_nmda.neurongroups
-
-    ntree._add_neuronsubgroup()
-
-    assert "sub" in ntree.b2model.neurongroups
-    assert ntree.b2model.neurongroups["sub"]["name"] == "sub"
-    assert ntree.b2model.neurongroups["sub"]["target"] == "neuron_input"
-    assert ntree.b2model.neurongroups["sub"]["idxs"] == (1, 2)
-    assert ntree.b2model.must_be_rebuilt is True
-
-
-def test_rename_tree_element(
-    mfx_nmda: B2Model, qtbot: QtBot, qmessagebox_calls: list
-) -> None:
-    ptree = EditableParameterTree(mfx_nmda, ParameterDialog, "parameters")
     qtbot.addWidget(ptree)
     assert ptree.b2model.must_be_rebuilt is False
 
@@ -195,47 +371,15 @@ def test_rename_tree_element(
 
 
 def test_neurontree_add_neurongroup_list_update(
-    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch
+    mfx_nmda: B2Model,
+    qtbot: QtBot,
 ) -> None:
-    def exec_ndiag(ndiag: NeuronSubgroupDialog) -> Any:
-        ndiag.name_entry.setText("p1")
-        ndiag.equation.setText("dv/dt = -v : siemens")
-        ndiag.threshold.setText("v < -10 mV")
-        ndiag.neuronnumber.setText("25")
-        ndiag.solver.setText("euler")
-
-        ndiag.accept_name("neurongroups")
-        ndiag.accept_parameter_with_savebutton(
-            ndiag.threshold,
-            "threshold",
-            ndiag.model.define_threshold,
-            ndiag.threshold_button,
-        )
-        ndiag.accept_parameter_with_savebutton(
-            ndiag.solver,
-            "solver",
-            ndiag.model.define_solver_method,
-            ndiag.solver_button,
-        )
-        ndiag.accept_parameter_with_savebutton(
-            ndiag.neuronnumber,
-            "neuronnumber",
-            ndiag.model.define_neuronnumber,
-            ndiag.neuronnumber_button,
-            lambda v: int(v),
-        )
-        ndiag.accept_parameter_with_savebutton(
-            ndiag.equation, "model", ndiag.model.define_equation, ndiag.equation_button
-        )
-        ndiag.accept()
-        return True
-
-    monkeypatch.setattr(NeuronGroupDialog, "exec", exec_ndiag)
-
     ntree = EditableNeurongroupTree(
         mfx_nmda,
     )
     qtbot.addWidget(ntree)
+
+    ntree._add_neuronsubgroup()
 
     # add synpase tree to assure later that the data has been updated
     stree = EditableSynapseTree(mfx_nmda)
@@ -255,7 +399,9 @@ def test_neurontree_add_neurongroup_list_update(
 
     all_names = [origin.widget.itemText(i) for i in range(origin.widget.count())]
 
-    assert set(all_names) == set(["neurons", "neuron_input", "input_subgroup"])
+    assert set(all_names) == set(
+        ["neurons", "neuron_input", "new_neuronsubgroup", "input_subgroup"]
+    )
 
     assert ntree.states == mfx_nmda.neurongroups
 
@@ -299,19 +445,23 @@ def test_neurontree_add_neurongroup_list_update(
         ]
     )
 
-    ntree.add_item()
+    ntree._add_item()
 
-    assert "p1" in ntree.b2model.neurongroups
-    assert ntree.b2model.neurongroups["p1"]["model"] == "dv/dt = -v : siemens\n"
-    assert ntree.b2model.neurongroups["p1"]["th"] == "v < -10 mV"
-    assert ntree.b2model.neurongroups["p1"]["method"] == "euler"
-    assert ntree.b2model.neurongroups["p1"]["neuronnumber"] == 25
+    assert "new_neurongroup" in ntree.b2model.neurongroups
     assert ntree.b2model.must_be_rebuilt is True
 
     # trigger list update for synapse origin
     origin._update_list()
     all_names = [origin.widget.itemText(i) for i in range(origin.widget.count())]
-    assert set(all_names) == set(["neurons", "neuron_input", "p1", "input_subgroup"])
+    assert set(all_names) == set(
+        [
+            "neurons",
+            "neuron_input",
+            "new_neurongroup",
+            "input_subgroup",
+            "new_neuronsubgroup",
+        ]
+    )
 
     var_selection.setSelected(True)
     assert var_selection.isSelected()
