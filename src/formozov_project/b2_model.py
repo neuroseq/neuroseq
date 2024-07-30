@@ -85,7 +85,7 @@ class B2Model:
         self.functions[group_class][name] = {
             "rename": modifier.rename,
             "delete": modifier.delete,
-            "element_added": modifier.add,
+            "add": modifier.add,
         }
 
     @_trigger_rebuild
@@ -405,6 +405,7 @@ class B2Model:
             """
             Delete the element behind the currently held name
             """
+            print("delete thing: ", self.current_name)
             del self.pdict[self.current_name]
             del self.fdict[self.current_name]
             self.with_rebuilt()
@@ -413,7 +414,7 @@ class B2Model:
             """
             add a new element if the held pdict is a nested dict
             """
-            self.element_adder(*args, **kwargs)
+            self.element_adder(self.current_name, *args, **kwargs)
 
     def __init__(
         self,
@@ -484,11 +485,7 @@ class B2Model:
                 name,
                 "initials",
                 lambda: self.set_rebuilt(True),
-                lambda n, vn, v: self.define_init(n, vn, v),
-            )
-
-            self.functions["initials"][name]["add"] = lambda n, vn, v: self.define_init(
-                n, vn, v
+                lambda n: self.define_init(n, "variable", "value"),
             )
 
         element_modifier = self.Modifier(

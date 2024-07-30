@@ -6,14 +6,11 @@ from copy import deepcopy
 from typing import Any
 
 import brian2 as b2  # noqa: F401
-import qtawesome as qta
 from brian2 import TimedArray
 from pyqtgraph.parametertree import Parameter
 from pyqtgraph.parametertree import ParameterTree
 from pyqtgraph.parametertree import registerParameterItemType
 from pyqtgraph.parametertree import registerParameterType
-from pyqtgraph.parametertree.parameterTypes import GroupParameter
-from pyqtgraph.parametertree.parameterTypes import GroupParameterItem
 from pyqtgraph.parametertree.parameterTypes import ListParameter
 from pyqtgraph.parametertree.parameterTypes import ListParameterItem
 from qtpy import QtCore
@@ -169,46 +166,10 @@ class UpdatingListParameter(ListParameter):
         return paramitem
 
 
-class ExtendibleGroupParameterItem(GroupParameterItem):
-    def __init__(self, param: Parameter, depth: int):
-        super().__init__(param, depth)
-
-        # Create a button and add it to the layout
-        self.button = QtWidgets.QPushButton("Add Item")
-        self.button.clicked.connect(self.add_new_item)
-        icon = qta.icon("mdi6.plus")
-        self.button.setIcon(icon)
-
-        # Insert the button into the layout
-        self.layoutWidget.layout().insertWidget(1, self.button)
-
-    def add_new_item(self):
-        new_param = Parameter.create(
-            name=f"New Item {len(self.param.children())}", type="str", value="value"
-        )
-        self.param.addChild(new_param)
-
-
-class ExtendibleGroupParameter(GroupParameter):
-    itemClass = ExtendibleGroupParameterItem
-
-    def __init__(self, **opts):
-        super().__init__(**opts)
-
-    def makeTreeItem(self, depth):
-        itemClass = self.itemClass
-        paramitem = itemClass(self, depth)
-        return paramitem
-
-
 # register the new types with the parametertree implementation
 registerParameterType("updatinglist", UpdatingListParameter)
 registerParameterItemType(
     "updatinglistitem", UpdatingListParameterItem, UpdatingListParameter
-)
-registerParameterType("extendiblegroup", ExtendibleGroupParameter)
-registerParameterItemType(
-    "extendiblegroupitem", ExtendibleGroupParameterItem, ExtendibleGroupParameter
 )
 
 
@@ -297,7 +258,7 @@ class EditableParameterTree(ParameterTree):
         param : Parameter
             parent paremeter
         """
-        if param.type() == "extendiblegroup":
+        if param.type() == "group":
             if all(f in funcs for f in ["delete", "rename"]):
                 param.sigRemoved.connect(
                     lambda: self._call_with_errormessage(funcs["delete"])
@@ -306,18 +267,10 @@ class EditableParameterTree(ParameterTree):
                     lambda p: self._call_with_errormessage(funcs["rename"], p.name())
                 )
 
-            if "add" in funcs:
-                param.sigChildAdded.connect(
-                    lambda parent, new_child, _: self._call_with_errormessage(
-                        funcs["add"], parent.name(), new_child.name(), new_child.value()
-                    )
-                )
-
             for child in param.children():
                 if child.name() in funcs:
                     self._connect_parameters(child, funcs[child.name()])
                 else:
-                    print("passing over: ", child.name())
                     pass
         else:
             param.sigValueChanged.connect(
@@ -354,7 +307,11 @@ class EditableParameterTree(ParameterTree):
             return v
 
     def _convert_dict_to_params(
-        self, data: dict[Any, Any], functions: dict[Any, Any], key: Any = ""
+        self,
+        data: dict[Any, Any],
+        functions: dict[Any, Any],
+        key: Any = "",
+        expanded: bool = False,
     ) -> list[Any]:
         """
         Recursively go through a nested dict and create a hierarchical pyqtgraph Parameter representation of it
@@ -377,18 +334,15 @@ class EditableParameterTree(ParameterTree):
             value = self._get_value(value)
             if isinstance(value, dict):
                 child_params = self._convert_dict_to_params(
-                    value,
-                    functions[key],
-                    key,
+                    value, functions[key], key, expanded=expanded
                 )
 
-                # FIXME: this thing needs a + button for some things with an activated list to choose from for some of those in turn
                 params.append(
                     {
                         "name": key,
-                        "type": "extendiblegroup",
+                        "type": "group",
                         "children": child_params,
-                        "expanded": False,
+                        "expanded": expanded,
                         "removable": True,
                         "renamable": True,
                         "syncExpanded": True,
@@ -420,16 +374,21 @@ class EditableParameterTree(ParameterTree):
 
         return params
 
-    def _build_tree(self) -> None:
+    def _build_tree(self, expanded: bool = False) -> None:
         """
         _summary_
         """
         params = self._call_with_errormessage(
-            self._convert_dict_to_params, self.states, self.functions
+            self._convert_dict_to_params, self.states, self.functions, expanded=expanded
         )
         self.root = self._call_with_errormessage(
-            Parameter.create, name=self.name, type="extendiblegroup", children=params
+            Parameter.create,
+            name=self.name,
+            type="group",
+            children=params,
+            # addText="New",
         )
+        # self.root.sigAddNew.connect(self._add_item)
         self.setParameters(self.root, showTop=False)
 
         self._call_with_errormessage(
@@ -707,9 +666,9 @@ class EditableNeurongroupTree(EditableParameterTree):
         )
 
         self.add_neurongroup_action = self.add_item_action
-        self.add_neurongroup_action.setText("add Neurongroup")
+        self.add_neurongroup_action.setText("add neurongroup")
 
-        self.add_neuronsubgroup_action = QtWidgets.QAction("add Neuron subgroup")
+        self.add_neuronsubgroup_action = QtWidgets.QAction("add neuron subgroup")
         self.add_neuronsubgroup_action.triggered.connect(self._add_neuronsubgroup)
 
     def _add_neuronsubgroup(self) -> None:
@@ -731,7 +690,7 @@ class EditableNeurongroupTree(EditableParameterTree):
         return [
             n
             for n in self.b2model.neurongroups
-            if "idx" not in self.b2model.neurongroups[n]
+            if "idxs" not in self.b2model.neurongroups[n]
         ]
 
     def contextMenuEvent(self, ev: QtCore.Event) -> None:
@@ -755,8 +714,132 @@ class EditableNeurongroupTree(EditableParameterTree):
             menu.exec(self.mapToGlobal(ev.pos()))
 
 
-class EditableInitialconditionTree(EditableParameterTree):
-    pass
+class EditableInitialConditionTree(EditableParameterTree):
+    def __init__(
+        self,
+        model: B2Model,
+        parent: QtWidgets.QWidget | None = None,
+        showHeader: bool = True,
+    ):
+        super().__init__(
+            model,
+            "initials",
+            model.define_default_init,
+            parent=parent,
+            showHeader=showHeader,
+        )
+
+    def _connect_parameters(self, param: Parameter, funcs: dict[Any, Any]) -> None:
+        """
+        connect the signals emitted by the entries of the parameter tree to their respective actions.
+        Whenever something changes (add/delete child node, change value) the model is set to be rebuilt
+        when the dialog is accepted, and changed parameters are updated.
+
+        Parameters
+        ----------
+        param : Parameter
+            parent paremeter
+        """
+        if param.type() == "group":
+            if all(f in funcs for f in ["delete", "rename"]):
+                param.sigRemoved.connect(
+                    lambda: self._call_with_errormessage(funcs["delete"])
+                )
+                param.sigNameChanged.connect(
+                    lambda p: self._call_with_errormessage(funcs["rename"], p.name())
+                )
+            param.sigAddNew.connect(lambda: self._call_with_errormessage(funcs["add"]))
+            param.sigAddNew.connect(
+                lambda: self._call_with_errormessage(self._build_tree)
+            )
+
+            for child in param.children():
+                if child.name() in funcs:
+                    self._connect_parameters(child, funcs[child.name()])
+                else:
+                    pass
+        else:
+            param.sigValueChanged.connect(
+                lambda p: self._call_with_errormessage(
+                    funcs["modify"],
+                    self._call_with_errormessage(parse_string_to_quantity, p.value()),
+                )
+            )
+            param.sigRemoved.connect(
+                lambda: self._call_with_errormessage(funcs["delete"])
+            )
+            param.sigNameChanged.connect(
+                lambda p: self._call_with_errormessage(funcs["rename"], p.name())
+            )
+
+    def _convert_dict_to_params(
+        self,
+        data: dict[Any, Any],
+        functions: dict[Any, Any],
+        key: Any = "",
+        expanded: bool = True,
+    ) -> list[Any]:
+        """
+        Recursively go through a nested dict and create a hierarchical pyqtgraph Parameter representation of it
+        from which a ParameterTree object can be constructed.
+
+        Parameters
+        ----------
+        data : dict[Any, Any]
+            Possibly nested dict to be represented in the parametertree
+        key : Any, optional
+            Current key of 'data' that is processed. Needed for keeping track of parameter names, by default ""
+
+        Returns
+        -------
+        list[Any]
+            list of Parameter representations that internally define all the parent-child relationships to create the parametertree.
+        """
+        # FIXME: this must be such that it isn't  as repetitive
+        params = []
+        for key, value in data.items():
+            value = self._get_value(value)
+            if isinstance(value, dict):
+                child_params = self._convert_dict_to_params(
+                    value, functions[key], key, True
+                )
+
+                params.append(
+                    {
+                        "name": key,
+                        "type": "group",
+                        "children": child_params,
+                        "expanded": True,
+                        "removable": True,
+                        "renamable": True,
+                        "syncExpanded": True,
+                        "addText": "New",
+                    }
+                )
+            else:
+                # Determine the parameter type based on value type
+                param_type = "str"
+                if isinstance(value, b2.Quantity):
+                    value = value.in_best_unit(python_code=True)
+                value = str(value)
+
+                param = {
+                    "name": key,
+                    "type": param_type,
+                    "value": value,
+                    "removable": True,
+                    "renamable": True,
+                    "syncExpanded": True,
+                }
+
+                # need 'limits' for the underlying ListParameter and 'element' for the custom class
+                if key in list(self.list_items.keys()):
+                    param["type"] = "updatinglist"
+                    param["limits"] = self.list_items[key]["update_from"]()
+                    param["update"] = self.list_items[key]["update_from"]
+
+                params.append(param)
+        return params
 
 
 class ModelEditorDialog(QtWidgets.QDialog):
@@ -798,10 +881,8 @@ class ModelEditorDialog(QtWidgets.QDialog):
                 default_creator=b2model.define_default_parameter,
                 parent=self,
             ),
-            "Initial Conditions": EditableParameterTree(
+            "Initial Conditions": EditableInitialConditionTree(
                 b2model,
-                domain_name="initials",
-                default_creator=b2model.define_default_init,
                 parent=self,
             ),
         }
@@ -821,20 +902,39 @@ class ModelEditorDialog(QtWidgets.QDialog):
         button_box = QtWidgets.QDialogButtonBox(btns)
 
         i = 0
-        for k, t in trees.items():
+        for k, tree in trees.items():
             nameplate = QtWidgets.QLabel(str(k), parent=self)
             bold_font = QtGui.QFont()
             bold_font.setBold(True)
             nameplate.setFont(bold_font)
             layout.addWidget(nameplate, 0, i)
-            layout.addWidget(t, 1, i)
+
+            add_group_button = QtWidgets.QPushButton("New", self)
+            add_group_button.clicked.connect(tree._add_item)
+            layout.addWidget(add_group_button, 0, i + 1)
+            col_add = 0
+            if k == "Neurongroups":
+                col_add = 4
+                add_group_button_sub = QtWidgets.QPushButton("New subgroup", self)
+                layout.addWidget(add_group_button_sub, 0, i + 2)
+                add_group_button_sub.clicked.connect(tree._add_neuronsubgroup)
+            else:
+                col_add = 3
+            layout.addWidget(tree, 1, i, 1, col_add - 1)
             separator = QtWidgets.QFrame()
             separator.setFrameShape(QtWidgets.QFrame.VLine)
             separator.setFrameShadow(QtWidgets.QFrame.Sunken)
-            layout.addWidget(separator, 1, i + 1)
-            i += 2
+            layout.addWidget(separator, 0, i + col_add - 1, layout.rowCount(), 1)
+            i += col_add
 
-        layout.addWidget(button_box, layout.rowCount(), 1, 1, 4, QtCore.Qt.AlignCenter)
+        layout.addWidget(
+            button_box,
+            layout.rowCount(),
+            1,
+            1,
+            layout.columnCount() - 1,
+            QtCore.Qt.AlignCenter,
+        )
 
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
