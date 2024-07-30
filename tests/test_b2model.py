@@ -1186,3 +1186,41 @@ def test_modify_remove_group(mfx_ornstein) -> None:
 
     mfx_ornstein.functions["initials"]["P"]["v"]["modify"](3)
     assert mfx_ornstein.initials["P"]["v"] == 3
+
+
+def test_assemble_network_add_exceptions(
+    mocker: MockerFixture, default_model_path
+) -> None:
+    model = b2_model.B2Model.load_model(default_model_path)
+    mocker.patch(
+        "formozov_project.b2_model.b2.Network.add",
+        side_effect=Exception("fake exception"),
+    )
+
+    with pytest.raises(RuntimeError, match=".*adding.*"):
+        model._assemble_synapse("Ce")
+
+    with pytest.raises(RuntimeError, match=".*adding.*"):
+        model._assemble_monitor("Traces_v")
+
+    with pytest.raises(RuntimeError, match=".*adding.*"):
+        model._assemble_neurongroup("P")
+
+
+def test_assemble_network_remove_exceptions(
+    mocker: MockerFixture, default_model_path
+) -> None:
+    model = b2_model.B2Model.load_model(default_model_path)
+    mocker.patch(
+        "formozov_project.b2_model.b2.Network.remove",
+        side_effect=Exception("fake exception"),
+    )
+
+    with pytest.raises(RuntimeError, match=".*removing.*"):
+        model._assemble_synapse("Ce")
+
+    with pytest.raises(RuntimeError, match=".*removing.*"):
+        model._assemble_monitor("Traces_v")
+
+    with pytest.raises(RuntimeError, match=".*removing.*"):
+        model._assemble_neurongroup("P")

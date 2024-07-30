@@ -11,6 +11,7 @@ from typing import Any
 
 import brian2 as b2
 import brian2.numpy_ as np
+import brian2.units.allunits as b2_units
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
@@ -149,7 +150,7 @@ class QtABCMeta(type(QtCore.QObject), abc.ABCMeta):  # type: ignore
 
 def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:
     """
-    Parse a string into a brian2 quantity or return it if that is not possible. Quantities can be of the from
+    Parse a string into a brian2 quantity or return it if that is not possible. Quantities can be of the form
     number * unit.
 
     Parameters
@@ -170,7 +171,7 @@ def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:
         When something goes wrong during evaluation of the unit part of the input quantity string
     """
     # extract numerical value via regex. allow for multiple numbers left and right of a '.' and multiple spaces or a '*' between number and unit
-    pattern = r"([\(\)\d./\*]+)\s*\*?\s*(\w*)"
+    pattern = r"([\(\)\d./\*\-\+e]+)\s*\*?\s*(\w*)"
     match = re.match(pattern, quantity_str)
     quantity_obj = None
     if match:
@@ -189,9 +190,12 @@ def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:
             # Map the unit string to a Brian2 unit
             try:
                 unit = getattr(b2, unit_str)
-            except Exception as e:
-                message = f"Error when interpreting unit string: {e}"
-                raise RuntimeError(message) from e
+            except AttributeError:
+                try:
+                    unit = getattr(b2_units, unit_str)
+                except AttributeError as e:
+                    message = f"Error when interpreting unit string: {e}"
+                    raise RuntimeError(message) from e
 
             quantity_obj = v * unit
             return quantity_obj
@@ -202,6 +206,7 @@ def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:
             quantity = eval(quantity_str)
             return quantity
         except Exception as _:
+            logging.debug(f"Failed to parse {quantity_str} as Quantity")
             return quantity_str
 
 

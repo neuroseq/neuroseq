@@ -396,7 +396,7 @@ class StimEditor(QtWidgets.QWidget):
                 toolbar,
                 self,
                 shortcut="Ctrl+Shift+V",
-                icon=qta.icon("fa.paste"),
+                icon=qta.icon("fa5s.paste"),
             )
         )
         self.actions_edit.append(

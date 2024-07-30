@@ -379,7 +379,10 @@ class EditableParameterTree(ParameterTree):
             else:
                 # Determine the parameter type based on value type
                 param_type = "str"
+                if isinstance(value, b2.Quantity):
+                    value = value.in_best_unit(python_code=True)
                 value = str(value)
+
                 param = {
                     "name": key,
                     "type": param_type,
@@ -570,7 +573,7 @@ class EditableMonitorTree(EditableParameterTree):
             if "idx" not in self.b2model.neurongroups[n]
         ] + list(self.b2model.synapses.keys())
 
-        self.logger.debug("updating available object list for monitors to {lst}")
+        self.logger.debug(f"updating available object list for monitors to {lst}")
         return lst
 
     def _make_selection_list(self, typename: str, sourcename: str) -> list[str]:
