@@ -38,7 +38,7 @@ def test_define_equation(mfx: b2_model.B2Model) -> None:
 
     assert all(
         f in mfx.functions["neurongroups"]["P"]["model"]
-        for f in ["add", "delete", "modify", "rename"]
+        for f in ["delete", "modify", "rename"]
     )
 
     with pytest.raises(
@@ -178,7 +178,7 @@ def test_rename_parameter(mfx_nmda: b2_model.B2Model) -> None:
     assert mfx_nmda.parameters["renamed"] == test_data
     assert all(
         f in mfx_nmda.functions["parameters"]["renamed"]
-        for f in ["add", "delete", "modify", "rename"]
+        for f in ["delete", "modify", "rename"]
     )
 
 
@@ -233,9 +233,10 @@ def test_rename_init_element(mfx_nmda: b2_model.B2Model) -> None:
     assert "renamed" in mfx_nmda.functions["initials"]["S"]
 
     assert mfx_nmda.initials["S"]["renamed"] == test_data
+    print(mfx_nmda.functions["initials"]["S"]["renamed"])
     assert all(
         f in mfx_nmda.functions["initials"]["S"]["renamed"]
-        for f in ["add", "delete", "modify", "rename"]
+        for f in ["delete", "modify", "rename"]
     )
 
 
@@ -256,7 +257,7 @@ def test_rename_neurongroup_element_with_modification(
     assert mfx_nmda.neurongroups["neurons"]["renamed"] == test_data
     assert all(
         f in mfx_nmda.functions["neurongroups"]["neurons"]["renamed"]
-        for f in ["add", "delete", "modify", "rename"]
+        for f in ["delete", "modify", "rename"]
     )
 
     mfx_nmda.functions["neurongroups"]["neurons"]["renamed"]["modify"]("dv/dt=-v:1")
@@ -287,7 +288,7 @@ def test_rename_synapse_element(mfx_nmda: b2_model.B2Model) -> None:
     assert mfx_nmda.synapses["S"]["renamed"] == test_data
     assert all(
         f in mfx_nmda.functions["synapses"]["S"]["renamed"]
-        for f in ["add", "delete", "modify", "rename"]
+        for f in ["delete", "modify", "rename"]
     )
 
     mfx_nmda.functions["synapses"]["S"]["renamed"]["rename"]("another_name")
@@ -301,7 +302,7 @@ def test_rename_synapse_element(mfx_nmda: b2_model.B2Model) -> None:
     assert mfx_nmda.synapses["S"]["another_name"] == test_data
     assert all(
         f in mfx_nmda.functions["synapses"]["S"]["another_name"]
-        for f in ["add", "delete", "modify", "rename"]
+        for f in ["delete", "modify", "rename"]
     )
 
 
@@ -320,7 +321,7 @@ def test_rename_monitor_element(mfx_nmda: b2_model.B2Model) -> None:
     assert mfx_nmda.monitors["M"]["renamed"] == test_data
     assert all(
         f in mfx_nmda.functions["monitors"]["M"]["renamed"]
-        for f in ["add", "delete", "modify", "rename"]
+        for f in ["delete", "modify", "rename"]
     )
 
 
