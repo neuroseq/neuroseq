@@ -259,11 +259,10 @@ def test_delete_neurongroup(mfx_nmda, qtbot: QtBot) -> None:
 
 
 def test_delete_neurongroup_element(mfx_nmda, qtbot: QtBot) -> None:
-    # send delete signal -> then check that group is gone
     ntree = EditableNeurongroupTree(mfx_nmda)
     qtbot.add_widget(ntree)
 
-    # find neurongroup element with name 'neurongroup
+    # find neurongroup element with name 'neurons
     assert "neuronnumber" in mfx_nmda.neurongroups["neurons"]
 
     ngs = ntree.findItems(
@@ -284,7 +283,6 @@ def test_delete_synapse(mfx_nmda, qtbot: QtBot) -> None:
     ntree = EditableSynapseTree(mfx_nmda)
     qtbot.add_widget(ntree)
 
-    # find neurongroup element with name 'neurongroup
     assert "S" in mfx_nmda.synapses
 
     ng = ntree.findItems(
@@ -299,23 +297,80 @@ def test_delete_synapse(mfx_nmda, qtbot: QtBot) -> None:
 
 
 def test_delete_synapse_element(mfx_nmda, qtbot: QtBot) -> None:
-    pass
+    ntree = EditableSynapseTree(mfx_nmda)
+    qtbot.add_widget(ntree)
+
+    assert "origin" in mfx_nmda.synapses["S"]
+
+    ngs = ntree.findItems(
+        "origin",
+        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+        0,
+    )
+
+    ng = [p.param for p in ngs if p.parent().param.name() == "S"][0]
+
+    with qtbot.waitSignal(ng.sigRemoved, timeout=1000, raising=True):
+        ng.remove()
+
+    assert "origin" not in mfx_nmda.synapses["S"]
 
 
 def test_delete_monitor(mfx_nmda, qtbot: QtBot) -> None:
-    pass
+    ntree = EditableMonitorTree(mfx_nmda)
+    qtbot.add_widget(ntree)
 
+    assert "Mn" in mfx_nmda.monitors
 
-def test_delete_parameter(mfx_nmda, qtbot: QtBot) -> None:
-    pass
+    ng = ntree.findItems(
+        "Mn",
+        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+        0,
+    )[0]
+    with qtbot.waitSignal(ng.param.sigRemoved, timeout=1000, raising=True):
+        ng.param.remove()
+
+    assert "Mn" not in mfx_nmda.monitors
 
 
 def test_delete_monitor_element(mfx_nmda, qtbot: QtBot) -> None:
-    pass
+    ntree = EditableMonitorTree(mfx_nmda)
+    qtbot.add_widget(ntree)
+
+    assert "source" in mfx_nmda.monitors["M"]
+
+    ngs = ntree.findItems(
+        "source",
+        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+        0,
+    )
+
+    ng = [p.param for p in ngs if p.parent().param.name() == "M"][0]
+
+    with qtbot.waitSignal(ng.sigRemoved, timeout=1000, raising=True):
+        ng.remove()
+
+    assert "source" not in mfx_nmda.monitors["M"]
 
 
-def test_delete_parameter_element(mfx_nmda, qtbot: QtBot) -> None:
-    pass
+def test_delete_parameter(mfx_nmda, qtbot: QtBot) -> None:
+    tree = EditableParameterTree(
+        mfx_nmda, "parameters", mfx_nmda.define_default_parameter
+    )
+    qtbot.add_widget(tree)
+
+    assert "a" in mfx_nmda.parameters
+
+    ng = tree.findItems(
+        "a",
+        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+        0,
+    )[0]
+
+    with qtbot.waitSignal(ng.param.sigRemoved, timeout=1000, raising=True):
+        ng.param.remove()
+
+    assert "a" not in mfx_nmda.parameters
 
 
 def test_ptree_edit_b2quantity(mfx_nmda: B2Model, qtbot: QtBot) -> None:
