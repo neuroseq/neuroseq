@@ -873,7 +873,6 @@ class ModelEditorDialog(QtWidgets.QDialog):
                 self.logger.critical(message)
                 QtWidgets.QMessageBox.critical(self, "Model rebuilding error", message)
                 self._restore_old_model()
-                shutil.rmtree(Path(str(self.backup_directory)))
         else:
             super().accept()
 
