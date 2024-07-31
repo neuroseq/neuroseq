@@ -191,6 +191,8 @@ class EditableParameterTree(ParameterTree):
         parent: QtWidgets.QWidget | None = None,
         showHeader: bool = True,
         list_items: dict[str, Any] | None = None,
+        add_to_groups: bool = False,
+        add_to_groups_text: str = "New",
     ):
         """
         Create a new paramter tree displaying a part of the definition of a B2Model.
@@ -220,9 +222,11 @@ class EditableParameterTree(ParameterTree):
         self.functions = self.b2model.functions[self.name]
         self.list_items = list_items
         self.default_creator = default_creator
-        self._build_tree()
+        self.add_to_groups = add_to_groups
+        self.add_to_groups_text = add_to_groups_text
         self.add_item_action = QtWidgets.QAction(f"add {self.name}")
         self.add_item_action.triggered.connect(self._add_item)
+        self._build_tree()
 
     def _call_with_errormessage(self, signal: Callable, *args: Any, **kwargs) -> Any:
         """
@@ -245,6 +249,7 @@ class EditableParameterTree(ParameterTree):
             return signal(*args, **kwargs)
         except Exception as e:
             message = f"An error occured: {e}"
+            self.logger.critical(message)
             QtWidgets.QMessageBox.critical(self, "Error", message)
 
     def _connect_parameters(self, param: Parameter, funcs: dict[Any, Any]) -> None:
@@ -265,6 +270,17 @@ class EditableParameterTree(ParameterTree):
                 )
                 param.sigNameChanged.connect(
                     lambda p: self._call_with_errormessage(funcs["rename"], p.name())
+                )
+
+            if "addText" in param.opts:
+                # allow for making a new element, utilizing the function stored behind the 'add' key in the
+                # supplied dictionary of slots
+                param.sigAddNew.connect(
+                    lambda: self._call_with_errormessage(funcs["add"])
+                )
+                # rebuilt the tree to make sure everything is updated correctly. TODO: make this less overreaching
+                param.sigAddNew.connect(
+                    lambda: self._call_with_errormessage(self._build_tree)
                 )
 
             for child in param.children():
@@ -307,7 +323,11 @@ class EditableParameterTree(ParameterTree):
             return v
 
     def _convert_dict_to_params(
-        self, data: dict[Any, Any], functions: dict[Any, Any], key: Any = ""
+        self,
+        data: dict[Any, Any],
+        functions: dict[Any, Any],
+        key: Any = "",
+        expanded: bool = False,
     ) -> list[Any]:
         """
         Recursively go through a nested dict and create a hierarchical pyqtgraph Parameter representation of it
@@ -330,23 +350,24 @@ class EditableParameterTree(ParameterTree):
             value = self._get_value(value)
             if isinstance(value, dict):
                 child_params = self._convert_dict_to_params(
-                    value,
-                    functions[key],
-                    key,
+                    value, functions[key], key, expanded=expanded
                 )
 
-                # FIXME: this thing needs a + button for some things with an activated list to choose from for some of those in turn
-                params.append(
-                    {
-                        "name": key,
-                        "type": "group",
-                        "children": child_params,
-                        "expanded": False,
-                        "removable": True,
-                        "renamable": True,
-                        "syncExpanded": True,
-                    }
-                )
+                new_param = {
+                    "name": key,
+                    "type": "group",
+                    "children": child_params,
+                    "expanded": expanded,
+                    "removable": True,
+                    "renamable": True,
+                    "syncExpanded": True,
+                }
+
+                if self.add_to_groups:
+                    new_param["addText"] = self.add_to_groups_text
+
+                params.append(new_param)
+
             else:
                 # Determine the parameter type based on value type
                 param_type = "str"
@@ -373,15 +394,18 @@ class EditableParameterTree(ParameterTree):
 
         return params
 
-    def _build_tree(self) -> None:
+    def _build_tree(self, expanded: bool = False) -> None:
         """
         _summary_
         """
         params = self._call_with_errormessage(
-            self._convert_dict_to_params, self.states, self.functions
+            self._convert_dict_to_params, self.states, self.functions, expanded=expanded
         )
         self.root = self._call_with_errormessage(
-            Parameter.create, name=self.name, type="group", children=params
+            Parameter.create,
+            name=self.name,
+            type="group",
+            children=params,
         )
         self.setParameters(self.root, showTop=False)
 
@@ -657,12 +681,13 @@ class EditableNeurongroupTree(EditableParameterTree):
                     "update_from": self._update_neurongroup_list,
                 },
             },
+            add_to_groups=False,
         )
 
         self.add_neurongroup_action = self.add_item_action
-        self.add_neurongroup_action.setText("add Neurongroup")
+        self.add_neurongroup_action.setText("add neurongroup")
 
-        self.add_neuronsubgroup_action = QtWidgets.QAction("add Neuron subgroup")
+        self.add_neuronsubgroup_action = QtWidgets.QAction("add neuron subgroup")
         self.add_neuronsubgroup_action.triggered.connect(self._add_neuronsubgroup)
 
     def _add_neuronsubgroup(self) -> None:
@@ -684,7 +709,7 @@ class EditableNeurongroupTree(EditableParameterTree):
         return [
             n
             for n in self.b2model.neurongroups
-            if "idx" not in self.b2model.neurongroups[n]
+            if "idxs" not in self.b2model.neurongroups[n]
         ]
 
     def contextMenuEvent(self, ev: QtCore.Event) -> None:
@@ -747,6 +772,13 @@ class ModelEditorDialog(QtWidgets.QDialog):
                 default_creator=b2model.define_default_parameter,
                 parent=self,
             ),
+            "Initial Conditions": EditableParameterTree(
+                b2model,
+                domain_name="initials",
+                default_creator=b2model.define_default_init,
+                parent=self,
+                add_to_groups=True,
+            ),
         }
         self.b2model = b2model
 
@@ -764,20 +796,39 @@ class ModelEditorDialog(QtWidgets.QDialog):
         button_box = QtWidgets.QDialogButtonBox(btns)
 
         i = 0
-        for k, t in trees.items():
+        for k, tree in trees.items():
             nameplate = QtWidgets.QLabel(str(k), parent=self)
             bold_font = QtGui.QFont()
             bold_font.setBold(True)
             nameplate.setFont(bold_font)
             layout.addWidget(nameplate, 0, i)
-            layout.addWidget(t, 1, i)
+
+            add_group_button = QtWidgets.QPushButton("New " + k[0 : len(k) - 1], self)
+            add_group_button.clicked.connect(tree._add_item)
+            layout.addWidget(add_group_button, 0, i + 1)
+            col_add = 0
+            if k == "Neurongroups":
+                col_add = 4
+                add_group_button_sub = QtWidgets.QPushButton("New subgroup", self)
+                layout.addWidget(add_group_button_sub, 0, i + 2)
+                add_group_button_sub.clicked.connect(tree._add_neuronsubgroup)
+            else:
+                col_add = 3
+            layout.addWidget(tree, 1, i, 1, col_add - 1)
             separator = QtWidgets.QFrame()
             separator.setFrameShape(QtWidgets.QFrame.VLine)
             separator.setFrameShadow(QtWidgets.QFrame.Sunken)
-            layout.addWidget(separator, 1, i + 1)
-            i += 2
+            layout.addWidget(separator, 0, i + col_add - 1, layout.rowCount(), 1)
+            i += col_add
 
-        layout.addWidget(button_box, layout.rowCount(), 1, 1, 4, QtCore.Qt.AlignCenter)
+        layout.addWidget(
+            button_box,
+            layout.rowCount(),
+            1,
+            1,
+            layout.columnCount() - 1,
+            QtCore.Qt.AlignCenter,
+        )
 
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)

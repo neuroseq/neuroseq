@@ -6,6 +6,7 @@ from formozov_project.model_editor import EditableNeurongroupTree
 from formozov_project.model_editor import EditableParameterTree
 from formozov_project.model_editor import EditableSynapseTree
 from formozov_project.model_editor import ModelEditorDialog
+from pyqtgraph.parametertree import Parameter
 from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
@@ -239,6 +240,46 @@ def test_tree_add_new_monitor(mfx_nmda, qtbot: QtBot) -> None:
     )
 
 
+def test_add_new_init(mfx_nmda, qtbot: QtBot) -> None:
+    itree = EditableParameterTree(
+        mfx_nmda, "initials", mfx_nmda.define_default_init, add_to_groups=True
+    )
+
+    qtbot.add_widget(itree)
+
+    assert "group" not in mfx_nmda.initials
+    itree._add_item()
+    assert "group" in mfx_nmda.initials
+
+
+def test_add_new_init_element(mfx_nmda, qtbot: QtBot) -> None:
+    itree = EditableParameterTree(
+        mfx_nmda, "initials", mfx_nmda.define_default_init, add_to_groups=True
+    )
+
+    qtbot.add_widget(itree)
+
+    sn = itree.findItems(
+        "S",
+        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+        0,
+    )[0]
+
+    new_param = Parameter.create(
+        **{
+            "name": "new_element",  # dummy values
+        }
+    )
+
+    assert "variable" not in mfx_nmda.initials["S"]
+
+    with qtbot.waitSignal(sn.param.sigAddNew, timeout=1000, raising=True):
+        sn.param.addNew(new_param)
+
+    assert "variable" in mfx_nmda.initials["S"]
+    assert "value" in mfx_nmda.initials["S"]["variable"]
+
+
 def test_delete_neurongroup(mfx_nmda, qtbot: QtBot) -> None:
     # send delete signal -> then check that group is gone
     ntree = EditableNeurongroupTree(mfx_nmda)
@@ -371,6 +412,46 @@ def test_delete_parameter(mfx_nmda, qtbot: QtBot) -> None:
         ng.param.remove()
 
     assert "a" not in mfx_nmda.parameters
+
+
+def test_delete_init(mfx_nmda, qtbot: QtBot) -> None:
+    tree = EditableParameterTree(
+        mfx_nmda, "initials", mfx_nmda.define_default_init, add_to_groups=True
+    )
+    qtbot.add_widget(tree)
+
+    assert "S" in mfx_nmda.initials
+
+    ng = tree.findItems(
+        "S",
+        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+        0,
+    )[0]
+
+    with qtbot.waitSignal(ng.param.sigRemoved, timeout=1000, raising=True):
+        ng.param.remove()
+
+    assert "S" not in mfx_nmda.initials
+
+
+def test_delete_init_element(mfx_nmda: B2Model, qtbot: QtBot) -> None:
+    itree = EditableParameterTree(
+        mfx_nmda, "initials", mfx_nmda.define_default_init, add_to_groups=True
+    )
+    qtbot.add_widget(itree)
+
+    assert "w" in mfx_nmda.initials["S"]
+
+    ng = itree.findItems(
+        "w",
+        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+        0,
+    )[0]
+
+    with qtbot.waitSignal(ng.param.sigRemoved, timeout=1000, raising=True):
+        ng.param.remove()
+
+    assert "w" not in mfx_nmda.initials["S"]
 
 
 def test_ptree_edit_b2quantity(mfx_nmda: B2Model, qtbot: QtBot) -> None:

@@ -85,7 +85,7 @@ class B2Model:
         self.functions[group_class][name] = {
             "rename": modifier.rename,
             "delete": modifier.delete,
-            "element_added": modifier.add,
+            "add": modifier.add,
         }
 
     @_trigger_rebuild
@@ -361,6 +361,21 @@ class B2Model:
             with_rebuilt: Callable,
             element_adder: Callable = lambda *args: None,
         ):
+            """
+            Create a new modifier instance
+            Parameters
+            ----------
+            current_name : str
+                name of the element this modifier is bound to in its parent object
+            pdict : dict
+                element this modifier is bound to
+            fdict : dict
+                function dictionary the `pdict` argument is bound to
+            with_rebuilt : Callable
+                function to call upon modification of `pdict`
+            element_adder: Callable
+                function taking arbitrary args and kwargs to create a new element if this modifier is bound to a dictionary object
+            """
             self.current_name = current_name
             self.pdict = pdict
             self.fdict = fdict
@@ -412,6 +427,7 @@ class B2Model:
             """
             Delete the element behind the currently held name
             """
+            print("delete thing: ", self.current_name)
             del self.pdict[self.current_name]
             del self.fdict[self.current_name]
             self.with_rebuilt()
@@ -421,7 +437,7 @@ class B2Model:
             """
             add a new element if the held pdict is a nested dict
             """
-            self.element_adder(*args, **kwargs)
+            self.element_adder(self.current_name, *args, **kwargs)
             self.with_rebuilt()
             self.logger.info(
                 f"Added element to {self.current_name} built with {args}, {kwargs},"
@@ -454,11 +470,7 @@ class B2Model:
             "neurongroups": {},
             "synapses": {},
             "initials": {},
-            "parameters": {
-                "element_removed": lambda _, n: self._delete_dict_element(
-                    "parameters", n
-                )
-            },
+            "parameters": {},
             "monitors": {},
         }
         self.checkpoints: list[str] = []
@@ -496,7 +508,7 @@ class B2Model:
                 name,
                 "initials",
                 lambda: self.set_rebuilt(True),
-                lambda n, vn, v: self.define_init(n, vn, v),
+                lambda n: self.define_init(n, "variable", "value"),
             )
 
         element_modifier = self.Modifier(
