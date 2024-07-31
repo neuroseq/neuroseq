@@ -170,8 +170,38 @@ def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:
     RuntimeError
         When something goes wrong during evaluation of the unit part of the input quantity string
     """
-    # extract numerical value via regex. allow for multiple numbers left and right of a '.' and multiple spaces or a '*' between number and unit
-    pattern = r"([\(\)\d./\*\-\+e]+)\s*\*?\s*(\w*)"
+
+    # Regex pattern explanation: (TODO: this is mscopilot derived, possibly needs to be corrected. Needs to be maintained along with code )
+
+    # 1. Character Class `([\(\)\d./\*\-\+]+(?:e[\d\+\-]*)?)`:
+
+    # - `[` and `]` define a character class, which matches any one of the characters inside the brackets.
+    # - `\(` and `\)` match literal parentheses `(` and `)`.
+    # - `\d` matches any digit (equivalent to `[0-9]`).
+    # - `.` matches a literal dot `.`.
+    # - `/` matches a literal forward slash `/`.
+    # - `\*` matches a literal asterisk `*`.
+    # - `\-` matches a literal hyphen `-`.
+    # - `\+` matches a literal plus `+`.
+    # - The `+` outside the character class means "one or more" of the preceding character class.
+    # - `(?:e[\d\+\-]*)?` is a non-capturing group that matches an optional `e` followed by zero or more digits, plus, or minus signs. This ensures that scientific notation like `2e10` is matched correctly.
+
+    # 2. **Whitespace `\s*`**:
+    # - `\s` matches any whitespace character (spaces, tabs, newlines).
+    # - `*` means "zero or more" of the preceding whitespace characters.
+
+    # 3. **Optional Asterisk `\*?`**:
+    # - `\*` matches a literal asterisk `*`.
+    # - `?` means "zero or one" of the preceding character (making the asterisk optional).
+
+    # 4. **Whitespace `\s*`**:
+    # - Again, `\s*` matches zero or more whitespace characters.
+
+    # 5. **Word Characters `(\w*)`**:
+    # - `\w` matches any word character (equivalent to `[a-zA-Z0-9_]`).
+    # - `*` means "zero or more" of the preceding word characters.
+
+    pattern = r"([\(\)\d./\*\-\+]+(?:e[\d\+\-]*)?)\s*\*?\s*(\w*)"
     match = re.match(pattern, quantity_str)
     quantity_obj = None
     if match:
