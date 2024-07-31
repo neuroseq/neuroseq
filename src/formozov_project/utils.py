@@ -171,7 +171,7 @@ def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:
         When something goes wrong during evaluation of the unit part of the input quantity string
     """
     # extract numerical value via regex. allow for multiple numbers left and right of a '.' and multiple spaces or a '*' between number and unit
-    pattern = r"([\(\)\d./\*\-\+e]+)\s*\*?\s*(\w*)"
+    pattern = r"([\(\)\d./\*\-\+]+(?:e[\d\+\-]*)?)\s*\*?\s*(\w*)"
     match = re.match(pattern, quantity_str)
     quantity_obj = None
     if match:

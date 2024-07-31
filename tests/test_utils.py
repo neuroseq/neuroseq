@@ -61,6 +61,18 @@ def test_quantity_parser() -> None:
 
     assert utils.parse_string_to_quantity("euler") == "euler"
 
+    assert utils.parse_string_to_quantity("exponential_euler") == "exponential_euler"
+
+    assert utils.parse_string_to_quantity("exact") == "exact"
+
+    assert utils.parse_string_to_quantity("rk2") == "rk2"
+
+    assert utils.parse_string_to_quantity("rk4") == "rk4"
+
+    assert utils.parse_string_to_quantity("heun") == "heun"
+
+    assert utils.parse_string_to_quantity("milstein") == "milstein"
+
 
 def test_update_nested_dict() -> None:
     d: dict[Any, Any] = {

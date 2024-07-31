@@ -405,23 +405,45 @@ def test_method_selection(
     forest = diag.findChildren(EditableParameterTree)
     tree = [t for t in forest if isinstance(t, EditableNeurongroupTree)][0]
 
-    # find dropdown for method 
-    method_dropdown = tree.findItems(
+    # find dropdown for method for the neurongroup "neuron_input"
+    method_dropdown_elements = tree.findItems(
         "method",
         QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
         0,
-    )[1]
+    )
 
-    with qtbot.waitSignal(method_dropdown.widget.currentIndexChanged, timeout=1000, raising=True):
-        method_dropdown.widget.setCurrentText("exponential_euler")
+    method_dropdown = list(
+        filter(
+            lambda w: w.param.parent().name() == "neuron_input",
+            method_dropdown_elements,
+        )
+    )[0]
+
+    with qtbot.waitSignal(
+        method_dropdown.param.sigValueChanged, timeout=1000, raising=True
+    ):
+        method_dropdown.param.setValue("exponential_euler")
 
     assert mfx_nmda.neurongroups["neuron_input"]["method"] == "exponential_euler"
 
+    assert mfx_nmda.network["Mn"].g.shape == (1, 0)
     # try to run
-    mfx_nmda.run_simulation()
+    mfx_nmda.run_simulation(1.0 * b2.second)
 
-    method_dropdown.widget.setCurrentText("euler")
+    exp_euler_data_shape = mfx_nmda.network["Mn"].g.shape
 
+    with qtbot.waitSignal(
+        method_dropdown.param.sigValueChanged, timeout=1000, raising=True
+    ):
+        method_dropdown.param.setValue("euler")
+    assert mfx_nmda.neurongroups["neuron_input"]["method"] == "euler"
+
+    mfx_nmda.assemble_network()
+    mfx_nmda.run_simulation(1.0 * b2.second)
+
+    euler_data_shape = mfx_nmda.network["Mn"].g.shape
+
+    assert exp_euler_data_shape == euler_data_shape
 
 
 def test_monitordialog_with_run(

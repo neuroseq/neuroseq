@@ -697,7 +697,15 @@ class EditableNeurongroupTree(EditableParameterTree):
             showHeader=showHeader,
             list_items={
                 "method": {
-                    "update_from": lambda: ["euler", "exponential_euler", "exact"],
+                    "update_from": lambda: [
+                        "euler",
+                        "exponential_euler",
+                        "exact",
+                        "rk2",
+                        "rk4",
+                        "heun",
+                        "milstein",
+                    ],
                 },
                 "target": {
                     "update_from": self._update_neurongroup_list,
