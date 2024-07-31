@@ -116,6 +116,16 @@ To run the test suite:
 pytest
 ```
 
+List of commands:
+
+```bash
+formozov-project --help
+```
+
+
+
+
+
 By default this runs using xvfb to allow headless GUI testing. If you want to see the GUI while the tests are running, you can run:
 
 ```bash
