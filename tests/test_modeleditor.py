@@ -400,8 +400,28 @@ def test_method_selection(
 ):
     diag = ModelEditorDialog(mfx_nmda)
     qtbot.add_widget(diag)
+
+    # find tree
     forest = diag.findChildren(EditableParameterTree)
     tree = [t for t in forest if isinstance(t, EditableNeurongroupTree)][0]
+
+    # find dropdown for method 
+    method_dropdown = tree.findItems(
+        "method",
+        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+        0,
+    )[1]
+
+    with qtbot.waitSignal(method_dropdown.widget.currentIndexChanged, timeout=1000, raising=True):
+        method_dropdown.widget.setCurrentText("exponential_euler")
+
+    assert mfx_nmda.neurongroups["neuron_input"]["method"] == "exponential_euler"
+
+    # try to run
+    mfx_nmda.run_simulation()
+
+    method_dropdown.widget.setCurrentText("euler")
+
 
 
 def test_monitordialog_with_run(

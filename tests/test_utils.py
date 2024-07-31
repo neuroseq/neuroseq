@@ -59,6 +59,8 @@ def test_quantity_parser() -> None:
     with pytest.raises(RuntimeError, match="Error when interpreting unit string"):
         utils.parse_string_to_quantity("1/(10) * Mx")
 
+    assert utils.parse_string_to_quantity("euler") == "euler"
+
 
 def test_update_nested_dict() -> None:
     d: dict[Any, Any] = {

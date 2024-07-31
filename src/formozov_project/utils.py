@@ -184,7 +184,9 @@ def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:
             v = eval(value)
             # Create the quantity object
         except Exception as e:
-            raise RuntimeError(f"Error when interpreting numerical string: {e}") from e
+            message = f"Error when interpreting numerical string: {e}"
+            logging.debug(message)
+            raise RuntimeError(message) from e
 
         if unit_str != "":
             # Map the unit string to a Brian2 unit
@@ -195,6 +197,7 @@ def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:
                     unit = getattr(b2_units, unit_str)
                 except AttributeError as e:
                     message = f"Error when interpreting unit string: {e}"
+                    logging.debug(message)
                     raise RuntimeError(message) from e
 
             quantity_obj = v * unit
