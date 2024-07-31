@@ -7,6 +7,7 @@ import brian2.numpy_ as np
 import pytest
 from formozov_project.b2_model import B2Model
 from formozov_project.stim_console import StimConsole
+from formozov_project.timed_array_modifer import TimedArrayModifier
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 
@@ -53,8 +54,8 @@ def test_stim_console_repl(qtbot: QtBot) -> None:
     assert stim_console.namespace()["model"] is None
     # start with a valid dict of stims and a valid model
     stims = {
-        "a": b2.TimedArray(np.zeros((10, 10)), dt=1 * b2.ms),
-        "b": b2.TimedArray(np.zeros((100, 3)), dt=5 * b2.ms),
+        "a": TimedArrayModifier(b2.TimedArray(np.zeros((10, 10)), dt=1 * b2.ms)),
+        "b": TimedArrayModifier(b2.TimedArray(np.zeros((100, 3)), dt=5 * b2.ms)),
     }
     stim_console.set_stims(stims)
     model = B2Model()
@@ -71,8 +72,8 @@ def test_stim_console_repl(qtbot: QtBot) -> None:
     qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
     assert stim_console.namespace()["x"] == 5
     assert len(signals) == 1
-    assert np.allclose(signals[-1]["a"], stims["a"].values)
-    assert np.allclose(signals[-1]["b"], stims["b"].values)
+    assert np.allclose(signals[-1]["a"], stims["a"].timed_array.values)
+    assert np.allclose(signals[-1]["b"], stims["b"].timed_array.values)
     # modify stims array in a valid way
     target_a = np.ones((5, 20))
     stim_console.input.setText("stims['a'] = np.ones((5,20))")
@@ -80,7 +81,7 @@ def test_stim_console_repl(qtbot: QtBot) -> None:
     assert np.allclose(stim_console.namespace()["stims"]["a"], target_a)
     assert len(signals) == 2
     assert np.allclose(signals[-1]["a"], target_a)
-    assert np.allclose(signals[-1]["b"], stims["b"].values)
+    assert np.allclose(signals[-1]["b"], stims["b"].timed_array.values)
     # modify stims array in an invalid way: no signal should be emitted
     stim_console.input.setText("stims['a'] = 5")
     qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)

@@ -273,12 +273,12 @@ def test_gui_edit_stim_with_console(qtbot: QtBot, mfx_ornstein: B2Model) -> None
     stim_editor = gui.stim_editor
     stim_console = gui.stim_console
     assert stim_editor.stims_dict is not None
-    assert_allclose(stim_editor.stims_dict["stim"].values, stim)
+    assert_allclose(stim_editor.stims_dict["stim"].timed_array.values, stim)
     # set all stimuli to 1: StimWidget and model stimuli updated
     stim_console.input.setText("stims['stim'][:,:] = 1")
     qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
     stim[:, :] = 1
-    assert_allclose(stim_editor.stims_dict["stim"].values, stim)
+    assert_allclose(stim_editor.stims_dict["stim"].timed_array.values, stim)
     assert gui.model.parameters is not None
     assert_allclose(gui.model.parameters["stim"].values, stim)
     assert len(stim_editor.stim_widget.neuron_plots) == n_neurons
@@ -289,12 +289,12 @@ def test_gui_edit_stim_with_console(qtbot: QtBot, mfx_ornstein: B2Model) -> None
     stim_console.input.setText("stims['stim'] = 5")
     qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
     assert len(stim_editor.stim_widget.neuron_plots) == n_neurons
-    assert_allclose(stim_editor.stims_dict["stim"].values, stim)
+    assert_allclose(stim_editor.stims_dict["stim"].timed_array.values, stim)
     assert_allclose(gui.model.parameters["stim"].values, stim)
     # assign random valid stim array with different shape, StimWidget and model updated
     stim_console.input.setText("stims['stim'] = np.random.rand(127, 83)")
     qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
-    assert stim_editor.stims_dict["stim"].values.shape == (127, 83)
+    assert stim_editor.stims_dict["stim"].timed_array.values.shape == (127, 83)
     assert gui.model.parameters["stim"].values.shape == (127, 83)
     assert len(stim_editor.stim_widget.neuron_plots) == 83
 
