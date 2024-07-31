@@ -33,12 +33,15 @@ def test_define_equation(mfx: b2_model.B2Model) -> None:
     assert mfx.neurongroups["P"]["model"] == "dge/dt = -ge*(1./taue) : siemens\n"
     assert all(
         f in mfx.functions["neurongroups"]["P"]
-        for f in ["rename", "delete", "element_added", "element_removed"]
+        for f in [
+            "rename",
+            "delete",
+        ]
     )
 
     assert all(
         f in mfx.functions["neurongroups"]["P"]["model"]
-        for f in ["add", "delete", "modify", "rename"]
+        for f in ["delete", "modify", "rename"]
     )
 
     with pytest.raises(
@@ -141,7 +144,10 @@ def test_rename_neurongroup(mfx_nmda: b2_model.B2Model) -> None:
 
     assert all(
         f in mfx_nmda.functions["neurongroups"]["renamed"]
-        for f in ["rename", "delete", "element_added", "element_removed"]
+        for f in [
+            "rename",
+            "delete",
+        ]
     )
 
 
@@ -160,7 +166,10 @@ def test_rename_synapse(mfx_nmda: b2_model.B2Model) -> None:
     assert mfx_nmda.synapses["renamed"] == test_data
     assert all(
         f in mfx_nmda.functions["synapses"]["renamed"]
-        for f in ["rename", "delete", "element_added", "element_removed"]
+        for f in [
+            "rename",
+            "delete",
+        ]
     )
 
 
@@ -178,7 +187,7 @@ def test_rename_parameter(mfx_nmda: b2_model.B2Model) -> None:
     assert mfx_nmda.parameters["renamed"] == test_data
     assert all(
         f in mfx_nmda.functions["parameters"]["renamed"]
-        for f in ["add", "delete", "modify", "rename"]
+        for f in ["delete", "modify", "rename"]
     )
 
 
@@ -198,7 +207,10 @@ def test_rename_monitor(mfx_nmda: b2_model.B2Model) -> None:
 
     assert all(
         f in mfx_nmda.functions["monitors"]["renamed"]
-        for f in ["rename", "delete", "element_added", "element_removed"]
+        for f in [
+            "rename",
+            "delete",
+        ]
     )
 
 
@@ -217,7 +229,10 @@ def test_rename_init(mfx_nmda: b2_model.B2Model) -> None:
     assert mfx_nmda.initials["renamed"] == test_data
     assert all(
         f in mfx_nmda.functions["initials"]["renamed"]
-        for f in ["rename", "delete", "element_added", "element_removed"]
+        for f in [
+            "rename",
+            "delete",
+        ]
     )
 
 
@@ -233,9 +248,10 @@ def test_rename_init_element(mfx_nmda: b2_model.B2Model) -> None:
     assert "renamed" in mfx_nmda.functions["initials"]["S"]
 
     assert mfx_nmda.initials["S"]["renamed"] == test_data
+    print(mfx_nmda.functions["initials"]["S"]["renamed"])
     assert all(
         f in mfx_nmda.functions["initials"]["S"]["renamed"]
-        for f in ["add", "delete", "modify", "rename"]
+        for f in ["delete", "modify", "rename"]
     )
 
 
@@ -256,7 +272,7 @@ def test_rename_neurongroup_element_with_modification(
     assert mfx_nmda.neurongroups["neurons"]["renamed"] == test_data
     assert all(
         f in mfx_nmda.functions["neurongroups"]["neurons"]["renamed"]
-        for f in ["add", "delete", "modify", "rename"]
+        for f in ["delete", "modify", "rename"]
     )
 
     mfx_nmda.functions["neurongroups"]["neurons"]["renamed"]["modify"]("dv/dt=-v:1")
@@ -287,7 +303,7 @@ def test_rename_synapse_element(mfx_nmda: b2_model.B2Model) -> None:
     assert mfx_nmda.synapses["S"]["renamed"] == test_data
     assert all(
         f in mfx_nmda.functions["synapses"]["S"]["renamed"]
-        for f in ["add", "delete", "modify", "rename"]
+        for f in ["delete", "modify", "rename"]
     )
 
     mfx_nmda.functions["synapses"]["S"]["renamed"]["rename"]("another_name")
@@ -301,7 +317,7 @@ def test_rename_synapse_element(mfx_nmda: b2_model.B2Model) -> None:
     assert mfx_nmda.synapses["S"]["another_name"] == test_data
     assert all(
         f in mfx_nmda.functions["synapses"]["S"]["another_name"]
-        for f in ["add", "delete", "modify", "rename"]
+        for f in ["delete", "modify", "rename"]
     )
 
 
@@ -320,7 +336,7 @@ def test_rename_monitor_element(mfx_nmda: b2_model.B2Model) -> None:
     assert mfx_nmda.monitors["M"]["renamed"] == test_data
     assert all(
         f in mfx_nmda.functions["monitors"]["M"]["renamed"]
-        for f in ["add", "delete", "modify", "rename"]
+        for f in ["delete", "modify", "rename"]
     )
 
 
@@ -398,18 +414,6 @@ def test_neuron_subgroup_creation_exception(
         RuntimeError, match="Error when trying to create a neuronsubgroup"
     ):
         mfx._assemble_neuronsubgroup("excitatory")
-
-
-def test_neuron_subgroup_wrong_group(
-    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
-) -> None:
-    mfx, _ = mfx_parameterized
-
-    mfx.network = b2.Network()
-    with pytest.raises(
-        KeyError, match="Error, target Px could not be found in neurongroups"
-    ):
-        mfx.define_neuronsubgroup_target("ng", "Px")
 
 
 def test_synapse_connection_prob_numerical(
@@ -1086,6 +1090,47 @@ def test_timed_array_padding(mfx_ornstein: b2_model.B2Model) -> None:
     assert np.allclose(new_timed_array.values[0:100, 0:10], timed_array.values)
     assert np.max(new_timed_array.values[0:100, 10:]) == pytest.approx(0)
     assert np.max(new_timed_array.values[100:, :]) == pytest.approx(0)
+
+
+def test_default_group_addition(mfx_ornstein) -> None:
+    mfx_ornstein.define_default_neurongroup()
+    assert mfx_ornstein.neurongroups["new_neurongroup"] == {
+        "neuronnumber": 0,
+        "model": "dv/dt=0:1\n",
+        "method": "euler",
+        "dt": 10 * b2.ms,
+        "reset": "0",
+        "th": "0",
+        "refractory": "0",
+    }
+
+    mfx_ornstein.define_default_synapse()
+    assert mfx_ornstein.synapses["new_synapse"] == {
+        "origin": "origin",
+        "target": "target",
+        "model": "dv/dt=0:1\n",
+        "method": "euler",
+        "dt": 10 * b2.ms,
+        "delay": 0 * b2.ms,
+        "connection_condition": "i!=j",
+        "p": 0.0,
+        "on_pre": "x=y\n",
+        "on_post": "x=y\n",
+    }
+
+    mfx_ornstein.define_default_monitor()
+    assert mfx_ornstein.monitors["new_monitor"] == {
+        "type": "StateMonitor",
+        "source": "source",
+        "variable": "variable",
+        "dt": None,
+    }
+
+    mfx_ornstein.define_default_parameter()
+    assert mfx_ornstein.parameters["new_parameter"] is None
+
+    mfx_ornstein.define_default_init()
+    assert mfx_ornstein.initials["group"]["value"] is None
 
 
 def test_assemble_network_add_exceptions(

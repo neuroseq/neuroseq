@@ -21,11 +21,6 @@ from qtpy.QtCore import Signal
 from qtpy.QtWidgets import QComboBox
 
 from formozov_project.b2_model import B2Model
-from formozov_project.b2_model_widget import MonitorDialog
-from formozov_project.b2_model_widget import NeuronGroupDialog
-from formozov_project.b2_model_widget import NeuronSubgroupDialog
-from formozov_project.b2_model_widget import ParameterDialog
-from formozov_project.b2_model_widget import SynapseDialog
 from formozov_project.utils import parse_string_to_quantity
 
 
@@ -191,8 +186,8 @@ class EditableParameterTree(ParameterTree):
     def __init__(
         self,
         b2model: B2Model,
-        item_adder_dialog: type,
         domain_name: str,
+        default_creator: Callable,
         parent: QtWidgets.QWidget | None = None,
         showHeader: bool = True,
         list_items: dict[str, Any] | None = None,
@@ -205,7 +200,6 @@ class EditableParameterTree(ParameterTree):
         ----------
         b2model : B2Model
             b2model to display a part of
-        item_adder_dialog : Dialog to open when right-clicking into empty space.
 
         domain_name : str
             Name of the domain of the b2model to be displayed. One of synapses, parameter, or monitors. Neurongroups are treated in their own subclass
@@ -220,30 +214,17 @@ class EditableParameterTree(ParameterTree):
             list_items = {}
 
         self.b2model = b2model
-        self.dialogtype = item_adder_dialog
         self.logger = logging.getLogger(__name__)
         self.name = domain_name
         self.states = getattr(self.b2model, self.name)
         self.functions = self.b2model.functions[self.name]
-
         self.list_items = list_items
-
-        params = self._convert_dict_to_params(self.states, self.functions)
-        self.root = Parameter.create(name=domain_name, type="group", children=params)
-
-        self.setParameters(self.root, showTop=False)
-
-        try:
-            self._connect_parameters(self.root, self.functions)
-        except Exception as e:
-            message = f"Error when reading model definition: {e}"
-            self.logger.critical(message)
-            QtWidgets.QMessageBox.critical(self, "Model definition error", message)
-
+        self.default_creator = default_creator
+        self._build_tree()
         self.add_item_action = QtWidgets.QAction(f"add {self.name}")
-        self.add_item_action.triggered.connect(self.add_item)
+        self.add_item_action.triggered.connect(self._add_item)
 
-    def _call_with_errormessage(self, signal: Callable, *args: Any) -> Any:
+    def _call_with_errormessage(self, signal: Callable, *args: Any, **kwargs) -> Any:
         """
         Call the function 'signal' with arguments '*args' and display an error message box
         when it fails with an exception. This function mostly acts as a wrapper around qt slots
@@ -261,7 +242,7 @@ class EditableParameterTree(ParameterTree):
             Any return value from the slot
         """
         try:
-            return signal(*args)
+            return signal(*args, **kwargs)
         except Exception as e:
             message = f"An error occured: {e}"
             QtWidgets.QMessageBox.critical(self, "Error", message)
@@ -278,13 +259,6 @@ class EditableParameterTree(ParameterTree):
             parent paremeter
         """
         if param.type() == "group":
-            if all(
-                f in list(funcs.keys()) for f in ["element_added", "element_removed"]
-            ):
-                param.sigChildAdded.connect(funcs["element_added"])
-                param.sigAddNew.connect(funcs["element_added"])
-                param.sigChildRemoved.connect(funcs["element_removed"])
-
             if all(f in funcs for f in ["delete", "rename"]):
                 param.sigRemoved.connect(
                     lambda: self._call_with_errormessage(funcs["delete"])
@@ -353,7 +327,6 @@ class EditableParameterTree(ParameterTree):
         """
         params = []
         for key, value in data.items():
-            param_type = "str"  # Default type
             value = self._get_value(value)
             if isinstance(value, dict):
                 child_params = self._convert_dict_to_params(
@@ -368,11 +341,10 @@ class EditableParameterTree(ParameterTree):
                         "name": key,
                         "type": "group",
                         "children": child_params,
-                        "expanded": True,
+                        "expanded": False,
                         "removable": True,
                         "renamable": True,
                         "syncExpanded": True,
-                        "functions": functions,
                     }
                 )
             else:
@@ -389,7 +361,6 @@ class EditableParameterTree(ParameterTree):
                     "removable": True,
                     "renamable": True,
                     "syncExpanded": True,
-                    "functions": functions,
                 }
 
                 # need 'limits' for the underlying ListParameter and 'element' for the custom class
@@ -401,6 +372,34 @@ class EditableParameterTree(ParameterTree):
                 params.append(param)
 
         return params
+
+    def _build_tree(self) -> None:
+        """
+        _summary_
+        """
+        params = self._call_with_errormessage(
+            self._convert_dict_to_params, self.states, self.functions
+        )
+        self.root = self._call_with_errormessage(
+            Parameter.create, name=self.name, type="group", children=params
+        )
+        self.setParameters(self.root, showTop=False)
+
+        self._call_with_errormessage(
+            self._connect_parameters, self.root, self.functions
+        )
+
+    def _add_item(self) -> None:
+        """
+        Call the custom dialog given in the callers constructor to add custom elements and update
+        the parametertree accordingly
+        """
+        # FIXME: the connections are correct when the entire tree is rebuild, but when only the added part is rebuild they fail
+        # and it seems that the definition dict is copied.
+        # check the recursive functions again for a point where stuff can get copied?
+        self._call_with_errormessage(self.default_creator)
+        self.clear()
+        self._build_tree()
 
     def contextMenuEvent(self, ev: QtCore.QEvent) -> None:
         """
@@ -418,51 +417,6 @@ class EditableParameterTree(ParameterTree):
             menu = QtWidgets.QMenu(self)
             menu.addAction(self.add_item_action)
             menu.exec(self.mapToGlobal(ev.pos()))
-
-    def update_params(self, new_name: str, new_data: dict[Any, Any]) -> None:
-        """
-        Update the parameters in the parametertree when a new item is added
-        to the model through the custom dialog.
-
-        Parameters
-        ----------
-        new_name : str
-            Name of the element to be added
-        new_data : dict[Any, Any]
-            Data dict to be added
-        """
-        param = self._convert_dict_to_params(
-            {
-                new_name: new_data,
-            },
-            self.functions,
-        )
-        self.root.addChildren(param)
-
-    def add_item(self) -> None:
-        """
-        Call the custom dialog given in the callers constructor to add custom elements and update
-        the parametertree accordingly
-        """
-
-        # check which name has changed, add this name to the internal dict
-        # and to the parameters that are displayed
-
-        old_names = set(getattr(self.b2model, self.name).keys())
-        self.dialog = self.dialogtype(self.b2model)
-
-        # update the internal states by
-        if self.dialog.exec():
-            new_names = set(getattr(self.b2model, self.name).keys())
-
-            new_name = list(new_names - old_names)[0]
-            param = self._convert_dict_to_params(
-                {
-                    new_name: getattr(self.b2model, self.name)[new_name],
-                },
-                self.functions,
-            )
-            self.root.addChildren(param)
 
 
 class EditableSynapseTree(EditableParameterTree):
@@ -491,7 +445,7 @@ class EditableSynapseTree(EditableParameterTree):
         super().__init__(
             b2model,
             parent=parent,
-            item_adder_dialog=SynapseDialog,
+            default_creator=b2model.define_default_synapse,
             showHeader=showHeader,
             domain_name="synapses",
             list_items={
@@ -538,7 +492,7 @@ class EditableMonitorTree(EditableParameterTree):
         super().__init__(
             b2model,
             parent=parent,
-            item_adder_dialog=MonitorDialog,
+            default_creator=b2model.define_default_monitor,
             showHeader=showHeader,
             domain_name="monitors",
             list_items={
@@ -691,7 +645,7 @@ class EditableNeurongroupTree(EditableParameterTree):
         """
         super().__init__(
             b2model=b2model,
-            item_adder_dialog=NeuronGroupDialog,
+            default_creator=b2model.define_default_neurongroup,
             domain_name="neurongroups",
             parent=parent,
             showHeader=showHeader,
@@ -713,20 +667,10 @@ class EditableNeurongroupTree(EditableParameterTree):
 
     def _add_neuronsubgroup(self) -> None:
         """open neuron subgroup definition dialog and update the displayed parameters"""
-        old_names = set(getattr(self.b2model, self.name).keys())
-        self.dialog = NeuronSubgroupDialog(self.b2model)
 
-        # update the internal states by
-        if self.dialog.exec():
-            new_names = set(getattr(self.b2model, self.name).keys())
-            new_name = list(new_names - old_names)[0]
-            param = self._convert_dict_to_params(
-                {
-                    new_name: getattr(self.b2model, self.name)[new_name],
-                },
-                self.functions,
-            )
-            self.root.addChildren(param)
+        self._call_with_errormessage(self.b2model.define_default_neuronsubgroup)
+        self.clear()
+        self._build_tree()
 
     def _update_neurongroup_list(self) -> list[str]:
         """
@@ -799,8 +743,8 @@ class ModelEditorDialog(QtWidgets.QDialog):
             ),
             "Parameters": EditableParameterTree(
                 b2model,
-                ParameterDialog,
                 domain_name="parameters",
+                default_creator=b2model.define_default_parameter,
                 parent=self,
             ),
         }
