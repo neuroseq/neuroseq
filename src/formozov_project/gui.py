@@ -74,7 +74,7 @@ class Gui(QtWidgets.QMainWindow):
         main_horizontal_layout.addWidget(split_vertical)
         self.setCentralWidget(central_widget)
         self._create_actions()
-        self.resize(800, 600)
+        self.showMaximized()
         self._create_progressbar()
         self.link_x_axes(True)
         self.link_y_axes(True)
