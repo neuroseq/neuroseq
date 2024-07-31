@@ -79,7 +79,7 @@ class B2Model:
             getattr(self, group_class),
             self.functions[group_class],
             with_rebuilt=with_rebuilt,
-            elemnet_adder=element_adder,
+            element_adder=element_adder,
         )
 
         self.functions[group_class][name] = {
@@ -365,7 +365,7 @@ class B2Model:
             self.pdict = pdict
             self.fdict = fdict
             self.with_rebuilt = with_rebuilt
-            self.element_adder = elemnet_adder
+            self.element_adder = element_adder
             self.logger = logging.getLogger(__name__)
 
         def rename(self, new_name: str) -> None:
