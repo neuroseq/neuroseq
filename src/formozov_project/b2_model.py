@@ -79,7 +79,7 @@ class B2Model:
             getattr(self, group_class),
             self.functions[group_class],
             with_rebuilt=with_rebuilt,
-            elemnet_adder=element_adder,
+            element_adder=element_adder,
         )
 
         self.functions[group_class][name] = {
@@ -359,7 +359,7 @@ class B2Model:
             pdict: dict[Any, Any],
             fdict: dict[Any, Any],
             with_rebuilt: Callable,
-            elemnet_adder: Callable = lambda *_, **__: None,
+            element_adder: Callable = lambda *args: None,
         ):
             """
             Create a new modifier instance
@@ -380,7 +380,8 @@ class B2Model:
             self.pdict = pdict
             self.fdict = fdict
             self.with_rebuilt = with_rebuilt
-            self.element_adder = elemnet_adder
+            self.element_adder = element_adder
+            self.logger = logging.getLogger(__name__)
 
         def rename(self, new_name: str) -> None:
             """
@@ -397,9 +398,9 @@ class B2Model:
             self.pdict[new_name] = self.pdict.pop(used_old_name)
             self.fdict[new_name] = self.fdict.pop(used_old_name)
             self.with_rebuilt()
-            if self.pdict[new_name] and "name" in self.pdict[new_name]:
+            if "name" in self.pdict[new_name]:
                 self.pdict[new_name]["name"] = new_name
-            logging.critical(f"Renamed {used_old_name} to {new_name}")
+            self.logger.info(f"Renamed {used_old_name} to {new_name}")
 
         def modify(self, value: str) -> None:
             """
@@ -411,9 +412,7 @@ class B2Model:
                 value to set the element to
             """
             self.pdict[self.current_name] = value
-            logging.critical(
-                f"Modified {self.current_name} to {value}, in id: {id(self.pdict)}"
-            )
+            self.logger.info(f"Modified {self.current_name} to {value},")
             self.with_rebuilt()
 
         def delete(self) -> None:
@@ -424,13 +423,17 @@ class B2Model:
             del self.pdict[self.current_name]
             del self.fdict[self.current_name]
             self.with_rebuilt()
+            self.logger.info(f"Deleted {self.current_name} ")
 
         def add(self, *args, **kwargs) -> None:
             """
             add a new element if the held pdict is a nested dict
             """
             self.element_adder(self.current_name, *args, **kwargs)
-            logging.critical(f"add element to {self.current_name}: {args}, {kwargs}")
+            self.with_rebuilt()
+            self.logger.info(
+                f"Added element to {self.current_name} built with {args}, {kwargs},"
+            )
 
     def __init__(
         self,
@@ -594,7 +597,7 @@ class B2Model:
                 name,
                 "neurongroups",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         self.define_neuronnumber(name, 0)
@@ -616,7 +619,7 @@ class B2Model:
                 name,
                 "neurongroups",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         self.define_neuronsubgroup_target(name, "unknown")
@@ -640,7 +643,7 @@ class B2Model:
                 name,
                 "neurongroups",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         element_modifier = self.Modifier(
@@ -690,7 +693,7 @@ class B2Model:
                 name,
                 "neurongroups",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         element_modifier = self.Modifier(
@@ -698,12 +701,6 @@ class B2Model:
             self.neurongroups[name],
             self.functions["neurongroups"][name],
             lambda: self.set_rebuilt(True),
-        )
-        print(
-            "in class: ",
-            id(self.neurongroups[name]),
-            "in modifier: ",
-            id(element_modifier.pdict),
         )
 
         self.functions["neurongroups"][name]["model"] = {
@@ -734,7 +731,7 @@ class B2Model:
                 name,
                 "neurongroups",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         element_modifier = self.Modifier(
@@ -778,7 +775,7 @@ class B2Model:
                 name,
                 "neurongroups",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         element_modifier = self.Modifier(
@@ -824,7 +821,7 @@ class B2Model:
                 name,
                 "neurongroups",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         element_modifier = self.Modifier(
@@ -871,7 +868,7 @@ class B2Model:
                 name,
                 "neurongroups",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
         element_modifier = self.Modifier(
             "refractory",
@@ -916,7 +913,7 @@ class B2Model:
                 name,
                 "neurongroups",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
         element_modifier = self.Modifier(
             "neuronnumber",
@@ -929,13 +926,6 @@ class B2Model:
             "modify": element_modifier.modify,
             "rename": element_modifier.rename,
         }
-
-        print(
-            "in class: ",
-            id(self.neurongroups[name]),
-            "in modifier: ",
-            id(element_modifier.pdict),
-        )
 
         utils.update_nested_dict(
             self.neurongroups,
@@ -974,7 +964,7 @@ class B2Model:
                 name,
                 "neurongroups",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         element_modifier = self.Modifier(
@@ -1020,7 +1010,7 @@ class B2Model:
                 name,
                 "neurongroups",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         element_modifier = self.Modifier(
@@ -1051,7 +1041,7 @@ class B2Model:
                 name,
                 "synapses",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         self.define_synapse_origin(
@@ -1113,7 +1103,7 @@ class B2Model:
                 name,
                 "synapses",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         element_modifier = self.Modifier(
@@ -1154,7 +1144,7 @@ class B2Model:
                 name,
                 "synapses",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         element_modifier = self.Modifier(
@@ -1197,7 +1187,7 @@ class B2Model:
                 name,
                 "synapses",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         element_modifier = self.Modifier(
@@ -1241,7 +1231,7 @@ class B2Model:
                 name,
                 "synapses",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         element_modifier = self.Modifier(
@@ -1293,7 +1283,7 @@ class B2Model:
                 name,
                 "synapses",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
         element_modifier = self.Modifier(
             "model",
@@ -1330,7 +1320,7 @@ class B2Model:
                 name,
                 "synapses",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         element_modifier = self.Modifier(
@@ -1378,7 +1368,7 @@ class B2Model:
                 name,
                 "synapses",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         element_modifier = self.Modifier(
@@ -1426,7 +1416,7 @@ class B2Model:
                 name,
                 "synapses",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
         element_modifier = self.Modifier(
             "connection_condition",
@@ -1469,7 +1459,7 @@ class B2Model:
                 name,
                 "synapses",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
         element_modifier = self.Modifier(
             "delay",
@@ -1515,7 +1505,7 @@ class B2Model:
                 name,
                 "synapses",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         element_modifier = self.Modifier(
@@ -1552,7 +1542,7 @@ class B2Model:
                 name,
                 "monitors",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         self.define_monitor_type(
@@ -1584,7 +1574,7 @@ class B2Model:
                 name,
                 "monitors",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         element_modifier = self.Modifier(
@@ -1630,7 +1620,7 @@ class B2Model:
                 name,
                 "monitors",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         element_modifier = self.Modifier(
@@ -1676,7 +1666,7 @@ class B2Model:
                 name,
                 "monitors",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         element_modifier = self.Modifier(
@@ -1721,7 +1711,7 @@ class B2Model:
                 name,
                 "monitors",
                 lambda: self.set_rebuilt(True),
-                lambda _, __, ___: self.set_rebuilt(True),
+                lambda: self.set_rebuilt(True),
             )
 
         element_modifier = self.Modifier(
