@@ -359,7 +359,7 @@ class B2Model:
             pdict: dict[Any, Any],
             fdict: dict[Any, Any],
             with_rebuilt: Callable,
-            elemnet_adder: Callable = lambda *_, **__: None,
+            element_adder: Callable = lambda *args: None,
         ):
             self.current_name = current_name
             self.pdict = pdict
