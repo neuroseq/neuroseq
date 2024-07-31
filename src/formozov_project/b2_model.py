@@ -378,14 +378,22 @@ class B2Model:
                 New name of the element
 
             """
+            self.logger.info(f"Renaming {self.current_name} to {new_name}")
+
             used_old_name = self.current_name
             self.current_name = new_name
-            self.pdict[new_name] = self.pdict.pop(used_old_name)
-            self.fdict[new_name] = self.fdict.pop(used_old_name)
-            self.with_rebuilt()
-            if "name" in self.pdict[new_name]:
+            old_value = self.pdict.pop(used_old_name)
+            old_functions = self.fdict.pop(used_old_name)
+            self.pdict[new_name] = old_value
+            self.fdict[new_name] = old_functions
+
+            if (
+                isinstance(self.pdict[new_name], dict)
+                and "name" in self.pdict[new_name]
+            ):
                 self.pdict[new_name]["name"] = new_name
-            self.logger.info(f"Renamed {used_old_name} to {new_name}")
+
+            self.with_rebuilt()
 
         def modify(self, value: str) -> None:
             """
