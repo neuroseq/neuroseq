@@ -394,6 +394,16 @@ def test_modeldialog_reject(
     ]
 
 
+def test_method_selection(
+    mfx_nmda: B2Model,
+    qtbot: QtBot,
+):
+    diag = ModelEditorDialog(mfx_nmda)
+    qtbot.add_widget(diag)
+    forest = diag.findChildren(EditableParameterTree)
+    tree = [t for t in forest if isinstance(t, EditableNeurongroupTree)][0]
+
+
 def test_monitordialog_with_run(
     mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
 ):
