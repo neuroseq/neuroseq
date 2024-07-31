@@ -13,7 +13,7 @@ class StimWidget(TimeseriesWidget):
     """A widget that displays a brian2.TimedArray stimuli timeseries for neurons.
 
     Assumes that the stimuli are non-negative.
-    Applies global normalisation to the displayed stimuli such that the largest stimulus has an amplitude of 0.95.
+    Applies global normalisation to the displayed stimuli such that the largest stimulus has an amplitude of 1.0.
     """
 
     def __init__(
@@ -21,6 +21,7 @@ class StimWidget(TimeseriesWidget):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self.plotItem.showGrid(x=True, y=True)
 
     def set_data(self, stims: b2.TimedArray | None = None) -> None:
         if stims is None:
@@ -35,7 +36,7 @@ class StimWidget(TimeseriesWidget):
         stim_max = np.max(data)
         if stim_max == 0:
             stim_max = 1
-        stim_norm = stim_max / 0.95
+        stim_norm = stim_max
         for neuron_index, stim in enumerate(data):
             # vertically offset the data for each neuron by its index
             y_offset = neuron_index - 0.5

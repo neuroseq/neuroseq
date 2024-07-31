@@ -30,6 +30,39 @@ class MouseMode(Enum):
     MOVE = 3
 
 
+class OffsetYAxisItem(pg.AxisItem):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.set_num_neurons(0)
+
+    def set_num_neurons(self, n_neurons: int):
+        major_ticks = []
+        for neuron in range(n_neurons):
+            major_ticks.append((float(neuron), str(neuron)))
+            major_ticks.append((neuron + 0.5, ""))
+        self.setTicks([major_ticks, []])
+
+
+class MinDtXAxisItem(pg.AxisItem):
+    def __init__(self, dt: float = 1.0, *args, **kwargs):
+        super().__init__(*args, **kwargs, units="s")
+        self.setLabel("s")
+        self.dt = dt
+
+    def set_dt(self, dt: float):
+        self.dt = dt
+
+    def tickSpacing(self, minVal, maxVal, size):
+        levels = super().tickSpacing(minVal, maxVal, size)
+        # filter out any levels that are less than the minimum spacing above dt
+        min_spacing_above_dt = 7 * self.dt
+        new_levels = [level for level in levels if level[0] > min_spacing_above_dt]
+        # if there are less than 3 remaining levels, add a dt level
+        if len(new_levels) < 3:
+            new_levels.append((self.dt, 0))
+        return new_levels
+
+
 class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
     """A base class for widgets that display a set of timeseries data for a number of neurons, stacked vertically.
 
@@ -45,7 +78,13 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
     selection_moved = QtCore.Signal(int, int)
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
-        super().__init__(parent)
+        super().__init__(
+            parent,
+            axisItems={
+                "bottom": MinDtXAxisItem(orientation="bottom"),
+                "left": OffsetYAxisItem(orientation="left"),
+            },
+        )
         self.logger = logging.getLogger(__name__)
         self.timeline = Timeline()
         self.timeline.setZValue(1e8)
@@ -58,7 +97,6 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
         self.neuron_plots: list[SelectablePlotItem] = []
         self.n_neurons = 0
         self.n_timestamps = 0
-        self.getAxis("top").show()
         self.roi = QtWidgets.QGraphicsRectItem(0, 0, 0, 0)
         self.roi.setPen(QtGui.QColor(255, 255, 255, 100))
         self.roi.setBrush(QtGui.QColor(200, 200, 255, 100))
@@ -76,12 +114,8 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
         self.n_timestamps = 0
         self.unselect_neurons()
         self.clear()
-        for ax_label in ["top", "bottom"]:
-            ax = self.plotItem.getAxis(ax_label)
-            ax.setLabel("Time (s)")
         # set the y-axis to display the trace index
         self.plotItem.getAxis("left").setLabel("Neuron")
-        self.plotItem.getAxis("left").setTickSpacing(1, 1)
         self.addItem(self.timeline)
 
     @abc.abstractmethod
@@ -132,6 +166,8 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
             yMin=-0.5,
             yMax=self.n_neurons - 0.5,
         )
+        self.plotItem.getAxis("bottom").set_dt(self.dt)
+        self.plotItem.getAxis("left").set_num_neurons(self.n_neurons)
         self._plot_neuron_data(data, timestamps, self.dt)
 
     def mousePressEvent(self, ev: Any) -> None:
