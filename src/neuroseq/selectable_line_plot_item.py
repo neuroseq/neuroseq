@@ -4,7 +4,7 @@ from typing import Any
 
 import pyqtgraph as pg
 
-from formozov_project.selectable_mixin import SelectableMixin
+from neuroseq.selectable_mixin import SelectableMixin
 
 
 class SelectableLinePlotItem(pg.PlotDataItem, SelectableMixin):

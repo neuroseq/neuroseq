@@ -53,4 +53,4 @@ repos:
     hooks:
       - id: actionlint
 
-exclude: ".*/formozov_project/example_models/.*$"
+exclude: ".*/neuroseq/example_models/.*$"

@@ -14,18 +14,18 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
-from formozov_project import __version__
-from formozov_project.b2_model import B2Model
-from formozov_project.heatmap_widget import HeatmapWidget
-from formozov_project.model_editor import ModelEditorDialog
-from formozov_project.spike_widget import SpikeWidget
-from formozov_project.stim_console import StimConsole
-from formozov_project.stim_editor import StimEditor
-from formozov_project.trace_widget import TraceWidget
-from formozov_project.utils import add_action
-from formozov_project.utils import construct_synapse_matrix
-from formozov_project.utils import example_models_path
-from formozov_project.utils import with_wait_cursor
+from neuroseq import __version__
+from neuroseq.b2_model import B2Model
+from neuroseq.heatmap_widget import HeatmapWidget
+from neuroseq.model_editor import ModelEditorDialog
+from neuroseq.spike_widget import SpikeWidget
+from neuroseq.stim_console import StimConsole
+from neuroseq.stim_editor import StimEditor
+from neuroseq.trace_widget import TraceWidget
+from neuroseq.utils import add_action
+from neuroseq.utils import construct_synapse_matrix
+from neuroseq.utils import example_models_path
+from neuroseq.utils import with_wait_cursor
 
 
 @dataclass
@@ -49,7 +49,7 @@ class Gui(QtWidgets.QMainWindow):
         self.neurons: dict[str, tuple[b2.StateMonitor, str]] = {}
         self.synapses: dict[str, tuple[b2.StateMonitor, str]] = {}
         self.spikes: dict[str, b2.SpikeMonitor] = {}
-        self.setWindowTitle("Formozov Project")
+        self.setWindowTitle("NeuroSeq")
         self.cmb_neuron = QtWidgets.QComboBox()
         self.cmb_spike = QtWidgets.QComboBox()
         self.cmb_synapse = QtWidgets.QComboBox()
@@ -624,9 +624,9 @@ class Gui(QtWidgets.QMainWindow):
     def about(self) -> None:
         QtWidgets.QMessageBox.about(
             self,
-            "About formozov_project",
-            f"Formozov Project\n\nVersion {__version__}\n\n"
-            + "https://github.com/ssciwr/formozov-project",
+            "About neuroseq",
+            f"NeuroSeq\n\nVersion {__version__}\n\n"
+            + "https://github.com/ssciwr/neuroseq",
         )
 
     def _create_progressbar(self) -> None:

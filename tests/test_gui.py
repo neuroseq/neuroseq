@@ -7,9 +7,9 @@ import brian2 as b2
 import pytest
 from brian2 import numpy_ as np
 from brian2.tests.utils import assert_allclose
-from formozov_project.b2_model import B2Model
-from formozov_project.gui import Gui
-from formozov_project.selectable_bar_plot_item import SelectableBarPlotItem
+from neuroseq.b2_model import B2Model
+from neuroseq.gui import Gui
+from neuroseq.selectable_bar_plot_item import SelectableBarPlotItem
 from pytest import MonkeyPatch
 from pytest import approx
 from pytestqt.qtbot import QtBot

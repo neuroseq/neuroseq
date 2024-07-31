@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 from click.testing import CliRunner
-from formozov_project.__main__ import main
+from neuroseq.__main__ import main
 
 
 class FakeGui:
@@ -26,10 +26,8 @@ class FakeQApplication:
 
 @pytest.fixture()
 def cli_runner_fake_gui(monkeypatch: pytest.MonkeyPatch) -> CliRunner:
-    monkeypatch.setattr("formozov_project.__main__.Gui", FakeGui)
-    monkeypatch.setattr(
-        "formozov_project.__main__.QtWidgets.QApplication", FakeQApplication
-    )
+    monkeypatch.setattr("neuroseq.__main__.Gui", FakeGui)
+    monkeypatch.setattr("neuroseq.__main__.QtWidgets.QApplication", FakeQApplication)
     return CliRunner()
 
 

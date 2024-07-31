@@ -13,11 +13,11 @@ from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
-from formozov_project.selectable_bar_line_plot_item import SelectableBarLinePlotItem
-from formozov_project.selectable_bar_plot_item import SelectableBarPlotItem
-from formozov_project.selectable_line_plot_item import SelectableLinePlotItem
-from formozov_project.timeline import Timeline
-from formozov_project.utils import QtABCMeta
+from neuroseq.selectable_bar_line_plot_item import SelectableBarLinePlotItem
+from neuroseq.selectable_bar_plot_item import SelectableBarPlotItem
+from neuroseq.selectable_line_plot_item import SelectableLinePlotItem
+from neuroseq.timeline import Timeline
+from neuroseq.utils import QtABCMeta
 
 SelectablePlotItem: TypeAlias = (
     SelectableLinePlotItem | SelectableBarPlotItem | SelectableBarLinePlotItem

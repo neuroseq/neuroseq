@@ -5,9 +5,9 @@ from pathlib import Path
 import brian2 as b2
 import brian2.numpy_ as np
 from brian2.tests.utils import assert_allclose
-from formozov_project.b2_model import B2Model
-from formozov_project.stim_editor import DrawMode
-from formozov_project.stim_editor import StimEditor
+from neuroseq.b2_model import B2Model
+from neuroseq.stim_editor import DrawMode
+from neuroseq.stim_editor import StimEditor
 from pytest import MonkeyPatch
 from pytest import approx
 from pytestqt.qtbot import QtBot

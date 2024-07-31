@@ -20,8 +20,8 @@ from qtpy.QtCore import QEvent
 from qtpy.QtCore import Signal
 from qtpy.QtWidgets import QComboBox
 
-from formozov_project.b2_model import B2Model
-from formozov_project.utils import parse_string_to_quantity
+from neuroseq.b2_model import B2Model
+from neuroseq.utils import parse_string_to_quantity
 
 
 # derive a new combobox which has a 'clicked' signal

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from formozov_project.selectable_bar_plot_item import SelectableBarPlotItem
-from formozov_project.selectable_line_plot_item import SelectableLinePlotItem
-from formozov_project.selectable_mixin import SelectableMixin
+from neuroseq.selectable_bar_plot_item import SelectableBarPlotItem
+from neuroseq.selectable_line_plot_item import SelectableLinePlotItem
+from neuroseq.selectable_mixin import SelectableMixin
 
 
 class SelectableBarLinePlotItem(SelectableMixin):

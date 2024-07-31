@@ -3,9 +3,9 @@ from __future__ import annotations
 import brian2.numpy_ as np
 from qtpy import QtWidgets
 
-from formozov_project.selectable_bar_plot_item import SelectableBarPlotItem
-from formozov_project.timeseries_widget import TimeseriesWidget
-from formozov_project.utils import shuffle_index
+from neuroseq.selectable_bar_plot_item import SelectableBarPlotItem
+from neuroseq.timeseries_widget import TimeseriesWidget
+from neuroseq.utils import shuffle_index
 
 
 class SpikeWidget(TimeseriesWidget):

@@ -1,8 +1,8 @@
-# Formozov Project
+# NeuroSeq
 
-[![CI](https://github.com/ssciwr/formozov-project/actions/workflows/ci.yml/badge.svg)](https://github.com/ssciwr/formozov-project/actions/workflows/ci.yml)
+[![CI](https://github.com/ssciwr/neuroseq/actions/workflows/ci.yml/badge.svg)](https://github.com/ssciwr/neuroseq/actions/workflows/ci.yml)
 
-Private repository containing the prototype GUI for the [Formozov project](https://github.com/ssciwr/formozov-project-notes).
+Private repository containing the neuroseq prototype GUI.
 
 ![screenshot](screenshot.png)
 
@@ -11,14 +11,14 @@ Private repository containing the prototype GUI for the [Formozov project](https
 If you have ssh authentication to GitHub set up you can install directly from this repository with pip:
 
 ```bash
-pip install git+ssh://git@github.com/ssciwr/formozov-project
+pip install git+ssh://git@github.com/ssciwr/neuroseq
 ```
 
 Alternatively you can clone the repository and then install it:
 
 ```bash
-git clone git@github.com:ssciwr/formozov-project.git
-cd formozov-project
+git clone git@github.com:ssciwr/neuroseq.git
+cd neuroseq
 pip install .
 ```
 
@@ -35,7 +35,7 @@ Visual Studio 2022 is available here: [https://learn.microsoft.com/en-us/visuals
 After installing, you should be able to run the following command to launch the GUI:
 
 ```bash
-formozov-project
+neuroseq
 ```
 
 ## GUI Console
@@ -93,8 +93,8 @@ Note that these objects should not be directly modified using the console, as it
 To do an editable installation including test dependencies and pre-commit:
 
 ```bash
-git clone git@github.com:ssciwr/formozov-project.git
-cd formozov-project
+git clone git@github.com:ssciwr/neuroseq.git
+cd neuroseq
 pip install -e .[tests]
 pip install pre-commit
 pre-commit install
@@ -107,7 +107,7 @@ The `-e` (editable install) flag used during installation means that any changes
 The GUI is launched the same way as above:
 
 ```bash
-formozov-project
+neuroseq
 ```
 
 To run the test suite:
@@ -125,5 +125,5 @@ pytest --no-xvfb
 List of commands:
 
 ```bash
-formozov-project --help
+neuroseq --help
 ```

@@ -8,7 +8,7 @@ from brian2 import ms
 from brian2 import nS
 from brian2 import second
 from brian2.tests.utils import assert_allclose
-from formozov_project import b2json
+from neuroseq import b2json
 
 
 def test_quantity_json(tmp_path: Path) -> None:

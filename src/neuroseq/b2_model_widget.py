@@ -9,7 +9,7 @@ import brian2.numpy_ as np
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from formozov_project.b2_model import B2Model
+from neuroseq.b2_model import B2Model
 
 
 class ModelDialog(QtWidgets.QDialog):
