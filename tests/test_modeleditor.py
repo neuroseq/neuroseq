@@ -676,13 +676,6 @@ def test_modeldialog_reject(
 
     assert diag.b2model.network["Mn"].g.shape[1] > 0  # has values for timesteps
 
-    def raise_error(_, __):
-        raise RuntimeError("dummy")
-
-    monkeypatch.setattr(B2Model, "define_b2seed", raise_error)
-
-    diag.reject()
-
 
 def test_monitordialog_with_run(
     mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list

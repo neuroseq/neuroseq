@@ -866,14 +866,14 @@ class ModelEditorDialog(QtWidgets.QDialog):
             try:
                 self.b2model.assemble_network()  # keep underlying network in sync
                 self.b2model.must_be_rebuilt = False
-                shutil.rmtree(self.backup_directory)
+                shutil.rmtree(Path(str(self.backup_directory)))
                 super().accept()
             except Exception as e:
                 message = f"Error when rebuilding the model after editing: {e}"
                 self.logger.critical(message)
                 QtWidgets.QMessageBox.critical(self, "Model rebuilding error", message)
                 self._restore_old_model()
-                shutil.rmtree(self.backup_directory)
+                shutil.rmtree(Path(str(self.backup_directory)))
         else:
             super().accept()
 
@@ -884,5 +884,5 @@ class ModelEditorDialog(QtWidgets.QDialog):
         self.logger.info("Edited model specification not accepted, restoring")
 
         self._restore_old_model()
-        shutil.rmtree(self.backup_directory)
+        shutil.rmtree(Path(str(self.backup_directory)))
         super().reject()
