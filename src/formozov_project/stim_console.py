@@ -9,6 +9,7 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 from formozov_project.b2_model import B2Model
+from formozov_project.timed_array_modifer import TimedArrayModifier
 
 
 class StimConsole(ReplWidget):
@@ -49,8 +50,10 @@ class StimConsole(ReplWidget):
             "\n\nNumpy is available as np, and indentation can be done with a single space.\n\n\n"
         )
 
-    def set_stims(self, stims: dict[str, b2.TimedArray]) -> None:
-        self.namespace_dict["stims"] = {k: v.values.copy() for k, v in stims.items()}
+    def set_stims(self, stims: dict[str, TimedArrayModifier]) -> None:
+        self.namespace_dict["stims"] = {
+            k: v.timed_array.values.copy() for k, v in stims.items()
+        }
 
     def set_model(self, model: B2Model) -> None:
         self.namespace_dict["model"] = model

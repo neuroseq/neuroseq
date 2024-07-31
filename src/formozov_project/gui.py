@@ -84,7 +84,7 @@ class Gui(QtWidgets.QMainWindow):
         self.heatmap_widget.connect_timeseries_widget_timeline(self.spike_widget)
         self.spike_widget.connect_heatmap_widget(self.heatmap_widget)
         self.stim_console.sig_stims_values_dict_updated.connect(
-            self.stim_editor.update_stims_values
+            self.stim_editor.update_stim_values_dict
         )
         self.cmb_neuron.currentTextChanged.connect(self.set_neuron)
         self.cmb_synapse.currentTextChanged.connect(self.set_synapse)
