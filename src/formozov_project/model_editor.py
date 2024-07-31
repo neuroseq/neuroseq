@@ -191,6 +191,8 @@ class EditableParameterTree(ParameterTree):
         parent: QtWidgets.QWidget | None = None,
         showHeader: bool = True,
         list_items: dict[str, Any] | None = None,
+        add_to_groups: bool = False,
+        add_to_groups_text: str = "New",
     ):
         """
         Create a new paramter tree displaying a part of the definition of a B2Model.
@@ -220,9 +222,11 @@ class EditableParameterTree(ParameterTree):
         self.functions = self.b2model.functions[self.name]
         self.list_items = list_items
         self.default_creator = default_creator
-        self._build_tree()
+        self.add_to_groups = add_to_groups
+        self.add_to_groups_text = add_to_groups_text
         self.add_item_action = QtWidgets.QAction(f"add {self.name}")
         self.add_item_action.triggered.connect(self._add_item)
+        self._build_tree()
 
     def _call_with_errormessage(self, signal: Callable, *args: Any, **kwargs) -> Any:
         """
@@ -245,6 +249,7 @@ class EditableParameterTree(ParameterTree):
             return signal(*args, **kwargs)
         except Exception as e:
             message = f"An error occured: {e}"
+            self.logger.critical(message)
             QtWidgets.QMessageBox.critical(self, "Error", message)
 
     def _connect_parameters(self, param: Parameter, funcs: dict[Any, Any]) -> None:
@@ -265,6 +270,17 @@ class EditableParameterTree(ParameterTree):
                 )
                 param.sigNameChanged.connect(
                     lambda p: self._call_with_errormessage(funcs["rename"], p.name())
+                )
+
+            if "addText" in param.opts:
+                # allow for making a new element, utilizing the function stored behind the 'add' key in the
+                # supplied dictionary of slots
+                param.sigAddNew.connect(
+                    lambda: self._call_with_errormessage(funcs["add"])
+                )
+                # rebuilt the tree to make sure everything is updated correctly. TODO: make this less overreaching
+                param.sigAddNew.connect(
+                    lambda: self._call_with_errormessage(self._build_tree)
                 )
 
             for child in param.children():
@@ -337,17 +353,21 @@ class EditableParameterTree(ParameterTree):
                     value, functions[key], key, expanded=expanded
                 )
 
-                params.append(
-                    {
-                        "name": key,
-                        "type": "group",
-                        "children": child_params,
-                        "expanded": expanded,
-                        "removable": True,
-                        "renamable": True,
-                        "syncExpanded": True,
-                    }
-                )
+                new_param = {
+                    "name": key,
+                    "type": "group",
+                    "children": child_params,
+                    "expanded": expanded,
+                    "removable": True,
+                    "renamable": True,
+                    "syncExpanded": True,
+                }
+
+                if self.add_to_groups:
+                    new_param["addText"] = self.add_to_groups_text
+
+                params.append(new_param)
+
             else:
                 # Determine the parameter type based on value type
                 param_type = "str"
@@ -386,9 +406,7 @@ class EditableParameterTree(ParameterTree):
             name=self.name,
             type="group",
             children=params,
-            # addText="New",
         )
-        # self.root.sigAddNew.connect(self._add_item)
         self.setParameters(self.root, showTop=False)
 
         self._call_with_errormessage(
@@ -663,6 +681,7 @@ class EditableNeurongroupTree(EditableParameterTree):
                     "update_from": self._update_neurongroup_list,
                 },
             },
+            add_to_groups=False,
         )
 
         self.add_neurongroup_action = self.add_item_action
@@ -714,134 +733,6 @@ class EditableNeurongroupTree(EditableParameterTree):
             menu.exec(self.mapToGlobal(ev.pos()))
 
 
-class EditableInitialConditionTree(EditableParameterTree):
-    def __init__(
-        self,
-        model: B2Model,
-        parent: QtWidgets.QWidget | None = None,
-        showHeader: bool = True,
-    ):
-        super().__init__(
-            model,
-            "initials",
-            model.define_default_init,
-            parent=parent,
-            showHeader=showHeader,
-        )
-
-    def _connect_parameters(self, param: Parameter, funcs: dict[Any, Any]) -> None:
-        """
-        connect the signals emitted by the entries of the parameter tree to their respective actions.
-        Whenever something changes (add/delete child node, change value) the model is set to be rebuilt
-        when the dialog is accepted, and changed parameters are updated.
-
-        Parameters
-        ----------
-        param : Parameter
-            parent paremeter
-        """
-        if param.type() == "group":
-            if all(f in funcs for f in ["delete", "rename"]):
-                param.sigRemoved.connect(
-                    lambda: self._call_with_errormessage(funcs["delete"])
-                )
-                param.sigNameChanged.connect(
-                    lambda p: self._call_with_errormessage(funcs["rename"], p.name())
-                )
-            param.sigAddNew.connect(lambda: self._call_with_errormessage(funcs["add"]))
-            param.sigAddNew.connect(
-                lambda: self._call_with_errormessage(self._build_tree)
-            )
-
-            for child in param.children():
-                if child.name() in funcs:
-                    self._connect_parameters(child, funcs[child.name()])
-                else:
-                    pass
-        else:
-            param.sigValueChanged.connect(
-                lambda p: self._call_with_errormessage(
-                    funcs["modify"],
-                    self._call_with_errormessage(parse_string_to_quantity, p.value()),
-                )
-            )
-            param.sigRemoved.connect(
-                lambda: self._call_with_errormessage(funcs["delete"])
-            )
-            param.sigNameChanged.connect(
-                lambda p: self._call_with_errormessage(funcs["rename"], p.name())
-            )
-
-    def _convert_dict_to_params(
-        self,
-        data: dict[Any, Any],
-        functions: dict[Any, Any],
-        key: Any = "",
-        expanded: bool = True,
-    ) -> list[Any]:
-        """
-        Recursively go through a nested dict and create a hierarchical pyqtgraph Parameter representation of it
-        from which a ParameterTree object can be constructed.
-
-        Parameters
-        ----------
-        data : dict[Any, Any]
-            Possibly nested dict to be represented in the parametertree
-        key : Any, optional
-            Current key of 'data' that is processed. Needed for keeping track of parameter names, by default ""
-
-        Returns
-        -------
-        list[Any]
-            list of Parameter representations that internally define all the parent-child relationships to create the parametertree.
-        """
-        # FIXME: this must be such that it isn't  as repetitive
-        params = []
-        for key, value in data.items():
-            value = self._get_value(value)
-            if isinstance(value, dict):
-                child_params = self._convert_dict_to_params(
-                    value, functions[key], key, True
-                )
-
-                params.append(
-                    {
-                        "name": key,
-                        "type": "group",
-                        "children": child_params,
-                        "expanded": True,
-                        "removable": True,
-                        "renamable": True,
-                        "syncExpanded": True,
-                        "addText": "New",
-                    }
-                )
-            else:
-                # Determine the parameter type based on value type
-                param_type = "str"
-                if isinstance(value, b2.Quantity):
-                    value = value.in_best_unit(python_code=True)
-                value = str(value)
-
-                param = {
-                    "name": key,
-                    "type": param_type,
-                    "value": value,
-                    "removable": True,
-                    "renamable": True,
-                    "syncExpanded": True,
-                }
-
-                # need 'limits' for the underlying ListParameter and 'element' for the custom class
-                if key in list(self.list_items.keys()):
-                    param["type"] = "updatinglist"
-                    param["limits"] = self.list_items[key]["update_from"]()
-                    param["update"] = self.list_items[key]["update_from"]
-
-                params.append(param)
-        return params
-
-
 class ModelEditorDialog(QtWidgets.QDialog):
     """
     Editor dialog for editing the properties of a model using multiple pyqtgraph ParameterTrees.
@@ -881,9 +772,12 @@ class ModelEditorDialog(QtWidgets.QDialog):
                 default_creator=b2model.define_default_parameter,
                 parent=self,
             ),
-            "Initial Conditions": EditableInitialConditionTree(
+            "Initial Conditions": EditableParameterTree(
                 b2model,
+                domain_name="initials",
+                default_creator=b2model.define_default_init,
                 parent=self,
+                add_to_groups=True,
             ),
         }
         self.b2model = b2model
@@ -909,7 +803,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
             nameplate.setFont(bold_font)
             layout.addWidget(nameplate, 0, i)
 
-            add_group_button = QtWidgets.QPushButton("New", self)
+            add_group_button = QtWidgets.QPushButton("New " + k[0 : len(k) - 1], self)
             add_group_button.clicked.connect(tree._add_item)
             layout.addWidget(add_group_button, 0, i + 1)
             col_add = 0
