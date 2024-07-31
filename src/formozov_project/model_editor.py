@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import tempfile
 from collections.abc import Callable
-from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 import brian2 as b2  # noqa: F401
@@ -790,8 +792,11 @@ class ModelEditorDialog(QtWidgets.QDialog):
         }
         self.b2model = b2model
 
-        self.backup = self.b2model.get_model_definition()
-        self.functions_backup = deepcopy(self.b2model.functions)
+        self.backup_dir = tempfile.TemporaryDirectory()
+
+        self.backup = Path(str(self.backup_dir.name)) / "backup.json"
+
+        self.b2model.save_model(self.backup)
 
         self.logger = logging.getLogger(__name__)
 
@@ -848,16 +853,9 @@ class ModelEditorDialog(QtWidgets.QDialog):
         Restore the old model before editing when the edited stuff has been rejected or
         something goes wrong
         """
+        self.logger.info("Restoring model from backup")
         try:
-            # reset the specification to the backup values
-            self.b2model.neurongroups = self.backup["neurongroups"]
-            self.b2model.synapses = self.backup["synapses"]
-            self.b2model.monitors = self.backup["monitors"]
-            self.b2model.parameters = self.backup["parameters"]
-            self.b2model.initials = self.backup["initials"]
-            self.b2model.functions = self.functions_backup
-            self.b2model.define_b2seed(self.backup["seed"])
-            self.b2model.assemble_network()  # keep underlying network in sync
+            self.b2model = B2Model.load_model(self.backup)
         except Exception as e:
             message = f"Error when restoring old model: {e}"
             self.logger.critical(message)
@@ -868,19 +866,18 @@ class ModelEditorDialog(QtWidgets.QDialog):
         Accept the current state of the model and rebuilt it if anything has been edited.
         """
         self.logger.info(f"accept model editions {self.b2model.must_be_rebuilt}")
-        if self.b2model.must_be_rebuilt:
-            self.logger.info("rebuilding model after change")
+        try:
+            if self.b2model.must_be_rebuilt:
+                self.logger.info("rebuilding model after change")
 
-            try:
                 self.b2model.assemble_network()  # keep underlying network in sync
                 self.b2model.must_be_rebuilt = False
-            except Exception as e:
-                message = f"Error when rebuilding the model after editing: {e}"
-                self.logger.critical(message)
-                QtWidgets.QMessageBox.critical(self, "Model rebuilding error", message)
-                self._restore_old_model()
-
-        super().accept()
+            shutil.rmtree(self.backup_dir.name)
+            super().accept()
+        except Exception as e:
+            message = f"Error when rebuilding the model after editing: {e}"
+            self.logger.critical(message)
+            QtWidgets.QMessageBox.critical(self, "Model rebuilding error", message)
 
     def reject(self):
         """
@@ -888,12 +885,6 @@ class ModelEditorDialog(QtWidgets.QDialog):
         """
         self.logger.info("Edited model specification not accepted, restoring")
 
-        if self.b2model.seed != self.backup["seed"]:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "Model rng warning"
-                "The system's random number generator will be reseeded. This potentially can change the results when compared to previous ones",
-            )
-
         self._restore_old_model()
+        shutil.rmtree(self.backup_dir.name)
         super().reject()

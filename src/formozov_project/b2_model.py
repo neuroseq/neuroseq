@@ -427,7 +427,6 @@ class B2Model:
             """
             Delete the element behind the currently held name
             """
-            print("delete thing: ", self.current_name)
             del self.pdict[self.current_name]
             del self.fdict[self.current_name]
             self.with_rebuilt()

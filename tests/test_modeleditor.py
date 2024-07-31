@@ -615,20 +615,21 @@ def test_modeldialog_accept(
     diag = ModelEditorDialog(mfx_nmda)
     qtbot.addWidget(diag)
     assert diag.b2model.must_be_rebuilt is False
-    specs = mfx_nmda.get_model_definition()
-    assert diag.backup == specs
-    assert list(diag.functions_backup.keys()) == list(mfx_nmda.functions.keys())
 
     diag.b2model.define_neuronnumber("p1", 25)
     diag.b2model.define_solver_method("p1", "euler")
     diag.b2model.define_equation("p1", "dv/dt=-v: 1")
-
     assert diag.b2model.must_be_rebuilt is True
-
     diag.accept()
-
     assert "p1" in diag.b2model.neurongroups
     assert "p1" in [obj.name for obj in diag.b2model.network.objects]
+
+
+def test_modeldialog_accept_exception(
+    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+) -> None:
+    diag = ModelEditorDialog(mfx_nmda)
+    qtbot.addWidget(diag)
 
     def raise_error(_):
         raise RuntimeError("dummy")
@@ -650,9 +651,6 @@ def test_modeldialog_reject(
 ) -> None:
     diag = ModelEditorDialog(mfx_nmda)
     qtbot.add_widget(diag)
-    specs = mfx_nmda.get_model_definition()
-    assert diag.backup == specs
-    assert list(diag.functions_backup.keys()) == list(mfx_nmda.functions.keys())
 
     diag.b2model.functions["monitors"]["Mn"]["delete"]()
 
@@ -664,10 +662,17 @@ def test_modeldialog_reject(
     assert "Mn" in diag.b2model.monitors
     assert "Mn" in [obj.name for obj in diag.b2model.network.objects]
 
-    def raise_error(_, __):
+
+def test_modeldialog_reject_exception(
+    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+) -> None:
+    diag = ModelEditorDialog(mfx_nmda)
+    qtbot.add_widget(diag)
+
+    def raise_error(_):
         raise RuntimeError("dummy")
 
-    monkeypatch.setattr(B2Model, "define_b2seed", raise_error)
+    monkeypatch.setattr(B2Model, "load_model", raise_error)
 
     diag.reject()
 
