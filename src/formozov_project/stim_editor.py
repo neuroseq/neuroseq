@@ -22,6 +22,7 @@ from formozov_project.utils import timed_array_with_new_data
 class DrawMode(Enum):
     REGION = 1
     SINGLE_STIM = 2
+    SINGLE_STIM_ERASE = 3
 
 
 class StimEditor(QtWidgets.QWidget):
@@ -130,11 +131,14 @@ class StimEditor(QtWidgets.QWidget):
         self.logger.debug(f"Draw mode updated: {draw_mode}")
         self.draw_mode = draw_mode
 
-    def draw_stim_region(self, neuron_slice: slice, time_slice: slice) -> None:
+    def draw_stim_region(
+        self, neuron_slice: slice, time_slice: slice, erase=False
+    ) -> None:
         if self.current_stim_modifier is None:
             return
         self.logger.debug(f"Draw stim for neurons {neuron_slice} and time {time_slice}")
-        self.current_stim_modifier.do(neuron_slice, time_slice, self.draw_stim_value)
+        stim_value = 0 if erase else self.draw_stim_value
+        self.current_stim_modifier.do(neuron_slice, time_slice, stim_value)
         self._stim_values_updated()
         self.stim_widget.select_neurons(neuron_slice, time_slice)
 
@@ -152,7 +156,7 @@ class StimEditor(QtWidgets.QWidget):
         if self.current_stim_modifier is None:
             return
         if self.action_toggle_draw.isChecked():
-            if self.draw_mode != DrawMode.SINGLE_STIM:
+            if self.draw_mode not in [DrawMode.SINGLE_STIM, DrawMode.SINGLE_STIM_ERASE]:
                 return
             neuron_slice = slice(neuron_index, neuron_index + 1)
             time_length_s = 0.001
@@ -166,7 +170,11 @@ class StimEditor(QtWidgets.QWidget):
             self.logger.debug(f"Time slice: {time_slice}")
             if not self._is_valid_slice(neuron_slice, time_slice):
                 return
-            self.draw_stim_region(neuron_slice, time_slice)
+            self.draw_stim_region(
+                neuron_slice,
+                time_slice,
+                erase=self.draw_mode == DrawMode.SINGLE_STIM_ERASE,
+            )
         else:
             self.stim_widget.unselect_neurons()
             self.stim_widget.timeline.setX(
@@ -392,7 +400,7 @@ class StimEditor(QtWidgets.QWidget):
         self.actions_draw = []
         self.actions_draw.append(
             add_action(
-                "Stimulus region",
+                "Draw stimulus region",
                 lambda: self.draw_mode_updated(DrawMode.REGION),
                 menu,
                 toolbar,
@@ -404,12 +412,24 @@ class StimEditor(QtWidgets.QWidget):
         )
         self.actions_draw.append(
             add_action(
-                "Single 1ms stimulus",
+                "Draw single 1ms stimulus",
                 lambda: self.draw_mode_updated(DrawMode.SINGLE_STIM),
                 menu,
                 toolbar,
                 self,
                 icon=qta.icon("mdi6.pencil"),
+                checkable=True,
+                is_checked=False,
+            )
+        )
+        self.actions_draw.append(
+            add_action(
+                "Erase single 1ms stimulus",
+                lambda: self.draw_mode_updated(DrawMode.SINGLE_STIM_ERASE),
+                menu,
+                toolbar,
+                self,
+                icon=qta.icon("mdi6.eraser"),
                 checkable=True,
                 is_checked=False,
             )
