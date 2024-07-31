@@ -659,10 +659,19 @@ def test_modeldialog_reject(
     assert "Mn" not in diag.b2model.monitors
     assert "Mn" in [obj.name for obj in diag.b2model.network.objects]
 
+    assert mfx_nmda.must_be_rebuilt is True
     diag.reject()
+    assert mfx_nmda.must_be_rebuilt is False
 
     assert "Mn" in diag.b2model.monitors
     assert "Mn" in [obj.name for obj in diag.b2model.network.objects]
+
+    assert diag.b2model.network["Mn"].g.shape[1] == 0  # has no values for timesteps
+
+    # check that the system can run
+    mfx_nmda.run_simulation(1.0 * b2.second)
+
+    assert diag.b2model.network["Mn"].g.shape[1] > 0  # has values for timesteps
 
     def raise_error(_, __):
         raise RuntimeError("dummy")

@@ -289,6 +289,11 @@ class B2Model:
 
         ng = None
         self.logger.info(f"assembling neurongroup '{name}'")
+
+        # print("neurongroup: ", name)
+        # for k, v in self.neurongroups[name].items():
+        #     print(k, v, type(v))
+
         try:
             ng = b2.NeuronGroup(
                 self.neurongroups[name].get("neuronnumber", None),
@@ -1080,7 +1085,7 @@ class B2Model:
             name,
             "i!=j",
         )
-        self.define_synapse_connection_probablitiy(
+        self.define_synapse_connection_probability(
             name,
             0.0,
         )
@@ -1492,7 +1497,7 @@ class B2Model:
         )
 
     @_trigger_rebuild
-    def define_synapse_connection_probablitiy(self, name: str, p: float) -> None:
+    def define_synapse_connection_probability(self, name: str, p: float) -> None:
         """
         define_synapse_connection_probability Define the connection probability for a given synapse called `name`.
 
@@ -1750,6 +1755,7 @@ class B2Model:
         """
         Assemble the network from its predefined components.
         """
+        self.logger.info(f"Assembling network: {self.name}")
         self.network = b2.Network(name=self.name)
         self.checkpoints.clear()
 
@@ -2058,6 +2064,7 @@ class B2Model:
             Path to save the data at, by default None
         """
         if self.must_be_rebuilt:
+            self.logger.info("Rebuilding before run")
             self.network = b2.Network(name=self.network.name)
             self.assemble_network()
 

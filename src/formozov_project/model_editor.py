@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
+import tempfile
 from collections.abc import Callable
-from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 import brian2 as b2  # noqa: F401
@@ -782,8 +783,9 @@ class ModelEditorDialog(QtWidgets.QDialog):
         }
         self.b2model = b2model
 
-        self.backup = self.b2model.get_model_definition()
-        self.functions_backup = deepcopy(self.b2model.functions)
+        self.backup_file = Path(str(tempfile.TemporaryDirectory())) / "backup.json"
+
+        b2model.save_model(self.backup_file)
 
         self.logger = logging.getLogger(__name__)
 
@@ -842,14 +844,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
         """
         try:
             # reset the specification to the backup values
-            self.b2model.neurongroups = self.backup["neurongroups"]
-            self.b2model.synapses = self.backup["synapses"]
-            self.b2model.monitors = self.backup["monitors"]
-            self.b2model.parameters = self.backup["parameters"]
-            self.b2model.initials = self.backup["initials"]
-            self.b2model.functions = self.functions_backup
-            self.b2model.define_b2seed(self.backup["seed"])
-            self.b2model.assemble_network()  # keep underlying network in sync
+            self.b2model = B2Model.load_model(self.backup_file)
         except Exception as e:
             message = f"Error when restoring old model: {e}"
             self.logger.critical(message)
@@ -866,13 +861,14 @@ class ModelEditorDialog(QtWidgets.QDialog):
             try:
                 self.b2model.assemble_network()  # keep underlying network in sync
                 self.b2model.must_be_rebuilt = False
+                super().accept()
             except Exception as e:
                 message = f"Error when rebuilding the model after editing: {e}"
                 self.logger.critical(message)
                 QtWidgets.QMessageBox.critical(self, "Model rebuilding error", message)
                 self._restore_old_model()
-
-        super().accept()
+        else:
+            super().accept()
 
     def reject(self):
         """

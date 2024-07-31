@@ -794,7 +794,7 @@ class SynapseDialog(ModelDialog):
             lambda: self.accept_parameter_with_savebutton(
                 self.connect_prob,
                 "connection_probability",
-                self.model.define_synapse_connection_probablitiy,
+                self.model.define_synapse_connection_probability,
                 self.connect_prob_button,
                 converter=lambda input: float(input),
             )
