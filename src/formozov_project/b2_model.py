@@ -2013,17 +2013,16 @@ class B2Model:
                     )
                     self.define_parameter(name, new_timed_array)
 
-    def _pad_timed_arrays(self, padding_seconds):
+    def _pad_timed_arrays(self, sim_time_seconds: float, padding_seconds: float):
         """
-        Pad any TimedArrays with zeros up to simulation time + padding_seconds
+        Pad any TimedArrays with zeros up to sim_time_secs + padding_seconds
         """
-        sim_time_secs = self.network.t / b2.second
         for name, timed_array in self.parameters.items():
             if isinstance(timed_array, b2.TimedArray) and timed_array.values.ndim > 1:
                 n_timestamps = timed_array.values.shape[0]
                 array_time_secs = timed_array.dt * n_timestamps
                 padding_required_seqs = (
-                    sim_time_secs + padding_seconds - array_time_secs
+                    sim_time_seconds + padding_seconds - array_time_secs
                 )
                 if padding_required_seqs > 0:
                     n_pad = math.ceil(padding_required_seqs / timed_array.dt)
@@ -2072,7 +2071,9 @@ class B2Model:
         )
         self.logger.info(f"run the system for {tfinal} with savepath = {savepath}")
         if timed_array_padding_seconds is not None:
-            self._pad_timed_arrays(timed_array_padding_seconds)
+            self._pad_timed_arrays(
+                self.network.t / b2.second, timed_array_padding_seconds
+            )
         if savepath is not None:
             self.save_to_h5(savepath)
 
