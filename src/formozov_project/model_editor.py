@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -783,7 +784,11 @@ class ModelEditorDialog(QtWidgets.QDialog):
         }
         self.b2model = b2model
 
-        self.backup_file = Path(str(tempfile.TemporaryDirectory())) / "backup.json"
+        self.backup_directory = tempfile.TemporaryDirectory()
+
+        Path(str(self.backup_directory)).mkdir(parents=True)
+
+        self.backup_file = Path(str(self.backup_directory)) / "backup.json"
 
         b2model.save_model(self.backup_file)
 
@@ -861,12 +866,14 @@ class ModelEditorDialog(QtWidgets.QDialog):
             try:
                 self.b2model.assemble_network()  # keep underlying network in sync
                 self.b2model.must_be_rebuilt = False
+                shutil.rmtree(self.backup_directory)
                 super().accept()
             except Exception as e:
                 message = f"Error when rebuilding the model after editing: {e}"
                 self.logger.critical(message)
                 QtWidgets.QMessageBox.critical(self, "Model rebuilding error", message)
                 self._restore_old_model()
+                shutil.rmtree(self.backup_directory)
         else:
             super().accept()
 
@@ -876,12 +883,6 @@ class ModelEditorDialog(QtWidgets.QDialog):
         """
         self.logger.info("Edited model specification not accepted, restoring")
 
-        if self.b2model.seed != self.backup["seed"]:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "Model rng warning"
-                "The system's random number generator will be reseeded. This potentially can change the results when compared to previous ones",
-            )
-
         self._restore_old_model()
+        shutil.rmtree(self.backup_directory)
         super().reject()

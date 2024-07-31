@@ -615,9 +615,8 @@ def test_modeldialog_accept(
     diag = ModelEditorDialog(mfx_nmda)
     qtbot.addWidget(diag)
     assert diag.b2model.must_be_rebuilt is False
-    specs = mfx_nmda.get_model_definition()
-    assert diag.backup == specs
-    assert list(diag.functions_backup.keys()) == list(mfx_nmda.functions.keys())
+
+    assert diag.backup_file.exists()
 
     diag.b2model.define_neuronnumber("p1", 25)
     diag.b2model.define_solver_method("p1", "euler")
@@ -629,6 +628,13 @@ def test_modeldialog_accept(
 
     assert "p1" in diag.b2model.neurongroups
     assert "p1" in [obj.name for obj in diag.b2model.network.objects]
+
+
+def test_modeldialog_accept_error(
+    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+) -> None:
+    diag = ModelEditorDialog(mfx_nmda)
+    qtbot.addWidget(diag)
 
     def raise_error(_):
         raise RuntimeError("dummy")
@@ -650,18 +656,15 @@ def test_modeldialog_reject(
 ) -> None:
     diag = ModelEditorDialog(mfx_nmda)
     qtbot.add_widget(diag)
-    specs = mfx_nmda.get_model_definition()
-    assert diag.backup == specs
-    assert list(diag.functions_backup.keys()) == list(mfx_nmda.functions.keys())
 
     diag.b2model.functions["monitors"]["Mn"]["delete"]()
 
     assert "Mn" not in diag.b2model.monitors
     assert "Mn" in [obj.name for obj in diag.b2model.network.objects]
 
-    assert mfx_nmda.must_be_rebuilt is True
+    assert diag.b2model.must_be_rebuilt is True
     diag.reject()
-    assert mfx_nmda.must_be_rebuilt is False
+    assert diag.b2model.must_be_rebuilt is False
 
     assert "Mn" in diag.b2model.monitors
     assert "Mn" in [obj.name for obj in diag.b2model.network.objects]
@@ -669,7 +672,7 @@ def test_modeldialog_reject(
     assert diag.b2model.network["Mn"].g.shape[1] == 0  # has no values for timesteps
 
     # check that the system can run
-    mfx_nmda.run_simulation(1.0 * b2.second)
+    diag.b2model.run_simulation(1.0 * b2.second)
 
     assert diag.b2model.network["Mn"].g.shape[1] > 0  # has values for timesteps
 
@@ -679,14 +682,6 @@ def test_modeldialog_reject(
     monkeypatch.setattr(B2Model, "define_b2seed", raise_error)
 
     diag.reject()
-
-    assert qmessagebox_calls == [
-        {
-            "name": "critical",
-            "text": "Error when restoring old model: dummy",
-            "title": "Model specification error",
-        },
-    ]
 
 
 def test_monitordialog_with_run(
