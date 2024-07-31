@@ -361,6 +361,21 @@ class B2Model:
             with_rebuilt: Callable,
             elemnet_adder: Callable = lambda *_, **__: None,
         ):
+            """
+            Create a new modifier instance
+            Parameters
+            ----------
+            current_name : str
+                name of the element this modifier is bound to in its parent object
+            pdict : dict
+                element this modifier is bound to
+            fdict : dict
+                function dictionary the `pdict` argument is bound to
+            with_rebuilt : Callable
+                function to call upon modification of `pdict`
+            element_adder: Callable
+                function taking arbitrary args and kwargs to create a new element if this modifier is bound to a dictionary object
+            """
             self.current_name = current_name
             self.pdict = pdict
             self.fdict = fdict
@@ -415,6 +430,7 @@ class B2Model:
             add a new element if the held pdict is a nested dict
             """
             self.element_adder(self.current_name, *args, **kwargs)
+            logging.critical(f"add element to {self.current_name}: {args}, {kwargs}")
 
     def __init__(
         self,
@@ -443,11 +459,7 @@ class B2Model:
             "neurongroups": {},
             "synapses": {},
             "initials": {},
-            "parameters": {
-                "element_removed": lambda _, n: self._delete_dict_element(
-                    "parameters", n
-                )
-            },
+            "parameters": {},
             "monitors": {},
         }
         self.checkpoints: list[str] = []
