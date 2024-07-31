@@ -59,6 +59,24 @@ def test_quantity_parser() -> None:
     with pytest.raises(RuntimeError, match="Error when interpreting unit string"):
         utils.parse_string_to_quantity("1/(10) * Mx")
 
+    assert utils.parse_string_to_quantity("euler") == "euler"
+
+    assert utils.parse_string_to_quantity("exponential_euler") == "exponential_euler"
+
+    assert utils.parse_string_to_quantity("exact") == "exact"
+
+    assert utils.parse_string_to_quantity("rk2") == "rk2"
+
+    assert utils.parse_string_to_quantity("rk4") == "rk4"
+
+    assert utils.parse_string_to_quantity("heun") == "heun"
+
+    assert utils.parse_string_to_quantity("milstein") == "milstein"
+
+    assert utils.parse_string_to_quantity("2e10 ms") == 2e10 * b2.ms
+
+    assert utils.parse_string_to_quantity("2e-5 ms") == 2e-5 * b2.ms
+
 
 def test_update_nested_dict() -> None:
     d: dict[Any, Any] = {
