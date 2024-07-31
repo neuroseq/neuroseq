@@ -73,6 +73,10 @@ def test_quantity_parser() -> None:
 
     assert utils.parse_string_to_quantity("milstein") == "milstein"
 
+    assert utils.parse_string_to_quantity("2e10 ms") == 2e10 * b2.ms
+
+    assert utils.parse_string_to_quantity("2e-5 ms") == 2e-5 * b2.ms
+
 
 def test_update_nested_dict() -> None:
     d: dict[Any, Any] = {
