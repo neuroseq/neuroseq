@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import logging
-import shutil
-import tempfile
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 import brian2 as b2  # noqa: F401
@@ -792,11 +789,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
         }
         self.b2model = b2model
 
-        self.backup_dir = tempfile.TemporaryDirectory()
-
-        self.backup = Path(str(self.backup_dir.name)) / "backup.json"
-
-        self.b2model.save_model(self.backup)
+        self.backup = self.b2model.to_dict()
 
         self.logger = logging.getLogger(__name__)
 
@@ -872,7 +865,6 @@ class ModelEditorDialog(QtWidgets.QDialog):
 
                 self.b2model.assemble_network()  # keep underlying network in sync
                 self.b2model.must_be_rebuilt = False
-            shutil.rmtree(self.backup_dir.name)
             super().accept()
         except Exception as e:
             message = f"Error when rebuilding the model after editing: {e}"
@@ -886,5 +878,4 @@ class ModelEditorDialog(QtWidgets.QDialog):
         self.logger.info("Edited model specification not accepted, restoring")
 
         self._restore_old_model()
-        shutil.rmtree(self.backup_dir.name)
         super().reject()

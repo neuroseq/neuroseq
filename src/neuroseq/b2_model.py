@@ -1079,7 +1079,7 @@ class B2Model:
             name,
             "i!=j",
         )
-        self.define_synapse_connection_probablitiy(
+        self.define_synapse_connection_probability(
             name,
             0.0,
         )
@@ -1491,7 +1491,7 @@ class B2Model:
         )
 
     @_trigger_rebuild
-    def define_synapse_connection_probablitiy(self, name: str, p: float) -> None:
+    def define_synapse_connection_probability(self, name: str, p: float) -> None:
         """
         define_synapse_connection_probability Define the connection probability for a given synapse called `name`.
 

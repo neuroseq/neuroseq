@@ -216,7 +216,7 @@ class Reconstructor:
                     model.define_synapse_pre,
                     model.define_synapse_post,
                     model.define_synapse_connection,
-                    model.define_synapse_connection_probablitiy,
+                    model.define_synapse_connection_probability,
                     model.define_synapse_solver_method,
                     model.define_synapse_dt,
                 ],
