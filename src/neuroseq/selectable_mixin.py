@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import abc
 
-from formozov_project.utils import QtABCMeta
+from neuroseq.utils import QtABCMeta
 
 
 class SelectableMixin(metaclass=QtABCMeta):

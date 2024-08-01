@@ -4,7 +4,7 @@ from typing import cast
 
 import brian2.numpy_ as np
 import pyqtgraph as pg
-from formozov_project.trace_widget import TraceWidget
+from neuroseq.trace_widget import TraceWidget
 from pytestqt.qtbot import QtBot
 
 

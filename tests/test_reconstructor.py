@@ -3,8 +3,8 @@ from pathlib import Path
 
 import brian2 as b2
 import pytest
-from formozov_project.b2_model import B2Model
-from formozov_project.reconstructor import Reconstructor
+from neuroseq.b2_model import B2Model
+from neuroseq.reconstructor import Reconstructor
 from pytest import MonkeyPatch
 
 

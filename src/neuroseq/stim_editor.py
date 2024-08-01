@@ -12,11 +12,11 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
-from formozov_project.b2_model import B2Model
-from formozov_project.stim_widget import StimWidget
-from formozov_project.timed_array_modifer import TimedArrayModifier
-from formozov_project.utils import add_action
-from formozov_project.utils import timed_array_with_new_data
+from neuroseq.b2_model import B2Model
+from neuroseq.stim_widget import StimWidget
+from neuroseq.timed_array_modifer import TimedArrayModifier
+from neuroseq.utils import add_action
+from neuroseq.utils import timed_array_with_new_data
 
 
 class DrawMode(Enum):

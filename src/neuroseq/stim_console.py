@@ -8,8 +8,8 @@ from pyqtgraph.console.repl_widget import ReplWidget
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from formozov_project.b2_model import B2Model
-from formozov_project.timed_array_modifer import TimedArrayModifier
+from neuroseq.b2_model import B2Model
+from neuroseq.timed_array_modifer import TimedArrayModifier
 
 
 class StimConsole(ReplWidget):

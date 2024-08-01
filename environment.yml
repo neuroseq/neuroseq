@@ -1,4 +1,4 @@
-name: formozov
+name: neuroseq
 channels:
   - conda-forge
 dependencies:

@@ -3,11 +3,11 @@ from __future__ import annotations
 import brian2.numpy_ as np
 from qtpy import QtWidgets
 
-from formozov_project.selectable_bar_line_plot_item import SelectableBarLinePlotItem
-from formozov_project.selectable_bar_plot_item import SelectableBarPlotItem
-from formozov_project.selectable_line_plot_item import SelectableLinePlotItem
-from formozov_project.timeseries_widget import TimeseriesWidget
-from formozov_project.utils import shuffle_index
+from neuroseq.selectable_bar_line_plot_item import SelectableBarLinePlotItem
+from neuroseq.selectable_bar_plot_item import SelectableBarPlotItem
+from neuroseq.selectable_line_plot_item import SelectableLinePlotItem
+from neuroseq.timeseries_widget import TimeseriesWidget
+from neuroseq.utils import shuffle_index
 
 
 class StimTraceWidget(TimeseriesWidget):

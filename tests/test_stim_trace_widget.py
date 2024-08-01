@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import brian2.numpy_ as np
 import pytest
-from formozov_project.stim_trace_widget import StimTraceWidget
+from neuroseq.stim_trace_widget import StimTraceWidget
 from pytestqt.qtbot import QtBot
 
 

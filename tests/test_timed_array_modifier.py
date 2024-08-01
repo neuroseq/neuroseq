@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import brian2 as b2
 from brian2 import numpy_ as np
-from formozov_project.timed_array_modifer import TimedArrayModifier
+from neuroseq.timed_array_modifer import TimedArrayModifier
 from pytest import approx
 
 

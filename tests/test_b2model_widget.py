@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import formozov_project.b2_model_widget as B2W
-from formozov_project.b2_model import B2Model
+import neuroseq.b2_model_widget as B2W
+from neuroseq.b2_model import B2Model
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 

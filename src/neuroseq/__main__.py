@@ -8,8 +8,8 @@ import click
 from qtpy import API_NAME
 from qtpy import QtWidgets
 
-from formozov_project.gui import Gui
-from formozov_project.utils import init_brian2_logging
+from neuroseq.gui import Gui
+from neuroseq.utils import init_brian2_logging
 
 
 @click.command()
