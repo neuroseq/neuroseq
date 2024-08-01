@@ -1546,7 +1546,9 @@ class B2Model:
     def define_default_monitor(self) -> None:
         name = "new_monitor"
         if name not in self.monitors:
-            self.monitors[name] = {}
+            self.monitors[name] = {
+                "name": name,
+            }
 
         if name not in self.functions["monitors"]:
             self._add_group_modifier(
