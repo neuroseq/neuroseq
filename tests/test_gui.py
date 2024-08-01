@@ -440,3 +440,43 @@ def test_gui_stim_padding(
     # should have ~0.1 secs of simulation data, and ~10.1 secs of stim array data with dt=0.1ms
     assert gui.heatmap_widget.tVals[-1] == approx(0.1, rel=1e-2)
     assert gui.stim_editor.stim_widget.n_timestamps == 10100
+
+
+def test_gui_simulate_external_model(
+    monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list
+) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    # load external simulation function
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getOpenFileName",
+        lambda *args: ("external_simulation_example/simulate.py", True),
+    )
+    assert (
+        gui.stim_editor.stim_widget.n_timestamps * gui.stim_editor.stim_widget.dt
+        == approx(2.0)
+    )
+    # simulate for 10 seconds
+    simulation_time_secs = 10
+    gui.connect_external_simulation_function()
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog,
+        "getText",
+        lambda *args: (f"{simulation_time_secs}", True),
+    )
+    gui.btn_continue_simulation_clicked()
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    # stim array should be padded to simulation time + default padding of 5 secs
+    assert (
+        gui.stim_editor.stim_widget.n_timestamps * gui.stim_editor.stim_widget.dt
+        == approx(simulation_time_secs + 5, rel=1e-2)
+    )
+    assert gui.trace_widget.n_neurons == 32
+    assert gui.trace_widget.n_timestamps == 2000
+    assert gui.spike_widget.n_neurons == 32
+    assert gui.spike_widget.dt == approx(simulation_time_secs / 2000, rel=1e-2)
+    assert gui.heatmap_widget.tVals[-1] == approx(simulation_time_secs, rel=1e-2)

@@ -30,6 +30,7 @@ class SpikeWidget(TimeseriesWidget):
     ) -> None:
         self.clear_data()
         self.n_neurons = n_neurons
+        self.dt = dt
         self.setLimits(
             xMin=0, xMax=n_timesteps * dt, yMin=-0.5, yMax=self.n_neurons - 0.5
         )
