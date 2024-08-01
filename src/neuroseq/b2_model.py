@@ -426,7 +426,7 @@ class B2Model:
                 value to set the element to
             """
             self.pdict[self.current_name] = value
-            self.logger.info(f"Modified {self.current_name} to {value},")
+            self.logger.info(f"Modified {self.current_name} to {value}")
             self.with_rebuilt()
 
         def delete(self) -> None:
@@ -436,7 +436,7 @@ class B2Model:
             del self.pdict[self.current_name]
             del self.fdict[self.current_name]
             self.with_rebuilt()
-            self.logger.info(f"Deleted {self.current_name} ")
+            self.logger.info(f"Deleted {self.current_name}")
 
         def add(self, *args, **kwargs) -> None:
             """
@@ -445,7 +445,7 @@ class B2Model:
             self.element_adder(self.current_name, *args, **kwargs)
             self.with_rebuilt()
             self.logger.info(
-                f"Added element to {self.current_name} built with {args}, {kwargs},"
+                f"Added element to {self.current_name} built with {args}, {kwargs}"
             )
 
     def __init__(
