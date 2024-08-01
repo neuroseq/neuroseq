@@ -3,6 +3,7 @@ from __future__ import annotations
 import brian2.numpy_ as np
 from qtpy import QtWidgets
 
+from neuroseq.custom_analysis_widget import CustomAnalysisDataType
 from neuroseq.selectable_line_plot_item import SelectableLinePlotItem
 from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.utils import shuffle_index
@@ -22,6 +23,8 @@ class TraceWidget(TimeseriesWidget):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self.data_type = CustomAnalysisDataType.Trace
+        self._create_custom_analysis_menu()
         self.mouse_clicked.connect(self._on_mouse_clicked)
 
     def set_data(

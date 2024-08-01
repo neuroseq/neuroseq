@@ -13,6 +13,8 @@ from pyqtgraph.parametertree import registerParameterItemType
 from pyqtgraph.parametertree import registerParameterType
 from pyqtgraph.parametertree.parameterTypes import ListParameter
 from pyqtgraph.parametertree.parameterTypes import ListParameterItem
+from pyqtgraph.parametertree.parameterTypes import TextParameter
+from pyqtgraph.parametertree.parameterTypes import TextParameterItem
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
@@ -166,11 +168,68 @@ class UpdatingListParameter(ListParameter):
         return paramitem
 
 
+class LargeTextParameterItem(TextParameterItem):
+    """
+    Subclass of TextParameterItem to adjust the textbox size dynamically to the
+    number of lines in the displayed text
+
+    Parameters
+    ----------
+    TextParameterItem : Original pyqtgraph TextParameterItem that only has fixed adjustment
+
+    """
+
+    def makeWidget(self) -> QtWidgets.QTextWidget:
+        """
+        Override for the superclass' makeWidget function that includees size adjustment
+
+        Returns
+        -------
+        QtWidgets.QTextWidget
+            QTextWidget that displays the editable text
+        """
+        w = self.adjust_to_text_size(super().makeWidget())
+        w.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+        )
+        return w
+
+    def adjust_to_text_size(self, w: QtWidgets.QTextWidget) -> QtWidgets.QTextWidget:
+        """
+        Adjust the height of the displayed text box to be (1+num(newlines)) * fontheight
+
+        Parameters
+        ----------
+        w : QtWidgets.QTextWidget
+            Textwidget to adjust height for
+
+        Returns
+        -------
+        QtWidgets.QTextWidget
+            Input widget with adjusted height
+        """
+        # adjust height of input box to the number of lines, + 1 to make it
+        # look less crammed
+        new_height = int(
+            (1 + self.param.value().count("\n")) * w.fontMetrics().height()
+        )
+        w.setMinimumSize(QtCore.QSize(int(w.width()), new_height))
+
+        return w
+
+
+class LargeTextParameter(TextParameter):
+    itemClass = LargeTextParameterItem
+
+
 # register the new types with the parametertree implementation
 registerParameterType("updatinglist", UpdatingListParameter)
 registerParameterItemType(
     "updatinglistitem", UpdatingListParameterItem, UpdatingListParameter
 )
+
+registerParameterType("largetext", LargeTextParameter)
+registerParameterItemType("largetextitem", LargeTextParameterItem, LargeTextParameter)
 
 
 class EditableParameterTree(ParameterTree):
@@ -370,10 +429,11 @@ class EditableParameterTree(ParameterTree):
 
             else:
                 # Determine the parameter type based on value type
-                param_type = "str"
+
                 if isinstance(value, b2.Quantity):
                     value = value.in_best_unit(python_code=True)
                 value = str(value)
+                param_type = "largetext" if "\n" in value and "=" in value else "str"
 
                 param = {
                     "name": key,
@@ -382,6 +442,7 @@ class EditableParameterTree(ParameterTree):
                     "removable": True,
                     "renamable": True,
                     "syncExpanded": True,
+                    "expanded": expanded,
                 }
 
                 # need 'limits' for the underlying ListParameter and 'element' for the custom class
@@ -841,6 +902,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
         self.button_box.rejected.connect(self.reject)
 
         self.setLayout(layout)
+        self.showMaximized()
 
     def accept(self):
         """

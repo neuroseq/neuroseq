@@ -11,6 +11,7 @@ authors = [{ name = "SSC", email = "ssc@iwr.uni-heidelberg.de" }]
 requires-python = ">=3.10"
 dependencies = [
     "brian2",
+    "matplotlib",
     "numpy",
     "qtpy",
     "pyside6",
