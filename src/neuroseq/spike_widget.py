@@ -19,6 +19,7 @@ class SpikeWidget(TimeseriesWidget):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self.mouse_clicked.connect(self._on_mouse_clicked)
 
     def set_data(
         self,
@@ -57,3 +58,6 @@ class SpikeWidget(TimeseriesWidget):
     ) -> None:
         # since timestamps is a sparse array the plotting logic is different, and is implemented in set_data
         pass
+
+    def _on_mouse_clicked(self, neuron_index: int, time_index: int):
+        self.timeline.setPos(time_index * self.dt)

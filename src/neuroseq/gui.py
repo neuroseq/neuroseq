@@ -89,6 +89,10 @@ class Gui(QtWidgets.QMainWindow):
         self.link_x_axes(True)
         self.link_y_axes(True)
         # connect widgets
+        self.heatmap_widget.connect_timeseries_widget_timeline(
+            self.stim_editor.stim_widget
+        )
+        self.stim_editor.stim_widget.connect_heatmap_widget(self.heatmap_widget)
         self.heatmap_widget.connect_timeseries_widget_timeline(self.trace_widget)
         self.trace_widget.connect_heatmap_widget(self.heatmap_widget)
         self.heatmap_widget.connect_timeseries_widget_timeline(self.spike_widget)
