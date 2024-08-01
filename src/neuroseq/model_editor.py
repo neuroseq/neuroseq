@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from collections.abc import Callable
-from copy import deepcopy
 from typing import Any
 
 import brian2 as b2  # noqa: F401
@@ -832,8 +833,10 @@ class ModelEditorDialog(QtWidgets.QDialog):
             parent widget, by default None
         """
         super().__init__(parent=parent)
-
-        self.b2model = B2Model.load_model(deepcopy(b2model.to_dict()))
+        tmp = tempfile.TemporaryDirectory()
+        file = os.path.join(tmp.name, "model.json")
+        b2model.save_model(file)
+        self.b2model = B2Model.load_model(file)
 
         trees = {
             "Neurongroups": EditableNeurongroupTree(self.b2model, parent=self),
