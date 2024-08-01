@@ -409,15 +409,12 @@ class EditableParameterTree(ParameterTree):
             list of Parameter representations that internally define all the parent-child relationships to create the parametertree.
         """
         params = []
-        for key, v in data.items():
-            value = self._get_value(v)
+        for key, value in data.items():
+            readonly = isinstance(value, TimedArray)
+            value = self._get_value(value)
             if isinstance(value, dict):
                 child_params = self._convert_dict_to_params(
-                    value,
-                    functions[key],
-                    key,
-                    expanded=expanded,
-                    read_only=isinstance(v, TimedArray),
+                    value, functions[key], key, expanded=expanded, read_only=readonly
                 )
 
                 new_param = {
@@ -428,7 +425,7 @@ class EditableParameterTree(ParameterTree):
                     "removable": True,
                     "renamable": True,
                     "syncExpanded": True,
-                    "readonly": isinstance(v, TimedArray),
+                    "readonly": readonly,
                 }
 
                 if self.add_to_groups:
@@ -441,7 +438,9 @@ class EditableParameterTree(ParameterTree):
                 if isinstance(value, b2.Quantity):
                     value = value.in_best_unit(python_code=True)
                 value = str(value)
-                param_type = "largetext" if "\n" in value and "=" in value else "str"
+                param_type = (
+                    "largetext" if "\n" in value and "=" in value else "str"
+                )  # make sure our custom QTextEdit based ParameterItem is used for potentially large equations
 
                 param = {
                     "name": key,
