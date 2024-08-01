@@ -799,7 +799,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
             QtWidgets.QDialogButtonBox.StandardButton.Ok
             | QtWidgets.QDialogButtonBox.StandardButton.Cancel
         )
-        button_box = QtWidgets.QDialogButtonBox(btns)
+        self.button_box = QtWidgets.QDialogButtonBox(btns)
 
         i = 0
         for k, tree in trees.items():
@@ -828,7 +828,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
             i += col_add
 
         layout.addWidget(
-            button_box,
+            self.button_box,
             layout.rowCount(),
             1,
             1,
@@ -836,8 +836,8 @@ class ModelEditorDialog(QtWidgets.QDialog):
             QtCore.Qt.AlignCenter,
         )
 
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
 
         self.setLayout(layout)
 
@@ -862,7 +862,6 @@ class ModelEditorDialog(QtWidgets.QDialog):
         try:
             if self.b2model.must_be_rebuilt:
                 self.logger.info("rebuilding model after change")
-
                 self.b2model.assemble_network()  # keep underlying network in sync
                 self.b2model.must_be_rebuilt = False
             super().accept()
