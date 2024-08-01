@@ -16,6 +16,7 @@ from qtpy.compat import getsavefilename
 
 from neuroseq import __version__
 from neuroseq.b2_model import B2Model
+from neuroseq.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.spike_widget import SpikeWidget
@@ -66,9 +67,11 @@ class Gui(QtWidgets.QMainWindow):
         split_left_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         self.heatmap_widget = HeatmapWidget()
         split_left_right.addWidget(self.heatmap_widget)
+        self.custom_analysis_widget = CustomAnalysisWidget()
+        split_left_right.addWidget(self.custom_analysis_widget)
         self.stim_console = StimConsole()
         split_left_right.addWidget(self.stim_console)
-        split_left_right.setSizes([1000, 1000])
+        split_left_right.setSizes([1000, 1000, 1000])
         # main vertical splitter layout
         split_vertical = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.stim_editor = StimEditor(
@@ -79,7 +82,7 @@ class Gui(QtWidgets.QMainWindow):
         split_vertical.addWidget(self.trace_widget)
         self.spike_widget = SpikeWidget()
         split_vertical.addWidget(self.spike_widget)
-        # heatmap / console
+        # heatmap / custom analysis widget / console
         split_vertical.addWidget(split_left_right)
         main_horizontal_layout.addWidget(split_vertical)
         self.setCentralWidget(central_widget)
@@ -99,6 +102,12 @@ class Gui(QtWidgets.QMainWindow):
         self.spike_widget.connect_heatmap_widget(self.heatmap_widget)
         self.stim_console.sig_stims_values_dict_updated.connect(
             self.stim_editor.update_stim_values_dict
+        )
+        self.trace_widget.custom_analysis_requested.connect(
+            self.custom_analysis_widget.set_data
+        )
+        self.spike_widget.custom_analysis_requested.connect(
+            self.custom_analysis_widget.set_data
         )
         self.cmb_neuron.currentTextChanged.connect(self.set_neuron)
         self.cmb_synapse.currentTextChanged.connect(self.set_synapse)
@@ -792,18 +801,19 @@ class Gui(QtWidgets.QMainWindow):
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
     ) -> None:
         for name, widget, icon in [
-            ("&Stimuli", self.stim_editor, "chart-timeline"),
-            ("&Traces", self.trace_widget, "chart-line"),
-            ("&Spikes", self.spike_widget, "chart-scatter-plot"),
-            ("&Heatmap", self.heatmap_widget, "data-matrix"),
-            ("&Console", self.stim_console, "console"),
+            ("&Stimuli", self.stim_editor, "mdi6.chart-timeline"),
+            ("&Traces", self.trace_widget, "mdi.waves"),
+            ("&Spikes", self.spike_widget, "ph.barcode-light"),
+            ("&Heatmap", self.heatmap_widget, "mdi6.data-matrix"),
+            ("&Custom analysis", self.custom_analysis_widget, "mdi6.chart-histogram"),
+            ("&Console", self.stim_console, "mdi6.console"),
         ]:
             add_action(
                 f"Show {name}",
                 lambda toggled, w=widget: w.setVisible(toggled),
                 menu,
                 toolbar,
-                icon=qta.icon(f"mdi6.{icon}"),
+                icon=qta.icon(f"{icon}"),
                 checkable=True,
                 is_checked=True,
             )

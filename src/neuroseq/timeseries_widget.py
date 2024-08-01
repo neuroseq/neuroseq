@@ -9,15 +9,19 @@ from typing import TypeAlias
 
 import brian2.numpy_ as np
 import pyqtgraph as pg
+import qtawesome as qta
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
+from neuroseq.custom_analysis_widget import CustomAnalysisDataType
+from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.selectable_bar_line_plot_item import SelectableBarLinePlotItem
 from neuroseq.selectable_bar_plot_item import SelectableBarPlotItem
 from neuroseq.selectable_line_plot_item import SelectableLinePlotItem
 from neuroseq.timeline import Timeline
 from neuroseq.utils import QtABCMeta
+from neuroseq.utils import add_action
 
 SelectablePlotItem: TypeAlias = (
     SelectableLinePlotItem | SelectableBarPlotItem | SelectableBarLinePlotItem
@@ -76,6 +80,9 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
     mouse_clicked = QtCore.Signal(int, int)
     selection_made = QtCore.Signal(slice, slice)
     selection_moved = QtCore.Signal(int, int)
+    custom_analysis_requested = QtCore.Signal(
+        CustomAnalysisDataType, CustomAnalysisType, slice, slice, dict
+    )
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(
@@ -86,12 +93,15 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
             },
         )
         self.logger = logging.getLogger(__name__)
+        self.data: dict[str, int | float | np.ndarray] = {}
+        self.data_type: CustomAnalysisDataType | None = None
         self.timeline = Timeline()
         self.timeline.setZValue(1e8)
         self.dt = 1.0
         self.mouse_mode = MouseMode.NONE
         self.mouse_press_pos: QtCore.QPointF | None = None
         self.mouse_selected_rect: QtCore.QRectF = QtCore.QRectF()
+        self.enable_mouse_move_roi = False
         self.selected_time_slice: slice | None = None
         self.selected_neuron_slice: slice | None = None
         self.neuron_plots: list[SelectablePlotItem] = []
@@ -108,8 +118,27 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
         self.plotItem.vb.sigRangeChanged.connect(self.update_roi)
         self.sigRangeChanged.connect(self.update_roi)
 
+    def _create_custom_analysis_menu(self) -> None:
+        self.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.ActionsContextMenu)
+        self.menu_custom_analysis = QtWidgets.QMenu("Custom analysis", self)
+        add_action(
+            "Histogram",
+            lambda: self.custom_analysis_requested.emit(
+                self.data_type,
+                CustomAnalysisType.Histogram,
+                self.selected_neuron_slice,
+                self.selected_time_slice,
+                self.data,
+            ),
+            self.menu_custom_analysis,
+            None,
+            self,
+            icon=qta.icon("mdi6.chart-histogram"),
+        )
+
     def clear_data(self) -> None:
         self.neuron_plots.clear()
+        self.data = {}
         self.n_neurons = 0
         self.n_timestamps = 0
         self.unselect_neurons()
@@ -168,6 +197,7 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
         )
         self.plotItem.getAxis("bottom").set_dt(self.dt)
         self.plotItem.getAxis("left").set_num_neurons(self.n_neurons)
+        self.data = {"data": data, "timestamps": timestamps, "dt": self.dt}
         self._plot_neuron_data(data, timestamps, self.dt)
 
     def mousePressEvent(self, ev: Any) -> None:
@@ -176,7 +206,11 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
         if ev.button() != QtCore.Qt.MouseButton.LeftButton:
             return
         self.mouse_press_pos = ev.position()
-        if self.roi.isVisible() and self.roi.rect().contains(ev.position()):
+        if (
+            self.enable_mouse_move_roi
+            and self.roi.isVisible()
+            and self.roi.rect().contains(ev.position())
+        ):
             self.mouse_mode = MouseMode.MOVE
             self.setCursor(QtCore.Qt.CursorShape.OpenHandCursor)
         else:

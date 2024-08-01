@@ -6,6 +6,7 @@ import logging
 import pathlib
 import re
 from collections.abc import Callable
+from enum import Enum
 from importlib import resources
 from typing import Any
 
@@ -19,6 +20,11 @@ from qtpy import QtWidgets
 import neuroseq
 
 example_models_path = pathlib.Path(str(resources.files(neuroseq))) / "example_models"
+
+
+class PrettyPrintEnum(Enum):
+    def __str__(self):
+        return self.name
 
 
 def timed_array_with_new_data(

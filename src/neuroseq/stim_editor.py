@@ -504,7 +504,7 @@ class StimEditor(QtWidgets.QWidget):
                 toolbar,
                 self,
                 shortcut="Ctrl+Shift+S",
-                icon=qta.icon("mdi6.content-save"),
+                icon=qta.icon("mdi6.application-export"),
             )
         )
         self.actions_edit.append(
@@ -515,7 +515,7 @@ class StimEditor(QtWidgets.QWidget):
                 toolbar,
                 self,
                 shortcut="Ctrl+Shift+O",
-                icon=qta.icon("mdi6.folder-open"),
+                icon=qta.icon("mdi6.application-import"),
             )
         )
         self.actions_edit.append(
