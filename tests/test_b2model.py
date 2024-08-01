@@ -10,8 +10,8 @@ import brian2.numpy_ as np
 import h5py
 import pytest
 from brian2.tests.utils import assert_allclose
-from formozov_project import b2_model
-from formozov_project import b2json
+from neuroseq import b2_model
+from neuroseq import b2json
 from pytest import MonkeyPatch
 from pytest_mock import MockerFixture
 
@@ -523,7 +523,7 @@ def test_assemble_synapse_exception(
     mocker: MockerFixture, mfx_with_synapse: tuple[b2_model.B2Model, dict[str, Any]]
 ) -> None:
     mocker.patch(
-        "formozov_project.b2_model.b2.Synapses", side_effect=Exception("fake exception")
+        "neuroseq.b2_model.b2.Synapses", side_effect=Exception("fake exception")
     )
     mfx, _ = mfx_with_synapse
 
@@ -535,7 +535,7 @@ def test_connect_synapse_exception(
     mocker: MockerFixture, mfx_with_synapse: tuple[b2_model.B2Model, dict[str, Any]]
 ) -> None:
     mocker.patch(
-        "formozov_project.b2_model.b2.Synapses.connect",
+        "neuroseq.b2_model.b2.Synapses.connect",
         side_effect=Exception("fake exception"),
     )
 
@@ -568,7 +568,7 @@ def test_define_monitor_exception(
     mocker: MockerFixture, mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]]
 ) -> None:
     mocker.patch(
-        "formozov_project.b2_model.b2.StateMonitor",
+        "neuroseq.b2_model.b2.StateMonitor",
         side_effect=Exception("fake exception"),
     )
 
@@ -924,7 +924,7 @@ def test_hdf5(tmp_path: Path, mfx_ornstein: b2_model.B2Model) -> None:
 def test_logger(
     tmp_path: Path, caplog: pytest.LogCaptureFixture, mfx_ornstein: b2_model.B2Model
 ) -> None:
-    caplog.set_level(logging.INFO, logger="formozov_project.b2_model")
+    caplog.set_level(logging.INFO, logger="neuroseq.b2_model")
     mfx_ornstein.run_simulation(1 * b2.second, savepath=tmp_path / "data.h5 ")
 
     logs = [record.message for record in caplog.records]
@@ -1138,7 +1138,7 @@ def test_assemble_network_add_exceptions(
 ) -> None:
     model = b2_model.B2Model.load_model(default_model_path)
     mocker.patch(
-        "formozov_project.b2_model.b2.Network.add",
+        "neuroseq.b2_model.b2.Network.add",
         side_effect=Exception("fake exception"),
     )
 
@@ -1157,7 +1157,7 @@ def test_assemble_network_remove_exceptions(
 ) -> None:
     model = b2_model.B2Model.load_model(default_model_path)
     mocker.patch(
-        "formozov_project.b2_model.b2.Network.remove",
+        "neuroseq.b2_model.b2.Network.remove",
         side_effect=Exception("fake exception"),
     )
 

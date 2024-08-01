@@ -7,7 +7,7 @@ from typing import Any
 
 from brian2 import seed
 
-from formozov_project import b2json
+from neuroseq import b2json
 
 
 class Reconstructor:

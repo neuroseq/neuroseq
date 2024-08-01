@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import brian2.numpy_ as np
 import pytest
-from formozov_project.timeseries_widget import TimeseriesWidget
+from neuroseq.timeseries_widget import TimeseriesWidget
 from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 

@@ -4,7 +4,7 @@ from typing import cast
 
 import brian2.numpy_ as np
 import pyqtgraph as pg
-from formozov_project.spike_widget import SpikeWidget
+from neuroseq.spike_widget import SpikeWidget
 from pytestqt.qtbot import QtBot
 
 

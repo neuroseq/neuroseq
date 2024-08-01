@@ -5,7 +5,7 @@ from typing import Any
 import brian2 as b2
 import pytest
 from brian2 import numpy_ as np
-from formozov_project import utils
+from neuroseq import utils
 
 
 @pytest.mark.parametrize(

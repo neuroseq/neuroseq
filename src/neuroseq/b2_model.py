@@ -12,9 +12,9 @@ import brian2 as b2
 import brian2.numpy_ as np
 import h5py
 
-from formozov_project import b2json
-from formozov_project import utils
-from formozov_project.reconstructor import Reconstructor
+from neuroseq import b2json
+from neuroseq import utils
+from neuroseq.reconstructor import Reconstructor
 
 
 class B2Model:

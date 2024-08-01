@@ -6,8 +6,8 @@ import brian2 as b2
 import brian2.numpy_ as np
 import pytest
 import qtpy
-from formozov_project.selectable_bar_plot_item import SelectableBarPlotItem
-from formozov_project.stim_widget import StimWidget
+from neuroseq.selectable_bar_plot_item import SelectableBarPlotItem
+from neuroseq.stim_widget import StimWidget
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtGui

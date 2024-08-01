@@ -16,11 +16,9 @@ from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
-import formozov_project
+import neuroseq
 
-example_models_path = (
-    pathlib.Path(str(resources.files(formozov_project))) / "example_models"
-)
+example_models_path = pathlib.Path(str(resources.files(neuroseq))) / "example_models"
 
 
 def timed_array_with_new_data(
