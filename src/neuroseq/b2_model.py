@@ -36,7 +36,9 @@ class B2Model:
         self.logger.exception(e)
         raise RuntimeError(message) from e
 
-    def _add_equation_to_group(self, group: dict, line: str) -> None:
+    def _add_equation_to_group(
+        self, group: dict, line: str, key: str = "model"
+    ) -> None:
         r"""
         _add_equation_to_group Add an equation to a neurongroup or synapse dictionary that holds arguments to construct the respective objects.
 
@@ -54,18 +56,22 @@ class B2Model:
         ValueError
             When there is no '=' block in the line given
         """
+        line = line.strip("\n")
+
+        if line == "":
+            return
+
         if ":" not in line and "=" not in line:
             message = "Equation must have a colon that separates equation and unit or an equal sign"
             self.logger.critical(message)
             raise ValueError(message)
 
-        if "model" in group:
-            group["model"] += line + "\n"
+        if key in group:
+            group[key] += line + "\n"
         else:
-            group["model"] = line + "\n"
+            group[key] = line + "\n"
 
-        self.logger.info(f"Equation defined for group {group}")
-        self.logger.debug(f"full equation: {line}")
+        self.logger.debug(f"full equation: {repr(line)}")
 
     def _add_group_modifier(
         self,
@@ -1343,17 +1349,7 @@ class B2Model:
             "modify": element_modifier.modify,
         }
 
-        if name not in self.synapses or "on_pre" not in self.synapses[name]:
-            utils.update_nested_dict(
-                self.synapses,
-                {
-                    name: {
-                        "on_pre": line + "\n",
-                    },
-                },
-            )
-        else:
-            self.synapses[name]["on_pre"] += line + "\n"
+        self._add_equation_to_group(self.synapses[name], line, key="on_pre")
 
     @_trigger_rebuild
     def define_synapse_post(self, name: str, line: str) -> None:
@@ -1391,17 +1387,7 @@ class B2Model:
             "modify": element_modifier.modify,
         }
 
-        if name not in self.synapses or "on_post" not in self.synapses[name]:
-            utils.update_nested_dict(
-                self.synapses,
-                {
-                    name: {
-                        "on_post": line + "\n",
-                    },
-                },
-            )
-        else:
-            self.synapses[name]["on_post"] += line + "\n"
+        self._add_equation_to_group(self.synapses[name], line, key="on_post")
 
     @_trigger_rebuild
     def define_synapse_connection(self, name: str, connection_condition: str) -> None:

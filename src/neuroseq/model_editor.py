@@ -387,6 +387,7 @@ class EditableParameterTree(ParameterTree):
         functions: dict[Any, Any],
         key: Any = "",
         expanded: bool = False,
+        readonly: bool = False,
     ) -> list[Any]:
         """
         Recursively go through a nested dict and create a hierarchical pyqtgraph Parameter representation of it
@@ -398,18 +399,25 @@ class EditableParameterTree(ParameterTree):
             Possibly nested dict to be represented in the parametertree
         key : Any, optional
             Current key of 'data' that is processed. Needed for keeping track of parameter names, by default ""
-
+        expanded:bool
+            Whether to have all groups expanded or not when opening
+        readonly:
+            Whether to make element in a dictionary read only based on ad condition evaluated in their parent. This currently only applies to TimedArrays
         Returns
         -------
         list[Any]
             list of Parameter representations that internally define all the parent-child relationships to create the parametertree.
         """
         params = []
-        for key, value in data.items():
-            value = self._get_value(value)
+        for key, v in data.items():
+            value = self._get_value(v)
             if isinstance(value, dict):
                 child_params = self._convert_dict_to_params(
-                    value, functions[key], key, expanded=expanded
+                    value,
+                    functions[key],
+                    key,
+                    expanded=expanded,
+                    readonly=isinstance(v, b2.TimedArray),
                 )
 
                 new_param = {
@@ -420,6 +428,7 @@ class EditableParameterTree(ParameterTree):
                     "removable": True,
                     "renamable": True,
                     "syncExpanded": True,
+                    "readonly": readonly,
                 }
 
                 if self.add_to_groups:
@@ -432,6 +441,7 @@ class EditableParameterTree(ParameterTree):
 
                 if isinstance(value, b2.Quantity):
                     value = value.in_best_unit(python_code=True)
+
                 value = str(value)
                 param_type = "largetext" if "\n" in value and "=" in value else "str"
 
@@ -443,6 +453,7 @@ class EditableParameterTree(ParameterTree):
                     "renamable": True,
                     "syncExpanded": True,
                     "expanded": expanded,
+                    "readonly": readonly,
                 }
 
                 # need 'limits' for the underlying ListParameter and 'element' for the custom class
