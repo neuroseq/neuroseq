@@ -203,6 +203,7 @@ class Gui(QtWidgets.QMainWindow):
             )
         else:
             mdiag = ModelEditorDialog(self.model, parent=self)
+
             if mdiag.exec():
                 self.update_model(mdiag.b2model)
 

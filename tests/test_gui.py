@@ -9,6 +9,8 @@ from brian2 import numpy_ as np
 from brian2.tests.utils import assert_allclose
 from neuroseq.b2_model import B2Model
 from neuroseq.gui import Gui
+from neuroseq.model_editor import EditableSynapseTree
+from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.selectable_bar_plot_item import SelectableBarPlotItem
 from pytest import MonkeyPatch
 from pytest import approx
@@ -480,3 +482,73 @@ def test_gui_simulate_external_model(
     assert gui.spike_widget.n_neurons == 32
     assert gui.spike_widget.dt == approx(simulation_time_secs / 2000, rel=1e-2)
     assert gui.heatmap_widget.tVals[-1] == approx(simulation_time_secs, rel=1e-2)
+
+
+def test_integration_modeleditor_delete_restore(
+    qtbot: QtBot, qmessagebox_calls: list
+) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(gui.isVisible)
+    qtbot.wait(delay_after_update_model_call_in_ms)
+
+    gui.btn_edit_clicked()
+
+    modeleditor = gui.findChild(ModelEditorDialog)
+
+    qtbot.addWidget(modeleditor)
+    qtbot.waitUntil(modeleditor.isVisible)
+
+    # find synapse tree
+    synapsetree = modeleditor.findChild(EditableSynapseTree)
+
+    assert "Ce" in modeleditor.b2model.synapses
+
+    # delete Ce synapse by triggering the remove signal
+    ce_synapse_element = synapsetree.findItems(
+        "Ce",
+        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+        0,
+    )[0]
+
+    with qtbot.waitSignal(
+        ce_synapse_element.param.sigRemoved, timeout=1000, raising=True
+    ):
+        ce_synapse_element.param.remove()
+
+    # assert Ce is gone from the definition
+    assert "Ce" not in modeleditor.b2model.synapses
+    assert "Ce" in gui.model.synapses
+
+    # try to accept, error
+    qtbot.mouseClick(
+        modeleditor.button_box.button(QtWidgets.QDialogButtonBox.Ok),
+        QtCore.Qt.LeftButton,
+    )
+
+    # check error message
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "critical"
+    assert "model rebuilding error" in qmessagebox_calls[0]["title"].lower()
+    assert (
+        "error when rebuilding the model after editing"
+        in qmessagebox_calls[0]["text"].lower()
+    )
+
+    # reject-> only option available, restores old model
+    qtbot.mouseClick(
+        modeleditor.button_box.button(QtWidgets.QDialogButtonBox.Cancel),
+        QtCore.Qt.LeftButton,
+    )
+    qtbot.waitUntil(lambda: not modeleditor.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+
+    # assert that Ce is in the definition and in the network -> restoring old state works
+    assert "Ce" in gui.model.synapses
+    assert gui.model.network["Ce"] is not None
+
+    # run the model and make sure it works as it should
+    gui.model.run_simulation(0.2 * b2.second)
+
+    assert gui.model.network["Traces_v"].v.shape == (30, 2000)

@@ -764,34 +764,32 @@ class ModelEditorDialog(QtWidgets.QDialog):
         """
         super().__init__(parent=parent)
 
+        self.b2model = B2Model.load_model(deepcopy(b2model.to_dict()))
+
         trees = {
-            "Neurongroups": EditableNeurongroupTree(b2model, parent=self),
+            "Neurongroups": EditableNeurongroupTree(self.b2model, parent=self),
             "Synapses": EditableSynapseTree(
-                b2model,
+                self.b2model,
                 parent=self,
             ),
             "Monitors": EditableMonitorTree(
-                b2model,
+                self.b2model,
                 parent=self,
             ),
             "Parameters": EditableParameterTree(
-                b2model,
+                self.b2model,
                 domain_name="parameters",
-                default_creator=b2model.define_default_parameter,
+                default_creator=self.b2model.define_default_parameter,
                 parent=self,
             ),
             "Initial Conditions": EditableParameterTree(
-                b2model,
+                self.b2model,
                 domain_name="initials",
-                default_creator=b2model.define_default_init,
+                default_creator=self.b2model.define_default_init,
                 parent=self,
                 add_to_groups=True,
             ),
         }
-        self.b2model = b2model
-
-        self.backup = self.b2model.get_model_definition()
-        self.functions_backup = deepcopy(self.b2model.functions)
 
         self.logger = logging.getLogger(__name__)
 
@@ -801,7 +799,8 @@ class ModelEditorDialog(QtWidgets.QDialog):
             QtWidgets.QDialogButtonBox.StandardButton.Ok
             | QtWidgets.QDialogButtonBox.StandardButton.Cancel
         )
-        button_box = QtWidgets.QDialogButtonBox(btns)
+
+        self.button_box = QtWidgets.QDialogButtonBox(btns)
 
         i = 0
         for k, tree in trees.items():
@@ -830,7 +829,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
             i += col_add
 
         layout.addWidget(
-            button_box,
+            self.button_box,
             layout.rowCount(),
             1,
             1,
@@ -838,62 +837,31 @@ class ModelEditorDialog(QtWidgets.QDialog):
             QtCore.Qt.AlignCenter,
         )
 
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
 
         self.setLayout(layout)
-
-    def _restore_old_model(self):
-        """
-        Restore the old model before editing when the edited stuff has been rejected or
-        something goes wrong
-        """
-        try:
-            # reset the specification to the backup values
-            self.b2model.neurongroups = self.backup["neurongroups"]
-            self.b2model.synapses = self.backup["synapses"]
-            self.b2model.monitors = self.backup["monitors"]
-            self.b2model.parameters = self.backup["parameters"]
-            self.b2model.initials = self.backup["initials"]
-            self.b2model.functions = self.functions_backup
-            self.b2model.define_b2seed(self.backup["seed"])
-            self.b2model.assemble_network()  # keep underlying network in sync
-        except Exception as e:
-            message = f"Error when restoring old model: {e}"
-            self.logger.critical(message)
-            QtWidgets.QMessageBox.critical(self, "Model specification error", message)
 
     def accept(self):
         """
         Accept the current state of the model and rebuilt it if anything has been edited.
         """
         self.logger.info(f"accept model editions {self.b2model.must_be_rebuilt}")
-        if self.b2model.must_be_rebuilt:
-            self.logger.info("rebuilding model after change")
-
-            try:
+        try:
+            if self.b2model.must_be_rebuilt:
+                self.logger.info("rebuilding model after change")
                 self.b2model.assemble_network()  # keep underlying network in sync
                 self.b2model.must_be_rebuilt = False
-            except Exception as e:
-                message = f"Error when rebuilding the model after editing: {e}"
-                self.logger.critical(message)
-                QtWidgets.QMessageBox.critical(self, "Model rebuilding error", message)
-                self._restore_old_model()
-
-        super().accept()
+            super().accept()
+        except Exception as e:
+            message = f"Error when rebuilding the model after editing: {e}"
+            self.logger.critical(message)
+            QtWidgets.QMessageBox.critical(self, "Model rebuilding error", message)
 
     def reject(self):
         """
-        Reject the edited model specification and restore the original state
+        Reject the edited model specification
         """
         self.logger.info("Edited model specification not accepted, restoring")
 
-        if self.b2model.seed != self.backup["seed"]:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "Model rng warning"
-                "The system's random number generator will be reseeded. This potentially can change the results when compared to previous ones",
-            )
-
-        self._restore_old_model()
         super().reject()

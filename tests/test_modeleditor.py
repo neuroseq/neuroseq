@@ -615,20 +615,21 @@ def test_modeldialog_accept(
     diag = ModelEditorDialog(mfx_nmda)
     qtbot.addWidget(diag)
     assert diag.b2model.must_be_rebuilt is False
-    specs = mfx_nmda.get_model_definition()
-    assert diag.backup == specs
-    assert list(diag.functions_backup.keys()) == list(mfx_nmda.functions.keys())
 
     diag.b2model.define_neuronnumber("p1", 25)
     diag.b2model.define_solver_method("p1", "euler")
     diag.b2model.define_equation("p1", "dv/dt=-v: 1")
-
     assert diag.b2model.must_be_rebuilt is True
-
     diag.accept()
-
     assert "p1" in diag.b2model.neurongroups
     assert "p1" in [obj.name for obj in diag.b2model.network.objects]
+
+
+def test_modeldialog_accept_exception(
+    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+) -> None:
+    diag = ModelEditorDialog(mfx_nmda)
+    qtbot.addWidget(diag)
 
     def raise_error(_):
         raise RuntimeError("dummy")
@@ -643,41 +644,6 @@ def test_modeldialog_accept(
         "text": "Error when rebuilding the model after editing: dummy",
         "title": "Model rebuilding error",
     }
-
-
-def test_modeldialog_reject(
-    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
-) -> None:
-    diag = ModelEditorDialog(mfx_nmda)
-    qtbot.add_widget(diag)
-    specs = mfx_nmda.get_model_definition()
-    assert diag.backup == specs
-    assert list(diag.functions_backup.keys()) == list(mfx_nmda.functions.keys())
-
-    diag.b2model.functions["monitors"]["Mn"]["delete"]()
-
-    assert "Mn" not in diag.b2model.monitors
-    assert "Mn" in [obj.name for obj in diag.b2model.network.objects]
-
-    diag.reject()
-
-    assert "Mn" in diag.b2model.monitors
-    assert "Mn" in [obj.name for obj in diag.b2model.network.objects]
-
-    def raise_error(_, __):
-        raise RuntimeError("dummy")
-
-    monkeypatch.setattr(B2Model, "define_b2seed", raise_error)
-
-    diag.reject()
-
-    assert qmessagebox_calls == [
-        {
-            "name": "critical",
-            "text": "Error when restoring old model: dummy",
-            "title": "Model specification error",
-        },
-    ]
 
 
 def test_method_selection(
@@ -710,7 +676,8 @@ def test_method_selection(
     ):
         method_dropdown.param.setValue("exponential_euler")
 
-    assert mfx_nmda.neurongroups["neuron_input"]["method"] == "exponential_euler"
+    assert diag.b2model.neurongroups["neuron_input"]["method"] == "exponential_euler"
+    assert mfx_nmda.neurongroups["neuron_input"]["method"] == "euler"
 
     assert mfx_nmda.network["Mn"].g.shape == (1, 0)
     # try to run

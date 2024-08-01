@@ -421,7 +421,7 @@ def test_synapse_connection_prob_numerical(
 ) -> None:
     mfx, _ = mfx_parameterized
 
-    mfx.define_synapse_connection_probablitiy("Ce", 0.5)
+    mfx.define_synapse_connection_probability("Ce", 0.5)
 
     assert np.isclose(mfx.synapses["Ce"]["p"], 0.5)
 
@@ -430,13 +430,13 @@ def test_synapse_connection_prob_numerical(
         ValueError,
         match="Error, supplied value 1.0000000000000002 is not a probability.",
     ):
-        mfx.define_synapse_connection_probablitiy("Ce", boundary)
+        mfx.define_synapse_connection_probability("Ce", boundary)
 
     boundary = np.nextafter(0.0, -1.0)
     with pytest.raises(
         ValueError, match="Error, supplied value -5e-324 is not a probability."
     ):
-        mfx.define_synapse_connection_probablitiy("Ce", boundary)
+        mfx.define_synapse_connection_probability("Ce", boundary)
 
 
 def test_define_synapse_delay(
@@ -480,7 +480,7 @@ def test_define_synapse(
     mfx.define_parameter("dApost", dApost)
 
     mfx.define_synapse_connection("Ce", "i != j")
-    mfx.define_synapse_connection_probablitiy("Ce", 1.0)
+    mfx.define_synapse_connection_probability("Ce", 1.0)
     mfx.define_synapse_origin("Ce", "Pe")
     mfx.define_synapse_target("Ce", "Pi")
     mfx.define_synapse_equation(
@@ -513,7 +513,7 @@ def test_define_synapse(
     ce = mfx.network["Ce"]
 
     # test removal and reassembly
-    mfx.define_synapse_connection_probablitiy("Ce", 0.5)
+    mfx.define_synapse_connection_probability("Ce", 0.5)
     mfx._assemble_synapse("Ce")
     assert ce is not mfx.network["Ce"]
     assert mfx.synapses["Ce"]["p"] == 0.5

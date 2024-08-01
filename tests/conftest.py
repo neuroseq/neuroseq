@@ -340,7 +340,7 @@ def mfx_with_synapse(
     mfx.define_parameter("dApost", dApost)
 
     mfx.define_synapse_connection("Ce", "i != j")
-    mfx.define_synapse_connection_probablitiy("Ce", 1.0)
+    mfx.define_synapse_connection_probability("Ce", 1.0)
     mfx.define_synapse_origin("Ce", "Pe")
     mfx.define_synapse_target("Ce", "Pi")
     mfx.define_synapse_equation(

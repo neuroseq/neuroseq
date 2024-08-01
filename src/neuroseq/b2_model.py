@@ -427,7 +427,6 @@ class B2Model:
             """
             Delete the element behind the currently held name
             """
-            print("delete thing: ", self.current_name)
             del self.pdict[self.current_name]
             del self.fdict[self.current_name]
             self.with_rebuilt()
@@ -1080,7 +1079,7 @@ class B2Model:
             name,
             "i!=j",
         )
-        self.define_synapse_connection_probablitiy(
+        self.define_synapse_connection_probability(
             name,
             0.0,
         )
@@ -1492,7 +1491,7 @@ class B2Model:
         )
 
     @_trigger_rebuild
-    def define_synapse_connection_probablitiy(self, name: str, p: float) -> None:
+    def define_synapse_connection_probability(self, name: str, p: float) -> None:
         """
         define_synapse_connection_probability Define the connection probability for a given synapse called `name`.
 
@@ -2156,7 +2155,9 @@ class B2Model:
 
     @classmethod
     def load_model(
-        cls, filepath: str | Path, report: Callable[[int], None] | None = None
+        cls,
+        filepath: str | Path | dict[Any, Any],
+        report: Callable[[int], None] | None = None,
     ) -> B2Model:
         """
         Load model from file
