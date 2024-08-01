@@ -22,6 +22,7 @@ class TraceWidget(TimeseriesWidget):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self.mouse_clicked.connect(self._on_mouse_clicked)
 
     def set_data(
         self,
@@ -45,3 +46,6 @@ class TraceWidget(TimeseriesWidget):
             )
             self.neuron_plots.append(line)
             self.addItem(line)
+
+    def _on_mouse_clicked(self, neuron_index: int, time_index: int):
+        self.timeline.setPos(time_index * self.dt)

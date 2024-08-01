@@ -177,7 +177,7 @@ class StimEditor(QtWidgets.QWidget):
             )
         else:
             self.stim_widget.unselect_neurons()
-            self.stim_widget.timeline.setX(
+            self.stim_widget.timeline.setPos(
                 time_index * self.current_stim_modifier.timed_array.dt
             )
 
