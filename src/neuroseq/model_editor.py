@@ -387,6 +387,7 @@ class EditableParameterTree(ParameterTree):
         functions: dict[Any, Any],
         key: Any = "",
         expanded: bool = False,
+        read_only: bool = False,
     ) -> list[Any]:
         """
         Recursively go through a nested dict and create a hierarchical pyqtgraph Parameter representation of it
@@ -398,7 +399,10 @@ class EditableParameterTree(ParameterTree):
             Possibly nested dict to be represented in the parametertree
         key : Any, optional
             Current key of 'data' that is processed. Needed for keeping track of parameter names, by default ""
-
+        expanded: bool
+            Whether group elements should be expanded on first open or not
+        read_only:
+            Whether children should be read_only based on a condition evalutated in the parent. Currently used to make TimedArray displays readonly
         Returns
         -------
         list[Any]
@@ -406,10 +410,11 @@ class EditableParameterTree(ParameterTree):
         """
         params = []
         for key, value in data.items():
+            readonly = isinstance(value, TimedArray)
             value = self._get_value(value)
             if isinstance(value, dict):
                 child_params = self._convert_dict_to_params(
-                    value, functions[key], key, expanded=expanded
+                    value, functions[key], key, expanded=expanded, read_only=readonly
                 )
 
                 new_param = {
@@ -420,6 +425,7 @@ class EditableParameterTree(ParameterTree):
                     "removable": True,
                     "renamable": True,
                     "syncExpanded": True,
+                    "readonly": readonly,
                 }
 
                 if self.add_to_groups:
@@ -429,11 +435,12 @@ class EditableParameterTree(ParameterTree):
 
             else:
                 # Determine the parameter type based on value type
-
                 if isinstance(value, b2.Quantity):
                     value = value.in_best_unit(python_code=True)
                 value = str(value)
-                param_type = "largetext" if "\n" in value and "=" in value else "str"
+                param_type = (
+                    "largetext" if "\n" in value and "=" in value else "str"
+                )  # make sure our custom QTextEdit based ParameterItem is used for potentially large equations
 
                 param = {
                     "name": key,
@@ -443,6 +450,7 @@ class EditableParameterTree(ParameterTree):
                     "renamable": True,
                     "syncExpanded": True,
                     "expanded": expanded,
+                    "readonly": read_only,
                 }
 
                 # need 'limits' for the underlying ListParameter and 'element' for the custom class
