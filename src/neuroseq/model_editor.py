@@ -348,7 +348,9 @@ class EditableParameterTree(ParameterTree):
         params = []
         for key, value in data.items():
             value = self._get_value(value)
+            print("key", key, "value", value, type(value))
             if isinstance(value, dict):
+                print("making group item")
                 child_params = self._convert_dict_to_params(
                     value, functions[key], key, expanded=expanded
                 )
@@ -373,6 +375,8 @@ class EditableParameterTree(ParameterTree):
                 param_type = "str"
                 if isinstance(value, b2.Quantity):
                     value = value.in_best_unit(python_code=True)
+                elif key == "model":
+                    param_type = "text"
                 value = str(value)
 
                 param = {
@@ -382,6 +386,7 @@ class EditableParameterTree(ParameterTree):
                     "removable": True,
                     "renamable": True,
                     "syncExpanded": True,
+                    "expanded": expanded,
                 }
 
                 # need 'limits' for the underlying ListParameter and 'element' for the custom class
@@ -842,6 +847,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
         button_box.rejected.connect(self.reject)
 
         self.setLayout(layout)
+        self.showMaximized()
 
     def _restore_old_model(self):
         """
