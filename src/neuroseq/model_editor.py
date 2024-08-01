@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from copy import deepcopy
 from typing import Any
 
 import brian2 as b2  # noqa: F401
@@ -763,33 +764,32 @@ class ModelEditorDialog(QtWidgets.QDialog):
         """
         super().__init__(parent=parent)
 
+        self.b2model = B2Model.load_model(deepcopy(b2model.to_dict()))
+
         trees = {
-            "Neurongroups": EditableNeurongroupTree(b2model, parent=self),
+            "Neurongroups": EditableNeurongroupTree(self.b2model, parent=self),
             "Synapses": EditableSynapseTree(
-                b2model,
+                self.b2model,
                 parent=self,
             ),
             "Monitors": EditableMonitorTree(
-                b2model,
+                self.b2model,
                 parent=self,
             ),
             "Parameters": EditableParameterTree(
-                b2model,
+                self.b2model,
                 domain_name="parameters",
-                default_creator=b2model.define_default_parameter,
+                default_creator=self.b2model.define_default_parameter,
                 parent=self,
             ),
             "Initial Conditions": EditableParameterTree(
-                b2model,
+                self.b2model,
                 domain_name="initials",
-                default_creator=b2model.define_default_init,
+                default_creator=self.b2model.define_default_init,
                 parent=self,
                 add_to_groups=True,
             ),
         }
-        self.b2model = b2model
-
-        self.backup = self.b2model.to_dict()
 
         self.logger = logging.getLogger(__name__)
 
@@ -799,6 +799,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
             QtWidgets.QDialogButtonBox.StandardButton.Ok
             | QtWidgets.QDialogButtonBox.StandardButton.Cancel
         )
+
         self.button_box = QtWidgets.QDialogButtonBox(btns)
 
         i = 0
@@ -841,19 +842,6 @@ class ModelEditorDialog(QtWidgets.QDialog):
 
         self.setLayout(layout)
 
-    def _restore_old_model(self):
-        """
-        Restore the old model before editing when the edited stuff has been rejected or
-        something goes wrong
-        """
-        self.logger.info("Restoring model from backup")
-        try:
-            self.b2model = B2Model.load_model(self.backup)
-        except Exception as e:
-            message = f"Error when restoring old model: {e}"
-            self.logger.critical(message)
-            QtWidgets.QMessageBox.critical(self, "Model specification error", message)
-
     def accept(self):
         """
         Accept the current state of the model and rebuilt it if anything has been edited.
@@ -872,9 +860,8 @@ class ModelEditorDialog(QtWidgets.QDialog):
 
     def reject(self):
         """
-        Reject the edited model specification and restore the original state
+        Reject the edited model specification
         """
         self.logger.info("Edited model specification not accepted, restoring")
 
-        self._restore_old_model()
         super().reject()

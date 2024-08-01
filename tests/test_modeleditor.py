@@ -646,45 +646,6 @@ def test_modeldialog_accept_exception(
     }
 
 
-def test_modeldialog_reject(
-    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
-) -> None:
-    diag = ModelEditorDialog(mfx_nmda)
-    qtbot.add_widget(diag)
-
-    diag.b2model.functions["monitors"]["Mn"]["delete"]()
-
-    assert "Mn" not in diag.b2model.monitors
-    assert "Mn" in [obj.name for obj in diag.b2model.network.objects]
-
-    diag.reject()
-
-    assert "Mn" in diag.b2model.monitors
-    assert "Mn" in [obj.name for obj in diag.b2model.network.objects]
-
-
-def test_modeldialog_reject_exception(
-    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
-) -> None:
-    diag = ModelEditorDialog(mfx_nmda)
-    qtbot.add_widget(diag)
-
-    def raise_error(_):
-        raise RuntimeError("dummy")
-
-    monkeypatch.setattr(B2Model, "load_model", raise_error)
-
-    diag.reject()
-
-    assert qmessagebox_calls == [
-        {
-            "name": "critical",
-            "text": "Error when restoring old model: dummy",
-            "title": "Model specification error",
-        },
-    ]
-
-
 def test_method_selection(
     mfx_nmda: B2Model,
     qtbot: QtBot,
@@ -715,7 +676,8 @@ def test_method_selection(
     ):
         method_dropdown.param.setValue("exponential_euler")
 
-    assert mfx_nmda.neurongroups["neuron_input"]["method"] == "exponential_euler"
+    assert diag.b2model.neurongroups["neuron_input"]["method"] == "exponential_euler"
+    assert mfx_nmda.neurongroups["neuron_input"]["method"] == "euler"
 
     assert mfx_nmda.network["Mn"].g.shape == (1, 0)
     # try to run

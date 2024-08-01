@@ -199,8 +199,9 @@ class Gui(QtWidgets.QMainWindow):
             )
         else:
             mdiag = ModelEditorDialog(self.model, parent=self)
-            mdiag.exec()
-            self.update_model(mdiag.b2model)
+
+            if mdiag.exec():
+                self.update_model(mdiag.b2model)
 
     @with_wait_cursor
     def load_model(self, filename: str) -> None:

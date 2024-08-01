@@ -2155,7 +2155,9 @@ class B2Model:
 
     @classmethod
     def load_model(
-        cls, filepath: str | Path, report: Callable[[int], None] | None = None
+        cls,
+        filepath: str | Path | dict[Any, Any],
+        report: Callable[[int], None] | None = None,
     ) -> B2Model:
         """
         Load model from file

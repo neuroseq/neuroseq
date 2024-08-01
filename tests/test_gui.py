@@ -503,7 +503,7 @@ def test_integration_modeleditor_delete_restore(
     # find synapse tree
     synapsetree = modeleditor.findChild(EditableSynapseTree)
 
-    assert "Ce" in gui.model.synapses
+    assert "Ce" in modeleditor.b2model.synapses
 
     # delete Ce synapse by triggering the remove signal
     ce_synapse_element = synapsetree.findItems(
@@ -518,7 +518,8 @@ def test_integration_modeleditor_delete_restore(
         ce_synapse_element.param.remove()
 
     # assert Ce is gone from the definition
-    assert "Ce" not in gui.model.synapses
+    assert "Ce" not in modeleditor.b2model.synapses
+    assert "Ce" in gui.model.synapses
 
     # try to accept, error
     qtbot.mouseClick(
@@ -543,14 +544,11 @@ def test_integration_modeleditor_delete_restore(
     qtbot.waitUntil(lambda: not modeleditor.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)
 
-    # simulate update model
-    gui.update_model(modeleditor.b2model)  # FIXME: this should not be here?! it´
-
     # assert that Ce is in the definition and in the network -> restoring old state works
     assert "Ce" in gui.model.synapses
     assert gui.model.network["Ce"] is not None
 
     # run the model and make sure it works as it should
-    gui.model.run_simulation(1 * b2.second)
+    gui.model.run_simulation(0.2 * b2.second)
 
-    assert gui.model.network["Traces_v"].v.shape == (30, 10000)
+    assert gui.model.network["Traces_v"].v.shape == (30, 2000)
