@@ -21,6 +21,7 @@ class StimWidget(TimeseriesWidget):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self.enable_mouse_move_roi = True
         self.plotItem.showGrid(x=True, y=True)
 
     def set_data(self, stims: b2.TimedArray | None = None) -> None:

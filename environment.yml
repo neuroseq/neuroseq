@@ -6,6 +6,7 @@ dependencies:
   - brian2
   - numpy
   - qtpy
+  - matplotlib
   - pyside6
   - pyqtgraph
   - h5py
