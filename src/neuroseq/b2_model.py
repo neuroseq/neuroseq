@@ -54,6 +54,11 @@ class B2Model:
         ValueError
             When there is no '=' block in the line given
         """
+        line = line.strip("\n")
+
+        if line == "":
+            return
+
         if ":" not in line and "=" not in line:
             message = "Equation must have a colon that separates equation and unit or an equal sign"
             self.logger.critical(message)
@@ -64,8 +69,7 @@ class B2Model:
         else:
             group["model"] = line + "\n"
 
-        self.logger.info(f"Equation defined for group {group}")
-        self.logger.debug(f"full equation: {line}")
+        self.logger.debug(f"full equation: {repr(line)}")
 
     def _add_group_modifier(
         self,
