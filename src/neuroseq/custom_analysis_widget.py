@@ -17,6 +17,7 @@ class CustomAnalysisDataType(PrettyPrintEnum):
 
 class CustomAnalysisType(PrettyPrintEnum):
     Histogram = "mdi6.chart-histogram"
+    Histogram2d = "mdi6.data-matrix"
 
 
 class CustomAnalysisWidget(MatplotlibWidget):
@@ -106,6 +107,22 @@ class CustomAnalysisWidget(MatplotlibWidget):
             self.subplot.hist(x, bins=30, density=True)
             self.subplot.set_xlabel("Value")
             self.subplot.set_ylabel("Density")
+        elif analysis_type == CustomAnalysisType.Histogram2d:
+            if data_type == CustomAnalysisDataType.Trace:
+                assert self.traces is not None
+                x = np.tile(
+                    self.dt * np.arange(self.traces.shape[1]), self.traces.shape[0]
+                )
+                if time_slice is not None and time_slice.start is not None:
+                    x += time_slice.start * self.dt
+                y = np.asarray(self.traces).flatten()
+                self.subplot.set_ylabel("Values")
+            elif data_type == CustomAnalysisDataType.Spike:
+                x = self.spike_times
+                y = self.spike_indices
+                self.subplot.set_ylabel("Neurons")
+            self.subplot.hist2d(x, y, bins=30, density=True)
+            self.subplot.set_xlabel("Time")
         else:
             return
         self.draw()
