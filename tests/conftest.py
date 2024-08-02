@@ -8,7 +8,6 @@ import brian2 as b2
 import brian2.numpy_ as np
 import pytest
 from neuroseq import b2_model
-from neuroseq import b2_model_widget
 from neuroseq.utils import example_models_path
 from neuroseq.utils import init_brian2_logging
 from qtpy import QtWidgets
@@ -36,12 +35,12 @@ def pytest_collection_modifyitems(config, items):
                 item.add_marker(pytest.mark.skip(reason="Skipping screenshot update"))
 
 
-# replace all .exec() calls within the b2_model_widget module with .show() to avoid blocking the tests
+# replace all .exec() calls with .show() to avoid blocking the tests
 @pytest.fixture(autouse=True)
 def patch_b2w_exec_show(monkeypatch: pytest.MonkeyPatch) -> None:
     for widget in [
-        b2_model_widget.QtWidgets.QDialog,
-        b2_model_widget.QtWidgets.QMessageBox,
+        QtWidgets.QDialog,
+        QtWidgets.QMessageBox,
     ]:
         monkeypatch.setattr(widget, "exec", lambda self: self.show())
 
