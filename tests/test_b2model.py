@@ -194,7 +194,6 @@ def test_rename_parameter(mfx_nmda: b2_model.B2Model) -> None:
 def test_rename_monitor(mfx_nmda: b2_model.B2Model) -> None:
     assert "M" in mfx_nmda.monitors
     test_data = deepcopy(mfx_nmda.monitors["M"])
-    test_data["name"] = "renamed"
 
     mfx_nmda.functions["monitors"]["M"]["rename"]("renamed")
     assert "M" not in mfx_nmda.monitors
