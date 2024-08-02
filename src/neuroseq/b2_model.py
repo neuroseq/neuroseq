@@ -36,9 +36,7 @@ class B2Model:
         self.logger.exception(e)
         raise RuntimeError(message) from e
 
-    def _add_equation_to_group(
-        self, group: dict, line: str, key: str = "model"
-    ) -> None:
+    def _add_equation_to_group(self, group: dict, eqs: str, key: str = "model") -> None:
         r"""
         _add_equation_to_group Add an equation to a neurongroup or synapse dictionary that holds arguments to construct the respective objects.
 
@@ -46,7 +44,7 @@ class B2Model:
         ----------
         group : dict
             Argument dictionary for constructing a brian2 group object - neurongroup or synapse.
-        line : str
+        eqs : str
             An equation of the form v = f(y,x): unit, possibly containing multiple lines for multiple variables.
 
         Raises
@@ -56,19 +54,19 @@ class B2Model:
         ValueError
             When there is no '=' block in the line given
         """
-        line = line.strip("\n")
+        eqs = eqs.strip("\n")
 
-        if line == "":
+        if eqs == "":
             return
 
-        if ":" not in line and "=" not in line:
+        if ":" not in eqs and "=" not in eqs:
             message = "Equation must have a colon that separates equation and unit or an equal sign"
             self.logger.critical(message)
             raise ValueError(message)
 
-        group[key] = line + "\n"
+        group[key] = eqs
 
-        self.logger.debug(f"full equation: {repr(line)}")
+        self.logger.debug(f"full equation: {repr(eqs)}")
 
     def _add_group_modifier(
         self,

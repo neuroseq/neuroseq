@@ -78,7 +78,7 @@ def test_neurondialog_define_equation(qtbot: QtBot) -> None:
 
     qtbot.mouseClick(ndiag.equation_button, QtCore.Qt.MouseButton.LeftButton)
 
-    assert ndiag.model.neurongroups["x"]["model"] == "dv/dt = -v : mV\n"
+    assert ndiag.model.neurongroups["x"]["model"] == "dv/dt = -v : mV"
 
 
 def test_neurondialog_define_dt(qtbot: QtBot) -> None:

@@ -30,7 +30,7 @@ def test_define_equation(mfx: b2_model.B2Model) -> None:
 
     mfx.define_equation("P", "dge/dt = -ge*(1./taue) : siemens")
 
-    assert mfx.neurongroups["P"]["model"] == "dge/dt = -ge*(1./taue) : siemens\n"
+    assert mfx.neurongroups["P"]["model"] == "dge/dt = -ge*(1./taue) : siemens"
     assert all(
         f in mfx.functions["neurongroups"]["P"]
         for f in [
@@ -1086,7 +1086,7 @@ def test_default_group_addition(mfx_ornstein) -> None:
     mfx_ornstein.define_default_neurongroup()
     assert mfx_ornstein.neurongroups["new_neurongroup"] == {
         "neuronnumber": 0,
-        "model": "dv/dt=0:1\n",
+        "model": "dv/dt=0:1",
         "method": "euler",
         "dt": 10 * b2.ms,
         "reset": "0",
@@ -1098,14 +1098,14 @@ def test_default_group_addition(mfx_ornstein) -> None:
     assert mfx_ornstein.synapses["new_synapse"] == {
         "origin": "origin",
         "target": "target",
-        "model": "dv/dt=0:1\n",
+        "model": "dv/dt=0:1",
         "method": "euler",
         "dt": 10 * b2.ms,
         "delay": 0 * b2.ms,
         "connection_condition": "i!=j",
         "p": 0.0,
-        "on_pre": "x=y\n",
-        "on_post": "x=y\n",
+        "on_pre": "x=y",
+        "on_post": "x=y",
     }
 
     mfx_ornstein.define_default_monitor()
