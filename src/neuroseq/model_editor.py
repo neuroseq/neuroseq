@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from collections.abc import Callable
-from copy import deepcopy
 from typing import Any
 
 import brian2 as b2  # noqa: F401
@@ -387,7 +388,7 @@ class EditableParameterTree(ParameterTree):
         functions: dict[Any, Any],
         key: Any = "",
         expanded: bool = False,
-        readonly: bool = False,
+        read_only: bool = False,
     ) -> list[Any]:
         """
         Recursively go through a nested dict and create a hierarchical pyqtgraph Parameter representation of it
@@ -399,25 +400,22 @@ class EditableParameterTree(ParameterTree):
             Possibly nested dict to be represented in the parametertree
         key : Any, optional
             Current key of 'data' that is processed. Needed for keeping track of parameter names, by default ""
-        expanded:bool
-            Whether to have all groups expanded or not when opening
-        readonly:
-            Whether to make element in a dictionary read only based on ad condition evaluated in their parent. This currently only applies to TimedArrays
+        expanded: bool
+            Whether group elements should be expanded on first open or not
+        read_only:
+            Whether children should be read_only based on a condition evalutated in the parent. Currently used to make TimedArray displays readonly
         Returns
         -------
         list[Any]
             list of Parameter representations that internally define all the parent-child relationships to create the parametertree.
         """
         params = []
-        for key, v in data.items():
-            value = self._get_value(v)
+        for key, value in data.items():
+            readonly = isinstance(value, TimedArray)
+            value = self._get_value(value)
             if isinstance(value, dict):
                 child_params = self._convert_dict_to_params(
-                    value,
-                    functions[key],
-                    key,
-                    expanded=expanded,
-                    readonly=isinstance(v, b2.TimedArray),
+                    value, functions[key], key, expanded=expanded, read_only=readonly
                 )
 
                 new_param = {
@@ -438,12 +436,13 @@ class EditableParameterTree(ParameterTree):
 
             else:
                 # Determine the parameter type based on value type
-
                 if isinstance(value, b2.Quantity):
                     value = value.in_best_unit(python_code=True)
 
                 value = str(value)
-                param_type = "largetext" if "\n" in value and "=" in value else "str"
+                param_type = (
+                    "largetext" if "\n" in value and "=" in value else "str"
+                )  # make sure our custom QTextEdit based ParameterItem is used for potentially large equations
 
                 param = {
                     "name": key,
@@ -453,7 +452,7 @@ class EditableParameterTree(ParameterTree):
                     "renamable": True,
                     "syncExpanded": True,
                     "expanded": expanded,
-                    "readonly": readonly,
+                    "readonly": read_only,
                 }
 
                 # need 'limits' for the underlying ListParameter and 'element' for the custom class
@@ -835,8 +834,10 @@ class ModelEditorDialog(QtWidgets.QDialog):
             parent widget, by default None
         """
         super().__init__(parent=parent)
-
-        self.b2model = B2Model.load_model(deepcopy(b2model.to_dict()))
+        tmp = tempfile.TemporaryDirectory()
+        file = os.path.join(tmp.name, "model.json")
+        b2model.save_model(file)
+        self.b2model = B2Model.load_model(file)
 
         trees = {
             "Neurongroups": EditableNeurongroupTree(self.b2model, parent=self),
