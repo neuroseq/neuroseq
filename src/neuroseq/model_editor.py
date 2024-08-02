@@ -111,9 +111,15 @@ class UpdatingListParameterItem(ListParameterItem):
         # we also need to reconnect the signal
         self.widget.clicked.connect(self._update_list)
 
-        self.limitsChanged(self.param, self.update())
-        if len(self.forward) > 0 and self.param.hasValue():
-            self.setValue(self.param.value())
+        self.limitsChanged(
+            self.param,
+            [
+                "-",
+            ]
+            + self.update(),
+        )
+
+        self.widget.setCurrentIndex(0)
         return w
 
     def _update_list(self) -> None:
@@ -147,6 +153,8 @@ class UpdatingListParameter(ListParameter):
         else:
             self.update = update
         super().__init__(**opts)
+
+        self.setValue(opts.get("value", "unknown"))
 
     def makeTreeItem(self, depth: Any) -> UpdatingListParameterItem:
         """
@@ -347,6 +355,7 @@ class EditableParameterTree(ParameterTree):
                 if child.name() in funcs:
                     self._connect_parameters(child, funcs[child.name()])
                 else:
+                    # root is not part of the function tree and must be skipped
                     pass
         else:
             param.sigValueChanged.connect(
@@ -441,7 +450,7 @@ class EditableParameterTree(ParameterTree):
 
                 value = str(value)
                 param_type = (
-                    "largetext" if "\n" in value and "=" in value else "str"
+                    "largetext" if "=" in value else "str"
                 )  # make sure our custom QTextEdit based ParameterItem is used for potentially large equations
 
                 param = {
@@ -467,11 +476,12 @@ class EditableParameterTree(ParameterTree):
 
     def _build_tree(self, expanded: bool = False) -> None:
         """
-        _summary_
+        Rebuild the tree upon changed
         """
         params = self._call_with_errormessage(
             self._convert_dict_to_params, self.states, self.functions, expanded=expanded
         )
+
         self.root = self._call_with_errormessage(
             Parameter.create,
             name=self.name,

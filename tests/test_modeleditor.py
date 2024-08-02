@@ -548,9 +548,9 @@ def test_neurontree_add_neurongroup_list_update(
         0,
     )[0]
 
-    source = mn_item.child(1).value()
-    typename = mn_item.child(2).value()
-    var_selection = mn_item.child(3)
+    source = mn_item.child(0).value()
+    typename = mn_item.child(1).value()
+    var_selection = mn_item.child(2)
     variables = mtree._make_selection_list(typename, source)
 
     # make expected list of selectable items
@@ -607,6 +607,13 @@ def test_neurontree_add_neurongroup_list_update(
     assert set(updated_list) == set(
         list(mtree.b2model.network["neurons"].equations.names)
     )
+
+
+def test_dropdownmenu_consistency(
+    mfx_nmda: B2Model,
+    qtbot: QtBot,
+) -> None:
+    assert 3 == 6
 
 
 def test_modeldialog_accept(
@@ -699,7 +706,7 @@ def test_method_selection(
     assert exp_euler_data_shape == euler_data_shape
 
 
-def test_monitordialog_with_run(
+def test_monitordialog_modify_with_run(
     mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
 ):
     mfx_nmda.define_monitor_dt("M", 200 * b2.ms)
