@@ -8,6 +8,17 @@ Private repository containing the neuroseq prototype GUI.
 
 ## Installation
 
+### Ananconda
+
+It is reccomended to use Anaconda enviroment for the installation. First, create and activate new enviroment in a command line for the installation:
+
+```
+conda create -n neuroseq python=3.10
+conda activate neuroseq
+```
+
+### Installation of the neuroseq
+
 If you have ssh authentication to GitHub set up you can install directly from this repository with pip:
 
 ```bash
