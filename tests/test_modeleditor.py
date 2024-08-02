@@ -527,18 +527,22 @@ def test_neurontree_add_neurongroup_list_update(
     assert mtree.states == mfx_nmda.monitors
 
     # get out the origin subwidget for synapses
-    origin = stree.findItems(
-        "origin",
-        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
-        0,
-    )[0]
+    widgets = [
+        o
+        for o in stree.findItems(
+            "origin",
+            QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+            0,
+        )
+    ]
+
+    origin = widgets[0]
 
     all_names = [origin.widget.itemText(i) for i in range(origin.widget.count())]
 
     assert set(all_names) == set(
-        ["neurons", "neuron_input", "new_neuronsubgroup", "input_subgroup"]
+        ["neurons", "neuron_input", "new_neuronsubgroup", "input_subgroup", "-"]
     )
-
     assert ntree.states == mfx_nmda.neurongroups
 
     # get the variables widget for the monitor and check that it is filled as it should
@@ -561,9 +565,7 @@ def test_neurontree_add_neurongroup_list_update(
         else:
             vs.extend(list(obj.equations.names) + list(obj.variables.keys()))
 
-    vs = list(set(vs)) + [
-        "None",
-    ]
+    vs = list(set(vs)) + ["None", "-"]
 
     entries = [
         var_selection.widget.itemText(i) for i in range(0, var_selection.widget.count())
@@ -613,7 +615,57 @@ def test_dropdownmenu_consistency(
     mfx_nmda: B2Model,
     qtbot: QtBot,
 ) -> None:
-    assert 3 == 6
+    # add synpase tree to assure later that the data has been updated
+    stree = EditableSynapseTree(mfx_nmda)
+    qtbot.addWidget(stree)
+    origin = stree.findItems(
+        "origin",
+        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+        0,
+    )[0]
+
+    assert origin.widget.currentText() == "neuron_input"
+
+    with qtbot.waitSignal(origin.param.sigValueChanged, timeout=1000, raising=True):
+        origin.widget.setCurrentIndex(2)
+
+    assert origin.widget.currentText() == "neurons"
+    assert origin.param.value() == "neurons"
+    assert mfx_nmda.synapses["S"]["origin"] == "neurons"
+
+
+def test_dropdown_menu_for_new_item(
+    mfx_nmda: B2Model,
+    qtbot: QtBot,
+):
+    mfx_nmda.define_default_synapse()
+    stree = EditableSynapseTree(mfx_nmda)
+    ot = [
+        o
+        for o in stree.findItems(
+            "origin",
+            QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+            0,
+        )
+        if o.parent().param.name() == "new_synapse"
+    ]
+
+    for item in ot:
+        assert item.widget.currentText() == "-"
+
+    with qtbot.waitSignal(ot[0].param.sigValueChanged, raising=True):
+        ot[0].widget.setCurrentIndex(2)
+
+    assert ot[0].widget.currentText() == "neurons"
+    assert ot[0].param.value == "neurons"
+    assert mfx_nmda.synapses["new_synapse"]["origin"] == "neurons"
+
+    with qtbot.waitSignal(ot[0].param.sigValueChanged, raising=True):
+        ot[0].widget.setCurrentIndex(1)
+
+    assert ot[0].widget.currentText() == "neuron_input"
+    assert ot[0].param.value == "neuron_input"
+    assert mfx_nmda.synapses["new_synapse"]["origin"] == "neuron_input"
 
 
 def test_modeldialog_accept(
@@ -724,7 +776,7 @@ def test_monitordialog_modify_with_run(
     mfx_nmda.run_simulation(1 * b2.second)
 
     assert mfx_nmda.network["M"].g.shape[1] == 5
-    dtparam = m.child(4)
+    dtparam = m.child(3)
 
     mfx_nmda.assemble_network()
 
