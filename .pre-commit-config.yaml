@@ -9,7 +9,7 @@ repos:
       - id: check-toml
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.5.3
+    rev: v0.5.5
     hooks:
       - id: ruff
         types_or: [python, pyi, jupyter]
@@ -31,13 +31,13 @@ repos:
           - "prettier-plugin-toml"
 
   - repo: https://github.com/python-jsonschema/check-jsonschema
-    rev: 0.29.0
+    rev: 0.29.1
     hooks:
       - id: check-github-workflows
       - id: check-readthedocs
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.10.1
+    rev: v1.11.1
     hooks:
       - id: mypy
         additional_dependencies: [numpy, PySide6-stubs]

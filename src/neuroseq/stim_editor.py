@@ -108,9 +108,11 @@ class StimEditor(QtWidgets.QWidget):
 
     def select_stim(self, stim_name: str) -> None:
         self.logger.debug(f"Selected stim: {stim_name}")
-        if stim_name in self.stims_dict:
+        if (
+            stim_name in self.stims_dict
+            and self.current_stim_modifier != self.stims_dict[stim_name]
+        ):
             self.current_stim_modifier = self.stims_dict[stim_name]
-            self.stim_widget.set_data(self.current_stim_modifier.timed_array)
             self.draw_stim_value = np.max(self.current_stim_modifier.timed_array.values)
             if self.draw_stim_value == 0:
                 self.draw_stim_value = 1

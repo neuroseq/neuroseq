@@ -438,6 +438,7 @@ class EditableParameterTree(ParameterTree):
                 # Determine the parameter type based on value type
                 if isinstance(value, b2.Quantity):
                     value = value.in_best_unit(python_code=True)
+
                 value = str(value)
                 param_type = (
                     "largetext" if "\n" in value and "=" in value else "str"

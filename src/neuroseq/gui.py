@@ -234,6 +234,7 @@ class Gui(QtWidgets.QMainWindow):
             self.progress_dialog.reset()
             return
 
+    @with_wait_cursor
     def update_model(self, model: B2Model) -> None:
         self.model = model
         self.stim_console.set_model(self.model)
@@ -479,6 +480,7 @@ class Gui(QtWidgets.QMainWindow):
             return
         self._update_data()
 
+    @with_wait_cursor
     def do_external_simulation(self, simulation_time: float) -> None:
         try:
             # pre-emptively pad timed arrays before simulating
