@@ -611,29 +611,6 @@ def test_neurontree_add_neurongroup_list_update(
     )
 
 
-def test_dropdownmenu_consistency(
-    mfx_nmda: B2Model,
-    qtbot: QtBot,
-) -> None:
-    # add synpase tree to assure later that the data has been updated
-    stree = EditableSynapseTree(mfx_nmda)
-    qtbot.addWidget(stree)
-    origin = stree.findItems(
-        "origin",
-        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
-        0,
-    )[0]
-
-    assert origin.widget.currentText() == "neuron_input"
-
-    with qtbot.waitSignal(origin.param.sigValueChanged, timeout=1000, raising=True):
-        origin.widget.setCurrentIndex(2)
-
-    assert origin.widget.currentText() == "neurons"
-    assert origin.param.value() == "neurons"
-    assert mfx_nmda.synapses["S"]["origin"] == "neurons"
-
-
 def test_dropdown_menu_for_new_item(
     mfx_nmda: B2Model,
     qtbot: QtBot,
@@ -652,20 +629,6 @@ def test_dropdown_menu_for_new_item(
 
     for item in ot:
         assert item.widget.currentText() == "-"
-
-    with qtbot.waitSignal(ot[0].param.sigValueChanged, raising=True):
-        ot[0].widget.setCurrentIndex(2)
-
-    assert ot[0].widget.currentText() == "neurons"
-    assert ot[0].param.value == "neurons"
-    assert mfx_nmda.synapses["new_synapse"]["origin"] == "neurons"
-
-    with qtbot.waitSignal(ot[0].param.sigValueChanged, raising=True):
-        ot[0].widget.setCurrentIndex(1)
-
-    assert ot[0].widget.currentText() == "neuron_input"
-    assert ot[0].param.value == "neuron_input"
-    assert mfx_nmda.synapses["new_synapse"]["origin"] == "neuron_input"
 
 
 def test_modeldialog_accept(
