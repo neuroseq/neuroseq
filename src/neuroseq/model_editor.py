@@ -103,7 +103,7 @@ class UpdatingListParameterItem(ListParameterItem):
         # instead of the normal QComboBox
         w = EagerQComboBox()
         w.setMaximumHeight(20)  ## set to match height of spin box and line edit
-        w.sigChanged = w.currentIndexChanged
+        w.sigChanged = w.activated
         w.value = self.value
         w.setValue = self.setValue
         self.widget = w  ## needs to be set before limits are changed
