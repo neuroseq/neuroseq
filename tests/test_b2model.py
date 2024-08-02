@@ -57,16 +57,6 @@ def test_define_equation(mfx: b2_model.B2Model) -> None:
         mfx.define_equation("P", "-ge*(1./taue) siemens")
 
 
-def test_define_equation_incremental(mfx: b2_model.B2Model) -> None:
-    mfx.define_equation("P", "dApre/dt = -Apre / taupre : siemens")
-    mfx.define_equation("P", "dApost/dt = -Apost / taupost : siemens")
-
-    e = b2.Equations(mfx.neurongroups["P"]["model"])
-
-    assert set(e.names) == set(["Apre", "Apost"])
-    assert e.parameter_names == set()
-
-
 def test_define_dt(mfx: b2_model.B2Model) -> None:
     assert mfx.neurongroups == {}
     standard_dt = b2.defaultclock.dt

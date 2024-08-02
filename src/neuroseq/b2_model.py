@@ -66,10 +66,7 @@ class B2Model:
             self.logger.critical(message)
             raise ValueError(message)
 
-        if key in group:
-            group[key] += line + "\n"
-        else:
-            group[key] = line + "\n"
+        group[key] = line + "\n"
 
         self.logger.debug(f"full equation: {repr(line)}")
 
@@ -80,6 +77,21 @@ class B2Model:
         with_rebuilt: Callable,
         element_adder: Callable = lambda *_, **__: None,
     ) -> None:
+        """
+        add a modifier instance responsible for modifying dictionary elements
+        that are themselves dictionaries
+
+        Parameters
+        ----------
+        name : str
+            key of the held dict
+        group_class : str
+            name of the element the held dict belongs to "neurongroups", "monitors", "synapses", "initials" or "parameters".
+        with_rebuilt : Callable
+            function to determine whether the system has to be rebuilt or not when chaning something
+        element_adder : Callable, optional
+            Function to call to add an element to he held dict, by default lambda*_
+        """
         modifier = self.Modifier(
             name,
             getattr(self, group_class),
