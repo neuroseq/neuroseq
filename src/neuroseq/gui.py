@@ -443,7 +443,6 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Error", f"{error}")
             return
 
-    @with_wait_cursor
     def btn_continue_simulation_clicked(self) -> None:
         simulation_time_str, ok = QtWidgets.QInputDialog.getText(
             self,

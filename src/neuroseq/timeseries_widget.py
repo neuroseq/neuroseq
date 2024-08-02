@@ -121,20 +121,22 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
     def _create_custom_analysis_menu(self) -> None:
         self.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.ActionsContextMenu)
         self.menu_custom_analysis = QtWidgets.QMenu("Custom analysis", self)
-        add_action(
-            "Histogram",
-            lambda: self.custom_analysis_requested.emit(
-                self.data_type,
-                CustomAnalysisType.Histogram,
-                self.selected_neuron_slice,
-                self.selected_time_slice,
-                self.data,
-            ),
-            self.menu_custom_analysis,
-            None,
-            self,
-            icon=qta.icon("mdi6.chart-histogram"),
-        )
+        for custom_analysis_type in CustomAnalysisType:
+            add_action(
+                str(custom_analysis_type),
+                lambda *args,
+                _custom_analysis_type=custom_analysis_type: self.custom_analysis_requested.emit(
+                    self.data_type,
+                    _custom_analysis_type,
+                    self.selected_neuron_slice,
+                    self.selected_time_slice,
+                    self.data,
+                ),
+                self.menu_custom_analysis,
+                None,
+                self,
+                icon=qta.icon(custom_analysis_type.value),
+            )
 
     def clear_data(self) -> None:
         self.neuron_plots.clear()
