@@ -37,7 +37,7 @@ class B2Model:
         raise RuntimeError(message) from e
 
     def _add_equation_to_group(self, group: dict, line: str) -> None:
-        r"""
+        """
         _add_equation_to_group Add an equation to a neurongroup or synapse dictionary that holds arguments to construct the respective objects.
 
         Parameters
