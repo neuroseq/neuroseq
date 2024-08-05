@@ -247,19 +247,17 @@ class Reconstructor:
         data_of_group : dict[str, Any]
             json node to reconstruct the monitor from
         """
-        model.define_monitor_type(data_of_group["name"], data_of_group["type"])
-        model.define_monitor_source(data_of_group["name"], data_of_group["source"])
-        model.define_monitor_variable(
-            data_of_group["name"], data_of_group.get("variable")
-        )
+        model.define_monitor_type(name, data_of_group["type"])
+        model.define_monitor_source(name, data_of_group["source"])
+        model.define_monitor_variable(name, data_of_group.get("variable"))
 
         if "dt" in data_of_group:
-            model.define_monitor_dt(data_of_group["name"], data_of_group["dt"])
-            model._assemble_monitor(data_of_group["name"])
+            model.define_monitor_dt(name, data_of_group["dt"])
+            model._assemble_monitor(name)
         else:
-            model._assemble_monitor(data_of_group["name"])
+            model._assemble_monitor(name)
             model.define_monitor_dt(
-                data_of_group["name"], model.network[data_of_group["name"]].clock.dt
+                name, model.network[name].clock.dt
             )  # define the timestep from the clock of the constructed monitor to expose it in the intermediate representation
 
     def reconstruct(

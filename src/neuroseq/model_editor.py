@@ -148,6 +148,8 @@ class UpdatingListParameter(ListParameter):
             self.update = update
         super().__init__(**opts)
 
+        self.setValue(opts.get("value", "unknown"))
+
     def makeTreeItem(self, depth: Any) -> UpdatingListParameterItem:
         """
         Override of the ListParameter.makeTreeItem to use `UpdatingListParameterItem`
@@ -347,6 +349,7 @@ class EditableParameterTree(ParameterTree):
                 if child.name() in funcs:
                     self._connect_parameters(child, funcs[child.name()])
                 else:
+                    # root is not part of the function tree and must be skipped
                     pass
         else:
             param.sigValueChanged.connect(
@@ -441,7 +444,7 @@ class EditableParameterTree(ParameterTree):
 
                 value = str(value)
                 param_type = (
-                    "largetext" if "\n" in value and "=" in value else "str"
+                    "largetext" if "=" in value else "str"
                 )  # make sure our custom QTextEdit based ParameterItem is used for potentially large equations
 
                 param = {
@@ -467,11 +470,12 @@ class EditableParameterTree(ParameterTree):
 
     def _build_tree(self, expanded: bool = False) -> None:
         """
-        _summary_
+        Rebuild the tree upon changed
         """
         params = self._call_with_errormessage(
             self._convert_dict_to_params, self.states, self.functions, expanded=expanded
         )
+
         self.root = self._call_with_errormessage(
             Parameter.create,
             name=self.name,
@@ -549,13 +553,20 @@ class EditableSynapseTree(EditableParameterTree):
                         "euler",
                         "exponential_euler",
                         "exact",
+                        "rk2",
+                        "rk4",
+                        "heun",
+                        "milstein",
+                        "-",
                     ],  # methods are static, so we can give a list
                 },
                 "origin": {
-                    "update_from": lambda: list(self.b2model.neurongroups.keys()),
+                    "update_from": lambda: list(self.b2model.neurongroups.keys())
+                    + ["-"],
                 },
                 "target": {
-                    "update_from": lambda: list(self.b2model.neurongroups.keys()),
+                    "update_from": lambda: list(self.b2model.neurongroups.keys())
+                    + ["-"],
                 },
             },
         )
@@ -595,6 +606,7 @@ class EditableMonitorTree(EditableParameterTree):
                     "update_from": lambda: [
                         b2.StateMonitor.__name__,
                         b2.SpikeMonitor.__name__,
+                        "-",
                     ],
                 },
                 "source": {
@@ -615,11 +627,15 @@ class EditableMonitorTree(EditableParameterTree):
         list[str]
             list of synapses to choose from
         """
-        lst = [
-            n
-            for n in self.b2model.neurongroups
-            if "idx" not in self.b2model.neurongroups[n]
-        ] + list(self.b2model.synapses.keys())
+        lst = (
+            [
+                n
+                for n in self.b2model.neurongroups
+                if "idx" not in self.b2model.neurongroups[n]
+            ]
+            + list(self.b2model.synapses.keys())
+            + ["-"]
+        )
 
         self.logger.debug(f"updating available object list for monitors to {lst}")
         return lst
@@ -644,10 +660,13 @@ class EditableMonitorTree(EditableParameterTree):
         # if none are given for the respective monitor, which gives the set of
         # selectable variables
         if typename == "StateMonitor":
-            return list(self.b2model.network[sourcename].equations.names)
+            return list(self.b2model.network[sourcename].equations.names) + [
+                "-",
+            ]
         elif typename == "SpikeMonitor":
             return list(self.b2model.network[sourcename].variables.keys()) + [
                 "None",
+                "-",
             ]  # None is allowed for spikemonitor
         else:
             message = f"Unknonw monitor type {typename}"
@@ -691,16 +710,23 @@ class EditableMonitorTree(EditableParameterTree):
                 self.logger.critical(
                     f"Something went wrong while forming selection for monitored element {source.text(0)}: {e}"
                 )
-                varnames = list(
-                    self.b2model.network[source.value()].get_states().keys()
-                )
+
+                if source.value() in self.b2model.network.objects:
+                    existing_vars = list(
+                        self.b2model.network[source.value()].get_states().keys()
+                    )
+                else:
+                    existing_vars = []
+                varnames = existing_vars + ["None", "-"]
             return varnames
         else:
             self.logger.debug("no selected item found, make full list of variables")
             # when we have no selected items, we make a big list of everything that's available since we don´t yet
             # know which one it will be, and we need a list that contains the actually selected one in the
             # underlying monitor definition in order to display it correctly
-            varnames = []
+            varnames = [
+                "-",
+            ]
             for obj in self.b2model.network.objects:
                 if isinstance(obj, b2.StateMonitor | b2.EventMonitor):
                     continue
@@ -754,6 +780,7 @@ class EditableNeurongroupTree(EditableParameterTree):
                         "rk4",
                         "heun",
                         "milstein",
+                        "-",
                     ],
                 },
                 "target": {
@@ -789,6 +816,8 @@ class EditableNeurongroupTree(EditableParameterTree):
             n
             for n in self.b2model.neurongroups
             if "idxs" not in self.b2model.neurongroups[n]
+        ] + [
+            "-",
         ]
 
     def contextMenuEvent(self, ev: QtCore.Event) -> None:
@@ -889,7 +918,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
             col_add = 0
             if k == "Neurongroups":
                 col_add = 4
-                add_group_button_sub = QtWidgets.QPushButton("New subgroup", self)
+                add_group_button_sub = QtWidgets.QPushButton("New Subgroup", self)
                 layout.addWidget(add_group_button_sub, 0, i + 2)
                 add_group_button_sub.clicked.connect(tree._add_neuronsubgroup)
             else:

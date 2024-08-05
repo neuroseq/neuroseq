@@ -254,7 +254,7 @@ class B2Model:
                     self.network[self.monitors[name]["source"]],
                     self.monitors[name].get("variable", None),
                     record=True,
-                    name=self.monitors[name]["name"],
+                    name=name,
                     dt=self.monitors[name].get(
                         "dt", self.network[self.monitors[name]["source"]].clock.dt
                     ),  # set to source dt when no timestep is given --> max resolution. Also, .dt gives a VariableView, which needs to be converted to a value again
@@ -264,7 +264,7 @@ class B2Model:
                     self.network[self.monitors[name]["source"]],
                     self.monitors[name].get("variable", None),
                     record=True,
-                    name=self.monitors[name]["name"],
+                    name=name,
                 )
         except Exception as e:
             self._handle_exception(e, f"Error in defining monitor {name}: {e}")
@@ -417,12 +417,6 @@ class B2Model:
             old_functions = self.fdict.pop(used_old_name)
             self.pdict[new_name] = old_value
             self.fdict[new_name] = old_functions
-
-            if (
-                isinstance(self.pdict[new_name], dict)
-                and "name" in self.pdict[new_name]
-            ):
-                self.pdict[new_name]["name"] = new_name
 
             self.with_rebuilt()
 
@@ -624,8 +618,8 @@ class B2Model:
             )
 
         self.define_neuronnumber(name, 0)
-        self.define_equation(name, "dv/dt=0:1")
-        self.define_solver_method(name, "euler")
+        self.define_equation(name, "dx/dt = y : 1")
+        self.define_solver_method(name, "-")
         self.define_dt(name, 10 * b2.ms)
         self.define_reset(name, "0")
         self.define_threshold(name, "0")
@@ -645,8 +639,8 @@ class B2Model:
                 lambda: self.set_rebuilt(True),
             )
 
-        self.define_neuronsubgroup_target(name, "unknown")
-        self.define_neuronsubgroup_idxs(name, [0, 1])
+        self.define_neuronsubgroup_target(name, "-")
+        self.define_neuronsubgroup_idxs(name, [0, 0])
 
     @_trigger_rebuild
     def define_dt(self, name: str, dt: b2.Quantity) -> None:
@@ -1069,19 +1063,19 @@ class B2Model:
 
         self.define_synapse_origin(
             name,
-            "origin",
+            "-",
         )
         self.define_synapse_target(
             name,
-            "target",
+            "-",
         )
         self.define_synapse_equation(
             name,
-            "dv/dt=0:1",
+            "dx/dt = y : 1",
         )
         self.define_synapse_solver_method(
             name,
-            "euler",
+            "-",
         )
         self.define_synapse_dt(
             name,
@@ -1093,7 +1087,7 @@ class B2Model:
         )
         self.define_synapse_connection(
             name,
-            "i!=j",
+            "x!=y",
         )
         self.define_synapse_connection_probability(
             name,
@@ -1550,10 +1544,10 @@ class B2Model:
 
         self.define_monitor_type(
             name,
-            "StateMonitor",
+            "-",
         )
-        self.define_monitor_source(name, "source")
-        self.define_monitor_variable(name, "variable")
+        self.define_monitor_source(name, "-")
+        self.define_monitor_variable(name, "-")
         self.define_monitor_dt(name, None)
 
     @_trigger_rebuild
@@ -1569,9 +1563,7 @@ class B2Model:
             name of the type to use in brian2
         """
         if name not in self.monitors:
-            self.monitors[name] = {
-                "name": name,
-            }
+            self.monitors[name] = {}
         if name not in self.functions["monitors"]:
             self._add_group_modifier(
                 name,
@@ -1615,9 +1607,7 @@ class B2Model:
             Member of the network to monitor variables for
         """
         if name not in self.monitors:
-            self.monitors[name] = {
-                "name": name,
-            }
+            self.monitors[name] = {}
         if name not in self.functions["monitors"]:
             self._add_group_modifier(
                 name,
@@ -1661,9 +1651,7 @@ class B2Model:
             Variable name
         """
         if name not in self.monitors:
-            self.monitors[name] = {
-                "name": name,
-            }
+            self.monitors[name] = {}
         if name not in self.functions["monitors"]:
             self._add_group_modifier(
                 name,
@@ -1705,9 +1693,7 @@ class B2Model:
             timestep to be used. Must be given as value * unit.
         """
         if name not in self.monitors:
-            self.monitors[name] = {
-                "name": name,
-            }
+            self.monitors[name] = {}
 
         if name not in self.functions["monitors"]:
             self._add_group_modifier(
