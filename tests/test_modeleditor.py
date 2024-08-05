@@ -10,6 +10,7 @@ from pyqtgraph.parametertree import Parameter
 from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
+from qtpy import QtWidgets
 
 
 def test_EagerComboBox(qtbot: QtBot) -> None:
@@ -81,177 +82,6 @@ def test_etree_edit_item(mfx_nmda: B2Model, qtbot: QtBot) -> None:
     assert stree.b2model.synapses["S"]["model"] == "dv/dt = -v: 1"
 
 
-def test_tree_add_new_parameter(
-    mfx_nmda: B2Model,
-    qtbot: QtBot,
-) -> None:
-    ptree = EditableParameterTree(
-        mfx_nmda, "parameters", mfx_nmda.define_default_parameter
-    )
-    qtbot.addWidget(ptree)
-
-    assert (
-        len(
-            ptree.findItems(
-                "new_parameter",
-                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
-                0,
-            )
-        )
-        == 0
-    )
-
-    assert "new_parameter" not in mfx_nmda.parameters
-    ptree._add_item()
-    assert "new_parameter" in mfx_nmda.parameters
-
-    assert mfx_nmda.parameters["new_parameter"] is None
-
-    assert (
-        len(
-            ptree.findItems(
-                "new_parameter",
-                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
-                0,
-            )
-        )
-        == 1
-    )
-
-
-def test_tree_add_new_neurongroups(mfx_nmda, qtbot: QtBot) -> None:
-    ntree = EditableNeurongroupTree(
-        mfx_nmda,
-    )
-    qtbot.addWidget(ntree)
-
-    assert (
-        len(
-            ntree.findItems(
-                "new_neurongroup",
-                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
-                0,
-            )
-        )
-        == 0
-    )
-
-    assert "new_neurongroup" not in mfx_nmda.neurongroups
-    ntree._add_item()
-    assert "new_neurongroup" in mfx_nmda.neurongroups
-    assert (
-        len(
-            ntree.findItems(
-                "new_neurongroup",
-                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
-                0,
-            )
-        )
-        == 1
-    )
-
-    assert (
-        len(
-            ntree.findItems(
-                "new_neuronsubgroup",
-                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
-                0,
-            )
-        )
-        == 0
-    )
-    assert "new_neuronsubgroup" not in mfx_nmda.neurongroups
-    ntree._add_neuronsubgroup()
-
-    assert (
-        len(
-            ntree.findItems(
-                "new_neuronsubgroup",
-                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
-                1,
-            )
-        )
-        == 0
-    )
-    assert "new_neuronsubgroup" in mfx_nmda.neurongroups
-
-
-def test_tree_add_new_synapses(mfx_nmda, qtbot: QtBot) -> None:
-    ntree = EditableSynapseTree(
-        mfx_nmda,
-    )
-    qtbot.addWidget(ntree)
-
-    assert (
-        len(
-            ntree.findItems(
-                "new_synapse",
-                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
-                0,
-            )
-        )
-        == 0
-    )
-
-    assert "new_synapse" not in mfx_nmda.synapses
-    ntree._add_item()
-    assert "new_synapse" in mfx_nmda.synapses
-    assert (
-        len(
-            ntree.findItems(
-                "new_synapse",
-                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
-                0,
-            )
-        )
-        == 1
-    )
-
-
-def test_tree_add_new_monitor(mfx_nmda, qtbot: QtBot) -> None:
-    ntree = EditableMonitorTree(
-        mfx_nmda,
-    )
-    qtbot.addWidget(ntree)
-
-    assert (
-        len(
-            ntree.findItems(
-                "new_monitor",
-                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
-                0,
-            )
-        )
-        == 0
-    )
-
-    assert "new_monitor" not in mfx_nmda.monitors
-    ntree._add_item()
-    assert "new_monitor" in mfx_nmda.monitors
-    assert (
-        len(
-            ntree.findItems(
-                "new_monitor",
-                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
-                0,
-            )
-        )
-        == 1
-    )
-
-
-def test_add_new_init(mfx_nmda, qtbot: QtBot) -> None:
-    itree = EditableParameterTree(
-        mfx_nmda, "initials", mfx_nmda.define_default_init, add_to_groups=True
-    )
-
-    qtbot.add_widget(itree)
-
-    assert "group" not in mfx_nmda.initials
-    itree._add_item()
-    assert "group" in mfx_nmda.initials
-
-
 def test_add_new_init_element(mfx_nmda, qtbot: QtBot) -> None:
     itree = EditableParameterTree(
         mfx_nmda, "initials", mfx_nmda.define_default_init, add_to_groups=True
@@ -278,6 +108,274 @@ def test_add_new_init_element(mfx_nmda, qtbot: QtBot) -> None:
 
     assert "variable" in mfx_nmda.initials["S"]
     assert "value" in mfx_nmda.initials["S"]["variable"]
+
+
+def test_default_neurongroup_addition(
+    mfx_nmda: B2Model,
+    qtbot: QtBot,
+) -> None:
+    mdiag = ModelEditorDialog(mfx_nmda)
+    qtbot.addWidget(mdiag)
+
+    # find add neurongroup button
+    button = next(
+        filter(
+            lambda p: p.text() == "New Neurongroup",
+            mdiag.findChildren(QtWidgets.QPushButton),
+        )
+    )
+    assert button is not None
+    qtbot.mouseClick(button, QtCore.Qt.LeftButton)
+    ntree = mdiag.findChild(EditableNeurongroupTree)
+
+    assert "new_neurongroup" in mdiag.b2model.neurongroups
+    for name, should in zip(
+        [
+            "neuronnumber",
+            "model",
+            "method",
+            "dt",
+            "reset",
+            "th",
+            "refractory",
+        ],
+        [0, "dx/dt = y : 1", "-", 10 * b2.msecond, "0", "0", "0"],
+        strict=True,
+    ):
+        assert mdiag.b2model.neurongroups["new_neurongroup"][name] == should
+        o = [
+            o
+            for o in ntree.findItems(
+                name,
+                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+                0,
+            )
+            if o.parent().param.name() == "new_neurongroup"
+        ][0]
+
+        if isinstance(o.widget, QtWidgets.QLineEdit):
+            assert (
+                o.widget.text() == should.__repr__()
+                if isinstance(should, b2.Quantity)
+                else str(should)
+            )
+        elif isinstance(o.widget, QtWidgets.QTextEdit):
+            assert (
+                o.widget.toPlainText() == should.__repr__()
+                if isinstance(should, b2.Quantity)
+                else str(should)
+            )
+        else:
+            assert (
+                o.widget.currentText() == should.__repr__()
+                if isinstance(should, b2.Quantity)
+                else str(should)
+            )
+
+
+def test_default_synapse_addition(
+    mfx_nmda: B2Model,
+    qtbot: QtBot,
+) -> None:
+    mdiag = ModelEditorDialog(mfx_nmda)
+    qtbot.addWidget(mdiag)
+
+    button = next(
+        filter(
+            lambda p: p.text() == "New Synapse",
+            mdiag.findChildren(QtWidgets.QPushButton),
+        )
+    )
+    assert button is not None
+    qtbot.mouseClick(button, QtCore.Qt.LeftButton)
+    stree = mdiag.findChild(EditableSynapseTree)
+
+    assert "new_synapse" in mdiag.b2model.synapses
+
+    for name, should in zip(
+        [
+            "origin",
+            "target",
+            "method",
+            "model",
+            "on_pre",
+            "on_post",
+            "dt",
+            "delay",
+            "p",
+            "connection_condition",
+        ],
+        [
+            "-",
+            "-",
+            "-",
+            "dx/dt = y : 1",
+            "x=y",
+            "x=y",
+            10 * b2.ms,
+            0 * b2.ms,
+            0.0,
+            "x!=y",
+        ],
+        strict=True,
+    ):
+        assert mdiag.b2model.synapses["new_synapse"][name] == should
+
+        o = [
+            o
+            for o in stree.findItems(
+                name,
+                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+                0,
+            )
+            if o.parent().param.name() == "new_synapse"
+        ][0]
+
+        if isinstance(o.widget, QtWidgets.QLineEdit):
+            assert (
+                o.widget.text() == should.__repr__()
+                if isinstance(should, b2.Quantity)
+                else str(should)
+            )
+        elif isinstance(o.widget, QtWidgets.QTextEdit):
+            assert (
+                o.widget.toPlainText() == should.__repr__()
+                if isinstance(should, b2.Quantity)
+                else str(should)
+            )
+        else:
+            assert (
+                o.widget.currentText() == should.__repr__()
+                if isinstance(should, b2.Quantity)
+                else str(should)
+            )
+
+
+def test_default_monitor_addition(
+    mfx_nmda: B2Model,
+    qtbot: QtBot,
+) -> None:
+    mdiag = ModelEditorDialog(mfx_nmda)
+    qtbot.addWidget(mdiag)
+
+    button = next(
+        filter(
+            lambda p: p.text() == "New Monitor",
+            mdiag.findChildren(QtWidgets.QPushButton),
+        )
+    )
+    assert button is not None
+    qtbot.mouseClick(button, QtCore.Qt.LeftButton)
+    stree = mdiag.findChild(EditableMonitorTree)
+
+    assert "new_monitor" in mdiag.b2model.monitors
+
+    for name, should in zip(
+        ["type", "source", "variable", "dt"],
+        ["-", "-", "-", None],
+        strict=True,
+    ):
+        assert mdiag.b2model.monitors["new_monitor"][name] == should
+
+        o = [
+            o
+            for o in stree.findItems(
+                name,
+                QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+                0,
+            )
+            if o.parent().param.name() == "new_monitor"
+        ][0]
+
+        if isinstance(o.widget, QtWidgets.QLineEdit):
+            assert (
+                o.widget.text() == should.__repr__()
+                if isinstance(should, b2.Quantity)
+                else str(should)
+            )
+        elif isinstance(o.widget, QtWidgets.QTextEdit):
+            assert (
+                o.widget.toPlainText() == should.__repr__()
+                if isinstance(should, b2.Quantity)
+                else str(should)
+            )
+        else:
+            assert (
+                o.widget.currentText() == should.__repr__()
+                if isinstance(should, b2.Quantity)
+                else str(should)
+            )
+
+
+def test_default_parameter_addition(
+    mfx_nmda: B2Model,
+    qtbot: QtBot,
+) -> None:
+    mdiag = ModelEditorDialog(mfx_nmda)
+    qtbot.addWidget(mdiag)
+
+    button = next(
+        filter(
+            lambda p: p.text() == "New Parameter",
+            mdiag.findChildren(QtWidgets.QPushButton),
+        )
+    )
+    assert button is not None
+    qtbot.mouseClick(button, QtCore.Qt.LeftButton)
+    forest = mdiag.findChildren(
+        EditableParameterTree,
+    )
+    stree = [tree for tree in forest if tree.name == "parameters"][0]
+
+    assert "new_parameter" in mdiag.b2model.parameters
+
+    assert mdiag.b2model.parameters["new_parameter"] is None
+
+    o = stree.findItems(
+        "new_parameter",
+        QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+        0,
+    )[0]
+
+    assert o.widget.text() == "None"
+
+
+def test_default_init_addition(
+    mfx_nmda: B2Model,
+    qtbot: QtBot,
+) -> None:
+    mdiag = ModelEditorDialog(mfx_nmda)
+    qtbot.addWidget(mdiag)
+
+    button = next(
+        filter(
+            lambda p: p.text() == "New Initial Condition",
+            mdiag.findChildren(QtWidgets.QPushButton),
+        )
+    )
+    assert button is not None
+
+    qtbot.mouseClick(button, QtCore.Qt.LeftButton)
+    forest = mdiag.findChildren(
+        EditableParameterTree,
+    )
+    stree = [tree for tree in forest if tree.name == "initials"][0]
+
+    assert "group" in mdiag.b2model.initials
+
+    assert mdiag.b2model.initials["group"]["value"] is None
+
+    o = [
+        o
+        for o in stree.findItems(
+            "value",
+            QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+            0,
+        )
+        if o.parent().param.name() == "group"
+    ][0]
+
+    assert o.widget.text() == "None"
 
 
 def test_delete_neurongroup(mfx_nmda, qtbot: QtBot) -> None:
@@ -573,14 +671,16 @@ def test_neurontree_add_neurongroup_list_update(
 
     assert set(vs) == set(entries)
 
-    assert set(variables) == set(list(mtree.b2model.network["neurons"].equations.names))
+    assert set(variables) == set(
+        list(mtree.b2model.network["neurons"].equations.names)
+        + [
+            "-",
+        ]
+    )
 
     variables = mtree._make_selection_list("SpikeMonitor", source)
     assert set(variables) == set(
-        list(mtree.b2model.network["neurons"].variables)
-        + [
-            "None",
-        ]
+        list(mtree.b2model.network["neurons"].variables) + ["None", "-"]
     )
 
     ntree._add_item()
@@ -598,6 +698,7 @@ def test_neurontree_add_neurongroup_list_update(
             "new_neurongroup",
             "input_subgroup",
             "new_neuronsubgroup",
+            "-",
         ]
     )
 
@@ -608,27 +709,10 @@ def test_neurontree_add_neurongroup_list_update(
 
     assert set(updated_list) == set(
         list(mtree.b2model.network["neurons"].equations.names)
+        + [
+            "-",
+        ]
     )
-
-
-def test_dropdown_menu_for_new_item(
-    mfx_nmda: B2Model,
-    qtbot: QtBot,
-):
-    mfx_nmda.define_default_synapse()
-    stree = EditableSynapseTree(mfx_nmda)
-    ot = [
-        o
-        for o in stree.findItems(
-            "origin",
-            QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
-            0,
-        )
-        if o.parent().param.name() == "new_synapse"
-    ]
-
-    for item in ot:
-        assert item.widget.currentText() == "-"
 
 
 def test_modeldialog_accept(
@@ -692,6 +776,9 @@ def test_method_selection(
             method_dropdown_elements,
         )
     )[0]
+
+    # FIXME: this signal connection is wrong. It needs to start with the selection of the menu item, which should then trigger the 'sigValueChanged' signal in the end.
+    # it does so in the real app, but not in the tests
 
     with qtbot.waitSignal(
         method_dropdown.param.sigValueChanged, timeout=1000, raising=True

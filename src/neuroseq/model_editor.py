@@ -917,7 +917,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
             col_add = 0
             if k == "Neurongroups":
                 col_add = 4
-                add_group_button_sub = QtWidgets.QPushButton("New subgroup", self)
+                add_group_button_sub = QtWidgets.QPushButton("New Subgroup", self)
                 layout.addWidget(add_group_button_sub, 0, i + 2)
                 add_group_button_sub.clicked.connect(tree._add_neuronsubgroup)
             else:

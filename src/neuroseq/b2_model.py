@@ -618,7 +618,7 @@ class B2Model:
             )
 
         self.define_neuronnumber(name, 0)
-        self.define_equation(name, "dx/dt=y:1")
+        self.define_equation(name, "dx/dt = y : 1")
         self.define_solver_method(name, "-")
         self.define_dt(name, 10 * b2.ms)
         self.define_reset(name, "0")
@@ -1071,7 +1071,7 @@ class B2Model:
         )
         self.define_synapse_equation(
             name,
-            "dx/dt=y:1",
+            "dx/dt = y : 1",
         )
         self.define_synapse_solver_method(
             name,
@@ -1544,7 +1544,7 @@ class B2Model:
 
         self.define_monitor_type(
             name,
-            "StateMonitor",
+            "-",
         )
         self.define_monitor_source(name, "-")
         self.define_monitor_variable(name, "-")
