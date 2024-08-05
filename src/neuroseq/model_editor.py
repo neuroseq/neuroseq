@@ -103,7 +103,7 @@ class UpdatingListParameterItem(ListParameterItem):
         # instead of the normal QComboBox
         w = EagerQComboBox()
         w.setMaximumHeight(20)  ## set to match height of spin box and line edit
-        w.sigChanged = w.activated
+        w.sigChanged = w.currentIndexChanged
         w.value = self.value
         w.setValue = self.setValue
         self.widget = w  ## needs to be set before limits are changed
@@ -606,6 +606,7 @@ class EditableMonitorTree(EditableParameterTree):
                     "update_from": lambda: [
                         b2.StateMonitor.__name__,
                         b2.SpikeMonitor.__name__,
+                        "-",
                     ],
                 },
                 "source": {

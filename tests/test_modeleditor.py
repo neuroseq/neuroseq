@@ -306,6 +306,133 @@ def test_default_monitor_addition(
                 else str(should)
             )
 
+    # select stuff that makes sense and test that it is carried over correctly
+
+    # find dropdown
+    typeitem = [
+        p
+        for p in stree.findItems(
+            "type",
+            QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+            0,
+        )
+        if p.parent().param.name() == "new_monitor"
+    ][0]
+
+    sourceitem = [
+        p
+        for p in stree.findItems(
+            "type",
+            QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+            0,
+        )
+        if p.parent().param.name() == "new_monitor"
+    ][0]
+
+    varitem = [
+        p
+        for p in stree.findItems(
+            "type",
+            QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+            0,
+        )
+        if p.parent().param.name() == "new_monitor"
+    ][0]
+
+    assert typeitem is not None
+    assert sourceitem is not None
+    assert varitem is not None
+
+    with qtbot.waitSignal(typeitem.widget.activated, timeout=1000, raising=True):
+        qtbot.mouseClick(typeitem.widget, QtCore.Qt.LeftButton)
+        qtbot.keyClick(typeitem.widget, QtCore.Qt.Key_Up)
+
+    assert typeitem.widget.currentText() == "SpikeMonitor"
+    assert typeitem.param.value() == "SpikeMonitor"
+    assert stree.b2model.monitors["new_monitor"]["type"] == "SpikeMonitor"
+
+
+def test_default_monitor_customization(
+    mfx_nmda: B2Model,
+    qtbot: QtBot,
+) -> None:
+    mdiag = ModelEditorDialog(mfx_nmda)
+    qtbot.addWidget(mdiag)
+
+    button = next(
+        filter(
+            lambda p: p.text() == "New Monitor",
+            mdiag.findChildren(QtWidgets.QPushButton),
+        )
+    )
+    assert button is not None
+    qtbot.mouseClick(button, QtCore.Qt.LeftButton)
+    stree = mdiag.findChild(EditableMonitorTree)
+
+    # select stuff that makes sense and test that it is carried over correctly
+
+    # find dropdown
+    typeitem = [
+        p
+        for p in stree.findItems(
+            "type",
+            QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+            0,
+        )
+        if p.parent().param.name() == "new_monitor"
+    ][0]
+
+    sourceitem = [
+        p
+        for p in stree.findItems(
+            "source",
+            QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+            0,
+        )
+        if p.parent().param.name() == "new_monitor"
+    ][0]
+
+    varitem = [
+        p
+        for p in stree.findItems(
+            "variable",
+            QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+            0,
+        )
+        if p.parent().param.name() == "new_monitor"
+    ][0]
+
+    assert typeitem is not None
+    assert sourceitem is not None
+    assert varitem is not None
+
+    with qtbot.waitSignal(
+        typeitem.widget.currentIndexChanged, timeout=1000, raising=True
+    ):
+        typeitem.widget.setCurrentIndex(0)
+
+    assert typeitem.widget.currentText() == "StateMonitor"
+    assert typeitem.param.value() == "StateMonitor"
+    assert stree.b2model.monitors["new_monitor"]["type"] == "StateMonitor"
+
+    with qtbot.waitSignal(
+        sourceitem.widget.currentIndexChanged, timeout=1000, raising=True
+    ):
+        sourceitem.widget.setCurrentIndex(1)
+
+    assert sourceitem.widget.currentText() == "neurons"
+    assert sourceitem.param.value() == "neurons"
+    assert stree.b2model.monitors["new_monitor"]["source"] == "neurons"
+
+    with qtbot.waitSignal(
+        varitem.widget.currentIndexChanged, timeout=1000, raising=True
+    ):
+        varitem.widget.setCurrentIndex(2)
+
+    assert varitem.widget.currentText() != "-"
+    assert varitem.param.value() != "-"
+    assert stree.b2model.monitors["new_monitor"]["variable"] != "-"
+
 
 def test_default_parameter_addition(
     mfx_nmda: B2Model,

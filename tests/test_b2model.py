@@ -1085,7 +1085,7 @@ def test_default_group_addition(mfx_ornstein) -> None:
     mfx_ornstein.define_default_neurongroup()
     assert mfx_ornstein.neurongroups["new_neurongroup"] == {
         "neuronnumber": 0,
-        "model": "dx/dt=y:1",
+        "model": "dx/dt = y : 1",
         "method": "-",
         "dt": 10 * b2.ms,
         "reset": "0",
@@ -1097,7 +1097,7 @@ def test_default_group_addition(mfx_ornstein) -> None:
     assert mfx_ornstein.synapses["new_synapse"] == {
         "origin": "-",
         "target": "-",
-        "model": "dx/dt=y:1",
+        "model": "dx/dt = y : 1",
         "method": "-",
         "dt": 10 * b2.ms,
         "delay": 0 * b2.ms,
@@ -1109,7 +1109,7 @@ def test_default_group_addition(mfx_ornstein) -> None:
 
     mfx_ornstein.define_default_monitor()
     assert mfx_ornstein.monitors["new_monitor"] == {
-        "type": "StateMonitor",
+        "type": "-",
         "source": "-",
         "variable": "-",
         "dt": None,
