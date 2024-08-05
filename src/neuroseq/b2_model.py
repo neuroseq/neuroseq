@@ -618,8 +618,8 @@ class B2Model:
             )
 
         self.define_neuronnumber(name, 0)
-        self.define_equation(name, "dv/dt=0:1")
-        self.define_solver_method(name, "euler")
+        self.define_equation(name, "dx/dt=y:1")
+        self.define_solver_method(name, "-")
         self.define_dt(name, 10 * b2.ms)
         self.define_reset(name, "0")
         self.define_threshold(name, "0")
@@ -639,8 +639,8 @@ class B2Model:
                 lambda: self.set_rebuilt(True),
             )
 
-        self.define_neuronsubgroup_target(name, "unknown")
-        self.define_neuronsubgroup_idxs(name, [0, 1])
+        self.define_neuronsubgroup_target(name, "-")
+        self.define_neuronsubgroup_idxs(name, [0, 0])
 
     @_trigger_rebuild
     def define_dt(self, name: str, dt: b2.Quantity) -> None:
@@ -1063,19 +1063,19 @@ class B2Model:
 
         self.define_synapse_origin(
             name,
-            "origin",
+            "-",
         )
         self.define_synapse_target(
             name,
-            "target",
+            "-",
         )
         self.define_synapse_equation(
             name,
-            "dv/dt=0:1",
+            "dx/dt=y:1",
         )
         self.define_synapse_solver_method(
             name,
-            "euler",
+            "-",
         )
         self.define_synapse_dt(
             name,
@@ -1087,7 +1087,7 @@ class B2Model:
         )
         self.define_synapse_connection(
             name,
-            "i!=j",
+            "x!=y",
         )
         self.define_synapse_connection_probability(
             name,
@@ -1546,8 +1546,8 @@ class B2Model:
             name,
             "StateMonitor",
         )
-        self.define_monitor_source(name, "source")
-        self.define_monitor_variable(name, "variable")
+        self.define_monitor_source(name, "-")
+        self.define_monitor_variable(name, "-")
         self.define_monitor_dt(name, None)
 
     @_trigger_rebuild

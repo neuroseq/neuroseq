@@ -111,15 +111,9 @@ class UpdatingListParameterItem(ListParameterItem):
         # we also need to reconnect the signal
         self.widget.clicked.connect(self._update_list)
 
-        self.limitsChanged(
-            self.param,
-            [
-                "-",
-            ]
-            + self.update(),
-        )
-
-        self.widget.setCurrentIndex(0)
+        self.limitsChanged(self.param, self.update())
+        if len(self.forward) > 0 and self.param.hasValue():
+            self.setValue(self.param.value())
         return w
 
     def _update_list(self) -> None:
@@ -559,13 +553,20 @@ class EditableSynapseTree(EditableParameterTree):
                         "euler",
                         "exponential_euler",
                         "exact",
+                        "rk2",
+                        "rk4",
+                        "heun",
+                        "milstein",
+                        "-",
                     ],  # methods are static, so we can give a list
                 },
                 "origin": {
-                    "update_from": lambda: list(self.b2model.neurongroups.keys()),
+                    "update_from": lambda: list(self.b2model.neurongroups.keys())
+                    + ["-"],
                 },
                 "target": {
-                    "update_from": lambda: list(self.b2model.neurongroups.keys()),
+                    "update_from": lambda: list(self.b2model.neurongroups.keys())
+                    + ["-"],
                 },
             },
         )
@@ -625,11 +626,15 @@ class EditableMonitorTree(EditableParameterTree):
         list[str]
             list of synapses to choose from
         """
-        lst = [
-            n
-            for n in self.b2model.neurongroups
-            if "idx" not in self.b2model.neurongroups[n]
-        ] + list(self.b2model.synapses.keys())
+        lst = (
+            [
+                n
+                for n in self.b2model.neurongroups
+                if "idx" not in self.b2model.neurongroups[n]
+            ]
+            + list(self.b2model.synapses.keys())
+            + ["-"]
+        )
 
         self.logger.debug(f"updating available object list for monitors to {lst}")
         return lst
@@ -654,10 +659,13 @@ class EditableMonitorTree(EditableParameterTree):
         # if none are given for the respective monitor, which gives the set of
         # selectable variables
         if typename == "StateMonitor":
-            return list(self.b2model.network[sourcename].equations.names)
+            return list(self.b2model.network[sourcename].equations.names) + [
+                "-",
+            ]
         elif typename == "SpikeMonitor":
             return list(self.b2model.network[sourcename].variables.keys()) + [
                 "None",
+                "-",
             ]  # None is allowed for spikemonitor
         else:
             message = f"Unknonw monitor type {typename}"
@@ -701,16 +709,23 @@ class EditableMonitorTree(EditableParameterTree):
                 self.logger.critical(
                     f"Something went wrong while forming selection for monitored element {source.text(0)}: {e}"
                 )
-                varnames = list(
-                    self.b2model.network[source.value()].get_states().keys()
-                )
+
+                if source.value() in self.b2model.network.objects:
+                    existing_vars = list(
+                        self.b2model.network[source.value()].get_states().keys()
+                    )
+                else:
+                    existing_vars = []
+                varnames = existing_vars + ["None", "-"]
             return varnames
         else:
             self.logger.debug("no selected item found, make full list of variables")
             # when we have no selected items, we make a big list of everything that's available since we don´t yet
             # know which one it will be, and we need a list that contains the actually selected one in the
             # underlying monitor definition in order to display it correctly
-            varnames = []
+            varnames = [
+                "-",
+            ]
             for obj in self.b2model.network.objects:
                 if isinstance(obj, b2.StateMonitor | b2.EventMonitor):
                     continue
@@ -764,6 +779,7 @@ class EditableNeurongroupTree(EditableParameterTree):
                         "rk4",
                         "heun",
                         "milstein",
+                        "-",
                     ],
                 },
                 "target": {
@@ -799,6 +815,8 @@ class EditableNeurongroupTree(EditableParameterTree):
             n
             for n in self.b2model.neurongroups
             if "idxs" not in self.b2model.neurongroups[n]
+        ] + [
+            "-",
         ]
 
     def contextMenuEvent(self, ev: QtCore.Event) -> None:
