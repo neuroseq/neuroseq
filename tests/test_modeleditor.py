@@ -777,9 +777,6 @@ def test_method_selection(
         )
     )[0]
 
-    # FIXME: this signal connection is wrong. It needs to start with the selection of the menu item, which should then trigger the 'sigValueChanged' signal in the end.
-    # it does so in the real app, but not in the tests
-
     with qtbot.waitSignal(
         method_dropdown.param.sigValueChanged, timeout=1000, raising=True
     ):
@@ -790,20 +787,20 @@ def test_method_selection(
 
     assert mfx_nmda.network["Mn"].g.shape == (1, 0)
     # try to run
-    mfx_nmda.run_simulation(1.0 * b2.second)
+    diag.b2model.run_simulation(1.0 * b2.second)
 
-    exp_euler_data_shape = mfx_nmda.network["Mn"].g.shape
+    exp_euler_data_shape = diag.b2model.network["Mn"].g.shape
 
     with qtbot.waitSignal(
         method_dropdown.param.sigValueChanged, timeout=1000, raising=True
     ):
         method_dropdown.param.setValue("euler")
-    assert mfx_nmda.neurongroups["neuron_input"]["method"] == "euler"
+    assert diag.b2model.neurongroups["neuron_input"]["method"] == "euler"
 
-    mfx_nmda.assemble_network()
-    mfx_nmda.run_simulation(1.0 * b2.second)
+    diag.b2model.assemble_network()
+    diag.b2model.run_simulation(1.0 * b2.second)
 
-    euler_data_shape = mfx_nmda.network["Mn"].g.shape
+    euler_data_shape = diag.b2model.network["Mn"].g.shape
 
     assert exp_euler_data_shape == euler_data_shape
 
