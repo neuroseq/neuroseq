@@ -7,16 +7,17 @@ import brian2 as b2
 import pytest
 from brian2 import numpy_ as np
 from brian2.tests.utils import assert_allclose
-from neuroseq.b2_model import B2Model
-from neuroseq.gui import Gui
-from neuroseq.model_editor import EditableSynapseTree
-from neuroseq.model_editor import ModelEditorDialog
-from neuroseq.selectable_bar_plot_item import SelectableBarPlotItem
 from pytest import MonkeyPatch
 from pytest import approx
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
+
+from neuroseq.b2_model import B2Model
+from neuroseq.gui import Gui
+from neuroseq.model_editor import EditableSynapseTree
+from neuroseq.model_editor import ModelEditorDialog
+from neuroseq.selectable_bar_plot_item import SelectableBarPlotItem
 
 # no obvious signal to wait for after the model is updated to know when the GUI is ready,
 # so for now we just wait for a fixed time

@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 from click.testing import CliRunner
+
 from neuroseq.__main__ import main
 
 

@@ -1,4 +1,10 @@
 import brian2 as b2
+from pyqtgraph.parametertree import Parameter
+from pytest import MonkeyPatch
+from pytestqt.qtbot import QtBot
+from qtpy import QtCore
+from qtpy import QtWidgets
+
 from neuroseq.b2_model import B2Model
 from neuroseq.model_editor import EagerQComboBox
 from neuroseq.model_editor import EditableMonitorTree
@@ -6,11 +12,6 @@ from neuroseq.model_editor import EditableNeurongroupTree
 from neuroseq.model_editor import EditableParameterTree
 from neuroseq.model_editor import EditableSynapseTree
 from neuroseq.model_editor import ModelEditorDialog
-from pyqtgraph.parametertree import Parameter
-from pytest import MonkeyPatch
-from pytestqt.qtbot import QtBot
-from qtpy import QtCore
-from qtpy import QtWidgets
 
 
 def test_EagerComboBox(qtbot: QtBot) -> None:

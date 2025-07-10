@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import brian2 as b2
 from brian2 import numpy_ as np
-from neuroseq.timed_array_modifer import TimedArrayModifier
 from pytest import approx
+
+from neuroseq.timed_array_modifer import TimedArrayModifier
 
 
 def test_timed_array_modifier() -> None:

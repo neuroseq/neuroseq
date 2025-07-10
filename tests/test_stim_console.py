@@ -5,11 +5,12 @@ from typing import Any
 import brian2 as b2
 import brian2.numpy_ as np
 import pytest
+from pytestqt.qtbot import QtBot
+from qtpy import QtCore
+
 from neuroseq.b2_model import B2Model
 from neuroseq.stim_console import StimConsole
 from neuroseq.timed_array_modifer import TimedArrayModifier
-from pytestqt.qtbot import QtBot
-from qtpy import QtCore
 
 
 @pytest.mark.parametrize(

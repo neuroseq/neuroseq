@@ -4,8 +4,9 @@ from typing import cast
 
 import brian2.numpy_ as np
 import pyqtgraph as pg
-from neuroseq.spike_widget import SpikeWidget
 from pytestqt.qtbot import QtBot
+
+from neuroseq.spike_widget import SpikeWidget
 
 
 def test_spike_widget(qtbot: QtBot) -> None:

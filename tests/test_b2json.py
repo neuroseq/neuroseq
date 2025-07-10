@@ -8,6 +8,7 @@ from brian2 import ms
 from brian2 import nS
 from brian2 import second
 from brian2.tests.utils import assert_allclose
+
 from neuroseq import b2json
 
 
