@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import brian2.numpy_ as np
 import pytest
-from neuroseq.timeseries_widget import TimeseriesWidget
 from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
+
+from neuroseq.timeseries_widget import TimeseriesWidget
 
 
 class InvalidTimeseriesWidget(TimeseriesWidget):

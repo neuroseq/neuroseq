@@ -10,10 +10,11 @@ import brian2.numpy_ as np
 import h5py
 import pytest
 from brian2.tests.utils import assert_allclose
-from neuroseq import b2_model
-from neuroseq import b2json
 from pytest import MonkeyPatch
 from pytest_mock import MockerFixture
+
+from neuroseq import b2_model
+from neuroseq import b2json
 
 
 def test_construction(tmp_path: Path) -> None:

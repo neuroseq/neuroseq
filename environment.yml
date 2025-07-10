@@ -7,7 +7,7 @@ dependencies:
   - numpy
   - qtpy
   - matplotlib
-  - pyside6
+  - pyside6 !=6.9.1
   - pyqtgraph
   - h5py
   - qtawesome

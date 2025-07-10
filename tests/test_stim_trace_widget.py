@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import brian2.numpy_ as np
 import pytest
-from neuroseq.stim_trace_widget import StimTraceWidget
 from pytestqt.qtbot import QtBot
+
+from neuroseq.stim_trace_widget import StimTraceWidget
 
 
 def test_stim_trace_widget(qtbot: QtBot) -> None:

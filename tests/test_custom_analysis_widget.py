@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import brian2.numpy_ as np
+from pytestqt.qtbot import QtBot
+
 from neuroseq.custom_analysis_widget import CustomAnalysisDataType
 from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
-from pytestqt.qtbot import QtBot
 
 gui_delay_in_ms = 50
 

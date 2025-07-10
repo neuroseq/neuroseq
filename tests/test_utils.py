@@ -5,6 +5,7 @@ from typing import Any
 import brian2 as b2
 import pytest
 from brian2 import numpy_ as np
+
 from neuroseq import utils
 
 

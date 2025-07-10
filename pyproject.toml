@@ -14,7 +14,7 @@ dependencies = [
     "matplotlib",
     "numpy",
     "qtpy",
-    "pyside6",
+    "pyside6!=6.9.1",
     "pyqtgraph",
     "h5py",
     "qtawesome",
@@ -25,7 +25,7 @@ dynamic = ["version"]
 [project.scripts]
 neuroseq = "neuroseq.__main__:main"
 
-[project.optional-dependencies]
+[dependency-groups]
 tests = [
     "memray",
     "pytest",

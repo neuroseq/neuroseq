@@ -3,10 +3,11 @@ from __future__ import annotations
 from time import perf_counter
 
 import brian2.numpy_ as np
-from neuroseq.heatmap_widget import HeatmapWidget
 from pytest import approx
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
+
+from neuroseq.heatmap_widget import HeatmapWidget
 
 
 def test_heatmap_widget_no_data(qtbot: QtBot) -> None:

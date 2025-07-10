@@ -7,10 +7,11 @@ from typing import Any
 import brian2 as b2
 import brian2.numpy_ as np
 import pytest
+from qtpy import QtWidgets
+
 from neuroseq import b2_model
 from neuroseq.utils import example_models_path
 from neuroseq.utils import init_brian2_logging
-from qtpy import QtWidgets
 
 b2.prefs.codegen.target = "numpy"
 

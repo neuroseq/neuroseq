@@ -3,9 +3,10 @@ from pathlib import Path
 
 import brian2 as b2
 import pytest
+from pytest import MonkeyPatch
+
 from neuroseq.b2_model import B2Model
 from neuroseq.reconstructor import Reconstructor
-from pytest import MonkeyPatch
 
 
 @pytest.fixture()

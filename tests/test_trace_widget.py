@@ -4,8 +4,9 @@ from typing import cast
 
 import brian2.numpy_ as np
 import pyqtgraph as pg
-from neuroseq.trace_widget import TraceWidget
 from pytestqt.qtbot import QtBot
+
+from neuroseq.trace_widget import TraceWidget
 
 
 def test_trace_widget(qtbot: QtBot) -> None:

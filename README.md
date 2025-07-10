@@ -106,7 +106,7 @@ To do an editable installation including test dependencies and pre-commit:
 ```bash
 git clone git@github.com:ssciwr/neuroseq.git
 cd neuroseq
-pip install -e .[tests]
+pip install -e . --group tests
 pip install pre-commit
 pre-commit install
 ```

@@ -6,12 +6,13 @@ import brian2 as b2
 import brian2.numpy_ as np
 import pytest
 import qtpy
-from neuroseq.selectable_bar_plot_item import SelectableBarPlotItem
-from neuroseq.stim_widget import StimWidget
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy.QtTest import QTest
+
+from neuroseq.selectable_bar_plot_item import SelectableBarPlotItem
+from neuroseq.stim_widget import StimWidget
 
 
 def mouse_ctrl_click(
