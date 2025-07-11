@@ -28,7 +28,7 @@ class StimWidget(TimeseriesWidget):
         if stims is None:
             self.clear_data()
             return
-        super()._plot_data(stims.values.T, dt=stims.dt)
+        super()._plot_data(1000 * stims.values.T, dt=1000 * stims.dt)  # convert to ms
 
     def _plot_neuron_data(
         self, data: list[np.ndarray] | np.ndarray, timestamps: np.ndarray, dt: float

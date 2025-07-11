@@ -96,13 +96,13 @@ def test_stim_widget_no_ctrl_key(qtbot: QtBot, stims: b2.TimedArray) -> None:
     neuron_plot = cast(SelectableBarPlotItem, stim_widget.neuron_plots[0])
     assert len(neuron_plot.getData()[0]) == n_timestamps
     # bar plot x-values are the center of the bars, so shifted forwards by 0.5dt compared to timestamps
-    assert np.allclose(neuron_plot.getData()[0], timestamps + 0.5 * stims.dt)
+    assert np.allclose(neuron_plot.getData()[0], 1000 * (timestamps + 0.5 * stims.dt))
     # set dt instead of providing timestamps array, same x-values should be constructed
     stim_widget.set_data(stims)
     assert len(stim_widget.neuron_plots) == n_neurons
     neuron_plot = cast(SelectableBarPlotItem, stim_widget.neuron_plots[0])
     assert len(neuron_plot.getData()[0]) == n_timestamps
-    assert np.allclose(neuron_plot.getData()[0], timestamps + 0.5 * stims.dt)
+    assert np.allclose(neuron_plot.getData()[0], 1000 * (timestamps + 0.5 * stims.dt))
     # initially no neurons are selected
     assert stim_widget.selected_neuron_slice is None
     assert stim_widget.selected_time_slice is None

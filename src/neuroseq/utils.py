@@ -76,7 +76,7 @@ def construct_synapse_matrix(
         strict=True,
     ):
         matrix[i, j, :] = value
-    timestamps = (monitor.t / b2.second)[::downsample_factor]
+    timestamps = (monitor.t / b2.msecond)[::downsample_factor]
     return matrix, timestamps
 
 

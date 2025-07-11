@@ -282,7 +282,7 @@ class Gui(QtWidgets.QMainWindow):
         if neuron_name not in self.neurons:
             return
         monitor, variable = self.neurons[neuron_name]
-        timestamps = monitor.t / b2.second
+        timestamps = monitor.t / b2.msecond
         if timestamps.shape[0] == 0:
             self.trace_widget.clear_data()
             return
@@ -298,6 +298,7 @@ class Gui(QtWidgets.QMainWindow):
             data = self.external_simulation_data[neuron_name]
             timestamps = data["timestamps"]
             assert isinstance(timestamps, np.ndarray)
+            timestamps / 0.001  # convert to millisecondss
             traces = data["traces"]
             assert isinstance(traces, np.ndarray)
             self.logger.info(
@@ -344,7 +345,9 @@ class Gui(QtWidgets.QMainWindow):
             self.logger.info(
                 f"Displaying external HeatmapWidget data {synapse_name}: {timestamps.shape} timestamps, {matrix.shape} data"
             )
-            self.heatmap_widget.set_data(matrix, timestamps)
+            self.heatmap_widget.set_data(
+                matrix, timestamps / 0.001
+            )  # convert to milliseconds
         except Exception as e:
             QtWidgets.QMessageBox.critical(
                 self,
@@ -364,8 +367,8 @@ class Gui(QtWidgets.QMainWindow):
             return
         monitor = self.spikes[spike_name]
         spikes = monitor.variables["i"].get_value().T
-        timestamps = monitor.t / b2.second
-        dt = monitor.clock.dt / b2.second
+        timestamps = monitor.t / b2.msecond
+        dt = monitor.clock.dt / b2.msecond
         n_neurons = monitor.source.N
         n_timesteps = int(monitor.clock.t / monitor.clock.dt)
         if timestamps.shape[0] == 0:
@@ -382,6 +385,7 @@ class Gui(QtWidgets.QMainWindow):
             data = self.external_simulation_data[spike_name]
             timestamps = data["timestamps"]
             assert isinstance(timestamps, np.ndarray)
+            timestamps /= 0.001  # convert to milliseconds
             spikes = data["spikes"]
             assert isinstance(spikes, np.ndarray)
             dt = data["dt"]
