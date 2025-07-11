@@ -26,8 +26,9 @@ dynamic = ["version"]
 neuroseq = "neuroseq.__main__:main"
 
 [dependency-groups]
-tests = [
+dev = [
     "memray",
+    "pre-commit",
     "pytest",
     "pytest-qt",
     "pytest-randomly",
