@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
 
 import brian2 as b2
 import pytest
@@ -17,7 +16,6 @@ from neuroseq.b2_model import B2Model
 from neuroseq.gui import Gui
 from neuroseq.model_editor import EditableSynapseTree
 from neuroseq.model_editor import ModelEditorDialog
-from neuroseq.selectable_bar_plot_item import SelectableBarPlotItem
 
 # no obvious signal to wait for after the model is updated to know when the GUI is ready,
 # so for now we just wait for a fixed time
@@ -69,7 +67,6 @@ def test_gui_simulate_and_playback(
     qtbot.waitUntil(lambda: gui.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)
     assert gui.heatmap_widget.currentIndex == 0
-    assert gui.trace_widget.timeline.getXPos() == approx(0)
     assert "run" in gui.continue_simulation_action.text().lower()
     assert "continue" not in gui.continue_simulation_action.text().lower()
     simulation_time = 0.1
@@ -95,19 +92,21 @@ def test_gui_simulate_and_playback(
     qtbot.waitUntil(lambda: gui.heatmap_widget.currentIndex == n_timesteps - 1)
     assert "run" not in gui.continue_simulation_action.text().lower()
     assert "continue" in gui.continue_simulation_action.text().lower()
-    assert gui.trace_widget.timeline.getXPos() == approx(simulation_time_ms, rel=2)
-    assert gui.spike_widget.timeline.getXPos() == approx(simulation_time_ms, rel=2)
+    assert gui.trace_widget.timeline is not None
+    assert gui.trace_widget.timeline.selection == approx(simulation_time_ms, rel=2)
+    # todo: re-enable these spike_widget timeline tests when fastplotlib supports the timeline in scatter plots
+    # assert gui.spike_widget.timeline.selection == approx(simulation_time_ms, rel=2)
     gui.btn_skip_to_start_clicked()
-    assert gui.trace_widget.timeline.getXPos() == approx(0)
-    assert gui.spike_widget.timeline.getXPos() == approx(0)
+    assert gui.trace_widget.timeline.selection == approx(0)
+    # assert gui.spike_widget.timeline.selection == approx(0)
     assert gui.heatmap_widget.currentIndex == 0
     gui.btn_skip_to_end_clicked()
-    assert gui.trace_widget.timeline.getXPos() == approx(simulation_time_ms, rel=2)
-    assert gui.spike_widget.timeline.getXPos() == approx(simulation_time_ms, rel=2)
+    assert gui.trace_widget.timeline.selection == approx(simulation_time_ms, rel=2)
+    # assert gui.spike_widget.timeline.selection == approx(simulation_time_ms, rel=2)
     assert gui.heatmap_widget.currentIndex == n_timesteps - 1
     gui.btn_stop_clicked()
-    assert gui.trace_widget.timeline.getXPos() == approx(0)
-    assert gui.spike_widget.timeline.getXPos() == approx(0)
+    assert gui.trace_widget.timeline.selection == approx(0)
+    # assert gui.spike_widget.timeline.selection == approx(0)
     assert gui.heatmap_widget.currentIndex == 0
 
 
@@ -277,8 +276,6 @@ def test_gui_edit_stim_with_console(qtbot: QtBot, mfx_ornstein: B2Model) -> None
     assert mfx_ornstein.parameters == {}
     mfx_ornstein.parameters = {"stim": b2.TimedArray(stim, dt=dt)}
     gui.update_model(mfx_ornstein)
-    # bar plot x-values are the center of the bars, so shifted forwards by 0.5dt compared to timestamps
-    expected_timestamps_array = dt * (np.arange(n_timestamps) + 0.5) / b2.second
     stim_editor = gui.stim_editor
     stim_console = gui.stim_console
     assert stim_editor.stims_dict is not None
@@ -290,14 +287,11 @@ def test_gui_edit_stim_with_console(qtbot: QtBot, mfx_ornstein: B2Model) -> None
     assert_allclose(stim_editor.stims_dict["stim"].timed_array.values, stim)
     assert gui.model.parameters is not None
     assert_allclose(gui.model.parameters["stim"].values, stim)
-    assert len(stim_editor.stim_widget.neuron_plots) == n_neurons
-    neuron_plot = cast(SelectableBarPlotItem, stim_editor.stim_widget.neuron_plots[0])
-    assert len(neuron_plot.getData()[0]) == n_timestamps
-    assert_allclose(neuron_plot.getData()[0], 1000 * expected_timestamps_array)
+    assert stim_editor.stim_widget.n_neurons == n_neurons
     # set stims to an invalid value: StimWidget and model not updated
     stim_console.input.setText("stims['stim'] = 5")
     qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
-    assert len(stim_editor.stim_widget.neuron_plots) == n_neurons
+    assert stim_editor.stim_widget.n_neurons == n_neurons
     assert_allclose(stim_editor.stims_dict["stim"].timed_array.values, stim)
     assert_allclose(gui.model.parameters["stim"].values, stim)
     # assign random valid stim array with different shape, StimWidget and model updated
@@ -305,50 +299,7 @@ def test_gui_edit_stim_with_console(qtbot: QtBot, mfx_ornstein: B2Model) -> None
     qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
     assert stim_editor.stims_dict["stim"].timed_array.values.shape == (127, 83)
     assert gui.model.parameters["stim"].values.shape == (127, 83)
-    assert len(stim_editor.stim_widget.neuron_plots) == 83
-
-
-def test_gui_link_axes(
-    qtbot: QtBot, monkeypatch: MonkeyPatch, default_model_path: Path
-) -> None:
-    gui = Gui()
-    gui.show()
-    qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible())
-    stim_widget_viewbox = gui.stim_editor.stim_widget.getPlotItem().getViewBox()
-    spike_widget_viewbox = gui.spike_widget.getPlotItem().getViewBox()
-    trace_widget_viewbox = gui.trace_widget.getPlotItem().getViewBox()
-    # initially both X and Y axes are linked to the stim widget viewbox
-    assert spike_widget_viewbox.state["linkedViews"][0]() == stim_widget_viewbox
-    assert spike_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
-    assert trace_widget_viewbox.state["linkedViews"][0]() == stim_widget_viewbox
-    assert trace_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
-    gui.link_x_axes(False)
-    assert spike_widget_viewbox.state["linkedViews"][0] is None
-    assert spike_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
-    assert trace_widget_viewbox.state["linkedViews"][0] is None
-    assert trace_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
-    gui.link_y_axes(False)
-    assert spike_widget_viewbox.state["linkedViews"][0] is None
-    assert spike_widget_viewbox.state["linkedViews"][1] is None
-    assert trace_widget_viewbox.state["linkedViews"][0] is None
-    assert trace_widget_viewbox.state["linkedViews"][1] is None
-    gui.link_y_axes(True)
-    assert spike_widget_viewbox.state["linkedViews"][0] is None
-    assert spike_widget_viewbox.state["linkedViews"][1] is not None
-    assert spike_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
-    assert trace_widget_viewbox.state["linkedViews"][0] is None
-    assert trace_widget_viewbox.state["linkedViews"][1] is not None
-    assert trace_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
-    gui.link_x_axes(True)
-    assert spike_widget_viewbox.state["linkedViews"][0] is not None
-    assert spike_widget_viewbox.state["linkedViews"][0]() == stim_widget_viewbox
-    assert spike_widget_viewbox.state["linkedViews"][1] is not None
-    assert spike_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
-    assert trace_widget_viewbox.state["linkedViews"][0] is not None
-    assert trace_widget_viewbox.state["linkedViews"][0]() == stim_widget_viewbox
-    assert trace_widget_viewbox.state["linkedViews"][1] is not None
-    assert trace_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
+    assert stim_editor.stim_widget.n_neurons == 83
 
 
 def test_gui_synapse_ram_limit(

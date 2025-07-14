@@ -28,11 +28,11 @@ class HeatmapWidget(pg.ImageView):
     ) -> None:
         """Set the data to be displayed in the heatmap.
         data should be a 3d numpy array with shape (n_rows, n_columns, n_timesteps).
-        timestamps should be a 1-d numpy array of timestamps in milliseconds.
+        timestamps should be a 1-d numpy array of timestamps in seconds.
         """
         self.clear()
-        if data is not None:
-            self.setImage(data.T, xvals=timestamps)
+        if data is not None and timestamps is not None:
+            self.setImage(data.T, xvals=timestamps * 1000.0)
             self._update_playRate()
 
     def set_relative_playback_speed(self, relative_playback_speed: float) -> None:
@@ -48,9 +48,9 @@ class HeatmapWidget(pg.ImageView):
             self.playRate = self.relative_playback_speed * realtime_fps
 
     def connect_timeseries_widget_timeline(
-        self, timeseries_widget: pg.PlotWidget
+        self, timeseries_widget: QtWidgets.QWidget
     ) -> None:
         """Connect the timeline in this widget to the timeline in the TimeseriesWidget."""
         self.sigTimeChanged.connect(
-            lambda idx, time: timeseries_widget.timeline.setValue(time)
+            lambda idx, time: setattr(timeseries_widget.timeline, "selection", time)
         )

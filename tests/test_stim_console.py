@@ -9,7 +9,9 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 
 from neuroseq.b2_model import B2Model
+from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.stim_console import StimConsole
+from neuroseq.stim_widget import StimWidget
 from neuroseq.timed_array_modifer import TimedArrayModifier
 
 
@@ -53,10 +55,16 @@ def test_stim_console_repl(qtbot: QtBot) -> None:
     assert "b2" in stim_console.namespace()
     assert stim_console.namespace()["stims"] is None
     assert stim_console.namespace()["model"] is None
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
     # start with a valid dict of stims and a valid model
     stims = {
-        "a": TimedArrayModifier(b2.TimedArray(np.zeros((10, 10)), dt=1 * b2.ms)),
-        "b": TimedArrayModifier(b2.TimedArray(np.zeros((100, 3)), dt=5 * b2.ms)),
+        "a": TimedArrayModifier(
+            b2.TimedArray(np.zeros((10, 10)), dt=1 * b2.ms), stim_widget
+        ),
+        "b": TimedArrayModifier(
+            b2.TimedArray(np.zeros((100, 3)), dt=5 * b2.ms), stim_widget
+        ),
     }
     stim_console.set_stims(stims)
     model = B2Model()
