@@ -117,6 +117,11 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
         self.plotItem.vb.sigRangeChanged.connect(self.update_roi)
         self.sigRangeChanged.connect(self.update_roi)
 
+    # workaround for AttributeError: autoRangeEnabled when setClipToView is enabled,
+    # see https://github.com/pyqtgraph/pyqtgraph/issues/1854 for more details
+    def autoRangeEnabled(self):
+        return self.plotItem.getViewBox().autoRangeEnabled()
+
     def _create_custom_analysis_menu(self) -> None:
         self.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.ActionsContextMenu)
         self.menu_custom_analysis = QtWidgets.QMenu("Custom analysis", self)
