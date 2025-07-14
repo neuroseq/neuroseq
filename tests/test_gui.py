@@ -78,6 +78,7 @@ def test_gui_simulate_and_playback(
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
     )
     qtbot.wait(delay_after_update_model_call_in_ms)
+    simulation_time_ms = simulation_time * 1000
     assert gui.cmb_synapse.count() == 1
     assert gui.cmb_synapse.itemText(0) == "Ce / we"
     assert gui.cmb_neuron.count() == 1
@@ -94,15 +95,15 @@ def test_gui_simulate_and_playback(
     qtbot.waitUntil(lambda: gui.heatmap_widget.currentIndex == n_timesteps - 1)
     assert "run" not in gui.continue_simulation_action.text().lower()
     assert "continue" in gui.continue_simulation_action.text().lower()
-    assert gui.trace_widget.timeline.getXPos() == approx(simulation_time, rel=1e-2)
-    assert gui.spike_widget.timeline.getXPos() == approx(simulation_time, rel=1e-2)
+    assert gui.trace_widget.timeline.getXPos() == approx(simulation_time_ms, rel=2)
+    assert gui.spike_widget.timeline.getXPos() == approx(simulation_time_ms, rel=2)
     gui.btn_skip_to_start_clicked()
     assert gui.trace_widget.timeline.getXPos() == approx(0)
     assert gui.spike_widget.timeline.getXPos() == approx(0)
     assert gui.heatmap_widget.currentIndex == 0
     gui.btn_skip_to_end_clicked()
-    assert gui.trace_widget.timeline.getXPos() == approx(simulation_time, rel=1e-2)
-    assert gui.spike_widget.timeline.getXPos() == approx(simulation_time, rel=1e-2)
+    assert gui.trace_widget.timeline.getXPos() == approx(simulation_time_ms, rel=2)
+    assert gui.spike_widget.timeline.getXPos() == approx(simulation_time_ms, rel=2)
     assert gui.heatmap_widget.currentIndex == n_timesteps - 1
     gui.btn_stop_clicked()
     assert gui.trace_widget.timeline.getXPos() == approx(0)
@@ -292,7 +293,7 @@ def test_gui_edit_stim_with_console(qtbot: QtBot, mfx_ornstein: B2Model) -> None
     assert len(stim_editor.stim_widget.neuron_plots) == n_neurons
     neuron_plot = cast(SelectableBarPlotItem, stim_editor.stim_widget.neuron_plots[0])
     assert len(neuron_plot.getData()[0]) == n_timestamps
-    assert_allclose(neuron_plot.getData()[0], expected_timestamps_array)
+    assert_allclose(neuron_plot.getData()[0], 1000 * expected_timestamps_array)
     # set stims to an invalid value: StimWidget and model not updated
     stim_console.input.setText("stims['stim'] = 5")
     qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
@@ -446,7 +447,7 @@ def test_gui_stim_padding(
     gui.btn_continue_simulation_clicked()
     qtbot.wait(delay_after_update_model_call_in_ms)
     # should have ~0.1 secs of simulation data, and ~10.1 secs of stim array data with dt=0.1ms
-    assert gui.heatmap_widget.tVals[-1] == approx(0.1, rel=1e-2)
+    assert gui.heatmap_widget.tVals[-1] == approx(100, rel=2)
     assert gui.stim_editor.stim_widget.n_timestamps == 10100
 
 
@@ -466,7 +467,7 @@ def test_gui_simulate_external_model(
     )
     assert (
         gui.stim_editor.stim_widget.n_timestamps * gui.stim_editor.stim_widget.dt
-        == approx(2.0)
+        == approx(2000, rel=2)
     )
     # simulate for 10 seconds
     simulation_time_secs = 10
@@ -478,16 +479,17 @@ def test_gui_simulate_external_model(
     )
     gui.btn_continue_simulation_clicked()
     qtbot.wait(delay_after_update_model_call_in_ms)
+    simulation_time_ms = simulation_time_secs * 1000
     # stim array should be padded to simulation time + default padding of 5 secs
     assert (
         gui.stim_editor.stim_widget.n_timestamps * gui.stim_editor.stim_widget.dt
-        == approx(simulation_time_secs + 5, rel=1e-2)
+        == approx(simulation_time_ms + 5000, rel=2)
     )
     assert gui.trace_widget.n_neurons == 32
     assert gui.trace_widget.n_timestamps == 2000
     assert gui.spike_widget.n_neurons == 32
-    assert gui.spike_widget.dt == approx(simulation_time_secs / 2000, rel=1e-2)
-    assert gui.heatmap_widget.tVals[-1] == approx(simulation_time_secs, rel=1e-2)
+    assert gui.spike_widget.dt == approx(simulation_time_ms / 2000, rel=2)
+    assert gui.heatmap_widget.tVals[-1] == approx(simulation_time_ms, rel=2)
 
 
 def test_integration_modeleditor_delete_restore(

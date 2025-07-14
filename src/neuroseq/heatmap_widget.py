@@ -25,9 +25,17 @@ class HeatmapWidget(pg.ImageView):
         data: np.ndarray | None = None,
         timestamps: np.ndarray | None = None,
     ) -> None:
+        """Set the data to be displayed in the heatmap.
+        data should be a 3d numpy array with shape (n_rows, n_columns, n_timesteps).
+        timestamps should be a 1-d numpy array of timestamps in milliseconds.
+        """
         self.clear()
         if data is not None:
             self.setImage(data.T, xvals=timestamps)
+            if timestamps is not None:
+                self.playRate = (
+                    1000 * (data.T.shape[0] - 1) / (timestamps[-1] - timestamps[0])
+                )
 
     def connect_timeseries_widget_timeline(
         self, timeseries_widget: pg.PlotWidget

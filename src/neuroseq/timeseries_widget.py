@@ -49,8 +49,7 @@ class OffsetYAxisItem(pg.AxisItem):
 
 class MinDtXAxisItem(pg.AxisItem):
     def __init__(self, dt: float = 1.0, *args, **kwargs):
-        super().__init__(*args, **kwargs, units="s")
-        self.setLabel("s")
+        super().__init__(*args, **kwargs, units="ms")
         self.dt = dt
 
     def set_dt(self, dt: float):
