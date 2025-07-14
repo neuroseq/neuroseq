@@ -8,9 +8,9 @@ Private repository containing the neuroseq prototype GUI.
 
 ## Installation
 
-### Anaconda
+### Conda
 
-It is reccomended to use Anaconda enviroment for the installation. First, create and activate new enviroment in a command line for the installation:
+It is recommended to use a conda environment for the installation. First, create and activate a new environment in a command line for the installation:
 
 ```
 conda create -n neuroseq python=3.10
@@ -64,7 +64,7 @@ The console also has a history feature, which can be accessed by pressing the up
 ### Stimuli editing
 
 The main purpose of the console is to allow users to modify the numpy arrays of stimuli using numpy and Python code.
-Any changes you make to the stimuli will be checked for validity, and if valid then they will updated in the model and the changes will be displayed in the GUI, e.g.
+Any changes you make to the stimuli will be checked for validity, and if valid then they will be updated in the model and the changes will be displayed in the GUI, e.g.
 
 ```python
 >>> stims['stimulus'] = np.random.randint(2,size=(500, 24))
@@ -106,12 +106,15 @@ To do an editable installation including test dependencies and pre-commit:
 ```bash
 git clone git@github.com:ssciwr/neuroseq.git
 cd neuroseq
-pip install -e . --group tests
+pip install -e . --group dev
 pip install pre-commit
 pre-commit install
 ```
 
 The `-e` (editable install) flag used during installation means that any changes to the source code will be reflected in the installed package without needing to reinstall.
+
+If you are using [uv](https://docs.astral.sh/uv) you can skip the pip install steps above,
+and instead prepend `uv run` to the commands below.
 
 ## Developer Use
 
