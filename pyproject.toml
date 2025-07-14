@@ -7,7 +7,7 @@ name = "neuroseq"
 description = "Protoype GUI to edit and run neuron models"
 readme = "README.md"
 license = { text = "NONE" }
-authors = [{ name = "SSC", email = "ssc@iwr.uni-heidelberg.de" }]
+authors = [{ name = "SSC", email = "ssc@uni-heidelberg.de" }]
 requires-python = ">=3.10"
 dependencies = [
     "brian2",
@@ -19,6 +19,7 @@ dependencies = [
     "h5py",
     "qtawesome",
     "click",
+    "fastplotlib>=0.5.1",
 ]
 dynamic = ["version"]
 
@@ -34,7 +35,6 @@ dev = [
     "pytest-randomly",
     "pytest-cov",
     "pytest-mock",
-    "pytest-xvfb",
     "pytest-memray",
     "diff-cover",
 ]

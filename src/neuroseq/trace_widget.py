@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import brian2.numpy_ as np
+import pygfx
 from qtpy import QtWidgets
 
 from neuroseq.custom_analysis_widget import CustomAnalysisDataType
-from neuroseq.selectable_line_plot_item import SelectableLinePlotItem
 from neuroseq.timeseries_widget import TimeseriesWidget
-from neuroseq.utils import shuffle_index
+from neuroseq.utils import cmap_transform_indices
 
 
 class TraceWidget(TimeseriesWidget):
@@ -20,12 +20,12 @@ class TraceWidget(TimeseriesWidget):
 
     def __init__(
         self,
+        controller: pygfx.Controller,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
-        super().__init__(parent)
+        super().__init__(controller, parent)
         self.data_type = CustomAnalysisDataType.Trace
-        self._create_custom_analysis_menu()
-        self.mouse_clicked.connect(self._on_mouse_clicked)
+        self.subplot.title = "Traces"
 
     def set_data(
         self,
@@ -33,22 +33,41 @@ class TraceWidget(TimeseriesWidget):
         timestamps: np.ndarray | None = None,
         dt: float | None = None,
     ) -> None:
-        super()._plot_data(traces, timestamps, dt)
-
-    def _plot_neuron_data(
-        self, data: list[np.ndarray] | np.ndarray, timestamps: np.ndarray, dt: float
-    ) -> None:
-        assert isinstance(data, np.ndarray)
-        trace_norm = 2.0 * np.max(np.abs(data))
-        for index, trace in enumerate(data):
-            # offset each trace by its index, give each trace a unique color
-            line = SelectableLinePlotItem(
-                timestamps,
-                trace / trace_norm + index,
-                pen=shuffle_index(index, len(data)),
+        assert isinstance(traces, np.ndarray)
+        if not isinstance(timestamps, np.ndarray):
+            if dt is None:
+                dt = 1.0
+            timestamps = dt * np.arange(traces.shape[1])
+        self.data = {"data": traces, "timestamps": timestamps, "dt": 0.001}
+        trace_norm = 2.0 * np.max(np.abs(traces))
+        if trace_norm == 0:
+            trace_norm = 1.0
+        # convert timestamps to milliseconds and stack to produce a format suitable for line_stack
+        # todo: should be possible to re-use the same timestamps for all traces?
+        tiled_timestamps = np.tile(
+            timestamps.astype(np.float32) * np.float32(1000.0), (traces.shape[0], 1)
+        )
+        data = np.stack(
+            [tiled_timestamps, traces.astype(np.float32) / np.float32(trace_norm)],
+            axis=2,
+            dtype=np.float32,
+        )
+        self.subplot.clear()
+        if traces is None:
+            return
+        self.graphic = self.subplot.add_line_collection(
+            data,
+            cmap="jet",
+            cmap_transform=cmap_transform_indices(np.arange(traces.shape[0])),
+            thickness=1,
+        )
+        for i, line in enumerate(self.graphic.graphics):
+            line.offset = (line.offset[0], i, line.offset[2])
+        self.controller.max_height = max(self.controller.max_height, traces.shape[0])
+        self.n_neurons = traces.shape[0]
+        if timestamps is not None:
+            self.controller.max_width = max(
+                self.controller.max_width, timestamps[-1] - timestamps[0]
             )
-            self.neuron_plots.append(line)
-            self.addItem(line)
-
-    def _on_mouse_clicked(self, neuron_index: int, time_index: int):
-        self.timeline.setPos(time_index * self.dt)
+            self.n_timestamps = timestamps.shape[0]
+        self.post_set_data()
