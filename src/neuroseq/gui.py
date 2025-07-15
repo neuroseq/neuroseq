@@ -469,6 +469,10 @@ class Gui(QtWidgets.QMainWindow):
         if self.external_simulation_function is not None:
             return self.do_external_simulation(simulation_time)
         try:
+            self.progress_dialog.setLabelText("Compiling...")
+            self.progress_dialog.setValue(0)
+            self.progress_dialog.setVisible(True)
+            QtCore.QCoreApplication.processEvents()
             self.model.run_simulation(
                 simulation_time * b2.second,
                 report=self._update_simulation_progress,
