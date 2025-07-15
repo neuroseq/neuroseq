@@ -451,6 +451,40 @@ def test_gui_stim_padding(
     assert gui.stim_editor.stim_widget.n_timestamps == 10100
 
 
+def test_gui_playback_speed(
+    monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list
+) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    assert gui.heatmap_widget.relative_playback_speed == pytest.approx(1.0)
+    # mock getItem to return the desired playback speed
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getText", lambda *args: ("2.6743", True)
+    )
+    gui.btn_playback_speed_clicked()
+    assert gui.heatmap_widget.relative_playback_speed == pytest.approx(2.6743)
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getText", lambda *args: ("0.1234", True)
+    )
+    gui.btn_playback_speed_clicked()
+    assert gui.heatmap_widget.relative_playback_speed == pytest.approx(0.1234)
+    # pressing cancel should not change the playback speed
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("1.0", False))
+    gui.btn_playback_speed_clicked()
+    assert gui.heatmap_widget.relative_playback_speed == pytest.approx(0.1234)
+    # invalid input should show an error message and not change the playback speed
+    assert len(qmessagebox_calls) == 0
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.0", True))
+    gui.btn_playback_speed_clicked()
+    assert gui.heatmap_widget.relative_playback_speed == pytest.approx(0.1234)
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "critical"
+    assert "invalid input" in qmessagebox_calls[0]["title"].lower()
+
+
 def test_gui_simulate_external_model(
     monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list
 ) -> None:

@@ -540,6 +540,29 @@ class Gui(QtWidgets.QMainWindow):
     def btn_play_clicked(self) -> None:
         self.heatmap_widget.togglePause()
 
+    def btn_playback_speed_clicked(self) -> None:
+        new_speed, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "Set playback speed",
+            "Playback speed (1.0=realtime, 0.5=half speed, 2.0=double speed, etc.)",
+            QtWidgets.QLineEdit.EchoMode.Normal,
+            f"{self.heatmap_widget.relative_playback_speed}",
+        )
+        if not ok:
+            return
+        try:
+            new_speed_as_float = float(new_speed)
+            if new_speed_as_float <= 0:
+                raise ValueError("Playback speed must be a positive number")
+            self.heatmap_widget.set_relative_playback_speed(new_speed_as_float)
+        except ValueError:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Invalid input",
+                f"Could not parse playback speed '{new_speed}' as a valid positive number",
+            )
+            return
+
     def btn_skip_to_end_clicked(self) -> None:
         self.heatmap_widget.setCurrentIndex(self.heatmap_widget.nframes() - 1)
 
@@ -774,6 +797,14 @@ class Gui(QtWidgets.QMainWindow):
     def _create_actions_playback(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
     ) -> None:
+        add_action(
+            "&Set playback speed",
+            self.btn_playback_speed_clicked,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon=qta.icon("mdi6.speedometer"),
+        )
         add_action(
             "&Skip to start",
             self.btn_skip_to_start_clicked,
