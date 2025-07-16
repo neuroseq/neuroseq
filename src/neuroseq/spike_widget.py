@@ -33,6 +33,7 @@ class SpikeWidget(TimeseriesWidget):
         n_timesteps: int,
     ) -> None:
         self.clear_data()
+        self.plotItem.getViewBox().enableAutoRange(enable=False)
         self.data = {
             "spike_indices": spike_indices,
             "spike_times": spike_times,
@@ -60,6 +61,7 @@ class SpikeWidget(TimeseriesWidget):
             )
             self.neuron_plots.append(bar)
             self.addItem(bar)
+        self.plotItem.getViewBox().enableAutoRange(enable=True)
 
     def _plot_neuron_data(
         self, data: list[np.ndarray] | np.ndarray, timestamps: np.ndarray, dt: float
