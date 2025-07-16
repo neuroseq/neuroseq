@@ -143,6 +143,7 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
             )
 
     def clear_data(self) -> None:
+        self.plotItem.getViewBox().enableAutoRange(enable=False)
         self.neuron_plots.clear()
         self.data = {}
         self.n_neurons = 0
@@ -152,6 +153,7 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
         # set the y-axis to display the trace index
         self.plotItem.getAxis("left").setLabel("Neuron")
         self.addItem(self.timeline)
+        self.plotItem.getViewBox().enableAutoRange(enable=True)
 
     @abc.abstractmethod
     def _plot_neuron_data(
@@ -204,7 +206,9 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
         self.plotItem.getAxis("bottom").set_dt(self.dt)
         self.plotItem.getAxis("left").set_num_neurons(self.n_neurons)
         self.data = {"data": data, "timestamps": timestamps, "dt": self.dt}
+        self.plotItem.getViewBox().enableAutoRange(enable=False)
         self._plot_neuron_data(data, timestamps, self.dt)
+        self.plotItem.getViewBox().enableAutoRange(enable=True)
 
     def mousePressEvent(self, ev: Any) -> None:
         if ev.modifiers() != QtCore.Qt.KeyboardModifier.ControlModifier:
