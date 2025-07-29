@@ -52,7 +52,7 @@ neuroseq
 ## GUI Console
 
 The GUI console is a text box at the bottom of the GUI that can be used to run Python code.
-The code is executed in the same Python environment as the GUI, with the following variables made available:
+The code is executed in the same Python environment as the GUI, with the following variables/objects made available (run dir() command to see the list):
 
 - `np`: numpy
 - `b2`: brian2
