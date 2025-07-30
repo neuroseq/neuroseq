@@ -27,7 +27,7 @@ neuroseq = "neuroseq.__main__:main"
 
 [dependency-groups]
 dev = [
-    "memray",
+    "memray ; platform_system != 'Windows'",
     "pre-commit",
     "pytest",
     "pytest-qt",
