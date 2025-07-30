@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import pathlib
-import sys
+import runpy
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -388,7 +388,7 @@ class Gui(QtWidgets.QMainWindow):
             timestamps /= 0.001  # convert to milliseconds
             spikes = data["spikes"]
             assert isinstance(spikes, np.ndarray)
-            dt = data["dt"]
+            dt = float(data["dt"]) / 0.001  # convert to milliseconds
             assert isinstance(dt, float)
             n_neurons = data["n_neurons"]
             assert isinstance(n_neurons, int)
@@ -606,11 +606,8 @@ class Gui(QtWidgets.QMainWindow):
         )
         if filename != "":
             try:
-                path = pathlib.Path(filename)
-                sys.path.append(str(path.resolve().parent))
-                from simulate import simulate
-
-                self.external_simulation_function = simulate
+                path = pathlib.Path(filename).resolve()
+                self.external_simulation_function = runpy.run_path(filename)["simulate"]
                 self.logger.info(f"Loaded custom simulate function from {path}")
                 QtWidgets.QMessageBox.information(
                     self,
