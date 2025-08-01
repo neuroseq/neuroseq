@@ -20,32 +20,32 @@ def simulate(stims_dict: dict[str, np.ndarray], simulation_time: float) -> SimDa
 
     defaultclock.dt = 0.1 * ms
 
-    stim = stims_dict["stimulus"]["array"]  ###TODO why there is an array there?
-    print(np.max(stim))
+    stim = stims_dict["stimulus"]["array"]  ###TODO: remove magic numebers
+    stim = 10e9 * stim
 
-    stim = np.zeros((int(tfinal / ms), 30), dtype="float")
-    stim[:, :] = 0
+    # stim = np.zeros((int(tfinal / ms), 30), dtype="float")
+    # stim[:, :] = 0
 
-    stim_constant = 300
+    # stim_constant = 300
 
     ##### STORAGE #####
 
-    bw_train = 400
-    bw_num = 40
+    # bw_train = 400
+    # bw_num = 40
 
-    for l in range(4):
-        for k in range(10):
-            stim[
-                bw_train * l + bw_num * k + 120 : bw_train * l + bw_num * k + 121, k + 4
-            ] = stim_constant
-            if (k % 2) == 0:
-                stim[
-                    bw_train * l + bw_num * k + 121 : bw_train * l + bw_num * k + 122, 0
-                ] = stim_constant
-            if (k % 2) == 1:
-                stim[
-                    bw_train * l + bw_num * k + 121 : bw_train * l + bw_num * k + 122, 1
-                ] = stim_constant
+    # for l in range(4):
+    #     for k in range(10):
+    #         stim[
+    #             bw_train * l + bw_num * k + 120 : bw_train * l + bw_num * k + 121, k + 4
+    #         ] = stim_constant
+    #         if (k % 2) == 0:
+    #             stim[
+    #                 bw_train * l + bw_num * k + 121 : bw_train * l + bw_num * k + 122, 0
+    #             ] = stim_constant
+    #         if (k % 2) == 1:
+    #             stim[
+    #                 bw_train * l + bw_num * k + 121 : bw_train * l + bw_num * k + 122, 1
+    #             ] = stim_constant
 
     stimulus = TimedArray(stim * nS, dt=1 * ms)
 
@@ -213,7 +213,7 @@ def simulate(stims_dict: dict[str, np.ndarray], simulation_time: float) -> SimDa
     connect_mat = np.array(synmon.we.tolist())
     sq_connect_mat = np.zeros(
         (n_neurons_heatmap, n_neurons_heatmap, n_timestamps_heatmap), dtype="float"
-    )  # TODO check
+    )
     shift = 0
 
     for i in range(n_neurons_heatmap):
@@ -223,8 +223,9 @@ def simulate(stims_dict: dict[str, np.ndarray], simulation_time: float) -> SimDa
                 sq_connect_mat[i, j, :] = 0
             else:
                 for tt in range(n_timestamps_heatmap):
-                    print(i, j, tt)
-                    sq_connect_mat[i, j, tt] = connect_mat[j + i * 24 - shift, tt]
+                    sq_connect_mat[i, j, tt] = connect_mat[
+                        j + i * n_neurons_heatmap - shift, tt
+                    ]
 
     # "heatmap" data is a dict of the following format:
     #   - "widget": "heatmap"

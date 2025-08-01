@@ -622,6 +622,26 @@ class Gui(QtWidgets.QMainWindow):
                 )
                 self.logger.exception(e)
 
+    def connect_external_simulation_function_with_brian2(self) -> None:
+        filename = "./external_simulation_example/run_brian2_externally.py"
+        if filename != "":
+            try:
+                path = pathlib.Path(filename).resolve()
+                self.external_simulation_function = runpy.run_path(filename)["simulate"]
+                self.logger.info(f"Loaded custom simulate_brian2 function from {path}")
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Custom simulate_brian2 function loaded",
+                    f"Custom simulate_brian2 function loaded from {path} - pressing simulate will now call this function until the GUI is restarted",
+                )
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Error loading simulate function",
+                    f"Could not load simulate function from {path}: {e}",
+                )
+                self.logger.exception(e)
+
     def choose_brian2_backend(self) -> None:
         backends = ["cython", "numpy"]
         try:
@@ -790,6 +810,14 @@ class Gui(QtWidgets.QMainWindow):
             shortcut="Ctrl+Shift+R",
             icon=qta.icon("mdi6.head-sync"),
         )
+        add_action(
+            "&Run brian2 with external simulation function",
+            self.connect_external_simulation_function_with_brian2,
+            menu,
+            toolbar,
+            shortcut="Ctrl+Shift+E",
+            icon=qta.icon("mdi6.function"),
+        )
 
     def _create_actions_playback(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
@@ -885,6 +913,11 @@ class Gui(QtWidgets.QMainWindow):
         add_action(
             "&Connect external simulation function",
             self.connect_external_simulation_function,
+            menu,
+        )
+        add_action(
+            "&Run brian2 with external simulation function",
+            self.connect_external_simulation_function_with_brian2,
             menu,
         )
 
