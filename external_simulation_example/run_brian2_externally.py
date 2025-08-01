@@ -12,8 +12,8 @@ def simulate(stims_dict: dict[str, np.ndarray], simulation_time: float) -> SimDa
     #   - "array": 2d numpy array of timestamps x neurons
     #   - "dt": the time step of the stimulus in seconds as a float
 
-    simulation_time = 1000 * int(
-        simulation_time
+    simulation_time = int(
+        1000 * simulation_time
     )  # convertion of seconds to milliseconds
 
     tfinal = simulation_time * ms
