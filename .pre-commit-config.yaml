@@ -14,6 +14,7 @@ repos:
       - id: ruff-check
         types_or: [python, pyi, jupyter]
         args: [--fix]
+        exclude: ^external_simulation_example/
       - id: ruff-format
         types_or: [python, pyi, jupyter]
 
@@ -47,6 +48,7 @@ repos:
             --warn-redundant-casts,
             --no-namespace-packages,
           ]
+        exclude: ^external_simulation_example/
 
   - repo: https://github.com/rhysd/actionlint
     rev: "v1.7.7"
