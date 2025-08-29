@@ -34,10 +34,10 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
     # these signals emit indices or slices of indices, neurons first and then times
     mouse_clicked = QtCore.Signal(
         int, int, int
-    )  # neuron index, time slice, mouse button (0 for no button, 1 for left, 2 for right)
+    )  # neuron slice, time slice, mouse button (0 for no button, 1 for left, 2 for right)
     mouse_dragged = QtCore.Signal(
-        int, slice, int
-    )  # neuron index, time index, mouse button (0 for no button, 1 for left, 2 for right)
+        int, int, int, int, int
+    )  # initial neuron index, current neuron index, initial time index, current time index, mouse button (0 for no button, 1 for left, 2 for right)
     custom_analysis_requested = QtCore.Signal(
         CustomAnalysisDataType, CustomAnalysisType, slice, slice, dict
     )
@@ -137,9 +137,10 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.subplot.axes._x._points.material.color = self.foreground_color
         self.subplot.axes._y._points.material.color = self.foreground_color
         if self.graphic is not None:
-            self.graphic.cmap = (
-                "matlab:hot" if self.background_color == "k" else "matlab:hot_r"
-            )
+            if self.graphic.cmap == "matlab:hot":
+                self.graphic.cmap = "matlab:hot_r"
+            elif self.graphic.cmap == "matlab:hot_r":
+                self.graphic.cmap = "matlab:hot"
 
     def contextMenuEvent(self, event):
         if (
@@ -191,7 +192,9 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
             self.mouse_drag_neuron_index = math.floor(self.mouse_pos[1] + 0.5)
             self.mouse_dragged.emit(
                 self.mouse_drag_neuron_index,
-                slice(self.mouse_drag_time_index, self.mouse_drag_time_index),
+                self.mouse_drag_neuron_index,
+                self.mouse_drag_time_index,
+                self.mouse_drag_time_index,
                 self.mouse_press_button,
             )
         else:
@@ -223,16 +226,20 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
             return
         elif self.mode == InteractMode.DRAW:
             drag_time_index = math.floor(self.mouse_pos[0])
-            if drag_time_index != self.mouse_drag_time_index:
+            drag_neuron_index = math.floor(self.mouse_pos[1] + 0.5)
+            if (
+                drag_time_index != self.mouse_drag_time_index
+                or drag_neuron_index != self.mouse_drag_neuron_index
+            ):
                 self.logger.debug(
-                    f"Move indices changed, emitting signal: {self.mouse_drag_time_index}, {self.mouse_drag_neuron_index}"
-                )
-                time_slice = slice(
-                    min(drag_time_index, self.mouse_drag_time_index),
-                    max(drag_time_index, self.mouse_drag_time_index),
+                    f"Emitting mouse_dragged signal: neuron {self.mouse_drag_neuron_index} time {self.mouse_drag_time_index} -> neuron {drag_neuron_index} time {drag_time_index}"
                 )
                 self.mouse_dragged.emit(
-                    self.mouse_drag_neuron_index, time_slice, self.mouse_press_button
+                    self.mouse_drag_neuron_index,
+                    drag_neuron_index,
+                    self.mouse_drag_time_index,
+                    drag_time_index,
+                    self.mouse_press_button,
                 )
                 self.mouse_drag_time_index = drag_time_index
 
