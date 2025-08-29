@@ -16,4 +16,5 @@ dependencies:
   - pytest
   - pytest-qt
   - pytest-mock
-  - pytest-xvfb
+  - pip:
+      - fastplotlib

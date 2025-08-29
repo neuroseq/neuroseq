@@ -70,8 +70,8 @@ def test_custom_analysis_widget_trace_histogram(qtbot: QtBot) -> None:
     )
     qtbot.wait(gui_delay_in_ms)
     assert "neurons 5-9" in custom_analysis_widget.subplot.get_title().lower()
-    assert "time 0." in custom_analysis_widget.subplot.get_title().lower()
-    assert "10." in custom_analysis_widget.subplot.get_title().lower()
+    assert "time 0" in custom_analysis_widget.subplot.get_title().lower()
+    assert "1050" in custom_analysis_widget.subplot.get_title().lower()
 
 
 def test_custom_analysis_widget_spike_histogram(qtbot: QtBot) -> None:
@@ -131,8 +131,8 @@ def test_custom_analysis_widget_spike_histogram(qtbot: QtBot) -> None:
     )
     qtbot.wait(gui_delay_in_ms)
     assert "neurons 5-9" in custom_analysis_widget.subplot.get_title().lower()
-    assert "time 0.1" in custom_analysis_widget.subplot.get_title().lower()
-    assert "1.0" in custom_analysis_widget.subplot.get_title().lower()
+    assert "time 150" in custom_analysis_widget.subplot.get_title().lower()
+    assert "1050" in custom_analysis_widget.subplot.get_title().lower()
 
 
 def test_custom_analysis_widget_trace_histogram2d(qtbot: QtBot) -> None:
@@ -188,8 +188,8 @@ def test_custom_analysis_widget_trace_histogram2d(qtbot: QtBot) -> None:
     )
     qtbot.wait(gui_delay_in_ms)
     assert "neurons 5-9" in custom_analysis_widget.subplot.get_title().lower()
-    assert "time 0." in custom_analysis_widget.subplot.get_title().lower()
-    assert "10." in custom_analysis_widget.subplot.get_title().lower()
+    assert "time 0" in custom_analysis_widget.subplot.get_title().lower()
+    assert "1050" in custom_analysis_widget.subplot.get_title().lower()
 
 
 def test_custom_analysis_widget_spike_histogram2d(qtbot: QtBot) -> None:
@@ -249,5 +249,5 @@ def test_custom_analysis_widget_spike_histogram2d(qtbot: QtBot) -> None:
     )
     qtbot.wait(gui_delay_in_ms)
     assert "neurons 5-9" in custom_analysis_widget.subplot.get_title().lower()
-    assert "time 0.1" in custom_analysis_widget.subplot.get_title().lower()
-    assert "1.0" in custom_analysis_widget.subplot.get_title().lower()
+    assert "time 150" in custom_analysis_widget.subplot.get_title().lower()
+    assert "1050" in custom_analysis_widget.subplot.get_title().lower()

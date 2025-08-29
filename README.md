@@ -111,7 +111,7 @@ pip install pre-commit
 pre-commit install
 ```
 
-The `-e` (editable install) flag used during installation means that any changes to the source code will be reflected in the installed package without needing to reinstall. Consider to remove "--group dev" flag for installation on Windows.  
+The `-e` (editable install) flag used during installation means that any changes to the source code will be reflected in the installed package without needing to reinstall. Consider to remove "--group dev" flag for installation on Windows.
 
 If you are using [uv](https://docs.astral.sh/uv) you can skip the pip install steps above,
 and instead prepend `uv run` to the commands below.
