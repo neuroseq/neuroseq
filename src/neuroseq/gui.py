@@ -388,7 +388,7 @@ class Gui(QtWidgets.QMainWindow):
             assert isinstance(timestamps, np.ndarray)
             spikes = data["spikes"]
             assert isinstance(spikes, np.ndarray)
-            dt = float(data["dt"]) / 0.001  # convert to milliseconds
+            dt = float(data["dt"])
             assert isinstance(dt, float)
             n_neurons = data["n_neurons"]
             assert isinstance(n_neurons, int)
