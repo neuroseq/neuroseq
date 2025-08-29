@@ -178,37 +178,52 @@ class StimEditor(QtWidgets.QWidget):
                 self.stim_widget.unselect_neurons()
                 # self.stim_widget.timeline.selection = time_index * self.current_stim_modifier.timed_array.dt
             return
-        if self.mode == InteractMode.DRAW:
-            neuron_slice = slice(neuron_index, neuron_index + 1)
-            time_slice = slice(time_index, time_index + self.draw_stim_length)
-            self.logger.debug(f"Time slice: {time_slice}")
-            if not self._is_valid_slice(neuron_slice, time_slice):
-                return
-            self.draw_stim_region(
-                neuron_slice,
-                time_slice,
-                erase=self.draw_mode == DrawMode.ERASE or button_index == 2,
-            )
 
     def stim_widget_mouse_dragged(
-        self, neuron_index: int, time_index_slice: slice, button_index: int
+        self,
+        initial_neuron_index: int,
+        current_neuron_index: int,
+        initial_time_index: int,
+        current_time_index: int,
+        button_index: int,
     ) -> None:
         self.logger.debug(
-            f"Mouse moved: neuron {neuron_index}, time {time_index_slice}, button {button_index}"
+            f"Mouse dragged from neuron {initial_neuron_index}, time index {initial_time_index} to neuron {current_neuron_index}, time index {current_time_index}, with button: {button_index}"
         )
         if self.current_stim_modifier is None:
             return
-        neuron_slice = slice(neuron_index, neuron_index + 1)
-        time_index_slice = slice(
-            time_index_slice.start, time_index_slice.stop + self.draw_stim_length
+        erase = (self.draw_mode == DrawMode.DRAW and button_index == 2) or (
+            self.draw_mode == DrawMode.ERASE and button_index == 1
         )
-        if not self._is_valid_slice(neuron_slice, time_index_slice):
+        if erase:
+            # when erasing use the current neuron index
+            neuron_slice = slice(current_neuron_index, current_neuron_index + 1)
+            if current_neuron_index == initial_neuron_index:
+                # if we are still on the initial neuron index, erase all neurons between the two time indices
+                time_slice = slice(
+                    min(initial_time_index, current_time_index),
+                    max(initial_time_index, current_time_index) + self.draw_stim_length,
+                )
+            else:
+                # otherwise just erase the current time index
+                time_slice = slice(
+                    current_time_index, current_time_index + self.draw_stim_length
+                )
+        else:
+            # when drawing keep the neuron index fixed to the initial neuron index
+            neuron_slice = slice(initial_neuron_index, initial_neuron_index + 1)
+            # and draw between the two time indices
+            time_slice = slice(
+                min(initial_time_index, current_time_index),
+                max(initial_time_index, current_time_index) + self.draw_stim_length,
+            )
+        if not self._is_valid_slice(neuron_slice, time_slice):
             return
         if self.mode == InteractMode.DRAW:
             self.draw_stim_region(
                 neuron_slice,
-                time_index_slice,
-                erase=button_index == 2,
+                time_slice,
+                erase=erase,
             )
 
     def copy_selected_stim(self) -> None:
@@ -419,7 +434,7 @@ class StimEditor(QtWidgets.QWidget):
         self.actions_draw = []
         self.actions_draw.append(
             add_action(
-                "Draw single 1ms stimulus",
+                "Draw stimulus",
                 lambda: self.set_draw_mode(DrawMode.DRAW),
                 menu,
                 toolbar,
@@ -431,7 +446,7 @@ class StimEditor(QtWidgets.QWidget):
         )
         self.actions_draw.append(
             add_action(
-                "Erase single 1ms stimulus",
+                "Erase stimulus",
                 lambda: self.set_draw_mode(DrawMode.ERASE),
                 menu,
                 toolbar,

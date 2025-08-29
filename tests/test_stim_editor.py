@@ -191,7 +191,7 @@ def test_stim_editor_actions(
     assert stim_editor.current_stim_modifier.timed_array.values[19, 8] == approx(0)
     assert stim_editor.current_stim_modifier.timed_array.values[16, 7] == approx(0)
     assert stim_editor.current_stim_modifier.timed_array.values[17, 7] == approx(0)
-    stim_editor.stim_widget_mouse_clicked(8, 18, 1)
+    stim_editor.stim_widget_mouse_dragged(8, 8, 18, 18, 1)
     new_stim_value = 1.0
     # drawn stimuli have magnitude of the maximum value of the existing stimuli
     assert stim_editor.current_stim_modifier.timed_array.values[18, 8] == approx(
@@ -202,7 +202,7 @@ def test_stim_editor_actions(
     )
     assert stim_editor.current_stim_modifier.timed_array.values[16, 7] == approx(0)
     assert stim_editor.current_stim_modifier.timed_array.values[17, 7] == approx(0)
-    stim_editor.stim_widget_mouse_clicked(7, 16, 1)
+    stim_editor.stim_widget_mouse_dragged(7, 7, 16, 16, 1)
     assert stim_editor.current_stim_modifier.timed_array.values[18, 8] == approx(
         new_stim_value
     )
@@ -231,7 +231,7 @@ def test_stim_editor_actions(
     assert stim_editor.current_stim_modifier.timed_array.values[17, 7] == approx(
         new_stim_value
     )
-    stim_editor.stim_widget_mouse_clicked(8, 18, 1)
+    stim_editor.stim_widget_mouse_dragged(8, 8, 18, 18, 1)
     # drawn stimuli have a magnitude of 1.0
     assert stim_editor.current_stim_modifier.timed_array.values[18, 8] == approx(0)
     assert stim_editor.current_stim_modifier.timed_array.values[19, 8] == approx(0)
@@ -241,7 +241,7 @@ def test_stim_editor_actions(
     assert stim_editor.current_stim_modifier.timed_array.values[17, 7] == approx(
         new_stim_value
     )
-    stim_editor.stim_widget_mouse_clicked(7, 16, 1)
+    stim_editor.stim_widget_mouse_dragged(7, 7, 16, 16, 1)
     assert stim_editor.current_stim_modifier.timed_array.values[18, 8] == approx(0)
     assert stim_editor.current_stim_modifier.timed_array.values[19, 8] == approx(0)
     assert stim_editor.current_stim_modifier.timed_array.values[16, 7] == approx(0)

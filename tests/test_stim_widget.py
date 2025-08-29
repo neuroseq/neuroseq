@@ -88,6 +88,7 @@ def test_stim_widget_select_mode(qtbot: QtBot, stims: b2.TimedArray) -> None:
     n_timestamps = stims.values.shape[0]
     n_neurons = stims.values.shape[1]
     stim_widget.set_data(stims)
+    stim_widget.toggle_dark_mode()
     assert stim_widget.n_neurons == n_neurons
     assert stim_widget.n_timestamps == n_timestamps
     # initially no neurons are selected
@@ -179,4 +180,26 @@ def test_stim_widget_draw_mode(qtbot: QtBot, stims: b2.TimedArray) -> None:
     assert stim_widget.selected_time_slice is None
     assert stim_widget.selected_neuron_slice is None
 
-    # todo: mouse drag in draw mode should draw a line
+    # mouse drag
+    drag_signals = []
+    stim_widget.mouse_dragged.connect(
+        lambda n0, n1, t0, t1, btn: drag_signals.append((n0, n1, t0, t1, btn))
+    )
+    mouse_click_and_drag(
+        qtbot, stim_widget, QtCore.QPoint(x0, y0), QtCore.QPoint(x2, y0)
+    )
+    assert len(drag_signals) > 2
+    # first signal on start of drag
+    n0, n1, t0, t1, btn = drag_signals[0]
+    assert btn == 1
+    assert n0 == n1
+    assert t1 == t0
+    assert 0 < t0 / n_timestamps < 0.4
+    assert 0 < n0 / n_neurons < 1.0
+    # last signal at end of drag
+    n0, n1, t0, t1, btn = drag_signals[-1]
+    assert btn == 1
+    assert n0 == n1
+    assert t1 > t0
+    assert 0.6 < t1 / n_timestamps < 1.0
+    assert 0 < n0 / n_neurons < 1.0
