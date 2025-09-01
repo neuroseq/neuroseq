@@ -5,13 +5,14 @@ from enum import Enum
 
 import brian2 as b2
 import brian2.numpy_ as np
-import pygfx
 import qtawesome as qta
+from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
 from neuroseq.b2_model import B2Model
+from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.stim_widget import StimWidget
 from neuroseq.timed_array_modifer import TimedArrayModifier
 from neuroseq.utils import InteractMode
@@ -35,7 +36,7 @@ class StimEditor(QtWidgets.QWidget):
 
     def __init__(
         self,
-        controller: pygfx.Controller,
+        controller: ConstrainedPanZoomController,
         cmb_stim: QtWidgets.QComboBox,
         toolbar: QtWidgets.QToolBar,
         parent: QtWidgets.QWidget | None = None,
@@ -53,14 +54,42 @@ class StimEditor(QtWidgets.QWidget):
         self.draw_stim_length = 1  # in milliseconds
         self.stims_dict: dict[str, TimedArrayModifier] = {}
         self.copy_values = np.zeros((0, 0))
-        layout = QtWidgets.QHBoxLayout()
+        layout = QtWidgets.QGridLayout(self)
         layout.setSpacing(0)
         layout.setContentsMargins(0, 0, 0, 0)
         self.context_menu = QtWidgets.QMenu("Actions", self)
         self._add_actions(self.toolbar, self.context_menu)
         self.stim_widget = StimWidget(controller=controller, menu=self.context_menu)
-        layout.addWidget(self.stim_widget)
+        layout.addWidget(self.stim_widget, 0, 0, 3, 3)
+        # y scrollbar and zoom buttons
+        self.y_scrollbar = QtWidgets.QScrollBar(QtCore.Qt.Orientation.Vertical)
+        controller.connect_y_scroll_bar(self.y_scrollbar)
+        layout.addWidget(self.y_scrollbar, 0, 3)
+        self.y_btn_zoom_in = QtWidgets.QPushButton("+", self)
+        self.y_btn_zoom_in.setFixedSize(14, 24)
+        self.y_btn_zoom_in.setToolTip("Zoom in (Shift + Mouse Wheel Up)")
+        self.y_btn_zoom_in.clicked.connect(lambda: controller.zoom((0.0, 0.5), ()))
+        layout.addWidget(self.y_btn_zoom_in, 1, 3)
         self.stim_widget.set_mode(self.mode)
+        self.y_btn_zoom_out = QtWidgets.QPushButton("-", self)
+        self.y_btn_zoom_out.setFixedSize(14, 24)
+        self.y_btn_zoom_out.setToolTip("Zoom out (Shift + Mouse Wheel Down)")
+        self.y_btn_zoom_out.clicked.connect(lambda: controller.zoom((0.0, -0.5), ()))
+        layout.addWidget(self.y_btn_zoom_out, 2, 3)
+        # x scrollbar and zoom buttons
+        self.x_scrollbar = QtWidgets.QScrollBar(QtCore.Qt.Orientation.Horizontal)
+        controller.connect_x_scroll_bar(self.x_scrollbar)
+        layout.addWidget(self.x_scrollbar, 3, 0)
+        self.x_btn_zoom_out = QtWidgets.QPushButton("-", self)
+        self.x_btn_zoom_out.setFixedSize(24, 14)
+        self.x_btn_zoom_out.setToolTip("Zoom out (Ctrl + Mouse Wheel Down)")
+        self.x_btn_zoom_out.clicked.connect(lambda: controller.zoom((-0.5, 0.0), ()))
+        layout.addWidget(self.x_btn_zoom_out, 3, 1)
+        self.x_btn_zoom_in = QtWidgets.QPushButton("+", self)
+        self.x_btn_zoom_in.setFixedSize(24, 14)
+        self.x_btn_zoom_in.setToolTip("Zoom in (Ctrl + Mouse Wheel Up)")
+        self.x_btn_zoom_in.clicked.connect(lambda: controller.zoom((0.5, 0.0), ()))
+        layout.addWidget(self.x_btn_zoom_in, 3, 2)
         self.setLayout(layout)
         self.cmb_stim.currentTextChanged.connect(self.select_stim)
         self.stim_widget.mouse_clicked.connect(self.stim_widget_mouse_clicked)

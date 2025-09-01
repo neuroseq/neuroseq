@@ -30,6 +30,40 @@ def test_stim_editor_no_data(qtbot: QtBot) -> None:
     qtbot.waitUntil(lambda: not stim_editor.isVisible())
 
 
+def test_stim_editor_zoom_pan(qtbot: QtBot) -> None:
+    model = B2Model()
+    timed_array = b2.TimedArray(np.random.random((127, 17)), dt=1.0 * b2.ms)
+    model.parameters = {"a": timed_array}
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.show()
+    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    stim_editor.set_model(model)
+    # zoom/pan using the sliders and zoom buttons
+    delay = 50
+    for _ in range(4):
+        stim_editor.x_btn_zoom_in.click()
+        qtbot.wait(delay)
+        stim_editor.y_btn_zoom_in.click()
+        qtbot.wait(delay)
+    stim_editor.x_scrollbar.setValue(512)
+    qtbot.wait(delay)
+    stim_editor.x_scrollbar.setValue(0)
+    qtbot.wait(delay)
+    stim_editor.y_scrollbar.setValue(317)
+    qtbot.wait(delay)
+    stim_editor.y_scrollbar.setValue(0)
+    qtbot.wait(delay)
+    for _ in range(7):
+        stim_editor.x_btn_zoom_out.click()
+        qtbot.wait(delay)
+        stim_editor.y_btn_zoom_out.click()
+        qtbot.wait(delay)
+
+
 def test_stim_editor_actions(
     qtbot: QtBot, monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
