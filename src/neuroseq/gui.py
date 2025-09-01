@@ -574,6 +574,14 @@ class Gui(QtWidgets.QMainWindow):
         ]:
             widget.toggle_dark_mode()
 
+    def toggle_selection_text(self):
+        for widget in [
+            self.stim_editor.stim_widget,
+            self.trace_widget,
+            self.spike_widget,
+        ]:
+            widget.toggle_selection_text()
+
     def choose_max_ram_synapse_plot_matrix(self) -> None:
         new_max_ram, ok = QtWidgets.QInputDialog.getText(
             self,
@@ -859,6 +867,15 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             icon=qta.icon("mdi6.theme-light-dark"),
+            checkable=True,
+            is_checked=True,
+        )
+        add_action(
+            "Toggle selection text",
+            self.toggle_selection_text,
+            menu,
+            toolbar,
+            icon=qta.icon("mdi6.format-text"),
             checkable=True,
             is_checked=True,
         )
