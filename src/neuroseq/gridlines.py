@@ -1,42 +1,51 @@
 import numpy as np
 import pygfx
+import pylinalg
 from fastplotlib import Graphic
 
 DTYPE = "f4"
 
 
 def generate_gridlines(
-    n_neurons: int, time: float, dt: float, draw_neuron_lines: bool
-) -> np.ndarray:
-    """Generate gridlines for a timeseries plot.
-
-    Returns an array of shape (2*N, 3) where N is the number of line segments,
-    and each line segment is represented by two consecutive points in 3D space.
-    """
+    n_neurons: int, time: float, dt: float, thickness: float
+) -> pygfx.Line:
+    """Generate vertical gridlines for a timeseries plot."""
     n_x = int(time / dt) + 1
-    n_y = n_neurons + 1 if draw_neuron_lines else 0
-    coords = np.zeros((2 * (n_x + n_y), 3), dtype=DTYPE)
+    coords = np.zeros((2 * n_x, 3), dtype=DTYPE)
 
     # time and dt are in seconds, but the plots use milliseconds
     max_timestamp = time * 1000.0
-    # add vertical lines
+    # each line segment is represented by two consecutive points in 3D space
     x_coords = np.linspace(0, max_timestamp, num=n_x, dtype=DTYPE)
     coords[0 : 2 * n_x : 2, 0] = x_coords
     coords[1 : 2 * n_x : 2, 0] = x_coords
     coords[0 : 2 * n_x : 2, 1] = -0.5
-    coords[1 : 2 * n_x : 2, 1] = n_neurons
-
-    if draw_neuron_lines:
-        # add horizontal lines
-        y_coords = np.linspace(-0.5, n_neurons - 0.5, num=n_y, dtype=DTYPE)
-        coords[2 * n_x :: 2, 1] = y_coords
-        coords[2 * n_x + 1 :: 2, 1] = y_coords
-        coords[2 * n_x + 1 :: 2, 0] = max_timestamp
-
-    # set z-coordinates
+    coords[1 : 2 * n_x : 2, 1] = n_neurons - 0.5
     coords[:, 2] = 199.0
 
-    return coords
+    color = pygfx.Color((0.6, 0.6, 0.6, 0.3))
+    geometry = pygfx.Geometry(positions=coords)
+    material = pygfx.LineSegmentMaterial(thickness=thickness, aa=True, color=color)
+    return pygfx.Line(geometry, material)
+
+
+def generate_stripes(n_neurons: int, time: float) -> pygfx.InstancedMesh:
+    """Generate horizontal zebra-stripes for a timeseries plot."""
+    color = pygfx.Color((0.0, 0.0, 0.4, 0.2))
+    material = pygfx.MeshBasicMaterial(color=color)
+    # time is in seconds, but the plots use milliseconds
+    width = time * 1000.0
+    geometry = pygfx.plane_geometry(width, 1)
+    n_stripes = n_neurons // 2
+    # create an instanced mesh with an instance for each stripe
+    rect = pygfx.InstancedMesh(geometry, material, n_stripes)
+    # translate each rectangle to the correct position
+    for i_neuron in range(n_stripes):
+        rect.set_matrix_at(
+            i_neuron, pylinalg.mat_from_translation((0, i_neuron * 2, 0))
+        )
+    rect.world.position = [0.5 * width, 0, 199.0]
+    return rect
 
 
 class GridLines(Graphic):
@@ -44,18 +53,14 @@ class GridLines(Graphic):
         """Create gridlines for a timeseries plot."""
         super().__init__()
         group = pygfx.Group()
-        for dt, thickness, draw_neuron_lines in [
-            (0.001, 0.2, False),
-            (0.01, 1, True),
-            (0.1, 3, False),
+        group.add(generate_stripes(n_neurons, time))
+        for (
+            dt,
+            thickness,
+        ) in [
+            (0.001, 0.2),
+            (0.01, 1),
+            (0.1, 3),
         ]:
-            color = pygfx.Color((0.6, 0.6, 0.6, 0.3))
-            geometry = pygfx.Geometry(
-                positions=generate_gridlines(n_neurons, time, dt, draw_neuron_lines)
-            )
-            material = pygfx.LineSegmentMaterial(
-                thickness=thickness, aa=True, color=color
-            )
-            lines = pygfx.Line(geometry, material)
-            group.add(lines)
+            group.add(generate_gridlines(n_neurons, time, dt, thickness))
         self._set_world_object(group)
