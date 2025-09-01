@@ -16,7 +16,8 @@ from neuroseq.custom_analysis_widget import CustomAnalysisDataType
 from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.gridlines import GridLines
 from neuroseq.heatmap_widget import HeatmapWidget
-from neuroseq.rectangle import Rectangle
+from neuroseq.region_of_interest import RegionOfInterest
+from neuroseq.text import Text
 from neuroseq.utils import InteractMode
 from neuroseq.utils import QtABCMeta
 from neuroseq.utils import add_action
@@ -56,8 +57,9 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
             None
         )
         self.mode = InteractMode.SELECT
-        self.roi = Rectangle(fill_color=(0.5, 0.5, 0.5, 0.2))
+        self.roi = RegionOfInterest(fill_color=(0.5, 0.5, 0.5, 0.2))
         self.hover_slice_graphic: fpl.Graphic | None = None
+        self.text = Text()
         self.timeline: fpl.LinearSelector | None = None
         self.setLayout(layout)
         self.subplot: Subplot = self.figure[0, 0]
@@ -112,6 +114,10 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.roi.visible = False
         self.unselect_neurons()
 
+    def toggle_selection_text(self):
+        self.roi.text.visible = not self.roi.text.visible
+        self.text.visible = not self.text.visible
+
     def toggle_dark_mode(self):
         """Toggle the colors of the plot between light and dark."""
         if self.background_color == "k":
@@ -141,6 +147,8 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
                 self.graphic.cmap = "matlab:hot_r"
             elif self.graphic.cmap == "matlab:hot_r":
                 self.graphic.cmap = "matlab:hot"
+        self.roi.toggle_dark_mode()
+        self.text.toggle_dark_mode()
 
     def contextMenuEvent(self, event):
         if (
@@ -158,6 +166,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.subplot.add_graphic(
             GridLines(self.n_neurons, self.n_timestamps * self.dt), center=False
         )
+        self.subplot.add_graphic(self.text, center=False)
         self.roi.visible = False
         if hasattr(self.graphic, "add_linear_selector"):
             self.timeline = self.graphic.add_linear_selector(thickness=2)
@@ -207,6 +216,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         if self.mouse_pos is None:
             return
         self.logger.debug(f"pointer_move at {self.mouse_pos} in mode {self.mode}")
+        self.text.set_pos(self.mouse_pos)
         if self.hover_slice_graphic is not None:
             self.hover_slice_graphic.offset = (
                 self.mouse_pos[0],
