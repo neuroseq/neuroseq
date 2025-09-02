@@ -7,6 +7,7 @@ from qtpy import QtWidgets
 
 class ConstrainedPanZoomController(pygfx.PanZoomController):
     _default_controls = {
+        "mouse3": ("pan", "drag", (1, 1)),  # pan with middle button drag
         "wheel": ("pan", "push", (0, -0.5)),  # pan y-axis on mouse scroll
         "control+wheel": (
             "zoom",

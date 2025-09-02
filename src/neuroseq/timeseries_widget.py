@@ -35,10 +35,10 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
     # these signals emit indices or slices of indices, neurons first and then times
     mouse_clicked = QtCore.Signal(
         int, int, int
-    )  # neuron slice, time slice, mouse button (0 for no button, 1 for left, 2 for right)
+    )  # neuron slice, time slice, mouse button (0 for no button, 1 for left, 2 for right, 3 for middle)
     mouse_dragged = QtCore.Signal(
         int, int, int, int, int
-    )  # initial neuron index, current neuron index, initial time index, current time index, mouse button (0 for no button, 1 for left, 2 for right)
+    )  # initial neuron index, current neuron index, initial time index, current time index, mouse button (0 for no button, 1 for left, 2 for right, 3 for middle)
     custom_analysis_requested = QtCore.Signal(
         CustomAnalysisDataType, CustomAnalysisType, slice, slice, dict
     )
@@ -186,8 +186,6 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.unselect_neurons()
 
     def pointer_down(self, ev: pygfx.PointerEvent) -> None:
-        if "Control" in ev.modifiers:
-            return
         self.mouse_press_pos = self.subplot.map_screen_to_world(ev)
         self.mouse_pos = self.mouse_press_pos
         self.mouse_press_button = ev.button
@@ -212,8 +210,6 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
             return
 
     def pointer_move(self, ev: pygfx.PointerEvent) -> None:
-        if "Control" in ev.modifiers:
-            return
         self.mouse_pos = self.subplot.map_screen_to_world(ev)
         if self.mouse_pos is None:
             self.text.visible = False
@@ -261,8 +257,6 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
                 self.mouse_drag_time_index = drag_time_index
 
     def pointer_up(self, ev: pygfx.PointerEvent) -> None:
-        if "Control" in ev.modifiers:
-            return
         if self.mouse_press_pos is None:
             self.mouse_press_button = 0
             return
