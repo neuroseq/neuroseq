@@ -163,6 +163,14 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
 
     def post_set_data(self):
         self.subplot.auto_scale(zoom=1.0, maintain_aspect=False)
+        self.subplot.grids = False
+        self.subplot.axes.y.ticks = np.arange(0, self.n_neurons, 1)
+        self.subplot.axes.y.points.visible = False
+        self.subplot.axes.y.line.visible = False
+        self.subplot.axes.x.points.visible = False
+        self.subplot.axes.x.line.visible = False
+        self.subplot.axes.x.min_tick_distance = 100
+        self.subplot.axes.x.tick_format = lambda x, x_min, x_max: f"{x:.0f}ms"
         self.subplot.toolbar = False
         self.subplot.add_graphic(self.roi, center=False)
         self.subplot.add_graphic(
