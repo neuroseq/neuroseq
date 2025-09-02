@@ -60,6 +60,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.roi = RegionOfInterest(fill_color=(0.5, 0.5, 0.5, 0.2))
         self.hover_slice_graphic: fpl.Graphic | None = None
         self.text = Text()
+        self.show_text = True
         self.timeline: fpl.LinearSelector | None = None
         self.setLayout(layout)
         self.subplot: Subplot = self.figure[0, 0]
@@ -115,8 +116,9 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.unselect_neurons()
 
     def toggle_selection_text(self):
-        self.roi.text.visible = not self.roi.text.visible
-        self.text.visible = not self.text.visible
+        self.show_text = not self.show_text
+        self.roi.text.visible = self.show_text
+        self.text.visible = self.show_text
 
     def toggle_dark_mode(self):
         """Toggle the colors of the plot between light and dark."""
@@ -214,10 +216,15 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
             return
         self.mouse_pos = self.subplot.map_screen_to_world(ev)
         if self.mouse_pos is None:
+            self.text.visible = False
+            if self.hover_slice_graphic is not None:
+                self.hover_slice_graphic.visible = False
             return
         self.logger.debug(f"pointer_move at {self.mouse_pos} in mode {self.mode}")
+        self.text.visible = self.show_text
         self.text.set_pos(self.mouse_pos)
         if self.hover_slice_graphic is not None:
+            self.hover_slice_graphic.visible = True
             self.hover_slice_graphic.offset = (
                 self.mouse_pos[0],
                 self.mouse_pos[1],
