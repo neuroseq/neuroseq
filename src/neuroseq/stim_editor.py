@@ -205,7 +205,6 @@ class StimEditor(QtWidgets.QWidget):
                 self.paste_selected_stim(neuron_index, time_index)
             else:
                 self.stim_widget.unselect_neurons()
-                # self.stim_widget.timeline.selection = time_index * self.current_stim_modifier.timed_array.dt
             return
 
     def stim_widget_mouse_dragged(
@@ -219,7 +218,7 @@ class StimEditor(QtWidgets.QWidget):
         self.logger.debug(
             f"Mouse dragged from neuron {initial_neuron_index}, time index {initial_time_index} to neuron {current_neuron_index}, time index {current_time_index}, with button: {button_index}"
         )
-        if self.current_stim_modifier is None:
+        if self.current_stim_modifier is None or button_index > 2:
             return
         erase = (self.draw_mode == DrawMode.DRAW and button_index == 2) or (
             self.draw_mode == DrawMode.ERASE and button_index == 1
