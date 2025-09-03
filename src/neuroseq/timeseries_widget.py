@@ -42,6 +42,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
     custom_analysis_requested = QtCore.Signal(
         CustomAnalysisDataType, CustomAnalysisType, slice, slice, dict
     )
+    escape_pressed = QtCore.Signal()
 
     def __init__(
         self, controller: pygfx.Controller, parent: QtWidgets.QWidget | None = None
@@ -106,6 +107,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.figure.renderer.add_event_handler(self.pointer_down, "pointer_down")
         self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
         self.figure.renderer.add_event_handler(self.pointer_up, "pointer_up")
+        self.figure.renderer.add_event_handler(self.key_down, "key_down")
 
     def set_mode(self, mode: InteractMode) -> None:
         self.mode = mode
@@ -291,6 +293,11 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.mouse_press_pos = None
         self.mouse_press_button = 0
         self.selection_in_progress = False
+
+    def key_down(self, ev: pygfx.KeyboardEvent) -> None:
+        if ev.key == "Escape":
+            self.unselect_neurons()
+            self.escape_pressed.emit()
 
     def unselect_neurons(self) -> None:
         self.mouse_press_pos = None

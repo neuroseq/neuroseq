@@ -94,6 +94,7 @@ class StimEditor(QtWidgets.QWidget):
         self.cmb_stim.currentTextChanged.connect(self.select_stim)
         self.stim_widget.mouse_clicked.connect(self.stim_widget_mouse_clicked)
         self.stim_widget.mouse_dragged.connect(self.stim_widget_mouse_dragged)
+        self.stim_widget.escape_pressed.connect(self.cancel_paste_selected_stim)
         self.resize(800, 600)
 
     def set_model(self, model: B2Model) -> None:
@@ -276,6 +277,13 @@ class StimEditor(QtWidgets.QWidget):
         self.stim_widget.set_hover_slice(self.copy_values)
         self.stim_widget.set_mode(InteractMode.DRAW)
         self.select_mode = SelectMode.PASTE_INVERTED if invert else SelectMode.PASTE
+
+    def cancel_paste_selected_stim(self) -> None:
+        if self.select_mode not in (SelectMode.PASTE, SelectMode.PASTE_INVERTED):
+            return
+        self.stim_widget.set_hover_slice(None)
+        self.stim_widget.set_mode(InteractMode.SELECT)
+        self.select_mode = SelectMode.SELECT
 
     def paste_selected_stim(self, neuron_index: int, time_index: int) -> None:
         if self.current_stim_modifier is None:
