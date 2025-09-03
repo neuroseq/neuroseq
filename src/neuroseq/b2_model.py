@@ -1789,9 +1789,12 @@ class B2Model:
                     monitor = self.network[key]
                     group = h5file.create_group(monitor.name)
                     for v in monitor.record_variables:
-                        group.create_dataset(
-                            v, shape=getattr(monitor, v).shape, data=getattr(monitor, v)
-                        )
+                        try:
+                            shape = getattr(monitor, v).shape
+                        except AttributeError:
+                            # workaround for https://github.com/brian-team/brian2/issues/1662
+                            shape = getattr(monitor, v).__array__().shape
+                        group.create_dataset(v, shape=shape, data=getattr(monitor, v))
         except FileNotFoundError as e:
             message = f"Path {pathname} does not exist"
             self.logger.critical(message)
