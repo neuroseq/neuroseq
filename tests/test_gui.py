@@ -180,7 +180,7 @@ def test_gui_save(
     assert mfx_ornstein.monitors.keys() == loaded_model.monitors.keys()
 
 
-def test_gui_export(
+def test_gui_export_with_simulation_data(
     tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_ornstein: B2Model
 ) -> None:
     gui = Gui()
@@ -188,7 +188,9 @@ def test_gui_export(
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)
-    gui.update_model(mfx_ornstein)
+    # generate some simulation data
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.1", True))
+    gui.btn_continue_simulation_clicked()
     qtbot.wait(delay_after_update_model_call_in_ms)
     filename = tmp_path / "test.h5"
     assert not filename.exists()
