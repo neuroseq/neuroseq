@@ -118,7 +118,7 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_synapse.currentTextChanged.connect(self.set_synapse)
         self.cmb_spike.currentTextChanged.connect(self.set_spike)
         if filename is None:
-            filename = example_models_path / "default_model.json"
+            filename = example_models_path / "default_model.nseq"
         self.load_model(str(filename))
 
     def _update_data(self) -> None:
@@ -154,14 +154,14 @@ class Gui(QtWidgets.QMainWindow):
         self.progress_dialog.setValue(completed_percent)
 
     def btn_new_clicked(self) -> None:
-        self.load_model(str(example_models_path / "default_model.json"))
+        self.load_model(str(example_models_path / "default_model.nseq"))
 
     def btn_open_clicked(self) -> None:
         filename, _ = getopenfilename(
             self,
             "load model",
-            "model.json",
-            "json file (*.json)",
+            "model.nseq",
+            "neuroseq model (*.nseq)",
         )
         if filename != "":
             self.load_model(filename)
@@ -170,11 +170,14 @@ class Gui(QtWidgets.QMainWindow):
         filename, _ = getsavefilename(
             self,
             "Save model",
-            "model.json",
-            "json file (*.json)",
+            "model.nseq",
+            "neuroseq model (*.nseq)",
         )
         if filename == "":
             return
+        filename = pathlib.Path(filename)
+        if filename.suffix != ".nseq":
+            filename = filename.with_suffix(".nseq")
         try:
             self.model.save_model(filename)
         except Exception as e:

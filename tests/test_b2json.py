@@ -17,11 +17,9 @@ def test_quantity_json(tmp_path: Path) -> None:
 
     d = {"a": q, "b": 3.13 * 1 / second}
 
-    with open(tmp_path / "test.json", "w") as file:
-        b2json.dump(d, file)
-
-    with open(tmp_path / "test.json") as file:
-        read = b2json.load(file)
+    tmp_file = tmp_path / "test.nseq"
+    b2json.dump(d, tmp_file)
+    read = b2json.load(tmp_file)
 
     assert list(d.keys()) == list(read.keys())
     assert d["b"] == read["b"]
@@ -42,11 +40,9 @@ def test_timed_array_json(tmp_path: Path) -> None:
         "t": t,
     }
 
-    with open(tmp_path / "test.json", "w") as file:
-        b2json.dump(d, file)
-
-    with open(tmp_path / "test.json") as file:
-        read = b2json.load(file)
+    tmp_file = tmp_path / "test.nseq"
+    b2json.dump(d, tmp_file)
+    read = b2json.load(tmp_file)
 
     assert_allclose(np.array(d["t"].values), np.array(read["t"].values))
     assert (
@@ -61,10 +57,8 @@ def test_numpy_json(tmp_path: Path) -> None:
         "a": q,
     }
 
-    with open(tmp_path / "test.json", "w") as file:
-        b2json.dump(d, file)
-
-    with open(tmp_path / "test.json") as file:
-        read = b2json.load(file)
+    tmp_file = tmp_path / "test.nseq"
+    b2json.dump(d, tmp_file)
+    read = b2json.load(tmp_file)
 
     assert_allclose(d["a"], read["a"])

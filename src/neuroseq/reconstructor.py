@@ -15,21 +15,17 @@ class Reconstructor:
     Class that reconstructs a B2Model from its serialized version.
     """
 
-    def __init__(self, data_or_path: str | Path | dict[Any, Any]) -> None:
+    def __init__(self, filepath: str | Path) -> None:
         """
         Construct a new `Reconstructor` object.
 
         Parameters
         ----------
         path : str
-            Path to the json file that contains the model or a preloaded dictionary
+            Path to the file that contains the model or a preloaded dictionary
         """
         self.logger = logging.getLogger(__name__)
-        if isinstance(data_or_path, dict):
-            self.loaded_data = data_or_path
-        else:
-            with open(data_or_path) as file:
-                self.loaded_data = b2json.load(file)
+        self.loaded_data = b2json.load(filepath)
 
     def _reconstruct_dynamic_object(
         self,

@@ -75,7 +75,7 @@ def reduce_brian2_logging_verbosity() -> None:
 
 @pytest.fixture(scope="session")
 def default_model_path() -> pathlib.Path:
-    return example_models_path / "default_model.json"
+    return example_models_path / "default_model.nseq"
 
 
 @pytest.fixture(scope="session")
