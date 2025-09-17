@@ -971,10 +971,9 @@ def test_store_restore(mfx_ornstein: b2_model.B2Model) -> None:
 
 
 def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
-    mfx_nmda.save_model(tmp_path / "model.json")
-
-    with open(tmp_path / "model.json") as file:
-        loaded_data = b2json.load(file)
+    tmp_file = tmp_path / "model.nseq"
+    mfx_nmda.save_model(tmp_file)
+    loaded_data = b2json.load(tmp_file)
 
     for k in [
         "neurons",
@@ -988,7 +987,7 @@ def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
     ]:
         assert k in loaded_data
 
-    reconstructed_model = b2_model.B2Model.load_model(tmp_path / "model.json")
+    reconstructed_model = b2_model.B2Model.load_model(tmp_file)
 
     assert reconstructed_model.seed == mfx_nmda.seed
     assert reconstructed_model.network["neurons"].dt == mfx_nmda.network["neurons"].dt

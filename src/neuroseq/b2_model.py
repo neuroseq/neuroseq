@@ -2131,17 +2131,14 @@ class B2Model:
         Parameters
         ----------
         filepath : str
-            path to the yaml file where the current state should be stored
+            path to the file where the current state should be stored
         """
-        states = self.to_dict()
-
-        with open(filepath, "w") as file:
-            b2json.dump(states, file)
+        b2json.dump(self.to_dict(), filepath)
 
     @classmethod
     def load_model(
         cls,
-        filepath: str | Path | dict[Any, Any],
+        filepath: str | Path,
         report: Callable[[int], None] | None = None,
     ) -> B2Model:
         """

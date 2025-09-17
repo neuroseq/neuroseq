@@ -166,11 +166,15 @@ def test_gui_save(
     qtbot.wait(delay_after_update_model_call_in_ms)
     gui.update_model(mfx_ornstein)
     qtbot.wait(delay_after_update_model_call_in_ms)
-    filename = tmp_path / "test.json"
+    filename_without_extension = tmp_path / "test"
+    # the gui will add the .nseq extension automatically
+    filename = filename_without_extension.with_suffix(".nseq")
     assert not filename.exists()
     # mock getSaveFileName to return the desired filename
     monkeypatch.setattr(
-        QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (f"{filename}", True)
+        QtWidgets.QFileDialog,
+        "getSaveFileName",
+        lambda *args: (f"{filename_without_extension}", True),
     )
     gui.btn_save_clicked()
     assert filename.exists()
