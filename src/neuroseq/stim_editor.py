@@ -340,7 +340,7 @@ class StimEditor(QtWidgets.QWidget):
         ]
         self.logger.info(f"Saving {arr.shape} stim selection to file {filename}")
         try:
-            np.save(filename, arr, allow_pickle=False, fix_imports=False)
+            np.save(filename, arr, allow_pickle=False)
         except Exception as e:
             msg = f"Error saving stim selection to file: {e}"
             self.logger.error(msg)

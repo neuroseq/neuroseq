@@ -179,8 +179,11 @@ class Gui(QtWidgets.QMainWindow):
         if filename.suffix != ".nseq":
             filename = filename.with_suffix(".nseq")
         try:
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
             self.model.save_model(filename)
+            QtWidgets.QApplication.restoreOverrideCursor()
         except Exception as e:
+            QtWidgets.QApplication.restoreOverrideCursor()
             self.logger.warning(f"Failed to save file {filename}: {e}")
             QtWidgets.QMessageBox.critical(
                 self,
@@ -233,6 +236,7 @@ class Gui(QtWidgets.QMainWindow):
 
         except Exception as e:
             self.logger.warning(f"Failed to load model from file {filename}: {e}")
+            self.logger.exception(e)
             QtWidgets.QMessageBox.critical(
                 self,
                 "Model construction error",

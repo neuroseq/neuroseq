@@ -1,3 +1,5 @@
+import json
+import zipfile
 from pathlib import Path
 
 import brian2.numpy_ as np
@@ -18,8 +20,9 @@ def test_quantity_json(tmp_path: Path) -> None:
     d = {"a": q, "b": 3.13 * 1 / second}
 
     tmp_file = tmp_path / "test.nseq"
-    b2json.dump(d, tmp_file)
-    read = b2json.load(tmp_file)
+    with zipfile.ZipFile(tmp_file, "w", zipfile.ZIP_DEFLATED) as zf:
+        json_str = json.dumps(d, cls=b2json.b2json_encoder_factory(zf))
+        read = json.loads(json_str, object_hook=b2json.b2_object_hook_factory(zf))
 
     assert list(d.keys()) == list(read.keys())
     assert d["b"] == read["b"]
@@ -41,8 +44,9 @@ def test_timed_array_json(tmp_path: Path) -> None:
     }
 
     tmp_file = tmp_path / "test.nseq"
-    b2json.dump(d, tmp_file)
-    read = b2json.load(tmp_file)
+    with zipfile.ZipFile(tmp_file, "w", zipfile.ZIP_DEFLATED) as zf:
+        json_str = json.dumps(d, cls=b2json.b2json_encoder_factory(zf))
+        read = json.loads(json_str, object_hook=b2json.b2_object_hook_factory(zf))
 
     assert_allclose(np.array(d["t"].values), np.array(read["t"].values))
     assert (
@@ -58,7 +62,8 @@ def test_numpy_json(tmp_path: Path) -> None:
     }
 
     tmp_file = tmp_path / "test.nseq"
-    b2json.dump(d, tmp_file)
-    read = b2json.load(tmp_file)
+    with zipfile.ZipFile(tmp_file, "w", zipfile.ZIP_DEFLATED) as zf:
+        json_str = json.dumps(d, cls=b2json.b2json_encoder_factory(zf))
+        read = json.loads(json_str, object_hook=b2json.b2_object_hook_factory(zf))
 
     assert_allclose(d["a"], read["a"])

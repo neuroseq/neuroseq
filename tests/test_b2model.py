@@ -14,7 +14,6 @@ from pytest import MonkeyPatch
 from pytest_mock import MockerFixture
 
 from neuroseq import b2_model
-from neuroseq import b2json
 
 
 def test_construction(tmp_path: Path) -> None:
@@ -972,21 +971,12 @@ def test_store_restore(mfx_ornstein: b2_model.B2Model) -> None:
 
 def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
     tmp_file = tmp_path / "model.nseq"
+
+    # simulate for 1 second, save checkpoint, then simulate for another second & save
+    mfx_nmda.run_simulation(1 * b2.second)
+    mfx_nmda.store("after_1s")
+    mfx_nmda.run_simulation(1 * b2.second)
     mfx_nmda.save_model(tmp_file)
-    loaded_data = b2json.load(tmp_file)
-
-    for k in [
-        "neurons",
-        "neuron_input",
-        "S",
-        "S_pre",
-        "M",
-        "Mn",
-        "seed",
-        "input_subgroup",
-    ]:
-        assert k in loaded_data
-
     reconstructed_model = b2_model.B2Model.load_model(tmp_file)
 
     assert reconstructed_model.seed == mfx_nmda.seed
@@ -1026,14 +1016,21 @@ def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
 
     assert reconstructed_model.parameters == mfx_nmda.parameters
 
-    # resetting the seed is necessary, since brian2 has only one global rng (and buffer of cached random numbers),
-    # and if the seed is not reset the second simulation will run with different random numbers and produce different results
-    b2.seed(loaded_data["seed"])
-    mfx_nmda.run_simulation(1 * b2.second)
+    # simulation data at save time is restored
+    assert len(reconstructed_model.network["M"].t) == 20000
+    assert reconstructed_model.network["M"].t[-1] == pytest.approx(2, abs=0.001)
+    assert_allclose(mfx_nmda.network["M"].g, reconstructed_model.network["M"].g)
+    assert_allclose(mfx_nmda.network["Mn"].g, reconstructed_model.network["Mn"].g)
 
-    b2.seed(loaded_data["seed"])
+    # as are checkpoints
+    assert len(reconstructed_model.checkpoints) == 2
+    assert "after_1s" in reconstructed_model.checkpoints
+    reconstructed_model.restore("after_1s")
+    assert len(reconstructed_model.network["M"].t) == 10000
+    assert reconstructed_model.network["M"].t[-1] == pytest.approx(1, abs=0.001)
+
+    # and simulations can be continued: run for 1s so that both models have run for 2s from the same initial conditions
     reconstructed_model.run_simulation(1 * b2.second)
-
     assert_allclose(mfx_nmda.network["M"].g, reconstructed_model.network["M"].g)
     assert_allclose(mfx_nmda.network["Mn"].g, reconstructed_model.network["Mn"].g)
 
