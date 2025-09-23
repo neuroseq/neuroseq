@@ -21,6 +21,8 @@ import neuroseq
 
 example_models_path = pathlib.Path(str(resources.files(neuroseq))) / "example_models"
 
+save_store_name = "___current-simulation-state-at-save-time___"
+
 
 class InteractMode(Enum):
     DRAW = 1

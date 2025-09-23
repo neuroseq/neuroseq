@@ -1,7 +1,6 @@
 import json
 import zipfile
 from io import BytesIO
-from pathlib import Path
 
 from brian2 import Quantity
 from brian2 import TimedArray
@@ -92,31 +91,3 @@ def b2_object_hook_factory(zf: zipfile.ZipFile | None):
         return dct
 
     return b2_object_hook
-
-
-def dump(obj: dict, filepath: str | Path):
-    """
-    Dumps a dict representing the model to a zipfile containing a model.json file and a npy file for each TimedArray.
-    """
-    with zipfile.ZipFile(filepath, "w", zipfile.ZIP_DEFLATED) as zf:
-        model_json = json.dumps(
-            obj, cls=b2json_encoder_factory(zf), separators=(",", ":")
-        )
-        zf.writestr("model.json", model_json)
-
-
-def load(filepath: str | Path) -> dict:
-    """
-    Returns a dict representing the model from a zipfile containing a model.json file and a npy file for each TimedArray.
-    """
-    if Path(filepath).suffix == ".json":
-        # for backwards compatibility, support loading models from json files
-        with open(filepath) as fp:
-            return json.load(fp, object_hook=b2_object_hook_factory(None))
-    else:
-        # default is to load the model from a zipfile
-        with (
-            zipfile.ZipFile(filepath, "r", zipfile.ZIP_DEFLATED) as zf,
-            zf.open("model.json") as fp,
-        ):
-            return json.load(fp, object_hook=b2_object_hook_factory(zf))
