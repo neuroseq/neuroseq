@@ -1,0 +1,46 @@
+# Developer Guide
+
+## Developer Installation with uv
+
+First ensure you have [installed uv](https://docs.astral.sh/uv/getting-started/installation/#standalone-installer).
+
+Then you can install [prek](https://prek.j178.dev/) (a faster implementation of [pre-commit](https://pre-commit.com/)) using uv:
+
+```bash
+uv tool install prek
+```
+
+Then clone the repository and set up the pre-commit hooks for this repository:
+
+```bash
+git clone git@github.com:ssciwr/neuroseq.git
+cd neuroseq
+prek install
+```
+
+## Developer Installation without uv
+
+Alternatively, if you aren't using uv, then create a new conda environment or virtual environment and activate it.
+Then do an editable install of the package (which means that any changes to the source code will be reflected in the installed package without needing to reinstall), and install the pre-commit hooks:
+
+```bash
+pip install -e . --group dev
+pip install prek
+prek install
+```
+
+## Developer Use
+
+The GUI is launched with:
+
+```bash
+uv run neuroseq
+```
+
+(if you are not using uv, just run `neuroseq`)
+
+To run the test suite:
+
+```bash
+uv run pytest
+```
