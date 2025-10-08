@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import pathlib
 import runpy
@@ -9,6 +10,7 @@ from dataclasses import dataclass
 import brian2 as b2
 import brian2.numpy_ as np
 import qtawesome as qta
+from platformdirs import user_config_dir
 from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
@@ -120,6 +122,7 @@ class Gui(QtWidgets.QMainWindow):
         if filename is None:
             filename = example_models_path / "default_model.nseq"
         self.load_model(str(filename))
+        self.load_config_settings()
 
     def _update_data(self) -> None:
         if self.model.network.t > 0:
@@ -609,6 +612,23 @@ class Gui(QtWidgets.QMainWindow):
             )
             return
         self._update_data()
+        # save to config file
+        try:
+            config_dir = user_config_dir("neuroseq", "ssciwr")
+            config_file = config_dir + "config.json"
+            with open(config_file, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "max_ram_synapse_plot_matrix": self.settings.max_ram_synapse_plot_matrix
+                    },
+                    f,
+                )
+            self.logger.info(
+                f"Saved max RAM for synapse plot matrix to config file {config_file}"
+            )
+        except Exception as e:
+            self.logger.warning(f"Could not save config file: {e}")
+            self.logger.exception(e)
 
     def connect_external_simulation_function(self) -> None:
         filename, _ = getopenfilename(
@@ -654,6 +674,16 @@ class Gui(QtWidgets.QMainWindow):
         self.logger.info(f"Setting Brian2 backend to {new_backend}")
         b2.prefs.codegen.target = new_backend
         self.settings.brian2_backend = new_backend
+        # save to config file
+        try:
+            config_dir = user_config_dir("neuroseq", "ssciwr")
+            config_file = config_dir + "config.json"
+            with open(config_file, "w", encoding="utf-8") as f:
+                json.dump({"brian2_backend": new_backend}, f)
+            self.logger.info(f"Saved Brian2 backend to config file {config_file}")
+        except Exception as e:
+            self.logger.warning(f"Could not save config file: {e}")
+            self.logger.exception(e)
 
     def choose_stim_padding_secs(self) -> None:
         new_padding_secs, ok = QtWidgets.QInputDialog.getText(
@@ -677,6 +707,73 @@ class Gui(QtWidgets.QMainWindow):
         self.logger.info(
             f"Setting stimulus padding to {self.settings.stim_padding_secs}s"
         )
+        # save to config file
+        try:
+            config_dir = user_config_dir("neuroseq", "ssciwr")
+            config_file = config_dir + "config.json"
+            with open(config_file, "w", encoding="utf-8") as f:
+                json.dump({"stim_padding_secs": self.settings.stim_padding_secs}, f)
+            self.logger.info(f"Saved stimulus padding to config file {config_file}")
+        except Exception as e:
+            self.logger.warning(f"Could not save config file: {e}")
+            self.logger.exception(e)
+
+    def load_config_settings(self) -> None:
+        # check if config file exists, if not, do nothing and run on default values
+        config_dir = user_config_dir("neuroseq", "ssciwr")
+        config_file = config_dir + "config.json"
+        if not pathlib.Path(config_file).exists():
+            self.logger.info(
+                f"No config file found at {config_file}, using default settings"
+            )
+            return
+        # config file exists, reading...
+        try:
+            config_dir = user_config_dir("neuroseq", "ssciwr")
+            config_file = config_dir + "config.json"
+            with open(config_file, encoding="utf-8") as f:
+                config = json.load(f)
+
+            # retrieving values
+            brian2_backend = config.get("brian2_backend", "cython")
+            max_ram_synapse_plot_matrix = config.get("max_ram_synapse_plot_matrix", 256)
+            stim_padding_secs = config.get("stim_padding_secs", 5)
+
+            # setting values
+            if brian2_backend in ["cython", "numpy"]:
+                self.settings.brian2_backend = brian2_backend
+                b2.prefs.codegen.target = brian2_backend
+                self.logger.info(
+                    f"Loaded Brian2 backend from config file {config_file}: {brian2_backend}"
+                )
+            else:
+                self.logger.warning(
+                    f"Invalid Brian2 backend in config file {config_file}: {brian2_backend}"
+                )
+            try:
+                self.settings.max_ram_synapse_plot_matrix = max(
+                    0, int(max_ram_synapse_plot_matrix)
+                )
+                self._update_data()
+                self.logger.info(
+                    f"Loaded max RAM for synapse plot matrix from config file {config_file}: {max_ram_synapse_plot_matrix}"
+                )
+            except ValueError:
+                self.logger.warning(
+                    f"Invalid max RAM synapse plot matrix in config file {config_file}: {max_ram_synapse_plot_matrix}"
+                )
+            try:
+                self.settings.stim_padding_secs = max(0, int(stim_padding_secs))
+                self.logger.info(
+                    f"Loaded stimulus padding from config file {config_file}: {stim_padding_secs}"
+                )
+            except ValueError:
+                self.logger.warning(
+                    f"Invalid stimulus padding in config file {config_file}: {stim_padding_secs}"
+                )
+        except Exception as e:
+            self.logger.warning(f"Could not load config file: {e}")
+            self.logger.exception(e)
 
     def about(self) -> None:
         QtWidgets.QMessageBox.about(
