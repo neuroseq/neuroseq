@@ -432,6 +432,57 @@ def test_gui_stim_padding(
     gui.choose_stim_padding_secs()
 
 
+def test_gui_restore_settings_on_restart(
+    monkeypatch: MonkeyPatch, qtbot: QtBot
+) -> None:
+    gui = Gui()
+    # retrieve current config settings to restore after the test, since choosing the backend now overwrites the config file
+    orig_backend = gui.settings.brian2_backend
+    orig_ram_limit = gui.settings.max_ram_synapse_plot_matrix
+    orig_stim_padding = gui.settings.stim_padding_secs
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    # change all settings
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("cython", True)
+    )
+    gui.choose_brian2_backend()
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("512", True))
+    gui.choose_max_ram_synapse_plot_matrix()
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("6", True))
+    gui.choose_stim_padding_secs()
+    assert b2.prefs.codegen.target == "cython"
+    assert gui.settings.max_ram_synapse_plot_matrix == 512
+    assert gui.settings.stim_padding_secs == 6
+
+    # close gui and reopen to check if settings were saved and reloaded correctly
+    gui.close()
+    gui2 = Gui()
+    gui2.show()
+    qtbot.addWidget(gui2)
+    qtbot.waitUntil(lambda: gui2.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    assert b2.prefs.codegen.target == "cython"
+    assert gui2.settings.max_ram_synapse_plot_matrix == 512
+    assert gui2.settings.stim_padding_secs == 6
+
+    # restore original settings
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: (orig_backend, True)
+    )
+    gui2.choose_brian2_backend()
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getText", lambda *args: (f"{orig_ram_limit}", True)
+    )
+    gui2.choose_max_ram_synapse_plot_matrix()
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getText", lambda *args: (f"{orig_stim_padding}", True)
+    )
+    gui2.choose_stim_padding_secs()
+
+
 def test_gui_playback_speed(
     monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list
 ) -> None:
