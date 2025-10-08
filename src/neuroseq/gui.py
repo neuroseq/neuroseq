@@ -737,8 +737,10 @@ class Gui(QtWidgets.QMainWindow):
                 )
             else:
                 self.logger.warning(
-                    f"Invalid Brian2 backend in config file {config_file}: {brian2_backend}"
+                    f"Invalid Brian2 backend in config file {config_file}: {brian2_backend}. Restoring default of numpy"
                 )
+                self.settings.brian2_backend = "numpy"
+                b2.prefs.codegen.target = "numpy"
             try:
                 self.settings.max_ram_synapse_plot_matrix = max(
                     0, int(max_ram_synapse_plot_matrix)
@@ -749,8 +751,10 @@ class Gui(QtWidgets.QMainWindow):
                 )
             except ValueError:
                 self.logger.warning(
-                    f"Invalid max RAM synapse plot matrix in config file {config_file}: {max_ram_synapse_plot_matrix}"
+                    f"Invalid max RAM synapse plot matrix in config file {config_file}: {max_ram_synapse_plot_matrix}. Restoring default of 256MB"
                 )
+                self.settings.max_ram_synapse_plot_matrix = 256
+                self._update_data()
             try:
                 self.settings.stim_padding_secs = max(0, int(stim_padding_secs))
                 self.logger.info(
@@ -758,8 +762,9 @@ class Gui(QtWidgets.QMainWindow):
                 )
             except ValueError:
                 self.logger.warning(
-                    f"Invalid stimulus padding in config file {config_file}: {stim_padding_secs}"
+                    f"Invalid stimulus padding in config file {config_file}: {stim_padding_secs}. Restoring default of 5s"
                 )
+                self.settings.stim_padding_secs = 5
         except Exception as e:
             self.logger.warning(f"Could not load config file: {e}")
             self.logger.exception(e)
