@@ -364,10 +364,8 @@ def test_gui_synapse_ram_limit(
     assert "invalid input" in qmessagebox_calls[0]["title"].lower()
 
     # restore original setting
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog, "getText", lambda *args: (f"{orig_setting}", True)
-    )
-    gui.choose_max_ram_synapse_plot_matrix()
+    gui.settings.max_ram_synapse_plot_matrix = orig_setting
+    gui.save_config_settings()
 
 
 def test_gui_brian2_backend(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
@@ -396,10 +394,8 @@ def test_gui_brian2_backend(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
     assert b2.prefs.codegen.target == "numpy"
 
     # restore original setting
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: (orig_setting, True)
-    )
-    gui.choose_brian2_backend()
+    gui.settings.brian2_backend = orig_setting
+    gui.save_config_settings()
 
 
 def test_gui_stim_padding(
@@ -428,10 +424,8 @@ def test_gui_stim_padding(
     assert gui.stim_editor.stim_widget.n_timestamps == 10100
 
     # restore original setting
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog, "getText", lambda *args: (f"{orig_setting}", True)
-    )
-    gui.choose_stim_padding_secs()
+    gui.settings.stim_padding_secs = orig_setting
+    gui.save_config_settings()
 
 
 def test_gui_restore_settings_on_restart(
@@ -471,18 +465,10 @@ def test_gui_restore_settings_on_restart(
     assert gui2.settings.stim_padding_secs == 6
 
     # restore original settings
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: (orig_backend, True)
-    )
-    gui2.choose_brian2_backend()
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog, "getText", lambda *args: (f"{orig_ram_limit}", True)
-    )
-    gui2.choose_max_ram_synapse_plot_matrix()
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog, "getText", lambda *args: (f"{orig_stim_padding}", True)
-    )
-    gui2.choose_stim_padding_secs()
+    gui2.settings.brian2_backend = orig_backend
+    gui2.settings.max_ram_synapse_plot_matrix = orig_ram_limit
+    gui2.settings.stim_padding_secs = orig_stim_padding
+    gui2.save_config_settings()
 
 
 def test_gui_save_config_settings(qtbot: QtBot) -> None:
