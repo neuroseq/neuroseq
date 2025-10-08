@@ -314,6 +314,8 @@ def test_gui_synapse_ram_limit(
     qmessagebox_calls: list,
 ) -> None:
     gui = Gui()
+    # get current config settings to restore after the test, since choosing the ram limit now overwrites the config file
+    orig_setting = gui.settings.max_ram_synapse_plot_matrix
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -359,6 +361,12 @@ def test_gui_synapse_ram_limit(
     assert qmessagebox_calls[0]["name"] == "critical"
     assert "invalid input" in qmessagebox_calls[0]["title"].lower()
 
+    # restore original setting
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getText", lambda *args: (f"{orig_setting}", True)
+    )
+    gui.choose_max_ram_synapse_plot_matrix()
+
 
 def test_gui_brian2_backend(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
     gui = Gui()
@@ -385,7 +393,7 @@ def test_gui_brian2_backend(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
     gui.choose_brian2_backend()
     assert b2.prefs.codegen.target == "numpy"
 
-    # restore original settings
+    # restore original setting
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: (orig_setting, True)
     )
@@ -398,6 +406,8 @@ def test_gui_stim_padding(
     qmessagebox_calls: list,
 ) -> None:
     gui = Gui()
+    # get current config settings to restore after the test, since choosing the stim padding now overwrites the config file
+    orig_setting = gui.settings.stim_padding_secs
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -414,6 +424,12 @@ def test_gui_stim_padding(
     # should have ~0.1 secs of simulation data, and ~10.1 secs of stim array data with dt=0.1ms
     assert gui.heatmap_widget.tVals[-1] == approx(100, rel=2)
     assert gui.stim_editor.stim_widget.n_timestamps == 10100
+
+    # restore original setting
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getText", lambda *args: (f"{orig_setting}", True)
+    )
+    gui.choose_stim_padding_secs()
 
 
 def test_gui_playback_speed(
