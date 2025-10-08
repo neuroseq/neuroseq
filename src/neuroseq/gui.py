@@ -612,23 +612,7 @@ class Gui(QtWidgets.QMainWindow):
             )
             return
         self._update_data()
-        # save to config file
-        try:
-            config_dir = user_config_dir("neuroseq", "ssciwr")
-            config_file = config_dir + "config.json"
-            with open(config_file, "w", encoding="utf-8") as f:
-                json.dump(
-                    {
-                        "max_ram_synapse_plot_matrix": self.settings.max_ram_synapse_plot_matrix
-                    },
-                    f,
-                )
-            self.logger.info(
-                f"Saved max RAM for synapse plot matrix to config file {config_file}"
-            )
-        except Exception as e:
-            self.logger.warning(f"Could not save config file: {e}")
-            self.logger.exception(e)
+        self.save_config_settings()
 
     def connect_external_simulation_function(self) -> None:
         filename, _ = getopenfilename(
@@ -674,16 +658,7 @@ class Gui(QtWidgets.QMainWindow):
         self.logger.info(f"Setting Brian2 backend to {new_backend}")
         b2.prefs.codegen.target = new_backend
         self.settings.brian2_backend = new_backend
-        # save to config file
-        try:
-            config_dir = user_config_dir("neuroseq", "ssciwr")
-            config_file = config_dir + "config.json"
-            with open(config_file, "w", encoding="utf-8") as f:
-                json.dump({"brian2_backend": new_backend}, f)
-            self.logger.info(f"Saved Brian2 backend to config file {config_file}")
-        except Exception as e:
-            self.logger.warning(f"Could not save config file: {e}")
-            self.logger.exception(e)
+        self.save_config_settings()
 
     def choose_stim_padding_secs(self) -> None:
         new_padding_secs, ok = QtWidgets.QInputDialog.getText(
@@ -707,19 +682,28 @@ class Gui(QtWidgets.QMainWindow):
         self.logger.info(
             f"Setting stimulus padding to {self.settings.stim_padding_secs}s"
         )
-        # save to config file
+        self.save_config_settings()
+
+    def save_config_settings(self) -> None:
         try:
             config_dir = user_config_dir("neuroseq", "ssciwr")
             config_file = config_dir + "config.json"
             with open(config_file, "w", encoding="utf-8") as f:
-                json.dump({"stim_padding_secs": self.settings.stim_padding_secs}, f)
-            self.logger.info(f"Saved stimulus padding to config file {config_file}")
+                json.dump(
+                    {
+                        "brian2_backend": self.settings.brian2_backend,
+                        "max_ram_synapse_plot_matrix": self.settings.max_ram_synapse_plot_matrix,
+                        "stim_padding_secs": self.settings.stim_padding_secs,
+                    },
+                    f,
+                )
+            self.logger.info(f"Saved config settings to {config_file}")
         except Exception as e:
             self.logger.warning(f"Could not save config file: {e}")
             self.logger.exception(e)
 
     def load_config_settings(self) -> None:
-        # check if config file exists, if not, do nothing and run on default values
+        # check if config file exists. If not, do nothing and run on default values
         config_dir = user_config_dir("neuroseq", "ssciwr")
         config_file = config_dir + "config.json"
         if not pathlib.Path(config_file).exists():
@@ -729,6 +713,7 @@ class Gui(QtWidgets.QMainWindow):
             return
         # config file exists, reading...
         try:
+            # open file
             config_dir = user_config_dir("neuroseq", "ssciwr")
             config_file = config_dir + "config.json"
             with open(config_file, encoding="utf-8") as f:
