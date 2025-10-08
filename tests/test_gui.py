@@ -362,11 +362,13 @@ def test_gui_synapse_ram_limit(
 
 def test_gui_brian2_backend(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
     gui = Gui()
+    # retrieve current config settings to restore after the test, since choosing the backend now overwrites the config file
+    orig_setting = gui.settings.brian2_backend
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)
-    assert b2.prefs.codegen.target == "numpy"
+    assert b2.prefs.codegen.target == orig_setting
     # mock getItem to return the desired backend choice
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("cython", True)
@@ -382,6 +384,12 @@ def test_gui_brian2_backend(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
     gui.settings.brian2_backend = "invalid"
     gui.choose_brian2_backend()
     assert b2.prefs.codegen.target == "numpy"
+
+    # restore original settings
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: (orig_setting, True)
+    )
+    gui.choose_brian2_backend()
 
 
 def test_gui_stim_padding(
