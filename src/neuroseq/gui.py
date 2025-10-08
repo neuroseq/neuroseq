@@ -35,7 +35,7 @@ from neuroseq.utils import with_wait_cursor
 @dataclass
 class GuiSettings:
     max_ram_synapse_plot_matrix: int = 256
-    brian2_backend: str = "cython"
+    brian2_backend: str = "numpy"
     stim_padding_secs: int = 5
 
 
@@ -720,9 +720,13 @@ class Gui(QtWidgets.QMainWindow):
                 config = json.load(f)
 
             # retrieving values
-            brian2_backend = config.get("brian2_backend", "cython")
-            max_ram_synapse_plot_matrix = config.get("max_ram_synapse_plot_matrix", 256)
-            stim_padding_secs = config.get("stim_padding_secs", 5)
+            brian2_backend = config.get("brian2_backend", self.settings.brian2_backend)
+            max_ram_synapse_plot_matrix = config.get(
+                "max_ram_synapse_plot_matrix", self.settings.max_ram_synapse_plot_matrix
+            )
+            stim_padding_secs = config.get(
+                "stim_padding_secs", self.settings.stim_padding_secs
+            )
 
             # setting values
             if brian2_backend in ["cython", "numpy"]:
