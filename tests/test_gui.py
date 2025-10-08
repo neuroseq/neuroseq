@@ -556,9 +556,9 @@ def test_gui_load_config_settings(qtbot: QtBot) -> None:
     gui.save_config_settings()
 
     # try loading invalid values
-    # brian2 backend - nothing should happen
+    # brian2 backend - should reset to default 'numpy'
     gui.load_config_settings()
-    assert gui.settings.brian2_backend == "invalid backend"
+    assert gui.settings.brian2_backend == "numpy"
     # max_ram_synapse_plot_matrix - should be set to 0
     assert gui.settings.max_ram_synapse_plot_matrix == 0
     # stim_padding_secs - should be set to 0
@@ -569,17 +569,17 @@ def test_gui_load_config_settings(qtbot: QtBot) -> None:
     gui.settings.max_ram_synapse_plot_matrix = "this is not even a number!"
     gui.settings.stim_padding_secs = orig_stim_padding  # valid again
     gui.save_config_settings()
-    # should log a ValueError and nothing should change
+    # should log a ValueError and default to 256
     gui.load_config_settings()
-    assert gui.settings.max_ram_synapse_plot_matrix == "this is not even a number!"
+    assert gui.settings.max_ram_synapse_plot_matrix == 256
 
     # try setting stim_padding_secs to string
     gui.settings.max_ram_synapse_plot_matrix = orig_ram_limit  # valid again
     gui.settings.stim_padding_secs = "this is not even a number!"
     gui.save_config_settings()
-    # should log a ValueError and nothing should change
+    # should log a ValueError and default to 5s
     gui.load_config_settings()
-    assert gui.settings.stim_padding_secs == "this is not even a number!"
+    assert gui.settings.stim_padding_secs == 5
 
     # restore original settings
     gui.settings.brian2_backend = orig_backend
