@@ -493,9 +493,9 @@ def test_gui_save_config_settings(qtbot: QtBot) -> None:
     gui.save_config_settings()
 
     # check if settings file exists and contains the correct values
-    config_dir = user_config_dir("neuroseq", "ssciwr")
-    config_file = config_dir + "config.json"
-    assert Path(config_file).exists()
+    config_dir = Path(user_config_dir("neuroseq", "ssciwr"))
+    config_file = config_dir / "config.json"
+    assert config_file.exists()
 
     # check if settings were saved correctly
     with open(config_file) as f:
@@ -551,8 +551,8 @@ def test_gui_load_config_settings(qtbot: QtBot) -> None:
 
     # try loading invalid values
     gui.settings.brian2_backend = "invalid backend"
-    gui.settings.max_ram_synapse_plot_matrix = -5  # invalid, must be >= 0
-    gui.settings.stim_padding_secs = -3  # invalid, must be >= 0
+    gui.settings.max_ram_synapse_plot_matrix = -5
+    gui.settings.stim_padding_secs = -3
     gui.save_config_settings()
 
     # try loading invalid values
@@ -566,7 +566,7 @@ def test_gui_load_config_settings(qtbot: QtBot) -> None:
 
     # try setting RAM to string
     gui.settings.brian2_backend = orig_backend  # valid again
-    gui.settings.max_ram_synapse_plot_matrix = "this is not even a number!"
+    gui.settings.max_ram_synapse_plot_matrix = "this is not even a number!"  # type: ignore[assignment]
     gui.settings.stim_padding_secs = orig_stim_padding  # valid again
     gui.save_config_settings()
     # should log a ValueError and default to 256
@@ -575,7 +575,7 @@ def test_gui_load_config_settings(qtbot: QtBot) -> None:
 
     # try setting stim_padding_secs to string
     gui.settings.max_ram_synapse_plot_matrix = orig_ram_limit  # valid again
-    gui.settings.stim_padding_secs = "this is not even a number!"
+    gui.settings.stim_padding_secs = "this is not even a number!"  # type: ignore[assignment]
     gui.save_config_settings()
     # should log a ValueError and default to 5s
     gui.load_config_settings()

@@ -686,8 +686,9 @@ class Gui(QtWidgets.QMainWindow):
 
     def save_config_settings(self) -> None:
         try:
-            config_dir = user_config_dir("neuroseq", "ssciwr")
-            config_file = config_dir + "config.json"
+            config_dir = pathlib.Path(user_config_dir("neuroseq", "ssciwr"))
+            config_dir.mkdir(parents=True, exist_ok=True)
+            config_file = config_dir / "config.json"
             with open(config_file, "w", encoding="utf-8") as f:
                 json.dump(
                     {
@@ -704,9 +705,9 @@ class Gui(QtWidgets.QMainWindow):
 
     def load_config_settings(self) -> None:
         # check if config file exists. If not, do nothing and run on default values
-        config_dir = user_config_dir("neuroseq", "ssciwr")
-        config_file = config_dir + "config.json"
-        if not pathlib.Path(config_file).exists():
+        config_dir = pathlib.Path(user_config_dir("neuroseq", "ssciwr"))
+        config_file = config_dir / "config.json"
+        if not config_file.exists():
             self.logger.info(
                 f"No config file found at {config_file}, using default settings"
             )
@@ -714,8 +715,8 @@ class Gui(QtWidgets.QMainWindow):
         # config file exists, reading...
         try:
             # open file
-            config_dir = user_config_dir("neuroseq", "ssciwr")
-            config_file = config_dir + "config.json"
+            config_dir = pathlib.Path(user_config_dir("neuroseq", "ssciwr"))
+            config_file = config_dir / "config.json"
             with open(config_file, encoding="utf-8") as f:
                 config = json.load(f)
 
