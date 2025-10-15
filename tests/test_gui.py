@@ -30,8 +30,6 @@ def tmp_config_dir(monkeypatch: MonkeyPatch, tmp_path: Path):
         "neuroseq.gui.user_config_dir", lambda *args, **kwargs: str(tmp_path)
     )
     yield tmp_path
-    # clean up monkeypatch
-    monkeypatch.undo()
 
 
 @pytest.mark.screenshot
