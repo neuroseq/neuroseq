@@ -39,7 +39,8 @@ class GuiSettings:
     stim_padding_secs: int = 5
 
     def __init__(self) -> None:
-        self.logger = logging.getLogger(__name__)
+        self.logger: logging.Logger
+        self.__dict__["logger"] = logging.getLogger(__name__)
         self.logger.info("loading GUI settings")
         self.load_config_settings()
         b2.prefs.codegen.target = self.brian2_backend
@@ -47,12 +48,7 @@ class GuiSettings:
     def __setattr__(self, prop, val):
         super().__setattr__(prop, val)
         # save changes to the config file
-        if prop in [
-            "brian2_backend",
-            "max_ram_synapse_plot_matrix",
-            "stim_padding_secs",
-        ]:
-            self.save_config_settings()
+        self.save_config_settings()
 
     def save_config_settings(self) -> None:
         try:
