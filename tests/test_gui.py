@@ -468,7 +468,6 @@ def test_gui_restore_settings_on_restart(
     gui2.settings.brian2_backend = orig_backend
     gui2.settings.max_ram_synapse_plot_matrix = orig_ram_limit
     gui2.settings.stim_padding_secs = orig_stim_padding
-    gui2.save_config_settings()
 
 
 def test_gui_save_config_settings(qtbot: QtBot) -> None:
@@ -490,7 +489,6 @@ def test_gui_save_config_settings(qtbot: QtBot) -> None:
     gui.settings.stim_padding_secs = (
         orig_stim_padding + 1 if orig_stim_padding < 20 else orig_stim_padding - 1
     )
-    gui.save_config_settings()
 
     # check if settings file exists and contains the correct values
     config_dir = Path(user_config_dir("neuroseq", "ssciwr"))
@@ -511,7 +509,6 @@ def test_gui_save_config_settings(qtbot: QtBot) -> None:
     gui.settings.brian2_backend = orig_backend
     gui.settings.max_ram_synapse_plot_matrix = orig_ram_limit
     gui.settings.stim_padding_secs = orig_stim_padding
-    gui.save_config_settings()
 
 
 def test_gui_load_config_settings(qtbot: QtBot) -> None:
@@ -534,15 +531,14 @@ def test_gui_load_config_settings(qtbot: QtBot) -> None:
     gui.settings.brian2_backend = new_backend
     gui.settings.max_ram_synapse_plot_matrix = new_ram_limit
     gui.settings.stim_padding_secs = new_stim_padding
-    gui.save_config_settings()
 
     # set settings to original to check if loading works
-    gui.settings.brian2_backend = orig_backend
-    gui.settings.max_ram_synapse_plot_matrix = orig_ram_limit
-    gui.settings.stim_padding_secs = orig_stim_padding
+    gui.settings.__dict__["brian2_backend"] = orig_backend
+    gui.settings.__dict__["max_ram_synapse_plot_matrix"] = orig_ram_limit
+    gui.settings.__dict__["stim_padding_secs"] = orig_stim_padding
 
     # load settings from file
-    gui.load_config_settings()
+    gui.settings.load_config_settings()
 
     # check if settings were loaded correctly
     assert gui.settings.brian2_backend == new_backend
@@ -553,11 +549,10 @@ def test_gui_load_config_settings(qtbot: QtBot) -> None:
     gui.settings.brian2_backend = "invalid backend"
     gui.settings.max_ram_synapse_plot_matrix = -5
     gui.settings.stim_padding_secs = -3
-    gui.save_config_settings()
 
     # try loading invalid values
     # brian2 backend - should reset to default 'numpy'
-    gui.load_config_settings()
+    gui.settings.load_config_settings()
     assert gui.settings.brian2_backend == "numpy"
     # max_ram_synapse_plot_matrix - should be set to 0
     assert gui.settings.max_ram_synapse_plot_matrix == 0
@@ -568,24 +563,21 @@ def test_gui_load_config_settings(qtbot: QtBot) -> None:
     gui.settings.brian2_backend = orig_backend  # valid again
     gui.settings.max_ram_synapse_plot_matrix = "this is not even a number!"  # type: ignore[assignment]
     gui.settings.stim_padding_secs = orig_stim_padding  # valid again
-    gui.save_config_settings()
     # should log a ValueError and default to 256
-    gui.load_config_settings()
+    gui.settings.load_config_settings()
     assert gui.settings.max_ram_synapse_plot_matrix == 256
 
     # try setting stim_padding_secs to string
     gui.settings.max_ram_synapse_plot_matrix = orig_ram_limit  # valid again
     gui.settings.stim_padding_secs = "this is not even a number!"  # type: ignore[assignment]
-    gui.save_config_settings()
     # should log a ValueError and default to 5s
-    gui.load_config_settings()
+    gui.settings.load_config_settings()
     assert gui.settings.stim_padding_secs == 5
 
     # restore original settings
     gui.settings.brian2_backend = orig_backend
     gui.settings.max_ram_synapse_plot_matrix = orig_ram_limit
     gui.settings.stim_padding_secs = orig_stim_padding
-    gui.save_config_settings()
 
 
 def test_gui_playback_speed(
