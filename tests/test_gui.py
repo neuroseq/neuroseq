@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import brian2 as b2
@@ -20,6 +21,15 @@ from neuroseq.model_editor import ModelEditorDialog
 # no obvious signal to wait for after the model is updated to know when the GUI is ready,
 # so for now we just wait for a fixed time
 delay_after_update_model_call_in_ms = 50
+
+
+# pytest fixture for config file
+@pytest.fixture()
+def tmp_config_dir(monkeypatch: MonkeyPatch, tmp_path: Path):
+    monkeypatch.setattr(
+        "neuroseq.gui.user_config_dir", lambda *args, **kwargs: str(tmp_path)
+    )
+    yield tmp_path
 
 
 @pytest.mark.screenshot
@@ -312,6 +322,7 @@ def test_gui_synapse_ram_limit(
     monkeypatch: MonkeyPatch,
     qtbot: QtBot,
     qmessagebox_calls: list,
+    tmp_config_dir,
 ) -> None:
     gui = Gui()
     gui.show()
@@ -360,7 +371,9 @@ def test_gui_synapse_ram_limit(
     assert "invalid input" in qmessagebox_calls[0]["title"].lower()
 
 
-def test_gui_brian2_backend(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
+def test_gui_brian2_backend(
+    monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_config_dir
+) -> None:
     gui = Gui()
     gui.show()
     qtbot.addWidget(gui)
@@ -388,6 +401,7 @@ def test_gui_stim_padding(
     monkeypatch: MonkeyPatch,
     qtbot: QtBot,
     qmessagebox_calls: list,
+    tmp_config_dir,
 ) -> None:
     gui = Gui()
     gui.show()
@@ -406,6 +420,122 @@ def test_gui_stim_padding(
     # should have ~0.1 secs of simulation data, and ~10.1 secs of stim array data with dt=0.1ms
     assert gui.heatmap_widget.tVals[-1] == approx(100, rel=2)
     assert gui.stim_editor.stim_widget.n_timestamps == 10100
+
+
+def test_gui_restore_settings_on_restart(
+    monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_config_dir
+) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    # change all settings
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("cython", True)
+    )
+    gui.choose_brian2_backend()
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("512", True))
+    gui.choose_max_ram_synapse_plot_matrix()
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("6", True))
+    gui.choose_stim_padding_secs()
+    assert b2.prefs.codegen.target == "cython"
+    assert gui.settings.max_ram_synapse_plot_matrix == 512
+    assert gui.settings.stim_padding_secs == 6
+
+    # close gui and reopen to check if settings were saved and reloaded correctly
+    gui.close()
+    gui2 = Gui()
+    gui2.show()
+    qtbot.addWidget(gui2)
+    qtbot.waitUntil(lambda: gui2.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    assert b2.prefs.codegen.target == "cython"
+    assert gui2.settings.max_ram_synapse_plot_matrix == 512
+    assert gui2.settings.stim_padding_secs == 6
+
+
+def test_gui_save_config_settings(qtbot: QtBot, tmp_config_dir) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+
+    # change all settings
+    gui.settings.brian2_backend = "cython"
+    gui.settings.max_ram_synapse_plot_matrix = 512
+    gui.settings.stim_padding_secs = 6
+
+    # check if settings file exists and contains the correct values
+    config_dir = Path(tmp_config_dir)
+    config_file = config_dir / "config.json"
+    assert config_file.exists()
+
+    # check if settings were saved correctly
+    with open(config_file) as f:
+        config = json.load(f)
+    assert config["brian2_backend"] == gui.settings.brian2_backend
+    assert (
+        config["max_ram_synapse_plot_matrix"]
+        == gui.settings.max_ram_synapse_plot_matrix
+    )
+    assert config["stim_padding_secs"] == gui.settings.stim_padding_secs
+
+
+def test_gui_load_config_settings(qtbot: QtBot, tmp_config_dir) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+
+    # change all settings
+    gui.settings.brian2_backend = "cython"
+    gui.settings.max_ram_synapse_plot_matrix = 512
+    gui.settings.stim_padding_secs = 6
+
+    # set settings to original to check if loading works
+    gui.settings.__dict__["brian2_backend"] = "numpy"
+    gui.settings.__dict__["max_ram_synapse_plot_matrix"] = 256
+    gui.settings.__dict__["stim_padding_secs"] = 5
+
+    # load settings from file
+    gui.settings.load_config_settings()
+
+    # check if settings were loaded correctly
+    assert gui.settings.brian2_backend == "cython"
+    assert gui.settings.max_ram_synapse_plot_matrix == 512
+    assert gui.settings.stim_padding_secs == 6
+
+    # try loading invalid values
+    gui.settings.brian2_backend = "invalid backend"
+    gui.settings.max_ram_synapse_plot_matrix = -5
+    gui.settings.stim_padding_secs = -3
+
+    # try loading invalid values
+    # brian2 backend - should reset to default 'numpy'
+    gui.settings.load_config_settings()
+    assert gui.settings.brian2_backend == "numpy"
+    # max_ram_synapse_plot_matrix - should be set to 0
+    assert gui.settings.max_ram_synapse_plot_matrix == 0
+    # stim_padding_secs - should be set to 0
+    assert gui.settings.stim_padding_secs == 0
+
+    # try setting RAM to string
+    gui.settings.brian2_backend = "numpy"  # valid again
+    gui.settings.max_ram_synapse_plot_matrix = "this is not even a number!"  # type: ignore[assignment]
+    gui.settings.stim_padding_secs = 5  # valid again
+    # should log a ValueError and default to 256
+    gui.settings.load_config_settings()
+    assert gui.settings.max_ram_synapse_plot_matrix == 256
+
+    # try setting stim_padding_secs to string
+    gui.settings.max_ram_synapse_plot_matrix = 256  # valid again
+    gui.settings.stim_padding_secs = "this is not even a number!"  # type: ignore[assignment]
+    # should log a ValueError and default to 5s
+    gui.settings.load_config_settings()
+    assert gui.settings.stim_padding_secs == 5
 
 
 def test_gui_playback_speed(

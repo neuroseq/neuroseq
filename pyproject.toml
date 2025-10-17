@@ -21,6 +21,7 @@ dependencies = [
     "click",
     "fastplotlib>=0.5.1",
     "pyparsing!=3.2.4",
+    "platformdirs",
 ]
 dynamic = ["version"]
 
