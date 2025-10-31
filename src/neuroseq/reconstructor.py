@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import json
 import logging
+import pickle
+import zipfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from brian2 import seed
 
-from neuroseq import b2json
+from neuroseq.b2json import b2_object_hook_factory
+from neuroseq.utils import save_store_name
 
 
 class Reconstructor:
@@ -15,21 +19,32 @@ class Reconstructor:
     Class that reconstructs a B2Model from its serialized version.
     """
 
-    def __init__(self, data_or_path: str | Path | dict[Any, Any]) -> None:
+    def __init__(self, filepath: str | Path) -> None:
         """
         Construct a new `Reconstructor` object.
 
         Parameters
         ----------
         path : str
-            Path to the json file that contains the model or a preloaded dictionary
+            Path to the file that contains the model or a preloaded dictionary
         """
         self.logger = logging.getLogger(__name__)
-        if isinstance(data_or_path, dict):
-            self.loaded_data = data_or_path
+        self.stored_state = {}
+        if Path(filepath).suffix == ".json":
+            # for backwards compatibility, support loading models from json files
+            with open(filepath) as fp:
+                self.loaded_data = json.load(
+                    fp, object_hook=b2_object_hook_factory(None)
+                )
         else:
-            with open(data_or_path) as file:
-                self.loaded_data = b2json.load(file)
+            # default is to load the model from a zipfile
+            with (
+                zipfile.ZipFile(filepath, "r", zipfile.ZIP_DEFLATED) as zf,
+                zf.open("model.json") as fp,
+            ):
+                self.loaded_data = json.load(fp, object_hook=b2_object_hook_factory(zf))
+                if "stored_state.pkl" in zf.namelist():
+                    self.stored_state = pickle.loads(zf.read("stored_state.pkl"))
 
     def _reconstruct_dynamic_object(
         self,
@@ -278,6 +293,8 @@ class Reconstructor:
 
         seed(self.loaded_data["seed"])
 
+        model.checkpoints = self.loaded_data.get("checkpoints", [])
+
         # reconstruct parameters, timestep, seed.
         for k, v in self.loaded_data["parameters"].items():
             model.define_parameter(k, v)
@@ -314,6 +331,13 @@ class Reconstructor:
             for k, v in init.items():
                 model.define_init(n, k, v)
             model._assemble_initial_conditions(n)
+
+        # restore checkpoints
+        model.network._stored_state = self.stored_state
+        # restore state when saved if provided, then remove this temporary checkpoint
+        if save_store_name in model.network._stored_state:
+            model.network.restore(save_store_name)
+            del model.network._stored_state[save_store_name]
 
         model.must_be_rebuilt = False
 

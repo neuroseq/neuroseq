@@ -864,7 +864,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
         """
         super().__init__(parent=parent)
         tmp = tempfile.TemporaryDirectory()
-        file = os.path.join(tmp.name, "model.json")
+        file = os.path.join(tmp.name, "model.nseq")
         b2model.save_model(file)
         self.b2model = B2Model.load_model(file)
 

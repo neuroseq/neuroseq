@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import cast
 
 import brian2 as b2
 import pytest
@@ -17,11 +17,19 @@ from neuroseq.b2_model import B2Model
 from neuroseq.gui import Gui
 from neuroseq.model_editor import EditableSynapseTree
 from neuroseq.model_editor import ModelEditorDialog
-from neuroseq.selectable_bar_plot_item import SelectableBarPlotItem
 
 # no obvious signal to wait for after the model is updated to know when the GUI is ready,
 # so for now we just wait for a fixed time
 delay_after_update_model_call_in_ms = 50
+
+
+# pytest fixture for config file
+@pytest.fixture()
+def tmp_config_dir(monkeypatch: MonkeyPatch, tmp_path: Path):
+    monkeypatch.setattr(
+        "neuroseq.gui.user_config_dir", lambda *args, **kwargs: str(tmp_path)
+    )
+    yield tmp_path
 
 
 @pytest.mark.screenshot
@@ -69,7 +77,6 @@ def test_gui_simulate_and_playback(
     qtbot.waitUntil(lambda: gui.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)
     assert gui.heatmap_widget.currentIndex == 0
-    assert gui.trace_widget.timeline.getXPos() == approx(0)
     assert "run" in gui.continue_simulation_action.text().lower()
     assert "continue" not in gui.continue_simulation_action.text().lower()
     simulation_time = 0.1
@@ -95,19 +102,21 @@ def test_gui_simulate_and_playback(
     qtbot.waitUntil(lambda: gui.heatmap_widget.currentIndex == n_timesteps - 1)
     assert "run" not in gui.continue_simulation_action.text().lower()
     assert "continue" in gui.continue_simulation_action.text().lower()
-    assert gui.trace_widget.timeline.getXPos() == approx(simulation_time_ms, rel=2)
-    assert gui.spike_widget.timeline.getXPos() == approx(simulation_time_ms, rel=2)
+    assert gui.trace_widget.timeline is not None
+    assert gui.trace_widget.timeline.selection == approx(simulation_time_ms, rel=2)
+    # todo: re-enable these spike_widget timeline tests when fastplotlib supports the timeline in scatter plots
+    # assert gui.spike_widget.timeline.selection == approx(simulation_time_ms, rel=2)
     gui.btn_skip_to_start_clicked()
-    assert gui.trace_widget.timeline.getXPos() == approx(0)
-    assert gui.spike_widget.timeline.getXPos() == approx(0)
+    assert gui.trace_widget.timeline.selection == approx(0)
+    # assert gui.spike_widget.timeline.selection == approx(0)
     assert gui.heatmap_widget.currentIndex == 0
     gui.btn_skip_to_end_clicked()
-    assert gui.trace_widget.timeline.getXPos() == approx(simulation_time_ms, rel=2)
-    assert gui.spike_widget.timeline.getXPos() == approx(simulation_time_ms, rel=2)
+    assert gui.trace_widget.timeline.selection == approx(simulation_time_ms, rel=2)
+    # assert gui.spike_widget.timeline.selection == approx(simulation_time_ms, rel=2)
     assert gui.heatmap_widget.currentIndex == n_timesteps - 1
     gui.btn_stop_clicked()
-    assert gui.trace_widget.timeline.getXPos() == approx(0)
-    assert gui.spike_widget.timeline.getXPos() == approx(0)
+    assert gui.trace_widget.timeline.selection == approx(0)
+    # assert gui.spike_widget.timeline.selection == approx(0)
     assert gui.heatmap_widget.currentIndex == 0
 
 
@@ -167,11 +176,15 @@ def test_gui_save(
     qtbot.wait(delay_after_update_model_call_in_ms)
     gui.update_model(mfx_ornstein)
     qtbot.wait(delay_after_update_model_call_in_ms)
-    filename = tmp_path / "test.json"
+    filename_without_extension = tmp_path / "test"
+    # the gui will add the .nseq extension automatically
+    filename = filename_without_extension.with_suffix(".nseq")
     assert not filename.exists()
     # mock getSaveFileName to return the desired filename
     monkeypatch.setattr(
-        QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (f"{filename}", True)
+        QtWidgets.QFileDialog,
+        "getSaveFileName",
+        lambda *args: (f"{filename_without_extension}", True),
     )
     gui.btn_save_clicked()
     assert filename.exists()
@@ -181,7 +194,7 @@ def test_gui_save(
     assert mfx_ornstein.monitors.keys() == loaded_model.monitors.keys()
 
 
-def test_gui_export(
+def test_gui_export_with_simulation_data(
     tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_ornstein: B2Model
 ) -> None:
     gui = Gui()
@@ -189,7 +202,9 @@ def test_gui_export(
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)
-    gui.update_model(mfx_ornstein)
+    # generate some simulation data
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.1", True))
+    gui.btn_continue_simulation_clicked()
     qtbot.wait(delay_after_update_model_call_in_ms)
     filename = tmp_path / "test.h5"
     assert not filename.exists()
@@ -277,8 +292,6 @@ def test_gui_edit_stim_with_console(qtbot: QtBot, mfx_ornstein: B2Model) -> None
     assert mfx_ornstein.parameters == {}
     mfx_ornstein.parameters = {"stim": b2.TimedArray(stim, dt=dt)}
     gui.update_model(mfx_ornstein)
-    # bar plot x-values are the center of the bars, so shifted forwards by 0.5dt compared to timestamps
-    expected_timestamps_array = dt * (np.arange(n_timestamps) + 0.5) / b2.second
     stim_editor = gui.stim_editor
     stim_console = gui.stim_console
     assert stim_editor.stims_dict is not None
@@ -290,14 +303,11 @@ def test_gui_edit_stim_with_console(qtbot: QtBot, mfx_ornstein: B2Model) -> None
     assert_allclose(stim_editor.stims_dict["stim"].timed_array.values, stim)
     assert gui.model.parameters is not None
     assert_allclose(gui.model.parameters["stim"].values, stim)
-    assert len(stim_editor.stim_widget.neuron_plots) == n_neurons
-    neuron_plot = cast(SelectableBarPlotItem, stim_editor.stim_widget.neuron_plots[0])
-    assert len(neuron_plot.getData()[0]) == n_timestamps
-    assert_allclose(neuron_plot.getData()[0], 1000 * expected_timestamps_array)
+    assert stim_editor.stim_widget.n_neurons == n_neurons
     # set stims to an invalid value: StimWidget and model not updated
     stim_console.input.setText("stims['stim'] = 5")
     qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
-    assert len(stim_editor.stim_widget.neuron_plots) == n_neurons
+    assert stim_editor.stim_widget.n_neurons == n_neurons
     assert_allclose(stim_editor.stims_dict["stim"].timed_array.values, stim)
     assert_allclose(gui.model.parameters["stim"].values, stim)
     # assign random valid stim array with different shape, StimWidget and model updated
@@ -305,56 +315,14 @@ def test_gui_edit_stim_with_console(qtbot: QtBot, mfx_ornstein: B2Model) -> None
     qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
     assert stim_editor.stims_dict["stim"].timed_array.values.shape == (127, 83)
     assert gui.model.parameters["stim"].values.shape == (127, 83)
-    assert len(stim_editor.stim_widget.neuron_plots) == 83
-
-
-def test_gui_link_axes(
-    qtbot: QtBot, monkeypatch: MonkeyPatch, default_model_path: Path
-) -> None:
-    gui = Gui()
-    gui.show()
-    qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible())
-    stim_widget_viewbox = gui.stim_editor.stim_widget.getPlotItem().getViewBox()
-    spike_widget_viewbox = gui.spike_widget.getPlotItem().getViewBox()
-    trace_widget_viewbox = gui.trace_widget.getPlotItem().getViewBox()
-    # initially both X and Y axes are linked to the stim widget viewbox
-    assert spike_widget_viewbox.state["linkedViews"][0]() == stim_widget_viewbox
-    assert spike_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
-    assert trace_widget_viewbox.state["linkedViews"][0]() == stim_widget_viewbox
-    assert trace_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
-    gui.link_x_axes(False)
-    assert spike_widget_viewbox.state["linkedViews"][0] is None
-    assert spike_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
-    assert trace_widget_viewbox.state["linkedViews"][0] is None
-    assert trace_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
-    gui.link_y_axes(False)
-    assert spike_widget_viewbox.state["linkedViews"][0] is None
-    assert spike_widget_viewbox.state["linkedViews"][1] is None
-    assert trace_widget_viewbox.state["linkedViews"][0] is None
-    assert trace_widget_viewbox.state["linkedViews"][1] is None
-    gui.link_y_axes(True)
-    assert spike_widget_viewbox.state["linkedViews"][0] is None
-    assert spike_widget_viewbox.state["linkedViews"][1] is not None
-    assert spike_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
-    assert trace_widget_viewbox.state["linkedViews"][0] is None
-    assert trace_widget_viewbox.state["linkedViews"][1] is not None
-    assert trace_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
-    gui.link_x_axes(True)
-    assert spike_widget_viewbox.state["linkedViews"][0] is not None
-    assert spike_widget_viewbox.state["linkedViews"][0]() == stim_widget_viewbox
-    assert spike_widget_viewbox.state["linkedViews"][1] is not None
-    assert spike_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
-    assert trace_widget_viewbox.state["linkedViews"][0] is not None
-    assert trace_widget_viewbox.state["linkedViews"][0]() == stim_widget_viewbox
-    assert trace_widget_viewbox.state["linkedViews"][1] is not None
-    assert trace_widget_viewbox.state["linkedViews"][1]() == stim_widget_viewbox
+    assert stim_editor.stim_widget.n_neurons == 83
 
 
 def test_gui_synapse_ram_limit(
     monkeypatch: MonkeyPatch,
     qtbot: QtBot,
     qmessagebox_calls: list,
+    tmp_config_dir,
 ) -> None:
     gui = Gui()
     gui.show()
@@ -403,7 +371,9 @@ def test_gui_synapse_ram_limit(
     assert "invalid input" in qmessagebox_calls[0]["title"].lower()
 
 
-def test_gui_brian2_backend(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
+def test_gui_brian2_backend(
+    monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_config_dir
+) -> None:
     gui = Gui()
     gui.show()
     qtbot.addWidget(gui)
@@ -431,6 +401,7 @@ def test_gui_stim_padding(
     monkeypatch: MonkeyPatch,
     qtbot: QtBot,
     qmessagebox_calls: list,
+    tmp_config_dir,
 ) -> None:
     gui = Gui()
     gui.show()
@@ -449,6 +420,122 @@ def test_gui_stim_padding(
     # should have ~0.1 secs of simulation data, and ~10.1 secs of stim array data with dt=0.1ms
     assert gui.heatmap_widget.tVals[-1] == approx(100, rel=2)
     assert gui.stim_editor.stim_widget.n_timestamps == 10100
+
+
+def test_gui_restore_settings_on_restart(
+    monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_config_dir
+) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    # change all settings
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("cython", True)
+    )
+    gui.choose_brian2_backend()
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("512", True))
+    gui.choose_max_ram_synapse_plot_matrix()
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("6", True))
+    gui.choose_stim_padding_secs()
+    assert b2.prefs.codegen.target == "cython"
+    assert gui.settings.max_ram_synapse_plot_matrix == 512
+    assert gui.settings.stim_padding_secs == 6
+
+    # close gui and reopen to check if settings were saved and reloaded correctly
+    gui.close()
+    gui2 = Gui()
+    gui2.show()
+    qtbot.addWidget(gui2)
+    qtbot.waitUntil(lambda: gui2.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    assert b2.prefs.codegen.target == "cython"
+    assert gui2.settings.max_ram_synapse_plot_matrix == 512
+    assert gui2.settings.stim_padding_secs == 6
+
+
+def test_gui_save_config_settings(qtbot: QtBot, tmp_config_dir) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+
+    # change all settings
+    gui.settings.brian2_backend = "cython"
+    gui.settings.max_ram_synapse_plot_matrix = 512
+    gui.settings.stim_padding_secs = 6
+
+    # check if settings file exists and contains the correct values
+    config_dir = Path(tmp_config_dir)
+    config_file = config_dir / "config.json"
+    assert config_file.exists()
+
+    # check if settings were saved correctly
+    with open(config_file) as f:
+        config = json.load(f)
+    assert config["brian2_backend"] == gui.settings.brian2_backend
+    assert (
+        config["max_ram_synapse_plot_matrix"]
+        == gui.settings.max_ram_synapse_plot_matrix
+    )
+    assert config["stim_padding_secs"] == gui.settings.stim_padding_secs
+
+
+def test_gui_load_config_settings(qtbot: QtBot, tmp_config_dir) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+
+    # change all settings
+    gui.settings.brian2_backend = "cython"
+    gui.settings.max_ram_synapse_plot_matrix = 512
+    gui.settings.stim_padding_secs = 6
+
+    # set settings to original to check if loading works
+    gui.settings.__dict__["brian2_backend"] = "numpy"
+    gui.settings.__dict__["max_ram_synapse_plot_matrix"] = 256
+    gui.settings.__dict__["stim_padding_secs"] = 5
+
+    # load settings from file
+    gui.settings.load_config_settings()
+
+    # check if settings were loaded correctly
+    assert gui.settings.brian2_backend == "cython"
+    assert gui.settings.max_ram_synapse_plot_matrix == 512
+    assert gui.settings.stim_padding_secs == 6
+
+    # try loading invalid values
+    gui.settings.brian2_backend = "invalid backend"
+    gui.settings.max_ram_synapse_plot_matrix = -5
+    gui.settings.stim_padding_secs = -3
+
+    # try loading invalid values
+    # brian2 backend - should reset to default 'numpy'
+    gui.settings.load_config_settings()
+    assert gui.settings.brian2_backend == "numpy"
+    # max_ram_synapse_plot_matrix - should be set to 0
+    assert gui.settings.max_ram_synapse_plot_matrix == 0
+    # stim_padding_secs - should be set to 0
+    assert gui.settings.stim_padding_secs == 0
+
+    # try setting RAM to string
+    gui.settings.brian2_backend = "numpy"  # valid again
+    gui.settings.max_ram_synapse_plot_matrix = "this is not even a number!"  # type: ignore[assignment]
+    gui.settings.stim_padding_secs = 5  # valid again
+    # should log a ValueError and default to 256
+    gui.settings.load_config_settings()
+    assert gui.settings.max_ram_synapse_plot_matrix == 256
+
+    # try setting stim_padding_secs to string
+    gui.settings.max_ram_synapse_plot_matrix = 256  # valid again
+    gui.settings.stim_padding_secs = "this is not even a number!"  # type: ignore[assignment]
+    # should log a ValueError and default to 5s
+    gui.settings.load_config_settings()
+    assert gui.settings.stim_padding_secs == 5
 
 
 def test_gui_playback_speed(

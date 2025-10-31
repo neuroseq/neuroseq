@@ -25,7 +25,6 @@ from neuroseq import utils
 )
 def test_quantity_parser_round_trip_quantities(quantity: b2.Quantity) -> None:
     string = str(quantity.in_best_unit(python_code=True))
-    print(string)
     parsed_quantity = utils.parse_string_to_quantity(string)
     assert isinstance(parsed_quantity, b2.Quantity)
     assert parsed_quantity.has_same_dimensions(quantity)
@@ -131,19 +130,22 @@ def test_update_nested_dict() -> None:
     }
 
 
-def test_shuffle_index_small_n() -> None:
-    assert utils.shuffle_index(0, 1) == (0, 1)
-    assert utils.shuffle_index(0, 2) == (0, 2)
-    assert utils.shuffle_index(1, 2) == (1, 2)
-
-
 @pytest.mark.parametrize("n", [3, 7, 20, 100, 2000, 2001])
-def test_shuffle_index(n: int) -> None:
-    ordered_indices = list(range(n))
-    shuffled_indices = [utils.shuffle_index(i, n)[0] for i in ordered_indices]
-    assert len(shuffled_indices) == n
-    assert shuffled_indices != ordered_indices
-    assert sorted(shuffled_indices) == ordered_indices
+def test_cmap_transform_neuron_indices(n: int) -> None:
+    ordered_indices = np.arange(n)
+    shuffled_indices = utils.cmap_transform_neuron_indices(n)
+    assert shuffled_indices.shape == (n,)
+    assert not np.allclose(shuffled_indices, ordered_indices)
+    sorted_shuffled_indices = np.sort(shuffled_indices)
+    assert np.allclose(sorted_shuffled_indices, ordered_indices)
+    # shuffle an array of indices, check that mapping is the same as above for each index
+    arr = utils.cmap_transform_neuron_indices(n, [2, 0, 1, 0])
+    assert list(arr) == [
+        shuffled_indices[2],
+        shuffled_indices[0],
+        shuffled_indices[1],
+        shuffled_indices[0],
+    ]
 
 
 def test_get_downsample_factor_valid() -> None:

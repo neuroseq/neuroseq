@@ -34,7 +34,7 @@ def simulate(stims_dict: dict[str, np.ndarray], simulation_time: float) -> SimDa
     #   - "widget": "spike"
     #   - "timestamps": 1d array of spike timestamps
     #   - "spikes": 1d array of spike neuron indices
-    #   - "dt": the simulation time step as a float
+    #   - "dt": the simulation time step in seconds as a float
     #   - "n_neurons": the number of neurons as an int
     #   - "n_timesteps": the total number of timesteps in the simulation as an int
     n_neurons_spike = 32

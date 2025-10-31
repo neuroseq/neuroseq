@@ -5,6 +5,8 @@ import logging
 import brian2 as b2
 import brian2.numpy_ as np
 
+from neuroseq.stim_widget import StimWidget
+
 
 class ReversibleAction:
     """An action that can be done and undone on a (slice of a) 2-d brian2 TimedArray."""
@@ -23,19 +25,35 @@ class ReversibleAction:
             new_values.copy() if isinstance(new_values, np.ndarray) else new_values
         )
 
-    def __call__(self, timed_array: b2.TimedArray) -> None:
-        timed_array.values[self.time_slice, self.neuron_slice] = self.new_values
+    def __call__(self, timed_array: b2.TimedArray, stim_widget: StimWidget) -> None:
+        self._asign_values(timed_array, stim_widget, self.new_values)
 
-    def undo(self, timed_array: b2.TimedArray) -> None:
-        timed_array.values[self.time_slice, self.neuron_slice] = self.old_values
+    def undo(self, timed_array: b2.TimedArray, stim_widget: StimWidget) -> None:
+        self._asign_values(timed_array, stim_widget, self.old_values)
+
+    def _asign_values(
+        self,
+        timed_array: b2.TimedArray,
+        stim_widget: StimWidget,
+        values: np.ndarray | float,
+    ) -> None:
+        """Assign the new values to the TimedArray and update the StimWidget accordingly."""
+        timed_array.values[self.time_slice, self.neuron_slice] = values
+        # note: the data TextureArray in the stim_widget.graphic is transposed compared to the TimedArray
+        texture_values = values.T if isinstance(values, np.ndarray) else values
+        if stim_widget.graphic is not None:
+            stim_widget.graphic.data[self.neuron_slice, self.time_slice] = (
+                texture_values
+            )
 
 
 class TimedArrayModifier:
     """A class to track changes to a 2-d brian2 TimedArray and allow undoing and redoing them."""
 
-    def __init__(self, timed_array: b2.TimedArray) -> None:
+    def __init__(self, timed_array: b2.TimedArray, stim_widget: StimWidget) -> None:
         self.logger = logging.getLogger(__name__)
         self.timed_array = timed_array
+        self.stim_widget = stim_widget
         self.action_stack: list[ReversibleAction] = []
         self.current_index = -1
 
@@ -55,7 +73,7 @@ class TimedArrayModifier:
         action = ReversibleAction(
             self.timed_array, neuron_slice, time_slice, new_values
         )
-        action(self.timed_array)
+        action(self.timed_array, self.stim_widget)
         self.action_stack = self.action_stack[:action_index]
         self.action_stack.append(action)
         self.current_index = action_index
@@ -68,7 +86,7 @@ class TimedArrayModifier:
         self.logger.debug(
             f"Undoing action {action_index}: neuron slice {action.neuron_slice}, time slice {action.time_slice}, TimedArray {self.timed_array.name}"
         )
-        action.undo(self.timed_array)
+        action.undo(self.timed_array, self.stim_widget)
         self.current_index -= 1
 
     def redo(self) -> None:
@@ -77,7 +95,7 @@ class TimedArrayModifier:
         self.current_index += 1
         action_index = self.current_index
         action = self.action_stack[action_index]
-        action(self.timed_array)
+        action(self.timed_array, self.stim_widget)
         self.logger.debug(
             f"Redoing action {self.current_index}: neuron slice {action.neuron_slice}, time slice {action.time_slice}, TimedArray {self.timed_array.name}"
         )

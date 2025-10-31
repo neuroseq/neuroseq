@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 import math
+import pickle
+import zipfile
 from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
@@ -12,9 +15,10 @@ import brian2 as b2
 import brian2.numpy_ as np
 import h5py
 
-from neuroseq import b2json
 from neuroseq import utils
+from neuroseq.b2json import b2json_encoder_factory
 from neuroseq.reconstructor import Reconstructor
+from neuroseq.utils import save_store_name
 
 
 class B2Model:
@@ -192,7 +196,9 @@ class B2Model:
                 on_pre=args.get("on_pre", None),
                 on_post=args.get("on_post", None),
                 delay=args.get("delay", None),
-                dt=args.get("dt", b2.defaultclock.dt),
+                clock=b2.Clock(
+                    dt=args.get("dt", b2.defaultclock.dt), name=f"clock_synapse_{name}"
+                ),
                 name=name,
                 namespace=self.parameters,
             )
@@ -223,10 +229,7 @@ class B2Model:
         self.logger.info(f"Synapse defined: {name}")
 
     @_trigger_rebuild
-    def _assemble_monitor(
-        self,
-        name: str,
-    ) -> None:
+    def _assemble_monitor(self, name: str) -> None:
         """
         _assemble_monitor Assemble a new monitor from predefined elements. When a monitor exists that
         in the network that has the same name, it is removed and replaced by the newly assembled one
@@ -250,14 +253,19 @@ class B2Model:
             monitortype = getattr(b2, self.monitors[name]["type"])
 
             if monitortype is b2.StateMonitor:
+                # set to source dt when no timestep is given --> max resolution. Also, .dt gives a VariableView, which needs to be converted to a value again
+                clock = b2.Clock(
+                    dt=self.monitors[name].get(
+                        "dt", self.network[self.monitors[name]["source"]].clock.dt
+                    ),
+                    name=f"clock_monitor_{name}",
+                )
                 monitor = monitortype(
                     self.network[self.monitors[name]["source"]],
                     self.monitors[name].get("variable", None),
                     record=True,
                     name=name,
-                    dt=self.monitors[name].get(
-                        "dt", self.network[self.monitors[name]["source"]].clock.dt
-                    ),  # set to source dt when no timestep is given --> max resolution. Also, .dt gives a VariableView, which needs to be converted to a value again
+                    clock=clock,
                 )
             else:
                 monitor = monitortype(
@@ -314,7 +322,10 @@ class B2Model:
                 method=self.neurongroups[name].get("method", None),
                 namespace=self.parameters,
                 reset=self.neurongroups[name].get("reset", None),
-                dt=self.neurongroups[name].get("dt", b2.defaultclock.dt),
+                clock=b2.Clock(
+                    dt=self.neurongroups[name].get("dt", b2.defaultclock.dt),
+                    name=f"clock_neurongroup_{name}",
+                ),
                 name=name,
             )
         except Exception as e:
@@ -1789,9 +1800,12 @@ class B2Model:
                     monitor = self.network[key]
                     group = h5file.create_group(monitor.name)
                     for v in monitor.record_variables:
-                        group.create_dataset(
-                            v, shape=getattr(monitor, v).shape, data=getattr(monitor, v)
-                        )
+                        try:
+                            shape = getattr(monitor, v).shape
+                        except AttributeError:
+                            # workaround for https://github.com/brian-team/brian2/issues/1662
+                            shape = getattr(monitor, v).__array__().shape
+                        group.create_dataset(v, shape=shape, data=getattr(monitor, v))
         except FileNotFoundError as e:
             message = f"Path {pathname} does not exist"
             self.logger.critical(message)
@@ -2091,17 +2105,24 @@ class B2Model:
             raise ValueError(message) from e
 
     def to_dict(self) -> dict[Any, Any]:
-        states = self.network.get_states()
+        states = self.network.get_states(read_only_variables=False)
+        # remove monitors from state to avoid saving their recorded data
+        for key in self.monitors:
+            del states[key]
         states["current_time"] = self.network.t
-
         states["seed"] = self.seed
-
-        states["objects"] = {}
-        states["objects"]["neurongroups"] = list(self.neurongroups.keys())
-        states["objects"]["synapses"] = list(self.synapses.keys())
-        states["objects"]["monitors"] = list(self.monitors.keys())
         states["parameters"] = self.parameters
         states["initials"] = self.initials
+        states["checkpoints"] = self.checkpoints
+        states["objects"] = {
+            "neurongroups": list(self.neurongroups.keys()),
+            "synapses": list(self.synapses.keys()),
+            "monitors": list(self.monitors.keys()),
+        }
+
+        # add minimal defining data for monitors
+        for key, n in self.monitors.items():
+            states[key] = n
 
         # augment neurongroups and synapses
         for group in [self.neurongroups, self.synapses]:
@@ -2111,34 +2132,36 @@ class B2Model:
                 for k, v in n.items():
                     states[key][k] = v
 
-        # add minimal defining data for monitors to avoid data writing
-        for key, n in self.monitors.items():
-            if key not in states:
-                states[key] = {}
-
-            for k, v in n.items():
-                states[key][k] = v
-
         return states
 
     def save_model(self, filepath: str | Path) -> None:
         """
-        Save the current state of the network to disk
+        Saves the model including any simulation checkpoints to a zipfile which contains
+            - a model.json file representing the model
+            - a npy file for each TimedArray
+            - a pickle file for the stored_state containing the simulation checkpoints
 
         Parameters
         ----------
         filepath : str
-            path to the yaml file where the current state should be stored
+            path to the file where the current model should be stored
         """
-        states = self.to_dict()
 
-        with open(filepath, "w") as file:
-            b2json.dump(states, file)
+        with zipfile.ZipFile(filepath, "w", zipfile.ZIP_DEFLATED) as zf:
+            model_json = json.dumps(
+                self.to_dict(), cls=b2json_encoder_factory(zf), separators=(",", ":")
+            )
+            zf.writestr("model.json", model_json)
+            # store the current simulation data state to a temporary checkpoint to be able to restore it on load
+            self.store(save_store_name)
+            zf.writestr(
+                "stored_state.pkl", pickle.dumps(self.network._stored_state, protocol=4)
+            )
 
     @classmethod
     def load_model(
         cls,
-        filepath: str | Path | dict[Any, Any],
+        filepath: str | Path,
         report: Callable[[int], None] | None = None,
     ) -> B2Model:
         """

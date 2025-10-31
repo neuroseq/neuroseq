@@ -59,7 +59,7 @@ class CustomAnalysisWidget(MatplotlibWidget):
             time_slice = slice(None, None)
             time_str = "all time"
         else:
-            time_str = f"time {time_slice.start * self.dt:.4f}s-{time_slice.stop * self.dt:.4f}s"
+            time_str = f"time {1000.0 * time_slice.start * self.dt:.0f}ms-{1000.0 * time_slice.stop * self.dt:.0f}ms"
         self.time_slice = time_slice
         self.subplot.set_title(f"{data_type} {analysis_type}: {neuron_str}, {time_str}")
         if data_type == CustomAnalysisDataType.Trace:

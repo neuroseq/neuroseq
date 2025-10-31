@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import brian2.numpy_ as np
+import pygfx
 from qtpy import QtWidgets
 
 from neuroseq.custom_analysis_widget import CustomAnalysisDataType
-from neuroseq.selectable_bar_plot_item import SelectableBarPlotItem
 from neuroseq.timeseries_widget import TimeseriesWidget
-from neuroseq.utils import shuffle_index
+from neuroseq.utils import cmap_transform_neuron_indices
 
 
 class SpikeWidget(TimeseriesWidget):
@@ -17,12 +17,12 @@ class SpikeWidget(TimeseriesWidget):
 
     def __init__(
         self,
+        controller: pygfx.Controller,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
-        super().__init__(parent)
-        self.data_type = CustomAnalysisDataType.Spike
-        self._create_custom_analysis_menu()
-        self.mouse_clicked.connect(self._on_mouse_clicked)
+        super().__init__(controller, parent)
+        self.subplot.title = "Spikes"
+        self.data_type = CustomAnalysisDataType.Trace
 
     def set_data(
         self,
@@ -32,42 +32,34 @@ class SpikeWidget(TimeseriesWidget):
         n_neurons: int,
         n_timesteps: int,
     ) -> None:
-        self.clear_data()
-        self.plotItem.getViewBox().enableAutoRange(enable=False)
         self.data = {
             "spike_indices": spike_indices,
             "spike_times": spike_times,
             "dt": dt,
         }
         self.n_neurons = n_neurons
+        self.n_timestamps = n_timesteps
         self.dt = dt
-        self.setLimits(
-            xMin=0, xMax=n_timesteps * dt, yMin=-0.5, yMax=self.n_neurons - 0.5
+        self.subplot.clear()
+        if spike_indices is None:
+            return
+        data = np.stack(
+            [
+                spike_times.astype(np.float32) * np.float32(1000),
+                spike_indices.astype(np.float32),
+            ],
+            axis=1,
         )
-        for neuron_index in range(self.n_neurons):
-            # filter the spikes for this neuron
-            spikes = spike_times[spike_indices == neuron_index]
-            # vertically offset the data for each neuron by its index
-            y_offset = neuron_index - 0.5
-            # give each neuron a unique color
-            brush = shuffle_index(neuron_index, self.n_neurons)
-            bar = SelectableBarPlotItem(
-                x=spikes + 0.5 * dt,
-                width=dt,
-                y0=y_offset,
-                y1=y_offset + 0.95,
-                pen=None,
-                brush=brush,
-            )
-            self.neuron_plots.append(bar)
-            self.addItem(bar)
-        self.plotItem.getViewBox().enableAutoRange(enable=True)
-
-    def _plot_neuron_data(
-        self, data: list[np.ndarray] | np.ndarray, timestamps: np.ndarray, dt: float
-    ) -> None:
-        # since timestamps is a sparse array the plotting logic is different, and is implemented in set_data
-        pass
-
-    def _on_mouse_clicked(self, neuron_index: int, time_index: int):
-        self.timeline.setPos(time_index * self.dt)
+        self.graphic = self.subplot.add_scatter(
+            data,
+            cmap="jet",
+            cmap_transform=cmap_transform_neuron_indices(self.n_neurons, spike_indices),
+            sizes=7,
+            size_space="screen",
+            uniform_size=True,
+        )
+        self.controller.max_height = max(self.controller.max_height, self.n_neurons)
+        self.controller.max_width = max(
+            self.controller.max_width, n_timesteps * dt * 1000.0
+        )  # convert to milliseconds
+        self.post_set_data()

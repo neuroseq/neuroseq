@@ -21,6 +21,13 @@ import neuroseq
 
 example_models_path = pathlib.Path(str(resources.files(neuroseq))) / "example_models"
 
+save_store_name = "___current-simulation-state-at-save-time___"
+
+
+class InteractMode(Enum):
+    DRAW = 1
+    SELECT = 2
+
 
 class PrettyPrintEnum(Enum):
     def __str__(self):
@@ -76,18 +83,20 @@ def construct_synapse_matrix(
         strict=True,
     ):
         matrix[i, j, :] = value
-    timestamps = (monitor.t / b2.msecond)[::downsample_factor]
+    timestamps = (monitor.t / b2.second)[::downsample_factor]
     return matrix, timestamps
 
 
-def shuffle_index(i: int, n: int) -> tuple[int, int]:
-    """Deterministic shuffling of the index i in a list of length n.
+def cmap_transform_neuron_indices(
+    n_neurons: int, indices: np.ndarray | None = None
+) -> np.ndarray:
+    """Transform the supplied neuron indices to generate cmap transform indices in a pseudo-random order
 
-    Returns a tuple (j, n) where j is the shuffled index and n is the length of the list.
-    """
-    assert 0 <= i < n
+    For a given value of n_neurons, this will always return the same transform."""
     m = 415343
-    return i * m % n, n
+    if indices is None:
+        indices = np.arange(n_neurons, dtype=np.int32)
+    return np.mod(np.asarray(indices) * m, n_neurons)
 
 
 def init_brian2_logging(log_level: str = "ERROR") -> None:

@@ -12,8 +12,10 @@ dependencies:
   - h5py
   - qtawesome
   - click
+  - pyparsing !=3.2.4
   # test deps
   - pytest
   - pytest-qt
   - pytest-mock
-  - pytest-xvfb
+  - pip:
+      - fastplotlib

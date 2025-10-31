@@ -13,8 +13,9 @@ from neuroseq.reconstructor import Reconstructor
 def mfx_nmda_serialized(tmp_path: Path, mfx_nmda: B2Model) -> Generator:
     mfx_nmda.define_dt("neurons", 0.1 * b2.ms)
     mfx_nmda.define_synapse_dt("S", 0.2 * b2.ms)
-    mfx_nmda.save_model(tmp_path / "testmodel.json")
-    yield tmp_path / "testmodel.json"
+    file_path = tmp_path / "testmodel.nseq"
+    mfx_nmda.save_model(file_path)
+    yield file_path
 
 
 def raise_error(s: B2Model, name: str) -> None:
