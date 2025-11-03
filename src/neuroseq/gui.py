@@ -150,7 +150,7 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_spike = QtWidgets.QComboBox()
         self.cmb_synapse = QtWidgets.QComboBox()
         self._create_menus_and_toolbars()
-        self.setWindowIcon(qta.icon("mdi6.brain"))
+        self.setWindowIcon(qta.icon("fa6s.brain"))
         self.controller = ConstrainedPanZoomController()
         main_horizontal_layout = QtWidgets.QHBoxLayout()
         central_widget = QtWidgets.QWidget()
