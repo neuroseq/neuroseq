@@ -879,7 +879,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="Ctrl+E",
-            icon=qta.icon("ph.share-network"),
+            icon=qta.icon("ph.polygon-light"),
         )
         add_action(
             "E&xit",
@@ -899,7 +899,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="Ctrl+R",
-            icon=qta.icon("mdi6.head"),
+            icon=qta.icon("mdi6.rocket-launch-outline"),
         )
         add_action(
             "&Store simulation checkpoint",
@@ -915,7 +915,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="Ctrl+Shift+R",
-            icon=qta.icon("mdi6.head-sync"),
+            icon=qta.icon("mdi.ray-start-arrow"),
         )
         add_action(
             "&Run brian2 with external simulation function",
