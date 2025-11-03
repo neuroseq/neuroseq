@@ -879,7 +879,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="Ctrl+E",
-            icon=qta.icon("mdi6.cog"),
+            icon=qta.icon("ph.share-network"),
         )
         add_action(
             "E&xit",
@@ -907,7 +907,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="Ctrl+Shift+S",
-            icon=qta.icon("mdi6.head-check"),
+            icon=qta.icon("mdi6.timeline-check-outline"),
         )
         add_action(
             "&Restore simulation checkpoint",
