@@ -818,6 +818,7 @@ class Gui(QtWidgets.QMainWindow):
         self.menu_simulate = menu.addMenu("&Simulate")
         self.toolbar_simulate = QtWidgets.QToolBar("Simulate")
         self.addToolBar(self.toolbar_simulate)
+
         self.menu_playback = menu.addMenu("&Playback")
         self.toolbar_playback = QtWidgets.QToolBar("Playback")
         self.addToolBar(self.toolbar_playback)
@@ -826,6 +827,11 @@ class Gui(QtWidgets.QMainWindow):
         self.addToolBar(self.toolbar_view)
         self.toolbar_data = QtWidgets.QToolBar("Data")
         self.addToolBar(self.toolbar_data)
+
+        self.menu_experiment = menu.addMenu("&Experiment")
+        self.toolbar_experiment = QtWidgets.QToolBar("Experiment")
+        self.addToolBar(self.toolbar_experiment)
+
         self.menu_settings = menu.addMenu("&Settings")
         self.menu_help = menu.addMenu("&Help")
         self._create_actions_data(toolbar=self.toolbar_data, menu=None)
@@ -837,6 +843,7 @@ class Gui(QtWidgets.QMainWindow):
         self._create_actions_view(self.menu_view, self.toolbar_view)
         self._create_actions_settings(menu=self.menu_settings, toolbar=None)
         self._create_actions_help(menu=self.menu_help, toolbar=None)
+        self._create_action_experiment(self.menu_experiment, self.toolbar_experiment)
 
     def _create_actions_file(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
@@ -916,14 +923,6 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             shortcut="Ctrl+Shift+R",
             icon=qta.icon("mdi.ray-start-arrow"),
-        )
-        add_action(
-            "&Run brian2 with external simulation function",
-            self.connect_external_simulation_function_with_brian2,
-            menu,
-            toolbar,
-            shortcut="Ctrl+Shift+E",
-            icon=qta.icon("mdi6.function"),
         )
 
     def _create_actions_playback(
@@ -1045,3 +1044,15 @@ class Gui(QtWidgets.QMainWindow):
         toolbar.addWidget(self.cmb_spike)
         toolbar.addWidget(QtWidgets.QLabel("  Synapse data: "))
         toolbar.addWidget(self.cmb_synapse)
+
+    def _create_action_experiment(
+        self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
+    ) -> None:
+        add_action(
+            "&Run external stimulation function",
+            self.connect_external_simulation_function_with_brian2,
+            menu,
+            toolbar,
+            shortcut="Ctrl+Shift+E",
+            icon=qta.icon("mdi6.function"),
+        )
