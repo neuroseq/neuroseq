@@ -667,14 +667,6 @@ class Gui(QtWidgets.QMainWindow):
     def btn_skip_to_end_clicked(self) -> None:
         self.heatmap_widget.setCurrentIndex(self.heatmap_widget.nframes() - 1)
 
-    def toggle_dark_mode(self):
-        for widget in [
-            self.stim_editor.stim_widget,
-            self.trace_widget,
-            self.spike_widget,
-        ]:
-            widget.toggle_dark_mode()
-
     def toggle_selection_text(self):
         for widget in [
             self.stim_editor.stim_widget,
@@ -989,15 +981,6 @@ class Gui(QtWidgets.QMainWindow):
                 checkable=True,
                 is_checked=True,
             )
-        add_action(
-            "Toggle dark mode",
-            self.toggle_dark_mode,
-            menu,
-            toolbar,
-            icon=qta.icon("mdi6.theme-light-dark"),
-            checkable=True,
-            is_checked=True,
-        )
         add_action(
             "Toggle selection text",
             self.toggle_selection_text,

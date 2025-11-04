@@ -21,6 +21,7 @@ class RegionOfInterest(Graphic):
         group.add(self.fill)
         self.text = pygfx.Text(screen_space=True)
         self.text.world.position = (0, 0, 200)
+        self.text.material.color = pygfx.Color(0, 0, 0)
         group.add(self.text)
         self._set_world_object(group)
 
@@ -52,11 +53,4 @@ class RegionOfInterest(Graphic):
             time_index_slice.stop,
             neuron_index_slice.start - 0.5,
             neuron_index_slice.stop - 0.5,
-        )
-
-    def toggle_dark_mode(self):
-        self.text.material.color = (
-            pygfx.Color(1, 1, 1)
-            if self.text.material.color != pygfx.Color(1, 1, 1)
-            else pygfx.Color(0, 0, 0)
         )
