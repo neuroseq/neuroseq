@@ -13,6 +13,8 @@ dependencies:
   - qtawesome
   - click
   - pyparsing !=3.2.4
+  - psutil
+  - nvidia-ml-py
   # test deps
   - pytest
   - pytest-qt

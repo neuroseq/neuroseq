@@ -22,6 +22,7 @@ from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomControlle
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.model_editor import ModelEditorDialog
+from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim_console import StimConsole
 from neuroseq.stim_editor import StimEditor
@@ -137,6 +138,9 @@ class Gui(QtWidgets.QMainWindow):
         self.logger = logging.getLogger(__name__)
         self.logger.info("starting Gui")
         self.settings = GuiSettings()
+        self.status_bar = QtWidgets.QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.addPermanentWidget(ResourceMonitorLabel())
         self.model = B2Model()
         self.external_simulation_function: Callable | None = None
         self.external_simulation_data: (
