@@ -22,6 +22,8 @@ dependencies = [
     "fastplotlib>=0.5.1",
     "pyparsing!=3.2.4",
     "platformdirs",
+    "psutil",
+    "nvidia-ml-py",
 ]
 dynamic = ["version"]
 
