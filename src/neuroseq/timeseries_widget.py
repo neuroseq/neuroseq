@@ -40,7 +40,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         int, int, int, int, int
     )  # initial neuron index, current neuron index, initial time index, current time index, mouse button (0 for no button, 1 for left, 2 for right, 3 for middle)
     custom_analysis_requested = QtCore.Signal(
-        CustomAnalysisDataType, CustomAnalysisType, slice, slice, dict
+        CustomAnalysisDataType, CustomAnalysisType, bool, slice, slice, dict
     )
     escape_pressed = QtCore.Signal()
 
@@ -70,21 +70,24 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
 
         self.context_menu = QtWidgets.QMenu("Custom analysis", self)
         for custom_analysis_type in CustomAnalysisType:
-            add_action(
-                str(custom_analysis_type),
-                lambda *args,
-                _custom_analysis_type=custom_analysis_type: self.custom_analysis_requested.emit(
-                    self.data_type,
-                    _custom_analysis_type,
-                    self.selected_neuron_slice,
-                    self.selected_time_slice,
-                    self.data,
-                ),
-                self.context_menu,
-                None,
-                self,
-                icon=qta.icon(custom_analysis_type.value),
-            )
+            for new_window in [False, True]:
+                add_action(
+                    f"{custom_analysis_type} {'(new window)' if new_window else ''}",
+                    lambda *args,
+                    _custom_analysis_type=custom_analysis_type,
+                    _new_window=new_window: self.custom_analysis_requested.emit(
+                        self.data_type,
+                        _custom_analysis_type,
+                        _new_window,
+                        self.selected_neuron_slice,
+                        self.selected_time_slice,
+                        self.data,
+                    ),
+                    self.context_menu,
+                    None,
+                    self,
+                    icon=qta.icon(custom_analysis_type.value),
+                )
 
         self.logger = logging.getLogger(__name__)
         self.data: dict[str, int | float | np.ndarray] = {}

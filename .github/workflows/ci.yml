@@ -64,11 +64,6 @@ jobs:
   pre-commit:
     runs-on: "macos-arm64-ssc"
     steps:
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cache/pre-commit
-          key: ccache-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
-          restore-keys: ccache-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v7
-      - run: uvx pre-commit run -a && uvx pre-commit gc
+      - run: uvx prek run -a
