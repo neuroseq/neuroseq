@@ -65,9 +65,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.timeline: fpl.LinearSelector | None = None
         self.setLayout(layout)
         self.subplot: Subplot = self.figure[0, 0]
-        self.background_color = "k"
-        self.foreground_color = "w"
-        self.toggle_dark_mode()
+        self._set_light_mode()
         self.resize(800, 600)
 
         self.context_menu = QtWidgets.QMenu("Custom analysis", self)
@@ -122,38 +120,6 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.roi.text.visible = self.show_text
         self.text.visible = self.show_text
 
-    def toggle_dark_mode(self):
-        """Toggle the colors of the plot between light and dark."""
-        if self.background_color == "k":
-            self.background_color = "w"
-            self.foreground_color = "k"
-        else:
-            self.background_color = "k"
-            self.foreground_color = "w"
-        # some of these currently require accessing private attributes: should refactor when fastplotlib allows setting these colors directly
-        self.subplot.background_color = self.background_color
-        self.subplot.axes.colors = (
-            self.foreground_color,
-            self.foreground_color,
-            self.foreground_color,
-        )
-        self.subplot.axes.grids.xy.axis_color = self.foreground_color
-        self.subplot.axes.grids.xy.major_color = self.foreground_color
-        self.subplot.axes.grids.xy.minor_color = self.foreground_color
-        self.subplot.axes._x._text.material.color = self.foreground_color
-        self.subplot.axes._y._text.material.color = self.foreground_color
-        self.subplot.axes._x._line.material.color = self.foreground_color
-        self.subplot.axes._y._line.material.color = self.foreground_color
-        self.subplot.axes._x._points.material.color = self.foreground_color
-        self.subplot.axes._y._points.material.color = self.foreground_color
-        if self.graphic is not None:
-            if self.graphic.cmap == "matlab:hot":
-                self.graphic.cmap = "matlab:hot_r"
-            elif self.graphic.cmap == "matlab:hot_r":
-                self.graphic.cmap = "matlab:hot"
-        self.roi.toggle_dark_mode()
-        self.text.toggle_dark_mode()
-
     def contextMenuEvent(self, event):
         if (
             self.mode == InteractMode.SELECT
@@ -162,6 +128,24 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
             self.context_menu.exec(event.globalPos())
         else:
             super().contextMenuEvent(event)
+
+    def _set_light_mode(self) -> None:
+        # some of these currently require accessing private attributes: should refactor when fastplotlib allows setting these colors directly
+        self.subplot.background_color = "w"
+        self.subplot.axes.colors = (
+            "k",
+            "k",
+            "k",
+        )
+        self.subplot.axes.grids.xy.axis_color = "k"
+        self.subplot.axes.grids.xy.major_color = "k"
+        self.subplot.axes.grids.xy.minor_color = "k"
+        self.subplot.axes._x._text.material.color = "k"
+        self.subplot.axes._y._text.material.color = "k"
+        self.subplot.axes._x._line.material.color = "k"
+        self.subplot.axes._y._line.material.color = "k"
+        self.subplot.axes._x._points.material.color = "k"
+        self.subplot.axes._y._points.material.color = "k"
 
     def post_set_data(self):
         self.subplot.auto_scale(zoom=1.0, maintain_aspect=False)
@@ -179,6 +163,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
             GridLines(self.n_neurons, self.n_timestamps * self.dt), center=False
         )
         self.subplot.add_graphic(self.text, center=False)
+        self._set_light_mode()
         self.roi.visible = False
         if hasattr(self.graphic, "add_linear_selector"):
             self.timeline = self.graphic.add_linear_selector(thickness=2)

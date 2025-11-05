@@ -35,7 +35,7 @@ class StimWidget(TimeseriesWidget):
         self.dt = stims.dt
         self.graphic = self.subplot.add_image(
             stims.values.T,
-            cmap="matlab:hot" if self.background_color == "k" else "matlab:hot_r",
+            cmap="matlab:hot_r",
             offset=(0.5, 0, 0),
         )
         self.n_neurons = stims.values.shape[1]

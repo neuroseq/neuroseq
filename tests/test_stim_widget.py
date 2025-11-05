@@ -88,9 +88,6 @@ def test_stim_widget_select_mode(qtbot: QtBot, stims: b2.TimedArray) -> None:
     n_timestamps = stims.values.shape[0]
     n_neurons = stims.values.shape[1]
     stim_widget.set_data(stims)
-    # toggle dark mode on and off again
-    stim_widget.toggle_dark_mode()
-    stim_widget.toggle_dark_mode()
     # toggle selection text on and off again
     stim_widget.toggle_selection_text()
     stim_widget.toggle_selection_text()
