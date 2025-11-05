@@ -19,6 +19,7 @@ from neuroseq.b2_model import B2Model
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.model_editor import ModelEditorDialog
+from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim_console import StimConsole
 from neuroseq.stim_editor import StimEditor
@@ -622,6 +623,96 @@ class Gui(QtWidgets.QMainWindow):
                 )
                 self.logger.exception(e)
 
+    def import_patchclamp_data(self) -> None:
+        """Open dialog to import patch clamp data and integrate with current model"""
+        dialog = PatchClampImportDialog(self)
+        dialog.data_imported.connect(self.handle_patchclamp_import)
+        dialog.exec_()
+
+    def handle_patchclamp_import(self, imported_data: dict) -> None:
+        """Handle imported patch clamp data and expand stims if needed"""
+        try:
+            # Get metadata
+            metadata = imported_data.get("_metadata", {})
+            n_timepoints = metadata.get("n_timepoints", 0)
+            dt = metadata.get("dt", 1.0/30.0)
+            
+            # Expand stims to match imported data length if needed
+            if self.model.parameters and n_timepoints > 0:
+                self.expand_stims_to_length(n_timepoints, dt)
+            
+            # Store the imported data for display
+            self.external_simulation_data = {
+                key: value for key, value in imported_data.items() 
+                if not key.startswith("_")
+            }
+            
+            # Update the GUI to show imported data
+            self._update_external_data_widgets()
+            
+            self.logger.info(f"Successfully imported patch clamp data with {n_timepoints} timepoints")
+            
+        except Exception as e:
+            self.logger.exception("Error handling patch clamp import")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Import Error", 
+                f"Error processing imported data:\n{str(e)}"
+            )
+
+    def expand_stims_to_length(self, target_length: int, target_dt: float) -> None:
+        """Expand stimulation arrays to match imported data length"""
+        if not self.model.parameters:
+            return
+            
+        for param_name, param_value in self.model.parameters.items():
+            if hasattr(param_value, 'values') and hasattr(param_value, 'dt'):
+                # This is a TimedArray
+                current_values = param_value.values
+                current_length = current_values.shape[0] if current_values.ndim > 0 else 0
+                
+                if current_length < target_length:
+                    # Expand with zeros
+                    if current_values.ndim == 1:
+                        # 1D array
+                        padding = np.zeros(target_length - current_length)
+                        new_values = np.concatenate([current_values, padding])
+                    elif current_values.ndim == 2:
+                        # 2D array (timepoints x neurons)
+                        n_neurons = current_values.shape[1]
+                        padding = np.zeros((target_length - current_length, n_neurons))
+                        new_values = np.concatenate([current_values, padding], axis=0)
+                    else:
+                        # Skip arrays with unexpected dimensions
+                        continue
+                        
+                    # Create new TimedArray with expanded values
+                    import brian2 as b2
+                    new_timed_array = b2.TimedArray(new_values, dt=target_dt*b2.second)
+                    self.model.parameters[param_name] = new_timed_array
+                    
+                    self.logger.info(f"Expanded {param_name} from {current_length} to {target_length} timepoints")
+
+    def _update_external_data_widgets(self) -> None:
+        """Update widgets to display external simulation data"""
+        if not self.external_simulation_data:
+            return
+            
+        # Update comboboxes with new data
+        if hasattr(self, 'cmb_neuron'):
+            self.cmb_neuron.clear()
+            trace_datasets = [key for key, value in self.external_simulation_data.items() 
+                            if value.get("widget") == "trace"]
+            if trace_datasets:
+                self.cmb_neuron.addItems(trace_datasets)
+                
+        if hasattr(self, 'cmb_spike'):
+            self.cmb_spike.clear() 
+            spike_datasets = [key for key, value in self.external_simulation_data.items()
+                            if value.get("widget") == "spike"]
+            if spike_datasets:
+                self.cmb_spike.addItems(spike_datasets)
+
     def choose_brian2_backend(self) -> None:
         backends = ["cython", "numpy"]
         try:
@@ -789,6 +880,15 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             shortcut="Ctrl+Shift+R",
             icon=qta.icon("mdi6.head-sync"),
+        )
+        menu.addSeparator()
+        add_action(
+            "&Import Patch Clamp Data",
+            self.import_patchclamp_data,
+            menu,
+            None,
+            shortcut="Ctrl+I",
+            icon=qta.icon("mdi6.import"),
         )
 
     def _create_actions_playback(
