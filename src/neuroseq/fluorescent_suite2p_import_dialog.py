@@ -67,14 +67,14 @@ class FluorescentSuite2pImportDialog(QtWidgets.QDialog):
         options_group = QtWidgets.QGroupBox("Import Options")
         options_layout = QtWidgets.QFormLayout(options_group)
         
-        self.sampling_rate_spin = QtWidgets.QDoubleSpinBox()
-        self.sampling_rate_spin.setMinimum(0.1)
-        self.sampling_rate_spin.setMaximum(100000.0)
-        self.sampling_rate_spin.setValue(30000.0)  # This aligns with the 900 data points exactly on a time scale.
-        # but I think that's really because we "accidentally" multiply patchclamp data by 30hz when it's already 1:1 hz
-        # Ask Andrey: so in other words this should sample at 1000, patchclamp should sample at 1 hz (?)
-        self.sampling_rate_spin.setSuffix(" Hz")
-        options_layout.addRow("Sampling rate:", self.sampling_rate_spin)
+        # self.sampling_rate_spin = QtWidgets.QDoubleSpinBox()
+        # self.sampling_rate_spin.setMinimum(0.1)
+        # self.sampling_rate_spin.setMaximum(100000.0)
+        # self.sampling_rate_spin.setValue(30000.0)  # This aligns with the 900 data points exactly on a time scale.
+        # # but I think that's really because we "accidentally" multiply patchclamp data by 30hz when it's already 1:1 hz
+        # # Ask Andrey: so in other words this should sample at 1000, patchclamp should sample at 1 hz (?)
+        # self.sampling_rate_spin.setSuffix(" Hz")
+        # options_layout.addRow("Sampling rate:", self.sampling_rate_spin)
         
         
         layout.addWidget(options_group)
@@ -190,7 +190,7 @@ class FluorescentSuite2pImportDialog(QtWidgets.QDialog):
                 return
                 
             # Get import settings
-            sampling_rate = self.sampling_rate_spin.value()
+            sampling_rate = 30.0  # fixed sampling rate for suite2p data
             dt = 1.0 / sampling_rate
             
             n_neurons, n_timepoints = self.spike_data.shape
