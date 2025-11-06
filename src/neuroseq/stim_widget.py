@@ -33,6 +33,8 @@ class StimWidget(TimeseriesWidget):
         if stims is None:
             return
         self.dt = stims.dt
+        self.hover_values = stims.values
+        self.units = b2.get_unit(stims.dim).__str__()
         self.graphic = self.subplot.add_image(
             stims.values.T,
             cmap="matlab:hot_r",
