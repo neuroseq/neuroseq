@@ -142,6 +142,7 @@ def add_action(
         action.setIcon(icon)
     if shortcut is not None:
         action.setShortcut(QtGui.QKeySequence(shortcut))
+        action.setShortcutContext(QtCore.Qt.ShortcutContext.WindowShortcut)
     if menu is not None:
         menu.addAction(action)
     if toolbar is not None:

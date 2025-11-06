@@ -97,8 +97,18 @@ class StimEditor(QtWidgets.QWidget):
         self.stim_widget.escape_pressed.connect(self.cancel_paste_selected_stim)
         self.resize(800, 600)
 
-    def set_model(self, model: B2Model) -> None:
+    def set_model(self, model: B2Model, keep_undo_history=False) -> None:
         self.model = model
+        if self.current_stim_modifier is not None and keep_undo_history:
+            for k in self.stims_dict:
+                if k in self.model.parameters:
+                    self.logger.debug(
+                        f"Updating TimedArray for stim '{k}' without clearing undo history"
+                    )
+                    self.stims_dict[k].timed_array = self.model.parameters[k]
+            self.current_stim_modifier = None
+            self.select_stim(self.cmb_stim.currentText())
+            return
         self.stims_dict = {}
         if self.model is not None and self.model.parameters is not None:
             self.stims_dict = {
@@ -424,7 +434,7 @@ class StimEditor(QtWidgets.QWidget):
 
     def _add_actions(self, toolbar: QtWidgets.QToolBar, menu: QtWidgets.QMenu) -> None:
         self.action_draw_mode = add_action(
-            "Draw mode",
+            "Draw mode (1)",
             lambda: self.set_mode(InteractMode.DRAW),
             menu,
             toolbar,
@@ -435,7 +445,7 @@ class StimEditor(QtWidgets.QWidget):
             is_checked=True,
         )
         self.action_select_mode = add_action(
-            "Select mode",
+            "Select mode (2)",
             lambda: self.set_mode(InteractMode.SELECT),
             menu,
             toolbar,
@@ -447,7 +457,7 @@ class StimEditor(QtWidgets.QWidget):
         )
         self.toolbar.addSeparator()
         self.action_undo = add_action(
-            "Undo",
+            "Undo (Ctrl+Z)",
             self.undo,
             menu,
             toolbar,
@@ -457,7 +467,7 @@ class StimEditor(QtWidgets.QWidget):
         )
         self.action_undo.setEnabled(False)
         self.action_redo = add_action(
-            "Redo",
+            "Redo (Ctrl+Shift+Z)",
             self.redo,
             menu,
             toolbar,
@@ -509,7 +519,7 @@ class StimEditor(QtWidgets.QWidget):
         self.actions_edit = []
         self.actions_edit.append(
             add_action(
-                "Select all",
+                "Select all (Ctrl+A)",
                 lambda: self.stim_widget.select_neurons(None, None),
                 menu,
                 toolbar,
@@ -520,7 +530,7 @@ class StimEditor(QtWidgets.QWidget):
         )
         self.actions_edit.append(
             add_action(
-                "Copy",
+                "Copy (Ctrl+C)",
                 self.copy_selected_stim,
                 menu,
                 toolbar,
@@ -531,7 +541,7 @@ class StimEditor(QtWidgets.QWidget):
         )
         self.actions_edit.append(
             add_action(
-                "Cut",
+                "Cut (Ctrl+X)",
                 self.cut_selected_stim,
                 menu,
                 toolbar,
@@ -542,7 +552,7 @@ class StimEditor(QtWidgets.QWidget):
         )
         self.actions_edit.append(
             add_action(
-                "Paste",
+                "Paste (Ctrl+V)",
                 self.init_paste_selected_stim,
                 menu,
                 toolbar,
@@ -553,7 +563,7 @@ class StimEditor(QtWidgets.QWidget):
         )
         self.actions_edit.append(
             add_action(
-                "Paste inverted",
+                "Paste inverted (Ctrl+Shift+V)",
                 lambda: self.init_paste_selected_stim(invert=True),
                 menu,
                 toolbar,
@@ -569,7 +579,6 @@ class StimEditor(QtWidgets.QWidget):
                 menu,
                 toolbar,
                 self,
-                shortcut="Ctrl+Shift+S",
                 icon=qta.icon("mdi6.application-export"),
             )
         )
@@ -580,13 +589,12 @@ class StimEditor(QtWidgets.QWidget):
                 menu,
                 toolbar,
                 self,
-                shortcut="Ctrl+Shift+O",
                 icon=qta.icon("mdi6.application-import"),
             )
         )
         self.actions_edit.append(
             add_action(
-                "Ctrl+Delete",
+                "Delete selected stim region",
                 self.delete_selected_stim,
                 menu,
                 toolbar,
