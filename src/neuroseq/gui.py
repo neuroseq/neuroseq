@@ -678,7 +678,7 @@ class Gui(QtWidgets.QMainWindow):
         try:
             # Get metadata
             metadata = imported_data.get("_metadata", {})
-t             dt = metadata.get("dt", 1.0/30.0)
+            dt = metadata.get("dt", 1.0/30.0)
             
             # Initialize external data if needed
             if self.external_simulation_data is None:
