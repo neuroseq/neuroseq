@@ -65,7 +65,6 @@ class FluorescentSuite2pImportDialog(QtWidgets.QDialog):
         
         # Import options
         options_group = QtWidgets.QGroupBox("Import Options")
-        options_layout = QtWidgets.QFormLayout(options_group)
         
         # self.sampling_rate_spin = QtWidgets.QDoubleSpinBox()
         # self.sampling_rate_spin.setMinimum(0.1)
