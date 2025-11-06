@@ -18,6 +18,7 @@ from neuroseq import __version__
 from neuroseq.b2_model import B2Model
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.heatmap_widget import HeatmapWidget
+from neuroseq.fluorescent_suite2p_import_dialog import FluorescentSuite2pImportDialog
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
 from neuroseq.spike_widget import SpikeWidget
@@ -629,6 +630,12 @@ class Gui(QtWidgets.QMainWindow):
         dialog.data_imported.connect(self.handle_patchclamp_import)
         dialog.exec_()
 
+    def import_suite2p_spikes(self) -> None:
+        """Open dialog to import Suite2p spike data"""
+        dialog = FluorescentSuite2pImportDialog(self)
+        dialog.data_imported.connect(self.handle_patchclamp_import)  # Use same handler
+        dialog.exec_()
+
     def handle_patchclamp_import(self, imported_data: dict) -> None:
         """Handle imported patch clamp data and expand stims if needed"""
         try:
@@ -641,11 +648,14 @@ class Gui(QtWidgets.QMainWindow):
             if self.model.parameters and n_timepoints > 0:
                 self.expand_stims_to_length(n_timepoints, dt)
             
-            # Store the imported data for display
-            self.external_simulation_data = {
-                key: value for key, value in imported_data.items() 
-                if not key.startswith("_")
-            }
+            # Store the imported data for display, preserving existing data
+            if self.external_simulation_data is None:
+                self.external_simulation_data = {}
+            
+            # Update with new data (preserves existing traces/spikes from other imports)
+            for key, value in imported_data.items():
+                if not key.startswith("_"):
+                    self.external_simulation_data[key] = value
             
             # Update the GUI to show imported data
             self._update_external_data_widgets()
@@ -845,6 +855,24 @@ class Gui(QtWidgets.QMainWindow):
             shortcut="Ctrl+E",
             icon=qta.icon("mdi6.cog"),
         )
+        menu.addSeparator()
+        add_action(
+            "Import &Patchclamp",
+            self.import_patchclamp_data,
+            menu,
+            None,
+            shortcut="Ctrl+I",
+            icon=qta.icon("mdi6.import"),
+        )
+        add_action(
+            "Import &Suite2p",
+            self.import_suite2p_spikes,
+            menu,
+            None,
+            shortcut="Ctrl+Shift+I",
+            icon=qta.icon("mdi6.import"),
+        )
+        menu.addSeparator()
         add_action(
             "E&xit",
             self.btn_exit_clicked,
@@ -880,15 +908,6 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             shortcut="Ctrl+Shift+R",
             icon=qta.icon("mdi6.head-sync"),
-        )
-        menu.addSeparator()
-        add_action(
-            "&Import Patch Clamp Data",
-            self.import_patchclamp_data,
-            menu,
-            None,
-            shortcut="Ctrl+I",
-            icon=qta.icon("mdi6.import"),
         )
 
     def _create_actions_playback(

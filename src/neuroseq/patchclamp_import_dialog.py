@@ -69,6 +69,11 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         options_group = QtWidgets.QGroupBox("Import Options")
         options_layout = QtWidgets.QFormLayout(options_group)
         
+        self.import_type_combo = QtWidgets.QComboBox()
+        self.import_type_combo.addItems(["traces", "spikes"])
+        self.import_type_combo.setCurrentText("traces")
+        options_layout.addRow("Import as:", self.import_type_combo)
+        
         self.data_source_combo = QtWidgets.QComboBox()
         self.data_source_combo.addItems(["soma", "dend", "bg"])
         self.data_source_combo.setCurrentText("soma") # this lets user choose what to select when importing patch clamp for traces.
@@ -177,6 +182,46 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             
         self.preview_text.setPlainText("\n".join(preview_text))
         
+    def extract_spikes_from_voltage(self, voltage_traces: np.ndarray, dt: float) -> dict:
+        """
+        Extract spike events from voltage traces for spike widget.
+        
+        Args:
+            voltage_traces: 2D array (neurons × timepoints)
+            dt: time step in seconds
+            
+        Returns:
+            Dict compatible with spike widget format
+        """
+        spike_times = []
+        spike_indices = []
+        
+        n_neurons, n_timesteps = voltage_traces.shape
+        
+        # Simple threshold-based spike detection
+        for neuron_idx in range(n_neurons):
+            trace = voltage_traces[neuron_idx, :]
+            
+            # Dynamic threshold: mean + 3*std
+            threshold = np.mean(trace) + 2 * np.std(trace)
+            
+            # Find crossings
+            above_threshold = trace > threshold
+            spike_timepoints = np.where(above_threshold)[0]
+            
+            # Convert to times and add to lists
+            for timepoint in spike_timepoints:
+                spike_times.append(timepoint * dt)
+                spike_indices.append(neuron_idx)
+        
+        return {
+            "timestamps": np.array(spike_times),
+            "spikes": np.array(spike_indices),
+            "dt": dt,
+            "n_neurons": n_neurons,
+            "n_timesteps": n_timesteps
+        }
+        
     def import_data(self):
         """Import the selected data and emit signal"""
         try:
@@ -184,26 +229,41 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 return
                 
             # Get import settings
+            import_type = self.import_type_combo.currentText()  # "traces" or "spikes"
             data_source = self.data_source_combo.currentText() # allows user to select soma/dend/bg
             max_neurons = self.max_neurons_spin.value()
             sampling_rate = self.sampling_rate_spin.value()
             dt = 1.0 / sampling_rate
 
-            voltage_traces = self.mat_data[data_source] # note this is still soma/dend/bg - we probably want soma only?
+            voltage_traces = self.mat_data[data_source]
             n_neurons, n_timepoints = voltage_traces.shape
             
             # Limit number of neurons for testing
             n_neurons_to_import = min(max_neurons, n_neurons)
             voltage_traces = voltage_traces[:n_neurons_to_import, :]
             
-            # actually improt the data:
-            timestamps = np.arange(n_timepoints) * dt
+            # Import data based on user choice
             imported_data = {}
-            imported_data[f"patchclamp_{data_source}_traces"] = {
-                "widget": "trace",
-                "timestamps": timestamps,
-                "traces": voltage_traces
-            }
+            
+            if import_type == "traces":
+                timestamps = np.arange(n_timepoints) * dt
+                self.logger.info(f"Min voltage scaled: {voltage_traces - np.min(voltage_traces)}")
+                self.logger.info(f"Max voltage range: {np.max(voltage_traces) - np.min(voltage_traces)}")
+                # Shim: Scale voltage traces to mV approximate range (asking Andrey about this...)
+                scaled_traces = -0.07 + (voltage_traces - np.min(voltage_traces)) * (0.03 - (-0.07)) / (np.max(voltage_traces) - np.min(voltage_traces))
+                imported_data[f"patchclamp_{data_source}_traces"] = {
+                    "widget": "trace",
+                    "timestamps": timestamps,
+                    "traces": scaled_traces
+                }
+                
+            elif import_type == "spikes":
+                # Extract and import as spikes
+                spike_data = self.extract_spikes_from_voltage(voltage_traces, dt)
+                imported_data[f"patchclamp_{data_source}_spikes"] = {
+                    "widget": "spike",
+                    **spike_data
+                }
 
             
             # Store metadata for stim expansion
@@ -212,22 +272,32 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 "dt": dt,
                 "sampling_rate": sampling_rate,
                 "data_source": data_source,
+                "import_type": import_type,
                 "n_neurons_imported": n_neurons_to_import,
                 "n_neurons_total": n_neurons
             }
             
-            self.logger.info(f"Imported {n_neurons_to_import} neurons from {data_source} with {n_timepoints} timepoints")
+            self.logger.info(f"Imported {n_neurons_to_import} neurons from {data_source} as {import_type} with {n_timepoints} timepoints")
             
             # Emit signal with the imported data
             self.data_imported.emit(imported_data)
             
             # Show success message
-            QtWidgets.QMessageBox.information(
-                self,
-                "Import Successful",
-                f"Successfully imported {n_neurons_to_import} neurons from {data_source} patch clamp data (traces only).\n"
-                f"Data contains {n_timepoints} timepoints at {sampling_rate} Hz."
-            )
+            if import_type == "spikes":
+                spike_count = len(imported_data[f"patchclamp_{data_source}_spikes"]["spikes"])
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Import Successful",
+                    f"Successfully imported {n_neurons_to_import} neurons from {data_source} as spike data.\n"
+                    f"Detected {spike_count} spike events from {n_timepoints} timepoints at {sampling_rate} Hz."
+                )
+            else:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Import Successful",
+                    f"Successfully imported {n_neurons_to_import} neurons from {data_source} as trace data.\n"
+                    f"Data contains {n_timepoints} timepoints at {sampling_rate} Hz."
+                )
             
             self.accept()
             
