@@ -39,13 +39,6 @@ from neuroseq.utils import example_models_path
 from neuroseq.utils import with_wait_cursor
 
 
-
-@dataclass
-class GuiSettings:
-    max_ram_synapse_plot_matrix: int = 256
-    brian2_backend: str = "cython"
-    stim_padding_secs: int = 500
-
 class Gui(QtWidgets.QMainWindow):
     def __init__(self, filename: pathlib.Path | str | None = None) -> None:
         super().__init__()
@@ -685,8 +678,7 @@ class Gui(QtWidgets.QMainWindow):
         try:
             # Get metadata
             metadata = imported_data.get("_metadata", {})
-            n_timepoints = metadata.get("n_timepoints", 0)
-            dt = metadata.get("dt", 1.0/30.0)
+t             dt = metadata.get("dt", 1.0/30.0)
             
             # Initialize external data if needed
             if self.external_simulation_data is None:
