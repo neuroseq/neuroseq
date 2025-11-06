@@ -83,12 +83,12 @@ class FluorescentSuite2pContrastingTracesImportDialog(QtWidgets.QDialog):
         options_group = QtWidgets.QGroupBox("Import Options")
         options_layout = QtWidgets.QFormLayout(options_group)
         
-        self.sampling_rate_spin = QtWidgets.QDoubleSpinBox()
-        self.sampling_rate_spin.setMinimum(0.001)
-        self.sampling_rate_spin.setMaximum(100000.0)
-        self.sampling_rate_spin.setValue(30.0) # as specified
-        self.sampling_rate_spin.setSuffix(" Hz")
-        options_layout.addRow("Sampling rate:", self.sampling_rate_spin)
+        # self.sampling_rate_spin = QtWidgets.QDoubleSpinBox()
+        # self.sampling_rate_spin.setMinimum(0.001)
+        # self.sampling_rate_spin.setMaximum(100000.0)
+        # self.sampling_rate_spin.setValue(30.0) # as specified
+        # self.sampling_rate_spin.setSuffix(" Hz")
+        # options_layout.addRow("Sampling rate:", self.sampling_rate_spin)
         
         self.max_neurons_spin = QtWidgets.QSpinBox()
         self.max_neurons_spin.setMinimum(1)
@@ -239,10 +239,16 @@ class FluorescentSuite2pContrastingTracesImportDialog(QtWidgets.QDialog):
             if not (hasattr(self, 'f_data') and hasattr(self, 'fneu_data')):
                 return
                 
-            # Get import settings
-            sampling_rate = self.sampling_rate_spin.value()
+            # Get import settings  
+            sampling_rate = 30.0  # fixed sampling rate for suite2p data
             max_neurons = self.max_neurons_spin.value()
             dt = 1.0 / sampling_rate
+
+            # todo: Implement (again) sampling rate modifying the actual data points when we have data with very high sample rate that we want to offer the option to downsample
+            # The thing is this data is 30hz which is likely our lowest hz, so we probably want to keep it at the granularity it is at.
+            # when we add the patchclamp data that should be much higher, in the khz, so probably, we should wait until then.
+            # or we could actually upsample too, letting the user upsample this typically 30hz data to the same as the patchclamp
+            # Anyway it's not derivable from the files and we don't have current examples of different sample rates, so not implemented for now.
             
             n_neurons, n_timepoints = self.f_data.shape
             
