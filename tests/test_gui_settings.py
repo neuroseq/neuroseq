@@ -1,0 +1,78 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from neuroseq.gui_settings import GuiSettings
+
+
+def test_gui_save_config_settings(tmp_config_dir) -> None:
+    settings = GuiSettings()
+
+    # change all settings
+    settings.brian2_backend = "cython"
+    settings.max_ram_synapse_plot_matrix = 512
+    settings.stim_padding_secs = 6
+
+    # check if settings file exists and contains the correct values
+    config_dir = Path(tmp_config_dir)
+    config_file = config_dir / "config.json"
+    assert config_file.exists()
+
+    # check if settings were saved correctly
+    with open(config_file) as f:
+        config = json.load(f)
+    assert config["brian2_backend"] == settings.brian2_backend
+    assert config["max_ram_synapse_plot_matrix"] == settings.max_ram_synapse_plot_matrix
+    assert config["stim_padding_secs"] == settings.stim_padding_secs
+
+
+def test_gui_load_config_settings(tmp_config_dir) -> None:
+    settings = GuiSettings()
+
+    # change all settings
+    settings.brian2_backend = "cython"
+    settings.max_ram_synapse_plot_matrix = 512
+    settings.stim_padding_secs = 6
+
+    # set settings to original to check if loading works
+    settings.__dict__["brian2_backend"] = "numpy"
+    settings.__dict__["max_ram_synapse_plot_matrix"] = 256
+    settings.__dict__["stim_padding_secs"] = 5
+
+    # load settings from file
+    settings.load_config_settings()
+
+    # check if settings were loaded correctly
+    assert settings.brian2_backend == "cython"
+    assert settings.max_ram_synapse_plot_matrix == 512
+    assert settings.stim_padding_secs == 6
+
+    # try loading invalid values
+    settings.brian2_backend = "invalid backend"
+    settings.max_ram_synapse_plot_matrix = -5
+    settings.stim_padding_secs = -3
+
+    # try loading invalid values
+    # brian2 backend - should reset to default 'numpy'
+    settings.load_config_settings()
+    assert settings.brian2_backend == "numpy"
+    # max_ram_synapse_plot_matrix - should be set to 0
+    assert settings.max_ram_synapse_plot_matrix == 0
+    # stim_padding_secs - should be set to 0
+    assert settings.stim_padding_secs == 0
+
+    # try setting RAM to string
+    settings.brian2_backend = "numpy"  # valid again
+    settings.max_ram_synapse_plot_matrix = "this is not even a number!"  # type: ignore[assignment]
+    settings.stim_padding_secs = 5  # valid again
+    # should log a ValueError and default to 256
+    settings.load_config_settings()
+    assert settings.max_ram_synapse_plot_matrix == 256
+
+    # try setting stim_padding_secs to string
+    settings.max_ram_synapse_plot_matrix = 256  # valid again
+    settings.stim_padding_secs = "this is not even a number!"  # type: ignore[assignment]
+    # should log a ValueError and default to 5s
+    settings.load_config_settings()
+    assert settings.stim_padding_secs == 5
