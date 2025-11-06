@@ -1,308 +1,305 @@
 from __future__ import annotations
 
-import abc
 import logging
 import math
-from enum import Enum
-from typing import Any
-from typing import TypeAlias
 
 import brian2.numpy_ as np
+import fastplotlib as fpl
+import pygfx
 import pyqtgraph as pg
 import qtawesome as qta
+from fastplotlib.layouts import Subplot
 from qtpy import QtCore
-from qtpy import QtGui
 from qtpy import QtWidgets
 
 from neuroseq.custom_analysis_widget import CustomAnalysisDataType
 from neuroseq.custom_analysis_widget import CustomAnalysisType
-from neuroseq.selectable_bar_line_plot_item import SelectableBarLinePlotItem
-from neuroseq.selectable_bar_plot_item import SelectableBarPlotItem
-from neuroseq.selectable_line_plot_item import SelectableLinePlotItem
-from neuroseq.timeline import Timeline
+from neuroseq.gridlines import GridLines
+from neuroseq.heatmap_widget import HeatmapWidget
+from neuroseq.region_of_interest import RegionOfInterest
+from neuroseq.text import Text
+from neuroseq.utils import InteractMode
 from neuroseq.utils import QtABCMeta
 from neuroseq.utils import add_action
 
-SelectablePlotItem: TypeAlias = (
-    SelectableLinePlotItem | SelectableBarPlotItem | SelectableBarLinePlotItem
-)
 
-
-class MouseMode(Enum):
-    NONE = 1
-    SELECT = 2
-    MOVE = 3
-
-
-class OffsetYAxisItem(pg.AxisItem):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.set_num_neurons(0)
-
-    def set_num_neurons(self, n_neurons: int):
-        major_ticks = []
-        for neuron in range(n_neurons):
-            major_ticks.append((float(neuron), str(neuron)))
-            major_ticks.append((neuron + 0.5, ""))
-        self.setTicks([major_ticks, []])
-
-
-class MinDtXAxisItem(pg.AxisItem):
-    def __init__(self, dt: float = 1.0, *args, **kwargs):
-        super().__init__(*args, **kwargs, units="ms")
-        self.dt = dt
-
-    def set_dt(self, dt: float):
-        self.dt = dt
-
-    def tickSpacing(self, minVal, maxVal, size):
-        levels = super().tickSpacing(minVal, maxVal, size)
-        # filter out any levels that are less than the minimum spacing above dt
-        min_spacing_above_dt = 7 * self.dt
-        new_levels = [level for level in levels if level[0] > min_spacing_above_dt]
-        # if there are less than 3 remaining levels, add a dt level
-        if len(new_levels) < 3:
-            new_levels.append((self.dt, 0))
-        return new_levels
-
-
-class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
+class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
     """A base class for widgets that display a set of timeseries data for a number of neurons, stacked vertically.
 
     data should be a 2d array or list of 2d arrays, where the first index of each
     array is the neuron index and the second index is the time index.
 
-    Subclasses should call _plot_data() and implement _plot_neuron_data() to plot the data.
+    Subclasses should call post_set_data() after updating the data.
     """
 
     # these signals emit indices or slices of indices, neurons first and then times
-    mouse_clicked = QtCore.Signal(int, int)
-    selection_made = QtCore.Signal(slice, slice)
-    selection_moved = QtCore.Signal(int, int)
+    mouse_clicked = QtCore.Signal(
+        int, int, int
+    )  # neuron slice, time slice, mouse button (0 for no button, 1 for left, 2 for right, 3 for middle)
+    mouse_dragged = QtCore.Signal(
+        int, int, int, int, int
+    )  # initial neuron index, current neuron index, initial time index, current time index, mouse button (0 for no button, 1 for left, 2 for right, 3 for middle)
     custom_analysis_requested = QtCore.Signal(
-        CustomAnalysisDataType, CustomAnalysisType, slice, slice, dict
+        CustomAnalysisDataType, CustomAnalysisType, bool, slice, slice, dict
     )
+    escape_pressed = QtCore.Signal()
 
-    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
-        super().__init__(
-            parent,
-            axisItems={
-                "bottom": MinDtXAxisItem(orientation="bottom"),
-                "left": OffsetYAxisItem(orientation="left"),
-            },
+    def __init__(
+        self, controller: pygfx.Controller, parent: QtWidgets.QWidget | None = None
+    ) -> None:
+        super().__init__(parent)
+        self.heatmap_widget: HeatmapWidget | None = None
+        self.controller = controller
+        self.figure: fpl.Figure = fpl.Figure(controllers=controller)
+        layout = QtWidgets.QVBoxLayout(self)
+        self.widget = self.figure.show()
+        layout.addWidget(self.widget)
+        self.graphic: fpl.ImageGraphic | fpl.LineStack | fpl.ScatterGraphic | None = (
+            None
         )
+        self.mode = InteractMode.SELECT
+        self.roi = RegionOfInterest(fill_color=(0.5, 0.5, 0.5, 0.2))
+        self.hover_slice_graphic: fpl.Graphic | None = None
+        self.text = Text()
+        self.show_text = True
+        self.timeline: fpl.LinearSelector | None = None
+        self.setLayout(layout)
+        self.subplot: Subplot = self.figure[0, 0]
+        self._set_light_mode()
+        self.resize(800, 600)
+
+        self.context_menu = QtWidgets.QMenu("Custom analysis", self)
+        for custom_analysis_type in CustomAnalysisType:
+            for new_window in [False, True]:
+                add_action(
+                    f"{custom_analysis_type} {'(new window)' if new_window else ''}",
+                    lambda *args,
+                    _custom_analysis_type=custom_analysis_type,
+                    _new_window=new_window: self.custom_analysis_requested.emit(
+                        self.data_type,
+                        _custom_analysis_type,
+                        _new_window,
+                        self.selected_neuron_slice,
+                        self.selected_time_slice,
+                        self.data,
+                    ),
+                    self.context_menu,
+                    None,
+                    self,
+                    icon=qta.icon(custom_analysis_type.value),
+                )
+
         self.logger = logging.getLogger(__name__)
         self.data: dict[str, int | float | np.ndarray] = {}
         self.data_type: CustomAnalysisDataType | None = None
-        self.timeline = Timeline()
-        self.timeline.setZValue(1e8)
         self.dt = 1.0
-        self.mouse_mode = MouseMode.NONE
-        self.mouse_press_pos: QtCore.QPointF | None = None
-        self.mouse_selected_rect: QtCore.QRectF = QtCore.QRectF()
-        self.enable_mouse_move_roi = False
+        self.selection_in_progress = False
+        self.mouse_pos: np.ndarray | None = None
+        self.mouse_drag_time_index: int | None = None
+        self.mouse_drag_neuron_index: int | None = None
+        self.mouse_press_pos: np.ndarray | None = None
+        self.mouse_press_button: int = (
+            0  # 0 for no button pressed, 1 for left button, 2 for right button
+        )
         self.selected_time_slice: slice | None = None
         self.selected_neuron_slice: slice | None = None
-        self.neuron_plots: list[SelectablePlotItem] = []
         self.n_neurons = 0
         self.n_timestamps = 0
-        self.roi = QtWidgets.QGraphicsRectItem(0, 0, 0, 0)
-        self.roi.setPen(QtGui.QColor(255, 255, 255, 100))
-        self.roi.setBrush(QtGui.QColor(200, 200, 255, 100))
-        self.roi.setZValue(1e9)
-        self.roi.hide()
-        self.scene().addItem(self.roi)
-        # in principle self.sigRangeChanged should be enough here, but it seems to get emitted before the view transform
-        # used by self.mapFromView is updated, so we use the underlying ViewBox's sigRangeChanged signal instead
-        self.plotItem.vb.sigRangeChanged.connect(self.update_roi)
-        self.sigRangeChanged.connect(self.update_roi)
+        self.figure.renderer.add_event_handler(self.pointer_down, "pointer_down")
+        self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
+        self.figure.renderer.add_event_handler(self.pointer_up, "pointer_up")
+        self.figure.renderer.add_event_handler(self.key_down, "key_down")
 
-    # workaround for AttributeError: autoRangeEnabled when setClipToView is enabled,
-    # see https://github.com/pyqtgraph/pyqtgraph/issues/1854 for more details
-    def autoRangeEnabled(self):
-        return self.plotItem.getViewBox().autoRangeEnabled()
+    def set_mode(self, mode: InteractMode) -> None:
+        self.mode = mode
+        self.mouse_press_pos = None
+        self.mouse_press_button = 0
+        self.selection_in_progress = False
+        self.roi.visible = False
+        self.unselect_neurons()
 
-    def _create_custom_analysis_menu(self) -> None:
-        self.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.ActionsContextMenu)
-        self.menu_custom_analysis = QtWidgets.QMenu("Custom analysis", self)
-        for custom_analysis_type in CustomAnalysisType:
-            add_action(
-                str(custom_analysis_type),
-                lambda *args,
-                _custom_analysis_type=custom_analysis_type: self.custom_analysis_requested.emit(
-                    self.data_type,
-                    _custom_analysis_type,
-                    self.selected_neuron_slice,
-                    self.selected_time_slice,
-                    self.data,
-                ),
-                self.menu_custom_analysis,
-                None,
-                self,
-                icon=qta.icon(custom_analysis_type.value),
+    def toggle_selection_text(self):
+        self.show_text = not self.show_text
+        self.roi.text.visible = self.show_text
+        self.text.visible = self.show_text
+
+    def contextMenuEvent(self, event):
+        if (
+            self.mode == InteractMode.SELECT
+            and event.modifiers() != QtCore.Qt.KeyboardModifier.ControlModifier
+        ):
+            self.context_menu.exec(event.globalPos())
+        else:
+            super().contextMenuEvent(event)
+
+    def _set_light_mode(self) -> None:
+        # some of these currently require accessing private attributes: should refactor when fastplotlib allows setting these colors directly
+        self.subplot.background_color = "w"
+        self.subplot.axes.colors = (
+            "k",
+            "k",
+            "k",
+        )
+        self.subplot.axes.grids.xy.axis_color = "k"
+        self.subplot.axes.grids.xy.major_color = "k"
+        self.subplot.axes.grids.xy.minor_color = "k"
+        self.subplot.axes._x._text.material.color = "k"
+        self.subplot.axes._y._text.material.color = "k"
+        self.subplot.axes._x._line.material.color = "k"
+        self.subplot.axes._y._line.material.color = "k"
+        self.subplot.axes._x._points.material.color = "k"
+        self.subplot.axes._y._points.material.color = "k"
+
+    def post_set_data(self):
+        self.subplot.auto_scale(zoom=1.0, maintain_aspect=False)
+        self.subplot.grids = False
+        self.subplot.axes.y.ticks = np.arange(0, self.n_neurons, 1)
+        self.subplot.axes.y.points.visible = False
+        self.subplot.axes.y.line.visible = False
+        self.subplot.axes.x.points.visible = False
+        self.subplot.axes.x.line.visible = False
+        self.subplot.axes.x.min_tick_distance = 100
+        self.subplot.axes.x.tick_format = lambda x, x_min, x_max: f"{x:.0f}ms"
+        self.subplot.toolbar = False
+        self.subplot.add_graphic(self.roi, center=False)
+        self.subplot.add_graphic(
+            GridLines(self.n_neurons, self.n_timestamps * self.dt), center=False
+        )
+        self.subplot.add_graphic(self.text, center=False)
+        self._set_light_mode()
+        self.roi.visible = False
+        if hasattr(self.graphic, "add_linear_selector"):
+            self.timeline = self.graphic.add_linear_selector(thickness=2)
+            self.timeline.add_event_handler(
+                lambda ev: self.heatmap_widget.timeLine.setValue(ev.info["value"]),
+                "selection",
             )
 
     def clear_data(self) -> None:
-        self.plotItem.getViewBox().enableAutoRange(enable=False)
-        self.neuron_plots.clear()
+        self.subplot.clear()
+        self.hover_slice_graphic = None
         self.data = {}
         self.n_neurons = 0
         self.n_timestamps = 0
         self.unselect_neurons()
-        self.clear()
-        # set the y-axis to display the trace index
-        self.plotItem.getAxis("left").setLabel("Neuron")
-        self.addItem(self.timeline)
-        self.plotItem.getViewBox().enableAutoRange(enable=True)
 
-    @abc.abstractmethod
-    def _plot_neuron_data(
-        self, data: list[np.ndarray] | np.ndarray, timestamps: np.ndarray, dt: float
-    ) -> None:
-        """Plot the data for each neuron.
-
-        This method should create a plot for each neuron and store them in the self.neuron_plots list.
-
-        The plotted data should be normalised so that each neuron's data lies in the range [-0.5, 0.5],
-        and offset vertically by the neuron's index.
-        """
-        # fallback for pyside6 which apparently does not fully support abstract methods in a metaclass
-        raise NotImplementedError("Subclasses must implement _plot_neuron_data")
-
-    def _plot_data(
-        self,
-        data: list[np.ndarray] | np.ndarray | None = None,
-        timestamps: np.ndarray | None = None,
-        dt: float | None = None,
-    ) -> None:
-        self.clear_data()
-        if data is None:
-            return
-        shape = data[0].shape if isinstance(data, list) else data.shape
-        self.logger.debug(f"Plotting data with shape {shape}")
-        if len(shape) != 2:
-            return
-        self.n_neurons, self.n_timestamps = shape
-        if self.n_neurons == 0 or self.n_timestamps == 0:
-            return
-        if isinstance(data, list) and not all(
-            d.shape[0] == self.n_neurons and d.shape[1] == self.n_timestamps
-            for d in data
-        ):
-            raise ValueError("All data arrays must have the same shape")
-        if timestamps is not None:
-            # timestamps, if provided, take precedence over dt
-            self.dt = timestamps[1] - timestamps[0] if len(timestamps) > 1 else 1.0
-        else:
-            self.dt = dt if dt is not None else 1.0
-            timestamps = self.dt * np.arange(self.n_timestamps)
-        # don't let user zoom/pan outside of the data
-        self.setLimits(
-            xMin=timestamps[0],
-            xMax=timestamps[-1] + self.dt,
-            yMin=-0.5,
-            yMax=self.n_neurons - 0.5,
+    def pointer_down(self, ev: pygfx.PointerEvent) -> None:
+        self.mouse_press_pos = self.subplot.map_screen_to_world(ev)
+        self.mouse_pos = self.mouse_press_pos
+        self.mouse_press_button = ev.button
+        self.logger.debug(
+            f"pointer_down button {self.mouse_press_button} at {self.mouse_press_pos} in mode {self.mode}"
         )
-        self.plotItem.getAxis("bottom").set_dt(self.dt)
-        self.plotItem.getAxis("left").set_num_neurons(self.n_neurons)
-        self.data = {"data": data, "timestamps": timestamps, "dt": self.dt}
-        self.plotItem.getViewBox().enableAutoRange(enable=False)
-        self._plot_neuron_data(data, timestamps, self.dt)
-        self.plotItem.getViewBox().enableAutoRange(enable=True)
-
-    def mousePressEvent(self, ev: Any) -> None:
-        if ev.modifiers() != QtCore.Qt.KeyboardModifier.ControlModifier:
-            return super().mousePressEvent(ev)
-        if ev.button() != QtCore.Qt.MouseButton.LeftButton:
-            return
-        self.mouse_press_pos = ev.position()
-        if (
-            self.enable_mouse_move_roi
-            and self.roi.isVisible()
-            and self.roi.rect().contains(ev.position())
-        ):
-            self.mouse_mode = MouseMode.MOVE
-            self.setCursor(QtCore.Qt.CursorShape.OpenHandCursor)
+        if self.mode == InteractMode.SELECT and self.mouse_press_button == 1:
+            self.logger.debug("starting ROI selection")
+            self.roi.visible = True
+            self.selection_in_progress = True
+        elif self.mode == InteractMode.DRAW:
+            self.mouse_drag_time_index = math.floor(self.mouse_pos[0])
+            self.mouse_drag_neuron_index = math.floor(self.mouse_pos[1] + 0.5)
+            self.mouse_dragged.emit(
+                self.mouse_drag_neuron_index,
+                self.mouse_drag_neuron_index,
+                self.mouse_drag_time_index,
+                self.mouse_drag_time_index,
+                self.mouse_press_button,
+            )
         else:
-            self.mouse_mode = MouseMode.SELECT
-        self.logger.debug(f"Starting f{self.mouse_mode} from {self.mouse_press_pos}")
+            return
 
-    def mouseMoveEvent(self, ev: Any) -> None:
-        if ev.modifiers() != QtCore.Qt.KeyboardModifier.ControlModifier:
-            return super().mouseMoveEvent(ev)
+    def pointer_move(self, ev: pygfx.PointerEvent) -> None:
+        self.mouse_pos = self.subplot.map_screen_to_world(ev)
+        if self.mouse_pos is None:
+            self.text.visible = False
+            if self.hover_slice_graphic is not None:
+                self.hover_slice_graphic.visible = False
+            return
+        self.logger.debug(f"pointer_move at {self.mouse_pos} in mode {self.mode}")
+        self.text.visible = self.show_text
+        self.text.set_pos(self.mouse_pos)
+        if self.hover_slice_graphic is not None:
+            self.hover_slice_graphic.visible = True
+            self.hover_slice_graphic.offset = (
+                self.mouse_pos[0],
+                self.mouse_pos[1],
+                100,
+            )
         if self.mouse_press_pos is None:
             return
-        pos = ev.position()
-        delta_pos = pos - self.mouse_press_pos
-        if self.mouse_mode == MouseMode.MOVE:
-            self.roi.setRect(self.mouse_selected_rect.translated(delta_pos))
-        elif self.mouse_mode == MouseMode.SELECT:
-            x = min(pos.x(), self.mouse_press_pos.x())
-            y = min(pos.y(), self.mouse_press_pos.y())
-            w = abs(delta_pos.x())
-            h = abs(delta_pos.y())
-            self.roi.setRect(QtCore.QRectF(x, y, w, h))
-        self.roi.show()
+        if self.mode == InteractMode.SELECT and self.selection_in_progress:
+            x0 = min(self.mouse_pos[0], self.mouse_press_pos[0])
+            x1 = max(self.mouse_pos[0], self.mouse_press_pos[0])
+            y0 = min(self.mouse_pos[1] + 0.5, self.mouse_press_pos[1] + 0.5)
+            y1 = max(self.mouse_pos[1] + 0.5, self.mouse_press_pos[1] + 0.5)
+            time_slice = slice(max(0, math.floor(x0)), math.ceil(x1))
+            neuron_slice = slice(math.floor(y0), math.ceil(y1))
+            self.select_neurons(neuron_slice, time_slice)
+            return
+        elif self.mode == InteractMode.DRAW:
+            drag_time_index = math.floor(self.mouse_pos[0])
+            drag_neuron_index = math.floor(self.mouse_pos[1] + 0.5)
+            if (
+                drag_time_index != self.mouse_drag_time_index
+                or drag_neuron_index != self.mouse_drag_neuron_index
+            ):
+                self.logger.debug(
+                    f"Emitting mouse_dragged signal: neuron {self.mouse_drag_neuron_index} time {self.mouse_drag_time_index} -> neuron {drag_neuron_index} time {drag_time_index}"
+                )
+                self.mouse_dragged.emit(
+                    self.mouse_drag_neuron_index,
+                    drag_neuron_index,
+                    self.mouse_drag_time_index,
+                    drag_time_index,
+                    self.mouse_press_button,
+                )
+                self.mouse_drag_time_index = drag_time_index
 
-    def mouseReleaseEvent(self, ev: Any) -> None:
-        if self.cursor().shape() == QtCore.Qt.CursorShape.OpenHandCursor:
-            self.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
-        if ev.modifiers() != QtCore.Qt.KeyboardModifier.ControlModifier:
-            return super().mouseReleaseEvent(ev)
-        if (
-            self.mouse_press_pos is None
-            or ev.button() != QtCore.Qt.MouseButton.LeftButton
-        ):
+    def pointer_up(self, ev: pygfx.PointerEvent) -> None:
+        if self.mouse_press_pos is None:
+            self.mouse_press_button = 0
             return
-        pos = ev.position()
+        self.logger.debug(
+            f"pointer_up at {self.mouse_pos} with button {self.mouse_press_button} in mode {self.mode}"
+        )
         if (
-            self.mouse_mode == MouseMode.SELECT
-            and self.mouse_press_pos == ev.position()
+            self.mode == InteractMode.SELECT
+            and self.selection_in_progress
+            and self.mouse_pos is not None
         ):
-            self.unselect_neurons()
-            p = self.mapToView(pos)
+            if (
+                self.mouse_press_pos[0] == self.mouse_pos[0]
+                and self.mouse_press_pos[1] == self.mouse_pos[1]
+            ):
+                self.unselect_neurons()
+                self.roi.visible = False
+        elif self.mode == InteractMode.DRAW:
             self.mouse_clicked.emit(
-                math.floor(p.y() + 0.5), math.floor(p.x() / self.dt)
+                self.mouse_drag_neuron_index,
+                self.mouse_drag_time_index,
+                self.mouse_press_button,
             )
-            return
-        if self.mouse_mode == MouseMode.SELECT:
-            p0 = self.mapToView(self.roi.rect().topLeft())
-            p1 = self.mapToView(self.roi.rect().bottomRight())
-            x0 = max(0, math.ceil(p0.x() / self.dt))
-            x1 = math.floor(p1.x() / self.dt)
-            y0 = max(0, math.ceil(p1.y() + 0.5))
-            y1 = math.floor(p0.y() + 0.5)
-            selected_x_slice = slice(min(x0, x1), max(x0, x1))
-            selected_y_slice = slice(min(y0, y1), max(y0, y1))
-            self.logger.debug(
-                f"Selecting neurons {selected_y_slice} and times {selected_x_slice}"
-            )
-            self.select_neurons(selected_y_slice, selected_x_slice)
-            self.selection_made.emit(selected_y_slice, selected_x_slice)
-        elif self.mouse_mode == MouseMode.MOVE:
-            delta = self.mapToView(pos) - self.mapToView(self.mouse_press_pos)
-            neuron_index_offset = round(delta.y())
-            time_index_offset = round(delta.x() / self.dt)
-            self.logger.debug(
-                f"Selection moved by neuron index offset {neuron_index_offset}, time index offset {time_index_offset}"
-            )
-            self.selection_moved.emit(neuron_index_offset, time_index_offset)
         self.mouse_press_pos = None
-        self.mouse_mode = MouseMode.NONE
+        self.mouse_press_button = 0
+        self.selection_in_progress = False
+
+    def key_down(self, ev: pygfx.KeyboardEvent) -> None:
+        if ev.key == "Escape":
+            self.unselect_neurons()
+            self.escape_pressed.emit()
 
     def unselect_neurons(self) -> None:
         self.mouse_press_pos = None
-        self.roi.hide()
         self.selected_time_slice = None
         self.selected_neuron_slice = None
-        for neuron_plot in self.neuron_plots:
-            neuron_plot.set_selected_slice(slice(0, -1))
+        self.roi.visible = False
+        self.selection_in_progress = False
 
     def select_neurons(
         self,
         neuron_index_slice: slice | None = None,
         time_index_slice: slice | None = None,
     ) -> None:
+        pass
         if neuron_index_slice is None:
             neuron_index_slice = slice(0, self.n_neurons)
         if time_index_slice is None:
@@ -311,49 +308,14 @@ class TimeseriesWidget(pg.PlotWidget, metaclass=QtABCMeta):
             neuron_index_slice = slice(neuron_index_slice.start, self.n_neurons)
         if time_index_slice.stop is None:
             time_index_slice = slice(time_index_slice.start, self.n_timestamps)
+        self.roi.visible = True
+        self.roi.select_slice(neuron_index_slice, time_index_slice)
         self.selected_time_slice = time_index_slice
         self.selected_neuron_slice = neuron_index_slice
         self.logger.debug(
             f"Selecting neurons {neuron_index_slice} and times {time_index_slice}"
         )
-        self.roi.show()
-        self.update_roi()
-        for neuron_index, neuron_plot in enumerate(self.neuron_plots):
-            if neuron_index >= neuron_index_slice.start and (
-                neuron_index_slice.stop is None
-                or neuron_index < neuron_index_slice.stop
-            ):
-                neuron_plot.set_selected_slice(time_index_slice)
-            else:
-                neuron_plot.set_selected_slice(slice(0, 0))
-
-    def update_roi(self) -> None:
-        if (
-            self.roi.isVisible()
-            and self.selected_time_slice is not None
-            and self.selected_neuron_slice is not None
-        ):
-            top_left_view = QtCore.QPointF(
-                self.selected_time_slice.start * self.dt,
-                self.selected_neuron_slice.stop - 0.5,
-            )
-            # in principle self.mapFromView should be enough here,
-            # but the transform doesn't seem to get updated until after the corresponding signal is emitted,
-            # so instead we do mapFromView for the underlying ViewBox and add its position inside the PlotItem
-            self.mouse_selected_rect.setTopLeft(
-                self.plotItem.vb.pos() + self.plotItem.vb.mapFromView(top_left_view)
-            )
-            bottom_right_view = QtCore.QPointF(
-                self.selected_time_slice.stop * self.dt,
-                self.selected_neuron_slice.start - 0.5,
-            )
-            self.mouse_selected_rect.setBottomRight(
-                self.plotItem.vb.pos() + self.plotItem.vb.mapFromView(bottom_right_view)
-            )
-            self.roi.setRect(self.mouse_selected_rect)
 
     def connect_heatmap_widget(self, heatmap_widget: pg.ImageView) -> None:
         """Connect the timeline in this widget to the timeline in the HeatmapWidget."""
-        self.timeline.sigPositionChanged.connect(
-            lambda: heatmap_widget.timeLine.setValue(self.timeline.getXPos())
-        )
+        self.heatmap_widget = heatmap_widget

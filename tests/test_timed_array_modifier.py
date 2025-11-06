@@ -3,13 +3,21 @@ from __future__ import annotations
 import brian2 as b2
 from brian2 import numpy_ as np
 from pytest import approx
+from pytestqt.qtbot import QtBot
 
+from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.stim_widget import StimWidget
 from neuroseq.timed_array_modifer import TimedArrayModifier
 
 
-def test_timed_array_modifier() -> None:
+def test_timed_array_modifier(qtbot: QtBot) -> None:
     timed_array = b2.TimedArray(np.zeros((100, 10)), dt=1 * b2.ms)
-    tma = TimedArrayModifier(timed_array)
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    stim_widget.show()
+    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    tma = TimedArrayModifier(timed_array, stim_widget)
     assert tma.can_undo() is False
     assert tma.can_redo() is False
     assert len(tma) == 0

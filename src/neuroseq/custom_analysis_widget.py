@@ -6,6 +6,7 @@ import brian2.numpy_ as np
 import numpy.typing as npt
 from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
 from qtpy import QtWidgets
+from qtpy.QtCore import Qt
 
 from neuroseq.utils import PrettyPrintEnum
 
@@ -18,6 +19,22 @@ class CustomAnalysisDataType(PrettyPrintEnum):
 class CustomAnalysisType(PrettyPrintEnum):
     Histogram = "mdi6.chart-histogram"
     Histogram2d = "mdi6.data-matrix"
+
+
+class CustomAnalysisWindow(QtWidgets.QWidget):
+    """A window that contains a CustomAnalysisWidget."""
+
+    def __init__(
+        self,
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.Tool)
+        self.setWindowTitle("Custom Analysis")
+        self.resize(800, 600)
+        self.layout = QtWidgets.QVBoxLayout(self)
+        self.analysis_widget = CustomAnalysisWidget(self)
+        self.layout.addWidget(self.analysis_widget)
 
 
 class CustomAnalysisWidget(MatplotlibWidget):
@@ -59,7 +76,7 @@ class CustomAnalysisWidget(MatplotlibWidget):
             time_slice = slice(None, None)
             time_str = "all time"
         else:
-            time_str = f"time {time_slice.start * self.dt:.4f}s-{time_slice.stop * self.dt:.4f}s"
+            time_str = f"time {1000.0 * time_slice.start * self.dt:.0f}ms-{1000.0 * time_slice.stop * self.dt:.0f}ms"
         self.time_slice = time_slice
         self.subplot.set_title(f"{data_type} {analysis_type}: {neuron_str}, {time_str}")
         if data_type == CustomAnalysisDataType.Trace:

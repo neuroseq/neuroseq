@@ -1,27 +1,43 @@
 from __future__ import annotations
 
 import brian2.numpy_ as np
+import pytest
 from pytestqt.qtbot import QtBot
 
 from neuroseq.custom_analysis_widget import CustomAnalysisDataType
 from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
+from neuroseq.custom_analysis_widget import CustomAnalysisWindow
 
 gui_delay_in_ms = 50
 
 
-def test_custom_analysis_widget_no_data(qtbot: QtBot) -> None:
-    custom_analysis_widget = CustomAnalysisWidget()
-    qtbot.addWidget(custom_analysis_widget)
-    custom_analysis_widget.show()
-    qtbot.wait(gui_delay_in_ms)
+def make_custom_analysis_widget(
+    qtbot: QtBot, new_window: bool
+) -> tuple[CustomAnalysisWidget, CustomAnalysisWindow | None]:
+    if new_window:
+        win = CustomAnalysisWindow()
+        qtbot.addWidget(win)
+        qtbot.addWidget(win.analysis_widget)
+        win.show()
+        qtbot.wait(gui_delay_in_ms)
+        return win.analysis_widget, win
+    else:
+        custom_analysis_widget = CustomAnalysisWidget()
+        qtbot.addWidget(custom_analysis_widget)
+        custom_analysis_widget.show()
+        qtbot.wait(gui_delay_in_ms)
+        return custom_analysis_widget, None
 
 
-def test_custom_analysis_widget_trace_histogram(qtbot: QtBot) -> None:
-    custom_analysis_widget = CustomAnalysisWidget()
-    qtbot.addWidget(custom_analysis_widget)
-    custom_analysis_widget.show()
-    qtbot.wait(gui_delay_in_ms)
+@pytest.mark.parametrize("new_window", [False, True])
+def test_custom_analysis_widget_no_data(qtbot: QtBot, new_window: bool) -> None:
+    make_custom_analysis_widget(qtbot, new_window)
+
+
+@pytest.mark.parametrize("new_window", [False, True])
+def test_custom_analysis_widget_trace_histogram(qtbot: QtBot, new_window: bool) -> None:
+    custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
     qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
     assert custom_analysis_widget.subplot.get_title() == ""
     data = {"dt": 0.1, "data": np.random.rand(10, 1000)}
@@ -70,15 +86,13 @@ def test_custom_analysis_widget_trace_histogram(qtbot: QtBot) -> None:
     )
     qtbot.wait(gui_delay_in_ms)
     assert "neurons 5-9" in custom_analysis_widget.subplot.get_title().lower()
-    assert "time 0." in custom_analysis_widget.subplot.get_title().lower()
-    assert "10." in custom_analysis_widget.subplot.get_title().lower()
+    assert "time 0" in custom_analysis_widget.subplot.get_title().lower()
+    assert "1050" in custom_analysis_widget.subplot.get_title().lower()
 
 
-def test_custom_analysis_widget_spike_histogram(qtbot: QtBot) -> None:
-    custom_analysis_widget = CustomAnalysisWidget()
-    qtbot.addWidget(custom_analysis_widget)
-    custom_analysis_widget.show()
-    qtbot.wait(gui_delay_in_ms)
+@pytest.mark.parametrize("new_window", [False, True])
+def test_custom_analysis_widget_spike_histogram(qtbot: QtBot, new_window: bool) -> None:
+    custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
     qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
     assert custom_analysis_widget.subplot.get_title() == ""
     data = {
@@ -131,15 +145,15 @@ def test_custom_analysis_widget_spike_histogram(qtbot: QtBot) -> None:
     )
     qtbot.wait(gui_delay_in_ms)
     assert "neurons 5-9" in custom_analysis_widget.subplot.get_title().lower()
-    assert "time 0.1" in custom_analysis_widget.subplot.get_title().lower()
-    assert "1.0" in custom_analysis_widget.subplot.get_title().lower()
+    assert "time 150" in custom_analysis_widget.subplot.get_title().lower()
+    assert "1050" in custom_analysis_widget.subplot.get_title().lower()
 
 
-def test_custom_analysis_widget_trace_histogram2d(qtbot: QtBot) -> None:
-    custom_analysis_widget = CustomAnalysisWidget()
-    qtbot.addWidget(custom_analysis_widget)
-    custom_analysis_widget.show()
-    qtbot.wait(gui_delay_in_ms)
+@pytest.mark.parametrize("new_window", [False, True])
+def test_custom_analysis_widget_trace_histogram2d(
+    qtbot: QtBot, new_window: bool
+) -> None:
+    custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
     qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
     assert custom_analysis_widget.subplot.get_title() == ""
     data = {"dt": 0.1, "data": np.random.rand(10, 1000)}
@@ -188,15 +202,15 @@ def test_custom_analysis_widget_trace_histogram2d(qtbot: QtBot) -> None:
     )
     qtbot.wait(gui_delay_in_ms)
     assert "neurons 5-9" in custom_analysis_widget.subplot.get_title().lower()
-    assert "time 0." in custom_analysis_widget.subplot.get_title().lower()
-    assert "10." in custom_analysis_widget.subplot.get_title().lower()
+    assert "time 0" in custom_analysis_widget.subplot.get_title().lower()
+    assert "1050" in custom_analysis_widget.subplot.get_title().lower()
 
 
-def test_custom_analysis_widget_spike_histogram2d(qtbot: QtBot) -> None:
-    custom_analysis_widget = CustomAnalysisWidget()
-    qtbot.addWidget(custom_analysis_widget)
-    custom_analysis_widget.show()
-    qtbot.wait(gui_delay_in_ms)
+@pytest.mark.parametrize("new_window", [False, True])
+def test_custom_analysis_widget_spike_histogram2d(
+    qtbot: QtBot, new_window: bool
+) -> None:
+    custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
     qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
     assert custom_analysis_widget.subplot.get_title() == ""
     data = {
@@ -249,5 +263,5 @@ def test_custom_analysis_widget_spike_histogram2d(qtbot: QtBot) -> None:
     )
     qtbot.wait(gui_delay_in_ms)
     assert "neurons 5-9" in custom_analysis_widget.subplot.get_title().lower()
-    assert "time 0.1" in custom_analysis_widget.subplot.get_title().lower()
-    assert "1.0" in custom_analysis_widget.subplot.get_title().lower()
+    assert "time 150" in custom_analysis_widget.subplot.get_title().lower()
+    assert "1050" in custom_analysis_widget.subplot.get_title().lower()

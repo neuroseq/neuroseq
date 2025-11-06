@@ -1,4 +1,6 @@
 import json
+import zipfile
+from io import BytesIO
 
 from brian2 import Quantity
 from brian2 import TimedArray
@@ -25,42 +27,67 @@ def _obj_units_as_str(obj: Quantity | TimedArray) -> str:
     return get_dimensions(obj)._str_representation(python_code=True)
 
 
-class _B2JSONEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, TimedArray):
-            return {
-                "!TimedArray": True,
-                "value": _obj_unitless_json_value(obj.values),
-                "unit": _obj_units_as_str(obj),
-                "dt": obj.dt,
-                "name": obj.name,
-            }
-        elif isinstance(obj, Quantity):
-            return {
-                "!Quantity": True,
-                "value": _obj_unitless_json_value(obj),
-                "unit": _obj_units_as_str(obj),
-            }
-        elif isinstance(obj, numpy_.ndarray):
-            return {"!Ndarray": True, "value": _obj_unitless_json_value(obj)}
-        return super().default(obj)
+def b2json_encoder_factory(zf: zipfile.ZipFile):
+    """
+    Factory function that creates a JSON encoder class that can handle Brian2 objects.
+
+    The encoder saves any TimedArray it encounters as .npy files in the provided zipfile.
+    """
+
+    class B2JSONEncoder(json.JSONEncoder):
+        def save_array(self, name: str, array: numpy_.ndarray):
+            npy_buffer = BytesIO()
+            numpy_.save(npy_buffer, array)
+            npy_buffer.seek(0)
+            zf.writestr(name, npy_buffer.getvalue())
+
+        def default(self, obj):
+            if isinstance(obj, TimedArray):
+                self.save_array(obj.name, obj.values)
+                return {
+                    "!TimedArray": True,
+                    "unit": _obj_units_as_str(obj),
+                    "dt": obj.dt,
+                    "name": obj.name,
+                }
+            elif isinstance(obj, Quantity):
+                return {
+                    "!Quantity": True,
+                    "value": _obj_unitless_json_value(obj),
+                    "unit": _obj_units_as_str(obj),
+                }
+            elif isinstance(obj, numpy_.ndarray):
+                return {"!Ndarray": True, "value": _obj_unitless_json_value(obj)}
+            return super().default(obj)
+
+    return B2JSONEncoder
 
 
-def _b2_json_object_hook(dct: dict):
-    if "!Ndarray" in dct:
-        return numpy_.array(dct["value"])
-    elif "!Quantity" in dct:
-        return dct["value"] * eval(dct["unit"])
-    elif "!TimedArray" in dct:
-        return TimedArray(
-            dct["value"] * eval(dct["unit"]), dct["dt"] * second, name=dct["name"]
-        )
-    return dct
+def b2_object_hook_factory(zf: zipfile.ZipFile | None):
+    """
+    Factory function that creates an object_hook that can reconstruct Brian2 objects.
 
+    If a zipfile is provided, the numpy arrays for any TimedArrays are loaded from the
+    corresponding .npy file in the provided zipfile, otherwise they are read from the
+    dict directly (to support older models where the arrays were included directly in the json).
+    """
 
-def dump(obj: dict, fp):
-    json.dump(obj, fp, cls=_B2JSONEncoder, separators=(",", ":"))
+    def b2_object_hook(dct: dict, _zf=zf):
+        if "!Ndarray" in dct:
+            return numpy_.array(dct["value"])
+        elif "!Quantity" in dct:
+            return dct["value"] * eval(dct["unit"])
+        elif "!TimedArray" in dct:
+            if _zf is not None:
+                # get the array from the npy file in the zipfile
+                with _zf.open(dct["name"]) as fp:
+                    array = numpy_.load(fp)
+            else:
+                # get the array from the json directly (for backwards compatibility)
+                array = numpy_.array(dct["value"])
+            return TimedArray(
+                array * eval(dct["unit"]), dct["dt"] * second, name=dct["name"]
+            )
+        return dct
 
-
-def load(fp):
-    return json.load(fp, object_hook=_b2_json_object_hook)
+    return b2_object_hook

@@ -25,7 +25,7 @@ jobs:
       run:
         shell: bash -leo pipefail {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: mamba-org/setup-micromamba@v2
         with:
           environment-file: environment.yml
@@ -41,13 +41,13 @@ jobs:
         os: ["macos-arm64-ssc"]
         python-version: ["3.10", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
       - run: uv run pytest -sv --cov --cov-report=xml || uv run pytest -sv --cov --cov-report=xml || uv run pytest -sv --cov --cov-report=xml
         env:
           QT_API: pyside6
@@ -64,11 +64,6 @@ jobs:
   pre-commit:
     runs-on: "macos-arm64-ssc"
     steps:
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cache/pre-commit
-          key: ccache-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
-          restore-keys: ccache-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - run: uvx pre-commit run -a && uvx pre-commit gc
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+      - run: uvx prek run -a

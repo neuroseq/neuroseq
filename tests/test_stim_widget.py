@@ -1,47 +1,47 @@
 from __future__ import annotations
 
-from typing import cast
-
 import brian2 as b2
 import brian2.numpy_ as np
 import pytest
-import qtpy
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtGui
-from qtpy.QtTest import QTest
 
-from neuroseq.selectable_bar_plot_item import SelectableBarPlotItem
+from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.stim_widget import StimWidget
+from neuroseq.utils import InteractMode
 
 
-def mouse_ctrl_click(
-    qtbot: QtBot, widget: QtGui.QWidget, pos: QtCore.QPoint, delay_ms=10
+def mouse_click(
+    qtbot: QtBot,
+    widget: QtGui.QWidget,
+    pos: QtCore.QPoint,
+    button: QtCore.Qt.MouseButton = QtCore.Qt.MouseButton.LeftButton,
+    delay_ms=10,
 ) -> None:
     qtbot.wait(delay_ms)
     qtbot.mouseClick(
-        widget.viewport(),
-        QtCore.Qt.MouseButton.LeftButton,
-        QtCore.Qt.KeyboardModifier.ControlModifier,
+        widget.windowHandle(),
+        button,
         pos=pos,
     )
 
 
-def mouse_ctrl_click_and_drag(
+def mouse_click_and_drag(
     qtbot: QtBot,
     widget: QtGui.QWidget,
     start: QtCore.QPoint,
     end: QtCore.QPoint,
+    button: QtCore.Qt.MouseButton = QtCore.Qt.MouseButton.LeftButton,
     delay_ms=10,
     intermediate_points=4,
 ) -> None:
     qtbot.wait(delay_ms)
-    qtbot.mouseMove(widget.viewport(), pos=start)
+    qtbot.mouseMove(widget.windowHandle(), pos=start)
     qtbot.wait(delay_ms)
     qtbot.mousePress(
-        widget.viewport(),
-        QtCore.Qt.MouseButton.LeftButton,
-        QtCore.Qt.KeyboardModifier.ControlModifier,
+        widget.windowHandle(),
+        button,
         pos=start,
     )
     n_points = intermediate_points + 2
@@ -51,19 +51,14 @@ def mouse_ctrl_click_and_drag(
         strict=True,
     ):
         qtbot.wait(delay_ms)
-        QTest.mouseEvent(
-            QTest.MouseAction.MouseMove,
-            widget.viewport(),
-            QtCore.Qt.MouseButton.NoButton,
-            QtCore.Qt.KeyboardModifier.ControlModifier,
-            QtCore.QPoint(int(x), int(y)),
-            0,
+        qtbot.mouseMove(
+            widget.windowHandle(),
+            pos=QtCore.QPoint(int(x), int(y)),
         )
     qtbot.wait(delay_ms)
     qtbot.mouseRelease(
-        widget.viewport(),
-        QtCore.Qt.MouseButton.LeftButton,
-        QtCore.Qt.KeyboardModifier.ControlModifier,
+        widget,
+        button,
         pos=end,
     )
     qtbot.wait(delay_ms)
@@ -82,27 +77,22 @@ def stims() -> b2.TimedArray:
     return b2.TimedArray(stim.T, dt=dt * b2.second)
 
 
-def test_stim_widget_no_ctrl_key(qtbot: QtBot, stims: b2.TimedArray) -> None:
-    stim_widget = StimWidget()
+def test_stim_widget_select_mode(qtbot: QtBot, stims: b2.TimedArray) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
     stim_widget.show()
     qtbot.waitUntil(lambda: stim_widget.isVisible())
-    assert len(stim_widget.neuron_plots) == 0
+    stim_widget.set_mode(InteractMode.SELECT)
+    assert stim_widget.n_neurons == 0
     n_timestamps = stims.values.shape[0]
     n_neurons = stims.values.shape[1]
-    timestamps = np.arange(n_timestamps) * stims.dt
     stim_widget.set_data(stims)
-    assert len(stim_widget.neuron_plots) == n_neurons
-    neuron_plot = cast(SelectableBarPlotItem, stim_widget.neuron_plots[0])
-    assert len(neuron_plot.getData()[0]) == n_timestamps
-    # bar plot x-values are the center of the bars, so shifted forwards by 0.5dt compared to timestamps
-    assert np.allclose(neuron_plot.getData()[0], 1000 * (timestamps + 0.5 * stims.dt))
-    # set dt instead of providing timestamps array, same x-values should be constructed
-    stim_widget.set_data(stims)
-    assert len(stim_widget.neuron_plots) == n_neurons
-    neuron_plot = cast(SelectableBarPlotItem, stim_widget.neuron_plots[0])
-    assert len(neuron_plot.getData()[0]) == n_timestamps
-    assert np.allclose(neuron_plot.getData()[0], 1000 * (timestamps + 0.5 * stims.dt))
+    # toggle selection text on and off again
+    stim_widget.toggle_selection_text()
+    stim_widget.toggle_selection_text()
+    assert stim_widget.n_neurons == n_neurons
+    assert stim_widget.n_timestamps == n_timestamps
     # initially no neurons are selected
     assert stim_widget.selected_neuron_slice is None
     assert stim_widget.selected_time_slice is None
@@ -123,84 +113,95 @@ def test_stim_widget_no_ctrl_key(qtbot: QtBot, stims: b2.TimedArray) -> None:
     stim_widget.select_neurons()
     assert stim_widget.selected_neuron_slice == slice(0, n_neurons)
     assert stim_widget.selected_time_slice == slice(0, n_timestamps)
+    stim_widget.unselect_neurons()
+    ## Select about half the neurons and half the time points
+    x0 = stim_widget.size().width() // 4
+    y0 = stim_widget.size().height() // 4
+    mouse_click_and_drag(
+        qtbot, stim_widget, QtCore.QPoint(x0, y0), QtCore.QPoint(x0 * 3, y0 * 3)
+    )
+    assert stim_widget.selected_neuron_slice is not None
+    assert stim_widget.selected_time_slice is not None
+    assert 0.15 * n_neurons < stim_widget.selected_neuron_slice.start < 0.35 * n_neurons
+    assert 0.65 * n_neurons < stim_widget.selected_neuron_slice.stop < 0.85 * n_neurons
+    assert (
+        0.15 * n_timestamps
+        < stim_widget.selected_time_slice.start
+        < 0.35 * n_timestamps
+    )
+    assert (
+        0.65 * n_timestamps < stim_widget.selected_time_slice.stop < 0.85 * n_timestamps
+    )
 
 
-@pytest.mark.skipif(
-    not qtpy.PYSIDE6,
-    reason="click&drag with ctrl key uses mouseEvent to be able to add the ctrl key modifier, which is apparently only provided by qtest in pyside6",
-)
-def test_stim_widget_mouse_with_ctrl_key(qtbot: QtBot, stims: b2.TimedArray) -> None:
-    stim_widget = StimWidget()
+def test_stim_widget_draw_mode(qtbot: QtBot, stims: b2.TimedArray) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
     stim_widget.show()
     qtbot.waitUntil(lambda: stim_widget.isVisible())
-    assert len(stim_widget.neuron_plots) == 0
+    stim_widget.set_mode(InteractMode.DRAW)
+    assert stim_widget.n_neurons == 0
     n_timestamps = stims.values.shape[0]
     n_neurons = stims.values.shape[1]
-    timestamps = np.arange(n_timestamps) * stims.dt
     stim_widget.set_data(stims)
-    assert len(stim_widget.neuron_plots) == n_neurons
+    assert stim_widget.n_neurons == n_neurons
     x0 = stim_widget.size().width() // 4
     y0 = stim_widget.size().height() // 4
     x1 = x0 * 2
     y1 = y0 * 2
     x2 = x0 * 3
-    y2 = y0 * 3
     assert stim_widget.selected_time_slice is None
     assert stim_widget.selected_neuron_slice is None
 
-    # ctrl+mouse click signal
+    # mouse clicks
     stim_widget.setFocus()
-    qtbot.wait(20)
-    assert stim_widget.timeline.x() == 0
     with qtbot.waitSignal(stim_widget.mouse_clicked) as signal:
-        mouse_ctrl_click(qtbot, stim_widget, QtCore.QPoint(x0, y0))
-        neuron_index_offset, time_index = signal.args
-        assert 0 < time_index / n_timestamps < 0.4
-        assert 0 < neuron_index_offset / n_neurons < 1.0
+        mouse_click(qtbot, stim_widget, QtCore.QPoint(x0, y0))
+    neuron_index_offset, time_index, mouse_button = signal.args
+    assert 0 < time_index / n_timestamps < 0.4
+    assert 0 < neuron_index_offset / n_neurons < 1.0
+    assert mouse_button == 1
     with qtbot.waitSignal(stim_widget.mouse_clicked) as signal:
-        mouse_ctrl_click(qtbot, stim_widget, QtCore.QPoint(x1, y0))
-        neuron_index_offset, time_index = signal.args
-        assert 0.3 < time_index / n_timestamps < 0.7
-        assert 0 < neuron_index_offset / n_neurons < 1.0
+        mouse_click(
+            qtbot,
+            stim_widget.figure.canvas,
+            QtCore.QPoint(x1, y0),
+            QtCore.Qt.MouseButton.RightButton,
+        )
+    neuron_index_offset, time_index, mouse_button = signal.args
+    assert 0.3 < time_index / n_timestamps < 0.7
+    assert 0 < neuron_index_offset / n_neurons < 1.0
+    assert mouse_button == 2
     with qtbot.waitSignal(stim_widget.mouse_clicked) as signal:
-        mouse_ctrl_click(qtbot, stim_widget, QtCore.QPoint(x2, y1))
-        neuron_index_offset, time_index = signal.args
-        assert 0.6 < time_index / n_timestamps < 1.0
-        assert 0 < neuron_index_offset / n_neurons < 1.0
+        mouse_click(qtbot, stim_widget.figure.canvas, QtCore.QPoint(x2, y1))
+    neuron_index_offset, time_index, mouse_button = signal.args
+    assert 0.6 < time_index / n_timestamps < 1.0
+    assert 0 < neuron_index_offset / n_neurons < 1.0
+    assert mouse_button == 1
     assert stim_widget.selected_time_slice is None
     assert stim_widget.selected_neuron_slice is None
 
-    # mouse drag selects neurons
-    with qtbot.waitSignal(stim_widget.selection_made) as signal:
-        mouse_ctrl_click_and_drag(
-            qtbot, stim_widget, QtCore.QPoint(x0, y0), QtCore.QPoint(x2, y2)
-        )
-        neuron_slice, time_slice = signal.args
-        assert neuron_slice == stim_widget.selected_neuron_slice
-        assert time_slice == stim_widget.selected_time_slice
-
-    assert stim_widget.selected_time_slice is not None
-    assert stim_widget.selected_time_slice.start > 0
-    assert (
-        stim_widget.selected_time_slice.start
-        < stim_widget.selected_time_slice.stop
-        < len(timestamps)
+    # mouse drag
+    drag_signals = []
+    stim_widget.mouse_dragged.connect(
+        lambda n0, n1, t0, t1, btn: drag_signals.append((n0, n1, t0, t1, btn))
     )
-    assert stim_widget.selected_neuron_slice is not None
-    assert stim_widget.selected_neuron_slice.start > 0
-    assert (
-        stim_widget.selected_neuron_slice.start
-        < stim_widget.selected_neuron_slice.stop
-        < n_neurons
+    mouse_click_and_drag(
+        qtbot, stim_widget, QtCore.QPoint(x0, y0), QtCore.QPoint(x2, y0)
     )
-
-    # mouse drag starting from inside selected region causes a selection_moved signal
-    # drag up and to the left
-    with qtbot.waitSignal(stim_widget.selection_moved) as signal:
-        mouse_ctrl_click_and_drag(
-            qtbot, stim_widget, QtCore.QPoint(x1, y1), QtCore.QPoint(x0, y0)
-        )
-        neuron_index_offset, time_index_offset = signal.args
-        assert neuron_index_offset > 0
-        assert time_index_offset < 0
+    assert len(drag_signals) > 2
+    # first signal on start of drag
+    n0, n1, t0, t1, btn = drag_signals[0]
+    assert btn == 1
+    assert n0 == n1
+    assert t1 == t0
+    assert 0 < t0 / n_timestamps < 0.4
+    assert 0 < n0 / n_neurons < 1.0
+    # last signal at end of drag
+    n0, n1, t0, t1, btn = drag_signals[-1]
+    assert btn == 1
+    assert n0 == n1
+    assert t1 > t0
+    assert 0.6 < t1 / n_timestamps < 1.0
+    assert 0 < n0 / n_neurons < 1.0

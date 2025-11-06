@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import brian2 as b2
 import brian2.numpy_ as np
+import fastplotlib as fpl
+import pygfx
+from qtpy import QtCore
 from qtpy import QtWidgets
 
-from neuroseq.selectable_bar_plot_item import SelectableBarPlotItem
 from neuroseq.timeseries_widget import TimeseriesWidget
-from neuroseq.utils import shuffle_index
 
 
 class StimWidget(TimeseriesWidget):
@@ -18,38 +19,42 @@ class StimWidget(TimeseriesWidget):
 
     def __init__(
         self,
+        controller: pygfx.Controller,
+        menu: QtWidgets.QMenu | None = None,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
-        super().__init__(parent)
-        self.enable_mouse_move_roi = True
-        self.plotItem.showGrid(x=True, y=True)
+        super().__init__(controller, parent)
+        self.context_menu = menu
+        self.subplot.title = "Stimuli"
+        self.hover_slice_graphic: fpl.Graphic | None = None
 
     def set_data(self, stims: b2.TimedArray | None = None) -> None:
+        self.subplot.clear()
         if stims is None:
-            self.clear_data()
             return
-        super()._plot_data(1000 * stims.values.T, dt=1000 * stims.dt)  # convert to ms
+        self.dt = stims.dt
+        self.graphic = self.subplot.add_image(
+            stims.values.T,
+            cmap="matlab:hot_r",
+            offset=(0.5, 0, 0),
+        )
+        self.n_neurons = stims.values.shape[1]
+        self.n_timestamps = stims.values.shape[0]
+        self.controller.max_height = max(self.controller.max_height, self.n_neurons)
+        self.controller.max_width = max(self.controller.max_width, self.n_timestamps)
+        self.post_set_data()
 
-    def _plot_neuron_data(
-        self, data: list[np.ndarray] | np.ndarray, timestamps: np.ndarray, dt: float
-    ) -> None:
-        assert isinstance(data, np.ndarray)
-        stim_max = np.max(data)
-        if stim_max == 0:
-            stim_max = 1
-        stim_norm = stim_max
-        for neuron_index, stim in enumerate(data):
-            # vertically offset the data for each neuron by its index
-            y_offset = neuron_index - 0.5
-            # give each neuron a unique color
-            brush = shuffle_index(neuron_index, len(data))
-            bar = SelectableBarPlotItem(
-                x=timestamps + 0.5 * dt,
-                width=dt,
-                y0=y_offset,
-                y1=y_offset + stim / stim_norm,
-                pen=None,
-                brush=brush,
-            )
-            self.neuron_plots.append(bar)
-            self.addItem(bar)
+    def set_hover_slice(self, data: np.ndarray | None) -> None:
+        """Set the slice of data (if any) to be displayed at the current mouse position."""
+        if self.hover_slice_graphic is not None:
+            self.subplot.remove_graphic(self.hover_slice_graphic)
+        if data is None:
+            self.hover_slice_graphic = None
+            self.subplot.canvas.unsetCursor()
+            return
+        self.subplot.canvas.setCursor(QtCore.Qt.CursorShape.CrossCursor)
+        if self.mouse_pos is not None:
+            offset = (np.rint(self.mouse_pos[0]), np.rint(self.mouse_pos[1]), 100)
+        else:
+            offset = (0, 0, 100)
+        self.hover_slice_graphic = self.subplot.add_image(data.T, offset=offset)

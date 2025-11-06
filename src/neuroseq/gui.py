@@ -4,10 +4,10 @@ import logging
 import pathlib
 import runpy
 from collections.abc import Callable
-from dataclasses import dataclass
 
 import brian2 as b2
 import brian2.numpy_ as np
+import numpy.typing as npt
 import qtawesome as qta
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -16,12 +16,19 @@ from qtpy.compat import getsavefilename
 
 from neuroseq import __version__
 from neuroseq.b2_model import B2Model
+from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.custom_analysis_widget import CustomAnalysisDataType
+from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
+from neuroseq.custom_analysis_widget import CustomAnalysisWindow
+from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.fluorescent_suite2p_import_dialog import FluorescentSuite2pImportDialog
 from neuroseq.fluorescent_suite2p_contrasting_traces_import_dialog import FluorescentSuite2pContrastingTracesImportDialog
 from neuroseq.model_editor import ModelEditorDialog
+
 from neuroseq.optostim_import_dialog import OptoStimReadingsImportDialog
+from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim_console import StimConsole
 from neuroseq.stim_editor import StimEditor
@@ -32,12 +39,12 @@ from neuroseq.utils import example_models_path
 from neuroseq.utils import with_wait_cursor
 
 
+
 @dataclass
 class GuiSettings:
     max_ram_synapse_plot_matrix: int = 256
     brian2_backend: str = "cython"
     stim_padding_secs: int = 500
-
 
 class Gui(QtWidgets.QMainWindow):
     def __init__(self, filename: pathlib.Path | str | None = None) -> None:
@@ -45,6 +52,9 @@ class Gui(QtWidgets.QMainWindow):
         self.logger = logging.getLogger(__name__)
         self.logger.info("starting Gui")
         self.settings = GuiSettings()
+        self.status_bar = QtWidgets.QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.addPermanentWidget(ResourceMonitorLabel())
         self.model = B2Model()
         self.external_simulation_function: Callable | None = None
         self.external_simulation_data: (
@@ -58,7 +68,8 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_spike = QtWidgets.QComboBox()
         self.cmb_synapse = QtWidgets.QComboBox()
         self._create_menus_and_toolbars()
-        self.setWindowIcon(qta.icon("mdi6.brain"))
+        self.setWindowIcon(qta.icon("fa6s.brain"))
+        self.controller = ConstrainedPanZoomController()
         main_horizontal_layout = QtWidgets.QHBoxLayout()
         central_widget = QtWidgets.QWidget()
         central_widget.setLayout(main_horizontal_layout)
@@ -76,14 +87,18 @@ class Gui(QtWidgets.QMainWindow):
         split_left_right.addWidget(self.stim_console)
         split_left_right.setSizes([1000, 1000, 1000])
         # main vertical splitter layout
-        split_vertical = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        split_vertical = QtWidgets.QSplitter(
+            QtCore.Qt.Orientation.Vertical, handleWidth=0
+        )
         self.stim_editor = StimEditor(
-            cmb_stim=self.cmb_stim, toolbar=self.toolbar_stim_editor
+            controller=self.controller,
+            cmb_stim=self.cmb_stim,
+            toolbar=self.toolbar_stim_editor,
         )
         split_vertical.addWidget(self.stim_editor)
-        self.trace_widget = TraceWidget()
+        self.trace_widget = TraceWidget(self.controller)
         split_vertical.addWidget(self.trace_widget)
-        self.spike_widget = SpikeWidget()
+        self.spike_widget = SpikeWidget(self.controller)
         split_vertical.addWidget(self.spike_widget)
         # heatmap / custom analysis widget / console
         split_vertical.addWidget(split_left_right)
@@ -92,8 +107,6 @@ class Gui(QtWidgets.QMainWindow):
         self._create_actions()
         self.showMaximized()
         self._create_progressbar()
-        self.link_x_axes(True)
-        self.link_y_axes(True)
         # connect widgets
         self.heatmap_widget.connect_timeseries_widget_timeline(
             self.stim_editor.stim_widget
@@ -101,23 +114,47 @@ class Gui(QtWidgets.QMainWindow):
         self.stim_editor.stim_widget.connect_heatmap_widget(self.heatmap_widget)
         self.heatmap_widget.connect_timeseries_widget_timeline(self.trace_widget)
         self.trace_widget.connect_heatmap_widget(self.heatmap_widget)
-        self.heatmap_widget.connect_timeseries_widget_timeline(self.spike_widget)
+        # re-enable when fastplotlib scatter plots support timeline
+        # self.heatmap_widget.connect_timeseries_widget_timeline(self.spike_widget)
         self.spike_widget.connect_heatmap_widget(self.heatmap_widget)
         self.stim_console.sig_stims_values_dict_updated.connect(
             self.stim_editor.update_stim_values_dict
         )
-        self.trace_widget.custom_analysis_requested.connect(
-            self.custom_analysis_widget.set_data
-        )
-        self.spike_widget.custom_analysis_requested.connect(
-            self.custom_analysis_widget.set_data
-        )
+        self.trace_widget.custom_analysis_requested.connect(self._custom_analysis)
+        self.spike_widget.custom_analysis_requested.connect(self._custom_analysis)
         self.cmb_neuron.currentTextChanged.connect(self.set_neuron)
         self.cmb_synapse.currentTextChanged.connect(self.set_synapse)
         self.cmb_spike.currentTextChanged.connect(self.set_spike)
         if filename is None:
-            filename = example_models_path / "default_model.json"
+            filename = example_models_path / "default_model.nseq"
         self.load_model(str(filename))
+
+    def _custom_analysis(
+        self,
+        data_type: CustomAnalysisDataType | None,
+        analysis_type: CustomAnalysisType | None,
+        new_window: bool,
+        neuron_slice: slice | None,
+        time_slice: slice | None,
+        data: dict[str, int | float | npt.NDArray],
+    ):
+        if new_window:
+            analysis_window = CustomAnalysisWindow(parent=self)
+            analysis_window.analysis_widget.set_data(
+                data_type,
+                analysis_type,
+                neuron_slice,
+                time_slice,
+                data,
+            )
+            analysis_window.setWindowTitle(
+                analysis_window.analysis_widget.subplot.get_title()
+            )
+            analysis_window.show()
+        else:
+            self.custom_analysis_widget.set_data(
+                data_type, analysis_type, neuron_slice, time_slice, data
+            )
 
     def _update_data(self) -> None:
         if self.model.network.t > 0:
@@ -152,14 +189,14 @@ class Gui(QtWidgets.QMainWindow):
         self.progress_dialog.setValue(completed_percent)
 
     def btn_new_clicked(self) -> None:
-        self.load_model(str(example_models_path / "default_model.json"))
+        self.load_model(str(example_models_path / "default_model.nseq"))
 
     def btn_open_clicked(self) -> None:
         filename, _ = getopenfilename(
             self,
             "load model",
-            "model.json",
-            "json file (*.json)",
+            "model.nseq",
+            "neuroseq model (*.nseq)",
         )
         if filename != "":
             self.load_model(filename)
@@ -168,14 +205,20 @@ class Gui(QtWidgets.QMainWindow):
         filename, _ = getsavefilename(
             self,
             "Save model",
-            "model.json",
-            "json file (*.json)",
+            "model.nseq",
+            "neuroseq model (*.nseq)",
         )
         if filename == "":
             return
+        filename = pathlib.Path(filename)
+        if filename.suffix != ".nseq":
+            filename = filename.with_suffix(".nseq")
         try:
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
             self.model.save_model(filename)
+            QtWidgets.QApplication.restoreOverrideCursor()
         except Exception as e:
+            QtWidgets.QApplication.restoreOverrideCursor()
             self.logger.warning(f"Failed to save file {filename}: {e}")
             QtWidgets.QMessageBox.critical(
                 self,
@@ -225,10 +268,10 @@ class Gui(QtWidgets.QMainWindow):
             self.progress_dialog.setLabelText("Loading model...")
             model = B2Model.load_model(filename, report=self._update_load_progress)
             self.logger.info(f"Model {self.model.name} loaded from {filename}")
-            self.update_model(model)
 
         except Exception as e:
             self.logger.warning(f"Failed to load model from file {filename}: {e}")
+            self.logger.exception(e)
             QtWidgets.QMessageBox.critical(
                 self,
                 "Model construction error",
@@ -236,6 +279,7 @@ class Gui(QtWidgets.QMainWindow):
             )
             self.progress_dialog.reset()
             return
+        self.update_model(model)
 
     @with_wait_cursor
     def update_model(self, model: B2Model) -> None:
@@ -245,7 +289,6 @@ class Gui(QtWidgets.QMainWindow):
         self.heatmap_widget.clear_data()
         self.trace_widget.clear_data()
         self.stim_editor.set_model(self.model)
-        self.stim_editor.action_toggle_draw.setChecked(False)
         self.cmb_neuron.clear()
         self.neurons.clear()
         self.cmb_synapse.clear()
@@ -285,7 +328,7 @@ class Gui(QtWidgets.QMainWindow):
         if neuron_name not in self.neurons:
             return
         monitor, variable = self.neurons[neuron_name]
-        timestamps = monitor.t / b2.msecond
+        timestamps = monitor.t / b2.second
         if timestamps.shape[0] == 0:
             self.trace_widget.clear_data()
             return
@@ -301,7 +344,6 @@ class Gui(QtWidgets.QMainWindow):
             data = self.external_simulation_data[neuron_name]
             timestamps = data["timestamps"]
             assert isinstance(timestamps, np.ndarray)
-            timestamps / 0.001  # convert to millisecondss
             traces = data["traces"]
             assert isinstance(traces, np.ndarray)
             self.logger.info(
@@ -348,9 +390,7 @@ class Gui(QtWidgets.QMainWindow):
             self.logger.info(
                 f"Displaying external HeatmapWidget data {synapse_name}: {timestamps.shape} timestamps, {matrix.shape} data"
             )
-            self.heatmap_widget.set_data(
-                matrix, timestamps / 0.001
-            )  # convert to milliseconds
+            self.heatmap_widget.set_data(matrix, timestamps)
         except Exception as e:
             QtWidgets.QMessageBox.critical(
                 self,
@@ -370,8 +410,8 @@ class Gui(QtWidgets.QMainWindow):
             return
         monitor = self.spikes[spike_name]
         spikes = monitor.variables["i"].get_value().T
-        timestamps = monitor.t / b2.msecond
-        dt = monitor.clock.dt / b2.msecond
+        timestamps = monitor.t / b2.second
+        dt = monitor.clock.dt / b2.second
         n_neurons = monitor.source.N
         n_timesteps = int(monitor.clock.t / monitor.clock.dt)
         if timestamps.shape[0] == 0:
@@ -388,10 +428,9 @@ class Gui(QtWidgets.QMainWindow):
             data = self.external_simulation_data[spike_name]
             timestamps = data["timestamps"]
             assert isinstance(timestamps, np.ndarray)
-            timestamps /= 0.001  # convert to milliseconds
             spikes = data["spikes"]
             assert isinstance(spikes, np.ndarray)
-            dt = float(data["dt"]) / 0.001  # convert to milliseconds
+            dt = float(data["dt"])
             assert isinstance(dt, float)
             n_neurons = data["n_neurons"]
             assert isinstance(n_neurons, int)
@@ -569,15 +608,13 @@ class Gui(QtWidgets.QMainWindow):
     def btn_skip_to_end_clicked(self) -> None:
         self.heatmap_widget.setCurrentIndex(self.heatmap_widget.nframes() - 1)
 
-    def link_x_axes(self, checked: bool) -> None:
-        link_target = self.stim_editor.stim_widget if checked else None
-        for widget in [self.trace_widget, self.spike_widget]:
-            widget.setXLink(link_target)
-
-    def link_y_axes(self, checked: bool) -> None:
-        link_target = self.stim_editor.stim_widget if checked else None
-        for widget in [self.trace_widget, self.spike_widget]:
-            widget.setYLink(link_target)
+    def toggle_selection_text(self):
+        for widget in [
+            self.stim_editor.stim_widget,
+            self.trace_widget,
+            self.spike_widget,
+        ]:
+            widget.toggle_selection_text()
 
     def choose_max_ram_synapse_plot_matrix(self) -> None:
         new_max_ram, ok = QtWidgets.QInputDialog.getText(
@@ -845,7 +882,27 @@ class Gui(QtWidgets.QMainWindow):
                 if current_selection in spike_datasets:
                     self.cmb_spike.setCurrentText(current_selection)
                 else:
-                    self.cmb_spike.setCurrentIndex(0)  # Select newest
+                    self.cmb_spike.setCurrentIndex(0)  # Select 
+                    
+    def connect_external_simulation_function_with_brian2(self) -> None:
+        filename = "./external_simulation_example/run_brian2_externally.py"
+        if filename != "":
+            try:
+                path = pathlib.Path(filename).resolve()
+                self.external_simulation_function = runpy.run_path(filename)["simulate"]
+                self.logger.info(f"Loaded custom simulate_brian2 function from {path}")
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Custom simulate_brian2 function loaded",
+                    f"Custom simulate_brian2 function loaded from {path} - pressing simulate will now call this function until the GUI is restarted",
+                )
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Error loading simulate function",
+                    f"Could not load simulate function from {path}: {e}",
+                )
+                self.logger.exception(e)
 
     def choose_brian2_backend(self) -> None:
         backends = ["cython", "numpy"]
@@ -916,6 +973,7 @@ class Gui(QtWidgets.QMainWindow):
         self.menu_simulate = menu.addMenu("&Simulate")
         self.toolbar_simulate = QtWidgets.QToolBar("Simulate")
         self.addToolBar(self.toolbar_simulate)
+
         self.menu_playback = menu.addMenu("&Playback")
         self.toolbar_playback = QtWidgets.QToolBar("Playback")
         self.addToolBar(self.toolbar_playback)
@@ -924,6 +982,11 @@ class Gui(QtWidgets.QMainWindow):
         self.addToolBar(self.toolbar_view)
         self.toolbar_data = QtWidgets.QToolBar("Data")
         self.addToolBar(self.toolbar_data)
+
+        self.menu_experiment = menu.addMenu("&Experiment")
+        self.toolbar_experiment = QtWidgets.QToolBar("Experiment")
+        self.addToolBar(self.toolbar_experiment)
+
         self.menu_settings = menu.addMenu("&Settings")
         self.menu_help = menu.addMenu("&Help")
         self._create_actions_data(toolbar=self.toolbar_data, menu=None)
@@ -935,6 +998,7 @@ class Gui(QtWidgets.QMainWindow):
         self._create_actions_view(self.menu_view, self.toolbar_view)
         self._create_actions_settings(menu=self.menu_settings, toolbar=None)
         self._create_actions_help(menu=self.menu_help, toolbar=None)
+        self._create_action_experiment(self.menu_experiment, self.toolbar_experiment)
 
     def _create_actions_file(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
@@ -977,7 +1041,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="Ctrl+E",
-            icon=qta.icon("mdi6.cog"),
+            icon=qta.icon("ph.polygon-light"),
         )
         menu.addSeparator()
         optostim_action = add_action(
@@ -1024,7 +1088,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="Ctrl+R",
-            icon=qta.icon("mdi6.head"),
+            icon=qta.icon("mdi6.rocket-launch-outline"),
         )
         add_action(
             "&Store simulation checkpoint",
@@ -1032,7 +1096,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="Ctrl+Shift+S",
-            icon=qta.icon("mdi6.head-check"),
+            icon=qta.icon("mdi6.timeline-check-outline"),
         )
         add_action(
             "&Restore simulation checkpoint",
@@ -1040,7 +1104,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="Ctrl+Shift+R",
-            icon=qta.icon("mdi6.head-sync"),
+            icon=qta.icon("mdi.ray-start-arrow"),
         )
 
     def _create_actions_playback(
@@ -1108,20 +1172,11 @@ class Gui(QtWidgets.QMainWindow):
                 is_checked=True,
             )
         add_action(
-            "Link X axes",
-            self.link_x_axes,
+            "Toggle selection text",
+            self.toggle_selection_text,
             menu,
             toolbar,
-            icon=qta.icon("mdi6.arrow-horizontal-lock"),
-            checkable=True,
-            is_checked=True,
-        )
-        add_action(
-            "Link Y axes",
-            self.link_y_axes,
-            menu,
-            toolbar,
-            icon=qta.icon("mdi6.arrow-vertical-lock"),
+            icon=qta.icon("mdi6.format-text"),
             checkable=True,
             is_checked=True,
         )
@@ -1137,6 +1192,11 @@ class Gui(QtWidgets.QMainWindow):
         add_action(
             "&Connect external simulation function",
             self.connect_external_simulation_function,
+            menu,
+        )
+        add_action(
+            "&Run brian2 with external simulation function",
+            self.connect_external_simulation_function_with_brian2,
             menu,
         )
 
@@ -1157,3 +1217,15 @@ class Gui(QtWidgets.QMainWindow):
         toolbar.addWidget(self.cmb_spike)
         toolbar.addWidget(QtWidgets.QLabel("  Synapse data: "))
         toolbar.addWidget(self.cmb_synapse)
+
+    def _create_action_experiment(
+        self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
+    ) -> None:
+        add_action(
+            "&Run external stimulation function",
+            self.connect_external_simulation_function_with_brian2,
+            menu,
+            toolbar,
+            shortcut="Ctrl+Shift+E",
+            icon=qta.icon("mdi6.function"),
+        )
