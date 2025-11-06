@@ -19,8 +19,9 @@ from neuroseq.b2_model import B2Model
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.fluorescent_suite2p_import_dialog import FluorescentSuite2pImportDialog
+from neuroseq.fluorescent_suite2p_contrasting_traces_import_dialog import FluorescentSuite2pContrastingTracesImportDialog
 from neuroseq.model_editor import ModelEditorDialog
-from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
+from neuroseq.optostim_import_dialog import OptoStimReadingsImportDialog
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim_console import StimConsole
 from neuroseq.stim_editor import StimEditor
@@ -626,17 +627,23 @@ class Gui(QtWidgets.QMainWindow):
 
     def import_patchclamp_data(self) -> None:
         """Open dialog to import patch clamp data and integrate with current model"""
-        dialog = PatchClampImportDialog(self)
-        dialog.data_imported.connect(self.handle_patchclamp_import)
+        dialog = OptoStimReadingsImportDialog(self)
+        dialog.data_imported.connect(self.handle_general_import)
         dialog.exec_()
 
     def import_suite2p_spikes(self) -> None:
         """Open dialog to import Suite2p spike data"""
         dialog = FluorescentSuite2pImportDialog(self)
-        dialog.data_imported.connect(self.handle_patchclamp_import)  # Use same handler
+        dialog.data_imported.connect(self.handle_general_import)  # Use same handler
         dialog.exec_()
 
-    def handle_patchclamp_import(self, imported_data: dict) -> None:
+    def import_suite2p_traces(self) -> None:
+        """Open dialog to import Suite2p Fneu trace data"""
+        dialog = FluorescentSuite2pContrastingTracesImportDialog(self)
+        dialog.data_imported.connect(self.handle_general_import)  # Use same handler
+        dialog.exec_()
+
+    def handle_general_import(self, imported_data: dict) -> None:
         """Handle imported patch clamp data and expand stims if needed"""
         try:
             # Get metadata
@@ -713,6 +720,7 @@ class Gui(QtWidgets.QMainWindow):
             self.cmb_neuron.clear()
             trace_datasets = [key for key, value in self.external_simulation_data.items() 
                             if value.get("widget") == "trace"]
+            self.logger.info(f"Available trace datasets: {trace_datasets}")
             if trace_datasets:
                 self.cmb_neuron.addItems(trace_datasets)
                 
@@ -720,6 +728,7 @@ class Gui(QtWidgets.QMainWindow):
             self.cmb_spike.clear() 
             spike_datasets = [key for key, value in self.external_simulation_data.items()
                             if value.get("widget") == "spike"]
+            self.logger.info(f"Available spike datasets: {spike_datasets}")
             if spike_datasets:
                 self.cmb_spike.addItems(spike_datasets)
 
@@ -865,11 +874,19 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.import"),
         )
         add_action(
-            "Import &Suite2p",
+            "Import Suite2p &Spikes",
             self.import_suite2p_spikes,
             menu,
             None,
             shortcut="Ctrl+Shift+I",
+            icon=qta.icon("mdi6.import"),
+        )
+        add_action(
+            "Import Suite2p &Traces (Fneu)",
+            self.import_suite2p_traces,
+            menu,
+            None,
+            shortcut="Ctrl+Shift+T",
             icon=qta.icon("mdi6.import"),
         )
         menu.addSeparator()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -206,8 +207,9 @@ class FluorescentSuite2pImportDialog(QtWidgets.QDialog):
             spike_events = self.convert_spks_to_spike_events(self.spike_data, dt, spike_threshold)
             
             # Prepare data for Neuroseq
+            timestamp = int(time.time())
             imported_data = {
-                "suite2p_spikes": {
+                f"suite2p_spikes_{timestamp}": {
                     "widget": "spike",
                     **spike_events
                 },
