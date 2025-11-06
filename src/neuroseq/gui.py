@@ -21,12 +21,13 @@ from neuroseq.custom_analysis_widget import CustomAnalysisDataType
 from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.custom_analysis_widget import CustomAnalysisWindow
+from neuroseq.fluorescent_suite2p_contrasting_traces_import_dialog import (
+    FluorescentSuite2pContrastingTracesImportDialog,
+)
+from neuroseq.fluorescent_suite2p_import_dialog import FluorescentSuite2pImportDialog
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
-from neuroseq.fluorescent_suite2p_import_dialog import FluorescentSuite2pImportDialog
-from neuroseq.fluorescent_suite2p_contrasting_traces_import_dialog import FluorescentSuite2pContrastingTracesImportDialog
 from neuroseq.model_editor import ModelEditorDialog
-
 from neuroseq.optostim_import_dialog import OptoStimReadingsImportDialog
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.spike_widget import SpikeWidget
@@ -51,7 +52,7 @@ class Gui(QtWidgets.QMainWindow):
         self.model = B2Model()
         self.external_simulation_function: Callable | None = None
         self.external_simulation_data: (
-            dict[str, dict[str, str | int | float | np.ndarray]] | None
+            dict[str, dict[str, str | int | float | npt.NDArray]] | None
         ) = None
         self.neurons: dict[str, tuple[b2.StateMonitor, str]] = {}
         self.synapses: dict[str, tuple[b2.StateMonitor, str]] = {}
@@ -678,20 +679,20 @@ class Gui(QtWidgets.QMainWindow):
         try:
             # Get metadata
             metadata = imported_data.get("_metadata", {})
-            dt = metadata.get("dt", 1.0/30.0)
-            
+            dt = metadata.get("dt", 1.0 / 30.0) # hard coded d time / hz sample for now.
+
             # Initialize external data if needed
             if self.external_simulation_data is None:
                 self.external_simulation_data = {}
-            
+
             # Process each dataset and concatenate to existing timeline
             for key, value in imported_data.items():
                 if key.startswith("_"):
                     continue
-                    
+
                 # Use the key as-is since we're no longer using timestamps
                 base_key = key
-                
+
                 widget_type = value.get("widget")
                 if widget_type == "trace":
                     self._concatenate_trace_data(base_key, value, dt)
@@ -700,96 +701,135 @@ class Gui(QtWidgets.QMainWindow):
                 else:
                     # For other data types, just store with base key
                     self.external_simulation_data[base_key] = value
-            
+
             # Calculate total timepoints across all concatenated data for stimulus expansion
             total_timepoints = self._get_max_timepoints()
             if self.model.parameters and total_timepoints > 0:
                 self.expand_stims_to_length(total_timepoints, dt)
-            
+
             # Update the GUI to show imported data
             self._update_external_data_widgets()
-            
-            self.logger.info(f"Successfully imported and concatenated data (total timepoints: {total_timepoints})")
-            
+
+            self.logger.info(
+                f"Successfully imported and concatenated data (total timepoints: {total_timepoints})"
+            )
+
         except Exception as e:
             self.logger.exception("Error handling import")
             QtWidgets.QMessageBox.critical(
-                self,
-                "Import Error", 
-                f"Error processing imported data:\n{str(e)}"
+                self, "Import Error", f"Error processing imported data:\n{str(e)}"
             )
 
-    def _concatenate_trace_data(self, base_key: str, new_value: dict, dt: float) -> None:
+    def _concatenate_trace_data(
+        self, base_key: str, new_value: dict, dt: float
+    ) -> None:
         """Concatenate trace data to existing timeline"""
         new_timestamps = new_value.get("timestamps")
         new_traces = new_value.get("traces")
-        
-        if base_key in self.external_simulation_data:
+
+        if self.external_simulation_data and base_key in self.external_simulation_data:
             # Existing data - concatenate along time axis
             existing_data = self.external_simulation_data[base_key]
             existing_timestamps = existing_data.get("timestamps")
             existing_traces = existing_data.get("traces")
-            
-            if existing_timestamps is not None and existing_traces is not None:
-                # Calculate time offset (continue from where last data ended)
-                time_offset = existing_timestamps[-1] + dt
-                adjusted_new_timestamps = new_timestamps + time_offset
-                
-                # Concatenate along time axis (axis=1 for traces)
-                combined_timestamps = np.concatenate([existing_timestamps, adjusted_new_timestamps])
-                combined_traces = np.concatenate([existing_traces, new_traces], axis=1)
-                
-                self.external_simulation_data[base_key] = {
-                    "widget": "trace",
-                    "timestamps": combined_timestamps,
-                    "traces": combined_traces
-                }
-                
-                self.logger.info(f"Concatenated trace data for {base_key}: {existing_traces.shape} + {new_traces.shape} = {combined_traces.shape}")
-                return
-        
-        # No existing data - store as new
-        self.external_simulation_data[base_key] = new_value
-        self.logger.info(f"Stored new trace data for {base_key}: {new_traces.shape}")
 
-    def _concatenate_spike_data(self, base_key: str, new_value: dict, dt: float) -> None:
+            if (
+                isinstance(existing_timestamps, np.ndarray)
+                and isinstance(existing_traces, np.ndarray)
+                and isinstance(new_timestamps, np.ndarray)
+                and isinstance(new_traces, np.ndarray)
+            ):
+                # Calculate time offset (continue from where last data ended)
+                time_offset = float(existing_timestamps[-1]) + dt
+                adjusted_new_timestamps = new_timestamps + time_offset
+
+                # Concatenate along time axis (axis=1 for traces)
+                combined_timestamps = np.concatenate(
+                    [existing_timestamps, adjusted_new_timestamps]
+                )
+                combined_traces = np.concatenate([existing_traces, new_traces], axis=1)
+
+                if self.external_simulation_data:
+                    self.external_simulation_data[base_key] = {
+                        "widget": "trace",
+                        "timestamps": combined_timestamps,
+                        "traces": combined_traces,
+                    }
+
+                self.logger.info(
+                    f"Concatenated trace data for {base_key}: {existing_traces.shape} + {new_traces.shape} = {combined_traces.shape}"
+                )
+                return
+
+        # No existing data - store as new
+        if self.external_simulation_data is None:
+            self.external_simulation_data = {}
+        self.external_simulation_data[base_key] = new_value
+        if isinstance(new_traces, np.ndarray):
+            self.logger.info(
+                f"Stored new trace data for {base_key}: {new_traces.shape}"
+            )
+
+    def _concatenate_spike_data(
+        self, base_key: str, new_value: dict, dt: float
+    ) -> None:
         """Concatenate spike data to existing timeline"""
         new_timestamps = new_value.get("timestamps")
         new_spikes = new_value.get("spikes")
         new_n_timesteps = new_value.get("n_timesteps", 0)
-        
-        if base_key in self.external_simulation_data:
+
+        if self.external_simulation_data and base_key in self.external_simulation_data:
             # Existing data - concatenate spikes
             existing_data = self.external_simulation_data[base_key]
             existing_timestamps = existing_data.get("timestamps")
             existing_spikes = existing_data.get("spikes")
             existing_n_timesteps = existing_data.get("n_timesteps", 0)
-            
-            if existing_timestamps is not None and existing_spikes is not None:
+
+            if (
+                isinstance(existing_timestamps, np.ndarray)
+                and isinstance(existing_spikes, np.ndarray)
+                and isinstance(new_timestamps, np.ndarray)
+                and isinstance(new_spikes, np.ndarray)
+                and isinstance(existing_n_timesteps, (int, float))
+                and isinstance(new_n_timesteps, (int, float))
+            ):
                 # Calculate time offset (continue from where last data ended)
-                time_offset = existing_n_timesteps * dt
+                time_offset = float(existing_n_timesteps) * dt
                 adjusted_new_timestamps = new_timestamps + time_offset
-                
+
                 # Concatenate spike arrays
-                combined_timestamps = np.concatenate([existing_timestamps, adjusted_new_timestamps])
+                combined_timestamps = np.concatenate(
+                    [existing_timestamps, adjusted_new_timestamps]
+                )
                 combined_spikes = np.concatenate([existing_spikes, new_spikes])
-                combined_n_timesteps = existing_n_timesteps + new_n_timesteps
-                
-                self.external_simulation_data[base_key] = {
-                    "widget": "spike",
-                    "timestamps": combined_timestamps,
-                    "spikes": combined_spikes,
-                    "dt": dt,
-                    "n_neurons": max(existing_data.get("n_neurons", 0), new_value.get("n_neurons", 0)),
-                    "n_timesteps": combined_n_timesteps
-                }
-                
-                self.logger.info(f"Concatenated spike data for {base_key}: {len(existing_spikes)} + {len(new_spikes)} = {len(combined_spikes)} spikes")
+                combined_n_timesteps = int(existing_n_timesteps) + int(new_n_timesteps)
+
+                if self.external_simulation_data:
+                    self.external_simulation_data[base_key] = {
+                        "widget": "spike",
+                        "timestamps": combined_timestamps,
+                        "spikes": combined_spikes,
+                        "dt": dt,
+                        "n_neurons": max(
+                            existing_data.get("n_neurons", 0),
+                            new_value.get("n_neurons", 0),
+                        ),
+                        "n_timesteps": combined_n_timesteps,
+                    }
+
+                self.logger.info(
+                    f"Concatenated spike data for {base_key}: {len(existing_spikes)} + {len(new_spikes)} = {len(combined_spikes)} spikes"
+                )
                 return
-        
+
         # No existing data - store as new
+        if self.external_simulation_data is None:
+            self.external_simulation_data = {}
         self.external_simulation_data[base_key] = new_value
-        self.logger.info(f"Stored new spike data for {base_key}: {len(new_spikes)} spikes")
+        if isinstance(new_spikes, np.ndarray):
+            self.logger.info(
+                f"Stored new spike data for {base_key}: {len(new_spikes)} spikes"
+            )
 
     def _get_max_timepoints(self) -> int:
         """Get maximum timepoints across all external data for stimulus expansion"""
@@ -798,24 +838,27 @@ class Gui(QtWidgets.QMainWindow):
             for data in self.external_simulation_data.values():
                 if data.get("widget") == "trace":
                     timestamps = data.get("timestamps")
-                    if timestamps is not None:
+                    if isinstance(timestamps, np.ndarray):
                         max_timepoints = max(max_timepoints, len(timestamps))
                 elif data.get("widget") == "spike":
                     n_timesteps = data.get("n_timesteps", 0)
-                    max_timepoints = max(max_timepoints, n_timesteps)
+                    if isinstance(n_timesteps, (int, float)):
+                        max_timepoints = max(max_timepoints, int(n_timesteps))
         return max_timepoints
 
     def expand_stims_to_length(self, target_length: int, target_dt: float) -> None:
         """Expand stimulation arrays to match imported data length"""
         if not self.model.parameters:
             return
-            
+
         for param_name, param_value in self.model.parameters.items():
-            if hasattr(param_value, 'values') and hasattr(param_value, 'dt'):
+            if hasattr(param_value, "values") and hasattr(param_value, "dt"):
                 # This is a TimedArray
                 current_values = param_value.values
-                current_length = current_values.shape[0] if current_values.ndim > 0 else 0
-                
+                current_length = (
+                    current_values.shape[0] if current_values.ndim > 0 else 0
+                )
+
                 if current_length < target_length:
                     # Expand with zeros
                     if current_values.ndim == 1:
@@ -830,25 +873,33 @@ class Gui(QtWidgets.QMainWindow):
                     else:
                         # Skip arrays with unexpected dimensions
                         continue
-                        
+
                     # Create new TimedArray with expanded values
                     import brian2 as b2
-                    new_timed_array = b2.TimedArray(new_values, dt=target_dt*b2.second)
+
+                    new_timed_array = b2.TimedArray(
+                        new_values, dt=target_dt * b2.second
+                    )
                     self.model.parameters[param_name] = new_timed_array
-                    
-                    self.logger.info(f"Expanded {param_name} from {current_length} to {target_length} timepoints")
+
+                    self.logger.info(
+                        f"Expanded {param_name} from {current_length} to {target_length} timepoints"
+                    )
 
     def _update_external_data_widgets(self) -> None:
         """Update widgets to display external simulation data"""
         if not self.external_simulation_data:
             return
-            
+
         # Update comboboxes with new data
-        if hasattr(self, 'cmb_neuron'):
+        if hasattr(self, "cmb_neuron"):
             current_selection = self.cmb_neuron.currentText()
             self.cmb_neuron.clear()
-            trace_datasets = [key for key, value in self.external_simulation_data.items() 
-                            if value.get("widget") == "trace"]
+            trace_datasets = [
+                key
+                for key, value in self.external_simulation_data.items()
+                if value.get("widget") == "trace"
+            ]
             self.logger.info(f"Available trace datasets: {trace_datasets}")
             if trace_datasets:
                 # Sort by timestamp (newest first) to show latest imports first
@@ -859,12 +910,15 @@ class Gui(QtWidgets.QMainWindow):
                     self.cmb_neuron.setCurrentText(current_selection)
                 else:
                     self.cmb_neuron.setCurrentIndex(0)  # Select newest
-                
-        if hasattr(self, 'cmb_spike'):
+
+        if hasattr(self, "cmb_spike"):
             current_selection = self.cmb_spike.currentText()
-            self.cmb_spike.clear() 
-            spike_datasets = [key for key, value in self.external_simulation_data.items()
-                            if value.get("widget") == "spike"]
+            self.cmb_spike.clear()
+            spike_datasets = [
+                key
+                for key, value in self.external_simulation_data.items()
+                if value.get("widget") == "spike"
+            ]
             self.logger.info(f"Available spike datasets: {spike_datasets}")
             if spike_datasets:
                 # Sort by timestamp (newest first) to show latest imports first
@@ -874,8 +928,8 @@ class Gui(QtWidgets.QMainWindow):
                 if current_selection in spike_datasets:
                     self.cmb_spike.setCurrentText(current_selection)
                 else:
-                    self.cmb_spike.setCurrentIndex(0)  # Select 
-                    
+                    self.cmb_spike.setCurrentIndex(0)  # Select
+
     def connect_external_simulation_function_with_brian2(self) -> None:
         filename = "./external_simulation_example/run_brian2_externally.py"
         if filename != "":
