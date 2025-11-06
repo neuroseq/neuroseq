@@ -36,7 +36,7 @@ from neuroseq.utils import with_wait_cursor
 class GuiSettings:
     max_ram_synapse_plot_matrix: int = 256
     brian2_backend: str = "cython"
-    stim_padding_secs: int = 5
+    stim_padding_secs: int = 500
 
 
 class Gui(QtWidgets.QMainWindow):
@@ -625,7 +625,7 @@ class Gui(QtWidgets.QMainWindow):
                 )
                 self.logger.exception(e)
 
-    def import_patchclamp_data(self) -> None:
+    def import_optometric_readings_data(self) -> None:
         """Open dialog to import patch clamp data and integrate with current model"""
         dialog = OptoStimReadingsImportDialog(self)
         dialog.data_imported.connect(self.handle_general_import)
@@ -644,38 +644,137 @@ class Gui(QtWidgets.QMainWindow):
         dialog.exec_()
 
     def handle_general_import(self, imported_data: dict) -> None:
-        """Handle imported patch clamp data and expand stims if needed"""
+        """Handle imported data with timeline concatenation"""
         try:
             # Get metadata
             metadata = imported_data.get("_metadata", {})
             n_timepoints = metadata.get("n_timepoints", 0)
             dt = metadata.get("dt", 1.0/30.0)
             
-            # Expand stims to match imported data length if needed
-            if self.model.parameters and n_timepoints > 0:
-                self.expand_stims_to_length(n_timepoints, dt)
-            
-            # Store the imported data for display, preserving existing data
+            # Initialize external data if needed
             if self.external_simulation_data is None:
                 self.external_simulation_data = {}
             
-            # Update with new data (preserves existing traces/spikes from other imports)
+            # Process each dataset and concatenate to existing timeline
             for key, value in imported_data.items():
-                if not key.startswith("_"):
-                    self.external_simulation_data[key] = value
+                if key.startswith("_"):
+                    continue
+                    
+                # Use the key as-is since we're no longer using timestamps
+                base_key = key
+                
+                widget_type = value.get("widget")
+                if widget_type == "trace":
+                    self._concatenate_trace_data(base_key, value, dt)
+                elif widget_type == "spike":
+                    self._concatenate_spike_data(base_key, value, dt)
+                else:
+                    # For other data types, just store with base key
+                    self.external_simulation_data[base_key] = value
+            
+            # Calculate total timepoints across all concatenated data for stimulus expansion
+            total_timepoints = self._get_max_timepoints()
+            if self.model.parameters and total_timepoints > 0:
+                self.expand_stims_to_length(total_timepoints, dt)
             
             # Update the GUI to show imported data
             self._update_external_data_widgets()
             
-            self.logger.info(f"Successfully imported patch clamp data with {n_timepoints} timepoints")
+            self.logger.info(f"Successfully imported and concatenated data (total timepoints: {total_timepoints})")
             
         except Exception as e:
-            self.logger.exception("Error handling patch clamp import")
+            self.logger.exception("Error handling import")
             QtWidgets.QMessageBox.critical(
                 self,
                 "Import Error", 
                 f"Error processing imported data:\n{str(e)}"
             )
+
+    def _concatenate_trace_data(self, base_key: str, new_value: dict, dt: float) -> None:
+        """Concatenate trace data to existing timeline"""
+        new_timestamps = new_value.get("timestamps")
+        new_traces = new_value.get("traces")
+        
+        if base_key in self.external_simulation_data:
+            # Existing data - concatenate along time axis
+            existing_data = self.external_simulation_data[base_key]
+            existing_timestamps = existing_data.get("timestamps")
+            existing_traces = existing_data.get("traces")
+            
+            if existing_timestamps is not None and existing_traces is not None:
+                # Calculate time offset (continue from where last data ended)
+                time_offset = existing_timestamps[-1] + dt
+                adjusted_new_timestamps = new_timestamps + time_offset
+                
+                # Concatenate along time axis (axis=1 for traces)
+                combined_timestamps = np.concatenate([existing_timestamps, adjusted_new_timestamps])
+                combined_traces = np.concatenate([existing_traces, new_traces], axis=1)
+                
+                self.external_simulation_data[base_key] = {
+                    "widget": "trace",
+                    "timestamps": combined_timestamps,
+                    "traces": combined_traces
+                }
+                
+                self.logger.info(f"Concatenated trace data for {base_key}: {existing_traces.shape} + {new_traces.shape} = {combined_traces.shape}")
+                return
+        
+        # No existing data - store as new
+        self.external_simulation_data[base_key] = new_value
+        self.logger.info(f"Stored new trace data for {base_key}: {new_traces.shape}")
+
+    def _concatenate_spike_data(self, base_key: str, new_value: dict, dt: float) -> None:
+        """Concatenate spike data to existing timeline"""
+        new_timestamps = new_value.get("timestamps")
+        new_spikes = new_value.get("spikes")
+        new_n_timesteps = new_value.get("n_timesteps", 0)
+        
+        if base_key in self.external_simulation_data:
+            # Existing data - concatenate spikes
+            existing_data = self.external_simulation_data[base_key]
+            existing_timestamps = existing_data.get("timestamps")
+            existing_spikes = existing_data.get("spikes")
+            existing_n_timesteps = existing_data.get("n_timesteps", 0)
+            
+            if existing_timestamps is not None and existing_spikes is not None:
+                # Calculate time offset (continue from where last data ended)
+                time_offset = existing_n_timesteps * dt
+                adjusted_new_timestamps = new_timestamps + time_offset
+                
+                # Concatenate spike arrays
+                combined_timestamps = np.concatenate([existing_timestamps, adjusted_new_timestamps])
+                combined_spikes = np.concatenate([existing_spikes, new_spikes])
+                combined_n_timesteps = existing_n_timesteps + new_n_timesteps
+                
+                self.external_simulation_data[base_key] = {
+                    "widget": "spike",
+                    "timestamps": combined_timestamps,
+                    "spikes": combined_spikes,
+                    "dt": dt,
+                    "n_neurons": max(existing_data.get("n_neurons", 0), new_value.get("n_neurons", 0)),
+                    "n_timesteps": combined_n_timesteps
+                }
+                
+                self.logger.info(f"Concatenated spike data for {base_key}: {len(existing_spikes)} + {len(new_spikes)} = {len(combined_spikes)} spikes")
+                return
+        
+        # No existing data - store as new
+        self.external_simulation_data[base_key] = new_value
+        self.logger.info(f"Stored new spike data for {base_key}: {len(new_spikes)} spikes")
+
+    def _get_max_timepoints(self) -> int:
+        """Get maximum timepoints across all external data for stimulus expansion"""
+        max_timepoints = 0
+        if self.external_simulation_data:
+            for data in self.external_simulation_data.values():
+                if data.get("widget") == "trace":
+                    timestamps = data.get("timestamps")
+                    if timestamps is not None:
+                        max_timepoints = max(max_timepoints, len(timestamps))
+                elif data.get("widget") == "spike":
+                    n_timesteps = data.get("n_timesteps", 0)
+                    max_timepoints = max(max_timepoints, n_timesteps)
+        return max_timepoints
 
     def expand_stims_to_length(self, target_length: int, target_dt: float) -> None:
         """Expand stimulation arrays to match imported data length"""
@@ -717,20 +816,36 @@ class Gui(QtWidgets.QMainWindow):
             
         # Update comboboxes with new data
         if hasattr(self, 'cmb_neuron'):
+            current_selection = self.cmb_neuron.currentText()
             self.cmb_neuron.clear()
             trace_datasets = [key for key, value in self.external_simulation_data.items() 
                             if value.get("widget") == "trace"]
             self.logger.info(f"Available trace datasets: {trace_datasets}")
             if trace_datasets:
+                # Sort by timestamp (newest first) to show latest imports first
+                trace_datasets.sort(reverse=True)
                 self.cmb_neuron.addItems(trace_datasets)
+                # Select the newest (first) dataset, or restore previous selection if it still exists
+                if current_selection in trace_datasets:
+                    self.cmb_neuron.setCurrentText(current_selection)
+                else:
+                    self.cmb_neuron.setCurrentIndex(0)  # Select newest
                 
         if hasattr(self, 'cmb_spike'):
+            current_selection = self.cmb_spike.currentText()
             self.cmb_spike.clear() 
             spike_datasets = [key for key, value in self.external_simulation_data.items()
                             if value.get("widget") == "spike"]
             self.logger.info(f"Available spike datasets: {spike_datasets}")
             if spike_datasets:
+                # Sort by timestamp (newest first) to show latest imports first
+                spike_datasets.sort(reverse=True)
                 self.cmb_spike.addItems(spike_datasets)
+                # Select the newest (first) dataset, or restore previous selection if it still exists
+                if current_selection in spike_datasets:
+                    self.cmb_spike.setCurrentText(current_selection)
+                else:
+                    self.cmb_spike.setCurrentIndex(0)  # Select newest
 
     def choose_brian2_backend(self) -> None:
         backends = ["cython", "numpy"]
@@ -866,8 +981,8 @@ class Gui(QtWidgets.QMainWindow):
         )
         menu.addSeparator()
         add_action(
-            "Import &Patchclamp",
-            self.import_patchclamp_data,
+            "Import &Optometrics REadings",
+            self.import_optometric_readings_data,
             menu,
             None,
             shortcut="Ctrl+I",

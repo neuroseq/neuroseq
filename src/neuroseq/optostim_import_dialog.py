@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -11,8 +12,12 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
 
-class PatchClampImportDialog(QtWidgets.QDialog):
-    """Dialog for importing patch clamp data from .mat files"""
+# This file expects to import a Mat file, for now just one of the Spikes. This comes from the OptoStim repository
+# Brian2 spike monitor. That's why most values are close to 0.
+# It will also import the Neuron Traces, once the statemonitor is added to that code in the Optostim repository.
+
+class OptoStimReadingsImportDialog(QtWidgets.QDialog):
+    """Dialog for importing optostim readings data from .mat files"""
     
     # Signal emitted when data is successfully imported
     # Emits dict with traces data compatible with Neuroseq format
@@ -26,7 +31,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         
     def setup_ui(self):
         """Set up the dialog UI"""
-        self.setWindowTitle("Import Patch Clamp Data")
+        self.setWindowTitle("Import OptoStim Readings Data")
         self.setModal(True)
         self.resize(500, 300)
         
@@ -34,7 +39,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         
         # Instructions
         instructions = QtWidgets.QLabel(
-            "Select a .mat file containing patch clamp data.\n"
+            "Select a .mat file containing optostim readings data.\n"
             "Expected format: MATLAB file with 'neur_act' structure containing 'soma', 'dend', 'bg' fields."
         )
         instructions.setWordWrap(True)
@@ -71,12 +76,12 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         
         self.import_type_combo = QtWidgets.QComboBox()
         self.import_type_combo.addItems(["traces", "spikes"])
-        self.import_type_combo.setCurrentText("traces")
+        self.import_type_combo.setCurrentText("spikes")
         options_layout.addRow("Import as:", self.import_type_combo)
         
         self.data_source_combo = QtWidgets.QComboBox()
         self.data_source_combo.addItems(["soma", "dend", "bg"])
-        self.data_source_combo.setCurrentText("soma") # this lets user choose what to select when importing patch clamp for traces.
+        self.data_source_combo.setCurrentText("soma") # this lets user choose what to select when importing optostim readings for traces.
         options_layout.addRow("Data source:", self.data_source_combo)
         
         self.max_neurons_spin = QtWidgets.QSpinBox()
@@ -112,7 +117,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         """Open file browser to select .mat file"""
         filename, _ = getopenfilename(
             self,
-            "Select Patch Clamp Data File",
+            "Select OptoStim Readings Data File",
             "",
             "MATLAB files (*.mat);;All files (*)"
         )
@@ -184,10 +189,11 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         
     def extract_spikes_from_voltage(self, voltage_traces: np.ndarray, dt: float) -> dict:
         """
-        Extract spike events from voltage traces for spike widget.
+        Extract spike events from postprocessed voltage traces for spike widget.
+        Assumes voltage traces already contain postprocessed spike data.
         
         Args:
-            voltage_traces: 2D array (neurons × timepoints)
+            voltage_traces: 2D array (neurons × timepoints) with postprocessed spike data
             dt: time step in seconds
             
         Returns:
@@ -198,16 +204,12 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         
         n_neurons, n_timesteps = voltage_traces.shape
         
-        # Simple threshold-based spike detection
+        # Extract spikes from postprocessed data - no threshold needed
         for neuron_idx in range(n_neurons):
             trace = voltage_traces[neuron_idx, :]
             
-            # Dynamic threshold: mean + 3*std
-            threshold = np.mean(trace) + 2 * np.std(trace)
-            
-            # Find crossings
-            above_threshold = trace > threshold
-            spike_timepoints = np.where(above_threshold)[0]
+            # Find spike events (assume postprocessed data where spikes are already detected)
+            spike_timepoints = np.where(trace > 0)[0]
             
             # Convert to times and add to lists
             for timepoint in spike_timepoints:
@@ -244,6 +246,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             
             # Import data based on user choice
             imported_data = {}
+            timestamp = int(time.time())
             
             if import_type == "traces":
                 timestamps = np.arange(n_timepoints) * dt
@@ -251,7 +254,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 self.logger.info(f"Max voltage range: {np.max(voltage_traces) - np.min(voltage_traces)}")
                 # Shim: Scale voltage traces to mV approximate range (asking Andrey about this...)
                 scaled_traces = -0.07 + (voltage_traces - np.min(voltage_traces)) * (0.03 - (-0.07)) / (np.max(voltage_traces) - np.min(voltage_traces))
-                imported_data[f"patchclamp_{data_source}_traces"] = {
+                imported_data[f"optostim_readings_{data_source}_traces"] = {
                     "widget": "trace",
                     "timestamps": timestamps,
                     "traces": scaled_traces
@@ -260,7 +263,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             elif import_type == "spikes":
                 # Extract and import as spikes
                 spike_data = self.extract_spikes_from_voltage(voltage_traces, dt)
-                imported_data[f"patchclamp_{data_source}_spikes"] = {
+                imported_data[f"optostim_readings_{data_source}_spikes"] = {
                     "widget": "spike",
                     **spike_data
                 }
@@ -284,7 +287,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             
             # Show success message
             if import_type == "spikes":
-                spike_count = len(imported_data[f"patchclamp_{data_source}_spikes"]["spikes"])
+                spike_count = len(imported_data[f"optostim_readings_{data_source}_spikes_{timestamp}"]["spikes"])
                 QtWidgets.QMessageBox.information(
                     self,
                     "Import Successful",

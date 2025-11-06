@@ -271,9 +271,8 @@ class FluorescentSuite2pContrastingTracesImportDialog(QtWidgets.QDialog):
             timestamps = np.arange(n_timepoints) * dt
             
             # Prepare data for Neuroseq
-            timestamp = int(time.time())
             imported_data = {
-                f"suite2p_contrasting_traces_{timestamp}": {
+                "suite2p_contrasting_traces": {
                     "widget": "trace",
                     "timestamps": timestamps,
                     "traces": final_traces

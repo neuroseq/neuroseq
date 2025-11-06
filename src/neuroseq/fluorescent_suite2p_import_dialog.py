@@ -76,12 +76,6 @@ class FluorescentSuite2pImportDialog(QtWidgets.QDialog):
         self.sampling_rate_spin.setSuffix(" Hz")
         options_layout.addRow("Sampling rate:", self.sampling_rate_spin)
         
-        self.spike_threshold_spin = QtWidgets.QDoubleSpinBox()
-        self.spike_threshold_spin.setMinimum(0.0)
-        self.spike_threshold_spin.setMaximum(100.0)
-        self.spike_threshold_spin.setValue(0.1)
-        self.spike_threshold_spin.setDecimals(3)
-        options_layout.addRow("Spike threshold:", self.spike_threshold_spin)
         
         layout.addWidget(options_group)
         
@@ -157,14 +151,13 @@ class FluorescentSuite2pImportDialog(QtWidgets.QDialog):
         
         self.preview_text.setPlainText("\n".join(preview_text))
         
-    def convert_spks_to_spike_events(self, spks_array: np.ndarray, dt: float, threshold: float) -> dict:
+    def convert_spks_to_spike_events(self, spks_array: np.ndarray, dt: float) -> dict:
         """
         Convert Suite2p spike probability array to spike events.
         
         Args:
-            spks_array: 2D array (neurons × timepoints) with spike probabilities
+            spks_array: 2D array (neurons × timepoints) with postprocessed spike data
             dt: time step in seconds
-            threshold: minimum value to consider as spike
             
         Returns:
             Dict compatible with spike widget format
@@ -174,11 +167,11 @@ class FluorescentSuite2pImportDialog(QtWidgets.QDialog):
         
         n_neurons, n_timesteps = spks_array.shape
         
-        # Find all timepoints where spike probability exceeds threshold
+        # Use raw spike data without thresholding
         for neuron_idx in range(n_neurons):
             for time_idx in range(n_timesteps):
-                spike_prob = spks_array[neuron_idx, time_idx]
-                if spike_prob > threshold:
+                spike_val = spks_array[neuron_idx, time_idx]
+                if spike_val > 0:  # Only include non-zero values
                     spike_times.append(time_idx * dt)
                     spike_indices.append(neuron_idx)
         
@@ -198,18 +191,16 @@ class FluorescentSuite2pImportDialog(QtWidgets.QDialog):
                 
             # Get import settings
             sampling_rate = self.sampling_rate_spin.value()
-            spike_threshold = self.spike_threshold_spin.value()
             dt = 1.0 / sampling_rate
             
             n_neurons, n_timepoints = self.spike_data.shape
             
             # Convert spks array to spike events
-            spike_events = self.convert_spks_to_spike_events(self.spike_data, dt, spike_threshold)
+            spike_events = self.convert_spks_to_spike_events(self.spike_data, dt)
             
             # Prepare data for Neuroseq
-            timestamp = int(time.time())
             imported_data = {
-                f"suite2p_spikes_{timestamp}": {
+                "suite2p_spikes": {
                     "widget": "spike",
                     **spike_events
                 },
@@ -217,7 +208,6 @@ class FluorescentSuite2pImportDialog(QtWidgets.QDialog):
                     "n_timepoints": n_timepoints,
                     "dt": dt,
                     "sampling_rate": sampling_rate,
-                    "spike_threshold": spike_threshold,
                     "n_neurons": n_neurons,
                     "data_type": "suite2p_spikes"
                 }
