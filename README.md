@@ -141,3 +141,6 @@ List of commands:
 ```bash
 neuroseq --help
 ```
+
+Importing data
+You can import data from .npy files, if they have traces or spikes. This is in the File dropdown.

@@ -980,7 +980,7 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.cog"),
         )
         menu.addSeparator()
-        add_action(
+        optostim_action = add_action(
             "Import &Optometrics REadings",
             self.import_optometric_readings_data,
             menu,
@@ -988,6 +988,7 @@ class Gui(QtWidgets.QMainWindow):
             shortcut="Ctrl+I",
             icon=qta.icon("mdi6.import"),
         )
+        optostim_action.setEnabled(False)
         add_action(
             "Import Suite2p &Spikes",
             self.import_suite2p_spikes,
