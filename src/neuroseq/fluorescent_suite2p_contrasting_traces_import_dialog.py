@@ -86,7 +86,7 @@ class FluorescentSuite2pContrastingTracesImportDialog(QtWidgets.QDialog):
         self.sampling_rate_spin = QtWidgets.QDoubleSpinBox()
         self.sampling_rate_spin.setMinimum(0.001)
         self.sampling_rate_spin.setMaximum(100000.0)
-        self.sampling_rate_spin.setValue(0.001)  # Typical for calcium imaging
+        self.sampling_rate_spin.setValue(30.0) # as specified
         self.sampling_rate_spin.setSuffix(" Hz")
         options_layout.addRow("Sampling rate:", self.sampling_rate_spin)
         
@@ -94,7 +94,7 @@ class FluorescentSuite2pContrastingTracesImportDialog(QtWidgets.QDialog):
         self.max_neurons_spin.setMinimum(1)
         self.max_neurons_spin.setMaximum(10000)
         self.max_neurons_spin.setValue(50)
-        options_layout.addRow("Max neurons to import:", self.max_neurons_spin)
+        options_layout.addRow("Max neurons to import:", self.max_neurons_spin) # there are 503 in the base test data
         
         layout.addWidget(options_group)
         
