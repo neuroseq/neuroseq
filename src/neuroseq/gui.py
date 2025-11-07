@@ -679,7 +679,9 @@ class Gui(QtWidgets.QMainWindow):
         try:
             # Get metadata
             metadata = imported_data.get("_metadata", {})
-            dt = metadata.get("dt", 1.0 / 30.0) # hard coded d time / hz sample for now.
+            dt = metadata.get(
+                "dt", 1.0 / 30.0
+            )  # hard coded d time / hz sample for now.
 
             # Initialize external data if needed
             if self.external_simulation_data is None:
@@ -790,8 +792,8 @@ class Gui(QtWidgets.QMainWindow):
                 and isinstance(existing_spikes, np.ndarray)
                 and isinstance(new_timestamps, np.ndarray)
                 and isinstance(new_spikes, np.ndarray)
-                and isinstance(existing_n_timesteps, (int, float))
-                and isinstance(new_n_timesteps, (int, float))
+                and isinstance(existing_n_timesteps, int | float)
+                and isinstance(new_n_timesteps, int | float)
             ):
                 # Calculate time offset (continue from where last data ended)
                 time_offset = float(existing_n_timesteps) * dt
@@ -842,7 +844,7 @@ class Gui(QtWidgets.QMainWindow):
                         max_timepoints = max(max_timepoints, len(timestamps))
                 elif data.get("widget") == "spike":
                     n_timesteps = data.get("n_timesteps", 0)
-                    if isinstance(n_timesteps, (int, float)):
+                    if isinstance(n_timesteps, int | float):
                         max_timepoints = max(max_timepoints, int(n_timesteps))
         return max_timepoints
 
