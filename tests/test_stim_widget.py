@@ -8,6 +8,7 @@ from qtpy import QtCore
 from qtpy import QtGui
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.stim_widget import StimType
 from neuroseq.stim_widget import StimWidget
 from neuroseq.utils import InteractMode
 
@@ -74,6 +75,25 @@ def stims() -> b2.TimedArray:
     for row in stim:
         for _ in range(n_stim_per_neuron):
             row[np.random.randint(0, n_timestamps)] = 1.4
+    return b2.TimedArray(stim.T, dt=dt * b2.second)
+
+
+@pytest.fixture
+def negative_and_positive_stims() -> b2.TimedArray:
+    # stim array with values from -2.0 to 3.0
+    n_neurons = 3
+    n_timestamps = 3
+    dt = 0.683
+    stim = np.zeros((n_neurons, n_timestamps))
+    stim[0, 0] = -1.18
+    stim[0, 1] = 0.0
+    stim[0, 2] = 1.0
+    stim[1, 0] = -2.0
+    stim[1, 1] = 0.0
+    stim[1, 2] = 1.5
+    stim[2, 0] = -0.11
+    stim[2, 1] = 0.0
+    stim[2, 2] = 3.0
     return b2.TimedArray(stim.T, dt=dt * b2.second)
 
 
@@ -205,3 +225,15 @@ def test_stim_widget_draw_mode(qtbot: QtBot, stims: b2.TimedArray) -> None:
     assert t1 > t0
     assert 0.6 < t1 / n_timestamps < 1.0
     assert 0 < n0 / n_neurons < 1.0
+
+
+def test_stim_widget_ext_stims_colormap(
+    qtbot: QtBot, negative_and_positive_stims: b2.TimedArray
+) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    stim_widget.show()
+    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    stim_widget.set_data(negative_and_positive_stims, stim_type=StimType.External)
+    qtbot.wait(0)

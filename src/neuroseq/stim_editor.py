@@ -13,6 +13,7 @@ from qtpy.compat import getsavefilename
 
 from neuroseq.b2_model import B2Model
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.stim_widget import StimType
 from neuroseq.stim_widget import StimWidget
 from neuroseq.timed_array_modifer import TimedArrayModifier
 from neuroseq.utils import InteractMode
@@ -158,7 +159,14 @@ class StimEditor(QtWidgets.QWidget):
             and self.current_stim_modifier != self.stims_dict[stim_name]
         ):
             self.current_stim_modifier = self.stims_dict[stim_name]
-            self.stim_widget.set_data(self.current_stim_modifier.timed_array)
+            stim_type = StimType.Excitation
+            if "inh" in stim_name.lower():
+                stim_type = StimType.Inhibition
+            elif "ext" in stim_name.lower():
+                stim_type = StimType.External
+            self.stim_widget.set_data(
+                self.current_stim_modifier.timed_array, stim_type=stim_type
+            )
             self.set_mode(InteractMode.DRAW)
             self.set_draw_mode(DrawMode.DRAW)
             self._stim_values_updated()
