@@ -273,6 +273,8 @@ class Gui(QtWidgets.QMainWindow):
     @with_wait_cursor
     def update_model(self, model: B2Model) -> None:
         self.model = model
+        self.controller.max_height = 1
+        self.controller.max_width = 1
         self.stim_console.set_model(self.model)
         self.continue_simulation_action.setText("&Run simulation")
         self.heatmap_widget.clear_data()
