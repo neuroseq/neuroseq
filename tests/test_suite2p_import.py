@@ -29,9 +29,10 @@ class TestFluorescentSuite2pContrastingTracesImportDialog:
         dialog = FluorescentSuite2pContrastingTracesImportDialog()
         qtbot.addWidget(dialog)
 
-        test_f_path = Path("../src/imported_data/F.npy")
+        test_data_dir = Path(__file__).parent / "imported_data"
+        test_f_path = test_data_dir / "F.npy"
         dialog.load_f_file(str(test_f_path))
-        dialog.load_fneu_file(str(test_f_path.parent / "Fneu.npy"))
+        dialog.load_fneu_file(str(test_data_dir / "Fneu.npy"))
 
         assert dialog.import_button.isEnabled()
         assert (
@@ -43,7 +44,7 @@ class TestFluorescentSuite2pContrastingTracesImportDialog:
         dialog = FluorescentSuite2pContrastingTracesImportDialog()
         qtbot.addWidget(dialog)
 
-        test_data_dir = Path("../src/imported_data")
+        test_data_dir = Path(__file__).parent / "imported_data"
         dialog.load_f_file(str(test_data_dir / "F.npy"))
         dialog.load_fneu_file(str(test_data_dir / "Fneu.npy"))
 
@@ -69,7 +70,7 @@ class TestFluorescentSuite2pContrastingTracesImportDialog:
         dialog = FluorescentSuite2pContrastingTracesImportDialog()
         qtbot.addWidget(dialog)
 
-        test_data_dir = Path("../src/imported_data")
+        test_data_dir = Path(__file__).parent / "imported_data"
         dialog.load_f_file(str(test_data_dir / "F.npy"))
         dialog.load_fneu_file(str(test_data_dir / "Fneu.npy"))
 
@@ -93,7 +94,7 @@ class TestSuite2pDataValidation:
 
     def test_data_dimensions_validation(self):
         """Test that imported data has correct dimensions"""
-        test_data_dir = Path("../src/imported_data")
+        test_data_dir = Path(__file__).parent / "imported_data"
 
         f_data = np.load(test_data_dir / "F.npy")
         fneu_data = np.load(test_data_dir / "Fneu.npy")
@@ -104,7 +105,7 @@ class TestSuite2pDataValidation:
 
     def test_data_content_validation(self):
         """Test that data contains expected non-zero values"""
-        test_data_dir = Path("../src/imported_data")
+        test_data_dir = Path(__file__).parent / "imported_data"
 
         f_data = np.load(test_data_dir / "F.npy")
         fneu_data = np.load(test_data_dir / "Fneu.npy")
@@ -120,7 +121,7 @@ class TestSuite2pDataValidation:
 
     def test_timesteps_length(self):
         """Test that data has exactly 900 timesteps"""
-        test_data_dir = Path("../src/imported_data")
+        test_data_dir = Path(__file__).parent / "imported_data"
 
         f_data = np.load(test_data_dir / "F.npy")
         fneu_data = np.load(test_data_dir / "Fneu.npy")
