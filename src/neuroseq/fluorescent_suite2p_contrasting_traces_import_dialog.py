@@ -91,7 +91,7 @@ class FluorescentSuite2pContrastingTracesImportDialog(QtWidgets.QDialog):
         self.max_neurons_spin = QtWidgets.QSpinBox()
         self.max_neurons_spin.setMinimum(1)
         self.max_neurons_spin.setMaximum(10000)
-        self.max_neurons_spin.setValue(50)
+        self.max_neurons_spin.setValue(2)
         options_layout.addRow(
             "Max neurons to import:", self.max_neurons_spin
         )  # there are 503 in the base test data
@@ -254,7 +254,9 @@ class FluorescentSuite2pContrastingTracesImportDialog(QtWidgets.QDialog):
             # Get import settings
             sampling_rate = 30.0  # fixed sampling rate for suite2p data
             max_neurons = self.max_neurons_spin.value()
-            dt = 1.0 / sampling_rate
+            dt = (
+                1.0 / sampling_rate * 1000
+            )  # right now 1 timestep in the system is a ms.
 
             # todo: Implement (again) sampling rate modifying the actual data points when we have data with very high sample rate that we want to offer the option to downsample
             # The thing is this data is 30hz which is likely our lowest hz, so we probably want to keep it at the granularity it is at.
@@ -279,8 +281,8 @@ class FluorescentSuite2pContrastingTracesImportDialog(QtWidgets.QDialog):
                 f"Calculated contrasting traces range: {np.min(contrasting_traces):.6f} to {np.max(contrasting_traces):.6f}"
             )
 
-            # Sample some values for detailed logging
-            for neuron_idx in range(min(3, n_neurons)):
+            # Sample some values for detailed logging (every 5 neurons)
+            for neuron_idx in range(0, n_neurons, 5):
                 for time_idx in range(min(3, n_timepoints)):
                     f_val = self.f_data[neuron_idx, time_idx]
                     fneu_val = self.fneu_data[neuron_idx, time_idx]
