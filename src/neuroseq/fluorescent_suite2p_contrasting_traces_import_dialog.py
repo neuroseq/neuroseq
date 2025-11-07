@@ -94,7 +94,7 @@ class FluorescentSuite2pContrastingTracesImportDialog(QtWidgets.QDialog):
         self.max_neurons_spin.setValue(2)
         options_layout.addRow(
             "Max neurons to import:", self.max_neurons_spin
-        )  # there are 503 in the base test data
+        )
 
         layout.addWidget(options_group)
 
