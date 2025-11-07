@@ -22,7 +22,7 @@ class TestFluorescentSuite2pContrastingTracesImportDialog:
         assert dialog.import_button is not None
 
         assert not dialog.import_button.isEnabled()
-        assert dialog.max_neurons_spin.value() == 50
+        assert dialog.max_neurons_spin.value() == 2
 
     def test_file_loading_and_preview(self, qtbot: QtBot):
         """Test loading F.npy file and showing preview"""
