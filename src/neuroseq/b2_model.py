@@ -1987,22 +1987,30 @@ class B2Model:
         """
         Ensure any TimedArrays have the correct shape
 
-        For now, we just ensure that they have at least as many neurons as the largest NeuronGroup
+        For now, we just ensure that they have the same number of neurons as the largest NeuronGroup in the model.
         """
-        min_neurons = 0
+        target_n_neurons = 0
         for neuron_group in self.neurongroups.values():
-            min_neurons = max(min_neurons, neuron_group.get("neuronnumber", 0))
+            target_n_neurons = max(
+                target_n_neurons, neuron_group.get("neuronnumber", 0)
+            )
         for name, timed_array in self.parameters.items():
             if isinstance(timed_array, b2.TimedArray) and timed_array.values.ndim > 1:
                 n_neurons = timed_array.values.shape[1]
-                if n_neurons < min_neurons:
-                    self.logger.info(
-                        f"Increasing neurons in TimedArray {name} from {n_neurons} to {min_neurons}"
-                    )
-                    new_array = np.pad(
-                        timed_array.values,
-                        pad_width=((0, 0), (0, min_neurons - n_neurons)),
-                    )
+                if n_neurons != target_n_neurons:
+                    if n_neurons < target_n_neurons:
+                        self.logger.info(
+                            f"Increasing neurons in TimedArray {name} from {n_neurons} to {target_n_neurons}"
+                        )
+                        new_array = np.pad(
+                            timed_array.values,
+                            pad_width=((0, 0), (0, target_n_neurons - n_neurons)),
+                        )
+                    else:
+                        self.logger.info(
+                            f"Decreasing neurons in TimedArray {name} from {n_neurons} to {target_n_neurons}"
+                        )
+                        new_array = timed_array.values[:, :target_n_neurons]
                     new_timed_array = utils.timed_array_with_new_data(
                         timed_array, new_array
                     )

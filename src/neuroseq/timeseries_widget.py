@@ -158,6 +158,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.subplot.axes.y.ticks = np.arange(0, self.n_neurons, 1)
         self.subplot.axes.y.points.visible = False
         self.subplot.axes.y.line.visible = False
+        self.subplot.axes.x.ticks = None
         self.subplot.axes.x.points.visible = False
         self.subplot.axes.x.line.visible = False
         self.subplot.axes.x.min_tick_distance = 100
@@ -179,6 +180,14 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
 
     def clear_data(self) -> None:
         self.subplot.clear()
+        self.subplot.grids = False
+        self.subplot.axes.y.ticks = {}
+        self.subplot.axes.y.points.visible = False
+        self.subplot.axes.y.line.visible = False
+        self.subplot.axes.x.points.visible = False
+        self.subplot.axes.x.line.visible = False
+        self.subplot.axes.x.ticks = {}
+        self.subplot.toolbar = False
         self.hover_slice_graphic = None
         self.data = {}
         self.n_neurons = 0
