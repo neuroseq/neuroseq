@@ -145,12 +145,12 @@ class Gui(QtWidgets.QMainWindow):
                 data_type, analysis_type, neuron_slice, time_slice, data
             )
 
-    def _update_data(self) -> None:
+    def _update_data(self, keep_undo_history: bool) -> None:
         if self.model.network.t > 0:
             self.continue_simulation_action.setText("&Continue simulation")
         else:
             self.continue_simulation_action.setText("&Run simulation")
-        self.stim_editor.set_model(self.model)
+        self.stim_editor.set_model(self.model, keep_undo_history)
         self.set_neuron(self.cmb_neuron.currentText())
         self.set_synapse(self.cmb_synapse.currentText())
         self.set_spike(self.cmb_spike.currentText())
@@ -473,7 +473,7 @@ class Gui(QtWidgets.QMainWindow):
             return
         try:
             self.model.restore(checkpoint)
-            self._update_data()
+            self._update_data(keep_undo_history=False)
         except ValueError as error:
             QtWidgets.QMessageBox.critical(self, "Error", f"{error}")
             return
@@ -517,7 +517,7 @@ class Gui(QtWidgets.QMainWindow):
             )
             self.logger.exception(e)
             return
-        self._update_data()
+        self._update_data(keep_undo_history=True)
 
     @with_wait_cursor
     def do_external_simulation(self, simulation_time: float) -> None:
@@ -624,7 +624,7 @@ class Gui(QtWidgets.QMainWindow):
                 f"Could not parse RAM limit '{new_max_ram}' as a number",
             )
             return
-        self._update_data()
+        self._update_data(keep_undo_history=True)
 
     def connect_external_simulation_function(self) -> None:
         filename, _ = getopenfilename(
