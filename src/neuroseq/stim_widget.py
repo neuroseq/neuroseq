@@ -8,6 +8,13 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.timeseries_widget import TimeseriesWidget
+from neuroseq.utils import PrettyPrintEnum
+
+
+class StimType(PrettyPrintEnum):
+    Excitation = 1
+    Inhibition = 2
+    External = 3
 
 
 class StimWidget(TimeseriesWidget):
@@ -28,16 +35,30 @@ class StimWidget(TimeseriesWidget):
         self.subplot.title = "Stimuli"
         self.hover_slice_graphic: fpl.Graphic | None = None
 
-    def set_data(self, stims: b2.TimedArray | None = None) -> None:
+    def set_data(
+        self, stims: b2.TimedArray | None = None, stim_type=StimType.Excitation
+    ) -> None:
         self.subplot.clear()
         if stims is None:
             return
         self.dt = stims.dt
         self.hover_values = stims.values
+        vmin = 0
+        vmax = np.max(np.abs(stims.values))
+        match stim_type:
+            case StimType.Excitation:
+                cmap = "chrisluts:I_Magenta"
+            case StimType.Inhibition:
+                cmap = "chrisluts:I_Blue"
+            case StimType.External:
+                vmin = -vmax
+                cmap = "colorbrewer:PRGn"
         self.units = b2.get_unit(stims.dim).__str__()
         self.graphic = self.subplot.add_image(
             stims.values.T,
-            cmap="matlab:hot_r",
+            vmin=vmin,
+            vmax=vmax,
+            cmap=cmap,
             offset=(0.5, 0, 0),
         )
         self.n_neurons = stims.values.shape[1]
