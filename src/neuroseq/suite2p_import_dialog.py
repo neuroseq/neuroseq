@@ -10,6 +10,7 @@ from qtpy.compat import getopenfilename
 
 from neuroseq.suite2p_importer import Suite2pSpikePayload
 from neuroseq.suite2p_importer import Suite2pTracePayload
+from neuroseq.suite2p_importer import compute_normalized_suite2p_spikes
 from neuroseq.suite2p_importer import compute_normalized_suite2p_traces
 from neuroseq.suite2p_importer import prepare_suite2p_spikes
 from neuroseq.suite2p_importer import prepare_suite2p_traces
@@ -123,9 +124,9 @@ class Suite2pImportDialog(QtWidgets.QDialog):
         self.spike_threshold_spin = QtWidgets.QDoubleSpinBox()
         self.spike_threshold_spin.setDecimals(3)
         self.spike_threshold_spin.setMinimum(0.0)
-        self.spike_threshold_spin.setMaximum(1_000_000.0)
-        self.spike_threshold_spin.setSingleStep(10.0)
-        self.spike_threshold_spin.setValue(100.0)
+        self.spike_threshold_spin.setMaximum(1.0)
+        self.spike_threshold_spin.setSingleStep(0.01)
+        self.spike_threshold_spin.setValue(0.02)  # will be 36
         self.spike_threshold_spin.valueChanged.connect(
             lambda _: self._update_spike_preview()
         )
@@ -134,6 +135,7 @@ class Suite2pImportDialog(QtWidgets.QDialog):
         self.replace_checkbox = QtWidgets.QCheckBox(
             "Replace existing trace/spike data instead of appending"
         )
+        self.replace_checkbox.setChecked(True)
         self.replace_checkbox.setToolTip(
             "When enabled, imported Suite2p traces or spikes will overwrite the "
             "current widget data rather than being concatenated to it."
@@ -330,11 +332,15 @@ class Suite2pImportDialog(QtWidgets.QDialog):
             return
 
         threshold = self.spike_threshold_spin.value()
+        normalized_spikes, raw_min, raw_max = compute_normalized_suite2p_spikes(
+            self.spike_data
+        )
         non_zero_count = int(np.sum(self.spike_data > 0))
-        above_threshold = int(np.sum(self.spike_data >= threshold))
+        above_threshold = int(np.sum(normalized_spikes >= threshold))
         preview_lines = [
             f"spks.npy shape: {self.spike_data.shape}",
-            f"Value range: {np.min(self.spike_data):.3f}–{np.max(self.spike_data):.3f}",
+            f"Raw value range: {raw_min:.3f}–{raw_max:.3f}",
+            "Normalized spike magnitudes scaled to 0–1",
             f"Non-zero entries: {non_zero_count}",
             f"Entries ≥ threshold ({threshold:.3f}): {above_threshold}",
         ]

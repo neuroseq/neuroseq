@@ -23,8 +23,9 @@ class TestSuite2pImportDialog:
 
         assert not dialog.import_button.isEnabled()
         assert dialog.max_neurons_spin.value() == 2
-        assert dialog.spike_threshold_spin.value() == 100.0
+        assert dialog.spike_threshold_spin.value() == 0.2
         assert dialog.sampling_rate_spin.value() == 30.0
+        assert dialog.replace_checkbox.isChecked() is True
 
     def test_file_loading_and_preview(self, qtbot: QtBot):
         """Test loading F.npy file and showing preview"""
@@ -63,9 +64,10 @@ class TestSuite2pImportDialog:
         assert traces.shape == (5, 900)  # 5 neurons, 900 time steps
         assert np.all((traces >= 0.0) & (traces <= 1.0))
         assert np.all(np.isfinite(traces))  # no NaN or inf values
-        expected_traces, _, _ = compute_normalized_suite2p_traces(
-            dialog.f_data, dialog.fneu_data
-        )
+        assert dialog.f_data is not None
+        f_data = dialog.f_data
+        fneu_data = dialog.fneu_data
+        expected_traces, _, _ = compute_normalized_suite2p_traces(f_data, fneu_data)
         np.testing.assert_allclose(traces, expected_traces[: traces.shape[0], :])
         assert trace_data["sampling_rate"] == 30.0
         assert trace_data["dt"] == pytest.approx(1.0 / 30.0)
@@ -108,10 +110,11 @@ class TestSuite2pImportDialog:
 
         assert imported_data is not None
         traces = imported_data["suite2p_contrasting_traces"]["traces"]
-        expected_traces, _, _ = compute_normalized_suite2p_traces(dialog.f_data, None)
+        assert dialog.f_data is not None
+        f_data = dialog.f_data
+        expected_traces, _, _ = compute_normalized_suite2p_traces(f_data, None)
         np.testing.assert_allclose(traces, expected_traces[: traces.shape[0], :])
 
-    # double check
     def test_optional_spike_import_with_threshold(self, qtbot: QtBot):
         """Test importing optional spks file with adjustable threshold"""
         dialog = Suite2pImportDialog()
@@ -122,7 +125,9 @@ class TestSuite2pImportDialog:
         dialog.load_fneu_file(str(test_data_dir / "Fneu.npy"))
         dialog.load_spks_file(str(test_data_dir / "spks.npy"))
 
-        dialog.spike_threshold_spin.setValue(0.01)
+        dialog.spike_threshold_spin.setValue(
+            0.02
+        )  # realistic default, this will leave 36 spikes.
 
         dialog.import_data()
         imported_data = dialog.get_imported_data()

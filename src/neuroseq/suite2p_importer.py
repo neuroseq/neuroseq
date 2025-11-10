@@ -13,6 +13,7 @@ __all__ = [
     "prepare_suite2p_traces",
     "prepare_suite2p_spikes",
     "compute_normalized_suite2p_traces",
+    "compute_normalized_suite2p_spikes",
 ]
 
 
@@ -34,6 +35,24 @@ class Suite2pSpikePayload(TypedDict):
     threshold: float
 
 
+def _normalize_array(
+    data: npt.NDArray[Any],
+) -> tuple[npt.NDArray[Any], float, float]:
+    """Return min/max normalized copy of the array along with the raw bounds."""
+    if data.size == 0:
+        raise ValueError("Cannot normalize empty array")
+
+    raw_min = float(np.min(data))
+    raw_max = float(np.max(data))
+
+    if raw_max > raw_min:
+        normalized = (data - raw_min) / (raw_max - raw_min)
+    else:
+        normalized = np.zeros_like(data)
+
+    return normalized, raw_min, raw_max
+
+
 def compute_normalized_suite2p_traces(
     f_data: npt.NDArray[Any],
     fneu_data: npt.NDArray[Any] | None = None,
@@ -48,15 +67,14 @@ def compute_normalized_suite2p_traces(
         )
 
     contrasting_traces = f_data - 0.7 * fneu_data if fneu_data is not None else f_data
-    raw_min = float(np.min(contrasting_traces))
-    raw_max = float(np.max(contrasting_traces))
+    return _normalize_array(contrasting_traces)
 
-    if raw_max > raw_min:
-        normalized = (contrasting_traces - raw_min) / (raw_max - raw_min)
-    else:
-        normalized = np.zeros_like(contrasting_traces)
 
-    return normalized, raw_min, raw_max
+def compute_normalized_suite2p_spikes(
+    spike_data: npt.NDArray[Any],
+) -> tuple[npt.NDArray[Any], float, float]:
+    """Normalize Suite2p spiking activity to [0, 1]."""
+    return _normalize_array(spike_data)
 
 
 def prepare_suite2p_traces(
@@ -103,7 +121,8 @@ def prepare_suite2p_spikes(
 
     n_neurons, n_timesteps = spike_data.shape
     n_neurons_to_import = min(max_neurons, n_neurons)
-    trimmed_data = spike_data[:n_neurons_to_import, :]
+    normalized_spikes, _, _ = compute_normalized_suite2p_spikes(spike_data)
+    trimmed_data = normalized_spikes[:n_neurons_to_import, :]
 
     mask = trimmed_data >= threshold
     neuron_indices, time_indices = np.nonzero(mask)

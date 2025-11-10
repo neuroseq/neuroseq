@@ -65,7 +65,7 @@ def test_prepare_suite2p_spikes_respects_threshold_and_limits_neurons():
     assert payload["n_neurons"] == 4
     assert payload["n_timesteps"] == spike_data.shape[1]
     assert len(payload["timestamps"]) == len(payload["spikes"])
-    assert payload["threshold"] == pytest.approx(0.01)
+    assert payload["threshold"] == pytest.approx(threshold)
 
     neuron_indices = payload["spikes"]
     time_indices = np.rint(payload["timestamps"] / dt).astype(int)
