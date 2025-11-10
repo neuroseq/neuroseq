@@ -5,6 +5,8 @@ import pathlib
 import runpy
 from collections.abc import Callable
 from collections.abc import Mapping
+from typing import Any
+from typing import cast
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -17,6 +19,7 @@ from qtpy.compat import getsavefilename
 
 from neuroseq import __version__
 from neuroseq.b2_model import B2Model
+from neuroseq.cellpose_helper_dialog import CellposeLegendHelperDialog
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.custom_analysis_widget import CustomAnalysisDataType
 from neuroseq.custom_analysis_widget import CustomAnalysisType
@@ -24,18 +27,20 @@ from neuroseq.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.custom_analysis_widget import CustomAnalysisWindow
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
+from neuroseq.import_dialog import Suite2pImportDialog
+from neuroseq.import_dialog import Suite2pImportResult
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim_console import StimConsole
 from neuroseq.stim_editor import StimEditor
-from neuroseq.suite2p_import_dialog import Suite2pImportDialog
-from neuroseq.suite2p_import_dialog import Suite2pImportResult
 from neuroseq.trace_widget import TraceWidget
 from neuroseq.utils import add_action
 from neuroseq.utils import construct_synapse_matrix
 from neuroseq.utils import example_models_path
 from neuroseq.utils import with_wait_cursor
+
+PayloadDict = dict[str, object]
 
 
 class Gui(QtWidgets.QMainWindow):
@@ -49,9 +54,7 @@ class Gui(QtWidgets.QMainWindow):
         self.status_bar.addPermanentWidget(ResourceMonitorLabel())
         self.model = B2Model()
         self.external_simulation_function: Callable | None = None
-        self.external_simulation_data: (
-            dict[str, dict[str, str | int | float | npt.NDArray]] | None
-        ) = None
+        self.external_simulation_data: dict[str, PayloadDict] | None = None
         self.neurons: dict[str, tuple[b2.StateMonitor, str]] = {}
         self.synapses: dict[str, tuple[b2.StateMonitor, str]] = {}
         self.spikes: dict[str, b2.SpikeMonitor] = {}
@@ -422,12 +425,8 @@ class Gui(QtWidgets.QMainWindow):
             assert isinstance(timestamps, np.ndarray)
             spikes = data["spikes"]
             assert isinstance(spikes, np.ndarray)
-            dt = float(data["dt"])
-            assert isinstance(dt, float)
-            n_neurons = data["n_neurons"]
-            assert isinstance(n_neurons, int)
-            n_timesteps = data["n_timesteps"]
-            assert isinstance(n_timesteps, int)
+            dt = self._safe_float(data.get("dt"), 0.0)
+            n_neurons, n_timesteps = self._ensure_spike_metadata(data, dt)
             self.logger.info(
                 f"Displaying external SpikeWidget data {spike_name}: {timestamps.shape} timestamps, {spikes.shape} data, dt {dt}, n_neurons {n_neurons}, n_timesteps {n_timesteps}"
             )
@@ -649,6 +648,11 @@ class Gui(QtWidgets.QMainWindow):
             if imported_data:
                 self.handle_general_import(imported_data)
 
+    def open_cellpose_legend_helper(self) -> None:
+        """Open the placeholder dialog for Cellpose legend assistance."""
+        dialog = CellposeLegendHelperDialog(self)
+        dialog.exec()
+
     def handle_general_import(
         self, imported_data: Suite2pImportResult | Mapping[str, object]
     ) -> None:
@@ -667,10 +671,19 @@ class Gui(QtWidgets.QMainWindow):
                 if key.startswith("_"):
                     continue
 
+                if not isinstance(value, Mapping):
+                    self.logger.warning(
+                        f"Ignoring imported dataset '{key}' because it is not a mapping"
+                    )
+                    continue
+
+                payload: PayloadDict = dict(value)
+
                 # Use the key as-is since we're no longer using timestamps
                 base_key = key
 
-                widget_type = value.get("widget")
+                widget_type_obj = payload.get("widget")
+                widget_type = widget_type_obj if isinstance(widget_type_obj, str) else ""
                 if (
                     replace_mode
                     and widget_type in {"trace", "spike"}
@@ -680,17 +693,17 @@ class Gui(QtWidgets.QMainWindow):
                     cleared_widget_types.add(widget_type)
 
                 if widget_type == "trace":
-                    dataset_dt = float(value.get("dt", 1.0 / 30.0))
+                    dataset_dt = self._safe_float(payload.get("dt"), 1.0 / 30.0)
                     dt_for_expand = dataset_dt
-                    self._concatenate_trace_data(base_key, value, dataset_dt)
+                    self._concatenate_trace_data(base_key, payload, dataset_dt)
                 elif widget_type == "spike":
-                    dataset_dt = float(value.get("dt", 1.0 / 30.0))
+                    dataset_dt = self._safe_float(payload.get("dt"), 1.0 / 30.0)
                     if dt_for_expand is None:
                         dt_for_expand = dataset_dt
-                    self._concatenate_spike_data(base_key, value, dataset_dt)
+                    self._concatenate_spike_data(base_key, payload, dataset_dt)
                 else:
                     # For other data types, just store with base key
-                    self.external_simulation_data[base_key] = value
+                    self.external_simulation_data[base_key] = payload
 
             # Calculate total timepoints across all concatenated data for stimulus expansion
             total_timepoints = self._get_max_timepoints()
@@ -714,8 +727,63 @@ class Gui(QtWidgets.QMainWindow):
                 self, "Import Error", f"Error processing imported data:\n{str(e)}"
             )
 
+    @staticmethod
+    def _safe_int(value: object) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, np.ndarray):
+            if value.shape == ():
+                try:
+                    return int(value.item())
+                except (TypeError, ValueError, OverflowError):
+                    return None
+            return None
+        try:
+            return int(cast(Any, value))
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    @staticmethod
+    def _safe_float(value: object, default: float) -> float:
+        if value is None:
+            return default
+        try:
+            return float(cast(Any, value))
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _infer_spike_neuron_count(spikes: object) -> int:
+        if isinstance(spikes, np.ndarray) and spikes.size > 0:
+            return int(np.max(spikes)) + 1
+        return 0
+
+    @staticmethod
+    def _infer_spike_timestep_count(timestamps: object, dt: float) -> int:
+        if isinstance(timestamps, np.ndarray) and timestamps.size > 0 and dt > 0:
+            max_timestamp = float(np.max(timestamps))
+            approx_steps = int(np.round(max_timestamp / dt))
+            return max(approx_steps + 1, 1)
+        return 0
+
+    def _ensure_spike_metadata(
+        self, payload: PayloadDict, dt: float
+    ) -> tuple[int, int]:
+        n_neurons = self._safe_int(payload.get("n_neurons"))
+        n_timesteps = self._safe_int(payload.get("n_timesteps"))
+        spikes = payload.get("spikes")
+        timestamps = payload.get("timestamps")
+
+        if n_neurons is None:
+            n_neurons = self._infer_spike_neuron_count(spikes)
+            payload["n_neurons"] = n_neurons
+        if n_timesteps is None:
+            n_timesteps = self._infer_spike_timestep_count(timestamps, dt)
+            payload["n_timesteps"] = n_timesteps
+        return n_neurons, n_timesteps
+
     def _concatenate_trace_data(
-        self, base_key: str, new_value: dict, dt: float
+        self, base_key: str, new_value: PayloadDict, dt: float
     ) -> None:
         """Concatenate trace data to existing timeline"""
         new_timestamps = new_value.get("timestamps")
@@ -765,30 +833,34 @@ class Gui(QtWidgets.QMainWindow):
             )
 
     def _concatenate_spike_data(
-        self, base_key: str, new_value: dict, dt: float
+        self, base_key: str, new_value: PayloadDict, dt: float
     ) -> None:
         """Concatenate spike data to existing timeline"""
         new_timestamps = new_value.get("timestamps")
         new_spikes = new_value.get("spikes")
-        new_n_timesteps = new_value.get("n_timesteps", 0)
+        dataset_dt = self._safe_float(new_value.get("dt"), dt)
+        new_n_neurons, new_n_timesteps = self._ensure_spike_metadata(
+            new_value, dataset_dt
+        )
 
         if self.external_simulation_data and base_key in self.external_simulation_data:
             # Existing data - concatenate spikes
             existing_data = self.external_simulation_data[base_key]
             existing_timestamps = existing_data.get("timestamps")
             existing_spikes = existing_data.get("spikes")
-            existing_n_timesteps = existing_data.get("n_timesteps", 0)
+            existing_dt = self._safe_float(existing_data.get("dt"), dataset_dt)
+            existing_n_neurons, existing_n_timesteps = self._ensure_spike_metadata(
+                existing_data, existing_dt
+            )
 
             if (
                 isinstance(existing_timestamps, np.ndarray)
                 and isinstance(existing_spikes, np.ndarray)
                 and isinstance(new_timestamps, np.ndarray)
                 and isinstance(new_spikes, np.ndarray)
-                and isinstance(existing_n_timesteps, int | float)
-                and isinstance(new_n_timesteps, int | float)
             ):
                 # Calculate time offset (continue from where last data ended)
-                time_offset = float(existing_n_timesteps) * dt
+                time_offset = float(existing_n_timesteps) * existing_dt
                 adjusted_new_timestamps = new_timestamps + time_offset
 
                 # Concatenate spike arrays
@@ -804,10 +876,7 @@ class Gui(QtWidgets.QMainWindow):
                         "timestamps": combined_timestamps,
                         "spikes": combined_spikes,
                         "dt": dt,
-                        "n_neurons": max(
-                            existing_data.get("n_neurons", 0),
-                            new_value.get("n_neurons", 0),
-                        ),
+                        "n_neurons": max(existing_n_neurons, new_n_neurons),
                         "n_timesteps": combined_n_timesteps,
                     }
 
@@ -860,9 +929,13 @@ class Gui(QtWidgets.QMainWindow):
                     if isinstance(timestamps, np.ndarray):
                         max_timepoints = max(max_timepoints, len(timestamps))
                 elif data.get("widget") == "spike":
-                    n_timesteps = data.get("n_timesteps", 0)
-                    if isinstance(n_timesteps, int | float):
-                        max_timepoints = max(max_timepoints, int(n_timesteps))
+                    n_timesteps_value = data.get("n_timesteps")
+                    if isinstance(n_timesteps_value, int | float):
+                        inferred_timesteps = int(n_timesteps_value)
+                    else:
+                        dt = self._safe_float(data.get("dt"), 0.0)
+                        _, inferred_timesteps = self._ensure_spike_metadata(data, dt)
+                    max_timepoints = max(max_timepoints, max(0, inferred_timesteps))
         return max_timepoints
 
     def expand_stims_to_length(self, target_length: int, target_dt: float) -> None:
@@ -1030,6 +1103,7 @@ class Gui(QtWidgets.QMainWindow):
         self.menu_file = menu.addMenu("&File")
         self.toolbar_file = QtWidgets.QToolBar("File")
         self.addToolBar(self.toolbar_file)
+        self.menu_import = menu.addMenu("&Import")
         self.menu_simulate = menu.addMenu("&Simulate")
         self.toolbar_simulate = QtWidgets.QToolBar("Simulate")
         self.addToolBar(self.toolbar_simulate)
@@ -1053,6 +1127,7 @@ class Gui(QtWidgets.QMainWindow):
 
     def _create_actions(self) -> None:
         self._create_actions_file(self.menu_file, self.toolbar_file)
+        self._create_actions_import(self.menu_import)
         self._create_actions_simulate(self.menu_simulate, self.toolbar_simulate)
         self._create_actions_playback(self.menu_playback, self.toolbar_playback)
         self._create_actions_view(self.menu_view, self.toolbar_view)
@@ -1102,15 +1177,6 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             shortcut="Ctrl+E",
             icon=qta.icon("ph.polygon-light"),
-        )
-        menu.addSeparator()
-        add_action(
-            "Import Suite2p &Data",
-            self.import_suite2p_data,
-            menu,
-            None,
-            shortcut="Ctrl+Shift+I",
-            icon=qta.icon("mdi6.import"),
         )
         menu.addSeparator()
         add_action(
@@ -1247,6 +1313,23 @@ class Gui(QtWidgets.QMainWindow):
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
     ) -> None:
         add_action("&About", self.about, menu)
+
+    def _create_actions_import(self, menu: QtWidgets.QMenu) -> None:
+        add_action(
+            "Import Suite2p &Data",
+            self.import_suite2p_data,
+            menu,
+            None,
+            shortcut="Ctrl+Shift+I",
+            icon=qta.icon("mdi6.import"),
+        )
+        add_action(
+            "&Cellpose To Neuron ID Legend Helper",
+            self.open_cellpose_legend_helper,
+            menu,
+            None,
+            icon=qta.icon("mdi6.image-plus"),
+        )
 
     def _create_actions_data(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
