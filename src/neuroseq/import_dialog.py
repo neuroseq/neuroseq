@@ -8,12 +8,12 @@ import brian2.numpy_ as np
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
-from neuroseq.suite2p_importer import Suite2pSpikePayload
-from neuroseq.suite2p_importer import Suite2pTracePayload
-from neuroseq.suite2p_importer import compute_normalized_suite2p_spikes
-from neuroseq.suite2p_importer import compute_normalized_suite2p_traces
-from neuroseq.suite2p_importer import prepare_suite2p_spikes
-from neuroseq.suite2p_importer import prepare_suite2p_traces
+from neuroseq.importer import Suite2pSpikePayload
+from neuroseq.importer import Suite2pTracePayload
+from neuroseq.importer import compute_normalized_suite2p_spikes
+from neuroseq.importer import compute_normalized_suite2p_traces
+from neuroseq.importer import prepare_suite2p_spikes
+from neuroseq.importer import prepare_suite2p_traces
 
 
 class Suite2pImportResult(TypedDict, total=False):

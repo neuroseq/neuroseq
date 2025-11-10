@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 from pytestqt.qtbot import QtBot
 
-from neuroseq.suite2p_import_dialog import Suite2pImportDialog
-from neuroseq.suite2p_importer import compute_normalized_suite2p_traces
+from neuroseq.import_dialog import Suite2pImportDialog
+from neuroseq.importer import compute_normalized_suite2p_traces
 
 
 class TestSuite2pImportDialog:
@@ -27,12 +25,12 @@ class TestSuite2pImportDialog:
         assert dialog.sampling_rate_spin.value() == 30.0
         assert dialog.replace_checkbox.isChecked() is True
 
-    def test_file_loading_and_preview(self, qtbot: QtBot):
+    def test_file_loading_and_preview(self, qtbot: QtBot, suite2p_import_data_dir):
         """Test loading F.npy file and showing preview"""
         dialog = Suite2pImportDialog()
         qtbot.addWidget(dialog)
 
-        test_data_dir = Path(__file__).parent / "imported_data"
+        test_data_dir = suite2p_import_data_dir
         test_f_path = test_data_dir / "F.npy"
         dialog.load_f_file(str(test_f_path))
         dialog.load_fneu_file(str(test_data_dir / "Fneu.npy"))
@@ -41,12 +39,12 @@ class TestSuite2pImportDialog:
         preview = dialog.preview_text.toPlainText()
         assert "Contrasting traces: 5 neurons × 900 timepoints" in preview
 
-    def test_data_import_with_valid_files(self, qtbot: QtBot):
+    def test_data_import_with_valid_files(self, qtbot: QtBot, suite2p_import_data_dir):
         """Test importing data from F.npy and Fneu.npy files"""
         dialog = Suite2pImportDialog()
         qtbot.addWidget(dialog)
 
-        test_data_dir = Path(__file__).parent / "imported_data"
+        test_data_dir = suite2p_import_data_dir
         dialog.load_f_file(str(test_data_dir / "F.npy"))
         dialog.load_fneu_file(str(test_data_dir / "Fneu.npy"))
 
@@ -73,12 +71,12 @@ class TestSuite2pImportDialog:
         assert trace_data["dt"] == pytest.approx(1.0 / 30.0)
         assert "suite2p_spikes" not in imported_data
 
-    def test_contrasting_calculation(self, qtbot: QtBot):
+    def test_contrasting_calculation(self, qtbot: QtBot, suite2p_import_data_dir):
         """Test that F - 0.7 * Fneu calculation is performed correctly"""
         dialog = Suite2pImportDialog()
         qtbot.addWidget(dialog)
 
-        test_data_dir = Path(__file__).parent / "imported_data"
+        test_data_dir = suite2p_import_data_dir
         dialog.load_f_file(str(test_data_dir / "F.npy"))
         dialog.load_fneu_file(str(test_data_dir / "Fneu.npy"))
 
@@ -95,12 +93,12 @@ class TestSuite2pImportDialog:
         traces = imported_data["suite2p_contrasting_traces"]["traces"]
         np.testing.assert_array_almost_equal(traces, expected_contrasted, decimal=5)
 
-    def test_import_without_fneu_file(self, qtbot: QtBot):
+    def test_import_without_fneu_file(self, qtbot: QtBot, suite2p_import_data_dir):
         """F.npy-only imports should normalize fluorescence without neuropil subtraction."""
         dialog = Suite2pImportDialog()
         qtbot.addWidget(dialog)
 
-        test_data_dir = Path(__file__).parent / "imported_data"
+        test_data_dir = suite2p_import_data_dir
         dialog.load_f_file(str(test_data_dir / "F.npy"))
 
         assert dialog.import_button.isEnabled()
@@ -115,12 +113,14 @@ class TestSuite2pImportDialog:
         expected_traces, _, _ = compute_normalized_suite2p_traces(f_data, None)
         np.testing.assert_allclose(traces, expected_traces[: traces.shape[0], :])
 
-    def test_optional_spike_import_with_threshold(self, qtbot: QtBot):
+    def test_optional_spike_import_with_threshold(
+        self, qtbot: QtBot, suite2p_import_data_dir
+    ):
         """Test importing optional spks file with adjustable threshold"""
         dialog = Suite2pImportDialog()
         qtbot.addWidget(dialog)
 
-        test_data_dir = Path(__file__).parent / "imported_data"
+        test_data_dir = suite2p_import_data_dir
         dialog.load_f_file(str(test_data_dir / "F.npy"))
         dialog.load_fneu_file(str(test_data_dir / "Fneu.npy"))
         dialog.load_spks_file(str(test_data_dir / "spks.npy"))
@@ -142,12 +142,14 @@ class TestSuite2pImportDialog:
         )
 
     # todo: double check
-    def test_sampling_rate_adjustment_affects_timeline(self, qtbot: QtBot):
+    def test_sampling_rate_adjustment_affects_timeline(
+        self, qtbot: QtBot, suite2p_import_data_dir
+    ):
         """Changing the sampling rate should scale timestamps (base unit ms)."""
         dialog = Suite2pImportDialog()
         qtbot.addWidget(dialog)
 
-        test_data_dir = Path(__file__).parent / "imported_data"
+        test_data_dir = suite2p_import_data_dir
         dialog.load_f_file(str(test_data_dir / "F.npy"))
         dialog.load_fneu_file(str(test_data_dir / "Fneu.npy"))
 
@@ -168,12 +170,12 @@ class TestSuite2pImportDialog:
         expected_duration = (trace_data["traces"].shape[1] - 1) * dt
         assert total_duration == pytest.approx(expected_duration)
 
-    def test_replace_checkbox_sets_flag(self, qtbot: QtBot):
+    def test_replace_checkbox_sets_flag(self, qtbot: QtBot, suite2p_import_data_dir):
         """Checking the replace option propagates to emitted payloads."""
         dialog = Suite2pImportDialog()
         qtbot.addWidget(dialog)
 
-        test_data_dir = Path(__file__).parent / "imported_data"
+        test_data_dir = suite2p_import_data_dir
         dialog.load_f_file(str(test_data_dir / "F.npy"))
         dialog.load_fneu_file(str(test_data_dir / "Fneu.npy"))
         dialog.replace_checkbox.setChecked(True)
@@ -188,9 +190,9 @@ class TestSuite2pImportDialog:
 class TestSuite2pDataValidation:
     """Test data validation for Suite2p imports"""
 
-    def test_data_dimensions_validation(self):
+    def test_data_dimensions_validation(self, suite2p_import_data_dir):
         """Test that imported data has correct dimensions"""
-        test_data_dir = Path(__file__).parent / "imported_data"
+        test_data_dir = suite2p_import_data_dir
 
         f_data = np.load(test_data_dir / "F.npy")
         fneu_data = np.load(test_data_dir / "Fneu.npy")
@@ -199,9 +201,9 @@ class TestSuite2pDataValidation:
         assert fneu_data.shape == (5, 900)
         assert f_data.shape == fneu_data.shape
 
-    def test_data_content_validation(self):
+    def test_data_content_validation(self, suite2p_import_data_dir):
         """Test that data contains expected non-zero values"""
-        test_data_dir = Path(__file__).parent / "imported_data"
+        test_data_dir = suite2p_import_data_dir
 
         f_data = np.load(test_data_dir / "F.npy")
         fneu_data = np.load(test_data_dir / "Fneu.npy")
@@ -215,9 +217,9 @@ class TestSuite2pDataValidation:
         contrasted_data = f_data - 0.7 * fneu_data
         assert np.count_nonzero(contrasted_data) > 0
 
-    def test_timesteps_length(self):
+    def test_timesteps_length(self, suite2p_import_data_dir):
         """Test that data has exactly 900 timesteps"""
-        test_data_dir = Path(__file__).parent / "imported_data"
+        test_data_dir = suite2p_import_data_dir
 
         f_data = np.load(test_data_dir / "F.npy")
         fneu_data = np.load(test_data_dir / "Fneu.npy")

@@ -1,21 +1,17 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 
-from neuroseq.suite2p_importer import compute_normalized_suite2p_spikes
-from neuroseq.suite2p_importer import compute_normalized_suite2p_traces
-from neuroseq.suite2p_importer import prepare_suite2p_spikes
-from neuroseq.suite2p_importer import prepare_suite2p_traces
-
-DATA_DIR = Path(__file__).parent / "imported_data"
+from neuroseq.importer import compute_normalized_suite2p_spikes
+from neuroseq.importer import compute_normalized_suite2p_traces
+from neuroseq.importer import prepare_suite2p_spikes
+from neuroseq.importer import prepare_suite2p_traces
 
 
-def test_prepare_suite2p_traces_produces_widget_payload():
-    f_data = np.load(DATA_DIR / "F.npy")
-    fneu_data = np.load(DATA_DIR / "Fneu.npy")
+def test_prepare_suite2p_traces_produces_widget_payload(suite2p_import_data_dir):
+    f_data = np.load(suite2p_import_data_dir / "F.npy")
+    fneu_data = np.load(suite2p_import_data_dir / "Fneu.npy")
 
     payload = prepare_suite2p_traces(
         f_data,
@@ -33,8 +29,8 @@ def test_prepare_suite2p_traces_produces_widget_payload():
     np.testing.assert_allclose(payload["traces"], expected_traces[:3, :])
 
 
-def test_prepare_suite2p_traces_works_without_fneu():
-    f_data = np.load(DATA_DIR / "F.npy")
+def test_prepare_suite2p_traces_works_without_fneu(suite2p_import_data_dir):
+    f_data = np.load(suite2p_import_data_dir / "F.npy")
     payload = prepare_suite2p_traces(
         f_data,
         None,
@@ -49,8 +45,10 @@ def test_prepare_suite2p_traces_works_without_fneu():
     np.testing.assert_allclose(payload["traces"], expected_traces[:2, :])
 
 
-def test_prepare_suite2p_spikes_respects_threshold_and_limits_neurons():
-    spike_data = np.load(DATA_DIR / "spks.npy")
+def test_prepare_suite2p_spikes_respects_threshold_and_limits_neurons(
+    suite2p_import_data_dir,
+):
+    spike_data = np.load(suite2p_import_data_dir / "spks.npy")
     dt = 1 / 30.0
 
     threshold = 0.2
@@ -62,8 +60,6 @@ def test_prepare_suite2p_spikes_respects_threshold_and_limits_neurons():
     )
 
     assert payload["widget"] == "spike"
-    assert payload["n_neurons"] == 4
-    assert payload["n_timesteps"] == spike_data.shape[1]
     assert len(payload["timestamps"]) == len(payload["spikes"])
     assert payload["threshold"] == pytest.approx(threshold)
 

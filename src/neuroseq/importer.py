@@ -30,8 +30,6 @@ class Suite2pSpikePayload(TypedDict):
     timestamps: npt.NDArray[Any]
     spikes: npt.NDArray[Any]
     dt: float
-    n_neurons: int
-    n_timesteps: int
     threshold: float
 
 
@@ -133,7 +131,5 @@ def prepare_suite2p_spikes(
         "timestamps": spike_times,
         "spikes": neuron_indices,
         "dt": dt,
-        "n_neurons": n_neurons_to_import,
-        "n_timesteps": n_timesteps,
         "threshold": threshold,
     }
