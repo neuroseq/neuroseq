@@ -780,6 +780,15 @@ class Gui(QtWidgets.QMainWindow):
             shortcut="Ctrl+N",
             icon=qta.icon("mdi6.file"),
         )
+        # add "open example model" item to the file menu which opens a sub-menu with all of the example models from src/neuroseq/example_models
+        example_models_menu = menu.addMenu("&Open example model")
+        for example_model_file in sorted(example_models_path.glob("*.nseq")):
+            add_action(
+                example_model_file.stem,
+                lambda checked, f=example_model_file: self.load_model(str(f)),
+                example_models_menu,
+                None,
+            )
         add_action(
             "&Open model",
             self.btn_open_clicked,
