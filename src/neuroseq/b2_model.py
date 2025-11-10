@@ -6,10 +6,12 @@ import math
 import pickle
 import zipfile
 from collections.abc import Callable
+from collections.abc import Sequence
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 from typing import NoReturn
+from typing import TypeVar
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -17,8 +19,15 @@ import h5py
 
 from neuroseq import utils
 from neuroseq.b2json import b2json_encoder_factory
+from neuroseq.experiment import SpikeData
+from neuroseq.experiment import SynapseData
+from neuroseq.experiment import TraceData
 from neuroseq.reconstructor import Reconstructor
+from neuroseq.utils import append_data
+from neuroseq.utils import construct_synapse_matrix
 from neuroseq.utils import save_store_name
+
+DataType = TypeVar("DataType", TraceData, SpikeData, SynapseData)
 
 
 class B2Model:
@@ -485,6 +494,12 @@ class B2Model:
         self.synapses: dict[str, dict[str, Any]] = {}
         self.monitors: dict[str, dict[str, Any]] = {}
         self.initials: dict[str, dict[str, Any]] = {}
+        self.experiments: dict[str, list[TraceData | SpikeData | SynapseData]] = {}
+
+        self.max_ram_synapse_plot_matrix = 256
+        self.trace_name_to_monitor: dict[str, b2.StateMonitor] = {}
+        self.spike_name_to_monitor: dict[str, b2.SpikeMonitor] = {}
+        self.synapse_name_to_monitor: dict[str, b2.StateMonitor] = {}
 
         self.functions: dict[str, Any] = {
             "neurongroups": {},
@@ -2016,7 +2031,7 @@ class B2Model:
                     )
                     self.define_parameter(name, new_timed_array)
 
-    def _pad_timed_arrays(self, sim_time_seconds: float, padding_seconds: float):
+    def pad_timed_arrays(self, sim_time_seconds: float, padding_seconds: float):
         """
         Pad any TimedArrays with zeros up to sim_time_secs + padding_seconds
         """
@@ -2074,7 +2089,7 @@ class B2Model:
         )
         self.logger.info(f"run the system for {tfinal} with savepath = {savepath}")
         if timed_array_padding_seconds is not None:
-            self._pad_timed_arrays(
+            self.pad_timed_arrays(
                 self.network.t / b2.second, timed_array_padding_seconds
             )
         if savepath is not None:
@@ -2112,6 +2127,277 @@ class B2Model:
             self.logger.exception(e)
             raise ValueError(message) from e
 
+    def get_data_names(
+        self, data_type: type[TraceData | SpikeData | SynapseData]
+    ) -> list[str]:
+        """
+        Get names of all data of the given type
+
+        Parameters
+        ----------
+        data_type : type[TraceData | SpikeData | SynapseData]
+            Type of data to get names for
+
+        Returns
+        -------
+        list[str]
+            List of data names that can be passed to get_experimental_data
+        """
+        data_names = []
+        if data_type is TraceData:
+            data_names.extend(self.get_simulation_trace_names())
+        elif data_type is SpikeData:
+            data_names.extend(self.get_simulation_spike_names())
+        elif data_type is SynapseData:
+            data_names.extend(self.get_simulation_synapse_names())
+        for experiment_name, data_list in self.experiments.items():
+            for datum in data_list:
+                if isinstance(datum, data_type):
+                    data_names.append(f"{experiment_name} :: {datum.name}")
+        return data_names
+
+    def get_data(
+        self,
+        name: str,
+        data_type: type[DataType],
+    ) -> DataType | None:
+        """
+        Get experimental data from the model
+
+        Parameters
+        ----------
+        name : str
+            Name of the data to get, as provided by get_experimental_data_names()
+        data_type : type[TraceData | SpikeData | SynapseData]
+            Type of data to get
+
+        Returns
+        -------
+        TraceData | SpikeData | SynapseData | None
+            The requested data, or None if not found
+        """
+        if name == "":
+            return None
+        self.logger.info(f"Getting '{name}' of type {data_type}")
+        experiment_name, data_name = name.split(" :: ")
+        if experiment_name == "Simulation":
+            if data_type is TraceData:
+                return self.get_simulation_trace_data(name)  # type: ignore
+            if data_type is SpikeData:
+                return self.get_simulation_spike_data(name)  # type: ignore
+            if data_type is SynapseData:
+                return self.get_simulation_synapse_data(
+                    name, self.max_ram_synapse_plot_matrix
+                )  # type: ignore
+        if experiment_name not in self.experiments:
+            self.logger.info(f"  - experiment '{experiment_name}' not found")
+            return None
+        for data in self.experiments[experiment_name]:
+            if data.name == data_name and isinstance(data, data_type):
+                return data
+        self.logger.info(f"  - data '{data_name}' not found")
+        return None
+
+    def add_experimental_data(
+        self,
+        experiment_name: str,
+        new_data: Sequence[TraceData | SpikeData | SynapseData],
+        append: bool = False,
+    ):
+        """
+        Add experimental data to the model
+
+        Parameters
+        ----------
+        experiment_name : str
+            Name of the experiment
+        new_data : Sequence[TraceData | SpikeData | SynapseData]
+            List of data objects to add
+        append : bool, optional
+            Whether to append to existing data for the experiment, by default False
+        """
+        if not append:
+            self.logger.info(
+                f"Adding experimental data for experiment '{experiment_name}'"
+            )
+            self.experiments[experiment_name] = list(new_data)
+            return
+        if experiment_name not in self.experiments:
+            self.logger.warning(
+                f"Append requested but experiment '{experiment_name}' does not exist yet - creating"
+            )
+            self.experiments[experiment_name] = []
+        self.logger.info(
+            f"Appending experimental data to experiment '{experiment_name}'"
+        )
+        # (for now) automatically get time offset when appending from existing trace data for this experiment
+        existing_trace_data = next(
+            (d for d in self.experiments[experiment_name] if isinstance(d, TraceData)),
+            None,
+        )
+        if existing_trace_data is not None:
+            time_offset_seconds = (
+                existing_trace_data.dt * existing_trace_data.traces.shape[1]
+            )
+            self.logger.info(
+                f"Setting time offset to {time_offset_seconds}s from existing trace data '{existing_trace_data.name}'"
+            )
+        else:
+            self.logger.warning(
+                f"No existing trace data found for experiment '{experiment_name}', setting time offset to 0s"
+            )
+            time_offset_seconds = 0.0
+        new_min_stim_array_length_seconds = time_offset_seconds
+        # match data by type and name and append
+        for data in new_data:
+            if isinstance(data, TraceData):
+                new_min_stim_array_length_seconds = max(
+                    new_min_stim_array_length_seconds,
+                    time_offset_seconds + data.dt * data.traces.shape[1],
+                )
+            existing_datum = next(
+                (
+                    d
+                    for d in self.experiments[experiment_name]
+                    if d.name == data.name and isinstance(d, type(data))
+                ),
+                None,
+            )
+            if existing_datum is not None:
+                self.logger.info(f"  - appending experimental data to '{data.name}'")
+                append_data(existing_datum, data, time_offset_seconds)
+            else:
+                self.logger.warning(
+                    f"'{data.name}' not found when trying to append - addding new data instead of appending."
+                )
+                self.experiments[experiment_name].append(data)
+        self.pad_timed_arrays(new_min_stim_array_length_seconds, 0.0)
+
+    def get_simulation_trace_names(self) -> list[str]:
+        """
+        Get the names of all recorded traces in the simulation
+
+        Returns
+        -------
+        list[str]
+            List of trace names
+        """
+        trace_names = []
+        self.trace_name_to_monitor = {}
+        for m in self.network.objects:
+            if isinstance(m, b2.StateMonitor) and isinstance(m.source, b2.NeuronGroup):
+                for variable in m.record_variables:
+                    trace_name = f"Simulation :: {m.source.name} / {variable}"
+                    trace_names.append(trace_name)
+                    self.trace_name_to_monitor[trace_name] = m
+        return trace_names
+
+    def get_simulation_trace_data(self, trace_name: str) -> TraceData | None:
+        """
+        Get trace data for the given trace name
+
+        Parameters
+        ----------
+        trace_name : str
+            Name of the trace as returned by get_simulation_trace_names()
+
+        Returns
+        -------
+        TraceData
+            the recorded data
+        """
+        self.logger.info(f"Getting simulation trace data for '{trace_name}'")
+        neuron_group, variable_name = trace_name.split(" / ")
+        monitor = self.trace_name_to_monitor.get(trace_name)
+        if monitor is None:
+            return None
+        timestamps = monitor.t / b2.second
+        if timestamps.shape[0] < 2:
+            return None
+        dt = timestamps[1] - timestamps[0]
+        return TraceData(
+            trace_name, monitor.variables[variable_name].get_value().T, "unitsTODO", dt
+        )
+
+    def get_simulation_spike_names(self) -> list[str]:
+        """
+        Get the names of all recorded spikes in the simulation
+
+        Returns
+        -------
+        list[str]
+            List of spike names
+        """
+        spike_names = []
+        self.spike_name_to_monitor = {}
+        for m in self.network.objects:
+            if isinstance(m, b2.SpikeMonitor):
+                spike_name = f"Simulation :: {m.source.name}"
+                self.spike_name_to_monitor[spike_name] = m
+                spike_names.append(spike_name)
+        return spike_names
+
+    def get_simulation_spike_data(self, spike_name: str) -> SpikeData | None:
+        """
+        Get spike data for the given spike name
+
+        Parameters
+        ----------
+        spike_name : str
+            Name of the spike as returned by get_simulation_spike_names()
+
+        Returns
+        -------
+        SpikeData
+            the recorded data
+        """
+        monitor = self.spike_name_to_monitor[spike_name]
+        spike_indices = monitor.variables["i"].get_value().T
+        spike_times = monitor.t / b2.second
+        return SpikeData(spike_name, spike_indices, spike_times)
+
+    def get_simulation_synapse_names(self) -> list[str]:
+        """
+        Get the names of all recorded synapse data in the simulation
+
+        Returns
+        -------
+        list[str]
+            List of synapse names
+        """
+        synapse_names = []
+        self.synapse_name_to_monitor = {}
+        for m in self.network.objects:
+            if isinstance(m, b2.StateMonitor) and isinstance(m.source, b2.Synapses):
+                for variable in m.record_variables:
+                    synapse_name = f"Simulation :: {m.source.name} / {variable}"
+                    synapse_names.append(synapse_name)
+                    self.synapse_name_to_monitor[synapse_name] = m
+        return synapse_names
+
+    def get_simulation_synapse_data(
+        self, synapse_name: str, max_ram_mb: int
+    ) -> SynapseData | None:
+        """
+        Get synapse data for the given name
+
+        Parameters
+        ----------
+        synapse_name : str
+            Name of the synapse as returned by get_simulation_synapse_names()
+
+        Returns
+        -------
+        SynapseData
+            the recorded data
+        """
+        monitor = self.synapse_name_to_monitor[synapse_name]
+        synapse, variable_name = synapse_name.split(" / ")
+        values, timestamps = construct_synapse_matrix(
+            monitor, variable_name, max_ram_mb
+        )
+        return SynapseData(synapse_name, values, timestamps)
+
     def to_dict(self) -> dict[Any, Any]:
         states = self.network.get_states(read_only_variables=False)
         # remove monitors from state to avoid saving their recorded data
@@ -2142,12 +2428,18 @@ class B2Model:
 
         return states
 
-    def save_model(self, filepath: str | Path) -> None:
+    def save_model(
+        self,
+        filepath: str | Path,
+        include_simulation_data: bool = True,
+        include_experimental_data: bool = True,
+    ) -> None:
         """
-        Saves the model including any simulation checkpoints to a zipfile which contains
+        Saves the model to a zipfile which contains
             - a model.json file representing the model
-            - a npy file for each TimedArray
-            - a pickle file for the stored_state containing the simulation checkpoints
+            - an optional experimental_data.json file representing the experimental data
+            - an optional pickle file for the stored_state containing the simulation checkpoints
+            - npy files for each numpy array in any TimedArray, TraceData or SpikeData objects
 
         Parameters
         ----------
@@ -2160,11 +2452,20 @@ class B2Model:
                 self.to_dict(), cls=b2json_encoder_factory(zf), separators=(",", ":")
             )
             zf.writestr("model.json", model_json)
-            # store the current simulation data state to a temporary checkpoint to be able to restore it on load
-            self.store(save_store_name)
-            zf.writestr(
-                "stored_state.pkl", pickle.dumps(self.network._stored_state, protocol=4)
-            )
+            if include_simulation_data:
+                # store the current simulation data state to a temporary checkpoint to be able to restore it on load
+                self.store(save_store_name)
+                zf.writestr(
+                    "stored_state.pkl",
+                    pickle.dumps(self.network._stored_state, protocol=4),
+                )
+            if include_experimental_data:
+                experimental_data_json = json.dumps(
+                    self.experiments,
+                    cls=b2json_encoder_factory(zf),
+                    separators=(",", ":"),
+                )
+                zf.writestr("experimental_data.json", experimental_data_json)
 
     @classmethod
     def load_model(

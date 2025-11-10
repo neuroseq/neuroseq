@@ -2,24 +2,17 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TypedDict
 
 import brian2.numpy_ as np
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
-from neuroseq.importer import Suite2pSpikePayload
-from neuroseq.importer import Suite2pTracePayload
+from neuroseq.experiment import SpikeData
+from neuroseq.experiment import TraceData
 from neuroseq.importer import compute_normalized_suite2p_spikes
 from neuroseq.importer import compute_normalized_suite2p_traces
 from neuroseq.importer import prepare_suite2p_spikes
 from neuroseq.importer import prepare_suite2p_traces
-
-
-class Suite2pImportResult(TypedDict, total=False):
-    suite2p_contrasting_traces: Suite2pTracePayload
-    suite2p_spikes: Suite2pSpikePayload
-    _replace_existing: bool
 
 
 class Suite2pImportDialog(QtWidgets.QDialog):
@@ -27,8 +20,12 @@ class Suite2pImportDialog(QtWidgets.QDialog):
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
+
+        self.experiment_name: str = "Suite2p Import"
+        self.append_data: bool = False
+        self.imported_data: list[TraceData | SpikeData] = []
+
         self.logger = logging.getLogger(__name__)
-        self._imported_data: Suite2pImportResult | None = None
         self.f_file_path: Path | None = None
         self.fneu_file_path: Path | None = None
         self.spks_file_path: Path | None = None
@@ -126,7 +123,7 @@ class Suite2pImportDialog(QtWidgets.QDialog):
         self.spike_threshold_spin.setMinimum(0.0)
         self.spike_threshold_spin.setMaximum(1.0)
         self.spike_threshold_spin.setSingleStep(0.01)
-        self.spike_threshold_spin.setValue(0.02)  # will be 36
+        self.spike_threshold_spin.setValue(0.02)
         self.spike_threshold_spin.valueChanged.connect(
             lambda _: self._update_spike_preview()
         )
@@ -135,10 +132,10 @@ class Suite2pImportDialog(QtWidgets.QDialog):
         self.replace_checkbox = QtWidgets.QCheckBox(
             "Replace existing trace/spike data instead of appending"
         )
-        self.replace_checkbox.setChecked(True)
+        self.replace_checkbox.setChecked(not self.append_data)
         self.replace_checkbox.setToolTip(
             "When enabled, imported Suite2p traces or spikes will overwrite the "
-            "current widget data rather than being concatenated to it."
+            "current data for this experiment, rather than being concatenated to it."
         )
         options_layout.addRow(self.replace_checkbox)
 
@@ -362,7 +359,7 @@ class Suite2pImportDialog(QtWidgets.QDialog):
             return
 
         try:
-            self._imported_data = None
+            self.append_data = not self.replace_checkbox.isChecked()
             sampling_rate = float(self.sampling_rate_spin.value())
             if sampling_rate <= 0.0:
                 raise ValueError("Sample rate must be positive")
@@ -371,33 +368,27 @@ class Suite2pImportDialog(QtWidgets.QDialog):
             n_neurons, n_timepoints = self.f_data.shape
             n_neurons_to_import = min(max_neurons, n_neurons)
 
-            trace_payload = prepare_suite2p_traces(
-                self.f_data,
-                self.fneu_data,
-                max_neurons=max_neurons,
-                sampling_rate=sampling_rate,
+            self.imported_data.append(
+                prepare_suite2p_traces(
+                    self.f_data,
+                    self.fneu_data,
+                    max_neurons=max_neurons,
+                    sampling_rate=sampling_rate,
+                )
             )
-
-            imported_data: Suite2pImportResult = {
-                "suite2p_contrasting_traces": trace_payload,
-            }
-            imported_data["_replace_existing"] = self.replace_checkbox.isChecked()
 
             spike_summary = ""
             if self.spike_data is not None:
                 threshold = self.spike_threshold_spin.value()
-                spike_payload = prepare_suite2p_spikes(
+                spike_data = prepare_suite2p_spikes(
                     self.spike_data,
                     dt=dt,
                     threshold=threshold,
                     max_neurons=max_neurons,
                 )
-                imported_data["suite2p_spikes"] = spike_payload
-                spike_summary = (
-                    f"\nSpikes: {len(spike_payload['spikes'])} events ≥ {threshold:.3f}"
-                )
+                self.imported_data.append(spike_data)
+                spike_summary = f"\nSpikes: {len(spike_data.spike_indices)} events ≥ {threshold:.3f}"
 
-            self._imported_data = imported_data
             QtWidgets.QMessageBox.information(
                 self,
                 "Import successful",
@@ -412,7 +403,3 @@ class Suite2pImportDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.critical(
                 self, "Import Error", f"Error importing Suite2p data:\n{exc}"
             )
-
-    def get_imported_data(self) -> Suite2pImportResult | None:
-        """Return the last successfully imported data payload."""
-        return self._imported_data
