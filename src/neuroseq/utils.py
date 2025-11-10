@@ -152,6 +152,17 @@ def add_action(
     return action
 
 
+def add_items_to_combobox(combobox: QtWidgets.QComboBox, items: list[str]) -> None:
+    """Add items to a combobox and adjust its width to avoid contents getting truncated on Windows."""
+    if len(items) == 0:
+        return
+    combobox.addItems(items)
+    longest_item = max(items, key=len)
+    font_metrics = QtGui.QFontMetrics(combobox.font())
+    max_width = font_metrics.boundingRect(longest_item).width()
+    combobox.view().setMinimumWidth(max_width + 20)
+
+
 class QtABCMeta(type(QtCore.QObject), abc.ABCMeta):  # type: ignore
     """Metaclass that allows a class to be both a QObject and an Abstract Base Class.
 

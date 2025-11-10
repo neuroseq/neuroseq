@@ -30,6 +30,7 @@ from neuroseq.stim_console import StimConsole
 from neuroseq.stim_editor import StimEditor
 from neuroseq.trace_widget import TraceWidget
 from neuroseq.utils import add_action
+from neuroseq.utils import add_items_to_combobox
 from neuroseq.utils import construct_synapse_matrix
 from neuroseq.utils import example_models_path
 from neuroseq.utils import with_wait_cursor
@@ -305,9 +306,9 @@ class Gui(QtWidgets.QMainWindow):
             self.logger.debug(f"neurons: {self.neurons}")
             self.logger.debug(f"synapses: {self.synapses}")
             self.logger.debug(f"spikes: {self.spikes}")
-            self.cmb_neuron.addItems(list(self.neurons.keys()))
-            self.cmb_synapse.addItems(list(self.synapses.keys()))
-            self.cmb_spike.addItems(list(self.spikes.keys()))
+            add_items_to_combobox(self.cmb_neuron, list(self.neurons.keys()))
+            add_items_to_combobox(self.cmb_synapse, list(self.synapses.keys()))
+            add_items_to_combobox(self.cmb_spike, list(self.spikes.keys()))
 
     @with_wait_cursor
     def set_neuron(self, neuron_name: str) -> None:

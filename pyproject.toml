@@ -39,7 +39,7 @@ dev = [
     "pytest-randomly",
     "pytest-cov",
     "pytest-mock",
-    "pytest-memray",
+    "pytest-memray ; platform_system != 'Windows'",
     "diff-cover",
 ]
 
