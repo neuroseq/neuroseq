@@ -5,6 +5,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from neuroseq.suite2p_importer import compute_normalized_suite2p_spikes
+from neuroseq.suite2p_importer import compute_normalized_suite2p_traces
 from neuroseq.suite2p_importer import prepare_suite2p_spikes
 from neuroseq.suite2p_importer import prepare_suite2p_traces
 
@@ -27,16 +29,35 @@ def test_prepare_suite2p_traces_produces_widget_payload():
     assert payload["timestamps"].shape == (900,)
     assert payload["dt"] == pytest.approx(1 / 30.0)
     assert payload["sampling_rate"] == pytest.approx(30.0)
+    expected_traces, _, _ = compute_normalized_suite2p_traces(f_data, fneu_data)
+    np.testing.assert_allclose(payload["traces"], expected_traces[:3, :])
+
+
+def test_prepare_suite2p_traces_works_without_fneu():
+    f_data = np.load(DATA_DIR / "F.npy")
+    payload = prepare_suite2p_traces(
+        f_data,
+        None,
+        max_neurons=2,
+        sampling_rate=15.0,
+    )
+
+    assert payload["widget"] == "trace"
+    assert payload["traces"].shape[0] == 2
+    assert payload["dt"] == pytest.approx(1 / 15.0)
+    expected_traces, _, _ = compute_normalized_suite2p_traces(f_data, None)
+    np.testing.assert_allclose(payload["traces"], expected_traces[:2, :])
 
 
 def test_prepare_suite2p_spikes_respects_threshold_and_limits_neurons():
     spike_data = np.load(DATA_DIR / "spks.npy")
     dt = 1 / 30.0
 
+    threshold = 0.2
     payload = prepare_suite2p_spikes(
         spike_data,
         dt=dt,
-        threshold=0.01,
+        threshold=threshold,
         max_neurons=4,
     )
 
@@ -48,14 +69,15 @@ def test_prepare_suite2p_spikes_respects_threshold_and_limits_neurons():
 
     neuron_indices = payload["spikes"]
     time_indices = np.rint(payload["timestamps"] / dt).astype(int)
-    trimmed_data = spike_data[:4, :]
+    normalized_spikes, _, _ = compute_normalized_suite2p_spikes(spike_data)
+    trimmed_data = normalized_spikes[:4, :]
     values = trimmed_data[neuron_indices, time_indices]
-    assert np.all(values >= 0.01)
+    assert np.all(values >= threshold)
 
     high_threshold_payload = prepare_suite2p_spikes(
         spike_data,
         dt=dt,
-        threshold=1e6,
+        threshold=1.1,
         max_neurons=4,
     )
     assert len(high_threshold_payload["spikes"]) == 0
