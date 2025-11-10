@@ -3,19 +3,18 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 from pytestqt.qtbot import QtBot
 
-from neuroseq.fluorescent_suite2p_contrasting_traces_import_dialog import (
-    FluorescentSuite2pContrastingTracesImportDialog,
-)
+from neuroseq.suite2p_import_dialog import Suite2pImportDialog
 
 
-class TestFluorescentSuite2pContrastingTracesImportDialog:
-    """Test cases for the Suite2p contrasting traces import dialog"""
+class TestSuite2pImportDialog:
+    """Test cases for the combined Suite2p import dialog"""
 
     def test_dialog_initialization(self, qtbot: QtBot):
         """Test that the dialog initializes correctly with all UI elements"""
-        dialog = FluorescentSuite2pContrastingTracesImportDialog()
+        dialog = Suite2pImportDialog()
         qtbot.addWidget(dialog)
 
         assert dialog.f_file_path_label is not None
@@ -23,10 +22,12 @@ class TestFluorescentSuite2pContrastingTracesImportDialog:
 
         assert not dialog.import_button.isEnabled()
         assert dialog.max_neurons_spin.value() == 2
+        assert dialog.spike_threshold_spin.value() == 100.0
+        assert dialog.sampling_rate_spin.value() == 30.0
 
     def test_file_loading_and_preview(self, qtbot: QtBot):
         """Test loading F.npy file and showing preview"""
-        dialog = FluorescentSuite2pContrastingTracesImportDialog()
+        dialog = Suite2pImportDialog()
         qtbot.addWidget(dialog)
 
         test_data_dir = Path(__file__).parent / "imported_data"
@@ -35,13 +36,12 @@ class TestFluorescentSuite2pContrastingTracesImportDialog:
         dialog.load_fneu_file(str(test_data_dir / "Fneu.npy"))
 
         assert dialog.import_button.isEnabled()
-        assert (
-            "Shape: (5, 900)" in dialog.preview_text.toPlainText()
-        )  # handy to know hwo many neurons x time steps are in the import
+        preview = dialog.preview_text.toPlainText()
+        assert "Contrasting traces: 5 neurons × 900 timepoints" in preview
 
     def test_data_import_with_valid_files(self, qtbot: QtBot):
         """Test importing data from F.npy and Fneu.npy files"""
-        dialog = FluorescentSuite2pContrastingTracesImportDialog()
+        dialog = Suite2pImportDialog()
         qtbot.addWidget(dialog)
 
         test_data_dir = Path(__file__).parent / "imported_data"
@@ -54,7 +54,6 @@ class TestFluorescentSuite2pContrastingTracesImportDialog:
         dialog.import_data()
 
         assert "suite2p_contrasting_traces" in imported_data
-        assert "_metadata" in imported_data
 
         trace_data = imported_data["suite2p_contrasting_traces"]
         assert "traces" in trace_data
@@ -64,10 +63,13 @@ class TestFluorescentSuite2pContrastingTracesImportDialog:
         assert traces.shape == (5, 900)  # 5 neurons, 900 time steps
         assert np.count_nonzero(traces) > 0  # non-zero values present
         assert np.all(np.isfinite(traces))  # no NaN or inf values
+        assert trace_data["sampling_rate"] == 30.0
+        assert trace_data["dt"] == pytest.approx(1.0 / 30.0)
+        assert "suite2p_spikes" not in imported_data
 
     def test_contrasting_calculation(self, qtbot: QtBot):
         """Test that F - 0.7 * Fneu calculation is performed correctly"""
-        dialog = FluorescentSuite2pContrastingTracesImportDialog()
+        dialog = Suite2pImportDialog()
         qtbot.addWidget(dialog)
 
         test_data_dir = Path(__file__).parent / "imported_data"
@@ -86,7 +88,56 @@ class TestFluorescentSuite2pContrastingTracesImportDialog:
         traces = imported_data["suite2p_contrasting_traces"]["traces"]
         np.testing.assert_array_almost_equal(traces, expected_contrasted, decimal=5)
 
-    # todo when implemented: sample rate test
+    def test_optional_spike_import_with_threshold(self, qtbot: QtBot):
+        """Test importing optional spks file with adjustable threshold"""
+        dialog = Suite2pImportDialog()
+        qtbot.addWidget(dialog)
+
+        test_data_dir = Path(__file__).parent / "imported_data"
+        dialog.load_f_file(str(test_data_dir / "F.npy"))
+        dialog.load_fneu_file(str(test_data_dir / "Fneu.npy"))
+        dialog.load_spks_file(str(test_data_dir / "spks.npy"))
+
+        dialog.spike_threshold_spin.setValue(0.01)
+
+        imported_data = {}
+        dialog.data_imported.connect(lambda data: imported_data.update(data))
+
+        dialog.import_data()
+
+        spike_data = imported_data["suite2p_spikes"]
+        assert spike_data["threshold"] == dialog.spike_threshold_spin.value()
+        assert len(spike_data["spikes"]) > 0
+        assert len(spike_data["timestamps"]) == len(spike_data["spikes"])
+        assert spike_data["dt"] == pytest.approx(
+            1.0 / dialog.sampling_rate_spin.value()
+        )
+
+    def test_sampling_rate_adjustment_affects_timeline(self, qtbot: QtBot):
+        """Changing the sampling rate should scale timestamps (base unit ms)."""
+        dialog = Suite2pImportDialog()
+        qtbot.addWidget(dialog)
+
+        test_data_dir = Path(__file__).parent / "imported_data"
+        dialog.load_f_file(str(test_data_dir / "F.npy"))
+        dialog.load_fneu_file(str(test_data_dir / "Fneu.npy"))
+
+        dialog.sampling_rate_spin.setValue(10.0)  # Hz
+
+        imported_data = {}
+        dialog.data_imported.connect(lambda data: imported_data.update(data))
+        dialog.import_data()
+
+        trace_data = imported_data["suite2p_contrasting_traces"]
+        timestamps = trace_data["timestamps"]
+        dt = trace_data["dt"]
+        assert dt == pytest.approx(0.1)
+        assert trace_data["sampling_rate"] == pytest.approx(10.0)
+
+        assert timestamps[1] - timestamps[0] == pytest.approx(dt)
+        total_duration = timestamps[-1] - timestamps[0]
+        expected_duration = (trace_data["traces"].shape[1] - 1) * dt
+        assert total_duration == pytest.approx(expected_duration)
 
 
 class TestSuite2pDataValidation:

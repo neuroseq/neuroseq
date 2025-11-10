@@ -31,9 +31,6 @@ def prepare_suite2p_traces(
         "traces": contrasting_traces[:n_neurons_to_import, :],
         "dt": dt,
         "sampling_rate": float(sampling_rate),
-        "n_neurons": n_neurons_to_import,
-        "n_timepoints": n_timepoints,
-        "data_type": "suite2p_contrasting_traces",
     }
 
 

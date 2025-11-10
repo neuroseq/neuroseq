@@ -93,6 +93,18 @@ class Suite2pImportDialog(QtWidgets.QDialog):
         self.max_neurons_spin.setValue(2)
         options_layout.addRow("Max neurons to import:", self.max_neurons_spin)
 
+        self.sampling_rate_spin = QtWidgets.QDoubleSpinBox()
+        self.sampling_rate_spin.setDecimals(3)
+        self.sampling_rate_spin.setMinimum(0.001)
+        self.sampling_rate_spin.setMaximum(10000.0)
+        self.sampling_rate_spin.setSingleStep(1.0)
+        self.sampling_rate_spin.setValue(30.0)
+        self.sampling_rate_spin.setSuffix(" Hz")
+        self.sampling_rate_spin.setToolTip(
+            "Sampling rate in Hz (base timeline unit is milliseconds)."
+        )
+        options_layout.addRow("Sample rate:", self.sampling_rate_spin)
+
         self.spike_threshold_spin = QtWidgets.QDoubleSpinBox()
         self.spike_threshold_spin.setDecimals(3)
         self.spike_threshold_spin.setMinimum(0.0)
@@ -284,7 +296,9 @@ class Suite2pImportDialog(QtWidgets.QDialog):
             return
 
         try:
-            sampling_rate = 30.0  # Hz
+            sampling_rate = float(self.sampling_rate_spin.value())
+            if sampling_rate <= 0.0:
+                raise ValueError("Sample rate must be positive")
             dt = 1.0 / sampling_rate
             max_neurons = self.max_neurons_spin.value()
             n_neurons, n_timepoints = self.f_data.shape
