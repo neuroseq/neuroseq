@@ -6,6 +6,7 @@ from typing import Any
 
 import brian2 as b2
 import brian2.numpy_ as np
+import numpy as onp
 import pytest
 from qtpy import QtWidgets
 
@@ -80,6 +81,51 @@ def tmp_config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path):
         "neuroseq.gui_settings.user_config_dir", lambda *args, **kwargs: str(tmp_path)
     )
     yield tmp_path
+
+
+def _generate_suite2p_trace_arrays(
+    n_neurons: int = 5,
+    n_timepoints: int = 900,
+    seed: int = 12345,
+) -> tuple[onp.ndarray, onp.ndarray, onp.ndarray]:
+    """Generate simple Suite2p-style arrays with fixed means/stds."""
+    rng = onp.random.default_rng(seed)
+
+    f_data = rng.normal(
+        loc=146.0,
+        scale=14.401437,
+        size=(n_neurons, n_timepoints),
+    ).astype(onp.float32)
+
+    fneu_data = rng.normal(
+        loc=133.0,
+        scale=12.630169,
+        size=(n_neurons, n_timepoints),
+    ).astype(onp.float32)
+
+    spike_data = onp.zeros((n_neurons, n_timepoints), dtype=onp.float32)
+    total_points = n_neurons * n_timepoints
+    n_active = int(total_points * 0.04)  # make 4% of points have a spike
+    active_indices = rng.choice(total_points, size=n_active, replace=False)
+    spike_values = rng.uniform(0.0, 0.05, size=n_active).astype(onp.float32)
+    spike_data.ravel()[active_indices] = spike_values
+
+    return f_data, fneu_data, spike_data
+
+
+@pytest.fixture(scope="session")
+def suite2p_import_data_dir(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> pathlib.Path:
+    """Provide a temp directory with generated Suite2p-style .npy files for tests."""
+    data_dir = pathlib.Path(tmp_path_factory.mktemp("suite2p_import"))
+    f_data, fneu_data, spike_data = _generate_suite2p_trace_arrays()
+
+    onp.save(data_dir / "F.npy", f_data)
+    onp.save(data_dir / "Fneu.npy", fneu_data)
+    onp.save(data_dir / "spks.npy", spike_data)
+
+    return data_dir
 
 
 @pytest.fixture(scope="session")
