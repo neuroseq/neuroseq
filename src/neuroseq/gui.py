@@ -21,18 +21,14 @@ from neuroseq.custom_analysis_widget import CustomAnalysisDataType
 from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.custom_analysis_widget import CustomAnalysisWindow
-from neuroseq.fluorescent_suite2p_contrasting_traces_import_dialog import (
-    FluorescentSuite2pContrastingTracesImportDialog,
-)
-from neuroseq.fluorescent_suite2p_import_dialog import FluorescentSuite2pImportDialog
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.model_editor import ModelEditorDialog
-from neuroseq.optostim_import_dialog import OptoStimReadingsImportDialog
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim_console import StimConsole
 from neuroseq.stim_editor import StimEditor
+from neuroseq.suite2p_import_dialog import Suite2pImportDialog
 from neuroseq.trace_widget import TraceWidget
 from neuroseq.utils import add_action
 from neuroseq.utils import construct_synapse_matrix
@@ -656,32 +652,16 @@ class Gui(QtWidgets.QMainWindow):
                 )
                 self.logger.exception(e)
 
-    def import_optometric_readings_data(self) -> None:
-        """Open dialog to import patch clamp data and integrate with current model"""
-        dialog = OptoStimReadingsImportDialog(self)
+    def import_suite2p_data(self) -> None:
+        """Open dialog to import Suite2p traces (and optional spikes)"""
+        dialog = Suite2pImportDialog(self)
         dialog.data_imported.connect(self.handle_general_import)
-        dialog.exec_()
-
-    def import_suite2p_spikes(self) -> None:
-        """Open dialog to import Suite2p spike data"""
-        dialog = FluorescentSuite2pImportDialog(self)
-        dialog.data_imported.connect(self.handle_general_import)  # Use same handler
-        dialog.exec_()
-
-    def import_suite2p_traces(self) -> None:
-        """Open dialog to import Suite2p Fneu trace data"""
-        dialog = FluorescentSuite2pContrastingTracesImportDialog(self)
-        dialog.data_imported.connect(self.handle_general_import)  # Use same handler
         dialog.exec_()
 
     def handle_general_import(self, imported_data: dict) -> None:
         """Handle imported data with timeline concatenation"""
         try:
-            # Get metadata
-            metadata = imported_data.get("_metadata", {})
-            dt = metadata.get(
-                "dt", 1.0 / 30.0
-            )  # hard coded d time / hz sample for now.
+            dt_for_expand: float | None = None
 
             # Initialize external data if needed
             if self.external_simulation_data is None:
@@ -697,17 +677,26 @@ class Gui(QtWidgets.QMainWindow):
 
                 widget_type = value.get("widget")
                 if widget_type == "trace":
-                    self._concatenate_trace_data(base_key, value, dt)
+                    dataset_dt = float(value.get("dt", 1.0 / 30.0))
+                    dt_for_expand = dataset_dt
+                    self._concatenate_trace_data(base_key, value, dataset_dt)
                 elif widget_type == "spike":
-                    self._concatenate_spike_data(base_key, value, dt)
+                    dataset_dt = float(value.get("dt", 1.0 / 30.0))
+                    if dt_for_expand is None:
+                        dt_for_expand = dataset_dt
+                    self._concatenate_spike_data(base_key, value, dataset_dt)
                 else:
                     # For other data types, just store with base key
                     self.external_simulation_data[base_key] = value
 
             # Calculate total timepoints across all concatenated data for stimulus expansion
             total_timepoints = self._get_max_timepoints()
-            if self.model.parameters and total_timepoints > 0:
-                self.expand_stims_to_length(total_timepoints, dt)
+            if (
+                self.model.parameters
+                and total_timepoints > 0
+                and dt_for_expand is not None
+            ):
+                self.expand_stims_to_length(total_timepoints, dt_for_expand)
 
             # Update the GUI to show imported data
             self._update_external_data_widgets()
@@ -1092,29 +1081,12 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("ph.polygon-light"),
         )
         menu.addSeparator()
-        optostim_action = add_action(
-            "Import &Optometrics REadings",
-            self.import_optometric_readings_data,
-            menu,
-            None,
-            shortcut="Ctrl+I",
-            icon=qta.icon("mdi6.import"),
-        )
-        optostim_action.setEnabled(False)
         add_action(
-            "Import Suite2p &Spikes",
-            self.import_suite2p_spikes,
+            "Import Suite2p &Data",
+            self.import_suite2p_data,
             menu,
             None,
             shortcut="Ctrl+Shift+I",
-            icon=qta.icon("mdi6.import"),
-        )
-        add_action(
-            "Import Suite2p &Traces (Fneu)",
-            self.import_suite2p_traces,
-            menu,
-            None,
-            shortcut="Ctrl+Shift+T",
             icon=qta.icon("mdi6.import"),
         )
         menu.addSeparator()
