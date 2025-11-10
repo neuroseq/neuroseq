@@ -39,12 +39,7 @@ class ReversibleAction:
     ) -> None:
         """Assign the new values to the TimedArray and update the StimWidget accordingly."""
         timed_array.values[self.time_slice, self.neuron_slice] = values
-        # note: the data TextureArray in the stim_widget.graphic is transposed compared to the TimedArray
-        texture_values = values.T if isinstance(values, np.ndarray) else values
-        if stim_widget.graphic is not None:
-            stim_widget.graphic.data[self.neuron_slice, self.time_slice] = (
-                texture_values
-            )
+        stim_widget.update_data_slice(self.neuron_slice, self.time_slice, values)
 
 
 class TimedArrayModifier:

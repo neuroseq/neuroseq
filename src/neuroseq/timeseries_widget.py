@@ -93,7 +93,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.data: dict[str, int | float | np.ndarray] = {}
         self.data_type: CustomAnalysisDataType | None = None
         self.dt = 1.0
-        self.hover_values: np.ndarray | None = None
+        self.data_values: np.ndarray | None = None
         self.units = ""
         self.selection_in_progress = False
         self.mouse_pos: np.ndarray | None = None
@@ -228,14 +228,14 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.logger.debug(f"pointer_move at {self.mouse_pos} in mode {self.mode}")
         self.text.visible = self.show_text
         hover_value_text = ""
-        if self.hover_values is not None:
+        if self.data_values is not None:
             time_index = np.clip(
-                math.floor(self.mouse_pos[0]), 0, self.hover_values.shape[0] - 1
+                math.floor(self.mouse_pos[0]), 0, self.data_values.shape[0] - 1
             )
             neuron_index = np.clip(
-                math.floor(self.mouse_pos[1] + 0.5), 0, self.hover_values.shape[1] - 1
+                math.floor(self.mouse_pos[1] + 0.5), 0, self.data_values.shape[1] - 1
             )
-            hover_value = self.hover_values[time_index, neuron_index]
+            hover_value = self.data_values[time_index, neuron_index]
             hover_value_text = f"{hover_value:.3g} {self.units}"
         self.text.set_pos(self.mouse_pos, hover_value_text)
         if self.hover_slice_graphic is not None:
