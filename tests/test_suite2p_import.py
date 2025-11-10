@@ -48,11 +48,10 @@ class TestSuite2pImportDialog:
         dialog.load_f_file(str(test_data_dir / "F.npy"))
         dialog.load_fneu_file(str(test_data_dir / "Fneu.npy"))
 
-        imported_data = {}
-        dialog.data_imported.connect(lambda data: imported_data.update(data))
-
         dialog.import_data()
+        imported_data = dialog.get_imported_data()
 
+        assert imported_data is not None
         assert "suite2p_contrasting_traces" in imported_data
 
         trace_data = imported_data["suite2p_contrasting_traces"]
@@ -76,18 +75,20 @@ class TestSuite2pImportDialog:
         dialog.load_f_file(str(test_data_dir / "F.npy"))
         dialog.load_fneu_file(str(test_data_dir / "Fneu.npy"))
 
+        assert dialog.f_data is not None
+        assert dialog.fneu_data is not None
         f_data = dialog.f_data
         fneu_data = dialog.fneu_data
         expected_contrasted = f_data - 0.7 * fneu_data
 
-        imported_data = {}
-        dialog.data_imported.connect(lambda data: imported_data.update(data))
-
         dialog.import_data()
+        imported_data = dialog.get_imported_data()
 
+        assert imported_data is not None
         traces = imported_data["suite2p_contrasting_traces"]["traces"]
         np.testing.assert_array_almost_equal(traces, expected_contrasted, decimal=5)
 
+    # double check
     def test_optional_spike_import_with_threshold(self, qtbot: QtBot):
         """Test importing optional spks file with adjustable threshold"""
         dialog = Suite2pImportDialog()
@@ -100,11 +101,10 @@ class TestSuite2pImportDialog:
 
         dialog.spike_threshold_spin.setValue(0.01)
 
-        imported_data = {}
-        dialog.data_imported.connect(lambda data: imported_data.update(data))
-
         dialog.import_data()
+        imported_data = dialog.get_imported_data()
 
+        assert imported_data is not None
         spike_data = imported_data["suite2p_spikes"]
         assert spike_data["threshold"] == dialog.spike_threshold_spin.value()
         assert len(spike_data["spikes"]) > 0
@@ -113,6 +113,7 @@ class TestSuite2pImportDialog:
             1.0 / dialog.sampling_rate_spin.value()
         )
 
+    # todo: double check
     def test_sampling_rate_adjustment_affects_timeline(self, qtbot: QtBot):
         """Changing the sampling rate should scale timestamps (base unit ms)."""
         dialog = Suite2pImportDialog()
@@ -124,10 +125,10 @@ class TestSuite2pImportDialog:
 
         dialog.sampling_rate_spin.setValue(10.0)  # Hz
 
-        imported_data = {}
-        dialog.data_imported.connect(lambda data: imported_data.update(data))
         dialog.import_data()
+        imported_data = dialog.get_imported_data()
 
+        assert imported_data is not None
         trace_data = imported_data["suite2p_contrasting_traces"]
         timestamps = trace_data["timestamps"]
         dt = trace_data["dt"]
@@ -149,10 +150,10 @@ class TestSuite2pImportDialog:
         dialog.load_fneu_file(str(test_data_dir / "Fneu.npy"))
         dialog.replace_checkbox.setChecked(True)
 
-        imported_data = {}
-        dialog.data_imported.connect(lambda data: imported_data.update(data))
         dialog.import_data()
+        imported_data = dialog.get_imported_data()
 
+        assert imported_data is not None
         assert imported_data.get("_replace_existing") is True
 
 

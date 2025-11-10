@@ -2,24 +2,37 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TypedDict
 
 import brian2.numpy_ as np
-from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
+from neuroseq.suite2p_importer import Suite2pSpikePayload
+from neuroseq.suite2p_importer import Suite2pTracePayload
 from neuroseq.suite2p_importer import prepare_suite2p_spikes
 from neuroseq.suite2p_importer import prepare_suite2p_traces
+
+
+class Suite2pImportResult(TypedDict, total=False):
+    suite2p_contrasting_traces: Suite2pTracePayload
+    suite2p_spikes: Suite2pSpikePayload
+    _replace_existing: bool
 
 
 class Suite2pImportDialog(QtWidgets.QDialog):
     """Dialog for importing Suite2p traces and optional spike data."""
 
-    data_imported = QtCore.Signal(dict)
-
-    def __init__(self, parent: QtWidgets.QWidget | None = None):
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
+        self._imported_data: Suite2pImportResult | None = None
+        self.f_file_path: Path | None = None
+        self.fneu_file_path: Path | None = None
+        self.spks_file_path: Path | None = None
+        self.f_data: np.ndarray | None = None
+        self.fneu_data: np.ndarray | None = None
+        self.spike_data: np.ndarray | None = None
         self._setup_ui()
 
     # -- UI helpers -----------------------------------------------------
@@ -115,6 +128,15 @@ class Suite2pImportDialog(QtWidgets.QDialog):
             lambda _: self._update_spike_preview()
         )
         options_layout.addRow("Spike threshold:", self.spike_threshold_spin)
+
+        self.replace_checkbox = QtWidgets.QCheckBox(
+            "Replace existing trace/spike data instead of appending"
+        )
+        self.replace_checkbox.setToolTip(
+            "When enabled, imported Suite2p traces or spikes will overwrite the "
+            "current widget data rather than being concatenated to it."
+        )
+        options_layout.addRow(self.replace_checkbox)
 
         layout.addWidget(options_group)
 
@@ -219,13 +241,12 @@ class Suite2pImportDialog(QtWidgets.QDialog):
             )
             self.spks_file_path_label.setText("Optional – no file selected")
             self.spks_file_path_label.setStyleSheet("QLabel { color: gray; }")
-            if hasattr(self, "spike_data"):
-                del self.spike_data
+            self.spike_data = None
             self._update_spike_preview()
 
     # -- Validation / preview ------------------------------------------
     def _check_files_loaded(self) -> None:
-        if hasattr(self, "f_data") and hasattr(self, "fneu_data"):
+        if self.f_data is not None and self.fneu_data is not None:
             if self.f_data.shape != self.fneu_data.shape:
                 QtWidgets.QMessageBox.critical(
                     self,
@@ -239,14 +260,14 @@ class Suite2pImportDialog(QtWidgets.QDialog):
             self._check_spike_shape_matches()
 
     def _check_spike_shape_matches(self) -> None:
-        if hasattr(self, "spike_data") and hasattr(self, "f_data"):
+        if self.spike_data is not None and self.f_data is not None:
             if self.spike_data.shape != self.f_data.shape:
                 QtWidgets.QMessageBox.warning(
                     self,
                     "Shape mismatch",
                     "spks.npy dimensions do not match F/Fneu data. Spike import will be disabled.",
                 )
-                del self.spike_data
+                self.spike_data = None
                 self.spike_preview_text.setPlainText(
                     "Spikes disabled because shapes do not match fluorescence data."
                 )
@@ -257,7 +278,7 @@ class Suite2pImportDialog(QtWidgets.QDialog):
                 self._update_spike_preview()
 
     def _update_trace_preview(self) -> None:
-        if not (hasattr(self, "f_data") and hasattr(self, "fneu_data")):
+        if self.f_data is None or self.fneu_data is None:
             self.preview_text.clear()
             return
 
@@ -273,7 +294,7 @@ class Suite2pImportDialog(QtWidgets.QDialog):
         self.preview_text.setPlainText("\n".join(preview_lines))
 
     def _update_spike_preview(self) -> None:
-        if not hasattr(self, "spike_data"):
+        if self.spike_data is None:
             self.spike_preview_text.setPlainText(
                 "No spks.npy selected. Spike import is optional."
             )
@@ -292,10 +313,11 @@ class Suite2pImportDialog(QtWidgets.QDialog):
 
     # -- Import logic ---------------------------------------------------
     def import_data(self) -> None:
-        if not (hasattr(self, "f_data") and hasattr(self, "fneu_data")):
+        if self.f_data is None or self.fneu_data is None:
             return
 
         try:
+            self._imported_data = None
             sampling_rate = float(self.sampling_rate_spin.value())
             if sampling_rate <= 0.0:
                 raise ValueError("Sample rate must be positive")
@@ -311,12 +333,13 @@ class Suite2pImportDialog(QtWidgets.QDialog):
                 sampling_rate=sampling_rate,
             )
 
-            imported_data: dict[str, object] = {
+            imported_data: Suite2pImportResult = {
                 "suite2p_contrasting_traces": trace_payload,
             }
+            imported_data["_replace_existing"] = self.replace_checkbox.isChecked()
 
             spike_summary = ""
-            if hasattr(self, "spike_data"):
+            if self.spike_data is not None:
                 threshold = self.spike_threshold_spin.value()
                 spike_payload = prepare_suite2p_spikes(
                     self.spike_data,
@@ -329,8 +352,7 @@ class Suite2pImportDialog(QtWidgets.QDialog):
                     f"\nSpikes: {len(spike_payload['spikes'])} events ≥ {threshold:.3f}"
                 )
 
-            self.data_imported.emit(imported_data)
-
+            self._imported_data = imported_data
             QtWidgets.QMessageBox.information(
                 self,
                 "Import successful",
@@ -345,3 +367,7 @@ class Suite2pImportDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.critical(
                 self, "Import Error", f"Error importing Suite2p data:\n{exc}"
             )
+
+    def get_imported_data(self) -> Suite2pImportResult | None:
+        """Return the last successfully imported data payload."""
+        return self._imported_data

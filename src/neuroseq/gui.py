@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import pathlib
 import runpy
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -655,10 +655,12 @@ class Gui(QtWidgets.QMainWindow):
     def import_suite2p_data(self) -> None:
         """Open dialog to import Suite2p traces (and optional spikes)"""
         dialog = Suite2pImportDialog(self)
-        dialog.data_imported.connect(self.handle_general_import)
-        dialog.exec_()
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            imported_data = dialog.get_imported_data()
+            if imported_data:
+                self.handle_general_import(imported_data)
 
-    def handle_general_import(self, imported_data: dict) -> None:
+    def handle_general_import(self, imported_data: Mapping[str, object]) -> None:
         """Handle imported data with timeline concatenation"""
         try:
             dt_for_expand: float | None = None
