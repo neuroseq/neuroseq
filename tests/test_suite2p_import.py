@@ -139,6 +139,22 @@ class TestSuite2pImportDialog:
         expected_duration = (trace_data["traces"].shape[1] - 1) * dt
         assert total_duration == pytest.approx(expected_duration)
 
+    def test_replace_checkbox_sets_flag(self, qtbot: QtBot):
+        """Checking the replace option propagates to emitted payloads."""
+        dialog = Suite2pImportDialog()
+        qtbot.addWidget(dialog)
+
+        test_data_dir = Path(__file__).parent / "imported_data"
+        dialog.load_f_file(str(test_data_dir / "F.npy"))
+        dialog.load_fneu_file(str(test_data_dir / "Fneu.npy"))
+        dialog.replace_checkbox.setChecked(True)
+
+        imported_data = {}
+        dialog.data_imported.connect(lambda data: imported_data.update(data))
+        dialog.import_data()
+
+        assert imported_data.get("_replace_existing") is True
+
 
 class TestSuite2pDataValidation:
     """Test data validation for Suite2p imports"""

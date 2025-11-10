@@ -144,3 +144,8 @@ neuroseq --help
 
 Importing data
 You can import data from .npy files, if they have traces or spikes. This is in the File dropdown.
+
+# To run specific tests:
+
+Use them _through_ uv if yo uare using uv, e.g. `uv pytest`, NOT python3 pytest..
+`uv run pytest tests/test_suite2p_import.py` etc

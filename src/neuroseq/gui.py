@@ -662,6 +662,8 @@ class Gui(QtWidgets.QMainWindow):
         """Handle imported data with timeline concatenation"""
         try:
             dt_for_expand: float | None = None
+            replace_mode = bool(imported_data.get("_replace_existing"))
+            cleared_widget_types: set[str] = set()
 
             # Initialize external data if needed
             if self.external_simulation_data is None:
@@ -676,6 +678,14 @@ class Gui(QtWidgets.QMainWindow):
                 base_key = key
 
                 widget_type = value.get("widget")
+                if (
+                    replace_mode
+                    and widget_type in {"trace", "spike"}
+                    and widget_type not in cleared_widget_types
+                ):
+                    self._clear_external_widget_data(widget_type)
+                    cleared_widget_types.add(widget_type)
+
                 if widget_type == "trace":
                     dataset_dt = float(value.get("dt", 1.0 / 30.0))
                     dt_for_expand = dataset_dt
@@ -821,6 +831,31 @@ class Gui(QtWidgets.QMainWindow):
             self.logger.info(
                 f"Stored new spike data for {base_key}: {len(new_spikes)} spikes"
             )
+
+    def _clear_external_widget_data(self, widget_type: str) -> None:
+        """Remove existing external data for the specified widget type."""
+        if not self.external_simulation_data:
+            return
+
+        keys_to_remove = [
+            key
+            for key, value in self.external_simulation_data.items()
+            if value.get("widget") == widget_type
+        ]
+        if not keys_to_remove:
+            return
+
+        for key in keys_to_remove:
+            del self.external_simulation_data[key]
+
+        if widget_type == "trace":
+            self.trace_widget.clear_data()
+        elif widget_type == "spike":
+            self.spike_widget.clear_data()
+
+        self.logger.info(
+            f"Cleared existing {widget_type} data before replacement (removed: {keys_to_remove})"
+        )
 
     def _get_max_timepoints(self) -> int:
         """Get maximum timepoints across all external data for stimulus expansion"""
