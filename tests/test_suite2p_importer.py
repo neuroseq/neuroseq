@@ -1,0 +1,61 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from neuroseq.suite2p_importer import prepare_suite2p_spikes
+from neuroseq.suite2p_importer import prepare_suite2p_traces
+
+DATA_DIR = Path(__file__).parent / "imported_data"
+
+
+def test_prepare_suite2p_traces_produces_widget_payload():
+    f_data = np.load(DATA_DIR / "F.npy")
+    fneu_data = np.load(DATA_DIR / "Fneu.npy")
+
+    payload = prepare_suite2p_traces(
+        f_data,
+        fneu_data,
+        max_neurons=3,
+        sampling_rate=30.0,
+    )
+
+    assert payload["widget"] == "trace"
+    assert payload["traces"].shape == (3, 900)
+    assert payload["timestamps"].shape == (900,)
+    assert payload["dt"] == pytest.approx(1 / 30.0)
+    assert payload["sampling_rate"] == pytest.approx(30.0)
+
+
+def test_prepare_suite2p_spikes_respects_threshold_and_limits_neurons():
+    spike_data = np.load(DATA_DIR / "spks.npy")
+    dt = 1 / 30.0
+
+    payload = prepare_suite2p_spikes(
+        spike_data,
+        dt=dt,
+        threshold=0.01,
+        max_neurons=4,
+    )
+
+    assert payload["widget"] == "spike"
+    assert payload["n_neurons"] == 4
+    assert payload["n_timesteps"] == spike_data.shape[1]
+    assert len(payload["timestamps"]) == len(payload["spikes"])
+    assert payload["threshold"] == pytest.approx(0.01)
+
+    neuron_indices = payload["spikes"]
+    time_indices = np.rint(payload["timestamps"] / dt).astype(int)
+    trimmed_data = spike_data[:4, :]
+    values = trimmed_data[neuron_indices, time_indices]
+    assert np.all(values >= 0.01)
+
+    high_threshold_payload = prepare_suite2p_spikes(
+        spike_data,
+        dt=dt,
+        threshold=1e6,
+        max_neurons=4,
+    )
+    assert len(high_threshold_payload["spikes"]) == 0
