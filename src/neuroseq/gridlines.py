@@ -31,7 +31,7 @@ def generate_gridlines(
 
 def generate_stripes(n_neurons: int, time: float) -> pygfx.InstancedMesh:
     """Generate horizontal zebra-stripes for a timeseries plot."""
-    color = pygfx.Color((0.0, 0.0, 0.4, 0.2))
+    color = pygfx.Color((0.0, 0.0, 0.0, 0.05))
     material = pygfx.MeshBasicMaterial(color=color)
     # time is in seconds, but the plots use milliseconds
     width = time * 1000.0

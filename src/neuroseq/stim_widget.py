@@ -20,8 +20,11 @@ class StimType(PrettyPrintEnum):
 class StimWidget(TimeseriesWidget):
     """A widget that displays a brian2.TimedArray stimuli timeseries for neurons.
 
-    Assumes that the stimuli are non-negative.
-    Applies global normalisation to the displayed stimuli such that the largest stimulus has an amplitude of 1.0.
+    The colormap used to represent the intensity of the stimuli depends on the type of stimulus:
+    - Excitatory stimuli are shown in a magenta colormap.
+    - Inhibitory stimuli are shown in a blue colormap.
+    - External stimuli (which can be both positive and negative) are shown in a diverging
+    colormap ranging from purple (negative) to green (positive).
     """
 
     def __init__(
@@ -34,6 +37,10 @@ class StimWidget(TimeseriesWidget):
         self.context_menu = menu
         self.subplot.title = "Stimuli"
         self.hover_slice_graphic: fpl.Graphic | None = None
+        self.vmin = 0.0
+        self.vmax = 1.0
+        self.cmap = "chrisluts:I_Magenta"
+        self.stim_type = StimType.Excitation
 
     def set_data(
         self, stims: b2.TimedArray | None = None, stim_type=StimType.Excitation
@@ -42,23 +49,24 @@ class StimWidget(TimeseriesWidget):
         if stims is None:
             return
         self.dt = stims.dt
-        self.hover_values = stims.values
-        vmin = 0
-        vmax = np.max(np.abs(stims.values))
-        match stim_type:
+        self.data_values = stims.values
+        self.vmin = 0
+        self.vmax = np.max(np.abs(stims.values))
+        self.stim_type = stim_type
+        match self.stim_type:
             case StimType.Excitation:
-                cmap = "chrisluts:I_Magenta"
+                self.cmap = "chrisluts:I_Magenta"
             case StimType.Inhibition:
-                cmap = "chrisluts:I_Blue"
+                self.cmap = "chrisluts:I_Blue"
             case StimType.External:
-                vmin = -vmax
-                cmap = "colorbrewer:PRGn"
+                self.vmin = -self.vmax
+                self.cmap = "colorbrewer:PRGn"
         self.units = b2.get_unit(stims.dim).__str__()
         self.graphic = self.subplot.add_image(
             stims.values.T,
-            vmin=vmin,
-            vmax=vmax,
-            cmap=cmap,
+            vmin=self.vmin,
+            vmax=self.vmax,
+            cmap=self.cmap,
             offset=(0.5, 0, 0),
         )
         self.n_neurons = stims.values.shape[1]
@@ -66,6 +74,30 @@ class StimWidget(TimeseriesWidget):
         self.controller.max_height = max(self.controller.max_height, self.n_neurons)
         self.controller.max_width = max(self.controller.max_width, self.n_timestamps)
         self.post_set_data()
+
+    def autoscale_colormap(self) -> None:
+        """Autoscale the colormap based on the current data."""
+        if self.graphic is not None:
+            max_value = np.max(np.abs(self.graphic.data.value))
+            self.vmax = max_value
+            self.graphic.vmax = self.vmax
+            if self.stim_type == StimType.External:
+                self.vmin = -self.vmax
+                self.graphic.vmin = self.vmin
+
+    def update_data_slice(
+        self, neuron_slice: slice, time_slice: slice, values: np.ndarray | float
+    ) -> None:
+        """Update a slice of the existing data in the widget.
+
+        Values can be a 2d array matching the shape of the slice defined by neuron_slice and time_slice,
+        or a single float value to set the entire slice to.
+        """
+        texture_values = values.T if isinstance(values, np.ndarray) else values
+        if self.graphic is not None:
+            # directly update the relevant data in the graphic's texture
+            self.graphic.data[neuron_slice, time_slice] = texture_values
+            self.autoscale_colormap()
 
     def set_hover_slice(self, data: np.ndarray | None) -> None:
         """Set the slice of data (if any) to be displayed at the current mouse position."""

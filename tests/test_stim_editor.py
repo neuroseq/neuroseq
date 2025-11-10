@@ -4,6 +4,7 @@ from pathlib import Path
 
 import brian2 as b2
 import brian2.numpy_ as np
+import pytest
 from brian2.tests.utils import assert_allclose
 from pytest import MonkeyPatch
 from pytest import approx
@@ -216,6 +217,30 @@ def test_stim_editor_actions(
     )
     assert len(error_messages) == 3
     assert "too many neurons" in error_messages[-1]
+    # default stim drawing intensity is the maximum value of the existing stimuli
+    assert stim_editor.draw_stim_intensity == pytest.approx(
+        stim_editor.current_stim_modifier.timed_array.values.max()
+    )
+    # try to set a negative stim drawing intensity
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("-1", True))
+    stim_editor.choose_stim_intensity()
+    assert len(error_messages) == 4
+    assert "negative" in error_messages[-1]
+    # try to set an invalid float stim drawing intensity
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getText", lambda *args: ("notanumber", True)
+    )
+    stim_editor.choose_stim_intensity()
+    assert len(error_messages) == 5
+    assert "could not parse" in error_messages[-1].lower()
+    # set a valid value for stim drawing intensity
+    new_stim_value = 1.85
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getText", lambda *args: (f"{new_stim_value}", True)
+    )
+    stim_editor.choose_stim_intensity()
+    assert len(error_messages) == 5
+    assert stim_editor.draw_stim_intensity == pytest.approx(new_stim_value)
     # 2ms stim is drawn at mouse click location if draw mode is active with mode DRAW
     stim_editor.draw_stim_length = 2
     stim_editor.set_mode(InteractMode.DRAW)
@@ -226,8 +251,6 @@ def test_stim_editor_actions(
     assert stim_editor.current_stim_modifier.timed_array.values[16, 7] == approx(0)
     assert stim_editor.current_stim_modifier.timed_array.values[17, 7] == approx(0)
     stim_editor.stim_widget_mouse_dragged(8, 8, 18, 18, 1)
-    new_stim_value = 1.0
-    # drawn stimuli have magnitude of the maximum value of the existing stimuli
     assert stim_editor.current_stim_modifier.timed_array.values[18, 8] == approx(
         new_stim_value
     )

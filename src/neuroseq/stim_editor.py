@@ -51,8 +51,10 @@ class StimEditor(QtWidgets.QWidget):
         self.mode = InteractMode.DRAW
         self.draw_mode = DrawMode.DRAW
         self.select_mode = SelectMode.SELECT
-        self.draw_stim_value = 1.0
+        self.draw_stim_intensity = 1.0  # in units of the draw_stim_units
         self.draw_stim_length = 1  # in milliseconds
+        self.draw_stim_units = ""
+        self.stim_type = StimType.Excitation
         self.stims_dict: dict[str, TimedArrayModifier] = {}
         self.copy_values = np.zeros((0, 0))
         layout = QtWidgets.QGridLayout(self)
@@ -159,13 +161,18 @@ class StimEditor(QtWidgets.QWidget):
             and self.current_stim_modifier != self.stims_dict[stim_name]
         ):
             self.current_stim_modifier = self.stims_dict[stim_name]
-            stim_type = StimType.Excitation
+            self.stim_type = StimType.Excitation
             if "inh" in stim_name.lower():
-                stim_type = StimType.Inhibition
+                self.stim_type = StimType.Inhibition
             elif "ext" in stim_name.lower():
-                stim_type = StimType.External
+                self.stim_type = StimType.External
+            self.draw_stim_intensity = np.max(
+                self.current_stim_modifier.timed_array.values
+            )
+            if self.draw_stim_intensity == 0:
+                self.draw_stim_intensity = 1.0
             self.stim_widget.set_data(
-                self.current_stim_modifier.timed_array, stim_type=stim_type
+                self.current_stim_modifier.timed_array, stim_type=self.stim_type
             )
             self.set_mode(InteractMode.DRAW)
             self.set_draw_mode(DrawMode.DRAW)
@@ -178,7 +185,7 @@ class StimEditor(QtWidgets.QWidget):
             self.action_draw_mode.setChecked(True)
             self.action_select_mode.setChecked(False)
             self.stim_widget.set_hover_slice(
-                self.draw_stim_value * np.ones((self.draw_stim_length, 1))
+                self.draw_stim_intensity * np.ones((self.draw_stim_length, 1))
             )
         elif self.mode == InteractMode.SELECT:
             self.action_draw_mode.setChecked(False)
@@ -197,12 +204,14 @@ class StimEditor(QtWidgets.QWidget):
     ) -> None:
         if self.current_stim_modifier is None:
             return
-        self.logger.debug(f"Draw stim for neurons {neuron_slice} and time {time_slice}")
-        stim_value = 0 if erase else self.draw_stim_value
+        stim_intensity = 0 if erase else self.draw_stim_intensity
+        self.logger.debug(
+            f"Draw stim intensity {stim_intensity} for neurons {neuron_slice} and time {time_slice}"
+        )
         time_slice = slice(time_slice.start, time_slice.stop)
         if not self._is_valid_slice(neuron_slice, time_slice):
             return
-        self.current_stim_modifier.do(neuron_slice, time_slice, stim_value)
+        self.current_stim_modifier.do(neuron_slice, time_slice, stim_intensity)
         self._stim_values_updated()
 
     def stim_widget_mouse_clicked(
@@ -316,7 +325,7 @@ class StimEditor(QtWidgets.QWidget):
         if self.select_mode == SelectMode.PASTE_INVERTED:
             max_value = np.max(self.copy_values)
             if max_value == 0:
-                max_value = self.draw_stim_value
+                max_value = self.draw_stim_intensity
             new_values = max_value - self.copy_values
         else:
             new_values = self.copy_values
@@ -432,6 +441,38 @@ class StimEditor(QtWidgets.QWidget):
             return
         self.logger.debug(f"Setting draw stim length to {self.draw_stim_length}ms")
 
+    def choose_stim_intensity(self) -> None:
+        new_stim_intensity, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "Stimulus intensity",
+            f"Intensity of stimulus in {self.stim_widget.units}",
+            QtWidgets.QLineEdit.EchoMode.Normal,
+            f"{self.draw_stim_intensity}",
+        )
+        if not ok:
+            return
+        try:
+            new_stim_intensity_as_float = float(new_stim_intensity)
+            if self.stim_type != StimType.External and new_stim_intensity_as_float < 0:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Invalid input",
+                    "Stimulus intensity for this stimulation type cannot be negative.",
+                )
+                return
+            self.draw_stim_intensity = new_stim_intensity_as_float
+            self.set_mode(self.mode)  # Reset mode to update hover slice
+        except ValueError:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Invalid input",
+                f"Could not parse '{new_stim_intensity}' as a number.",
+            )
+            return
+        self.logger.debug(
+            f"Setting draw stim intensity to {self.draw_stim_intensity} {self.stim_widget.units}"
+        )
+
     def _is_valid_slice(self, neuron_slice: slice, time_slice: slice) -> bool:
         return (
             neuron_slice.start >= 0
@@ -510,15 +551,26 @@ class StimEditor(QtWidgets.QWidget):
                 is_checked=False,
             )
         )
-        self.action_stim_length = add_action(
-            "Modify stimulus length",
-            self.choose_stim_length,
-            menu,
-            toolbar,
-            self,
-            icon=qta.icon("mdi6.arrow-expand-horizontal"),
+        self.actions_draw.append(
+            add_action(
+                "Modify stimulus intensity",
+                self.choose_stim_intensity,
+                menu,
+                toolbar,
+                self,
+                icon=qta.icon("mdi6.network-strength-3"),
+            )
         )
-        self.actions_draw.append(self.action_stim_length)
+        self.actions_draw.append(
+            add_action(
+                "Modify stimulus length",
+                self.choose_stim_length,
+                menu,
+                toolbar,
+                self,
+                icon=qta.icon("mdi6.arrow-expand-horizontal"),
+            )
+        )
         self.actions_draw_group = QtWidgets.QActionGroup(self)
         self.actions_draw_group.setExclusive(True)
         self.toolbar.addSeparator()

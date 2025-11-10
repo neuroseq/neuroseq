@@ -66,7 +66,7 @@ def mouse_click_and_drag(
 
 
 @pytest.fixture
-def stims() -> b2.TimedArray:
+def positive_stims() -> b2.TimedArray:
     n_neurons = 20
     n_stim_per_neuron = 5
     n_timestamps = 100
@@ -97,7 +97,7 @@ def negative_and_positive_stims() -> b2.TimedArray:
     return b2.TimedArray(stim.T, dt=dt * b2.second)
 
 
-def test_stim_widget_select_mode(qtbot: QtBot, stims: b2.TimedArray) -> None:
+def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: b2.TimedArray) -> None:
     controller = ConstrainedPanZoomController()
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
@@ -105,9 +105,9 @@ def test_stim_widget_select_mode(qtbot: QtBot, stims: b2.TimedArray) -> None:
     qtbot.waitUntil(lambda: stim_widget.isVisible())
     stim_widget.set_mode(InteractMode.SELECT)
     assert stim_widget.n_neurons == 0
-    n_timestamps = stims.values.shape[0]
-    n_neurons = stims.values.shape[1]
-    stim_widget.set_data(stims)
+    n_timestamps = positive_stims.values.shape[0]
+    n_neurons = positive_stims.values.shape[1]
+    stim_widget.set_data(positive_stims)
     # toggle selection text on and off again
     stim_widget.toggle_selection_text()
     stim_widget.toggle_selection_text()
@@ -154,7 +154,7 @@ def test_stim_widget_select_mode(qtbot: QtBot, stims: b2.TimedArray) -> None:
     )
 
 
-def test_stim_widget_draw_mode(qtbot: QtBot, stims: b2.TimedArray) -> None:
+def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: b2.TimedArray) -> None:
     controller = ConstrainedPanZoomController()
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
@@ -162,9 +162,9 @@ def test_stim_widget_draw_mode(qtbot: QtBot, stims: b2.TimedArray) -> None:
     qtbot.waitUntil(lambda: stim_widget.isVisible())
     stim_widget.set_mode(InteractMode.DRAW)
     assert stim_widget.n_neurons == 0
-    n_timestamps = stims.values.shape[0]
-    n_neurons = stims.values.shape[1]
-    stim_widget.set_data(stims)
+    n_timestamps = positive_stims.values.shape[0]
+    n_neurons = positive_stims.values.shape[1]
+    stim_widget.set_data(positive_stims)
     assert stim_widget.n_neurons == n_neurons
     x0 = stim_widget.size().width() // 4
     y0 = stim_widget.size().height() // 4
@@ -227,7 +227,7 @@ def test_stim_widget_draw_mode(qtbot: QtBot, stims: b2.TimedArray) -> None:
     assert 0 < n0 / n_neurons < 1.0
 
 
-def test_stim_widget_ext_stims_colormap(
+def test_stim_widget_ext_stims(
     qtbot: QtBot, negative_and_positive_stims: b2.TimedArray
 ) -> None:
     controller = ConstrainedPanZoomController()
@@ -235,5 +235,41 @@ def test_stim_widget_ext_stims_colormap(
     qtbot.addWidget(stim_widget)
     stim_widget.show()
     qtbot.waitUntil(lambda: stim_widget.isVisible())
+    # default stim type and colormap settings
+    assert stim_widget.stim_type == StimType.Excitation
+    assert stim_widget.vmin == pytest.approx(0.0)
+    assert stim_widget.vmax == pytest.approx(1.0)
+    assert stim_widget.cmap == "chrisluts:I_Magenta"
+    # set external stim type with negative and positive values
     stim_widget.set_data(negative_and_positive_stims, stim_type=StimType.External)
-    qtbot.wait(0)
+    assert stim_widget.stim_type == StimType.External
+    # vmin/vmax should be symmetric around zero and include the largest absolute value
+    assert stim_widget.vmin == pytest.approx(-3.0)
+    assert stim_widget.vmax == pytest.approx(3.0)
+    assert stim_widget.cmap == "colorbrewer:PRGn"
+    # update data slice with larger (negative) values than current max
+    stim_widget.update_data_slice(
+        neuron_slice=slice(0, 2),
+        time_slice=slice(0, 2),
+        values=np.array([[2.0, -4.0], [2.0, -2.0]]),
+    )
+    assert stim_widget.vmin == pytest.approx(-4.0)
+    assert stim_widget.vmax == pytest.approx(4.0)
+    # update data slice with larger (positive) values than current max
+    stim_widget.update_data_slice(
+        neuron_slice=slice(1, 2), time_slice=slice(1, 2), values=12
+    )
+    assert stim_widget.vmin == pytest.approx(-12.0)
+    assert stim_widget.vmax == pytest.approx(12.0)
+    # update data slice by overwriting the current largest (positive) values with zero
+    stim_widget.update_data_slice(
+        neuron_slice=slice(1, 2), time_slice=slice(1, 2), values=0
+    )
+    assert stim_widget.vmin == pytest.approx(-4.0)
+    assert stim_widget.vmax == pytest.approx(4.0)
+    # update data slice by overwriting the current largest (negative) values with zero
+    stim_widget.update_data_slice(
+        neuron_slice=slice(0, 2), time_slice=slice(0, 2), values=np.zeros((2, 2))
+    )
+    assert stim_widget.vmin == pytest.approx(-3.0)
+    assert stim_widget.vmax == pytest.approx(3.0)
