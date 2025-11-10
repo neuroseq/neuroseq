@@ -7,6 +7,7 @@ import pytest
 from pytestqt.qtbot import QtBot
 
 from neuroseq.suite2p_import_dialog import Suite2pImportDialog
+from neuroseq.suite2p_importer import compute_normalized_suite2p_traces
 
 
 class TestSuite2pImportDialog:
@@ -60,8 +61,12 @@ class TestSuite2pImportDialog:
 
         traces = trace_data["traces"]
         assert traces.shape == (5, 900)  # 5 neurons, 900 time steps
-        assert np.count_nonzero(traces) > 0  # non-zero values present
+        assert np.all((traces >= 0.0) & (traces <= 1.0))
         assert np.all(np.isfinite(traces))  # no NaN or inf values
+        expected_traces, _, _ = compute_normalized_suite2p_traces(
+            dialog.f_data, dialog.fneu_data
+        )
+        np.testing.assert_allclose(traces, expected_traces[: traces.shape[0], :])
         assert trace_data["sampling_rate"] == 30.0
         assert trace_data["dt"] == pytest.approx(1.0 / 30.0)
         assert "suite2p_spikes" not in imported_data
@@ -79,7 +84,7 @@ class TestSuite2pImportDialog:
         assert dialog.fneu_data is not None
         f_data = dialog.f_data
         fneu_data = dialog.fneu_data
-        expected_contrasted = f_data - 0.7 * fneu_data
+        expected_contrasted, _, _ = compute_normalized_suite2p_traces(f_data, fneu_data)
 
         dialog.import_data()
         imported_data = dialog.get_imported_data()
@@ -87,6 +92,24 @@ class TestSuite2pImportDialog:
         assert imported_data is not None
         traces = imported_data["suite2p_contrasting_traces"]["traces"]
         np.testing.assert_array_almost_equal(traces, expected_contrasted, decimal=5)
+
+    def test_import_without_fneu_file(self, qtbot: QtBot):
+        """F.npy-only imports should normalize fluorescence without neuropil subtraction."""
+        dialog = Suite2pImportDialog()
+        qtbot.addWidget(dialog)
+
+        test_data_dir = Path(__file__).parent / "imported_data"
+        dialog.load_f_file(str(test_data_dir / "F.npy"))
+
+        assert dialog.import_button.isEnabled()
+
+        dialog.import_data()
+        imported_data = dialog.get_imported_data()
+
+        assert imported_data is not None
+        traces = imported_data["suite2p_contrasting_traces"]["traces"]
+        expected_traces, _, _ = compute_normalized_suite2p_traces(dialog.f_data, None)
+        np.testing.assert_allclose(traces, expected_traces[: traces.shape[0], :])
 
     # double check
     def test_optional_spike_import_with_threshold(self, qtbot: QtBot):
