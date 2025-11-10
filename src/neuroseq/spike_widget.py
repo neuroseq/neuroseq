@@ -43,6 +43,11 @@ class SpikeWidget(TimeseriesWidget):
         self.subplot.clear()
         if spike_indices is None:
             return
+        if spike_indices.size == 0 or spike_times.size == 0:
+            self.logger.info("No spikes to display for current dataset.")
+            self.graphic = None
+            self.post_set_data()
+            return
         data = np.stack(
             [
                 spike_times.astype(np.float32) * np.float32(1000),
