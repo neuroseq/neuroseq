@@ -72,15 +72,15 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         super()._set_camera_state(new_state)
 
     def _set_scroll_bar_position(
-        self, scroll_bar: QtWidgets.QScrollBar, relative_position: float
-    ):
+        self, scroll_bar: QtWidgets.QScrollBar | None, relative_position: float
+    ) -> None:
         if scroll_bar is None:
             return
         scroll_bar.setValue(int(self.scroll_bar_steps * relative_position))
 
     def _set_scroll_bar_size(
-        self, scroll_bar: QtWidgets.QScrollBar, relative_size: float
-    ):
+        self, scroll_bar: QtWidgets.QScrollBar | None, relative_size: float
+    ) -> None:
         if scroll_bar is None:
             return
         old_page_step = scroll_bar.pageStep()

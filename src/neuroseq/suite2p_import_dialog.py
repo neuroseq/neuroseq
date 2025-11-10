@@ -10,6 +10,7 @@ from qtpy.compat import getopenfilename
 
 from neuroseq.suite2p_importer import Suite2pSpikePayload
 from neuroseq.suite2p_importer import Suite2pTracePayload
+from neuroseq.suite2p_importer import compute_normalized_suite2p_traces
 from neuroseq.suite2p_importer import prepare_suite2p_spikes
 from neuroseq.suite2p_importer import prepare_suite2p_traces
 
@@ -44,8 +45,9 @@ class Suite2pImportDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
 
         instructions = QtWidgets.QLabel(
-            "Select Suite2p fluorescence files (F.npy and Fneu.npy).\n"
-            "Optionally include spks.npy to import spike events at the same time."
+            "Select the Suite2p fluorescence file (F.npy). "
+            "Optionally include Fneu.npy for neuropil subtraction and spks.npy "
+            "to import spike events at the same time."
         )
         instructions.setWordWrap(True)
         layout.addWidget(instructions)
@@ -62,7 +64,7 @@ class Suite2pImportDialog(QtWidgets.QDialog):
         f_layout.addWidget(browse_f_button)
         file_layout.addRow("F.npy:", f_layout)
 
-        self.fneu_file_path_label = QtWidgets.QLabel("No file selected")
+        self.fneu_file_path_label = QtWidgets.QLabel("Optional – no file selected")
         self.fneu_file_path_label.setStyleSheet("QLabel { color: gray; }")
         browse_fneu_button = QtWidgets.QPushButton("Browse…")
         browse_fneu_button.clicked.connect(self.browse_fneu_file)
@@ -246,18 +248,23 @@ class Suite2pImportDialog(QtWidgets.QDialog):
 
     # -- Validation / preview ------------------------------------------
     def _check_files_loaded(self) -> None:
-        if self.f_data is not None and self.fneu_data is not None:
-            if self.f_data.shape != self.fneu_data.shape:
-                QtWidgets.QMessageBox.critical(
-                    self,
-                    "Shape mismatch",
-                    f"F.npy shape {self.f_data.shape} does not match Fneu.npy shape {self.fneu_data.shape}",
-                )
-                self.import_button.setEnabled(False)
-                return
-            self.import_button.setEnabled(True)
-            self._update_trace_preview()
-            self._check_spike_shape_matches()
+        if self.f_data is None:
+            self.import_button.setEnabled(False)
+            self.preview_text.clear()
+            return
+
+        if self.fneu_data is not None and self.f_data.shape != self.fneu_data.shape:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Shape mismatch",
+                f"F.npy shape {self.f_data.shape} does not match Fneu.npy shape {self.fneu_data.shape}",
+            )
+            self.import_button.setEnabled(False)
+            return
+
+        self.import_button.setEnabled(True)
+        self._update_trace_preview()
+        self._check_spike_shape_matches()
 
     def _check_spike_shape_matches(self) -> None:
         if self.spike_data is not None and self.f_data is not None:
@@ -278,19 +285,41 @@ class Suite2pImportDialog(QtWidgets.QDialog):
                 self._update_spike_preview()
 
     def _update_trace_preview(self) -> None:
-        if self.f_data is None or self.fneu_data is None:
+        if self.f_data is None:
             self.preview_text.clear()
             return
 
-        contrasting_traces = self.f_data - 0.7 * self.fneu_data
+        try:
+            normalized_traces, raw_min, raw_max = compute_normalized_suite2p_traces(
+                self.f_data, self.fneu_data
+            )
+        except ValueError as exc:
+            self.preview_text.setPlainText(str(exc))
+            return
+
         n_neurons, n_timepoints = self.f_data.shape
+        normalized_min = float(np.min(normalized_traces))
+        normalized_max = float(np.max(normalized_traces))
         preview_lines = [
             f"F.npy shape: {self.f_data.shape}, range {np.min(self.f_data):.3f}–{np.max(self.f_data):.3f}",
-            f"Fneu.npy shape: {self.fneu_data.shape}, range {np.min(self.fneu_data):.3f}–{np.max(self.fneu_data):.3f}",
-            f"Contrasting traces: {n_neurons} neurons × {n_timepoints} timepoints",
-            f"Value range: {np.min(contrasting_traces):.3f}–{np.max(contrasting_traces):.3f}",
-            f"Mean ± std: {np.mean(contrasting_traces):.3f} ± {np.std(contrasting_traces):.3f}",
         ]
+
+        if self.fneu_data is not None:
+            preview_lines.append(
+                f"Fneu.npy shape: {self.fneu_data.shape}, range {np.min(self.fneu_data):.3f}–{np.max(self.fneu_data):.3f}"
+            )
+            preview_lines.append("Neuropil subtraction applied (F - 0.7 · Fneu)")
+        else:
+            preview_lines.append("Fneu.npy not provided – using F.npy directly")
+
+        preview_lines.extend(
+            [
+                f"Contrasting traces: {n_neurons} neurons × {n_timepoints} timepoints",
+                f"Pre-normalization range: {raw_min:.3f}–{raw_max:.3f}",
+                f"Normalized range: {normalized_min:.3f}–{normalized_max:.3f}",
+                f"Mean ± std (normalized): {np.mean(normalized_traces):.3f} ± {np.std(normalized_traces):.3f}",
+            ]
+        )
         self.preview_text.setPlainText("\n".join(preview_lines))
 
     def _update_spike_preview(self) -> None:
@@ -313,7 +342,7 @@ class Suite2pImportDialog(QtWidgets.QDialog):
 
     # -- Import logic ---------------------------------------------------
     def import_data(self) -> None:
-        if self.f_data is None or self.fneu_data is None:
+        if self.f_data is None:
             return
 
         try:

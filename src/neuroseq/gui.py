@@ -3,7 +3,8 @@ from __future__ import annotations
 import logging
 import pathlib
 import runpy
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
+from collections.abc import Mapping
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -29,6 +30,7 @@ from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim_console import StimConsole
 from neuroseq.stim_editor import StimEditor
 from neuroseq.suite2p_import_dialog import Suite2pImportDialog
+from neuroseq.suite2p_import_dialog import Suite2pImportResult
 from neuroseq.trace_widget import TraceWidget
 from neuroseq.utils import add_action
 from neuroseq.utils import construct_synapse_matrix
@@ -538,22 +540,9 @@ class Gui(QtWidgets.QMainWindow):
                 simulation_time,
             )
             assert isinstance(self.external_simulation_data, dict)
-            self.cmb_neuron.clear()
-            self.cmb_spike.clear()
-            self.cmb_synapse.clear()
             for name, data in self.external_simulation_data.items():
-                widget = data.get("widget", "")
-                if widget == "trace":
-                    self.cmb_neuron.addItem(name)
-                elif widget == "spike":
-                    self.cmb_spike.addItem(name)
-                elif widget == "heatmap":
-                    self.cmb_synapse.addItem(name)
-                else:
-                    self.logger.info(
-                        f"Ignoring unknown widget type {widget} for external simulation data {name}"
-                    )
                 self.logger.info(f"External simulation data: {name}: {data.keys()}")
+            self._update_external_data_widgets()
         except Exception as e:
             QtWidgets.QMessageBox.critical(
                 self,
@@ -660,7 +649,9 @@ class Gui(QtWidgets.QMainWindow):
             if imported_data:
                 self.handle_general_import(imported_data)
 
-    def handle_general_import(self, imported_data: Mapping[str, object]) -> None:
+    def handle_general_import(
+        self, imported_data: Suite2pImportResult | Mapping[str, object]
+    ) -> None:
         """Handle imported data with timeline concatenation"""
         try:
             dt_for_expand: float | None = None
@@ -919,44 +910,39 @@ class Gui(QtWidgets.QMainWindow):
         if not self.external_simulation_data:
             return
 
-        # Update comboboxes with new data
-        if hasattr(self, "cmb_neuron"):
-            current_selection = self.cmb_neuron.currentText()
-            self.cmb_neuron.clear()
-            trace_datasets = [
-                key
-                for key, value in self.external_simulation_data.items()
-                if value.get("widget") == "trace"
-            ]
-            self.logger.info(f"Available trace datasets: {trace_datasets}")
-            if trace_datasets:
-                # Sort by timestamp (newest first) to show latest imports first
-                trace_datasets.sort(reverse=True)
-                self.cmb_neuron.addItems(trace_datasets)
-                # Select the newest (first) dataset, or restore previous selection if it still exists
-                if current_selection in trace_datasets:
-                    self.cmb_neuron.setCurrentText(current_selection)
-                else:
-                    self.cmb_neuron.setCurrentIndex(0)  # Select newest
+        widget_map = {
+            "trace": getattr(self, "cmb_neuron", None),
+            "spike": getattr(self, "cmb_spike", None),
+            "heatmap": getattr(self, "cmb_synapse", None),
+        }
 
-        if hasattr(self, "cmb_spike"):
-            current_selection = self.cmb_spike.currentText()
-            self.cmb_spike.clear()
-            spike_datasets = [
+        known_types = set(widget_map.keys())
+        for name, data in self.external_simulation_data.items():
+            widget_type = data.get("widget", "")
+            if widget_type not in known_types:
+                self.logger.info(
+                    f"Ignoring unknown widget type {widget_type} for external simulation data {name}"
+                )
+
+        for widget_type, combo in widget_map.items():
+            if combo is None:
+                continue
+
+            current_selection = combo.currentText()
+            combo.clear()
+            datasets = [
                 key
                 for key, value in self.external_simulation_data.items()
-                if value.get("widget") == "spike"
+                if value.get("widget") == widget_type
             ]
-            self.logger.info(f"Available spike datasets: {spike_datasets}")
-            if spike_datasets:
-                # Sort by timestamp (newest first) to show latest imports first
-                spike_datasets.sort(reverse=True)
-                self.cmb_spike.addItems(spike_datasets)
-                # Select the newest (first) dataset, or restore previous selection if it still exists
-                if current_selection in spike_datasets:
-                    self.cmb_spike.setCurrentText(current_selection)
+            self.logger.info(f"Available {widget_type} datasets: {datasets}")
+            if datasets:
+                datasets.sort(reverse=True)
+                combo.addItems(datasets)
+                if current_selection in datasets:
+                    combo.setCurrentText(current_selection)
                 else:
-                    self.cmb_spike.setCurrentIndex(0)  # Select
+                    combo.setCurrentIndex(0)
 
     def connect_external_simulation_function_with_brian2(self) -> None:
         filename = "./external_simulation_example/run_brian2_externally.py"
