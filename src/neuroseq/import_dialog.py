@@ -196,6 +196,10 @@ class Suite2pImportDialog(QtWidgets.QDialog):
             self.logger.info(
                 f"Loaded F.npy ({self.f_data.shape[0]} neurons × {self.f_data.shape[1]} timepoints)"
             )
+            # Set max_neurons to the actual number of neurons in the data
+            n_neurons = self.f_data.shape[0]
+            self.max_neurons_spin.setMaximum(max(10000, n_neurons))
+            self.max_neurons_spin.setValue(n_neurons)
             self._check_files_loaded()
         except Exception as exc:
             self.logger.exception("Error loading F.npy file")

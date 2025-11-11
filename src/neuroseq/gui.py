@@ -657,21 +657,11 @@ class Gui(QtWidgets.QMainWindow):
             dt_for_expand: float | None = None
             replace_mode = bool(imported_data.get("_replace_existing"))
             cleared_widget_types: set[str] = set()
-            has_spike_import = any(
-                isinstance(value, Mapping) and value.get("widget") == "spike"
-                for key, value in imported_data.items()
-                if not key.startswith("_")
-            )
+            imported_widget_types: set[str] = set()
 
             # Initialize external data if needed
             if self.external_simulation_data is None:
                 self.external_simulation_data = {}
-
-            # If extend mode (not replace) and no spike data is being imported,
-            # clear existing spike data to avoid showing outdated spikes
-            if not replace_mode and not has_spike_import:
-                self._clear_external_widget_data("spike")
-                cleared_widget_types.add("spike")
 
             # Process each dataset and concatenate to existing timeline
             for key, value in imported_data.items():
@@ -693,6 +683,10 @@ class Gui(QtWidgets.QMainWindow):
                 widget_type = (
                     widget_type_obj if isinstance(widget_type_obj, str) else ""
                 )
+
+                if widget_type:
+                    imported_widget_types.add(widget_type)
+
                 if (
                     replace_mode
                     and widget_type in {"trace", "spike"}
@@ -713,6 +707,15 @@ class Gui(QtWidgets.QMainWindow):
                 else:
                     # For other data types, just store with base key
                     self.external_simulation_data[base_key] = payload
+
+            # extend not replace mode
+            if (
+                not replace_mode
+                and "trace" in imported_widget_types
+                and "spike" not in imported_widget_types
+                and "spike" not in cleared_widget_types
+            ):
+                self._clear_external_widget_data("spike")
 
             # Calculate total timepoints across all concatenated data for stimulus expansion
             total_timepoints = self._get_max_timepoints()
