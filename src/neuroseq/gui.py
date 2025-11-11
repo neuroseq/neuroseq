@@ -647,6 +647,8 @@ class Gui(QtWidgets.QMainWindow):
             if imported_data:
                 self.handle_general_import(imported_data)
 
+    # todo: Refactor this out of this function. It's not particularly/relaly the GUI except the widget interaction.
+    # Certainly the code about clearing spks etc, this management of state, when we have multiple experiments, needs to be elsewhere.
     def handle_general_import(
         self, imported_data: Suite2pImportResult | Mapping[str, object]
     ) -> None:
@@ -655,10 +657,21 @@ class Gui(QtWidgets.QMainWindow):
             dt_for_expand: float | None = None
             replace_mode = bool(imported_data.get("_replace_existing"))
             cleared_widget_types: set[str] = set()
+            has_spike_import = any(
+                isinstance(value, Mapping) and value.get("widget") == "spike"
+                for key, value in imported_data.items()
+                if not key.startswith("_")
+            )
 
             # Initialize external data if needed
             if self.external_simulation_data is None:
                 self.external_simulation_data = {}
+
+            # If extend mode (not replace) and no spike data is being imported,
+            # clear existing spike data to avoid showing outdated spikes
+            if not replace_mode and not has_spike_import:
+                self._clear_external_widget_data("spike")
+                cleared_widget_types.add("spike")
 
             # Process each dataset and concatenate to existing timeline
             for key, value in imported_data.items():
@@ -1099,7 +1112,6 @@ class Gui(QtWidgets.QMainWindow):
         self.menu_file = menu.addMenu("&File")
         self.toolbar_file = QtWidgets.QToolBar("File")
         self.addToolBar(self.toolbar_file)
-        self.menu_import = menu.addMenu("&Import")
         self.menu_simulate = menu.addMenu("&Simulate")
         self.toolbar_simulate = QtWidgets.QToolBar("Simulate")
         self.addToolBar(self.toolbar_simulate)
@@ -1123,7 +1135,6 @@ class Gui(QtWidgets.QMainWindow):
 
     def _create_actions(self) -> None:
         self._create_actions_file(self.menu_file, self.toolbar_file)
-        self._create_actions_import(self.menu_import)
         self._create_actions_simulate(self.menu_simulate, self.toolbar_simulate)
         self._create_actions_playback(self.menu_playback, self.toolbar_playback)
         self._create_actions_view(self.menu_view, self.toolbar_view)
@@ -1173,6 +1184,15 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             shortcut="Ctrl+E",
             icon=qta.icon("ph.polygon-light"),
+        )
+        menu.addSeparator()
+        add_action(
+            "Import Suite2p &Data",
+            self.import_suite2p_data,
+            menu,
+            toolbar,
+            shortcut="Ctrl+Shift+I",
+            icon=qta.icon("mdi6.import"),
         )
         menu.addSeparator()
         add_action(
@@ -1309,16 +1329,6 @@ class Gui(QtWidgets.QMainWindow):
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None
     ) -> None:
         add_action("&About", self.about, menu)
-
-    def _create_actions_import(self, menu: QtWidgets.QMenu) -> None:
-        add_action(
-            "Import Suite2p &Data",
-            self.import_suite2p_data,
-            menu,
-            None,
-            shortcut="Ctrl+Shift+I",
-            icon=qta.icon("mdi6.import"),
-        )
 
     def _create_actions_data(
         self, menu: QtWidgets.QMenu | None, toolbar: QtWidgets.QToolBar | None

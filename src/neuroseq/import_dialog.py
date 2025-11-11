@@ -292,7 +292,7 @@ class Suite2pImportDialog(QtWidgets.QDialog):
             return
 
         try:
-            normalized_traces, raw_min, raw_max = compute_normalized_suite2p_traces(
+            normalized_traces, raw_mins, raw_maxs = compute_normalized_suite2p_traces(
                 self.f_data, self.fneu_data
             )
         except ValueError as exc:
@@ -302,6 +302,8 @@ class Suite2pImportDialog(QtWidgets.QDialog):
         n_neurons, n_timepoints = self.f_data.shape
         normalized_min = float(np.min(normalized_traces))
         normalized_max = float(np.max(normalized_traces))
+        overall_raw_min = float(np.min(raw_mins))
+        overall_raw_max = float(np.max(raw_maxs))
         preview_lines = [
             f"F.npy shape: {self.f_data.shape}, range {np.min(self.f_data):.3f}–{np.max(self.f_data):.3f}",
         ]
@@ -317,7 +319,8 @@ class Suite2pImportDialog(QtWidgets.QDialog):
         preview_lines.extend(
             [
                 f"Contrasting traces: {n_neurons} neurons × {n_timepoints} timepoints",
-                f"Pre-normalization range: {raw_min:.3f}–{raw_max:.3f}",
+                f"Pre-normalization range (overall): {overall_raw_min:.3f}–{overall_raw_max:.3f}",
+                "Per-neuron normalization applied to preserve individual dynamics",
                 f"Normalized range: {normalized_min:.3f}–{normalized_max:.3f}",
                 f"Mean ± std (normalized): {np.mean(normalized_traces):.3f} ± {np.std(normalized_traces):.3f}",
             ]
@@ -332,14 +335,17 @@ class Suite2pImportDialog(QtWidgets.QDialog):
             return
 
         threshold = self.spike_threshold_spin.value()
-        normalized_spikes, raw_min, raw_max = compute_normalized_suite2p_spikes(
+        normalized_spikes, raw_mins, raw_maxs = compute_normalized_suite2p_spikes(
             self.spike_data
         )
         non_zero_count = int(np.sum(self.spike_data > 0))
         above_threshold = int(np.sum(normalized_spikes >= threshold))
+        overall_raw_min = float(np.min(raw_mins))
+        overall_raw_max = float(np.max(raw_maxs))
         preview_lines = [
             f"spks.npy shape: {self.spike_data.shape}",
-            f"Raw value range: {raw_min:.3f}–{raw_max:.3f}",
+            f"Raw value range (overall): {overall_raw_min:.3f}–{overall_raw_max:.3f}",
+            "Per-neuron normalization applied to preserve individual dynamics",
             "Normalized spike magnitudes scaled to 0–1",
             f"Non-zero entries: {non_zero_count}",
             f"Entries ≥ threshold ({threshold:.3f}): {above_threshold}",
