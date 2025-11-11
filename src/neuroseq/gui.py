@@ -19,7 +19,6 @@ from qtpy.compat import getsavefilename
 
 from neuroseq import __version__
 from neuroseq.b2_model import B2Model
-from neuroseq.cellpose_helper_dialog import CellposeLegendHelperDialog
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.custom_analysis_widget import CustomAnalysisDataType
 from neuroseq.custom_analysis_widget import CustomAnalysisType
@@ -648,11 +647,6 @@ class Gui(QtWidgets.QMainWindow):
             if imported_data:
                 self.handle_general_import(imported_data)
 
-    def open_cellpose_legend_helper(self) -> None:
-        """Open the placeholder dialog for Cellpose legend assistance."""
-        dialog = CellposeLegendHelperDialog(self)
-        dialog.exec()
-
     def handle_general_import(
         self, imported_data: Suite2pImportResult | Mapping[str, object]
     ) -> None:
@@ -683,7 +677,9 @@ class Gui(QtWidgets.QMainWindow):
                 base_key = key
 
                 widget_type_obj = payload.get("widget")
-                widget_type = widget_type_obj if isinstance(widget_type_obj, str) else ""
+                widget_type = (
+                    widget_type_obj if isinstance(widget_type_obj, str) else ""
+                )
                 if (
                     replace_mode
                     and widget_type in {"trace", "spike"}
@@ -1291,7 +1287,7 @@ class Gui(QtWidgets.QMainWindow):
         )
 
     def _create_actions_settings(
-        self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
+        self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None
     ) -> None:
         add_action("&Brian2 simulation backend", self.choose_brian2_backend, menu)
         add_action("&Stimulus automatic padding", self.choose_stim_padding_secs, menu)
@@ -1310,7 +1306,7 @@ class Gui(QtWidgets.QMainWindow):
         )
 
     def _create_actions_help(
-        self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
+        self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None
     ) -> None:
         add_action("&About", self.about, menu)
 
@@ -1323,17 +1319,12 @@ class Gui(QtWidgets.QMainWindow):
             shortcut="Ctrl+Shift+I",
             icon=qta.icon("mdi6.import"),
         )
-        add_action(
-            "&Cellpose To Neuron ID Legend Helper",
-            self.open_cellpose_legend_helper,
-            menu,
-            None,
-            icon=qta.icon("mdi6.image-plus"),
-        )
 
     def _create_actions_data(
-        self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
+        self, menu: QtWidgets.QMenu | None, toolbar: QtWidgets.QToolBar | None
     ) -> None:
+        if toolbar is None:
+            return
         self.cmb_stim = QtWidgets.QComboBox()
         toolbar.addWidget(QtWidgets.QLabel("  Stim data: "))
         toolbar.addWidget(self.cmb_stim)
