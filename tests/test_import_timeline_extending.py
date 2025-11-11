@@ -175,7 +175,10 @@ def _create_import_data(
         sampling_rate=SAMPLING_RATE,
     )
 
-    return {TRACE_KEY: trace_payload, "_replace_existing": replace_existing}
+    return {
+        "suite2p_contrasting_traces": trace_payload,
+        "_replace_existing": replace_existing,
+    }
 
 
 def _timeline_metrics(trace_dataset: dict[str, Any]) -> tuple[int, float]:
@@ -332,8 +335,8 @@ def test_import_with_spikes_and_traces(
     )
 
     import_data: Suite2pImportResult = {
-        TRACE_KEY: trace_payload,
-        SPIKE_KEY: spike_payload,
+        "suite2p_contrasting_traces": trace_payload,
+        "suite2p_spikes": spike_payload,
         "_replace_existing": True,
     }
 

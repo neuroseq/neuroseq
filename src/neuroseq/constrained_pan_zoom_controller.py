@@ -22,7 +22,7 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
     }
     scroll_bar_steps = 999
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         self.min_width = 1.0
         self.max_width = 1.0
         self.min_height = 1.0
