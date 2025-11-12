@@ -16,6 +16,7 @@ from neuroseq.custom_analysis_widget import CustomAnalysisDataType
 from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.gridlines import GridLines
 from neuroseq.heatmap_widget import HeatmapWidget
+from neuroseq.heatmap_widget_fpl import HeatmapWidgetFPL
 from neuroseq.region_of_interest import RegionOfInterest
 from neuroseq.text import Text
 from neuroseq.utils import InteractMode
@@ -49,6 +50,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
     ) -> None:
         super().__init__(parent)
         self.heatmap_widget: HeatmapWidget | None = None
+        self.heatmap_widget_fpl: HeatmapWidgetFPL | None = None  # TODO-FPL
         self.controller = controller
         self.figure: fpl.Figure = fpl.Figure(controllers=controller)
         layout = QtWidgets.QVBoxLayout(self)
@@ -177,6 +179,12 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
                 lambda ev: self.heatmap_widget.timeLine.setValue(ev.info["value"]),
                 "selection",
             )
+            self.timeline.add_event_handler(
+                lambda ev: setattr(
+                    self.heatmap_widget_fpl.image_widget.current_index, ev.info["index"]
+                ),
+                "selection",
+            )  # TODO-FPL
 
     def clear_data(self) -> None:
         self.subplot.clear()
@@ -337,6 +345,9 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
             f"Selecting neurons {neuron_index_slice} and times {time_index_slice}"
         )
 
-    def connect_heatmap_widget(self, heatmap_widget: pg.ImageView) -> None:
+    def connect_heatmap_widget(
+        self, heatmap_widget: pg.ImageView, heatmap_widget_fpl: HeatmapWidgetFPL
+    ) -> None:
         """Connect the timeline in this widget to the timeline in the HeatmapWidget."""
         self.heatmap_widget = heatmap_widget
+        self.heatmap_widget_fpl = heatmap_widget_fpl  # TODO-FPL

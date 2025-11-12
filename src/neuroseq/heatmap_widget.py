@@ -51,6 +51,9 @@ class HeatmapWidget(pg.ImageView):
         self, timeseries_widget: QtWidgets.QWidget
     ) -> None:
         """Connect the timeline in this widget to the timeline in the TimeseriesWidget."""
-        self.sigTimeChanged.connect(
-            lambda idx, time: setattr(timeseries_widget.timeline, "selection", time)
-        )
+
+        def _on_sigTimeChanged(idx, time):
+            print(idx, time)
+            timeseries_widget.timeline.selection = time
+
+        self.sigTimeChanged.connect(_on_sigTimeChanged)

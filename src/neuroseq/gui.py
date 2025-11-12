@@ -104,18 +104,28 @@ class Gui(QtWidgets.QMainWindow):
         self.heatmap_widget.connect_timeseries_widget_timeline(
             self.stim_editor.stim_widget
         )  # TODO-FPL
+        self.heatmap_widget_fpl.connect_timeseries_widget_timeline(
+            self.stim_editor.stim_widget
+        )  # TODO-FPL
         self.stim_editor.stim_widget.connect_heatmap_widget(
-            self.heatmap_widget
+            self.heatmap_widget, self.heatmap_widget_fpl
         )  # TODO-FPL
         self.heatmap_widget.connect_timeseries_widget_timeline(
             self.trace_widget
         )  # TODO-FPL
-        self.trace_widget.connect_heatmap_widget(self.heatmap_widget)  # TODO-FPL
+        self.heatmap_widget_fpl.connect_timeseries_widget_timeline(
+            self.trace_widget
+        )  # TODO-FPL
+        self.trace_widget.connect_heatmap_widget(
+            self.heatmap_widget, self.heatmap_widget_fpl
+        )  # TODO-FPL
         # re-enable when fastplotlib scatter plots support timeline
         # self.heatmap_widget.connect_timeseries_widget_timeline(
         #     self.spike_widget
         # )  # TODO-FPL
-        self.spike_widget.connect_heatmap_widget(self.heatmap_widget)  # TODO-FPL
+        self.spike_widget.connect_heatmap_widget(
+            self.heatmap_widget, self.heatmap_widget_fpl
+        )  # TODO-FPL
         self.stim_console.sig_stims_values_dict_updated.connect(
             self.stim_editor.update_stim_values_dict
         )
@@ -381,7 +391,7 @@ class Gui(QtWidgets.QMainWindow):
             f"Displaying {synapse_name} in HeatmapWidget: {timestamps.shape} timestamps, {matrix.shape} data"
         )
         self.heatmap_widget.set_data(matrix, timestamps)
-        self.heatmap_widget_fpl.set_data(matrix)  # TODO-FPL
+        self.heatmap_widget_fpl.set_data(matrix, timestamps)  # TODO-FPL
 
     def set_synapse_external(self, synapse_name: str) -> None:
         try:
@@ -395,7 +405,7 @@ class Gui(QtWidgets.QMainWindow):
                 f"Displaying external HeatmapWidget data {synapse_name}: {timestamps.shape} timestamps, {matrix.shape} data"
             )
             self.heatmap_widget.set_data(matrix, timestamps)
-            self.heatmap_widget_fpl.set_data(matrix)  # TODO-FPL
+            self.heatmap_widget_fpl.set_data(matrix, timestamps)  # TODO-FPL
         except Exception as e:
             QtWidgets.QMessageBox.critical(
                 self,
