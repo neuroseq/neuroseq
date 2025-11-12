@@ -380,7 +380,7 @@ class Gui(QtWidgets.QMainWindow):
         self.logger.info(
             f"Displaying {synapse_name} in HeatmapWidget: {timestamps.shape} timestamps, {matrix.shape} data"
         )
-        self.heatmap_widget.set_data(matrix)
+        self.heatmap_widget.set_data(matrix, timestamps)
         self.heatmap_widget_fpl.set_data(matrix)  # TODO-FPL
 
     def set_synapse_external(self, synapse_name: str) -> None:
@@ -394,7 +394,7 @@ class Gui(QtWidgets.QMainWindow):
             self.logger.info(
                 f"Displaying external HeatmapWidget data {synapse_name}: {timestamps.shape} timestamps, {matrix.shape} data"
             )
-            self.heatmap_widget.set_data(matrix)
+            self.heatmap_widget.set_data(matrix, timestamps)
             self.heatmap_widget_fpl.set_data(matrix)  # TODO-FPL
         except Exception as e:
             QtWidgets.QMessageBox.critical(
