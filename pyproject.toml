@@ -19,11 +19,12 @@ dependencies = [
     "h5py",
     "qtawesome",
     "click",
-    "fastplotlib>=0.5.1",
+    "fastplotlib[imgui]",
     "pyparsing!=3.2.4",
     "platformdirs",
     "psutil",
     "nvidia-ml-py",
+    "imgui-bundle",
 ]
 dynamic = ["version"]
 
