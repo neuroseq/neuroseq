@@ -82,6 +82,51 @@ def tmp_config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path):
     yield tmp_path
 
 
+def _generate_suite2p_trace_arrays(
+    n_neurons: int = 5,
+    n_timepoints: int = 900,
+    seed: int = 12345,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Generate simple Suite2p-style arrays with fixed means/stds."""
+    rng = np.random.default_rng(seed)
+
+    f_data = rng.normal(
+        loc=146.0,
+        scale=14.401437,
+        size=(n_neurons, n_timepoints),
+    ).astype(np.float32)
+
+    fneu_data = rng.normal(
+        loc=133.0,
+        scale=12.630169,
+        size=(n_neurons, n_timepoints),
+    ).astype(np.float32)
+
+    spike_data = np.zeros((n_neurons, n_timepoints), dtype=np.float32)
+    total_points = n_neurons * n_timepoints
+    n_active = int(total_points * 0.04)  # make 4% of points have a spike
+    active_indices = rng.choice(total_points, size=n_active, replace=False)
+    spike_values = rng.uniform(0.0, 0.05, size=n_active).astype(np.float32)
+    spike_data.ravel()[active_indices] = spike_values
+
+    return f_data, fneu_data, spike_data
+
+
+@pytest.fixture(scope="session")
+def suite2p_import_data_dir(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> pathlib.Path:
+    """Provide a temp directory with generated Suite2p-style .npy files for tests."""
+    data_dir = pathlib.Path(tmp_path_factory.mktemp("suite2p_import"))
+    f_data, fneu_data, spike_data = _generate_suite2p_trace_arrays()
+
+    np.save(data_dir / "F.npy", f_data)
+    np.save(data_dir / "Fneu.npy", fneu_data)
+    np.save(data_dir / "spks.npy", spike_data)
+
+    return data_dir
+
+
 @pytest.fixture(scope="session")
 def default_model_path() -> pathlib.Path:
     return example_models_path / "default_model.nseq"

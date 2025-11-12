@@ -35,8 +35,7 @@ def simulate(stims_dict: dict[str, np.ndarray], simulation_time: float) -> SimDa
     #   - "timestamps": 1d array of spike timestamps
     #   - "spikes": 1d array of spike neuron indices
     #   - "dt": the simulation time step in seconds as a float
-    #   - "n_neurons": the number of neurons as an int
-    #   - "n_timesteps": the total number of timesteps in the simulation as an int
+    # Neuroseq infers neuron/time counts from the spike payload.
     n_neurons_spike = 32
     n_timesteps_spike = 2000
     n_spikes_spike = 74
@@ -46,8 +45,6 @@ def simulate(stims_dict: dict[str, np.ndarray], simulation_time: float) -> SimDa
         "timestamps": np.linspace(0, simulation_time, n_spikes_spike),
         "spikes": np.random.randint(n_neurons_spike, size=(n_spikes_spike,)),
         "dt": dt_spike,
-        "n_neurons": n_neurons_spike,
-        "n_timesteps": n_timesteps_spike,
     }
 
     # "heatmap" data is a dict of the following format:
