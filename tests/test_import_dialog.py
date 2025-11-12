@@ -21,7 +21,7 @@ class TestSuite2pImportDialog:
 
         assert not dialog.import_button.isEnabled()
         assert dialog.max_neurons_spin.value() == 2
-        assert dialog.spike_threshold_spin.value() == 0.2
+        assert dialog.spike_threshold_spin.value() == 0.02
         assert dialog.sampling_rate_spin.value() == 30.0
         assert dialog.replace_checkbox.isChecked() is True
 
@@ -39,7 +39,9 @@ class TestSuite2pImportDialog:
         preview = dialog.preview_text.toPlainText()
         assert "Contrasting traces: 5 neurons × 900 timepoints" in preview
 
-    def test_data_import_with_valid_files(self, qtbot: QtBot, suite2p_import_data_dir):
+    def test_data_import_with_valid_files(
+        self, qtbot: QtBot, suite2p_import_data_dir, qmessagebox_calls: list
+    ):
         """Test importing data from F.npy and Fneu.npy files"""
         dialog = Suite2pImportDialog()
         qtbot.addWidget(dialog)
@@ -49,6 +51,9 @@ class TestSuite2pImportDialog:
         dialog.load_fneu_file(str(test_data_dir / "Fneu.npy"))
 
         dialog.import_data()
+        assert len(qmessagebox_calls) == 1
+        assert "successful" in qmessagebox_calls[-1]["title"].lower()
+
         imported_data = dialog.get_imported_data()
 
         assert imported_data is not None
@@ -71,7 +76,9 @@ class TestSuite2pImportDialog:
         assert trace_data["dt"] == pytest.approx(1.0 / 30.0)
         assert "suite2p_spikes" not in imported_data
 
-    def test_contrasting_calculation(self, qtbot: QtBot, suite2p_import_data_dir):
+    def test_contrasting_calculation(
+        self, qtbot: QtBot, suite2p_import_data_dir, qmessagebox_calls: list
+    ):
         """Test that F - 0.7 * Fneu calculation is performed correctly"""
         dialog = Suite2pImportDialog()
         qtbot.addWidget(dialog)
@@ -87,13 +94,17 @@ class TestSuite2pImportDialog:
         expected_contrasted, _, _ = compute_normalized_suite2p_traces(f_data, fneu_data)
 
         dialog.import_data()
+        assert len(qmessagebox_calls) == 1
+        assert "successful" in qmessagebox_calls[-1]["title"].lower()
         imported_data = dialog.get_imported_data()
 
         assert imported_data is not None
         traces = imported_data["suite2p_contrasting_traces"]["traces"]
         np.testing.assert_array_almost_equal(traces, expected_contrasted, decimal=5)
 
-    def test_import_without_fneu_file(self, qtbot: QtBot, suite2p_import_data_dir):
+    def test_import_without_fneu_file(
+        self, qtbot: QtBot, suite2p_import_data_dir, qmessagebox_calls: list
+    ):
         """F.npy-only imports should normalize fluorescence without neuropil subtraction."""
         dialog = Suite2pImportDialog()
         qtbot.addWidget(dialog)
@@ -104,6 +115,8 @@ class TestSuite2pImportDialog:
         assert dialog.import_button.isEnabled()
 
         dialog.import_data()
+        assert len(qmessagebox_calls) == 1
+        assert "successful" in qmessagebox_calls[-1]["title"].lower()
         imported_data = dialog.get_imported_data()
 
         assert imported_data is not None
@@ -114,7 +127,7 @@ class TestSuite2pImportDialog:
         np.testing.assert_allclose(traces, expected_traces[: traces.shape[0], :])
 
     def test_optional_spike_import_with_threshold(
-        self, qtbot: QtBot, suite2p_import_data_dir
+        self, qtbot: QtBot, suite2p_import_data_dir, qmessagebox_calls: list
     ):
         """Test importing optional spks file with adjustable threshold"""
         dialog = Suite2pImportDialog()
@@ -143,7 +156,7 @@ class TestSuite2pImportDialog:
 
     # todo: double check
     def test_sampling_rate_adjustment_affects_timeline(
-        self, qtbot: QtBot, suite2p_import_data_dir
+        self, qtbot: QtBot, suite2p_import_data_dir, qmessagebox_calls: list
     ):
         """Changing the sampling rate should scale timestamps (base unit ms)."""
         dialog = Suite2pImportDialog()
@@ -170,7 +183,9 @@ class TestSuite2pImportDialog:
         expected_duration = (trace_data["traces"].shape[1] - 1) * dt
         assert total_duration == pytest.approx(expected_duration)
 
-    def test_replace_checkbox_sets_flag(self, qtbot: QtBot, suite2p_import_data_dir):
+    def test_replace_checkbox_sets_flag(
+        self, qtbot: QtBot, suite2p_import_data_dir, qmessagebox_calls: list
+    ):
         """Checking the replace option propagates to emitted payloads."""
         dialog = Suite2pImportDialog()
         qtbot.addWidget(dialog)
