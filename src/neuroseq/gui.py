@@ -112,9 +112,9 @@ class Gui(QtWidgets.QMainWindow):
         )  # TODO-FPL
         self.trace_widget.connect_heatmap_widget(self.heatmap_widget)  # TODO-FPL
         # re-enable when fastplotlib scatter plots support timeline
-        self.heatmap_widget.connect_timeseries_widget_timeline(
-            self.spike_widget
-        )  # TODO-FPL
+        # self.heatmap_widget.connect_timeseries_widget_timeline(
+        #     self.spike_widget
+        # )  # TODO-FPL
         self.spike_widget.connect_heatmap_widget(self.heatmap_widget)  # TODO-FPL
         self.stim_console.sig_stims_values_dict_updated.connect(
             self.stim_editor.update_stim_values_dict
