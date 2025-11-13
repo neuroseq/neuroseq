@@ -19,6 +19,7 @@ from qtpy.compat import getsavefilename
 
 from neuroseq import __version__
 from neuroseq.b2_model import B2Model
+from neuroseq.cellpose_import_dialog import CellposeImportDialog
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.custom_analysis_widget import CustomAnalysisDataType
 from neuroseq.custom_analysis_widget import CustomAnalysisType
@@ -28,6 +29,7 @@ from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.import_dialog import Suite2pImportDialog
 from neuroseq.import_dialog import Suite2pImportResult
+from neuroseq.importer import CellposeImportResult
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.spike_widget import SpikeWidget
@@ -58,6 +60,7 @@ class Gui(QtWidgets.QMainWindow):
         self.neurons: dict[str, tuple[b2.StateMonitor, str]] = {}
         self.synapses: dict[str, tuple[b2.StateMonitor, str]] = {}
         self.spikes: dict[str, b2.SpikeMonitor] = {}
+        self.cellpose_data: CellposeImportResult | None = None
         self.setWindowTitle("NeuroSeq")
         self.cmb_neuron = QtWidgets.QComboBox()
         self.cmb_spike = QtWidgets.QComboBox()
@@ -650,6 +653,19 @@ class Gui(QtWidgets.QMainWindow):
             if imported_data:
                 self.handle_general_import(imported_data)
 
+    def import_cellpose_data(self) -> None:
+        """Open dialog to import Cellpose segmentation data"""
+        dialog = CellposeImportDialog(self)
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            imported_data = dialog.get_imported_data()
+            if imported_data:
+                self.cellpose_data = imported_data
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Cellpose Data Loaded",
+                    "Cellpose data has been loaded.",
+                )
+
     # todo: Refactor this out of this function. It's not particularly/relaly the GUI except the widget interaction.
     # Certainly the code about clearing spks etc, this management of state, when we have multiple experiments, needs to be elsewhere.
     def handle_general_import(
@@ -1208,6 +1224,14 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             shortcut="Ctrl+Shift+I",
             icon=qta.icon("mdi6.import"),
+        )
+        add_action(
+            "Import &Cellpose Data",
+            self.import_cellpose_data,
+            menu,
+            None,
+            shortcut="Ctrl+Shift+C",
+            icon=qta.icon("mdi6.brain"),
         )
         menu.addSeparator()
         add_action(
