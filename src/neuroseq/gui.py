@@ -327,7 +327,7 @@ class Gui(QtWidgets.QMainWindow):
             self,
             "Store simulation checkpoint",
             "Store the current simulation state as a named checkpoint.\nEnter a new name, or select an existing checkpoint to overwrite:",
-            self.model.checkpoints,
+            [f"Checkpoint {len(self.model.checkpoints) + 1}"] + self.model.checkpoints,
             current=0,
             editable=True,
         )

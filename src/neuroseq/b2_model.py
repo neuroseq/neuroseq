@@ -2141,7 +2141,7 @@ class B2Model:
         Returns
         -------
         list[str]
-            List of data names that can be passed to get_experimental_data
+            List of data names that can be passed to get_data()
         """
         data_names = []
         if data_type is TraceData:
@@ -2167,7 +2167,7 @@ class B2Model:
         Parameters
         ----------
         name : str
-            Name of the data to get, as provided by get_experimental_data_names()
+            Name of the data to get, as provided by get_data_names()
         data_type : type[TraceData | SpikeData | SynapseData]
             Type of data to get
 
