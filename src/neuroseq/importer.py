@@ -1,36 +1,12 @@
 from __future__ import annotations
 
 from typing import Any
-from typing import Literal
-from typing import TypedDict
 
 import brian2.numpy_ as np
 import numpy.typing as npt
 
-__all__ = [
-    "Suite2pTracePayload",
-    "Suite2pSpikePayload",
-    "prepare_suite2p_traces",
-    "prepare_suite2p_spikes",
-    "compute_normalized_suite2p_traces",
-    "compute_normalized_suite2p_spikes",
-]
-
-
-class Suite2pTracePayload(TypedDict):
-    widget: Literal["trace"]
-    timestamps: npt.NDArray[Any]
-    traces: npt.NDArray[Any]
-    dt: float
-    sampling_rate: float
-
-
-class Suite2pSpikePayload(TypedDict):
-    widget: Literal["spike"]
-    timestamps: npt.NDArray[Any]
-    spikes: npt.NDArray[Any]
-    dt: float
-    threshold: float
+from neuroseq.experiment import SpikeData
+from neuroseq.experiment import TraceData
 
 
 def _normalize_array_per_neuron(
@@ -94,8 +70,8 @@ def prepare_suite2p_traces(
     *,
     max_neurons: int,
     sampling_rate: float = 30.0,
-) -> Suite2pTracePayload:
-    """Create Neuroseq trace widget payload from Suite2p fluorescence data."""
+) -> TraceData:
+    """Create TraceData from Suite2p fluorescence data."""
 
     if max_neurons <= 0:
         raise ValueError("max_neurons must be positive")
@@ -105,13 +81,12 @@ def prepare_suite2p_traces(
     n_neurons_to_import = min(max_neurons, n_neurons)
     normalized_traces, _, _ = compute_normalized_suite2p_traces(f_data, fneu_data)
 
-    return {
-        "widget": "trace",
-        "timestamps": np.arange(n_timepoints) * dt,
-        "traces": normalized_traces[:n_neurons_to_import, :],
-        "dt": dt,
-        "sampling_rate": float(sampling_rate),
-    }
+    return TraceData(
+        "Suite2p contrasting traces",
+        normalized_traces[:n_neurons_to_import, :],
+        "units",
+        dt,
+    )
 
 
 def prepare_suite2p_spikes(
@@ -120,9 +95,9 @@ def prepare_suite2p_spikes(
     dt: float,
     threshold: float,
     max_neurons: int,
-) -> Suite2pSpikePayload:
+) -> SpikeData:
     """
-    Create Neuroseq spike widget payload from Suite2p spks.npy data.
+    Create SpikeData from Suite2p spks.npy data.
     """
     if max_neurons <= 0:
         raise ValueError("max_neurons must be positive")
@@ -139,10 +114,4 @@ def prepare_suite2p_spikes(
     neuron_indices, time_indices = np.nonzero(mask)
     spike_times = time_indices * dt
 
-    return {
-        "widget": "spike",
-        "timestamps": spike_times,
-        "spikes": neuron_indices,
-        "dt": dt,
-        "threshold": threshold,
-    }
+    return SpikeData("Suite2p spikes", neuron_indices, spike_times)

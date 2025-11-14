@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-import brian2.numpy_ as np
+import logging
+
 import pyqtgraph as pg
 from qtpy import QtWidgets
+
+from neuroseq.experiment import SynapseData
 
 
 class HeatmapWidget(pg.ImageView):
@@ -17,23 +20,23 @@ class HeatmapWidget(pg.ImageView):
         self.ui.menuBtn.hide()
         self.setPredefinedGradient("viridis")
         self.relative_playback_speed = 1.0
+        self.logger = logging.getLogger(__name__)
 
     def clear_data(self) -> None:
         self.clear()
 
     def set_data(
         self,
-        data: np.ndarray | None = None,
-        timestamps: np.ndarray | None = None,
+        data: SynapseData | None = None,
     ) -> None:
-        """Set the data to be displayed in the heatmap.
-        data should be a 3d numpy array with shape (n_rows, n_columns, n_timesteps).
-        timestamps should be a 1-d numpy array of timestamps in seconds.
-        """
         self.clear()
-        if data is not None and timestamps is not None:
-            self.setImage(data.T, xvals=timestamps * 1000.0)
-            self._update_playRate()
+        if data is None or data.values.shape[0] == 0:
+            return
+        self.logger.info(
+            f"{data.values.shape} values with {data.timestamps.shape} timestamps"
+        )
+        self.setImage(data.values.T, xvals=data.timestamps * 1000.0)
+        self._update_playRate()
 
     def set_relative_playback_speed(self, relative_playback_speed: float) -> None:
         """Set the relative playback speed, where 1 is real-time."""

@@ -12,8 +12,10 @@ from fastplotlib.layouts import Subplot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from neuroseq.custom_analysis_widget import CustomAnalysisDataType
 from neuroseq.custom_analysis_widget import CustomAnalysisType
+from neuroseq.experiment import SpikeData
+from neuroseq.experiment import SynapseData
+from neuroseq.experiment import TraceData
 from neuroseq.gridlines import GridLines
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.region_of_interest import RegionOfInterest
@@ -40,8 +42,8 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         int, int, int, int, int
     )  # initial neuron index, current neuron index, initial time index, current time index, mouse button (0 for no button, 1 for left, 2 for right, 3 for middle)
     custom_analysis_requested = QtCore.Signal(
-        CustomAnalysisDataType, CustomAnalysisType, bool, slice, slice, dict
-    )
+        object, CustomAnalysisType, bool, slice, slice
+    )  # data, analysis type, new window, neuron slice, time slice
     escape_pressed = QtCore.Signal()
 
     def __init__(
@@ -76,12 +78,11 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
                     lambda *args,
                     _custom_analysis_type=custom_analysis_type,
                     _new_window=new_window: self.custom_analysis_requested.emit(
-                        self.data_type,
+                        self.data,
                         _custom_analysis_type,
                         _new_window,
                         self.selected_neuron_slice,
                         self.selected_time_slice,
-                        self.data,
                     ),
                     self.context_menu,
                     None,
@@ -90,9 +91,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
                 )
 
         self.logger = logging.getLogger(__name__)
-        self.data: dict[str, int | float | np.ndarray] = {}
-        self.data_type: CustomAnalysisDataType | None = None
-        self.dt = 1.0
+        self.data: TraceData | SpikeData | SynapseData | None = None
         self.data_values: np.ndarray | None = None
         self.units = ""
         self.selection_in_progress = False
@@ -106,6 +105,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.selected_time_slice: slice | None = None
         self.selected_neuron_slice: slice | None = None
         self.n_neurons = 0
+        self.dt_ms = 1.0
         self.n_timestamps = 0
         self.figure.renderer.add_event_handler(self.pointer_down, "pointer_down")
         self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
@@ -166,7 +166,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.subplot.toolbar = False
         self.subplot.add_graphic(self.roi, center=False)
         self.subplot.add_graphic(
-            GridLines(self.n_neurons, self.n_timestamps * self.dt), center=False
+            GridLines(self.n_neurons, self.n_timestamps * self.dt_ms), center=False
         )
         self.subplot.add_graphic(self.text, center=False)
         self._set_light_mode()
@@ -189,9 +189,10 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.subplot.axes.x.ticks = {}
         self.subplot.toolbar = False
         self.hover_slice_graphic = None
-        self.data = {}
+        self.data = None
         self.n_neurons = 0
         self.n_timestamps = 0
+        self.dt_ms = 0.0
         self.unselect_neurons()
 
     def pointer_down(self, ev: pygfx.PointerEvent) -> None:
@@ -206,7 +207,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
             self.roi.visible = True
             self.selection_in_progress = True
         elif self.mode == InteractMode.DRAW:
-            self.mouse_drag_time_index = math.floor(self.mouse_pos[0])
+            self.mouse_drag_time_index = math.floor(self.mouse_pos[0] / self.dt_ms)
             self.mouse_drag_neuron_index = math.floor(self.mouse_pos[1] + 0.5)
             self.mouse_dragged.emit(
                 self.mouse_drag_neuron_index,
@@ -230,7 +231,9 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         hover_value_text = ""
         if self.data_values is not None:
             time_index = np.clip(
-                math.floor(self.mouse_pos[0]), 0, self.data_values.shape[0] - 1
+                math.floor(self.mouse_pos[0] / self.dt_ms),
+                0,
+                self.data_values.shape[0] - 1,
             )
             neuron_index = np.clip(
                 math.floor(self.mouse_pos[1] + 0.5), 0, self.data_values.shape[1] - 1
@@ -252,12 +255,14 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
             x1 = max(self.mouse_pos[0], self.mouse_press_pos[0])
             y0 = min(self.mouse_pos[1] + 0.5, self.mouse_press_pos[1] + 0.5)
             y1 = max(self.mouse_pos[1] + 0.5, self.mouse_press_pos[1] + 0.5)
-            time_slice = slice(max(0, math.floor(x0)), math.ceil(x1))
+            time_slice = slice(
+                max(0, math.floor(x0 / self.dt_ms)), math.ceil(x1 / self.dt_ms)
+            )
             neuron_slice = slice(math.floor(y0), math.ceil(y1))
             self.select_neurons(neuron_slice, time_slice)
             return
         elif self.mode == InteractMode.DRAW:
-            drag_time_index = math.floor(self.mouse_pos[0])
+            drag_time_index = math.floor(self.mouse_pos[0] / self.dt_ms)
             drag_neuron_index = math.floor(self.mouse_pos[1] + 0.5)
             if (
                 drag_time_index != self.mouse_drag_time_index
@@ -330,7 +335,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         if time_index_slice.stop is None:
             time_index_slice = slice(time_index_slice.start, self.n_timestamps)
         self.roi.visible = True
-        self.roi.select_slice(neuron_index_slice, time_index_slice)
+        self.roi.select_slice(neuron_index_slice, time_index_slice, self.dt_ms)
         self.selected_time_slice = time_index_slice
         self.selected_neuron_slice = neuron_index_slice
         self.logger.debug(

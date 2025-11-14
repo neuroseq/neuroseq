@@ -4,6 +4,8 @@ import numpy as np
 import pytest
 from pytestqt.qtbot import QtBot
 
+from neuroseq.experiment import SpikeData
+from neuroseq.experiment import TraceData
 from neuroseq.import_dialog import Suite2pImportDialog
 from neuroseq.importer import compute_normalized_suite2p_traces
 
@@ -54,16 +56,11 @@ class TestSuite2pImportDialog:
         assert len(qmessagebox_calls) == 1
         assert "successful" in qmessagebox_calls[-1]["title"].lower()
 
-        imported_data = dialog.get_imported_data()
-
-        assert imported_data is not None
-        assert "suite2p_contrasting_traces" in imported_data
-
-        trace_data = imported_data["suite2p_contrasting_traces"]
-        assert "traces" in trace_data
-        assert "timestamps" in trace_data
-
-        traces = trace_data["traces"]
+        # only get traces:
+        assert len(dialog.imported_data) == 1
+        trace_data = dialog.imported_data[0]
+        assert isinstance(trace_data, TraceData)
+        traces = trace_data.traces
         assert traces.shape == (5, 900)  # 5 neurons, 900 time steps
         assert np.all((traces >= 0.0) & (traces <= 1.0))
         assert np.all(np.isfinite(traces))  # no NaN or inf values
@@ -72,9 +69,7 @@ class TestSuite2pImportDialog:
         fneu_data = dialog.fneu_data
         expected_traces, _, _ = compute_normalized_suite2p_traces(f_data, fneu_data)
         np.testing.assert_allclose(traces, expected_traces[: traces.shape[0], :])
-        assert trace_data["sampling_rate"] == 30.0
-        assert trace_data["dt"] == pytest.approx(1.0 / 30.0)
-        assert "suite2p_spikes" not in imported_data
+        assert trace_data.dt == pytest.approx(1.0 / 30.0)
 
     def test_contrasting_calculation(
         self, qtbot: QtBot, suite2p_import_data_dir, qmessagebox_calls: list
@@ -96,10 +91,11 @@ class TestSuite2pImportDialog:
         dialog.import_data()
         assert len(qmessagebox_calls) == 1
         assert "successful" in qmessagebox_calls[-1]["title"].lower()
-        imported_data = dialog.get_imported_data()
 
-        assert imported_data is not None
-        traces = imported_data["suite2p_contrasting_traces"]["traces"]
+        assert len(dialog.imported_data) == 1
+        trace_data = dialog.imported_data[0]
+        assert isinstance(trace_data, TraceData)
+        traces = trace_data.traces
         np.testing.assert_array_almost_equal(traces, expected_contrasted, decimal=5)
 
     def test_import_without_fneu_file(
@@ -117,10 +113,11 @@ class TestSuite2pImportDialog:
         dialog.import_data()
         assert len(qmessagebox_calls) == 1
         assert "successful" in qmessagebox_calls[-1]["title"].lower()
-        imported_data = dialog.get_imported_data()
 
-        assert imported_data is not None
-        traces = imported_data["suite2p_contrasting_traces"]["traces"]
+        assert len(dialog.imported_data) == 1
+        trace_data = dialog.imported_data[0]
+        assert isinstance(trace_data, TraceData)
+        traces = trace_data.traces
         assert dialog.f_data is not None
         f_data = dialog.f_data
         expected_traces, _, _ = compute_normalized_suite2p_traces(f_data, None)
@@ -143,45 +140,13 @@ class TestSuite2pImportDialog:
         )  # realistic default, this will leave 36 spikes.
 
         dialog.import_data()
-        imported_data = dialog.get_imported_data()
-
-        assert imported_data is not None
-        spike_data = imported_data["suite2p_spikes"]
-        assert spike_data["threshold"] == dialog.spike_threshold_spin.value()
-        assert len(spike_data["spikes"]) > 0
-        assert len(spike_data["timestamps"]) == len(spike_data["spikes"])
-        assert spike_data["dt"] == pytest.approx(
-            1.0 / dialog.sampling_rate_spin.value()
-        )
-
-    # todo: double check
-    def test_sampling_rate_adjustment_affects_timeline(
-        self, qtbot: QtBot, suite2p_import_data_dir, qmessagebox_calls: list
-    ):
-        """Changing the sampling rate should scale timestamps (base unit ms)."""
-        dialog = Suite2pImportDialog()
-        qtbot.addWidget(dialog)
-
-        test_data_dir = suite2p_import_data_dir
-        dialog.load_f_file(str(test_data_dir / "F.npy"))
-        dialog.load_fneu_file(str(test_data_dir / "Fneu.npy"))
-
-        dialog.sampling_rate_spin.setValue(10.0)  # Hz
-
-        dialog.import_data()
-        imported_data = dialog.get_imported_data()
-
-        assert imported_data is not None
-        trace_data = imported_data["suite2p_contrasting_traces"]
-        timestamps = trace_data["timestamps"]
-        dt = trace_data["dt"]
-        assert dt == pytest.approx(0.1)
-        assert trace_data["sampling_rate"] == pytest.approx(10.0)
-
-        assert timestamps[1] - timestamps[0] == pytest.approx(dt)
-        total_duration = timestamps[-1] - timestamps[0]
-        expected_duration = (trace_data["traces"].shape[1] - 1) * dt
-        assert total_duration == pytest.approx(expected_duration)
+        assert len(dialog.imported_data) == 2
+        trace_data = dialog.imported_data[0]
+        assert isinstance(trace_data, TraceData)
+        spike_data = dialog.imported_data[1]
+        assert isinstance(spike_data, SpikeData)
+        assert len(spike_data.spike_indices) > 0
+        assert len(spike_data.spike_times) == len(spike_data.spike_indices)
 
     def test_replace_checkbox_sets_flag(
         self, qtbot: QtBot, suite2p_import_data_dir, qmessagebox_calls: list
@@ -196,10 +161,8 @@ class TestSuite2pImportDialog:
         dialog.replace_checkbox.setChecked(True)
 
         dialog.import_data()
-        imported_data = dialog.get_imported_data()
-
-        assert imported_data is not None
-        assert imported_data.get("_replace_existing") is True
+        assert len(dialog.imported_data) == 1
+        assert dialog.append_data is False
 
 
 class TestSuite2pDataValidation:

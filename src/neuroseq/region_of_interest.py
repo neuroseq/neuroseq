@@ -34,23 +34,25 @@ class RegionOfInterest(Graphic):
         # send the changes to the GPU
         self.fill.geometry.positions.update_range()
 
-    def select_slice(self, neuron_index_slice: slice, time_index_slice: slice):
+    def select_slice(
+        self, neuron_index_slice: slice, time_index_slice: slice, dt_ms: float
+    ):
         neuron_text = (
             f"Neurons {neuron_index_slice.start}-{neuron_index_slice.stop - 1}"
             if neuron_index_slice.stop > neuron_index_slice.start + 1
             else f"Neuron {neuron_index_slice.start}"
         )
         self.text.set_text(
-            f"{neuron_text}\n{time_index_slice.start}ms-{time_index_slice.stop}ms"
+            f"{neuron_text}\n{time_index_slice.start * dt_ms:0.1f}ms-{time_index_slice.stop * dt_ms:0.1f}ms"
         )
         self.text.world.position = (
-            (time_index_slice.stop + time_index_slice.start) / 2,
+            dt_ms * (time_index_slice.stop + time_index_slice.start) / 2,
             (neuron_index_slice.stop + neuron_index_slice.start) / 2 - 0.5,
             200,
         )
         self.select(
-            time_index_slice.start,
-            time_index_slice.stop,
+            dt_ms * time_index_slice.start,
+            dt_ms * time_index_slice.stop,
             neuron_index_slice.start - 0.5,
             neuron_index_slice.stop - 0.5,
         )

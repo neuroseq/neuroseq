@@ -14,6 +14,8 @@ from pytest import MonkeyPatch
 from pytest_mock import MockerFixture
 
 from neuroseq import b2_model
+from neuroseq.experiment import SpikeData
+from neuroseq.experiment import TraceData
 
 
 def test_construction(tmp_path: Path) -> None:
@@ -969,14 +971,136 @@ def test_store_restore(mfx_ornstein: b2_model.B2Model) -> None:
         mfx_ornstein.restore("idontexist")
 
 
+def _make_experimental_data(n_neurons=12, dt=0.01) -> list[TraceData | SpikeData]:
+    trace_data = TraceData(
+        name="test_trace", traces=np.random.rand(n_neurons, 37), units="mV", dt=dt
+    )
+    spike_data = SpikeData(
+        name="test_spike",
+        spike_indices=np.array([1, 4, 5]),
+        spike_times=np.array([0.1, 0.6, 0.99]),
+    )
+    return [trace_data, spike_data]
+
+
+def test_add_experimental_data_overwrite(mfx_ornstein: b2_model.B2Model) -> None:
+    mfx_ornstein.add_experimental_data(
+        "test_experiment", _make_experimental_data(), append=False
+    )
+
+    assert len(mfx_ornstein.experiments) == 1
+    assert "test_experiment" in mfx_ornstein.experiments
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][0], TraceData)
+    assert mfx_ornstein.experiments["test_experiment"][0].traces.shape == (12, 37)
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][1], SpikeData)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_indices.shape == (3,)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_times.shape == (3,)
+
+    mfx_ornstein.add_experimental_data(
+        "test_experiment", _make_experimental_data(), append=False
+    )
+
+    assert len(mfx_ornstein.experiments) == 1
+    assert "test_experiment" in mfx_ornstein.experiments
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][0], TraceData)
+    assert mfx_ornstein.experiments["test_experiment"][0].traces.shape == (12, 37)
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][1], SpikeData)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_indices.shape == (3,)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_times.shape == (3,)
+
+
+def test_add_experimental_data_append(mfx_ornstein: b2_model.B2Model) -> None:
+    mfx_ornstein.add_experimental_data(
+        "test_experiment", _make_experimental_data(), append=False
+    )
+
+    assert len(mfx_ornstein.experiments) == 1
+    assert "test_experiment" in mfx_ornstein.experiments
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][0], TraceData)
+    assert mfx_ornstein.experiments["test_experiment"][0].traces.shape == (12, 37)
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][1], SpikeData)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_indices.shape == (3,)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_times.shape == (3,)
+
+    mfx_ornstein.add_experimental_data(
+        "test_experiment", _make_experimental_data(), append=True
+    )
+
+    assert len(mfx_ornstein.experiments) == 1
+    assert "test_experiment" in mfx_ornstein.experiments
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][0], TraceData)
+    assert mfx_ornstein.experiments["test_experiment"][0].traces.shape == (12, 74)
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][1], SpikeData)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_indices.shape == (6,)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_times.shape == (6,)
+
+    mfx_ornstein.add_experimental_data(
+        "test_experiment", _make_experimental_data(), append=True
+    )
+
+    assert len(mfx_ornstein.experiments) == 1
+    assert "test_experiment" in mfx_ornstein.experiments
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][0], TraceData)
+    assert mfx_ornstein.experiments["test_experiment"][0].traces.shape == (12, 111)
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][1], SpikeData)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_indices.shape == (9,)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_times.shape == (9,)
+
+    mfx_ornstein.add_experimental_data(
+        "test_experiment", _make_experimental_data(), append=False
+    )
+
+    assert len(mfx_ornstein.experiments) == 1
+    assert "test_experiment" in mfx_ornstein.experiments
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][0], TraceData)
+    assert mfx_ornstein.experiments["test_experiment"][0].traces.shape == (12, 37)
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][1], SpikeData)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_indices.shape == (3,)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_times.shape == (3,)
+
+
+def test_add_experimental_data_append_invalid(mfx_ornstein: b2_model.B2Model) -> None:
+    mfx_ornstein.add_experimental_data(
+        "test_experiment", _make_experimental_data(n_neurons=6, dt=0.2), append=False
+    )
+    with pytest.raises(ValueError) as excinfo:
+        mfx_ornstein.add_experimental_data(
+            "test_experiment", _make_experimental_data(n_neurons=7, dt=0.2), append=True
+        )
+    assert "neurons" in str(excinfo.value)
+    with pytest.raises(ValueError) as excinfo:
+        mfx_ornstein.add_experimental_data(
+            "test_experiment",
+            _make_experimental_data(n_neurons=6, dt=0.15),
+            append=True,
+        )
+    assert "dt" in str(excinfo.value)
+
+
 def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
     tmp_file = tmp_path / "model.nseq"
 
-    # simulate for 1 second, save checkpoint, then simulate for another second & save
+    # simulate for 1 second, save checkpoint, then simulate for another second
     mfx_nmda.run_simulation(1 * b2.second)
     mfx_nmda.store("after_1s")
     mfx_nmda.run_simulation(1 * b2.second)
-    mfx_nmda.save_model(tmp_file)
+
+    # add some experimental data
+    trace_data = TraceData(
+        name="test_trace", traces=np.random.rand(12, 3), units="mV", dt=0.01
+    )
+    spike_data = SpikeData(
+        name="test_spike",
+        spike_indices=np.array([1, 4, 5]),
+        spike_times=np.array([0.1, 0.6, 0.99]),
+    )
+    experimental_data: list[TraceData | SpikeData] = [trace_data, spike_data]
+    mfx_nmda.add_experimental_data("test_experiment", experimental_data)
+
+    # save model including simulation data, simulation checkpoints and experimental data
+    mfx_nmda.save_model(
+        tmp_file, include_simulation_data=True, include_experimental_data=True
+    )
     reconstructed_model = b2_model.B2Model.load_model(tmp_file)
 
     assert reconstructed_model.seed == mfx_nmda.seed
@@ -1028,6 +1152,23 @@ def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
     reconstructed_model.restore("after_1s")
     assert len(reconstructed_model.network["M"].t) == 10000
     assert reconstructed_model.network["M"].t[-1] == pytest.approx(1, abs=0.001)
+
+    # as well as experimental data
+    assert len(reconstructed_model.experiments) == 1
+    assert "test_experiment" in reconstructed_model.experiments
+    loaded_experimental_data = reconstructed_model.experiments["test_experiment"]
+    assert len(loaded_experimental_data) == 2
+    loaded_trace_data = loaded_experimental_data[0]
+    assert isinstance(loaded_trace_data, TraceData)
+    assert loaded_trace_data.name == trace_data.name
+    assert loaded_trace_data.units == trace_data.units
+    assert loaded_trace_data.dt == pytest.approx(trace_data.dt)
+    assert np.allclose(loaded_trace_data.traces, trace_data.traces)
+    loaded_spike_data = loaded_experimental_data[1]
+    assert isinstance(loaded_spike_data, SpikeData)
+    assert loaded_spike_data.name == spike_data.name
+    assert np.allclose(loaded_spike_data.spike_indices, spike_data.spike_indices)
+    assert np.allclose(loaded_spike_data.spike_times, spike_data.spike_times)
 
     # and simulations can be continued: run for 1s so that both models have run for 2s from the same initial conditions
     reconstructed_model.run_simulation(1 * b2.second)

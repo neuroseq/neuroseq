@@ -4,7 +4,7 @@ import brian2.numpy_ as np
 import pygfx
 from qtpy import QtWidgets
 
-from neuroseq.custom_analysis_widget import CustomAnalysisDataType
+from neuroseq.experiment import TraceData
 from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.utils import cmap_transform_neuron_indices
 
@@ -24,35 +24,42 @@ class TraceWidget(TimeseriesWidget):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(controller, parent)
-        self.data_type = CustomAnalysisDataType.Trace
         self.subplot.title = "Traces"
 
     def set_data(
         self,
-        traces: np.ndarray | None = None,
-        timestamps: np.ndarray | None = None,
+        data: TraceData | None = None,
     ) -> None:
         self.subplot.clear()
-        if traces is None:
+        if data is None:
             return
-        if timestamps is None:
-            return
-        self.dt = timestamps[1] - timestamps[0]
-        self.data = {"data": traces, "timestamps": timestamps, "dt": self.dt}
-        trace_norm = 2.0 * np.max(np.abs(traces))
+        self.logger.info(
+            f"{data.traces.shape} traces with dt={data.dt}s and units={data.units}"
+        )
+        self.data = data
+        self.n_neurons = data.traces.shape[0]
+        self.dt_ms = data.dt * 1000.0  # convert to milliseconds
+        self.n_timestamps = data.traces.shape[1]
+        trace_norm = 2.0 * np.max(np.abs(data.traces))
         if trace_norm == 0:
             trace_norm = 1.0
         # convert timestamps to milliseconds and stack to produce a format suitable for line_stack
         # todo: should be possible to re-use the same timestamps for all traces?
-        tiled_timestamps = np.tile(
-            timestamps.astype(np.float32) * np.float32(1000.0), (traces.shape[0], 1)
+        timestamps_ms = np.arange(data.traces.shape[1], dtype=np.float32) * np.float32(
+            data.dt * 1000.0
+        )
+        tiled_timestamps_ms = np.tile(
+            timestamps_ms,
+            (self.n_neurons, 1),
         )
         data = np.stack(
-            [tiled_timestamps, traces.astype(np.float32) / np.float32(trace_norm)],
+            [
+                tiled_timestamps_ms,
+                data.traces.astype(np.float32) / np.float32(trace_norm),
+            ],
             axis=2,
             dtype=np.float32,
         )
-        self.n_neurons = traces.shape[0]
         self.graphic = self.subplot.add_line_collection(
             data,
             cmap="jet",
@@ -61,10 +68,8 @@ class TraceWidget(TimeseriesWidget):
         )
         for i, line in enumerate(self.graphic.graphics):
             line.offset = (line.offset[0], i, line.offset[2])
-        self.controller.max_height = max(self.controller.max_height, traces.shape[0])
-        if timestamps is not None:
-            self.controller.max_width = max(
-                self.controller.max_width, timestamps[-1] - timestamps[0]
-            )
-            self.n_timestamps = timestamps.shape[0]
+        self.controller.max_height = max(self.controller.max_height, self.n_neurons)
+        self.controller.max_width = max(
+            self.controller.max_width, self.n_timestamps * self.dt_ms
+        )
         self.post_set_data()
