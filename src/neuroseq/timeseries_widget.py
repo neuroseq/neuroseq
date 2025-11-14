@@ -184,8 +184,18 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
                         self.heatmap_widget_fpl.timestamps * 1000.0 - ev.info["value"]
                     )
                 ).argmin()
-                self.heatmap_widget_fpl.image_widget.current_index = {"t": idx}
-                print(f"TimeseriesWidget _on_timeline_change: t={ev.info}, idx={idx}")
+                # parse to int
+                try:
+                    idx = int(idx)
+                except Exception as e:
+                    print(f"Error converting index to int: {e}")
+                print(
+                    f"TimeseriesWidget _on_timeline_change: t={ev.info}, idx={idx}, idx-type={type(idx)}"
+                )
+                try:
+                    self.heatmap_widget_fpl.image_widget.current_index = {"t": idx}
+                except Exception as e:
+                    print(f"Error setting current index: {e}")
 
             self.timeline.add_event_handler(
                 _on_timeline_change,
