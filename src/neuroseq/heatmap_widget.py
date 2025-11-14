@@ -53,7 +53,7 @@ class HeatmapWidget(pg.ImageView):
         """Connect the timeline in this widget to the timeline in the TimeseriesWidget."""
 
         def _on_sigTimeChanged(idx, time):
-            print(idx, time)
+            print(f"Heatmap _on_sigTimeChanged: {idx}, {time}")
             timeseries_widget.timeline.selection = time
 
         self.sigTimeChanged.connect(_on_sigTimeChanged)

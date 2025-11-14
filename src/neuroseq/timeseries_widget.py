@@ -175,16 +175,22 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.roi.visible = False
         if hasattr(self.graphic, "add_linear_selector"):
             self.timeline = self.graphic.add_linear_selector(thickness=2)
+
+            def _on_timeline_change(ev):
+                self.heatmap_widget.timeLine.setValue(ev.info["value"])
+                # timestamp value to index
+                idx = (
+                    np.abs(
+                        self.heatmap_widget_fpl.timestamps * 1000.0 - ev.info["value"]
+                    )
+                ).argmin()
+                self.heatmap_widget_fpl.image_widget.current_index = {"t": idx}
+                print(f"TimeseriesWidget _on_timeline_change: t={ev.info}, idx={idx}")
+
             self.timeline.add_event_handler(
-                lambda ev: self.heatmap_widget.timeLine.setValue(ev.info["value"]),
+                _on_timeline_change,
                 "selection",
             )
-            self.timeline.add_event_handler(
-                lambda ev: setattr(
-                    self.heatmap_widget_fpl.image_widget.current_index, ev.info["index"]
-                ),
-                "selection",
-            )  # TODO-FPL
 
     def clear_data(self) -> None:
         self.subplot.clear()

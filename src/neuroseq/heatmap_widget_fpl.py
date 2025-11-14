@@ -57,7 +57,8 @@ class HeatmapWidgetFPL(QtWidgets.QWidget):
         def _on_index(idx):
             if not self.suppress_events:
                 t = self.timestamps[idx["t"]] * 1000.0
-                print(idx, t)
+                print(f"HeatmapFPL _on_index: {idx}, {t}")
+                print(f"HeatmapFPL current index: {self.image_widget.current_index}")
                 timeseries_widget.timeline.selection = t
 
-        self.image_widget.add_event_handler(_on_index)
+        self.image_widget.add_event_handler(_on_index, "current_index")
