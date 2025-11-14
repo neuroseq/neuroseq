@@ -52,7 +52,9 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         super().__init__(parent)
         self.heatmap_widget: HeatmapWidget | None = None
         self.controller = controller
-        self.figure: fpl.Figure = fpl.Figure(controllers=controller)
+        self.figure: fpl.Figure = fpl.Figure(
+            controllers=controller, canvas_kwargs={"parent": self}
+        )
         layout = QtWidgets.QVBoxLayout(self)
         self.widget = self.figure.show()
         layout.addWidget(self.widget)
