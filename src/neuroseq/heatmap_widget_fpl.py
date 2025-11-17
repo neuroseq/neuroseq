@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import brian2.numpy_ as np
 import fastplotlib as fpl
 from qtpy import QtWidgets
@@ -18,7 +20,9 @@ class HeatmapWidgetFPL(QtWidgets.QWidget):
 
         empty_data = np.zeros((1, 1, 1))
         self.image_widget: fpl.ImageWidget = fpl.ImageWidget(
-            data=empty_data, cmap="viridis"
+            data=empty_data,
+            cmap="viridis",
+            figure_kwargs={"canvas_kwargs": {"parent": self}},
         )
         self.timestamps: np.ndarray = np.array([0.0])
         self.suppress_events: bool = False
@@ -28,6 +32,7 @@ class HeatmapWidgetFPL(QtWidgets.QWidget):
         self.setLayout(layout)
         self.playing = False
         self.relative_playback_speed = 1.0
+        self.logger = logging.getLogger(__name__)
 
         self.image_widget.figure.add_animations(self.update_heatmap)
 
@@ -48,6 +53,9 @@ class HeatmapWidgetFPL(QtWidgets.QWidget):
         self.clear_data()
         if data is None or data.values.shape[0] == 0:
             return
+        self.logger.info(
+            f"{data.values.shape} values with {data.timestamps.shape} timestamps"
+        )
         # Data format used by the old HeatmapWidget: (n_rows, n_columns, n_timesteps)
         # rearrange to (n_timesteps, n_rows, n_columns) for fastplotlib
         values = data.values
@@ -71,6 +79,7 @@ class HeatmapWidgetFPL(QtWidgets.QWidget):
         self.image_widget.add_event_handler(_on_index, "current_index")
 
     def toggle_pause(self) -> None:
+        self.logger.info(f"Playing: {self.playing}")
         self.playing = not self.playing
 
     def update_heatmap(self) -> None:
