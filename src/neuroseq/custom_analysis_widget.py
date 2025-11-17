@@ -8,12 +8,10 @@ from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 
+from neuroseq.experiment import SpikeData
+from neuroseq.experiment import SynapseData
+from neuroseq.experiment import TraceData
 from neuroseq.utils import PrettyPrintEnum
-
-
-class CustomAnalysisDataType(PrettyPrintEnum):
-    Trace = 1
-    Spike = 2
 
 
 class CustomAnalysisType(PrettyPrintEnum):
@@ -48,22 +46,24 @@ class CustomAnalysisWidget(MatplotlibWidget):
         self.logger = logging.getLogger(__name__)
         self.subplot = self.getFigure().add_subplot(111)
         self.traces: npt.NDArray | None = None
-        self.spike_times: npt.NDArray | None = None
+        self.spike_times_ms: npt.NDArray | None = None
         self.spike_indices: npt.NDArray | None = None
-        self.dt: float = 1.0
+        self.dt_ms: float = 1.0
 
     def _preprocess_data(
         self,
-        data_type: CustomAnalysisDataType,
+        data: TraceData | SpikeData | SynapseData,
         analysis_type: CustomAnalysisType,
         neuron_slice: slice | None,
         time_slice: slice | None,
-        data: dict[str, int | float | npt.NDArray],
     ) -> None:
         self.traces = None
-        self.spike_times = None
+        self.spike_times_ms = None
         self.spike_indices = None
-        self.dt = float(data["dt"])
+        if isinstance(data, TraceData):
+            self.dt_ms = data.dt * 1000.0
+        else:
+            self.dt_ms = 1.0
         if neuron_slice is None:
             neuron_slice = slice(None, None)
             neuron_str = "all neurons"
@@ -76,64 +76,69 @@ class CustomAnalysisWidget(MatplotlibWidget):
             time_slice = slice(None, None)
             time_str = "all time"
         else:
-            time_str = f"time {1000.0 * time_slice.start * self.dt:.0f}ms-{1000.0 * time_slice.stop * self.dt:.0f}ms"
+            time_str = f"time {time_slice.start * self.dt_ms:.0f}ms-{time_slice.stop * self.dt_ms:.0f}ms"
         self.time_slice = time_slice
-        self.subplot.set_title(f"{data_type} {analysis_type}: {neuron_str}, {time_str}")
-        if data_type == CustomAnalysisDataType.Trace:
-            self.traces = np.asarray(data["data"])[neuron_slice, time_slice]
-        elif data_type == CustomAnalysisDataType.Spike:
-            spike_times = np.asarray(data["spike_times"])
-            spike_indices = np.asarray(data["spike_indices"])
+        self.subplot.set_title(f"{data.name} {analysis_type}: {neuron_str}, {time_str}")
+        if isinstance(data, TraceData):
+            self.traces = np.asarray(data.traces)[neuron_slice, time_slice]
+        elif isinstance(data, SpikeData):
+            spike_times_ms = (
+                np.asarray(data.spike_times) * 1000.0
+            )  # convert to milliseconds
+            spike_indices = np.asarray(data.spike_indices)
             if time_slice.start is not None and time_slice.stop is not None:
-                times_mask = (spike_times >= time_slice.start * self.dt) & (
-                    spike_times < time_slice.stop * self.dt
+                times_mask = (spike_times_ms >= time_slice.start * self.dt_ms) & (
+                    spike_times_ms < time_slice.stop * self.dt_ms
                 )
+                self.logger.error(
+                    f"{time_slice.start * self.dt_ms} - {time_slice.stop * self.dt_ms}"
+                )
+                self.logger.error(f"{sum(times_mask)} spikes in time slice")
                 spike_indices = spike_indices[times_mask]
-                spike_times = spike_times[times_mask]
+                spike_times_ms = spike_times_ms[times_mask]
             if neuron_slice.start is not None and neuron_slice.stop is not None:
                 neurons_mask = (spike_indices >= neuron_slice.start) & (
                     spike_indices < neuron_slice.stop
                 )
                 spike_indices = spike_indices[neurons_mask]
-                spike_times = spike_times[neurons_mask]
+                spike_times_ms = spike_times_ms[neurons_mask]
             self.spike_indices = spike_indices
-            self.spike_times = spike_times
+            self.spike_times_ms = spike_times_ms
 
     def set_data(
         self,
-        data_type: CustomAnalysisDataType | None,
+        data: TraceData | SpikeData | SynapseData | None,
         analysis_type: CustomAnalysisType | None,
         neuron_slice: slice | None,
         time_slice: slice | None,
-        data: dict[str, int | float | npt.NDArray],
     ) -> None:
         self.subplot.clear()
-        if data_type is None or analysis_type is None or len(data) == 0:
+        if data is None or analysis_type is None:
             return
         self.logger.info(
-            f"Plotting {analysis_type} of {data_type} data {data.keys()} for neuron slice {neuron_slice} and time slice {time_slice}"
+            f"Plotting {analysis_type} of {type(data)} data for neuron slice {neuron_slice} and time slice {time_slice}"
         )
-        self._preprocess_data(data_type, analysis_type, neuron_slice, time_slice, data)
+        self._preprocess_data(data, analysis_type, neuron_slice, time_slice)
         if analysis_type == CustomAnalysisType.Histogram:
-            if data_type == CustomAnalysisDataType.Trace:
+            if isinstance(data, TraceData):
                 x = np.asarray(self.traces).flatten()
-            elif data_type == CustomAnalysisDataType.Spike:
+            elif isinstance(data, SpikeData):
                 x = self.spike_indices
             self.subplot.hist(x, bins=30, density=True)
             self.subplot.set_xlabel("Value")
             self.subplot.set_ylabel("Density")
         elif analysis_type == CustomAnalysisType.Histogram2d:
-            if data_type == CustomAnalysisDataType.Trace:
+            if isinstance(data, TraceData):
                 assert self.traces is not None
                 x = np.tile(
-                    self.dt * np.arange(self.traces.shape[1]), self.traces.shape[0]
+                    self.dt_ms * np.arange(self.traces.shape[1]), self.traces.shape[0]
                 )
                 if time_slice is not None and time_slice.start is not None:
-                    x += time_slice.start * self.dt
+                    x += time_slice.start * self.dt_ms
                 y = np.asarray(self.traces).flatten()
                 self.subplot.set_ylabel("Values")
-            elif data_type == CustomAnalysisDataType.Spike:
-                x = self.spike_times
+            elif isinstance(data, SpikeData):
+                x = self.spike_times_ms
                 y = self.spike_indices
                 self.subplot.set_ylabel("Neurons")
             self.subplot.hist2d(x, y, bins=30, density=True)

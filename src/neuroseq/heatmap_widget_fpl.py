@@ -4,6 +4,8 @@ import brian2.numpy_ as np
 import fastplotlib as fpl
 from qtpy import QtWidgets
 
+from neuroseq.experiment import SynapseData
+
 
 class HeatmapWidgetFPL(QtWidgets.QWidget):
     """A widget that displays a 3d array as a timeline of 2d heatmaps.
@@ -37,20 +39,21 @@ class HeatmapWidgetFPL(QtWidgets.QWidget):
 
     def set_data(
         self,
-        data: np.ndarray | None = None,
-        timestamps: np.ndarray | None = None,
+        data: SynapseData | None = None,
     ) -> None:
         """Set the data to be displayed in the heatmap.
         data should be a 3d numpy array with shape (n_rows, n_columns, n_timesteps).
         """
         self.suppress_events = True
         self.clear_data()
-        if data is not None:
-            # Data format used by the old HeatmapWidget: (n_rows, n_columns, n_timesteps)
-            # rearrange to (n_timesteps, n_rows, n_columns) for fastplotlib
-            data = np.transpose(data, (2, 0, 1))
-            self.image_widget.set_data(data)
-            self.timestamps = timestamps
+        if data is None or data.values.shape[0] == 0:
+            return
+        # Data format used by the old HeatmapWidget: (n_rows, n_columns, n_timesteps)
+        # rearrange to (n_timesteps, n_rows, n_columns) for fastplotlib
+        values = data.values
+        values = np.transpose(values, (2, 0, 1))
+        self.image_widget.set_data(values)
+        self.timestamps = data.timestamps
         self.suppress_events = False
 
     def connect_timeseries_widget_timeline(

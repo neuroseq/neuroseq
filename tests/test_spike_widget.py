@@ -4,6 +4,7 @@ import brian2.numpy_ as np
 from pytestqt.qtbot import QtBot
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.experiment import SpikeData
 from neuroseq.spike_widget import SpikeWidget
 
 
@@ -23,5 +24,6 @@ def test_spike_widget(qtbot: QtBot) -> None:
     spike_times = np.arange(n_spikes) * dt * (
         n_timesteps - 1
     ) / n_spikes + 0.2 * np.random.rand(n_spikes)
-    spike_widget.set_data(spike_indices, spike_times, dt, n_neurons, n_timesteps)
-    assert spike_widget.n_neurons == n_neurons
+    data = SpikeData("spikes", spike_indices, spike_times)
+    spike_widget.set_data(data)
+    assert spike_widget.n_neurons == max(spike_indices) + 1

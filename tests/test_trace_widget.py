@@ -4,6 +4,7 @@ import brian2.numpy_ as np
 from pytestqt.qtbot import QtBot
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.experiment import TraceData
 from neuroseq.trace_widget import TraceWidget
 
 
@@ -16,9 +17,13 @@ def test_trace_widget_zero_traces(qtbot: QtBot) -> None:
     n_neurons = 20
     n_timestamps = 100
     dt = 0.0991
-    traces = np.zeros(shape=(n_neurons, n_timestamps), dtype=np.float32)
-    timestamps = dt * np.arange(n_timestamps)
-    trace_widget.set_data(traces, timestamps)
+    data = TraceData(
+        name="traces",
+        traces=np.zeros(shape=(n_neurons, n_timestamps), dtype=np.float32),
+        dt=dt,
+        units="mV",
+    )
+    trace_widget.set_data(data)
 
 
 def test_trace_widget(qtbot: QtBot) -> None:
@@ -30,10 +35,14 @@ def test_trace_widget(qtbot: QtBot) -> None:
     n_neurons = 20
     n_timestamps = 100
     dt = 0.0991
-    traces = np.random.rand(n_neurons, n_timestamps)
-    timestamps = dt * np.arange(n_timestamps)
-    trace_widget.set_data(traces, timestamps)
-    assert trace_widget.n_neurons == traces.shape[0]
+    data = TraceData(
+        name="traces",
+        traces=np.random.rand(n_neurons, n_timestamps),
+        dt=dt,
+        units="mV",
+    )
+    trace_widget.set_data(data)
+    assert trace_widget.n_neurons == n_neurons
     assert trace_widget.n_timestamps == n_timestamps
     # initially no neurons are selected
     assert trace_widget.selected_neuron_slice is None

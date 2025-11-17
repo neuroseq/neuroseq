@@ -12,6 +12,7 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+import neuroseq.save_options_dialog
 from neuroseq.b2_model import B2Model
 from neuroseq.gui import Gui
 from neuroseq.model_editor import EditableSynapseTree
@@ -77,11 +78,11 @@ def test_gui_simulate_and_playback(
     qtbot.wait(delay_after_update_model_call_in_ms)
     simulation_time_ms = simulation_time * 1000
     assert gui.cmb_synapse.count() == 1
-    assert gui.cmb_synapse.itemText(0) == "Ce / we"
-    assert gui.cmb_neuron.count() == 1
-    assert gui.cmb_neuron.itemText(0) == "P / v"
+    assert gui.cmb_synapse.itemText(0) == "Simulation :: Ce / we"
+    assert gui.cmb_trace.count() == 1
+    assert gui.cmb_trace.itemText(0) == "Simulation :: P / v"
     assert gui.cmb_spike.count() == 1
-    assert gui.cmb_spike.itemText(0) == "P"
+    assert gui.cmb_spike.itemText(0) == "Simulation :: P"
     gui.btn_continue_simulation_clicked()
     n_timesteps = gui.heatmap_widget.tVals.size
     gui.btn_play_clicked()
@@ -156,6 +157,15 @@ def test_gui_open(
     assert list(gui.model.monitors.keys()) == list(loaded_model.monitors.keys())
 
 
+class MockSaveOptionsDialog:
+    include_simulation_data = True
+    include_simulation_checkpoints = True
+    include_experimental_data = True
+
+    def exec(self) -> bool:
+        return True
+
+
 def test_gui_save(
     tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_ornstein: B2Model
 ) -> None:
@@ -170,6 +180,11 @@ def test_gui_save(
     # the gui will add the .nseq extension automatically
     filename = filename_without_extension.with_suffix(".nseq")
     assert not filename.exists()
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "SaveOptionsDialog",
+        MockSaveOptionsDialog,
+    )
     # mock getSaveFileName to return the desired filename
     monkeypatch.setattr(
         QtWidgets.QFileDialog,
@@ -494,7 +509,7 @@ def test_gui_simulate_external_model(
         lambda *args: ("external_simulation_example/simulate.py", True),
     )
     assert (
-        gui.stim_editor.stim_widget.n_timestamps * gui.stim_editor.stim_widget.dt
+        gui.stim_editor.stim_widget.n_timestamps * gui.stim_editor.stim_widget.dt_ms
         == approx(2000, rel=2)
     )
     # simulate for 10 seconds
@@ -505,18 +520,22 @@ def test_gui_simulate_external_model(
         "getText",
         lambda *args: (f"{simulation_time_secs}", True),
     )
-    gui.btn_continue_simulation_clicked()
+    gui.btn_do_external_simulation_clicked()
     qtbot.wait(delay_after_update_model_call_in_ms)
     simulation_time_ms = simulation_time_secs * 1000
     # stim array should be padded to simulation time + default padding of 5 secs
     assert (
-        gui.stim_editor.stim_widget.n_timestamps * gui.stim_editor.stim_widget.dt
+        gui.stim_editor.stim_widget.n_timestamps * gui.stim_editor.stim_widget.dt_ms
         == approx(simulation_time_ms + 5000, rel=2)
     )
+    # select the newly added simulation data in the dropdowns
+    gui.set_neuron(gui.cmb_trace.itemText(gui.cmb_trace.count() - 1))
+    gui.set_spike(gui.cmb_spike.itemText(gui.cmb_spike.count() - 1))
+    gui.set_synapse(gui.cmb_synapse.itemText(gui.cmb_synapse.count() - 1))
     assert gui.trace_widget.n_neurons == 32
     assert gui.trace_widget.n_timestamps == 2000
     assert gui.spike_widget.n_neurons == 32
-    assert gui.spike_widget.dt == approx(simulation_time_ms / 2000, rel=2)
+    assert gui.spike_widget.dt_ms == approx(simulation_time_ms / 2000, rel=2)
     assert gui.heatmap_widget.tVals[-1] == approx(simulation_time_ms, rel=2)
 
 
@@ -559,8 +578,8 @@ def test_integration_modeleditor_delete_restore(
 
     # try to accept, error
     qtbot.mouseClick(
-        modeleditor.button_box.button(QtWidgets.QDialogButtonBox.Ok),
-        QtCore.Qt.LeftButton,
+        modeleditor.button_box.button(QtWidgets.QDialogButtonBox.StandardButton.Ok),
+        QtCore.Qt.MouseButton.LeftButton,
     )
 
     # check error message
@@ -574,8 +593,8 @@ def test_integration_modeleditor_delete_restore(
 
     # reject-> only option available, restores old model
     qtbot.mouseClick(
-        modeleditor.button_box.button(QtWidgets.QDialogButtonBox.Cancel),
-        QtCore.Qt.LeftButton,
+        modeleditor.button_box.button(QtWidgets.QDialogButtonBox.StandardButton.Cancel),
+        QtCore.Qt.MouseButton.LeftButton,
     )
     qtbot.waitUntil(lambda: not modeleditor.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)

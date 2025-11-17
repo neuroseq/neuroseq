@@ -30,6 +30,7 @@ class Reconstructor:
         """
         self.logger = logging.getLogger(__name__)
         self.stored_state = {}
+        self.experimental_data = {}
         if Path(filepath).suffix == ".json":
             # for backwards compatibility, support loading models from json files
             with open(filepath) as fp:
@@ -45,6 +46,11 @@ class Reconstructor:
                 self.loaded_data = json.load(fp, object_hook=b2_object_hook_factory(zf))
                 if "stored_state.pkl" in zf.namelist():
                     self.stored_state = pickle.loads(zf.read("stored_state.pkl"))
+                if "experimental_data.json" in zf.namelist():
+                    with zf.open("experimental_data.json") as exp_fp:
+                        self.experimental_data = json.load(
+                            exp_fp, object_hook=b2_object_hook_factory(zf)
+                        )
 
     def _reconstruct_dynamic_object(
         self,
@@ -338,6 +344,8 @@ class Reconstructor:
         if save_store_name in model.network._stored_state:
             model.network.restore(save_store_name)
             del model.network._stored_state[save_store_name]
+
+        model.experiments = self.experimental_data
 
         model.must_be_rebuilt = False
 
