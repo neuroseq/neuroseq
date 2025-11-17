@@ -66,6 +66,9 @@ class HeatmapWidgetFPL(QtWidgets.QWidget):
         self.timestamps = data.timestamps
         self.suppress_events = False
 
+    def nframes(self) -> int:
+        return self.timestamps.shape[0]
+
     def connect_timeseries_widget_timeline(
         self, timeseries_widget: QtWidgets.QWidget
     ) -> None:
@@ -84,16 +87,17 @@ class HeatmapWidgetFPL(QtWidgets.QWidget):
         self.logger.info(f"Playing: {self.playing}")
         self.playing = not self.playing
 
+    def stop(self) -> None:
+        self.playing = False
+
     def set_current_index(self, idx: int) -> None:
-        self.suppress_events = True
         self.image_widget.current_index = {"t": idx}
-        self.suppress_events = False
 
     def update_heatmap(self) -> None:
         if not self.playing:
             return
         current_idx = self.image_widget.current_index["t"]
         next_idx = current_idx + 1
-        if next_idx >= self.timestamps.shape[0]:
+        if next_idx >= self.nframes():
             next_idx = 0
         self.image_widget.current_index = {"t": next_idx}

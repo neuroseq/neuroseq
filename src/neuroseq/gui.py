@@ -455,10 +455,12 @@ class Gui(QtWidgets.QMainWindow):
         self._do_external_simulation(simulation_time)
 
     def btn_skip_to_start_clicked(self) -> None:
-        self.heatmap_widget.setCurrentIndex(0)  # TODO-FPL
+        # self.heatmap_widget.setCurrentIndex(0)  # TODO-FPL
+        self.heatmap_widget_fpl.set_current_index(0)  # TODO-FPL
 
     def btn_stop_clicked(self) -> None:
-        self.heatmap_widget.play(0)  # TODO-FPL
+        # self.heatmap_widget.play(0)  # TODO-FPL
+        self.heatmap_widget_fpl.stop()  # TODO-FPL
         self.btn_skip_to_start_clicked()
 
     def btn_play_clicked(self) -> None:
@@ -491,8 +493,11 @@ class Gui(QtWidgets.QMainWindow):
             return
 
     def btn_skip_to_end_clicked(self) -> None:
-        self.heatmap_widget.setCurrentIndex(
-            self.heatmap_widget.nframes() - 1
+        # self.heatmap_widget.setCurrentIndex(
+        #     self.heatmap_widget.nframes() - 1
+        # )  # TODO-FPL
+        self.heatmap_widget_fpl.set_current_index(
+            self.heatmap_widget_fpl.nframes() - 1
         )  # TODO-FPL
 
     def toggle_selection_text(self):
