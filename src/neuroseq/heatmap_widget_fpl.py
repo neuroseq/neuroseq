@@ -24,6 +24,10 @@ class HeatmapWidgetFPL(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         layout.addWidget(self.widget)
         self.setLayout(layout)
+        self.playing = False
+        self.relative_playback_speed = 1.0
+
+        self.image_widget.figure.add_animations(self.update_heatmap)
 
     def clear_data(self) -> None:
         self.suppress_events = True
@@ -62,3 +66,15 @@ class HeatmapWidgetFPL(QtWidgets.QWidget):
                 timeseries_widget.timeline.selection = t
 
         self.image_widget.add_event_handler(_on_index, "current_index")
+
+    def toggle_pause(self) -> None:
+        self.playing = not self.playing
+
+    def update_heatmap(self) -> None:
+        if not self.playing:
+            return
+        current_idx = self.image_widget.current_index["t"]
+        next_idx = current_idx + 1
+        if next_idx >= self.image_widget.data.shape[0]:
+            next_idx = 0
+        self.image_widget.current_index = {"t": next_idx}

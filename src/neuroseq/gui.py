@@ -595,7 +595,8 @@ class Gui(QtWidgets.QMainWindow):
         self.btn_skip_to_start_clicked()
 
     def btn_play_clicked(self) -> None:
-        self.heatmap_widget.togglePause()  # TODO-FPL
+        # self.heatmap_widget.togglePause()  # TODO-FPL
+        self.heatmap_widget_fpl.toggle_pause()  # TODO-FPL
 
     def btn_playback_speed_clicked(self) -> None:
         new_speed, ok = QtWidgets.QInputDialog.getText(
