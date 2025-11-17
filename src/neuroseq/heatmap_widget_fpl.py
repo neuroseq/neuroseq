@@ -90,8 +90,12 @@ class HeatmapWidgetFPL(QtWidgets.QWidget):
     def stop(self) -> None:
         self.playing = False
 
-    def set_current_index(self, idx: int) -> None:
+    def set_current_index(self, idx: int, event=True) -> None:
+        if not event:
+            self.suppress_events = True
         self.image_widget.current_index = {"t": idx}
+        if not event:
+            self.suppress_events = False
 
     def update_heatmap(self) -> None:
         if not self.playing:
