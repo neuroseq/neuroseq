@@ -67,6 +67,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.text = Text()
         self.show_text = True
         self.timeline: fpl.LinearSelector | None = None
+        self.grid_lines: GridLines | None = None
         self.setLayout(layout)
         self.subplot: Subplot = self.figure[0, 0]
         self._set_light_mode()
@@ -167,9 +168,9 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.subplot.axes.x.tick_format = lambda x, x_min, x_max: f"{x:.0f}ms"
         self.subplot.toolbar = False
         self.subplot.add_graphic(self.roi, center=False)
-        self.subplot.add_graphic(
-            GridLines(self.n_neurons, self.n_timestamps * self.dt_ms), center=False
-        )
+        self.grid_lines = GridLines(self.n_neurons, self.n_timestamps * self.dt_ms)
+        self.subplot.add_graphic(self.grid_lines, center=False)
+        self.controller.add_grid_lines(self.grid_lines)
         self.subplot.add_graphic(self.text, center=False)
         self._set_light_mode()
         self.roi.visible = False

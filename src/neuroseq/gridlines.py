@@ -50,13 +50,20 @@ class GridLines(Graphic):
         super().__init__()
         group = pygfx.Group()
         group.add(generate_stripes(n_neurons, time_ms))
-        for (
-            dt_ms,
-            thickness,
-        ) in [
-            (1.0, 0.2),
-            (10.0, 1),
-            (100.0, 3),
-        ]:
-            group.add(generate_gridlines(n_neurons, time_ms, dt_ms, thickness))
+        self.gridline_1ms = generate_gridlines(n_neurons, time_ms, 1, 0.2)
+        group.add(self.gridline_1ms)
+        self.gridline_10ms = generate_gridlines(n_neurons, time_ms, 10, 1)
+        group.add(self.gridline_10ms)
+        self.gridline_100ms = generate_gridlines(n_neurons, time_ms, 100, 2)
+        group.add(self.gridline_100ms)
+        self.gridline_1000ms = generate_gridlines(n_neurons, time_ms, 1000, 3)
+        group.add(self.gridline_1000ms)
         self._set_world_object(group)
+        self.set_current_time_extent(time_ms)
+
+    def set_current_time_extent(self, time_ms: float):
+        """Set visibility of gridlines based on current time extent."""
+        self.gridline_1ms.visible = time_ms < 250.0
+        self.gridline_10ms.visible = time_ms < 2500.0
+        self.gridline_100ms.visible = time_ms < 25000.0
+        self.gridline_1000ms.visible = time_ms < 250000.0

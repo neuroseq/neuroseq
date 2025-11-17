@@ -283,6 +283,7 @@ class Gui(QtWidgets.QMainWindow):
         self.trace_widget.clear_data()
         self.spike_widget.clear_data()
         self.heatmap_widget.clear_data()
+        self.controller.clear_grid_lines()
         self.stim_editor.set_model(self.model)
         cmb_trace_text = self.cmb_trace.currentText()
         self.cmb_trace.clear()
