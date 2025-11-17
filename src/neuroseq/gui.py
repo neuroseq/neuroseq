@@ -56,9 +56,10 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_spike.setMinimumWidth(120)
         self.cmb_synapse = QtWidgets.QComboBox()
         self.cmb_synapse.setMinimumWidth(120)
+        self.controller = ConstrainedPanZoomController()
+        self.trace_widget = TraceWidget(self.controller)
         self._create_menus_and_toolbars()
         self.setWindowIcon(qta.icon("fa6s.brain"))
-        self.controller = ConstrainedPanZoomController()
         main_horizontal_layout = QtWidgets.QHBoxLayout()
         central_widget = QtWidgets.QWidget()
         central_widget.setLayout(main_horizontal_layout)
@@ -85,7 +86,6 @@ class Gui(QtWidgets.QMainWindow):
             toolbar=self.toolbar_stim_editor,
         )
         split_vertical.addWidget(self.stim_editor)
-        self.trace_widget = TraceWidget(self.controller)
         split_vertical.addWidget(self.trace_widget)
         self.spike_widget = SpikeWidget(self.controller)
         split_vertical.addWidget(self.spike_widget)
@@ -852,6 +852,14 @@ class Gui(QtWidgets.QMainWindow):
         toolbar.addWidget(self.cmb_stim)
         toolbar.addWidget(QtWidgets.QLabel("  Neuron data: "))
         toolbar.addWidget(self.cmb_trace)
+        add_action(
+            "&Trace normalization",
+            self.trace_widget.trace_norm_dialog,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon=qta.icon("mdi6.arrow-expand-vertical"),
+        )
         toolbar.addWidget(QtWidgets.QLabel("  Spike data: "))
         toolbar.addWidget(self.cmb_spike)
         toolbar.addWidget(QtWidgets.QLabel("  Synapse data: "))
