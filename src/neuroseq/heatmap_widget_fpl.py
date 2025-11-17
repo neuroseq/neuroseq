@@ -21,9 +21,11 @@ class HeatmapWidgetFPL(QtWidgets.QWidget):
         empty_data = np.zeros((1, 1, 1))
         self.image_widget: fpl.ImageWidget = fpl.ImageWidget(
             data=empty_data,
+            names=[""],
             cmap="viridis",
             figure_kwargs={"canvas_kwargs": {"parent": self}},
         )
+        self.image_widget.figure[0, 0].toolbar = False
         self.timestamps: np.ndarray = np.array([0.0])
         self.suppress_events: bool = False
         self.widget = self.image_widget.show()
