@@ -196,7 +196,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
                     f"TimeseriesWidget _on_timeline_change: t={ev.info}, idx={idx}, idx-type={type(idx)}"
                 )
                 try:
-                    self.heatmap_widget_fpl.image_widget.current_index = {"t": idx}
+                    self.heatmap_widget_fpl.set_current_index(idx)
                 except Exception as e:
                     print(f"Error setting current index: {e}")
 
