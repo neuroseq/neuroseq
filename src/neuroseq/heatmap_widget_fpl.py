@@ -78,6 +78,6 @@ class HeatmapWidgetFPL(QtWidgets.QWidget):
             return
         current_idx = self.image_widget.current_index["t"]
         next_idx = current_idx + 1
-        if next_idx >= self.image_widget.data.shape[0]:
+        if next_idx >= self.timestamps.shape[0]:
             next_idx = 0
         self.image_widget.current_index = {"t": next_idx}
