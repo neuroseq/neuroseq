@@ -108,7 +108,12 @@ class HeatmapWidget(QtWidgets.QWidget):
         """Stop playback of the heatmap."""
         self.playing = False
 
-    def set_current_index(self, idx: int, event=True) -> None:
+    def set_current_index(self, idx: int) -> None:
+        """Set the current index of the slider."""
+        self.slider.setValue(idx)
+        self.slider.valueChanged.emit(idx)
+
+    def set_heatmap_index(self, idx: int) -> None:
         """Set the current index of the heatmap."""
         self.image_widget.current_index = {"t": idx}
 
@@ -120,7 +125,7 @@ class HeatmapWidget(QtWidgets.QWidget):
         next_idx = current_idx + 1
         if next_idx >= self.nframes():
             next_idx = 0
-        self.image_widget.current_index = {"t": next_idx}
+        self.set_current_index(next_idx)
 
     def on_slider_value_changed(self, value: int) -> None:
-        self.set_current_index(value)
+        self.set_heatmap_index(value)
