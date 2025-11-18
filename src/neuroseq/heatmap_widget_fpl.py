@@ -12,7 +12,7 @@ from neuroseq.experiment import SynapseData
 class HeatmapWidgetFPL(QtWidgets.QWidget):
     """A widget that displays a 3d array as a timeline of 2d heatmaps.
 
-    see https://pyqtgraph.readthedocs.io/en/latest/api_reference/widgets/imageview.html
+    see https://www.fastplotlib.org/ver/dev/api/widgets/ImageWidget.html
     """
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
@@ -39,6 +39,7 @@ class HeatmapWidgetFPL(QtWidgets.QWidget):
         self.image_widget.figure.add_animations(self.update_heatmap)
 
     def clear_data(self) -> None:
+        """Clear the data in the heatmap, setting it to a 1x1x1 array of zeros."""
         self.suppress_events = True
         self.image_widget.set_data(np.zeros((1, 1, 1)))
         self.timestamps = np.array([0.0])
@@ -48,9 +49,7 @@ class HeatmapWidgetFPL(QtWidgets.QWidget):
         self,
         data: SynapseData | None = None,
     ) -> None:
-        """Set the data to be displayed in the heatmap.
-        data should be a 3d numpy array with shape (n_rows, n_columns, n_timesteps).
-        """
+        """Set the data to be displayed in the heatmap."""
         self.suppress_events = True
         self.clear_data()
         if data is None or data.values.shape[0] == 0:
@@ -67,6 +66,7 @@ class HeatmapWidgetFPL(QtWidgets.QWidget):
         self.suppress_events = False
 
     def nframes(self) -> int:
+        """Return the number of frames in the heatmap."""
         return self.timestamps.shape[0]
 
     def connect_timeseries_widget_timeline(
@@ -84,13 +84,16 @@ class HeatmapWidgetFPL(QtWidgets.QWidget):
         self.image_widget.add_event_handler(_on_index, "current_index")
 
     def toggle_pause(self) -> None:
+        """Toggle the playback state between playing and paused."""
         self.logger.info(f"Playing: {self.playing}")
         self.playing = not self.playing
 
     def stop(self) -> None:
+        """Stop playback of the heatmap."""
         self.playing = False
 
     def set_current_index(self, idx: int, event=True) -> None:
+        """Set the current index of the heatmap. If event is False, suppresses the current_index event of ImageWidget."""
         if not event:
             self.suppress_events = True
         self.image_widget.current_index = {"t": idx}
@@ -98,6 +101,7 @@ class HeatmapWidgetFPL(QtWidgets.QWidget):
             self.suppress_events = False
 
     def update_heatmap(self) -> None:
+        """Update the heatmap to the next frame if playing."""
         if not self.playing:
             return
         current_idx = self.image_widget.current_index["t"]
