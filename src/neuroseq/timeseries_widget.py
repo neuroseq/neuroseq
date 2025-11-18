@@ -349,6 +349,9 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.heatmap_widget = heatmap_widget
 
     def on_slider_value_changed(self, value: int) -> None:
+        """Slot for the heatmap widget slider.valueChanged signal.
+        Updates the timeline in this widget.
+        """
         if self.heatmap_widget is None:
             return
         if self.timeline is None:
@@ -357,6 +360,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.timeline.selection = t
 
     def on_timeline_change(self, ev):
+        """Outgoing event handler for timeline selection changes."""
         # timestamp value to index
         idx = (
             np.abs(self.heatmap_widget.timestamps * 1000.0 - ev.info["value"])

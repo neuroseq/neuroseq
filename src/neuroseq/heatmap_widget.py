@@ -12,6 +12,7 @@ from neuroseq.experiment import SynapseData
 
 class HeatmapWidget(QtWidgets.QWidget):
     """A widget that displays a 3d array as a timeline of 2d heatmaps.
+    The widget is controlled via a QSlider, which controls the Heatmap index, connected TimeseriesWidgets linear selectors and the playback logic.
 
     see https://www.fastplotlib.org/ver/dev/api/widgets/ImageWidget.html
     """
@@ -109,12 +110,17 @@ class HeatmapWidget(QtWidgets.QWidget):
         self.playing = False
 
     def set_current_index(self, idx: int) -> None:
-        """Set the current index of the slider."""
+        """Set the current index of the slider.
+        This will also update the heatmap index,
+        and via signals the connected TimeseriesWidget timelines.
+        """
         self.slider.setValue(idx)
         self.slider.valueChanged.emit(idx)
 
     def set_heatmap_index(self, idx: int) -> None:
-        """Set the current index of the heatmap."""
+        """Set the current index of the heatmap.
+        The heatmap index should only be modifed by the slider.
+        """
         self.image_widget.current_index = {"t": idx}
 
     def update_heatmap(self) -> None:
