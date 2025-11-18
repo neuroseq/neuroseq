@@ -22,10 +22,9 @@ class HeatmapWidget(QtWidgets.QWidget):
         self.image_widget: fpl.ImageWidget = fpl.ImageWidget(
             data=empty_data,
             names=[""],
-            cmap="viridis",
             figure_kwargs={"canvas_kwargs": {"parent": self}},
         )
-        self.image_widget.figure[0, 0].toolbar = False
+        self.subplot: fpl.layouts.Subplot = self.image_widget.figure[0, 0]
         self.timestamps: np.ndarray = np.array([0.0])
         self.suppress_events: bool = False
         self.widget = self.image_widget.show()
@@ -35,7 +34,7 @@ class HeatmapWidget(QtWidgets.QWidget):
         self.playing = False
         self.relative_playback_speed = 1.0
         self.logger = logging.getLogger(__name__)
-
+        self.configure_subplot()
         self.image_widget.figure.add_animations(self.update_heatmap)
 
     def clear_data(self) -> None:
@@ -64,6 +63,17 @@ class HeatmapWidget(QtWidgets.QWidget):
         self.image_widget.set_data(values)
         self.timestamps = data.timestamps
         self.suppress_events = False
+
+    def configure_subplot(self) -> None:
+        self.subplot.toolbar = False
+        self.subplot.axes.y.ticks = None
+        self.subplot.axes.y.points.visible = False
+        self.subplot.axes.y.line.visible = False
+        self.subplot.axes.y.tick_format = lambda *a: ""
+        self.subplot.axes.x.ticks = None
+        self.subplot.axes.x.points.visible = False
+        self.subplot.axes.x.line.visible = False
+        self.subplot.axes.x.tick_format = lambda *a: ""
 
     def set_relative_playback_speed(self, relative_playback_speed: float) -> None:
         """Set the relative playback speed, where 1 is real-time.
