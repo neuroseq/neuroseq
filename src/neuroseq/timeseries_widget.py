@@ -16,7 +16,7 @@ from neuroseq.experiment import SpikeData
 from neuroseq.experiment import SynapseData
 from neuroseq.experiment import TraceData
 from neuroseq.gridlines import GridLines
-from neuroseq.heatmap_widget_fpl import HeatmapWidgetFPL
+from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.region_of_interest import RegionOfInterest
 from neuroseq.text import Text
 from neuroseq.utils import InteractMode
@@ -49,7 +49,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self, controller: pygfx.Controller, parent: QtWidgets.QWidget | None = None
     ) -> None:
         super().__init__(parent)
-        self.heatmap_widget: HeatmapWidgetFPL | None = None
+        self.heatmap_widget: HeatmapWidget | None = None
         self.controller = controller
         self.figure: fpl.Figure = fpl.Figure(
             controllers=controller, canvas_kwargs={"parent": self}
@@ -363,6 +363,6 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
             f"Selecting neurons {neuron_index_slice} and times {time_index_slice}"
         )
 
-    def connect_heatmap_widget(self, heatmap_widget: HeatmapWidgetFPL) -> None:
+    def connect_heatmap_widget(self, heatmap_widget: HeatmapWidget) -> None:
         """Connect the timeline in this widget to the timeline in the HeatmapWidget."""
         self.heatmap_widget = heatmap_widget
