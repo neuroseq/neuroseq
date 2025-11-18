@@ -45,10 +45,9 @@ class HeatmapWidget(QtWidgets.QWidget):
 
     def clear_data(self) -> None:
         """Clear the data in the heatmap, setting it to a 1x1x1 array of zeros."""
-        self.suppress_events = True
         self.image_widget.set_data(np.zeros((1, 1, 1)))
         self.timestamps = np.array([0.0])
-        self.suppress_events = False
+        self.slider.setValue(0)
         self.slider.setEnabled(False)
 
     def set_data(
@@ -56,7 +55,6 @@ class HeatmapWidget(QtWidgets.QWidget):
         data: SynapseData | None = None,
     ) -> None:
         """Set the data to be displayed in the heatmap."""
-        self.suppress_events = True
         self.clear_data()
         if data is None or data.values.shape[0] == 0:
             return
@@ -72,7 +70,6 @@ class HeatmapWidget(QtWidgets.QWidget):
         self.slider.setMaximum(self.nframes() - 1)
         self.slider.setMinimum(0)
         self.slider.setEnabled(True)
-        self.suppress_events = False
 
     def configure_subplot(self) -> None:
         self.subplot.toolbar = False
