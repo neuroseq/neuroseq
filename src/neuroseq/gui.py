@@ -391,9 +391,7 @@ class Gui(QtWidgets.QMainWindow):
             return
         try:
             # pre-emptively pad timed arrays before simulating
-            self.model.pad_timed_arrays(
-                simulation_time, self.settings.stim_padding_secs
-            )
+            self.model.pad_timed_arrays(total_time_seconds=simulation_time)
             self.stim_editor.set_model(self.model)
             stims_dict = {
                 k: {"array": v.timed_array.values, "dt": v.timed_array.dt}

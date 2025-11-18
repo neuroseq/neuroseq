@@ -2031,29 +2031,56 @@ class B2Model:
                     )
                     self.define_parameter(name, new_timed_array)
 
-    def pad_timed_arrays(self, sim_time_seconds: float, padding_seconds: float):
+    def pad_timed_arrays(self, total_time_seconds: float):
         """
-        Pad any TimedArrays with zeros up to sim_time_secs + padding_seconds
+        Pad all TimedArrays in the model to a length of total_time_seconds
         """
         for name, timed_array in self.parameters.items():
             if isinstance(timed_array, b2.TimedArray) and timed_array.values.ndim > 1:
                 n_timestamps = timed_array.values.shape[0]
                 array_time_secs = timed_array.dt * n_timestamps
-                padding_required_seqs = (
-                    sim_time_seconds + padding_seconds - array_time_secs
-                )
-                if padding_required_seqs > 0:
-                    n_pad = math.ceil(padding_required_seqs / timed_array.dt)
+                padding_required_secs = total_time_seconds - array_time_secs
+                if padding_required_secs > 0:
+                    n_pad = math.ceil(padding_required_secs / timed_array.dt)
                     new_array = np.pad(
                         timed_array.values, pad_width=((0, n_pad), (0, 0))
                     )
                     self.logger.info(
-                        f"Adding {padding_required_seqs}s padding to {name}: {timed_array.values.shape} -> {new_array.shape}"
+                        f"Adding {padding_required_secs}s padding to {name}: {timed_array.values.shape} -> {new_array.shape}"
                     )
                     new_timed_array = utils.timed_array_with_new_data(
                         timed_array, new_array
                     )
                     self.define_parameter(name, new_timed_array)
+
+    def trim_timed_arrays(self, total_time_seconds: float):
+        """
+        Trim all TimedArrays in the model to a length of total_time_seconds
+        """
+        for name, timed_array in self.parameters.items():
+            if isinstance(timed_array, b2.TimedArray) and timed_array.values.ndim > 1:
+                n_timestamps = timed_array.values.shape[0]
+                new_n_timestamps = int(total_time_seconds / timed_array.dt)
+                if new_n_timestamps < n_timestamps:
+                    new_array = timed_array.values[:new_n_timestamps, :]
+                    self.logger.info(
+                        f"Reducing {name} number of timestamps: {n_timestamps} -> {new_n_timestamps}"
+                    )
+                    new_timed_array = utils.timed_array_with_new_data(
+                        timed_array, new_array
+                    )
+                    self.define_parameter(name, new_timed_array)
+
+    def trim_timed_array_would_delete_data(self, total_time_seconds: float) -> bool:
+        """
+        Check whether trimming all TimedArrays in the model to a length of total_time_seconds would delete data
+        """
+        for timed_array in self.parameters.values():
+            if isinstance(timed_array, b2.TimedArray) and timed_array.values.ndim > 1:
+                new_n_timestamps = int(total_time_seconds / timed_array.dt)
+                if np.sum(timed_array.values[new_n_timestamps:, :]) > 0:
+                    return True
+        return False
 
     def run_simulation(
         self,
@@ -2088,10 +2115,10 @@ class B2Model:
             namespace=self.parameters,
         )
         self.logger.info(f"run the system for {tfinal} with savepath = {savepath}")
+        total_time_seconds = self.network.t / b2.second
         if timed_array_padding_seconds is not None:
-            self.pad_timed_arrays(
-                self.network.t / b2.second, timed_array_padding_seconds
-            )
+            total_time_seconds += timed_array_padding_seconds
+        self.pad_timed_arrays(total_time_seconds=total_time_seconds)
         if savepath is not None:
             self.save_to_h5(savepath)
 
@@ -2271,7 +2298,7 @@ class B2Model:
                     f"'{data.name}' not found when trying to append - addding new data instead of appending."
                 )
                 self.experiments[experiment_name].append(data)
-        self.pad_timed_arrays(new_min_stim_array_length_seconds, 0.0)
+        self.pad_timed_arrays(total_time_seconds=new_min_stim_array_length_seconds)
 
     def get_simulation_trace_names(self) -> list[str]:
         """
