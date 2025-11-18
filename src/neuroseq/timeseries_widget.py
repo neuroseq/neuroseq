@@ -6,7 +6,6 @@ import math
 import brian2.numpy_ as np
 import fastplotlib as fpl
 import pygfx
-import pyqtgraph as pg
 import qtawesome as qta
 from fastplotlib.layouts import Subplot
 from qtpy import QtCore
@@ -17,7 +16,6 @@ from neuroseq.experiment import SpikeData
 from neuroseq.experiment import SynapseData
 from neuroseq.experiment import TraceData
 from neuroseq.gridlines import GridLines
-from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.heatmap_widget_fpl import HeatmapWidgetFPL
 from neuroseq.region_of_interest import RegionOfInterest
 from neuroseq.text import Text
@@ -51,8 +49,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self, controller: pygfx.Controller, parent: QtWidgets.QWidget | None = None
     ) -> None:
         super().__init__(parent)
-        self.heatmap_widget: HeatmapWidget | None = None
-        self.heatmap_widget_fpl: HeatmapWidgetFPL | None = None  # TODO-FPL
+        self.heatmap_widget: HeatmapWidgetFPL | None = None
         self.controller = controller
         self.figure: fpl.Figure = fpl.Figure(
             controllers=controller, canvas_kwargs={"parent": self}
@@ -180,12 +177,9 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
             self.timeline = self.graphic.add_linear_selector(thickness=2)
 
             def _on_timeline_change(ev):
-                self.heatmap_widget.timeLine.setValue(ev.info["value"])
                 # timestamp value to index
                 idx = (
-                    np.abs(
-                        self.heatmap_widget_fpl.timestamps * 1000.0 - ev.info["value"]
-                    )
+                    np.abs(self.heatmap_widget.timestamps * 1000.0 - ev.info["value"])
                 ).argmin()
                 # parse to int
                 try:
@@ -196,7 +190,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
                     f"TimeseriesWidget _on_timeline_change: t={ev.info}, idx={idx}, idx-type={type(idx)}"
                 )
                 try:
-                    self.heatmap_widget_fpl.set_current_index(idx, event=False)
+                    self.heatmap_widget.set_current_index(idx, event=False)
                 except Exception as e:
                     print(f"Error setting current index: {e}")
 
@@ -369,9 +363,6 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
             f"Selecting neurons {neuron_index_slice} and times {time_index_slice}"
         )
 
-    def connect_heatmap_widget(
-        self, heatmap_widget: pg.ImageView, heatmap_widget_fpl: HeatmapWidgetFPL
-    ) -> None:
+    def connect_heatmap_widget(self, heatmap_widget: HeatmapWidgetFPL) -> None:
         """Connect the timeline in this widget to the timeline in the HeatmapWidget."""
         self.heatmap_widget = heatmap_widget
-        self.heatmap_widget_fpl = heatmap_widget_fpl  # TODO-FPL

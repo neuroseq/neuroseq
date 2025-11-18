@@ -65,6 +65,12 @@ class HeatmapWidgetFPL(QtWidgets.QWidget):
         self.timestamps = data.timestamps
         self.suppress_events = False
 
+    def set_relative_playback_speed(self, relative_playback_speed: float) -> None:
+        """Set the relative playback speed, where 1 is real-time.
+        Currently relative playback speed does not affect the playback rate.
+        """
+        self.relative_playback_speed = relative_playback_speed
+
     def nframes(self) -> int:
         """Return the number of frames in the heatmap."""
         return self.timestamps.shape[0]

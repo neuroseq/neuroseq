@@ -22,7 +22,6 @@ from neuroseq.experiment import SpikeData
 from neuroseq.experiment import SynapseData
 from neuroseq.experiment import TraceData
 from neuroseq.gui_settings import GuiSettings
-from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.heatmap_widget_fpl import HeatmapWidgetFPL
 from neuroseq.import_dialog import Suite2pImportDialog
 from neuroseq.model_editor import ModelEditorDialog
@@ -69,10 +68,8 @@ class Gui(QtWidgets.QMainWindow):
         main_horizontal_layout.addWidget(self.toolbar_stim_editor)
         # left/right splitters between heatmap and console
         split_left_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
-        self.heatmap_widget = HeatmapWidget()
-        self.heatmap_widget_fpl = HeatmapWidgetFPL()  # TODO-FPL
-        split_left_right.addWidget(self.heatmap_widget)
-        split_left_right.addWidget(self.heatmap_widget_fpl)  # TODO-FPL
+        self.heatmap_widget_fpl = HeatmapWidgetFPL()
+        split_left_right.addWidget(self.heatmap_widget_fpl)
         self.custom_analysis_widget = CustomAnalysisWidget()
         split_left_right.addWidget(self.custom_analysis_widget)
         self.stim_console = StimConsole()
@@ -100,31 +97,17 @@ class Gui(QtWidgets.QMainWindow):
         self.showMaximized()
         self._create_progressbar()
         # connect widgets
-        self.heatmap_widget.connect_timeseries_widget_timeline(
-            self.stim_editor.stim_widget
-        )  # TODO-FPL
         self.heatmap_widget_fpl.connect_timeseries_widget_timeline(
             self.stim_editor.stim_widget
-        )  # TODO-FPL
-        self.stim_editor.stim_widget.connect_heatmap_widget(
-            self.heatmap_widget, self.heatmap_widget_fpl
-        )  # TODO-FPL
-        self.heatmap_widget.connect_timeseries_widget_timeline(
-            self.trace_widget
-        )  # TODO-FPL
-        self.heatmap_widget_fpl.connect_timeseries_widget_timeline(
-            self.trace_widget
-        )  # TODO-FPL
-        self.trace_widget.connect_heatmap_widget(
-            self.heatmap_widget, self.heatmap_widget_fpl
-        )  # TODO-FPL
+        )
+        self.stim_editor.stim_widget.connect_heatmap_widget(self.heatmap_widget_fpl)
+        self.heatmap_widget_fpl.connect_timeseries_widget_timeline(self.trace_widget)
+        self.trace_widget.connect_heatmap_widget(self.heatmap_widget_fpl)
         # re-enable when fastplotlib scatter plots support timeline
         # self.heatmap_widget.connect_timeseries_widget_timeline(
         #     self.spike_widget
-        # )  # TODO-FPL
-        self.spike_widget.connect_heatmap_widget(
-            self.heatmap_widget, self.heatmap_widget_fpl
-        )  # TODO-FPL
+        # )
+        self.spike_widget.connect_heatmap_widget(self.heatmap_widget_fpl)
         self.stim_console.sig_stims_values_dict_updated.connect(
             self.stim_editor.update_stim_values_dict
         )
@@ -301,8 +284,7 @@ class Gui(QtWidgets.QMainWindow):
         self.continue_simulation_action.setText("&Run simulation")
         self.trace_widget.clear_data()
         self.spike_widget.clear_data()
-        self.heatmap_widget.clear_data()
-        self.heatmap_widget_fpl.clear_data()  # TODO-FPL
+        self.heatmap_widget_fpl.clear_data()
         self.controller.clear_grid_lines()
         self.stim_editor.set_model(self.model)
         cmb_trace_text = self.cmb_trace.currentText()
@@ -333,8 +315,7 @@ class Gui(QtWidgets.QMainWindow):
             self.settings.max_ram_synapse_plot_matrix
         )
         data = self.model.get_data(cmb_name, SynapseData)
-        self.heatmap_widget.set_data(data)
-        self.heatmap_widget_fpl.set_data(data)  # TODO-FPL
+        self.heatmap_widget_fpl.set_data(data)
 
     @with_wait_cursor
     def set_spike(self, cmb_name: str) -> None:
@@ -455,17 +436,14 @@ class Gui(QtWidgets.QMainWindow):
         self._do_external_simulation(simulation_time)
 
     def btn_skip_to_start_clicked(self) -> None:
-        # self.heatmap_widget.setCurrentIndex(0)  # TODO-FPL
-        self.heatmap_widget_fpl.set_current_index(0)  # TODO-FPL
+        self.heatmap_widget_fpl.set_current_index(0)
 
     def btn_stop_clicked(self) -> None:
-        # self.heatmap_widget.play(0)  # TODO-FPL
-        self.heatmap_widget_fpl.stop()  # TODO-FPL
+        self.heatmap_widget_fpl.stop()
         self.btn_skip_to_start_clicked()
 
     def btn_play_clicked(self) -> None:
-        # self.heatmap_widget.togglePause()  # TODO-FPL
-        self.heatmap_widget_fpl.toggle_pause()  # TODO-FPL
+        self.heatmap_widget_fpl.toggle_pause()
 
     def btn_playback_speed_clicked(self) -> None:
         new_speed, ok = QtWidgets.QInputDialog.getText(
@@ -473,7 +451,7 @@ class Gui(QtWidgets.QMainWindow):
             "Set playback speed",
             "Playback speed (1.0=realtime, 0.5=half speed, 2.0=double speed, etc.)",
             QtWidgets.QLineEdit.EchoMode.Normal,
-            f"{self.heatmap_widget.relative_playback_speed}",  # TODO-FPL
+            f"{self.heatmap_widget_fpl.relative_playback_speed}",
         )
         if not ok:
             return
@@ -481,9 +459,7 @@ class Gui(QtWidgets.QMainWindow):
             new_speed_as_float = float(new_speed)
             if new_speed_as_float <= 0:
                 raise ValueError("Playback speed must be a positive number")
-            self.heatmap_widget.set_relative_playback_speed(
-                new_speed_as_float
-            )  # TODO-FPL
+            self.heatmap_widget_fpl.set_relative_playback_speed(new_speed_as_float)
         except ValueError:
             QtWidgets.QMessageBox.critical(
                 self,
@@ -493,12 +469,7 @@ class Gui(QtWidgets.QMainWindow):
             return
 
     def btn_skip_to_end_clicked(self) -> None:
-        # self.heatmap_widget.setCurrentIndex(
-        #     self.heatmap_widget.nframes() - 1
-        # )  # TODO-FPL
-        self.heatmap_widget_fpl.set_current_index(
-            self.heatmap_widget_fpl.nframes() - 1
-        )  # TODO-FPL
+        self.heatmap_widget_fpl.set_current_index(self.heatmap_widget_fpl.nframes() - 1)
 
     def toggle_selection_text(self):
         for widget in [
@@ -836,7 +807,7 @@ class Gui(QtWidgets.QMainWindow):
             ("&Stimuli", self.stim_editor, "mdi6.chart-timeline"),
             ("&Traces", self.trace_widget, "mdi.waves"),
             ("&Spikes", self.spike_widget, "ph.barcode-light"),
-            ("&Heatmap", self.heatmap_widget, "mdi6.data-matrix"),
+            ("&Heatmap", self.heatmap_widget_fpl, "mdi6.data-matrix"),
             ("&Custom analysis", self.custom_analysis_widget, "mdi6.chart-histogram"),
             ("&Console", self.stim_console, "mdi6.console"),
         ]:
