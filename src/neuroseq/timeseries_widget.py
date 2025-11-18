@@ -175,24 +175,8 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.roi.visible = False
         if hasattr(self.graphic, "add_linear_selector"):
             self.timeline = self.graphic.add_linear_selector(thickness=2)
-
-            def _on_timeline_change(ev):
-                # timestamp value to index
-                idx = (
-                    np.abs(self.heatmap_widget.timestamps * 1000.0 - ev.info["value"])
-                ).argmin()
-                # parse to int
-                try:
-                    idx = int(idx)
-                except Exception as e:
-                    self.logger.critical(f"Error converting index to int: {e}")
-                try:
-                    self.heatmap_widget.slider.setValue(idx)
-                except Exception as e:
-                    self.logger.critical(f"Error setting current index: {e}")
-
             self.timeline.add_event_handler(
-                _on_timeline_change,
+                self.on_timeline_change,
                 "selection",
             )
 
@@ -371,3 +355,18 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
             return
         t = self.heatmap_widget.timestamps[value] * 1000.0
         self.timeline.selection = t
+
+    def on_timeline_change(self, ev):
+        # timestamp value to index
+        idx = (
+            np.abs(self.heatmap_widget.timestamps * 1000.0 - ev.info["value"])
+        ).argmin()
+        # parse to int
+        try:
+            idx = int(idx)
+        except Exception as e:
+            self.logger.critical(f"Error converting index to int: {e}")
+        try:
+            self.heatmap_widget.slider.setValue(idx)
+        except Exception as e:
+            self.logger.critical(f"Error setting current index: {e}")
