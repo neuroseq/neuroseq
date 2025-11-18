@@ -5,6 +5,7 @@ import logging
 import brian2.numpy_ as np
 import fastplotlib as fpl
 from qtpy import QtWidgets
+from qtpy.QtCore import Qt
 
 from neuroseq.experiment import SynapseData
 
@@ -24,12 +25,16 @@ class HeatmapWidget(QtWidgets.QWidget):
             names=[""],
             figure_kwargs={"canvas_kwargs": {"parent": self}},
         )
+        self.image_widget.figure.guis["bottom"] = None
         self.subplot: fpl.layouts.Subplot = self.image_widget.figure[0, 0]
         self.timestamps: np.ndarray = np.array([0.0])
-        self.suppress_events: bool = False
         self.widget = self.image_widget.show()
         layout = QtWidgets.QVBoxLayout(self)
         layout.addWidget(self.widget)
+        self.slider = QtWidgets.QSlider(orientation=Qt.Horizontal, parent=self)
+        self.slider.setEnabled(False)
+        self.slider.valueChanged.connect(self.on_slider_value_changed)
+        layout.addWidget(self.slider)
         self.setLayout(layout)
         self.playing = False
         self.relative_playback_speed = 1.0
@@ -43,6 +48,7 @@ class HeatmapWidget(QtWidgets.QWidget):
         self.image_widget.set_data(np.zeros((1, 1, 1)))
         self.timestamps = np.array([0.0])
         self.suppress_events = False
+        self.slider.setEnabled(False)
 
     def set_data(
         self,
@@ -62,6 +68,9 @@ class HeatmapWidget(QtWidgets.QWidget):
         values = np.transpose(values, (2, 0, 1))
         self.image_widget.set_data(values)
         self.timestamps = data.timestamps
+        self.slider.setMaximum(self.nframes() - 1)
+        self.slider.setMinimum(0)
+        self.slider.setEnabled(True)
         self.suppress_events = False
 
     def configure_subplot(self) -> None:
@@ -89,19 +98,10 @@ class HeatmapWidget(QtWidgets.QWidget):
         self, timeseries_widget: QtWidgets.QWidget
     ) -> None:
         """Connect the timeline in this widget to the timeline in the TimeseriesWidget."""
-
-        def _on_index(idx):
-            if not self.suppress_events:
-                t = self.timestamps[idx["t"]] * 1000.0
-                print(f"HeatmapFPL _on_index: {idx}, {t}")
-                print(f"HeatmapFPL current index: {self.image_widget.current_index}")
-                timeseries_widget.timeline.selection = t
-
-        self.image_widget.add_event_handler(_on_index, "current_index")
+        self.slider.valueChanged.connect(timeseries_widget.on_slider_value_changed)
 
     def toggle_pause(self) -> None:
         """Toggle the playback state between playing and paused."""
-        self.logger.info(f"Playing: {self.playing}")
         self.playing = not self.playing
 
     def stop(self) -> None:
@@ -109,12 +109,8 @@ class HeatmapWidget(QtWidgets.QWidget):
         self.playing = False
 
     def set_current_index(self, idx: int, event=True) -> None:
-        """Set the current index of the heatmap. If event is False, suppresses the current_index event of ImageWidget."""
-        if not event:
-            self.suppress_events = True
+        """Set the current index of the heatmap."""
         self.image_widget.current_index = {"t": idx}
-        if not event:
-            self.suppress_events = False
 
     def update_heatmap(self) -> None:
         """Update the heatmap to the next frame if playing."""
@@ -125,3 +121,6 @@ class HeatmapWidget(QtWidgets.QWidget):
         if next_idx >= self.nframes():
             next_idx = 0
         self.image_widget.current_index = {"t": next_idx}
+
+    def on_slider_value_changed(self, value: int) -> None:
+        self.set_current_index(value)

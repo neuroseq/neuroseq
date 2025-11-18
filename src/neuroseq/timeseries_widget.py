@@ -185,14 +185,11 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
                 try:
                     idx = int(idx)
                 except Exception as e:
-                    print(f"Error converting index to int: {e}")
-                print(
-                    f"TimeseriesWidget _on_timeline_change: t={ev.info}, idx={idx}, idx-type={type(idx)}"
-                )
+                    self.logger.critical(f"Error converting index to int: {e}")
                 try:
-                    self.heatmap_widget.set_current_index(idx, event=False)
+                    self.heatmap_widget.slider.setValue(idx)
                 except Exception as e:
-                    print(f"Error setting current index: {e}")
+                    self.logger.critical(f"Error setting current index: {e}")
 
             self.timeline.add_event_handler(
                 _on_timeline_change,
@@ -366,3 +363,11 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
     def connect_heatmap_widget(self, heatmap_widget: HeatmapWidget) -> None:
         """Connect the timeline in this widget to the timeline in the HeatmapWidget."""
         self.heatmap_widget = heatmap_widget
+
+    def on_slider_value_changed(self, value: int) -> None:
+        if self.heatmap_widget is None:
+            return
+        if self.timeline is None:
+            return
+        t = self.heatmap_widget.timestamps[value] * 1000.0
+        self.timeline.selection = t
