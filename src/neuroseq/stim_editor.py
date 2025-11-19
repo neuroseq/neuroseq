@@ -53,6 +53,8 @@ class StimEditor(QtWidgets.QWidget):
         self.select_mode = SelectMode.SELECT
         self.draw_stim_intensity = 1.0  # in units of the draw_stim_units
         self.draw_stim_length = 1  # in milliseconds
+        self.pad_stim_array_secs = 5.0
+        self.trim_stim_array_secs = 5.0
         self.draw_stim_units = ""
         self.stim_type = StimType.Excitation
         self.stims_dict: dict[str, TimedArrayModifier] = {}
@@ -145,6 +147,100 @@ class StimEditor(QtWidgets.QWidget):
                     old_timed_array, array_values
                 )
         self.set_model(self.model)
+
+    def pad_stim_array(self) -> None:
+        if self.current_stim_modifier is None or self.model is None:
+            return
+        padding_seconds, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "Pad stim arrays",
+            "Padding to add to stim arrays in seconds",
+            QtWidgets.QLineEdit.EchoMode.Normal,
+            f"{self.pad_stim_array_secs}",
+        )
+        if not ok:
+            return
+        try:
+            paddings_seconds_as_float = float(padding_seconds)
+        except ValueError:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Invalid input",
+                f"Could not parse '{padding_seconds}' as a number of seconds.",
+            )
+            return
+        if paddings_seconds_as_float <= 0.0:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Invalid input",
+                "Padding seconds must be positive.",
+            )
+            return
+        self.pad_stim_array_secs = paddings_seconds_as_float
+        timed_array = self.current_stim_modifier.timed_array
+        current_length_secs = timed_array.dt * timed_array.values.shape[0]
+        try:
+            self.model.pad_timed_arrays(current_length_secs + self.pad_stim_array_secs)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Error",
+                f"Error padding stim arrays: '{e}'",
+            )
+            return
+        self.set_model(self.model, keep_undo_history=True)
+
+    def trim_stim_array(self) -> None:
+        if self.current_stim_modifier is None or self.model is None:
+            return
+        trim_seconds, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "Trim stim arrays",
+            "Seconds to trim from the stim arrays",
+            QtWidgets.QLineEdit.EchoMode.Normal,
+            "5.0",
+        )
+        if not ok:
+            return
+        try:
+            trim_seconds_as_float = float(trim_seconds)
+        except ValueError:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Invalid input",
+                f"Could not parse '{trim_seconds}' as a number of seconds.",
+            )
+            return
+        if trim_seconds_as_float <= 0.0:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Invalid input",
+                "Seconds to trim must be positive.",
+            )
+            return
+        timed_array = self.current_stim_modifier.timed_array
+        current_length_secs = timed_array.dt * timed_array.values.shape[0]
+        new_length_secs = current_length_secs - trim_seconds_as_float
+        if new_length_secs <= 0.0:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Invalid input",
+                f"Trim seconds {trim_seconds_as_float} is greater than or equal to current stim length {current_length_secs}.",
+            )
+            return
+        if self.model.trim_timed_array_would_delete_data(new_length_secs):
+            continue_with_trim = QtWidgets.QMessageBox.question(
+                self,
+                "Trim stim arrays",
+                "Trimming the stim arrays would delete non-zero stimulus data. Do you want to continue?",
+                QtWidgets.QMessageBox.StandardButton.Yes
+                | QtWidgets.QMessageBox.StandardButton.No,
+            )
+            if continue_with_trim != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+        self.trim_stim_array_secs = trim_seconds_as_float
+        self.model.trim_timed_arrays(new_length_secs)
+        self.set_model(self.model, keep_undo_history=False)
 
     def _stim_values_updated(self) -> None:
         if self.current_stim_modifier is None:
@@ -525,6 +621,24 @@ class StimEditor(QtWidgets.QWidget):
             icon=qta.icon("mdi6.redo"),
         )
         self.action_redo.setEnabled(False)
+        add_action(
+            "Pad stim array (Ctrl+Shift+Plus)",
+            self.pad_stim_array,
+            menu,
+            toolbar,
+            self,
+            shortcut="Ctrl++",
+            icon=qta.icon("mdi6.timeline-plus"),
+        )
+        add_action(
+            "Trim stim array (Ctrl+Shift+Minus)",
+            self.trim_stim_array,
+            menu,
+            toolbar,
+            self,
+            shortcut="Ctrl+Shift+-",
+            icon=qta.icon("mdi6.timeline-minus"),
+        )
         self.toolbar.addSeparator()
         self.actions_draw = []
         self.actions_draw.append(
