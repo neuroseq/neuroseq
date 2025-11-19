@@ -15,7 +15,7 @@ dependencies = [
     "numpy",
     "qtpy",
     "pyside6!=6.9.1",
-    "pyqtgraph",
+    "pyqtgraph!=0.14.0",
     "h5py",
     "qtawesome",
     "click",
@@ -50,7 +50,7 @@ path = "src/neuroseq/__init__.py"
 testpaths = ["tests"]
 markers = ["screenshot"]
 log_cli = "true"
-log_cli_level = "DEBUG"
+log_cli_level = "ERROR"
 
 [tool.ruff]
 extend-include = ["*.ipynb"]

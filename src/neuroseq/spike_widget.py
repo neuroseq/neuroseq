@@ -26,7 +26,9 @@ class SpikeWidget(TimeseriesWidget):
     def set_data(self, data: SpikeData | None) -> None:
         self.subplot.clear()
         if data is None or data.spike_times.shape[0] == 0:
+            self.subplot.title = "Spikes"
             return
+        self.subplot.title = f"Spikes: {data.name}"
         self.data = data
         self.n_neurons = max(data.spike_indices) + 1
         self.logger.info(
@@ -52,9 +54,5 @@ class SpikeWidget(TimeseriesWidget):
             sizes=7,
             size_space="screen",
             uniform_size=True,
-        )
-        self.controller.max_height = max(self.controller.max_height, self.n_neurons)
-        self.controller.max_width = max(
-            self.controller.max_width, self.n_timestamps * self.dt_ms
         )
         self.post_set_data()
