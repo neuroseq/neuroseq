@@ -81,7 +81,6 @@ class TraceWidget(TimeseriesWidget):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(controller, parent)
-        self.subplot.title = "Traces"
         self.trace_norm_percent = 100
         self.clip = True
 

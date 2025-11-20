@@ -52,12 +52,8 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         super().__init__(parent)
         self.heatmap_widget: HeatmapWidget | None = None
         self.controller = controller
-        self.figure: fpl.Figure = fpl.Figure(
-            controllers=controller, canvas_kwargs={"parent": self}
-        )
+        self.figure: fpl.Figure | None = None
         layout = QtWidgets.QVBoxLayout(self)
-        self.widget = self.figure.show()
-        layout.addWidget(self.widget)
         self.graphic: fpl.ImageGraphic | fpl.LineStack | fpl.ScatterGraphic | None = (
             None
         )
@@ -69,8 +65,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.timeline: fpl.LinearSelector | None = None
         self.grid_lines: GridLines | None = None
         self.setLayout(layout)
-        self.subplot: Subplot = self.figure[0, 0]
-        self._set_light_mode()
+        self.subplot: Subplot | None = None
         self.setMinimumSize(QtCore.QSize(100, 100))
         self.resize(800, 600)
 
@@ -111,10 +106,27 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.n_neurons = 0
         self.dt_ms = 1.0
         self.n_timestamps = 0
-        self.figure.renderer.add_event_handler(self.pointer_down, "pointer_down")
-        self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
-        self.figure.renderer.add_event_handler(self.pointer_up, "pointer_up")
-        self.figure.renderer.add_event_handler(self.key_down, "key_down")
+
+    def showEvent(self, event, /):
+        super().showEvent(event)
+        if self.figure is None:
+            self.figure = fpl.Figure(
+                controllers=self.controller,
+                canvas_kwargs={"parent": self},
+                size=(self.width(), self.height()),
+            )
+            self.widget = self.figure.show()
+            self.subplot = self.figure[0, 0]
+            self._set_light_mode()
+            self.figure.renderer.add_event_handler(self.pointer_down, "pointer_down")
+            self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
+            self.figure.renderer.add_event_handler(self.pointer_up, "pointer_up")
+            self.figure.renderer.add_event_handler(self.key_down, "key_down")
+            # temporary hack to wait until canvas is ready before adding it to the layout
+            app = QtWidgets.QApplication.instance()
+            for i in range(10):
+                app.processEvents()
+            self.layout().addWidget(self.widget)
 
     def set_mode(self, mode: InteractMode) -> None:
         self.mode = mode
@@ -187,15 +199,16 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
             )
 
     def clear_data(self) -> None:
-        self.subplot.clear()
-        self.subplot.grids = False
-        self.subplot.axes.y.ticks = {}
-        self.subplot.axes.y.points.visible = False
-        self.subplot.axes.y.line.visible = False
-        self.subplot.axes.x.points.visible = False
-        self.subplot.axes.x.line.visible = False
-        self.subplot.axes.x.ticks = {}
-        self.subplot.toolbar = False
+        if self.subplot is not None:
+            self.subplot.clear()
+            self.subplot.grids = False
+            self.subplot.axes.y.ticks = {}
+            self.subplot.axes.y.points.visible = False
+            self.subplot.axes.y.line.visible = False
+            self.subplot.axes.x.points.visible = False
+            self.subplot.axes.x.line.visible = False
+            self.subplot.axes.x.ticks = {}
+            self.subplot.toolbar = False
         self.hover_slice_graphic = None
         self.data = None
         self.n_neurons = 0

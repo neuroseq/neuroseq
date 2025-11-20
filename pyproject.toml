@@ -50,7 +50,7 @@ path = "src/neuroseq/__init__.py"
 testpaths = ["tests"]
 markers = ["screenshot"]
 log_cli = "true"
-log_cli_level = "ERROR"
+log_cli_level = "info"
 
 [tool.ruff]
 extend-include = ["*.ipynb"]

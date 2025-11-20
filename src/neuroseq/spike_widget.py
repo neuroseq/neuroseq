@@ -21,7 +21,6 @@ class SpikeWidget(TimeseriesWidget):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(controller, parent)
-        self.subplot.title = "Spikes"
 
     def set_data(self, data: SpikeData | None) -> None:
         self.subplot.clear()

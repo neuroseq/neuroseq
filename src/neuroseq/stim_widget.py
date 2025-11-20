@@ -35,7 +35,6 @@ class StimWidget(TimeseriesWidget):
     ) -> None:
         super().__init__(controller, parent)
         self.context_menu = menu
-        self.subplot.title = "Stimuli"
         self.hover_slice_graphic: fpl.Graphic | None = None
         self.vmin = 0.0
         self.vmax = 1.0
@@ -46,6 +45,7 @@ class StimWidget(TimeseriesWidget):
         self, stims: b2.TimedArray | None = None, stim_type=StimType.Excitation
     ) -> None:
         self.subplot.clear()
+        self.subplot.title = "Stimuli"
         if stims is None:
             return
         self.data_values = stims.values
