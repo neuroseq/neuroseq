@@ -549,7 +549,7 @@ class Gui(QtWidgets.QMainWindow):
                     break
 
     def btn_import_suite2p_data_clicked(self) -> None:
-        """Open dialog to import Suite2p traces (and optional spikes)"""
+        """Open dialog to import experimental traces/spikes from Suite2p/CSV data"""
         dialog = Suite2pImportDialog(self)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             # possibly: pass in existing experiment data to the dialog to let it do sanity checks & auto-fill the offset?
