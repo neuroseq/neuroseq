@@ -90,10 +90,6 @@ class CustomAnalysisWidget(MatplotlibWidget):
                 times_mask = (spike_times_ms >= time_slice.start * self.dt_ms) & (
                     spike_times_ms < time_slice.stop * self.dt_ms
                 )
-                self.logger.error(
-                    f"{time_slice.start * self.dt_ms} - {time_slice.stop * self.dt_ms}"
-                )
-                self.logger.error(f"{sum(times_mask)} spikes in time slice")
                 spike_indices = spike_indices[times_mask]
                 spike_times_ms = spike_times_ms[times_mask]
             if neuron_slice.start is not None and neuron_slice.stop is not None:

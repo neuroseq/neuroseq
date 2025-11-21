@@ -71,6 +71,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.setLayout(layout)
         self.subplot: Subplot = self.figure[0, 0]
         self._set_light_mode()
+        self.setMinimumSize(QtCore.QSize(100, 100))
         self.resize(800, 600)
 
         self.context_menu = QtWidgets.QMenu("Custom analysis", self)
@@ -156,6 +157,10 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.subplot.axes._y._points.material.color = "k"
 
     def post_set_data(self):
+        self.controller.max_height = max(self.controller.max_height, self.n_neurons)
+        self.controller.max_width = max(
+            self.controller.max_width, self.n_timestamps * self.dt_ms
+        )
         self.subplot.auto_scale(zoom=1.0, maintain_aspect=False)
         self.subplot.grids = False
         self.subplot.axes.y.ticks = np.arange(0, self.n_neurons, 1)
@@ -348,3 +353,10 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
     def connect_heatmap_widget(self, heatmap_widget: pg.ImageView) -> None:
         """Connect the timeline in this widget to the timeline in the HeatmapWidget."""
         self.heatmap_widget = heatmap_widget
+
+    def closeEvent(self, event):
+        if self.figure is not None:
+            # stop the renderer before closing the widget otherwise it may try to render to the deleted object
+            self.figure.close()
+            self.figure = None
+        super().closeEvent(event)

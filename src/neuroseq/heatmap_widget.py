@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 import pyqtgraph as pg
+from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.experiment import SynapseData
@@ -21,6 +22,7 @@ class HeatmapWidget(pg.ImageView):
         self.setPredefinedGradient("viridis")
         self.relative_playback_speed = 1.0
         self.logger = logging.getLogger(__name__)
+        self.setMinimumSize(QtCore.QSize(100, 100))
 
     def clear_data(self) -> None:
         self.clear()

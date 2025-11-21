@@ -114,10 +114,12 @@ class TraceWidget(TimeseriesWidget):
     ) -> None:
         self.subplot.clear()
         if data is None:
+            self.subplot.title = "Traces"
             return
         self.logger.info(
             f"{data.traces.shape} traces with dt={data.dt}s and units={data.units}"
         )
+        self.subplot.title = f"Traces: {data.name}"
         self.data = data
         self.n_neurons = data.traces.shape[0]
         self.dt_ms = data.dt * 1000.0  # convert to milliseconds
@@ -152,8 +154,4 @@ class TraceWidget(TimeseriesWidget):
         )
         for i, line in enumerate(self.graphic.graphics):
             line.offset = (line.offset[0], i, line.offset[2])
-        self.controller.max_height = max(self.controller.max_height, self.n_neurons)
-        self.controller.max_width = max(
-            self.controller.max_width, self.n_timestamps * self.dt_ms
-        )
         self.post_set_data()
