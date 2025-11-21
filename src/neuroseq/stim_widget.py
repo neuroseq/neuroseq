@@ -72,10 +72,6 @@ class StimWidget(TimeseriesWidget):
         self.dt_ms = stims.dt * 1000.0  # convert to milliseconds
         self.n_neurons = stims.values.shape[1]
         self.n_timestamps = stims.values.shape[0]
-        self.controller.max_height = max(self.controller.max_height, self.n_neurons)
-        self.controller.max_width = max(
-            self.controller.max_width, self.n_timestamps * self.dt_ms
-        )
         self.post_set_data()
 
     def autoscale_colormap(self) -> None:
