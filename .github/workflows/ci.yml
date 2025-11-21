@@ -48,10 +48,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - uses: astral-sh/setup-uv@v7
-      - run: uv run pytest -sv --cov --cov-report=xml || uv run pytest -sv --cov --cov-report=xml || uv run pytest -sv --cov --cov-report=xml
-        env:
-          QT_API: pyside6
-          PYTEST_QT_API: pyside6
+      #      - run: uv run pytest -sv --cov --cov-report=xml || uv run pytest -sv --cov --cov-report=xml || uv run pytest -sv --cov --cov-report=xml
+      #        env:
+      #          QT_API: pyside6
+      #          PYTEST_QT_API: pyside6
       - run: uv add pyqt6 && uv run pytest -sv || uv run pytest -sv || uv run pytest -sv
         env:
           QT_API: pyqt6
