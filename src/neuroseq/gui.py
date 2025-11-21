@@ -550,23 +550,22 @@ class Gui(QtWidgets.QMainWindow):
 
     def btn_import_suite2p_data_clicked(self) -> None:
         """Open dialog to import experimental traces/spikes from Suite2p/CSV data"""
-        dialog = Suite2pImportDialog(self)
+        # possibly: pass in existing experiment data to the dialog to let it do sanity checks & auto-fill the offset?
+        dialog = Suite2pImportDialog(
+            self,
+            import_handler=self._apply_imported_experimental_data,
+        )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
-            # possibly: pass in existing experiment data to the dialog to let it do sanity checks & auto-fill the offset?
-            try:
-                self.model.add_experimental_data(
-                    dialog.experiment_name, dialog.imported_data, dialog.append_data
-                )
-            except Exception as e:
-                QtWidgets.QMessageBox.critical(
-                    self,
-                    "Data import error",
-                    f"Could not import Suite2p data: {e}",
-                )
-                self.logger.exception(e)
-                return
             self.update_model(self.model)
             self._select_experiment_data(dialog.experiment_name)
+
+    def _apply_imported_experimental_data(
+        self,
+        experiment_name: str,
+        data: list[TraceData | SpikeData],
+        append: bool,
+    ) -> None:
+        self.model.add_experimental_data(experiment_name, data, append)
 
     def connect_external_simulation_function_with_brian2(self) -> None:
         self._load_external_simulation_function(
