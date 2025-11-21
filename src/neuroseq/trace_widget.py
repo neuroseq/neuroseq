@@ -21,58 +21,71 @@ class TraceNormDialog(QtWidgets.QDialog):
         self.setWindowTitle("Set Trace Normalization")
         self.trace_widget = trace_widget
         self.trace_norm_percent = self.trace_widget.trace_norm_percent
+        self.offset_by_median = self.trace_widget.offset_by_median
         self.clip = self.trace_widget.clip
 
         self.layout = QtWidgets.QVBoxLayout(self)
 
-        self.label = QtWidgets.QLabel(
+        self.label_norm = QtWidgets.QLabel(
             f"Normalization: {self.trace_norm_percent}%", self
         )
-        self.layout.addWidget(self.label)
-
+        self.layout.addWidget(self.label_norm)
         self.slider_norm = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal, self)
         self.slider_norm.setRange(100, 10000)
         self.slider_norm.setValue(self.trace_norm_percent)
         self.slider_norm.valueChanged.connect(self.update_norm_input)
         self.layout.addWidget(self.slider_norm)
 
-        self.btn_reset_norm = QtWidgets.QPushButton("Reset Normalization", self)
-        self.btn_reset_norm.clicked.connect(self.reset_norm)
-        self.layout.addWidget(self.btn_reset_norm)
+        self.chk_offset = QtWidgets.QCheckBox("Center median")
+        self.chk_offset.setChecked(self.clip)
+        self.chk_offset.clicked.connect(self.chk_offset_clicked)
+        self.layout.addWidget(self.chk_offset)
 
         self.chk_clip = QtWidgets.QCheckBox("Clip values")
         self.chk_clip.setChecked(self.clip)
-        self.chk_clip.clicked.connect(self.check_clip_clicked)
+        self.chk_clip.clicked.connect(self.chk_clip_clicked)
         self.layout.addWidget(self.chk_clip)
+
+        self.btn_reset_defaults = QtWidgets.QPushButton("Reset to defaults", self)
+        self.btn_reset_defaults.clicked.connect(self.reset_defaults)
+        self.layout.addWidget(self.btn_reset_defaults)
 
         self.btn_close = QtWidgets.QPushButton("Close", self)
         self.btn_close.clicked.connect(self.close)
         self.layout.addWidget(self.btn_close)
 
-    def reset_norm(self) -> None:
+    def reset_defaults(self) -> None:
         self.slider_norm.setValue(100)
+        self.offset_by_median = True
+        self.clip = True
+        self.chk_offset.setChecked(self.offset_by_median)
+        self.chk_offset.setChecked(self.clip)
         self.update_norm_input(self.slider_norm.value())
 
-    def check_clip_clicked(self, checked: bool) -> None:
+    def chk_offset_clicked(self, checked: bool) -> None:
+        self.offset_by_median = checked
+        self.update_trace_widget()
+
+    def chk_clip_clicked(self, checked: bool) -> None:
         self.clip = checked
         self.update_trace_widget()
 
     def update_norm_input(self, value: int) -> None:
         self.trace_norm_percent = value
-        self.label.setText(f"Normalization: {value}%")
+        self.label_norm.setText(f"Normalization: {value}%")
         self.update_trace_widget()
 
     def update_trace_widget(self) -> None:
-        self.trace_widget.set_trace_norm(self.trace_norm_percent, self.clip)
+        self.trace_widget.trace_norm_percent = self.trace_norm_percent
+        self.trace_widget.offset_by_median = self.offset_by_median
+        self.trace_widget.clip = self.clip
+        self.trace_widget.replot_traces()
 
 
 class TraceWidget(TimeseriesWidget):
     """A widget that displays a set of traces stacked vertically.
 
     traces should be a 2d array, where the first index is the neuron index and the second index is the time index.
-
-    Applies global normalisation to the traces so that they all lie in range [-0.5, 0.5],
-    without changing their relative amplitudes or their offset from zero.
     """
 
     def __init__(
@@ -83,30 +96,42 @@ class TraceWidget(TimeseriesWidget):
         super().__init__(controller, parent)
         self.subplot.title = "Traces"
         self.trace_norm_percent = 100
+        self.offset_by_median = True
         self.clip = True
 
     def trace_norm_dialog(self):
         TraceNormDialog(self).exec()
 
-    def set_trace_norm(self, trace_norm_percent: int, clip: bool) -> None:
-        """Set the normalization factor for the traces."""
-        self.trace_norm_percent = trace_norm_percent
-        self.clip = clip
+    def get_normalized_trace_data(self) -> np.ndarray:
+        if self.data is None or not isinstance(self.data, TraceData):
+            return np.array([], dtype=np.float32)
+        if self.offset_by_median:
+            median_values = np.median(self.data.traces, axis=1)
+            max_values = np.max(self.data.traces, axis=1)
+            max_trace = np.max(np.abs(max_values - median_values))
+        else:
+            max_trace = np.max(np.abs(self.data.traces))
+        norm = 0.5 if max_trace == 0 else 1.0 / (2.0 * max_trace)
+        norm = np.float32((self.trace_norm_percent / 100.0) * norm)
+        if self.offset_by_median:
+            offset = (-median_values * norm).astype(np.float32)
+        else:
+            offset = np.zeros(self.n_neurons, dtype=np.float32)
+        data = norm * self.data.traces.astype(np.float32) + offset[:, np.newaxis]
+        if self.clip:
+            np.clip(data, -0.5, 0.5, out=data)
+        return data
+
+    def replot_traces(self) -> None:
+        """Update the plotted traces based on the current normalization settings."""
         if (
             self.data is not None
             and isinstance(self.data, TraceData)
             and self.graphic is not None
         ):
-            max_trace = np.max(np.abs(self.data.traces))
-            if max_trace == 0:
-                norm = np.float32(1.0)
-            else:
-                norm = np.float32((self.trace_norm_percent / 100.0) / (2.0 * max_trace))
+            normalized_traces = self.get_normalized_trace_data()
             for line_index, line_graphic in enumerate(self.graphic):
-                data = (norm * self.data.traces[line_index, :]).astype(np.float32)
-                if self.clip:
-                    data = np.clip(data, -0.5, 0.5)
-                line_graphic.data[:, 1] = data
+                line_graphic.data[:, 1] = normalized_traces[line_index, :]
 
     def set_data(
         self,
@@ -124,11 +149,6 @@ class TraceWidget(TimeseriesWidget):
         self.n_neurons = data.traces.shape[0]
         self.dt_ms = data.dt * 1000.0  # convert to milliseconds
         self.n_timestamps = data.traces.shape[1]
-        max_trace = np.max(np.abs(self.data.traces))
-        if max_trace == 0:
-            norm = np.float32(1.0)
-        else:
-            norm = np.float32((self.trace_norm_percent / 100.0) / (2.0 * max_trace))
         # convert timestamps to milliseconds and stack to produce a format suitable for line_stack
         # todo: should be possible to re-use the same timestamps for all traces?
         timestamps_ms = np.arange(data.traces.shape[1], dtype=np.float32) * np.float32(
@@ -138,10 +158,11 @@ class TraceWidget(TimeseriesWidget):
             timestamps_ms,
             (self.n_neurons, 1),
         )
+        normalized_traces = self.get_normalized_trace_data()
         data = np.stack(
             [
                 tiled_timestamps_ms,
-                norm * data.traces.astype(np.float32),
+                normalized_traces,
             ],
             axis=2,
             dtype=np.float32,
