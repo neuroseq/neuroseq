@@ -123,6 +123,14 @@ def suite2p_import_data_dir(
     np.save(data_dir / "F.npy", f_data)
     np.save(data_dir / "Fneu.npy", fneu_data)
     np.save(data_dir / "spks.npy", spike_data)
+    # optional metadata file
+    stat_data = np.zeros(5, dtype=object)
+    np.save(data_dir / "stat.npy", stat_data)
+
+    # CSV fallbacks for less advanced users
+    np.savetxt(data_dir / "F.csv", f_data, delimiter=",")
+    np.savetxt(data_dir / "Fneu.csv", fneu_data, delimiter=",")
+    np.savetxt(data_dir / "spks.csv", spike_data, delimiter=",")
 
     return data_dir
 
