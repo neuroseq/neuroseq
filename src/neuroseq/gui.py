@@ -4,13 +4,8 @@ import logging
 import pathlib
 import runpy
 from collections.abc import Callable
-from collections.abc import Mapping
-from typing import Any
-from typing import cast
 
 import brian2 as b2
-import brian2.numpy_ as np
-import numpy.typing as npt
 import qtawesome as qta
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -19,30 +14,29 @@ from qtpy.compat import getsavefilename
 
 from neuroseq import __version__
 from neuroseq.b2_model import B2Model
-from neuroseq.cellpose_import_dialog import CellposeImportDialog
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
-from neuroseq.custom_analysis_widget import CustomAnalysisDataType
 from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.custom_analysis_widget import CustomAnalysisWindow
+from neuroseq.data_widget import DataWidget
+from neuroseq.experiment import SpikeData
+from neuroseq.experiment import SynapseData
+from neuroseq.experiment import TraceData
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.import_dialog import Suite2pImportDialog
-from neuroseq.import_dialog import Suite2pImportResult
-from neuroseq.importer import CellposeImportResult
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
+from neuroseq.save_options_dialog import SaveOptionsDialog
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim_console import StimConsole
 from neuroseq.stim_editor import StimEditor
 from neuroseq.trace_widget import TraceWidget
 from neuroseq.utils import add_action
 from neuroseq.utils import add_items_to_combobox
-from neuroseq.utils import construct_synapse_matrix
 from neuroseq.utils import example_models_path
+from neuroseq.utils import getSimulationTime
 from neuroseq.utils import with_wait_cursor
-
-PayloadDict = dict[str, object]
 
 
 class Gui(QtWidgets.QMainWindow):
@@ -56,18 +50,19 @@ class Gui(QtWidgets.QMainWindow):
         self.status_bar.addPermanentWidget(ResourceMonitorLabel())
         self.model = B2Model()
         self.external_simulation_function: Callable | None = None
-        self.external_simulation_data: dict[str, PayloadDict] | None = None
-        self.neurons: dict[str, tuple[b2.StateMonitor, str]] = {}
-        self.synapses: dict[str, tuple[b2.StateMonitor, str]] = {}
-        self.spikes: dict[str, b2.SpikeMonitor] = {}
-        self.cellpose_data: CellposeImportResult | None = None
         self.setWindowTitle("NeuroSeq")
-        self.cmb_neuron = QtWidgets.QComboBox()
+        self.cmb_trace = QtWidgets.QComboBox()
+        self.cmb_trace.setMinimumWidth(120)
         self.cmb_spike = QtWidgets.QComboBox()
+        self.cmb_spike.setMinimumWidth(120)
         self.cmb_synapse = QtWidgets.QComboBox()
+        self.cmb_synapse.setMinimumWidth(120)
+        self.cmb_data = QtWidgets.QComboBox()
+        self.cmb_data.setMinimumWidth(120)
+        self.controller = ConstrainedPanZoomController()
+        self.trace_widget = TraceWidget(self.controller)
         self._create_menus_and_toolbars()
         self.setWindowIcon(qta.icon("fa6s.brain"))
-        self.controller = ConstrainedPanZoomController()
         main_horizontal_layout = QtWidgets.QHBoxLayout()
         central_widget = QtWidgets.QWidget()
         central_widget.setLayout(main_horizontal_layout)
@@ -86,7 +81,7 @@ class Gui(QtWidgets.QMainWindow):
         split_left_right.setSizes([1000, 1000, 1000])
         # main vertical splitter layout
         split_vertical = QtWidgets.QSplitter(
-            QtCore.Qt.Orientation.Vertical, handleWidth=0
+            QtCore.Qt.Orientation.Vertical, handleWidth=0, childrenCollapsible=False
         )
         self.stim_editor = StimEditor(
             controller=self.controller,
@@ -94,10 +89,12 @@ class Gui(QtWidgets.QMainWindow):
             toolbar=self.toolbar_stim_editor,
         )
         split_vertical.addWidget(self.stim_editor)
-        self.trace_widget = TraceWidget(self.controller)
         split_vertical.addWidget(self.trace_widget)
         self.spike_widget = SpikeWidget(self.controller)
         split_vertical.addWidget(self.spike_widget)
+        self.data_widget = DataWidget(self.controller)
+        split_vertical.addWidget(self.data_widget)
+        self.data_widget.setVisible(False)
         # heatmap / custom analysis widget / console
         split_vertical.addWidget(split_left_right)
         main_horizontal_layout.addWidget(split_vertical)
@@ -119,31 +116,36 @@ class Gui(QtWidgets.QMainWindow):
             self.stim_editor.update_stim_values_dict
         )
         self.trace_widget.custom_analysis_requested.connect(self._custom_analysis)
+        self.data_widget.trace_widget.custom_analysis_requested.connect(
+            self._custom_analysis
+        )
         self.spike_widget.custom_analysis_requested.connect(self._custom_analysis)
-        self.cmb_neuron.currentTextChanged.connect(self.set_neuron)
+        self.data_widget.spike_widget.custom_analysis_requested.connect(
+            self._custom_analysis
+        )
+        self.cmb_trace.currentTextChanged.connect(self.set_neuron)
         self.cmb_synapse.currentTextChanged.connect(self.set_synapse)
         self.cmb_spike.currentTextChanged.connect(self.set_spike)
+        self.cmb_data.currentTextChanged.connect(self.set_data)
         if filename is None:
             filename = example_models_path / "default_model.nseq"
         self.load_model(str(filename))
 
     def _custom_analysis(
         self,
-        data_type: CustomAnalysisDataType | None,
+        data: TraceData | SpikeData | SynapseData,
         analysis_type: CustomAnalysisType | None,
         new_window: bool,
         neuron_slice: slice | None,
         time_slice: slice | None,
-        data: dict[str, int | float | npt.NDArray],
     ):
         if new_window:
             analysis_window = CustomAnalysisWindow(parent=self)
             analysis_window.analysis_widget.set_data(
-                data_type,
+                data,
                 analysis_type,
                 neuron_slice,
                 time_slice,
-                data,
             )
             analysis_window.setWindowTitle(
                 analysis_window.analysis_widget.subplot.get_title()
@@ -151,7 +153,7 @@ class Gui(QtWidgets.QMainWindow):
             analysis_window.show()
         else:
             self.custom_analysis_widget.set_data(
-                data_type, analysis_type, neuron_slice, time_slice, data
+                data, analysis_type, neuron_slice, time_slice
             )
 
     def _update_data(self, keep_undo_history: bool) -> None:
@@ -160,9 +162,10 @@ class Gui(QtWidgets.QMainWindow):
         else:
             self.continue_simulation_action.setText("&Run simulation")
         self.stim_editor.set_model(self.model, keep_undo_history)
-        self.set_neuron(self.cmb_neuron.currentText())
+        self.set_neuron(self.cmb_trace.currentText())
         self.set_synapse(self.cmb_synapse.currentText())
         self.set_spike(self.cmb_spike.currentText())
+        self.set_data(self.cmb_data.currentText())
 
     def _update_simulation_progress(
         self,
@@ -200,6 +203,9 @@ class Gui(QtWidgets.QMainWindow):
             self.load_model(filename)
 
     def btn_save_clicked(self) -> None:
+        save_options_dialog = SaveOptionsDialog()
+        if not save_options_dialog.exec():
+            return
         filename, _ = getsavefilename(
             self,
             "Save model",
@@ -213,7 +219,11 @@ class Gui(QtWidgets.QMainWindow):
             filename = filename.with_suffix(".nseq")
         try:
             QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
-            self.model.save_model(filename)
+            self.model.save_model(
+                filename,
+                include_simulation_data=save_options_dialog.include_simulation_data,
+                include_experimental_data=save_options_dialog.include_experimental_data,
+            )
             QtWidgets.QApplication.restoreOverrideCursor()
         except Exception as e:
             QtWidgets.QApplication.restoreOverrideCursor()
@@ -256,7 +266,6 @@ class Gui(QtWidgets.QMainWindow):
             )
         else:
             mdiag = ModelEditorDialog(self.model, parent=self)
-
             if mdiag.exec():
                 self.update_model(mdiag.b2model)
 
@@ -266,7 +275,6 @@ class Gui(QtWidgets.QMainWindow):
             self.progress_dialog.setLabelText("Loading model...")
             model = B2Model.load_model(filename, report=self._update_load_progress)
             self.logger.info(f"Model {self.model.name} loaded from {filename}")
-
         except Exception as e:
             self.logger.warning(f"Failed to load model from file {filename}: {e}")
             self.logger.exception(e)
@@ -286,163 +294,65 @@ class Gui(QtWidgets.QMainWindow):
         self.controller.max_width = 1
         self.stim_console.set_model(self.model)
         self.continue_simulation_action.setText("&Run simulation")
-        self.heatmap_widget.clear_data()
         self.trace_widget.clear_data()
+        self.spike_widget.clear_data()
+        self.heatmap_widget.clear_data()
+        self.controller.clear_grid_lines()
         self.stim_editor.set_model(self.model)
-        self.cmb_neuron.clear()
-        self.neurons.clear()
+        cmb_trace_text = self.cmb_trace.currentText()
+        self.cmb_trace.clear()
+        cmb_synapse_text = self.cmb_synapse.currentText()
         self.cmb_synapse.clear()
-        self.synapses.clear()
+        cmb_spike_text = self.cmb_spike.currentText()
         self.cmb_spike.clear()
-        self.spikes.clear()
+        cmb_data_text = self.cmb_data.currentText()
+        self.cmb_data.clear()
         if self.model is not None:
             self.stim_console.set_stims(self.stim_editor.stims_dict)
-            for m in self.model.network.objects:
-                if isinstance(m, b2.StateMonitor):
-                    dct = (
-                        self.neurons
-                        if isinstance(m.source, b2.NeuronGroup)
-                        else self.synapses
-                        if isinstance(m.source, b2.Synapses)
-                        else None
-                    )
-                    if dct is not None:
-                        for var in m.record_variables:
-                            dct[f"{m.source.name} / {var}"] = (m, var)
-                elif isinstance(m, b2.SpikeMonitor):
-                    self.spikes[f"{m.source.name}"] = m
-            self.logger.debug(f"neurons: {self.neurons}")
-            self.logger.debug(f"synapses: {self.synapses}")
-            self.logger.debug(f"spikes: {self.spikes}")
-            add_items_to_combobox(self.cmb_neuron, list(self.neurons.keys()))
-            add_items_to_combobox(self.cmb_synapse, list(self.synapses.keys()))
-            add_items_to_combobox(self.cmb_spike, list(self.spikes.keys()))
+            add_items_to_combobox(self.cmb_trace, self.model.get_data_names(TraceData))
+            self.cmb_trace.setCurrentText(cmb_trace_text)
+            add_items_to_combobox(self.cmb_spike, self.model.get_data_names(SpikeData))
+            self.cmb_spike.setCurrentText(cmb_spike_text)
+            add_items_to_combobox(
+                self.cmb_synapse, self.model.get_data_names(SynapseData)
+            )
+            self.cmb_synapse.setCurrentText(cmb_synapse_text)
+            add_items_to_combobox(
+                self.cmb_data,
+                [f"{d} [trace]" for d in self.model.get_data_names(TraceData)]
+                + [f"{d} [spike]" for d in self.model.get_data_names(SpikeData)]
+                + [f"{d} [synapse]" for d in self.model.get_data_names(SynapseData)],
+            )
+            self.cmb_data.setCurrentText(cmb_data_text)
 
     @with_wait_cursor
-    def set_neuron(self, neuron_name: str) -> None:
-        if (
-            self.external_simulation_data is not None
-            and neuron_name in self.external_simulation_data
-        ):
-            self.set_neuron_external(neuron_name)
-        if neuron_name not in self.neurons:
-            return
-        monitor, variable = self.neurons[neuron_name]
-        timestamps = monitor.t / b2.second
-        if timestamps.shape[0] == 0:
-            self.trace_widget.clear_data()
-            return
-        traces = monitor.variables[variable].get_value().T
-        self.logger.info(
-            f"Displaying {neuron_name} in TraceWidget: {timestamps.shape} timestamps, {traces.shape} data"
-        )
-        self.trace_widget.set_data(traces, timestamps)
-
-    def set_neuron_external(self, neuron_name: str) -> None:
-        try:
-            assert self.external_simulation_data is not None
-            data = self.external_simulation_data[neuron_name]
-            timestamps = data["timestamps"]
-            assert isinstance(timestamps, np.ndarray)
-            traces = data["traces"]
-            assert isinstance(traces, np.ndarray)
-            self.logger.info(
-                f"Displaying external TraceWidget data {neuron_name}: {timestamps.shape} timestamps, {traces.shape} data"
-            )
-            self.trace_widget.set_data(traces, timestamps)
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "External Simulation data error",
-                f"Could not load external trace simulation data {neuron_name}: {e}",
-            )
-            self.logger.exception(e)
+    def set_neuron(self, cmb_name: str) -> None:
+        data = self.model.get_data(cmb_name, TraceData)
+        self.trace_widget.set_data(data)
 
     @with_wait_cursor
-    def set_synapse(self, synapse_name: str) -> None:
-        if (
-            self.external_simulation_data is not None
-            and synapse_name in self.external_simulation_data
-        ):
-            return self.set_synapse_external(synapse_name)
-        if synapse_name not in self.synapses:
-            return
-        monitor, variable = self.synapses[synapse_name]
-        matrix, timestamps = construct_synapse_matrix(
-            monitor, variable, self.settings.max_ram_synapse_plot_matrix
+    def set_synapse(self, cmb_name: str) -> None:
+        self.model.max_ram_synapse_plot_matrix = (
+            self.settings.max_ram_synapse_plot_matrix
         )
-        if matrix.size == 0:
-            self.heatmap_widget.clear_data()
-            return
-        self.logger.info(
-            f"Displaying {synapse_name} in HeatmapWidget: {timestamps.shape} timestamps, {matrix.shape} data"
-        )
-        self.heatmap_widget.set_data(matrix, timestamps)
-
-    def set_synapse_external(self, synapse_name: str) -> None:
-        try:
-            assert self.external_simulation_data is not None
-            data = self.external_simulation_data[synapse_name]
-            timestamps = data["timestamps"]
-            assert isinstance(timestamps, np.ndarray)
-            matrix = data["matrix"]
-            assert isinstance(matrix, np.ndarray)
-            self.logger.info(
-                f"Displaying external HeatmapWidget data {synapse_name}: {timestamps.shape} timestamps, {matrix.shape} data"
-            )
-            self.heatmap_widget.set_data(matrix, timestamps)
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "External Simulation data error",
-                f"Could not load external heatmap simulation data {synapse_name}: {e}",
-            )
-            self.logger.exception(e)
+        data = self.model.get_data(cmb_name, SynapseData)
+        self.heatmap_widget.set_data(data)
 
     @with_wait_cursor
-    def set_spike(self, spike_name: str) -> None:
-        if (
-            self.external_simulation_data is not None
-            and spike_name in self.external_simulation_data
-        ):
-            return self.set_spike_external(spike_name)
-        if spike_name not in self.spikes:
-            return
-        monitor = self.spikes[spike_name]
-        spikes = monitor.variables["i"].get_value().T
-        timestamps = monitor.t / b2.second
-        dt = monitor.clock.dt / b2.second
-        n_neurons = monitor.source.N
-        n_timesteps = int(monitor.clock.t / monitor.clock.dt)
-        if timestamps.shape[0] == 0:
-            self.spike_widget.clear_data()
-            return
-        self.logger.info(
-            f"Displaying {spike_name} in SpikeWidget: {timestamps.shape} timestamps, {spikes.shape} data"
-        )
-        self.spike_widget.set_data(spikes, timestamps, dt, n_neurons, n_timesteps)
+    def set_spike(self, cmb_name: str) -> None:
+        data = self.model.get_data(cmb_name, SpikeData)
+        self.spike_widget.set_data(data)
 
-    def set_spike_external(self, spike_name: str) -> None:
-        try:
-            assert self.external_simulation_data is not None
-            data = self.external_simulation_data[spike_name]
-            timestamps = data["timestamps"]
-            assert isinstance(timestamps, np.ndarray)
-            spikes = data["spikes"]
-            assert isinstance(spikes, np.ndarray)
-            dt = self._safe_float(data.get("dt"), 0.0)
-            n_neurons, n_timesteps = self._ensure_spike_metadata(data, dt)
-            self.logger.info(
-                f"Displaying external SpikeWidget data {spike_name}: {timestamps.shape} timestamps, {spikes.shape} data, dt {dt}, n_neurons {n_neurons}, n_timesteps {n_timesteps}"
-            )
-            self.spike_widget.set_data(spikes, timestamps, dt, n_neurons, n_timesteps)
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "External Simulation data error",
-                f"Could not load external spike simulation data {spike_name}: {e}",
-            )
-            self.logger.exception(e)
+    @with_wait_cursor
+    def set_data(self, cmb_name: str) -> None:
+        data: TraceData | SpikeData | SynapseData | None = None
+        if cmb_name.endswith(" [trace]"):
+            data = self.model.get_data(cmb_name[:-8], TraceData)
+        elif cmb_name.endswith(" [spike]"):
+            data = self.model.get_data(cmb_name[:-8], SpikeData)
+        elif cmb_name.endswith(" [synapse]"):
+            data = self.model.get_data(cmb_name[:-10], SynapseData)
+        self.data_widget.set_data(data)
 
     def btn_exit_clicked(self) -> None:
         self.close()
@@ -452,7 +362,7 @@ class Gui(QtWidgets.QMainWindow):
             self,
             "Store simulation checkpoint",
             "Store the current simulation state as a named checkpoint.\nEnter a new name, or select an existing checkpoint to overwrite:",
-            self.model.checkpoints,
+            [f"Checkpoint {len(self.model.checkpoints) + 1}"] + self.model.checkpoints,
             current=0,
             editable=True,
         )
@@ -486,26 +396,9 @@ class Gui(QtWidgets.QMainWindow):
             return
 
     def btn_continue_simulation_clicked(self) -> None:
-        simulation_time_str, ok = QtWidgets.QInputDialog.getText(
-            self,
-            "Simulate",
-            "Simulation time (s)",
-            QtWidgets.QLineEdit.EchoMode.Normal,
-            "1.0",
-        )
-        if not ok:
+        simulation_time = getSimulationTime(self)
+        if simulation_time is None:
             return
-        try:
-            simulation_time = float(simulation_time_str)
-        except ValueError:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Invalid input",
-                f"Could not parse simulation time '{simulation_time_str}' as a number",
-            )
-            return
-        if self.external_simulation_function is not None:
-            return self.do_external_simulation(simulation_time)
         try:
             self.progress_dialog.setLabelText("Compiling...")
             self.progress_dialog.setValue(0)
@@ -527,26 +420,30 @@ class Gui(QtWidgets.QMainWindow):
         self._update_data(keep_undo_history=True)
 
     @with_wait_cursor
-    def do_external_simulation(self, simulation_time: float) -> None:
+    def _do_external_simulation(self, simulation_time: float):
+        if self.external_simulation_function is None:
+            return
         try:
             # pre-emptively pad timed arrays before simulating
-            self.model._pad_timed_arrays(
-                simulation_time, self.settings.stim_padding_secs
-            )
+            self.model.pad_timed_arrays(total_time_seconds=simulation_time)
             self.stim_editor.set_model(self.model)
             stims_dict = {
                 k: {"array": v.timed_array.values, "dt": v.timed_array.dt}
                 for k, v in self.stim_editor.stims_dict.items()
             }
-            assert self.external_simulation_function is not None
-            self.external_simulation_data = self.external_simulation_function(
+            self.logger.info(
+                f"Running external simulation function for {simulation_time} seconds"
+            )
+            data = self.external_simulation_function(
                 stims_dict,
                 simulation_time,
             )
-            assert isinstance(self.external_simulation_data, dict)
-            for name, data in self.external_simulation_data.items():
-                self.logger.info(f"External simulation data: {name}: {data.keys()}")
-            self._update_external_data_widgets()
+            self.logger.info(
+                f"External simulation complete, returned {len(data)} data objects"
+            )
+            self.model.add_experimental_data("External Simulation", data, False)
+            self.update_model(self.model)
+            self._select_experiment_data("External Simulation")
         except Exception as e:
             QtWidgets.QMessageBox.critical(
                 self,
@@ -554,6 +451,19 @@ class Gui(QtWidgets.QMainWindow):
                 f"Could not run external simulation: {e}",
             )
             self.logger.exception(e)
+
+    def btn_do_external_simulation_clicked(self) -> None:
+        if self.external_simulation_function is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "No external simulation function",
+                "No external simulation function loaded - please load one first.",
+            )
+            return
+        simulation_time = getSimulationTime(self)
+        if simulation_time is None:
+            return
+        self._do_external_simulation(simulation_time)
 
     def btn_skip_to_start_clicked(self) -> None:
         self.heatmap_widget.setCurrentIndex(0)
@@ -596,6 +506,8 @@ class Gui(QtWidgets.QMainWindow):
             self.stim_editor.stim_widget,
             self.trace_widget,
             self.spike_widget,
+            self.data_widget.trace_widget,
+            self.data_widget.spike_widget,
         ]:
             widget.toggle_selection_text()
 
@@ -627,446 +539,59 @@ class Gui(QtWidgets.QMainWindow):
             "simulate.py",
             "Python file (*.py)",
         )
-        if filename != "":
-            try:
-                path = pathlib.Path(filename).resolve()
-                self.external_simulation_function = runpy.run_path(filename)["simulate"]
-                self.logger.info(f"Loaded custom simulate function from {path}")
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "Custom simulate function loaded",
-                    f"Custom simulate function loaded from {path} - pressing simulate will now call this function until the GUI is restarted",
-                )
-            except Exception as e:
-                QtWidgets.QMessageBox.critical(
-                    self,
-                    "Error loading simulate function",
-                    f"Could not load simulate function from {path}: {e}",
-                )
-                self.logger.exception(e)
+        self._load_external_simulation_function(filename)
 
-    def import_suite2p_data(self) -> None:
+    def _select_experiment_data(self, experiment_name):
+        for cmb in (self.cmb_trace, self.cmb_spike, self.cmb_synapse, self.cmb_data):
+            for i in range(cmb.count()):
+                if cmb.itemText(i).startswith(f"{experiment_name} ::"):
+                    cmb.setCurrentIndex(i)
+                    break
+
+    def btn_import_suite2p_data_clicked(self) -> None:
         """Open dialog to import Suite2p traces (and optional spikes)"""
         dialog = Suite2pImportDialog(self)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
-            imported_data = dialog.get_imported_data()
-            if imported_data:
-                self.handle_general_import(imported_data)
-
-    def import_cellpose_data(self) -> None:
-        """Open dialog to import Cellpose segmentation data"""
-        dialog = CellposeImportDialog(self)
-        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
-            imported_data = dialog.get_imported_data()
-            if imported_data:
-                self.cellpose_data = imported_data
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "Cellpose Data Loaded",
-                    "Cellpose data has been loaded.",
-                )
-
-    # todo: Refactor this out of this function. It's not particularly/relaly the GUI except the widget interaction.
-    # Certainly the code about clearing spks etc, this management of state, when we have multiple experiments, needs to be elsewhere.
-    def handle_general_import(
-        self, imported_data: Suite2pImportResult | Mapping[str, object]
-    ) -> None:
-        """Handle imported data with timeline concatenation"""
-        try:
-            dt_for_expand: float | None = None
-            replace_mode = bool(imported_data.get("_replace_existing"))
-            cleared_widget_types: set[str] = set()
-            imported_widget_types: set[str] = set()
-
-            # Initialize external data if needed
-            if self.external_simulation_data is None:
-                self.external_simulation_data = {}
-
-            # Process each dataset and concatenate to existing timeline
-            for key, value in imported_data.items():
-                if key.startswith("_"):
-                    continue
-
-                if not isinstance(value, Mapping):
-                    self.logger.warning(
-                        f"Ignoring imported dataset '{key}' because it is not a mapping"
-                    )
-                    continue
-
-                payload: PayloadDict = dict(value)
-
-                # Use the key as-is since we're no longer using timestamps
-                base_key = key
-
-                widget_type_obj = payload.get("widget")
-                widget_type = (
-                    widget_type_obj if isinstance(widget_type_obj, str) else ""
-                )
-
-                if widget_type:
-                    imported_widget_types.add(widget_type)
-
-                if (
-                    replace_mode
-                    and widget_type in {"trace", "spike"}
-                    and widget_type not in cleared_widget_types
-                ):
-                    self._clear_external_widget_data(widget_type)
-                    cleared_widget_types.add(widget_type)
-
-                if widget_type == "trace":
-                    dataset_dt = self._safe_float(payload.get("dt"), 1.0 / 30.0)
-                    dt_for_expand = dataset_dt
-                    self._concatenate_trace_data(base_key, payload, dataset_dt)
-                elif widget_type == "spike":
-                    dataset_dt = self._safe_float(payload.get("dt"), 1.0 / 30.0)
-                    if dt_for_expand is None:
-                        dt_for_expand = dataset_dt
-                    self._concatenate_spike_data(base_key, payload, dataset_dt)
-                else:
-                    # For other data types, just store with base key
-                    self.external_simulation_data[base_key] = payload
-
-            # extend not replace mode
-            if (
-                not replace_mode
-                and "trace" in imported_widget_types
-                and "spike" not in imported_widget_types
-                and "spike" not in cleared_widget_types
-            ):
-                self._clear_external_widget_data("spike")
-
-            # Calculate total timepoints across all concatenated data for stimulus expansion
-            total_timepoints = self._get_max_timepoints()
-            if (
-                self.model.parameters
-                and total_timepoints > 0
-                and dt_for_expand is not None
-            ):
-                self.expand_stims_to_length(total_timepoints, dt_for_expand)
-
-            # Update the GUI to show imported data
-            self._update_external_data_widgets()
-
-            self.logger.info(
-                f"Successfully imported and concatenated data (total timepoints: {total_timepoints})"
-            )
-
-        except Exception as e:
-            self.logger.exception("Error handling import")
-            QtWidgets.QMessageBox.critical(
-                self, "Import Error", f"Error processing imported data:\n{str(e)}"
-            )
-
-    @staticmethod
-    def _safe_int(value: object) -> int | None:
-        if value is None:
-            return None
-        if isinstance(value, np.ndarray):
-            if value.shape == ():
-                try:
-                    return int(value.item())
-                except (TypeError, ValueError, OverflowError):
-                    return None
-            return None
-        try:
-            return int(cast(Any, value))
-        except (TypeError, ValueError, OverflowError):
-            return None
-
-    @staticmethod
-    def _safe_float(value: object, default: float) -> float:
-        if value is None:
-            return default
-        try:
-            return float(cast(Any, value))
-        except (TypeError, ValueError):
-            return default
-
-    @staticmethod
-    def _infer_spike_neuron_count(spikes: object) -> int:
-        if isinstance(spikes, np.ndarray) and spikes.size > 0:
-            return int(np.max(spikes)) + 1
-        return 0
-
-    @staticmethod
-    def _infer_spike_timestep_count(timestamps: object, dt: float) -> int:
-        if isinstance(timestamps, np.ndarray) and timestamps.size > 0 and dt > 0:
-            max_timestamp = float(np.max(timestamps))
-            approx_steps = int(np.round(max_timestamp / dt))
-            return max(approx_steps + 1, 1)
-        return 0
-
-    def _ensure_spike_metadata(
-        self, payload: PayloadDict, dt: float
-    ) -> tuple[int, int]:
-        n_neurons = self._safe_int(payload.get("n_neurons"))
-        n_timesteps = self._safe_int(payload.get("n_timesteps"))
-        spikes = payload.get("spikes")
-        timestamps = payload.get("timestamps")
-
-        if n_neurons is None:
-            n_neurons = self._infer_spike_neuron_count(spikes)
-            payload["n_neurons"] = n_neurons
-        if n_timesteps is None:
-            n_timesteps = self._infer_spike_timestep_count(timestamps, dt)
-            payload["n_timesteps"] = n_timesteps
-        return n_neurons, n_timesteps
-
-    def _concatenate_trace_data(
-        self, base_key: str, new_value: PayloadDict, dt: float
-    ) -> None:
-        """Concatenate trace data to existing timeline"""
-        new_timestamps = new_value.get("timestamps")
-        new_traces = new_value.get("traces")
-
-        if self.external_simulation_data and base_key in self.external_simulation_data:
-            # Existing data - concatenate along time axis
-            existing_data = self.external_simulation_data[base_key]
-            existing_timestamps = existing_data.get("timestamps")
-            existing_traces = existing_data.get("traces")
-
-            if (
-                isinstance(existing_timestamps, np.ndarray)
-                and isinstance(existing_traces, np.ndarray)
-                and isinstance(new_timestamps, np.ndarray)
-                and isinstance(new_traces, np.ndarray)
-            ):
-                # Calculate time offset (continue from where last data ended)
-                time_offset = float(existing_timestamps[-1]) + dt
-                adjusted_new_timestamps = new_timestamps + time_offset
-
-                # Concatenate along time axis (axis=1 for traces)
-                combined_timestamps = np.concatenate(
-                    [existing_timestamps, adjusted_new_timestamps]
-                )
-                combined_traces = np.concatenate([existing_traces, new_traces], axis=1)
-
-                if self.external_simulation_data:
-                    self.external_simulation_data[base_key] = {
-                        "widget": "trace",
-                        "timestamps": combined_timestamps,
-                        "traces": combined_traces,
-                    }
-
-                self.logger.info(
-                    f"Concatenated trace data for {base_key}: {existing_traces.shape} + {new_traces.shape} = {combined_traces.shape}"
-                )
-                return
-
-        # No existing data - store as new
-        if self.external_simulation_data is None:
-            self.external_simulation_data = {}
-        self.external_simulation_data[base_key] = new_value
-        if isinstance(new_traces, np.ndarray):
-            self.logger.info(
-                f"Stored new trace data for {base_key}: {new_traces.shape}"
-            )
-
-    def _concatenate_spike_data(
-        self, base_key: str, new_value: PayloadDict, dt: float
-    ) -> None:
-        """Concatenate spike data to existing timeline"""
-        new_timestamps = new_value.get("timestamps")
-        new_spikes = new_value.get("spikes")
-        dataset_dt = self._safe_float(new_value.get("dt"), dt)
-        new_n_neurons, new_n_timesteps = self._ensure_spike_metadata(
-            new_value, dataset_dt
-        )
-
-        if self.external_simulation_data and base_key in self.external_simulation_data:
-            # Existing data - concatenate spikes
-            existing_data = self.external_simulation_data[base_key]
-            existing_timestamps = existing_data.get("timestamps")
-            existing_spikes = existing_data.get("spikes")
-            existing_dt = self._safe_float(existing_data.get("dt"), dataset_dt)
-            existing_n_neurons, existing_n_timesteps = self._ensure_spike_metadata(
-                existing_data, existing_dt
-            )
-
-            if (
-                isinstance(existing_timestamps, np.ndarray)
-                and isinstance(existing_spikes, np.ndarray)
-                and isinstance(new_timestamps, np.ndarray)
-                and isinstance(new_spikes, np.ndarray)
-            ):
-                # Calculate time offset (continue from where last data ended)
-                time_offset = float(existing_n_timesteps) * existing_dt
-                adjusted_new_timestamps = new_timestamps + time_offset
-
-                # Concatenate spike arrays
-                combined_timestamps = np.concatenate(
-                    [existing_timestamps, adjusted_new_timestamps]
-                )
-                combined_spikes = np.concatenate([existing_spikes, new_spikes])
-                combined_n_timesteps = int(existing_n_timesteps) + int(new_n_timesteps)
-
-                if self.external_simulation_data:
-                    self.external_simulation_data[base_key] = {
-                        "widget": "spike",
-                        "timestamps": combined_timestamps,
-                        "spikes": combined_spikes,
-                        "dt": dt,
-                        "n_neurons": max(existing_n_neurons, new_n_neurons),
-                        "n_timesteps": combined_n_timesteps,
-                    }
-
-                self.logger.info(
-                    f"Concatenated spike data for {base_key}: {len(existing_spikes)} + {len(new_spikes)} = {len(combined_spikes)} spikes"
-                )
-                return
-
-        # No existing data - store as new
-        if self.external_simulation_data is None:
-            self.external_simulation_data = {}
-        self.external_simulation_data[base_key] = new_value
-        if isinstance(new_spikes, np.ndarray):
-            self.logger.info(
-                f"Stored new spike data for {base_key}: {len(new_spikes)} spikes"
-            )
-
-    def _clear_external_widget_data(self, widget_type: str) -> None:
-        """Remove existing external data for the specified widget type."""
-        if not self.external_simulation_data:
-            return
-
-        keys_to_remove = [
-            key
-            for key, value in self.external_simulation_data.items()
-            if value.get("widget") == widget_type
-        ]
-        if not keys_to_remove:
-            return
-
-        for key in keys_to_remove:
-            del self.external_simulation_data[key]
-
-        if widget_type == "trace":
-            self.trace_widget.clear_data()
-        elif widget_type == "spike":
-            self.spike_widget.clear_data()
-
-        self.logger.info(
-            f"Cleared existing {widget_type} data before replacement (removed: {keys_to_remove})"
-        )
-
-    def _get_max_timepoints(self) -> int:
-        """Get maximum timepoints across all external data for stimulus expansion"""
-        max_timepoints = 0
-        if self.external_simulation_data:
-            for data in self.external_simulation_data.values():
-                if data.get("widget") == "trace":
-                    timestamps = data.get("timestamps")
-                    if isinstance(timestamps, np.ndarray):
-                        max_timepoints = max(max_timepoints, len(timestamps))
-                elif data.get("widget") == "spike":
-                    n_timesteps_value = data.get("n_timesteps")
-                    if isinstance(n_timesteps_value, int | float):
-                        inferred_timesteps = int(n_timesteps_value)
-                    else:
-                        dt = self._safe_float(data.get("dt"), 0.0)
-                        _, inferred_timesteps = self._ensure_spike_metadata(data, dt)
-                    max_timepoints = max(max_timepoints, max(0, inferred_timesteps))
-        return max_timepoints
-
-    def expand_stims_to_length(self, target_length: int, target_dt: float) -> None:
-        """Expand stimulation arrays to match imported data length"""
-        if not self.model.parameters:
-            return
-
-        for param_name, param_value in self.model.parameters.items():
-            if hasattr(param_value, "values") and hasattr(param_value, "dt"):
-                # This is a TimedArray
-                current_values = param_value.values
-                current_length = (
-                    current_values.shape[0] if current_values.ndim > 0 else 0
-                )
-
-                if current_length < target_length:
-                    # Expand with zeros
-                    if current_values.ndim == 1:
-                        # 1D array
-                        padding = np.zeros(target_length - current_length)
-                        new_values = np.concatenate([current_values, padding])
-                    elif current_values.ndim == 2:
-                        # 2D array (timepoints x neurons)
-                        n_neurons = current_values.shape[1]
-                        padding = np.zeros((target_length - current_length, n_neurons))
-                        new_values = np.concatenate([current_values, padding], axis=0)
-                    else:
-                        # Skip arrays with unexpected dimensions
-                        continue
-
-                    # Create new TimedArray with expanded values
-                    import brian2 as b2
-
-                    new_timed_array = b2.TimedArray(
-                        new_values, dt=target_dt * b2.second
-                    )
-                    self.model.parameters[param_name] = new_timed_array
-
-                    self.logger.info(
-                        f"Expanded {param_name} from {current_length} to {target_length} timepoints"
-                    )
-
-    def _update_external_data_widgets(self) -> None:
-        """Update widgets to display external simulation data"""
-        if not self.external_simulation_data:
-            return
-
-        widget_map = {
-            "trace": getattr(self, "cmb_neuron", None),
-            "spike": getattr(self, "cmb_spike", None),
-            "heatmap": getattr(self, "cmb_synapse", None),
-        }
-
-        known_types = set(widget_map.keys())
-        for name, data in self.external_simulation_data.items():
-            widget_type = data.get("widget", "")
-            if widget_type not in known_types:
-                self.logger.info(
-                    f"Ignoring unknown widget type {widget_type} for external simulation data {name}"
-                )
-
-        for widget_type, combo in widget_map.items():
-            if combo is None:
-                continue
-
-            current_selection = combo.currentText()
-            combo.clear()
-            datasets = [
-                key
-                for key, value in self.external_simulation_data.items()
-                if value.get("widget") == widget_type
-            ]
-            self.logger.info(f"Available {widget_type} datasets: {datasets}")
-            if datasets:
-                datasets.sort(reverse=True)
-                combo.addItems(datasets)
-                if current_selection in datasets:
-                    combo.setCurrentText(current_selection)
-                else:
-                    combo.setCurrentIndex(0)
-
-    def connect_external_simulation_function_with_brian2(self) -> None:
-        filename = "./external_simulation_example/run_brian2_externally.py"
-        if filename != "":
+            # possibly: pass in existing experiment data to the dialog to let it do sanity checks & auto-fill the offset?
             try:
-                path = pathlib.Path(filename).resolve()
-                self.external_simulation_function = runpy.run_path(filename)["simulate"]
-                self.logger.info(f"Loaded custom simulate_brian2 function from {path}")
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "Custom simulate_brian2 function loaded",
-                    f"Custom simulate_brian2 function loaded from {path} - pressing simulate will now call this function until the GUI is restarted",
+                self.model.add_experimental_data(
+                    dialog.experiment_name, dialog.imported_data, dialog.append_data
                 )
             except Exception as e:
                 QtWidgets.QMessageBox.critical(
                     self,
-                    "Error loading simulate function",
-                    f"Could not load simulate function from {path}: {e}",
+                    "Data import error",
+                    f"Could not import Suite2p data: {e}",
                 )
                 self.logger.exception(e)
+                return
+            self.update_model(self.model)
+            self._select_experiment_data(dialog.experiment_name)
+
+    def connect_external_simulation_function_with_brian2(self) -> None:
+        self._load_external_simulation_function(
+            "./external_simulation_example/run_brian2_externally.py"
+        )
+
+    def _load_external_simulation_function(self, filename: str) -> None:
+        if filename == "":
+            return
+        try:
+            path = pathlib.Path(filename).resolve()
+            self.external_simulation_function = runpy.run_path(filename)["simulate"]
+            self.logger.info(f"Loaded custom simulate function from {path}")
+            QtWidgets.QMessageBox.information(
+                self,
+                "Custom simulate function loaded",
+                f"Custom simulate function loaded from {path}. You can run this simulation using the Experiment -> Run external simulation function menu option.",
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Error loading simulate function",
+                f"Could not load simulate function from {path}: {e}",
+            )
+            self.logger.exception(e)
 
     def choose_brian2_backend(self) -> None:
         backends = ["cython", "numpy"]
@@ -1219,19 +744,11 @@ class Gui(QtWidgets.QMainWindow):
         menu.addSeparator()
         add_action(
             "Import Suite2p &Data",
-            self.import_suite2p_data,
+            self.btn_import_suite2p_data_clicked,
             menu,
             toolbar,
             shortcut="Ctrl+Shift+I",
             icon=qta.icon("mdi6.import"),
-        )
-        add_action(
-            "Import &Cellpose Data",
-            self.import_cellpose_data,
-            menu,
-            None,
-            shortcut="Ctrl+Shift+C",
-            icon=qta.icon("mdi6.brain"),
         )
         menu.addSeparator()
         add_action(
@@ -1318,13 +835,19 @@ class Gui(QtWidgets.QMainWindow):
     def _create_actions_view(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
     ) -> None:
-        for name, widget, icon in [
-            ("&Stimuli", self.stim_editor, "mdi6.chart-timeline"),
-            ("&Traces", self.trace_widget, "mdi.waves"),
-            ("&Spikes", self.spike_widget, "ph.barcode-light"),
-            ("&Heatmap", self.heatmap_widget, "mdi6.data-matrix"),
-            ("&Custom analysis", self.custom_analysis_widget, "mdi6.chart-histogram"),
-            ("&Console", self.stim_console, "mdi6.console"),
+        for name, widget, icon, is_checked in [
+            ("&Stimuli", self.stim_editor, "mdi6.chart-timeline", True),
+            ("&Traces", self.trace_widget, "mdi.waves", True),
+            ("&Spikes", self.spike_widget, "ph.barcode-light", True),
+            ("&Data", self.data_widget, "mdi6.chart-donut", False),
+            ("&Heatmap", self.heatmap_widget, "mdi6.data-matrix", True),
+            (
+                "&Custom analysis",
+                self.custom_analysis_widget,
+                "mdi6.chart-histogram",
+                True,
+            ),
+            ("&Console", self.stim_console, "mdi6.console", True),
         ]:
             add_action(
                 f"Show {name}",
@@ -1333,7 +856,7 @@ class Gui(QtWidgets.QMainWindow):
                 toolbar,
                 icon=qta.icon(f"{icon}"),
                 checkable=True,
-                is_checked=True,
+                is_checked=is_checked,
             )
         add_action(
             "Toggle selection text",
@@ -1353,16 +876,6 @@ class Gui(QtWidgets.QMainWindow):
         add_action(
             "&Synapse matrix RAM limit", self.choose_max_ram_synapse_plot_matrix, menu
         )
-        add_action(
-            "&Connect external simulation function",
-            self.connect_external_simulation_function,
-            menu,
-        )
-        add_action(
-            "&Run brian2 with external simulation function",
-            self.connect_external_simulation_function_with_brian2,
-            menu,
-        )
 
     def _create_actions_help(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None
@@ -1378,20 +891,55 @@ class Gui(QtWidgets.QMainWindow):
         toolbar.addWidget(QtWidgets.QLabel("  Stim data: "))
         toolbar.addWidget(self.cmb_stim)
         toolbar.addWidget(QtWidgets.QLabel("  Neuron data: "))
-        toolbar.addWidget(self.cmb_neuron)
+        toolbar.addWidget(self.cmb_trace)
+        add_action(
+            "&Trace normalization",
+            self.trace_widget.trace_norm_dialog,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon=qta.icon("mdi6.arrow-expand-vertical"),
+        )
         toolbar.addWidget(QtWidgets.QLabel("  Spike data: "))
         toolbar.addWidget(self.cmb_spike)
         toolbar.addWidget(QtWidgets.QLabel("  Synapse data: "))
         toolbar.addWidget(self.cmb_synapse)
+        toolbar.addWidget(QtWidgets.QLabel("  All data: "))
+        toolbar.addWidget(self.cmb_data)
 
     def _create_action_experiment(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
     ) -> None:
         add_action(
-            "&Run external stimulation function",
+            "&Connect external stimulation function",
+            self.connect_external_simulation_function,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon=qta.icon("mdi6.code-braces"),
+        )
+        add_action(
+            "&Connect brian2 external stimulation function",
             self.connect_external_simulation_function_with_brian2,
             menu,
             toolbar,
             shortcut="Ctrl+Shift+E",
             icon=qta.icon("mdi6.function"),
         )
+        add_action(
+            "&Run external stimulation function",
+            self.btn_do_external_simulation_clicked,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon=qta.icon("mdi6.rocket-launch-outline"),
+        )
+
+    def closeEvent(self, event):
+        # explicitly close all fastplotlib figures to avoid renderer trying to access them after they have been destroyed
+        self.spike_widget.close()
+        self.trace_widget.close()
+        self.stim_editor.stim_widget.close()
+        self.data_widget.trace_widget.close()
+        self.data_widget.spike_widget.close()
+        super().closeEvent(event)

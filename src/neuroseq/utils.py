@@ -18,6 +18,9 @@ from qtpy import QtGui
 from qtpy import QtWidgets
 
 import neuroseq
+from neuroseq.experiment import SpikeData
+from neuroseq.experiment import SynapseData
+from neuroseq.experiment import TraceData
 
 example_models_path = pathlib.Path(str(resources.files(neuroseq))) / "example_models"
 
@@ -286,3 +289,76 @@ def update_nested_dict(original: dict[Any, Any], updates: Any) -> None:
             update_nested_dict(original[key], value)
         else:
             original[key] = value
+
+
+def append_data(
+    existing_data: TraceData | SpikeData | SynapseData,
+    new_data: TraceData | SpikeData | SynapseData,
+    time_offset_seconds: float,
+):
+    """Append new trace or spike data in-place to the existing data
+
+    Parameters
+    ----------
+    existing_data : TraceData | SpikeData | SynapseData
+        Existing trace or spike data to append to.
+    new_data : TraceData | SpikeData | SynapseData
+        New trace or spike data to append.
+    time_offset_seconds: float
+        Time offset in seconds to apply to the timestamps in the new data when appending
+
+    Raises
+    -------
+    ValueError
+        If existing and new data are not compatible.
+    TypeError
+        If existing_data and new_data are not of the same type.
+    """
+    if type(existing_data) is not type(new_data):
+        raise TypeError("existing_data and new_data must be of the same type.")
+    if isinstance(existing_data, TraceData) and isinstance(new_data, TraceData):
+        if existing_data.traces.shape[0] != new_data.traces.shape[0]:
+            raise ValueError(
+                f"Cannot append TraceData with different number of neurons: {existing_data.traces.shape[0]} != {new_data.traces.shape[0]}"
+            )
+        if existing_data.dt != new_data.dt:
+            raise ValueError(
+                f"Cannot append TraceData with different dt: {existing_data.dt} != {new_data.dt}"
+            )
+        if existing_data.traces.shape[1] * existing_data.dt != time_offset_seconds:
+            raise ValueError(
+                f"Time offset {time_offset_seconds} does not match the length of the existing trace data {existing_data.traces.shape[1] * existing_data.dt}."
+            )
+        existing_data.traces = np.concatenate(
+            (existing_data.traces, new_data.traces), axis=1
+        )
+    elif isinstance(existing_data, SpikeData) and isinstance(new_data, SpikeData):
+        existing_data.spike_indices = np.concatenate(
+            (existing_data.spike_indices, new_data.spike_indices), axis=0
+        )
+        existing_data.spike_times = np.concatenate(
+            (existing_data.spike_times, new_data.spike_times + time_offset_seconds),
+            axis=0,
+        )
+
+
+def getSimulationTime(parent: QtWidgets.QWidget | None = None) -> float | None:
+    simulation_time_str, ok = QtWidgets.QInputDialog.getText(
+        parent,
+        "Simulate",
+        "Simulation time (s)",
+        QtWidgets.QLineEdit.EchoMode.Normal,
+        "1.0",
+    )
+    if not ok:
+        return None
+    try:
+        simulation_time = float(simulation_time_str)
+    except ValueError:
+        QtWidgets.QMessageBox.critical(
+            parent,
+            "Invalid input",
+            f"Could not parse simulation time '{simulation_time_str}' as a number",
+        )
+        return None
+    return simulation_time

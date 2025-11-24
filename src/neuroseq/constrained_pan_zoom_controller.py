@@ -4,6 +4,8 @@ import brian2.numpy_ as np
 import pygfx
 from qtpy import QtWidgets
 
+from neuroseq.gridlines import GridLines
+
 
 class ConstrainedPanZoomController(pygfx.PanZoomController):
     _default_controls = {
@@ -29,12 +31,14 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         self.max_height = 1.0
         self.x_scroll_bar: QtWidgets.QScrollBar | None = None
         self.y_scroll_bar: QtWidgets.QScrollBar | None = None
+        self.grid_lines: list[GridLines] = []
         super().__init__(*args, **kwargs)
 
     def _set_camera_state(self, new_state):
         """Override the _set_camera_state method
         - limit the width, height and position to keep the data visible
         - update the scroll bars if they are connected
+        - hide or show sub-gridlines based on the current zoom level
         """
         if "position" in new_state:
             current_state = self._get_camera_state()
@@ -62,6 +66,9 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
             self._set_scroll_bar_size(
                 self.x_scroll_bar, new_state["width"] / self.max_width
             )
+            for grid_line in self.grid_lines:
+                if grid_line is not None:
+                    grid_line.set_current_time_extent(new_state["width"])
         if "height" in new_state:
             new_state["height"] = float(
                 np.clip(new_state["height"], self.min_height, self.max_height)
@@ -100,6 +107,12 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         scroll_bar.setValue(0)
         scroll_bar.setSingleStep(1)
         scroll_bar.setPageStep(self.scroll_bar_steps)
+
+    def add_grid_lines(self, gridlines: GridLines):
+        self.grid_lines.append(gridlines)
+
+    def clear_grid_lines(self):
+        self.grid_lines.clear()
 
     def connect_x_scroll_bar(self, scroll_bar: QtWidgets.QScrollBar):
         self.x_scroll_bar = scroll_bar

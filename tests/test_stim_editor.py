@@ -65,6 +65,92 @@ def test_stim_editor_zoom_pan(qtbot: QtBot) -> None:
         qtbot.wait(delay)
 
 
+def test_stim_editor_pad_and_trim(
+    monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list
+):
+    timed_array = b2.TimedArray(np.random.random_sample((500, 10)), dt=1.0 * b2.ms)
+    model = B2Model()
+    model.parameters = {"a": timed_array, "irrelevant": 4}
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.show()
+    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    stim_editor.set_model(model)
+    # pad with invalid number of seconds
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getText", lambda *args: ("notanumber", True)
+    )
+    assert len(qmessagebox_calls) == 0
+    stim_editor.pad_stim_array()
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "critical"
+    assert "parse" in qmessagebox_calls[0]["text"].lower()
+    # pad with negative number of seconds
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("-2", True))
+    assert len(qmessagebox_calls) == 1
+    stim_editor.pad_stim_array()
+    assert len(qmessagebox_calls) == 2
+    assert qmessagebox_calls[1]["name"] == "critical"
+    assert "positive" in qmessagebox_calls[1]["text"].lower()
+    # pad with 1 second
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("1", True))
+    assert len(qmessagebox_calls) == 2
+    stim_editor.pad_stim_array()
+    assert len(qmessagebox_calls) == 2
+    assert stim_editor.current_stim_modifier is not None
+    assert stim_editor.current_stim_modifier.timed_array.values.shape[0] == 1500
+    # trim with invalid number of seconds
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getText", lambda *args: ("notanumber", True)
+    )
+    assert len(qmessagebox_calls) == 2
+    stim_editor.trim_stim_array()
+    assert len(qmessagebox_calls) == 3
+    assert qmessagebox_calls[2]["name"] == "critical"
+    assert "parse" in qmessagebox_calls[2]["text"].lower()
+    # trim with negative number of seconds
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("-2", True))
+    assert len(qmessagebox_calls) == 3
+    stim_editor.trim_stim_array()
+    assert len(qmessagebox_calls) == 4
+    assert qmessagebox_calls[3]["name"] == "critical"
+    assert "positive" in qmessagebox_calls[3]["text"].lower()
+    # trim with too large number of seconds
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("5", True))
+    assert len(qmessagebox_calls) == 4
+    stim_editor.trim_stim_array()
+    assert len(qmessagebox_calls) == 5
+    assert qmessagebox_calls[4]["name"] == "critical"
+    assert "greater than" in qmessagebox_calls[4]["text"].lower()
+    # trim by 0.5 seconds (no confirmation dialog since all stimuli being removed are zero)
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.5", True))
+    assert len(qmessagebox_calls) == 5
+    stim_editor.trim_stim_array()
+    assert len(qmessagebox_calls) == 5
+    assert stim_editor.current_stim_modifier.timed_array.values.shape[0] == 1000
+    # trim with 0.7 seconds (confirmation dialog since some non-zero stimuli will be removed)
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.7", True))
+    # say no when asked to confirm
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args: QtWidgets.QMessageBox.StandardButton.No,
+    )
+    stim_editor.trim_stim_array()
+    assert stim_editor.current_stim_modifier.timed_array.values.shape[0] == 1000
+    # do it again and this time say yes when asked to confirm
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args: QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+    stim_editor.trim_stim_array()
+    assert stim_editor.current_stim_modifier.timed_array.values.shape[0] == 300
+
+
 def test_stim_editor_actions(
     qtbot: QtBot, monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
