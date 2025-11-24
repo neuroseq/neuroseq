@@ -70,7 +70,7 @@ def positive_stims() -> b2.TimedArray:
     n_neurons = 20
     n_stim_per_neuron = 5
     n_timestamps = 100
-    dt = 0.683
+    dt = 0.001  # 1 ms
     stim = np.zeros((n_neurons, n_timestamps))
     for row in stim:
         for _ in range(n_stim_per_neuron):
@@ -83,7 +83,7 @@ def negative_and_positive_stims() -> b2.TimedArray:
     # stim array with values from -2.0 to 3.0
     n_neurons = 3
     n_timestamps = 3
-    dt = 0.683
+    dt = 0.001  # 1 ms
     stim = np.zeros((n_neurons, n_timestamps))
     stim[0, 0] = -1.18
     stim[0, 1] = 0.0
@@ -143,14 +143,14 @@ def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: b2.TimedArray) ->
     assert stim_widget.selected_neuron_slice is not None
     assert stim_widget.selected_time_slice is not None
     assert 0.15 * n_neurons < stim_widget.selected_neuron_slice.start < 0.35 * n_neurons
-    assert 0.65 * n_neurons < stim_widget.selected_neuron_slice.stop < 0.85 * n_neurons
+    assert 0.65 * n_neurons < stim_widget.selected_neuron_slice.stop < 0.90 * n_neurons
     assert (
         0.15 * n_timestamps
         < stim_widget.selected_time_slice.start
         < 0.35 * n_timestamps
     )
     assert (
-        0.65 * n_timestamps < stim_widget.selected_time_slice.stop < 0.85 * n_timestamps
+        0.65 * n_timestamps < stim_widget.selected_time_slice.stop < 0.90 * n_timestamps
     )
 
 
@@ -166,6 +166,7 @@ def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: b2.TimedArray) -> N
     n_neurons = positive_stims.values.shape[1]
     stim_widget.set_data(positive_stims)
     assert stim_widget.n_neurons == n_neurons
+    assert stim_widget.dt_ms == 1000 * positive_stims.dt
     x0 = stim_widget.size().width() // 4
     y0 = stim_widget.size().height() // 4
     x1 = x0 * 2

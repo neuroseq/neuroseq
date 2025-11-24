@@ -7,6 +7,7 @@ import pytest
 from pytest import approx
 from pytestqt.qtbot import QtBot
 
+from neuroseq.experiment import SynapseData
 from neuroseq.heatmap_widget import HeatmapWidget
 
 
@@ -25,13 +26,14 @@ def test_heatmap_widget_3d_data_with_timeline(
     qtbot.addWidget(heatmap_widget)
     heatmap_widget.show()
     qtbot.waitUntil(lambda: heatmap_widget.isVisible())
-    data = np.random.rand(23, 18, 10)
+    values = np.random.rand(23, 18, 10)
     interval_s = 0.05
-    timepoints_s = interval_s * np.arange(data.shape[2])
+    timepoints_s = interval_s * np.arange(values.shape[2])
     total_playback_time_secs = timepoints_s[-1] / relative_playback_speed
-    heatmap_widget.set_data(data, timepoints_s)
+    data = SynapseData("synapse", values, timepoints_s)
+    heatmap_widget.set_data(data)
     heatmap_widget.set_relative_playback_speed(relative_playback_speed)
-    assert heatmap_widget.getProcessedImage().shape == data.T.shape
+    assert heatmap_widget.getProcessedImage().shape == values.T.shape
     assert heatmap_widget.timeLine.isVisible()
     heatmap_widget.togglePause()
     start_time_secs = perf_counter()

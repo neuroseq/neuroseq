@@ -3,10 +3,12 @@
 import numpy as np
 from brian2 import *
 
-SimData = dict[str, dict[str, str | float | int | np.ndarray]]
+from neuroseq.experiment import TraceData, SpikeData, SynapseData
 
 
-def simulate(stims_dict: dict[str, np.ndarray], simulation_time: float) -> SimData:
+def simulate(
+    stims_dict: dict[str, np.ndarray], simulation_time: float
+) -> list[TraceData | SpikeData | SynapseData]:
     # This function is provided by neuroseq with a dict of stimuli, and the desired simulation time.
     # stims_dict is a dict of key:data pairs, where data contains
     #   - "array": 2d numpy array of timestamps x neurons
@@ -160,45 +162,26 @@ def simulate(stims_dict: dict[str, np.ndarray], simulation_time: float) -> SimDa
 
     run(tfinal, report="text")
 
-    # ...do some simulation using stims_dict and simulation_time...
-
-    # It should return a dict of key:data pairs, where the key is the name to be displayed in the GUI.
-    data: SimData = {}
-    # Three types of data can be returned, which differ depending on the widget used to display the data in the GUI
-    # Below are some example random data of each type:
-
-    # "trace" data is a dict of the following format:
-    #   - "widget": "trace"
-    #   - "timestamps": 1d array of timestamps
-    #   - "traces": 2d array of neurons x timestamps
-    n_neurons_trace = 32
     dt_trace = 0.1  # ms
-    n_timestamps_trace = int(simulation_time / dt_trace)
 
-    data["trace_example"] = {
-        "widget": "trace",
-        "timestamps": np.linspace(0, simulation_time, n_timestamps_trace),
-        "traces": Traces_v.v,  # np.random.rand(n_neurons_trace, n_timestamps_trace))
-    }
+    results = []
 
-    # "spike" data is a dict of the following format:
-    #   - "widget": "spike"
-    #   - "timestamps": 1d array of spike timestamps
-    #   - "spikes": 1d array of spike neuron indices
-    #   - "dt": the simulation time step as a float
-    # Neuroseq will infer neuron/time counts from the spike/timestamp arrays.
-    dt_spike = 0.001
-    data["spike_example"] = {
-        "widget": "spike",
-        "timestamps": np.array(spikemon.t)[:],
-        "spikes": np.array(spikemon.i)[:],
-        "dt": dt_spike,
-    }
+    results.append(
+        TraceData(
+            name="trace_example",
+            traces=Traces_v.v,
+            dt=dt_trace / 1000.0,  # conversion to seconds
+            units="",
+        )
+    )
 
-    # "heatmap" data is a dict of the following format:
-    #   - "widget": "heatmap"
-    #   - "timestamps": 1d array of timestamps
-    #   - "matrix": 3d array of neurons x neurons x timestamps
+    results.append(
+        SpikeData(
+            name="spike_example",
+            spike_indices=np.array(spikemon.i)[:],
+            spike_times=np.array(spikemon.t)[:],
+        )
+    )
 
     n_neurons_heatmap = 24
     dt_heatmap = 10
@@ -221,17 +204,12 @@ def simulate(stims_dict: dict[str, np.ndarray], simulation_time: float) -> SimDa
                         j + i * n_neurons_heatmap - shift, tt
                     ]
 
-    # "heatmap" data is a dict of the following format:
-    #   - "widget": "heatmap"
-    #   - "timestamps": 1d array of timestamps
-    #   - "matrix": 3d array of neurons x neurons x timestamps
+    results.append(
+        SynapseData(
+            name="heatmap_example",
+            values=sq_connect_mat,
+            timestamps=np.linspace(0, simulation_time / 1000.0, n_timestamps_heatmap),
+        )
+    )
 
-    data["heatmap_example"] = {
-        "widget": "heatmap",
-        "timestamps": np.linspace(
-            0, simulation_time / 1000, n_timestamps_heatmap
-        ),  ### here the timestamps are in seconds (!)
-        "matrix": sq_connect_mat,  # np.random.rand(n_neurons_heatmap, n_neurons_heatmap, n_timestamps_heatmap),
-    }
-
-    return data
+    return results

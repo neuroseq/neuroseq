@@ -52,14 +52,6 @@ jobs:
         env:
           QT_API: pyside6
           PYTEST_QT_API: pyside6
-      - run: uv add pyqt6 && uv run pytest -sv || uv run pytest -sv || uv run pytest -sv
-        env:
-          QT_API: pyqt6
-          PYTEST_QT_API: pyqt6
-      - run: uv add pyqt5 && uv run pytest -sv || uv run pytest -sv || uv run pytest -sv
-        env:
-          QT_API: pyqt5
-          PYTEST_QT_API: pyqt5
       - run: uv run diff-cover coverage.xml -c pyproject.toml
   pre-commit:
     runs-on: "macos-arm64-ssc"

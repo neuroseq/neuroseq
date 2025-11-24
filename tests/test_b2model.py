@@ -14,6 +14,8 @@ from pytest import MonkeyPatch
 from pytest_mock import MockerFixture
 
 from neuroseq import b2_model
+from neuroseq.experiment import SpikeData
+from neuroseq.experiment import TraceData
 
 
 def test_construction(tmp_path: Path) -> None:
@@ -969,14 +971,136 @@ def test_store_restore(mfx_ornstein: b2_model.B2Model) -> None:
         mfx_ornstein.restore("idontexist")
 
 
+def _make_experimental_data(n_neurons=12, dt=0.01) -> list[TraceData | SpikeData]:
+    trace_data = TraceData(
+        name="test_trace", traces=np.random.rand(n_neurons, 37), units="mV", dt=dt
+    )
+    spike_data = SpikeData(
+        name="test_spike",
+        spike_indices=np.array([1, 4, 5]),
+        spike_times=np.array([0.1, 0.6, 0.99]),
+    )
+    return [trace_data, spike_data]
+
+
+def test_add_experimental_data_overwrite(mfx_ornstein: b2_model.B2Model) -> None:
+    mfx_ornstein.add_experimental_data(
+        "test_experiment", _make_experimental_data(), append=False
+    )
+
+    assert len(mfx_ornstein.experiments) == 1
+    assert "test_experiment" in mfx_ornstein.experiments
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][0], TraceData)
+    assert mfx_ornstein.experiments["test_experiment"][0].traces.shape == (12, 37)
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][1], SpikeData)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_indices.shape == (3,)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_times.shape == (3,)
+
+    mfx_ornstein.add_experimental_data(
+        "test_experiment", _make_experimental_data(), append=False
+    )
+
+    assert len(mfx_ornstein.experiments) == 1
+    assert "test_experiment" in mfx_ornstein.experiments
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][0], TraceData)
+    assert mfx_ornstein.experiments["test_experiment"][0].traces.shape == (12, 37)
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][1], SpikeData)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_indices.shape == (3,)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_times.shape == (3,)
+
+
+def test_add_experimental_data_append(mfx_ornstein: b2_model.B2Model) -> None:
+    mfx_ornstein.add_experimental_data(
+        "test_experiment", _make_experimental_data(), append=False
+    )
+
+    assert len(mfx_ornstein.experiments) == 1
+    assert "test_experiment" in mfx_ornstein.experiments
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][0], TraceData)
+    assert mfx_ornstein.experiments["test_experiment"][0].traces.shape == (12, 37)
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][1], SpikeData)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_indices.shape == (3,)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_times.shape == (3,)
+
+    mfx_ornstein.add_experimental_data(
+        "test_experiment", _make_experimental_data(), append=True
+    )
+
+    assert len(mfx_ornstein.experiments) == 1
+    assert "test_experiment" in mfx_ornstein.experiments
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][0], TraceData)
+    assert mfx_ornstein.experiments["test_experiment"][0].traces.shape == (12, 74)
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][1], SpikeData)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_indices.shape == (6,)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_times.shape == (6,)
+
+    mfx_ornstein.add_experimental_data(
+        "test_experiment", _make_experimental_data(), append=True
+    )
+
+    assert len(mfx_ornstein.experiments) == 1
+    assert "test_experiment" in mfx_ornstein.experiments
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][0], TraceData)
+    assert mfx_ornstein.experiments["test_experiment"][0].traces.shape == (12, 111)
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][1], SpikeData)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_indices.shape == (9,)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_times.shape == (9,)
+
+    mfx_ornstein.add_experimental_data(
+        "test_experiment", _make_experimental_data(), append=False
+    )
+
+    assert len(mfx_ornstein.experiments) == 1
+    assert "test_experiment" in mfx_ornstein.experiments
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][0], TraceData)
+    assert mfx_ornstein.experiments["test_experiment"][0].traces.shape == (12, 37)
+    assert isinstance(mfx_ornstein.experiments["test_experiment"][1], SpikeData)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_indices.shape == (3,)
+    assert mfx_ornstein.experiments["test_experiment"][1].spike_times.shape == (3,)
+
+
+def test_add_experimental_data_append_invalid(mfx_ornstein: b2_model.B2Model) -> None:
+    mfx_ornstein.add_experimental_data(
+        "test_experiment", _make_experimental_data(n_neurons=6, dt=0.2), append=False
+    )
+    with pytest.raises(ValueError) as excinfo:
+        mfx_ornstein.add_experimental_data(
+            "test_experiment", _make_experimental_data(n_neurons=7, dt=0.2), append=True
+        )
+    assert "neurons" in str(excinfo.value)
+    with pytest.raises(ValueError) as excinfo:
+        mfx_ornstein.add_experimental_data(
+            "test_experiment",
+            _make_experimental_data(n_neurons=6, dt=0.15),
+            append=True,
+        )
+    assert "dt" in str(excinfo.value)
+
+
 def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
     tmp_file = tmp_path / "model.nseq"
 
-    # simulate for 1 second, save checkpoint, then simulate for another second & save
+    # simulate for 1 second, save checkpoint, then simulate for another second
     mfx_nmda.run_simulation(1 * b2.second)
     mfx_nmda.store("after_1s")
     mfx_nmda.run_simulation(1 * b2.second)
-    mfx_nmda.save_model(tmp_file)
+
+    # add some experimental data
+    trace_data = TraceData(
+        name="test_trace", traces=np.random.rand(12, 3), units="mV", dt=0.01
+    )
+    spike_data = SpikeData(
+        name="test_spike",
+        spike_indices=np.array([1, 4, 5]),
+        spike_times=np.array([0.1, 0.6, 0.99]),
+    )
+    experimental_data: list[TraceData | SpikeData] = [trace_data, spike_data]
+    mfx_nmda.add_experimental_data("test_experiment", experimental_data)
+
+    # save model including simulation data, simulation checkpoints and experimental data
+    mfx_nmda.save_model(
+        tmp_file, include_simulation_data=True, include_experimental_data=True
+    )
     reconstructed_model = b2_model.B2Model.load_model(tmp_file)
 
     assert reconstructed_model.seed == mfx_nmda.seed
@@ -1029,17 +1153,112 @@ def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
     assert len(reconstructed_model.network["M"].t) == 10000
     assert reconstructed_model.network["M"].t[-1] == pytest.approx(1, abs=0.001)
 
+    # as well as experimental data
+    assert len(reconstructed_model.experiments) == 1
+    assert "test_experiment" in reconstructed_model.experiments
+    loaded_experimental_data = reconstructed_model.experiments["test_experiment"]
+    assert len(loaded_experimental_data) == 2
+    loaded_trace_data = loaded_experimental_data[0]
+    assert isinstance(loaded_trace_data, TraceData)
+    assert loaded_trace_data.name == trace_data.name
+    assert loaded_trace_data.units == trace_data.units
+    assert loaded_trace_data.dt == pytest.approx(trace_data.dt)
+    assert np.allclose(loaded_trace_data.traces, trace_data.traces)
+    loaded_spike_data = loaded_experimental_data[1]
+    assert isinstance(loaded_spike_data, SpikeData)
+    assert loaded_spike_data.name == spike_data.name
+    assert np.allclose(loaded_spike_data.spike_indices, spike_data.spike_indices)
+    assert np.allclose(loaded_spike_data.spike_times, spike_data.spike_times)
+
     # and simulations can be continued: run for 1s so that both models have run for 2s from the same initial conditions
     reconstructed_model.run_simulation(1 * b2.second)
     assert_allclose(mfx_nmda.network["M"].g, reconstructed_model.network["M"].g)
     assert_allclose(mfx_nmda.network["Mn"].g, reconstructed_model.network["Mn"].g)
 
 
-def test_timed_array_padding(mfx_ornstein: b2_model.B2Model) -> None:
+def test_timed_array_simulation_padding(mfx_ornstein: b2_model.B2Model) -> None:
     dt = 1 * b2.ms
     sim_time = 10 * b2.ms
     stim_padding_seconds = 3
     timed_array = b2.TimedArray(np.random.rand(100, 10) * b2.mS, dt=dt)
+    assert timed_array.values.shape == (100, 10)
+    mfx_ornstein.define_parameter("stim", timed_array)
+    mfx_ornstein.run_simulation(
+        sim_time, timed_array_padding_seconds=stim_padding_seconds
+    )
+    new_timed_array = mfx_ornstein.parameters["stim"]
+    # timed array length is simulation length + padding
+    assert new_timed_array.values.shape[0] == pytest.approx(
+        sim_time / dt + stim_padding_seconds * b2.second / dt
+    )
+    # timed array is padded with zeros - original values are preserved
+    assert np.allclose(new_timed_array.values[0:100, :], timed_array.values)
+    assert np.max(new_timed_array.values[100:, :]) == pytest.approx(0)
+
+
+def test_timed_array_padding(mfx_ornstein: b2_model.B2Model) -> None:
+    timed_array = b2.TimedArray(np.random.rand(1000, 10) * b2.mS, dt=1 * b2.ms)
+    assert timed_array.values.shape == (1000, 10)
+    mfx_ornstein.define_parameter("stim", timed_array)
+    # pad to 1.2s
+    mfx_ornstein.pad_timed_arrays(1.2)
+    new_timed_array = mfx_ornstein.parameters["stim"]
+    assert new_timed_array.values.shape[0] == pytest.approx(1200, abs=1)
+    assert np.allclose(
+        new_timed_array.values[0 : timed_array.values.shape[0], :], timed_array.values
+    )
+    assert np.max(new_timed_array.values[1000:, :]) == pytest.approx(0)
+    # pad to 2s
+    mfx_ornstein.pad_timed_arrays(2)
+    new_timed_array = mfx_ornstein.parameters["stim"]
+    assert new_timed_array.values.shape[0] == pytest.approx(2000, abs=1)
+    assert np.allclose(
+        new_timed_array.values[0 : timed_array.values.shape[0], :], timed_array.values
+    )
+    assert np.max(new_timed_array.values[1000:, :]) == pytest.approx(0)
+
+
+def test_timed_array_trimming(mfx_ornstein: b2_model.B2Model) -> None:
+    timed_array = b2.TimedArray(np.random.rand(1000, 10) * b2.mS, dt=1 * b2.ms)
+    # make that last 100 values (0.1s) zero
+    timed_array.values[900:, :] = 0
+    assert timed_array.values.shape == (1000, 10)
+    mfx_ornstein.define_parameter("stim", timed_array)
+    # last 0.1 seconds have no non-zero stimuli
+    assert mfx_ornstein.trim_timed_array_would_delete_data(1.0) is False
+    assert mfx_ornstein.trim_timed_array_would_delete_data(0.901) is False
+    assert mfx_ornstein.trim_timed_array_would_delete_data(0.899) is True
+    # trim to 0.95s
+    assert mfx_ornstein.trim_timed_array_would_delete_data(0.95) is False
+    mfx_ornstein.trim_timed_arrays(0.95)
+    new_timed_array = mfx_ornstein.parameters["stim"]
+    assert new_timed_array.values.shape[0] == pytest.approx(950, abs=1)
+    assert np.allclose(
+        new_timed_array.values,
+        timed_array.values[0 : new_timed_array.values.shape[0], :],
+    )
+    # trim to 0.5s
+    assert mfx_ornstein.trim_timed_array_would_delete_data(0.5) is True
+    mfx_ornstein.trim_timed_arrays(0.5)
+    new_timed_array = mfx_ornstein.parameters["stim"]
+    assert new_timed_array.values.shape[0] == pytest.approx(500, abs=1)
+    assert np.allclose(
+        new_timed_array.values,
+        timed_array.values[0 : new_timed_array.values.shape[0], :],
+    )
+    # trim to 0s
+    assert mfx_ornstein.trim_timed_array_would_delete_data(0) is True
+    mfx_ornstein.trim_timed_arrays(0)
+    new_timed_array = mfx_ornstein.parameters["stim"]
+    assert new_timed_array.values.shape[0] == pytest.approx(0, abs=1)
+    assert np.allclose(
+        new_timed_array.values,
+        timed_array.values[0 : new_timed_array.values.shape[0], :],
+    )
+
+
+def test_timed_array_neuron_number(mfx_ornstein: b2_model.B2Model) -> None:
+    timed_array = b2.TimedArray(np.random.rand(100, 10) * b2.mS, dt=1 * b2.ms)
     assert timed_array.values.shape == (100, 10)
     mfx_ornstein.define_parameter("stim", timed_array)
     # increase number of neurons in model to be larger than the number of neurons in the TimedArray
@@ -1049,33 +1268,24 @@ def test_timed_array_padding(mfx_ornstein: b2_model.B2Model) -> None:
         "neurongroup", "tau", np.random.rand(n_neurons) * b2.second
     )
     mfx_ornstein.define_init("neurongroup", "sigma", np.random.rand(n_neurons))
-    mfx_ornstein.run_simulation(
-        sim_time, timed_array_padding_seconds=stim_padding_seconds
-    )
+    mfx_ornstein.assemble_network()
     new_timed_array = mfx_ornstein.parameters["stim"]
-    # timed array neuron number has been increased to match the largest NeuronGroup
+    # timed array neuron number has been increased to match
     assert new_timed_array.values.shape[1] == 23
-    # timed array length is simulation length + padding
-    assert new_timed_array.values.shape[0] == pytest.approx(
-        sim_time / dt + stim_padding_seconds * b2.second / dt
-    )
-    # timed array is padded with zeros - original values are preserved
-    assert np.allclose(new_timed_array.values[0:100, 0:10], timed_array.values)
-    assert np.max(new_timed_array.values[0:100, 10:]) == pytest.approx(0)
-    assert np.max(new_timed_array.values[100:, :]) == pytest.approx(0)
-    # decreasing the number of neurons does not remove any neurons from the TimedArrays
+    # decrease the number of neurons
     n_neurons = 3
     mfx_ornstein.define_neuronnumber("neurongroup", n_neurons)
     mfx_ornstein.define_init(
         "neurongroup", "tau", np.random.rand(n_neurons) * b2.second
     )
     mfx_ornstein.define_init("neurongroup", "sigma", np.random.rand(n_neurons))
-    mfx_ornstein.run_simulation(
-        sim_time, timed_array_padding_seconds=stim_padding_seconds
+    mfx_ornstein.assemble_network()
+    # timed array neuron number has been decreased to match
+    new_timed_array = mfx_ornstein.parameters["stim"]
+    assert new_timed_array.values.shape == (100, 3)
+    assert np.allclose(
+        new_timed_array.values[0:100, 0:3], timed_array.values[0:100, 0:3]
     )
-    assert np.allclose(new_timed_array.values[0:100, 0:10], timed_array.values)
-    assert np.max(new_timed_array.values[0:100, 10:]) == pytest.approx(0)
-    assert np.max(new_timed_array.values[100:, :]) == pytest.approx(0)
 
 
 def test_default_group_addition(mfx_ornstein) -> None:
