@@ -9,10 +9,10 @@ from qtpy.compat import getopenfilename
 
 from neuroseq.experiment import SpikeData
 from neuroseq.experiment import TraceData
-from neuroseq.importer import compute_normalized_suite2p_spikes
-from neuroseq.importer import compute_normalized_suite2p_traces
-from neuroseq.importer import prepare_suite2p_spikes
-from neuroseq.importer import prepare_suite2p_traces
+from neuroseq.importer_suite2p import compute_normalized_suite2p_spikes
+from neuroseq.importer_suite2p import compute_normalized_suite2p_traces
+from neuroseq.importer_suite2p import prepare_suite2p_spikes
+from neuroseq.importer_suite2p import prepare_suite2p_traces
 
 
 class Suite2pImportDialog(QtWidgets.QDialog):

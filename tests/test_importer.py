@@ -3,10 +3,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from neuroseq.importer import compute_normalized_suite2p_spikes
-from neuroseq.importer import compute_normalized_suite2p_traces
-from neuroseq.importer import prepare_suite2p_spikes
-from neuroseq.importer import prepare_suite2p_traces
+from neuroseq.importer_suite2p import compute_normalized_suite2p_spikes
+from neuroseq.importer_suite2p import compute_normalized_suite2p_traces
+from neuroseq.importer_suite2p import prepare_suite2p_spikes
+from neuroseq.importer_suite2p import prepare_suite2p_traces
 
 
 def test_prepare_suite2p_traces_produces_widget_payload(suite2p_import_data_dir):

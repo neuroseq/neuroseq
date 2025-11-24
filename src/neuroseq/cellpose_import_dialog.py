@@ -8,8 +8,8 @@ from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
-from neuroseq.importer import CellPoseImporter
-from neuroseq.importer import CellposeImportResult
+from neuroseq.importer_cell2pose import CellPoseImporter
+from neuroseq.importer_cell2pose import CellposeImportResult
 
 
 class CellposeImportDialog(QtWidgets.QDialog):

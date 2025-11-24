@@ -7,7 +7,7 @@ from pytestqt.qtbot import QtBot
 from neuroseq.experiment import SpikeData
 from neuroseq.experiment import TraceData
 from neuroseq.import_dialog import Suite2pImportDialog
-from neuroseq.importer import compute_normalized_suite2p_traces
+from neuroseq.importer_suite2p import compute_normalized_suite2p_traces
 
 
 class TestSuite2pImportDialog:
