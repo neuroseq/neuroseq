@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from typing import Any
+from typing import TypedDict
 
 import brian2.numpy_ as np
 import cmap as cmap_lib
@@ -10,7 +13,7 @@ from PIL import ImageSequence
 from neuroseq.utils import cmap_transform_neuron_indices
 
 
-class CellposeImportResult(TypedDict, total=False):
+class CellposeImportResult(TypedDict):
     image_path: Path
     segmentation_array: np.ndarray
     overlay_image: np.ndarray
@@ -211,11 +214,12 @@ class CellPoseImporter:
         if self.segmentation_data is None or self.overlay_image is None:
             raise ValueError("Data must be processed before creating result")
 
-        return {
+        result: CellposeImportResult = {
             "image_path": image_path,
             "segmentation_array": self.segmentation_data,
             "overlay_image": self.overlay_image,
         }
+        return result
 
     def _compute_neuron_colors(self, n_neurons: int) -> np.ndarray:
         if n_neurons <= 0:
