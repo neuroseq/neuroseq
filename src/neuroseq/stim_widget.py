@@ -7,14 +7,8 @@ import pygfx
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+from neuroseq.stim import StimType
 from neuroseq.timeseries_widget import TimeseriesWidget
-from neuroseq.utils import PrettyPrintEnum
-
-
-class StimType(PrettyPrintEnum):
-    Excitation = 1
-    Inhibition = 2
-    External = 3
 
 
 class StimWidget(TimeseriesWidget):

@@ -13,7 +13,10 @@ from qtpy.compat import getsavefilename
 
 from neuroseq.b2_model import B2Model
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
-from neuroseq.stim_widget import StimType
+from neuroseq.stim import DrawStim
+from neuroseq.stim import DrawStimType
+from neuroseq.stim import StimType
+from neuroseq.stim_intensity_dialog import StimIntensityDialog
 from neuroseq.stim_widget import StimWidget
 from neuroseq.timed_array_modifer import TimedArrayModifier
 from neuroseq.utils import InteractMode
@@ -51,7 +54,7 @@ class StimEditor(QtWidgets.QWidget):
         self.mode = InteractMode.DRAW
         self.draw_mode = DrawMode.DRAW
         self.select_mode = SelectMode.SELECT
-        self.draw_stim_intensity = 1.0  # in units of the draw_stim_units
+        self.draw_stim = DrawStim(DrawStimType.Constant, 1.0, 1.0)
         self.draw_stim_length = 1  # in milliseconds
         self.pad_stim_array_secs = 5.0
         self.trim_stim_array_secs = 5.0
@@ -262,17 +265,48 @@ class StimEditor(QtWidgets.QWidget):
                 self.stim_type = StimType.Inhibition
             elif "ext" in stim_name.lower():
                 self.stim_type = StimType.External
-            self.draw_stim_intensity = np.max(
+            self.draw_stim.draw_stim_type = DrawStimType.Constant
+            self.draw_stim.value1 = np.max(
                 self.current_stim_modifier.timed_array.values
             )
-            if self.draw_stim_intensity == 0:
-                self.draw_stim_intensity = 1.0
+            if self.draw_stim.value1 == 0:
+                self.draw_stim.value1 = 1.0
+            self.draw_stim.value2 = self.draw_stim.value1
             self.stim_widget.set_data(
                 self.current_stim_modifier.timed_array, stim_type=self.stim_type
             )
             self.set_mode(InteractMode.DRAW)
             self.set_draw_mode(DrawMode.DRAW)
             self._stim_values_updated()
+
+    def _current_draw_stim_values(
+        self, force_array: bool = False, erase: bool = False
+    ) -> np.ndarray | float:
+        if erase:
+            if force_array:
+                return np.zeros((self.draw_stim_length, 1))
+            else:
+                return 0.0
+        match self.draw_stim.draw_stim_type:
+            case DrawStimType.Constant:
+                if force_array:
+                    return np.full((self.draw_stim_length, 1), self.draw_stim.value1)
+                else:
+                    return self.draw_stim.value1
+            case DrawStimType.Linear:
+                return np.linspace(
+                    self.draw_stim.value1, self.draw_stim.value2, self.draw_stim_length
+                )[:, np.newaxis]
+            case DrawStimType.Logarithmic:
+                return np.geomspace(
+                    self.draw_stim.value1, self.draw_stim.value2, self.draw_stim_length
+                )[:, np.newaxis]
+            case DrawStimType.Random:
+                return np.random.uniform(
+                    min(self.draw_stim.value1, self.draw_stim.value2),
+                    max(self.draw_stim.value1, self.draw_stim.value2),
+                    (self.draw_stim_length, 1),
+                )
 
     def set_mode(self, mode: InteractMode) -> None:
         self.mode = mode
@@ -281,7 +315,7 @@ class StimEditor(QtWidgets.QWidget):
             self.action_draw_mode.setChecked(True)
             self.action_select_mode.setChecked(False)
             self.stim_widget.set_hover_slice(
-                self.draw_stim_intensity * np.ones((self.draw_stim_length, 1))
+                self._current_draw_stim_values(force_array=True)
             )
         elif self.mode == InteractMode.SELECT:
             self.action_draw_mode.setChecked(False)
@@ -300,14 +334,16 @@ class StimEditor(QtWidgets.QWidget):
     ) -> None:
         if self.current_stim_modifier is None:
             return
-        stim_intensity = 0 if erase else self.draw_stim_intensity
-        self.logger.debug(
-            f"Draw stim intensity {stim_intensity} for neurons {neuron_slice} and time {time_slice}"
-        )
         time_slice = slice(time_slice.start, time_slice.stop)
+        if not erase and self.draw_stim.draw_stim_type != DrawStimType.Constant:
+            # for non-constant stim, don't allow draw region to be larger than draw_stim_length
+            time_slice = slice(
+                time_slice.start, time_slice.start + self.draw_stim_length
+            )
         if not self._is_valid_slice(neuron_slice, time_slice):
             return
-        self.current_stim_modifier.do(neuron_slice, time_slice, stim_intensity)
+        values = self._current_draw_stim_values(erase=erase)
+        self.current_stim_modifier.do(neuron_slice, time_slice, values)
         self._stim_values_updated()
 
     def stim_widget_mouse_clicked(
@@ -421,7 +457,7 @@ class StimEditor(QtWidgets.QWidget):
         if self.select_mode == SelectMode.PASTE_INVERTED:
             max_value = np.max(self.copy_values)
             if max_value == 0:
-                max_value = self.draw_stim_intensity
+                max_value = max(self.draw_stim.value1, self.draw_stim.value2)
             new_values = max_value - self.copy_values
         else:
             new_values = self.copy_values
@@ -538,36 +574,12 @@ class StimEditor(QtWidgets.QWidget):
         self.logger.debug(f"Setting draw stim length to {self.draw_stim_length}ms")
 
     def choose_stim_intensity(self) -> None:
-        new_stim_intensity, ok = QtWidgets.QInputDialog.getText(
-            self,
-            "Stimulus intensity",
-            f"Intensity of stimulus in {self.stim_widget.units}",
-            QtWidgets.QLineEdit.EchoMode.Normal,
-            f"{self.draw_stim_intensity}",
+        dialog = StimIntensityDialog(
+            self.draw_stim, self.stim_widget.units, self.stim_type, self
         )
-        if not ok:
-            return
-        try:
-            new_stim_intensity_as_float = float(new_stim_intensity)
-            if self.stim_type != StimType.External and new_stim_intensity_as_float < 0:
-                QtWidgets.QMessageBox.critical(
-                    self,
-                    "Invalid input",
-                    "Stimulus intensity for this stimulation type cannot be negative.",
-                )
-                return
-            self.draw_stim_intensity = new_stim_intensity_as_float
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            self.draw_stim = dialog.draw_stim
             self.set_mode(self.mode)  # Reset mode to update hover slice
-        except ValueError:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Invalid input",
-                f"Could not parse '{new_stim_intensity}' as a number.",
-            )
-            return
-        self.logger.debug(
-            f"Setting draw stim intensity to {self.draw_stim_intensity} {self.stim_widget.units}"
-        )
 
     def _is_valid_slice(self, neuron_slice: slice, time_slice: slice) -> bool:
         return (
