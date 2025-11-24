@@ -11,8 +11,12 @@ from neuroseq.utils import example_models_path
     "filename",
     [
         "default_model",
+        "example_non-HH_model",
         "example_non-linear",
         "HH_model",
+        "HH_model_with_plasticity",
+        "HH_model_with_synapses",
+        "HH_neurons_EI_model",
         "LIF_model",
         "LIF_model_without_stim",
     ],
