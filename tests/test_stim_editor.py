@@ -11,12 +11,25 @@ from pytest import approx
 from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
+import neuroseq
 from neuroseq.b2_model import B2Model
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.stim import DrawStim
+from neuroseq.stim import DrawStimType
 from neuroseq.stim_editor import DrawMode
 from neuroseq.stim_editor import SelectMode
 from neuroseq.stim_editor import StimEditor
 from neuroseq.utils import InteractMode
+
+
+class MockStimIntensityDialog:
+    draw_stim = DrawStim(DrawStimType.Constant, 1.0, 1.0)
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def exec(self) -> bool:
+        return True
 
 
 def test_stim_editor_no_data(qtbot: QtBot) -> None:
@@ -161,6 +174,11 @@ def test_stim_editor_actions(
     selection = np.random.randint(3, size=(5, 2))
     selection_inverted = 2 - selection
     timed_array.values[2:7, 1:3] = selection
+    monkeypatch.setattr(
+        neuroseq.stim_editor,
+        "StimIntensityDialog",
+        MockStimIntensityDialog,
+    )
     model = B2Model()
     model.parameters = {"a": timed_array, "irrelevant": 4}
     cmb_stim = QtWidgets.QComboBox()
@@ -303,30 +321,16 @@ def test_stim_editor_actions(
     )
     assert len(error_messages) == 3
     assert "too many neurons" in error_messages[-1]
-    # default stim drawing intensity is the maximum value of the existing stimuli
-    assert stim_editor.draw_stim_intensity == pytest.approx(
+    # default stim drawing is constant intensity with the maximum value of the existing stimuli
+    assert stim_editor.draw_stim.draw_stim_type == DrawStimType.Constant
+    assert stim_editor.draw_stim.value1 == pytest.approx(
         stim_editor.current_stim_modifier.timed_array.values.max()
     )
-    # try to set a negative stim drawing intensity
-    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("-1", True))
-    stim_editor.choose_stim_intensity()
-    assert len(error_messages) == 4
-    assert "negative" in error_messages[-1]
-    # try to set an invalid float stim drawing intensity
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog, "getText", lambda *args: ("notanumber", True)
-    )
-    stim_editor.choose_stim_intensity()
-    assert len(error_messages) == 5
-    assert "could not parse" in error_messages[-1].lower()
     # set a valid value for stim drawing intensity
     new_stim_value = 1.85
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog, "getText", lambda *args: (f"{new_stim_value}", True)
-    )
+    MockStimIntensityDialog.draw_stim.value1 = new_stim_value
     stim_editor.choose_stim_intensity()
-    assert len(error_messages) == 5
-    assert stim_editor.draw_stim_intensity == pytest.approx(new_stim_value)
+    assert stim_editor.draw_stim.value1 == pytest.approx(new_stim_value)
     # 2ms stim is drawn at mouse click location if draw mode is active with mode DRAW
     stim_editor.draw_stim_length = 2
     stim_editor.set_mode(InteractMode.DRAW)
