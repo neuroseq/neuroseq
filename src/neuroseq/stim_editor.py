@@ -21,6 +21,7 @@ from neuroseq.stim_widget import StimWidget
 from neuroseq.timed_array_modifer import TimedArrayModifier
 from neuroseq.utils import InteractMode
 from neuroseq.utils import add_action
+from neuroseq.utils import get_stim_type
 from neuroseq.utils import timed_array_with_new_data
 
 
@@ -260,11 +261,7 @@ class StimEditor(QtWidgets.QWidget):
             and self.current_stim_modifier != self.stims_dict[stim_name]
         ):
             self.current_stim_modifier = self.stims_dict[stim_name]
-            self.stim_type = StimType.Excitation
-            if "inh" in stim_name.lower():
-                self.stim_type = StimType.Inhibition
-            elif "ext" in stim_name.lower():
-                self.stim_type = StimType.External
+            self.stim_type = get_stim_type(stim_name)
             self.draw_stim.draw_stim_type = DrawStimType.Constant
             self.draw_stim.value1 = np.max(
                 self.current_stim_modifier.timed_array.values
@@ -275,6 +272,11 @@ class StimEditor(QtWidgets.QWidget):
             self.stim_widget.set_data(
                 self.current_stim_modifier.timed_array, stim_type=self.stim_type
             )
+            for name, modifier in self.stims_dict.items():
+                if modifier is not self.current_stim_modifier:
+                    self.stim_widget.set_background_data(
+                        modifier.timed_array, stim_type=get_stim_type(name)
+                    )
             self.set_mode(InteractMode.DRAW)
             self.set_draw_mode(DrawMode.DRAW)
             self._stim_values_updated()
@@ -573,6 +575,11 @@ class StimEditor(QtWidgets.QWidget):
             return
         self.logger.debug(f"Setting draw stim length to {self.draw_stim_length}ms")
 
+    def toggle_show_all_stim_arrays(self) -> None:
+        self.stim_widget.set_background_data_visible(
+            not self.stim_widget.show_background_graphics
+        )
+
     def choose_stim_intensity(self) -> None:
         dialog = StimIntensityDialog(
             self.draw_stim, self.stim_widget.units, self.stim_type, self
@@ -650,6 +657,16 @@ class StimEditor(QtWidgets.QWidget):
             self,
             shortcut="Ctrl+Shift+-",
             icon=qta.icon("mdi6.timeline-minus"),
+        )
+        add_action(
+            "Show all stim arrays",
+            self.toggle_show_all_stim_arrays,
+            menu,
+            toolbar,
+            self,
+            icon=qta.icon("mdi6.view-list"),
+            checkable=True,
+            is_checked=True,
         )
         self.toolbar.addSeparator()
         self.actions_draw = []

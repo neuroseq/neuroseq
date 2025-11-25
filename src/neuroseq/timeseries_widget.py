@@ -61,6 +61,8 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.graphic: fpl.ImageGraphic | fpl.LineStack | fpl.ScatterGraphic | None = (
             None
         )
+        self.background_graphics: list[fpl.Graphic] = []
+        self.show_background_graphics = True
         self.mode = InteractMode.SELECT
         self.roi = RegionOfInterest(fill_color=(0.5, 0.5, 0.5, 0.2))
         self.hover_slice_graphic: fpl.Graphic | None = None
@@ -197,6 +199,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.subplot.axes.x.ticks = {}
         self.subplot.toolbar = False
         self.hover_slice_graphic = None
+        self.background_graphics = []
         self.data = None
         self.n_neurons = 0
         self.n_timestamps = 0
