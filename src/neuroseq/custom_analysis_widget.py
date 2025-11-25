@@ -11,7 +11,7 @@ from qtpy.QtCore import Qt
 from neuroseq.experiment import SpikeData
 from neuroseq.experiment import SynapseData
 from neuroseq.experiment import TraceData
-from neuroseq.utils import PrettyPrintEnum
+from neuroseq.pretty_print_enum import PrettyPrintEnum
 
 
 class CustomAnalysisType(PrettyPrintEnum):

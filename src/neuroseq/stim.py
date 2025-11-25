@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from neuroseq.utils import PrettyPrintEnum
+from neuroseq.pretty_print_enum import PrettyPrintEnum
 
 
 class StimType(PrettyPrintEnum):

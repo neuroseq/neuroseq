@@ -13,6 +13,7 @@ from typing import Any
 import brian2 as b2
 import brian2.numpy_ as np
 import brian2.units.allunits as b2_units
+from cmap import Colormap
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
@@ -21,6 +22,7 @@ import neuroseq
 from neuroseq.experiment import SpikeData
 from neuroseq.experiment import SynapseData
 from neuroseq.experiment import TraceData
+from neuroseq.stim import StimType
 
 example_models_path = pathlib.Path(str(resources.files(neuroseq))) / "example_models"
 
@@ -30,11 +32,6 @@ save_store_name = "___current-simulation-state-at-save-time___"
 class InteractMode(Enum):
     DRAW = 1
     SELECT = 2
-
-
-class PrettyPrintEnum(Enum):
-    def __str__(self):
-        return self.name
 
 
 def timed_array_with_new_data(
@@ -362,3 +359,31 @@ def getSimulationTime(parent: QtWidgets.QWidget | None = None) -> float | None:
         )
         return None
     return simulation_time
+
+
+def get_stim_type(stim_name: str) -> StimType:
+    """Determine the stimulus type based on the stimulus name - to be replaced once we have a way of storing this info properly."""
+    stim_type = StimType.Excitation
+    if "inh" in stim_name.lower():
+        stim_type = StimType.Inhibition
+    elif "ext" in stim_name.lower():
+        stim_type = StimType.External
+    return stim_type
+
+
+def get_cmap(stim_type: StimType, alpha: float = 1.0) -> Colormap:
+    match stim_type:
+        case StimType.Excitation:
+            return Colormap([(1.0, 1.0, 1.0, 0.0), (1.0, 0.0, 1.0, alpha)])
+        case StimType.Inhibition:
+            return Colormap([(1.0, 1.0, 1.0, 0.0), (0.1255, 0.6784, 0.9725, alpha)])
+        case StimType.External:
+            return Colormap(
+                [
+                    (0.251, 0.0, 0.2941, alpha),
+                    (1.0, 1.0, 1.0, 0.0),
+                    (0.0, 0.2667, 0.1059, alpha),
+                ]
+            )
+        case _:
+            return Colormap([(1.0, 1.0, 1.0, 0.0), (0.0, 0.0, 0.0, alpha)])

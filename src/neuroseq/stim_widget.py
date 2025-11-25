@@ -9,6 +9,7 @@ from qtpy import QtWidgets
 
 from neuroseq.stim import StimType
 from neuroseq.timeseries_widget import TimeseriesWidget
+from neuroseq.utils import get_cmap
 
 
 class StimWidget(TimeseriesWidget):
@@ -33,33 +34,26 @@ class StimWidget(TimeseriesWidget):
         self.hover_slice_graphic: fpl.Graphic | None = None
         self.vmin = 0.0
         self.vmax = 1.0
-        self.cmap = "chrisluts:I_Magenta"
         self.stim_type = StimType.Excitation
 
     def set_data(
         self, stims: b2.TimedArray | None = None, stim_type=StimType.Excitation
     ) -> None:
-        self.subplot.clear()
+        self.clear_data()
         if stims is None:
             return
         self.data_values = stims.values
-        self.vmin = 0
-        self.vmax = np.max(np.abs(stims.values))
         self.stim_type = stim_type
-        match self.stim_type:
-            case StimType.Excitation:
-                self.cmap = "chrisluts:I_Magenta"
-            case StimType.Inhibition:
-                self.cmap = "chrisluts:I_Blue"
-            case StimType.External:
-                self.vmin = -self.vmax
-                self.cmap = "colorbrewer:PRGn"
+        self.vmin = 0.0
+        self.vmax = np.max(np.abs(stims.values))
+        if self.stim_type == StimType.External:
+            self.vmin = -self.vmax
         self.units = b2.get_unit(stims.dim).__str__()
         self.graphic = self.subplot.add_image(
             stims.values.T,
             vmin=self.vmin,
             vmax=self.vmax,
-            cmap=self.cmap,
+            cmap=get_cmap(self.stim_type),
             offset=(0.5, 0, 0),
         )
         # todo: properly support dt_ms != 1 (currently we share the camera with other widgets, but add_image has fixed integer x-axis spacing, so the bounds of the shared camera is only correct if dt_ms=1)
@@ -67,6 +61,30 @@ class StimWidget(TimeseriesWidget):
         self.n_neurons = stims.values.shape[1]
         self.n_timestamps = stims.values.shape[0]
         self.post_set_data()
+
+    def set_background_data(
+        self, stims: b2.TimedArray | None = None, stim_type=StimType.Excitation
+    ) -> None:
+        if stims is None:
+            return
+        vmax = np.max(np.abs(stims.values))
+        vmin = -vmax if stim_type == StimType.External else 0
+        cmap = get_cmap(stim_type, alpha=0.25)
+        image_graphic = self.subplot.add_image(
+            stims.values.T, vmin=vmin, vmax=vmax, cmap=cmap, offset=(0.5, 0, 0)
+        )
+        # set the graphic material texture colormap values directly, as add_image ignores any alpha values
+        image_graphic._material.map.texture.data[:] = cmap(
+            np.linspace(0, 255, 256, dtype=int)
+        ).astype(np.float32)
+        image_graphic._material.map.texture.update_range((0, 0, 0), size=(256, 1, 1))
+        image_graphic.visible = self.show_background_graphics
+        self.background_graphics.append(image_graphic)
+
+    def set_background_data_visible(self, visible: bool) -> None:
+        self.show_background_graphics = visible
+        for graphic in self.background_graphics:
+            graphic.visible = self.show_background_graphics
 
     def autoscale_colormap(self) -> None:
         """Autoscale the colormap based on the current data."""
