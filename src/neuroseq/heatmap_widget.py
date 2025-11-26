@@ -122,6 +122,10 @@ class HeatmapWidget(QtWidgets.QWidget):
         """
         self.image_widget.current_index = {"t": idx}
 
+    def get_heatmap_index(self) -> int:
+        """Get the current index of the heatmap."""
+        return self.image_widget.current_index["t"]
+
     def update_heatmap(self) -> None:
         """Update the heatmap to the next frame if playing."""
         if not self.playing:
