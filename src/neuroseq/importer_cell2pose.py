@@ -2,21 +2,67 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from dataclasses import dataclass
 from typing import Any
-from typing import TypedDict
 
 import brian2.numpy_ as np
-import cmap as cmap_lib
+import pygfx as gfx
 from PIL import Image
 from PIL import ImageSequence
 
+from neuroseq.experiment import SpikeData
+from neuroseq.experiment import TraceData
 from neuroseq.utils import cmap_transform_neuron_indices
 
 
-class CellposeImportResult(TypedDict):
+@dataclass
+class CellposeImportResult:
     image_path: Path
     segmentation_array: np.ndarray
     overlay_image: np.ndarray
+    trace_data: TraceData | None
+    spike_data: SpikeData | None
+
+
+def prepare_cellpose_traces(
+    traces: np.ndarray,
+    *,
+    name: str,
+    dt: float,
+    units: str,
+) -> TraceData:
+    if traces.ndim != 2:
+        raise ValueError("Cellpose traces must be a 2D array of shape (neurons, timepoints)")
+    if traces.shape[0] == 0 or traces.shape[1] == 0:
+        raise ValueError("Cellpose traces must contain at least one neuron and one timepoint")
+    if dt <= 0:
+        raise ValueError("Cellpose trace dt must be positive")
+
+    return TraceData(name, traces.astype(np.float32), units, dt)
+
+
+def prepare_cellpose_spikes(
+    spike_indices: np.ndarray,
+    spike_times: np.ndarray,
+    *,
+    name: str,
+) -> SpikeData:
+    if spike_indices.ndim != 1 or spike_times.ndim != 1:
+        raise ValueError("Spike indices and times must be 1D arrays")
+    if spike_indices.shape[0] != spike_times.shape[0]:
+        raise ValueError("Spike indices and times must have matching lengths")
+    if spike_indices.shape[0] == 0:
+        raise ValueError("Spike data must contain at least one event")
+    if np.any(spike_indices < 0):
+        raise ValueError("Spike indices must be non-negative")
+    if np.any(spike_times < 0):
+        raise ValueError("Spike times must be non-negative")
+
+    return SpikeData(
+        name,
+        spike_indices.astype(np.int32),
+        spike_times.astype(np.float32),
+    )
 
 
 class CellPoseImporter:
@@ -27,6 +73,8 @@ class CellPoseImporter:
         self.image_data: np.ndarray | None = None
         self.segmentation_data: np.ndarray | None = None
         self.overlay_image: np.ndarray | None = None
+        self.trace_data: TraceData | None = None
+        self.spike_data: SpikeData | None = None
         self._neuron_ids: np.ndarray | None = None
         self._neuron_colors: np.ndarray | None = None
 
@@ -129,6 +177,14 @@ class CellPoseImporter:
             self.logger.exception("Error loading segmentation file")
             raise ValueError(f"Could not load {filename}: {exc}") from exc
 
+    def set_trace_data(self, trace_data: TraceData) -> None:
+        self._validate_trace_data(trace_data)
+        self.trace_data = trace_data
+
+    def set_spike_data(self, spike_data: SpikeData) -> None:
+        self._validate_spike_data(spike_data)
+        self.spike_data = spike_data
+
     def validate_dimensions(self) -> None:
         """Check if image and segmentation dimensions match."""
         if self.image_data is None or self.segmentation_data is None:
@@ -152,8 +208,9 @@ class CellPoseImporter:
         neuron_ids = unique_ids[unique_ids > 0]
 
         if neuron_ids.size > 0:
+            n_neurons = self._expected_neuron_count(neuron_ids.size)
             self._neuron_ids = neuron_ids
-            self._neuron_colors = self._compute_neuron_colors(neuron_ids.size)
+            self._neuron_colors = self._compute_neuron_colors(n_neurons)
 
             overlay = np.zeros((*self.segmentation_data.shape, 3), dtype=np.uint8)
 
@@ -191,6 +248,11 @@ class CellPoseImporter:
                 unique_ids[unique_ids > 0].min(),
                 unique_ids[unique_ids > 0].max(),
             )
+        if self.trace_data is not None:
+            info["trace_neurons"] = self.trace_data.traces.shape[0]
+            info["trace_timepoints"] = self.trace_data.traces.shape[1]
+        if self.spike_data is not None:
+            info["spike_events"] = self.spike_data.spike_indices.shape[0]
 
         return info
 
@@ -214,12 +276,13 @@ class CellPoseImporter:
         if self.segmentation_data is None or self.overlay_image is None:
             raise ValueError("Data must be processed before creating result")
 
-        result: CellposeImportResult = {
-            "image_path": image_path,
-            "segmentation_array": self.segmentation_data,
-            "overlay_image": self.overlay_image,
-        }
-        return result
+        return CellposeImportResult(
+            image_path=image_path,
+            segmentation_array=self.segmentation_data,
+            overlay_image=self.overlay_image,
+            trace_data=self.trace_data,
+            spike_data=self.spike_data,
+        )
 
     def _compute_neuron_colors(self, n_neurons: int) -> np.ndarray:
         if n_neurons <= 0:
@@ -238,6 +301,42 @@ class CellPoseImporter:
         return (colors * 255.0).astype(np.uint8)
 
     @staticmethod
+    def _validate_trace_data(trace_data: TraceData) -> None:
+        if trace_data.traces.ndim != 2:
+            raise ValueError("TraceData.traces must be 2D")
+        if trace_data.traces.shape[0] == 0 or trace_data.traces.shape[1] == 0:
+            raise ValueError("TraceData.traces must contain at least one neuron and one timepoint")
+        if trace_data.dt <= 0:
+            raise ValueError("TraceData.dt must be positive")
+
+    @staticmethod
+    def _validate_spike_data(spike_data: SpikeData) -> None:
+        if spike_data.spike_indices.ndim != 1 or spike_data.spike_times.ndim != 1:
+            raise ValueError("SpikeData arrays must be 1D")
+        if spike_data.spike_indices.shape[0] != spike_data.spike_times.shape[0]:
+            raise ValueError("SpikeData indices and times must have matching lengths")
+        if spike_data.spike_indices.shape[0] == 0:
+            raise ValueError("SpikeData must contain at least one spike")
+        if np.any(spike_data.spike_indices < 0):
+            raise ValueError("Spike indices must be non-negative")
+        if np.any(spike_data.spike_times < 0):
+            raise ValueError("Spike times must be non-negative")
+
+    def _expected_neuron_count(self, segmentation_count: int) -> int:
+        expected_counts = [segmentation_count]
+        if self.trace_data is not None:
+            expected_counts.append(self.trace_data.traces.shape[0])
+        if self.spike_data is not None and self.spike_data.spike_indices.size > 0:
+            expected_counts.append(int(np.max(self.spike_data.spike_indices) + 1))
+
+        unique_counts = set(expected_counts)
+        if len(unique_counts) > 1:
+            raise ValueError(
+                f"Neuron counts differ between segmentation and attached data: {sorted(unique_counts)}"
+            )
+        return expected_counts[0]
+
+    @staticmethod
     def _normalize_transform(values: np.ndarray) -> np.ndarray:
         if values.size == 0:
             return values
@@ -251,5 +350,8 @@ class CellPoseImporter:
     @staticmethod
     def _get_jet_lut() -> np.ndarray:
         if not hasattr(CellPoseImporter, "_JET_LUT"):
-            CellPoseImporter._JET_LUT = cmap_lib.Colormap("jet").lut(256)
+            texture_data = gfx.cm.jet.texture.data
+            if texture_data is None:
+                raise RuntimeError("Jet colormap texture data is unavailable")
+            CellPoseImporter._JET_LUT = np.asarray(texture_data, dtype=np.float32)
         return CellPoseImporter._JET_LUT

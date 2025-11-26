@@ -19,6 +19,8 @@ from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.custom_analysis_widget import CustomAnalysisWindow
 from neuroseq.data_widget import DataWidget
+from neuroseq.cellpose_import_dialog import CellposeImportDialog
+from neuroseq.importer_cell2pose import CellposeImportResult
 from neuroseq.experiment import SpikeData
 from neuroseq.experiment import SynapseData
 from neuroseq.experiment import TraceData
@@ -127,6 +129,7 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_synapse.currentTextChanged.connect(self.set_synapse)
         self.cmb_spike.currentTextChanged.connect(self.set_spike)
         self.cmb_data.currentTextChanged.connect(self.set_data)
+        self.last_cellpose_import: CellposeImportResult | None = None
         if filename is None:
             filename = example_models_path / "default_model.nseq"
         self.load_model(str(filename))
@@ -568,6 +571,16 @@ class Gui(QtWidgets.QMainWindow):
             self.update_model(self.model)
             self._select_experiment_data(dialog.experiment_name)
 
+    def btn_import_cellpose_data_clicked(self) -> None:
+        dialog = CellposeImportDialog(self)
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            self.last_cellpose_import = dialog.get_imported_data()
+            QtWidgets.QMessageBox.information(
+                self,
+                "Cellpose import",
+                "Cellpose segmentation loaded. Verify colors match traces in the preview and legend.",
+            )
+
     def connect_external_simulation_function_with_brian2(self) -> None:
         self._load_external_simulation_function(
             "./external_simulation_example/run_brian2_externally.py"
@@ -749,6 +762,14 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             shortcut="Ctrl+Shift+I",
             icon=qta.icon("mdi6.import"),
+        )
+        add_action(
+            "Import Cellpose &Segmentation",
+            self.btn_import_cellpose_data_clicked,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon=qta.icon("mdi6.image-edit-outline"),
         )
         menu.addSeparator()
         add_action(
