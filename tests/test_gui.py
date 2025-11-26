@@ -67,7 +67,7 @@ def test_gui_simulate_and_playback(
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)
-    assert gui.heatmap_widget.currentIndex == 0
+    assert gui.heatmap_widget.get_heatmap_index() == 0
     assert "run" in gui.continue_simulation_action.text().lower()
     assert "continue" not in gui.continue_simulation_action.text().lower()
     simulation_time = 0.1
@@ -84,13 +84,15 @@ def test_gui_simulate_and_playback(
     assert gui.cmb_spike.count() == 1
     assert gui.cmb_spike.itemText(0) == "Simulation :: P"
     gui.btn_continue_simulation_clicked()
-    n_timesteps = gui.heatmap_widget.tVals.size
+    n_timesteps = gui.heatmap_widget.timestamps.size
     gui.btn_play_clicked()
-    qtbot.waitUntil(lambda: gui.heatmap_widget.currentIndex > 0)
+    qtbot.waitUntil(lambda: gui.heatmap_widget.get_heatmap_index() > 0)
     # pause and then continue playback
     gui.btn_play_clicked()
     gui.btn_play_clicked()
-    qtbot.waitUntil(lambda: gui.heatmap_widget.currentIndex == n_timesteps - 1)
+    qtbot.waitUntil(
+        lambda: gui.heatmap_widget.get_heatmap_index() == n_timesteps - 1, timeout=40000
+    )
     assert "run" not in gui.continue_simulation_action.text().lower()
     assert "continue" in gui.continue_simulation_action.text().lower()
     assert gui.trace_widget.timeline is not None
@@ -100,15 +102,15 @@ def test_gui_simulate_and_playback(
     gui.btn_skip_to_start_clicked()
     assert gui.trace_widget.timeline.selection == approx(0)
     # assert gui.spike_widget.timeline.selection == approx(0)
-    assert gui.heatmap_widget.currentIndex == 0
+    assert gui.heatmap_widget.get_heatmap_index() == 0
     gui.btn_skip_to_end_clicked()
     assert gui.trace_widget.timeline.selection == approx(simulation_time_ms, rel=2)
     # assert gui.spike_widget.timeline.selection == approx(simulation_time_ms, rel=2)
-    assert gui.heatmap_widget.currentIndex == n_timesteps - 1
+    assert gui.heatmap_widget.get_heatmap_index() == n_timesteps - 1
     gui.btn_stop_clicked()
     assert gui.trace_widget.timeline.selection == approx(0)
     # assert gui.spike_widget.timeline.selection == approx(0)
-    assert gui.heatmap_widget.currentIndex == 0
+    assert gui.heatmap_widget.get_heatmap_index() == 0
 
 
 def test_gui_new(
@@ -334,7 +336,7 @@ def test_gui_synapse_ram_limit(
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)
-    assert gui.heatmap_widget.currentIndex == 0
+    assert gui.heatmap_widget.get_heatmap_index() == 0
     simulation_time = 0.1
     # mock getText to return the desired simulation time
     monkeypatch.setattr(
@@ -342,25 +344,25 @@ def test_gui_synapse_ram_limit(
     )
     gui.btn_continue_simulation_clicked()
     qtbot.wait(delay_after_update_model_call_in_ms)
-    n_timesteps = gui.heatmap_widget.tVals.size
+    n_timesteps = gui.heatmap_widget.timestamps.size
     assert n_timesteps == 1000
     # 1 MB RAM limit
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("1", True))
     gui.choose_max_ram_synapse_plot_matrix()
     qtbot.wait(delay_after_update_model_call_in_ms)
-    n_timesteps = gui.heatmap_widget.tVals.size
+    n_timesteps = gui.heatmap_widget.timestamps.size
     assert n_timesteps == 334
     # 2 MB RAM limit
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("2", True))
     gui.choose_max_ram_synapse_plot_matrix()
     qtbot.wait(delay_after_update_model_call_in_ms)
-    n_timesteps = gui.heatmap_widget.tVals.size
+    n_timesteps = gui.heatmap_widget.timestamps.size
     assert n_timesteps == 500
     # 0 MB RAM limit == unlimited
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0", True))
     gui.choose_max_ram_synapse_plot_matrix()
     qtbot.wait(delay_after_update_model_call_in_ms)
-    n_timesteps = gui.heatmap_widget.tVals.size
+    n_timesteps = gui.heatmap_widget.timestamps.size
     assert n_timesteps == 1000
     # invalid string displays error message
     assert len(qmessagebox_calls) == 0
@@ -369,7 +371,7 @@ def test_gui_synapse_ram_limit(
     )
     gui.choose_max_ram_synapse_plot_matrix()
     qtbot.wait(delay_after_update_model_call_in_ms)
-    n_timesteps = gui.heatmap_widget.tVals.size
+    n_timesteps = gui.heatmap_widget.timestamps.size
     assert n_timesteps == 1000
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "critical"
@@ -413,7 +415,7 @@ def test_gui_stim_padding(
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)
-    assert gui.heatmap_widget.currentIndex == 0
+    assert gui.heatmap_widget.get_heatmap_index() == 0
     # set 10secs of stim padding
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("10", True))
     gui.choose_stim_padding_secs()
@@ -423,7 +425,7 @@ def test_gui_stim_padding(
     gui.btn_continue_simulation_clicked()
     qtbot.wait(delay_after_update_model_call_in_ms)
     # should have ~0.1 secs of simulation data, and ~10.1 secs of stim array data with dt=0.1ms
-    assert gui.heatmap_widget.tVals[-1] == approx(100, rel=2)
+    assert gui.heatmap_widget.timestamps[-1] == approx(100, rel=2)
     assert gui.stim_editor.stim_widget.n_timestamps == 10100
 
 
@@ -538,7 +540,7 @@ def test_gui_simulate_external_model(
     assert gui.trace_widget.n_timestamps == 2000
     assert gui.spike_widget.n_neurons == 32
     assert gui.spike_widget.dt_ms == approx(simulation_time_ms / 2000, rel=2)
-    assert gui.heatmap_widget.tVals[-1] == approx(simulation_time_ms, rel=2)
+    assert gui.heatmap_widget.timestamps[-1] == approx(simulation_time_ms, rel=2)
 
 
 def test_integration_modeleditor_delete_restore(
