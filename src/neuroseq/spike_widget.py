@@ -4,7 +4,7 @@ import brian2.numpy_ as np
 import pygfx
 from qtpy import QtWidgets
 
-from neuroseq.experiment import SpikeData
+from neuroseq.data import SpikeData
 from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.utils import cmap_transform_neuron_indices
 

@@ -9,8 +9,10 @@ import brian2.numpy_ as np
 import pytest
 from qtpy import QtWidgets
 
-from neuroseq import b2_model
-from neuroseq.utils import example_models_path
+from neuroseq.b2_model import B2Model
+from neuroseq.model import Model
+from neuroseq.stim import StimArray
+from neuroseq.stim import StimType
 from neuroseq.utils import init_brian2_logging
 
 b2.prefs.codegen.target = "numpy"
@@ -128,27 +130,22 @@ def suite2p_import_data_dir(
 
 
 @pytest.fixture(scope="session")
-def default_model_path() -> pathlib.Path:
-    return example_models_path / "default_model.nseq"
-
-
-@pytest.fixture(scope="session")
-def reference_parameters() -> dict[str, Any]:
+def test_stim_arrays() -> dict[str, StimArray]:
+    tfinal = 2000 * b2.ms
     data = np.array(
         [1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1], dtype="int"
     )
     data_inv = np.array(~np.array(data, dtype="bool"), dtype="int")
-    tfinal = 2000 * b2.ms
-
     stim = np.zeros((int(tfinal / b2.ms), 30), dtype="float")
     stim[:, :] = 0
     stim_constant = 300
-    tfinal = 2000 * b2.ms
-    stimulus = b2.TimedArray(stim * b2.nS, dt=1 * b2.ms)
+    stimulus = StimArray("stimulus", StimType.Excitation, stim, "siemens", 0.001)
     stim_inh = np.zeros(int(tfinal / b2.ms), dtype="float")
     stim_inh[0:500] = 0
     stim_inh[500:-1] = 0
-    stimulus_inh = b2.TimedArray(stim_inh * b2.nS, dt=1 * b2.ms)
+    stimulus_inh = StimArray(
+        "stimulus_inh", StimType.Inhibition, stim_inh, "siemens", 0.001
+    )
 
     for length in range(3):
         for k in range(20):
@@ -160,6 +157,16 @@ def reference_parameters() -> dict[str, Any]:
             )
         stim[200 * length + 119 : 200 * length + 120, 0] = stim_constant
 
+    return {
+        "stimulus": stimulus,
+        "stimulus_inh": stimulus_inh,
+    }
+
+
+@pytest.fixture(scope="session")
+def reference_parameters() -> dict[str, Any]:
+    tfinal = 2000 * b2.ms
+
     area = 20000 * b2.umetre**2
 
     taupre = 20 * b2.ms
@@ -170,8 +177,6 @@ def reference_parameters() -> dict[str, Any]:
         "n": 30,
         "tfinal": tfinal,
         "dt": 0.1 * b2.ms,
-        "stimulus": stimulus,
-        "stimulus_inh": stimulus_inh,
         "area": area,
         "Cm": (1 * b2.ufarad * b2.cm**-2) * area,
         "gl": (5e-5 * b2.siemens * b2.cm**-2) * area,
@@ -237,52 +242,55 @@ def reference_parameters() -> dict[str, Any]:
 
 
 @pytest.fixture()
-def mfx() -> b2_model.B2Model:
-    return b2_model.B2Model()
+def mfx() -> B2Model:
+    return B2Model()
 
 
 @pytest.fixture
-def mfx_ornstein() -> b2_model.B2Model:
+def mfx_ornstein() -> Model:
     eqs = """
         tau : second
         sigma : 1
         dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
     """
+    b2_model = B2Model(seed=4321)
+    b2_model.define_neuronnumber("neurongroup", 5)
+    b2_model.define_dt("neurongroup", 0.5 * b2.ms)
+    b2_model.define_solver_method("neurongroup", "euler")
+    b2_model.define_equation("neurongroup", eqs)
+    b2_model._assemble_neurongroup(name="neurongroup")
 
-    model = b2_model.B2Model(seed=4321)
-    model.define_neuronnumber("neurongroup", 5)
-    model.define_dt("neurongroup", 0.5 * b2.ms)
-    model.define_solver_method("neurongroup", "euler")
-    model.define_equation("neurongroup", eqs)
-    model._assemble_neurongroup(name="neurongroup")
-
-    model.define_monitor_source("M", "neurongroup")
-    model.define_monitor_type("M", "StateMonitor")
-    model.define_monitor_variable("M", "y")
-    model._assemble_monitor("M")
+    b2_model.define_monitor_source("M", "neurongroup")
+    b2_model.define_monitor_type("M", "StateMonitor")
+    b2_model.define_monitor_variable("M", "y")
+    b2_model._assemble_monitor("M")
 
     # initial conditions
-    model.define_init(
+    b2_model.define_init(
         "neurongroup", "tau", np.array([1, 0.8, 0.6, 0.3, 0.1]) * b2.second
     )
-    model.define_init("neurongroup", "y", 1)
-    model.define_init("neurongroup", "sigma", np.array([0.1, 0.31622, 0.4, 0.2, 0.88]))
+    b2_model.define_init("neurongroup", "y", 1)
+    b2_model.define_init(
+        "neurongroup", "sigma", np.array([0.1, 0.31622, 0.4, 0.2, 0.88])
+    )
 
-    for n in model.initials:
-        model._assemble_initial_conditions(n)
+    for n in b2_model.initials:
+        b2_model._assemble_initial_conditions(n)
 
-    model.must_be_rebuilt = False
+    b2_model.must_be_rebuilt = False
 
+    model = Model()
+    model.b2_model = b2_model
     return model
 
 
 @pytest.fixture
-def mfx_nmda() -> b2_model.B2Model:
+def b2_model_nmda() -> B2Model:
     a = 1 / (10 * b2.ms)
     b = 1 / (10 * b2.ms)
     c = 1 / (10 * b2.ms)
 
-    model = b2_model.B2Model(seed=4321)
+    model = B2Model(seed=4321)
 
     model.define_parameter("a", a)
     model.define_parameter("b", b)
@@ -342,9 +350,16 @@ def mfx_nmda() -> b2_model.B2Model:
 
 
 @pytest.fixture
+def model_nmda(b2_model_nmda: B2Model) -> Model:
+    model = Model()
+    model.b2_model = b2_model_nmda
+    return model
+
+
+@pytest.fixture
 def mfx_parameterized(
-    mfx: b2_model.B2Model, reference_parameters: dict[str, Any]
-) -> tuple[b2_model.B2Model, dict[str, Any]]:
+    mfx: B2Model, reference_parameters: dict[str, Any]
+) -> tuple[B2Model, dict[str, Any]]:
     b2.seed(reference_parameters["seed"])
     n = 30
     threshold = "v>-20*mV"
@@ -364,8 +379,8 @@ def mfx_parameterized(
 
 @pytest.fixture()
 def mfx_with_synapse(
-    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
-) -> tuple[b2_model.B2Model, dict[str, Any]]:
+    mfx_parameterized: tuple[B2Model, dict[str, Any]],
+) -> tuple[B2Model, dict[str, Any]]:
     taupre = 20 * b2.ms
     taupost = taupre
     gmax = 60 * b2.nS

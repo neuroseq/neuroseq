@@ -5,8 +5,8 @@ from typing import Any
 import brian2.numpy_ as np
 import numpy.typing as npt
 
-from neuroseq.experiment import SpikeData
-from neuroseq.experiment import TraceData
+from neuroseq.data import SpikeData
+from neuroseq.data import TraceData
 
 
 def _normalize_array_per_neuron(

@@ -3,11 +3,9 @@ from __future__ import annotations
 import abc
 import functools
 import logging
-import pathlib
 import re
 from collections.abc import Callable
 from enum import Enum
-from importlib import resources
 from typing import Any
 
 import brian2 as b2
@@ -18,13 +16,10 @@ from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
-import neuroseq
-from neuroseq.experiment import SpikeData
-from neuroseq.experiment import SynapseData
-from neuroseq.experiment import TraceData
+from neuroseq.data import SpikeData
+from neuroseq.data import SynapseData
+from neuroseq.data import TraceData
 from neuroseq.stim import StimType
-
-example_models_path = pathlib.Path(str(resources.files(neuroseq))) / "example_models"
 
 save_store_name = "___current-simulation-state-at-save-time___"
 

@@ -1,7 +1,7 @@
 # Example of an external simulation function that can be imported into neuroseq
 
 import numpy as np
-from neuroseq.experiment import TraceData, SpikeData, SynapseData
+from neuroseq.data import TraceData, SpikeData, SynapseData
 
 
 def simulate(

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
+from typing import Literal
+from typing import overload
 
-import brian2 as b2
 import brian2.numpy_ as np
 import qtawesome as qta
 from qtpy import QtCore
@@ -11,18 +12,17 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
-from neuroseq.b2_model import B2Model
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.model import Model
 from neuroseq.stim import DrawStim
 from neuroseq.stim import DrawStimType
 from neuroseq.stim import StimType
+from neuroseq.stim_array_modifier import StimArrayModifier
 from neuroseq.stim_intensity_dialog import StimIntensityDialog
 from neuroseq.stim_widget import StimWidget
-from neuroseq.timed_array_modifer import TimedArrayModifier
 from neuroseq.utils import InteractMode
 from neuroseq.utils import add_action
 from neuroseq.utils import get_stim_type
-from neuroseq.utils import timed_array_with_new_data
 
 
 class DrawMode(Enum):
@@ -49,9 +49,9 @@ class StimEditor(QtWidgets.QWidget):
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.toolbar = toolbar
-        self.model: B2Model | None = None
+        self.model: Model | None = None
         self.cmb_stim = cmb_stim
-        self.current_stim_modifier: TimedArrayModifier | None = None
+        self.current_stim_modifier: StimArrayModifier | None = None
         self.mode = InteractMode.DRAW
         self.draw_mode = DrawMode.DRAW
         self.select_mode = SelectMode.SELECT
@@ -61,7 +61,7 @@ class StimEditor(QtWidgets.QWidget):
         self.trim_stim_array_secs = 5.0
         self.draw_stim_units = ""
         self.stim_type = StimType.Excitation
-        self.stims_dict: dict[str, TimedArrayModifier] = {}
+        self.stims_dict: dict[str, StimArrayModifier] = {}
         self.copy_values = np.zeros((0, 0))
         layout = QtWidgets.QGridLayout(self)
         layout.setSpacing(0)
@@ -106,24 +106,23 @@ class StimEditor(QtWidgets.QWidget):
         self.stim_widget.escape_pressed.connect(self.cancel_paste_selected_stim)
         self.resize(800, 600)
 
-    def set_model(self, model: B2Model, keep_undo_history=False) -> None:
+    def set_model(self, model: Model, keep_undo_history=False) -> None:
         self.model = model
         if self.current_stim_modifier is not None and keep_undo_history:
             for k in self.stims_dict:
-                if k in self.model.parameters:
+                if k in self.model.stim_arrays:
                     self.logger.debug(
-                        f"Updating TimedArray for stim '{k}' without clearing undo history"
+                        f"Updating StimArray for stim '{k}' without clearing undo history"
                     )
-                    self.stims_dict[k].timed_array = self.model.parameters[k]
+                    self.stims_dict[k].stim_array = self.model.stim_arrays[k]
             self.current_stim_modifier = None
             self.select_stim(self.cmb_stim.currentText())
             return
         self.stims_dict = {}
-        if self.model is not None and self.model.parameters is not None:
+        if self.model is not None and self.model.stim_arrays is not None:
             self.stims_dict = {
-                k: TimedArrayModifier(v, self.stim_widget)
-                for k, v in self.model.parameters.items()
-                if isinstance(v, b2.TimedArray)
+                k: StimArrayModifier(v, self.stim_widget)
+                for k, v in self.model.stim_arrays.items()
             }
         have_stims = self.model is not None and len(self.stims_dict) > 0
         self.cmb_stim.clear()
@@ -138,18 +137,15 @@ class StimEditor(QtWidgets.QWidget):
         self.select_stim(self.cmb_stim.currentText())
 
     def update_stim_values_dict(self, stims_values_dict: dict[str, np.ndarray]) -> None:
-        if self.model is None or self.model.parameters is None:
+        if self.model is None or self.model.stim_arrays is None:
             return
         for name, array_values in stims_values_dict.items():
-            if name not in self.model.parameters:
+            if name not in self.model.stim_arrays:
                 self.logger.warning(
                     f"Stimuli '{name}' not found in model parameters: ignoring"
                 )
             else:
-                old_timed_array = self.model.parameters[name]
-                self.model.parameters[name] = timed_array_with_new_data(
-                    old_timed_array, array_values
-                )
+                self.model.stim_arrays[name].values = array_values
         self.set_model(self.model)
 
     def pad_stim_array(self) -> None:
@@ -181,10 +177,10 @@ class StimEditor(QtWidgets.QWidget):
             )
             return
         self.pad_stim_array_secs = paddings_seconds_as_float
-        timed_array = self.current_stim_modifier.timed_array
-        current_length_secs = timed_array.dt * timed_array.values.shape[0]
+        stim_array = self.current_stim_modifier.stim_array
+        current_length_secs = stim_array.dt * stim_array.values.shape[0]
         try:
-            self.model.pad_timed_arrays(current_length_secs + self.pad_stim_array_secs)
+            self.model.pad_stim_arrays(current_length_secs + self.pad_stim_array_secs)
         except Exception as e:
             QtWidgets.QMessageBox.critical(
                 self,
@@ -222,8 +218,8 @@ class StimEditor(QtWidgets.QWidget):
                 "Seconds to trim must be positive.",
             )
             return
-        timed_array = self.current_stim_modifier.timed_array
-        current_length_secs = timed_array.dt * timed_array.values.shape[0]
+        stim_array = self.current_stim_modifier.stim_array
+        current_length_secs = stim_array.dt * stim_array.values.shape[0]
         new_length_secs = current_length_secs - trim_seconds_as_float
         if new_length_secs <= 0.0:
             QtWidgets.QMessageBox.critical(
@@ -232,7 +228,7 @@ class StimEditor(QtWidgets.QWidget):
                 f"Trim seconds {trim_seconds_as_float} is greater than or equal to current stim length {current_length_secs}.",
             )
             return
-        if self.model.trim_timed_array_would_delete_data(new_length_secs):
+        if self.model.trim_stim_array_would_delete_data(new_length_secs):
             continue_with_trim = QtWidgets.QMessageBox.question(
                 self,
                 "Trim stim arrays",
@@ -243,7 +239,7 @@ class StimEditor(QtWidgets.QWidget):
             if continue_with_trim != QtWidgets.QMessageBox.StandardButton.Yes:
                 return
         self.trim_stim_array_secs = trim_seconds_as_float
-        self.model.trim_timed_arrays(new_length_secs)
+        self.model.trim_stim_arrays(new_length_secs)
         self.set_model(self.model, keep_undo_history=False)
 
     def _stim_values_updated(self) -> None:
@@ -263,24 +259,26 @@ class StimEditor(QtWidgets.QWidget):
             self.current_stim_modifier = self.stims_dict[stim_name]
             self.stim_type = get_stim_type(stim_name)
             self.draw_stim.draw_stim_type = DrawStimType.Constant
-            self.draw_stim.value1 = np.max(
-                self.current_stim_modifier.timed_array.values
-            )
+            self.draw_stim.value1 = np.max(self.current_stim_modifier.stim_array.values)
             if self.draw_stim.value1 == 0:
                 self.draw_stim.value1 = 1.0
             self.draw_stim.value2 = self.draw_stim.value1
-            self.stim_widget.set_data(
-                self.current_stim_modifier.timed_array, stim_type=self.stim_type
-            )
-            for name, modifier in self.stims_dict.items():
+            self.stim_widget.set_data(self.current_stim_modifier.stim_array)
+            for modifier in self.stims_dict.values():
                 if modifier is not self.current_stim_modifier:
-                    self.stim_widget.set_background_data(
-                        modifier.timed_array, stim_type=get_stim_type(name)
-                    )
+                    self.stim_widget.set_background_data(modifier.stim_array)
             self.set_mode(InteractMode.DRAW)
             self.set_draw_mode(DrawMode.DRAW)
             self._stim_values_updated()
 
+    @overload
+    def _current_draw_stim_values(
+        self, force_array: Literal[True], erase: bool = ...
+    ) -> np.ndarray: ...
+    @overload
+    def _current_draw_stim_values(
+        self, force_array: bool = ..., erase: bool = ...
+    ) -> np.ndarray | float: ...
     def _current_draw_stim_values(
         self, force_array: bool = False, erase: bool = False
     ) -> np.ndarray | float:
@@ -423,7 +421,7 @@ class StimEditor(QtWidgets.QWidget):
             or self.stim_widget.selected_neuron_slice is None
         ):
             return
-        self.copy_values = self.current_stim_modifier.timed_array.values[
+        self.copy_values = self.current_stim_modifier.stim_array.values[
             self.stim_widget.selected_time_slice, self.stim_widget.selected_neuron_slice
         ].copy()
 
@@ -496,7 +494,7 @@ class StimEditor(QtWidgets.QWidget):
         )
         if filename == "":
             return
-        arr = self.current_stim_modifier.timed_array.values[
+        arr = self.current_stim_modifier.stim_array.values[
             self.stim_widget.selected_time_slice, self.stim_widget.selected_neuron_slice
         ]
         self.logger.info(f"Saving {arr.shape} stim selection to file {filename}")
@@ -523,12 +521,11 @@ class StimEditor(QtWidgets.QWidget):
             self.logger.info(f"Loaded {arr.shape} stim selection from file {filename}")
             if arr.ndim > 2:
                 raise ValueError("Loaded array has wrong shape")
-            if arr.shape[0] > self.current_stim_modifier.timed_array.values.shape[0]:
+            if arr.shape[0] > self.current_stim_modifier.stim_array.values.shape[0]:
                 raise ValueError("Loaded array has too many time points")
             if (
                 arr.ndim == 2
-                and arr.shape[1]
-                > self.current_stim_modifier.timed_array.values.shape[1]
+                and arr.shape[1] > self.current_stim_modifier.stim_array.values.shape[1]
             ):
                 raise ValueError("Loaded array has too many neurons")
             self.copy_values = arr
