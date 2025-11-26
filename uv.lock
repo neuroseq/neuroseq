@@ -952,7 +952,7 @@ requires-dist = [
     { name = "platformdirs" },
     { name = "psutil" },
     { name = "pyparsing", specifier = "!=3.2.4" },
-    { name = "pyqtgraph" },
+    { name = "pyqtgraph", specifier = "!=0.14.0" },
     { name = "pyside6", specifier = "!=6.9.1" },
     { name = "qtawesome" },
     { name = "qtpy" },

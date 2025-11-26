@@ -8,12 +8,14 @@ from brian2 import TimedArray
 # these imports are needed so that we can do eval("units expression as python code"):
 from brian2 import amp  # noqa: F401
 from brian2 import asarray
+from brian2 import farad  # noqa: F401
 from brian2 import get_dimensions
 from brian2 import kelvin  # noqa: F401
 from brian2 import kilogram  # noqa: F401
 from brian2 import metre  # noqa: F401
 from brian2 import numpy_
 from brian2 import second
+from brian2 import siemens  # noqa: F401
 
 from neuroseq.experiment import SpikeData
 from neuroseq.experiment import SynapseData
@@ -130,9 +132,9 @@ def b2_object_hook_factory(zf: zipfile.ZipFile | None):
                 else:
                     # get the array from the json directly (for backwards compatibility with original file format)
                     array = numpy_.array(dct["value"])
-                return TimedArray(
-                    array * eval(dct["unit"]), dct["dt"] * second, name=dct["name"]
-                )
+                # workaround for brian2 issue where unitless TimedArrays have units of Dimension(), but this is not a valid expression
+                units = eval(dct["unit"]) if dct["unit"] != "Dimension()" else 1
+                return TimedArray(array * units, dct["dt"] * second, name=dct["name"])
             case {
                 "!SpikeData": True,
                 "name": name,

@@ -450,6 +450,8 @@ def test_gui_restore_settings_on_restart(
 
     # close gui and reopen to check if settings were saved and reloaded correctly
     gui.close()
+    qtbot.wait(delay_after_update_model_call_in_ms)
+
     gui2 = Gui()
     gui2.show()
     qtbot.addWidget(gui2)

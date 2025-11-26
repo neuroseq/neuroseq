@@ -1,24 +1,20 @@
 from __future__ import annotations
 
+import pathlib
+
 import brian2 as b2
 import pytest
 
 from neuroseq import b2_model
 from neuroseq.utils import example_models_path
 
+example_model_paths = list(example_models_path.glob("*.nseq"))
+
 
 @pytest.mark.parametrize(
-    "filename",
-    [
-        "default_model",
-        "example_non-linear",
-        "HH_model",
-        "LIF_model",
-        "LIF_model_without_stim",
-    ],
+    "model_path", example_model_paths, ids=[p.stem for p in example_model_paths]
 )
-def test_example_models(filename: str, tmp_path) -> None:
-    model_path = example_models_path / f"{filename}.nseq"
+def test_example_models(model_path: pathlib.Path, tmp_path) -> None:
     assert model_path.exists()
     model = b2_model.B2Model()
     model.load_model(model_path)

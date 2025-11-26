@@ -4,6 +4,7 @@ import logging
 
 import brian2.numpy_ as np
 import fastplotlib as fpl
+from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 
@@ -42,6 +43,7 @@ class HeatmapWidget(QtWidgets.QWidget):
         self.logger = logging.getLogger(__name__)
         self.configure_subplot()
         self.image_widget.figure.add_animations(self.update_heatmap)
+        self.setMinimumSize(QtCore.QSize(100, 100))
 
     def clear_data(self) -> None:
         """Clear the data in the heatmap, setting it to a 1x1x1 array of zeros."""
@@ -132,3 +134,9 @@ class HeatmapWidget(QtWidgets.QWidget):
 
     def on_slider_value_changed(self, value: int) -> None:
         self.set_heatmap_index(value)
+
+    def closeEvent(self, event):
+        if self.image_widget is not None:
+            self.image_widget.figure.close()
+            self.image_widget = None
+        super().closeEvent(event)

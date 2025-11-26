@@ -11,12 +11,25 @@ from pytest import approx
 from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
+import neuroseq
 from neuroseq.b2_model import B2Model
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.stim import DrawStim
+from neuroseq.stim import DrawStimType
 from neuroseq.stim_editor import DrawMode
 from neuroseq.stim_editor import SelectMode
 from neuroseq.stim_editor import StimEditor
 from neuroseq.utils import InteractMode
+
+
+class MockStimIntensityDialog:
+    draw_stim = DrawStim(DrawStimType.Constant, 1.0, 1.0)
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def exec(self) -> bool:
+        return True
 
 
 def test_stim_editor_no_data(qtbot: QtBot) -> None:
@@ -65,6 +78,92 @@ def test_stim_editor_zoom_pan(qtbot: QtBot) -> None:
         qtbot.wait(delay)
 
 
+def test_stim_editor_pad_and_trim(
+    monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list
+):
+    timed_array = b2.TimedArray(np.random.random_sample((500, 10)), dt=1.0 * b2.ms)
+    model = B2Model()
+    model.parameters = {"a": timed_array, "irrelevant": 4}
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.show()
+    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    stim_editor.set_model(model)
+    # pad with invalid number of seconds
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getText", lambda *args: ("notanumber", True)
+    )
+    assert len(qmessagebox_calls) == 0
+    stim_editor.pad_stim_array()
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "critical"
+    assert "parse" in qmessagebox_calls[0]["text"].lower()
+    # pad with negative number of seconds
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("-2", True))
+    assert len(qmessagebox_calls) == 1
+    stim_editor.pad_stim_array()
+    assert len(qmessagebox_calls) == 2
+    assert qmessagebox_calls[1]["name"] == "critical"
+    assert "positive" in qmessagebox_calls[1]["text"].lower()
+    # pad with 1 second
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("1", True))
+    assert len(qmessagebox_calls) == 2
+    stim_editor.pad_stim_array()
+    assert len(qmessagebox_calls) == 2
+    assert stim_editor.current_stim_modifier is not None
+    assert stim_editor.current_stim_modifier.timed_array.values.shape[0] == 1500
+    # trim with invalid number of seconds
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getText", lambda *args: ("notanumber", True)
+    )
+    assert len(qmessagebox_calls) == 2
+    stim_editor.trim_stim_array()
+    assert len(qmessagebox_calls) == 3
+    assert qmessagebox_calls[2]["name"] == "critical"
+    assert "parse" in qmessagebox_calls[2]["text"].lower()
+    # trim with negative number of seconds
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("-2", True))
+    assert len(qmessagebox_calls) == 3
+    stim_editor.trim_stim_array()
+    assert len(qmessagebox_calls) == 4
+    assert qmessagebox_calls[3]["name"] == "critical"
+    assert "positive" in qmessagebox_calls[3]["text"].lower()
+    # trim with too large number of seconds
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("5", True))
+    assert len(qmessagebox_calls) == 4
+    stim_editor.trim_stim_array()
+    assert len(qmessagebox_calls) == 5
+    assert qmessagebox_calls[4]["name"] == "critical"
+    assert "greater than" in qmessagebox_calls[4]["text"].lower()
+    # trim by 0.5 seconds (no confirmation dialog since all stimuli being removed are zero)
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.5", True))
+    assert len(qmessagebox_calls) == 5
+    stim_editor.trim_stim_array()
+    assert len(qmessagebox_calls) == 5
+    assert stim_editor.current_stim_modifier.timed_array.values.shape[0] == 1000
+    # trim with 0.7 seconds (confirmation dialog since some non-zero stimuli will be removed)
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.7", True))
+    # say no when asked to confirm
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args: QtWidgets.QMessageBox.StandardButton.No,
+    )
+    stim_editor.trim_stim_array()
+    assert stim_editor.current_stim_modifier.timed_array.values.shape[0] == 1000
+    # do it again and this time say yes when asked to confirm
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args: QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+    stim_editor.trim_stim_array()
+    assert stim_editor.current_stim_modifier.timed_array.values.shape[0] == 300
+
+
 def test_stim_editor_actions(
     qtbot: QtBot, monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -75,6 +174,11 @@ def test_stim_editor_actions(
     selection = np.random.randint(3, size=(5, 2))
     selection_inverted = 2 - selection
     timed_array.values[2:7, 1:3] = selection
+    monkeypatch.setattr(
+        neuroseq.stim_editor,
+        "StimIntensityDialog",
+        MockStimIntensityDialog,
+    )
     model = B2Model()
     model.parameters = {"a": timed_array, "irrelevant": 4}
     cmb_stim = QtWidgets.QComboBox()
@@ -217,30 +321,16 @@ def test_stim_editor_actions(
     )
     assert len(error_messages) == 3
     assert "too many neurons" in error_messages[-1]
-    # default stim drawing intensity is the maximum value of the existing stimuli
-    assert stim_editor.draw_stim_intensity == pytest.approx(
+    # default stim drawing is constant intensity with the maximum value of the existing stimuli
+    assert stim_editor.draw_stim.draw_stim_type == DrawStimType.Constant
+    assert stim_editor.draw_stim.value1 == pytest.approx(
         stim_editor.current_stim_modifier.timed_array.values.max()
     )
-    # try to set a negative stim drawing intensity
-    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("-1", True))
-    stim_editor.choose_stim_intensity()
-    assert len(error_messages) == 4
-    assert "negative" in error_messages[-1]
-    # try to set an invalid float stim drawing intensity
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog, "getText", lambda *args: ("notanumber", True)
-    )
-    stim_editor.choose_stim_intensity()
-    assert len(error_messages) == 5
-    assert "could not parse" in error_messages[-1].lower()
     # set a valid value for stim drawing intensity
     new_stim_value = 1.85
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog, "getText", lambda *args: (f"{new_stim_value}", True)
-    )
+    MockStimIntensityDialog.draw_stim.value1 = new_stim_value
     stim_editor.choose_stim_intensity()
-    assert len(error_messages) == 5
-    assert stim_editor.draw_stim_intensity == pytest.approx(new_stim_value)
+    assert stim_editor.draw_stim.value1 == pytest.approx(new_stim_value)
     # 2ms stim is drawn at mouse click location if draw mode is active with mode DRAW
     stim_editor.draw_stim_length = 2
     stim_editor.set_mode(InteractMode.DRAW)

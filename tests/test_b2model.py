@@ -1176,11 +1176,89 @@ def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
     assert_allclose(mfx_nmda.network["Mn"].g, reconstructed_model.network["Mn"].g)
 
 
-def test_timed_array_padding(mfx_ornstein: b2_model.B2Model) -> None:
+def test_timed_array_simulation_padding(mfx_ornstein: b2_model.B2Model) -> None:
     dt = 1 * b2.ms
     sim_time = 10 * b2.ms
     stim_padding_seconds = 3
     timed_array = b2.TimedArray(np.random.rand(100, 10) * b2.mS, dt=dt)
+    assert timed_array.values.shape == (100, 10)
+    mfx_ornstein.define_parameter("stim", timed_array)
+    mfx_ornstein.run_simulation(
+        sim_time, timed_array_padding_seconds=stim_padding_seconds
+    )
+    new_timed_array = mfx_ornstein.parameters["stim"]
+    # timed array length is simulation length + padding
+    assert new_timed_array.values.shape[0] == pytest.approx(
+        sim_time / dt + stim_padding_seconds * b2.second / dt
+    )
+    # timed array is padded with zeros - original values are preserved
+    assert np.allclose(new_timed_array.values[0:100, :], timed_array.values)
+    assert np.max(new_timed_array.values[100:, :]) == pytest.approx(0)
+
+
+def test_timed_array_padding(mfx_ornstein: b2_model.B2Model) -> None:
+    timed_array = b2.TimedArray(np.random.rand(1000, 10) * b2.mS, dt=1 * b2.ms)
+    assert timed_array.values.shape == (1000, 10)
+    mfx_ornstein.define_parameter("stim", timed_array)
+    # pad to 1.2s
+    mfx_ornstein.pad_timed_arrays(1.2)
+    new_timed_array = mfx_ornstein.parameters["stim"]
+    assert new_timed_array.values.shape[0] == pytest.approx(1200, abs=1)
+    assert np.allclose(
+        new_timed_array.values[0 : timed_array.values.shape[0], :], timed_array.values
+    )
+    assert np.max(new_timed_array.values[1000:, :]) == pytest.approx(0)
+    # pad to 2s
+    mfx_ornstein.pad_timed_arrays(2)
+    new_timed_array = mfx_ornstein.parameters["stim"]
+    assert new_timed_array.values.shape[0] == pytest.approx(2000, abs=1)
+    assert np.allclose(
+        new_timed_array.values[0 : timed_array.values.shape[0], :], timed_array.values
+    )
+    assert np.max(new_timed_array.values[1000:, :]) == pytest.approx(0)
+
+
+def test_timed_array_trimming(mfx_ornstein: b2_model.B2Model) -> None:
+    timed_array = b2.TimedArray(np.random.rand(1000, 10) * b2.mS, dt=1 * b2.ms)
+    # make that last 100 values (0.1s) zero
+    timed_array.values[900:, :] = 0
+    assert timed_array.values.shape == (1000, 10)
+    mfx_ornstein.define_parameter("stim", timed_array)
+    # last 0.1 seconds have no non-zero stimuli
+    assert mfx_ornstein.trim_timed_array_would_delete_data(1.0) is False
+    assert mfx_ornstein.trim_timed_array_would_delete_data(0.901) is False
+    assert mfx_ornstein.trim_timed_array_would_delete_data(0.899) is True
+    # trim to 0.95s
+    assert mfx_ornstein.trim_timed_array_would_delete_data(0.95) is False
+    mfx_ornstein.trim_timed_arrays(0.95)
+    new_timed_array = mfx_ornstein.parameters["stim"]
+    assert new_timed_array.values.shape[0] == pytest.approx(950, abs=1)
+    assert np.allclose(
+        new_timed_array.values,
+        timed_array.values[0 : new_timed_array.values.shape[0], :],
+    )
+    # trim to 0.5s
+    assert mfx_ornstein.trim_timed_array_would_delete_data(0.5) is True
+    mfx_ornstein.trim_timed_arrays(0.5)
+    new_timed_array = mfx_ornstein.parameters["stim"]
+    assert new_timed_array.values.shape[0] == pytest.approx(500, abs=1)
+    assert np.allclose(
+        new_timed_array.values,
+        timed_array.values[0 : new_timed_array.values.shape[0], :],
+    )
+    # trim to 0s
+    assert mfx_ornstein.trim_timed_array_would_delete_data(0) is True
+    mfx_ornstein.trim_timed_arrays(0)
+    new_timed_array = mfx_ornstein.parameters["stim"]
+    assert new_timed_array.values.shape[0] == pytest.approx(0, abs=1)
+    assert np.allclose(
+        new_timed_array.values,
+        timed_array.values[0 : new_timed_array.values.shape[0], :],
+    )
+
+
+def test_timed_array_neuron_number(mfx_ornstein: b2_model.B2Model) -> None:
+    timed_array = b2.TimedArray(np.random.rand(100, 10) * b2.mS, dt=1 * b2.ms)
     assert timed_array.values.shape == (100, 10)
     mfx_ornstein.define_parameter("stim", timed_array)
     # increase number of neurons in model to be larger than the number of neurons in the TimedArray
@@ -1190,33 +1268,24 @@ def test_timed_array_padding(mfx_ornstein: b2_model.B2Model) -> None:
         "neurongroup", "tau", np.random.rand(n_neurons) * b2.second
     )
     mfx_ornstein.define_init("neurongroup", "sigma", np.random.rand(n_neurons))
-    mfx_ornstein.run_simulation(
-        sim_time, timed_array_padding_seconds=stim_padding_seconds
-    )
+    mfx_ornstein.assemble_network()
     new_timed_array = mfx_ornstein.parameters["stim"]
-    # timed array neuron number has been increased to match the largest NeuronGroup
+    # timed array neuron number has been increased to match
     assert new_timed_array.values.shape[1] == 23
-    # timed array length is simulation length + padding
-    assert new_timed_array.values.shape[0] == pytest.approx(
-        sim_time / dt + stim_padding_seconds * b2.second / dt
-    )
-    # timed array is padded with zeros - original values are preserved
-    assert np.allclose(new_timed_array.values[0:100, 0:10], timed_array.values)
-    assert np.max(new_timed_array.values[0:100, 10:]) == pytest.approx(0)
-    assert np.max(new_timed_array.values[100:, :]) == pytest.approx(0)
-    # decreasing the number of neurons does not remove any neurons from the TimedArrays
+    # decrease the number of neurons
     n_neurons = 3
     mfx_ornstein.define_neuronnumber("neurongroup", n_neurons)
     mfx_ornstein.define_init(
         "neurongroup", "tau", np.random.rand(n_neurons) * b2.second
     )
     mfx_ornstein.define_init("neurongroup", "sigma", np.random.rand(n_neurons))
-    mfx_ornstein.run_simulation(
-        sim_time, timed_array_padding_seconds=stim_padding_seconds
+    mfx_ornstein.assemble_network()
+    # timed array neuron number has been decreased to match
+    new_timed_array = mfx_ornstein.parameters["stim"]
+    assert new_timed_array.values.shape == (100, 3)
+    assert np.allclose(
+        new_timed_array.values[0:100, 0:3], timed_array.values[0:100, 0:3]
     )
-    assert np.allclose(new_timed_array.values[0:100, 0:10], timed_array.values)
-    assert np.max(new_timed_array.values[0:100, 10:]) == pytest.approx(0)
-    assert np.max(new_timed_array.values[100:, :]) == pytest.approx(0)
 
 
 def test_default_group_addition(mfx_ornstein) -> None:

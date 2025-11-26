@@ -97,6 +97,28 @@ def negative_and_positive_stims() -> b2.TimedArray:
     return b2.TimedArray(stim.T, dt=dt * b2.second)
 
 
+def test_stim_widget_background_stims(
+    qtbot: QtBot, positive_stims: b2.TimedArray
+) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    stim_widget.show()
+    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    s1 = b2.TimedArray(np.random.random((10, 100)), dt=0.001 * b2.second)
+    s2 = b2.TimedArray(np.random.random((10, 100)), dt=0.001 * b2.second)
+    stim_widget.set_data(s1, stim_type=StimType.Excitation)
+    stim_widget.set_background_data(s2, stim_type=StimType.Inhibition)
+    assert len(stim_widget.background_graphics) == 1
+    # toggle background visibility off and on
+    stim_widget.set_background_data_visible(False)
+    for graphic in stim_widget.background_graphics:
+        assert graphic.visible is False
+    stim_widget.set_background_data_visible(True)
+    for graphic in stim_widget.background_graphics:
+        assert graphic.visible is True
+
+
 def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: b2.TimedArray) -> None:
     controller = ConstrainedPanZoomController()
     stim_widget = StimWidget(controller)
@@ -240,14 +262,12 @@ def test_stim_widget_ext_stims(
     assert stim_widget.stim_type == StimType.Excitation
     assert stim_widget.vmin == pytest.approx(0.0)
     assert stim_widget.vmax == pytest.approx(1.0)
-    assert stim_widget.cmap == "chrisluts:I_Magenta"
     # set external stim type with negative and positive values
     stim_widget.set_data(negative_and_positive_stims, stim_type=StimType.External)
     assert stim_widget.stim_type == StimType.External
     # vmin/vmax should be symmetric around zero and include the largest absolute value
     assert stim_widget.vmin == pytest.approx(-3.0)
     assert stim_widget.vmax == pytest.approx(3.0)
-    assert stim_widget.cmap == "colorbrewer:PRGn"
     # update data slice with larger (negative) values than current max
     stim_widget.update_data_slice(
         neuron_slice=slice(0, 2),

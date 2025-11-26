@@ -18,6 +18,7 @@ from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomControlle
 from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.custom_analysis_widget import CustomAnalysisWindow
+from neuroseq.data_widget import DataWidget
 from neuroseq.experiment import SpikeData
 from neuroseq.experiment import SynapseData
 from neuroseq.experiment import TraceData
@@ -56,9 +57,12 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_spike.setMinimumWidth(120)
         self.cmb_synapse = QtWidgets.QComboBox()
         self.cmb_synapse.setMinimumWidth(120)
+        self.cmb_data = QtWidgets.QComboBox()
+        self.cmb_data.setMinimumWidth(120)
+        self.controller = ConstrainedPanZoomController()
+        self.trace_widget = TraceWidget(self.controller)
         self._create_menus_and_toolbars()
         self.setWindowIcon(qta.icon("fa6s.brain"))
-        self.controller = ConstrainedPanZoomController()
         main_horizontal_layout = QtWidgets.QHBoxLayout()
         central_widget = QtWidgets.QWidget()
         central_widget.setLayout(main_horizontal_layout)
@@ -77,7 +81,7 @@ class Gui(QtWidgets.QMainWindow):
         split_left_right.setSizes([1000, 1000, 1000])
         # main vertical splitter layout
         split_vertical = QtWidgets.QSplitter(
-            QtCore.Qt.Orientation.Vertical, handleWidth=0
+            QtCore.Qt.Orientation.Vertical, handleWidth=0, childrenCollapsible=False
         )
         self.stim_editor = StimEditor(
             controller=self.controller,
@@ -85,10 +89,12 @@ class Gui(QtWidgets.QMainWindow):
             toolbar=self.toolbar_stim_editor,
         )
         split_vertical.addWidget(self.stim_editor)
-        self.trace_widget = TraceWidget(self.controller)
         split_vertical.addWidget(self.trace_widget)
         self.spike_widget = SpikeWidget(self.controller)
         split_vertical.addWidget(self.spike_widget)
+        self.data_widget = DataWidget(self.controller)
+        split_vertical.addWidget(self.data_widget)
+        self.data_widget.setVisible(False)
         # heatmap / custom analysis widget / console
         split_vertical.addWidget(split_left_right)
         main_horizontal_layout.addWidget(split_vertical)
@@ -112,10 +118,17 @@ class Gui(QtWidgets.QMainWindow):
             self.stim_editor.update_stim_values_dict
         )
         self.trace_widget.custom_analysis_requested.connect(self._custom_analysis)
+        self.data_widget.trace_widget.custom_analysis_requested.connect(
+            self._custom_analysis
+        )
         self.spike_widget.custom_analysis_requested.connect(self._custom_analysis)
+        self.data_widget.spike_widget.custom_analysis_requested.connect(
+            self._custom_analysis
+        )
         self.cmb_trace.currentTextChanged.connect(self.set_neuron)
         self.cmb_synapse.currentTextChanged.connect(self.set_synapse)
         self.cmb_spike.currentTextChanged.connect(self.set_spike)
+        self.cmb_data.currentTextChanged.connect(self.set_data)
         if filename is None:
             filename = example_models_path / "default_model.nseq"
         self.load_model(str(filename))
@@ -154,6 +167,7 @@ class Gui(QtWidgets.QMainWindow):
         self.set_neuron(self.cmb_trace.currentText())
         self.set_synapse(self.cmb_synapse.currentText())
         self.set_spike(self.cmb_spike.currentText())
+        self.set_data(self.cmb_data.currentText())
 
     def _update_simulation_progress(
         self,
@@ -293,6 +307,8 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_synapse.clear()
         cmb_spike_text = self.cmb_spike.currentText()
         self.cmb_spike.clear()
+        cmb_data_text = self.cmb_data.currentText()
+        self.cmb_data.clear()
         if self.model is not None:
             self.stim_console.set_stims(self.stim_editor.stims_dict)
             add_items_to_combobox(self.cmb_trace, self.model.get_data_names(TraceData))
@@ -303,6 +319,13 @@ class Gui(QtWidgets.QMainWindow):
                 self.cmb_synapse, self.model.get_data_names(SynapseData)
             )
             self.cmb_synapse.setCurrentText(cmb_synapse_text)
+            add_items_to_combobox(
+                self.cmb_data,
+                [f"{d} [trace]" for d in self.model.get_data_names(TraceData)]
+                + [f"{d} [spike]" for d in self.model.get_data_names(SpikeData)]
+                + [f"{d} [synapse]" for d in self.model.get_data_names(SynapseData)],
+            )
+            self.cmb_data.setCurrentText(cmb_data_text)
 
     @with_wait_cursor
     def set_neuron(self, cmb_name: str) -> None:
@@ -321,6 +344,17 @@ class Gui(QtWidgets.QMainWindow):
     def set_spike(self, cmb_name: str) -> None:
         data = self.model.get_data(cmb_name, SpikeData)
         self.spike_widget.set_data(data)
+
+    @with_wait_cursor
+    def set_data(self, cmb_name: str) -> None:
+        data: TraceData | SpikeData | SynapseData | None = None
+        if cmb_name.endswith(" [trace]"):
+            data = self.model.get_data(cmb_name[:-8], TraceData)
+        elif cmb_name.endswith(" [spike]"):
+            data = self.model.get_data(cmb_name[:-8], SpikeData)
+        elif cmb_name.endswith(" [synapse]"):
+            data = self.model.get_data(cmb_name[:-10], SynapseData)
+        self.data_widget.set_data(data)
 
     def btn_exit_clicked(self) -> None:
         self.close()
@@ -393,9 +427,7 @@ class Gui(QtWidgets.QMainWindow):
             return
         try:
             # pre-emptively pad timed arrays before simulating
-            self.model.pad_timed_arrays(
-                simulation_time, self.settings.stim_padding_secs
-            )
+            self.model.pad_timed_arrays(total_time_seconds=simulation_time)
             self.stim_editor.set_model(self.model)
             stims_dict = {
                 k: {"array": v.timed_array.values, "dt": v.timed_array.dt}
@@ -476,6 +508,8 @@ class Gui(QtWidgets.QMainWindow):
             self.stim_editor.stim_widget,
             self.trace_widget,
             self.spike_widget,
+            self.data_widget.trace_widget,
+            self.data_widget.spike_widget,
         ]:
             widget.toggle_selection_text()
 
@@ -510,7 +544,7 @@ class Gui(QtWidgets.QMainWindow):
         self._load_external_simulation_function(filename)
 
     def _select_experiment_data(self, experiment_name):
-        for cmb in (self.cmb_trace, self.cmb_spike, self.cmb_synapse):
+        for cmb in (self.cmb_trace, self.cmb_spike, self.cmb_synapse, self.cmb_data):
             for i in range(cmb.count()):
                 if cmb.itemText(i).startswith(f"{experiment_name} ::"):
                     cmb.setCurrentIndex(i)
@@ -803,13 +837,19 @@ class Gui(QtWidgets.QMainWindow):
     def _create_actions_view(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
     ) -> None:
-        for name, widget, icon in [
-            ("&Stimuli", self.stim_editor, "mdi6.chart-timeline"),
-            ("&Traces", self.trace_widget, "mdi.waves"),
-            ("&Spikes", self.spike_widget, "ph.barcode-light"),
-            ("&Heatmap", self.heatmap_widget, "mdi6.data-matrix"),
-            ("&Custom analysis", self.custom_analysis_widget, "mdi6.chart-histogram"),
-            ("&Console", self.stim_console, "mdi6.console"),
+        for name, widget, icon, is_checked in [
+            ("&Stimuli", self.stim_editor, "mdi6.chart-timeline", True),
+            ("&Traces", self.trace_widget, "mdi.waves", True),
+            ("&Spikes", self.spike_widget, "ph.barcode-light", True),
+            ("&Data", self.data_widget, "mdi6.chart-donut", False),
+            ("&Heatmap", self.heatmap_widget, "mdi6.data-matrix", True),
+            (
+                "&Custom analysis",
+                self.custom_analysis_widget,
+                "mdi6.chart-histogram",
+                True,
+            ),
+            ("&Console", self.stim_console, "mdi6.console", True),
         ]:
             add_action(
                 f"Show {name}",
@@ -818,7 +858,7 @@ class Gui(QtWidgets.QMainWindow):
                 toolbar,
                 icon=qta.icon(f"{icon}"),
                 checkable=True,
-                is_checked=True,
+                is_checked=is_checked,
             )
         add_action(
             "Toggle selection text",
@@ -854,10 +894,20 @@ class Gui(QtWidgets.QMainWindow):
         toolbar.addWidget(self.cmb_stim)
         toolbar.addWidget(QtWidgets.QLabel("  Neuron data: "))
         toolbar.addWidget(self.cmb_trace)
+        add_action(
+            "&Trace normalization",
+            self.trace_widget.trace_norm_dialog,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon=qta.icon("mdi6.arrow-expand-vertical"),
+        )
         toolbar.addWidget(QtWidgets.QLabel("  Spike data: "))
         toolbar.addWidget(self.cmb_spike)
         toolbar.addWidget(QtWidgets.QLabel("  Synapse data: "))
         toolbar.addWidget(self.cmb_synapse)
+        toolbar.addWidget(QtWidgets.QLabel("  All data: "))
+        toolbar.addWidget(self.cmb_data)
 
     def _create_action_experiment(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
@@ -886,3 +936,13 @@ class Gui(QtWidgets.QMainWindow):
             shortcut=None,
             icon=qta.icon("mdi6.rocket-launch-outline"),
         )
+
+    def closeEvent(self, event):
+        # explicitly close all fastplotlib figures to avoid renderer trying to access them after they have been destroyed
+        self.spike_widget.close()
+        self.trace_widget.close()
+        self.stim_editor.stim_widget.close()
+        self.data_widget.trace_widget.close()
+        self.data_widget.spike_widget.close()
+        self.heatmap_widget.close()
+        super().closeEvent(event)
