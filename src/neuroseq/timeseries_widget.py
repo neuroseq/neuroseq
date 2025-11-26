@@ -369,8 +369,8 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         try:
             idx = int(idx)
         except Exception as e:
-            self.logger.critical(f"Error converting index to int: {e}")
+            self.logger.error(f"Error converting index to int: {e}")
         try:
             self.heatmap_widget.slider.setValue(idx)
         except Exception as e:
-            self.logger.critical(f"Error setting current index: {e}")
+            self.logger.error(f"Error setting current index: {e}")
