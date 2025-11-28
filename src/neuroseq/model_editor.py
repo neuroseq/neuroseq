@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
-import tempfile
 from collections.abc import Callable
 from typing import Any
 
@@ -863,10 +861,9 @@ class ModelEditorDialog(QtWidgets.QDialog):
             parent widget, by default None
         """
         super().__init__(parent=parent)
-        tmp = tempfile.TemporaryDirectory()
-        file = os.path.join(tmp.name, "model.nseq")
-        b2model.save_model(file)
-        self.b2model = B2Model.load_model(file)
+        self.b2model = B2Model.from_dict(
+            b2model.to_dict(), b2model.network._stored_state
+        )
 
         trees = {
             "Neurongroups": EditableNeurongroupTree(self.b2model, parent=self),

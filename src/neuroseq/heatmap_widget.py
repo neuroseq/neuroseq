@@ -6,7 +6,7 @@ import pyqtgraph as pg
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from neuroseq.experiment import SynapseData
+from neuroseq.data import SynapseData
 
 
 class HeatmapWidget(pg.ImageView):

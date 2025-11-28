@@ -48,3 +48,6 @@ class SynapseData:
     name: str
     values: np.ndarray
     timestamps: np.ndarray
+
+
+Data = TraceData | SpikeData | SynapseData

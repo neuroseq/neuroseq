@@ -3,9 +3,9 @@ from __future__ import annotations
 import pygfx
 from qtpy import QtWidgets
 
-from neuroseq.experiment import SpikeData
-from neuroseq.experiment import SynapseData
-from neuroseq.experiment import TraceData
+from neuroseq.data import SpikeData
+from neuroseq.data import SynapseData
+from neuroseq.data import TraceData
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.trace_widget import TraceWidget

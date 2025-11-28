@@ -7,7 +7,7 @@ import pytest
 from pytest import approx
 from pytestqt.qtbot import QtBot
 
-from neuroseq.experiment import SynapseData
+from neuroseq.data import SynapseData
 from neuroseq.heatmap_widget import HeatmapWidget
 
 

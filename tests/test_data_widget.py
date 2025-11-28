@@ -4,10 +4,10 @@ import brian2.numpy_ as np
 from pytestqt.qtbot import QtBot
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.data import SpikeData
+from neuroseq.data import SynapseData
+from neuroseq.data import TraceData
 from neuroseq.data_widget import DataWidget
-from neuroseq.experiment import SpikeData
-from neuroseq.experiment import SynapseData
-from neuroseq.experiment import TraceData
 
 
 def test_data_widget(qtbot: QtBot) -> None:
