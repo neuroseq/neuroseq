@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import brian2.numpy_ as np
-import pygfx as gfx
 from PIL import Image
 from PIL import ImageSequence
 
 from neuroseq.experiment import SpikeData
 from neuroseq.experiment import TraceData
-from neuroseq.utils import cmap_transform_neuron_indices
+from neuroseq.utils import jet_colors_for_neurons
 
 
 @dataclass
@@ -32,9 +31,13 @@ def prepare_cellpose_traces(
     units: str,
 ) -> TraceData:
     if traces.ndim != 2:
-        raise ValueError("Cellpose traces must be a 2D array of shape (neurons, timepoints)")
+        raise ValueError(
+            "Cellpose traces must be a 2D array of shape (neurons, timepoints)"
+        )
     if traces.shape[0] == 0 or traces.shape[1] == 0:
-        raise ValueError("Cellpose traces must contain at least one neuron and one timepoint")
+        raise ValueError(
+            "Cellpose traces must contain at least one neuron and one timepoint"
+        )
     if dt <= 0:
         raise ValueError("Cellpose trace dt must be positive")
 
@@ -78,18 +81,41 @@ class CellPoseImporter:
         self._neuron_ids: np.ndarray | None = None
         self._neuron_colors: np.ndarray | None = None
 
-    def load_image_file(self, filename: str | Path) -> None:
-        """Load PNG or TIFF image file. TIFF stacks are averaged across frames."""
+    def load_image_file(
+        self,
+        filename: str | Path,
+        projection_method: str = "mean",
+        flip_horizontal: bool = False,
+        flip_vertical: bool = False,
+    ) -> None:
+        """Load PNG or TIFF image file. TIFF stacks use specified projection method."""
         path = Path(filename)
         suffix = path.suffix.lower()
         try:
             with Image.open(path) as pil_image:
                 if suffix in {".tif", ".tiff"}:
-                    self.image_data = self._load_mean_tiff(pil_image)
+                    self.image_data = self._load_tiff_with_projection(
+                        pil_image, projection_method
+                    )
                 else:
                     self.image_data = self._pil_to_rgb_array(pil_image)
 
-            self.logger.info(f"Loaded image: {self.image_data.shape}")
+            self.image_data = self._apply_image_transforms(
+                self.image_data, flip_horizontal, flip_vertical
+            )
+
+            transform_info = []
+            if flip_horizontal:
+                transform_info.append("horizontal flip")
+            if flip_vertical:
+                transform_info.append("vertical flip")
+            transform_str = (
+                f" with {', '.join(transform_info)}" if transform_info else ""
+            )
+
+            self.logger.info(
+                f"Loaded image using {projection_method} projection{transform_str}: {self.image_data.shape}"
+            )
         except Exception as exc:
             self.logger.exception("Error loading image file")
             raise ValueError(f"Could not load {filename}: {exc}") from exc
@@ -101,27 +127,61 @@ class CellPoseImporter:
             image = image.convert("RGB")
         return np.array(image)
 
-    def _load_mean_tiff(self, image: Image.Image) -> np.ndarray:
-        """Average all frames of a TIFF stack per pixel, then normalize to display range."""
-        accumulator: np.ndarray | None = None
-        n_frames = 0
+    def _load_tiff_with_projection(
+        self, image: Image.Image, method: str = "mean"
+    ) -> np.ndarray:
+        """Load TIFF stack using specified projection method."""
+        valid_methods = ["mean", "median", "max", "std", "frame"]
+        if method not in valid_methods and not method.startswith("frame_"):
+            raise ValueError(
+                f"Projection method must be one of {valid_methods} or 'frame_N'"
+            )
 
+        # Load all frames into memory
+        frames = []
         for frame in ImageSequence.Iterator(image):
             frame_array = self._frame_to_rgb_float(frame)
+            frames.append(frame_array)
 
-            if accumulator is None:
-                accumulator = np.zeros_like(frame_array, dtype=np.float64)
-            elif frame_array.shape != accumulator.shape:
-                raise ValueError("All TIF frames must share identical dimensions")
-
-            accumulator += frame_array
-            n_frames += 1
-
-        if accumulator is None or n_frames == 0:
+        if not frames:
             raise ValueError("TIF file contains no frames")
 
-        mean_frame = accumulator / float(n_frames)
-        return self._scale_float_image_to_uint8(mean_frame)
+        # Ensure all frames have same shape
+        first_shape = frames[0].shape
+        for i, frame in enumerate(frames):
+            if frame.shape != first_shape:
+                raise ValueError(
+                    f"Frame {i} has shape {frame.shape}, expected {first_shape}"
+                )
+
+        frame_stack = np.stack(frames, axis=0)
+
+        if method == "mean":
+            result = np.mean(frame_stack, axis=0)
+        elif method == "median":
+            result = np.median(frame_stack, axis=0)
+        elif method == "max":
+            result = np.max(frame_stack, axis=0)
+        elif method == "std":
+            result = np.std(frame_stack, axis=0)
+        elif method.startswith("frame_"):
+            try:
+                frame_idx = int(method.split("_")[1])
+                if frame_idx < 0 or frame_idx >= len(frames):
+                    raise ValueError(
+                        f"Frame index {frame_idx} out of range [0, {len(frames) - 1}]"
+                    )
+                result = frames[frame_idx]
+            except (ValueError, IndexError):
+                raise ValueError(f"Invalid frame specification: {method}")
+        else:
+            result = np.mean(frame_stack, axis=0)
+
+        return self._scale_float_image_to_uint8(result)
+
+    def _load_mean_tiff(self, image: Image.Image) -> np.ndarray:
+        """Average all frames of a TIFF stack per pixel, then normalize to display range."""
+        return self._load_tiff_with_projection(image, "mean")
 
     def _frame_to_rgb_float(self, frame: Image.Image) -> np.ndarray:
         """Return frame data as float32 RGB array preserving raw intensities."""
@@ -160,9 +220,15 @@ class CellPoseImporter:
         return scaled.astype(np.uint8)
 
     def load_segmentation_file(self, filename: str | Path) -> None:
-        """Load CSV segmentation file."""
+        """Load segmentation file saved as CSV or NPY."""
+        path = Path(filename)
         try:
-            self.segmentation_data = np.loadtxt(filename, delimiter=",", dtype=np.int32)
+            if path.suffix.lower() == ".npy":
+                loaded = np.load(path, allow_pickle=True)
+            else:
+                loaded = np.loadtxt(path, delimiter=",", dtype=np.int32)
+
+            self.segmentation_data = np.asarray(loaded, dtype=np.int32)
 
             if self.segmentation_data.ndim != 2:
                 raise ValueError(
@@ -172,7 +238,11 @@ class CellPoseImporter:
             if np.any(self.segmentation_data < 0):
                 raise ValueError("Segmentation data contains negative values")
 
-            self.logger.info(f"Loaded segmentation: {self.segmentation_data.shape}")
+            self.logger.info(
+                "Loaded segmentation from %s: %s",
+                path.suffix.lower(),
+                self.segmentation_data.shape,
+            )
         except Exception as exc:
             self.logger.exception("Error loading segmentation file")
             raise ValueError(f"Could not load {filename}: {exc}") from exc
@@ -208,9 +278,8 @@ class CellPoseImporter:
         neuron_ids = unique_ids[unique_ids > 0]
 
         if neuron_ids.size > 0:
-            n_neurons = self._expected_neuron_count(neuron_ids.size)
             self._neuron_ids = neuron_ids
-            self._neuron_colors = self._compute_neuron_colors(n_neurons)
+            self._neuron_colors = self._compute_neuron_colors(neuron_ids)
 
             overlay = np.zeros((*self.segmentation_data.shape, 3), dtype=np.uint8)
 
@@ -284,30 +353,38 @@ class CellPoseImporter:
             spike_data=self.spike_data,
         )
 
-    def _compute_neuron_colors(self, n_neurons: int) -> np.ndarray:
-        if n_neurons <= 0:
+    def _compute_neuron_colors(self, neuron_indices: np.ndarray | None) -> np.ndarray:
+        if neuron_indices is None or neuron_indices.size == 0:
             return np.zeros((0, 3), dtype=np.uint8)
 
-        # Use exactly the same color mapping as trace/spike widgets
-        # The graphics library normalizes cmap_transform to [0,1] then maps to colormap
-        transform = cmap_transform_neuron_indices(n_neurons).astype(np.float32)
-        normalized = self._normalize_transform(transform)
-
-        # Map normalized values to colormap indices
-        lut = self._get_jet_lut()
-        indices = (normalized * (lut.shape[0] - 1)).astype(int)
-        indices = np.clip(indices, 0, lut.shape[0] - 1)
-        colors = lut[indices, :3]
-        return (colors * 255.0).astype(np.uint8)
+        zero_based = neuron_indices - neuron_indices.min()
+        return jet_colors_for_neurons(zero_based)
 
     @staticmethod
     def _validate_trace_data(trace_data: TraceData) -> None:
         if trace_data.traces.ndim != 2:
             raise ValueError("TraceData.traces must be 2D")
         if trace_data.traces.shape[0] == 0 or trace_data.traces.shape[1] == 0:
-            raise ValueError("TraceData.traces must contain at least one neuron and one timepoint")
+            raise ValueError(
+                "TraceData.traces must contain at least one neuron and one timepoint"
+            )
         if trace_data.dt <= 0:
             raise ValueError("TraceData.dt must be positive")
+
+    @staticmethod
+    def _apply_image_transforms(
+        image: np.ndarray, flip_horizontal: bool, flip_vertical: bool
+    ) -> np.ndarray:
+        """Apply flip transforms to image data."""
+        result = image.copy()
+
+        if flip_horizontal:
+            result = np.fliplr(result)
+
+        if flip_vertical:
+            result = np.flipud(result)
+
+        return result
 
     @staticmethod
     def _validate_spike_data(spike_data: SpikeData) -> None:
@@ -321,37 +398,3 @@ class CellPoseImporter:
             raise ValueError("Spike indices must be non-negative")
         if np.any(spike_data.spike_times < 0):
             raise ValueError("Spike times must be non-negative")
-
-    def _expected_neuron_count(self, segmentation_count: int) -> int:
-        expected_counts = [segmentation_count]
-        if self.trace_data is not None:
-            expected_counts.append(self.trace_data.traces.shape[0])
-        if self.spike_data is not None and self.spike_data.spike_indices.size > 0:
-            expected_counts.append(int(np.max(self.spike_data.spike_indices) + 1))
-
-        unique_counts = set(expected_counts)
-        if len(unique_counts) > 1:
-            raise ValueError(
-                f"Neuron counts differ between segmentation and attached data: {sorted(unique_counts)}"
-            )
-        return expected_counts[0]
-
-    @staticmethod
-    def _normalize_transform(values: np.ndarray) -> np.ndarray:
-        if values.size == 0:
-            return values
-
-        min_val = float(np.min(values))
-        max_val = float(np.max(values))
-        if max_val > min_val:
-            return (values - min_val) / (max_val - min_val)
-        return np.zeros_like(values)
-
-    @staticmethod
-    def _get_jet_lut() -> np.ndarray:
-        if not hasattr(CellPoseImporter, "_JET_LUT"):
-            texture_data = gfx.cm.jet.texture.data
-            if texture_data is None:
-                raise RuntimeError("Jet colormap texture data is unavailable")
-            CellPoseImporter._JET_LUT = np.asarray(texture_data, dtype=np.float32)
-        return CellPoseImporter._JET_LUT

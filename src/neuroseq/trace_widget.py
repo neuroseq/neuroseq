@@ -7,7 +7,7 @@ from qtpy import QtWidgets
 
 from neuroseq.experiment import TraceData
 from neuroseq.timeseries_widget import TimeseriesWidget
-from neuroseq.utils import cmap_transform_neuron_indices
+from neuroseq.utils import jet_colors_for_neurons
 
 
 class TraceNormDialog(QtWidgets.QDialog):
@@ -167,10 +167,16 @@ class TraceWidget(TimeseriesWidget):
             axis=2,
             dtype=np.float32,
         )
+        ids = np.arange(self.n_neurons, dtype=np.int32)
+        colors_rgb = jet_colors_for_neurons(ids)
+        colors_rgba = np.column_stack(
+            [colors_rgb, np.full(colors_rgb.shape[0], 255, dtype=np.uint8)]
+        )
+        colors_normalized = colors_rgba.astype(np.float32) / 255.0
+
         self.graphic = self.subplot.add_line_collection(
             data,
-            cmap="jet",
-            cmap_transform=cmap_transform_neuron_indices(self.n_neurons),
+            colors=colors_normalized,
             thickness=2,
         )
         for i, line in enumerate(self.graphic.graphics):

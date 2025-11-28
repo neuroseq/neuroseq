@@ -5,7 +5,6 @@ import math
 
 import brian2.numpy_ as np
 import fastplotlib as fpl
-import pygfx
 import pyqtgraph as pg
 import qtawesome as qta
 from fastplotlib.layouts import Subplot

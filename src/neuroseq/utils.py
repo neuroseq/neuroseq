@@ -13,6 +13,7 @@ from typing import Any
 import brian2 as b2
 import brian2.numpy_ as np
 import brian2.units.allunits as b2_units
+import pygfx as gfx
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
@@ -100,6 +101,70 @@ def cmap_transform_neuron_indices(
     if indices is None:
         indices = np.arange(n_neurons, dtype=np.int32)
     return np.mod(np.asarray(indices) * m, n_neurons)
+
+
+def jet_cmap_transform_for_neurons(neuron_indices: np.ndarray) -> np.ndarray:
+    """Return a normalized jet colormap transform for the provided neuron indices.
+
+    Uses hash-based mapping to distribute colors evenly across the jet colormap.
+    """
+    if neuron_indices is None:
+        return np.array([], dtype=np.float32)
+
+    safe_indices = np.asarray(neuron_indices, dtype=np.int64)
+
+    # Use a better hash-based distribution across the full [0,1] range
+    # This gives much better color spread without patterns
+    hash_base = 2654435761  # Large prime for better distribution
+    hashed = (safe_indices * hash_base) % (2**32)
+    normalized = hashed.astype(np.float32) / (2**32 - 1)
+
+    return normalized
+
+
+_JET_LUT: np.ndarray | None = None
+
+
+def jet_lut() -> np.ndarray:
+    """Fetch and cache the jet lookup table from pygfx."""
+    global _JET_LUT
+    if _JET_LUT is None:
+        texture_data = gfx.cm.jet.texture.data
+        if texture_data is None:
+            raise RuntimeError("Jet colormap texture data is unavailable")
+        _JET_LUT = np.asarray(texture_data, dtype=np.float32)
+    return _JET_LUT
+
+
+def jet_colors_for_neurons(neuron_indices: np.ndarray | None) -> np.ndarray:
+    """Return uint8 RGB colors for the supplied neuron indices using the shared jet mapping."""
+    if neuron_indices is None or len(neuron_indices) == 0:
+        return np.zeros((0, 3), dtype=np.uint8)
+
+    normalized_sorted = jet_cmap_transform_for_neurons(np.asarray(neuron_indices))
+    lut = jet_lut()
+    indices = (normalized_sorted * (lut.shape[0] - 1)).astype(int)
+    indices = np.clip(indices, 0, lut.shape[0] - 1)
+    colors = (lut[indices, :3] * 255.0).astype(np.uint8)
+    return colors
+
+
+_JET_LUT: np.ndarray | None = None
+_JET_TRANSFORM_TABLE: np.ndarray | None = None
+
+
+def _jet_transform_table() -> np.ndarray:
+    """Precompute normalized transform values for a fixed colormap domain matching the jet LUT length (256)."""
+    global _JET_TRANSFORM_TABLE
+    if _JET_TRANSFORM_TABLE is None:
+        table_size = 256
+        base_indices = np.arange(table_size, dtype=np.int32)
+        transform = cmap_transform_neuron_indices(table_size, base_indices).astype(
+            np.float32
+        )
+        normalized = transform / float(max(1, table_size - 1))
+        _JET_TRANSFORM_TABLE = np.clip(normalized, 0.0, 1.0)
+    return _JET_TRANSFORM_TABLE
 
 
 def init_brian2_logging(log_level: str = "ERROR") -> None:

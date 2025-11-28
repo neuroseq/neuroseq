@@ -32,7 +32,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
 
         instructions = QtWidgets.QLabel(
-            "Select a PNG/TIFF image and corresponding CSV segmentation file. "
+            "Select a PNG/TIFF image and corresponding CSV or NPY segmentation file. "
             "The segmentation file should contain pixel-by-pixel segmentation IDs."
         )
         instructions.setWordWrap(True)
@@ -50,6 +50,45 @@ class CellposeImportDialog(QtWidgets.QDialog):
         image_layout.addWidget(browse_image_button)
         file_layout.addRow("Image (PNG/TIF):", image_layout)
 
+        self.projection_combo = QtWidgets.QComboBox()
+        self.projection_combo.addItems(
+            [
+                "mean",
+                "median",
+                "max",
+                "std",
+                "frame_0",
+                "frame_100",
+                "frame_450",
+                "frame_899",
+            ]
+        )
+        self.projection_combo.setToolTip(
+            "Projection method for TIFF stacks:\n"
+            "• mean: Average all frames (default, can be blurry)\n"
+            "• median: Median across frames (robust to noise/outliers)\n"
+            "• max: Maximum intensity projection\n"
+            "• std: Standard deviation (highlights changing regions)\n"
+            "• frame_N: Use specific frame number"
+        )
+        self.projection_combo.currentTextChanged.connect(self._projection_changed)
+        file_layout.addRow("TIF Projection:", self.projection_combo)
+
+        # Image flip options
+        flip_layout = QtWidgets.QHBoxLayout()
+        self.flip_horizontal_checkbox = QtWidgets.QCheckBox("Flip Horizontal")
+        self.flip_horizontal_checkbox.setToolTip("Mirror image left-right")
+        self.flip_horizontal_checkbox.toggled.connect(self._flip_options_changed)
+        flip_layout.addWidget(self.flip_horizontal_checkbox)
+
+        self.flip_vertical_checkbox = QtWidgets.QCheckBox("Flip Vertical")
+        self.flip_vertical_checkbox.setToolTip("Mirror image top-bottom")
+        self.flip_vertical_checkbox.toggled.connect(self._flip_options_changed)
+        flip_layout.addWidget(self.flip_vertical_checkbox)
+        flip_layout.addStretch()
+
+        file_layout.addRow("Image Flip:", flip_layout)
+
         self.segmentation_path_label = QtWidgets.QLabel("No segmentation file selected")
         self.segmentation_path_label.setStyleSheet("QLabel { color: gray; }")
         browse_seg_button = QtWidgets.QPushButton("Browse…")
@@ -57,7 +96,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         seg_layout = QtWidgets.QHBoxLayout()
         seg_layout.addWidget(self.segmentation_path_label, stretch=1)
         seg_layout.addWidget(browse_seg_button)
-        file_layout.addRow("Segmentation CSV:", seg_layout)
+        file_layout.addRow("Segmentation CSV/NPY:", seg_layout)
 
         layout.addWidget(file_group)
 
@@ -119,7 +158,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
     def _browse_segmentation_file(self) -> None:
         filename, _ = getopenfilename(
-            self, "Select segmentation CSV file", "", "CSV files (*.csv);;All files (*)"
+            self,
+            "Select segmentation file",
+            "",
+            "Segmentation files (*.csv *.npy);;CSV files (*.csv);;NumPy files (*.npy);;All files (*)",
         )
         if filename:
             self._load_segmentation_file(filename)
@@ -130,7 +172,13 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.image_path_label.setText(self.image_path.name)
             self.image_path_label.setStyleSheet("QLabel { color: black; }")
 
-            self.importer.load_image_file(filename)
+            projection_method = self.projection_combo.currentText()
+            flip_horizontal = self.flip_horizontal_checkbox.isChecked()
+            flip_vertical = self.flip_vertical_checkbox.isChecked()
+
+            self.importer.load_image_file(
+                filename, projection_method, flip_horizontal, flip_vertical
+            )
             self._check_files_loaded()
         except Exception as exc:
             self.logger.exception("Error loading image file")
@@ -283,6 +331,50 @@ class CellposeImportDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.critical(
                 self, "Import Error", f"Error importing Cellpose data:\n{exc}"
             )
+
+    def _projection_changed(self) -> None:
+        """Reload image with new projection method when user changes selection."""
+        if self.image_path is not None:
+            try:
+                projection_method = self.projection_combo.currentText()
+                flip_horizontal = self.flip_horizontal_checkbox.isChecked()
+                flip_vertical = self.flip_vertical_checkbox.isChecked()
+
+                self.importer.load_image_file(
+                    str(self.image_path),
+                    projection_method,
+                    flip_horizontal,
+                    flip_vertical,
+                )
+                self._check_files_loaded()
+            except Exception as exc:
+                self.logger.exception("Error reloading image with new projection")
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Projection Error",
+                    f"Could not apply {projection_method} projection:\n{exc}",
+                )
+
+    def _flip_options_changed(self) -> None:
+        """Reload image when flip options change."""
+        if self.image_path is not None:
+            try:
+                projection_method = self.projection_combo.currentText()
+                flip_horizontal = self.flip_horizontal_checkbox.isChecked()
+                flip_vertical = self.flip_vertical_checkbox.isChecked()
+
+                self.importer.load_image_file(
+                    str(self.image_path),
+                    projection_method,
+                    flip_horizontal,
+                    flip_vertical,
+                )
+                self._check_files_loaded()
+            except Exception as exc:
+                self.logger.exception("Error reloading image with flip options")
+                QtWidgets.QMessageBox.warning(
+                    self, "Transform Error", f"Could not apply image transforms:\n{exc}"
+                )
 
     def get_imported_data(self) -> CellposeImportResult | None:
         """Return the last successfully imported data payload."""
