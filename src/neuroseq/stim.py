@@ -20,7 +20,7 @@ class StimArray:
     Attributes:
         name (str): The name of the data set.
         stim_type (StimType): The type of the stimuli (Excitation, Inhibition, External).
-        values (np.ndarray): A 2D array of stimuli values where the first index is the neuron index and the second index is the time index.
+        values (np.ndarray): A 2D array of stimuli values where the first index is the time index and the second index is the neuron index.
         units (str): The unit of the stimuli (e.g., 'mV', 'pA').
         dt (float): The time step in seconds between consecutive timestamps.
     """

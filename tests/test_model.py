@@ -16,7 +16,7 @@ from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
 
-def _make_experimental_data(n_neurons=12, dt=0.01) -> list[TraceData | SpikeData]:
+def _make_experimental_data(n_neurons=12, dt=0.1) -> list[TraceData | SpikeData]:
     trace_data = TraceData(
         name="test_trace", traces=np.random.rand(n_neurons, 37), units="mV", dt=dt
     )
@@ -41,6 +41,7 @@ def test_add_experimental_data_overwrite() -> None:
     assert isinstance(model.experiments["test_experiment"][1], SpikeData)
     assert model.experiments["test_experiment"][1].spike_indices.shape == (3,)
     assert model.experiments["test_experiment"][1].spike_times.shape == (3,)
+    assert model.max_time_secs == pytest.approx(3.7, abs=0.01)
 
     model.add_experimental_data(
         "test_experiment", _make_experimental_data(), append=False
@@ -53,6 +54,7 @@ def test_add_experimental_data_overwrite() -> None:
     assert isinstance(model.experiments["test_experiment"][1], SpikeData)
     assert model.experiments["test_experiment"][1].spike_indices.shape == (3,)
     assert model.experiments["test_experiment"][1].spike_times.shape == (3,)
+    assert model.max_time_secs == pytest.approx(3.7, abs=0.01)
 
 
 def test_add_experimental_data_append() -> None:
@@ -68,6 +70,7 @@ def test_add_experimental_data_append() -> None:
     assert isinstance(model.experiments["test_experiment"][1], SpikeData)
     assert model.experiments["test_experiment"][1].spike_indices.shape == (3,)
     assert model.experiments["test_experiment"][1].spike_times.shape == (3,)
+    assert model.max_time_secs == pytest.approx(3.7, abs=0.01)
 
     model.add_experimental_data(
         "test_experiment", _make_experimental_data(), append=True
@@ -80,6 +83,7 @@ def test_add_experimental_data_append() -> None:
     assert isinstance(model.experiments["test_experiment"][1], SpikeData)
     assert model.experiments["test_experiment"][1].spike_indices.shape == (6,)
     assert model.experiments["test_experiment"][1].spike_times.shape == (6,)
+    assert model.max_time_secs == pytest.approx(7.4, abs=0.01)
 
     model.add_experimental_data(
         "test_experiment", _make_experimental_data(), append=True
@@ -92,6 +96,7 @@ def test_add_experimental_data_append() -> None:
     assert isinstance(model.experiments["test_experiment"][1], SpikeData)
     assert model.experiments["test_experiment"][1].spike_indices.shape == (9,)
     assert model.experiments["test_experiment"][1].spike_times.shape == (9,)
+    assert model.max_time_secs == pytest.approx(11.1, abs=0.01)
 
     model.add_experimental_data(
         "test_experiment", _make_experimental_data(), append=False
@@ -104,6 +109,7 @@ def test_add_experimental_data_append() -> None:
     assert isinstance(model.experiments["test_experiment"][1], SpikeData)
     assert model.experiments["test_experiment"][1].spike_indices.shape == (3,)
     assert model.experiments["test_experiment"][1].spike_times.shape == (3,)
+    assert model.max_time_secs == pytest.approx(3.7, abs=0.01)
 
 
 def test_add_experimental_data_append_invalid() -> None:
@@ -357,3 +363,47 @@ def test_stim_array_neuron_number(mfx_ornstein: Model) -> None:
     new_stim_array = mfx_ornstein.stim_arrays["stim"]
     assert new_stim_array.values.shape == (100, 3)
     assert np.allclose(new_stim_array.values[0:100, 0:3], arr[0:100, 0:3])
+
+
+def test_stim_array_properties() -> None:
+    arr = np.random.rand(1000, 30)
+    model = default_model()
+    model.stim_arrays["stim"] = StimArray(
+        "stim", StimType.Excitation, arr, "mS", dt=0.001
+    )
+    assert model.stim_arrays["stim"].values.shape == (1000, 30)
+    model.update_stim_array_properties(
+        "stim", units="nS", dt=0.01, n_neurons=25, stim_type=StimType.Inhibition
+    )
+    updated_stim_array = model.stim_arrays["stim"]
+    assert updated_stim_array.units == "nS"
+    assert updated_stim_array.dt == pytest.approx(0.01)
+    assert updated_stim_array.values.shape == (1000, 25)
+    assert updated_stim_array.stim_type == StimType.Inhibition
+    model.update_stim_array_properties(
+        "stim", units="nS", dt=0.001, n_neurons=44, stim_type=StimType.External
+    )
+    updated_stim_array = model.stim_arrays["stim"]
+    assert updated_stim_array.units == "nS"
+    assert updated_stim_array.dt == pytest.approx(0.001)
+    assert updated_stim_array.values.shape == (1000, 44)
+    assert updated_stim_array.stim_type == StimType.External
+
+
+def test_stim_array_rename() -> None:
+    arr = np.random.rand(1000, 30)
+    model = Model()
+    model.stim_arrays["stim"] = StimArray(
+        "stim", StimType.Excitation, arr, "mS", dt=0.001
+    )
+    model.rename_stim_array("stim", "stim2")
+    assert len(model.stim_arrays) == 1
+    assert "stim" not in model.stim_arrays
+    updated_stim_array = model.stim_arrays["stim2"]
+    assert updated_stim_array.units == "mS"
+    assert updated_stim_array.dt == pytest.approx(0.001)
+    assert updated_stim_array.values.shape == (1000, 30)
+    assert updated_stim_array.stim_type == StimType.Excitation
+    model.delete_stim_array("stim2")
+    assert "stim2" not in model.stim_arrays
+    assert len(model.stim_arrays) == 0

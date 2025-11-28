@@ -16,8 +16,10 @@ from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomControlle
 from neuroseq.model import Model
 from neuroseq.stim import DrawStim
 from neuroseq.stim import DrawStimType
+from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.stim_array_modifier import StimArrayModifier
+from neuroseq.stim_dialog import EditStimDialog
 from neuroseq.stim_intensity_dialog import StimIntensityDialog
 from neuroseq.stim_widget import StimWidget
 from neuroseq.utils import InteractMode
@@ -106,7 +108,9 @@ class StimEditor(QtWidgets.QWidget):
         self.stim_widget.escape_pressed.connect(self.cancel_paste_selected_stim)
         self.resize(800, 600)
 
-    def set_model(self, model: Model, keep_undo_history=False) -> None:
+    def set_model(
+        self, model: Model, keep_undo_history=False, stim_to_select=""
+    ) -> None:
         self.model = model
         if self.current_stim_modifier is not None and keep_undo_history:
             for k in self.stims_dict:
@@ -133,7 +137,10 @@ class StimEditor(QtWidgets.QWidget):
             self.current_stim_modifier = None
             return
         self.cmb_stim.addItems(list(self.stims_dict.keys()))
-        self.cmb_stim.setCurrentIndex(0)
+        if stim_to_select in self.stims_dict:
+            self.cmb_stim.setCurrentText(stim_to_select)
+        else:
+            self.cmb_stim.setCurrentIndex(0)
         self.select_stim(self.cmb_stim.currentText())
 
     def update_stim_values_dict(self, stims_values_dict: dict[str, np.ndarray]) -> None:
@@ -593,6 +600,76 @@ class StimEditor(QtWidgets.QWidget):
             and time_slice.stop <= self.stim_widget.n_timestamps
         )
 
+    def create_stim_array(self):
+        stim_type = StimType.Excitation
+        n_neurons = 10
+        units = "nS"
+        dt = 0.001
+        if self.current_stim_modifier is not None:
+            stim_type = self.current_stim_modifier.stim_array.stim_type
+            n_neurons = self.current_stim_modifier.stim_array.values.shape[1]
+            units = self.current_stim_modifier.stim_array.units
+            dt = self.current_stim_modifier.stim_array.dt
+        n_timestamps = int(self.model.max_time_secs / dt)
+        stim_array = StimArray(
+            "new_stim",
+            stim_type,
+            np.zeros((n_timestamps, n_neurons)),
+            units,
+            dt,
+        )
+        dialog = EditStimDialog(
+            stim_array,
+            existing_names=list(self.model.stim_arrays.keys()),
+            parent=self,
+        )
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            self.model.stim_arrays[dialog.name] = StimArray(
+                dialog.name,
+                dialog.stim_type,
+                np.zeros((n_timestamps, dialog.n_neurons)),
+                dialog.units,
+                dialog.dt,
+            )
+            self.set_model(self.model, stim_to_select=dialog.name)
+
+    def edit_stim_array(self):
+        if self.current_stim_modifier is None:
+            return
+        old_name = self.current_stim_modifier.stim_array.name
+        dialog = EditStimDialog(
+            self.current_stim_modifier.stim_array,
+            existing_names=[k for k in self.model.stim_arrays if k != old_name],
+            parent=self,
+        )
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            if dialog.name != old_name:
+                self.model.rename_stim_array(old_name, dialog.name)
+            self.model.update_stim_array_properties(
+                dialog.name,
+                n_neurons=dialog.n_neurons,
+                stim_type=dialog.stim_type,
+                units=dialog.units,
+                dt=dialog.dt,
+            )
+            self.set_model(self.model, stim_to_select=dialog.name)
+
+    def delete_stim_array(self):
+        if self.current_stim_modifier is None:
+            return
+        if (
+            QtWidgets.QMessageBox.question(
+                self,
+                "Delete stim array",
+                f"Are you sure you want to delete stim array '{self.current_stim_modifier.stim_array.name}'? (This action cannot be undone.)",
+                QtWidgets.QMessageBox.StandardButton.Yes
+                | QtWidgets.QMessageBox.StandardButton.No,
+            )
+            == QtWidgets.QMessageBox.StandardButton.Yes
+        ):
+            del self.model.stim_arrays[self.current_stim_modifier.stim_array.name]
+            self.set_model(self.model)
+
     def _add_actions(self, toolbar: QtWidgets.QToolBar, menu: QtWidgets.QMenu) -> None:
         self.action_draw_mode = add_action(
             "Draw mode (1)",
@@ -618,25 +695,29 @@ class StimEditor(QtWidgets.QWidget):
         )
         self.toolbar.addSeparator()
         self.action_undo = add_action(
-            "Undo (Ctrl+Z)",
-            self.undo,
+            "Create stim array",
+            self.create_stim_array,
             menu,
             toolbar,
             self,
-            shortcut="Ctrl+Z",
-            icon=qta.icon("mdi6.undo"),
+            icon=qta.icon("mdi6.text-box-plus"),
         )
-        self.action_undo.setEnabled(False)
-        self.action_redo = add_action(
-            "Redo (Ctrl+Shift+Z)",
-            self.redo,
+        self.action_undo = add_action(
+            "Edit stim array",
+            self.edit_stim_array,
             menu,
             toolbar,
             self,
-            shortcut="Ctrl+Shift+Z",
-            icon=qta.icon("mdi6.redo"),
+            icon=qta.icon("mdi6.text-box-edit"),
         )
-        self.action_redo.setEnabled(False)
+        self.action_undo = add_action(
+            "Delete stim array",
+            self.delete_stim_array,
+            menu,
+            toolbar,
+            self,
+            icon=qta.icon("mdi6.text-box-remove"),
+        )
         add_action(
             "Pad stim array (Ctrl+Shift+Plus)",
             self.pad_stim_array,
@@ -665,6 +746,27 @@ class StimEditor(QtWidgets.QWidget):
             checkable=True,
             is_checked=True,
         )
+        self.toolbar.addSeparator()
+        self.action_undo = add_action(
+            "Undo (Ctrl+Z)",
+            self.undo,
+            menu,
+            toolbar,
+            self,
+            shortcut="Ctrl+Z",
+            icon=qta.icon("mdi6.undo"),
+        )
+        self.action_undo.setEnabled(False)
+        self.action_redo = add_action(
+            "Redo (Ctrl+Shift+Z)",
+            self.redo,
+            menu,
+            toolbar,
+            self,
+            shortcut="Ctrl+Shift+Z",
+            icon=qta.icon("mdi6.redo"),
+        )
+        self.action_redo.setEnabled(False)
         self.toolbar.addSeparator()
         self.actions_draw = []
         self.actions_draw.append(
