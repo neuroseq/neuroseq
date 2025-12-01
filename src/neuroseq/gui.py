@@ -28,6 +28,7 @@ from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.import_dialog import Suite2pImportDialog
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.model_editor import ModelEditorDialog
+from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.save_options_dialog import SaveOptionsDialog
 from neuroseq.spike_widget import SpikeWidget
@@ -581,6 +582,28 @@ class Gui(QtWidgets.QMainWindow):
                 "Cellpose segmentation loaded. Verify colors match traces in the preview and legend.",
             )
 
+    def btn_import_patchclamp_data_clicked(self) -> None:
+        dialog = PatchClampImportDialog(
+            cellpose_import=self.last_cellpose_import, parent=self
+        )
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            if not dialog.imported_data:
+                return
+            try:
+                self.model.add_experimental_data(
+                    dialog.experiment_name, dialog.imported_data, dialog.append_data
+                )
+            except Exception as exc:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Patch clamp import error",
+                    f"Could not import patch clamp data: {exc}",
+                )
+                self.logger.exception(exc)
+                return
+            self.update_model(self.model)
+            self._select_experiment_data(dialog.experiment_name)
+
     def connect_external_simulation_function_with_brian2(self) -> None:
         self._load_external_simulation_function(
             "./external_simulation_example/run_brian2_externally.py"
@@ -770,6 +793,14 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             shortcut=None,
             icon=qta.icon("mdi6.image-edit-outline"),
+        )
+        add_action(
+            "Import &Patch Clamp Data",
+            self.btn_import_patchclamp_data_clicked,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon=qta.icon("mdi6.import"),
         )
         menu.addSeparator()
         add_action(

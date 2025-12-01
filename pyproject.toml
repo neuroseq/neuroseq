@@ -13,6 +13,7 @@ dependencies = [
     "brian2",
     "matplotlib",
     "numpy",
+    "scipy",
     "qtpy",
     "pyside6!=6.9.1",
     "pyqtgraph!=0.14.0",
