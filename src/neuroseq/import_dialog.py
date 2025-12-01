@@ -4,7 +4,7 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
-import numpy as np
+import brian2.numpy_ as np
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
@@ -330,7 +330,7 @@ class Suite2pImportDialog(QtWidgets.QDialog):
         if suffix == ".npy":
             data = np.load(filename)
         elif suffix == ".csv":
-            data = onp.loadtxt(filename, delimiter=",")
+            data = np.loadtxt(filename, delimiter=",")
         else:
             raise ValueError(
                 "Unsupported file type. Please provide a .npy or .csv file."
