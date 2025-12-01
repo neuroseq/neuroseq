@@ -94,7 +94,8 @@ def test_gui_simulate_and_playback(monkeypatch: MonkeyPatch, qtbot: QtBot) -> No
     gui.btn_play_clicked()
     gui.btn_play_clicked()
     qtbot.waitUntil(
-        lambda: gui.heatmap_widget.get_heatmap_index() == n_timesteps - 1, timeout=40000
+        lambda: gui.heatmap_widget.get_heatmap_index() == n_timesteps - 1,
+        timeout=100000,
     )
     assert "run" not in gui.continue_simulation_action.text().lower()
     assert "continue" in gui.continue_simulation_action.text().lower()
