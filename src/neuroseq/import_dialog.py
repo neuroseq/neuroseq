@@ -4,8 +4,7 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
-import brian2.numpy_ as np
-import numpy as onp
+import numpy as np
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
