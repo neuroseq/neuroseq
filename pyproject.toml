@@ -24,7 +24,6 @@ dependencies = [
     "platformdirs",
     "psutil",
     "nvidia-ml-py",
-    "imgui-bundle",
 ]
 dynamic = ["version"]
 

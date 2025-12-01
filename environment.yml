@@ -15,10 +15,9 @@ dependencies:
   - pyparsing !=3.2.4
   - psutil
   - nvidia-ml-py
-  - imgui-bundle
   # test deps
   - pytest
   - pytest-qt
   - pytest-mock
   - pip:
-      - fastplotlib
+      - fastplotlib[imgui]
