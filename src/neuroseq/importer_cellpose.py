@@ -84,38 +84,18 @@ class CellPoseImporter:
     def load_image_file(
         self,
         filename: str | Path,
-        projection_method: str = "mean",
-        flip_horizontal: bool = False,
-        flip_vertical: bool = False,
     ) -> None:
-        """Load PNG or TIFF image file. TIFF stacks use specified projection method."""
+        """load PNG or TIFF image file. TIFF stacks use mean projection."""
         path = Path(filename)
         suffix = path.suffix.lower()
         try:
             with Image.open(path) as pil_image:
                 if suffix in {".tif", ".tiff"}:
-                    self.image_data = self._load_tiff_with_projection(
-                        pil_image, projection_method
-                    )
+                    self.image_data = self._load_mean_tiff(pil_image)
                 else:
                     self.image_data = self._pil_to_rgb_array(pil_image)
 
-            self.image_data = self._apply_image_transforms(
-                self.image_data, flip_horizontal, flip_vertical
-            )
-
-            transform_info = []
-            if flip_horizontal:
-                transform_info.append("horizontal flip")
-            if flip_vertical:
-                transform_info.append("vertical flip")
-            transform_str = (
-                f" with {', '.join(transform_info)}" if transform_info else ""
-            )
-
-            self.logger.info(
-                f"Loaded image using {projection_method} projection{transform_str}: {self.image_data.shape}"
-            )
+            self.logger.info("Loaded image data: %s", self.image_data.shape)
         except Exception as exc:
             self.logger.exception("Error loading image file")
             raise ValueError(f"Could not load {filename}: {exc}") from exc
@@ -127,16 +107,8 @@ class CellPoseImporter:
             image = image.convert("RGB")
         return np.array(image)
 
-    def _load_tiff_with_projection(
-        self, image: Image.Image, method: str = "mean"
-    ) -> np.ndarray:
-        """Load TIFF stack using specified projection method."""
-        valid_methods = ["mean", "median", "max", "std", "frame"]
-        if method not in valid_methods and not method.startswith("frame_"):
-            raise ValueError(
-                f"Projection method must be one of {valid_methods} or 'frame_N'"
-            )
-
+    def _load_mean_tiff(self, image: Image.Image) -> np.ndarray:
+        """Average all frames of a TIFF stack per pixel, then normalize to display range."""
         # Load all frames into memory
         frames = []
         for frame in ImageSequence.Iterator(image):
@@ -155,33 +127,9 @@ class CellPoseImporter:
                 )
 
         frame_stack = np.stack(frames, axis=0)
-
-        if method == "mean":
-            result = np.mean(frame_stack, axis=0)
-        elif method == "median":
-            result = np.median(frame_stack, axis=0)
-        elif method == "max":
-            result = np.max(frame_stack, axis=0)
-        elif method == "std":
-            result = np.std(frame_stack, axis=0)
-        elif method.startswith("frame_"):
-            try:
-                frame_idx = int(method.split("_")[1])
-                if frame_idx < 0 or frame_idx >= len(frames):
-                    raise ValueError(
-                        f"Frame index {frame_idx} out of range [0, {len(frames) - 1}]"
-                    )
-                result = frames[frame_idx]
-            except (ValueError, IndexError):
-                raise ValueError(f"Invalid frame specification: {method}")
-        else:
-            result = np.mean(frame_stack, axis=0)
+        result = np.mean(frame_stack, axis=0)
 
         return self._scale_float_image_to_uint8(result)
-
-    def _load_mean_tiff(self, image: Image.Image) -> np.ndarray:
-        """Average all frames of a TIFF stack per pixel, then normalize to display range."""
-        return self._load_tiff_with_projection(image, "mean")
 
     def _frame_to_rgb_float(self, frame: Image.Image) -> np.ndarray:
         """Return frame data as float32 RGB array preserving raw intensities."""
@@ -203,7 +151,7 @@ class CellPoseImporter:
 
     @staticmethod
     def _scale_float_image_to_uint8(image_array: np.ndarray) -> np.ndarray:
-        """Scale arbitrary float RGB array into uint8 range using min/max normalization."""
+        """Scale arbitray float RGB array into uint8 range using min/max normalization."""
         finite_values = image_array[np.isfinite(image_array)]
         if finite_values.size == 0:
             raise ValueError("Image contains no finite pixels")
@@ -225,10 +173,32 @@ class CellPoseImporter:
         try:
             if path.suffix.lower() == ".npy":
                 loaded = np.load(path, allow_pickle=True)
+
+                # Handle cellpose output format (dict with 'masks' key)
+                if isinstance(loaded, np.ndarray) and loaded.dtype == object:
+                    if loaded.ndim == 0:
+                        dict_data = loaded.item()
+                        if isinstance(dict_data, dict) and "masks" in dict_data:
+                            self.segmentation_data = np.asarray(
+                                dict_data["masks"], dtype=np.int32
+                            )
+                            self.logger.info(
+                                "Loaded cellpose segmentation with masks from dict format: %s",
+                                self.segmentation_data.shape,
+                            )
+                        else:
+                            raise ValueError("Dict format but no 'masks' key found")
+                    else:
+                        # Array of dicts (stat.npy format) - not supported for segmentation
+                        raise ValueError(
+                            "Array of dict format not supported for segmentation"
+                        )
+                else:
+                    # Standard numpy array format
+                    self.segmentation_data = np.asarray(loaded, dtype=np.int32)
             else:
                 loaded = np.loadtxt(path, delimiter=",", dtype=np.int32)
-
-            self.segmentation_data = np.asarray(loaded, dtype=np.int32)
+                self.segmentation_data = np.asarray(loaded, dtype=np.int32)
 
             if self.segmentation_data.ndim != 2:
                 raise ValueError(
@@ -256,7 +226,7 @@ class CellPoseImporter:
         self.spike_data = spike_data
 
     def validate_dimensions(self) -> None:
-        """Check if image and segmentation dimensions match."""
+        """check if image and segmentation dimensions match."""
         if self.image_data is None or self.segmentation_data is None:
             raise ValueError("Both image and segmentation data must be loaded first")
 
@@ -370,21 +340,6 @@ class CellPoseImporter:
             )
         if trace_data.dt <= 0:
             raise ValueError("TraceData.dt must be positive")
-
-    @staticmethod
-    def _apply_image_transforms(
-        image: np.ndarray, flip_horizontal: bool, flip_vertical: bool
-    ) -> np.ndarray:
-        """Apply flip transforms to image data."""
-        result = image.copy()
-
-        if flip_horizontal:
-            result = np.fliplr(result)
-
-        if flip_vertical:
-            result = np.flipud(result)
-
-        return result
 
     @staticmethod
     def _validate_spike_data(spike_data: SpikeData) -> None:

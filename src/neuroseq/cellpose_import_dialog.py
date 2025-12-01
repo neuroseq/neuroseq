@@ -3,13 +3,12 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from qtpy import QtCore
-from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
-from neuroseq.importer_cell2pose import CellPoseImporter
-from neuroseq.importer_cell2pose import CellposeImportResult
+from neuroseq.cell_overlay_widget import CellOverlayWidget
+from neuroseq.importer_cellpose import CellPoseImporter
+from neuroseq.importer_cellpose import CellposeImportResult
 
 
 class CellposeImportDialog(QtWidgets.QDialog):
@@ -22,6 +21,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.image_path: Path | None = None
         self.segmentation_path: Path | None = None
         self.importer = CellPoseImporter()
+        self.overlay_widget = CellOverlayWidget("Color-coded Preview")
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -50,45 +50,6 @@ class CellposeImportDialog(QtWidgets.QDialog):
         image_layout.addWidget(browse_image_button)
         file_layout.addRow("Image (PNG/TIF):", image_layout)
 
-        self.projection_combo = QtWidgets.QComboBox()
-        self.projection_combo.addItems(
-            [
-                "mean",
-                "median",
-                "max",
-                "std",
-                "frame_0",
-                "frame_100",
-                "frame_450",
-                "frame_899",
-            ]
-        )
-        self.projection_combo.setToolTip(
-            "Projection method for TIFF stacks:\n"
-            "• mean: Average all frames (default, can be blurry)\n"
-            "• median: Median across frames (robust to noise/outliers)\n"
-            "• max: Maximum intensity projection\n"
-            "• std: Standard deviation (highlights changing regions)\n"
-            "• frame_N: Use specific frame number"
-        )
-        self.projection_combo.currentTextChanged.connect(self._projection_changed)
-        file_layout.addRow("TIF Projection:", self.projection_combo)
-
-        # Image flip options
-        flip_layout = QtWidgets.QHBoxLayout()
-        self.flip_horizontal_checkbox = QtWidgets.QCheckBox("Flip Horizontal")
-        self.flip_horizontal_checkbox.setToolTip("Mirror image left-right")
-        self.flip_horizontal_checkbox.toggled.connect(self._flip_options_changed)
-        flip_layout.addWidget(self.flip_horizontal_checkbox)
-
-        self.flip_vertical_checkbox = QtWidgets.QCheckBox("Flip Vertical")
-        self.flip_vertical_checkbox.setToolTip("Mirror image top-bottom")
-        self.flip_vertical_checkbox.toggled.connect(self._flip_options_changed)
-        flip_layout.addWidget(self.flip_vertical_checkbox)
-        flip_layout.addStretch()
-
-        file_layout.addRow("Image Flip:", flip_layout)
-
         self.segmentation_path_label = QtWidgets.QLabel("No segmentation file selected")
         self.segmentation_path_label.setStyleSheet("QLabel { color: gray; }")
         browse_seg_button = QtWidgets.QPushButton("Browse…")
@@ -100,16 +61,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         layout.addWidget(file_group)
 
-        preview_group = QtWidgets.QGroupBox("Color-coded Preview")
-        preview_layout = QtWidgets.QVBoxLayout(preview_group)
-
-        self.preview_label = QtWidgets.QLabel("Load files to see overlay preview")
-        self.preview_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.preview_label.setMinimumHeight(200)
-        self.preview_label.setStyleSheet("QLabel { border: 1px solid gray; }")
-        preview_layout.addWidget(self.preview_label)
-
-        layout.addWidget(preview_group)
+        layout.addWidget(self.overlay_widget)
 
         info_group = QtWidgets.QGroupBox("Data Information")
         info_layout = QtWidgets.QVBoxLayout(info_group)
@@ -120,19 +72,6 @@ class CellposeImportDialog(QtWidgets.QDialog):
         info_layout.addWidget(self.info_text)
 
         layout.addWidget(info_group)
-
-        legend_group = QtWidgets.QGroupBox("Cell Legend")
-        legend_layout = QtWidgets.QVBoxLayout(legend_group)
-
-        self.legend_scroll = QtWidgets.QScrollArea()
-        self.legend_scroll.setWidgetResizable(True)
-        self.legend_scroll.setMaximumHeight(120)
-        self.legend_widget = QtWidgets.QWidget()
-        self.legend_layout = QtWidgets.QGridLayout(self.legend_widget)
-        self.legend_scroll.setWidget(self.legend_widget)
-        legend_layout.addWidget(self.legend_scroll)
-
-        layout.addWidget(legend_group)
 
         button_layout = QtWidgets.QHBoxLayout()
         self.import_button = QtWidgets.QPushButton("Import")
@@ -172,13 +111,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.image_path_label.setText(self.image_path.name)
             self.image_path_label.setStyleSheet("QLabel { color: black; }")
 
-            projection_method = self.projection_combo.currentText()
-            flip_horizontal = self.flip_horizontal_checkbox.isChecked()
-            flip_vertical = self.flip_vertical_checkbox.isChecked()
-
-            self.importer.load_image_file(
-                filename, projection_method, flip_horizontal, flip_vertical
-            )
+            self.importer.load_image_file(filename)
             self._check_files_loaded()
         except Exception as exc:
             self.logger.exception("Error loading image file")
@@ -209,38 +142,15 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.importer.validate_dimensions()
             self.importer.generate_overlay()
             self.import_button.setEnabled(True)
-            self._display_overlay_preview()
+            self.overlay_widget.set_overlay(
+                self.importer.overlay_image,
+                self.importer.segmentation_data,
+                self.importer.get_legend_data(),
+            )
             self._update_info()
         except ValueError as exc:
             QtWidgets.QMessageBox.critical(self, "Dimension Mismatch", str(exc))
             self.import_button.setEnabled(False)
-
-    def _display_overlay_preview(self) -> None:
-        if self.importer.overlay_image is None:
-            return
-
-        # Convert to QPixmap for display
-        height, width, channel = self.importer.overlay_image.shape
-        bytes_per_line = 3 * width
-        q_image = QtGui.QImage(
-            self.importer.overlay_image.data,
-            width,
-            height,
-            bytes_per_line,
-            QtGui.QImage.Format.Format_RGB888,
-        )
-
-        # Scale to fit preview label
-        label_size = self.preview_label.size()
-        pixmap = QtGui.QPixmap.fromImage(q_image)
-        scaled_pixmap = pixmap.scaled(
-            label_size,
-            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-            QtCore.Qt.TransformationMode.SmoothTransformation,
-        )
-
-        self.preview_label.setPixmap(scaled_pixmap)
-        self._update_legend()
 
     def _update_info(self) -> None:
         info = self.importer.get_info()
@@ -261,47 +171,6 @@ class CellposeImportDialog(QtWidgets.QDialog):
             info_lines.append(f"Neuron ID range: {min_id}-{max_id}")
 
         self.info_text.setPlainText("\n".join(info_lines))
-
-    def _update_legend(self) -> None:
-        """Update the cell legend with colored squares for each cell ID."""
-        # Clear existing legend
-        for i in reversed(range(self.legend_layout.count())):
-            child = self.legend_layout.itemAt(i).widget()
-            if child:
-                child.setParent(None)
-
-        legend_data = self.importer.get_legend_data()
-        if not legend_data:
-            return
-
-        # Add legend entries in a grid (4 columns)
-        cols = 4
-        for i, (cell_id, rgb) in enumerate(legend_data):
-            row = i // cols
-            col = i % cols
-
-            # Create horizontal layout for this legend item
-            item_widget = QtWidgets.QWidget()
-            item_layout = QtWidgets.QHBoxLayout(item_widget)
-            item_layout.setContentsMargins(2, 2, 2, 2)
-            item_layout.setSpacing(4)
-
-            # Create colored square (16x16 px)
-            color_label = QtWidgets.QLabel()
-            color_label.setFixedSize(16, 16)
-            color_label.setStyleSheet(
-                f"QLabel {{ background-color: rgb({rgb[0]}, {rgb[1]}, {rgb[2]}); border: 1px solid black; }}"
-            )
-
-            # Create cell ID label
-            text_label = QtWidgets.QLabel(f"Cell {cell_id}")
-            text_label.setFixedHeight(16)
-
-            item_layout.addWidget(color_label)
-            item_layout.addWidget(text_label)
-            item_layout.addStretch()
-
-            self.legend_layout.addWidget(item_widget, row, col)
 
     def _import_data(self) -> None:
         if (
@@ -331,50 +200,6 @@ class CellposeImportDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.critical(
                 self, "Import Error", f"Error importing Cellpose data:\n{exc}"
             )
-
-    def _projection_changed(self) -> None:
-        """Reload image with new projection method when user changes selection."""
-        if self.image_path is not None:
-            try:
-                projection_method = self.projection_combo.currentText()
-                flip_horizontal = self.flip_horizontal_checkbox.isChecked()
-                flip_vertical = self.flip_vertical_checkbox.isChecked()
-
-                self.importer.load_image_file(
-                    str(self.image_path),
-                    projection_method,
-                    flip_horizontal,
-                    flip_vertical,
-                )
-                self._check_files_loaded()
-            except Exception as exc:
-                self.logger.exception("Error reloading image with new projection")
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "Projection Error",
-                    f"Could not apply {projection_method} projection:\n{exc}",
-                )
-
-    def _flip_options_changed(self) -> None:
-        """Reload image when flip options change."""
-        if self.image_path is not None:
-            try:
-                projection_method = self.projection_combo.currentText()
-                flip_horizontal = self.flip_horizontal_checkbox.isChecked()
-                flip_vertical = self.flip_vertical_checkbox.isChecked()
-
-                self.importer.load_image_file(
-                    str(self.image_path),
-                    projection_method,
-                    flip_horizontal,
-                    flip_vertical,
-                )
-                self._check_files_loaded()
-            except Exception as exc:
-                self.logger.exception("Error reloading image with flip options")
-                QtWidgets.QMessageBox.warning(
-                    self, "Transform Error", f"Could not apply image transforms:\n{exc}"
-                )
 
     def get_imported_data(self) -> CellposeImportResult | None:
         """Return the last successfully imported data payload."""

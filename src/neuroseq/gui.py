@@ -14,19 +14,19 @@ from qtpy.compat import getsavefilename
 
 from neuroseq import __version__
 from neuroseq.b2_model import B2Model
+from neuroseq.cellpose_import_dialog import CellposeImportDialog
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.custom_analysis_widget import CustomAnalysisWindow
 from neuroseq.data_widget import DataWidget
-from neuroseq.cellpose_import_dialog import CellposeImportDialog
-from neuroseq.importer_cell2pose import CellposeImportResult
 from neuroseq.experiment import SpikeData
 from neuroseq.experiment import SynapseData
 from neuroseq.experiment import TraceData
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.import_dialog import Suite2pImportDialog
+from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.save_options_dialog import SaveOptionsDialog
