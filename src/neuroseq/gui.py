@@ -33,6 +33,8 @@ from neuroseq.save_options import SaveOptionsDialog
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim_console import StimConsole
 from neuroseq.stim_editor import StimEditor
+from neuroseq.time_slider_widget import TimeSliderWidget
+from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.trace_widget import TraceWidget
 from neuroseq.utils import add_action
 from neuroseq.utils import add_items_to_combobox
@@ -95,6 +97,18 @@ class Gui(QtWidgets.QMainWindow):
         split_vertical.addWidget(self.spike_widget)
         self.data_widget = DataWidget(self.controller)
         split_vertical.addWidget(self.data_widget)
+        self.time_slider = TimeSliderWidget(self)
+        self.plot_widgets: list[TimeseriesWidget | HeatmapWidget] = [
+            self.stim_editor.stim_widget,
+            self.trace_widget,
+            self.spike_widget,
+            self.data_widget.trace_widget,
+            self.data_widget.spike_widget,
+            self.heatmap_widget,
+        ]
+        for widget in self.plot_widgets:
+            self.time_slider.connect_widget(widget)
+        split_vertical.addWidget(self.time_slider)
         self.data_widget.setVisible(False)
         # heatmap / custom analysis widget / console
         split_vertical.addWidget(split_left_right)
@@ -104,17 +118,6 @@ class Gui(QtWidgets.QMainWindow):
         self.showMaximized()
         self._create_progressbar()
         # connect widgets
-        self.heatmap_widget.connect_timeseries_widget_timeline(
-            self.stim_editor.stim_widget
-        )
-        self.stim_editor.stim_widget.connect_heatmap_widget(self.heatmap_widget)
-        self.heatmap_widget.connect_timeseries_widget_timeline(self.trace_widget)
-        self.trace_widget.connect_heatmap_widget(self.heatmap_widget)
-        # re-enable when fastplotlib scatter plots support timeline
-        # self.heatmap_widget.connect_timeseries_widget_timeline(
-        #     self.spike_widget
-        # )
-        self.spike_widget.connect_heatmap_widget(self.heatmap_widget)
         self.stim_console.sig_stims_values_dict_updated.connect(
             self.stim_editor.update_stim_values_dict
         )
@@ -130,10 +133,14 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_synapse.currentTextChanged.connect(self.set_synapse)
         self.cmb_spike.currentTextChanged.connect(self.set_spike)
         self.cmb_data.currentTextChanged.connect(self.set_data)
+        self.stim_editor.max_time_modified.connect(self.update_slider_time_max)
         if filename is not None:
             self.load_model(filename)
         else:
             self.load_model(default_model())
+
+    def update_slider_time_max(self) -> None:
+        self.time_slider.set_max_time_secs(self.model.max_time_secs)
 
     def _custom_analysis(
         self,
@@ -165,6 +172,7 @@ class Gui(QtWidgets.QMainWindow):
             self.continue_simulation_action.setText("&Continue simulation")
         else:
             self.continue_simulation_action.setText("&Run simulation")
+        self.update_slider_time_max()
         self.stim_editor.set_model(self.model, keep_undo_history)
         self._update_combo_boxes()
 
@@ -320,6 +328,7 @@ class Gui(QtWidgets.QMainWindow):
         self.stim_editor.set_model(self.model)
         if self.model is not None:
             self.stim_console.set_stims(self.stim_editor.stims_dict)
+        self.update_slider_time_max()
         self._update_combo_boxes()
 
     @with_wait_cursor
@@ -463,23 +472,13 @@ class Gui(QtWidgets.QMainWindow):
             return
         self._do_external_simulation(simulation_time)
 
-    def btn_skip_to_start_clicked(self) -> None:
-        self.heatmap_widget.set_current_index(0)
-
-    def btn_stop_clicked(self) -> None:
-        self.heatmap_widget.stop()
-        self.btn_skip_to_start_clicked()
-
-    def btn_play_clicked(self) -> None:
-        self.heatmap_widget.toggle_pause()
-
     def btn_playback_speed_clicked(self) -> None:
         new_speed, ok = QtWidgets.QInputDialog.getText(
             self,
             "Set playback speed",
             "Playback speed (1.0=realtime, 0.5=half speed, 2.0=double speed, etc.)",
             QtWidgets.QLineEdit.EchoMode.Normal,
-            f"{self.heatmap_widget.relative_playback_speed}",
+            f"{self.time_slider.relative_playback_speed}",
         )
         if not ok:
             return
@@ -487,7 +486,7 @@ class Gui(QtWidgets.QMainWindow):
             new_speed_as_float = float(new_speed)
             if new_speed_as_float <= 0:
                 raise ValueError("Playback speed must be a positive number")
-            self.heatmap_widget.set_relative_playback_speed(new_speed_as_float)
+            self.time_slider.set_relative_playback_speed(new_speed_as_float)
         except ValueError:
             QtWidgets.QMessageBox.critical(
                 self,
@@ -495,9 +494,6 @@ class Gui(QtWidgets.QMainWindow):
                 f"Could not parse playback speed '{new_speed}' as a valid positive number",
             )
             return
-
-    def btn_skip_to_end_clicked(self) -> None:
-        self.heatmap_widget.set_current_index(self.heatmap_widget.nframes() - 1)
 
     def toggle_selection_text(self):
         for widget in [
@@ -799,7 +795,7 @@ class Gui(QtWidgets.QMainWindow):
         )
         add_action(
             "&Skip to start",
-            self.btn_skip_to_start_clicked,
+            self.time_slider.skip_to_start,
             menu,
             toolbar,
             shortcut=None,
@@ -807,7 +803,7 @@ class Gui(QtWidgets.QMainWindow):
         )
         add_action(
             "&Stop",
-            self.btn_stop_clicked,
+            self.time_slider.stop,
             menu,
             toolbar,
             shortcut=None,
@@ -815,7 +811,7 @@ class Gui(QtWidgets.QMainWindow):
         )
         add_action(
             "&Play / Pause",
-            self.btn_play_clicked,
+            self.time_slider.toggle_pause,
             menu,
             toolbar,
             shortcut="Space",
@@ -823,7 +819,7 @@ class Gui(QtWidgets.QMainWindow):
         )
         add_action(
             "&Skip to end",
-            self.btn_skip_to_end_clicked,
+            self.time_slider.skip_to_end,
             menu,
             toolbar,
             shortcut=None,
@@ -935,10 +931,6 @@ class Gui(QtWidgets.QMainWindow):
 
     def closeEvent(self, event):
         # explicitly close all fastplotlib figures to avoid renderer trying to access them after they have been destroyed
-        self.spike_widget.close()
-        self.trace_widget.close()
-        self.stim_editor.stim_widget.close()
-        self.data_widget.trace_widget.close()
-        self.data_widget.spike_widget.close()
-        self.heatmap_widget.close()
+        for widget in self.plot_widgets:
+            widget.close()
         super().closeEvent(event)
