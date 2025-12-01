@@ -149,24 +149,6 @@ def jet_colors_for_neurons(neuron_indices: np.ndarray | None) -> np.ndarray:
     return colors
 
 
-_JET_LUT: np.ndarray | None = None
-_JET_TRANSFORM_TABLE: np.ndarray | None = None
-
-
-def _jet_transform_table() -> np.ndarray:
-    """Precompute normalized transform values for a fixed colormap domain matching the jet LUT length (256)."""
-    global _JET_TRANSFORM_TABLE
-    if _JET_TRANSFORM_TABLE is None:
-        table_size = 256
-        base_indices = np.arange(table_size, dtype=np.int32)
-        transform = cmap_transform_neuron_indices(table_size, base_indices).astype(
-            np.float32
-        )
-        normalized = transform / float(max(1, table_size - 1))
-        _JET_TRANSFORM_TABLE = np.clip(normalized, 0.0, 1.0)
-    return _JET_TRANSFORM_TABLE
-
-
 def init_brian2_logging(log_level: str = "ERROR") -> None:
     b2.prefs["logging"]["console_log_level"] = log_level
     b2.prefs["logging"]["display_brian_error_message"] = False
