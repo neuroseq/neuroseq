@@ -7,8 +7,8 @@ from pytestqt.qtbot import QtBot
 from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.custom_analysis_widget import CustomAnalysisWindow
-from neuroseq.experiment import SpikeData
-from neuroseq.experiment import TraceData
+from neuroseq.data import SpikeData
+from neuroseq.data import TraceData
 
 gui_delay_in_ms = 50
 

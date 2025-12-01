@@ -8,8 +8,8 @@ from pyqtgraph.console.repl_widget import ReplWidget
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from neuroseq.b2_model import B2Model
-from neuroseq.timed_array_modifer import TimedArrayModifier
+from neuroseq.model import Model
+from neuroseq.stim_array_modifier import StimArrayModifier
 
 
 class StimConsole(ReplWidget):
@@ -50,12 +50,12 @@ class StimConsole(ReplWidget):
             "\n\nNumpy is available as np, and indentation can be done with a single space.\n\n\n"
         )
 
-    def set_stims(self, stims: dict[str, TimedArrayModifier]) -> None:
+    def set_stims(self, stims: dict[str, StimArrayModifier]) -> None:
         self.namespace_dict["stims"] = {
-            k: v.timed_array.values.copy() for k, v in stims.items()
+            k: v.stim_array.values.copy() for k, v in stims.items()
         }
 
-    def set_model(self, model: B2Model) -> None:
+    def set_model(self, model: Model) -> None:
         self.namespace_dict["model"] = model
 
     def namespace(self) -> dict[str, Any]:

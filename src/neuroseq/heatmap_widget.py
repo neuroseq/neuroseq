@@ -8,7 +8,7 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 
-from neuroseq.experiment import SynapseData
+from neuroseq.data import SynapseData
 
 
 class HeatmapWidget(QtWidgets.QWidget):

@@ -12,9 +12,9 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.custom_analysis_widget import CustomAnalysisType
-from neuroseq.experiment import SpikeData
-from neuroseq.experiment import SynapseData
-from neuroseq.experiment import TraceData
+from neuroseq.data import SpikeData
+from neuroseq.data import SynapseData
+from neuroseq.data import TraceData
 from neuroseq.gridlines import GridLines
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.region_of_interest import RegionOfInterest

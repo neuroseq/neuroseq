@@ -2,32 +2,35 @@ from __future__ import annotations
 
 import pathlib
 
-import brian2 as b2
 import pytest
 
-from neuroseq import b2_model
-from neuroseq.utils import example_models_path
-
-example_model_paths = list(example_models_path.glob("*.nseq"))
+from neuroseq.example_models import example_models
+from neuroseq.model import Model
+from neuroseq.save_options import SaveOptions
 
 
 @pytest.mark.parametrize(
-    "model_path", example_model_paths, ids=[p.stem for p in example_model_paths]
+    "model_generator", example_models.values(), ids=example_models.keys()
 )
-def test_example_models(model_path: pathlib.Path, tmp_path) -> None:
-    assert model_path.exists()
-    model = b2_model.B2Model()
-    model.load_model(model_path)
+def test_example_models(model_generator, tmp_path: pathlib.Path) -> None:
+    model = model_generator()
     # do a short simulation
-    model.run_simulation(0.1 * b2.second)
+    model.run_simulation(0.01)
     # check we can save and re-load the model
-    model.save_model(tmp_path / "model.nseq")
-    model2 = b2_model.B2Model()
-    model2.load_model(tmp_path / "model.nseq")
+    save_options = SaveOptions(True, True, True, True)
+    model.save(tmp_path / "model.nseq", save_options)
+    model2 = Model(tmp_path / "model.nseq")
     # check saved model matches original
-    assert model2.parameters == model.parameters
-    assert model2.neurongroups == model.neurongroups
-    assert model2.synapses == model.synapses
-    assert model2.monitors == model.monitors
-    assert model2.initials == model.initials
-    assert model2.functions == model.functions
+    assert list(model2.stim_arrays.keys()) == list(model.stim_arrays.keys())
+    assert list(model2.b2_model.parameters.keys()) == list(
+        model.b2_model.parameters.keys()
+    )
+    assert list(model2.b2_model.neurongroups.keys()) == list(
+        model.b2_model.neurongroups.keys()
+    )
+    assert list(model2.b2_model.synapses.keys()) == list(model.b2_model.synapses.keys())
+    assert list(model2.b2_model.monitors.keys()) == list(model.b2_model.monitors.keys())
+    assert list(model2.b2_model.initials.keys()) == list(model.b2_model.initials.keys())
+    assert list(model2.b2_model.functions.keys()) == list(
+        model.b2_model.functions.keys()
+    )

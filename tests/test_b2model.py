@@ -13,21 +13,39 @@ from brian2.tests.utils import assert_allclose
 from pytest import MonkeyPatch
 from pytest_mock import MockerFixture
 
-from neuroseq import b2_model
-from neuroseq.experiment import SpikeData
-from neuroseq.experiment import TraceData
+from neuroseq.b2_model import B2Model
+from neuroseq.model import Model
+from neuroseq.stim import StimArray
 
 
-def test_construction(tmp_path: Path) -> None:
-    model = b2_model.B2Model()
+def test_default_construction() -> None:
+    model = B2Model()
     assert model.parameters == {}
     assert model.network is not None
-    assert model.network.name == "b2Network"
     assert model.synapses == {}
     assert model.monitors == {}
 
 
-def test_define_equation(mfx: b2_model.B2Model) -> None:
+@pytest.fixture()
+def mfx_nmda_as_dict(b2_model_nmda: B2Model) -> dict:
+    b2_model_nmda.define_dt("neurons", 0.1 * b2.ms)
+    b2_model_nmda.define_synapse_dt("S", 0.2 * b2.ms)
+    return b2_model_nmda.to_dict()
+
+
+def test_reconstruct_mfx_nmda_serialized(mfx_nmda_as_dict: dict) -> None:
+    model = B2Model.from_dict(mfx_nmda_as_dict, {})
+    assert "neurons" in model.network.get_states()
+    assert model.network["neurons"].dt == 0.1 * b2.ms
+    assert model.neurongroups["neurons"]["dt"] == 0.1 * b2.ms
+    assert "input_subgroup" in model.network.get_states()
+    assert "S" in model.network.get_states()
+    assert model.network["S"].dt == 0.2 * b2.ms
+    assert model.synapses["S"]["dt"] == 0.2 * b2.ms
+    assert "M" in model.network.get_states()
+
+
+def test_define_equation(mfx: B2Model) -> None:
     assert mfx.neurongroups == {}
 
     mfx.define_equation("P", "dge/dt = -ge*(1./taue) : siemens")
@@ -59,7 +77,7 @@ def test_define_equation(mfx: b2_model.B2Model) -> None:
         mfx.define_equation("P", "-ge*(1./taue) siemens")
 
 
-def test_define_dt(mfx: b2_model.B2Model) -> None:
+def test_define_dt(mfx: B2Model) -> None:
     assert mfx.neurongroups == {}
     standard_dt = b2.defaultclock.dt
 
@@ -76,7 +94,7 @@ def test_define_dt(mfx: b2_model.B2Model) -> None:
     assert mfx.monitors["M"]["dt"].has_same_dimensions(0.01 * b2.second)
 
 
-def test_define_parameter(mfx: b2_model.B2Model) -> None:
+def test_define_parameter(mfx: B2Model) -> None:
     assert mfx.parameters == {}
     mfx.define_parameter("taue", 5 * b2.ms)
     mfx.define_parameter("taui", 10 * b2.ms)
@@ -92,50 +110,50 @@ def test_define_parameter(mfx: b2_model.B2Model) -> None:
     }
 
 
-def test_define_threshold(mfx: b2_model.B2Model) -> None:
+def test_define_threshold(mfx: B2Model) -> None:
     assert mfx.neurongroups == {}
     mfx.define_threshold("P", "v > 10 * mV")
     assert mfx.neurongroups["P"]["th"] == "v > 10 * mV"
 
 
-def test_define_solver_method(mfx: b2_model.B2Model) -> None:
+def test_define_solver_method(mfx: B2Model) -> None:
     assert mfx.neurongroups == {}
     mfx.define_solver_method("P", "euler")
     assert mfx.neurongroups["P"]["method"] == "euler"
 
 
-def test_define_refractory(mfx: b2_model.B2Model) -> None:
+def test_define_refractory(mfx: B2Model) -> None:
     assert mfx.neurongroups == {}
     mfx.define_refractory("P", 5 * b2.ms)
     assert mfx.neurongroups["P"]["refractory"] == 5 * b2.ms
 
 
-def test_define_neuron_number(mfx: b2_model.B2Model) -> None:
+def test_define_neuron_number(mfx: B2Model) -> None:
     assert mfx.neurongroups == {}
     mfx.define_neuronnumber("P", 100)
     assert mfx.neurongroups["P"]["neuronnumber"] == 100
 
 
-def test_assemble_neurongroup_exception(mfx: b2_model.B2Model) -> None:
+def test_assemble_neurongroup_exception(mfx: B2Model) -> None:
     with pytest.raises(RuntimeError, match="Error in assembling neuron group N"):
         mfx._assemble_neurongroup("N")
 
 
-def test_rename_neurongroup(mfx_nmda: b2_model.B2Model) -> None:
-    assert "neurons" in mfx_nmda.neurongroups
-    test_data = deepcopy(mfx_nmda.neurongroups["neurons"])
+def test_rename_neurongroup(b2_model_nmda: B2Model) -> None:
+    assert "neurons" in b2_model_nmda.neurongroups
+    test_data = deepcopy(b2_model_nmda.neurongroups["neurons"])
 
-    mfx_nmda.functions["neurongroups"]["neurons"]["rename"]("renamed")
-    assert "neurons" not in mfx_nmda.neurongroups
-    assert "neurons" not in mfx_nmda.functions["neurongroups"]
+    b2_model_nmda.functions["neurongroups"]["neurons"]["rename"]("renamed")
+    assert "neurons" not in b2_model_nmda.neurongroups
+    assert "neurons" not in b2_model_nmda.functions["neurongroups"]
 
-    assert "renamed" in mfx_nmda.neurongroups
-    assert "renamed" in mfx_nmda.functions["neurongroups"]
+    assert "renamed" in b2_model_nmda.neurongroups
+    assert "renamed" in b2_model_nmda.functions["neurongroups"]
 
-    assert mfx_nmda.neurongroups["renamed"] == test_data
+    assert b2_model_nmda.neurongroups["renamed"] == test_data
 
     assert all(
-        f in mfx_nmda.functions["neurongroups"]["renamed"]
+        f in b2_model_nmda.functions["neurongroups"]["renamed"]
         for f in [
             "rename",
             "delete",
@@ -143,21 +161,21 @@ def test_rename_neurongroup(mfx_nmda: b2_model.B2Model) -> None:
     )
 
 
-def test_rename_synapse(mfx_nmda: b2_model.B2Model) -> None:
-    assert "S" in mfx_nmda.synapses
-    test_data = deepcopy(mfx_nmda.synapses["S"])
+def test_rename_synapse(b2_model_nmda: B2Model) -> None:
+    assert "S" in b2_model_nmda.synapses
+    test_data = deepcopy(b2_model_nmda.synapses["S"])
 
-    mfx_nmda.functions["synapses"]["S"]["rename"]("renamed")
+    b2_model_nmda.functions["synapses"]["S"]["rename"]("renamed")
 
-    assert "S" not in mfx_nmda.synapses
-    assert "S" not in mfx_nmda.functions["synapses"]
+    assert "S" not in b2_model_nmda.synapses
+    assert "S" not in b2_model_nmda.functions["synapses"]
 
-    assert "renamed" in mfx_nmda.synapses
-    assert "renamed" in mfx_nmda.functions["synapses"]
+    assert "renamed" in b2_model_nmda.synapses
+    assert "renamed" in b2_model_nmda.functions["synapses"]
 
-    assert mfx_nmda.synapses["renamed"] == test_data
+    assert b2_model_nmda.synapses["renamed"] == test_data
     assert all(
-        f in mfx_nmda.functions["synapses"]["renamed"]
+        f in b2_model_nmda.functions["synapses"]["renamed"]
         for f in [
             "rename",
             "delete",
@@ -165,39 +183,39 @@ def test_rename_synapse(mfx_nmda: b2_model.B2Model) -> None:
     )
 
 
-def test_rename_parameter(mfx_nmda: b2_model.B2Model) -> None:
-    assert "a" in mfx_nmda.parameters
-    test_data = deepcopy(mfx_nmda.parameters["a"])
+def test_rename_parameter(b2_model_nmda: B2Model) -> None:
+    assert "a" in b2_model_nmda.parameters
+    test_data = deepcopy(b2_model_nmda.parameters["a"])
 
-    mfx_nmda.functions["parameters"]["a"]["rename"]("renamed")
-    assert "a" not in mfx_nmda.parameters
-    assert "a" not in mfx_nmda.functions["parameters"]
+    b2_model_nmda.functions["parameters"]["a"]["rename"]("renamed")
+    assert "a" not in b2_model_nmda.parameters
+    assert "a" not in b2_model_nmda.functions["parameters"]
 
-    assert "renamed" in mfx_nmda.parameters
-    assert "renamed" in mfx_nmda.functions["parameters"]
+    assert "renamed" in b2_model_nmda.parameters
+    assert "renamed" in b2_model_nmda.functions["parameters"]
 
-    assert mfx_nmda.parameters["renamed"] == test_data
+    assert b2_model_nmda.parameters["renamed"] == test_data
     assert all(
-        f in mfx_nmda.functions["parameters"]["renamed"]
+        f in b2_model_nmda.functions["parameters"]["renamed"]
         for f in ["delete", "modify", "rename"]
     )
 
 
-def test_rename_monitor(mfx_nmda: b2_model.B2Model) -> None:
-    assert "M" in mfx_nmda.monitors
-    test_data = deepcopy(mfx_nmda.monitors["M"])
+def test_rename_monitor(b2_model_nmda: B2Model) -> None:
+    assert "M" in b2_model_nmda.monitors
+    test_data = deepcopy(b2_model_nmda.monitors["M"])
 
-    mfx_nmda.functions["monitors"]["M"]["rename"]("renamed")
-    assert "M" not in mfx_nmda.monitors
-    assert "M" not in mfx_nmda.functions["monitors"]
+    b2_model_nmda.functions["monitors"]["M"]["rename"]("renamed")
+    assert "M" not in b2_model_nmda.monitors
+    assert "M" not in b2_model_nmda.functions["monitors"]
 
-    assert "renamed" in mfx_nmda.monitors
-    assert "renamed" in mfx_nmda.functions["monitors"]
+    assert "renamed" in b2_model_nmda.monitors
+    assert "renamed" in b2_model_nmda.functions["monitors"]
 
-    assert mfx_nmda.monitors["renamed"] == test_data
+    assert b2_model_nmda.monitors["renamed"] == test_data
 
     assert all(
-        f in mfx_nmda.functions["monitors"]["renamed"]
+        f in b2_model_nmda.functions["monitors"]["renamed"]
         for f in [
             "rename",
             "delete",
@@ -205,21 +223,21 @@ def test_rename_monitor(mfx_nmda: b2_model.B2Model) -> None:
     )
 
 
-def test_rename_init(mfx_nmda: b2_model.B2Model) -> None:
-    assert "S" in mfx_nmda.initials
-    test_data = deepcopy(mfx_nmda.initials["S"])
+def test_rename_init(b2_model_nmda: B2Model) -> None:
+    assert "S" in b2_model_nmda.initials
+    test_data = deepcopy(b2_model_nmda.initials["S"])
 
-    mfx_nmda.functions["initials"]["S"]["rename"]("renamed")
+    b2_model_nmda.functions["initials"]["S"]["rename"]("renamed")
 
-    assert "S" not in mfx_nmda.initials
-    assert "S" not in mfx_nmda.functions["initials"]
+    assert "S" not in b2_model_nmda.initials
+    assert "S" not in b2_model_nmda.functions["initials"]
 
-    assert "renamed" in mfx_nmda.initials
-    assert "renamed" in mfx_nmda.functions["initials"]
+    assert "renamed" in b2_model_nmda.initials
+    assert "renamed" in b2_model_nmda.functions["initials"]
 
-    assert mfx_nmda.initials["renamed"] == test_data
+    assert b2_model_nmda.initials["renamed"] == test_data
     assert all(
-        f in mfx_nmda.functions["initials"]["renamed"]
+        f in b2_model_nmda.functions["initials"]["renamed"]
         for f in [
             "rename",
             "delete",
@@ -227,112 +245,114 @@ def test_rename_init(mfx_nmda: b2_model.B2Model) -> None:
     )
 
 
-def test_rename_init_element(mfx_nmda: b2_model.B2Model) -> None:
-    assert "w" in mfx_nmda.initials["S"]
-    test_data = deepcopy(mfx_nmda.initials["S"]["w"])
-    mfx_nmda.functions["initials"]["S"]["w"]["rename"]("renamed")
+def test_rename_init_element(b2_model_nmda: B2Model) -> None:
+    assert "w" in b2_model_nmda.initials["S"]
+    test_data = deepcopy(b2_model_nmda.initials["S"]["w"])
+    b2_model_nmda.functions["initials"]["S"]["w"]["rename"]("renamed")
 
-    assert "w" not in mfx_nmda.initials["S"]
-    assert "w" not in mfx_nmda.functions["initials"]["S"]
+    assert "w" not in b2_model_nmda.initials["S"]
+    assert "w" not in b2_model_nmda.functions["initials"]["S"]
 
-    assert "renamed" in mfx_nmda.initials["S"]
-    assert "renamed" in mfx_nmda.functions["initials"]["S"]
+    assert "renamed" in b2_model_nmda.initials["S"]
+    assert "renamed" in b2_model_nmda.functions["initials"]["S"]
 
-    assert mfx_nmda.initials["S"]["renamed"] == test_data
-    print(mfx_nmda.functions["initials"]["S"]["renamed"])
+    assert b2_model_nmda.initials["S"]["renamed"] == test_data
+    print(b2_model_nmda.functions["initials"]["S"]["renamed"])
     assert all(
-        f in mfx_nmda.functions["initials"]["S"]["renamed"]
+        f in b2_model_nmda.functions["initials"]["S"]["renamed"]
         for f in ["delete", "modify", "rename"]
     )
 
 
 def test_rename_neurongroup_element_with_modification(
-    mfx_nmda: b2_model.B2Model,
+    b2_model_nmda: B2Model,
 ) -> None:
-    assert "model" in mfx_nmda.neurongroups["neurons"]
-    test_data = deepcopy(mfx_nmda.neurongroups["neurons"]["model"])
+    assert "model" in b2_model_nmda.neurongroups["neurons"]
+    test_data = deepcopy(b2_model_nmda.neurongroups["neurons"]["model"])
 
-    mfx_nmda.functions["neurongroups"]["neurons"]["model"]["rename"]("renamed")
+    b2_model_nmda.functions["neurongroups"]["neurons"]["model"]["rename"]("renamed")
 
-    assert "model" not in mfx_nmda.neurongroups["neurons"]
-    assert "model" not in mfx_nmda.functions["neurongroups"]["neurons"]
+    assert "model" not in b2_model_nmda.neurongroups["neurons"]
+    assert "model" not in b2_model_nmda.functions["neurongroups"]["neurons"]
 
-    assert "renamed" in mfx_nmda.neurongroups["neurons"]
-    assert "renamed" in mfx_nmda.functions["neurongroups"]["neurons"]
+    assert "renamed" in b2_model_nmda.neurongroups["neurons"]
+    assert "renamed" in b2_model_nmda.functions["neurongroups"]["neurons"]
 
-    assert mfx_nmda.neurongroups["neurons"]["renamed"] == test_data
+    assert b2_model_nmda.neurongroups["neurons"]["renamed"] == test_data
     assert all(
-        f in mfx_nmda.functions["neurongroups"]["neurons"]["renamed"]
+        f in b2_model_nmda.functions["neurongroups"]["neurons"]["renamed"]
         for f in ["delete", "modify", "rename"]
     )
 
-    mfx_nmda.functions["neurongroups"]["neurons"]["renamed"]["modify"]("dv/dt=-v:1")
+    b2_model_nmda.functions["neurongroups"]["neurons"]["renamed"]["modify"](
+        "dv/dt=-v:1"
+    )
 
-    assert mfx_nmda.neurongroups["neurons"]["renamed"] == "dv/dt=-v:1"
+    assert b2_model_nmda.neurongroups["neurons"]["renamed"] == "dv/dt=-v:1"
 
-    assert "renamed" in mfx_nmda.functions["neurongroups"]["neurons"]
-    assert "renamed" in mfx_nmda.neurongroups["neurons"]
+    assert "renamed" in b2_model_nmda.functions["neurongroups"]["neurons"]
+    assert "renamed" in b2_model_nmda.neurongroups["neurons"]
 
-    mfx_nmda.functions["neurongroups"]["neurons"]["renamed"]["delete"]()
+    b2_model_nmda.functions["neurongroups"]["neurons"]["renamed"]["delete"]()
 
-    assert "renamed" not in mfx_nmda.functions["neurongroups"]["neurons"]
-    assert "renamed" not in mfx_nmda.neurongroups["neurons"]
+    assert "renamed" not in b2_model_nmda.functions["neurongroups"]["neurons"]
+    assert "renamed" not in b2_model_nmda.neurongroups["neurons"]
 
 
-def test_rename_synapse_element(mfx_nmda: b2_model.B2Model) -> None:
-    assert "model" in mfx_nmda.synapses["S"]
-    test_data = deepcopy(mfx_nmda.synapses["S"]["model"])
+def test_rename_synapse_element(b2_model_nmda: B2Model) -> None:
+    assert "model" in b2_model_nmda.synapses["S"]
+    test_data = deepcopy(b2_model_nmda.synapses["S"]["model"])
 
-    mfx_nmda.functions["synapses"]["S"]["model"]["rename"]("renamed")
+    b2_model_nmda.functions["synapses"]["S"]["model"]["rename"]("renamed")
 
-    assert "model" not in mfx_nmda.synapses["S"]
-    assert "model" not in mfx_nmda.functions["synapses"]["S"]
+    assert "model" not in b2_model_nmda.synapses["S"]
+    assert "model" not in b2_model_nmda.functions["synapses"]["S"]
 
-    assert "renamed" in mfx_nmda.synapses["S"]
-    assert "renamed" in mfx_nmda.functions["synapses"]["S"]
+    assert "renamed" in b2_model_nmda.synapses["S"]
+    assert "renamed" in b2_model_nmda.functions["synapses"]["S"]
 
-    assert mfx_nmda.synapses["S"]["renamed"] == test_data
+    assert b2_model_nmda.synapses["S"]["renamed"] == test_data
     assert all(
-        f in mfx_nmda.functions["synapses"]["S"]["renamed"]
+        f in b2_model_nmda.functions["synapses"]["S"]["renamed"]
         for f in ["delete", "modify", "rename"]
     )
 
-    mfx_nmda.functions["synapses"]["S"]["renamed"]["rename"]("another_name")
+    b2_model_nmda.functions["synapses"]["S"]["renamed"]["rename"]("another_name")
 
-    assert "renamed" not in mfx_nmda.synapses["S"]
-    assert "renamed" not in mfx_nmda.functions["synapses"]["S"]
+    assert "renamed" not in b2_model_nmda.synapses["S"]
+    assert "renamed" not in b2_model_nmda.functions["synapses"]["S"]
 
-    assert "another_name" in mfx_nmda.synapses["S"]
-    assert "another_name" in mfx_nmda.functions["synapses"]["S"]
+    assert "another_name" in b2_model_nmda.synapses["S"]
+    assert "another_name" in b2_model_nmda.functions["synapses"]["S"]
 
-    assert mfx_nmda.synapses["S"]["another_name"] == test_data
+    assert b2_model_nmda.synapses["S"]["another_name"] == test_data
     assert all(
-        f in mfx_nmda.functions["synapses"]["S"]["another_name"]
+        f in b2_model_nmda.functions["synapses"]["S"]["another_name"]
         for f in ["delete", "modify", "rename"]
     )
 
 
-def test_rename_monitor_element(mfx_nmda: b2_model.B2Model) -> None:
-    assert "type" in mfx_nmda.monitors["M"]
-    test_data = deepcopy(mfx_nmda.monitors["M"]["type"])
+def test_rename_monitor_element(b2_model_nmda: B2Model) -> None:
+    assert "type" in b2_model_nmda.monitors["M"]
+    test_data = deepcopy(b2_model_nmda.monitors["M"]["type"])
 
-    mfx_nmda.functions["monitors"]["M"]["type"]["rename"]("renamed")
+    b2_model_nmda.functions["monitors"]["M"]["type"]["rename"]("renamed")
 
-    assert "type" not in mfx_nmda.monitors["M"]
-    assert "type" not in mfx_nmda.functions["monitors"]["M"]
+    assert "type" not in b2_model_nmda.monitors["M"]
+    assert "type" not in b2_model_nmda.functions["monitors"]["M"]
 
-    assert "renamed" in mfx_nmda.monitors["M"]
-    assert "renamed" in mfx_nmda.functions["monitors"]["M"]
+    assert "renamed" in b2_model_nmda.monitors["M"]
+    assert "renamed" in b2_model_nmda.functions["monitors"]["M"]
 
-    assert mfx_nmda.monitors["M"]["renamed"] == test_data
+    assert b2_model_nmda.monitors["M"]["renamed"] == test_data
     assert all(
-        f in mfx_nmda.functions["monitors"]["M"]["renamed"]
+        f in b2_model_nmda.functions["monitors"]["M"]["renamed"]
         for f in ["delete", "modify", "rename"]
     )
 
 
 def test_neuron_subgroup(
-    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+    mfx_parameterized: tuple[B2Model, dict[str, Any]],
 ) -> None:
     mfx, _ = mfx_parameterized
 
@@ -353,7 +373,7 @@ def test_neuron_subgroup(
 
 
 def test_neuron_subgroup_remove_exception(
-    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+    mfx_parameterized: tuple[B2Model, dict[str, Any]],
     monkeypatch: MonkeyPatch,
 ) -> None:
     mfx, _ = mfx_parameterized
@@ -373,7 +393,7 @@ def test_neuron_subgroup_remove_exception(
 
 
 def test_neuron_subgroup_add_exception(
-    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+    mfx_parameterized: tuple[B2Model, dict[str, Any]],
     monkeypatch: MonkeyPatch,
 ) -> None:
     mfx, _ = mfx_parameterized
@@ -390,7 +410,7 @@ def test_neuron_subgroup_add_exception(
 
 
 def test_neuron_subgroup_creation_exception(
-    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]], monkeypatch: MonkeyPatch
+    mfx_parameterized: tuple[B2Model, dict[str, Any]], monkeypatch: MonkeyPatch
 ) -> None:
     mfx, _ = mfx_parameterized
     mfx.define_neuronsubgroup_target("excitatory", "P")
@@ -408,7 +428,7 @@ def test_neuron_subgroup_creation_exception(
 
 
 def test_synapse_connection_prob_numerical(
-    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+    mfx_parameterized: tuple[B2Model, dict[str, Any]],
 ) -> None:
     mfx, _ = mfx_parameterized
 
@@ -431,7 +451,7 @@ def test_synapse_connection_prob_numerical(
 
 
 def test_define_synapse_delay(
-    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+    mfx_parameterized: tuple[B2Model, dict[str, Any]],
 ) -> None:
     mfx, _ = mfx_parameterized
 
@@ -441,7 +461,7 @@ def test_define_synapse_delay(
 
 
 def test_define_synapse(
-    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+    mfx_parameterized: tuple[B2Model, dict[str, Any]],
 ) -> None:
     taupre = 20 * b2.ms
     taupost = taupre
@@ -511,7 +531,7 @@ def test_define_synapse(
 
 
 def test_assemble_synapse_exception(
-    mocker: MockerFixture, mfx_with_synapse: tuple[b2_model.B2Model, dict[str, Any]]
+    mocker: MockerFixture, mfx_with_synapse: tuple[B2Model, dict[str, Any]]
 ) -> None:
     mocker.patch(
         "neuroseq.b2_model.b2.Synapses", side_effect=Exception("fake exception")
@@ -523,7 +543,7 @@ def test_assemble_synapse_exception(
 
 
 def test_connect_synapse_exception(
-    mocker: MockerFixture, mfx_with_synapse: tuple[b2_model.B2Model, dict[str, Any]]
+    mocker: MockerFixture, mfx_with_synapse: tuple[B2Model, dict[str, Any]]
 ) -> None:
     mocker.patch(
         "neuroseq.b2_model.b2.Synapses.connect",
@@ -536,7 +556,7 @@ def test_connect_synapse_exception(
 
 
 def test_define_monitor(
-    mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]],
+    mfx_parameterized: tuple[B2Model, dict[str, Any]],
 ) -> None:
     mfx, _ = mfx_parameterized
 
@@ -556,7 +576,7 @@ def test_define_monitor(
 
 
 def test_define_monitor_exception(
-    mocker: MockerFixture, mfx_parameterized: tuple[b2_model.B2Model, dict[str, Any]]
+    mocker: MockerFixture, mfx_parameterized: tuple[B2Model, dict[str, Any]]
 ) -> None:
     mocker.patch(
         "neuroseq.b2_model.b2.StateMonitor",
@@ -572,7 +592,7 @@ def test_define_monitor_exception(
         mfx._assemble_monitor("M")
 
 
-def test_define_init(mfx_ornstein: b2_model.B2Model) -> None:
+def test_define_init(mfx_ornstein: Model) -> None:
     mfx = mfx_ornstein
 
     b2.seed(4321)
@@ -595,14 +615,18 @@ def test_define_init(mfx_ornstein: b2_model.B2Model) -> None:
 
     network = b2.Network([N, M])
 
-    assert all(network["neurongroup"].tau == mfx.network["neurongroup"].tau)
-    assert all(network["neurongroup"].sigma == mfx.network["neurongroup"].sigma)
-    assert all(network["neurongroup"].y == mfx.network["neurongroup"].y)
+    assert all(network["neurongroup"].tau == mfx.b2_model.network["neurongroup"].tau)
+    assert all(
+        network["neurongroup"].sigma == mfx.b2_model.network["neurongroup"].sigma
+    )
+    assert all(network["neurongroup"].y == mfx.b2_model.network["neurongroup"].y)
 
 
-def test_ornstein_uhlenbeck(mfx_ornstein: b2_model.B2Model) -> None:
+def test_ornstein_uhlenbeck(
+    mfx_ornstein: Model, test_stim_arrays: dict[str, StimArray]
+) -> None:
     b2.seed(4321)
-    mfx_ornstein.run_simulation(1 * b2.second)
+    mfx_ornstein.b2_model.run_simulation(1, test_stim_arrays)
 
     b2.seed(4321)
     N = b2.NeuronGroup(
@@ -613,7 +637,7 @@ def test_ornstein_uhlenbeck(mfx_ornstein: b2_model.B2Model) -> None:
         dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
         """,
         method="euler",
-        dt=mfx_ornstein.neurongroups["neurongroup"]["dt"],
+        dt=mfx_ornstein.b2_model.neurongroups["neurongroup"]["dt"],
     )
 
     N.tau = np.array([1, 0.8, 0.6, 0.3, 0.1]) * b2.second
@@ -630,9 +654,11 @@ def test_ornstein_uhlenbeck(mfx_ornstein: b2_model.B2Model) -> None:
 
     network.run(1 * b2.second)
 
-    assert np.allclose(M.t / b2.second, mfx_ornstein.network["M"].t / b2.second)
-    assert np.allclose(M.y[1], mfx_ornstein.network["M"].y[1])
-    assert np.allclose(M.y[0], mfx_ornstein.network["M"].y[0])
+    assert np.allclose(
+        M.t / b2.second, mfx_ornstein.b2_model.network["M"].t / b2.second
+    )
+    assert np.allclose(M.y[1], mfx_ornstein.b2_model.network["M"].y[1])
+    assert np.allclose(M.y[0], mfx_ornstein.b2_model.network["M"].y[0])
 
 
 def test_ornstein_uhlenbeck_other_dt() -> None:
@@ -641,7 +667,7 @@ def test_ornstein_uhlenbeck_other_dt() -> None:
         sigma : 1
         dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
     """
-    model = b2_model.B2Model(seed=4321)
+    model = B2Model(seed=4321)
     model.define_neuronnumber("neurongroup", 5)
     model.define_dt("neurongroup", 125 * b2.ms)
     model.define_dt("neurongroup", 0.5 * b2.ms)
@@ -667,15 +693,15 @@ def test_ornstein_uhlenbeck_other_dt() -> None:
 
     model.must_be_rebuilt = False
 
-    model.run_simulation(5 * b2.second)
+    model.run_simulation(5, stim_arrays={})
 
     assert model.network["M"].y.shape == (5, 20)
 
 
-def test_NMDA_model(mfx_nmda: b2_model.B2Model) -> None:
+def test_NMDA_model(b2_model_nmda: B2Model) -> None:
     # https://brian2.readthedocs.io/en/stable/examples/synapses.nonlinear.html
     b2.seed(4321)
-    mfx_nmda.run_simulation(100 * b2.ms)
+    b2_model_nmda.run_simulation(0.100, stim_arrays={})
 
     # test model
     neuron_input = b2.NeuronGroup(
@@ -684,7 +710,7 @@ def test_NMDA_model(mfx_nmda: b2_model.B2Model) -> None:
         threshold="v>1",
         reset="v = 0",
         method="euler",
-        namespace=mfx_nmda.parameters,
+        namespace=b2_model_nmda.parameters,
     )
 
     neurons = b2.NeuronGroup(
@@ -692,7 +718,7 @@ def test_NMDA_model(mfx_nmda: b2_model.B2Model) -> None:
         """dv/dt = (g-v)/(10*ms) : 1
                                 g : 1""",
         method="exact",
-        namespace=mfx_nmda.parameters,
+        namespace=b2_model_nmda.parameters,
     )
 
     S = b2.Synapses(
@@ -706,7 +732,7 @@ def test_NMDA_model(mfx_nmda: b2_model.B2Model) -> None:
                 """,
         on_pre="x += w",
         name="synapses_test",
-        namespace=mfx_nmda.parameters,
+        namespace=b2_model_nmda.parameters,
     )  # NMDA synapses
 
     S.connect()
@@ -734,67 +760,67 @@ def test_NMDA_model(mfx_nmda: b2_model.B2Model) -> None:
     test_network.add(M)
     test_network.add(Mn)
 
-    assert_allclose(S.w, mfx_nmda.network["S"].w)
-    assert_allclose(neuron_input.v, mfx_nmda.network["neuron_input"].v)
+    assert_allclose(S.w, b2_model_nmda.network["S"].w)
+    assert_allclose(neuron_input.v, b2_model_nmda.network["neuron_input"].v)
 
     test_network.run(100 * b2.ms)
 
     # assert result equality
-    assert_allclose(M.g, mfx_nmda.network["M"].g)
-    assert_allclose(Mn.g, mfx_nmda.network["Mn"].g)
+    assert_allclose(M.g, b2_model_nmda.network["M"].g)
+    assert_allclose(Mn.g, b2_model_nmda.network["Mn"].g)
 
-    mfx_nmda.must_be_rebuilt = True
-    mfx_nmda.run_simulation(100 * b2.ms)
+    b2_model_nmda.must_be_rebuilt = True
+    b2_model_nmda.run_simulation(0.100, stim_arrays={})
     assert (
-        mfx_nmda.must_be_rebuilt is False
+        b2_model_nmda.must_be_rebuilt is False
     )  # false indicate that the model has been rebuild
 
 
-def test_NMDA_model_delete(mfx_nmda: b2_model.B2Model) -> None:
-    assert "neuronnumber" in mfx_nmda.neurongroups["neuron_input"]
-    mfx_nmda.functions["neurongroups"]["neuron_input"]["neuronnumber"]["delete"]()
-    assert "neuronnumber" not in mfx_nmda.neurongroups["neuron_input"]
-    assert "neuronnumber" not in mfx_nmda.functions["neurongroups"]["neuron_input"]
+def test_NMDA_model_delete(b2_model_nmda: B2Model) -> None:
+    assert "neuronnumber" in b2_model_nmda.neurongroups["neuron_input"]
+    b2_model_nmda.functions["neurongroups"]["neuron_input"]["neuronnumber"]["delete"]()
+    assert "neuronnumber" not in b2_model_nmda.neurongroups["neuron_input"]
+    assert "neuronnumber" not in b2_model_nmda.functions["neurongroups"]["neuron_input"]
 
-    assert "on_pre" in mfx_nmda.synapses["S"]
-    mfx_nmda.functions["synapses"]["S"]["on_pre"]["delete"]()
-    assert "on_pre" not in mfx_nmda.synapses["S"]
-    assert "on_pre" not in mfx_nmda.functions["synapses"]["S"]
+    assert "on_pre" in b2_model_nmda.synapses["S"]
+    b2_model_nmda.functions["synapses"]["S"]["on_pre"]["delete"]()
+    assert "on_pre" not in b2_model_nmda.synapses["S"]
+    assert "on_pre" not in b2_model_nmda.functions["synapses"]["S"]
 
-    assert "source" in mfx_nmda.monitors["Mn"]
-    mfx_nmda.functions["monitors"]["Mn"]["source"]["delete"]()
-    assert "source" not in mfx_nmda.monitors["Mn"]
-    assert "source" not in mfx_nmda.functions["monitors"]["Mn"]
+    assert "source" in b2_model_nmda.monitors["Mn"]
+    b2_model_nmda.functions["monitors"]["Mn"]["source"]["delete"]()
+    assert "source" not in b2_model_nmda.monitors["Mn"]
+    assert "source" not in b2_model_nmda.functions["monitors"]["Mn"]
 
-    assert "w" in mfx_nmda.initials["S"]
-    mfx_nmda.functions["initials"]["S"]["w"]["delete"]()
-    assert "w" not in mfx_nmda.initials["S"]
-    assert "w" not in mfx_nmda.functions["initials"]["S"]
+    assert "w" in b2_model_nmda.initials["S"]
+    b2_model_nmda.functions["initials"]["S"]["w"]["delete"]()
+    assert "w" not in b2_model_nmda.initials["S"]
+    assert "w" not in b2_model_nmda.functions["initials"]["S"]
 
-    assert "Mn" in mfx_nmda.monitors
-    mfx_nmda.functions["monitors"]["Mn"]["delete"]()
-    assert "Mn" not in mfx_nmda.monitors
-    assert "Mn" not in mfx_nmda.functions["monitors"]
+    assert "Mn" in b2_model_nmda.monitors
+    b2_model_nmda.functions["monitors"]["Mn"]["delete"]()
+    assert "Mn" not in b2_model_nmda.monitors
+    assert "Mn" not in b2_model_nmda.functions["monitors"]
 
-    assert "neuron_input" in mfx_nmda.neurongroups
-    mfx_nmda.functions["neurongroups"]["neuron_input"]["delete"]()
-    assert "neuron_input" not in mfx_nmda.neurongroups
+    assert "neuron_input" in b2_model_nmda.neurongroups
+    b2_model_nmda.functions["neurongroups"]["neuron_input"]["delete"]()
+    assert "neuron_input" not in b2_model_nmda.neurongroups
 
-    assert "S" in mfx_nmda.synapses
-    mfx_nmda.functions["synapses"]["S"]["delete"]()
-    assert "S" not in mfx_nmda.synapses
+    assert "S" in b2_model_nmda.synapses
+    b2_model_nmda.functions["synapses"]["S"]["delete"]()
+    assert "S" not in b2_model_nmda.synapses
 
-    assert "a" in mfx_nmda.parameters  # type: ignore
-    mfx_nmda.functions["parameters"]["a"]["delete"]()
-    assert "a" not in mfx_nmda.parameters  # type: ignore
+    assert "a" in b2_model_nmda.parameters  # type: ignore
+    b2_model_nmda.functions["parameters"]["a"]["delete"]()
+    assert "a" not in b2_model_nmda.parameters  # type: ignore
 
 
-def test_assemble_network(mfx_nmda, monkeypatch: MonkeyPatch) -> None:
+def test_assemble_network(b2_model_nmda, monkeypatch: MonkeyPatch) -> None:
     a = 1 / (10 * b2.ms)
     b = 1 / (10 * b2.ms)
     c = 1 / (10 * b2.ms)
 
-    model = b2_model.B2Model(seed=4321)
+    model = B2Model(seed=4321)
 
     model.define_parameter("a", a)
     model.define_parameter("b", b)
@@ -842,13 +868,13 @@ def test_assemble_network(mfx_nmda, monkeypatch: MonkeyPatch) -> None:
 
     model.assemble_network()
 
-    assert model.neurongroups == mfx_nmda.neurongroups
-    assert model.synapses == mfx_nmda.synapses
-    assert model.monitors == mfx_nmda.monitors
-    assert model.parameters == mfx_nmda.parameters
+    assert model.neurongroups == b2_model_nmda.neurongroups
+    assert model.synapses == b2_model_nmda.synapses
+    assert model.monitors == b2_model_nmda.monitors
+    assert model.parameters == b2_model_nmda.parameters
 
     assert sorted(list(model.network.get_states().keys())) == sorted(
-        list(mfx_nmda.network.get_states().keys())
+        list(b2_model_nmda.network.get_states().keys())
     )
 
     assert "M" in [o.name for o in model.get_network_objects()]
@@ -883,414 +909,95 @@ def test_assemble_network(mfx_nmda, monkeypatch: MonkeyPatch) -> None:
         model.get_equation_names_of("neurons")
 
 
-def test_hdf5(tmp_path: Path, mfx_ornstein: b2_model.B2Model) -> None:
-    mfx_ornstein.run_simulation(10 * b2.second)
+def test_hdf5(
+    tmp_path: Path,
+    mfx_ornstein: Model,
+) -> None:
+    mfx_ornstein.run_simulation(10)
 
-    mfx_ornstein.save_to_h5(tmp_path / "data.h5")
+    mfx_ornstein.b2_model.save_to_h5(tmp_path / "data.h5")
 
     data = None
 
-    assert len(mfx_ornstein.checkpoints) > 0
+    assert len(mfx_ornstein.b2_model.checkpoints) > 0
 
     with h5py.File(Path(tmp_path, "data.h5"), "r") as h5file:
         data = h5file["M"]["y"][:]
 
-    assert np.allclose(data, mfx_ornstein.network["M"].y)
+    assert np.allclose(data, mfx_ornstein.b2_model.network["M"].y)
 
     with pytest.raises(ValueError, match="Path fakepath/data.h5 does not exist"):
-        mfx_ornstein.save_to_h5("fakepath/data.h5")
+        mfx_ornstein.b2_model.save_to_h5("fakepath/data.h5")
 
-    mfx_ornstein.monitors = {}
+    mfx_ornstein.b2_model.monitors = {}
 
     with pytest.raises(
         RuntimeError, match="Error, cannot save data when no monitors are defined"
     ):
-        mfx_ornstein.save_to_h5(tmp_path / "data.h5")
+        mfx_ornstein.b2_model.save_to_h5(tmp_path / "data.h5")
 
-    mfx_ornstein.assemble_network()
+    mfx_ornstein.b2_model.assemble_network()
 
-    assert len(mfx_ornstein.checkpoints) == 0
+    assert len(mfx_ornstein.b2_model.checkpoints) == 0
 
 
-def test_logger(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture, mfx_ornstein: b2_model.B2Model
-) -> None:
+def test_logger(caplog: pytest.LogCaptureFixture, mfx_ornstein: Model) -> None:
     caplog.set_level(logging.INFO, logger="neuroseq.b2_model")
-    mfx_ornstein.run_simulation(1 * b2.second, savepath=tmp_path / "data.h5 ")
+    mfx_ornstein.run_simulation(1)
 
     logs = [record.message for record in caplog.records]
-    assert f"run the system for 1. s with savepath = {tmp_path}" in logs[0]
-
-    pathname = tmp_path / "data.h5"
-    assert f"save data to hdf5 at {pathname}" in logs[1]
+    assert "run the system for 1" in logs[0]
 
 
-def test_store_restore(mfx_ornstein: b2_model.B2Model) -> None:
+def test_store_restore(mfx_ornstein: Model) -> None:
     sim_time = 10 * b2.ms
-    assert len(mfx_ornstein.checkpoints) == 0
-    mfx_ornstein.run_simulation(sim_time)
+    assert len(mfx_ornstein.b2_model.checkpoints) == 0
+    mfx_ornstein.run_simulation(sim_time / b2.second)
     # default initial state checkpoint is made on first simulation if no other checkpoints are made
-    assert len(mfx_ornstein.checkpoints) == 1
+    assert len(mfx_ornstein.b2_model.checkpoints) == 1
     assert (
-        mfx_ornstein.network["M"].t[-1]
-        == sim_time - mfx_ornstein.neurongroups["neurongroup"]["dt"]
+        mfx_ornstein.b2_model.network["M"].t[-1]
+        == sim_time - mfx_ornstein.b2_model.neurongroups["neurongroup"]["dt"]
     )
     # restore initial state
-    mfx_ornstein.restore(mfx_ornstein.checkpoints[0])
-    assert len(mfx_ornstein.network["M"].t) == 0
+    mfx_ornstein.b2_model.restore(mfx_ornstein.b2_model.checkpoints[0])
+    assert len(mfx_ornstein.b2_model.network["M"].t) == 0
     # store two new checkpoints
-    mfx_ornstein.run_simulation(sim_time)
+    mfx_ornstein.run_simulation(sim_time / b2.second)
     assert (
-        mfx_ornstein.network["M"].t[-1]
-        == sim_time - mfx_ornstein.neurongroups["neurongroup"]["dt"]
+        mfx_ornstein.b2_model.network["M"].t[-1]
+        == sim_time - mfx_ornstein.b2_model.neurongroups["neurongroup"]["dt"]
     )
-    mfx_ornstein.store("t1")
-    assert len(mfx_ornstein.checkpoints) == 2
-    mfx_ornstein.run_simulation(sim_time)
+    mfx_ornstein.b2_model.store("t1")
+    assert len(mfx_ornstein.b2_model.checkpoints) == 2
+    mfx_ornstein.run_simulation(sim_time / b2.second)
     assert (
-        mfx_ornstein.network["M"].t[-1]
-        == 2 * sim_time - mfx_ornstein.neurongroups["neurongroup"]["dt"]
+        mfx_ornstein.b2_model.network["M"].t[-1]
+        == 2 * sim_time - mfx_ornstein.b2_model.neurongroups["neurongroup"]["dt"]
     )
-    mfx_ornstein.store("t2")
-    assert len(mfx_ornstein.checkpoints) == 3
+    mfx_ornstein.b2_model.store("t2")
+    assert len(mfx_ornstein.b2_model.checkpoints) == 3
     # restore second checkpoint
-    mfx_ornstein.restore("t1")
+    mfx_ornstein.b2_model.restore("t1")
     assert (
-        mfx_ornstein.network["M"].t[-1]
-        == sim_time - mfx_ornstein.neurongroups["neurongroup"]["dt"]
+        mfx_ornstein.b2_model.network["M"].t[-1]
+        == sim_time - mfx_ornstein.b2_model.neurongroups["neurongroup"]["dt"]
     )
     # overwrite existing checkpoint
-    assert len(mfx_ornstein.checkpoints) == 3
-    mfx_ornstein.store("t2")
-    assert len(mfx_ornstein.checkpoints) == 3
+    assert len(mfx_ornstein.b2_model.checkpoints) == 3
+    mfx_ornstein.b2_model.store("t2")
+    assert len(mfx_ornstein.b2_model.checkpoints) == 3
     # restore initial state
-    mfx_ornstein.restore(mfx_ornstein.checkpoints[0])
-    assert len(mfx_ornstein.network["M"].t) == 0
+    mfx_ornstein.b2_model.restore(mfx_ornstein.b2_model.checkpoints[0])
+    assert len(mfx_ornstein.b2_model.network["M"].t) == 0
     # restore non-existing checkpoint
     with pytest.raises(ValueError, match=".*'idontexist'.*"):
-        mfx_ornstein.restore("idontexist")
-
-
-def _make_experimental_data(n_neurons=12, dt=0.01) -> list[TraceData | SpikeData]:
-    trace_data = TraceData(
-        name="test_trace", traces=np.random.rand(n_neurons, 37), units="mV", dt=dt
-    )
-    spike_data = SpikeData(
-        name="test_spike",
-        spike_indices=np.array([1, 4, 5]),
-        spike_times=np.array([0.1, 0.6, 0.99]),
-    )
-    return [trace_data, spike_data]
-
-
-def test_add_experimental_data_overwrite(mfx_ornstein: b2_model.B2Model) -> None:
-    mfx_ornstein.add_experimental_data(
-        "test_experiment", _make_experimental_data(), append=False
-    )
-
-    assert len(mfx_ornstein.experiments) == 1
-    assert "test_experiment" in mfx_ornstein.experiments
-    assert isinstance(mfx_ornstein.experiments["test_experiment"][0], TraceData)
-    assert mfx_ornstein.experiments["test_experiment"][0].traces.shape == (12, 37)
-    assert isinstance(mfx_ornstein.experiments["test_experiment"][1], SpikeData)
-    assert mfx_ornstein.experiments["test_experiment"][1].spike_indices.shape == (3,)
-    assert mfx_ornstein.experiments["test_experiment"][1].spike_times.shape == (3,)
-
-    mfx_ornstein.add_experimental_data(
-        "test_experiment", _make_experimental_data(), append=False
-    )
-
-    assert len(mfx_ornstein.experiments) == 1
-    assert "test_experiment" in mfx_ornstein.experiments
-    assert isinstance(mfx_ornstein.experiments["test_experiment"][0], TraceData)
-    assert mfx_ornstein.experiments["test_experiment"][0].traces.shape == (12, 37)
-    assert isinstance(mfx_ornstein.experiments["test_experiment"][1], SpikeData)
-    assert mfx_ornstein.experiments["test_experiment"][1].spike_indices.shape == (3,)
-    assert mfx_ornstein.experiments["test_experiment"][1].spike_times.shape == (3,)
-
-
-def test_add_experimental_data_append(mfx_ornstein: b2_model.B2Model) -> None:
-    mfx_ornstein.add_experimental_data(
-        "test_experiment", _make_experimental_data(), append=False
-    )
-
-    assert len(mfx_ornstein.experiments) == 1
-    assert "test_experiment" in mfx_ornstein.experiments
-    assert isinstance(mfx_ornstein.experiments["test_experiment"][0], TraceData)
-    assert mfx_ornstein.experiments["test_experiment"][0].traces.shape == (12, 37)
-    assert isinstance(mfx_ornstein.experiments["test_experiment"][1], SpikeData)
-    assert mfx_ornstein.experiments["test_experiment"][1].spike_indices.shape == (3,)
-    assert mfx_ornstein.experiments["test_experiment"][1].spike_times.shape == (3,)
-
-    mfx_ornstein.add_experimental_data(
-        "test_experiment", _make_experimental_data(), append=True
-    )
-
-    assert len(mfx_ornstein.experiments) == 1
-    assert "test_experiment" in mfx_ornstein.experiments
-    assert isinstance(mfx_ornstein.experiments["test_experiment"][0], TraceData)
-    assert mfx_ornstein.experiments["test_experiment"][0].traces.shape == (12, 74)
-    assert isinstance(mfx_ornstein.experiments["test_experiment"][1], SpikeData)
-    assert mfx_ornstein.experiments["test_experiment"][1].spike_indices.shape == (6,)
-    assert mfx_ornstein.experiments["test_experiment"][1].spike_times.shape == (6,)
-
-    mfx_ornstein.add_experimental_data(
-        "test_experiment", _make_experimental_data(), append=True
-    )
-
-    assert len(mfx_ornstein.experiments) == 1
-    assert "test_experiment" in mfx_ornstein.experiments
-    assert isinstance(mfx_ornstein.experiments["test_experiment"][0], TraceData)
-    assert mfx_ornstein.experiments["test_experiment"][0].traces.shape == (12, 111)
-    assert isinstance(mfx_ornstein.experiments["test_experiment"][1], SpikeData)
-    assert mfx_ornstein.experiments["test_experiment"][1].spike_indices.shape == (9,)
-    assert mfx_ornstein.experiments["test_experiment"][1].spike_times.shape == (9,)
-
-    mfx_ornstein.add_experimental_data(
-        "test_experiment", _make_experimental_data(), append=False
-    )
-
-    assert len(mfx_ornstein.experiments) == 1
-    assert "test_experiment" in mfx_ornstein.experiments
-    assert isinstance(mfx_ornstein.experiments["test_experiment"][0], TraceData)
-    assert mfx_ornstein.experiments["test_experiment"][0].traces.shape == (12, 37)
-    assert isinstance(mfx_ornstein.experiments["test_experiment"][1], SpikeData)
-    assert mfx_ornstein.experiments["test_experiment"][1].spike_indices.shape == (3,)
-    assert mfx_ornstein.experiments["test_experiment"][1].spike_times.shape == (3,)
-
-
-def test_add_experimental_data_append_invalid(mfx_ornstein: b2_model.B2Model) -> None:
-    mfx_ornstein.add_experimental_data(
-        "test_experiment", _make_experimental_data(n_neurons=6, dt=0.2), append=False
-    )
-    with pytest.raises(ValueError) as excinfo:
-        mfx_ornstein.add_experimental_data(
-            "test_experiment", _make_experimental_data(n_neurons=7, dt=0.2), append=True
-        )
-    assert "neurons" in str(excinfo.value)
-    with pytest.raises(ValueError) as excinfo:
-        mfx_ornstein.add_experimental_data(
-            "test_experiment",
-            _make_experimental_data(n_neurons=6, dt=0.15),
-            append=True,
-        )
-    assert "dt" in str(excinfo.value)
-
-
-def test_save_load(mfx_nmda: b2_model.B2Model, tmp_path: Path) -> None:
-    tmp_file = tmp_path / "model.nseq"
-
-    # simulate for 1 second, save checkpoint, then simulate for another second
-    mfx_nmda.run_simulation(1 * b2.second)
-    mfx_nmda.store("after_1s")
-    mfx_nmda.run_simulation(1 * b2.second)
-
-    # add some experimental data
-    trace_data = TraceData(
-        name="test_trace", traces=np.random.rand(12, 3), units="mV", dt=0.01
-    )
-    spike_data = SpikeData(
-        name="test_spike",
-        spike_indices=np.array([1, 4, 5]),
-        spike_times=np.array([0.1, 0.6, 0.99]),
-    )
-    experimental_data: list[TraceData | SpikeData] = [trace_data, spike_data]
-    mfx_nmda.add_experimental_data("test_experiment", experimental_data)
-
-    # save model including simulation data, simulation checkpoints and experimental data
-    mfx_nmda.save_model(
-        tmp_file, include_simulation_data=True, include_experimental_data=True
-    )
-    reconstructed_model = b2_model.B2Model.load_model(tmp_file)
-
-    assert reconstructed_model.seed == mfx_nmda.seed
-    assert reconstructed_model.network["neurons"].dt == mfx_nmda.network["neurons"].dt
-
-    # synapses
-    for neurongroupname in ["neuron_input", "neurons"]:
-        for var in mfx_nmda.network.get_states()[neurongroupname]:
-            assert_allclose(
-                getattr(reconstructed_model.network[neurongroupname], var),
-                getattr(mfx_nmda.network[neurongroupname], var),
-                verbose=True,
-            )
-
-    assert_allclose(
-        reconstructed_model.network["neurons"].g,
-        mfx_nmda.network["neurons"].g,
-        verbose=True,
-    )
-    assert_allclose(mfx_nmda.network["S"].g, reconstructed_model.network["S"].g)
-
-    # test synapses
-    for var in mfx_nmda.network.get_states()["S"]:
-        assert_allclose(
-            getattr(reconstructed_model.network["S"], var),
-            getattr(mfx_nmda.network["S"], var),
-            verbose=True,
-        )
-
-    for name in ["M", "Mn"]:
-        for var in mfx_nmda.network.get_states()[name]:
-            assert_allclose(
-                getattr(reconstructed_model.network[name], var),
-                getattr(mfx_nmda.network[name], var),
-                verbose=True,
-            )
-
-    assert reconstructed_model.parameters == mfx_nmda.parameters
-
-    # simulation data at save time is restored
-    assert len(reconstructed_model.network["M"].t) == 20000
-    assert reconstructed_model.network["M"].t[-1] == pytest.approx(2, abs=0.001)
-    assert_allclose(mfx_nmda.network["M"].g, reconstructed_model.network["M"].g)
-    assert_allclose(mfx_nmda.network["Mn"].g, reconstructed_model.network["Mn"].g)
-
-    # as are checkpoints
-    assert len(reconstructed_model.checkpoints) == 2
-    assert "after_1s" in reconstructed_model.checkpoints
-    reconstructed_model.restore("after_1s")
-    assert len(reconstructed_model.network["M"].t) == 10000
-    assert reconstructed_model.network["M"].t[-1] == pytest.approx(1, abs=0.001)
-
-    # as well as experimental data
-    assert len(reconstructed_model.experiments) == 1
-    assert "test_experiment" in reconstructed_model.experiments
-    loaded_experimental_data = reconstructed_model.experiments["test_experiment"]
-    assert len(loaded_experimental_data) == 2
-    loaded_trace_data = loaded_experimental_data[0]
-    assert isinstance(loaded_trace_data, TraceData)
-    assert loaded_trace_data.name == trace_data.name
-    assert loaded_trace_data.units == trace_data.units
-    assert loaded_trace_data.dt == pytest.approx(trace_data.dt)
-    assert np.allclose(loaded_trace_data.traces, trace_data.traces)
-    loaded_spike_data = loaded_experimental_data[1]
-    assert isinstance(loaded_spike_data, SpikeData)
-    assert loaded_spike_data.name == spike_data.name
-    assert np.allclose(loaded_spike_data.spike_indices, spike_data.spike_indices)
-    assert np.allclose(loaded_spike_data.spike_times, spike_data.spike_times)
-
-    # and simulations can be continued: run for 1s so that both models have run for 2s from the same initial conditions
-    reconstructed_model.run_simulation(1 * b2.second)
-    assert_allclose(mfx_nmda.network["M"].g, reconstructed_model.network["M"].g)
-    assert_allclose(mfx_nmda.network["Mn"].g, reconstructed_model.network["Mn"].g)
-
-
-def test_timed_array_simulation_padding(mfx_ornstein: b2_model.B2Model) -> None:
-    dt = 1 * b2.ms
-    sim_time = 10 * b2.ms
-    stim_padding_seconds = 3
-    timed_array = b2.TimedArray(np.random.rand(100, 10) * b2.mS, dt=dt)
-    assert timed_array.values.shape == (100, 10)
-    mfx_ornstein.define_parameter("stim", timed_array)
-    mfx_ornstein.run_simulation(
-        sim_time, timed_array_padding_seconds=stim_padding_seconds
-    )
-    new_timed_array = mfx_ornstein.parameters["stim"]
-    # timed array length is simulation length + padding
-    assert new_timed_array.values.shape[0] == pytest.approx(
-        sim_time / dt + stim_padding_seconds * b2.second / dt
-    )
-    # timed array is padded with zeros - original values are preserved
-    assert np.allclose(new_timed_array.values[0:100, :], timed_array.values)
-    assert np.max(new_timed_array.values[100:, :]) == pytest.approx(0)
-
-
-def test_timed_array_padding(mfx_ornstein: b2_model.B2Model) -> None:
-    timed_array = b2.TimedArray(np.random.rand(1000, 10) * b2.mS, dt=1 * b2.ms)
-    assert timed_array.values.shape == (1000, 10)
-    mfx_ornstein.define_parameter("stim", timed_array)
-    # pad to 1.2s
-    mfx_ornstein.pad_timed_arrays(1.2)
-    new_timed_array = mfx_ornstein.parameters["stim"]
-    assert new_timed_array.values.shape[0] == pytest.approx(1200, abs=1)
-    assert np.allclose(
-        new_timed_array.values[0 : timed_array.values.shape[0], :], timed_array.values
-    )
-    assert np.max(new_timed_array.values[1000:, :]) == pytest.approx(0)
-    # pad to 2s
-    mfx_ornstein.pad_timed_arrays(2)
-    new_timed_array = mfx_ornstein.parameters["stim"]
-    assert new_timed_array.values.shape[0] == pytest.approx(2000, abs=1)
-    assert np.allclose(
-        new_timed_array.values[0 : timed_array.values.shape[0], :], timed_array.values
-    )
-    assert np.max(new_timed_array.values[1000:, :]) == pytest.approx(0)
-
-
-def test_timed_array_trimming(mfx_ornstein: b2_model.B2Model) -> None:
-    timed_array = b2.TimedArray(np.random.rand(1000, 10) * b2.mS, dt=1 * b2.ms)
-    # make that last 100 values (0.1s) zero
-    timed_array.values[900:, :] = 0
-    assert timed_array.values.shape == (1000, 10)
-    mfx_ornstein.define_parameter("stim", timed_array)
-    # last 0.1 seconds have no non-zero stimuli
-    assert mfx_ornstein.trim_timed_array_would_delete_data(1.0) is False
-    assert mfx_ornstein.trim_timed_array_would_delete_data(0.901) is False
-    assert mfx_ornstein.trim_timed_array_would_delete_data(0.899) is True
-    # trim to 0.95s
-    assert mfx_ornstein.trim_timed_array_would_delete_data(0.95) is False
-    mfx_ornstein.trim_timed_arrays(0.95)
-    new_timed_array = mfx_ornstein.parameters["stim"]
-    assert new_timed_array.values.shape[0] == pytest.approx(950, abs=1)
-    assert np.allclose(
-        new_timed_array.values,
-        timed_array.values[0 : new_timed_array.values.shape[0], :],
-    )
-    # trim to 0.5s
-    assert mfx_ornstein.trim_timed_array_would_delete_data(0.5) is True
-    mfx_ornstein.trim_timed_arrays(0.5)
-    new_timed_array = mfx_ornstein.parameters["stim"]
-    assert new_timed_array.values.shape[0] == pytest.approx(500, abs=1)
-    assert np.allclose(
-        new_timed_array.values,
-        timed_array.values[0 : new_timed_array.values.shape[0], :],
-    )
-    # trim to 0s
-    assert mfx_ornstein.trim_timed_array_would_delete_data(0) is True
-    mfx_ornstein.trim_timed_arrays(0)
-    new_timed_array = mfx_ornstein.parameters["stim"]
-    assert new_timed_array.values.shape[0] == pytest.approx(0, abs=1)
-    assert np.allclose(
-        new_timed_array.values,
-        timed_array.values[0 : new_timed_array.values.shape[0], :],
-    )
-
-
-def test_timed_array_neuron_number(mfx_ornstein: b2_model.B2Model) -> None:
-    timed_array = b2.TimedArray(np.random.rand(100, 10) * b2.mS, dt=1 * b2.ms)
-    assert timed_array.values.shape == (100, 10)
-    mfx_ornstein.define_parameter("stim", timed_array)
-    # increase number of neurons in model to be larger than the number of neurons in the TimedArray
-    n_neurons = 23
-    mfx_ornstein.define_neuronnumber("neurongroup", n_neurons)
-    mfx_ornstein.define_init(
-        "neurongroup", "tau", np.random.rand(n_neurons) * b2.second
-    )
-    mfx_ornstein.define_init("neurongroup", "sigma", np.random.rand(n_neurons))
-    mfx_ornstein.assemble_network()
-    new_timed_array = mfx_ornstein.parameters["stim"]
-    # timed array neuron number has been increased to match
-    assert new_timed_array.values.shape[1] == 23
-    # decrease the number of neurons
-    n_neurons = 3
-    mfx_ornstein.define_neuronnumber("neurongroup", n_neurons)
-    mfx_ornstein.define_init(
-        "neurongroup", "tau", np.random.rand(n_neurons) * b2.second
-    )
-    mfx_ornstein.define_init("neurongroup", "sigma", np.random.rand(n_neurons))
-    mfx_ornstein.assemble_network()
-    # timed array neuron number has been decreased to match
-    new_timed_array = mfx_ornstein.parameters["stim"]
-    assert new_timed_array.values.shape == (100, 3)
-    assert np.allclose(
-        new_timed_array.values[0:100, 0:3], timed_array.values[0:100, 0:3]
-    )
+        mfx_ornstein.b2_model.restore("idontexist")
 
 
 def test_default_group_addition(mfx_ornstein) -> None:
-    mfx_ornstein.define_default_neurongroup()
-    assert mfx_ornstein.neurongroups["new_neurongroup"] == {
+    mfx_ornstein.b2_model.define_default_neurongroup()
+    assert mfx_ornstein.b2_model.neurongroups["new_neurongroup"] == {
         "neuronnumber": 0,
         "model": "dx/dt = y : 1",
         "method": "-",
@@ -1300,8 +1007,8 @@ def test_default_group_addition(mfx_ornstein) -> None:
         "refractory": "0",
     }
 
-    mfx_ornstein.define_default_synapse()
-    assert mfx_ornstein.synapses["new_synapse"] == {
+    mfx_ornstein.b2_model.define_default_synapse()
+    assert mfx_ornstein.b2_model.synapses["new_synapse"] == {
         "origin": "-",
         "target": "-",
         "model": "dx/dt = y : 1",
@@ -1314,54 +1021,16 @@ def test_default_group_addition(mfx_ornstein) -> None:
         "on_post": "x=y",
     }
 
-    mfx_ornstein.define_default_monitor()
-    assert mfx_ornstein.monitors["new_monitor"] == {
+    mfx_ornstein.b2_model.define_default_monitor()
+    assert mfx_ornstein.b2_model.monitors["new_monitor"] == {
         "type": "-",
         "source": "-",
         "variable": "-",
         "dt": None,
     }
 
-    mfx_ornstein.define_default_parameter()
-    assert mfx_ornstein.parameters["new_parameter"] is None
+    mfx_ornstein.b2_model.define_default_parameter()
+    assert mfx_ornstein.b2_model.parameters["new_parameter"] is None
 
-    mfx_ornstein.define_default_init()
-    assert mfx_ornstein.initials["group"]["value"] is None
-
-
-def test_assemble_network_add_exceptions(
-    mocker: MockerFixture, default_model_path
-) -> None:
-    model = b2_model.B2Model.load_model(default_model_path)
-    mocker.patch(
-        "neuroseq.b2_model.b2.Network.add",
-        side_effect=Exception("fake exception"),
-    )
-
-    with pytest.raises(RuntimeError, match=".*adding.*"):
-        model._assemble_synapse("Ce")
-
-    with pytest.raises(RuntimeError, match=".*adding.*"):
-        model._assemble_monitor("Traces_v")
-
-    with pytest.raises(RuntimeError, match=".*adding.*"):
-        model._assemble_neurongroup("P")
-
-
-def test_assemble_network_remove_exceptions(
-    mocker: MockerFixture, default_model_path
-) -> None:
-    model = b2_model.B2Model.load_model(default_model_path)
-    mocker.patch(
-        "neuroseq.b2_model.b2.Network.remove",
-        side_effect=Exception("fake exception"),
-    )
-
-    with pytest.raises(RuntimeError, match=".*removing.*"):
-        model._assemble_synapse("Ce")
-
-    with pytest.raises(RuntimeError, match=".*removing.*"):
-        model._assemble_monitor("Traces_v")
-
-    with pytest.raises(RuntimeError, match=".*removing.*"):
-        model._assemble_neurongroup("P")
+    mfx_ornstein.b2_model.define_default_init()
+    assert mfx_ornstein.b2_model.initials["group"]["value"] is None

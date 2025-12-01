@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-import brian2 as b2
-import brian2.numpy_ as np
 import fastplotlib as fpl
+import numpy as np
 import pygfx
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.utils import get_cmap
 
 
 class StimWidget(TimeseriesWidget):
-    """A widget that displays a brian2.TimedArray stimuli timeseries for neurons.
+    """A widget that displays a StimArray stimuli timeseries for neurons.
 
     The colormap used to represent the intensity of the stimuli depends on the type of stimulus:
     - Excitatory stimuli are shown in a magenta colormap.
@@ -36,42 +36,42 @@ class StimWidget(TimeseriesWidget):
         self.vmax = 1.0
         self.stim_type = StimType.Excitation
 
-    def set_data(
-        self, stims: b2.TimedArray | None = None, stim_type=StimType.Excitation
-    ) -> None:
+    def set_data(self, stim_array: StimArray | None = None) -> None:
         self.clear_data()
-        if stims is None:
+        if stim_array is None:
             return
-        self.data_values = stims.values
-        self.stim_type = stim_type
+        self.data_values = stim_array.values
+        self.stim_type = stim_array.stim_type
         self.vmin = 0.0
-        self.vmax = np.max(np.abs(stims.values))
+        self.vmax = np.max(np.abs(stim_array.values))
+        if self.vmax == 0:
+            self.vmax = 1.0
         if self.stim_type == StimType.External:
             self.vmin = -self.vmax
-        self.units = b2.get_unit(stims.dim).__str__()
+        self.units = stim_array.units
         self.graphic = self.subplot.add_image(
-            stims.values.T,
+            stim_array.values.T,
             vmin=self.vmin,
             vmax=self.vmax,
             cmap=get_cmap(self.stim_type),
             offset=(0.5, 0, 0),
         )
         # todo: properly support dt_ms != 1 (currently we share the camera with other widgets, but add_image has fixed integer x-axis spacing, so the bounds of the shared camera is only correct if dt_ms=1)
-        self.dt_ms = stims.dt * 1000.0  # convert to milliseconds
-        self.n_neurons = stims.values.shape[1]
-        self.n_timestamps = stims.values.shape[0]
+        self.dt_ms = stim_array.dt * 1000.0  # convert to milliseconds
+        self.n_neurons = stim_array.values.shape[1]
+        self.n_timestamps = stim_array.values.shape[0]
         self.post_set_data()
 
-    def set_background_data(
-        self, stims: b2.TimedArray | None = None, stim_type=StimType.Excitation
-    ) -> None:
-        if stims is None:
+    def set_background_data(self, stim_array: StimArray | None = None) -> None:
+        if stim_array is None:
             return
-        vmax = np.max(np.abs(stims.values))
-        vmin = -vmax if stim_type == StimType.External else 0
-        cmap = get_cmap(stim_type, alpha=0.25)
+        vmax = np.max(np.abs(stim_array.values))
+        if vmax == 0:
+            vmax = 1.0
+        vmin = -vmax if stim_array.stim_type == StimType.External else 0
+        cmap = get_cmap(stim_array.stim_type, alpha=0.25)
         image_graphic = self.subplot.add_image(
-            stims.values.T, vmin=vmin, vmax=vmax, cmap=cmap, offset=(0.5, 0, 0)
+            stim_array.values.T, vmin=vmin, vmax=vmax, cmap=cmap, offset=(0.5, 0, 0)
         )
         # set the graphic material texture colormap values directly, as add_image ignores any alpha values
         image_graphic._material.map.texture.data[:] = cmap(
@@ -90,6 +90,8 @@ class StimWidget(TimeseriesWidget):
         """Autoscale the colormap based on the current data."""
         if self.graphic is not None:
             max_value = np.max(np.abs(self.graphic.data.value))
+            if max_value == 0:
+                max_value = 1.0
             self.vmax = max_value
             self.graphic.vmax = self.vmax
             if self.stim_type == StimType.External:

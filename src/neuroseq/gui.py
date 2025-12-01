@@ -13,28 +13,29 @@ from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
 from neuroseq import __version__
-from neuroseq.b2_model import B2Model
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.custom_analysis_widget import CustomAnalysisWindow
+from neuroseq.data import SpikeData
+from neuroseq.data import SynapseData
+from neuroseq.data import TraceData
 from neuroseq.data_widget import DataWidget
-from neuroseq.experiment import SpikeData
-from neuroseq.experiment import SynapseData
-from neuroseq.experiment import TraceData
+from neuroseq.example_models import default_model
+from neuroseq.example_models import example_models
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.import_dialog import Suite2pImportDialog
+from neuroseq.model import Model
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
-from neuroseq.save_options_dialog import SaveOptionsDialog
+from neuroseq.save_options import SaveOptionsDialog
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim_console import StimConsole
 from neuroseq.stim_editor import StimEditor
 from neuroseq.trace_widget import TraceWidget
 from neuroseq.utils import add_action
 from neuroseq.utils import add_items_to_combobox
-from neuroseq.utils import example_models_path
 from neuroseq.utils import getSimulationTime
 from neuroseq.utils import with_wait_cursor
 
@@ -48,7 +49,7 @@ class Gui(QtWidgets.QMainWindow):
         self.status_bar = QtWidgets.QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.addPermanentWidget(ResourceMonitorLabel())
-        self.model = B2Model()
+        self.model = Model()
         self.external_simulation_function: Callable | None = None
         self.setWindowTitle("NeuroSeq")
         self.cmb_trace = QtWidgets.QComboBox()
@@ -129,9 +130,10 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_synapse.currentTextChanged.connect(self.set_synapse)
         self.cmb_spike.currentTextChanged.connect(self.set_spike)
         self.cmb_data.currentTextChanged.connect(self.set_data)
-        if filename is None:
-            filename = example_models_path / "default_model.nseq"
-        self.load_model(str(filename))
+        if filename is not None:
+            self.load_model(filename)
+        else:
+            self.load_model(default_model())
 
     def _custom_analysis(
         self,
@@ -159,15 +161,38 @@ class Gui(QtWidgets.QMainWindow):
             )
 
     def _update_data(self, keep_undo_history: bool) -> None:
-        if self.model.network.t > 0:
+        if self.model.b2_model.network.t > 0:
             self.continue_simulation_action.setText("&Continue simulation")
         else:
             self.continue_simulation_action.setText("&Run simulation")
         self.stim_editor.set_model(self.model, keep_undo_history)
-        self.set_neuron(self.cmb_trace.currentText())
-        self.set_synapse(self.cmb_synapse.currentText())
-        self.set_spike(self.cmb_spike.currentText())
-        self.set_data(self.cmb_data.currentText())
+        self._update_combo_boxes()
+
+    def _update_combo_box(
+        self,
+        cmb: QtWidgets.QComboBox,
+        data_type: type[TraceData | SpikeData | SynapseData],
+    ) -> None:
+        cmb_text = cmb.currentText()
+        cmb.clear()
+        if self.model is not None:
+            add_items_to_combobox(cmb, self.model.get_data_names(data_type))
+            cmb.setCurrentText(cmb_text)
+
+    def _update_combo_boxes(self) -> None:
+        self._update_combo_box(self.cmb_trace, TraceData)
+        self._update_combo_box(self.cmb_spike, SpikeData)
+        self._update_combo_box(self.cmb_synapse, SynapseData)
+        cmb_data_text = self.cmb_data.currentText()
+        self.cmb_data.clear()
+        if self.model is not None:
+            add_items_to_combobox(
+                self.cmb_data,
+                [f"{d} [trace]" for d in self.model.get_data_names(TraceData)]
+                + [f"{d} [spike]" for d in self.model.get_data_names(SpikeData)]
+                + [f"{d} [synapse]" for d in self.model.get_data_names(SynapseData)],
+            )
+            self.cmb_data.setCurrentText(cmb_data_text)
 
     def _update_simulation_progress(
         self,
@@ -192,7 +217,7 @@ class Gui(QtWidgets.QMainWindow):
         self.progress_dialog.setValue(completed_percent)
 
     def btn_new_clicked(self) -> None:
-        self.load_model(str(example_models_path / "default_model.nseq"))
+        self.load_model(default_model())
 
     def btn_open_clicked(self) -> None:
         filename, _ = getopenfilename(
@@ -211,7 +236,7 @@ class Gui(QtWidgets.QMainWindow):
         filename, _ = getsavefilename(
             self,
             "Save model",
-            "model.nseq",
+            f"{self.model.name}.nseq",
             "neuroseq model (*.nseq)",
         )
         if filename == "":
@@ -221,11 +246,7 @@ class Gui(QtWidgets.QMainWindow):
             filename = filename.with_suffix(".nseq")
         try:
             QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
-            self.model.save_model(
-                filename,
-                include_simulation_data=save_options_dialog.include_simulation_data,
-                include_experimental_data=save_options_dialog.include_experimental_data,
-            )
+            self.model.save(filename, save_options_dialog.save_options)
             QtWidgets.QApplication.restoreOverrideCursor()
         except Exception as e:
             QtWidgets.QApplication.restoreOverrideCursor()
@@ -247,7 +268,7 @@ class Gui(QtWidgets.QMainWindow):
         if filename == "":
             return
         try:
-            self.model.save_to_h5(filename)
+            self.model.b2_model.save_to_h5(filename)
         except Exception as e:
             self.logger.warning(f"Failed to export to file {filename}: {e}")
             QtWidgets.QMessageBox.critical(
@@ -258,25 +279,21 @@ class Gui(QtWidgets.QMainWindow):
             return
 
     def btn_edit_clicked(self) -> None:
-        if not self.model.neurongroups:
-            message = "There is no model to be edited, first open an existing one or define a new one"
-            self.logger.critical(message)
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Model edit error",
-                message,
-            )
-        else:
-            mdiag = ModelEditorDialog(self.model, parent=self)
-            if mdiag.exec():
-                self.update_model(mdiag.b2model)
+        mdiag = ModelEditorDialog(self.model.b2_model, parent=self)
+        if mdiag.exec():
+            self.model.b2_model = mdiag.b2model
+            self.update_model(self.model)
 
     @with_wait_cursor
-    def load_model(self, filename: str) -> None:
+    def load_model(self, model: str | pathlib.Path | Model) -> None:
         try:
             self.progress_dialog.setLabelText("Loading model...")
-            model = B2Model.load_model(filename, report=self._update_load_progress)
-            self.logger.info(f"Model {self.model.name} loaded from {filename}")
+            if not isinstance(model, Model):
+                filename = pathlib.Path(model)
+                model = Model(filename, report=self._update_load_progress)
+                self.logger.info(f"Model {self.model.name} loaded from {filename}")
+            else:
+                self.logger.info(f"Model {self.model.name} loaded from Model object")
         except Exception as e:
             self.logger.warning(f"Failed to load model from file {filename}: {e}")
             self.logger.exception(e)
@@ -290,7 +307,7 @@ class Gui(QtWidgets.QMainWindow):
         self.update_model(model)
 
     @with_wait_cursor
-    def update_model(self, model: B2Model) -> None:
+    def update_model(self, model: Model) -> None:
         self.model = model
         self.controller.max_height = 1
         self.controller.max_width = 1
@@ -301,31 +318,9 @@ class Gui(QtWidgets.QMainWindow):
         self.heatmap_widget.clear_data()
         self.controller.clear_grid_lines()
         self.stim_editor.set_model(self.model)
-        cmb_trace_text = self.cmb_trace.currentText()
-        self.cmb_trace.clear()
-        cmb_synapse_text = self.cmb_synapse.currentText()
-        self.cmb_synapse.clear()
-        cmb_spike_text = self.cmb_spike.currentText()
-        self.cmb_spike.clear()
-        cmb_data_text = self.cmb_data.currentText()
-        self.cmb_data.clear()
         if self.model is not None:
             self.stim_console.set_stims(self.stim_editor.stims_dict)
-            add_items_to_combobox(self.cmb_trace, self.model.get_data_names(TraceData))
-            self.cmb_trace.setCurrentText(cmb_trace_text)
-            add_items_to_combobox(self.cmb_spike, self.model.get_data_names(SpikeData))
-            self.cmb_spike.setCurrentText(cmb_spike_text)
-            add_items_to_combobox(
-                self.cmb_synapse, self.model.get_data_names(SynapseData)
-            )
-            self.cmb_synapse.setCurrentText(cmb_synapse_text)
-            add_items_to_combobox(
-                self.cmb_data,
-                [f"{d} [trace]" for d in self.model.get_data_names(TraceData)]
-                + [f"{d} [spike]" for d in self.model.get_data_names(SpikeData)]
-                + [f"{d} [synapse]" for d in self.model.get_data_names(SynapseData)],
-            )
-            self.cmb_data.setCurrentText(cmb_data_text)
+        self._update_combo_boxes()
 
     @with_wait_cursor
     def set_neuron(self, cmb_name: str) -> None:
@@ -364,16 +359,17 @@ class Gui(QtWidgets.QMainWindow):
             self,
             "Store simulation checkpoint",
             "Store the current simulation state as a named checkpoint.\nEnter a new name, or select an existing checkpoint to overwrite:",
-            [f"Checkpoint {len(self.model.checkpoints) + 1}"] + self.model.checkpoints,
+            [f"Checkpoint {len(self.model.b2_model.checkpoints) + 1}"]
+            + self.model.b2_model.checkpoints,
             current=0,
             editable=True,
         )
         if not ok:
             return
-        self.model.store(checkpoint)
+        self.model.b2_model.store(checkpoint)
 
     def btn_restore_checkpoint_clicked(self) -> None:
-        if len(self.model.checkpoints) == 0:
+        if len(self.model.b2_model.checkpoints) == 0:
             QtWidgets.QMessageBox.information(
                 self,
                 "No simulation checkpoints",
@@ -384,14 +380,14 @@ class Gui(QtWidgets.QMainWindow):
             self,
             "Restore simulation checkpoint",
             "Restore simulation checkpoint",
-            self.model.checkpoints,
+            self.model.b2_model.checkpoints,
             current=0,
             editable=False,
         )
         if not ok:
             return
         try:
-            self.model.restore(checkpoint)
+            self.model.b2_model.restore(checkpoint)
             self._update_data(keep_undo_history=False)
         except ValueError as error:
             QtWidgets.QMessageBox.critical(self, "Error", f"{error}")
@@ -407,9 +403,9 @@ class Gui(QtWidgets.QMainWindow):
             self.progress_dialog.setVisible(True)
             QtCore.QCoreApplication.processEvents()
             self.model.run_simulation(
-                simulation_time * b2.second,
+                simulation_time,
                 report=self._update_simulation_progress,
-                timed_array_padding_seconds=self.settings.stim_padding_secs,
+                stim_array_padding_seconds=self.settings.stim_padding_secs,
             )
         except Exception as e:
             QtWidgets.QMessageBox.critical(
@@ -427,10 +423,10 @@ class Gui(QtWidgets.QMainWindow):
             return
         try:
             # pre-emptively pad timed arrays before simulating
-            self.model.pad_timed_arrays(total_time_seconds=simulation_time)
+            self.model.pad_stim_arrays(total_time_seconds=simulation_time)
             self.stim_editor.set_model(self.model)
             stims_dict = {
-                k: {"array": v.timed_array.values, "dt": v.timed_array.dt}
+                k: {"array": v.stim_array.values, "dt": v.stim_array.dt}
                 for k, v in self.stim_editor.stims_dict.items()
             }
             self.logger.info(
@@ -578,8 +574,8 @@ class Gui(QtWidgets.QMainWindow):
     def _load_external_simulation_function(self, filename: str) -> None:
         if filename == "":
             return
+        path = pathlib.Path(filename).resolve()
         try:
-            path = pathlib.Path(filename).resolve()
             self.external_simulation_function = runpy.run_path(filename)["simulate"]
             self.logger.info(f"Loaded custom simulate function from {path}")
             QtWidgets.QMessageBox.information(
@@ -702,12 +698,12 @@ class Gui(QtWidgets.QMainWindow):
             shortcut="Ctrl+N",
             icon=qta.icon("mdi6.file"),
         )
-        # add "open example model" item to the file menu which opens a sub-menu with all of the example models from src/neuroseq/example_models
+        # add "open example model" item to the file menu which opens a sub-menu containing the example models from src/neuroseq/example_models
         example_models_menu = menu.addMenu("&Open example model")
-        for example_model_file in sorted(example_models_path.glob("*.nseq")):
+        for name, generator in example_models.items():
             add_action(
-                example_model_file.stem,
-                lambda checked, f=example_model_file: self.load_model(str(f)),
+                name,
+                lambda checked, _generator=generator: self.load_model(_generator()),
                 example_models_menu,
                 None,
             )

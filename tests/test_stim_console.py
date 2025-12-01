@@ -2,17 +2,18 @@ from __future__ import annotations
 
 from typing import Any
 
-import brian2 as b2
 import brian2.numpy_ as np
 import pytest
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 
-from neuroseq.b2_model import B2Model
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.model import Model
+from neuroseq.stim import StimArray
+from neuroseq.stim import StimType
+from neuroseq.stim_array_modifier import StimArrayModifier
 from neuroseq.stim_console import StimConsole
 from neuroseq.stim_widget import StimWidget
-from neuroseq.timed_array_modifer import TimedArrayModifier
 
 
 @pytest.mark.parametrize(
@@ -59,16 +60,22 @@ def test_stim_console_repl(qtbot: QtBot) -> None:
     stim_widget = StimWidget(controller)
     # start with a valid dict of stims and a valid model
     stims = {
-        "a": TimedArrayModifier(
-            b2.TimedArray(np.zeros((10, 10)), dt=1 * b2.ms), stim_widget
+        "a": StimArrayModifier(
+            StimArray(
+                "a", StimType.Excitation, np.zeros((10, 10)), units="mV", dt=0.001
+            ),
+            stim_widget,
         ),
-        "b": TimedArrayModifier(
-            b2.TimedArray(np.zeros((100, 3)), dt=5 * b2.ms), stim_widget
+        "b": StimArrayModifier(
+            StimArray(
+                "b", StimType.Excitation, np.zeros((100, 3)), units="mV", dt=0.005
+            ),
+            stim_widget,
         ),
     }
     stim_console.set_stims(stims)
-    model = B2Model()
-    model.parameters = {"x": 4}
+    model = Model()
+    model.b2_model.parameters = {"x": 4}
     stim_console.set_model(model)
     assert "np" in stim_console.namespace()
     assert "stims" in stim_console.namespace()
@@ -81,8 +88,8 @@ def test_stim_console_repl(qtbot: QtBot) -> None:
     qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
     assert stim_console.namespace()["x"] == 5
     assert len(signals) == 1
-    assert np.allclose(signals[-1]["a"], stims["a"].timed_array.values)
-    assert np.allclose(signals[-1]["b"], stims["b"].timed_array.values)
+    assert np.allclose(signals[-1]["a"], stims["a"].stim_array.values)
+    assert np.allclose(signals[-1]["b"], stims["b"].stim_array.values)
     # modify stims array in a valid way
     target_a = np.ones((5, 20))
     stim_console.input.setText("stims['a'] = np.ones((5,20))")
@@ -90,17 +97,8 @@ def test_stim_console_repl(qtbot: QtBot) -> None:
     assert np.allclose(stim_console.namespace()["stims"]["a"], target_a)
     assert len(signals) == 2
     assert np.allclose(signals[-1]["a"], target_a)
-    assert np.allclose(signals[-1]["b"], stims["b"].timed_array.values)
+    assert np.allclose(signals[-1]["b"], stims["b"].stim_array.values)
     # modify stims array in an invalid way: no signal should be emitted
     stim_console.input.setText("stims['a'] = 5")
     qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
     assert len(signals) == 2
-    # modify the stims array directly using the model (this bypasses the stim array validation checks)
-    assert "a" not in model.parameters
-    stim_console.input.setText(
-        "model.parameters['a'] = b2.TimedArray([1,2,3], 0.1*b2.second)"
-    )
-    qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
-    assert "a" in model.parameters
-    assert np.allclose(model.parameters["a"].values, [1, 2, 3])
-    assert model.parameters["a"].dt == 0.1

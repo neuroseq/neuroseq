@@ -5,7 +5,7 @@ import pygfx
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from neuroseq.experiment import TraceData
+from neuroseq.data import TraceData
 from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.utils import cmap_transform_neuron_indices
 

@@ -5,7 +5,7 @@ import pytest
 from pytestqt.qtbot import QtBot
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
-from neuroseq.experiment import TraceData
+from neuroseq.data import TraceData
 from neuroseq.trace_widget import TraceNormDialog
 from neuroseq.trace_widget import TraceWidget
 

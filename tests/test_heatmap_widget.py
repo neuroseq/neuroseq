@@ -4,7 +4,7 @@ import brian2.numpy_ as np
 import pytest
 from pytestqt.qtbot import QtBot
 
-from neuroseq.experiment import SynapseData
+from neuroseq.data import SynapseData
 from neuroseq.heatmap_widget import HeatmapWidget
 
 
