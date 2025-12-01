@@ -6,7 +6,6 @@ import math
 import brian2.numpy_ as np
 import fastplotlib as fpl
 import pygfx
-import pyqtgraph as pg
 import qtawesome as qta
 from fastplotlib.layouts import Subplot
 from qtpy import QtCore
@@ -184,7 +183,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         if hasattr(self.graphic, "add_linear_selector"):
             self.timeline = self.graphic.add_linear_selector(thickness=2)
             self.timeline.add_event_handler(
-                lambda ev: self.heatmap_widget.timeLine.setValue(ev.info["value"]),
+                self.on_timeline_change,
                 "selection",
             )
 
@@ -353,9 +352,36 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
             f"Selecting neurons {neuron_index_slice} and times {time_index_slice}"
         )
 
-    def connect_heatmap_widget(self, heatmap_widget: pg.ImageView) -> None:
+    def connect_heatmap_widget(self, heatmap_widget: HeatmapWidget) -> None:
         """Connect the timeline in this widget to the timeline in the HeatmapWidget."""
         self.heatmap_widget = heatmap_widget
+
+    def on_slider_value_changed(self, value: int) -> None:
+        """Slot for the heatmap widget slider.valueChanged signal.
+        Updates the timeline in this widget.
+        """
+        if self.heatmap_widget is None:
+            return
+        if self.timeline is None:
+            return
+        t = self.heatmap_widget.timestamps[value] * 1000.0
+        self.timeline.selection = t
+
+    def on_timeline_change(self, ev):
+        """Outgoing event handler for timeline selection changes."""
+        # timestamp value to index
+        idx = (
+            np.abs(self.heatmap_widget.timestamps * 1000.0 - ev.info["value"])
+        ).argmin()
+        # parse to int
+        try:
+            idx = int(idx)
+        except Exception as e:
+            self.logger.error(f"Error converting index to int: {e}")
+        try:
+            self.heatmap_widget.slider.setValue(idx)
+        except Exception as e:
+            self.logger.error(f"Error setting current index: {e}")
 
     def closeEvent(self, event):
         if self.figure is not None:

@@ -111,7 +111,9 @@ class Gui(QtWidgets.QMainWindow):
         self.heatmap_widget.connect_timeseries_widget_timeline(self.trace_widget)
         self.trace_widget.connect_heatmap_widget(self.heatmap_widget)
         # re-enable when fastplotlib scatter plots support timeline
-        # self.heatmap_widget.connect_timeseries_widget_timeline(self.spike_widget)
+        # self.heatmap_widget.connect_timeseries_widget_timeline(
+        #     self.spike_widget
+        # )
         self.spike_widget.connect_heatmap_widget(self.heatmap_widget)
         self.stim_console.sig_stims_values_dict_updated.connect(
             self.stim_editor.update_stim_values_dict
@@ -462,14 +464,14 @@ class Gui(QtWidgets.QMainWindow):
         self._do_external_simulation(simulation_time)
 
     def btn_skip_to_start_clicked(self) -> None:
-        self.heatmap_widget.setCurrentIndex(0)
+        self.heatmap_widget.set_current_index(0)
 
     def btn_stop_clicked(self) -> None:
-        self.heatmap_widget.play(0)
+        self.heatmap_widget.stop()
         self.btn_skip_to_start_clicked()
 
     def btn_play_clicked(self) -> None:
-        self.heatmap_widget.togglePause()
+        self.heatmap_widget.toggle_pause()
 
     def btn_playback_speed_clicked(self) -> None:
         new_speed, ok = QtWidgets.QInputDialog.getText(
@@ -495,7 +497,7 @@ class Gui(QtWidgets.QMainWindow):
             return
 
     def btn_skip_to_end_clicked(self) -> None:
-        self.heatmap_widget.setCurrentIndex(self.heatmap_widget.nframes() - 1)
+        self.heatmap_widget.set_current_index(self.heatmap_widget.nframes() - 1)
 
     def toggle_selection_text(self):
         for widget in [
@@ -938,4 +940,5 @@ class Gui(QtWidgets.QMainWindow):
         self.stim_editor.stim_widget.close()
         self.data_widget.trace_widget.close()
         self.data_widget.spike_widget.close()
+        self.heatmap_widget.close()
         super().closeEvent(event)

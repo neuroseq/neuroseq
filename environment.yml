@@ -20,4 +20,4 @@ dependencies:
   - pytest-qt
   - pytest-mock
   - pip:
-      - fastplotlib
+      - fastplotlib[imgui]
