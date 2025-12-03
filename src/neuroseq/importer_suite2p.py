@@ -7,6 +7,7 @@ import numpy.typing as npt
 
 from neuroseq.experiment import SpikeData
 from neuroseq.experiment import TraceData
+from neuroseq.spike_detection import detect_spikes_threshold
 
 
 def _normalize_array_per_neuron(
@@ -97,21 +98,12 @@ def prepare_suite2p_spikes(
     max_neurons: int,
 ) -> SpikeData:
     """
-    Create SpikeData from Suite2p spks.npy data.
+    Create SpikeData from Suite2p spks.npy data using shared spike detection.
     """
-    if max_neurons <= 0:
-        raise ValueError("max_neurons must be positive")
-
-    if dt <= 0:
-        raise ValueError("dt must be positive")
-
-    n_neurons, n_timesteps = spike_data.shape
-    n_neurons_to_import = min(max_neurons, n_neurons)
-    normalized_spikes, _, _ = compute_normalized_suite2p_spikes(spike_data)
-    trimmed_data = normalized_spikes[:n_neurons_to_import, :]
-
-    mask = trimmed_data >= threshold
-    neuron_indices, time_indices = np.nonzero(mask)
-    spike_times = time_indices * dt
-
-    return SpikeData("Suite2p spikes", neuron_indices, spike_times)
+    return detect_spikes_threshold(
+        spike_data,
+        dt=dt,
+        threshold=threshold,
+        max_neurons=max_neurons,
+        normalize_per_neuron=True,
+    )

@@ -109,8 +109,8 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.preview_scroll = QtWidgets.QScrollArea()
         self.preview_scroll.setWidget(self.preview_label)
         self.preview_scroll.setWidgetResizable(False)
-        self.preview_scroll.setMinimumHeight(300)
-        self.preview_scroll.setMaximumHeight(500)
+        self.preview_scroll.setMinimumHeight(600)
+        self.preview_scroll.setMaximumHeight(1400)
         layout.addWidget(self.preview_scroll)
 
         self.legend_scroll = QtWidgets.QScrollArea()
@@ -193,6 +193,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             debug_image = Image.fromarray(magnified_image)
             debug_image.save("latest_cellpose_2.png")
         except Exception:
+            # todo: do something here
             pass
 
         return magnified_image

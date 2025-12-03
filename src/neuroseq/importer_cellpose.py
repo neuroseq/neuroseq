@@ -208,8 +208,15 @@ class CellPoseImporter:
             if np.any(self.segmentation_data < 0):
                 raise ValueError("Segmentation data contains negative values")
 
+            # Convert cell indices to 0-based: cell 1 becomes 0, cell 2 becomes 1, etc.
+            # Background (0) remains 0
+            mask_nonzero = self.segmentation_data > 0
+            self.segmentation_data[mask_nonzero] = (
+                self.segmentation_data[mask_nonzero] - 1
+            )
+
             self.logger.info(
-                "Loaded segmentation from %s: %s",
+                "Loaded segmentation from %s: %s (converted to 0-based indexing)",
                 path.suffix.lower(),
                 self.segmentation_data.shape,
             )
@@ -245,9 +252,10 @@ class CellPoseImporter:
             raise ValueError("Both image and segmentation data must be loaded first")
 
         unique_ids = np.unique(self.segmentation_data)
-        neuron_ids = unique_ids[unique_ids > 0]
+        neuron_ids = unique_ids[unique_ids >= 0]  # Now includes 0-based indices
 
         if neuron_ids.size > 0:
+            # neuron_ids are already 0-based after loading
             self._neuron_ids = neuron_ids
             self._neuron_colors = self._compute_neuron_colors(neuron_ids)
 
@@ -327,8 +335,8 @@ class CellPoseImporter:
         if neuron_indices is None or neuron_indices.size == 0:
             return np.zeros((0, 3), dtype=np.uint8)
 
-        zero_based = neuron_indices - neuron_indices.min()
-        return jet_colors_for_neurons(zero_based)
+        # neuron_indices are already 0-based, so use them directly
+        return jet_colors_for_neurons(neuron_indices)
 
     @staticmethod
     def _validate_trace_data(trace_data: TraceData) -> None:

@@ -1,21 +1,21 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
-from typing import Any
 
 import brian2.numpy_ as np
-import scipy.io
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
 from neuroseq.cell_overlay_widget import CellOverlayWidget
-from neuroseq.experiment import TraceData
+from neuroseq.experiment import SpikeData
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.spike_detection import detect_spikes_voltage_trace
 
 
 class PatchClampImportDialog(QtWidgets.QDialog):
-    """Dialog for importing patch clamp traces from .mat files."""
+    """Dialog for importing patch clamp data from .npy files."""
 
     def __init__(
         self,
@@ -25,11 +25,13 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.cellpose_import = cellpose_import
-        self.imported_data: list[TraceData] = []
+        self.imported_data: list = []  # Keep for backward compatibility
+        self.imported_spike_data: list[SpikeData] = []
         self.experiment_name = "PatchClamp Import"
         self.append_data = False
         self.file_path: Path | None = None
-        self.mat_data: dict[str, Any] | None = None
+        self.npy_data: np.ndarray | None = None
+        self.extracted_neuron_id: int | None = None
         self.overlay_widget = CellOverlayWidget("Cell overlay preview")
         self._setup_ui()
         self._load_overlay_from_cellpose()
@@ -37,13 +39,17 @@ class PatchClampImportDialog(QtWidgets.QDialog):
     def _setup_ui(self) -> None:
         self.setWindowTitle("Import Patch Clamp Data")
         self.setModal(True)
-        self.resize(640, 540)
+
+        # Set width to 1.2k pixels or 90% of screen width, whichever is smaller
+        screen = QtWidgets.QApplication.primaryScreen()
+        screen_width = screen.availableGeometry().width()
+        target_width = min(1200, int(0.9 * screen_width))
+        self.resize(target_width, 540)
 
         layout = QtWidgets.QVBoxLayout(self)
 
         instructions = QtWidgets.QLabel(
-            "Select a .mat file containing patch clamp data. Expected variable: "
-            "'neur_act' with fields 'soma', 'dend', and 'bg'."
+            "Select a .npy file containing patch clamp voltage recording data."
         )
         instructions.setWordWrap(True)
         layout.addWidget(instructions)
@@ -73,16 +79,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         options_group = QtWidgets.QGroupBox("Import Options")
         options_layout = QtWidgets.QFormLayout(options_group)
 
-        self.data_source_combo = QtWidgets.QComboBox()
-        self.data_source_combo.addItems(["soma", "dend", "bg"])
-        options_layout.addRow("Data source:", self.data_source_combo)
-
-        self.max_neurons_spin = QtWidgets.QSpinBox()
-        self.max_neurons_spin.setMinimum(1)
-        self.max_neurons_spin.setMaximum(1000)
-        self.max_neurons_spin.setValue(20)
-        options_layout.addRow("Max neurons to import:", self.max_neurons_spin)
-
         self.sampling_rate_spin = QtWidgets.QDoubleSpinBox()
         self.sampling_rate_spin.setDecimals(2)
         self.sampling_rate_spin.setMinimum(0.1)
@@ -101,6 +97,12 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         first_button = self.mapping_buttons.buttons()[0]
         first_button.setChecked(True)
         options_layout.addRow("Mapping strategy:", mapping_layout)
+
+        self.custom_neuron_id_spin = QtWidgets.QSpinBox()
+        self.custom_neuron_id_spin.setMinimum(0)
+        self.custom_neuron_id_spin.setMaximum(999)
+        self.custom_neuron_id_spin.setValue(10)
+        options_layout.addRow("Custom neuron ID:", self.custom_neuron_id_spin)
 
         layout.addWidget(options_group)
 
@@ -139,7 +141,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             self,
             "Select Patch Clamp Data File",
             "",
-            "MATLAB files (*.mat);;All files (*)",
+            "NumPy files (*.npy);;All files (*)",
         )
         if filename:
             self.load_file(filename)
@@ -150,25 +152,15 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             self.file_path_label.setText(self.file_path.name)
             self.file_path_label.setStyleSheet("QLabel { color: black; }")
 
-            mat_data = scipy.io.loadmat(
-                filename, struct_as_record=False, squeeze_me=True
-            )
-            if "neur_act" not in mat_data:
-                raise ValueError("File does not contain 'neur_act' variable")
+            # Clear previous data
+            self.npy_data = None
+            self.extracted_neuron_id = None
 
-            neur_act = mat_data["neur_act"]
-            required_fields = ["soma", "dend", "bg"]
-            missing = [
-                field for field in required_fields if not hasattr(neur_act, field)
-            ]
-            if missing:
-                raise ValueError(f"Missing required fields: {', '.join(missing)}")
+            if self.file_path.suffix.lower() == ".npy":
+                self._load_npy_file(filename)
+            else:
+                raise ValueError("Unsupported file format. Expected .npy file.")
 
-            self.mat_data = {
-                "soma": np.asarray(neur_act.soma),
-                "dend": np.asarray(neur_act.dend),
-                "bg": np.asarray(neur_act.bg),
-            }
             self._update_preview()
             self.import_button.setEnabled(True)
         except Exception as exc:
@@ -180,25 +172,49 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             )
             self.import_button.setEnabled(False)
 
+    def _load_npy_file(self, filename: str) -> None:
+        self.npy_data = np.load(filename)
+
+        # Extract neuron ID from filename if possible
+        neuron_id_match = re.search(r"neuronID_(\d+)", Path(filename).name)
+        if neuron_id_match:
+            self.extracted_neuron_id = int(neuron_id_match.group(1))
+            # Auto-select Custom mapping and set the neuron ID
+            for button in self.mapping_buttons.buttons():
+                if button.text() == "Custom":
+                    button.setChecked(True)
+                    break
+            self.custom_neuron_id_spin.setValue(self.extracted_neuron_id)
+
+        if self.npy_data.ndim != 1:
+            raise ValueError(
+                "NumPy patchclamp data must be 1D (single neuron recording)"
+            )
+
+        # Set default sampling rate for patch clamp recordings (10kHz as mentioned)
+        self.sampling_rate_spin.setValue(10000.0)
+
     def _update_preview(self) -> None:
-        if self.mat_data is None:
+        lines = []
+
+        if self.npy_data is not None:
+            lines.append(f"NPY DATA: {self.npy_data.shape[0]} timepoints")
+            lines.append(
+                f"  mean {np.mean(self.npy_data):.3f} ± {np.std(self.npy_data):.3f}"
+            )
+            lines.append(
+                f"  range {np.min(self.npy_data):.3f} to {np.max(self.npy_data):.3f}"
+            )
+            if self.extracted_neuron_id is not None:
+                lines.append(f"  extracted neuron ID: {self.extracted_neuron_id}")
+
+            # Calculate duration at 10kHz
+            duration_sec = self.npy_data.shape[0] / 10000.0
+            lines.append(f"  duration: {duration_sec:.1f} seconds at 10kHz")
+            lines.append("")
+        else:
             self.preview_text.clear()
             return
-
-        lines = []
-        for field_name, data in self.mat_data.items():
-            if not isinstance(data, np.ndarray):
-                continue
-            if data.ndim != 2:
-                lines.append(f"{field_name}: unexpected shape {data.shape}")
-                continue
-            lines.append(
-                f"{field_name.upper()}: {data.shape[0]} neurons × {data.shape[1]} timepoints"
-            )
-            lines.append(
-                f"  mean {np.mean(data):.3f} ± {np.std(data):.3f}, range {np.min(data):.3f} to {np.max(data):.3f}"
-            )
-            lines.append("")
 
         self.preview_text.setPlainText("\n".join(lines).strip())
 
@@ -207,38 +223,16 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         return checked.text() if checked is not None else "Linear"
 
     def import_data(self) -> None:
-        if self.mat_data is None:
+        if self.npy_data is None:
             return
 
         try:
-            data_source = self.data_source_combo.currentText()
-            voltage_traces = np.asarray(self.mat_data[data_source])
-            if voltage_traces.ndim != 2:
-                raise ValueError("Patch clamp data must be 2D (neurons × timepoints)")
-
-            n_neurons, n_timepoints = voltage_traces.shape
-            n_neurons_to_import = min(self.max_neurons_spin.value(), n_neurons)
             sampling_rate = self.sampling_rate_spin.value()
             if sampling_rate <= 0:
                 raise ValueError("Sampling rate must be positive")
             dt = 1.0 / sampling_rate
 
-            voltage_traces = voltage_traces[:n_neurons_to_import, :]
-            trace_name = f"PatchClamp {data_source} ({self._get_mapping_strategy()})"
-            trace_data = TraceData(
-                trace_name,
-                voltage_traces.astype(np.float32),
-                "mV",
-                dt,
-            )
-
-            self.imported_data = [trace_data]
-            QtWidgets.QMessageBox.information(
-                self,
-                "Import Successful",
-                f"Imported {n_neurons_to_import} neurons from '{data_source}' with "
-                f"{n_timepoints} timepoints at {sampling_rate:.2f} Hz.",
-            )
+            self._import_npy_data(sampling_rate, dt)
             self.accept()
         except Exception as exc:
             self.logger.exception("Error importing patch clamp data")
@@ -246,4 +240,37 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 self,
                 "Import Error",
                 f"Error importing data:\n{exc}",
+            )
+
+    def _import_npy_data(self, sampling_rate: float, dt: float) -> None:
+        if self.npy_data is None:
+            raise ValueError("No NPY data loaded")
+
+        neuron_id = self.custom_neuron_id_spin.value()
+
+        # Use shared spike detection utility
+        spike_data = detect_spikes_voltage_trace(
+            self.npy_data,
+            neuron_id=neuron_id,
+            dt=dt,
+            threshold_method="mean_plus_std",
+            threshold_multiplier=3.0,  # Conservative threshold
+            min_spike_interval=0.001,  # 1ms minimum interval
+        )
+
+        if len(spike_data.spike_times) > 0:
+            self.imported_spike_data = [spike_data]
+
+            QtWidgets.QMessageBox.information(
+                self,
+                "Import Successful",
+                f"Imported {len(spike_data.spike_times)} spikes from neuron {neuron_id}\n"
+                f"Duration: {len(self.npy_data) / sampling_rate:.1f} seconds at {sampling_rate:.0f} Hz.",
+            )
+        else:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "No Spikes Detected",
+                f"No spikes were detected in the recording for neuron {neuron_id}.\n"
+                f"You may need to adjust the detection parameters.",
             )
