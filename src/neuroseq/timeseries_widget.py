@@ -7,7 +7,6 @@ import brian2.numpy_ as np
 import fastplotlib as fpl
 import pygfx
 import qtawesome as qta
-from fastplotlib.layouts import Subplot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
@@ -15,16 +14,16 @@ from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
+from neuroseq.fpl_widget import FPLWidget
 from neuroseq.gridlines import GridLines
 from neuroseq.region_of_interest import RegionOfInterest
 from neuroseq.text import Text
 from neuroseq.timeline import Timeline
 from neuroseq.utils import InteractMode
-from neuroseq.utils import QtABCMeta
 from neuroseq.utils import add_action
 
 
-class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
+class TimeseriesWidget(FPLWidget):
     """A base class for widgets that display a set of timeseries data for a number of neurons, stacked vertically.
 
     data should be a 2d array or list of 2d arrays, where the first index of each
@@ -48,16 +47,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
     def __init__(
         self, controller: pygfx.Controller, parent: QtWidgets.QWidget | None = None
     ) -> None:
-        super().__init__(parent)
-        self.controller = controller
-        self.figure: fpl.Figure = fpl.Figure(
-            controllers=controller, canvas_kwargs={"parent": self}
-        )
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        self.widget = self.figure.show()
-        layout.addWidget(self.widget)
+        super().__init__(controller=controller, parent=parent)
         self.graphic: fpl.ImageGraphic | fpl.LineStack | fpl.ScatterGraphic | None = (
             None
         )
@@ -70,11 +60,6 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.show_text = True
         self.timeline = Timeline()
         self.grid_lines: GridLines | None = None
-        self.setLayout(layout)
-        self.subplot: Subplot = self.figure[0, 0]
-        self._set_light_mode()
-        self.setMinimumSize(QtCore.QSize(100, 100))
-        self.resize(800, 600)
 
         self.context_menu = QtWidgets.QMenu("Custom analysis", self)
         for custom_analysis_type in CustomAnalysisType:
@@ -140,24 +125,6 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         else:
             super().contextMenuEvent(event)
 
-    def _set_light_mode(self) -> None:
-        # some of these currently require accessing private attributes: should refactor when fastplotlib allows setting these colors directly
-        self.subplot.background_color = "w"
-        self.subplot.axes.colors = (
-            "k",
-            "k",
-            "k",
-        )
-        self.subplot.axes.grids.xy.axis_color = "k"
-        self.subplot.axes.grids.xy.major_color = "k"
-        self.subplot.axes.grids.xy.minor_color = "k"
-        self.subplot.axes._x._text.material.color = "k"
-        self.subplot.axes._y._text.material.color = "k"
-        self.subplot.axes._x._line.material.color = "k"
-        self.subplot.axes._y._line.material.color = "k"
-        self.subplot.axes._x._points.material.color = "k"
-        self.subplot.axes._y._points.material.color = "k"
-
     def post_set_data(self):
         self.controller.max_height = max(self.controller.max_height, self.n_neurons)
         self.controller.max_width = max(
@@ -184,15 +151,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.roi.visible = False
 
     def clear_data(self) -> None:
-        self.subplot.clear()
-        self.subplot.grids = False
-        self.subplot.axes.y.ticks = {}
-        self.subplot.axes.y.points.visible = False
-        self.subplot.axes.y.line.visible = False
-        self.subplot.axes.x.points.visible = False
-        self.subplot.axes.x.line.visible = False
-        self.subplot.axes.x.ticks = {}
-        self.subplot.toolbar = False
+        super().clear_data()
         self.hover_slice_graphic = None
         self.background_graphics = []
         self.data = None
@@ -350,10 +309,3 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.logger.debug(
             f"Selecting neurons {neuron_index_slice} and times {time_index_slice}"
         )
-
-    def closeEvent(self, event):
-        if self.figure is not None:
-            # stop the renderer before closing the widget otherwise it may try to render to the deleted object
-            self.figure.close()
-            self.figure = None
-        super().closeEvent(event)

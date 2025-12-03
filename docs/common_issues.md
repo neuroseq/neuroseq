@@ -9,7 +9,7 @@ ERROR: Could not install packages due to an OSError: [Errno 2] No such file or d
 HINT: This error might have occurred since this system does not have Windows Long Path support enabled. You can find information on how to enable this at https://pip.pypa.io/warnings/enable-long-paths
 ```
 
-The issues can be fixed by entering Registery Editor and modifyting *LongPathsEnabled* variable under *HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\FileSystem* from "0" to "1".
+The issues can be fixed by entering Registry Editor and modifying _LongPathsEnabled_ variable under _HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\FileSystem_ from "0" to "1".
 
 Refer to this webpage on the instructions to fix it:
 https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation?tabs=registry#enable-long-paths-in-windows-10-version-1607-and-later

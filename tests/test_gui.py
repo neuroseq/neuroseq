@@ -87,6 +87,8 @@ def test_gui_simulate_and_playback(monkeypatch: MonkeyPatch, qtbot: QtBot) -> No
     assert gui.cmb_trace.itemText(0) == "Simulation :: P / v"
     assert gui.cmb_spike.count() == 1
     assert gui.cmb_spike.itemText(0) == "Simulation :: P"
+    assert gui.heatmap_widget.data is not None
+    assert gui.heatmap_widget.timestamps is not None
     n_timesteps = gui.heatmap_widget.timestamps.size
     gui.time_slider.toggle_pause()
     qtbot.waitUntil(lambda: gui.heatmap_widget.get_timestamp_index() > 0)
@@ -369,6 +371,8 @@ def test_gui_synapse_ram_limit(
     )
     gui.btn_continue_simulation_clicked()
     qtbot.wait(delay_after_update_model_call_in_ms)
+    assert gui.heatmap_widget.data is not None
+    assert gui.heatmap_widget.timestamps is not None
     n_timesteps = gui.heatmap_widget.timestamps.size
     assert n_timesteps == 1000
     # 1 MB RAM limit
@@ -450,6 +454,8 @@ def test_gui_stim_padding(
     gui.btn_continue_simulation_clicked()
     qtbot.wait(delay_after_update_model_call_in_ms)
     # should have ~0.1 secs of simulation data, and ~10.1 secs of stim array data with dt=0.1ms
+    assert gui.heatmap_widget.data is not None
+    assert gui.heatmap_widget.timestamps is not None
     assert gui.heatmap_widget.timestamps[-1] == approx(100, rel=2)
     assert gui.stim_editor.stim_widget.n_timestamps == 10100
 
@@ -565,6 +571,8 @@ def test_gui_simulate_external_model(
     assert gui.trace_widget.n_timestamps == 2000
     assert gui.spike_widget.n_neurons == 32
     assert gui.spike_widget.dt_ms == approx(simulation_time_ms / 2000, rel=2)
+    assert gui.heatmap_widget.data is not None
+    assert gui.heatmap_widget.timestamps is not None
     assert gui.heatmap_widget.timestamps[-1] == approx(simulation_time_ms, rel=2)
 
 

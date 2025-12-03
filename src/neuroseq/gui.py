@@ -104,6 +104,7 @@ class Gui(QtWidgets.QMainWindow):
             self.spike_widget,
             self.data_widget.trace_widget,
             self.data_widget.spike_widget,
+            self.data_widget.heatmap_widget,
             self.heatmap_widget,
         ]
         for widget in self.plot_widgets:

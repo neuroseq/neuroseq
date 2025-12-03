@@ -18,6 +18,7 @@ Once Anaconda installed, create and activate a new environment in a command line
 conda create -n neuroseq python=3.10
 conda activate neuroseq
 ```
+
 Alternatively, the new enviroment can be created within Anaconda Navigator. For this, open Anaconda Navigator and go to "Enviroments". Click "Create" button, write "neuroseq" as a name and select Python 3.10.
 
 ### Installation of the neuroseq
