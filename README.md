@@ -10,12 +10,15 @@ Private repository containing the neuroseq prototype GUI.
 
 ### Conda
 
-It is recommended to use a conda environment for the installation. First, create and activate a new environment in a command line for the installation:
+It is recommended to use Anaconda environment (package manager) for the installation. It can be downloaded from the official webpage https://www.anaconda.com/.
+
+Once Anaconda installed, create and activate a new environment in a command line:
 
 ```
 conda create -n neuroseq python=3.10
 conda activate neuroseq
 ```
+Alternatively, the new enviroment can be created within Anaconda Navigator. For this, open Anaconda Navigator and go to "Enviroments". Click "Create" button, write "neuroseq" as a name and select Python 3.10.
 
 ### Installation of the neuroseq
 
