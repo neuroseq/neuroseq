@@ -27,7 +27,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
     def _setup_ui(self) -> None:
         self.setWindowTitle("Import Cellpose Data")
         self.setModal(True)
-        self.resize(600, 500)
+
+        # Set width to at least 1200px or 90% of screen width, whichever is larger
+        screen = QtWidgets.QApplication.primaryScreen()
+        screen_width = screen.availableGeometry().width()
+        target_width = max(1200, int(0.9 * screen_width))
+        self.resize(target_width, 600)
 
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -38,6 +43,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
         instructions.setWordWrap(True)
         layout.addWidget(instructions)
 
+        # Create horizontal layout for file selection and info
+        top_horizontal_layout = QtWidgets.QHBoxLayout()
+
+        # File selection group
         file_group = QtWidgets.QGroupBox("File Selection")
         file_layout = QtWidgets.QFormLayout(file_group)
 
@@ -59,10 +68,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
         seg_layout.addWidget(browse_seg_button)
         file_layout.addRow("Segmentation CSV/NPY:", seg_layout)
 
-        layout.addWidget(file_group)
+        top_horizontal_layout.addWidget(file_group, stretch=2)
 
-        layout.addWidget(self.overlay_widget)
-
+        # Data information group
         info_group = QtWidgets.QGroupBox("Data Information")
         info_layout = QtWidgets.QVBoxLayout(info_group)
 
@@ -71,7 +79,13 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.info_text.setMaximumHeight(100)
         info_layout.addWidget(self.info_text)
 
-        layout.addWidget(info_group)
+        top_horizontal_layout.addWidget(info_group, stretch=1)
+
+        layout.addLayout(top_horizontal_layout)
+
+        # Limit preview height to make room for other controls
+        self.overlay_widget.setMaximumHeight(300)
+        layout.addWidget(self.overlay_widget)
 
         button_layout = QtWidgets.QHBoxLayout()
         self.import_button = QtWidgets.QPushButton("Import")
