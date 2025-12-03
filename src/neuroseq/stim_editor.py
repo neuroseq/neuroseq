@@ -41,6 +41,8 @@ class SelectMode(Enum):
 class StimEditor(QtWidgets.QWidget):
     """A GUI to edit 2-d numpy arrays of neuron stimuli interactively using mouse and keyboard input."""
 
+    max_time_modified = QtCore.Signal()
+
     def __init__(
         self,
         controller: ConstrainedPanZoomController,
@@ -196,6 +198,7 @@ class StimEditor(QtWidgets.QWidget):
             )
             return
         self.set_model(self.model, keep_undo_history=True)
+        self.max_time_modified.emit()
 
     def trim_stim_array(self) -> None:
         if self.current_stim_modifier is None or self.model is None:
@@ -248,6 +251,7 @@ class StimEditor(QtWidgets.QWidget):
         self.trim_stim_array_secs = trim_seconds_as_float
         self.model.trim_stim_arrays(new_length_secs)
         self.set_model(self.model, keep_undo_history=False)
+        self.max_time_modified.emit()
 
     def _stim_values_updated(self) -> None:
         if self.current_stim_modifier is None:

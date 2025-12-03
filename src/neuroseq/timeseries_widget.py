@@ -16,9 +16,9 @@ from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.gridlines import GridLines
-from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.region_of_interest import RegionOfInterest
 from neuroseq.text import Text
+from neuroseq.timeline import Timeline
 from neuroseq.utils import InteractMode
 from neuroseq.utils import QtABCMeta
 from neuroseq.utils import add_action
@@ -49,12 +49,13 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self, controller: pygfx.Controller, parent: QtWidgets.QWidget | None = None
     ) -> None:
         super().__init__(parent)
-        self.heatmap_widget: HeatmapWidget | None = None
         self.controller = controller
         self.figure: fpl.Figure = fpl.Figure(
             controllers=controller, canvas_kwargs={"parent": self}
         )
         layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         self.widget = self.figure.show()
         layout.addWidget(self.widget)
         self.graphic: fpl.ImageGraphic | fpl.LineStack | fpl.ScatterGraphic | None = (
@@ -67,7 +68,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.hover_slice_graphic: fpl.Graphic | None = None
         self.text = Text()
         self.show_text = True
-        self.timeline: fpl.LinearSelector | None = None
+        self.timeline = Timeline()
         self.grid_lines: GridLines | None = None
         self.setLayout(layout)
         self.subplot: Subplot = self.figure[0, 0]
@@ -174,18 +175,13 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.subplot.axes.x.tick_format = lambda x, x_min, x_max: f"{x:.0f}ms"
         self.subplot.toolbar = False
         self.subplot.add_graphic(self.roi, center=False)
+        self.subplot.add_graphic(self.timeline, center=False)
         self.grid_lines = GridLines(self.n_neurons, self.n_timestamps * self.dt_ms)
         self.subplot.add_graphic(self.grid_lines, center=False)
         self.controller.add_grid_lines(self.grid_lines)
         self.subplot.add_graphic(self.text, center=False)
         self._set_light_mode()
         self.roi.visible = False
-        if hasattr(self.graphic, "add_linear_selector"):
-            self.timeline = self.graphic.add_linear_selector(thickness=2)
-            self.timeline.add_event_handler(
-                self.on_timeline_change,
-                "selection",
-            )
 
     def clear_data(self) -> None:
         self.subplot.clear()
@@ -204,6 +200,9 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.n_timestamps = 0
         self.dt_ms = 0.0
         self.unselect_neurons()
+
+    def set_time_ms(self, time_ms: int) -> None:
+        self.timeline.t = time_ms
 
     def pointer_down(self, ev: pygfx.PointerEvent) -> None:
         self.mouse_press_pos = self.subplot.map_screen_to_world(ev)
@@ -351,37 +350,6 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.logger.debug(
             f"Selecting neurons {neuron_index_slice} and times {time_index_slice}"
         )
-
-    def connect_heatmap_widget(self, heatmap_widget: HeatmapWidget) -> None:
-        """Connect the timeline in this widget to the timeline in the HeatmapWidget."""
-        self.heatmap_widget = heatmap_widget
-
-    def on_slider_value_changed(self, value: int) -> None:
-        """Slot for the heatmap widget slider.valueChanged signal.
-        Updates the timeline in this widget.
-        """
-        if self.heatmap_widget is None:
-            return
-        if self.timeline is None:
-            return
-        t = self.heatmap_widget.timestamps[value] * 1000.0
-        self.timeline.selection = t
-
-    def on_timeline_change(self, ev):
-        """Outgoing event handler for timeline selection changes."""
-        # timestamp value to index
-        idx = (
-            np.abs(self.heatmap_widget.timestamps * 1000.0 - ev.info["value"])
-        ).argmin()
-        # parse to int
-        try:
-            idx = int(idx)
-        except Exception as e:
-            self.logger.error(f"Error converting index to int: {e}")
-        try:
-            self.heatmap_widget.slider.setValue(idx)
-        except Exception as e:
-            self.logger.error(f"Error setting current index: {e}")
 
     def closeEvent(self, event):
         if self.figure is not None:

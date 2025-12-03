@@ -48,7 +48,7 @@ def test_update_screenshot(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
     qtbot.wait(delay_after_update_model_call_in_ms)
     histogram_action.trigger()
     qtbot.wait(delay_after_update_model_call_in_ms)
-    gui.btn_play_clicked()
+    gui.time_slider.toggle_pause()
     qtbot.waitUntil(
         lambda: gui.heatmap_widget.currentIndex == gui.heatmap_widget.tVals.size - 1
     )
@@ -70,16 +70,16 @@ def test_gui_simulate_and_playback(monkeypatch: MonkeyPatch, qtbot: QtBot) -> No
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)
-    assert gui.heatmap_widget.get_heatmap_index() == 0
+    assert gui.heatmap_widget.get_timestamp_index() == 0
     assert "run" in gui.continue_simulation_action.text().lower()
     assert "continue" not in gui.continue_simulation_action.text().lower()
-    simulation_time = 0.1
+    simulation_time_s = 1.0
     # mock getText to return the desired simulation time
     monkeypatch.setattr(
-        QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
+        QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time_s}", True)
     )
     qtbot.wait(delay_after_update_model_call_in_ms)
-    simulation_time_ms = simulation_time * 1000
+    simulation_time_ms = simulation_time_s * 1000
     gui.btn_continue_simulation_clicked()
     assert gui.cmb_synapse.count() == 1
     assert gui.cmb_synapse.itemText(0) == "Simulation :: Ce / we"
@@ -88,33 +88,37 @@ def test_gui_simulate_and_playback(monkeypatch: MonkeyPatch, qtbot: QtBot) -> No
     assert gui.cmb_spike.count() == 1
     assert gui.cmb_spike.itemText(0) == "Simulation :: P"
     n_timesteps = gui.heatmap_widget.timestamps.size
-    gui.btn_play_clicked()
-    qtbot.waitUntil(lambda: gui.heatmap_widget.get_heatmap_index() > 0)
+    gui.time_slider.toggle_pause()
+    qtbot.waitUntil(lambda: gui.heatmap_widget.get_timestamp_index() > 0)
     # pause and then continue playback
-    gui.btn_play_clicked()
-    gui.btn_play_clicked()
+    gui.time_slider.toggle_pause()
+    gui.time_slider.toggle_pause()
     qtbot.waitUntil(
-        lambda: gui.heatmap_widget.get_heatmap_index() == n_timesteps - 1,
+        lambda: gui.heatmap_widget.get_timestamp_index() == n_timesteps - 1,
         timeout=100000,
     )
     assert "run" not in gui.continue_simulation_action.text().lower()
     assert "continue" in gui.continue_simulation_action.text().lower()
     assert gui.trace_widget.timeline is not None
-    assert gui.trace_widget.timeline.selection == approx(simulation_time_ms, rel=2)
-    # todo: re-enable these spike_widget timeline tests when fastplotlib supports the timeline in scatter plots
-    # assert gui.spike_widget.timeline.selection == approx(simulation_time_ms, rel=2)
-    gui.btn_skip_to_start_clicked()
-    assert gui.trace_widget.timeline.selection == approx(0)
-    # assert gui.spike_widget.timeline.selection == approx(0)
-    assert gui.heatmap_widget.get_heatmap_index() == 0
-    gui.btn_skip_to_end_clicked()
-    assert gui.trace_widget.timeline.selection == approx(simulation_time_ms, rel=2)
-    # assert gui.spike_widget.timeline.selection == approx(simulation_time_ms, rel=2)
-    assert gui.heatmap_widget.get_heatmap_index() == n_timesteps - 1
-    gui.btn_stop_clicked()
-    assert gui.trace_widget.timeline.selection == approx(0)
-    # assert gui.spike_widget.timeline.selection == approx(0)
-    assert gui.heatmap_widget.get_heatmap_index() == 0
+    assert gui.stim_editor.stim_widget.timeline.t == approx(simulation_time_ms, rel=2)
+    assert gui.trace_widget.timeline.t == approx(simulation_time_ms, rel=2)
+    assert gui.spike_widget.timeline.t == approx(simulation_time_ms, rel=2)
+    assert gui.heatmap_widget.get_timestamp_index() == n_timesteps - 1
+    gui.time_slider.skip_to_start()
+    assert gui.stim_editor.stim_widget.timeline.t == approx(0, rel=2)
+    assert gui.trace_widget.timeline.t == approx(0, rel=2)
+    assert gui.spike_widget.timeline.t == approx(0, rel=2)
+    assert gui.heatmap_widget.get_timestamp_index() == 0
+    gui.time_slider.skip_to_end()
+    assert gui.stim_editor.stim_widget.timeline.t == approx(simulation_time_ms, rel=2)
+    assert gui.trace_widget.timeline.t == approx(simulation_time_ms, rel=2)
+    assert gui.spike_widget.timeline.t == approx(simulation_time_ms, rel=2)
+    assert gui.heatmap_widget.get_timestamp_index() == n_timesteps - 1
+    gui.time_slider.stop()
+    assert gui.stim_editor.stim_widget.timeline.t == approx(0, rel=2)
+    assert gui.trace_widget.timeline.t == approx(0, rel=2)
+    assert gui.spike_widget.timeline.t == approx(0, rel=2)
+    assert gui.heatmap_widget.get_timestamp_index() == 0
 
 
 def test_gui_new(tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
@@ -357,7 +361,7 @@ def test_gui_synapse_ram_limit(
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)
-    assert gui.heatmap_widget.get_heatmap_index() == 0
+    assert gui.heatmap_widget.get_timestamp_index() == 0
     simulation_time = 0.1
     # mock getText to return the desired simulation time
     monkeypatch.setattr(
@@ -436,7 +440,7 @@ def test_gui_stim_padding(
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)
-    assert gui.heatmap_widget.get_heatmap_index() == 0
+    assert gui.heatmap_widget.get_timestamp_index() == 0
     # set 10secs of stim padding
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("10", True))
     gui.choose_stim_padding_secs()
@@ -493,27 +497,27 @@ def test_gui_playback_speed(
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)
-    assert gui.heatmap_widget.relative_playback_speed == pytest.approx(1.0)
+    assert gui.time_slider.relative_playback_speed == pytest.approx(1.0)
     # mock getItem to return the desired playback speed
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getText", lambda *args: ("2.6743", True)
     )
     gui.btn_playback_speed_clicked()
-    assert gui.heatmap_widget.relative_playback_speed == pytest.approx(2.6743)
+    assert gui.time_slider.relative_playback_speed == pytest.approx(2.6743)
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getText", lambda *args: ("0.1234", True)
     )
     gui.btn_playback_speed_clicked()
-    assert gui.heatmap_widget.relative_playback_speed == pytest.approx(0.1234)
+    assert gui.time_slider.relative_playback_speed == pytest.approx(0.1234)
     # pressing cancel should not change the playback speed
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("1.0", False))
     gui.btn_playback_speed_clicked()
-    assert gui.heatmap_widget.relative_playback_speed == pytest.approx(0.1234)
+    assert gui.time_slider.relative_playback_speed == pytest.approx(0.1234)
     # invalid input should show an error message and not change the playback speed
     assert len(qmessagebox_calls) == 0
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.0", True))
     gui.btn_playback_speed_clicked()
-    assert gui.heatmap_widget.relative_playback_speed == pytest.approx(0.1234)
+    assert gui.time_slider.relative_playback_speed == pytest.approx(0.1234)
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "critical"
     assert "invalid input" in qmessagebox_calls[0]["title"].lower()

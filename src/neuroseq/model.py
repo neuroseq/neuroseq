@@ -36,7 +36,6 @@ class Model:
 
         self.max_ram_synapse_plot_matrix = 256
         self.max_time_secs = 1.0
-        self.current_time_secs = 0.0
 
         self.logger = logging.getLogger(__name__)
         if filepath:
