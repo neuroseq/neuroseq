@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import abc
 import functools
 import logging
 import re
@@ -156,16 +155,6 @@ def add_items_to_combobox(combobox: QtWidgets.QComboBox, items: list[str]) -> No
     font_metrics = QtGui.QFontMetrics(combobox.font())
     max_width = font_metrics.boundingRect(longest_item).width()
     combobox.view().setMinimumWidth(max_width + 20)
-
-
-class QtABCMeta(type(QtCore.QObject), abc.ABCMeta):  # type: ignore
-    """Metaclass that allows a class to be both a QObject and an Abstract Base Class.
-
-    Note that pyside6 apparently does not fully support abstract methods in a metaclass,
-    so we also need to provide a fallback NotImplementedError in the abstract methods.
-    """
-
-    pass
 
 
 def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:

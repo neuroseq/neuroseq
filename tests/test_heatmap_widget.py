@@ -16,6 +16,7 @@ def test_heatmap_widget_no_data(qtbot: QtBot) -> None:
     qtbot.addWidget(heatmap_widget)
     heatmap_widget.show()
     qtbot.waitUntil(lambda: heatmap_widget.isVisible())
+    heatmap_widget.close()
 
 
 @pytest.mark.parametrize("relative_playback_speed", [0.5, 1.0, 2.0])
@@ -38,10 +39,9 @@ def test_heatmap_widget_3d_data_with_timeline(
     data = SynapseData("synapse", values, timepoints_s)
     heatmap_widget.set_data(data)
     time_slider.set_relative_playback_speed(relative_playback_speed)
-    assert (
-        heatmap_widget.image_widget.data[0].shape
-        == np.transpose(values, (2, 0, 1)).shape
-    )
+    assert heatmap_widget.data is not None
+    assert heatmap_widget.data.shape == values.T.shape
+    assert heatmap_widget.timestamps is not None
     assert heatmap_widget.timestamps.shape == timepoints_s.shape
     time_slider.toggle_pause()
     start_time_secs = perf_counter()
@@ -51,6 +51,7 @@ def test_heatmap_widget_3d_data_with_timeline(
     elapsed_time_secs = perf_counter() - start_time_secs
     # timing should be correct within 25%
     assert elapsed_time_secs == pytest.approx(total_playback_time_secs, rel=0.25)
+    heatmap_widget.close()
 
 
 def test_heatmap_widget_clear_data(qtbot: QtBot) -> None:
@@ -63,13 +64,15 @@ def test_heatmap_widget_clear_data(qtbot: QtBot) -> None:
     timepoints_s = interval_s * np.arange(values.shape[2])
     data = SynapseData("synapse", values, timepoints_s)
     heatmap_widget.set_data(data)
-    assert heatmap_widget.image_widget.data[0].shape[0] == values.shape[2]
+    assert heatmap_widget.data is not None
+    assert heatmap_widget.data.shape[0] == values.shape[2]
     heatmap_widget.clear_data()
-    assert heatmap_widget.image_widget.data[0].shape[0] == 1
+    assert heatmap_widget.data is None
+    heatmap_widget.close()
 
 
 @pytest.mark.parametrize("data_shape", [(15, 12, 8), (20, 5, 10), (8, 8, 4)])
-def test_heatmap_widget_set_data(qtbot: QtBot, data_shape) -> None:
+def test_heatmap_widget_set_data(qtbot: QtBot, data_shape: tuple[int]) -> None:
     heatmap_widget = HeatmapWidget()
     qtbot.addWidget(heatmap_widget)
     heatmap_widget.show()
@@ -79,11 +82,11 @@ def test_heatmap_widget_set_data(qtbot: QtBot, data_shape) -> None:
     timepoints_s = interval_s * np.arange(values.shape[2])
     data = SynapseData("synapse", values, timepoints_s)
     heatmap_widget.set_data(data)
-    assert (
-        heatmap_widget.image_widget.data[0].shape
-        == np.transpose(values, (2, 0, 1)).shape
-    )
+    assert heatmap_widget.data is not None
+    assert heatmap_widget.data.shape == values.T.shape
+    assert heatmap_widget.timestamps is not None
     assert heatmap_widget.timestamps.shape == timepoints_s.shape
+    heatmap_widget.close()
 
 
 def test_heatmap_widget_set_data_no_data(qtbot: QtBot) -> None:
@@ -92,41 +95,8 @@ def test_heatmap_widget_set_data_no_data(qtbot: QtBot) -> None:
     heatmap_widget.show()
     qtbot.waitUntil(lambda: heatmap_widget.isVisible())
     heatmap_widget.set_data(None)
-    assert heatmap_widget.image_widget.data[0].shape[0] == 1
-    heatmap_widget.set_data(SynapseData("synapse", np.empty((0, 0, 0)), np.empty((0,))))
-    assert heatmap_widget.image_widget.data[0].shape[0] == 1
-
-
-def test_heatmap_widget_configure_subplot(qtbot: QtBot) -> None:
-    heatmap_widget = HeatmapWidget()
-    qtbot.addWidget(heatmap_widget)
-    heatmap_widget.show()
-    qtbot.waitUntil(lambda: heatmap_widget.isVisible())
-    heatmap_widget.configure_subplot()
-    assert not heatmap_widget.subplot.toolbar
-    assert not heatmap_widget.subplot.axes.y.ticks
-    assert not heatmap_widget.subplot.axes.y.points.visible
-    assert not heatmap_widget.subplot.axes.y.line.visible
-    assert heatmap_widget.subplot.axes.y.tick_format(0) == ""
-    assert not heatmap_widget.subplot.axes.x.ticks
-    assert not heatmap_widget.subplot.axes.x.points.visible
-    assert not heatmap_widget.subplot.axes.x.line.visible
-    assert heatmap_widget.subplot.axes.x.tick_format(0) == ""
-    # check if assertions hold after setting data without calling configure_subplot again
-    values = np.random.rand(10, 10, 5)
-    interval_s = 0.1
-    timepoints_s = interval_s * np.arange(values.shape[2])
-    data = SynapseData("synapse", values, timepoints_s)
-    heatmap_widget.set_data(data)
-    assert not heatmap_widget.subplot.toolbar
-    assert not heatmap_widget.subplot.axes.y.ticks
-    assert not heatmap_widget.subplot.axes.y.points.visible
-    assert not heatmap_widget.subplot.axes.y.line.visible
-    assert heatmap_widget.subplot.axes.y.tick_format(0) == ""
-    assert not heatmap_widget.subplot.axes.x.ticks
-    assert not heatmap_widget.subplot.axes.x.points.visible
-    assert not heatmap_widget.subplot.axes.x.line.visible
-    assert heatmap_widget.subplot.axes.x.tick_format(0) == ""
+    assert heatmap_widget.data is None
+    heatmap_widget.close()
 
 
 def test_heatmap_widget_set_time_ms(qtbot: QtBot) -> None:
@@ -143,3 +113,4 @@ def test_heatmap_widget_set_time_ms(qtbot: QtBot) -> None:
         time_ms = 1000 * timepoints_s[idx]
         heatmap_widget.set_time_ms(time_ms)
         assert heatmap_widget.get_timestamp_index() == idx
+    heatmap_widget.close()

@@ -19,14 +19,14 @@ class DataWidget(QtWidgets.QWidget):
         controller: pygfx.Controller,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
-        super().__init__(parent)
+        super().__init__(parent=parent)
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.stacked_widget = QtWidgets.QStackedWidget()
         layout.addWidget(self.stacked_widget)
-        self.trace_widget = TraceWidget(controller, self)
-        self.spike_widget = SpikeWidget(controller, self)
-        self.heatmap_widget = HeatmapWidget(self)
+        self.trace_widget = TraceWidget(controller=controller, parent=self)
+        self.spike_widget = SpikeWidget(controller=controller, parent=self)
+        self.heatmap_widget = HeatmapWidget(parent=self)
         self.stacked_widget.addWidget(self.trace_widget)
         self.stacked_widget.addWidget(self.spike_widget)
         self.stacked_widget.addWidget(self.heatmap_widget)
