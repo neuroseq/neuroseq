@@ -5,6 +5,7 @@ from collections.abc import Iterable
 
 import brian2.numpy_ as np
 import fastplotlib as fpl
+from cmap import Colormap
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
@@ -32,6 +33,33 @@ class OverlayView(QtWidgets.QWidget, metaclass=QtABCMeta):  # metaclass from the
         self.logger = logging.getLogger(__name__)
         self.mouse_pos: np.ndarray | None = None
         self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
+
+    def add_overlay_data(
+        self, overlay_image: np.ndarray | None, segmentation: np.ndarray | None
+    ) -> None:
+        self.subplot.clear()
+        self.overlay_image = overlay_image
+        self.segmentation = segmentation
+
+        if overlay_image is None:
+            return
+
+        self.subplot.add_image(
+            overlay_image,
+            interpolation="nearest",
+        )
+
+        if segmentation is not None:
+            cmap = Colormap("jet")
+            norm = float(np.max(segmentation))
+            if norm == 0.0:
+                norm = 1.0
+            rgb = np.array(
+                [[np.asarray(cmap(v / norm)) for v in row] for row in segmentation]
+            )
+            rgb[:, :, 3] = 0.4
+            rgb[segmentation == 0, 3] = 0
+            self.subplot.add_image(rgb, interpolation="nearest")
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         super().mouseMoveEvent(event)
