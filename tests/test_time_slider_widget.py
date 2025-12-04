@@ -92,3 +92,9 @@ def test_time_slider_widget(qtbot: QtBot) -> None:
     assert spike_widget.timeline.t == pytest.approx(1000.0, abs=0.1)
     assert stim_widget.timeline.t == pytest.approx(1000.0, abs=0.1)
     assert heatmap_widget.get_timestamp_index() == pytest.approx(10, abs=1)
+
+    trace_widget.close()
+    spike_widget.close()
+    stim_widget.close()
+    heatmap_widget.close()
+    slider.close()

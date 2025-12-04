@@ -42,3 +42,4 @@ def test_data_widget(qtbot: QtBot) -> None:
     data_widget.clear_data()
     assert data_widget.trace_widget.n_neurons == 0
     assert data_widget.spike_widget.n_neurons == 0
+    data_widget.close()
