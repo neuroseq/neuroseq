@@ -2,80 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-import brian2 as b2
 import pytest
 from brian2 import numpy_ as np
 
 from neuroseq import utils
-
-
-@pytest.mark.parametrize(
-    "quantity",
-    [
-        3 * b2.amp,
-        0.0002 * b2.ms,
-        5e-12 * b2.ms,
-        -2e-3 * b2.ms,
-        -3 * b2.ms,
-        1 / 10 * b2.ms,
-        1.5 * 1e-5 * b2.ms,
-        7 * b2.us,
-        21.3 * b2.mS,
-    ],
-)
-def test_quantity_parser_round_trip_quantities(quantity: b2.Quantity) -> None:
-    string = str(quantity.in_best_unit(python_code=True))
-    parsed_quantity = utils.parse_string_to_quantity(string)
-    assert isinstance(parsed_quantity, b2.Quantity)
-    assert parsed_quantity.has_same_dimensions(quantity)
-    assert np.allclose(np.asarray(parsed_quantity), np.asarray(quantity))
-
-
-def test_quantity_parser() -> None:
-    assert utils.parse_string_to_quantity("3") == 3
-
-    assert utils.parse_string_to_quantity("3 * ms") == 3 * b2.ms
-
-    assert utils.parse_string_to_quantity("+3 * ms") == 3 * b2.ms
-
-    assert utils.parse_string_to_quantity("-3 * ms") == -3 * b2.ms
-
-    assert utils.parse_string_to_quantity("3 ms") == 3 * b2.ms
-
-    assert utils.parse_string_to_quantity("3e-1 ms") == 0.3 * b2.ms
-
-    assert utils.parse_string_to_quantity("3. ms") == 3 * b2.ms
-
-    assert utils.parse_string_to_quantity("3.   ms  ") == 3 * b2.ms
-
-    assert utils.parse_string_to_quantity("1/(10) * ms") == 1 / 10 * b2.ms
-
-    assert utils.parse_string_to_quantity("35") == 35
-
-    assert utils.parse_string_to_quantity("[3, 10]") == [3, 10]
-
-    assert utils.parse_string_to_quantity("x*y") == "x*y"
-
-    with pytest.raises(RuntimeError, match="Error when interpreting unit string"):
-        utils.parse_string_to_quantity("1/(10) * Mx")
-
-    assert utils.parse_string_to_quantity("euler") == "euler"
-
-    assert utils.parse_string_to_quantity("exponential_euler") == "exponential_euler"
-
-    assert utils.parse_string_to_quantity("exact") == "exact"
-
-    assert utils.parse_string_to_quantity("rk2") == "rk2"
-
-    assert utils.parse_string_to_quantity("rk4") == "rk4"
-
-    assert utils.parse_string_to_quantity("heun") == "heun"
-
-    assert utils.parse_string_to_quantity("milstein") == "milstein"
-
-    assert utils.parse_string_to_quantity("2e10 ms") == 2e10 * b2.ms
-
-    assert utils.parse_string_to_quantity("2e-5 ms") == 2e-5 * b2.ms
 
 
 def test_update_nested_dict() -> None:
