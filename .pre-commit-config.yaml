@@ -9,7 +9,7 @@ repos:
       - id: check-toml
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.7
+    rev: v0.14.8
     hooks:
       - id: ruff-check
         types_or: [python, pyi, jupyter]
@@ -51,7 +51,7 @@ repos:
         exclude: ^external_simulation_example/
 
   - repo: https://github.com/rhysd/actionlint
-    rev: "v1.7.9"
+    rev: v1.7.9
     hooks:
       - id: actionlint
 

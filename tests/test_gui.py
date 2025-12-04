@@ -72,7 +72,7 @@ def test_gui_simulate_and_playback(monkeypatch: MonkeyPatch, qtbot: QtBot) -> No
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)
-    assert gui.heatmap_widget.get_timestamp_index() == 0
+    assert gui.heatmap_widget.idx == 0
     assert "run" in gui.continue_simulation_action.text().lower()
     assert "continue" not in gui.continue_simulation_action.text().lower()
     simulation_time_s = 1.0
@@ -93,12 +93,12 @@ def test_gui_simulate_and_playback(monkeypatch: MonkeyPatch, qtbot: QtBot) -> No
     assert gui.heatmap_widget.timestamps is not None
     n_timesteps = gui.heatmap_widget.timestamps.size
     gui.time_slider.toggle_pause()
-    qtbot.waitUntil(lambda: gui.heatmap_widget.get_timestamp_index() > 0)
+    qtbot.waitUntil(lambda: gui.heatmap_widget.idx > 0)
     # pause and then continue playback
     gui.time_slider.toggle_pause()
     gui.time_slider.toggle_pause()
     qtbot.waitUntil(
-        lambda: gui.heatmap_widget.get_timestamp_index() == n_timesteps - 1,
+        lambda: gui.heatmap_widget.idx == n_timesteps - 1,
         timeout=100000,
     )
     assert "run" not in gui.continue_simulation_action.text().lower()
@@ -107,22 +107,22 @@ def test_gui_simulate_and_playback(monkeypatch: MonkeyPatch, qtbot: QtBot) -> No
     assert gui.stim_editor.stim_widget.timeline.t == approx(simulation_time_ms, rel=2)
     assert gui.trace_widget.timeline.t == approx(simulation_time_ms, rel=2)
     assert gui.spike_widget.timeline.t == approx(simulation_time_ms, rel=2)
-    assert gui.heatmap_widget.get_timestamp_index() == n_timesteps - 1
+    assert gui.heatmap_widget.idx == n_timesteps - 1
     gui.time_slider.skip_to_start()
     assert gui.stim_editor.stim_widget.timeline.t == approx(0, rel=2)
     assert gui.trace_widget.timeline.t == approx(0, rel=2)
     assert gui.spike_widget.timeline.t == approx(0, rel=2)
-    assert gui.heatmap_widget.get_timestamp_index() == 0
+    assert gui.heatmap_widget.idx == 0
     gui.time_slider.skip_to_end()
     assert gui.stim_editor.stim_widget.timeline.t == approx(simulation_time_ms, rel=2)
     assert gui.trace_widget.timeline.t == approx(simulation_time_ms, rel=2)
     assert gui.spike_widget.timeline.t == approx(simulation_time_ms, rel=2)
-    assert gui.heatmap_widget.get_timestamp_index() == n_timesteps - 1
+    assert gui.heatmap_widget.idx == n_timesteps - 1
     gui.time_slider.stop()
     assert gui.stim_editor.stim_widget.timeline.t == approx(0, rel=2)
     assert gui.trace_widget.timeline.t == approx(0, rel=2)
     assert gui.spike_widget.timeline.t == approx(0, rel=2)
-    assert gui.heatmap_widget.get_timestamp_index() == 0
+    assert gui.heatmap_widget.idx == 0
     gui.close()
 
 
@@ -373,7 +373,7 @@ def test_gui_synapse_ram_limit(
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)
-    assert gui.heatmap_widget.get_timestamp_index() == 0
+    assert gui.heatmap_widget.idx == 0
     simulation_time = 0.1
     # mock getText to return the desired simulation time
     monkeypatch.setattr(
@@ -456,7 +456,7 @@ def test_gui_stim_padding(
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)
-    assert gui.heatmap_widget.get_timestamp_index() == 0
+    assert gui.heatmap_widget.idx == 0
     # set 10secs of stim padding
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("10", True))
     gui.choose_stim_padding_secs()

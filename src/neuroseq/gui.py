@@ -63,7 +63,8 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_data = QtWidgets.QComboBox()
         self.cmb_data.setMinimumWidth(120)
         self.controller = ConstrainedPanZoomController()
-        self.trace_widget = TraceWidget(self.controller)
+        self.trace_widget = TraceWidget(self.controller, parent=self)
+        self.heatmap_widget = HeatmapWidget(parent=self)
         self._create_menus_and_toolbars()
         self.setWindowIcon(qta.icon("fa6s.brain"))
         main_horizontal_layout = QtWidgets.QHBoxLayout()
@@ -75,11 +76,10 @@ class Gui(QtWidgets.QMainWindow):
         main_horizontal_layout.addWidget(self.toolbar_stim_editor)
         # left/right splitters between heatmap and console
         split_left_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
-        self.heatmap_widget = HeatmapWidget()
         split_left_right.addWidget(self.heatmap_widget)
-        self.custom_analysis_widget = CustomAnalysisWidget()
+        self.custom_analysis_widget = CustomAnalysisWidget(parent=self)
         split_left_right.addWidget(self.custom_analysis_widget)
-        self.stim_console = StimConsole()
+        self.stim_console = StimConsole(parent=self)
         split_left_right.addWidget(self.stim_console)
         split_left_right.setSizes([1000, 1000, 1000])
         # main vertical splitter layout
@@ -90,12 +90,13 @@ class Gui(QtWidgets.QMainWindow):
             controller=self.controller,
             cmb_stim=self.cmb_stim,
             toolbar=self.toolbar_stim_editor,
+            parent=self,
         )
         split_vertical.addWidget(self.stim_editor)
         split_vertical.addWidget(self.trace_widget)
-        self.spike_widget = SpikeWidget(self.controller)
+        self.spike_widget = SpikeWidget(self.controller, parent=self)
         split_vertical.addWidget(self.spike_widget)
-        self.data_widget = DataWidget(self.controller)
+        self.data_widget = DataWidget(self.controller, parent=self)
         split_vertical.addWidget(self.data_widget)
         self.time_slider = TimeSliderWidget(self)
         self.plot_widgets: list[TimeseriesWidget | HeatmapWidget] = [
@@ -899,6 +900,14 @@ class Gui(QtWidgets.QMainWindow):
         toolbar.addWidget(self.cmb_spike)
         toolbar.addWidget(QtWidgets.QLabel("  Synapse data: "))
         toolbar.addWidget(self.cmb_synapse)
+        add_action(
+            "&Synapse normalization",
+            self.heatmap_widget.heatmap_norm_dialog,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon=qta.icon("mdi6.arrow-expand-vertical"),
+        )
         toolbar.addWidget(QtWidgets.QLabel("  All data: "))
         toolbar.addWidget(self.cmb_data)
 
