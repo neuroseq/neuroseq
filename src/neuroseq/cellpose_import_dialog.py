@@ -71,20 +71,21 @@ class CellposeImportDialog(QtWidgets.QDialog):
         top_horizontal_layout.addWidget(file_group, stretch=2)
 
         # Data information group
-        info_group = QtWidgets.QGroupBox("Data Information")
-        info_layout = QtWidgets.QVBoxLayout(info_group)
+        self.info_group = QtWidgets.QGroupBox("Data Information")
+        info_layout = QtWidgets.QVBoxLayout(self.info_group)
 
         self.info_text = QtWidgets.QTextEdit()
         self.info_text.setReadOnly(True)
         self.info_text.setMaximumHeight(100)
         info_layout.addWidget(self.info_text)
+        self.info_group.hide()
 
-        top_horizontal_layout.addWidget(info_group, stretch=1)
+        top_horizontal_layout.addWidget(self.info_group, stretch=1)
 
         layout.addLayout(top_horizontal_layout)
 
         # Limit preview height to make room for other controls
-        self.overlay_widget.setMaximumHeight(300)
+        self.overlay_widget.setMinimumHeight(450)
         layout.addWidget(self.overlay_widget)
 
         button_layout = QtWidgets.QHBoxLayout()
@@ -132,6 +133,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.critical(
                 self, "Error Loading Image", f"Could not load {filename}:\n{exc}"
             )
+            self._update_info(error=str(exc))
 
     def _load_segmentation_file(self, filename: str) -> None:
         try:
@@ -146,6 +148,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.critical(
                 self, "Error Loading Segmentation", f"Could not load {filename}:\n{exc}"
             )
+            self._update_info(error=str(exc))
 
     def _check_files_loaded(self) -> None:
         if self.importer.image_data is None or self.importer.segmentation_data is None:
@@ -161,30 +164,41 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 self.importer.segmentation_data,
                 self.importer.get_legend_data(),
             )
-            self._update_info()
+            self._hide_info()
         except ValueError as exc:
             QtWidgets.QMessageBox.critical(self, "Dimension Mismatch", str(exc))
+            self._update_info(error=str(exc))
             self.import_button.setEnabled(False)
 
-    def _update_info(self) -> None:
+    def _update_info(self, error: str | None = None) -> None:
         info = self.importer.get_info()
-        if not info:
-            self.info_text.clear()
+        if not info and not error:
+            self._hide_info()
             return
 
-        info_lines = [
-            f"Image shape: {info['image_shape']}",
-            f"Segmentation shape: {info['segmentation_shape']}",
-            f"Unique segment IDs: {info['unique_ids']}",
-            f"Background pixels (ID=0): {info['background_pixels']}",
-            f"Detected neurons: {info['n_neurons']}",
-        ]
-
-        if "neuron_id_range" in info:
-            min_id, max_id = info["neuron_id_range"]
-            info_lines.append(f"Neuron ID range: {min_id}-{max_id}")
+        info_lines = []
+        if error:
+            info_lines.append(f"Error: {error}")
+        if info:
+            info_lines.extend(
+                [
+                    f"Image shape: {info['image_shape']}",
+                    f"Segmentation shape: {info['segmentation_shape']}",
+                    f"Unique segment IDs: {info['unique_ids']}",
+                    f"Background pixels (ID=0): {info['background_pixels']}",
+                    f"Detected neurons: {info['n_neurons']}",
+                ]
+            )
+            if "neuron_id_range" in info:
+                min_id, max_id = info["neuron_id_range"]
+                info_lines.append(f"Neuron ID range: {min_id}-{max_id}")
 
         self.info_text.setPlainText("\n".join(info_lines))
+        self.info_group.show()
+
+    def _hide_info(self) -> None:
+        self.info_text.clear()
+        self.info_group.hide()
 
     def _import_data(self) -> None:
         if (

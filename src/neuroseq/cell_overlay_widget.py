@@ -1,20 +1,21 @@
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Iterable
 
 import brian2.numpy_ as np
 import fastplotlib as fpl
+import pygfx
 from cmap import Colormap
 from qtpy import QtCore
-from qtpy import QtGui
 from qtpy import QtWidgets
 
 from neuroseq.utils import QtABCMeta
 from neuroseq.utils import jet_colors_for_neurons
 
 
-class OverlayView(QtWidgets.QWidget, metaclass=QtABCMeta):  # metaclass from the example
+class OverlayView(QtWidgets.QWidget, metaclass=QtABCMeta):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.figure: fpl.Figure = fpl.Figure(canvas_kwargs={"parent": self})
@@ -22,16 +23,32 @@ class OverlayView(QtWidgets.QWidget, metaclass=QtABCMeta):  # metaclass from the
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         self.widget = self.figure.show()
+
+        # Hide any fastplotlib toolbars/controls
+        if hasattr(self.widget, "toolbar"):
+            self.widget.toolbar.hide()
+        if hasattr(self.widget, "_toolbar"):
+            self.widget._toolbar.hide()
+        if hasattr(self.widget, "menubar"):
+            self.widget.menubar.hide()
+        if hasattr(self.widget, "_menubar"):
+            self.widget._menubar.hide()
+
         layout.addWidget(self.widget)
         self.overlay_image: np.ndarray | None = None
         self.segmentation: np.ndarray | None = None
+        self.overlay_graphic = None
+        self.segmentation_graphic = None
         self.text = None
         self.setLayout(layout)
         self.subplot = self.figure[0, 0]
         self.setMinimumSize(QtCore.QSize(200, 200))
-        self.resize(800, 400)
+        self.resize(800, 800)
+        self.widget.setMinimumHeight(1000)
         self.logger = logging.getLogger(__name__)
         self.mouse_pos: np.ndarray | None = None
+        self.base_camera_state: dict | None = None
+        self.zoom_factor = 2.5
         self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
 
     def add_overlay_data(
@@ -40,11 +57,21 @@ class OverlayView(QtWidgets.QWidget, metaclass=QtABCMeta):  # metaclass from the
         self.subplot.clear()
         self.overlay_image = overlay_image
         self.segmentation = segmentation
+        self.overlay_graphic = None
+        self.segmentation_graphic = None
+        self.text = None
+        self.base_camera_state = None
 
         if overlay_image is None:
             return
 
-        self.subplot.add_image(
+        # keep the overlay view simple: hide axes and grids
+        self.subplot.axes.visible = False
+        self.subplot.grids = False
+        self.subplot.toolbar = False
+        self.subplot.camera.maintain_aspect = True
+
+        self.overlay_graphic = self.subplot.add_image(
             overlay_image,
             interpolation="nearest",
         )
@@ -59,85 +86,141 @@ class OverlayView(QtWidgets.QWidget, metaclass=QtABCMeta):  # metaclass from the
             )
             rgb[:, :, 3] = 0.4
             rgb[segmentation == 0, 3] = 0
-            self.subplot.add_image(rgb, interpolation="nearest")
+            self.segmentation_graphic = self.subplot.add_image(
+                rgb, interpolation="nearest"
+            )
 
-    def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
-        super().mouseMoveEvent(event)
+            unique_ids = np.unique(segmentation)
+            for cell_id in unique_ids:
+                if cell_id == 0:
+                    continue
+                mask = segmentation == cell_id
+                if not np.any(mask):
+                    continue
+                y_coords, x_coords = np.where(mask)
+                center_y = float(np.mean(y_coords))
+                center_x = float(np.mean(x_coords))
+                self.subplot.add_text(
+                    f"{cell_id}",
+                    font_size=5,
+                    offset=(center_x, center_y, 200.0),
+                    face_color=(0.0, 0.0, 0.0),
+                    outline_color=(1.0, 1.0, 1.0),
+                    outline_thickness=3.0,
+                    center=True,
+                    screen_space=False,
+                )
 
-        segmentation = self.parent_widget.segmentation
-        if segmentation is None or self.pixmap() is None:
-            self.setToolTip("")
+            self.text = self.subplot.add_text(
+                "",
+                font_size=24,
+                offset=(8.0, 4.0, 200.0),
+                face_color=(0.0, 0.0, 0.0),
+                outline_color=(1.0, 1.0, 1.0),
+                outline_thickness=3.0,
+                center=False,
+                anchor="bottom-right",
+                screen_space=True,
+            )
+
+        self._reset_camera()
+
+    def _reset_camera(self) -> None:
+        """Fit the camera to the image and apply the current zoom factor."""
+        if self.overlay_image is None:
+            self.base_camera_state = None
             return
 
-        pos = event.pos()
-        pixmap_rect = self.pixmap().rect()
-        label_size = self.size()
+        height, width = self.overlay_image.shape[:2]
+        cam_state = self.subplot.camera.get_state()
+        camera_z = float(cam_state.get("position", (0.0, 0.0, 0.0))[2])
+        maintain_aspect = bool(cam_state.get("maintain_aspect", True))
+        self.base_camera_state = {
+            "width": float(width),
+            "height": float(height),
+            "position": (float(width) / 2.0, float(height) / 2.0, camera_z),
+            "maintain_aspect": maintain_aspect,
+        }
+        self.subplot.axes.visible = False
+        self.subplot.grids = False
+        self.subplot.toolbar = False
+        self._apply_zoom(self.zoom_factor, force=True)
 
-        if label_size.width() == 0 or label_size.height() == 0:
-            self.setToolTip("")
+    def set_zoom_factor(self, zoom_factor: float) -> None:
+        """Zoom the camera while keeping pixelated rendering."""
+        self._apply_zoom(zoom_factor)
+
+    def _apply_zoom(self, zoom_factor: float, force: bool = False) -> None:
+        if self.base_camera_state is None:
             return
 
-        scale_x = pixmap_rect.width() / label_size.width()
-        scale_y = pixmap_rect.height() / label_size.height()
-        scale = max(scale_x, scale_y)
-
-        displayed_width = int(pixmap_rect.width() / max(scale, 1e-9))
-        displayed_height = int(pixmap_rect.height() / max(scale, 1e-9))
-
-        offset_x = (label_size.width() - displayed_width) // 2
-        offset_y = (label_size.height() - displayed_height) // 2
-
-        magnified_img_x = int((pos.x() - offset_x) * scale)
-        magnified_img_y = int((pos.y() - offset_y) * scale)
-
-        if self.parent_widget.current_magnification <= 0:
-            self.setToolTip("")
+        zoom = max(zoom_factor, 0.1)
+        if not force and math.isclose(zoom, self.zoom_factor, rel_tol=1e-3):
             return
 
-        original_img_x = int(magnified_img_x / self.parent_widget.current_magnification)
-        original_img_y = int(magnified_img_y / self.parent_widget.current_magnification)
+        self.zoom_factor = zoom
+        cam_state = dict(self.base_camera_state)
+        cam_state["maintain_aspect"] = True
+        cam_state["width"] = self.base_camera_state["width"] / zoom
+        cam_state["height"] = self.base_camera_state["height"] / zoom
+        cam_state["position"] = (
+            self.base_camera_state["position"][0],
+            self.base_camera_state["position"][1],
+            self.subplot.camera.get_state().get("position", (0.0, 0.0, 0.0))[2],
+        )
+        self.subplot.camera.set_state(cam_state)
+        self.figure.renderer.request_draw()
 
+    def pointer_move(self, ev: pygfx.PointerEvent) -> None:
+        if self.text is None or self.segmentation is None:
+            return
+        self.mouse_pos = self.subplot.map_screen_to_world(ev)
+        if self.mouse_pos is None:
+            self.text.visible = False
+            return
+        x = int(self.mouse_pos[0])
+        y = int(self.mouse_pos[1])
         if (
-            0 <= original_img_x < segmentation.shape[1]
-            and 0 <= original_img_y < segmentation.shape[0]
+            x < 0
+            or y < 0
+            or x >= self.segmentation.shape[1]
+            or y >= self.segmentation.shape[0]
         ):
-            cell_id = segmentation[original_img_y, original_img_x]
-            if cell_id > 0:
-                self.setToolTip(f"Cell ID: {cell_id}")
-            else:
-                self.setToolTip("Background")
-        else:
-            self.setToolTip("")
+            self.text.visible = False
+            return
+        neuron_index = self.segmentation[y, x]
+        if neuron_index == 0:
+            self.text.visible = False
+            return
+        self.text.visible = True
+        self.text.offset = (self.mouse_pos[0], self.mouse_pos[1], 200)
+        self.text.text = f"{neuron_index}"
+
+    def closeEvent(self, event):
+        if self.figure is not None:
+            self.figure.close()
+            self.figure = None
+        super().closeEvent(event)
 
 
 class CellOverlayWidget(QtWidgets.QGroupBox):
-    """Reusable widget that shows a cell overlay image, magnification toggle, and legend."""
-
     def __init__(self, title: str = "Color-coded Preview") -> None:
         super().__init__(title)
         self.logger = logging.getLogger(__name__)
         self.overlay_image: np.ndarray | None = None
         self.segmentation: np.ndarray | None = None
         self.legend_data: list[tuple[int, tuple[int, int, int]]] = []
-        self.current_magnification: int = 1
         self._setup_ui()
 
     def _setup_ui(self) -> None:
         layout = QtWidgets.QVBoxLayout(self)
 
-        self.magnified_checkbox = QtWidgets.QCheckBox(
-            "5x magnified view with cell numbers"
+        self.overlay_view = OverlayView()
+        self.overlay_view.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Expanding,
         )
-        self.magnified_checkbox.toggled.connect(self._display_overlay_preview)
-        layout.addWidget(self.magnified_checkbox)
-
-        self.preview_label = OverlayPreviewLabel(self)
-        self.preview_scroll = QtWidgets.QScrollArea()
-        self.preview_scroll.setWidget(self.preview_label)
-        self.preview_scroll.setWidgetResizable(False)
-        self.preview_scroll.setMinimumHeight(600)
-        self.preview_scroll.setMaximumHeight(1400)
-        layout.addWidget(self.preview_scroll)
+        layout.addWidget(self.overlay_view)
 
         self.legend_scroll = QtWidgets.QScrollArea()
         self.legend_scroll.setWidgetResizable(True)
@@ -158,167 +241,15 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.overlay_image = overlay_image
         self.segmentation = segmentation
         self.legend_data = list(legend_data or [])
-        self._display_overlay_preview()
+        self.overlay_view.add_overlay_data(overlay_image, segmentation)
         self._update_legend()
 
     def set_empty_message(self, message: str) -> None:
         self.overlay_image = None
         self.segmentation = None
         self.legend_data = []
-        self.preview_label.setPixmap(QtGui.QPixmap())
-        self.preview_label.setText(message)
-        self.preview_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.overlay_view.add_overlay_data(None, None)
         self._clear_legend()
-
-    def _display_overlay_preview(self) -> None:
-        if self.overlay_image is None:
-            self.preview_label.setPixmap(QtGui.QPixmap())
-            return
-
-        if self.magnified_checkbox.isChecked():
-            image_data = self._create_magnified_overlay()
-            self.current_magnification = 5
-        else:
-            image_data = self._create_base_magnified_overlay()
-            self.current_magnification = 2
-
-        height, width, _ = image_data.shape
-        bytes_per_line = 3 * width
-        q_image = QtGui.QImage(
-            image_data.data,
-            width,
-            height,
-            bytes_per_line,
-            QtGui.QImage.Format.Format_RGB888,
-        )
-        pixmap = QtGui.QPixmap.fromImage(q_image)
-        self.preview_label.resize(pixmap.size())
-        self.preview_label.setPixmap(pixmap)
-        self.preview_label.setScaledContents(False)
-        self.preview_label.setText("")
-
-    def _create_base_magnified_overlay(self) -> np.ndarray:
-        """Create a 2x magnified overlay for better visibility."""
-        if self.overlay_image is None:
-            return np.array([]).reshape(0, 0, 3)
-
-        original_image = self.overlay_image
-        height, width, channels = original_image.shape
-        magnified_image = np.zeros(
-            (height * 2, width * 2, channels), dtype=original_image.dtype
-        )
-
-        for y in range(height):
-            for x in range(width):
-                pixel_value = original_image[y, x]
-                magnified_image[y * 2 : y * 2 + 2, x * 2 : x * 2 + 2] = pixel_value
-
-        try:
-            from PIL import Image
-
-            debug_image = Image.fromarray(magnified_image)
-            debug_image.save("latest_cellpose_2.png")
-        except Exception:
-            # todo: do something here
-            pass
-
-        return magnified_image
-
-    def _create_magnified_overlay(self) -> np.ndarray:
-        """Create a 5x magnified overlay with cell numbers."""
-        if self.overlay_image is None:
-            return np.array([]).reshape(0, 0, 3)
-
-        original_image = self.overlay_image
-        original_segmentation = self.segmentation
-        height, width, channels = original_image.shape
-
-        magnified_image = np.zeros(
-            (height * 5, width * 5, channels), dtype=original_image.dtype
-        )
-
-        if original_segmentation is None:
-            for y in range(height):
-                for x in range(width):
-                    pixel_value = original_image[y, x]
-                    magnified_image[y * 5 : y * 5 + 5, x * 5 : x * 5 + 5] = pixel_value
-            return magnified_image
-
-        magnified_seg = np.zeros(
-            (height * 5, width * 5), dtype=original_segmentation.dtype
-        )
-
-        for y in range(height):
-            for x in range(width):
-                pixel_value = original_image[y, x]
-                seg_value = original_segmentation[y, x]
-                magnified_image[y * 5 : y * 5 + 5, x * 5 : x * 5 + 5] = pixel_value
-                magnified_seg[y * 5 : y * 5 + 5, x * 5 : x * 5 + 5] = seg_value
-
-        try:
-            from PIL import Image
-            from PIL import ImageDraw
-            from PIL import ImageFont
-
-            pil_image = Image.fromarray(magnified_image)
-            draw = ImageDraw.Draw(pil_image)
-
-            try:
-                font = ImageFont.truetype(
-                    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf", 16
-                )
-            except OSError:
-                try:
-                    font = ImageFont.truetype("arial.ttf", 16)
-                except OSError:
-                    font = ImageFont.load_default()
-
-            unique_ids = np.unique(magnified_seg)
-            for cell_id in unique_ids:
-                if cell_id == 0:
-                    continue
-                mask = magnified_seg == cell_id
-                if not np.any(mask):
-                    continue
-                y_coords, x_coords = np.where(mask)
-                center_y = int(np.mean(y_coords))
-                center_x = int(np.mean(x_coords))
-                text = str(cell_id)
-                for dx, dy in [
-                    (-1, -1),
-                    (-1, 0),
-                    (-1, 1),
-                    (0, -1),
-                    (0, 1),
-                    (1, -1),
-                    (1, 0),
-                    (1, 1),
-                ]:
-                    draw.text(
-                        (center_x + dx, center_y + dy),
-                        text,
-                        font=font,
-                        fill=(255, 255, 255, 255),
-                    )
-                draw.text((center_x, center_y), text, font=font, fill=(0, 0, 0, 128))
-
-            result_image = np.array(pil_image)
-            try:
-                debug_image = Image.fromarray(result_image)
-                debug_image.save("latest_cellpose_5.png")
-            except Exception:
-                pass
-
-            return result_image
-        except ImportError:
-            try:
-                from PIL import Image
-
-                debug_image = Image.fromarray(magnified_image)
-                debug_image.save("latest_cellpose_5.png")
-            except Exception:
-                pass
-            return magnified_image
 
     def _clear_legend(self) -> None:
         for i in reversed(range(self.legend_layout.count())):
