@@ -61,6 +61,7 @@ class TimeSliderWidget(QtWidgets.QWidget):
         self.timer.setInterval(40)  # 25 fps / 40ms tick interval
         self.timer.timeout.connect(self._tick)
         self.elapsed_timer = QtCore.QElapsedTimer()
+        self.setMaximumHeight(32)
 
     def connect_widget(self, widget: TimeseriesWidget | HeatmapWidget):
         self.widgets.append(widget)
