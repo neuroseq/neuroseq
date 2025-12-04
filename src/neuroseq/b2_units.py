@@ -1,3 +1,5 @@
+import logging
+
 import brian2 as b2
 import brian2.numpy_ as np
 
@@ -28,6 +30,23 @@ def value_unit_str_to_quantity(
     value: int | float | np.ndarray, unit_str: str
 ) -> b2.Quantity:
     return eval(unit_str) * value
+
+
+def str_to_quantity(string: str) -> b2.Quantity | str:
+    try:
+        quantity = eval(string)
+        if isinstance(quantity, b2.Quantity):
+            return quantity
+        else:
+            logging.warning(
+                f"'{string}' parsed to type {type(quantity)}, not b2.Quantity, returning original string"
+            )
+            return string
+    except Exception:
+        logging.warning(
+            f"Could not parse '{string}' as b2.Quantity, returning original string"
+        )
+        return string
 
 
 def display_units(quantity: b2.Quantity) -> str:

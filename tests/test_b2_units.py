@@ -4,6 +4,7 @@ import pytest
 
 from neuroseq.b2_units import display_units
 from neuroseq.b2_units import quantity_to_value_unit_str
+from neuroseq.b2_units import str_to_quantity
 from neuroseq.b2_units import value_unit_str_to_quantity
 
 
@@ -65,3 +66,67 @@ def test_b2_str_to_quantity(
 )
 def test_display_units(quantity: b2.Quantity, units: str):
     assert display_units(quantity) == units
+
+
+@pytest.mark.parametrize(
+    "quantity",
+    [
+        3 * b2.amp,
+        0.0002 * b2.ms,
+        5e-12 * b2.ms,
+        -2e-3 * b2.ms,
+        -3 * b2.ms,
+        1 / 10 * b2.ms,
+        1.5 * 1e-5 * b2.ms,
+        7 * b2.us,
+        21.3 * b2.mS,
+    ],
+)
+def test_quantity_parser_round_trip_quantities(quantity: b2.Quantity) -> None:
+    string = str(quantity.in_best_unit(python_code=True))
+    parsed_quantity = str_to_quantity(string)
+    assert isinstance(parsed_quantity, b2.Quantity)
+    assert parsed_quantity.has_same_dimensions(quantity)
+    assert np.allclose(np.asarray(parsed_quantity), np.asarray(quantity))
+
+
+def test_quantity_parser() -> None:
+    assert str_to_quantity("3") == "3"
+
+    assert str_to_quantity("3 * ms") == 3 * b2.ms
+
+    assert str_to_quantity("+3 * ms") == 3 * b2.ms
+
+    assert str_to_quantity("-3 * ms") == -3 * b2.ms
+
+    assert str_to_quantity("3e-1 * ms") == 0.3 * b2.ms
+
+    assert str_to_quantity("3. * ms") == 3 * b2.ms
+
+    assert str_to_quantity("3.  * ms  ") == 3 * b2.ms
+
+    assert str_to_quantity("1/(10) * ms") == 1 / 10 * b2.ms
+
+    assert str_to_quantity("35") == "35"
+
+    assert str_to_quantity("x*y") == "x*y"
+
+    assert str_to_quantity("1/(10) * Mx") == "1/(10) * Mx"
+
+    assert str_to_quantity("euler") == "euler"
+
+    assert str_to_quantity("exponential_euler") == "exponential_euler"
+
+    assert str_to_quantity("exact") == "exact"
+
+    assert str_to_quantity("rk2") == "rk2"
+
+    assert str_to_quantity("rk4") == "rk4"
+
+    assert str_to_quantity("heun") == "heun"
+
+    assert str_to_quantity("milstein") == "milstein"
+
+    assert str_to_quantity("2e10 * ms") == 2e10 * b2.ms
+
+    assert str_to_quantity("2e-5 * ms") == 2e-5 * b2.ms

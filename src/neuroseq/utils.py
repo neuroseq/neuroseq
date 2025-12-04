@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import functools
 import logging
-import re
 from collections.abc import Callable
 from enum import Enum
 from typing import Any
 
 import brian2 as b2
 import brian2.numpy_ as np
-import brian2.units.allunits as b2_units
 from cmap import Colormap
 from qtpy import QtCore
 from qtpy import QtGui
@@ -155,98 +153,6 @@ def add_items_to_combobox(combobox: QtWidgets.QComboBox, items: list[str]) -> No
     font_metrics = QtGui.QFontMetrics(combobox.font())
     max_width = font_metrics.boundingRect(longest_item).width()
     combobox.view().setMinimumWidth(max_width + 20)
-
-
-def parse_string_to_quantity(quantity_str: str) -> b2.Quantity | str:
-    """
-    Parse a string into a brian2 quantity or return it if that is not possible. Quantities can be of the form
-    number * unit.
-
-    Parameters
-    ----------
-    quantity_str : str
-        string representing a possible quantity
-
-    Returns
-    -------
-    b2.Quantity | str
-        either a brian2 Quantity or the input string
-
-    Raises
-    ------
-    RuntimeError
-        When something goes wrong during evaluation the numerical part of the input quantity string
-    RuntimeError
-        When something goes wrong during evaluation of the unit part of the input quantity string
-    """
-
-    # Regex pattern explanation: (TODO: this is mscopilot derived, possibly needs to be corrected. Needs to be maintained along with code )
-
-    # 1. Character Class `([\(\)\d./\*\-\+]+(?:e[\d\+\-]*)?)`:
-
-    # - `[` and `]` define a character class, which matches any one of the characters inside the brackets.
-    # - `\(` and `\)` match literal parentheses `(` and `)`.
-    # - `\d` matches any digit (equivalent to `[0-9]`).
-    # - `.` matches a literal dot `.`.
-    # - `/` matches a literal forward slash `/`.
-    # - `\*` matches a literal asterisk `*`.
-    # - `\-` matches a literal hyphen `-`.
-    # - `\+` matches a literal plus `+`.
-    # - The `+` outside the character class means "one or more" of the preceding character class.
-    # - `(?:e[\d\+\-]*)?` is a non-capturing group that matches an optional `e` followed by zero or more digits, plus, or minus signs. This ensures that scientific notation like `2e10` is matched correctly.
-
-    # 2. **Whitespace `\s*`**:
-    # - `\s` matches any whitespace character (spaces, tabs, newlines).
-    # - `*` means "zero or more" of the preceding whitespace characters.
-
-    # 3. **Optional Asterisk `\*?`**:
-    # - `\*` matches a literal asterisk `*`.
-    # - `?` means "zero or one" of the preceding character (making the asterisk optional).
-
-    # 4. **Whitespace `\s*`**:
-    # - Again, `\s*` matches zero or more whitespace characters.
-
-    # 5. **Word Characters `(\w*)`**:
-    # - `\w` matches any word character (equivalent to `[a-zA-Z0-9_]`).
-    # - `*` means "zero or more" of the preceding word characters.
-
-    pattern = r"([\(\)\d./\*\-\+]+(?:e[\d\+\-]*)?)\s*\*?\s*(\w*)"
-    match = re.match(pattern, quantity_str)
-    quantity_obj = None
-    if match:
-        value, unit_str = match.groups()
-
-        v = None
-        unit = None
-
-        try:
-            v = eval(value)
-            # Create the quantity object
-        except Exception as e:
-            raise RuntimeError(f"Error when interpreting numerical string: {e}") from e
-
-        if unit_str != "":
-            # Map the unit string to a Brian2 unit
-            try:
-                unit = getattr(b2, unit_str)
-            except AttributeError:
-                try:
-                    unit = getattr(b2_units, unit_str)
-                except AttributeError as e:
-                    message = f"Error when interpreting unit string: {e}"
-                    raise RuntimeError(message) from e
-
-            quantity_obj = v * unit
-            return quantity_obj
-        else:
-            return v
-    else:
-        try:
-            quantity = eval(quantity_str)
-            return quantity
-        except Exception as _:
-            logging.debug(f"Failed to parse {quantity_str} as Quantity")
-            return quantity_str
 
 
 def update_nested_dict(original: dict[Any, Any], updates: Any) -> None:

@@ -22,7 +22,7 @@ from qtpy.QtCore import Signal
 from qtpy.QtWidgets import QComboBox
 
 from neuroseq.b2_model import B2Model
-from neuroseq.utils import parse_string_to_quantity
+from neuroseq.b2_units import str_to_quantity
 
 
 # derive a new combobox which has a 'clicked' signal
@@ -353,7 +353,7 @@ class EditableParameterTree(ParameterTree):
             param.sigValueChanged.connect(
                 lambda p: self._call_with_errormessage(
                     funcs["modify"],
-                    self._call_with_errormessage(parse_string_to_quantity, p.value()),
+                    self._call_with_errormessage(str_to_quantity, p.value()),
                 )
             )
             param.sigRemoved.connect(
