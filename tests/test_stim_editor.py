@@ -79,6 +79,7 @@ def test_stim_editor_zoom_pan(qtbot: QtBot) -> None:
         qtbot.wait(delay)
         stim_editor.y_btn_zoom_out.click()
         qtbot.wait(delay)
+    stim_editor.close()
 
 
 def test_stim_editor_pad_and_trim(
@@ -172,6 +173,7 @@ def test_stim_editor_pad_and_trim(
     )
     stim_editor.trim_stim_array()
     assert stim_editor.current_stim_modifier.stim_array.values.shape[0] == 300
+    stim_editor.close()
 
 
 def test_stim_editor_actions(
@@ -400,3 +402,4 @@ def test_stim_editor_actions(
     assert stim_editor.current_stim_modifier.stim_array.values[19, 8] == approx(0)
     assert stim_editor.current_stim_modifier.stim_array.values[16, 7] == approx(0)
     assert stim_editor.current_stim_modifier.stim_array.values[17, 7] == approx(0)
+    stim_editor.close()

@@ -27,3 +27,4 @@ def test_spike_widget(qtbot: QtBot) -> None:
     data = SpikeData("spikes", spike_indices, spike_times)
     spike_widget.set_data(data)
     assert spike_widget.n_neurons == max(spike_indices) + 1
+    spike_widget.close()

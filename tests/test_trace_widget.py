@@ -49,6 +49,7 @@ def test_trace_widget_zero_traces(qtbot: QtBot) -> None:
     # nor does disabling clipping
     trace_norm_dialog.chk_clip_clicked(False)
     assert np.mean(trace_widget.graphic.data[:, 1]) == pytest.approx(0.0, abs=0.01)
+    trace_widget.close()
 
 
 def test_trace_widget_median_offset(qtbot: QtBot) -> None:
@@ -97,6 +98,7 @@ def test_trace_widget_median_offset(qtbot: QtBot) -> None:
     assert np.mean(trace_widget.graphic[0].data[:, 1]) == pytest.approx(0.0, abs=0.01)
     assert np.mean(trace_widget.graphic[1].data[:, 1]) == pytest.approx(0.0, abs=0.01)
     assert np.mean(trace_widget.graphic[2].data[:, 1]) == pytest.approx(0.0, abs=0.01)
+    trace_widget.close()
 
 
 def test_trace_widget(qtbot: QtBot) -> None:
@@ -172,3 +174,4 @@ def test_trace_widget(qtbot: QtBot) -> None:
     qtbot.wait(20)
     assert trace_widget.selected_neuron_slice is None
     assert trace_widget.selected_time_slice is None
+    trace_widget.close()

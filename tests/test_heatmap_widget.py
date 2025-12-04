@@ -52,6 +52,7 @@ def test_heatmap_widget_3d_data_with_timeline(
     # timing should be correct within 25%
     assert elapsed_time_secs == pytest.approx(total_playback_time_secs, rel=0.25)
     heatmap_widget.close()
+    qtbot.waitUntil(lambda: not heatmap_widget.isVisible())
 
 
 def test_heatmap_widget_clear_data(qtbot: QtBot) -> None:

@@ -119,6 +119,8 @@ def test_stim_widget_background_stims(qtbot: QtBot) -> None:
     stim_widget.set_background_data_visible(True)
     for graphic in stim_widget.background_graphics:
         assert graphic.visible is True
+    stim_widget.close()
+    qtbot.waitUntil(lambda: not stim_widget.isVisible())
 
 
 def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
@@ -176,6 +178,8 @@ def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: StimArray) -> Non
     assert (
         0.65 * n_timestamps < stim_widget.selected_time_slice.stop < 0.90 * n_timestamps
     )
+    stim_widget.close()
+    qtbot.waitUntil(lambda: not stim_widget.isVisible())
 
 
 def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
@@ -250,6 +254,8 @@ def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
     assert t1 > t0
     assert 0.6 < t1 / n_timestamps < 1.0
     assert 0 < n0 / n_neurons < 1.0
+    stim_widget.close()
+    qtbot.waitUntil(lambda: not stim_widget.isVisible())
 
 
 def test_stim_widget_ext_stims(
@@ -296,3 +302,5 @@ def test_stim_widget_ext_stims(
     )
     assert stim_widget.vmin == pytest.approx(-3.0)
     assert stim_widget.vmax == pytest.approx(3.0)
+    stim_widget.close()
+    qtbot.waitUntil(lambda: not stim_widget.isVisible())

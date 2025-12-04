@@ -53,6 +53,7 @@ def test_update_screenshot(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
         lambda: gui.heatmap_widget.currentIndex == gui.heatmap_widget.tVals.size - 1
     )
     gui.grab().save("screenshot.png")
+    gui.close()
 
 
 def test_gui_click_exit(qtbot: QtBot) -> None:
@@ -62,6 +63,7 @@ def test_gui_click_exit(qtbot: QtBot) -> None:
     qtbot.waitUntil(lambda: gui.isVisible())
     gui.btn_exit_clicked()
     qtbot.waitUntil(lambda: not gui.isVisible())
+    gui.close()
 
 
 def test_gui_simulate_and_playback(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
@@ -121,6 +123,7 @@ def test_gui_simulate_and_playback(monkeypatch: MonkeyPatch, qtbot: QtBot) -> No
     assert gui.trace_widget.timeline.t == approx(0, rel=2)
     assert gui.spike_widget.timeline.t == approx(0, rel=2)
     assert gui.heatmap_widget.get_timestamp_index() == 0
+    gui.close()
 
 
 def test_gui_new(tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
@@ -140,6 +143,7 @@ def test_gui_new(tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot) -> None
     assert gui.model.b2_model.neurongroups.keys() == model.b2_model.neurongroups.keys()
     assert gui.model.b2_model.synapses.keys() == model.b2_model.synapses.keys()
     assert gui.model.b2_model.monitors.keys() == model.b2_model.monitors.keys()
+    gui.close()
 
 
 def test_gui_open(monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_path: Path) -> None:
@@ -178,6 +182,7 @@ def test_gui_open(monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_path: Path) -> Non
     assert list(gui.model.b2_model.monitors.keys()) == list(
         model.b2_model.monitors.keys()
     )
+    gui.close()
 
 
 class MockSaveOptionsDialog:
@@ -225,6 +230,7 @@ def test_gui_save(
     assert (
         mfx_ornstein.b2_model.monitors.keys() == loaded_model.b2_model.monitors.keys()
     )
+    gui.close()
 
 
 def test_gui_export_with_simulation_data(
@@ -247,6 +253,7 @@ def test_gui_export_with_simulation_data(
     )
     gui.btn_export_clicked()
     assert filename.exists()
+    gui.close()
 
 
 def test_gui_export_empty_model(
@@ -269,6 +276,7 @@ def test_gui_export_empty_model(
     assert qmessagebox_calls[0]["name"] == "critical"
     assert "export error" in qmessagebox_calls[0]["title"].lower()
     assert not filename.exists()
+    gui.close()
 
 
 def test_gui_checkpoints(
@@ -311,6 +319,7 @@ def test_gui_checkpoints(
     assert "run" in gui.continue_simulation_action.text().lower()
     assert "continue" not in gui.continue_simulation_action.text().lower()
     assert len(gui.model.b2_model.network["M"].t) == 0
+    gui.close()
 
 
 def test_gui_edit_stim_with_console(qtbot: QtBot, mfx_ornstein: Model) -> None:
@@ -350,6 +359,7 @@ def test_gui_edit_stim_with_console(qtbot: QtBot, mfx_ornstein: Model) -> None:
     assert stim_editor.stims_dict["stim"].stim_array.values.shape == (127, 83)
     assert gui.model.stim_arrays["stim"].values.shape == (127, 83)
     assert stim_editor.stim_widget.n_neurons == 83
+    gui.close()
 
 
 def test_gui_synapse_ram_limit(
@@ -405,6 +415,7 @@ def test_gui_synapse_ram_limit(
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "critical"
     assert "invalid input" in qmessagebox_calls[0]["title"].lower()
+    gui.close()
 
 
 def test_gui_brian2_backend(
@@ -431,6 +442,7 @@ def test_gui_brian2_backend(
     gui.settings.brian2_backend = "invalid"
     gui.choose_brian2_backend()
     assert b2.prefs.codegen.target == "numpy"
+    gui.close()
 
 
 def test_gui_stim_padding(
@@ -458,6 +470,7 @@ def test_gui_stim_padding(
     assert gui.heatmap_widget.timestamps is not None
     assert gui.heatmap_widget.timestamps[-1] == approx(100, rel=2)
     assert gui.stim_editor.stim_widget.n_timestamps == 10100
+    gui.close()
 
 
 def test_gui_restore_settings_on_restart(
@@ -493,6 +506,7 @@ def test_gui_restore_settings_on_restart(
     assert b2.prefs.codegen.target == "cython"
     assert gui2.settings.max_ram_synapse_plot_matrix == 512
     assert gui2.settings.stim_padding_secs == 6
+    gui2.close()
 
 
 def test_gui_playback_speed(
@@ -527,6 +541,7 @@ def test_gui_playback_speed(
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "critical"
     assert "invalid input" in qmessagebox_calls[0]["title"].lower()
+    gui.close()
 
 
 def test_gui_simulate_external_model(
@@ -574,6 +589,7 @@ def test_gui_simulate_external_model(
     assert gui.heatmap_widget.data is not None
     assert gui.heatmap_widget.timestamps is not None
     assert gui.heatmap_widget.timestamps[-1] == approx(simulation_time_ms, rel=2)
+    gui.close()
 
 
 def test_integration_modeleditor_delete_restore(
@@ -646,3 +662,4 @@ def test_integration_modeleditor_delete_restore(
     assert gui.model.b2_model.network["Ce"] is not None
 
     assert gui.model.b2_model.network["trace"].v.shape == (30, 1000)
+    gui.close()

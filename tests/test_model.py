@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import brian2 as b2
 import brian2.numpy_ as np
 import pytest
 from brian2.tests.utils import assert_allclose
@@ -330,39 +329,6 @@ def test_stim_array_trimming(mfx_ornstein: Model) -> None:
         new_stim_array.values,
         arr[0 : new_stim_array.values.shape[0], :],
     )
-
-
-def test_stim_array_neuron_number(mfx_ornstein: Model) -> None:
-    arr = np.random.rand(100, 30)
-    mfx_ornstein.stim_arrays["stim"] = StimArray(
-        "stim", StimType.Excitation, arr, "mS", dt=0.001
-    )
-    assert mfx_ornstein.stim_arrays["stim"].values.shape == (100, 30)
-    # increase number of neurons in model to be larger than the number of neurons in the TimedArray
-    n_neurons = 33
-    mfx_ornstein.b2_model.define_neuronnumber("neurongroup", n_neurons)
-    mfx_ornstein.b2_model.define_init(
-        "neurongroup", "tau", np.random.rand(n_neurons) * b2.second
-    )
-    mfx_ornstein.b2_model.define_init("neurongroup", "sigma", np.random.rand(n_neurons))
-    mfx_ornstein.b2_model.assemble_network()
-    mfx_ornstein.make_stim_arrays_valid()
-    new_stim_array = mfx_ornstein.stim_arrays["stim"]
-    # timed array neuron number has been increased to match
-    assert new_stim_array.values.shape[1] == 33
-    # decrease the number of neurons
-    n_neurons = 3
-    mfx_ornstein.b2_model.define_neuronnumber("neurongroup", n_neurons)
-    mfx_ornstein.b2_model.define_init(
-        "neurongroup", "tau", np.random.rand(n_neurons) * b2.second
-    )
-    mfx_ornstein.b2_model.define_init("neurongroup", "sigma", np.random.rand(n_neurons))
-    mfx_ornstein.b2_model.assemble_network()
-    mfx_ornstein.make_stim_arrays_valid()
-    # timed array neuron number has been decreased to match
-    new_stim_array = mfx_ornstein.stim_arrays["stim"]
-    assert new_stim_array.values.shape == (100, 3)
-    assert np.allclose(new_stim_array.values[0:100, 0:3], arr[0:100, 0:3])
 
 
 def test_stim_array_properties() -> None:

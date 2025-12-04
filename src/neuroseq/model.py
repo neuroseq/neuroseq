@@ -262,35 +262,6 @@ class Model:
                 self.experiments[experiment_name].append(data)
         self.update_max_time_secs()
 
-    def make_stim_arrays_valid(self):
-        """
-        Ensure all StimArrays in the model have the same number of neurons as the largest NeuronGroup in the B2Model
-        """
-        target_n_neurons = 0
-        for neuron_group in self.b2_model.neurongroups.values():
-            target_n_neurons = max(
-                target_n_neurons, neuron_group.get("neuronnumber", 0)
-            )
-        for name, stim_array in self.stim_arrays.items():
-            if stim_array.values.ndim > 1:
-                n_neurons = stim_array.values.shape[1]
-                if n_neurons != target_n_neurons:
-                    if n_neurons < target_n_neurons:
-                        self.logger.info(
-                            f"Increasing neurons in StimArray {name} from {n_neurons} to {target_n_neurons}"
-                        )
-                        self.stim_arrays[name].values = np.pad(
-                            stim_array.values,
-                            pad_width=((0, 0), (0, target_n_neurons - n_neurons)),
-                        )
-                    else:
-                        self.logger.info(
-                            f"Decreasing neurons in StimArray {name} from {n_neurons} to {target_n_neurons}"
-                        )
-                        self.stim_arrays[name].values = stim_array.values[
-                            :, :target_n_neurons
-                        ]
-
     def pad_stim_arrays(self, total_time_seconds: float):
         """
         Pad all StimArrays in the model to a length of total_time_seconds
@@ -345,7 +316,6 @@ class Model:
         report: Callable | None = None,
         stim_array_padding_seconds: float = 0.0,
     ) -> None:
-        self.make_stim_arrays_valid()
         sim_time = self.b2_model.run_simulation(time_seconds, self.stim_arrays, report)
         self.max_time_secs = max(self.max_time_secs, sim_time)
         self.pad_stim_arrays(sim_time + stim_array_padding_seconds)

@@ -88,3 +88,4 @@ def test_timed_array_modifier(qtbot: QtBot) -> None:
     assert tma.can_undo() is False
     assert tma.can_redo() is True
     assert len(tma) == 2
+    stim_widget.close()
