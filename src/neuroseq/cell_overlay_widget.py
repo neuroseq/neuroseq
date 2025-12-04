@@ -4,36 +4,34 @@ import logging
 from collections.abc import Iterable
 
 import brian2.numpy_ as np
+import fastplotlib as fpl
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
+from neuroseq.utils import QtABCMeta
 from neuroseq.utils import jet_colors_for_neurons
 
 
-class OverlayPreviewLabel(QtWidgets.QLabel):
-    """Label that displays cell IDs as tooltips when hovering over an overlay image."""
-
-    def __init__(self, parent_widget: CellOverlayWidget) -> None:
-        super().__init__("Load files to see overlay preview")
-        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.setMinimumHeight(200)
-        self.setStyleSheet("QLabel { border: 1px solid gray; }")
-        self.setMouseTracking(True)
-        self.parent_widget = parent_widget
-
-        self.setStyleSheet(
-            """
-            QLabel { border: 1px solid gray; }
-            QToolTip {
-                background-color: yellow;
-                color: black;
-                border: 1px solid black;
-                padding: 4px;
-                border-radius: 3px;
-            }
-        """
-        )
+class OverlayView(QtWidgets.QWidget, metaclass=QtABCMeta):  # metaclass from the example
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.figure: fpl.Figure = fpl.Figure(canvas_kwargs={"parent": self})
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self.widget = self.figure.show()
+        layout.addWidget(self.widget)
+        self.overlay_image: np.ndarray | None = None
+        self.segmentation: np.ndarray | None = None
+        self.text = None
+        self.setLayout(layout)
+        self.subplot = self.figure[0, 0]
+        self.setMinimumSize(QtCore.QSize(200, 200))
+        self.resize(800, 400)
+        self.logger = logging.getLogger(__name__)
+        self.mouse_pos: np.ndarray | None = None
+        self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         super().mouseMoveEvent(event)
