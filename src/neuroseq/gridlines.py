@@ -49,7 +49,8 @@ class GridLines(Graphic):
         """Create gridlines for a timeseries plot."""
         super().__init__()
         group = pygfx.Group()
-        group.add(generate_stripes(n_neurons, time_ms))
+        if n_neurons > 1:
+            group.add(generate_stripes(n_neurons, time_ms))
         self.gridline_1ms = generate_gridlines(n_neurons, time_ms, 1, 0.2)
         group.add(self.gridline_1ms)
         self.gridline_10ms = generate_gridlines(n_neurons, time_ms, 10, 1)

@@ -38,7 +38,7 @@ def test_gui_load_config_settings(tmp_config_dir) -> None:
     # set settings to original to check if loading works
     settings.__dict__["brian2_backend"] = "numpy"
     settings.__dict__["max_ram_synapse_plot_matrix"] = 256
-    settings.__dict__["stim_padding_secs"] = 5
+    settings.__dict__["stim_padding_secs"] = 0
 
     # load settings from file
     settings.load_config_settings()
@@ -65,7 +65,7 @@ def test_gui_load_config_settings(tmp_config_dir) -> None:
     # try setting RAM to string
     settings.brian2_backend = "numpy"  # valid again
     settings.max_ram_synapse_plot_matrix = "this is not even a number!"  # type: ignore[assignment]
-    settings.stim_padding_secs = 5  # valid again
+    settings.stim_padding_secs = 0  # valid again
     # should log a ValueError and default to 256
     settings.load_config_settings()
     assert settings.max_ram_synapse_plot_matrix == 256
@@ -73,6 +73,6 @@ def test_gui_load_config_settings(tmp_config_dir) -> None:
     # try setting stim_padding_secs to string
     settings.max_ram_synapse_plot_matrix = 256  # valid again
     settings.stim_padding_secs = "this is not even a number!"  # type: ignore[assignment]
-    # should log a ValueError and default to 5s
+    # should log a ValueError and default to 0s
     settings.load_config_settings()
-    assert settings.stim_padding_secs == 5
+    assert settings.stim_padding_secs == 0

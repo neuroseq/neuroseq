@@ -33,12 +33,15 @@ def test_EagerComboBox(qtbot: QtBot) -> None:
 
 
 def test_etree_constr(
-    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+    b2_model_nmda: B2Model,
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+    qmessagebox_calls: list,
 ) -> None:
-    stree = EditableSynapseTree(mfx_nmda)
+    stree = EditableSynapseTree(b2_model_nmda)
     qtbot.addWidget(stree)
 
-    assert stree.states == mfx_nmda.synapses
+    assert stree.states == b2_model_nmda.synapses
 
     assert len(stree.root.children()) == 1
     for p in stree.root.children():
@@ -60,8 +63,10 @@ def test_etree_constr(
             assert p.type() == "updatinglist"
 
 
-def test_etree_edit_item(mfx_nmda: B2Model, qtbot: QtBot) -> None:
-    stree = EditableParameterTree(mfx_nmda, "synapses", mfx_nmda.define_default_synapse)
+def test_etree_edit_item(b2_model_nmda: B2Model, qtbot: QtBot) -> None:
+    stree = EditableParameterTree(
+        b2_model_nmda, "synapses", b2_model_nmda.define_default_synapse
+    )
     qtbot.addWidget(stree)
 
     synapsenode = stree.root.children()[0]
@@ -83,9 +88,9 @@ def test_etree_edit_item(mfx_nmda: B2Model, qtbot: QtBot) -> None:
     assert stree.b2model.synapses["S"]["model"] == "dv/dt = -v: 1"
 
 
-def test_add_new_init_element(mfx_nmda, qtbot: QtBot) -> None:
+def test_add_new_init_element(b2_model_nmda, qtbot: QtBot) -> None:
     itree = EditableParameterTree(
-        mfx_nmda, "initials", mfx_nmda.define_default_init, add_to_groups=True
+        b2_model_nmda, "initials", b2_model_nmda.define_default_init, add_to_groups=True
     )
 
     qtbot.add_widget(itree)
@@ -102,20 +107,20 @@ def test_add_new_init_element(mfx_nmda, qtbot: QtBot) -> None:
         }
     )
 
-    assert "variable" not in mfx_nmda.initials["S"]
+    assert "variable" not in b2_model_nmda.initials["S"]
 
     with qtbot.waitSignal(sn.param.sigAddNew, timeout=1000, raising=True):
         sn.param.addNew(new_param)
 
-    assert "variable" in mfx_nmda.initials["S"]
-    assert "value" in mfx_nmda.initials["S"]["variable"]
+    assert "variable" in b2_model_nmda.initials["S"]
+    assert "value" in b2_model_nmda.initials["S"]["variable"]
 
 
 def test_default_neurongroup_addition(
-    mfx_nmda: B2Model,
+    b2_model_nmda: B2Model,
     qtbot: QtBot,
 ) -> None:
-    mdiag = ModelEditorDialog(mfx_nmda)
+    mdiag = ModelEditorDialog(b2_model_nmda)
     qtbot.addWidget(mdiag)
 
     # find add neurongroup button
@@ -175,10 +180,10 @@ def test_default_neurongroup_addition(
 
 
 def test_default_synapse_addition(
-    mfx_nmda: B2Model,
+    b2_model_nmda: B2Model,
     qtbot: QtBot,
 ) -> None:
-    mdiag = ModelEditorDialog(mfx_nmda)
+    mdiag = ModelEditorDialog(b2_model_nmda)
     qtbot.addWidget(mdiag)
 
     button = next(
@@ -253,10 +258,10 @@ def test_default_synapse_addition(
 
 
 def test_default_monitor_addition(
-    mfx_nmda: B2Model,
+    b2_model_nmda: B2Model,
     qtbot: QtBot,
 ) -> None:
-    mdiag = ModelEditorDialog(mfx_nmda)
+    mdiag = ModelEditorDialog(b2_model_nmda)
     qtbot.addWidget(mdiag)
 
     button = next(
@@ -354,10 +359,10 @@ def test_default_monitor_addition(
 
 
 def test_default_monitor_customization(
-    mfx_nmda: B2Model,
+    b2_model_nmda: B2Model,
     qtbot: QtBot,
 ) -> None:
-    mdiag = ModelEditorDialog(mfx_nmda)
+    mdiag = ModelEditorDialog(b2_model_nmda)
     qtbot.addWidget(mdiag)
 
     button = next(
@@ -436,10 +441,10 @@ def test_default_monitor_customization(
 
 
 def test_default_parameter_addition(
-    mfx_nmda: B2Model,
+    b2_model_nmda: B2Model,
     qtbot: QtBot,
 ) -> None:
-    mdiag = ModelEditorDialog(mfx_nmda)
+    mdiag = ModelEditorDialog(b2_model_nmda)
     qtbot.addWidget(mdiag)
 
     button = next(
@@ -469,10 +474,10 @@ def test_default_parameter_addition(
 
 
 def test_default_init_addition(
-    mfx_nmda: B2Model,
+    b2_model_nmda: B2Model,
     qtbot: QtBot,
 ) -> None:
-    mdiag = ModelEditorDialog(mfx_nmda)
+    mdiag = ModelEditorDialog(b2_model_nmda)
     qtbot.addWidget(mdiag)
 
     button = next(
@@ -506,13 +511,13 @@ def test_default_init_addition(
     assert o.widget.text() == "None"
 
 
-def test_delete_neurongroup(mfx_nmda, qtbot: QtBot) -> None:
+def test_delete_neurongroup(b2_model_nmda, qtbot: QtBot) -> None:
     # send delete signal -> then check that group is gone
-    ntree = EditableNeurongroupTree(mfx_nmda)
+    ntree = EditableNeurongroupTree(b2_model_nmda)
     qtbot.add_widget(ntree)
 
     # find neurongroup element with name 'neurongroup
-    assert "neurons" in mfx_nmda.neurongroups
+    assert "neurons" in b2_model_nmda.neurongroups
 
     ng = ntree.findItems(
         "neurons",
@@ -522,15 +527,15 @@ def test_delete_neurongroup(mfx_nmda, qtbot: QtBot) -> None:
     with qtbot.waitSignal(ng.param.sigRemoved, timeout=1000, raising=True):
         ng.param.remove()
 
-    assert "neurons" not in mfx_nmda.neurongroups
+    assert "neurons" not in b2_model_nmda.neurongroups
 
 
-def test_delete_neurongroup_element(mfx_nmda, qtbot: QtBot) -> None:
-    ntree = EditableNeurongroupTree(mfx_nmda)
+def test_delete_neurongroup_element(b2_model_nmda, qtbot: QtBot) -> None:
+    ntree = EditableNeurongroupTree(b2_model_nmda)
     qtbot.add_widget(ntree)
 
     # find neurongroup element with name 'neurons
-    assert "neuronnumber" in mfx_nmda.neurongroups["neurons"]
+    assert "neuronnumber" in b2_model_nmda.neurongroups["neurons"]
 
     ngs = ntree.findItems(
         "neuronnumber",
@@ -543,14 +548,14 @@ def test_delete_neurongroup_element(mfx_nmda, qtbot: QtBot) -> None:
     with qtbot.waitSignal(ng.sigRemoved, timeout=1000, raising=True):
         ng.remove()
 
-    assert "neuronnumber" not in mfx_nmda.neurongroups["neurons"]
+    assert "neuronnumber" not in b2_model_nmda.neurongroups["neurons"]
 
 
-def test_delete_synapse(mfx_nmda, qtbot: QtBot) -> None:
-    ntree = EditableSynapseTree(mfx_nmda)
+def test_delete_synapse(b2_model_nmda, qtbot: QtBot) -> None:
+    ntree = EditableSynapseTree(b2_model_nmda)
     qtbot.add_widget(ntree)
 
-    assert "S" in mfx_nmda.synapses
+    assert "S" in b2_model_nmda.synapses
 
     ng = ntree.findItems(
         "S",
@@ -560,14 +565,14 @@ def test_delete_synapse(mfx_nmda, qtbot: QtBot) -> None:
     with qtbot.waitSignal(ng.param.sigRemoved, timeout=1000, raising=True):
         ng.param.remove()
 
-    assert "S" not in mfx_nmda.synapses
+    assert "S" not in b2_model_nmda.synapses
 
 
-def test_delete_synapse_element(mfx_nmda, qtbot: QtBot) -> None:
-    ntree = EditableSynapseTree(mfx_nmda)
+def test_delete_synapse_element(b2_model_nmda, qtbot: QtBot) -> None:
+    ntree = EditableSynapseTree(b2_model_nmda)
     qtbot.add_widget(ntree)
 
-    assert "origin" in mfx_nmda.synapses["S"]
+    assert "origin" in b2_model_nmda.synapses["S"]
 
     ngs = ntree.findItems(
         "origin",
@@ -580,14 +585,14 @@ def test_delete_synapse_element(mfx_nmda, qtbot: QtBot) -> None:
     with qtbot.waitSignal(ng.sigRemoved, timeout=1000, raising=True):
         ng.remove()
 
-    assert "origin" not in mfx_nmda.synapses["S"]
+    assert "origin" not in b2_model_nmda.synapses["S"]
 
 
-def test_delete_monitor(mfx_nmda, qtbot: QtBot) -> None:
-    ntree = EditableMonitorTree(mfx_nmda)
+def test_delete_monitor(b2_model_nmda, qtbot: QtBot) -> None:
+    ntree = EditableMonitorTree(b2_model_nmda)
     qtbot.add_widget(ntree)
 
-    assert "Mn" in mfx_nmda.monitors
+    assert "Mn" in b2_model_nmda.monitors
 
     ng = ntree.findItems(
         "Mn",
@@ -597,14 +602,14 @@ def test_delete_monitor(mfx_nmda, qtbot: QtBot) -> None:
     with qtbot.waitSignal(ng.param.sigRemoved, timeout=1000, raising=True):
         ng.param.remove()
 
-    assert "Mn" not in mfx_nmda.monitors
+    assert "Mn" not in b2_model_nmda.monitors
 
 
-def test_delete_monitor_element(mfx_nmda, qtbot: QtBot) -> None:
-    ntree = EditableMonitorTree(mfx_nmda)
+def test_delete_monitor_element(b2_model_nmda, qtbot: QtBot) -> None:
+    ntree = EditableMonitorTree(b2_model_nmda)
     qtbot.add_widget(ntree)
 
-    assert "source" in mfx_nmda.monitors["M"]
+    assert "source" in b2_model_nmda.monitors["M"]
 
     ngs = ntree.findItems(
         "source",
@@ -617,16 +622,16 @@ def test_delete_monitor_element(mfx_nmda, qtbot: QtBot) -> None:
     with qtbot.waitSignal(ng.sigRemoved, timeout=1000, raising=True):
         ng.remove()
 
-    assert "source" not in mfx_nmda.monitors["M"]
+    assert "source" not in b2_model_nmda.monitors["M"]
 
 
-def test_delete_parameter(mfx_nmda, qtbot: QtBot) -> None:
+def test_delete_parameter(b2_model_nmda, qtbot: QtBot) -> None:
     tree = EditableParameterTree(
-        mfx_nmda, "parameters", mfx_nmda.define_default_parameter
+        b2_model_nmda, "parameters", b2_model_nmda.define_default_parameter
     )
     qtbot.add_widget(tree)
 
-    assert "a" in mfx_nmda.parameters
+    assert "a" in b2_model_nmda.parameters
 
     ng = tree.findItems(
         "a",
@@ -637,16 +642,16 @@ def test_delete_parameter(mfx_nmda, qtbot: QtBot) -> None:
     with qtbot.waitSignal(ng.param.sigRemoved, timeout=1000, raising=True):
         ng.param.remove()
 
-    assert "a" not in mfx_nmda.parameters
+    assert "a" not in b2_model_nmda.parameters
 
 
-def test_delete_init(mfx_nmda, qtbot: QtBot) -> None:
+def test_delete_init(b2_model_nmda, qtbot: QtBot) -> None:
     tree = EditableParameterTree(
-        mfx_nmda, "initials", mfx_nmda.define_default_init, add_to_groups=True
+        b2_model_nmda, "initials", b2_model_nmda.define_default_init, add_to_groups=True
     )
     qtbot.add_widget(tree)
 
-    assert "S" in mfx_nmda.initials
+    assert "S" in b2_model_nmda.initials
 
     ng = tree.findItems(
         "S",
@@ -657,16 +662,16 @@ def test_delete_init(mfx_nmda, qtbot: QtBot) -> None:
     with qtbot.waitSignal(ng.param.sigRemoved, timeout=1000, raising=True):
         ng.param.remove()
 
-    assert "S" not in mfx_nmda.initials
+    assert "S" not in b2_model_nmda.initials
 
 
-def test_delete_init_element(mfx_nmda: B2Model, qtbot: QtBot) -> None:
+def test_delete_init_element(b2_model_nmda: B2Model, qtbot: QtBot) -> None:
     itree = EditableParameterTree(
-        mfx_nmda, "initials", mfx_nmda.define_default_init, add_to_groups=True
+        b2_model_nmda, "initials", b2_model_nmda.define_default_init, add_to_groups=True
     )
     qtbot.add_widget(itree)
 
-    assert "w" in mfx_nmda.initials["S"]
+    assert "w" in b2_model_nmda.initials["S"]
 
     ng = itree.findItems(
         "w",
@@ -677,12 +682,12 @@ def test_delete_init_element(mfx_nmda: B2Model, qtbot: QtBot) -> None:
     with qtbot.waitSignal(ng.param.sigRemoved, timeout=1000, raising=True):
         ng.param.remove()
 
-    assert "w" not in mfx_nmda.initials["S"]
+    assert "w" not in b2_model_nmda.initials["S"]
 
 
-def test_ptree_edit_b2quantity(mfx_nmda: B2Model, qtbot: QtBot) -> None:
+def test_ptree_edit_b2quantity(b2_model_nmda: B2Model, qtbot: QtBot) -> None:
     ptree = EditableParameterTree(
-        mfx_nmda, "parameters", mfx_nmda.define_default_parameter
+        b2_model_nmda, "parameters", b2_model_nmda.define_default_parameter
     )
     qtbot.addWidget(ptree)
 
@@ -698,9 +703,9 @@ def test_ptree_edit_b2quantity(mfx_nmda: B2Model, qtbot: QtBot) -> None:
     assert ptree.b2model.must_be_rebuilt is False
 
 
-def test_rename_tree_element(mfx_nmda: B2Model, qtbot: QtBot) -> None:
+def test_rename_tree_element(b2_model_nmda: B2Model, qtbot: QtBot) -> None:
     ptree = EditableParameterTree(
-        mfx_nmda, "parameters", mfx_nmda.define_default_parameter
+        b2_model_nmda, "parameters", b2_model_nmda.define_default_parameter
     )
     qtbot.addWidget(ptree)
     assert ptree.b2model.must_be_rebuilt is False
@@ -733,24 +738,24 @@ def test_rename_tree_element(mfx_nmda: B2Model, qtbot: QtBot) -> None:
 
 
 def test_neurontree_add_neurongroup_list_update(
-    mfx_nmda: B2Model,
+    b2_model_nmda: B2Model,
     qtbot: QtBot,
 ) -> None:
     ntree = EditableNeurongroupTree(
-        mfx_nmda,
+        b2_model_nmda,
     )
     qtbot.addWidget(ntree)
 
     ntree._add_neuronsubgroup()
 
     # add synpase tree to assure later that the data has been updated
-    stree = EditableSynapseTree(mfx_nmda)
+    stree = EditableSynapseTree(b2_model_nmda)
     qtbot.addWidget(stree)
 
     # add monitor tree to make sure that the update system for dropdown menus works
-    mtree = EditableMonitorTree(mfx_nmda)
+    mtree = EditableMonitorTree(b2_model_nmda)
     qtbot.addWidget(mtree)
-    assert mtree.states == mfx_nmda.monitors
+    assert mtree.states == b2_model_nmda.monitors
 
     # get out the origin subwidget for synapses
     widgets = [
@@ -769,7 +774,7 @@ def test_neurontree_add_neurongroup_list_update(
     assert set(all_names) == set(
         ["neurons", "neuron_input", "new_neuronsubgroup", "input_subgroup", "-"]
     )
-    assert ntree.states == mfx_nmda.neurongroups
+    assert ntree.states == b2_model_nmda.neurongroups
 
     # get the variables widget for the monitor and check that it is filled as it should
     mn_item = mtree.findItems(
@@ -844,9 +849,12 @@ def test_neurontree_add_neurongroup_list_update(
 
 
 def test_modeldialog_accept(
-    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+    b2_model_nmda: B2Model,
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+    qmessagebox_calls: list,
 ) -> None:
-    diag = ModelEditorDialog(mfx_nmda)
+    diag = ModelEditorDialog(b2_model_nmda)
     qtbot.addWidget(diag)
     assert diag.b2model.must_be_rebuilt is False
 
@@ -860,9 +868,12 @@ def test_modeldialog_accept(
 
 
 def test_modeldialog_accept_exception(
-    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+    b2_model_nmda: B2Model,
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+    qmessagebox_calls: list,
 ) -> None:
-    diag = ModelEditorDialog(mfx_nmda)
+    diag = ModelEditorDialog(b2_model_nmda)
     qtbot.addWidget(diag)
 
     def raise_error(_):
@@ -881,10 +892,10 @@ def test_modeldialog_accept_exception(
 
 
 def test_method_selection(
-    mfx_nmda: B2Model,
+    b2_model_nmda: B2Model,
     qtbot: QtBot,
 ):
-    diag = ModelEditorDialog(mfx_nmda)
+    diag = ModelEditorDialog(b2_model_nmda)
     qtbot.add_widget(diag)
 
     # find tree
@@ -911,11 +922,11 @@ def test_method_selection(
         method_dropdown.param.setValue("exponential_euler")
 
     assert diag.b2model.neurongroups["neuron_input"]["method"] == "exponential_euler"
-    assert mfx_nmda.neurongroups["neuron_input"]["method"] == "euler"
+    assert b2_model_nmda.neurongroups["neuron_input"]["method"] == "euler"
 
-    assert mfx_nmda.network["Mn"].g.shape == (1, 0)
+    assert b2_model_nmda.network["Mn"].g.shape == (1, 0)
     # try to run
-    diag.b2model.run_simulation(1.0 * b2.second)
+    diag.b2model.run_simulation(1.0, stim_arrays={})
 
     exp_euler_data_shape = diag.b2model.network["Mn"].g.shape
 
@@ -926,7 +937,7 @@ def test_method_selection(
     assert diag.b2model.neurongroups["neuron_input"]["method"] == "euler"
 
     diag.b2model.assemble_network()
-    diag.b2model.run_simulation(1.0 * b2.second)
+    diag.b2model.run_simulation(1.0, stim_arrays={})
 
     euler_data_shape = diag.b2model.network["Mn"].g.shape
 
@@ -934,13 +945,16 @@ def test_method_selection(
 
 
 def test_monitordialog_modify_with_run(
-    mfx_nmda: B2Model, qtbot: QtBot, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+    b2_model_nmda: B2Model,
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+    qmessagebox_calls: list,
 ):
-    mfx_nmda.define_monitor_dt("M", 200 * b2.ms)
-    mfx_nmda.assemble_network()
-    assert mfx_nmda.monitors["M"]["dt"] == 200 * b2.ms
+    b2_model_nmda.define_monitor_dt("M", 200 * b2.ms)
+    b2_model_nmda.assemble_network()
+    assert b2_model_nmda.monitors["M"]["dt"] == 200 * b2.ms
 
-    diag = EditableMonitorTree(mfx_nmda)
+    diag = EditableMonitorTree(b2_model_nmda)
 
     m = diag.findItems(
         "M",
@@ -948,21 +962,21 @@ def test_monitordialog_modify_with_run(
         0,
     )[0]
 
-    mfx_nmda.run_simulation(1 * b2.second)
+    b2_model_nmda.run_simulation(1, stim_arrays={})
 
-    assert mfx_nmda.network["M"].g.shape[1] == 5
+    assert b2_model_nmda.network["M"].g.shape[1] == 5
     dtparam = m.child(3)
 
-    mfx_nmda.assemble_network()
+    b2_model_nmda.assemble_network()
 
     with qtbot.waitSignal(dtparam.param.sigValueChanged, timeout=1000, raising=True):
         dtparam.param.setValue("100 * ms")
 
-    assert mfx_nmda.monitors["M"]["dt"] == 100 * b2.ms
+    assert b2_model_nmda.monitors["M"]["dt"] == 100 * b2.ms
 
-    mfx_nmda.assemble_network()
-    assert mfx_nmda.network["M"].clock.dt == 100 * b2.ms
+    b2_model_nmda.assemble_network()
+    assert b2_model_nmda.network["M"].clock.dt == 100 * b2.ms
 
-    mfx_nmda.run_simulation(1 * b2.second)
+    b2_model_nmda.run_simulation(1, stim_arrays={})
 
-    assert mfx_nmda.network["M"].g.shape[1] == 10
+    assert b2_model_nmda.network["M"].g.shape[1] == 10

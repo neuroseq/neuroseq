@@ -19,7 +19,7 @@ dependencies = [
     "h5py",
     "qtawesome",
     "click",
-    "fastplotlib>=0.5.1",
+    "fastplotlib",
     "pyparsing!=3.2.4",
     "platformdirs",
     "psutil",

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import brian2 as b2
-import brian2.numpy_ as np
+import numpy as np
 import pytest
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtGui
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.stim_widget import StimArray
 from neuroseq.stim_widget import StimType
 from neuroseq.stim_widget import StimWidget
 from neuroseq.utils import InteractMode
@@ -66,24 +66,24 @@ def mouse_click_and_drag(
 
 
 @pytest.fixture
-def positive_stims() -> b2.TimedArray:
+def positive_stims() -> StimArray:
     n_neurons = 20
     n_stim_per_neuron = 5
     n_timestamps = 100
-    dt = 0.001  # 1 ms
+    dt = 0.001  # 1 ms in seconds
     stim = np.zeros((n_neurons, n_timestamps))
     for row in stim:
         for _ in range(n_stim_per_neuron):
             row[np.random.randint(0, n_timestamps)] = 1.4
-    return b2.TimedArray(stim.T, dt=dt * b2.second)
+    return StimArray("", StimType.Excitation, stim.T, "mV", dt=dt)
 
 
 @pytest.fixture
-def negative_and_positive_stims() -> b2.TimedArray:
+def negative_and_positive_stims() -> StimArray:
     # stim array with values from -2.0 to 3.0
     n_neurons = 3
     n_timestamps = 3
-    dt = 0.001  # 1 ms
+    dt = 0.001  # 1 ms in seconds
     stim = np.zeros((n_neurons, n_timestamps))
     stim[0, 0] = -1.18
     stim[0, 1] = 0.0
@@ -94,10 +94,36 @@ def negative_and_positive_stims() -> b2.TimedArray:
     stim[2, 0] = -0.11
     stim[2, 1] = 0.0
     stim[2, 2] = 3.0
-    return b2.TimedArray(stim.T, dt=dt * b2.second)
+    return StimArray("", StimType.External, stim.T, "mV", dt=dt)
 
 
-def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: b2.TimedArray) -> None:
+def test_stim_widget_background_stims(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    stim_widget.show()
+    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    s1 = StimArray(
+        "s1", StimType.Excitation, np.random.random((10, 100)), "mV", dt=0.001
+    )
+    s2 = StimArray(
+        "s2", StimType.Inhibition, np.random.random((10, 100)), "mV", dt=0.001
+    )
+    stim_widget.set_data(s1)
+    stim_widget.set_background_data(s2)
+    assert len(stim_widget.background_graphics) == 1
+    # toggle background visibility off and on
+    stim_widget.set_background_data_visible(False)
+    for graphic in stim_widget.background_graphics:
+        assert graphic.visible is False
+    stim_widget.set_background_data_visible(True)
+    for graphic in stim_widget.background_graphics:
+        assert graphic.visible is True
+    stim_widget.close()
+    qtbot.waitUntil(lambda: not stim_widget.isVisible())
+
+
+def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
     controller = ConstrainedPanZoomController()
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
@@ -152,9 +178,11 @@ def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: b2.TimedArray) ->
     assert (
         0.65 * n_timestamps < stim_widget.selected_time_slice.stop < 0.90 * n_timestamps
     )
+    stim_widget.close()
+    qtbot.waitUntil(lambda: not stim_widget.isVisible())
 
 
-def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: b2.TimedArray) -> None:
+def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
     controller = ConstrainedPanZoomController()
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
@@ -226,10 +254,12 @@ def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: b2.TimedArray) -> N
     assert t1 > t0
     assert 0.6 < t1 / n_timestamps < 1.0
     assert 0 < n0 / n_neurons < 1.0
+    stim_widget.close()
+    qtbot.waitUntil(lambda: not stim_widget.isVisible())
 
 
 def test_stim_widget_ext_stims(
-    qtbot: QtBot, negative_and_positive_stims: b2.TimedArray
+    qtbot: QtBot, negative_and_positive_stims: StimArray
 ) -> None:
     controller = ConstrainedPanZoomController()
     stim_widget = StimWidget(controller)
@@ -240,14 +270,12 @@ def test_stim_widget_ext_stims(
     assert stim_widget.stim_type == StimType.Excitation
     assert stim_widget.vmin == pytest.approx(0.0)
     assert stim_widget.vmax == pytest.approx(1.0)
-    assert stim_widget.cmap == "chrisluts:I_Magenta"
     # set external stim type with negative and positive values
-    stim_widget.set_data(negative_and_positive_stims, stim_type=StimType.External)
+    stim_widget.set_data(negative_and_positive_stims)
     assert stim_widget.stim_type == StimType.External
     # vmin/vmax should be symmetric around zero and include the largest absolute value
     assert stim_widget.vmin == pytest.approx(-3.0)
     assert stim_widget.vmax == pytest.approx(3.0)
-    assert stim_widget.cmap == "colorbrewer:PRGn"
     # update data slice with larger (negative) values than current max
     stim_widget.update_data_slice(
         neuron_slice=slice(0, 2),
@@ -274,3 +302,5 @@ def test_stim_widget_ext_stims(
     )
     assert stim_widget.vmin == pytest.approx(-3.0)
     assert stim_widget.vmax == pytest.approx(3.0)
+    stim_widget.close()
+    qtbot.waitUntil(lambda: not stim_widget.isVisible())

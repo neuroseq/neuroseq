@@ -13,7 +13,7 @@ from platformdirs import user_config_dir
 class GuiSettings:
     max_ram_synapse_plot_matrix: int = 256
     brian2_backend: str = "numpy"
-    stim_padding_secs: int = 5
+    stim_padding_secs: int = 0
 
     def __init__(self) -> None:
         self.logger: logging.Logger
@@ -102,7 +102,7 @@ class GuiSettings:
                 self.logger.warning(
                     f"Invalid stimulus padding in config file {config_file}: {stim_padding_secs}. Restoring default of 5s"
                 )
-                self.__dict__["stim_padding_secs"] = 5
+                self.__dict__["stim_padding_secs"] = 0
         except Exception as e:
             self.logger.warning(f"Could not load config file: {e}")
             self.logger.exception(e)

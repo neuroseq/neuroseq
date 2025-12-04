@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
-import tempfile
 from collections.abc import Callable
 from typing import Any
 
@@ -24,7 +22,7 @@ from qtpy.QtCore import Signal
 from qtpy.QtWidgets import QComboBox
 
 from neuroseq.b2_model import B2Model
-from neuroseq.utils import parse_string_to_quantity
+from neuroseq.b2_units import str_to_quantity
 
 
 # derive a new combobox which has a 'clicked' signal
@@ -355,7 +353,7 @@ class EditableParameterTree(ParameterTree):
             param.sigValueChanged.connect(
                 lambda p: self._call_with_errormessage(
                     funcs["modify"],
-                    self._call_with_errormessage(parse_string_to_quantity, p.value()),
+                    self._call_with_errormessage(str_to_quantity, p.value()),
                 )
             )
             param.sigRemoved.connect(
@@ -863,10 +861,9 @@ class ModelEditorDialog(QtWidgets.QDialog):
             parent widget, by default None
         """
         super().__init__(parent=parent)
-        tmp = tempfile.TemporaryDirectory()
-        file = os.path.join(tmp.name, "model.nseq")
-        b2model.save_model(file)
-        self.b2model = B2Model.load_model(file)
+        self.b2model = B2Model.from_dict(
+            b2model.to_dict(), b2model.network._stored_state
+        )
 
         trees = {
             "Neurongroups": EditableNeurongroupTree(self.b2model, parent=self),

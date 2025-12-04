@@ -3,7 +3,7 @@
 import numpy as np
 from brian2 import *
 
-from neuroseq.experiment import TraceData, SpikeData, SynapseData
+from neuroseq.data import TraceData, SpikeData, SynapseData
 
 
 def simulate(

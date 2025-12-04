@@ -871,7 +871,7 @@ dev = [
 requires-dist = [
     { name = "brian2" },
     { name = "click" },
-    { name = "fastplotlib", specifier = ">=0.5.1" },
+    { name = "fastplotlib" },
     { name = "h5py" },
     { name = "matplotlib" },
     { name = "numpy" },
