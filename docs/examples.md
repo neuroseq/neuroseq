@@ -32,3 +32,10 @@ This example is a simplified version of the experiment when a whole-cell patch c
 ## Leaky-Integrate-and-Fire Neuron
 
 A simplified, Leaky-Integrate-and-Fire instead of Hodgkin-Huxley is used. The units for stimulation arrays are $$mW / \mu m^2$$.
+
+## Network of Hodgkin-Huxley Neurons
+
+This example simulates a network of 4000 neurons (80 % of excitatory and 20 % of inhibitory neurons). The neurons are interconnected in all-to-all manner with 2% probability.
+
+
+
