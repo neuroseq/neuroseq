@@ -21,6 +21,8 @@ class CellposeImportResult:
     overlay_image: np.ndarray
     trace_data: TraceData | None
     spike_data: SpikeData | None
+    original_cellpose_ids: np.ndarray | None = None
+    stimulus_to_cellpose_mapping: dict[int, int] | None = None
 
 
 def prepare_cellpose_traces(
@@ -80,6 +82,7 @@ class CellPoseImporter:
         self.spike_data: SpikeData | None = None
         self._neuron_ids: np.ndarray | None = None
         self._neuron_colors: np.ndarray | None = None
+        self._original_cellpose_ids: np.ndarray | None = None
 
     def load_image_file(
         self,
@@ -170,6 +173,7 @@ class CellPoseImporter:
     def load_segmentation_file(self, filename: str | Path) -> None:
         """Load segmentation file saved as CSV or NPY."""
         path = Path(filename)
+        suite2p_loaded = False
         try:
             if path.suffix.lower() == ".npy":
                 loaded = np.load(path, allow_pickle=True)
@@ -189,10 +193,12 @@ class CellPoseImporter:
                         else:
                             raise ValueError("Dict format but no 'masks' key found")
                     else:
-                        # Array of dicts (stat.npy format) - not supported for segmentation
-                        raise ValueError(
-                            "Array of dict format not supported for segmentation"
+                        # Array of dicts (suite2p stat.npy format)
+                        self.segmentation_data = self._load_suite2p_segmentation(
+                            loaded, path
                         )
+                        # Mark suite2p loaded but still needs 1-to-0 conversion
+                        suite2p_loaded = False  # Let normal conversion happen
                 else:
                     # Standard numpy array format
                     self.segmentation_data = np.asarray(loaded, dtype=np.int32)
@@ -208,12 +214,18 @@ class CellPoseImporter:
             if np.any(self.segmentation_data < 0):
                 raise ValueError("Segmentation data contains negative values")
 
+            # Store original cellpose IDs before conversion
+            unique_ids = np.unique(self.segmentation_data)
+            self._original_cellpose_ids = unique_ids[unique_ids > 0]
+
             # Convert cell indices to 0-based: cell 1 becomes 0, cell 2 becomes 1, etc.
             # Background (0) remains 0
-            mask_nonzero = self.segmentation_data > 0
-            self.segmentation_data[mask_nonzero] = (
-                self.segmentation_data[mask_nonzero] - 1
-            )
+            # Skip conversion for suite2p data as it's already correct
+            if not suite2p_loaded:
+                mask_nonzero = self.segmentation_data > 0
+                self.segmentation_data[mask_nonzero] = (
+                    self.segmentation_data[mask_nonzero] - 1
+                )
 
             self.logger.info(
                 "Loaded segmentation from %s: %s (converted to 0-based indexing)",
@@ -318,7 +330,11 @@ class CellPoseImporter:
 
         return legend_data
 
-    def create_result(self, image_path: Path) -> CellposeImportResult:
+    def create_result(
+        self,
+        image_path: Path,
+        stimulus_to_cellpose_mapping: dict[int, int] | None = None,
+    ) -> CellposeImportResult:
         """Create import result after successful processing."""
         if self.segmentation_data is None or self.overlay_image is None:
             raise ValueError("Data must be processed before creating result")
@@ -329,6 +345,8 @@ class CellPoseImporter:
             overlay_image=self.overlay_image,
             trace_data=self.trace_data,
             spike_data=self.spike_data,
+            original_cellpose_ids=self._original_cellpose_ids,
+            stimulus_to_cellpose_mapping=stimulus_to_cellpose_mapping,
         )
 
     def _compute_neuron_colors(self, neuron_indices: np.ndarray | None) -> np.ndarray:
@@ -361,3 +379,66 @@ class CellPoseImporter:
             raise ValueError("Spike indices must be non-negative")
         if np.any(spike_data.spike_times < 0):
             raise ValueError("Spike times must be non-negative")
+
+    def _load_suite2p_segmentation(
+        self, stat_data: np.ndarray, stat_path: Path
+    ) -> np.ndarray:
+        """Load suite2p stat.npy format and convert to segmentation mask."""
+        # Check if this looks like suite2p stat.npy format
+        if not (stat_data.dtype == object and len(stat_data) > 0):
+            raise ValueError(
+                "Array of dict format not supported for segmentation (not suite2p)"
+            )
+
+        first_roi = stat_data[0]
+        if not isinstance(first_roi, dict) or "ypix" not in first_roi:
+            raise ValueError(
+                "Array of dict format not supported for segmentation (not suite2p)"
+            )
+
+        # Look for corresponding iscell.npy file
+        iscell_path = stat_path.parent / "iscell.npy"
+        if not iscell_path.exists():
+            raise ValueError(
+                "Suite2p stat.npy detected but iscell.npy not found in same directory"
+            )
+
+        iscell_data = np.load(iscell_path)
+        if iscell_data.shape[0] != len(stat_data):
+            raise ValueError("Mismatch between stat.npy and iscell.npy lengths")
+
+        # Determine image dimensions from ROI coordinates
+        all_ypix = []
+        all_xpix = []
+        for roi in stat_data:
+            all_ypix.extend(roi["ypix"])
+            all_xpix.extend(roi["xpix"])
+
+        image_height = max(all_ypix) + 1
+        image_width = max(all_xpix) + 1
+
+        # Create segmentation mask
+        seg_mask = np.zeros((image_height, image_width), dtype=np.int32)
+        cell_id = 1  # Start with 1-based indexing, will convert to 0-based later
+
+        for i, roi in enumerate(stat_data):
+            # Only include cells that are marked as real (iscell == 1)
+            if iscell_data[i, 0] == 1:
+                ypix = roi["ypix"]
+                xpix = roi["xpix"]
+                seg_mask[ypix, xpix] = cell_id
+                cell_id += 1
+
+        n_cells = cell_id
+        n_total_rois = len(stat_data)
+        n_real_cells = np.sum(iscell_data[:, 0] == 1)
+
+        self.logger.info(
+            "Loaded suite2p segmentation: %s, %d cells from %d ROIs (%d real)",
+            seg_mask.shape,
+            n_cells,
+            n_total_rois,
+            n_real_cells,
+        )
+
+        return seg_mask

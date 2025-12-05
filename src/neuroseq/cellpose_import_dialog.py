@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 from pathlib import Path
 
 from qtpy import QtWidgets
@@ -84,8 +85,37 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         layout.addLayout(top_horizontal_layout)
 
+        # Add ID mapping options
+        mapping_group = QtWidgets.QGroupBox("ID Mapping Options")
+        mapping_layout = QtWidgets.QFormLayout(mapping_group)
+
+        # Strategy selection
+        strategy_layout = QtWidgets.QHBoxLayout()
+        self.mapping_buttons = QtWidgets.QButtonGroup(self)
+        for option in ("Linear", "Random", "Custom"):
+            button = QtWidgets.QRadioButton(option)
+            self.mapping_buttons.addButton(button)
+            strategy_layout.addWidget(button)
+        first_button = self.mapping_buttons.buttons()[0]
+        first_button.setChecked(True)
+        mapping_layout.addRow("Mapping strategy:", strategy_layout)
+
+        # Custom mapping input
+        self.custom_mapping_line = QtWidgets.QLineEdit()
+        self.custom_mapping_line.setPlaceholderText(
+            "e.g., 1:12,2:3 (stimkey:cellposeId)"
+        )
+        self.custom_mapping_line.setVisible(False)
+        mapping_layout.addRow("Custom mapping:", self.custom_mapping_line)
+
+        # Connect radio buttons to show/hide custom mapping input
+        for button in self.mapping_buttons.buttons():
+            button.toggled.connect(self._on_mapping_changed)
+
+        layout.addWidget(mapping_group)
+
         # Limit preview height to make room for other controls
-        self.overlay_widget.setMinimumHeight(450)
+        self.overlay_widget.setMinimumHeight(400)
         layout.addWidget(self.overlay_widget)
 
         button_layout = QtWidgets.QHBoxLayout()
@@ -99,6 +129,62 @@ class CellposeImportDialog(QtWidgets.QDialog):
         button_layout.addWidget(cancel_button)
 
         layout.addLayout(button_layout)
+
+    def _on_mapping_changed(self) -> None:
+        """Handle toggle between mapping strategies"""
+        mapping_strategy = self._get_mapping_strategy()
+        self.custom_mapping_line.setVisible(mapping_strategy == "Custom")
+
+    def _get_mapping_strategy(self) -> str:
+        """Get the currently selected mapping strategy"""
+        checked = self.mapping_buttons.checkedButton()
+        return checked.text() if checked is not None else "Linear"
+
+    def _parse_custom_mapping(self, mapping_str: str) -> dict[int, int]:
+        """Parse custom mapping string like '1:12,2:3' into {1: 12, 2: 3}"""
+        mapping = {}
+        if not mapping_str.strip():
+            return mapping
+
+        try:
+            pairs = mapping_str.split(",")
+            for pair in pairs:
+                pair = pair.strip()
+                if ":" not in pair:
+                    continue
+                stim_key, cellpose_id = pair.split(":", 1)
+                stim_key = int(stim_key.strip())
+                cellpose_id = int(cellpose_id.strip())
+                mapping[stim_key] = cellpose_id
+        except (ValueError, IndexError) as exc:
+            raise ValueError(f"Invalid custom mapping format: {exc}") from exc
+
+        return mapping
+
+    def _generate_stimulus_mapping(self, strategy: str) -> dict[int, int]:
+        """Generate stimulus-to-cellpose mapping based on strategy"""
+        if self.importer._original_cellpose_ids is None:
+            return {}
+
+        original_ids = self.importer._original_cellpose_ids
+
+        if strategy == "Linear":
+            # Map stimulus IDs 1,2,3... to cellpose IDs in order
+            return {
+                i + 1: int(cellpose_id) for i, cellpose_id in enumerate(original_ids)
+            }
+        elif strategy == "Random":
+            # Map stimulus IDs 1,2,3... to cellpose IDs randomly
+            shuffled_ids = list(original_ids)
+            random.shuffle(shuffled_ids)
+            return {
+                i + 1: int(cellpose_id) for i, cellpose_id in enumerate(shuffled_ids)
+            }
+        elif strategy == "Custom":
+            # Parse custom mapping string
+            return self._parse_custom_mapping(self.custom_mapping_line.text())
+        else:
+            return {}
 
     def _browse_image_file(self) -> None:
         filename, _ = getopenfilename(
@@ -163,6 +249,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 self.importer.overlay_image,
                 self.importer.segmentation_data,
                 self.importer.get_legend_data(),
+                self.importer._original_cellpose_ids,
             )
             self._hide_info()
         except ValueError as exc:

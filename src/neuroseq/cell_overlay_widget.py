@@ -14,7 +14,10 @@ from qtpy import QtWidgets
 from neuroseq.utils import QtABCMeta
 from neuroseq.utils import jet_colors_for_neurons
 
+feature_flag_text = True  # todo: remove.
 
+
+# todo: this is a bit slow to render, not sure right now why. Need to test: initial zoom.
 class OverlayView(QtWidgets.QWidget, metaclass=QtABCMeta):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -91,37 +94,38 @@ class OverlayView(QtWidgets.QWidget, metaclass=QtABCMeta):
             )
 
             unique_ids = np.unique(segmentation)
-            for cell_id in unique_ids:
-                if cell_id == 0:
-                    continue
-                mask = segmentation == cell_id
-                if not np.any(mask):
-                    continue
-                y_coords, x_coords = np.where(mask)
-                center_y = float(np.mean(y_coords))
-                center_x = float(np.mean(x_coords))
-                self.subplot.add_text(
-                    f"{cell_id}",
-                    font_size=5,
-                    offset=(center_x, center_y, 200.0),
+            if feature_flag_text:
+                for cell_id in unique_ids:
+                    if cell_id == 0:
+                        continue
+                    mask = segmentation == cell_id
+                    if not np.any(mask):
+                        continue
+                    y_coords, x_coords = np.where(mask)
+                    center_y = float(np.mean(y_coords))
+                    center_x = float(np.mean(x_coords))
+                    self.subplot.add_text(
+                        f"{cell_id}",
+                        font_size=5,
+                        offset=(center_x, center_y, 200.0),
+                        face_color=(0.0, 0.0, 0.0),
+                        outline_color=(1.0, 1.0, 1.0),
+                        outline_thickness=3.0,
+                        center=True,
+                        screen_space=False,
+                    )
+
+                self.text = self.subplot.add_text(
+                    "",
+                    font_size=24,
+                    offset=(8.0, 4.0, 200.0),
                     face_color=(0.0, 0.0, 0.0),
                     outline_color=(1.0, 1.0, 1.0),
                     outline_thickness=3.0,
-                    center=True,
-                    screen_space=False,
+                    center=False,
+                    anchor="bottom-right",
+                    screen_space=True,
                 )
-
-            self.text = self.subplot.add_text(
-                "",
-                font_size=24,
-                offset=(8.0, 4.0, 200.0),
-                face_color=(0.0, 0.0, 0.0),
-                outline_color=(1.0, 1.0, 1.0),
-                outline_thickness=3.0,
-                center=False,
-                anchor="bottom-right",
-                screen_space=True,
-            )
 
         self._reset_camera()
 
@@ -210,6 +214,9 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.overlay_image: np.ndarray | None = None
         self.segmentation: np.ndarray | None = None
         self.legend_data: list[tuple[int, tuple[int, int, int]]] = []
+        self.original_cellpose_ids: np.ndarray | None = None
+        self.stimulus_to_cellpose_mapping: dict[int, int] | None = None
+        self.show_stimulus_ids = True  # Default to stimulus IDs
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -222,6 +229,14 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         )
         layout.addWidget(self.overlay_view)
 
+        # Add toggle checkbox for ID display mode
+        self.id_toggle_checkbox = QtWidgets.QCheckBox(
+            "Show stimulus IDs (default: original cellpose IDs)"
+        )
+        self.id_toggle_checkbox.setChecked(self.show_stimulus_ids)
+        self.id_toggle_checkbox.toggled.connect(self._on_id_toggle_changed)
+        layout.addWidget(self.id_toggle_checkbox)
+
         self.legend_scroll = QtWidgets.QScrollArea()
         self.legend_scroll.setWidgetResizable(True)
         self.legend_scroll.setMaximumHeight(140)
@@ -232,17 +247,64 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.legend_scroll.setWidget(self.legend_widget)
         layout.addWidget(self.legend_scroll)
 
+    def _on_id_toggle_changed(self, checked: bool) -> None:
+        """Handle toggle between stimulus IDs and original cellpose IDs"""
+        self.show_stimulus_ids = checked
+        self._update_overlay_display()
+
+    def _update_overlay_display(self) -> None:
+        """Update the overlay display with current ID mode"""
+        display_segmentation = self._get_display_segmentation()
+        self.overlay_view.add_overlay_data(self.overlay_image, display_segmentation)
+        self._update_legend()
+
+    def _get_display_segmentation(self) -> np.ndarray | None:
+        """Get segmentation array with appropriate IDs for current display mode"""
+        if self.segmentation is None:
+            return None
+
+        if not self.show_stimulus_ids or self.stimulus_to_cellpose_mapping is None:
+            # Show original cellpose IDs (convert 0-based back to 1-based)
+            display_seg = self.segmentation.copy()
+            display_seg[display_seg > 0] = display_seg[display_seg > 0] + 1
+            return display_seg
+        else:
+            # Show stimulus IDs based on mapping
+            display_seg = np.zeros_like(self.segmentation)
+            # Create reverse mapping from cellpose ID to stimulus ID
+            cellpose_to_stimulus = {
+                v: k for k, v in self.stimulus_to_cellpose_mapping.items()
+            }
+
+            for cellpose_id, stimulus_id in cellpose_to_stimulus.items():
+                # cellpose_id is 1-based from mapping, but segmentation is 0-based
+                mask = self.segmentation == (cellpose_id - 1)
+                display_seg[mask] = stimulus_id
+
+            return display_seg
+
     def set_overlay(
         self,
         overlay_image: np.ndarray | None,
         segmentation: np.ndarray | None,
         legend_data: Iterable[tuple[int, tuple[int, int, int]]] | None = None,
+        original_cellpose_ids: np.ndarray | None = None,
+        stimulus_to_cellpose_mapping: dict[int, int] | None = None,
     ) -> None:
         self.overlay_image = overlay_image
         self.segmentation = segmentation
         self.legend_data = list(legend_data or [])
-        self.overlay_view.add_overlay_data(overlay_image, segmentation)
-        self._update_legend()
+        self.original_cellpose_ids = original_cellpose_ids
+        self.stimulus_to_cellpose_mapping = stimulus_to_cellpose_mapping
+
+        # Show/hide toggle checkbox based on whether mapping data is available
+        has_mapping = (
+            original_cellpose_ids is not None
+            and stimulus_to_cellpose_mapping is not None
+        )
+        self.id_toggle_checkbox.setVisible(has_mapping)
+
+        self._update_overlay_display()
 
     def set_empty_message(self, message: str) -> None:
         self.overlay_image = None
