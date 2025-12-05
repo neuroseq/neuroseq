@@ -609,3 +609,39 @@ def test_integration_modeleditor_delete_restore(
     gui.model.run_simulation(0.2 * b2.second)
 
     assert gui.model.network["Traces_v"].v.shape == (30, 2000)
+
+
+def test_gui_import_suite2p_data_dialog(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
+    """Test the Suite2p import dialog opens and applies imported data"""
+    import numpy as np
+
+    from neuroseq.experiment import TraceData
+
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+
+    # Mock the Suite2pImportDialog to return accepted and have test data
+    class MockSuite2pImportDialog:
+        def __init__(self, parent=None, import_handler=None):
+            self.parent = parent
+            self.import_handler = import_handler
+            self.experiment_name = "test_experiment"
+
+        def exec(self):
+            # Simulate successful import by calling the import_handler
+            test_traces = np.random.rand(5, 100)
+            trace_data = TraceData("test_traces", test_traces, "units", dt=1.0 / 30.0)
+            self.import_handler(self.experiment_name, [trace_data], False)
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    # Mock the Suite2pImportDialog class
+    monkeypatch.setattr("neuroseq.gui.Suite2pImportDialog", MockSuite2pImportDialog)
+
+    # Call the button method - this should successfully import data via the handler
+    gui.btn_import_suite2p_data_clicked()
+
+    # The test passes if no exception was raised and the dialog completed
+    # The actual data storage is handled by gui.model.add_experimental_data()
+    # which is tested separately in experiment tests

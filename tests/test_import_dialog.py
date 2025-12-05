@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from pytestqt.qtbot import QtBot
+from qtpy.QtCore import Qt
 
 from neuroseq.experiment import SpikeData
 from neuroseq.experiment import TraceData
@@ -163,6 +164,98 @@ class TestSuite2pImportDialog:
         dialog.import_data()
         assert len(dialog.imported_data) == 1
         assert dialog.append_data is False
+
+    def test_toggle_individual_file_imports(self, qtbot: QtBot):
+        """Test that the toggle button correctly shows/hides individual file imports"""
+        dialog = Suite2pImportDialog()
+        qtbot.addWidget(dialog)
+        dialog.show()
+        qtbot.waitUntil(lambda: dialog.isVisible())
+
+        # Initially individual file imports should be hidden
+        assert not dialog.individual_files_group.isVisible()
+        assert (
+            dialog.show_individual_files_button.text() == "Show individual file imports"
+        )
+
+        # Click to show individual file imports
+        qtbot.mouseClick(dialog.show_individual_files_button, Qt.MouseButton.LeftButton)
+        assert dialog.individual_files_group.isVisible()
+        assert (
+            dialog.show_individual_files_button.text() == "Hide individual file imports"
+        )
+
+        # Click again to hide individual file imports
+        qtbot.mouseClick(dialog.show_individual_files_button, Qt.MouseButton.LeftButton)
+        assert not dialog.individual_files_group.isVisible()
+        assert (
+            dialog.show_individual_files_button.text() == "Show individual file imports"
+        )
+
+    def test_load_data_directory_autofills_files(
+        self,
+        qtbot: QtBot,
+        suite2p_import_data_dir,
+        qmessagebox_calls: list,
+    ) -> None:
+        dialog = Suite2pImportDialog()
+        qtbot.addWidget(dialog)
+
+        detected = dialog.load_data_directory(suite2p_import_data_dir)
+        assert detected == ["f", "fneu", "spks", "stat"]
+        assert dialog.f_file_path is not None
+        assert dialog.fneu_file_path is not None
+        assert dialog.spks_file_path is not None
+        assert dialog.stat_data is not None
+        # one info message for autofill
+        assert qmessagebox_calls[0]["name"] == "information"
+        assert "Auto-filled" in qmessagebox_calls[0]["title"]
+
+    def test_loading_from_csv_files(
+        self,
+        qtbot: QtBot,
+        suite2p_import_data_dir,
+        qmessagebox_calls: list,
+    ) -> None:
+        dialog = Suite2pImportDialog()
+        qtbot.addWidget(dialog)
+
+        dialog.load_f_file(str(suite2p_import_data_dir / "F.csv"))
+        dialog.load_fneu_file(str(suite2p_import_data_dir / "Fneu.csv"))
+        dialog.load_spks_file(str(suite2p_import_data_dir / "spks.csv"))
+
+        assert dialog.import_button.isEnabled()
+        dialog.import_data()
+        # success message only (no folder auto fill)
+        assert qmessagebox_calls[-1]["name"] == "information"
+        assert "successful" in qmessagebox_calls[-1]["title"].lower()
+        assert len(dialog.imported_data) == 2
+        assert isinstance(dialog.imported_data[0], TraceData)
+        assert dialog.imported_data[0].traces.shape == (5, 900)
+        assert isinstance(dialog.imported_data[1], SpikeData)
+        assert len(dialog.imported_data[1].spike_indices) > 0
+
+    def test_import_handler_error_is_shown(
+        self,
+        qtbot: QtBot,
+        suite2p_import_data_dir,
+        qmessagebox_calls: list,
+    ) -> None:
+        def failing_handler(name, data, append):
+            raise ValueError("Cannot append TraceData with different dt")
+
+        dialog = Suite2pImportDialog(import_handler=failing_handler)
+        qtbot.addWidget(dialog)
+
+        dialog.load_f_file(str(suite2p_import_data_dir / "F.npy"))
+        dialog.load_fneu_file(str(suite2p_import_data_dir / "Fneu.npy"))
+
+        dialog.import_data()
+        assert qmessagebox_calls[-1]["name"] == "critical"
+        assert qmessagebox_calls[-1]["title"] == "Import Error"
+        assert "different dt" in qmessagebox_calls[-1]["text"]
+        # the dialog stays interactive so the user can correct inputs
+        assert dialog.import_button.isEnabled()
 
 
 class TestSuite2pDataValidation:
