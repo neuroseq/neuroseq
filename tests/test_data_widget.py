@@ -19,7 +19,13 @@ def test_data_widget(qtbot: QtBot) -> None:
     assert data_widget.trace_widget.n_neurons == 0
     assert data_widget.spike_widget.n_neurons == 0
     data_widget.set_data(
-        TraceData("trace", np.random.random_sample((3, 6)), "mV", 0.001)
+        TraceData(
+            "trace",
+            np.random.random_sample((3, 6)),
+            np.arange(0, 3, dtype=np.uint32),
+            "mV",
+            0.001,
+        )
     )
     assert data_widget.trace_widget.n_neurons == 3
     assert data_widget.spike_widget.n_neurons == 0

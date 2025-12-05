@@ -7,7 +7,7 @@ from qtpy import QtWidgets
 
 from neuroseq.data import TraceData
 from neuroseq.timeseries_widget import TimeseriesWidget
-from neuroseq.utils import cmap_transform_neuron_indices
+from neuroseq.utils import neuron_indices_to_colors
 
 
 class TraceNormDialog(QtWidgets.QDialog):
@@ -146,7 +146,7 @@ class TraceWidget(TimeseriesWidget):
         )
         self.subplot.title = f"Traces: {data.name}"
         self.data = data
-        self.n_neurons = data.traces.shape[0]
+        self.n_neurons = np.max(data.indices) + 1
         self.dt_ms = data.dt * 1000.0  # convert to milliseconds
         self.n_timestamps = data.traces.shape[1]
         # convert timestamps to milliseconds and stack to produce a format suitable for line_stack
@@ -156,7 +156,7 @@ class TraceWidget(TimeseriesWidget):
         )
         tiled_timestamps_ms = np.tile(
             timestamps_ms,
-            (self.n_neurons, 1),
+            (data.traces.shape[0], 1),
         )
         normalized_traces = self.get_normalized_trace_data()
         data = np.stack(
@@ -169,10 +169,9 @@ class TraceWidget(TimeseriesWidget):
         )
         self.graphic = self.subplot.add_line_collection(
             data,
-            cmap="jet",
-            cmap_transform=cmap_transform_neuron_indices(self.n_neurons),
+            colors=neuron_indices_to_colors(self.data.indices),
             thickness=2,
         )
         for i, line in enumerate(self.graphic.graphics):
-            line.offset = (line.offset[0], i, line.offset[2])
+            line.offset = (line.offset[0], self.data.indices[i], line.offset[2])
         self.post_set_data()
