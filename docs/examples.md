@@ -30,4 +30,4 @@ This example is a simplified version of the experiment when a whole-cell patch c
 
 ## Leaky-Integrate-and-Fire Neuron
 
-A simplified version of a _Singe HH Neuron_ model with Leaky-Integrate-and-Fire model used instead of Hodgkin-Huxley.
+A simplified, Leaky-Integrate-and-Fire instead of Hodgkin-Huxley is used. The units for stimulation arrays are "$$mW/\mu m^2$$".
