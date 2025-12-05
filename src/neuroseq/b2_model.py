@@ -2259,7 +2259,11 @@ class B2Model:
         dt = timestamps[1] - timestamps[0]
         quantity = monitor.variables[variable_name]
         return TraceData(
-            trace_name, quantity.get_value().T, display_units(quantity), dt
+            trace_name,
+            quantity.get_value().T,
+            monitor.record,
+            display_units(quantity),
+            dt,
         )
 
     def get_simulation_spike_names(self) -> list[str]:

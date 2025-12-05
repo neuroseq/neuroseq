@@ -84,6 +84,7 @@ def prepare_suite2p_traces(
     return TraceData(
         "Suite2p contrasting traces",
         normalized_traces[:n_neurons_to_import, :],
+        np.arange(n_neurons_to_import, dtype=np.uint32),
         "units",
         dt,
     )

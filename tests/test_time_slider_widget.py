@@ -28,7 +28,9 @@ def test_time_slider_widget(qtbot: QtBot) -> None:
     trace_widget = TraceWidget(controller)
     qtbot.addWidget(trace_widget)
     trace_widget.show()
-    trace_widget.set_data(TraceData("tr", np.zeros((1, 1800)), "mV", 0.001))
+    trace_widget.set_data(
+        TraceData("tr", np.zeros((1, 1800)), np.array([0]), "mV", 0.001)
+    )
     qtbot.waitUntil(lambda: trace_widget.isVisible())
     spike_widget = SpikeWidget(controller)
     qtbot.addWidget(spike_widget)

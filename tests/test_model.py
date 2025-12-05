@@ -17,7 +17,11 @@ from neuroseq.stim import StimType
 
 def _make_experimental_data(n_neurons=12, dt=0.1) -> list[TraceData | SpikeData]:
     trace_data = TraceData(
-        name="test_trace", traces=np.random.rand(n_neurons, 37), units="mV", dt=dt
+        name="test_trace",
+        traces=np.random.rand(n_neurons, 37),
+        indices=np.arange(0, n_neurons, dtype=np.uint32),
+        units="mV",
+        dt=dt,
     )
     spike_data = SpikeData(
         name="test_spike",
@@ -140,7 +144,11 @@ def test_save_load(model_nmda: Model, tmp_path: Path) -> None:
 
     # add some experimental data
     trace_data = TraceData(
-        name="test_trace", traces=np.random.rand(12, 3), units="mV", dt=0.01
+        name="test_trace",
+        traces=np.random.rand(12, 3),
+        indices=np.arange(0, 12, dtype=np.uint32),
+        units="mV",
+        dt=0.01,
     )
     spike_data = SpikeData(
         name="test_spike",

@@ -69,12 +69,21 @@ def test_stim_array_json(tmp_path: Path) -> None:
 
 
 def test_trace_data_json(tmp_path: Path) -> None:
-    d = {"s": TraceData("name", np.random.random_sample((10, 5)), "mV", 0.01)}
+    d = {
+        "s": TraceData(
+            "name",
+            np.random.random_sample((10, 5)),
+            np.arange(4, 14, dtype=np.uint32),
+            "mV",
+            0.01,
+        )
+    }
 
     read = _save_and_reload_json(d, tmp_path)
 
     assert d["s"].name == read["s"].name
     assert np.allclose(d["s"].traces, read["s"].traces)
+    assert np.allclose(d["s"].indices, read["s"].indices)
     assert d["s"].units == read["s"].units
     assert d["s"].dt == read["s"].dt
 
