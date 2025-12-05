@@ -517,15 +517,15 @@ def hh_neuron_with_plasticity() -> Model:
     return model
 
 
-@register_example_model("HH Neuron with synapses")
+@register_example_model("Network of Hodgkin-Huxley Neurons")
 def hh_neuron_with_synapses() -> Model:
     model = Model()
 
     # define Brian2 model
     b2_model = model.b2_model
 
-    nneurons = 4000
-    nneurons_exc = 3200
+    nneurons = 40
+    nneurons_exc = 32
 
     b2_model.define_parameter("area", 20000 * b2.umetre**2)
     b2_model.define_parameter(
@@ -572,9 +572,12 @@ def hh_neuron_with_synapses() -> Model:
     b2_model.define_parameter("opto_units", opto_units)
 
     eqs = """
-    dv/dt = (gl*(El-v)+ge*(Ee-v)+gi*(Ei-v)-
-             g_na*(m*m*m)*h*(v-ENa)-
-             g_kd*(n*n*n*n)*(v-EK))/Cm : volt
+    dv/dt = (ge*(Ee-v)+gi*(Ei-v)+geopto*(Eeopto-v)+giopto*(Eiopto-v)+gl*(El-v)-
+            g_na*(m*m*m)*h*(v-ENa)-
+            g_kd*(n*n*n*n)*(v-EK)+Iext)/Cm : volt
+    Iext = I_external(t,i) : amp
+    geopto = g_exc * Exc_stimulation(t, i)/opto_units: siemens
+    giopto = g_inh * Inh_stimulation(t, i)/opto_units: siemens
     dm/dt = alpha_m*(1-m)-beta_m*m : 1
     dn/dt = alpha_n*(1-n)-beta_n*n : 1
     dh/dt = alpha_h*(1-h)-beta_h*h : 1
@@ -604,11 +607,13 @@ def hh_neuron_with_synapses() -> Model:
     b2_model.define_neuronsubgroup_idxs("Pi", (nneurons_exc, nneurons))
 
     b2_model.define_synapse_connection("Ce", None)
+    b2_model.define_synapse_equation("Ce", """we = 6*nS : siemens""")
     b2_model.define_synapse_connection_probability("Ce", 0.02)
     b2_model.define_synapse_origin("Ce", "Pe")
     b2_model.define_synapse_target("Ce", "P")
 
     b2_model.define_synapse_connection("Ci", None)
+    b2_model.define_synapse_equation("Ci", """wi = 67*nS : siemens""")
     b2_model.define_synapse_connection_probability("Ci", 0.02)
     b2_model.define_synapse_origin("Ci", "Pi")
     b2_model.define_synapse_target("Ci", "P")
@@ -621,6 +626,9 @@ def hh_neuron_with_synapses() -> Model:
     b2_model.define_init("P", "ge", "(randn() * 1.5 + 4) * 10.*nS")
     b2_model.define_init("P", "gi", "(randn() * 12 + 20) * 10.*nS")
 
+    # b2_model.define_init("Ce", "we", "3.*nS")
+    # b2_model.define_init("Ci", "wi", "10.*nS")
+
     # monitors
     b2_model.define_monitor_source("trace", "P")
     b2_model.define_monitor_type("trace", "StateMonitor")
@@ -629,6 +637,11 @@ def hh_neuron_with_synapses() -> Model:
     b2_model.define_monitor_source("mon", "P")
     b2_model.define_monitor_type("mon", "SpikeMonitor")
     b2_model.define_monitor_variable("mon", "v")
+
+    b2_model.define_monitor_source("synapse", "Ce")
+    b2_model.define_monitor_type("synapse", "StateMonitor")
+    b2_model.define_monitor_variable("synapse", "we")
+    # self..define_monitor_dt(1.0 * b2.s, "synapse")
 
     # define stim arrays
 
@@ -653,7 +666,7 @@ def hh_neuron_with_synapses() -> Model:
         name="Exc_stimulation",
         stim_type=StimType.Excitation,
         values=exc_stim,
-        units="1",
+        units="mwatt / um2",
         dt=0.001,
     )
     model.add_stim_array(exc_stimulation)
@@ -665,7 +678,7 @@ def hh_neuron_with_synapses() -> Model:
         name="Inh_stimulation",
         stim_type=StimType.Inhibition,
         values=inh_stim,
-        units="1",
+        units="mwatt / um2",
         dt=0.001,
     )
     model.add_stim_array(inh_stimulation)
@@ -673,7 +686,6 @@ def hh_neuron_with_synapses() -> Model:
     return model
 
 
-@register_example_model("HH Neurons EI model")
 def hh_neurons_ei_model() -> Model:
     model = Model()
 
