@@ -182,7 +182,6 @@ we= clip(we + Apre, -gmax, gmax)
     return model
 
 
-@register_example_model("Non-linear")
 def non_linear() -> Model:
     model = Model()
 
