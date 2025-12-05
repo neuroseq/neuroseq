@@ -62,7 +62,7 @@ def test_time_slider_widget(qtbot: QtBot) -> None:
     assert trace_widget.timeline.t == pytest.approx(0.0, abs=0.1)
     assert spike_widget.timeline.t == pytest.approx(0.0, abs=0.1)
     assert stim_widget.timeline.t == pytest.approx(0.0, abs=0.1)
-    assert heatmap_widget.get_timestamp_index() == 0
+    assert heatmap_widget.idx == 0
 
     # set a max time for the slider
     slider.set_max_time_secs(2)
@@ -75,7 +75,7 @@ def test_time_slider_widget(qtbot: QtBot) -> None:
     assert spike_widget.timeline.t == pytest.approx(2000.0, abs=0.1)
     assert stim_widget.timeline.t == pytest.approx(2000.0, abs=0.1)
     assert heatmap_widget.timestamps is not None
-    assert heatmap_widget.get_timestamp_index() == heatmap_widget.timestamps.size - 1
+    assert heatmap_widget.idx == heatmap_widget.timestamps.size - 1
 
     # select min value of underlying slider
     slider.slider.setValue(-100)
@@ -83,7 +83,7 @@ def test_time_slider_widget(qtbot: QtBot) -> None:
     assert trace_widget.timeline.t == pytest.approx(0.0, abs=0.1)
     assert spike_widget.timeline.t == pytest.approx(0.0, abs=0.1)
     assert stim_widget.timeline.t == pytest.approx(0.0, abs=0.1)
-    assert heatmap_widget.get_timestamp_index() == 0
+    assert heatmap_widget.idx == 0
 
     # select mid value of underlying slider
     slider.slider.setValue(1000)
@@ -91,7 +91,7 @@ def test_time_slider_widget(qtbot: QtBot) -> None:
     assert trace_widget.timeline.t == pytest.approx(1000.0, abs=0.1)
     assert spike_widget.timeline.t == pytest.approx(1000.0, abs=0.1)
     assert stim_widget.timeline.t == pytest.approx(1000.0, abs=0.1)
-    assert heatmap_widget.get_timestamp_index() == pytest.approx(10, abs=1)
+    assert heatmap_widget.idx == pytest.approx(10, abs=1)
 
     trace_widget.close()
     spike_widget.close()
