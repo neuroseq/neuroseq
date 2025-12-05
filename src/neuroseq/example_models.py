@@ -967,11 +967,15 @@ def single_lif_neuron_many_stims() -> Model:
     b2_model.define_monitor_variable("mon", "v")
 
     # define stim arrays
-    tfinal = 1000 * b2.ms
+    tfinal = 3100 * b2.ms
 
     i_stim = np.zeros((int(tfinal / b2.ms), 1), dtype="float")
     i_stim[:, :] = 0
-    i_stim[200:300, :] = 1000
+    i_stim[100:199, :] = np.arange(99)[:, np.newaxis] * 3
+    i_stim[300:399, :] = np.arange(99)[:, np.newaxis] * 6
+    i_stim[500:599, :] = 200
+    i_stim[700:799, :] = 400
+    i_stim[900:999, :] = 600
     i_external = StimArray(
         name="I_external",
         stim_type=StimType.External,
@@ -983,7 +987,11 @@ def single_lif_neuron_many_stims() -> Model:
 
     exc_stim = np.zeros((int(tfinal / b2.ms), 1), dtype="float")
     exc_stim[:, :] = 0
-    exc_stim[50:100, :] = 0.3
+    exc_stim[1100:1199, :] = np.arange(99)[:, np.newaxis] * 0.005
+    exc_stim[1300:1399, :] = np.arange(99)[:, np.newaxis] * 0.01
+    exc_stim[1500:1599, :] = 0.25
+    exc_stim[1700:1799, :] = 0.5
+    exc_stim[1900:1999, :] = 1.0
     exc_stimulation = StimArray(
         name="Exc_stimulation",
         stim_type=StimType.Excitation,
@@ -995,7 +1003,11 @@ def single_lif_neuron_many_stims() -> Model:
 
     inh_stim = np.zeros((int(tfinal / b2.ms), 1), dtype="float")
     inh_stim[:, :] = 0
-    inh_stim[500:900, :] = 0.3
+    inh_stim[2100:2199, :] = np.arange(99)[:, np.newaxis] * 0.005
+    inh_stim[2300:2399, :] = np.arange(99)[:, np.newaxis] * 0.01
+    inh_stim[2500:2599, :] = 0.25
+    inh_stim[2700:2799, :] = 0.5
+    inh_stim[2900:2999, :] = 1.0
     inh_stimulation = StimArray(
         name="Inh_stimulation",
         stim_type=StimType.Inhibition,
