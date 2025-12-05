@@ -1,5 +1,5 @@
-# Examples 
+# Examples
 
 ## Single HH neuron
 
-This example illustrates 
+This example illustrates
