@@ -30,8 +30,8 @@ def default_model() -> Model:
     # define Brian2 model
     b2_model = model.b2_model
 
-    nneurons = 30
-    nneurons_exc = 24
+    nneurons = 40
+    nneurons_exc = 32
 
     b2_model.define_parameter("area", 20000 * b2.umetre**2)
     b2_model.define_parameter(
@@ -365,7 +365,7 @@ def single_hh_neuron() -> Model:
     return model
 
 
-@register_example_model("HH Neuron with plasticity")
+@register_example_model("Network of Hodgkin-Huxley Neurons with STDP")
 def hh_neuron_with_plasticity() -> Model:
     model = Model()
 
@@ -524,8 +524,8 @@ def hh_neuron_with_synapses() -> Model:
     # define Brian2 model
     b2_model = model.b2_model
 
-    nneurons = 40
-    nneurons_exc = 32
+    nneurons = 36
+    nneurons_exc = 28
 
     b2_model.define_parameter("area", 20000 * b2.umetre**2)
     b2_model.define_parameter(
@@ -606,14 +606,14 @@ def hh_neuron_with_synapses() -> Model:
     b2_model.define_neuronsubgroup_target("Pi", "P")
     b2_model.define_neuronsubgroup_idxs("Pi", (nneurons_exc, nneurons))
 
-    b2_model.define_synapse_connection("Ce", None)
-    b2_model.define_synapse_equation("Ce", """we = 6*nS : siemens""")
+    b2_model.define_synapse_connection("Ce", "i != j")
+    b2_model.define_synapse_equation("Ce", """we : siemens""")
     b2_model.define_synapse_connection_probability("Ce", 0.02)
     b2_model.define_synapse_origin("Ce", "Pe")
     b2_model.define_synapse_target("Ce", "P")
 
-    b2_model.define_synapse_connection("Ci", None)
-    b2_model.define_synapse_equation("Ci", """wi = 67*nS : siemens""")
+    b2_model.define_synapse_connection("Ci", "i != j")
+    b2_model.define_synapse_equation("Ci", """wi : siemens""")
     b2_model.define_synapse_connection_probability("Ci", 0.02)
     b2_model.define_synapse_origin("Ci", "Pi")
     b2_model.define_synapse_target("Ci", "P")
@@ -626,8 +626,8 @@ def hh_neuron_with_synapses() -> Model:
     b2_model.define_init("P", "ge", "(randn() * 1.5 + 4) * 10.*nS")
     b2_model.define_init("P", "gi", "(randn() * 12 + 20) * 10.*nS")
 
-    # b2_model.define_init("Ce", "we", "3.*nS")
-    # b2_model.define_init("Ci", "wi", "10.*nS")
+    b2_model.define_init("Ce", "we", "exp(0.25*randn())*6*nS")
+    b2_model.define_init("Ci", "wi", "exp(0.25*randn())*67*nS")
 
     # monitors
     b2_model.define_monitor_source("trace", "P")
