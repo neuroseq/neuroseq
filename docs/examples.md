@@ -16,8 +16,8 @@ A single Hodgkin-Huxley neuron is simulated. The model supports direct current i
 
 $$E_{rev}^{exc} = 0   mV$$ \
 $$E_{rev}^{inh} = - 80   mV$$ \
-$$g_{exc} = 2 \ mS \ cm^{-2}$$ \
-$$g_{inh} = 2 \ mS \ cm^{-2}$$
+$$g_{exc} = 0.1 \ mS \ cm^{-2}$$ \
+$$g_{inh} = 0.1 \ mS \ cm^{-2}$$
 
 No any other expternal imputs (e.g. gausian noise) was implemented in the model. The model can be configured for non-neuronal cell by setting up conductances for $$Na$$ and $$K$$ voltage gated channels to zero.
 
