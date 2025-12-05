@@ -2,7 +2,7 @@
 
 The examples provide a list of brian2 modeles. The first set of models is tailored to the real neurobiological experiments, and the description of the models contains addtional information on the relation of the model architecture and properties with real experiments. The parameters of the models in the examples and initial conditions can be deifned and modified in "File -> Edit Model".
 
-## Single Hodgkin-Huxley Neuron
+## Hodgkin-Huxley Neuron
 
 <img width="1441" height="433" alt="image" src="https://github.com/user-attachments/assets/cb9b8c37-934f-4631-bb93-139b9c910a65" />
 
@@ -28,6 +28,6 @@ No any other expternal imputs (e.g. gausian noise) was implemented in the model.
 
 This example is a simplified version of the experiment when a whole-cell patch clamp recording of a single neuron is conducted, and any synaptic transmission is absenend (e.g. when synaptic blockes are added).
 
-## Single Leaky-Integrate-and-Fire Neuron
+## Leaky-Integrate-and-Fire Neuron
 
 A simplified version of a _Singe HH Neuron_ model with Leaky-Integrate-and-Fire model used instead of Hodgkin-Huxley.
