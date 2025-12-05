@@ -35,7 +35,7 @@ A simplified, Leaky-Integrate-and-Fire instead of Hodgkin-Huxley is used. The un
 
 ## Network of Hodgkin-Huxley Neurons
 
-This example simulates a network of 4000 neurons (80 % of excitatory and 20 % of inhibitory neurons). The neurons are interconnected in all-to-all manner with 2% probability.
+This example simulates a network of 4000 neurons (80 % of excitatory and 20 % of inhibitory neurons). The neurons are interconnected in all-to-all manner with 2% probability. Synaptic strenght is destributed log-logarithmically.
 
 
 
