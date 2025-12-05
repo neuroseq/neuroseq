@@ -14,6 +14,7 @@ In this example, a experimental protocol of electrophysiological and optogenetic
 
 A single Hodgkin-Huxley neuron is simulated. The model supports direct current injeciton into the neuron (virtual current clamp) and optogenetic control via a pair of opsins (for excitation and inhibition). The injected current into the neuron can be controled via _I_external_ stimulation array that supports both positive and negative current values with units expressed in _pA_. The neuron is complemented by two additional conductences that can be modulated by light that represent optogenetic tools (opsins). As no intrinsic kinetics of opsins is taken into account, the opsins are considered to be ideal and have an immediate activation and deactivation. _Exc_stimulation_ and _Inh_stimulaiton_ are corresponding arrays with units beeing a fraction of predefined maximum conductances of opsin.
 
+The number of neurons in the model can be increased and stim array will be updated accordignly . As there is no synapic connections between them, they will operate independently. 
 
 **Reversal potintials and conductances defined in the model:**
 
@@ -22,7 +23,7 @@ $$E_{rev}^{inh} = - 80   mV$$ \
 $$g_{exc} = 0.1 \ mS \ cm^{-2}$$ \
 $$g_{inh} = 0.1 \ mS \ cm^{-2}$$
 
-No any other expternal imputs (e.g. gausian noise) was implemented in the model. The model can be configured for non-neuronal cell by setting up conductances for $$Na$$ and $$K$$ voltage gated channels to zero.
+No any other external imputs (e.g. gausian noise) was implemented in the model. The model can be configured for non-neuronal cell by setting up conductances for $$Na$$ and $$K$$ voltage gated channels to zero.
 
 ### Correspoding experiment
 
