@@ -37,4 +37,9 @@ A simplified, Leaky-Integrate-and-Fire instead of Hodgkin-Huxley is used. The un
 
 The example is an implementaiton of the COBAHH model from brain2 package (https://brian2.readthedocs.io/en/stable/examples/COBAHH.html) with modifications. This example simulates a network of 4000 neurons (80 % of excitatory and 20 % of inhibitory neurons) with fixed exponential synaptic conductances. The neurons are interconnected in all-to-all manner with 2% probability.
 
+## Network of Hodgkin-Huxley Neurons with STDP
+
+Network of Hodgkin-Huxley Neurons example with spike-timing dependent plasticity.
+
+
 
