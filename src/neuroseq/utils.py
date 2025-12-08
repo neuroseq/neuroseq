@@ -35,7 +35,7 @@ def timed_array_with_new_data(
 
 
 def get_downsample_factor(
-    n_floats: int, max_ram_mb: int, bits_per_float: int = 64
+    n_floats: float, max_ram_mb: int, bits_per_float: int = 64
 ) -> int:
     """Calculate the downsample factor for a given number of floats and maximum allowed RAM usage in MB."""
     if n_floats < 0 or max_ram_mb <= 0:
@@ -60,7 +60,7 @@ def construct_synapse_matrix(
     n_timestamps = values.shape[1]
     if n_timestamps == 0:
         return np.array([]), np.array([])
-    n_floats = N * N * n_timestamps
+    n_floats = N * N * float(n_timestamps)
     downsample_factor = get_downsample_factor(n_floats, max_ram_mb, bits_per_float=32)
     if downsample_factor > 1:
         logging.info(
