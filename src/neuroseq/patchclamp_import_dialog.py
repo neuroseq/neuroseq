@@ -55,8 +55,14 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.full_height = 540
         self.compact_height = 320
 
-        initial_width = self.full_width if self.cellpose_import is not None else self.compact_width
-        initial_height = self.full_height if self.cellpose_import is not None else self.compact_height
+        initial_width = (
+            self.full_width if self.cellpose_import is not None else self.compact_width
+        )
+        initial_height = (
+            self.full_height
+            if self.cellpose_import is not None
+            else self.compact_height
+        )
         self.resize(initial_width, initial_height)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -532,6 +538,9 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             peak_distance=self.peak_distance_spin.value(),
             peak_width=self.peak_width_spin.value(),
         )
+
+        # Use consistent name for all patch clamp spike data to enable merging
+        spike_data.name = "Patch Clamp Spikes"
 
         # Create trace data (single neuron, so reshape to 2D)
         trace_array = self.npy_data.reshape(1, -1)

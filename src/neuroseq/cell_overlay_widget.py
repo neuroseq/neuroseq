@@ -7,7 +7,6 @@ from collections.abc import Iterable
 import brian2.numpy_ as np
 import fastplotlib as fpl
 import pygfx
-from cmap import Colormap
 from qtpy import QtCore
 from qtpy import QtWidgets
 
@@ -60,7 +59,10 @@ class OverlayView(QtWidgets.QWidget):
         self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
 
     def add_overlay_data(
-        self, overlay_image: np.ndarray | None, segmentation: np.ndarray | None
+        self,
+        overlay_image: np.ndarray | None,
+        segmentation: np.ndarray | None,
+        legend_data: Iterable[tuple[int, tuple[int, int, int]]] | None = None,
     ) -> None:
         self.subplot.clear()
         self.overlay_image = overlay_image
@@ -72,6 +74,13 @@ class OverlayView(QtWidgets.QWidget):
 
         if overlay_image is None:
             return
+
+        legend_lookup: dict[int, tuple[float, float, float]] = {}
+        if legend_data:
+            legend_lookup = {
+                int(cell_id): (rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0)
+                for cell_id, rgb in legend_data
+            }
 
         # keep the overlay view simple: hide axes and grids
         self.subplot.axes.visible = False
@@ -85,15 +94,25 @@ class OverlayView(QtWidgets.QWidget):
         )
 
         if segmentation is not None:
-            cmap = Colormap("jet")
-            norm = float(np.max(segmentation))
-            if norm == 0.0:
-                norm = 1.0
-            rgb = np.array(
-                [[np.asarray(cmap(v / norm)) for v in row] for row in segmentation]
-            )
-            rgb[:, :, 3] = 0.4
-            rgb[segmentation == 0, 3] = 0
+            unique_ids = np.unique(segmentation)
+            neuron_ids = unique_ids[
+                unique_ids > 0
+            ]  # exclude background, same as legend
+
+            if len(neuron_ids) > 0:
+                zero_based_ids = neuron_ids - neuron_ids.min()
+                id_colors = neuron_indices_to_colors(zero_based_ids)
+
+                rgb = np.zeros((*segmentation.shape, 4))
+                for i, neuron_id in enumerate(neuron_ids):
+                    mask = segmentation == neuron_id
+                    color = legend_lookup.get(int(neuron_id), tuple(id_colors[i][:3]))
+                    rgb[mask, :3] = color
+
+                rgb[:, :, 3] = 0.4  # alpha for all cells
+                rgb[segmentation == 0, 3] = 0  # transparent background
+            else:
+                rgb = np.zeros((*segmentation.shape, 4))
             self.segmentation_graphic = self.subplot.add_image(
                 rgb, interpolation="nearest"
             )
@@ -262,8 +281,11 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
     def _update_overlay_display(self) -> None:
         """Update the overlay display with current ID mode"""
         display_segmentation = self._get_display_segmentation()
-        self.overlay_view.add_overlay_data(self.overlay_image, display_segmentation)
-        self._update_legend()
+        display_legend = self._get_display_legend(display_segmentation)
+        self.overlay_view.add_overlay_data(
+            self.overlay_image, display_segmentation, display_legend
+        )
+        self._update_legend(display_legend)
 
     def _get_display_segmentation(self) -> np.ndarray | None:
         """Get segmentation array with appropriate IDs for current display mode"""
@@ -287,6 +309,35 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
                 display_seg[mask] = stimulus_id
 
             return display_seg
+
+    def _get_display_legend(
+        self, display_segmentation: np.ndarray | None
+    ) -> list[tuple[int, tuple[int, int, int]]]:
+        """Build legend entries that match the currently displayed IDs and colors."""
+        if display_segmentation is None:
+            return []
+
+        # If no legend data was provided, fall back to computing from the display data
+        if not self.legend_data:
+            return self._compute_default_legend(display_segmentation)
+
+        # When showing stimulus IDs, remap legend entries to stimulus IDs but keep colors
+        if self.show_stimulus_ids and self.stimulus_to_cellpose_mapping:
+            cellpose_to_stimulus = {
+                v: k for k, v in self.stimulus_to_cellpose_mapping.items()
+            }
+            remapped: list[tuple[int, tuple[int, int, int]]] = []
+            for cellpose_id, rgb in self.legend_data:
+                stim_id = cellpose_to_stimulus.get(cellpose_id)
+                if stim_id is None:
+                    continue
+                remapped.append((int(stim_id), rgb))
+
+            if remapped:
+                remapped.sort(key=lambda item: item[0])
+                return remapped
+
+        return self.legend_data
 
     def set_overlay(
         self,
@@ -324,15 +375,21 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             if child:
                 child.setParent(None)
 
-    def _update_legend(self) -> None:
+    def _update_legend(
+        self, legend_data: Iterable[tuple[int, tuple[int, int, int]]] | None = None
+    ) -> None:
         self._clear_legend()
         if self.segmentation is None:
             return
 
         legend = (
-            self.legend_data
-            if self.legend_data
-            else self._compute_default_legend(self.segmentation)
+            list(legend_data)
+            if legend_data is not None
+            else (
+                self.legend_data
+                if self.legend_data
+                else self._compute_default_legend(self.segmentation)
+            )
         )
         if not legend:
             return
