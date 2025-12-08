@@ -950,6 +950,12 @@ def hh_neuron_with_plasticity() -> Model:
         "g_inh", (3e-3 * b2.siemens * b2.cm**-2) * b2_model.parameters["area"]
     )
 
+    b2_model.define_parameter("taupre", 20 * b2.ms)
+    b2_model.define_parameter("taupost", 20 * b2.ms)
+    b2_model.define_parameter("gmax", 60 * b2.nS)
+    b2_model.define_parameter("dApre", 6 * b2.nS)
+    b2_model.define_parameter("dApost", -6 * 1.05 * b2.nS)
+
     # b2_model.define_parameter("we", 6 * b2.nS)
     # b2_model.define_parameter("wi", 67 * b2.nS)
 
@@ -987,23 +993,49 @@ def hh_neuron_with_plasticity() -> Model:
     b2_model.define_neuronsubgroup_target("Pi", "P")
     b2_model.define_neuronsubgroup_idxs("Pi", (nneurons_exc, nneurons))
 
-    b2_model.define_synapse_connection("Ce", """we : siemens""")
+    ce_eq = """
+    we : siemens
+    dApre/dt = -Apre / taupre : siemens (event-driven)
+    dApost/dt = -Apost / taupost : siemens (event-driven)
+    """
+    b2_model.define_synapse_connection("Ce", None)
+    b2_model.define_synapse_equation("Ce", ce_eq)
     b2_model.define_synapse_connection_probability("Ce", 0.02)
     b2_model.define_synapse_origin("Ce", "Pe")
     b2_model.define_synapse_target("Ce", "P")
 
-    b2_model.define_synapse_connection("Ci", """wi : siemens""")
+    ce_on_pre = """
+    ge += we
+    Apre += dApre
+    we = clip(we + Apost, -gmax, gmax)
+    """
+    b2_model.define_synapse_pre("Ce", ce_on_pre)
+
+    ce_on_post = """
+    Apost += dApost
+    we= clip(we + Apre, -gmax, gmax)
+    """
+    b2_model.define_synapse_post("Ce", ce_on_post)
+
+    b2_model.define_synapse_connection("Ci", None)
+    b2_model.define_synapse_equation("Ci", """wi : siemens""")
     b2_model.define_synapse_connection_probability("Ci", 0.02)
     b2_model.define_synapse_origin("Ci", "Pi")
     b2_model.define_synapse_target("Ci", "P")
 
-    b2_model.define_synapse_pre("Ce", "ge += we")
-    b2_model.define_synapse_pre("Ci", "gi += wi")
+    # b2_model.define_synapse_pre("Ce", "ge += clip(we, 0*nS, 18*nS)")
+    # b2_model.define_synapse_pre("Ci", "gi += clip(wi, 0*nS, 210*nS)")
 
     # initial conditions
     b2_model.define_init("P", "v", "El + (randn() * 5 - 5)*mV")
     b2_model.define_init("P", "ge", "(randn() * 1.5 + 4) * 10.*nS")
     b2_model.define_init("P", "gi", "(randn() * 12 + 20) * 10.*nS")
+
+    # b2_model.define_init("Ce", "we", "exp(0.25*randn())*6*nS")
+    # b2_model.define_init("Ci", "wi", "exp(0.25*randn())*67*nS")
+
+    b2_model.define_init("Ce", "we", "0*nS")
+    b2_model.define_init("Ci", "wi", "exp(0.25*randn())*67*nS")
 
     # monitors
     b2_model.define_monitor_source("trace", "P")
