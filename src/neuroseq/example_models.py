@@ -664,16 +664,21 @@ def hh_neuron_with_synapses() -> Model:
     inh_stim[:, :] = 0
     # inh_stim[300:900, :] = 1
 
+    sp = 10
+
+    for n in range(0, 5):
+        exc_stim[sp + 10 * n : sp + 10 * (n + 1), n * 8 : n * 8 + 8] = 1
+
     sp = 100
 
-    for n in range(1, 90):
+    for n in range(1, 40):
         exc_stim[sp + 10 * n : sp + 10 * (n + 1), n] = 1
         inh_stim[sp + 10 * n : sp + 10 * (n + 1), (n + 1) : 3200] = 0.1
         inh_stim[sp + 10 * n : sp + 10 * (n + 1), 1:n] = 0.1
 
     sp = 1100
 
-    for n in range(1, 90):
+    for n in range(1, 40):
         exc_stim[sp + 10 * n : sp + 10 * (n + 1), n] = 1
         inh_stim[sp + 10 * n : sp + 10 * (n + 1), (n + 1) :] = 0.1
         inh_stim[sp + 10 * n : sp + 10 * (n + 1), 1:n] = 0.1
