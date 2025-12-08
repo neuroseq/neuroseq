@@ -61,21 +61,17 @@ def test_update_nested_dict() -> None:
 
 
 @pytest.mark.parametrize("n", [3, 7, 20, 100, 2000, 2001])
-def test_cmap_transform_neuron_indices(n: int) -> None:
+def test_neuron_indices_to_colors(n: int) -> None:
+    reference_colors = utils.neuron_indices_to_colors(np.arange(2048))
     ordered_indices = np.arange(n)
-    shuffled_indices = utils.cmap_transform_neuron_indices(n)
-    assert shuffled_indices.shape == (n,)
-    assert not np.allclose(shuffled_indices, ordered_indices)
-    sorted_shuffled_indices = np.sort(shuffled_indices)
-    assert np.allclose(sorted_shuffled_indices, ordered_indices)
-    # shuffle an array of indices, check that mapping is the same as above for each index
-    arr = utils.cmap_transform_neuron_indices(n, [2, 0, 1, 0])
-    assert list(arr) == [
-        shuffled_indices[2],
-        shuffled_indices[0],
-        shuffled_indices[1],
-        shuffled_indices[0],
-    ]
+    colors = utils.neuron_indices_to_colors(ordered_indices)
+    # returns n colors as RGBA floats with values in [0,1]
+    assert colors.shape == (n, 4)
+    assert np.max(colors) <= 1.0
+    assert np.min(colors) >= 0.0
+    # same index always gets the same color regardless of number of indices
+    for i in range(n):
+        np.testing.assert_array_equal(colors[i], reference_colors[i])
 
 
 def test_get_downsample_factor_valid() -> None:

@@ -51,6 +51,7 @@ def test_heatmap_widget_3d_data_with_timeline(
     assert heatmap_widget.data.shape == values.T.shape
     assert heatmap_widget.timestamps is not None
     assert heatmap_widget.timestamps.shape == timepoints_s.shape
+    qtbot.wait(100)  # allow time for initial rendering
     time_slider.toggle_pause()
     start_time_secs = perf_counter()
     qtbot.waitUntil(lambda: heatmap_widget.idx == timepoints_s.size - 1)

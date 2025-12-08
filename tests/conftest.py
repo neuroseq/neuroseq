@@ -433,3 +433,162 @@ def mfx_with_synapse(
     )
 
     return mfx, reference_parameters
+
+
+@pytest.fixture
+def test_model() -> Model:
+    model = Model()
+
+    # define Brian2 model
+    b2_model = model.b2_model
+
+    nneurons = 30
+    nneurons_exc = 24
+
+    b2_model.define_parameter("area", 20000 * b2.umetre**2)
+    b2_model.define_parameter(
+        "Cm", (1 * b2.ufarad * b2.cm**-2) * b2_model.parameters["area"]
+    )
+    b2_model.define_parameter("gl", 10.0 * b2.nsiemens)
+    b2_model.define_parameter("gmax", 60.0 * b2.nsiemens)
+
+    b2_model.define_parameter("El", -60 * b2.mV)
+    b2_model.define_parameter("EK", -90 * b2.mV)
+    b2_model.define_parameter("ENa", 50 * b2.mV)
+    b2_model.define_parameter("g_na", 20.0 * b2.usiemens)
+    b2_model.define_parameter("g_kd", 6.0 * b2.usiemens)
+    b2_model.define_parameter("VT", -63 * b2.mV)
+    # Time constants
+    b2_model.define_parameter("taue", 5 * b2.ms)
+    b2_model.define_parameter("taui", 10 * b2.ms)
+    b2_model.define_parameter("taupost", 20 * b2.ms)
+    b2_model.define_parameter("taupre", 20 * b2.ms)
+    ## Reversal potentials
+    b2_model.define_parameter("Ee", 0 * b2.mV)
+    b2_model.define_parameter("Ei", -80 * b2.mV)
+
+    ### optogenetics parameters
+    b2_model.define_parameter("Eeopto", 0 * b2.mV)
+    b2_model.define_parameter("Eiopto", -80 * b2.mV)
+
+    b2_model.define_parameter("we", 6 * b2.nS)
+    b2_model.define_parameter("wi", 67 * b2.nS)
+
+    b2_model.define_parameter("dApost", -6.3 * b2.nsiemens)
+    b2_model.define_parameter("dApre", 6.0 * b2.nsiemens)
+
+    eqs = """
+dv/dt = (gl*(El-v)+ge*(Ee-v)+geopto*(Eeopto-v)+gi*(Ei-v)+giopto*(Eiopto-v)-g_na*(m*m*m)*h*(v-ENa)-g_kd*(n*n*n*n)*(v-EK))/Cm : volt
+dm/dt = alpha_m*(1-m)-beta_m*m : 1
+dn/dt = alpha_n*(1-n)-beta_n*n : 1
+dh/dt = alpha_h*(1-h)-beta_h*h : 1
+dge/dt = -ge*(1./taue) : siemens
+dgi/dt = -gi*(1./taui) : siemens
+giopto = stimulus_inh(t, i): siemens
+geopto = stimulus(t, i): siemens
+alpha_m = 0.32*(mV**-1)*4*mV/exprel((13*mV-v+VT)/(4*mV))/ms : Hz
+beta_m = 0.28*(mV**-1)*5*mV/exprel((v-VT-40*mV)/(5*mV))/ms : Hz
+alpha_h = 0.128*exp((17*mV-v+VT)/(18*mV))/ms : Hz
+beta_h = 4./(1+exp((40*mV-v+VT)/(5*mV)))/ms : Hz
+alpha_n = 0.032*(mV**-1)*5*mV/exprel((15*mV-v+VT)/(5*mV))/ms : Hz
+beta_n = .5*exp((10*mV-v+VT)/(40*mV))/ms : Hz
+    """
+
+    # neuron group
+    b2_model.define_neuronnumber("P", nneurons)
+    b2_model.define_solver_method("P", "exponential_euler")
+    b2_model.define_equation("P", eqs)
+    b2_model.define_threshold("P", "v>-20*mV")
+    b2_model.define_refractory("P", 3 * b2.ms)
+
+    b2_model.define_neuronsubgroup_target("Pe", "P")
+    b2_model.define_neuronsubgroup_idxs("Pe", (0, nneurons_exc))
+
+    b2_model.define_neuronsubgroup_target("Pi", "P")
+    b2_model.define_neuronsubgroup_idxs("Pi", (nneurons_exc, nneurons))
+
+    ce_eq = """
+we : siemens
+dApre/dt = -Apre / taupre : siemens (event-driven)
+dApost/dt = -Apost / taupost : siemens (event-driven)
+    """
+    b2_model.define_synapse_equation("Ce", ce_eq)
+    b2_model.define_synapse_connection("Ce", connection_condition="i != j")
+    b2_model.define_synapse_origin("Ce", "Pe")
+    b2_model.define_synapse_target("Ce", "Pe")
+
+    b2_model.define_synapse_equation("Cie", "wi = 67*nS : siemens")
+    b2_model.define_synapse_connection("Cie", None)
+    b2_model.define_synapse_origin("Cie", "Pi")
+    b2_model.define_synapse_target("Cie", "Pe")
+
+    b2_model.define_synapse_equation("Cei", "we = 6*nS : siemens")
+    b2_model.define_synapse_connection("Cei", None)
+    b2_model.define_synapse_origin("Cei", "Pe")
+    b2_model.define_synapse_target("Cei", "Pi")
+
+    ce_on_pre = """
+ge += we
+Apre += dApre
+we = clip(we + Apost, -gmax, gmax)
+"""
+    b2_model.define_synapse_pre("Ce", ce_on_pre)
+    b2_model.define_synapse_pre("Cei", "ge+=we")
+    b2_model.define_synapse_pre("Cie", "gi+=wi")
+
+    ce_on_post = """
+Apost += dApost
+we= clip(we + Apre, -gmax, gmax)
+"""
+    b2_model.define_synapse_post("Ce", ce_on_post)
+
+    # initial conditions
+    b2_model.define_init("P", "v", "El + (randn() * 5 - 5)*mV")
+    b2_model.define_init("P", "ge", "(randn() * 1.5 + 4) * 10.*nS")
+    b2_model.define_init("P", "gi", "(randn() * 12 + 20) * 10.*nS")
+
+    # monitors
+    b2_model.define_monitor_source("trace", "P")
+    b2_model.define_monitor_type("trace", "StateMonitor")
+    b2_model.define_monitor_variable("trace", "v")
+
+    b2_model.define_monitor_source("spike", "P")
+    b2_model.define_monitor_type("spike", "SpikeMonitor")
+    b2_model.define_monitor_variable("spike", "v")
+
+    b2_model.define_monitor_source("synapse", "Ce")
+    b2_model.define_monitor_type("synapse", "StateMonitor")
+    b2_model.define_monitor_variable("synapse", "we")
+
+    # define stim arrays
+
+    tfinal = 1000 * b2.ms
+
+    stim = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
+    stim[120, :nneurons_exc:2] = 1
+    stim[121, 1:nneurons_exc:2] = 1
+    stim[320, :nneurons_exc:2] = 1
+    stim[321, 1:nneurons_exc:2] = 1
+    stim[520, :nneurons_exc:2] = 1
+    stim[521, 1:nneurons_exc:2] = 1
+    stim_array = StimArray(
+        name="stimulus",
+        stim_type=StimType.Excitation,
+        values=stim,
+        units="siemens",
+        dt=0.001,
+    )
+    model.add_stim_array(stim_array)
+
+    stim_inh = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
+    stim_inh[800:802, :nneurons_exc] = 1
+    stim_array_inh = StimArray(
+        name="stimulus_inh",
+        stim_type=StimType.Inhibition,
+        values=stim_inh,
+        units="siemens",
+        dt=0.001,
+    )
+    model.add_stim_array(stim_array_inh)
+
+    return model

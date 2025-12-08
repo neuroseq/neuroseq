@@ -40,7 +40,13 @@ def test_custom_analysis_widget_no_data(qtbot: QtBot, new_window: bool) -> None:
 def test_custom_analysis_widget_trace_histogram(qtbot: QtBot, new_window: bool) -> None:
     custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
     qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
-    data = TraceData("trace", np.random.rand(10, 1000), "mV", 0.1)
+    data = TraceData(
+        "trace",
+        np.random.random_sample((10, 1000)),
+        np.arange(0, 10, dtype=np.uint32),
+        "mV",
+        0.1,
+    )
     assert custom_analysis_widget.subplot.get_title() == ""
     # no data, no plot
     custom_analysis_widget.set_data(
@@ -163,7 +169,9 @@ def test_custom_analysis_widget_trace_histogram2d(
     custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
     qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
     assert custom_analysis_widget.subplot.get_title() == ""
-    data = TraceData("trace", np.random.rand(10, 1000), "mV", 0.1)
+    data = TraceData(
+        "trace", np.random.rand(10, 1000), np.arange(0, 10, dtype=np.uint32), "mV", 0.1
+    )
     # no data, no plot
     custom_analysis_widget.set_data(None, CustomAnalysisType.Histogram2d, None, None)
     qtbot.wait(gui_delay_in_ms)

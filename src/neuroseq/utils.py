@@ -49,7 +49,9 @@ def get_downsample_factor(
 def construct_synapse_matrix(
     monitor: b2.StateMonitor, variable: str, max_ram_mb: int
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Constructs NxNxt timeseries of synapse matrices and timestamps from a Brian2 StateMonitor of synapse variables.
+    """Constructs N_s x N_t x t timeseries of synapse matrices and timestamps from a Brian2 StateMonitor of synapse variables.
+
+    Where N_s is the number of source neurons, N_t is the number of target neurons, and t is the number of timestamps.
 
     Automatically downsamples the data if it exceeds the maximum RAM limit.
     """
@@ -81,16 +83,15 @@ def construct_synapse_matrix(
     return matrix, timestamps
 
 
-def cmap_transform_neuron_indices(
-    n_neurons: int, indices: np.ndarray | None = None
-) -> np.ndarray:
-    """Transform the supplied neuron indices to generate cmap transform indices in a pseudo-random order
-
-    For a given value of n_neurons, this will always return the same transform."""
-    m = 415343
-    if indices is None:
-        indices = np.arange(n_neurons, dtype=np.int32)
-    return np.mod(np.asarray(indices) * m, n_neurons)
+def neuron_indices_to_colors(indices: np.ndarray) -> np.ndarray:
+    """Transform the supplied neuron indices to colors in a fixed but psuedo-random order.
+    Such that a given index always maps to the same color, but nearby indices map to different colors.
+    """
+    colormap = Colormap("matlab:hsv")
+    # these values of a and m taken from table 2 of https://www.ams.org/journals/mcom/1999-68-225/S0025-5718-99-00996-5/S0025-5718-99-00996-5.pdf
+    a = 23234
+    m = 32749
+    return colormap(np.mod(np.asarray(indices) * a, m) / m)
 
 
 def init_brian2_logging(log_level: str = "ERROR") -> None:

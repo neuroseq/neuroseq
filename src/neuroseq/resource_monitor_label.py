@@ -32,11 +32,11 @@ class ResourceMonitorLabel(QLabel):
             text = f"CPU: {cpu_percent:.1f}% | RAM: {ram_gb:.2f} GB "
             if self.handle is not None:
                 gpu_percent = pynvml.nvmlDeviceGetUtilizationRates(self.handle).gpu
-                vram_gb = 0
+                text += f"| GPU: {gpu_percent:.1f}% "
                 for p in pynvml.nvmlDeviceGetComputeRunningProcesses(self.handle):
-                    if p.pid == self.pid:
+                    if p.pid == self.pid and p.usedGpuMemory is not None:
                         vram_gb = p.usedGpuMemory / (1024 * 1024 * 1024)
-                text += f"| GPU: {gpu_percent:.1f}% | VRAM: {vram_gb:.2f} GB "
+                        text += f"| VRAM: {vram_gb:.2f} GB "
             self.setText(text)
         except Exception as e:
             self.logger.exception(e)

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 import brian2.numpy_ as np
+from numpy.typing import NDArray
 
 
 @dataclass
@@ -10,12 +11,14 @@ class TraceData:
     Attributes:
         name (str): The name of the data set.
         traces (np.ndarray): A 2D array of traces where the first index is the neuron index and the second index is the time index.
+        indices (np.ndarray): A 1D array of neuron indices corresponding to the first dimension of traces.
         units (str): The unit of the traces (e.g., 'mV', 'pA').
         dt (float): The time step in seconds between consecutive timestamps.
     """
 
     name: str
-    traces: np.ndarray
+    traces: NDArray[np.float32]
+    indices: NDArray[np.uint32]
     units: str
     dt: float
 
