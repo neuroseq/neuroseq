@@ -41,13 +41,8 @@ def get_downsample_factor(
     if n_floats < 0 or max_ram_mb <= 0:
         return 1
     mb_in_bits = 1024 * 1024 * 8
-    print(n_floats)
-    print(bits_per_float)
-    print(mb_in_bits)
     mbits_per_float = float(bits_per_float) / mb_in_bits
     ram_mb = n_floats * mbits_per_float
-    print("get down")
-    print(ram_mb)
     return 1 + int(ram_mb // max_ram_mb)
 
 
@@ -62,18 +57,15 @@ def construct_synapse_matrix(
     # neuron_group = synapse_group.source
     values = monitor.variables[variable].get_value().T
     N = max(max(synapse_group.i), max(synapse_group.j)) + 1
-    print(N)
     n_timestamps = values.shape[1]
     if n_timestamps == 0:
         return np.array([]), np.array([])
     n_floats = N * N * n_timestamps
-    print(n_floats)
     downsample_factor = get_downsample_factor(n_floats, max_ram_mb, bits_per_float=32)
     if downsample_factor > 1:
         logging.info(
             f"Downsampling {N}x{N}x{n_timestamps} matrix by factor {downsample_factor} due to max RAM limit of {max_ram_mb} MB"
         )
-    print(downsample_factor)
     matrix = np.zeros(
         (N, N, values[0, ::downsample_factor].shape[0]),
         dtype=np.float32,
