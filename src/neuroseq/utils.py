@@ -93,31 +93,6 @@ def neuron_indices_to_colors(indices: np.ndarray) -> np.ndarray:
     return colormap(np.mod(np.asarray(indices) * a, m) / m)
 
 
-'''
-I updated to
-
-def neuron_indices_to_colors(indices: np.ndarray | None) -> np.ndarray:
-    """Transform neuron indices to RGBA colors in a fixed pseudo-random order.
-
-    A given index always maps to the same color, but nearby indices map to different colors.
-    """
-    if indices is None or len(indices) == 0:
-        return np.zeros((0, 4), dtype=np.float32)
-
-    colormap = Colormap("matlab:hsv")
-    # values of a and m from table 2 of
-    # https://www.ams.org/journals/mcom/1999-68-225/S0025-5718-99-00996-5/S0025-5718-99-00996-5.pdf
-    a = 23234
-    m = 32749
-    normalized = np.mod(np.asarray(indices) * a, m) / m
-    return np.asarray(colormap(normalized), dtype=np.float32)
-
-may be better to undo that, given the way spike/trace data is handled
-in the PR
-
-'''
-
-
 def init_brian2_logging(log_level: str = "ERROR") -> None:
     b2.prefs["logging"]["console_log_level"] = log_level
     b2.prefs["logging"]["display_brian_error_message"] = False
@@ -205,19 +180,29 @@ def update_nested_dict(original: dict[Any, Any], updates: Any) -> None:
             original[key] = value
 
 
+def safe_concat(arrays: list[np.ndarray], axis=0) -> np.ndarray:
+    """
+    Concatenate a list of NumPy arrays along the given axis, ignoring any arrays that are empty (size == 0).
+    """
+    return np.concatenate([a for a in arrays if a.size > 0], axis=axis)
+
+
 def append_data(
     existing_data: TraceData | SpikeData | SynapseData,
     new_data: TraceData | SpikeData | SynapseData,
+    data_duration_seconds: float,
     time_offset_seconds: float,
 ):
-    """Append new trace or spike data in-place to the existing data
+    """Append new data in-place to the existing data, overwriting the existing data if the time ranges overlap.
 
     Parameters
     ----------
     existing_data : TraceData | SpikeData | SynapseData
-        Existing trace or spike data to append to.
+        Existing data to append to.
     new_data : TraceData | SpikeData | SynapseData
         New trace or spike data to append.
+    data_duration_seconds: float
+        Duration in seconds of the new data being appended.
     time_offset_seconds: float
         Time offset in seconds to apply to the timestamps in the new data when appending
 
@@ -229,61 +214,78 @@ def append_data(
         If existing_data and new_data are not of the same type.
     """
     if type(existing_data) is not type(new_data):
-        raise TypeError("existing_data and new_data must be of the same type.")
+        raise TypeError("Existing data and new data must be of the same type.")
     if isinstance(existing_data, TraceData) and isinstance(new_data, TraceData):
         if existing_data.dt != new_data.dt:
             raise ValueError(
                 f"Cannot append TraceData with different dt: {existing_data.dt} != {new_data.dt}"
             )
-
-        # Check if we're merging neurons (different indices) vs time-extending same neurons
-        existing_indices = set(existing_data.indices)
-        new_indices = set(new_data.indices)
-
-        logging.getLogger(__name__).info(
-            f"Appending TraceData: existing_indices={existing_indices}, new_indices={new_indices}"
+        if existing_data.traces.shape[0] != new_data.traces.shape[0]:
+            raise ValueError(
+                f"Cannot append TraceData with different number of neurons: {existing_data.traces.shape[0]} != {new_data.traces.shape[0]}"
+            )
+        idx0 = int(time_offset_seconds / existing_data.dt)
+        idx1 = int((time_offset_seconds + data_duration_seconds) / existing_data.dt)
+        existing_data.traces = safe_concat(
+            [
+                existing_data.traces[:, 0:idx0],
+                new_data.traces,
+                existing_data.traces[:, idx1:],
+            ],
+            axis=1,
         )
-
-        if existing_indices.intersection(new_indices):
-            # Some neurons overlap - this is time extension for existing neurons
-            if existing_data.traces.shape[0] != new_data.traces.shape[0]:
-                raise ValueError(
-                    f"Cannot append TraceData with different number of neurons: {existing_data.traces.shape[0]} != {new_data.traces.shape[0]}"
-                )
-            if existing_data.traces.shape[1] * existing_data.dt != time_offset_seconds:
-                raise ValueError(
-                    f"Time offset {time_offset_seconds} does not match the length of the existing trace data {existing_data.traces.shape[1] * existing_data.dt}."
-                )
-            existing_data.traces = np.concatenate(
-                (existing_data.traces, new_data.traces), axis=1
-            )
-        else:
-            # No overlap - this is adding new neurons to the same dataset
-            # Merge the traces by expanding the neuron dimension
-            existing_n_neurons, existing_n_timepoints = existing_data.traces.shape
-            new_n_neurons, new_n_timepoints = new_data.traces.shape
-
-            logging.getLogger(__name__).debug(
-                f"Merging neurons: existing shape={existing_data.traces.shape}, new shape={new_data.traces.shape}"
-            )
-
-            # Combine traces and indices
-            existing_data.traces = np.concatenate(
-                (existing_data.traces, new_data.traces), axis=0
-            )
-            existing_data.indices = np.concatenate(
-                (existing_data.indices, new_data.indices), axis=0
-            )
-
-            logging.getLogger(__name__).debug(
-                f"After merging: shape={existing_data.traces.shape}, indices={existing_data.indices}"
-            )
     elif isinstance(existing_data, SpikeData) and isinstance(new_data, SpikeData):
-        existing_data.spike_indices = np.concatenate(
-            (existing_data.spike_indices, new_data.spike_indices), axis=0
+        # find the index of the last spike time in the existing data before the time offset
+        idx0 = np.searchsorted(
+            existing_data.spike_times, time_offset_seconds, side="left"
         )
-        existing_data.spike_times = np.concatenate(
-            (existing_data.spike_times, new_data.spike_times + time_offset_seconds),
+        # find the index of the first spike time in the existing data after the time offset + duration
+        idx1 = np.searchsorted(
+            existing_data.spike_times,
+            time_offset_seconds + data_duration_seconds,
+            side="left",
+        )
+        existing_data.spike_indices = safe_concat(
+            [
+                existing_data.spike_indices[0:idx0],
+                new_data.spike_indices,
+                existing_data.spike_indices[idx1:],
+            ],
+            axis=0,
+        )
+        existing_data.spike_times = safe_concat(
+            [
+                existing_data.spike_times[0:idx0],
+                new_data.spike_times + time_offset_seconds,
+                existing_data.spike_times[idx1:],
+            ],
+            axis=0,
+        )
+    elif isinstance(existing_data, SynapseData) and isinstance(new_data, SynapseData):
+        # find the index of the last timestamp in the existing data before the time offset
+        idx0 = np.searchsorted(
+            existing_data.timestamps, time_offset_seconds, side="left"
+        )
+        # find the index of the first timestamp in the existing data after the time offset + duration
+        idx1 = np.searchsorted(
+            existing_data.timestamps,
+            time_offset_seconds + data_duration_seconds,
+            side="left",
+        )
+        existing_data.values = safe_concat(
+            [
+                existing_data.values[0:idx0],
+                new_data.values,
+                existing_data.values[idx1:],
+            ],
+            axis=0,
+        )
+        existing_data.timestamps = safe_concat(
+            [
+                existing_data.timestamps[0:idx0],
+                new_data.timestamps + time_offset_seconds,
+                existing_data.timestamps[idx1:],
+            ],
             axis=0,
         )
 

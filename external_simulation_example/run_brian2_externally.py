@@ -3,12 +3,10 @@
 import numpy as np
 from brian2 import *
 
-from neuroseq.data import TraceData, SpikeData, SynapseData
+from neuroseq.data import TraceData, SpikeData, SynapseData, Experiment
 
 
-def simulate(
-    stims_dict: dict[str, np.ndarray], simulation_time: float
-) -> list[TraceData | SpikeData | SynapseData]:
+def simulate(stims_dict: dict[str, np.ndarray], simulation_time: float) -> Experiment:
     # This function is provided by neuroseq with a dict of stimuli, and the desired simulation time.
     # stims_dict is a dict of key:data pairs, where data contains
     #   - "array": 2d numpy array of timestamps x neurons
@@ -213,4 +211,4 @@ def simulate(
         )
     )
 
-    return results
+    return Experiment("external brian2 example", simulation_time / 1000.0, [], results)

@@ -8,6 +8,7 @@ import numpy as np
 
 from neuroseq.b2_units import quantity_to_value_unit_str
 from neuroseq.b2_units import value_unit_str_to_quantity
+from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
@@ -39,6 +40,14 @@ def _json_encoder_factory(zf: zipfile.ZipFile):
     class NeuroseqJSONEncoder(json.JSONEncoder):
         def default(self, obj):
             match obj:
+                case Experiment():
+                    return {
+                        "!Experiment": True,
+                        "name": obj.name,
+                        "duration": obj.duration,
+                        "timepoints": obj.timepoints,
+                        "data": obj.data,
+                    }
                 case SynapseData():
                     return {
                         "!SynapseData": True,
@@ -215,6 +224,14 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                         }
                     ),
                 )
+            case {
+                "!Experiment": True,
+                "name": name,
+                "duration": duration,
+                "timepoints": timepoints,
+                "data": data,
+            }:
+                return Experiment(name, duration, timepoints, data)
             case _:
                 return dct
 

@@ -54,3 +54,20 @@ class SynapseData:
 
 
 Data = TraceData | SpikeData | SynapseData
+
+
+@dataclass
+class Experiment:
+    """A data class representing a neuroscience experiment.
+
+    Attributes:
+        name (str): The name of the experiment.
+        duration (float): The total duration of the experiment in seconds.
+        timepoints (list[float]): A list of timepoints at which data was appended
+        data (list[Data]): A list of data objects (TraceData, SpikeData, SynapseData) associated with the experiment.
+    """
+
+    name: str
+    duration: float
+    timepoints: list[float]
+    data: list[Data]

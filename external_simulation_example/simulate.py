@@ -1,12 +1,10 @@
 # Example of an external simulation function that can be imported into neuroseq
 
 import numpy as np
-from neuroseq.data import TraceData, SpikeData, SynapseData
+from neuroseq.data import TraceData, SpikeData, SynapseData, Experiment
 
 
-def simulate(
-    stims_dict: dict[str, np.ndarray], simulation_time: float
-) -> list[TraceData | SpikeData | SynapseData]:
+def simulate(stims_dict: dict[str, np.ndarray], simulation_time: float) -> Experiment:
     # This function is provided by neuroseq with a dict of stimuli, and the desired simulation time.
     # stims_dict is a dict of key:data pairs, where data contains
     #   - "array": 2d numpy array of timestamps x neurons
@@ -14,7 +12,7 @@ def simulate(
 
     # ...do some simulation using stims_dict and simulation_time...
 
-    # It should return a list of simulation data objects
+    # It should return an experiment object, which contains a list of simulation data objects
     data: list[TraceData | SpikeData | SynapseData] = []
     # Three types of data can be returned, which differ depending on the widget used to display the data in the GUI
     # Below are some example random data of each type:
@@ -68,4 +66,4 @@ def simulate(
         )
     )
 
-    return data
+    return Experiment("external simulation example", simulation_time, [], data)
