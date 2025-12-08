@@ -10,7 +10,7 @@ class Timeline(Graphic):
         self._t = 0.0
         group = pygfx.Group()
         self.line = pygfx.Line(
-            geometry=pygfx.Geometry(positions=[[0, 0, 0], [-10, 1e6, 0]]),
+            geometry=pygfx.Geometry(positions=[[0, 0, 0], [0, 1e6, 0]]),
             material=pygfx.LineMaterial(thickness=2.0, color=pygfx.Color(1, 0, 0, 0.7)),
         )
         self.line.world.position = (0, self._t, 200)
@@ -24,4 +24,4 @@ class Timeline(Graphic):
     @t.setter
     def t(self, t: float):
         self._t = t
-        self.line.world.position = (self._t, 0, 200)
+        self.line.world.position = (self._t, -1, 200)
