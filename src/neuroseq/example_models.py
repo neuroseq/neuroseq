@@ -520,8 +520,8 @@ def hh_neuron_with_synapses() -> Model:
         "g_inh", (3e-3 * b2.siemens * b2.cm**-2) * b2_model.parameters["area"]
     )
 
-    b2_model.define_parameter("we", 6 * b2.nS)
-    b2_model.define_parameter("wi", 67 * b2.nS)
+    # b2_model.define_parameter("we", 6 * b2.nS)
+    # b2_model.define_parameter("wi", 67 * b2.nS)
 
     opto_units = 1 * b2.mwatt / b2.um2
 
@@ -576,19 +576,19 @@ def hh_neuron_with_synapses() -> Model:
     b2_model.define_synapse_origin("Ci", "Pi")
     b2_model.define_synapse_target("Ci", "P")
 
-    b2_model.define_synapse_pre("Ce", "ge += we")
-    b2_model.define_synapse_pre("Ci", "gi += wi")
+    b2_model.define_synapse_pre("Ce", "ge += clip(we, 0*nS, 18*nS)")
+    b2_model.define_synapse_pre("Ci", "gi += clip(wi, 0*nS, 210*nS)")
 
     # initial conditions
     b2_model.define_init("P", "v", "El + (randn() * 5 - 5)*mV")
     b2_model.define_init("P", "ge", "(randn() * 1.5 + 4) * 10.*nS")
     b2_model.define_init("P", "gi", "(randn() * 12 + 20) * 10.*nS")
 
-    # b2_model.define_init("Ce", "we", "exp(0.25*randn())*6*nS")
-    # b2_model.define_init("Ci", "wi", "exp(0.25*randn())*67*nS")
+    b2_model.define_init("Ce", "we", "exp(0.25*randn())*6*nS")
+    b2_model.define_init("Ci", "wi", "exp(0.25*randn())*67*nS")
 
-    b2_model.define_init("Ce", "we", "6*nS")
-    b2_model.define_init("Ci", "wi", "67*nS")
+    # b2_model.define_init("Ce", "we", "6*nS")
+    # b2_model.define_init("Ci", "wi", "67*nS")
 
     # monitors
     b2_model.define_monitor_source("trace", "P")
@@ -950,8 +950,8 @@ def hh_neuron_with_plasticity() -> Model:
         "g_inh", (3e-3 * b2.siemens * b2.cm**-2) * b2_model.parameters["area"]
     )
 
-    b2_model.define_parameter("we", 6 * b2.nS)
-    b2_model.define_parameter("wi", 67 * b2.nS)
+    # b2_model.define_parameter("we", 6 * b2.nS)
+    # b2_model.define_parameter("wi", 67 * b2.nS)
 
     opto_units = 1 * b2.mwatt / b2.um2
 
@@ -987,12 +987,12 @@ def hh_neuron_with_plasticity() -> Model:
     b2_model.define_neuronsubgroup_target("Pi", "P")
     b2_model.define_neuronsubgroup_idxs("Pi", (nneurons_exc, nneurons))
 
-    b2_model.define_synapse_connection("Ce", None)
+    b2_model.define_synapse_connection("Ce", """we : siemens""")
     b2_model.define_synapse_connection_probability("Ce", 0.02)
     b2_model.define_synapse_origin("Ce", "Pe")
     b2_model.define_synapse_target("Ce", "P")
 
-    b2_model.define_synapse_connection("Ci", None)
+    b2_model.define_synapse_connection("Ci", """wi : siemens""")
     b2_model.define_synapse_connection_probability("Ci", 0.02)
     b2_model.define_synapse_origin("Ci", "Pi")
     b2_model.define_synapse_target("Ci", "P")
