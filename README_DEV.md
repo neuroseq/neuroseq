@@ -18,10 +18,20 @@ cd neuroseq
 prek install
 ```
 
+The documentation is in the docs folder as markdown and rendered using [mkdocs-material](https://squidfunk.github.io/mkdocs-material/getting-started/).
+To serve the documentation locally run:
+
+```bash
+uv run mkdocs serve
+```
+
+Then go to http://127.0.0.1:8000/neuroseq to see the generated documentation.
+
 ## Developer Installation without uv
 
 Alternatively, if you aren't using uv, then create a new conda environment or virtual environment and activate it.
-Then do an editable install of the package (which means that any changes to the source code will be reflected in the installed package without needing to reinstall), and install the pre-commit hooks:
+Then do an editable install of the package (which means that any changes to the source code will be reflected in the installed package without needing to reinstall),
+and install the pre-commit hooks:
 
 ```bash
 pip install -e . --group dev

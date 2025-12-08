@@ -41,6 +41,7 @@ dev = [
     "pytest-mock",
     "pytest-memray ; platform_system != 'Windows'",
     "diff-cover",
+    "mkdocs-material"
 ]
 
 [tool.hatch.version]

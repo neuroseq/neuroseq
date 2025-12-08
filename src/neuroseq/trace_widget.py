@@ -105,18 +105,20 @@ class TraceWidget(TimeseriesWidget):
     def get_normalized_trace_data(self) -> np.ndarray:
         if self.data is None or not isinstance(self.data, TraceData):
             return np.array([], dtype=np.float32)
+        # replace any NaN values with zero for normalisation
+        traces = np.nan_to_num(self.data.traces, copy=True, nan=0.0)
         if self.offset_by_median:
-            median_values = np.median(self.data.traces, axis=1)
-            max_values = np.max(self.data.traces, axis=1)
+            median_values = np.median(traces, axis=1)
+            max_values = np.max(traces, axis=1)
             max_trace = np.max(np.abs(max_values - median_values))
         else:
-            max_trace = np.max(np.abs(self.data.traces))
+            max_trace = np.max(np.abs(traces))
         norm = 0.5 if max_trace == 0 else 1.0 / (2.0 * max_trace)
         norm = np.float32((self.trace_norm_percent / 100.0) * norm)
         if self.offset_by_median:
             offset = (-median_values * norm).astype(np.float32)
         else:
-            offset = np.zeros(self.n_neurons, dtype=np.float32)
+            offset = np.zeros(traces.shape[0], dtype=np.float32)
         data = norm * self.data.traces.astype(np.float32) + offset[:, np.newaxis]
         if self.clip:
             np.clip(data, -0.5, 0.5, out=data)
