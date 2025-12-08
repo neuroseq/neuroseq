@@ -6,7 +6,7 @@ from qtpy import QtWidgets
 
 from neuroseq.experiment import SpikeData
 from neuroseq.timeseries_widget import TimeseriesWidget
-from neuroseq.utils import jet_colors_for_neurons
+from neuroseq.utils import neuron_indices_to_colors
 
 
 class SpikeWidget(TimeseriesWidget):
@@ -50,10 +50,8 @@ class SpikeWidget(TimeseriesWidget):
             if data.spike_indices.size > 0
             else data.spike_indices
         )
-        colors_rgb = jet_colors_for_neurons(ids)
-        colors_rgba = np.column_stack(
-            [colors_rgb, np.full(colors_rgb.shape[0], 255, dtype=np.uint8)]
-        )
+        colors_rgba_float = neuron_indices_to_colors(ids)
+        colors_rgba = (colors_rgba_float * 255).astype(np.uint8)
         colors_normalized = colors_rgba.astype(np.float32) / 255.0
 
         self.graphic = self.subplot.add_scatter(

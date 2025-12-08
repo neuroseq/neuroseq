@@ -66,13 +66,18 @@ def b2json_encoder_factory(zf: zipfile.ZipFile):
                         ),
                     }
                 case TraceData():
-                    return {
+                    result = {
                         "!TraceData": True,
                         "name": obj.name,
                         "traces": _save_array(zf, f"_{obj.name}_traces", obj.traces),
                         "units": obj.units,
                         "dt": obj.dt,
                     }
+                    if obj.indices is not None:
+                        result["indices"] = _save_array(
+                            zf, f"_{obj.name}_indices", obj.indices
+                        )
+                    return result
                 case SpikeData():
                     return {
                         "!SpikeData": True,
@@ -154,6 +159,7 @@ def b2_object_hook_factory(zf: zipfile.ZipFile | None):
                 "traces": traces,
                 "units": units,
                 "dt": dt,
+                **rest,
             }:
                 if _zf is None:
                     raise RuntimeError(
@@ -161,7 +167,13 @@ def b2_object_hook_factory(zf: zipfile.ZipFile | None):
                     )
                 with _zf.open(traces) as fp:
                     loaded_traces = numpy_.load(fp)
-                return TraceData(name, loaded_traces, units, dt)
+
+                indices = None
+                if "indices" in rest:
+                    with _zf.open(rest["indices"]) as fp:
+                        indices = numpy_.load(fp)
+
+                return TraceData(name, loaded_traces, units, dt, indices)
             case {
                 "!SynapseData": True,
                 "name": name,

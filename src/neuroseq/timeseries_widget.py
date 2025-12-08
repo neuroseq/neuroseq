@@ -5,6 +5,7 @@ import math
 
 import brian2.numpy_ as np
 import fastplotlib as fpl
+import pygfx
 import pyqtgraph as pg
 import qtawesome as qta
 from fastplotlib.layouts import Subplot
@@ -51,10 +52,14 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         super().__init__(parent)
         self.heatmap_widget: HeatmapWidget | None = None
         self.controller = controller
+        layout = QtWidgets.QVBoxLayout(self)
+        self.setLayout(layout)
+        self.setMinimumSize(QtCore.QSize(100, 100))
+        self.resize(800, 600)
+
         self.figure: fpl.Figure = fpl.Figure(
             controllers=controller, canvas_kwargs={"parent": self}
         )
-        layout = QtWidgets.QVBoxLayout(self)
         self.widget = self.figure.show()
         layout.addWidget(self.widget)
         self.graphic: fpl.ImageGraphic | fpl.LineStack | fpl.ScatterGraphic | None = (
@@ -67,11 +72,8 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.show_text = True
         self.timeline: fpl.LinearSelector | None = None
         self.grid_lines: GridLines | None = None
-        self.setLayout(layout)
         self.subplot: Subplot = self.figure[0, 0]
         self._set_light_mode()
-        self.setMinimumSize(QtCore.QSize(100, 100))
-        self.resize(800, 600)
 
         self.context_menu = QtWidgets.QMenu("Custom analysis", self)
         for custom_analysis_type in CustomAnalysisType:
@@ -199,7 +201,7 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.data = None
         self.n_neurons = 0
         self.n_timestamps = 0
-        self.dt_ms = 0.0
+        self.dt_ms = 1.0
         self.unselect_neurons()
 
     def pointer_down(self, ev: pygfx.PointerEvent) -> None:
@@ -214,7 +216,10 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
             self.roi.visible = True
             self.selection_in_progress = True
         elif self.mode == InteractMode.DRAW:
-            self.mouse_drag_time_index = math.floor(self.mouse_pos[0] / self.dt_ms)
+            if self.dt_ms > 0:
+                self.mouse_drag_time_index = math.floor(self.mouse_pos[0] / self.dt_ms)
+            else:
+                self.mouse_drag_time_index = 0
             self.mouse_drag_neuron_index = math.floor(self.mouse_pos[1] + 0.5)
             self.mouse_dragged.emit(
                 self.mouse_drag_neuron_index,
@@ -237,11 +242,14 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.text.visible = self.show_text
         hover_value_text = ""
         if self.data_values is not None:
-            time_index = np.clip(
-                math.floor(self.mouse_pos[0] / self.dt_ms),
-                0,
-                self.data_values.shape[0] - 1,
-            )
+            if self.dt_ms > 0:
+                time_index = np.clip(
+                    math.floor(self.mouse_pos[0] / self.dt_ms),
+                    0,
+                    self.data_values.shape[0] - 1,
+                )
+            else:
+                time_index = 0
             neuron_index = np.clip(
                 math.floor(self.mouse_pos[1] + 0.5), 0, self.data_values.shape[1] - 1
             )
@@ -262,14 +270,23 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
             x1 = max(self.mouse_pos[0], self.mouse_press_pos[0])
             y0 = min(self.mouse_pos[1] + 0.5, self.mouse_press_pos[1] + 0.5)
             y1 = max(self.mouse_pos[1] + 0.5, self.mouse_press_pos[1] + 0.5)
-            time_slice = slice(
-                max(0, math.floor(x0 / self.dt_ms)), math.ceil(x1 / self.dt_ms)
-            )
+            if self.dt_ms > 0:
+                start_idx = max(0, math.floor(x0 / self.dt_ms))
+                end_idx = math.ceil(x1 / self.dt_ms)
+                if math.isfinite(start_idx) and math.isfinite(end_idx):
+                    time_slice = slice(int(start_idx), int(end_idx))
+                else:
+                    time_slice = slice(0, self.n_timestamps)
+            else:
+                time_slice = slice(0, self.n_timestamps)
             neuron_slice = slice(math.floor(y0), math.ceil(y1))
             self.select_neurons(neuron_slice, time_slice)
             return
         elif self.mode == InteractMode.DRAW:
-            drag_time_index = math.floor(self.mouse_pos[0] / self.dt_ms)
+            if self.dt_ms > 0:
+                drag_time_index = math.floor(self.mouse_pos[0] / self.dt_ms)
+            else:
+                drag_time_index = 0
             drag_neuron_index = math.floor(self.mouse_pos[1] + 0.5)
             if (
                 drag_time_index != self.mouse_drag_time_index

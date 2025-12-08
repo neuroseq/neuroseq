@@ -12,7 +12,7 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.utils import QtABCMeta
-from neuroseq.utils import jet_colors_for_neurons
+from neuroseq.utils import neuron_indices_to_colors
 
 feature_flag_text = True  # todo: remove.
 
@@ -21,7 +21,10 @@ feature_flag_text = True  # todo: remove.
 class OverlayView(QtWidgets.QWidget, metaclass=QtABCMeta):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
-        self.figure: fpl.Figure = fpl.Figure(canvas_kwargs={"parent": self})
+        # Suppress subplot title text by providing an empty name
+        self.figure: fpl.Figure = fpl.Figure(
+            canvas_kwargs={"parent": self}, names=[None]
+        )
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -45,6 +48,9 @@ class OverlayView(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.text = None
         self.setLayout(layout)
         self.subplot = self.figure[0, 0]
+        self.subplot.frame.plane.visible = False
+        self.subplot.frame.resize_handle.visible = False
+        self.subplot.title.text = ""
         self.setMinimumSize(QtCore.QSize(200, 200))
         self.resize(800, 800)
         self.widget.setMinimumHeight(1000)
@@ -94,6 +100,8 @@ class OverlayView(QtWidgets.QWidget, metaclass=QtABCMeta):
             )
 
             unique_ids = np.unique(segmentation)
+            print("Unique IDs:")
+            print(unique_ids)
             if feature_flag_text:
                 for cell_id in unique_ids:
                     if cell_id == 0:
@@ -266,10 +274,9 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         if not self.show_stimulus_ids or self.stimulus_to_cellpose_mapping is None:
             # Show original cellpose IDs (convert 0-based back to 1-based)
             display_seg = self.segmentation.copy()
-            display_seg[display_seg > 0] = display_seg[display_seg > 0] + 1
             return display_seg
         else:
-            # Show stimulus IDs based on mapping
+            # Show stimulus IDs based on mapping (with stims)
             display_seg = np.zeros_like(self.segmentation)
             # Create reverse mapping from cellpose ID to stimulus ID
             cellpose_to_stimulus = {
@@ -277,8 +284,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             }
 
             for cellpose_id, stimulus_id in cellpose_to_stimulus.items():
-                # cellpose_id is 1-based from mapping, but segmentation is 0-based
-                mask = self.segmentation == (cellpose_id - 1)
+                mask = self.segmentation == cellpose_id
                 display_seg[mask] = stimulus_id
 
             return display_seg
@@ -363,8 +369,9 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         if neuron_ids.size == 0:
             return []
         zero_based = neuron_ids - neuron_ids.min()
-        colors = jet_colors_for_neurons(zero_based)
+        colors = neuron_indices_to_colors(zero_based)
         legend = []
         for cell_id, color in zip(neuron_ids, colors, strict=True):
-            legend.append((int(cell_id), (int(color[0]), int(color[1]), int(color[2]))))
+            rgb_255 = (int(color[0] * 255), int(color[1] * 255), int(color[2] * 255))
+            legend.append((int(cell_id), rgb_255))
         return legend

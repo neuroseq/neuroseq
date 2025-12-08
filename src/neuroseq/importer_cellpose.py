@@ -11,7 +11,7 @@ from PIL import ImageSequence
 
 from neuroseq.experiment import SpikeData
 from neuroseq.experiment import TraceData
-from neuroseq.utils import jet_colors_for_neurons
+from neuroseq.utils import neuron_indices_to_colors
 
 
 @dataclass
@@ -173,62 +173,15 @@ class CellPoseImporter:
     def load_segmentation_file(self, filename: str | Path) -> None:
         """Load segmentation file saved as CSV or NPY."""
         path = Path(filename)
-        suite2p_loaded = False
         try:
-            if path.suffix.lower() == ".npy":
-                loaded = np.load(path, allow_pickle=True)
+            segmentation = self._read_segmentation_file(path)
+            self.segmentation_data = self._validate_segmentation(segmentation)
 
-                # Handle cellpose output format (dict with 'masks' key)
-                if isinstance(loaded, np.ndarray) and loaded.dtype == object:
-                    if loaded.ndim == 0:
-                        dict_data = loaded.item()
-                        if isinstance(dict_data, dict) and "masks" in dict_data:
-                            self.segmentation_data = np.asarray(
-                                dict_data["masks"], dtype=np.int32
-                            )
-                            self.logger.info(
-                                "Loaded cellpose segmentation with masks from dict format: %s",
-                                self.segmentation_data.shape,
-                            )
-                        else:
-                            raise ValueError("Dict format but no 'masks' key found")
-                    else:
-                        # Array of dicts (suite2p stat.npy format)
-                        self.segmentation_data = self._load_suite2p_segmentation(
-                            loaded, path
-                        )
-                        # Mark suite2p loaded but still needs 1-to-0 conversion
-                        suite2p_loaded = False  # Let normal conversion happen
-                else:
-                    # Standard numpy array format
-                    self.segmentation_data = np.asarray(loaded, dtype=np.int32)
-            else:
-                loaded = np.loadtxt(path, delimiter=",", dtype=np.int32)
-                self.segmentation_data = np.asarray(loaded, dtype=np.int32)
-
-            if self.segmentation_data.ndim != 2:
-                raise ValueError(
-                    f"Expected 2D array, got {self.segmentation_data.ndim}D array"
-                )
-
-            if np.any(self.segmentation_data < 0):
-                raise ValueError("Segmentation data contains negative values")
-
-            # Store original cellpose IDs before conversion
             unique_ids = np.unique(self.segmentation_data)
             self._original_cellpose_ids = unique_ids[unique_ids > 0]
 
-            # Convert cell indices to 0-based: cell 1 becomes 0, cell 2 becomes 1, etc.
-            # Background (0) remains 0
-            # Skip conversion for suite2p data as it's already correct
-            if not suite2p_loaded:
-                mask_nonzero = self.segmentation_data > 0
-                self.segmentation_data[mask_nonzero] = (
-                    self.segmentation_data[mask_nonzero] - 1
-                )
-
             self.logger.info(
-                "Loaded segmentation from %s: %s (converted to 0-based indexing)",
+                "Loaded segmentation from %s: %s (background kept at 0, cells preserved)",
                 path.suffix.lower(),
                 self.segmentation_data.shape,
             )
@@ -264,7 +217,7 @@ class CellPoseImporter:
             raise ValueError("Both image and segmentation data must be loaded first")
 
         unique_ids = np.unique(self.segmentation_data)
-        neuron_ids = unique_ids[unique_ids >= 0]  # Now includes 0-based indices
+        neuron_ids = unique_ids[unique_ids > 0]  # Exclude background (ID=0)
 
         if neuron_ids.size > 0:
             # neuron_ids are already 0-based after loading
@@ -354,7 +307,8 @@ class CellPoseImporter:
             return np.zeros((0, 3), dtype=np.uint8)
 
         # neuron_indices are already 0-based, so use them directly
-        return jet_colors_for_neurons(neuron_indices)
+        colors_rgba_float = neuron_indices_to_colors(neuron_indices)
+        return (colors_rgba_float[:, :3] * 255).astype(np.uint8)
 
     @staticmethod
     def _validate_trace_data(trace_data: TraceData) -> None:
@@ -419,7 +373,7 @@ class CellPoseImporter:
 
         # Create segmentation mask
         seg_mask = np.zeros((image_height, image_width), dtype=np.int32)
-        cell_id = 1  # Start with 1-based indexing, will convert to 0-based later
+        cell_id = 1  # Start with 1-based IDs; background stays 0
 
         for i, roi in enumerate(stat_data):
             # Only include cells that are marked as real (iscell == 1)
@@ -442,3 +396,39 @@ class CellPoseImporter:
         )
 
         return seg_mask
+
+    def _read_segmentation_file(self, path: Path) -> np.ndarray:
+        """Load segmentation data from CSV or NPY (cellpose or suite2p)."""
+        if path.suffix.lower() != ".npy":
+            return np.loadtxt(path, delimiter=",", dtype=np.int32)
+
+        loaded = np.load(path, allow_pickle=True)
+
+        # cellpose dict format
+        if isinstance(loaded, np.ndarray) and loaded.dtype == object:
+            if loaded.ndim == 0:
+                dict_data = loaded.item()
+                if isinstance(dict_data, dict) and "masks" in dict_data:
+                    return np.asarray(dict_data["masks"], dtype=np.int32)
+                raise ValueError("Dict format but no 'masks' key found")
+
+            # suite2p stat.npy format
+            return self._load_suite2p_segmentation(loaded, path)
+
+        # plain numeric array
+        return np.asarray(loaded, dtype=np.int32)
+
+    @staticmethod
+    def _validate_segmentation(segmentation: np.ndarray) -> np.ndarray:
+        seg = np.asarray(segmentation, dtype=np.int32)
+
+        if seg.ndim != 2:
+            raise ValueError(f"Expected 2D array, got {seg.ndim}D array")
+
+        if np.any(seg < 0):
+            raise ValueError("Segmentation data contains negative values")
+
+        if not np.isfinite(seg).all():
+            raise ValueError("Segmentation data contains non-finite values")
+
+        return seg

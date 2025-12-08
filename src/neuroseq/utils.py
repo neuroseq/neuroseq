@@ -13,7 +13,7 @@ from typing import Any
 import brian2 as b2
 import brian2.numpy_ as np
 import brian2.units.allunits as b2_units
-import pygfx as gfx
+from cmap import Colormap
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
@@ -103,50 +103,21 @@ def cmap_transform_neuron_indices(
     return np.mod(np.asarray(indices) * m, n_neurons)
 
 
-def jet_cmap_transform_for_neurons(neuron_indices: np.ndarray) -> np.ndarray:
-    """Return a normalized jet colormap transform for the provided neuron indices.
+def neuron_indices_to_colors(indices: np.ndarray | None) -> np.ndarray:
+    """Transform neuron indices to RGBA colors in a fixed pseudo-random order.
 
-    Uses hash-based mapping to distribute colors evenly across the jet colormap.
+    A given index always maps to the same color, but nearby indices map to different colors.
     """
-    if neuron_indices is None:
-        return np.array([], dtype=np.float32)
+    if indices is None or len(indices) == 0:
+        return np.zeros((0, 4), dtype=np.float32)
 
-    safe_indices = np.asarray(neuron_indices, dtype=np.int64)
-
-    # Use a better hash-based distribution across the full [0,1] range
-    # This gives much better color spread without patterns
-    hash_base = 2654435761  # Large prime for better distribution
-    hashed = (safe_indices * hash_base) % (2**32)
-    normalized = hashed.astype(np.float32) / (2**32 - 1)
-
-    return normalized
-
-
-_JET_LUT: np.ndarray | None = None
-
-
-def jet_lut() -> np.ndarray:
-    """Fetch and cache the jet lookup table from pygfx."""
-    global _JET_LUT
-    if _JET_LUT is None:
-        texture_data = gfx.cm.jet.texture.data
-        if texture_data is None:
-            raise RuntimeError("Jet colormap texture data is unavailable")
-        _JET_LUT = np.asarray(texture_data, dtype=np.float32)
-    return _JET_LUT
-
-
-def jet_colors_for_neurons(neuron_indices: np.ndarray | None) -> np.ndarray:
-    """Return uint8 RGB colors for the supplied neuron indices using the shared jet mapping."""
-    if neuron_indices is None or len(neuron_indices) == 0:
-        return np.zeros((0, 3), dtype=np.uint8)
-
-    normalized_sorted = jet_cmap_transform_for_neurons(np.asarray(neuron_indices))
-    lut = jet_lut()
-    indices = (normalized_sorted * (lut.shape[0] - 1)).astype(int)
-    indices = np.clip(indices, 0, lut.shape[0] - 1)
-    colors = (lut[indices, :3] * 255.0).astype(np.uint8)
-    return colors
+    colormap = Colormap("matlab:hsv")
+    # values of a and m from table 2 of
+    # https://www.ams.org/journals/mcom/1999-68-225/S0025-5718-99-00996-5/S0025-5718-99-00996-5.pdf
+    a = 23234
+    m = 32749
+    normalized = np.mod(np.asarray(indices) * a, m) / m
+    return np.asarray(colormap(normalized), dtype=np.float32)
 
 
 def init_brian2_logging(log_level: str = "ERROR") -> None:

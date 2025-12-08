@@ -572,13 +572,13 @@ class Gui(QtWidgets.QMainWindow):
         self.model.add_experimental_data(experiment_name, data, append)
 
     def btn_import_cellpose_data_clicked(self) -> None:
-        dialog = CellposeImportDialog(self)
+        dialog = CellposeImportDialog(self, existing_data=self.last_cellpose_import)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self.last_cellpose_import = dialog.get_imported_data()
             QtWidgets.QMessageBox.information(
                 self,
                 "Cellpose import",
-                "Cellpose segmentation loaded. Verify colors match traces in the preview and legend.",
+                "Cellpose segmentation loaded. Now ready for Patchclamp import",
             )
 
     def btn_import_patchclamp_data_clicked(self) -> None:

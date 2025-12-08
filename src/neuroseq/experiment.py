@@ -12,12 +12,14 @@ class TraceData:
         traces (np.ndarray): A 2D array of traces where the first index is the neuron index and the second index is the time index.
         units (str): The unit of the traces (e.g., 'mV', 'pA').
         dt (float): The time step in seconds between consecutive timestamps.
+        indices (np.ndarray | None): Optional 1D array of neuron indices corresponding to each trace row.
     """
 
     name: str
     traces: np.ndarray
     units: str
     dt: float
+    indices: np.ndarray | None = None
 
 
 @dataclass

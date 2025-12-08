@@ -5,7 +5,6 @@ from typing import Any
 import brian2.numpy_ as np
 import numpy.typing as npt
 from scipy.signal import find_peaks
-from sklearn.preprocessing import MinMaxScaler
 
 from neuroseq.experiment import SpikeData
 
@@ -19,12 +18,12 @@ def detect_spikes_threshold(
     normalize_per_neuron: bool = True,
 ) -> SpikeData:
     """
-    Detect spikes using threshold-based method on preprocessed data.
+    Detect spikes using find_peaks method on preprocessed data.
 
     Args:
         spike_data: 2D array (neurons, timepoints) or 1D array (single neuron)
         dt: Time step between samples
-        threshold: Detection threshold (0-1 if normalized)
+        threshold: Detection threshold (0-1 if normalized) - used as height_threshold multiplier
         max_neurons: Maximum neurons to process (None = all)
         normalize_per_neuron: Whether to normalize each neuron's data to [0,1]
 
@@ -48,18 +47,46 @@ def detect_spikes_threshold(
     else:
         processed_data = spike_data[:n_neurons_to_process, :].astype(np.float32)
 
-    # Find spikes above threshold
-    mask = processed_data >= threshold
-    neuron_indices, time_indices = np.nonzero(mask)
-    spike_times = time_indices.astype(np.float32) * dt
+    all_neuron_indices = []
+    all_spike_times = []
 
-    return SpikeData("Detected spikes", neuron_indices.astype(np.int32), spike_times)
+    for neuron_idx in range(n_neurons_to_process):
+        neuron_data = processed_data[neuron_idx, :]
+
+        # Use existing voltage trace detection with peak method
+        spike_result = detect_spikes_voltage_trace(
+            neuron_data,
+            neuron_id=neuron_idx,
+            dt=dt,
+            detection_method="peak",
+            peak_height_threshold=threshold,
+            peak_prominence=0.5,
+            min_spike_interval=0.001,
+        )
+
+        if len(spike_result.spike_indices) > 0:
+            all_neuron_indices.append(spike_result.spike_indices)
+            all_spike_times.append(spike_result.spike_times)
+
+    if all_neuron_indices:
+        final_neuron_indices = np.concatenate(all_neuron_indices)
+        final_spike_times = np.concatenate(all_spike_times)
+    else:
+        final_neuron_indices = np.array([], dtype=np.int32)
+        final_spike_times = np.array([], dtype=np.float32)
+
+    return SpikeData("Detected spikes", final_neuron_indices, final_spike_times)
 
 
 def _normalize_per_neuron(data: npt.NDArray[Any]) -> npt.NDArray[Any]:
     """Normalize each neuron's data to [0, 1] range (for each neuron, not for all neurons - massive variation exists)"""
-    scaler = MinMaxScaler()
-    return scaler.fit_transform(data.astype(np.float32)).astype(np.float32)
+    data = data.astype(np.float32)
+    min_vals = np.min(data, axis=1, keepdims=True)
+    max_vals = np.max(data, axis=1, keepdims=True)
+    ranges = max_vals - min_vals
+    # Avoid division by zero for flat traces
+    ranges[ranges == 0] = 1.0
+    return (data - min_vals) / ranges
 
 
 def detect_spikes_voltage_trace(

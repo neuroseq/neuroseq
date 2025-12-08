@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import random
 import re
 from pathlib import Path
 
@@ -90,7 +89,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         mapping_layout = QtWidgets.QHBoxLayout()
         self.mapping_buttons = QtWidgets.QButtonGroup(self)
-        for option in ("Linear", "Random", "Custom"):
+        for option in ("Linear", "Custom"):
             button = QtWidgets.QRadioButton(option)
             self.mapping_buttons.addButton(button)
             mapping_layout.addWidget(button)
@@ -112,10 +111,14 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         custom_layout = QtWidgets.QVBoxLayout()
         custom_layout.addWidget(self.custom_neuron_id_spin)
         custom_layout.addWidget(self.custom_mapping_line)
-        custom_widget = QtWidgets.QWidget()
-        custom_widget.setLayout(custom_layout)
+        self.custom_widget = QtWidgets.QWidget()
+        self.custom_widget.setLayout(custom_layout)
 
-        options_layout.addRow("Custom mapping:", custom_widget)
+        self.custom_mapping_label = QtWidgets.QLabel("Custom mapping:")
+        self.custom_mapping_label.setVisible(False)
+        self.custom_widget.setVisible(False)
+
+        options_layout.addRow(self.custom_mapping_label, self.custom_widget)
 
         # Replace/extend data option
         self.replace_checkbox = QtWidgets.QCheckBox(
@@ -126,20 +129,37 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             "When enabled, imported data will overwrite existing traces/spikes "
             "for the specified neuron ID. When disabled, data will be appended/extended."
         )
+        self.replace_checkbox.toggled.connect(self._on_replace_toggled)
         options_layout.addRow(self.replace_checkbox)
 
         # Connect radio buttons to show/hide custom mapping input
         for button in self.mapping_buttons.buttons():
             button.toggled.connect(self._on_mapping_changed)
 
-        self.spike_group = QtWidgets.QGroupBox("Spike Detection Parameters")
+        self.spike_group = QtWidgets.QGroupBox("Peak Detection Parameters")
         spike_layout = QtWidgets.QFormLayout(self.spike_group)
 
-        threshold_label = QtWidgets.QLabel("30.0 mV (fixed)")
-        threshold_label.setToolTip(
-            "Spikes detected above this absolute voltage threshold"
+        self.peak_height_spin = QtWidgets.QDoubleSpinBox()
+        self.peak_height_spin.setDecimals(2)
+        self.peak_height_spin.setMinimum(0.1)
+        self.peak_height_spin.setMaximum(10.0)
+        self.peak_height_spin.setSingleStep(0.1)
+        self.peak_height_spin.setValue(3.0)
+        self.peak_height_spin.setSuffix(" std")
+        self.peak_height_spin.setToolTip(
+            "Minimum height above baseline in standard deviations"
         )
-        spike_layout.addRow("Voltage threshold:", threshold_label)
+        spike_layout.addRow("Peak height threshold:", self.peak_height_spin)
+
+        self.peak_prominence_spin = QtWidgets.QDoubleSpinBox()
+        self.peak_prominence_spin.setDecimals(2)
+        self.peak_prominence_spin.setMinimum(0.1)
+        self.peak_prominence_spin.setMaximum(5.0)
+        self.peak_prominence_spin.setSingleStep(0.1)
+        self.peak_prominence_spin.setValue(0.5)
+        self.peak_prominence_spin.setSuffix(" std")
+        self.peak_prominence_spin.setToolTip("Minimum prominence for peak detection")
+        spike_layout.addRow("Peak prominence:", self.peak_prominence_spin)
 
         self.min_interval_spin = QtWidgets.QDoubleSpinBox()
         self.min_interval_spin.setDecimals(3)
@@ -150,6 +170,26 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.min_interval_spin.setSuffix(" s")
         self.min_interval_spin.setToolTip("Minimum interval between detected spikes")
         spike_layout.addRow("Min spike interval:", self.min_interval_spin)
+
+        self.peak_distance_spin = QtWidgets.QSpinBox()
+        self.peak_distance_spin.setMinimum(1)
+        self.peak_distance_spin.setMaximum(1000)
+        self.peak_distance_spin.setSingleStep(1)
+        self.peak_distance_spin.setValue(10)
+        self.peak_distance_spin.setSuffix(" samples")
+        self.peak_distance_spin.setToolTip(
+            "Minimum horizontal distance between peaks in samples"
+        )
+        spike_layout.addRow("Peak distance:", self.peak_distance_spin)
+
+        self.peak_width_spin = QtWidgets.QSpinBox()
+        self.peak_width_spin.setMinimum(1)
+        self.peak_width_spin.setMaximum(100)
+        self.peak_width_spin.setSingleStep(1)
+        self.peak_width_spin.setValue(1)
+        self.peak_width_spin.setSuffix(" samples")
+        self.peak_width_spin.setToolTip("Minimum width of peaks in samples")
+        spike_layout.addRow("Peak width:", self.peak_width_spin)
 
         layout.addWidget(self.options_group)
         layout.addWidget(self.spike_group)
@@ -169,12 +209,20 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
     def _on_mapping_changed(self) -> None:
         mapping_strategy = self._get_mapping_strategy()
-        if mapping_strategy == "Custom" and self.cellpose_import is not None:
+        is_custom = mapping_strategy == "Custom"
+
+        self.custom_mapping_label.setVisible(is_custom)
+        self.custom_widget.setVisible(is_custom)
+
+        if is_custom and self.cellpose_import is not None:
             self.custom_mapping_line.setVisible(True)
             self.custom_neuron_id_spin.setVisible(False)
-        else:
+        elif is_custom:
             self.custom_mapping_line.setVisible(False)
             self.custom_neuron_id_spin.setVisible(True)
+
+    def _on_replace_toggled(self, checked: bool) -> None:
+        self.append_data = not checked
 
     def _load_overlay_from_cellpose(self) -> None:
         if self.overlay_widget is None:
@@ -293,7 +341,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
     def _parse_custom_mapping(self, mapping_str: str) -> dict[int, int]:
         """Parse custom mapping string like '1:12,2:3' into {1: 12, 2: 3}"""
-        mapping = {}
+        mapping: dict[int, int] = {}
         if not mapping_str.strip():
             return mapping
 
@@ -303,9 +351,9 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 pair = pair.strip()
                 if ":" not in pair:
                     continue
-                stim_key, cellpose_id = pair.split(":", 1)
-                stim_key = int(stim_key.strip())
-                cellpose_id = int(cellpose_id.strip())
+                stim_key_str, cellpose_id_str = pair.split(":", 1)
+                stim_key = int(stim_key_str.strip())
+                cellpose_id = int(cellpose_id_str.strip())
                 mapping[stim_key] = cellpose_id
         except (ValueError, IndexError) as exc:
             raise ValueError(f"Invalid custom mapping format: {exc}") from exc
@@ -326,13 +374,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             # Map stimulus IDs 1,2,3... to cellpose IDs in order
             return {
                 i + 1: int(cellpose_id) for i, cellpose_id in enumerate(original_ids)
-            }
-        elif strategy == "Random":
-            # Map stimulus IDs 1,2,3... to cellpose IDs randomly
-            shuffled_ids = list(original_ids)
-            random.shuffle(shuffled_ids)
-            return {
-                i + 1: int(cellpose_id) for i, cellpose_id in enumerate(shuffled_ids)
             }
         elif strategy == "Custom":
             # Parse custom mapping string
@@ -375,24 +416,28 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         neuron_id = self.custom_neuron_id_spin.value()
 
-        # Use absolute voltage threshold for spike detection
+        # Use peak detection for spike detection
         spike_data = detect_spikes_voltage_trace(
             self.npy_data,
             neuron_id=neuron_id,
             dt=dt,
-            detection_method="threshold",
-            threshold_method="absolute",
-            threshold_multiplier=30.0,  # 30mV absolute threshold
+            detection_method="peak",
+            peak_height_threshold=self.peak_height_spin.value(),
+            peak_prominence=self.peak_prominence_spin.value(),
             min_spike_interval=self.min_interval_spin.value(),
+            peak_distance=self.peak_distance_spin.value(),
+            peak_width=self.peak_width_spin.value(),
         )
 
         # Create trace data (single neuron, so reshape to 2D)
         trace_array = self.npy_data.reshape(1, -1)
+        neuron_indices = np.array([neuron_id], dtype=np.int32)
         trace_data = TraceData(
             name=f"Voltage trace (Neuron {neuron_id})",
             traces=trace_array,
             units="mV",
             dt=dt,
+            indices=neuron_indices,
         )
 
         self.imported_spike_data.append(spike_data)
@@ -413,3 +458,8 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 f"No spikes were detected in the recording for neuron {neuron_id}.\n"
                 f"You may need to adjust the detection parameters.",
             )
+
+    @property
+    def imported_data(self) -> list:
+        """Combined imported spike and trace data."""
+        return self.imported_spike_data + self.imported_trace_data
