@@ -48,24 +48,31 @@ def get_downsample_factor(
 def construct_synapse_matrix(
     monitor: b2.StateMonitor, variable: str, max_ram_mb: int
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Constructs NxNxt timeseries of synapse matrices and timestamps from a Brian2 StateMonitor of synapse variables.
+    """Constructs N_s x N_t x t timeseries of synapse matrices and timestamps from a Brian2 StateMonitor of synapse variables.
+
+    Where N_s is the number of source neurons, N_t is the number of target neurons, and t is the number of timestamps.
 
     Automatically downsamples the data if it exceeds the maximum RAM limit.
     """
     synapse_group = monitor.source
-    neuron_group = synapse_group.source
+    source_neuron_group = synapse_group.source
+    target_neuron_group = synapse_group.target
     values = monitor.variables[variable].get_value().T
     n_timestamps = values.shape[1]
     if n_timestamps == 0:
         return np.array([]), np.array([])
-    n_floats = neuron_group.N * neuron_group.N * n_timestamps
+    n_floats = source_neuron_group.N * target_neuron_group.N * n_timestamps
     downsample_factor = get_downsample_factor(n_floats, max_ram_mb, bits_per_float=32)
     if downsample_factor > 1:
         logging.info(
-            f"Downsampling {neuron_group.N}x{neuron_group.N}x{n_timestamps} matrix by factor {downsample_factor} due to max RAM limit of {max_ram_mb} MB"
+            f"Downsampling {source_neuron_group.N}x{target_neuron_group.N}x{n_timestamps} matrix by factor {downsample_factor} due to max RAM limit of {max_ram_mb} MB"
         )
     matrix = np.zeros(
-        (neuron_group.N, neuron_group.N, values[0, ::downsample_factor].shape[0]),
+        (
+            source_neuron_group.N,
+            target_neuron_group.N,
+            values[0, ::downsample_factor].shape[0],
+        ),
         dtype=np.float32,
     )
     for i, j, value in zip(
