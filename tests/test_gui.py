@@ -66,8 +66,11 @@ def test_gui_click_exit(qtbot: QtBot) -> None:
     gui.close()
 
 
-def test_gui_simulate_and_playback(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
+def test_gui_simulate_and_playback(
+    monkeypatch: MonkeyPatch, qtbot: QtBot, test_model: Model
+) -> None:
     gui = Gui()
+    gui.load_model(test_model)
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -367,8 +370,10 @@ def test_gui_synapse_ram_limit(
     qtbot: QtBot,
     qmessagebox_calls: list,
     tmp_config_dir,
+    test_model: Model,
 ) -> None:
     gui = Gui()
+    gui.load_model(test_model)
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -510,9 +515,10 @@ def test_gui_restore_settings_on_restart(
 
 
 def test_gui_playback_speed(
-    monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list
+    monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list, test_model: Model
 ) -> None:
     gui = Gui()
+    gui.load_model(test_model)
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -593,9 +599,10 @@ def test_gui_simulate_external_model(
 
 
 def test_integration_modeleditor_delete_restore(
-    qtbot: QtBot, qmessagebox_calls: list
+    qtbot: QtBot, qmessagebox_calls: list, test_model: Model
 ) -> None:
     gui = Gui()
+    gui.load_model(test_model)
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(gui.isVisible)
