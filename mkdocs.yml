@@ -1,0 +1,29 @@
+site_name: Neuroseq
+site_url: https://ssciwr.github.io/neuroseq
+repo_url: https://github.com/ssciwr/neuroseq
+theme:
+  name: material
+  favicon: images/favicon.svg
+  features:
+    - content.code.copy
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - attr_list
+  - md_in_html
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+nav:
+  - Home: index.md
+  - Examples: examples.md
+  - Common issues: common_issues.md

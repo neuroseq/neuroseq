@@ -8,6 +8,7 @@ from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomControlle
 from neuroseq.data import TraceData
 from neuroseq.trace_widget import TraceNormDialog
 from neuroseq.trace_widget import TraceWidget
+from neuroseq.utils import neuron_indices_to_colors
 
 
 def test_trace_widget_zero_traces(qtbot: QtBot) -> None:
@@ -25,6 +26,7 @@ def test_trace_widget_zero_traces(qtbot: QtBot) -> None:
     data = TraceData(
         name="traces",
         traces=np.zeros(shape=(n_neurons, n_timestamps), dtype=np.float32),
+        indices=np.arange(n_neurons, dtype=np.uint32),
         dt=dt,
         units="mV",
     )
@@ -66,6 +68,7 @@ def test_trace_widget_median_offset(qtbot: QtBot) -> None:
         traces=np.array(
             [np.zeros(100), np.ones(100), -2 * np.ones(100)], dtype=np.float32
         ),
+        indices=np.array([0, 1, 2], dtype=np.uint32),
         dt=0.001,
         units="mV",
     )
@@ -101,6 +104,36 @@ def test_trace_widget_median_offset(qtbot: QtBot) -> None:
     trace_widget.close()
 
 
+def test_trace_widget_indices(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.show()
+    qtbot.waitUntil(lambda: trace_widget.isVisible())
+    data = TraceData(
+        name="traces",
+        traces=np.random.random_sample((5, 100)).astype(np.float32),
+        indices=np.array([0, 1, 6, 11, 15], dtype=np.uint32),
+        dt=0.001,
+        units="mV",
+    )
+    colormap = {i: neuron_indices_to_colors(np.array([i]))[0] for i in data.indices}
+    data.traces[0, :] = 0.0
+    trace_widget.set_data(data)
+    assert trace_widget.graphic is not None
+    for i, line in enumerate(trace_widget.graphic.graphics):
+        idx = data.indices[i]
+        assert line.offset[1] == pytest.approx(idx)
+        assert np.allclose(line.colors[0], colormap[data.indices[i]])
+    # now set same data with same indices in a different order
+    data.indices = np.array([15, 6, 11, 1, 0], dtype=np.uint32)
+    trace_widget.set_data(data)
+    for i, line in enumerate(trace_widget.graphic.graphics):
+        idx = data.indices[i]
+        assert line.offset[1] == pytest.approx(idx)
+        assert np.allclose(line.colors[0], colormap[data.indices[i]])
+
+
 def test_trace_widget(qtbot: QtBot) -> None:
     controller = ConstrainedPanZoomController()
     trace_widget = TraceWidget(controller)
@@ -116,6 +149,7 @@ def test_trace_widget(qtbot: QtBot) -> None:
     data = TraceData(
         name="traces",
         traces=np.random.rand(n_neurons, n_timestamps),
+        indices=np.arange(n_neurons, dtype=np.uint32),
         dt=dt,
         units="mV",
     )

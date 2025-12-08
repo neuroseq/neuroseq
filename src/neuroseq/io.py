@@ -51,6 +51,7 @@ def _json_encoder_factory(zf: zipfile.ZipFile):
                         "!TraceData": True,
                         "name": obj.name,
                         "traces": _save_array(zf, f"_{obj.name}_traces", obj.traces),
+                        "indices": _save_array(zf, f"_{obj.name}_indices", obj.indices),
                         "units": obj.units,
                         "dt": obj.dt,
                     }
@@ -135,12 +136,15 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                 "!TraceData": True,
                 "name": name,
                 "traces": traces,
+                "indices": indices,
                 "units": units,
                 "dt": dt,
             }:
                 with _zf.open(traces) as fp:
                     loaded_traces = np.load(fp)
-                return TraceData(name, loaded_traces, units, dt)
+                with _zf.open(indices) as fp:
+                    loaded_indices = np.load(fp)
+                return TraceData(name, loaded_traces, loaded_indices, units, dt)
             case {
                 "!SynapseData": True,
                 "name": name,

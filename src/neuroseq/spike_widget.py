@@ -6,7 +6,7 @@ from qtpy import QtWidgets
 
 from neuroseq.data import SpikeData
 from neuroseq.timeseries_widget import TimeseriesWidget
-from neuroseq.utils import cmap_transform_neuron_indices
+from neuroseq.utils import neuron_indices_to_colors
 
 
 class SpikeWidget(TimeseriesWidget):
@@ -47,10 +47,7 @@ class SpikeWidget(TimeseriesWidget):
         )
         self.graphic = self.subplot.add_scatter(
             spike_data,
-            cmap="jet",
-            cmap_transform=cmap_transform_neuron_indices(
-                self.n_neurons, data.spike_indices
-            ),
+            colors=neuron_indices_to_colors(data.spike_indices),
             sizes=7,
             size_space="screen",
             uniform_size=True,

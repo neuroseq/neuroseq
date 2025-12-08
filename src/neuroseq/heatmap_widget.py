@@ -41,7 +41,7 @@ class HeatmapNormDialog(QtWidgets.QDialog):
 
         self.slider_idx = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal, self)
         if self.heatmap_widget.timestamps is not None:
-            self.slider_idx.setRange(0, self.heatmap_widget.timestamps.shape[0])
+            self.slider_idx.setRange(0, self.heatmap_widget.timestamps.shape[0] - 1)
         if self.subtract:
             self.slider_idx.setValue(self.heatmap_widget.subtract_idx)
         else:

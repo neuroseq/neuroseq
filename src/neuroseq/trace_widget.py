@@ -7,7 +7,7 @@ from qtpy import QtWidgets
 
 from neuroseq.data import TraceData
 from neuroseq.timeseries_widget import TimeseriesWidget
-from neuroseq.utils import cmap_transform_neuron_indices
+from neuroseq.utils import neuron_indices_to_colors
 
 
 class TraceNormDialog(QtWidgets.QDialog):
@@ -105,18 +105,20 @@ class TraceWidget(TimeseriesWidget):
     def get_normalized_trace_data(self) -> np.ndarray:
         if self.data is None or not isinstance(self.data, TraceData):
             return np.array([], dtype=np.float32)
+        # replace any NaN values with zero for normalisation
+        traces = np.nan_to_num(self.data.traces, copy=True, nan=0.0)
         if self.offset_by_median:
-            median_values = np.median(self.data.traces, axis=1)
-            max_values = np.max(self.data.traces, axis=1)
+            median_values = np.median(traces, axis=1)
+            max_values = np.max(traces, axis=1)
             max_trace = np.max(np.abs(max_values - median_values))
         else:
-            max_trace = np.max(np.abs(self.data.traces))
+            max_trace = np.max(np.abs(traces))
         norm = 0.5 if max_trace == 0 else 1.0 / (2.0 * max_trace)
         norm = np.float32((self.trace_norm_percent / 100.0) * norm)
         if self.offset_by_median:
             offset = (-median_values * norm).astype(np.float32)
         else:
-            offset = np.zeros(self.n_neurons, dtype=np.float32)
+            offset = np.zeros(traces.shape[0], dtype=np.float32)
         data = norm * self.data.traces.astype(np.float32) + offset[:, np.newaxis]
         if self.clip:
             np.clip(data, -0.5, 0.5, out=data)
@@ -146,7 +148,7 @@ class TraceWidget(TimeseriesWidget):
         )
         self.subplot.title = f"Traces: {data.name}"
         self.data = data
-        self.n_neurons = data.traces.shape[0]
+        self.n_neurons = np.max(data.indices) + 1
         self.dt_ms = data.dt * 1000.0  # convert to milliseconds
         self.n_timestamps = data.traces.shape[1]
         # convert timestamps to milliseconds and stack to produce a format suitable for line_stack
@@ -156,7 +158,7 @@ class TraceWidget(TimeseriesWidget):
         )
         tiled_timestamps_ms = np.tile(
             timestamps_ms,
-            (self.n_neurons, 1),
+            (data.traces.shape[0], 1),
         )
         normalized_traces = self.get_normalized_trace_data()
         data = np.stack(
@@ -169,10 +171,9 @@ class TraceWidget(TimeseriesWidget):
         )
         self.graphic = self.subplot.add_line_collection(
             data,
-            cmap="jet",
-            cmap_transform=cmap_transform_neuron_indices(self.n_neurons),
+            colors=neuron_indices_to_colors(self.data.indices),
             thickness=2,
         )
         for i, line in enumerate(self.graphic.graphics):
-            line.offset = (line.offset[0], i, line.offset[2])
+            line.offset = (line.offset[0], self.data.indices[i], line.offset[2])
         self.post_set_data()
