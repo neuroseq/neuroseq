@@ -964,9 +964,12 @@ def hh_neuron_with_plasticity() -> Model:
     b2_model.define_parameter("opto_units", opto_units)
 
     eqs = """
-    dv/dt = (gl*(El-v)+ge*(Ee-v)+gi*(Ei-v)-
-             g_na*(m*m*m)*h*(v-ENa)-
-             g_kd*(n*n*n*n)*(v-EK))/Cm : volt
+    dv/dt = (ge*(Ee-v)+gi*(Ei-v)+geopto*(Eeopto-v)+giopto*(Eiopto-v)+gl*(El-v)-
+            g_na*(m*m*m)*h*(v-ENa)-
+            g_kd*(n*n*n*n)*(v-EK)+Iext)/Cm : volt
+    Iext = I_external(t,i) : amp
+    geopto = g_exc * Exc_stimulation(t, i)/opto_units: siemens
+    giopto = g_inh * Inh_stimulation(t, i)/opto_units: siemens
     dm/dt = alpha_m*(1-m)-beta_m*m : 1
     dn/dt = alpha_n*(1-n)-beta_n*n : 1
     dh/dt = alpha_h*(1-h)-beta_h*h : 1
@@ -1052,11 +1055,39 @@ def hh_neuron_with_plasticity() -> Model:
 
     # define stim arrays
 
-    tfinal = 1000 * b2.ms
+    tfinal = 2000 * b2.ms
 
     i_stim = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
     i_stim[:, :] = 0
-    i_stim[200:300, :] = 1
+    # i_stim[200:300, :] = 1
+
+    exc_stim = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
+    exc_stim[:, :] = 0
+    # exc_stim[0:200, :] = 1
+
+    inh_stim = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
+    inh_stim[:, :] = 0
+    # inh_stim[300:900, :] = 1
+
+    sp = 10
+
+    for n in range(0, 5):
+        exc_stim[sp + 10 * n : sp + 10 * (n + 1), n * 8 : n * 8 + 8] = 1
+
+    sp = 100
+
+    for n in range(1, 40):
+        exc_stim[sp + 10 * n : sp + 10 * (n + 1), n] = 1
+        inh_stim[sp + 10 * n : sp + 10 * (n + 1), (n + 1) : 3200] = 0.1
+        inh_stim[sp + 10 * n : sp + 10 * (n + 1), 1:n] = 0.1
+
+    sp = 1100
+
+    for n in range(1, 40):
+        exc_stim[sp + 10 * n : sp + 10 * (n + 1), n] = 1
+        inh_stim[sp + 10 * n : sp + 10 * (n + 1), (n + 1) :] = 0.1
+        inh_stim[sp + 10 * n : sp + 10 * (n + 1), 1:n] = 0.1
+
     i_external = StimArray(
         name="I_external",
         stim_type=StimType.External,
@@ -1066,26 +1097,20 @@ def hh_neuron_with_plasticity() -> Model:
     )
     model.add_stim_array(i_external)
 
-    exc_stim = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
-    exc_stim[:, :] = 0
-    exc_stim[0:200, :] = 1
     exc_stimulation = StimArray(
         name="Exc_stimulation",
         stim_type=StimType.Excitation,
         values=exc_stim,
-        units="1",
+        units="mwatt / um2",
         dt=0.001,
     )
     model.add_stim_array(exc_stimulation)
 
-    inh_stim = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
-    inh_stim[:, :] = 0
-    inh_stim[300:900, :] = 1
     inh_stimulation = StimArray(
         name="Inh_stimulation",
         stim_type=StimType.Inhibition,
         values=inh_stim,
-        units="1",
+        units="mwatt / um2",
         dt=0.001,
     )
     model.add_stim_array(inh_stimulation)
