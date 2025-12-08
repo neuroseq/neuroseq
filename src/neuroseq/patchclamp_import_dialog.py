@@ -20,15 +20,20 @@ class PatchClampImportDialog(QtWidgets.QDialog):
     def __init__(
         self,
         cellpose_import: CellposeImportResult | None = None,
+        model=None,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.cellpose_import = cellpose_import
+        self.model = model
         self.imported_spike_data: list = []
         self.imported_trace_data: list = []
         self.experiment_name = "PatchClamp Import"
         self.append_data = False
+        self.neurons_to_replace: set[int] = (
+            set()
+        )  # Track which neurons should be replaced
         self.file_path: Path | None = None
         self.npy_data: np.ndarray | None = None
         self.extracted_neuron_id: int | None = None
@@ -43,11 +48,16 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.setWindowTitle("Import Patch Clamp Data")
         self.setModal(True)
 
-        # Set width to 1.2k pixels or 90% of screen width, whichever is smaller
         screen = QtWidgets.QApplication.primaryScreen()
         screen_width = screen.availableGeometry().width()
-        target_width = min(1200, int(0.9 * screen_width))
-        self.resize(target_width, 540)
+        self.full_width = min(1200, int(0.9 * screen_width))
+        self.compact_width = min(820, int(0.55 * screen_width))
+        self.full_height = 540
+        self.compact_height = 320
+
+        initial_width = self.full_width if self.cellpose_import is not None else self.compact_width
+        initial_height = self.full_height if self.cellpose_import is not None else self.compact_height
+        self.resize(initial_width, initial_height)
 
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -352,6 +362,16 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         for group in (self.preview_group, self.options_group, self.spike_group):
             if group is not None:
                 group.setVisible(visible)
+        if visible:
+            self.resize(
+                max(self.width(), getattr(self, "full_width", self.width())),
+                max(self.height(), getattr(self, "full_height", self.height())),
+            )
+        elif self.cellpose_import is None:
+            self.resize(
+                min(self.width(), getattr(self, "compact_width", self.width())),
+                min(self.height(), getattr(self, "compact_height", self.height())),
+            )
 
     def _parse_custom_mapping(self, mapping_str: str) -> dict[int, int]:
         """Parse custom mapping string like '1:12,2:3' into {1: 12, 2: 3}"""
@@ -373,6 +393,49 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             raise ValueError(f"Invalid custom mapping format: {exc}") from exc
 
         return mapping
+
+    def _validate_append_import(self) -> None:
+        """Validate that we can safely append data in extend mode."""
+        if self.model is None:
+            return
+
+        # Get existing trace data for the same experiment name
+        existing_experiments = getattr(self.model, "experiments", {})
+        existing_data = existing_experiments.get(self.experiment_name, [])
+
+        # Find existing trace data with our target name
+        existing_trace_data = None
+        for data in existing_data:
+            if hasattr(data, "name") and data.name == "Patch Clamp Traces":
+                from neuroseq.data import TraceData
+
+                if isinstance(data, TraceData):
+                    existing_trace_data = data
+                    break
+
+        if existing_trace_data is None:
+            # No existing data, safe to proceed
+            return
+
+        # Check which neurons we're trying to import
+        neuron_id = self.custom_neuron_id_spin.value()
+        existing_neuron_indices = set(existing_trace_data.indices)
+
+        if neuron_id in existing_neuron_indices:
+            # This neuron already exists, which is fine for extension
+            return
+
+        # Check if there are multiple neurons being imported with mixed existing/new status
+        # For now, we're importing one neuron at a time, but this logic prepares for multiple
+        if len(existing_neuron_indices) > 0:
+            # We have existing data for some neurons but not others
+            # In extend mode, this could cause timestamp misalignment
+            raise ValueError(
+                f"Cannot extend data when importing neuron {neuron_id} - "
+                f"existing neurons {sorted(existing_neuron_indices)} already have data. "
+                f"This would cause timestamp misalignment. Use 'Replace' mode instead, "
+                f"or import all neurons with the same timeline."
+            )
 
     def _generate_stimulus_mapping(self, strategy: str) -> dict[int, int]:
         """Generate stimulus-to-cellpose mapping based on strategy"""
@@ -421,6 +484,10 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             if self.cellpose_import is not None:
                 self.cellpose_import.stimulus_to_cellpose_mapping = stimulus_mapping
 
+            # Validate import if in append mode
+            if self.append_data:
+                self._validate_append_import()
+
             self._import_npy_data(sampling_rate, dt)
             self.accept()
         except Exception as exc:
@@ -437,6 +504,10 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             raise ValueError("No NPY data loaded")
 
         neuron_id = self.custom_neuron_id_spin.value()
+
+        # Track neurons being imported for potential replacement
+        if not self.append_data:
+            self.neurons_to_replace.add(neuron_id)
 
         self.logger.debug(
             "Detecting spikes for patchclamp neuron %d: dt=%.6f height=%.2f prominence=%.2f min_interval=%.4f distance=%d width=%d",
@@ -464,13 +535,13 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         # Create trace data (single neuron, so reshape to 2D)
         trace_array = self.npy_data.reshape(1, -1)
-        neuron_indices = np.array([neuron_id], dtype=np.int32)
+        neuron_indices = np.array([neuron_id], dtype=np.uint32)
         trace_data = TraceData(
-            name=f"Voltage trace (Neuron {neuron_id})",
+            name="Patch Clamp Traces",  # Use consistent name for all patch clamp data
             traces=trace_array,
+            indices=neuron_indices,
             units="mV",
             dt=dt,
-            indices=neuron_indices,
         )
 
         self.imported_spike_data.append(spike_data)

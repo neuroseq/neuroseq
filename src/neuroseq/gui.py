@@ -583,14 +583,39 @@ class Gui(QtWidgets.QMainWindow):
 
     def btn_import_patchclamp_data_clicked(self) -> None:
         dialog = PatchClampImportDialog(
-            cellpose_import=self.last_cellpose_import, parent=self
+            cellpose_import=self.last_cellpose_import, model=self.model, parent=self
         )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             if not dialog.imported_data:
                 return
             try:
+                # For patch clamp imports, handle replace mode properly:
+                # - Replace mode: remove only the specific neuron IDs being imported, then add new data
+                # - Append mode: just append/merge the new data
+
+                self.logger.info(
+                    f"Patch clamp import: dialog.append_data={dialog.append_data}, "
+                    f"neurons_to_replace={dialog.neurons_to_replace}, "
+                    f"experiment_exists={dialog.experiment_name in self.model.experiments}"
+                )
+
+                if not dialog.append_data and dialog.neurons_to_replace:
+                    # Replace mode: remove only the specific neurons being imported
+                    if dialog.experiment_name in self.model.experiments:
+                        self.logger.info(
+                            f"Removing neurons {dialog.neurons_to_replace} before import"
+                        )
+                        self._remove_neurons_from_experiment(
+                            dialog.experiment_name, dialog.neurons_to_replace
+                        )
+
+                # Always use append mode to enable neuron merging (whether replacing specific neurons or extending)
+                append_mode = True
+
+                self.logger.info(f"Using append_mode={append_mode}")
+
                 self.model.add_experimental_data(
-                    dialog.experiment_name, dialog.imported_data, dialog.append_data
+                    dialog.experiment_name, dialog.imported_data, append_mode
                 )
             except Exception as exc:
                 QtWidgets.QMessageBox.critical(
@@ -678,6 +703,22 @@ class Gui(QtWidgets.QMainWindow):
             f"NeuroSeq\n\nVersion {__version__}\n\n"
             + "https://github.com/ssciwr/neuroseq",
         )
+
+    def _remove_neurons_from_experiment(
+        self, experiment_name: str, neurons_to_remove: set[int]
+    ) -> None:
+        """Remove specific neurons from an experiment's data."""
+        if experiment_name not in self.model.experiments:
+            return
+
+        from neuroseq.data import SpikeData
+        from neuroseq.data import TraceData
+        from neuroseq.utils import remove_neurons_from_data
+
+        # Remove neurons from each data object in the experiment
+        for data in self.model.experiments[experiment_name]:
+            if isinstance(data, (TraceData, SpikeData)):
+                remove_neurons_from_data(data, neurons_to_remove)
 
     def _create_progressbar(self) -> None:
         self.progress_dialog = QtWidgets.QProgressDialog(
