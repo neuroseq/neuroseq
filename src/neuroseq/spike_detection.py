@@ -5,6 +5,7 @@ from typing import Any
 import brian2.numpy_ as np
 import numpy.typing as npt
 from scipy.signal import find_peaks
+from sklearn.preprocessing import MinMaxScaler
 
 from neuroseq.experiment import SpikeData
 
@@ -35,7 +36,9 @@ def detect_spikes_threshold(
     if spike_data.ndim == 1:
         spike_data = spike_data.reshape(1, -1)
     elif spike_data.ndim > 2:
-        raise ValueError("spike_data must be 1D or 2D array - you may have used the wrong file or e.g. format with soma within it. Convert that first")
+        raise ValueError(
+            "spike_data must be 1D or 2D array - you may have used the wrong file or e.g. format with soma within it. Convert that first"
+        )
 
     n_neurons, n_timesteps = spike_data.shape
     n_neurons_to_process = min(max_neurons or n_neurons, n_neurons)
@@ -54,20 +57,132 @@ def detect_spikes_threshold(
 
 
 def _normalize_per_neuron(data: npt.NDArray[Any]) -> npt.NDArray[Any]:
-    # maybe this should be abstract also to the other use in the codebase for normalizing.
-    """Normalize each neuron's data to [0, 1] range (for each neuron, not for all neurons - massive variation exists0"""
+    """Normalize each neuron's data to [0, 1] range (for each neuron, not for all neurons - massive variation exists)"""
+    scaler = MinMaxScaler()
+    return scaler.fit_transform(data.astype(np.float32)).astype(np.float32)
 
-    n_neurons, n_timepoints = data.shape
-    normalized = np.zeros_like(data, dtype=np.float32)
 
-    for i in range(n_neurons):
-        neuron_data = data[i, :].astype(np.float32)
-        data_min = float(np.min(neuron_data))
-        data_max = float(np.max(neuron_data))
+def detect_spikes_voltage_trace(
+    voltage_trace: npt.NDArray[Any],
+    *,
+    neuron_id: int,
+    dt: float,
+    threshold_method: str = "mean_plus_std",
+    threshold_multiplier: float = 3.0,
+    min_spike_interval: float = 0.001,
+    detection_method: str = "peak",
+    peak_height_threshold: float = 3.0,
+    peak_prominence: float = 0.5,
+    peak_distance: int | None = None,
+    peak_width: float | None = None,
+) -> SpikeData:
+    """
+    General spike detection based on data provided as trace, to derive spikes from.
 
-        if data_max > data_min:
-            normalized[i, :] = (neuron_data - data_min) / (data_max - data_min)
+    Args:
+        voltage_trace: 1D voltage array for single neuron
+        threshold_method: "mean_plus_std" or "absolute" (for threshold detection)
+        peak_ - arguments for peak detection
+
+    Returns:
+        SpikeData object with detected spikes
+    """
+    if voltage_trace.ndim != 1:
+        raise ValueError(
+            "voltage_trace must be 1D array - run this function per Neuron"
+        )
+    if dt <= 0:
+        raise ValueError("dt must be positive")
+    if min_spike_interval < 0:
+        raise ValueError("min_spike_interval must be non-negative")
+
+    voltage_trace = voltage_trace.astype(np.float32)
+
+    if detection_method == "peak":
+        spike_indices = _detect_peaks_scipy(
+            voltage_trace,
+            dt,
+            peak_height_threshold,
+            peak_prominence,
+            min_spike_interval,
+            peak_distance,
+            peak_width,
+        )
+    elif detection_method == "threshold":
+        # Original threshold-based detection
+        if threshold_method == "mean_plus_std":
+            threshold = np.mean(voltage_trace) + threshold_multiplier * np.std(
+                voltage_trace
+            )
+        elif threshold_method == "absolute":
+            threshold = threshold_multiplier
         else:
-            normalized[i, :] = np.zeros_like(neuron_data)
+            raise ValueError("threshold_method must be 'mean_plus_std' or 'absolute'")
 
-    return normalized
+        potential_spikes = np.where(voltage_trace > threshold)[0]
+        min_spike_samples = int(min_spike_interval / dt)
+        filtered_spikes = []
+
+        if len(potential_spikes) > 0:
+            filtered_spikes = [potential_spikes[0]]
+            for spike_idx in potential_spikes[1:]:
+                if spike_idx - filtered_spikes[-1] > min_spike_samples:
+                    filtered_spikes.append(spike_idx)
+
+        spike_indices = np.array(filtered_spikes, dtype=np.int32)
+    else:
+        raise ValueError("detection_method must be 'peak' or 'threshold'")
+
+    spike_times = spike_indices.astype(np.float32) * dt
+    neuron_indices = np.full(len(spike_indices), neuron_id, dtype=np.int32)
+
+    return SpikeData(
+        f"Voltage spikes (Neuron {neuron_id})", neuron_indices, spike_times
+    )
+
+
+def _detect_peaks_scipy(
+    voltage_trace: npt.NDArray[Any],
+    dt: float,
+    peak_height_threshold: float,
+    peak_prominence: float,
+    min_spike_interval: float,
+    peak_distance: int | None = None,
+    peak_width: float | None = None,
+) -> npt.NDArray[Any]:
+    """
+    Scipy-based peak detection for spike detection in voltage traces.
+
+    Args:
+        voltage_trace: 1D voltage array
+        dt: Time step between samples
+        peak_height_threshold: Minimum height above baseline (in std devs)
+        peak_prominence: Minimum prominence for peak detection
+        min_spike_interval: Minimum time between spikes (seconds)
+        peak_distance: Minimum horizontal distance between peaks (samples)
+        peak_width: Minimum width of peaks (samples)
+
+    Returns:
+        Array of spike indices
+    """
+    baseline = np.mean(voltage_trace)
+    std_dev = np.std(voltage_trace)
+    min_height = baseline + peak_height_threshold * std_dev
+    min_spike_samples = int(min_spike_interval / dt)
+
+    # Set up find_peaks parameters
+    height = min_height
+    prominence = peak_prominence * std_dev
+    distance = peak_distance if peak_distance is not None else min_spike_samples
+    width = peak_width
+
+    # Use scipy find_peaks with these options  # think this works?
+    spike_indices, _ = find_peaks(
+        voltage_trace,
+        height=height,
+        prominence=prominence,
+        distance=distance,
+        width=width,
+    )
+
+    return spike_indices.astype(np.int32)
