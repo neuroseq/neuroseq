@@ -34,8 +34,8 @@ class SpikeData:
     """
 
     name: str
-    spike_indices: np.ndarray
-    spike_times: np.ndarray
+    spike_indices: NDArray[np.uint32]
+    spike_times: NDArray[np.float32]
 
 
 @dataclass

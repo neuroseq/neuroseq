@@ -36,7 +36,7 @@ def _make_experiment(
 
 def test_add_experimental_data_overwrite_raises_error() -> None:
     project = Project()
-    project.add_experimental_data(_make_experiment())
+    project.add_experiment(_make_experiment())
 
     assert len(project.experiments) == 1
     assert "test_experiment" in project.experiments
@@ -48,7 +48,7 @@ def test_add_experimental_data_overwrite_raises_error() -> None:
     assert project.max_time_secs == pytest.approx(3.7, abs=0.01)
 
     with pytest.raises(ValueError):
-        project.add_experimental_data(_make_experiment())
+        project.add_experiment(_make_experiment())
 
     assert len(project.experiments) == 1
     assert "test_experiment" in project.experiments
@@ -62,7 +62,7 @@ def test_add_experimental_data_overwrite_raises_error() -> None:
 
 def test_append_experimental_data() -> None:
     project = Project()
-    project.add_experimental_data(_make_experiment())
+    project.add_experiment(_make_experiment())
 
     assert len(project.experiments) == 1
     assert "test_experiment" in project.experiments
@@ -148,7 +148,7 @@ def test_append_experimental_data() -> None:
 
 def test_add_experimental_data_append_invalid() -> None:
     project = Project()
-    project.add_experimental_data(_make_experiment(n_neurons=6, dt=0.2))
+    project.add_experiment(_make_experiment(n_neurons=6, dt=0.2))
     with pytest.raises(ValueError) as excinfo:
         project.append_experimental_data(
             "test_experiment", 3.7, _make_experiment(n_neurons=7, dt=0.2).data, 3.7
@@ -161,7 +161,9 @@ def test_add_experimental_data_append_invalid() -> None:
     assert "dt" in str(excinfo.value)
 
 
-def test_save_load(project_nmda: Project, tmp_path: Path) -> None:
+def test_save_load(
+    project_nmda: Project, tmp_path: Path, test_experiment: Experiment
+) -> None:
     tmp_file = tmp_path / "project.nseq"
     assert project_nmda.filepath is None
 
@@ -171,25 +173,7 @@ def test_save_load(project_nmda: Project, tmp_path: Path) -> None:
     project_nmda.run_simulation(0.1)
 
     # add some experimental data
-    trace_data = TraceData(
-        name="test_trace",
-        traces=np.random.rand(12, 3),
-        indices=np.arange(0, 12, dtype=np.uint32),
-        units="mV",
-        dt=0.01,
-    )
-    spike_data = SpikeData(
-        name="test_spike",
-        spike_indices=np.array([1, 4, 5]),
-        spike_times=np.array([0.1, 0.6, 0.99]),
-    )
-    experimental_data = Experiment(
-        name="test_experiment",
-        duration=0.03,
-        timepoints=[],
-        data=[trace_data, spike_data],
-    )
-    project_nmda.add_experimental_data(experimental_data)
+    project_nmda.add_experiment(test_experiment)
 
     # save project including everything
     save_options = SaveLoadOptions(True, True, True, True)
@@ -267,20 +251,26 @@ def test_save_load(project_nmda: Project, tmp_path: Path) -> None:
 
     # as well as experimental data
     assert len(reconstructed_project.experiments) == 1
-    assert "test_experiment" in reconstructed_project.experiments
-    loaded_experimental_data = reconstructed_project.experiments["test_experiment"]
-    assert len(loaded_experimental_data.data) == 2
-    loaded_trace_data = loaded_experimental_data.data[0]
+    assert "test_exp" in reconstructed_project.experiments
+    exp = reconstructed_project.experiments["test_exp"]
+    assert exp.duration == pytest.approx(test_experiment.duration)
+    assert len(exp.timepoints) == 3
+    assert len(exp.data) == 2
+    loaded_trace_data = exp.data[0]
+    test_trace_data = test_experiment.data[0]
     assert isinstance(loaded_trace_data, TraceData)
-    assert loaded_trace_data.name == trace_data.name
-    assert loaded_trace_data.units == trace_data.units
-    assert loaded_trace_data.dt == pytest.approx(trace_data.dt)
-    assert np.allclose(loaded_trace_data.traces, trace_data.traces)
-    loaded_spike_data = loaded_experimental_data.data[1]
+    assert isinstance(test_trace_data, TraceData)
+    assert loaded_trace_data.name == test_trace_data.name
+    assert loaded_trace_data.units == test_trace_data.units
+    assert loaded_trace_data.dt == pytest.approx(test_trace_data.dt)
+    assert np.allclose(loaded_trace_data.traces, test_trace_data.traces)
+    loaded_spike_data = exp.data[1]
+    test_spike_data = test_experiment.data[1]
     assert isinstance(loaded_spike_data, SpikeData)
-    assert loaded_spike_data.name == spike_data.name
-    assert np.allclose(loaded_spike_data.spike_indices, spike_data.spike_indices)
-    assert np.allclose(loaded_spike_data.spike_times, spike_data.spike_times)
+    assert isinstance(test_spike_data, SpikeData)
+    assert loaded_spike_data.name == test_spike_data.name
+    assert np.allclose(loaded_spike_data.spike_indices, test_spike_data.spike_indices)
+    assert np.allclose(loaded_spike_data.spike_times, test_spike_data.spike_times)
 
     # and simulations can be continued: run for 1s so that both models have run for 0.2s from the same initial conditions
     reconstructed_project.run_simulation(0.1)
@@ -419,3 +409,85 @@ def test_stim_array_rename() -> None:
     project.delete_stim_array("stim2")
     assert "stim2" not in project.stim_arrays
     assert len(project.stim_arrays) == 0
+
+
+def test_issues_with_appending_experimental_data_valid(
+    project_nmda: Project, make_trace_data, make_spike_data
+) -> None:
+    experiment = Experiment(
+        "exp",
+        1.0,
+        [0.0, 0.5, 1.0],
+        [
+            make_trace_data(n_neurons=5, n_timestamps=1000, dt=0.001),
+            make_spike_data(n_neurons=5, max_time_secs=1.0),
+        ],
+    )
+    project_nmda.add_experiment(experiment)
+    # number of neurons and dt match, so no issues appending this data
+    assert (
+        project_nmda.issues_with_appending_experimental_data(
+            "exp",
+            [
+                make_trace_data(n_neurons=5, n_timestamps=100, dt=0.001),
+                make_spike_data(n_neurons=5, max_time_secs=0.10),
+            ],
+        )
+        == ""
+    )
+
+
+def test_issues_with_appending_experimental_data_invalid(
+    project_nmda: Project, make_trace_data, make_spike_data
+) -> None:
+    experiment = Experiment(
+        "exp",
+        1.0,
+        [0.0, 0.5, 1.0],
+        [
+            make_trace_data(n_neurons=5, n_timestamps=1000, dt=0.001),
+            make_spike_data(n_neurons=5, max_time_secs=1.0),
+        ],
+    )
+    project_nmda.add_experiment(experiment)
+
+    # experiment doesn't exist
+    assert "exist" in project_nmda.issues_with_appending_experimental_data(
+        "nonexistent_exp", []
+    )
+
+    # data names match but types do not
+    assert "data" in project_nmda.issues_with_appending_experimental_data(
+        "exp",
+        [
+            make_spike_data(name="test_traces", n_neurons=5, max_time_secs=0.20),
+            make_spike_data(n_neurons=5, max_time_secs=0.20),
+        ],
+    )
+
+    # data names don't match
+    assert "name" in project_nmda.issues_with_appending_experimental_data(
+        "exp",
+        [
+            make_trace_data(n_neurons=5, n_timestamps=100, dt=0.001, name="wrong_name"),
+            make_spike_data(n_neurons=5, max_time_secs=0.10),
+        ],
+    )
+
+    # number of neurons don't match
+    assert "neurons" in project_nmda.issues_with_appending_experimental_data(
+        "exp",
+        [
+            make_trace_data(n_neurons=6, n_timestamps=100, dt=0.001),
+            make_spike_data(n_neurons=6, max_time_secs=0.10),
+        ],
+    )
+
+    # dt doesn't match
+    assert "dt" in project_nmda.issues_with_appending_experimental_data(
+        "exp",
+        [
+            make_trace_data(n_neurons=5, n_timestamps=100, dt=0.002),
+            make_spike_data(n_neurons=5, max_time_secs=0.10),
+        ],
+    )

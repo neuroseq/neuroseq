@@ -24,6 +24,7 @@ from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.utils import append_data
+from neuroseq.utils import find_by_name_and_type
 from neuroseq.utils import save_store_name
 
 
@@ -232,12 +233,91 @@ class Project:
             )
             self.max_neurons = max(self.max_neurons, int(stim_array.values.shape[1]))
 
+    def issues_with_appending_experimental_data(
+        self,
+        experiment_name: str,
+        new_data: Sequence[TraceData | SpikeData | SynapseData],
+    ) -> str:
+        """
+        Check for any issues with appending additional experimental data to an existing experiment
+
+        Parameters
+        ----------
+        experiment_name : str
+            Name of the experiment to append to
+        new_data : Sequence[TraceData | SpikeData | SynapseData]
+            List of data objects to be appended to the experiment
+
+        Returns
+        -------
+        str
+            Description of any issues found, or an empty string if no issues
+        """
+        if experiment_name not in self.experiments:
+            return f"Experiment '{experiment_name}' does not exist"
+        existing_experiment = self.experiments[experiment_name]
+
+        for datum in new_data:
+            if isinstance(datum, TraceData):
+                existing_trace = find_by_name_and_type(
+                    existing_experiment.data,
+                    datum.name,
+                    TraceData,
+                )
+                if existing_trace is None:
+                    return (
+                        f"Cannot append data '{datum.name}': data with this name and type "
+                        f"does not exist in experiment '{experiment_name}'"
+                    )
+                if existing_trace.traces.shape[0] != datum.traces.shape[0]:
+                    return (
+                        f"Cannot append trace data '{datum.name}': number of neurons does not match "
+                        f"({existing_trace.traces.shape[0]} != {datum.traces.shape[0]})"
+                    )
+                if existing_trace.dt != datum.dt:
+                    return (
+                        f"Cannot append trace data '{datum.name}': dt does not match "
+                        f"({existing_trace.dt} != {datum.dt})"
+                    )
+            elif isinstance(datum, SpikeData):
+                existing_spike = find_by_name_and_type(
+                    existing_experiment.data,
+                    datum.name,
+                    SpikeData,
+                )
+                if existing_spike is None:
+                    return (
+                        f"Cannot append data '{datum.name}': data with this name and type "
+                        f"does not exist in experiment '{experiment_name}'"
+                    )
+            elif isinstance(datum, SynapseData):
+                existing_synapse = find_by_name_and_type(
+                    existing_experiment.data,
+                    datum.name,
+                    SynapseData,
+                )
+                if existing_synapse is None:
+                    return (
+                        f"Cannot append data '{datum.name}': data with this name and type "
+                        f"does not exist in experiment '{experiment_name}'"
+                    )
+                if (
+                    existing_synapse.values.shape[0] != datum.values.shape[0]
+                    or existing_synapse.values.shape[1] != datum.values.shape[1]
+                ):
+                    return (
+                        f"Cannot append synapse data '{datum.name}': number of neurons does not match "
+                        f"({existing_synapse.values.shape[0]}x{existing_synapse.values.shape[1]} != "
+                        f"{datum.values.shape[0]}x{datum.values.shape[1]})"
+                    )
+        return ""
+
     def append_experimental_data(
         self,
         experiment_name: str,
         duration_seconds: float,
         new_data: Sequence[TraceData | SpikeData | SynapseData],
-        time_offset_seconds: float | None = None,
+        time_offset_seconds: float,
     ):
         """
         Append new experimental data to an existing experiment
@@ -250,8 +330,8 @@ class Project:
             Duration in seconds of the new data to append
         new_data : Sequence[TraceData | SpikeData | SynapseData]
             List of data objects to append to the experiment
-        time_offset_seconds : float | None
-            Optional time in seconds at which to insert the new data. If None, append to the end.
+        time_offset_seconds : float
+            Time in seconds at which to insert the new data.
         """
         if experiment_name not in self.experiments:
             self.logger.warning(
@@ -295,7 +375,7 @@ class Project:
         )
         self.update_limits()
 
-    def add_experimental_data(
+    def add_experiment(
         self,
         experiment: Experiment,
     ):
@@ -318,6 +398,7 @@ class Project:
                 f"Add requested but experiment '{experiment.name}' already exists"
             )
             raise ValueError(f"Experiment '{experiment.name}' already exists")
+        self.logger.info(f"Adding experimental data for experiment '{experiment.name}'")
         for t in [0.0, experiment.duration]:
             if t not in experiment.timepoints:
                 experiment.timepoints.append(t)
