@@ -30,8 +30,8 @@ def default_model() -> Model:
     # define Brian2 model
     b2_model = model.b2_model
 
-    nneurons = 30
-    nneurons_exc = 24
+    nneurons = 40
+    nneurons_exc = 32
 
     b2_model.define_parameter("area", 20000 * b2.umetre**2)
     b2_model.define_parameter(
@@ -182,7 +182,6 @@ we= clip(we + Apre, -gmax, gmax)
     return model
 
 
-@register_example_model("Non-linear")
 def non_linear() -> Model:
     model = Model()
 
@@ -236,7 +235,7 @@ def non_linear() -> Model:
     return model
 
 
-@register_example_model("Single HH Neuron")
+@register_example_model("Hodgkin-Huxley Neuron")
 def single_hh_neuron() -> Model:
     model = Model()
 
@@ -267,10 +266,10 @@ def single_hh_neuron() -> Model:
     b2_model.define_parameter("Eeopto", 0 * b2.mV)
     b2_model.define_parameter("Eiopto", -80 * b2.mV)
     b2_model.define_parameter(
-        "g_exc", (2e-3 * b2.siemens * b2.cm**-2) * b2_model.parameters["area"]
+        "g_exc", (1e-4 * b2.siemens * b2.cm**-2) * b2_model.parameters["area"]
     )
     b2_model.define_parameter(
-        "g_inh", (3e-3 * b2.siemens * b2.cm**-2) * b2_model.parameters["area"]
+        "g_inh", (1e-4 * b2.siemens * b2.cm**-2) * b2_model.parameters["area"]
     )
 
     eqs = """
@@ -315,9 +314,13 @@ def single_hh_neuron() -> Model:
     b2_model.define_monitor_variable("mon", "v")
 
     # define stim arrays
-    i_stim = np.zeros((1000, 1), dtype="float")
+    i_stim = np.zeros((3100, 1), dtype="float")
     i_stim[:, :] = 0
-    i_stim[200:300, :] = 1
+    i_stim[100:199, :] = np.arange(99)[:, np.newaxis] * 3
+    i_stim[300:399, :] = np.arange(99)[:, np.newaxis] * 6
+    i_stim[500:599, :] = 200
+    i_stim[700:799, :] = 400
+    i_stim[900:999, :] = 600
     i_external = StimArray(
         name="I_external",
         stim_type=StimType.External,
@@ -327,9 +330,13 @@ def single_hh_neuron() -> Model:
     )
     model.add_stim_array(i_external)
 
-    exc_stim = np.zeros((1000, 1), dtype="float")
+    exc_stim = np.zeros((3100, 1), dtype="float")
     exc_stim[:, :] = 0
-    exc_stim[0:200, :] = 1
+    exc_stim[1100:1199, :] = np.arange(99)[:, np.newaxis] * 0.005
+    exc_stim[1300:1399, :] = np.arange(99)[:, np.newaxis] * 0.01
+    exc_stim[1500:1599, :] = 0.25
+    exc_stim[1700:1799, :] = 0.5
+    exc_stim[1900:1999, :] = 1.0
     exc_stimulation = StimArray(
         name="Exc_stimulation",
         stim_type=StimType.Excitation,
@@ -339,9 +346,13 @@ def single_hh_neuron() -> Model:
     )
     model.add_stim_array(exc_stimulation)
 
-    inh_stim = np.zeros((1000, 1), dtype="float")
+    inh_stim = np.zeros((3100, 1), dtype="float")
     inh_stim[:, :] = 0
-    inh_stim[300:900, :] = 1
+    inh_stim[2100:2199, :] = np.arange(99)[:, np.newaxis] * 0.005
+    inh_stim[2300:2399, :] = np.arange(99)[:, np.newaxis] * 0.01
+    inh_stim[2500:2599, :] = 0.25
+    inh_stim[2700:2799, :] = 0.5
+    inh_stim[2900:2999, :] = 1.0
     inh_stimulation = StimArray(
         name="Inh_stimulation",
         stim_type=StimType.Inhibition,
@@ -354,7 +365,7 @@ def single_hh_neuron() -> Model:
     return model
 
 
-@register_example_model("HH Neuron with plasticity")
+@register_example_model("Network of Hodgkin-Huxley Neurons with STDP")
 def hh_neuron_with_plasticity() -> Model:
     model = Model()
 
@@ -506,7 +517,7 @@ def hh_neuron_with_plasticity() -> Model:
     return model
 
 
-@register_example_model("HH Neuron with synapses")
+@register_example_model("Network of Hodgkin-Huxley Neurons")
 def hh_neuron_with_synapses() -> Model:
     model = Model()
 
@@ -561,9 +572,12 @@ def hh_neuron_with_synapses() -> Model:
     b2_model.define_parameter("opto_units", opto_units)
 
     eqs = """
-    dv/dt = (gl*(El-v)+ge*(Ee-v)+gi*(Ei-v)-
-             g_na*(m*m*m)*h*(v-ENa)-
-             g_kd*(n*n*n*n)*(v-EK))/Cm : volt
+    dv/dt = (ge*(Ee-v)+gi*(Ei-v)+geopto*(Eeopto-v)+giopto*(Eiopto-v)+gl*(El-v)-
+            g_na*(m*m*m)*h*(v-ENa)-
+            g_kd*(n*n*n*n)*(v-EK)+Iext)/Cm : volt
+    Iext = I_external(t,i) : amp
+    geopto = g_exc * Exc_stimulation(t, i)/opto_units: siemens
+    giopto = g_inh * Inh_stimulation(t, i)/opto_units: siemens
     dm/dt = alpha_m*(1-m)-beta_m*m : 1
     dn/dt = alpha_n*(1-n)-beta_n*n : 1
     dh/dt = alpha_h*(1-h)-beta_h*h : 1
@@ -593,11 +607,15 @@ def hh_neuron_with_synapses() -> Model:
     b2_model.define_neuronsubgroup_idxs("Pi", (nneurons_exc, nneurons))
 
     b2_model.define_synapse_connection("Ce", None)
+    # b2_model.define_synapse_connection("Ce", "i != j")
+    b2_model.define_synapse_equation("Ce", """we : siemens""")
     b2_model.define_synapse_connection_probability("Ce", 0.02)
     b2_model.define_synapse_origin("Ce", "Pe")
     b2_model.define_synapse_target("Ce", "P")
 
     b2_model.define_synapse_connection("Ci", None)
+    # b2_model.define_synapse_connection("Ci", "i != j")
+    b2_model.define_synapse_equation("Ci", """wi : siemens""")
     b2_model.define_synapse_connection_probability("Ci", 0.02)
     b2_model.define_synapse_origin("Ci", "Pi")
     b2_model.define_synapse_target("Ci", "P")
@@ -610,6 +628,12 @@ def hh_neuron_with_synapses() -> Model:
     b2_model.define_init("P", "ge", "(randn() * 1.5 + 4) * 10.*nS")
     b2_model.define_init("P", "gi", "(randn() * 12 + 20) * 10.*nS")
 
+    # b2_model.define_init("Ce", "we", "exp(0.25*randn())*6*nS")
+    # b2_model.define_init("Ci", "wi", "exp(0.25*randn())*67*nS")
+
+    b2_model.define_init("Ce", "we", "6*nS")
+    b2_model.define_init("Ci", "wi", "67*nS")
+
     # monitors
     b2_model.define_monitor_source("trace", "P")
     b2_model.define_monitor_type("trace", "StateMonitor")
@@ -619,13 +643,41 @@ def hh_neuron_with_synapses() -> Model:
     b2_model.define_monitor_type("mon", "SpikeMonitor")
     b2_model.define_monitor_variable("mon", "v")
 
+    b2_model.define_monitor_source("synapse", "Ce")
+    b2_model.define_monitor_type("synapse", "StateMonitor")
+    b2_model.define_monitor_variable("synapse", "we")
+    # self..define_monitor_dt(1.0 * b2.s, "synapse")
+
     # define stim arrays
 
-    tfinal = 1000 * b2.ms
+    tfinal = 2000 * b2.ms
 
     i_stim = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
     i_stim[:, :] = 0
-    i_stim[200:300, :] = 1
+    # i_stim[200:300, :] = 1
+
+    exc_stim = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
+    exc_stim[:, :] = 0
+    # exc_stim[0:200, :] = 1
+
+    inh_stim = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
+    inh_stim[:, :] = 0
+    # inh_stim[300:900, :] = 1
+
+    sp = 100
+
+    for n in range(1, 90):
+        exc_stim[sp + 10 * n : sp + 10 * (n + 1), n] = 1
+        inh_stim[sp + 10 * n : sp + 10 * (n + 1), (n + 1) : 3200] = 0.1
+        inh_stim[sp + 10 * n : sp + 10 * (n + 1), 1:n] = 0.1
+
+    sp = 1100
+
+    for n in range(1, 90):
+        exc_stim[sp + 10 * n : sp + 10 * (n + 1), n] = 1
+        inh_stim[sp + 10 * n : sp + 10 * (n + 1), (n + 1) :] = 0.1
+        inh_stim[sp + 10 * n : sp + 10 * (n + 1), 1:n] = 0.1
+
     i_external = StimArray(
         name="I_external",
         stim_type=StimType.External,
@@ -635,26 +687,20 @@ def hh_neuron_with_synapses() -> Model:
     )
     model.add_stim_array(i_external)
 
-    exc_stim = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
-    exc_stim[:, :] = 0
-    exc_stim[0:200, :] = 1
     exc_stimulation = StimArray(
         name="Exc_stimulation",
         stim_type=StimType.Excitation,
         values=exc_stim,
-        units="1",
+        units="mwatt / um2",
         dt=0.001,
     )
     model.add_stim_array(exc_stimulation)
 
-    inh_stim = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
-    inh_stim[:, :] = 0
-    inh_stim[300:900, :] = 1
     inh_stimulation = StimArray(
         name="Inh_stimulation",
         stim_type=StimType.Inhibition,
         values=inh_stim,
-        units="1",
+        units="mwatt / um2",
         dt=0.001,
     )
     model.add_stim_array(inh_stimulation)
@@ -662,7 +708,6 @@ def hh_neuron_with_synapses() -> Model:
     return model
 
 
-@register_example_model("HH Neurons EI model")
 def hh_neurons_ei_model() -> Model:
     model = Model()
 
@@ -801,7 +846,6 @@ def hh_neurons_ei_model() -> Model:
     return model
 
 
-@register_example_model("Single LIF Neuron")
 def single_lif_neuron() -> Model:
     model = Model()
 
@@ -859,7 +903,6 @@ def single_lif_neuron() -> Model:
     return model
 
 
-@register_example_model("Single LIF Neuron without stim")
 def single_lif_neuron_without_stim() -> Model:
     model = Model()
 
@@ -901,7 +944,7 @@ def single_lif_neuron_without_stim() -> Model:
     return model
 
 
-@register_example_model("Single LIF Neuron with many stims")
+@register_example_model("Leaky-Integrate-and-Fire Neuron")
 def single_lif_neuron_many_stims() -> Model:
     model = Model()
 
@@ -957,11 +1000,15 @@ def single_lif_neuron_many_stims() -> Model:
     b2_model.define_monitor_variable("mon", "v")
 
     # define stim arrays
-    tfinal = 1000 * b2.ms
+    tfinal = 3100 * b2.ms
 
     i_stim = np.zeros((int(tfinal / b2.ms), 1), dtype="float")
     i_stim[:, :] = 0
-    i_stim[200:300, :] = 1000
+    i_stim[100:199, :] = np.arange(99)[:, np.newaxis] * 3
+    i_stim[300:399, :] = np.arange(99)[:, np.newaxis] * 6
+    i_stim[500:599, :] = 200
+    i_stim[700:799, :] = 400
+    i_stim[900:999, :] = 600
     i_external = StimArray(
         name="I_external",
         stim_type=StimType.External,
@@ -973,7 +1020,11 @@ def single_lif_neuron_many_stims() -> Model:
 
     exc_stim = np.zeros((int(tfinal / b2.ms), 1), dtype="float")
     exc_stim[:, :] = 0
-    exc_stim[50:100, :] = 0.3
+    exc_stim[1100:1199, :] = np.arange(99)[:, np.newaxis] * 0.005
+    exc_stim[1300:1399, :] = np.arange(99)[:, np.newaxis] * 0.01
+    exc_stim[1500:1599, :] = 0.25
+    exc_stim[1700:1799, :] = 0.5
+    exc_stim[1900:1999, :] = 1.0
     exc_stimulation = StimArray(
         name="Exc_stimulation",
         stim_type=StimType.Excitation,
@@ -985,7 +1036,11 @@ def single_lif_neuron_many_stims() -> Model:
 
     inh_stim = np.zeros((int(tfinal / b2.ms), 1), dtype="float")
     inh_stim[:, :] = 0
-    inh_stim[500:900, :] = 0.3
+    inh_stim[2100:2199, :] = np.arange(99)[:, np.newaxis] * 0.005
+    inh_stim[2300:2399, :] = np.arange(99)[:, np.newaxis] * 0.01
+    inh_stim[2500:2599, :] = 0.25
+    inh_stim[2700:2799, :] = 0.5
+    inh_stim[2900:2999, :] = 1.0
     inh_stimulation = StimArray(
         name="Inh_stimulation",
         stim_type=StimType.Inhibition,
