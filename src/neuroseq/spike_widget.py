@@ -4,7 +4,7 @@ import brian2.numpy_ as np
 import pygfx
 from qtpy import QtWidgets
 
-from neuroseq.experiment import SpikeData
+from neuroseq.data import SpikeData
 from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.utils import neuron_indices_to_colors
 
@@ -45,6 +45,17 @@ class SpikeWidget(TimeseriesWidget):
             ],
             axis=1,
         )
+        self.graphic = self.subplot.add_scatter(
+            spike_data,
+            colors=neuron_indices_to_colors(data.spike_indices),
+            sizes=7,
+            size_space="screen",
+            uniform_size=True,
+        )
+        self.post_set_data()
+        """
+        Alternate implementation (for some reason I thought this was needed
+        but at time of merge am not sure. Keeping it briefly):
         ids = (
             data.spike_indices - data.spike_indices.min()
             if data.spike_indices.size > 0
@@ -54,11 +65,4 @@ class SpikeWidget(TimeseriesWidget):
         colors_rgba = (colors_rgba_float * 255).astype(np.uint8)
         colors_normalized = colors_rgba.astype(np.float32) / 255.0
 
-        self.graphic = self.subplot.add_scatter(
-            spike_data,
-            colors=colors_normalized,
-            sizes=7,
-            size_space="screen",
-            uniform_size=True,
-        )
-        self.post_set_data()
+"""

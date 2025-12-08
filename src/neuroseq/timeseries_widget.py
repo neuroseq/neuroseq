@@ -6,26 +6,26 @@ import math
 import brian2.numpy_ as np
 import fastplotlib as fpl
 import pygfx
-import pyqtgraph as pg
 import qtawesome as qta
 from fastplotlib.layouts import Subplot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.custom_analysis_widget import CustomAnalysisType
-from neuroseq.experiment import SpikeData
-from neuroseq.experiment import SynapseData
-from neuroseq.experiment import TraceData
+from neuroseq.data import SpikeData
+from neuroseq.data import SynapseData
+from neuroseq.data import TraceData
+from neuroseq.fpl_widget import FPLWidget
 from neuroseq.gridlines import GridLines
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.region_of_interest import RegionOfInterest
 from neuroseq.text import Text
+from neuroseq.timeline import Timeline
 from neuroseq.utils import InteractMode
-from neuroseq.utils import QtABCMeta
 from neuroseq.utils import add_action
 
 
-class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
+class TimeseriesWidget(FPLWidget):
     """A base class for widgets that display a set of timeseries data for a number of neurons, stacked vertically.
 
     data should be a 2d array or list of 2d arrays, where the first index of each
@@ -49,28 +49,21 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
     def __init__(
         self, controller: pygfx.Controller, parent: QtWidgets.QWidget | None = None
     ) -> None:
-        super().__init__(parent)
+        # provisonally included
+        super().__init__(controller=controller, parent=parent)
         self.heatmap_widget: HeatmapWidget | None = None
         self.controller = controller
-        layout = QtWidgets.QVBoxLayout(self)
-        self.setLayout(layout)
-        self.setMinimumSize(QtCore.QSize(100, 100))
-        self.resize(800, 600)
-
-        self.figure: fpl.Figure = fpl.Figure(
-            controllers=controller, canvas_kwargs={"parent": self}
-        )
-        self.widget = self.figure.show()
-        layout.addWidget(self.widget)
         self.graphic: fpl.ImageGraphic | fpl.LineStack | fpl.ScatterGraphic | None = (
             None
         )
+        self.background_graphics: list[fpl.Graphic] = []
+        self.show_background_graphics = True
         self.mode = InteractMode.SELECT
         self.roi = RegionOfInterest(fill_color=(0.5, 0.5, 0.5, 0.2))
         self.hover_slice_graphic: fpl.Graphic | None = None
         self.text = Text()
         self.show_text = True
-        self.timeline: fpl.LinearSelector | None = None
+        self.timeline = Timeline()
         self.grid_lines: GridLines | None = None
         self.subplot: Subplot = self.figure[0, 0]
         self._set_light_mode()
@@ -139,24 +132,6 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         else:
             super().contextMenuEvent(event)
 
-    def _set_light_mode(self) -> None:
-        # some of these currently require accessing private attributes: should refactor when fastplotlib allows setting these colors directly
-        self.subplot.background_color = "w"
-        self.subplot.axes.colors = (
-            "k",
-            "k",
-            "k",
-        )
-        self.subplot.axes.grids.xy.axis_color = "k"
-        self.subplot.axes.grids.xy.major_color = "k"
-        self.subplot.axes.grids.xy.minor_color = "k"
-        self.subplot.axes._x._text.material.color = "k"
-        self.subplot.axes._y._text.material.color = "k"
-        self.subplot.axes._x._line.material.color = "k"
-        self.subplot.axes._y._line.material.color = "k"
-        self.subplot.axes._x._points.material.color = "k"
-        self.subplot.axes._y._points.material.color = "k"
-
     def post_set_data(self):
         self.controller.max_height = max(self.controller.max_height, self.n_neurons)
         self.controller.max_width = max(
@@ -174,35 +149,26 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.subplot.axes.x.tick_format = lambda x, x_min, x_max: f"{x:.0f}ms"
         self.subplot.toolbar = False
         self.subplot.add_graphic(self.roi, center=False)
+        self.subplot.add_graphic(self.timeline, center=False)
         self.grid_lines = GridLines(self.n_neurons, self.n_timestamps * self.dt_ms)
         self.subplot.add_graphic(self.grid_lines, center=False)
         self.controller.add_grid_lines(self.grid_lines)
         self.subplot.add_graphic(self.text, center=False)
         self._set_light_mode()
         self.roi.visible = False
-        if hasattr(self.graphic, "add_linear_selector"):
-            self.timeline = self.graphic.add_linear_selector(thickness=2)
-            self.timeline.add_event_handler(
-                lambda ev: self.heatmap_widget.timeLine.setValue(ev.info["value"]),
-                "selection",
-            )
 
     def clear_data(self) -> None:
-        self.subplot.clear()
-        self.subplot.grids = False
-        self.subplot.axes.y.ticks = {}
-        self.subplot.axes.y.points.visible = False
-        self.subplot.axes.y.line.visible = False
-        self.subplot.axes.x.points.visible = False
-        self.subplot.axes.x.line.visible = False
-        self.subplot.axes.x.ticks = {}
-        self.subplot.toolbar = False
+        super().clear_data()
         self.hover_slice_graphic = None
+        self.background_graphics = []
         self.data = None
         self.n_neurons = 0
         self.n_timestamps = 0
-        self.dt_ms = 1.0
+        self.dt_ms = 0.0
         self.unselect_neurons()
+
+    def set_time_ms(self, time_ms: int) -> None:
+        self.timeline.t = time_ms
 
     def pointer_down(self, ev: pygfx.PointerEvent) -> None:
         self.mouse_press_pos = self.subplot.map_screen_to_world(ev)
@@ -216,10 +182,6 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
             self.roi.visible = True
             self.selection_in_progress = True
         elif self.mode == InteractMode.DRAW:
-            if self.dt_ms > 0:
-                self.mouse_drag_time_index = math.floor(self.mouse_pos[0] / self.dt_ms)
-            else:
-                self.mouse_drag_time_index = 0
             self.mouse_drag_neuron_index = math.floor(self.mouse_pos[1] + 0.5)
             self.mouse_dragged.emit(
                 self.mouse_drag_neuron_index,
@@ -242,14 +204,11 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.text.visible = self.show_text
         hover_value_text = ""
         if self.data_values is not None:
-            if self.dt_ms > 0:
-                time_index = np.clip(
-                    math.floor(self.mouse_pos[0] / self.dt_ms),
-                    0,
-                    self.data_values.shape[0] - 1,
-                )
-            else:
-                time_index = 0
+            time_index = np.clip(
+                math.floor(self.mouse_pos[0] / self.dt_ms),
+                0,
+                self.data_values.shape[0] - 1,
+            )
             neuron_index = np.clip(
                 math.floor(self.mouse_pos[1] + 0.5), 0, self.data_values.shape[1] - 1
             )
@@ -270,23 +229,14 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
             x1 = max(self.mouse_pos[0], self.mouse_press_pos[0])
             y0 = min(self.mouse_pos[1] + 0.5, self.mouse_press_pos[1] + 0.5)
             y1 = max(self.mouse_pos[1] + 0.5, self.mouse_press_pos[1] + 0.5)
-            if self.dt_ms > 0:
-                start_idx = max(0, math.floor(x0 / self.dt_ms))
-                end_idx = math.ceil(x1 / self.dt_ms)
-                if math.isfinite(start_idx) and math.isfinite(end_idx):
-                    time_slice = slice(int(start_idx), int(end_idx))
-                else:
-                    time_slice = slice(0, self.n_timestamps)
-            else:
-                time_slice = slice(0, self.n_timestamps)
+            time_slice = slice(
+                max(0, math.floor(x0 / self.dt_ms)), math.ceil(x1 / self.dt_ms)
+            )
             neuron_slice = slice(math.floor(y0), math.ceil(y1))
             self.select_neurons(neuron_slice, time_slice)
             return
         elif self.mode == InteractMode.DRAW:
-            if self.dt_ms > 0:
-                drag_time_index = math.floor(self.mouse_pos[0] / self.dt_ms)
-            else:
-                drag_time_index = 0
+            drag_time_index = math.floor(self.mouse_pos[0] / self.dt_ms)
             drag_neuron_index = math.floor(self.mouse_pos[1] + 0.5)
             if (
                 drag_time_index != self.mouse_drag_time_index
@@ -365,14 +315,3 @@ class TimeseriesWidget(QtWidgets.QWidget, metaclass=QtABCMeta):
         self.logger.debug(
             f"Selecting neurons {neuron_index_slice} and times {time_index_slice}"
         )
-
-    def connect_heatmap_widget(self, heatmap_widget: pg.ImageView) -> None:
-        """Connect the timeline in this widget to the timeline in the HeatmapWidget."""
-        self.heatmap_widget = heatmap_widget
-
-    def closeEvent(self, event):
-        if self.figure is not None:
-            # stop the renderer before closing the widget otherwise it may try to render to the deleted object
-            self.figure.close()
-            self.figure = None
-        super().closeEvent(event)

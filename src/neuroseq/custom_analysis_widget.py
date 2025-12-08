@@ -8,10 +8,10 @@ from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 
-from neuroseq.experiment import SpikeData
-from neuroseq.experiment import SynapseData
-from neuroseq.experiment import TraceData
-from neuroseq.utils import PrettyPrintEnum
+from neuroseq.data import SpikeData
+from neuroseq.data import SynapseData
+from neuroseq.data import TraceData
+from neuroseq.pretty_print_enum import PrettyPrintEnum
 
 
 class CustomAnalysisType(PrettyPrintEnum):

@@ -9,7 +9,7 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
 from neuroseq.cell_overlay_widget import CellOverlayWidget
-from neuroseq.experiment import TraceData
+from neuroseq.data import TraceData
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.spike_detection import detect_spikes_voltage_trace
 
@@ -287,10 +287,24 @@ class PatchClampImportDialog(QtWidgets.QDialog):
     def _load_npy_file(self, filename: str) -> None:
         self.npy_data = np.load(filename)
 
+        self.logger.debug(
+            "Loaded patchclamp npy: path=%s shape=%s dtype=%s range=%.4f–%.4f",
+            filename,
+            getattr(self.npy_data, "shape", None),
+            getattr(self.npy_data, "dtype", None),
+            float(np.min(self.npy_data)),
+            float(np.max(self.npy_data)),
+        )
+
         # Extract neuron ID from filename if possible
         neuron_id_match = re.search(r"neuronID_(\d+)", Path(filename).name)
         if neuron_id_match:
             self.extracted_neuron_id = int(neuron_id_match.group(1))
+            self.logger.debug(
+                "Extracted neuron ID %d from filename %s",
+                self.extracted_neuron_id,
+                filename,
+            )
             # Auto-select Custom mapping and set the neuron ID
             for button in self.mapping_buttons.buttons():
                 if button.text() == "Custom":
@@ -395,6 +409,14 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             mapping_strategy = self._get_mapping_strategy()
             stimulus_mapping = self._generate_stimulus_mapping(mapping_strategy)
 
+            self.logger.debug(
+                "Importing patchclamp data: sampling_rate=%.2fHz dt=%.6f mapping_strategy=%s mapping_keys=%s",
+                sampling_rate,
+                dt,
+                mapping_strategy,
+                sorted(stimulus_mapping.keys()),
+            )
+
             # Update cellpose import with the mapping
             if self.cellpose_import is not None:
                 self.cellpose_import.stimulus_to_cellpose_mapping = stimulus_mapping
@@ -415,6 +437,17 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             raise ValueError("No NPY data loaded")
 
         neuron_id = self.custom_neuron_id_spin.value()
+
+        self.logger.debug(
+            "Detecting spikes for patchclamp neuron %d: dt=%.6f height=%.2f prominence=%.2f min_interval=%.4f distance=%d width=%d",
+            neuron_id,
+            dt,
+            self.peak_height_spin.value(),
+            self.peak_prominence_spin.value(),
+            self.min_interval_spin.value(),
+            self.peak_distance_spin.value(),
+            self.peak_width_spin.value(),
+        )
 
         # Use peak detection for spike detection
         spike_data = detect_spikes_voltage_trace(
@@ -442,6 +475,13 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         self.imported_spike_data.append(spike_data)
         self.imported_trace_data.append(trace_data)
+        self.logger.debug(
+            "Patchclamp import complete: neuron=%d spikes=%d trace_len=%d dt=%.6f",
+            neuron_id,
+            len(spike_data.spike_times),
+            trace_array.shape[1],
+            dt,
+        )
         # todo: Liam/James to discuss/figure out saving the trace data in a sparse way (but still with gaps between, most likely by mapping e.g. 27:0, 5:1 would mean: show in stim arr pos 27 the value of traces data arr itself 0, and 5 value of traces data arr 1, and there would be in that case a 2x(timestamps) length array.
 
         if len(spike_data.spike_times) > 0:

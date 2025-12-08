@@ -1,38 +1,29 @@
 from __future__ import annotations
 
-import json
 import logging
-import math
-import pickle
-import zipfile
 from collections.abc import Callable
-from collections.abc import Sequence
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 from typing import NoReturn
-from typing import TypeVar
 
 import brian2 as b2
-import brian2.numpy_ as np
 import h5py
 
 from neuroseq import utils
-from neuroseq.b2json import b2json_encoder_factory
-from neuroseq.experiment import SpikeData
-from neuroseq.experiment import SynapseData
-from neuroseq.experiment import TraceData
-from neuroseq.reconstructor import Reconstructor
-from neuroseq.utils import append_data
+from neuroseq.b2_units import display_units
+from neuroseq.data import SpikeData
+from neuroseq.data import SynapseData
+from neuroseq.data import TraceData
+from neuroseq.io import as_timed_array
+from neuroseq.stim import StimArray
 from neuroseq.utils import construct_synapse_matrix
 from neuroseq.utils import save_store_name
-
-DataType = TypeVar("DataType", TraceData, SpikeData, SynapseData)
 
 
 class B2Model:
     """
-    Wrapper class that bundles brian2 capabilities for modelling neuronal networks. This creates a dict-based intermediate represenation
+    Wrapper class that bundles brian2 capabilities for modelling neuronal networks. This creates a dict-based intermediate representation
     of the model. All function attributes that start with `define_` act on this intermediate representation and add elements to it,
     all function attributes that are called `delete_` delete elements from it.
     """
@@ -48,6 +39,216 @@ class B2Model:
         self.logger.critical(message)
         self.logger.exception(e)
         raise RuntimeError(message) from e
+
+    def _reconstruct_dynamic_object(
+        self,
+        assembler: str,
+        name: str,
+        data_of_group: dict[str, Any],
+        augmented: list[tuple[str, Callable]],
+    ) -> None:
+        """
+        Reconstruct synapses and neurongroups from their respective dict representations
+
+        Parameters
+        ----------
+        assembler : str
+            Function to assemble the object with: `_assemble_neurongroup` or `_assemble_synapse`
+        name : str
+            Name of the object to be assembled
+        data_of_group : dict[str, Any]
+            The data to reconstruct the model from
+        augmented : list[tuple[str, Callable]]
+            List of name, function pairs to set attributes from `data_of_group`.
+
+        Raises
+        ------
+        RuntimeError
+            When something goes wrong in assembling the object
+        RuntimeError
+            When something goes wrong in setting an attribute of the assembled object
+        """
+
+        # rebuild the neurongroup
+        for key, function in augmented:
+            if key not in data_of_group:
+                continue
+
+            try:
+                function(name, data_of_group[key])
+            except Exception as e:
+                message = f"Error when defining {key} for object {name}: {e}"
+                raise RuntimeError(message) from e
+
+        # assemble object
+        try:
+            getattr(self, assembler)(name)
+        except Exception as e:
+            message = f"Error when assembling object {name}: {e}"
+            raise RuntimeError(message) from e
+
+        excluded = [n[0] for n in augmented]
+
+        # there is N and n, one defined by default the other one merely for the record, and we do not need both
+        excluded.extend(
+            [
+                "n",
+            ]
+        )
+
+        # set object variables
+        for key, value in data_of_group.items():
+            # check if there is a setter method
+            if key in excluded:
+                continue
+            else:
+                element = getattr(self.network[name], key)
+                if not isinstance(element, property) or element.fset is None:
+                    continue
+
+                try:
+                    setattr(self.network[name], key, value)
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Something went wrong when setting attribute {key} in object {name}: {e}"
+                    ) from e
+
+    def reconstruct_neurongroups(
+        self, name: str, data_of_group: dict[str, Any]
+    ) -> None:
+        """
+        Reconstruct a neurongroup from its dict representation
+
+        Parameters
+        ----------
+        name : str
+            name of the neurongroup to be reconstructed
+        data_of_group : dict[str, Any]
+            json node that contains the necessary data for reconstruction
+        """
+        augmented = list(
+            zip(
+                [
+                    "N",
+                    "neuronnumber",
+                    "model",
+                    "th",
+                    "refractory",
+                    "reset",
+                    "method",
+                    "dt",
+                ],
+                [
+                    self.define_neuronnumber,
+                    self.define_neuronnumber,
+                    self.define_equation,
+                    self.define_threshold,
+                    self.define_refractory,
+                    self.define_reset,
+                    self.define_solver_method,
+                    self.define_dt,
+                ],
+                strict=True,
+            )
+        )
+
+        self._reconstruct_dynamic_object(
+            "_assemble_neurongroup",
+            name,
+            data_of_group,
+            augmented,
+        )
+
+    def reconstruct_neuron_subgroup(
+        self, name: str, data_of_group: dict[str, Any]
+    ) -> None:
+        """
+        Reconstruct a neuron subgroup from its dict representation. Requires that the
+        target neurongroup has already been constructed.
+
+        Parameters
+        ----------
+        name : str
+            Name of the subgroup to be constructed
+        data_of_group : dict[str, Any]
+            dict containing the data to construct the subgroup
+        """
+        self.define_neuronsubgroup_target(name, data_of_group["target"])
+        self.define_neuronsubgroup_idxs(name, data_of_group["idxs"])
+        if "dt" in data_of_group:
+            self.define_dt(name, data_of_group["dt"])
+
+        self._assemble_neuronsubgroup(name)
+
+    def reconstruct_synapses(self, name: str, data_of_group: dict[str, Any]) -> None:
+        """
+        Reconstruct a synapse from its dict representation.
+
+        Parameters
+        ----------
+        name : str
+            Name of the synapse to be reconstructed
+        data_of_group : dict[str, Any]
+            json node to reconstruct the synapse from
+        """
+        augmented = list(
+            zip(
+                [
+                    "model",
+                    "origin",
+                    "target",
+                    "on_pre",
+                    "on_post",
+                    "connection_condition",
+                    "p",
+                    "method",
+                    "dt",
+                ],
+                [
+                    self.define_synapse_equation,
+                    self.define_synapse_origin,
+                    self.define_synapse_target,
+                    self.define_synapse_pre,
+                    self.define_synapse_post,
+                    self.define_synapse_connection,
+                    self.define_synapse_connection_probability,
+                    self.define_synapse_solver_method,
+                    self.define_synapse_dt,
+                ],
+                strict=True,
+            )
+        )
+
+        self._reconstruct_dynamic_object(
+            "_assemble_synapse",
+            name,
+            data_of_group,
+            augmented,
+        )
+
+    def reconstruct_monitors(self, name: str, data_of_group: dict[str, Any]) -> None:
+        """
+        Reconstruct a monitor for a model from its dict representation
+
+        Parameters
+        ----------
+        name : str
+            Name of the monitor to reconstruct
+        data_of_group : dict[str, Any]
+            json node to reconstruct the monitor from
+        """
+        self.define_monitor_type(name, data_of_group["type"])
+        self.define_monitor_source(name, data_of_group["source"])
+        self.define_monitor_variable(name, data_of_group.get("variable"))
+
+        if "dt" in data_of_group:
+            self.define_monitor_dt(name, data_of_group["dt"])
+            self._assemble_monitor(name)
+        else:
+            self._assemble_monitor(name)
+            self.define_monitor_dt(
+                name, self.network[name].clock.dt
+            )  # define the timestep from the clock of the constructed monitor to expose it in the intermediate representation
 
     def _add_equation_to_group(self, group: dict, eqs: str, key: str = "model") -> None:
         r"""
@@ -475,7 +676,6 @@ class B2Model:
     def __init__(
         self,
         seed: int = 123,
-        name: str = "b2Network",
     ):
         """
         __init__ Create a new `B2Model` instance.
@@ -488,15 +688,13 @@ class B2Model:
         b2.seed(seed)
 
         self.seed: int = seed
-        self.network = b2.Network(name=name)
+        self.network = b2.Network()
         self.parameters: dict[str, Any] = {}
         self.neurongroups: dict[str, dict[str, Any]] = {}
         self.synapses: dict[str, dict[str, Any]] = {}
         self.monitors: dict[str, dict[str, Any]] = {}
         self.initials: dict[str, dict[str, Any]] = {}
-        self.experiments: dict[str, list[TraceData | SpikeData | SynapseData]] = {}
 
-        self.max_ram_synapse_plot_matrix = 256
         self.trace_name_to_monitor: dict[str, b2.StateMonitor] = {}
         self.spike_name_to_monitor: dict[str, b2.SpikeMonitor] = {}
         self.synapse_name_to_monitor: dict[str, b2.StateMonitor] = {}
@@ -568,28 +766,6 @@ class B2Model:
     @_trigger_rebuild
     def define_default_init(self) -> None:
         self.define_init("group", "value", None)
-
-    def define_b2seed(self, seed: int) -> None:
-        """
-        Set the brian2 rng seed to 'seed'. This also regenerates the internal buffer of random numbers when using codegeneration with cython.
-
-        Parameters
-        ----------
-        seed : int
-            The new seed to set
-        """
-        b2.seed(seed)
-
-    def define_name(self, name: str) -> None:
-        """
-        define_name Define the name of the model
-
-        Parameters
-        ----------
-        name : str
-            Name of the model
-        """
-        self.network.name = self.name
 
     def define_parameter(
         self, name: str, value: str | b2.Quantity | b2.TimedArray
@@ -1303,7 +1479,7 @@ class B2Model:
     def define_synapse_equation(self, name: str, line: str) -> None:
         """
         define_synapse_equation Define a line in the model equation for a synapse called `synapse`, or the full equation all at once.
-        Have a look at the brian2 documentation for syanpses for more details.
+        Have a look at the brian2 documentation for synapses for more details.
 
         Parameters
         ----------
@@ -1430,7 +1606,7 @@ class B2Model:
         name : str
             Name of the synapse to add the connection condition to.
         connection_condition : str
-            String representaion of the connection condition.
+            String representation of the connection condition.
         """
         if name not in self.synapses:
             self.synapses[name] = {}
@@ -1664,16 +1840,15 @@ class B2Model:
         )
 
     @_trigger_rebuild
-    def define_monitor_variable(self, name: str, variable: str | None) -> None:
+    def define_monitor_variable(self, name: str, variable: str) -> None:
         """
-        define the variable a monitor can be attached to. Can be a string , None (for spikemonitors) or True (for a StateMonitor).
-        When True, all variables are recorded. This may take up a lot of memory
+        define the variable a monitor can be attached to.
 
         Parameters
         ----------
         name : str
             name of the monitor to define the variable for
-        variable : str | None
+        variable : str
             Variable name
         """
         if name not in self.monitors:
@@ -1759,8 +1934,6 @@ class B2Model:
         """
         self.network = b2.Network(name=self.name)
         self.checkpoints.clear()
-
-        self._make_timed_arrays_valid()
 
         for n in self.neurongroups:
             if "idxs" not in self.neurongroups[n]:
@@ -1953,40 +2126,6 @@ class B2Model:
                 f"Error, something went wrong when getting equation variables for {name}: {e}",
             )
 
-    def get_current_network_state(
-        self,
-        read_only_variables: bool = False,
-        subexpressions: bool = False,
-        vars: list[str] | None = None,
-    ) -> dict[str, Any]:
-        """
-        Get the current internal state of the underlying brian2 network
-
-        Parameters
-        ----------
-        read_only_variables : bool, optional
-            whether to include read-only variables, by default False
-        subexpressions : bool, optional
-            whether to include subexpressions, by default False
-        vars : list[str] | None, optional
-            list of variables to display. lists all if None, by default None
-
-        Returns
-        -------
-        dict[str, Any]
-            Dictionary representing the internal state of the network, including a lot of brian2 internals
-
-        Raises
-        ------
-        AttributeError
-            When the network has not yet been assembled
-        """
-        return self.network.get_states(
-            read_only_variables=read_only_variables,
-            subexpressions=subexpressions,
-            vars=vars,
-        )
-
     def get_network_objects(self) -> set[Any]:
         """
         Return the set of currently defined objects in the model
@@ -1998,133 +2137,55 @@ class B2Model:
         """
         return self.network.objects
 
-    def _make_timed_arrays_valid(self):
-        """
-        Ensure any TimedArrays have the correct shape
-
-        For now, we just ensure that they have the same number of neurons as the largest NeuronGroup in the model.
-        """
-        target_n_neurons = 0
-        for neuron_group in self.neurongroups.values():
-            target_n_neurons = max(
-                target_n_neurons, neuron_group.get("neuronnumber", 0)
-            )
-        for name, timed_array in self.parameters.items():
-            if isinstance(timed_array, b2.TimedArray) and timed_array.values.ndim > 1:
-                n_neurons = timed_array.values.shape[1]
-                if n_neurons != target_n_neurons:
-                    if n_neurons < target_n_neurons:
-                        self.logger.info(
-                            f"Increasing neurons in TimedArray {name} from {n_neurons} to {target_n_neurons}"
-                        )
-                        new_array = np.pad(
-                            timed_array.values,
-                            pad_width=((0, 0), (0, target_n_neurons - n_neurons)),
-                        )
-                    else:
-                        self.logger.info(
-                            f"Decreasing neurons in TimedArray {name} from {n_neurons} to {target_n_neurons}"
-                        )
-                        new_array = timed_array.values[:, :target_n_neurons]
-                    new_timed_array = utils.timed_array_with_new_data(
-                        timed_array, new_array
-                    )
-                    self.define_parameter(name, new_timed_array)
-
-    def pad_timed_arrays(self, total_time_seconds: float):
-        """
-        Pad all TimedArrays in the model to a length of total_time_seconds
-        """
-        for name, timed_array in self.parameters.items():
-            if isinstance(timed_array, b2.TimedArray) and timed_array.values.ndim > 1:
-                n_timestamps = timed_array.values.shape[0]
-                array_time_secs = timed_array.dt * n_timestamps
-                padding_required_secs = total_time_seconds - array_time_secs
-                if padding_required_secs > 0:
-                    n_pad = math.ceil(padding_required_secs / timed_array.dt)
-                    new_array = np.pad(
-                        timed_array.values, pad_width=((0, n_pad), (0, 0))
-                    )
-                    self.logger.info(
-                        f"Adding {padding_required_secs}s padding to {name}: {timed_array.values.shape} -> {new_array.shape}"
-                    )
-                    new_timed_array = utils.timed_array_with_new_data(
-                        timed_array, new_array
-                    )
-                    self.define_parameter(name, new_timed_array)
-
-    def trim_timed_arrays(self, total_time_seconds: float):
-        """
-        Trim all TimedArrays in the model to a length of total_time_seconds
-        """
-        for name, timed_array in self.parameters.items():
-            if isinstance(timed_array, b2.TimedArray) and timed_array.values.ndim > 1:
-                n_timestamps = timed_array.values.shape[0]
-                new_n_timestamps = int(total_time_seconds / timed_array.dt)
-                if new_n_timestamps < n_timestamps:
-                    new_array = timed_array.values[:new_n_timestamps, :]
-                    self.logger.info(
-                        f"Reducing {name} number of timestamps: {n_timestamps} -> {new_n_timestamps}"
-                    )
-                    new_timed_array = utils.timed_array_with_new_data(
-                        timed_array, new_array
-                    )
-                    self.define_parameter(name, new_timed_array)
-
-    def trim_timed_array_would_delete_data(self, total_time_seconds: float) -> bool:
-        """
-        Check whether trimming all TimedArrays in the model to a length of total_time_seconds would delete data
-        """
-        for timed_array in self.parameters.values():
-            if isinstance(timed_array, b2.TimedArray) and timed_array.values.ndim > 1:
-                new_n_timestamps = int(total_time_seconds / timed_array.dt)
-                if np.sum(timed_array.values[new_n_timestamps:, :]) > 0:
-                    return True
-        return False
-
     def run_simulation(
         self,
-        tfinal: b2.Quantity,
-        savepath: str | Path | None = None,
+        time_seconds: float,
+        stim_arrays: dict[str, StimArray],
         report: Callable | None = None,
-        timed_array_padding_seconds: int | None = None,
-    ) -> None:
+    ) -> float:
         """
-        run_simulation Run the fully defined simulation
+        Run the fully defined simulation
 
         Only networks with a fully defined system (neurongroups, possibly synapses, model equations and parameters) can be run.
 
         Parameters
         ----------
-        tfinal : b2.Quantity
-            The runtime of the system
-        savepath : str, optional
-            Path to save the data at, by default None
+        time_seconds : float
+            The runtime of the system in seconds
+        stim_arrays: dict[str, StimArray]
+            A dictionary of stimulus arrays to be used in the simulation
+        report : Callable | None, optional
+            A callable function to report progress, by default None
+
+        Returns
+        -------
+        float
+            The current simulation time in seconds
         """
         if self.must_be_rebuilt:
-            self.network = b2.Network(name=self.network.name)
+            network_name = self.network.name if self.network else "Network"
+            del self.network
+            self.network = b2.Network(name=network_name)
             self.assemble_network()
 
         if len(self.checkpoints) == 0:
             self.checkpoints.append("Initial state")
             self.network.store(self.checkpoints[-1])
+        namespace = self.parameters | {
+            name: as_timed_array(stim_array) for name, stim_array in stim_arrays.items()
+        }
         self.network.run(
-            tfinal,
+            time_seconds * b2.second,
             report=report,
-            report_period=0.5 * b2.second,
-            namespace=self.parameters,
+            report_period=1.0 * b2.second,
+            namespace=namespace,
         )
-        self.logger.info(f"run the system for {tfinal} with savepath = {savepath}")
-        total_time_seconds = self.network.t / b2.second
-        if timed_array_padding_seconds is not None:
-            total_time_seconds += timed_array_padding_seconds
-        self.pad_timed_arrays(total_time_seconds=total_time_seconds)
-        if savepath is not None:
-            self.save_to_h5(savepath)
+        self.logger.info(f"run the system for {time_seconds}s")
+        return float(self.network.t / b2.second)
 
     def store(self, checkpoint: str) -> None:
         """
-        store Store a named checkpoint of the current network state.
+        Store a named checkpoint of the current network state.
 
         Parameters
         ----------
@@ -2138,7 +2199,7 @@ class B2Model:
 
     def restore(self, checkpoint: str) -> None:
         """
-        restore Restore the network to a previously stored named checkpoint.
+        Restore the network to a previously stored named checkpoint.
 
         Parameters
         ----------
@@ -2153,152 +2214,6 @@ class B2Model:
             self.logger.critical(message)
             self.logger.exception(e)
             raise ValueError(message) from e
-
-    def get_data_names(
-        self, data_type: type[TraceData | SpikeData | SynapseData]
-    ) -> list[str]:
-        """
-        Get names of all data of the given type
-
-        Parameters
-        ----------
-        data_type : type[TraceData | SpikeData | SynapseData]
-            Type of data to get names for
-
-        Returns
-        -------
-        list[str]
-            List of data names that can be passed to get_data()
-        """
-        data_names = []
-        if data_type is TraceData:
-            data_names.extend(self.get_simulation_trace_names())
-        elif data_type is SpikeData:
-            data_names.extend(self.get_simulation_spike_names())
-        elif data_type is SynapseData:
-            data_names.extend(self.get_simulation_synapse_names())
-        for experiment_name, data_list in self.experiments.items():
-            for datum in data_list:
-                if isinstance(datum, data_type):
-                    data_names.append(f"{experiment_name} :: {datum.name}")
-        return data_names
-
-    def get_data(
-        self,
-        name: str,
-        data_type: type[DataType],
-    ) -> DataType | None:
-        """
-        Get experimental data from the model
-
-        Parameters
-        ----------
-        name : str
-            Name of the data to get, as provided by get_data_names()
-        data_type : type[TraceData | SpikeData | SynapseData]
-            Type of data to get
-
-        Returns
-        -------
-        TraceData | SpikeData | SynapseData | None
-            The requested data, or None if not found
-        """
-        if name == "":
-            return None
-        self.logger.info(f"Getting '{name}' of type {data_type}")
-        experiment_name, data_name = name.split(" :: ")
-        if experiment_name == "Simulation":
-            if data_type is TraceData:
-                return self.get_simulation_trace_data(name)  # type: ignore
-            if data_type is SpikeData:
-                return self.get_simulation_spike_data(name)  # type: ignore
-            if data_type is SynapseData:
-                return self.get_simulation_synapse_data(
-                    name, self.max_ram_synapse_plot_matrix
-                )  # type: ignore
-        if experiment_name not in self.experiments:
-            self.logger.info(f"  - experiment '{experiment_name}' not found")
-            return None
-        for data in self.experiments[experiment_name]:
-            if data.name == data_name and isinstance(data, data_type):
-                return data
-        self.logger.info(f"  - data '{data_name}' not found")
-        return None
-
-    def add_experimental_data(
-        self,
-        experiment_name: str,
-        new_data: Sequence[TraceData | SpikeData | SynapseData],
-        append: bool = False,
-    ):
-        """
-        Add experimental data to the model
-
-        Parameters
-        ----------
-        experiment_name : str
-            Name of the experiment
-        new_data : Sequence[TraceData | SpikeData | SynapseData]
-            List of data objects to add
-        append : bool, optional
-            Whether to append to existing data for the experiment, by default False
-        """
-        if not append:
-            self.logger.info(
-                f"Adding experimental data for experiment '{experiment_name}'"
-            )
-            self.experiments[experiment_name] = list(new_data)
-            return
-        if experiment_name not in self.experiments:
-            self.logger.warning(
-                f"Append requested but experiment '{experiment_name}' does not exist yet - creating"
-            )
-            self.experiments[experiment_name] = []
-        self.logger.info(
-            f"Appending experimental data to experiment '{experiment_name}'"
-        )
-        # (for now) automatically get time offset when appending from existing trace data for this experiment
-        existing_trace_data = next(
-            (d for d in self.experiments[experiment_name] if isinstance(d, TraceData)),
-            None,
-        )
-        if existing_trace_data is not None:
-            time_offset_seconds = (
-                existing_trace_data.dt * existing_trace_data.traces.shape[1]
-            )
-            self.logger.info(
-                f"Setting time offset to {time_offset_seconds}s from existing trace data '{existing_trace_data.name}'"
-            )
-        else:
-            self.logger.warning(
-                f"No existing trace data found for experiment '{experiment_name}', setting time offset to 0s"
-            )
-            time_offset_seconds = 0.0
-        new_min_stim_array_length_seconds = time_offset_seconds
-        # match data by type and name and append
-        for data in new_data:
-            if isinstance(data, TraceData):
-                new_min_stim_array_length_seconds = max(
-                    new_min_stim_array_length_seconds,
-                    time_offset_seconds + data.dt * data.traces.shape[1],
-                )
-            existing_datum = next(
-                (
-                    d
-                    for d in self.experiments[experiment_name]
-                    if d.name == data.name and isinstance(d, type(data))
-                ),
-                None,
-            )
-            if existing_datum is not None:
-                self.logger.info(f"  - appending experimental data to '{data.name}'")
-                append_data(existing_datum, data, time_offset_seconds)
-            else:
-                self.logger.warning(
-                    f"'{data.name}' not found when trying to append - addding new data instead of appending."
-                )
-                self.experiments[experiment_name].append(data)
-        self.pad_timed_arrays(total_time_seconds=new_min_stim_array_length_seconds)
 
     def get_simulation_trace_names(self) -> list[str]:
         """
@@ -2342,8 +2257,13 @@ class B2Model:
         if timestamps.shape[0] < 2:
             return None
         dt = timestamps[1] - timestamps[0]
+        quantity = monitor.variables[variable_name]
         return TraceData(
-            trace_name, monitor.variables[variable_name].get_value().T, "unitsTODO", dt
+            trace_name,
+            quantity.get_value().T,
+            monitor.record,
+            display_units(quantity),
+            dt,
         )
 
     def get_simulation_spike_names(self) -> list[str]:
@@ -2412,6 +2332,8 @@ class B2Model:
         ----------
         synapse_name : str
             Name of the synapse as returned by get_simulation_synapse_names()
+        max_ram_mb: int
+            Maximum RAM in MB to use when constructing the synapse data matrix
 
         Returns
         -------
@@ -2429,7 +2351,8 @@ class B2Model:
         states = self.network.get_states(read_only_variables=False)
         # remove monitors from state to avoid saving their recorded data
         for key in self.monitors:
-            del states[key]
+            if key in states:
+                del states[key]
         states["current_time"] = self.network.t
         states["seed"] = self.seed
         states["parameters"] = self.parameters
@@ -2455,73 +2378,79 @@ class B2Model:
 
         return states
 
-    def save_model(
-        self,
-        filepath: str | Path,
-        include_simulation_data: bool = True,
-        include_experimental_data: bool = True,
-    ) -> None:
-        """
-        Saves the model to a zipfile which contains
-            - a model.json file representing the model
-            - an optional experimental_data.json file representing the experimental data
-            - an optional pickle file for the stored_state containing the simulation checkpoints
-            - npy files for each numpy array in any TimedArray, TraceData or SpikeData objects
-
-        Parameters
-        ----------
-        filepath : str
-            path to the file where the current model should be stored
-        """
-
-        with zipfile.ZipFile(filepath, "w", zipfile.ZIP_DEFLATED) as zf:
-            model_json = json.dumps(
-                self.to_dict(), cls=b2json_encoder_factory(zf), separators=(",", ":")
-            )
-            zf.writestr("model.json", model_json)
-            if include_simulation_data:
-                # store the current simulation data state to a temporary checkpoint to be able to restore it on load
-                self.store(save_store_name)
-                zf.writestr(
-                    "stored_state.pkl",
-                    pickle.dumps(self.network._stored_state, protocol=4),
-                )
-            if include_experimental_data:
-                experimental_data_json = json.dumps(
-                    self.experiments,
-                    cls=b2json_encoder_factory(zf),
-                    separators=(",", ":"),
-                )
-                zf.writestr("experimental_data.json", experimental_data_json)
-
     @classmethod
-    def load_model(
+    def from_dict(
         cls,
-        filepath: str | Path,
+        b2_model_data: dict,
+        b2_stored_state: dict,
         report: Callable[[int], None] | None = None,
-    ) -> B2Model:
+    ):
         """
-        Load model from file
+        Create a B2Model from its dict representation.
 
         Parameters
         ----------
-        filepath : str
-            path to the model file
+        b2_model_data : dict
+            The serialized model data
+        b2_stored_state : dict
+            The stored simulation state of the model
         report : Callable[[int],None], optional
             function to report progress, receives percentage complete as integer from 0 to 100
         """
         if report is not None:
             report(1)
 
-        constr = Reconstructor(filepath)
-        if report is not None:
-            report(10)
+        model = cls(seed=b2_model_data["seed"])
+        model.checkpoints = b2_model_data.get("checkpoints", [])
 
-        model = cls(seed=constr.loaded_data["seed"])
         if report is not None:
             report(20)
 
-        constr.reconstruct(model, report)
+        # reconstruct parameters, timestep, seed.
+        for k, v in b2_model_data["parameters"].items():
+            model.define_parameter(k, v)
+
+        if report is not None:
+            report(30)
+
+        # reconstruct neurongroups
+        for n in b2_model_data["objects"]["neurongroups"]:
+            if "idxs" not in b2_model_data[n]:  # reconstruct full groups first...
+                model.reconstruct_neurongroups(n, b2_model_data[n])
+        if report is not None:
+            report(40)
+
+        for n in b2_model_data["objects"]["neurongroups"]:
+            if "idxs" in b2_model_data[n]:  # ... then define the subgroups
+                model.reconstruct_neuron_subgroup(n, b2_model_data[n])
+        if report is not None:
+            report(50)
+
+        # reconstruct synapses
+        for s in b2_model_data["objects"]["synapses"]:
+            model.reconstruct_synapses(s, b2_model_data[s])
+        if report is not None:
+            report(60)
+
+        # reconstruct monitors
+        for m in b2_model_data["objects"]["monitors"]:
+            model.reconstruct_monitors(m, b2_model_data[m])
+        if report is not None:
+            report(70)
+
+        for n, init in b2_model_data["initials"].items():
+            for k, v in init.items():
+                model.define_init(n, k, v)
+            model._assemble_initial_conditions(n)
+
+        # restore checkpoints
+        model.network._stored_state = b2_stored_state
+        # restore state when saved if provided, then remove this temporary checkpoint
+        if save_store_name in model.network._stored_state:
+            model.network.restore(save_store_name)
+            del model.network._stored_state[save_store_name]
+
+        model.must_be_rebuilt = False
 
         if report is not None:
             report(100)

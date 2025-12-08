@@ -9,8 +9,8 @@ import brian2.numpy_ as np
 from PIL import Image
 from PIL import ImageSequence
 
-from neuroseq.experiment import SpikeData
-from neuroseq.experiment import TraceData
+from neuroseq.data import SpikeData
+from neuroseq.data import TraceData
 from neuroseq.utils import neuron_indices_to_colors
 
 
@@ -43,7 +43,8 @@ def prepare_cellpose_traces(
     if dt <= 0:
         raise ValueError("Cellpose trace dt must be positive")
 
-    return TraceData(name, traces.astype(np.float32), units, dt)
+    indices = np.arange(traces.shape[0], dtype=np.uint32)
+    return TraceData(name, traces.astype(np.float32), indices, units, dt)
 
 
 def prepare_cellpose_spikes(

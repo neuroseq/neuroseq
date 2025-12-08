@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import brian2.numpy_ as np
 import numpy.typing as npt
 from scipy.signal import find_peaks
 
-from neuroseq.experiment import SpikeData
+from neuroseq.data import SpikeData
+
+logger = logging.getLogger(__name__)
 
 
 def detect_spikes_threshold(
@@ -30,6 +33,16 @@ def detect_spikes_threshold(
     Returns:
         SpikeData
     """
+
+    input_shape = getattr(spike_data, "shape", None)
+    logger.debug(
+        "Detecting spikes: input_shape=%s dt=%.6f threshold=%.4f max_neurons=%s normalize=%s",
+        input_shape,
+        dt,
+        threshold,
+        max_neurons,
+        normalize_per_neuron,
+    )
 
     # Handle 1D input (single neuron)
     if spike_data.ndim == 1:
@@ -74,6 +87,12 @@ def detect_spikes_threshold(
     else:
         final_neuron_indices = np.array([], dtype=np.int32)
         final_spike_times = np.array([], dtype=np.float32)
+
+    logger.debug(
+        "Spike detection summary: processed_neurons=%d spikes_found=%d",
+        n_neurons_to_process,
+        len(final_spike_times),
+    )
 
     return SpikeData("Detected spikes", final_neuron_indices, final_spike_times)
 

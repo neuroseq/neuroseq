@@ -1,7 +1,7 @@
 # Example of an external simulation function that can be imported into neuroseq
 
 import numpy as np
-from neuroseq.experiment import TraceData, SpikeData, SynapseData
+from neuroseq.data import TraceData, SpikeData, SynapseData
 
 
 def simulate(
@@ -22,6 +22,7 @@ def simulate(
     # TraceData attributes:
     #   - name (str): The name of the data set.
     #   - traces (np.ndarray): A 2D array of traces where the first index is the neuron index and the second index is the time index.
+    #   - indices (np.ndarray): A 1D array of neuron indices corresponding to the first dimension of traces.
     #   - units (str): The unit of the traces (e.g., 'mV', 'pA').
     #   - dt (float): The time step in seconds between consecutive timestamps.
     n_neurons_trace = 32
@@ -29,7 +30,8 @@ def simulate(
     data.append(
         TraceData(
             name="trace-example",
-            traces=np.random.rand(n_neurons_trace, n_timestamps_trace),
+            traces=np.random.random_sample((n_neurons_trace, n_timestamps_trace)),
+            indices=np.arange(n_neurons_trace, dtype=np.uint32),
             dt=simulation_time / n_timestamps_trace,
             units="mV",
         )

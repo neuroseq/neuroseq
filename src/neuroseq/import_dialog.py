@@ -8,8 +8,8 @@ import brian2.numpy_ as np
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
-from neuroseq.experiment import SpikeData
-from neuroseq.experiment import TraceData
+from neuroseq.data import SpikeData
+from neuroseq.data import TraceData
 from neuroseq.importer_suite2p import compute_normalized_suite2p_spikes
 from neuroseq.importer_suite2p import compute_normalized_suite2p_traces
 from neuroseq.importer_suite2p import prepare_suite2p_spikes
@@ -389,6 +389,16 @@ class Suite2pImportDialog(QtWidgets.QDialog):
             self.logger.info(
                 f"Loaded spks.npy ({self.spike_data.shape[0]} neurons × {self.spike_data.shape[1]} timepoints)"
             )
+            if self.spike_data.size > 0:
+                self.logger.debug(
+                    "spks.npy stats: dtype=%s range=%.4f–%.4f non_zero=%d",
+                    self.spike_data.dtype,
+                    float(np.min(self.spike_data)),
+                    float(np.max(self.spike_data)),
+                    int(np.count_nonzero(self.spike_data)),
+                )
+            else:
+                self.logger.debug("spks.npy appears to be empty after load")
             self._update_spike_preview()
             self._check_spike_shape_matches()
         except Exception as exc:
@@ -442,6 +452,11 @@ class Suite2pImportDialog(QtWidgets.QDialog):
     def _check_spike_shape_matches(self) -> None:
         if self.spike_data is not None and self.f_data is not None:
             if self.spike_data.shape != self.f_data.shape:
+                self.logger.debug(
+                    "Disabling spike import: spks shape %s does not match F/Fneu shape %s",
+                    self.spike_data.shape,
+                    self.f_data.shape,
+                )
                 QtWidgets.QMessageBox.warning(
                     self,
                     "Shape mismatch",
@@ -455,6 +470,10 @@ class Suite2pImportDialog(QtWidgets.QDialog):
                 self.spks_file_path_label.setStyleSheet("QLabel { color: gray; }")
             else:
                 self.spks_file_path_label.setStyleSheet("QLabel { color: black; }")
+                self.logger.debug(
+                    "spks.npy shape validated against F/Fneu: %s",
+                    self.spike_data.shape,
+                )
                 self._update_spike_preview()
 
     def _update_trace_preview(self) -> None:
@@ -518,6 +537,14 @@ class Suite2pImportDialog(QtWidgets.QDialog):
         above_threshold = int(np.sum(normalized_spikes >= threshold))
         overall_raw_min = float(np.min(raw_mins))
         overall_raw_max = float(np.max(raw_maxs))
+        self.logger.debug(
+            "Spike preview: threshold=%.3f raw_range=%.4f–%.4f non_zero=%d above_threshold=%d",
+            threshold,
+            overall_raw_min,
+            overall_raw_max,
+            non_zero_count,
+            above_threshold,
+        )
         preview_lines = [
             f"spks.npy shape: {self.spike_data.shape}",
             f"Raw value range (overall): {overall_raw_min:.3f}–{overall_raw_max:.3f}",
@@ -543,6 +570,16 @@ class Suite2pImportDialog(QtWidgets.QDialog):
             n_neurons, n_timepoints = self.f_data.shape
             n_neurons_to_import = min(max_neurons, n_neurons)
 
+            self.logger.debug(
+                "Importing Suite2p data: append=%s sample_rate=%.3fHz dt=%.6f max_neurons=%d f_shape=%s spks_shape=%s",
+                self.append_data,
+                sampling_rate,
+                dt,
+                max_neurons,
+                self.f_data.shape,
+                getattr(self.spike_data, "shape", None),
+            )
+
             traces = prepare_suite2p_traces(
                 self.f_data,
                 self.fneu_data,
@@ -562,6 +599,11 @@ class Suite2pImportDialog(QtWidgets.QDialog):
                     max_neurons=max_neurons,
                 )
                 payload.append(spike_data)
+                self.logger.debug(
+                    "Spike import ready: %d events at threshold %.3f",
+                    len(spike_data.spike_indices),
+                    threshold,
+                )
                 spike_summary = f"\nSpikes: {len(spike_data.spike_indices)} events ≥ {threshold:.3f}"
 
             self.imported_data = payload

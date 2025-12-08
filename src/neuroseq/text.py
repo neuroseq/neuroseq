@@ -14,6 +14,8 @@ class Text(Graphic):
         )
         self.text.world.position = (0, 0, 200)
         self.text.material.color = pygfx.Color(0, 0, 0)
+        self.text.material.outline_color = pygfx.Color(1, 1, 1)
+        self.text.material.outline_thickness = 0.5
         group.add(self.text)
         self._set_world_object(group)
 

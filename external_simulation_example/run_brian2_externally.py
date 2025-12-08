@@ -3,7 +3,7 @@
 import numpy as np
 from brian2 import *
 
-from neuroseq.experiment import TraceData, SpikeData, SynapseData
+from neuroseq.data import TraceData, SpikeData, SynapseData
 
 
 def simulate(
@@ -169,7 +169,8 @@ def simulate(
     results.append(
         TraceData(
             name="trace_example",
-            traces=Traces_v.v,
+            traces=np.array(Traces_v.v),
+            indices=np.array(Traces_v.record),
             dt=dt_trace / 1000.0,  # conversion to seconds
             units="",
         )
@@ -178,8 +179,8 @@ def simulate(
     results.append(
         SpikeData(
             name="spike_example",
-            spike_indices=np.array(spikemon.i)[:],
-            spike_times=np.array(spikemon.t)[:],
+            spike_indices=np.array(spikemon.i),
+            spike_times=np.array(spikemon.t / second),
         )
     )
 

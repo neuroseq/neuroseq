@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import brian2 as b2
 import brian2.numpy_ as np
 import pytest
 from brian2.tests.utils import assert_allclose
@@ -11,12 +10,26 @@ from pytest import approx
 from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
-from neuroseq.b2_model import B2Model
+import neuroseq
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.model import Model
+from neuroseq.stim import DrawStim
+from neuroseq.stim import DrawStimType
+from neuroseq.stim import StimArray
 from neuroseq.stim_editor import DrawMode
 from neuroseq.stim_editor import SelectMode
 from neuroseq.stim_editor import StimEditor
 from neuroseq.utils import InteractMode
+
+
+class MockStimIntensityDialog:
+    draw_stim = DrawStim(DrawStimType.Constant, 1.0, 1.0)
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def exec(self) -> bool:
+        return True
 
 
 def test_stim_editor_no_data(qtbot: QtBot) -> None:
@@ -32,9 +45,12 @@ def test_stim_editor_no_data(qtbot: QtBot) -> None:
 
 
 def test_stim_editor_zoom_pan(qtbot: QtBot) -> None:
-    model = B2Model()
-    timed_array = b2.TimedArray(np.random.random((127, 17)), dt=1.0 * b2.ms)
-    model.parameters = {"a": timed_array}
+    model = Model()
+    model.stim_arrays = {
+        "a": StimArray(
+            "a", neuroseq.stim.StimType.Excitation, np.zeros((127, 17)), "mV", 0.001
+        )
+    }
     cmb_stim = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
     controller = ConstrainedPanZoomController()
@@ -63,14 +79,22 @@ def test_stim_editor_zoom_pan(qtbot: QtBot) -> None:
         qtbot.wait(delay)
         stim_editor.y_btn_zoom_out.click()
         qtbot.wait(delay)
+    stim_editor.close()
 
 
 def test_stim_editor_pad_and_trim(
     monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list
 ):
-    timed_array = b2.TimedArray(np.random.random_sample((500, 10)), dt=1.0 * b2.ms)
-    model = B2Model()
-    model.parameters = {"a": timed_array, "irrelevant": 4}
+    model = Model()
+    model.stim_arrays = {
+        "a": StimArray(
+            "a",
+            neuroseq.stim.StimType.Excitation,
+            np.random.random_sample((500, 10)),
+            "mV",
+            0.001,
+        )
+    }
     cmb_stim = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
     controller = ConstrainedPanZoomController()
@@ -101,7 +125,7 @@ def test_stim_editor_pad_and_trim(
     stim_editor.pad_stim_array()
     assert len(qmessagebox_calls) == 2
     assert stim_editor.current_stim_modifier is not None
-    assert stim_editor.current_stim_modifier.timed_array.values.shape[0] == 1500
+    assert stim_editor.current_stim_modifier.stim_array.values.shape[0] == 1500
     # trim with invalid number of seconds
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getText", lambda *args: ("notanumber", True)
@@ -130,7 +154,7 @@ def test_stim_editor_pad_and_trim(
     assert len(qmessagebox_calls) == 5
     stim_editor.trim_stim_array()
     assert len(qmessagebox_calls) == 5
-    assert stim_editor.current_stim_modifier.timed_array.values.shape[0] == 1000
+    assert stim_editor.current_stim_modifier.stim_array.values.shape[0] == 1000
     # trim with 0.7 seconds (confirmation dialog since some non-zero stimuli will be removed)
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.7", True))
     # say no when asked to confirm
@@ -140,7 +164,7 @@ def test_stim_editor_pad_and_trim(
         lambda *args: QtWidgets.QMessageBox.StandardButton.No,
     )
     stim_editor.trim_stim_array()
-    assert stim_editor.current_stim_modifier.timed_array.values.shape[0] == 1000
+    assert stim_editor.current_stim_modifier.stim_array.values.shape[0] == 1000
     # do it again and this time say yes when asked to confirm
     monkeypatch.setattr(
         QtWidgets.QMessageBox,
@@ -148,7 +172,8 @@ def test_stim_editor_pad_and_trim(
         lambda *args: QtWidgets.QMessageBox.StandardButton.Yes,
     )
     stim_editor.trim_stim_array()
-    assert stim_editor.current_stim_modifier.timed_array.values.shape[0] == 300
+    assert stim_editor.current_stim_modifier.stim_array.values.shape[0] == 300
+    stim_editor.close()
 
 
 def test_stim_editor_actions(
@@ -156,13 +181,19 @@ def test_stim_editor_actions(
 ) -> None:
     n_neurons = 10
     n_timestamps = 20
-    dt = 1.0 * b2.ms
-    timed_array = b2.TimedArray(np.ones((n_timestamps, n_neurons)), dt=dt)
+    model = Model()
+    arr = np.ones((n_timestamps, n_neurons))
     selection = np.random.randint(3, size=(5, 2))
     selection_inverted = 2 - selection
-    timed_array.values[2:7, 1:3] = selection
-    model = B2Model()
-    model.parameters = {"a": timed_array, "irrelevant": 4}
+    arr[2:7, 1:3] = selection
+    model.stim_arrays = {
+        "a": StimArray("a", neuroseq.stim.StimType.Excitation, arr, "mV", 0.001)
+    }
+    monkeypatch.setattr(
+        neuroseq.stim_editor,
+        "StimIntensityDialog",
+        MockStimIntensityDialog,
+    )
     cmb_stim = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
     controller = ConstrainedPanZoomController()
@@ -177,28 +208,26 @@ def test_stim_editor_actions(
     stim_editor.set_model(model)
     stim_editor.set_mode(InteractMode.SELECT)
     assert "a" in stim_editor.stims_dict
-    assert_allclose(stim_editor.stims_dict["a"].timed_array.values, timed_array.values)
+    assert_allclose(stim_editor.stims_dict["a"].stim_array.values, arr)
     assert stim_editor.current_stim_modifier == stim_editor.stims_dict["a"]
     # delete a slice
     stim_editor.stim_widget.select_neurons(slice(1, 3), slice(10, 20))
     stim_editor.delete_selected_stim()
     assert np.allclose(
-        stim_editor.current_stim_modifier.timed_array.values[10:20, 1:3],
+        stim_editor.current_stim_modifier.stim_array.values[10:20, 1:3],
         np.zeros((10, 2)),
     )
     assert stim_editor.action_undo.isEnabled()
     assert not stim_editor.action_redo.isEnabled()
     # undo delete
     stim_editor.undo()
-    assert_allclose(
-        stim_editor.current_stim_modifier.timed_array.values, timed_array.values
-    )
+    assert_allclose(stim_editor.current_stim_modifier.stim_array.values, arr)
     assert not stim_editor.action_undo.isEnabled()
     assert stim_editor.action_redo.isEnabled()
     # redo delete
     stim_editor.redo()
     assert np.allclose(
-        stim_editor.current_stim_modifier.timed_array.values[10:20, 1:3],
+        stim_editor.current_stim_modifier.stim_array.values[10:20, 1:3],
         np.zeros((10, 2)),
     )
     assert stim_editor.action_undo.isEnabled()
@@ -206,13 +235,13 @@ def test_stim_editor_actions(
     # copy a slice
     stim_editor.copy_selected_stim()
     assert np.allclose(
-        stim_editor.current_stim_modifier.timed_array.values[2:7, 1:3], selection
+        stim_editor.current_stim_modifier.stim_array.values[2:7, 1:3], selection
     )
     # cut a slice
     stim_editor.stim_widget.select_neurons(slice(1, 3), slice(2, 7))
     stim_editor.cut_selected_stim()
     assert np.allclose(
-        stim_editor.current_stim_modifier.timed_array.values[2:7, 1:3],
+        stim_editor.current_stim_modifier.stim_array.values[2:7, 1:3],
         np.zeros_like(selection),
     )
     # paste an inverted slice into empty region starting at timeslice 10
@@ -221,20 +250,20 @@ def test_stim_editor_actions(
     stim_editor.select_mode = SelectMode.PASTE_INVERTED
     stim_editor.paste_selected_stim(1, 10)
     assert np.allclose(
-        stim_editor.current_stim_modifier.timed_array.values[10:15, 1:3],
+        stim_editor.current_stim_modifier.stim_array.values[10:15, 1:3],
         selection_inverted,
     )
     # paste a slice into empty region starting at timeslice 10
     stim_editor.stim_widget.select_neurons(slice(1, 3), slice(10, 15))
     stim_editor.delete_selected_stim()
     assert np.allclose(
-        stim_editor.current_stim_modifier.timed_array.values[10:15, 1:3],
+        stim_editor.current_stim_modifier.stim_array.values[10:15, 1:3],
         np.zeros_like(selection),
     )
     stim_editor.select_mode = SelectMode.PASTE
     stim_editor.paste_selected_stim(1, 10)
     assert np.allclose(
-        stim_editor.current_stim_modifier.timed_array.values[10:15, 1:3], selection
+        stim_editor.current_stim_modifier.stim_array.values[10:15, 1:3], selection
     )
     # save a slice to a file
     filename = tmp_path / "test.npy"
@@ -252,9 +281,7 @@ def test_stim_editor_actions(
         stim_editor.undo()
     assert not stim_editor.action_undo.isEnabled()
     assert stim_editor.action_redo.isEnabled()
-    assert_allclose(
-        stim_editor.current_stim_modifier.timed_array.values, timed_array.values
-    )
+    assert_allclose(stim_editor.current_stim_modifier.stim_array.values, arr)
     # redo all actions
     while stim_editor.action_redo.isEnabled():
         stim_editor.redo()
@@ -265,7 +292,7 @@ def test_stim_editor_actions(
     stim_editor.stim_widget.select_neurons(slice(0, None), slice(0, None))
     stim_editor.delete_selected_stim()
     assert np.allclose(
-        stim_editor.current_stim_modifier.timed_array.values,
+        stim_editor.current_stim_modifier.stim_array.values,
         np.zeros((n_timestamps, n_neurons)),
     )
     # load a slice from a file: neurons start at 0, timeslice starts at current timeline
@@ -275,7 +302,7 @@ def test_stim_editor_actions(
     stim_editor.load_selected_stim()
     stim_editor.paste_selected_stim(0, 5)
     assert np.allclose(
-        stim_editor.current_stim_modifier.timed_array.values[5:10, 0:2], selection
+        stim_editor.current_stim_modifier.stim_array.values[5:10, 0:2], selection
     )
     # invalid slices are not loaded and an error message is shown
     error_messages: list[str] = []
@@ -285,107 +312,94 @@ def test_stim_editor_actions(
     np.save(filename, np.zeros((4, 6, 7)))
     stim_editor.load_selected_stim()
     assert np.allclose(
-        stim_editor.current_stim_modifier.timed_array.values[5:10, 0:2], selection
+        stim_editor.current_stim_modifier.stim_array.values[5:10, 0:2], selection
     )
     assert len(error_messages) == 1
     assert "wrong shape" in error_messages[-1]
     np.save(filename, np.zeros((25, 2)))
     stim_editor.load_selected_stim()
     assert np.allclose(
-        stim_editor.current_stim_modifier.timed_array.values[5:10, 0:2], selection
+        stim_editor.current_stim_modifier.stim_array.values[5:10, 0:2], selection
     )
     assert len(error_messages) == 2
     assert "too many time points" in error_messages[-1]
     np.save(filename, np.zeros((2, 25)))
     stim_editor.load_selected_stim()
     assert np.allclose(
-        stim_editor.current_stim_modifier.timed_array.values[5:10, 0:2], selection
+        stim_editor.current_stim_modifier.stim_array.values[5:10, 0:2], selection
     )
     assert len(error_messages) == 3
     assert "too many neurons" in error_messages[-1]
-    # default stim drawing intensity is the maximum value of the existing stimuli
-    assert stim_editor.draw_stim_intensity == pytest.approx(
-        stim_editor.current_stim_modifier.timed_array.values.max()
+    # default stim drawing is constant intensity with the maximum value of the existing stimuli
+    assert stim_editor.draw_stim.draw_stim_type == DrawStimType.Constant
+    assert stim_editor.draw_stim.value1 == pytest.approx(
+        stim_editor.current_stim_modifier.stim_array.values.max()
     )
-    # try to set a negative stim drawing intensity
-    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("-1", True))
-    stim_editor.choose_stim_intensity()
-    assert len(error_messages) == 4
-    assert "negative" in error_messages[-1]
-    # try to set an invalid float stim drawing intensity
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog, "getText", lambda *args: ("notanumber", True)
-    )
-    stim_editor.choose_stim_intensity()
-    assert len(error_messages) == 5
-    assert "could not parse" in error_messages[-1].lower()
     # set a valid value for stim drawing intensity
     new_stim_value = 1.85
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog, "getText", lambda *args: (f"{new_stim_value}", True)
-    )
+    MockStimIntensityDialog.draw_stim.value1 = new_stim_value
     stim_editor.choose_stim_intensity()
-    assert len(error_messages) == 5
-    assert stim_editor.draw_stim_intensity == pytest.approx(new_stim_value)
+    assert stim_editor.draw_stim.value1 == pytest.approx(new_stim_value)
     # 2ms stim is drawn at mouse click location if draw mode is active with mode DRAW
     stim_editor.draw_stim_length = 2
     stim_editor.set_mode(InteractMode.DRAW)
     stim_editor.set_draw_mode(DrawMode.DRAW)
     # 1ms is two timesteps in the current stim
-    assert stim_editor.current_stim_modifier.timed_array.values[18, 8] == approx(0)
-    assert stim_editor.current_stim_modifier.timed_array.values[19, 8] == approx(0)
-    assert stim_editor.current_stim_modifier.timed_array.values[16, 7] == approx(0)
-    assert stim_editor.current_stim_modifier.timed_array.values[17, 7] == approx(0)
+    assert stim_editor.current_stim_modifier.stim_array.values[18, 8] == approx(0)
+    assert stim_editor.current_stim_modifier.stim_array.values[19, 8] == approx(0)
+    assert stim_editor.current_stim_modifier.stim_array.values[16, 7] == approx(0)
+    assert stim_editor.current_stim_modifier.stim_array.values[17, 7] == approx(0)
     stim_editor.stim_widget_mouse_dragged(8, 8, 18, 18, 1)
-    assert stim_editor.current_stim_modifier.timed_array.values[18, 8] == approx(
+    assert stim_editor.current_stim_modifier.stim_array.values[18, 8] == approx(
         new_stim_value
     )
-    assert stim_editor.current_stim_modifier.timed_array.values[19, 8] == approx(
+    assert stim_editor.current_stim_modifier.stim_array.values[19, 8] == approx(
         new_stim_value
     )
-    assert stim_editor.current_stim_modifier.timed_array.values[16, 7] == approx(0)
-    assert stim_editor.current_stim_modifier.timed_array.values[17, 7] == approx(0)
+    assert stim_editor.current_stim_modifier.stim_array.values[16, 7] == approx(0)
+    assert stim_editor.current_stim_modifier.stim_array.values[17, 7] == approx(0)
     stim_editor.stim_widget_mouse_dragged(7, 7, 16, 16, 1)
-    assert stim_editor.current_stim_modifier.timed_array.values[18, 8] == approx(
+    assert stim_editor.current_stim_modifier.stim_array.values[18, 8] == approx(
         new_stim_value
     )
-    assert stim_editor.current_stim_modifier.timed_array.values[19, 8] == approx(
+    assert stim_editor.current_stim_modifier.stim_array.values[19, 8] == approx(
         new_stim_value
     )
-    assert stim_editor.current_stim_modifier.timed_array.values[16, 7] == approx(
+    assert stim_editor.current_stim_modifier.stim_array.values[16, 7] == approx(
         new_stim_value
     )
-    assert stim_editor.current_stim_modifier.timed_array.values[17, 7] == approx(
+    assert stim_editor.current_stim_modifier.stim_array.values[17, 7] == approx(
         new_stim_value
     )
     # 1ms stim with value 0 is drawn at mouse click location if draw mode is active with mode ERASE
     stim_editor.action_draw_mode.setChecked(True)
     stim_editor.set_draw_mode(DrawMode.ERASE)
     # 1ms is two timesteps in the current stim
-    assert stim_editor.current_stim_modifier.timed_array.values[18, 8] == approx(
+    assert stim_editor.current_stim_modifier.stim_array.values[18, 8] == approx(
         new_stim_value
     )
-    assert stim_editor.current_stim_modifier.timed_array.values[19, 8] == approx(
+    assert stim_editor.current_stim_modifier.stim_array.values[19, 8] == approx(
         new_stim_value
     )
-    assert stim_editor.current_stim_modifier.timed_array.values[16, 7] == approx(
+    assert stim_editor.current_stim_modifier.stim_array.values[16, 7] == approx(
         new_stim_value
     )
-    assert stim_editor.current_stim_modifier.timed_array.values[17, 7] == approx(
+    assert stim_editor.current_stim_modifier.stim_array.values[17, 7] == approx(
         new_stim_value
     )
     stim_editor.stim_widget_mouse_dragged(8, 8, 18, 18, 1)
     # drawn stimuli have a magnitude of 1.0
-    assert stim_editor.current_stim_modifier.timed_array.values[18, 8] == approx(0)
-    assert stim_editor.current_stim_modifier.timed_array.values[19, 8] == approx(0)
-    assert stim_editor.current_stim_modifier.timed_array.values[16, 7] == approx(
+    assert stim_editor.current_stim_modifier.stim_array.values[18, 8] == approx(0)
+    assert stim_editor.current_stim_modifier.stim_array.values[19, 8] == approx(0)
+    assert stim_editor.current_stim_modifier.stim_array.values[16, 7] == approx(
         new_stim_value
     )
-    assert stim_editor.current_stim_modifier.timed_array.values[17, 7] == approx(
+    assert stim_editor.current_stim_modifier.stim_array.values[17, 7] == approx(
         new_stim_value
     )
     stim_editor.stim_widget_mouse_dragged(7, 7, 16, 16, 1)
-    assert stim_editor.current_stim_modifier.timed_array.values[18, 8] == approx(0)
-    assert stim_editor.current_stim_modifier.timed_array.values[19, 8] == approx(0)
-    assert stim_editor.current_stim_modifier.timed_array.values[16, 7] == approx(0)
-    assert stim_editor.current_stim_modifier.timed_array.values[17, 7] == approx(0)
+    assert stim_editor.current_stim_modifier.stim_array.values[18, 8] == approx(0)
+    assert stim_editor.current_stim_modifier.stim_array.values[19, 8] == approx(0)
+    assert stim_editor.current_stim_modifier.stim_array.values[16, 7] == approx(0)
+    assert stim_editor.current_stim_modifier.stim_array.values[17, 7] == approx(0)
+    stim_editor.close()

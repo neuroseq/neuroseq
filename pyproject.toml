@@ -20,7 +20,7 @@ dependencies = [
     "h5py",
     "qtawesome",
     "click",
-    "fastplotlib>=0.5.1",
+    "fastplotlib",
     "pyparsing!=3.2.4",
     "platformdirs",
     "psutil",
@@ -42,6 +42,7 @@ dev = [
     "pytest-mock",
     "pytest-memray ; platform_system != 'Windows'",
     "diff-cover",
+    "mkdocs-material"
 ]
 
 [tool.hatch.version]

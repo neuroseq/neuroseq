@@ -5,8 +5,8 @@ import pytest
 from pytestqt.qtbot import QtBot
 from qtpy.QtCore import Qt
 
-from neuroseq.experiment import SpikeData
-from neuroseq.experiment import TraceData
+from neuroseq.data import SpikeData
+from neuroseq.data import TraceData
 from neuroseq.import_dialog import Suite2pImportDialog
 from neuroseq.importer_suite2p import compute_normalized_suite2p_traces
 

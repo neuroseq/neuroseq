@@ -11,14 +11,13 @@ from cmap import Colormap
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from neuroseq.utils import QtABCMeta
 from neuroseq.utils import neuron_indices_to_colors
 
 feature_flag_text = True  # todo: remove.
 
 
 # todo: this is a bit slow to render, not sure right now why. Need to test: initial zoom.
-class OverlayView(QtWidgets.QWidget, metaclass=QtABCMeta):
+class OverlayView(QtWidgets.QWidget):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         # Suppress subplot title text by providing an empty name

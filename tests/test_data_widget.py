@@ -4,10 +4,10 @@ import brian2.numpy_ as np
 from pytestqt.qtbot import QtBot
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.data import SpikeData
+from neuroseq.data import SynapseData
+from neuroseq.data import TraceData
 from neuroseq.data_widget import DataWidget
-from neuroseq.experiment import SpikeData
-from neuroseq.experiment import SynapseData
-from neuroseq.experiment import TraceData
 
 
 def test_data_widget(qtbot: QtBot) -> None:
@@ -19,7 +19,13 @@ def test_data_widget(qtbot: QtBot) -> None:
     assert data_widget.trace_widget.n_neurons == 0
     assert data_widget.spike_widget.n_neurons == 0
     data_widget.set_data(
-        TraceData("trace", np.random.random_sample((3, 6)), "mV", 0.001)
+        TraceData(
+            "trace",
+            np.random.random_sample((3, 6)),
+            np.arange(0, 3, dtype=np.uint32),
+            "mV",
+            0.001,
+        )
     )
     assert data_widget.trace_widget.n_neurons == 3
     assert data_widget.spike_widget.n_neurons == 0
@@ -42,3 +48,4 @@ def test_data_widget(qtbot: QtBot) -> None:
     data_widget.clear_data()
     assert data_widget.trace_widget.n_neurons == 0
     assert data_widget.spike_widget.n_neurons == 0
+    data_widget.close()

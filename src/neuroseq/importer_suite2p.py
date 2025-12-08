@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import brian2.numpy_ as np
 import numpy.typing as npt
 
-from neuroseq.experiment import SpikeData
-from neuroseq.experiment import TraceData
+from neuroseq.data import SpikeData
+from neuroseq.data import TraceData
 from neuroseq.spike_detection import detect_spikes_threshold
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_array_per_neuron(
@@ -85,6 +88,7 @@ def prepare_suite2p_traces(
     return TraceData(
         "Suite2p contrasting traces",
         normalized_traces[:n_neurons_to_import, :],
+        np.arange(n_neurons_to_import, dtype=np.uint32),  # indices arg for the traces
         "units",
         dt,
     )
@@ -100,10 +104,23 @@ def prepare_suite2p_spikes(
     """
     Create SpikeData from Suite2p spks.npy data using shared spike detection.
     """
-    return detect_spikes_threshold(
+    logger.debug(
+        "Preparing Suite2p spikes: shape=%s dt=%.6f threshold=%.4f max_neurons=%s",
+        getattr(spike_data, "shape", None),
+        dt,
+        threshold,
+        max_neurons,
+    )
+    result = detect_spikes_threshold(
         spike_data,
         dt=dt,
         threshold=threshold,
         max_neurons=max_neurons,
         normalize_per_neuron=True,
     )
+    logger.debug(
+        "Spike detection complete: %d spikes across %d neurons",
+        len(result.spike_indices),
+        len(np.unique(result.spike_indices)) if result.spike_indices.size else 0,
+    )
+    return result
