@@ -48,7 +48,7 @@ class StimWidget(TimeseriesWidget):
             self.vmax = 1.0
         if self.stim_type == StimType.External:
             self.vmin = -self.vmax
-        self.units = stim_array.units
+        self.units = "" if stim_array.units == "1" else stim_array.units
         self.graphic = self.subplot.add_image(
             stim_array.values.T,
             vmin=self.vmin,
