@@ -33,7 +33,10 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.file_path: Path | None = None
         self.npy_data: np.ndarray | None = None
         self.extracted_neuron_id: int | None = None
-        self.overlay_widget = CellOverlayWidget("Cell overlay preview")
+        self.overlay_widget: CellOverlayWidget | None = None
+        self.preview_group: QtWidgets.QGroupBox | None = None
+        self.options_group: QtWidgets.QGroupBox | None = None
+        self.spike_group: QtWidgets.QGroupBox | None = None
         self._setup_ui()
         self._load_overlay_from_cellpose()
 
@@ -49,15 +52,11 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         layout = QtWidgets.QVBoxLayout(self)
 
-        instructions = QtWidgets.QLabel(
-            "Select a .npy file containing patch clamp voltage recording data."
-        )
-        instructions.setWordWrap(True)
-        layout.addWidget(instructions)
+        if self.cellpose_import is not None:
+            self.overlay_widget = CellOverlayWidget("Cell overlay preview")
+            layout.addWidget(self.overlay_widget)
 
-        layout.addWidget(self.overlay_widget)
-
-        file_group = QtWidgets.QGroupBox("File Selection")
+        file_group = QtWidgets.QGroupBox("Select .npy patchclamp file")
         file_layout = QtWidgets.QHBoxLayout(file_group)
 
         self.file_path_label = QtWidgets.QLabel("No file selected")
@@ -69,16 +68,16 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         layout.addWidget(file_group)
 
-        preview_group = QtWidgets.QGroupBox("Data Preview")
-        preview_layout = QtWidgets.QVBoxLayout(preview_group)
+        self.preview_group = QtWidgets.QGroupBox("Data Preview")
+        preview_layout = QtWidgets.QVBoxLayout(self.preview_group)
         self.preview_text = QtWidgets.QTextEdit()
         self.preview_text.setReadOnly(True)
         self.preview_text.setMaximumHeight(140)
         preview_layout.addWidget(self.preview_text)
-        layout.addWidget(preview_group)
+        layout.addWidget(self.preview_group)
 
-        options_group = QtWidgets.QGroupBox("Import Options")
-        options_layout = QtWidgets.QFormLayout(options_group)
+        self.options_group = QtWidgets.QGroupBox("Import Options")
+        options_layout = QtWidgets.QFormLayout(self.options_group)
 
         self.sampling_rate_spin = QtWidgets.QDoubleSpinBox()
         self.sampling_rate_spin.setDecimals(2)
@@ -118,12 +117,23 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         options_layout.addRow("Custom mapping:", custom_widget)
 
+        # Replace/extend data option
+        self.replace_checkbox = QtWidgets.QCheckBox(
+            "Replace existing data for this neuron ID instead of extending"
+        )
+        self.replace_checkbox.setChecked(not self.append_data)
+        self.replace_checkbox.setToolTip(
+            "When enabled, imported data will overwrite existing traces/spikes "
+            "for the specified neuron ID. When disabled, data will be appended/extended."
+        )
+        options_layout.addRow(self.replace_checkbox)
+
         # Connect radio buttons to show/hide custom mapping input
         for button in self.mapping_buttons.buttons():
             button.toggled.connect(self._on_mapping_changed)
 
-        spike_group = QtWidgets.QGroupBox("Spike Detection Parameters")
-        spike_layout = QtWidgets.QFormLayout(spike_group)
+        self.spike_group = QtWidgets.QGroupBox("Spike Detection Parameters")
+        spike_layout = QtWidgets.QFormLayout(self.spike_group)
 
         threshold_label = QtWidgets.QLabel("30.0 mV (fixed)")
         threshold_label.setToolTip(
@@ -141,8 +151,8 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.min_interval_spin.setToolTip("Minimum interval between detected spikes")
         spike_layout.addRow("Min spike interval:", self.min_interval_spin)
 
-        layout.addWidget(options_group)
-        layout.addWidget(spike_group)
+        layout.addWidget(self.options_group)
+        layout.addWidget(self.spike_group)
 
         button_layout = QtWidgets.QHBoxLayout()
         self.import_button = QtWidgets.QPushButton("Import")
@@ -155,6 +165,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         button_layout.addWidget(cancel_button)
 
         layout.addLayout(button_layout)
+        self._set_file_sections_visible(False)
 
     def _on_mapping_changed(self) -> None:
         mapping_strategy = self._get_mapping_strategy()
@@ -166,6 +177,8 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             self.custom_neuron_id_spin.setVisible(True)
 
     def _load_overlay_from_cellpose(self) -> None:
+        if self.overlay_widget is None:
+            return
         if self.cellpose_import is None:
             self.overlay_widget.set_empty_message(
                 "Import Cellpose segmentation to see the overlay here."
@@ -212,6 +225,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
             self._update_preview()
             self.import_button.setEnabled(True)
+            self._set_file_sections_visible(True)
         except Exception as exc:
             self.logger.exception("Error loading patch clamp file")
             QtWidgets.QMessageBox.critical(
@@ -220,6 +234,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 f"Could not load file {filename}:\n{exc}",
             )
             self.import_button.setEnabled(False)
+            self._set_file_sections_visible(False)
 
     def _load_npy_file(self, filename: str) -> None:
         self.npy_data = np.load(filename)
@@ -270,6 +285,11 @@ class PatchClampImportDialog(QtWidgets.QDialog):
     def _get_mapping_strategy(self) -> str:
         checked = self.mapping_buttons.checkedButton()
         return checked.text() if checked is not None else "Linear"
+
+    def _set_file_sections_visible(self, visible: bool) -> None:
+        for group in (self.preview_group, self.options_group, self.spike_group):
+            if group is not None:
+                group.setVisible(visible)
 
     def _parse_custom_mapping(self, mapping_str: str) -> dict[int, int]:
         """Parse custom mapping string like '1:12,2:3' into {1: 12, 2: 3}"""

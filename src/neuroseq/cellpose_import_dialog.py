@@ -135,6 +135,13 @@ class CellposeImportDialog(QtWidgets.QDialog):
         mapping_strategy = self._get_mapping_strategy()
         self.custom_mapping_line.setVisible(mapping_strategy == "Custom")
 
+        # Update preview if data is loaded
+        if (
+            self.importer.segmentation_data is not None
+            and self.importer.overlay_image is not None
+        ):
+            self._update_preview_mapping()
+
     def _get_mapping_strategy(self) -> str:
         """Get the currently selected mapping strategy"""
         checked = self.mapping_buttons.checkedButton()
@@ -185,6 +192,22 @@ class CellposeImportDialog(QtWidgets.QDialog):
             return self._parse_custom_mapping(self.custom_mapping_line.text())
         else:
             return {}
+
+    def _update_preview_mapping(self) -> None:
+        """Update the preview with current mapping strategy"""
+        try:
+            mapping_strategy = self._get_mapping_strategy()
+            preview_mapping = self._generate_stimulus_mapping(mapping_strategy)
+
+            self.overlay_widget.set_overlay(
+                self.importer.overlay_image,
+                self.importer.segmentation_data,
+                self.importer.get_legend_data(),
+                self.importer._original_cellpose_ids,
+                preview_mapping,
+            )
+        except Exception as exc:
+            self.logger.warning("Error updating preview mapping: %s", exc)
 
     def _browse_image_file(self) -> None:
         filename, _ = getopenfilename(
@@ -245,11 +268,20 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.importer.validate_dimensions()
             self.importer.generate_overlay()
             self.import_button.setEnabled(True)
+            # Generate preview mapping to show in overlay
+            mapping_strategy = self._get_mapping_strategy()
+            preview_mapping = (
+                self._generate_stimulus_mapping(mapping_strategy)
+                if mapping_strategy
+                else {}
+            )
+
             self.overlay_widget.set_overlay(
                 self.importer.overlay_image,
                 self.importer.segmentation_data,
                 self.importer.get_legend_data(),
                 self.importer._original_cellpose_ids,
+                preview_mapping,
             )
             self._hide_info()
         except ValueError as exc:
@@ -296,18 +328,29 @@ class CellposeImportDialog(QtWidgets.QDialog):
             return
 
         try:
-            self._imported_data = self.importer.create_result(self.image_path)
+            # Generate stimulus-to-cellpose mapping based on selected strategy
+            mapping_strategy = self._get_mapping_strategy()
+            stimulus_mapping = self._generate_stimulus_mapping(mapping_strategy)
+
+            self._imported_data = self.importer.create_result(
+                self.image_path, stimulus_mapping
+            )
 
             info = self.importer.get_info()
             unique_ids = [uid for uid in info["unique_ids"] if uid > 0]
 
-            QtWidgets.QMessageBox.information(
-                self,
-                "Import Successful",
+            # Create success message with mapping info
+            success_msg = (
                 f"Successfully imported Cellpose data.\n"
                 f"Image: {info['image_shape']}\n"
-                f"Detected {info['n_neurons']} neurons with IDs: {unique_ids}",
+                f"Detected {info['n_neurons']} neurons with IDs: {unique_ids}\n"
+                f"Mapping strategy: {mapping_strategy}"
             )
+
+            if stimulus_mapping:
+                success_msg += f"\nStimulus mapping: {dict(list(stimulus_mapping.items())[:5])}{'...' if len(stimulus_mapping) > 5 else ''}"
+
+            QtWidgets.QMessageBox.information(self, "Import Successful", success_msg)
             self.accept()
 
         except Exception as exc:
