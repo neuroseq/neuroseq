@@ -212,28 +212,37 @@ class CellPoseImporter:
                 f"segmentation dimensions {self.segmentation_data.shape}"
             )
 
-    def generate_overlay(self) -> None:
-        """Generate color overlay image using neuron colormap."""
+    def generate_overlay(self, opacity: float = 0.5) -> None:
+        """Generate color overlay image using neuron colormap.
+
+        Opacity parameter exists to make tests more certain/easier. There were issues with different color transforms/
+        implementations, so doing it this way lets us test colors exactly for an exact match between the legend and the
+        overlay itself.
+
+        Args:
+            opacity: Opacity for cell overlays (0.0 = transparent, 1.0 = full opacity)
+        """
         if self.image_data is None or self.segmentation_data is None:
             raise ValueError("Both image and segmentation data must be loaded first")
 
         unique_ids = np.unique(self.segmentation_data)
-        neuron_ids = unique_ids[unique_ids > 0]  # Exclude background (ID=0)
+        neuron_ids = unique_ids[unique_ids > 0]
 
         if neuron_ids.size > 0:
             # neuron_ids are already 0-based after loading
             self._neuron_ids = neuron_ids
             self._neuron_colors = self._compute_neuron_colors(neuron_ids)
 
-            overlay = np.zeros((*self.segmentation_data.shape, 3), dtype=np.uint8)
+            self.overlay_image = self.image_data.copy().astype(np.float32)
 
             for i, seg_id in enumerate(neuron_ids):
                 mask = self.segmentation_data == seg_id
-                overlay[mask] = self._neuron_colors[i]
+                cell_color = self._neuron_colors[i].astype(np.float32)
+                self.overlay_image[mask] = (1 - opacity) * self.image_data[
+                    mask
+                ] + opacity * cell_color
 
-            self.overlay_image = (0.5 * self.image_data + 0.5 * overlay).astype(
-                np.uint8
-            )
+            self.overlay_image = self.overlay_image.astype(np.uint8)
         else:
             self.overlay_image = self.image_data.copy()
             self._neuron_ids = None
@@ -309,7 +318,9 @@ class CellPoseImporter:
 
         # neuron_indices are already 0-based, so use them directly
         colors_rgba_float = neuron_indices_to_colors(neuron_indices)
-        return (colors_rgba_float[:, :3] * 255).astype(np.uint8)
+        return (colors_rgba_float[:, :3] * 255).astype(
+            np.uint8
+        )  # convert from decimal to RGB int8 integers
 
     @staticmethod
     def _validate_trace_data(trace_data: TraceData) -> None:
@@ -327,9 +338,11 @@ class CellPoseImporter:
         if spike_data.spike_indices.ndim != 1 or spike_data.spike_times.ndim != 1:
             raise ValueError("SpikeData arrays must be 1D")
         if spike_data.spike_indices.shape[0] != spike_data.spike_times.shape[0]:
-            raise ValueError("SpikeData indices and times must have matching lengths")
+            raise ValueError(
+                "SpikeData indices and times must have matching lengths - one set of times per"
+            )
         if spike_data.spike_indices.shape[0] == 0:
-            raise ValueError("SpikeData must contain at least one spike")
+            raise ValueError("SpikeData must contain at least one spike data point")
         if np.any(spike_data.spike_indices < 0):
             raise ValueError("Spike indices must be non-negative")
         if np.any(spike_data.spike_times < 0):
@@ -338,6 +351,7 @@ class CellPoseImporter:
     def _load_suite2p_segmentation(
         self, stat_data: np.ndarray, stat_path: Path
     ) -> np.ndarray:
+        # experimental support - not rigourously tested or tested in our tests.
         """Load suite2p stat.npy format and convert to segmentation mask."""
         # Check if this looks like suite2p stat.npy format
         if not (stat_data.dtype == object and len(stat_data) > 0):

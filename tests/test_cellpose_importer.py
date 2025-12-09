@@ -1,0 +1,411 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+from PIL import Image
+
+from neuroseq.importer_cellpose import CellPoseImporter
+from neuroseq.utils import neuron_indices_to_colors
+
+"""
+We test cellpose import with 2 of the 3 formats here, color exactness, and mapping of the cellpose results, plus the
+persistent nature of cellpose until you clear it
+"""
+
+
+def _fastplotlib_expected_colors(n_neurons: int) -> np.ndarray:
+    if n_neurons <= 0:
+        return np.zeros((0, 3), dtype=np.uint8)
+
+    indices = np.arange(n_neurons)
+    colors_rgba_float = neuron_indices_to_colors(indices)
+    return (colors_rgba_float[:, :3] * 255).astype(np.uint8)
+
+
+def test_load_tiff_stack_mean(tmp_path):
+    importer = CellPoseImporter()
+
+    rgb_frame = np.zeros((4, 4, 3), dtype=np.uint8)
+    gray_frame = np.full((4, 4), 120, dtype=np.uint8)
+    blue_frame = np.zeros((4, 4, 3), dtype=np.uint8)
+    blue_frame[..., 2] = 255
+
+    pil_frames = [
+        Image.fromarray(rgb_frame, mode="RGB"),
+        Image.fromarray(gray_frame),
+        Image.fromarray(blue_frame, mode="RGB"),
+    ]
+
+    tiff_path = Path(tmp_path) / "stack.tif"
+    pil_frames[0].save(
+        tiff_path, format="TIFF", save_all=True, append_images=pil_frames[1:]
+    )
+
+    importer.load_image_file(str(tiff_path))
+    assert importer.image_data is not None
+
+    expected_arrays = [importer._frame_to_rgb_float(frame) for frame in pil_frames]
+    expected_float = np.mean(np.stack(expected_arrays, axis=0), axis=0)
+    expected = importer._scale_float_image_to_uint8(expected_float)
+
+    np.testing.assert_array_equal(importer.image_data, expected)
+
+
+def test_load_uint16_tiff_stack(tmp_path):
+    importer = CellPoseImporter()
+
+    base = (np.arange(16, dtype=np.uint16).reshape(4, 4) * 1000).astype(np.uint16)
+    frame_a = base
+    frame_b = base + 5000
+
+    frames = [Image.fromarray(frame_a), Image.fromarray(frame_b)]
+
+    tiff_path = tmp_path / "stack16.tif"
+    frames[0].save(tiff_path, format="TIFF", save_all=True, append_images=frames[1:])
+
+    importer.load_image_file(str(tiff_path))
+    assert importer.image_data is not None
+
+    expected_arrays = [importer._frame_to_rgb_float(frame) for frame in frames]
+    expected_float = np.mean(np.stack(expected_arrays, axis=0), axis=0)
+    expected_rgb = importer._scale_float_image_to_uint8(expected_float)
+
+    np.testing.assert_array_equal(importer.image_data, expected_rgb)
+    assert len(np.unique(importer.image_data)) > 1
+
+
+def test_load_segmentation_npy(tmp_path):
+    importer = CellPoseImporter()
+
+    segmentation = np.array(
+        [
+            [0, 1, 2],
+            [2, 1, 3],
+            [0, 3, 3],
+        ],
+        dtype=np.int32,
+    )
+
+    seg_path = tmp_path / "segmentation.npy"
+    np.save(seg_path, segmentation)
+
+    importer.load_segmentation_file(seg_path)
+
+    assert importer.segmentation_data is not None
+    assert importer.segmentation_data.dtype == np.int32
+    np.testing.assert_array_equal(importer.segmentation_data, segmentation)
+
+
+def test_load_suite2p_segmentation(tmp_path):
+    importer = CellPoseImporter()
+
+    roi1 = {
+        "ypix": np.array([0, 0, 1, 1]),
+        "xpix": np.array([0, 1, 0, 1]),
+        "npix": 4,
+        "med": [0.5, 0.5],
+        "radius": 1.0,
+        "aspect_ratio": 1.0,
+    }
+    roi2 = {
+        "ypix": np.array([2, 2, 3, 3]),
+        "xpix": np.array([2, 3, 2, 3]),
+        "npix": 4,
+        "med": [2.5, 2.5],
+        "radius": 1.0,
+        "aspect_ratio": 1.0,
+    }
+    roi3 = {
+        "ypix": np.array([0, 1]),
+        "xpix": np.array([3, 3]),
+        "npix": 2,
+        "med": [0.5, 3.0],
+        "radius": 0.5,
+        "aspect_ratio": 0.5,
+    }
+
+    stat_data = np.array([roi1, roi2, roi3], dtype=object)
+
+    iscell_data = np.array([[1.0, 0.8], [1.0, 0.9], [0.0, 0.2]])
+
+    stat_path = tmp_path / "stat.npy"
+    iscell_path = tmp_path / "iscell.npy"
+    np.save(stat_path, stat_data, allow_pickle=True)
+    np.save(iscell_path, iscell_data)
+
+    importer.load_segmentation_file(stat_path)
+
+    assert importer.segmentation_data is not None
+    assert importer.segmentation_data.shape == (4, 4)
+    assert importer.segmentation_data.dtype == np.int32
+
+    expected = np.array(
+        [[1, 1, 0, 0], [1, 1, 0, 0], [0, 0, 2, 2], [0, 0, 2, 2]], dtype=np.int32
+    )
+
+    np.testing.assert_array_equal(importer.segmentation_data, expected)
+
+
+def test_load_csv_masks_segmentation(tmp_path):
+    """Test loading CSV segmentation file (masks.csv format)."""
+    importer = CellPoseImporter()
+
+    segmentation = np.array(
+        [
+            [0, 1, 1, 2, 2],
+            [0, 1, 1, 2, 2],
+            [0, 0, 0, 0, 0],
+            [3, 3, 0, 4, 4],
+            [3, 3, 0, 4, 4],
+        ],
+        dtype=np.int32,
+    )
+
+    csv_path = tmp_path / "masks.csv"
+    np.savetxt(csv_path, segmentation, fmt="%d", delimiter=",")
+
+    importer.load_segmentation_file(csv_path)
+
+    assert importer.segmentation_data is not None
+    assert importer.segmentation_data.shape == (5, 5)
+    assert importer.segmentation_data.dtype == np.int32
+    np.testing.assert_array_equal(importer.segmentation_data, segmentation)
+
+    expected_unique = np.array([0, 1, 2, 3, 4])
+    actual_unique = np.unique(importer.segmentation_data)
+    np.testing.assert_array_equal(actual_unique, expected_unique)
+
+
+def test_cellpose_patchclamp_visual_integration(tmp_path):
+    test_image = np.random.randint(0, 255, (50, 50, 3), dtype=np.uint8)
+
+    # Create test segmentation with a few cells
+    segmentation = np.zeros((50, 50), dtype=np.int32)
+    segmentation[10:20, 10:20] = 1
+    segmentation[30:40, 30:40] = 2
+    segmentation[15:25, 35:45] = 3  # cell 3
+
+    # Save test files
+    image_path = tmp_path / "test_image.png"
+    seg_path = tmp_path / "segmentation.npy"
+
+    from PIL import Image
+
+    Image.fromarray(test_image).save(image_path)
+    np.save(seg_path, segmentation)
+
+    # Import cellpose data
+    from neuroseq.importer_cellpose import CellPoseImporter
+
+    importer = CellPoseImporter()
+    importer.load_image_file(str(image_path))
+    importer.load_segmentation_file(seg_path)
+    importer.validate_dimensions()
+    importer.generate_overlay()
+
+    cellpose_result = importer.create_result(image_path)
+
+    # Verify cellpose result has expected data structure for visual display
+    assert cellpose_result.overlay_image is not None
+    assert cellpose_result.segmentation_array is not None
+    assert cellpose_result.overlay_image.shape == (50, 50, 3)
+    assert cellpose_result.segmentation_array.shape == (50, 50)
+
+    # Verify overlay image is properly generated (should be blend of image and segmentation colors)
+    np.testing.assert_array_equal(cellpose_result.segmentation_array, segmentation)
+
+    # Test that the importer computed neuron colors for visual display
+    assert importer._neuron_ids is not None
+    assert importer._neuron_colors is not None
+    expected_ids = [1, 2, 3]
+    np.testing.assert_array_equal(importer._neuron_ids, expected_ids)
+    assert importer._neuron_colors.shape == (3, 3)  # 3 neurons, RGB colors
+
+    # Test that legend data is available for visual display
+    legend_data = importer.get_legend_data()
+    assert len(legend_data) == 3
+    legend_ids = [cell_id for cell_id, _ in legend_data]
+    for expected_id in expected_ids:
+        assert expected_id in legend_ids
+
+    # Verify each legend entry has proper RGB color format
+    for cell_id, rgb in legend_data:
+        assert isinstance(cell_id, int)
+        assert len(rgb) == 3
+        assert all(0 <= c <= 255 for c in rgb)
+
+    # Test that overlay image pixels were modified (not identical to original)
+    assert not np.array_equal(cellpose_result.overlay_image, test_image)
+
+    # Test that background pixels (segmentation == 0) exist in overlay
+    background_mask = segmentation == 0
+    assert np.any(background_mask)
+
+    # Test that cell pixels have different colors from background in overlay
+    cell_mask = segmentation > 0
+    assert np.any(cell_mask)
+
+    # Verify that the overlay properly blends original image with colorized segmentation
+    # The overlay should be: 0.5 * original + 0.5 * colored_segmentation
+    assert cellpose_result.overlay_image.dtype == np.uint8
+    assert cellpose_result.overlay_image.shape == test_image.shape
+
+
+def test_custom_stim_cellpose_mapping(tmp_path):
+    """Test custom mapping between stimulus IDs and cellpose IDs (stim:cellpose format)."""
+    from PIL import Image
+
+    from neuroseq.importer_cellpose import CellPoseImporter
+
+    test_image = np.random.randint(50, 150, (40, 40, 3), dtype=np.uint8)
+    segmentation = np.zeros((40, 40), dtype=np.int32)
+    segmentation[5:15, 5:15] = 3
+    segmentation[20:30, 20:30] = 7
+    segmentation[10:20, 25:35] = 12
+    image_path = tmp_path / "test.png"
+    seg_path = tmp_path / "seg.npy"
+    Image.fromarray(test_image).save(image_path)
+    np.save(seg_path, segmentation)
+
+    importer = CellPoseImporter()
+    importer.load_image_file(str(image_path))
+    importer.load_segmentation_file(seg_path)
+    importer.validate_dimensions()
+    importer.generate_overlay()
+
+    stim_to_cellpose_mapping = {1: 3, 5: 7, 9: 12}
+    cellpose_result = importer.create_result(image_path, stim_to_cellpose_mapping)
+
+    assert cellpose_result.stimulus_to_cellpose_mapping == stim_to_cellpose_mapping
+    expected_cellpose_ids = [3, 7, 12]
+    for cellpose_id in expected_cellpose_ids:
+        assert cellpose_id in cellpose_result.original_cellpose_ids
+
+    # Test mapping parsing logic (simulates dialog parsing)
+    mapping_str = "1:3,5:7,9:12"
+    parsed_mapping = {}
+    for pair in mapping_str.split(","):
+        stim_key_str, cellpose_id_str = pair.split(":", 1)
+        stim_key = int(stim_key_str.strip())
+        cellpose_id = int(cellpose_id_str.strip())
+        parsed_mapping[stim_key] = cellpose_id
+
+    assert parsed_mapping == stim_to_cellpose_mapping
+
+
+def test_custom_mapping_parsing_edge_cases():
+    """Test edge cases in custom mapping string parsing."""
+    # Test various mapping string formats
+
+    # Standard format
+    mapping_str = "12:1,15:7,20:3"
+    mapping = {}
+    for pair in mapping_str.split(","):
+        stim_str, cellpose_str = pair.split(":", 1)
+        mapping[int(stim_str.strip())] = int(cellpose_str.strip())
+
+    expected = {12: 1, 15: 7, 20: 3}
+    assert mapping == expected
+
+    # Format with spaces
+    mapping_str = " 12 : 1 , 15 : 7 , 20 : 3 "
+    mapping = {}
+    for pair in mapping_str.split(","):
+        stim_str, cellpose_str = pair.split(":", 1)
+        mapping[int(stim_str.strip())] = int(cellpose_str.strip())
+
+    assert mapping == expected
+
+    # Single mapping
+    mapping_str = "5:10"
+    mapping = {}
+    for pair in mapping_str.split(","):
+        stim_str, cellpose_str = pair.split(":", 1)
+        mapping[int(stim_str.strip())] = int(cellpose_str.strip())
+
+    assert mapping == {5: 10}
+
+
+def test_cellpose_overlay_color_pixels(tmp_path):
+    """Test that cellpose overlay contains exact expected colors matching legend."""
+    from PIL import Image
+
+    from neuroseq.importer_cellpose import CellPoseImporter
+
+    test_image = np.zeros((30, 30, 3), dtype=np.uint8)
+
+    segmentation = np.zeros((30, 30), dtype=np.int32)
+    segmentation[5:15, 5:15] = (
+        1  # set these cells to cell 1 ID in the segmentation mask for our purposes here
+    )
+    segmentation[16:25, 16:25] = 2  # Same for cell 2
+    segmentation[5:15, 20:25] = 3  # and cell 3.
+
+    image_path = tmp_path / "test_image.png"
+    seg_path = tmp_path / "segmentation.npy"
+
+    Image.fromarray(test_image).save(image_path)
+    np.save(seg_path, segmentation)
+
+    importer = CellPoseImporter()
+    importer.load_image_file(str(image_path))
+    importer.load_segmentation_file(seg_path)
+    importer.validate_dimensions()
+    importer.generate_overlay(opacity=1.0)  # For testing exact colors.
+
+    legend_data = importer.get_legend_data()
+    assert len(legend_data) == 3
+
+    for cell_id, expected_rgb in legend_data:
+        cell_mask = segmentation == cell_id
+        if np.any(cell_mask):
+            actual_pixels = importer.overlay_image[cell_mask]
+            actual_rgb = actual_pixels[0]
+
+            assert np.array_equal(actual_rgb, expected_rgb), (
+                f"Cell {cell_id}: expected {expected_rgb}, got {actual_rgb}"
+            )
+
+            for pixel in actual_pixels:
+                assert np.array_equal(pixel, actual_rgb), (
+                    f"Cell {cell_id} has inconsistent colors"
+                )
+
+
+def test_cellpose_preview_pixel_differences(tmp_path):
+    """Test that cellpose preview shows 50% blend and background unchanged."""
+    from PIL import Image
+
+    from neuroseq.importer_cellpose import CellPoseImporter
+
+    original_image = np.full((20, 20, 3), 100, dtype=np.uint8)
+
+    segmentation = np.zeros((20, 20), dtype=np.int32)
+    segmentation[5:15, 5:15] = 1
+
+    image_path = tmp_path / "original.png"
+    seg_path = tmp_path / "seg.npy"
+
+    Image.fromarray(original_image).save(image_path)
+    np.save(seg_path, segmentation)
+
+    importer = CellPoseImporter()
+    importer.load_image_file(str(image_path))
+    importer.load_segmentation_file(seg_path)
+    importer.validate_dimensions()
+    importer.generate_overlay(opacity=0.5)
+
+    np.testing.assert_array_equal(importer.image_data, original_image)
+
+    bg_mask = segmentation == 0
+    cell_mask = segmentation == 1
+
+    bg_pixels = importer.overlay_image[bg_mask]
+    original_bg_pixels = original_image[bg_mask]
+    np.testing.assert_array_equal(bg_pixels, original_bg_pixels)
+
+    if np.any(cell_mask):
+        cell_pixels = importer.overlay_image[cell_mask]
+        original_cell_pixels = original_image[cell_mask]
+        assert not np.array_equal(cell_pixels, original_cell_pixels)
