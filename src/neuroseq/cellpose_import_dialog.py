@@ -484,14 +484,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.image_path_label.setStyleSheet("QLabel { color: blue; }")
 
             # Load the existing image and segmentation data
-            self.importer.image_data = np.array(self.existing_data.overlay_image)
-            self.importer.segmentation_data = (
-                self.existing_data.segmentation_array.copy()
-            )
-            self.importer._original_cellpose_ids = (
-                self.existing_data.original_cellpose_ids
-            )
-            self.importer.overlay_image = self.existing_data.overlay_image
+            self.importer.restore_from_result(self.existing_data)
 
             # Pre-fill custom mapping if available
             if self.existing_data.stimulus_to_cellpose_mapping:

@@ -225,17 +225,12 @@ class CellPoseImporter:
         if self.image_data is None or self.segmentation_data is None:
             raise ValueError("Both image and segmentation data must be loaded first")
 
-        unique_ids = np.unique(self.segmentation_data)
-        neuron_ids = unique_ids[unique_ids > 0]
+        self._refresh_neuron_colors()
 
-        if neuron_ids.size > 0:
-            # neuron_ids are already 0-based after loading
-            self._neuron_ids = neuron_ids
-            self._neuron_colors = self._compute_neuron_colors(neuron_ids)
-
+        if self._neuron_ids is not None and self._neuron_colors is not None:
             self.overlay_image = self.image_data.copy().astype(np.float32)
 
-            for i, seg_id in enumerate(neuron_ids):
+            for i, seg_id in enumerate(self._neuron_ids):
                 mask = self.segmentation_data == seg_id
                 cell_color = self._neuron_colors[i].astype(np.float32)
                 self.overlay_image[mask] = (1 - opacity) * self.image_data[
@@ -312,6 +307,37 @@ class CellPoseImporter:
             stimulus_to_cellpose_mapping=stimulus_to_cellpose_mapping,
         )
 
+    def restore_from_result(self, result: CellposeImportResult) -> None:
+        """Restore importer state from a previously saved result."""
+        self.trace_data = result.trace_data
+        self.spike_data = result.spike_data
+        self._original_cellpose_ids = result.original_cellpose_ids
+        self.segmentation_data = (
+            None
+            if result.segmentation_array is None
+            else np.array(result.segmentation_array, copy=True)
+        )
+        self.overlay_image = (
+            None
+            if result.overlay_image is None
+            else np.array(result.overlay_image, copy=True)
+        )
+
+        # Attempt to reload the original image; fall back to stored overlay if unavailable.
+        self.image_data = None
+        if result.image_path.exists():
+            try:
+                self.load_image_file(result.image_path)
+            except ValueError:
+                self.logger.warning(
+                    "Could not reload original image at %s; using stored overlay instead",
+                    result.image_path,
+                )
+        if self.image_data is None and self.overlay_image is not None:
+            self.image_data = np.array(self.overlay_image, copy=True)
+
+        self._refresh_neuron_colors()
+
     def _compute_neuron_colors(self, neuron_indices: np.ndarray | None) -> np.ndarray:
         if neuron_indices is None or neuron_indices.size == 0:
             return np.zeros((0, 3), dtype=np.uint8)
@@ -321,6 +347,23 @@ class CellPoseImporter:
         return (colors_rgba_float[:, :3] * 255).astype(
             np.uint8
         )  # convert from decimal to RGB int8 integers
+
+    def _refresh_neuron_colors(self) -> None:
+        """Recompute neuron IDs/colors based on the current segmentation data."""
+        if self.segmentation_data is None:
+            self._neuron_ids = None
+            self._neuron_colors = None
+            return
+
+        unique_ids = np.unique(self.segmentation_data)
+        neuron_ids = unique_ids[unique_ids > 0]
+        if neuron_ids.size == 0:
+            self._neuron_ids = None
+            self._neuron_colors = None
+            return
+
+        self._neuron_ids = neuron_ids
+        self._neuron_colors = self._compute_neuron_colors(neuron_ids)
 
     @staticmethod
     def _validate_trace_data(trace_data: TraceData) -> None:

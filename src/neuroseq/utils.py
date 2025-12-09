@@ -271,12 +271,6 @@ def append_data(
                 f"Merging neurons: existing shape={existing_data.traces.shape}, new shape={new_data.traces.shape}"
             )
 
-            # Both datasets should have the same time length for merging neurons
-            if existing_n_timepoints != new_n_timepoints:
-                raise ValueError(
-                    f"Cannot merge TraceData with different time lengths: {existing_n_timepoints} != {new_n_timepoints}"
-                )
-
             # Combine traces and indices
             existing_data.traces = np.concatenate(
                 (existing_data.traces, new_data.traces), axis=0

@@ -409,3 +409,46 @@ def test_cellpose_preview_pixel_differences(tmp_path):
         cell_pixels = importer.overlay_image[cell_mask]
         original_cell_pixels = original_image[cell_mask]
         assert not np.array_equal(cell_pixels, original_cell_pixels)
+
+
+def test_restore_from_result_preserves_colors(tmp_path):
+    """Reopening existing cellpose data should keep legend colors aligned with stored overlay."""
+    from PIL import Image
+
+    from neuroseq.importer_cellpose import CellPoseImporter
+
+    base_image = np.full((16, 16, 3), 50, dtype=np.uint8)
+    segmentation = np.zeros((16, 16), dtype=np.int32)
+    segmentation[0:8, 0:8] = 1
+    segmentation[8:16, 8:16] = 2
+
+    image_path = tmp_path / "image.png"
+    seg_path = tmp_path / "seg.npy"
+    Image.fromarray(base_image).save(image_path)
+    np.save(seg_path, segmentation)
+
+    importer = CellPoseImporter()
+    importer.load_image_file(str(image_path))
+    importer.load_segmentation_file(seg_path)
+    importer.validate_dimensions()
+    importer.generate_overlay(opacity=1.0)
+
+    original_legend = importer.get_legend_data()
+    result = importer.create_result(image_path)
+
+    restored = CellPoseImporter()
+    restored.restore_from_result(result)
+
+    assert restored.overlay_image is not None
+    assert restored.segmentation_data is not None
+    np.testing.assert_array_equal(restored.segmentation_data, segmentation)
+
+    restored_legend = restored.get_legend_data()
+    assert restored_legend == original_legend
+
+    # Verify pixel colors still match legend after restore
+    for cell_id, expected_rgb in restored_legend:
+        mask = restored.segmentation_data == cell_id
+        assert np.any(mask)
+        pixels = restored.overlay_image[mask]
+        assert np.all(pixels == expected_rgb)

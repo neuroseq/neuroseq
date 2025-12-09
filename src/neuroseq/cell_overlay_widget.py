@@ -271,6 +271,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.legend_layout.setContentsMargins(4, 4, 4, 4)
         self.legend_layout.setSpacing(6)
         self.legend_scroll.setWidget(self.legend_widget)
+        self._apply_legend_theme()
         layout.addWidget(self.legend_scroll)
 
     def _on_id_toggle_changed(self, checked: bool) -> None:
@@ -402,14 +403,19 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             item_layout = QtWidgets.QHBoxLayout(item_widget)
             item_layout.setContentsMargins(2, 2, 2, 2)
             item_layout.setSpacing(4)
+            item_widget.setStyleSheet("background-color: black;")
 
             color_label = QtWidgets.QLabel()
             color_label.setFixedSize(16, 16)
             color_label.setStyleSheet(
-                f"QLabel {{ background-color: rgb({rgb[0]}, {rgb[1]}, {rgb[2]}); border: 1px solid black; }}"
+                f"background-color: rgba({rgb[0]}, {rgb[1]}, {rgb[2]}, 128); "
+                "border: 1px solid white;"
             )
             text_label = QtWidgets.QLabel(f"Cell {cell_id}")
             text_label.setFixedHeight(16)
+            text_label.setStyleSheet(
+                "QLabel { color: white; background-color: transparent; }"
+            )
 
             item_layout.addWidget(color_label)
             item_layout.addWidget(text_label)
@@ -431,3 +437,14 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             rgb_255 = (int(color[0] * 255), int(color[1] * 255), int(color[2] * 255))
             legend.append((int(cell_id), rgb_255))
         return legend
+
+    def _apply_legend_theme(self) -> None:
+        """Ensure legend backgrounds/text stay readable against overlays."""
+        self.legend_widget.setStyleSheet("background-color: black; color: white;")
+        self.legend_scroll.setStyleSheet(
+            "QScrollArea { background-color: black; border: none; }"
+            "QScrollArea > QWidget { background-color: black; }"
+        )
+        viewport = self.legend_scroll.viewport()
+        if viewport is not None:
+            viewport.setStyleSheet("background-color: black;")

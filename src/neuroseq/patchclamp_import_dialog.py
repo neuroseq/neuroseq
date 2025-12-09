@@ -12,6 +12,7 @@ from neuroseq.cell_overlay_widget import CellOverlayWidget
 from neuroseq.data import TraceData
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.spike_detection import detect_spikes_voltage_trace
+from neuroseq.utils import neuron_indices_to_colors
 
 
 class PatchClampImportDialog(QtWidgets.QDialog):
@@ -43,6 +44,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.spike_group: QtWidgets.QGroupBox | None = None
         self._setup_ui()
         self._load_overlay_from_cellpose()
+        self._apply_existing_stim_mapping()
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("Import Patch Clamp Data")
@@ -122,7 +124,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         self.custom_mapping_line = QtWidgets.QLineEdit()
         self.custom_mapping_line.setPlaceholderText(
-            "e.g., 1:12,2:3 (stimkey:cellposeId)"
+            "Comma-separated stimulus IDs (e.g., 12,14)"
         )
         self.custom_mapping_line.setVisible(False)
 
@@ -132,9 +134,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.custom_widget = QtWidgets.QWidget()
         self.custom_widget.setLayout(custom_layout)
 
-        self.custom_mapping_label = QtWidgets.QLabel(
-            "Custom mapping (stim:cellpose ID):"
-        )
+        self.custom_mapping_label = QtWidgets.QLabel("Target stimulus IDs:")
         self.custom_mapping_label.setVisible(False)
         self.custom_widget.setVisible(False)
 
@@ -234,15 +234,53 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.custom_mapping_label.setVisible(is_custom)
         self.custom_widget.setVisible(is_custom)
 
-        if is_custom and self.cellpose_import is not None:
+        if is_custom:
             self.custom_mapping_line.setVisible(True)
             self.custom_neuron_id_line.setVisible(False)
-        elif is_custom:
+        else:
             self.custom_mapping_line.setVisible(False)
             self.custom_neuron_id_line.setVisible(True)
 
+    def _apply_existing_stim_mapping(self) -> None:
+        """Prefill custom mapping when Cellpose data already has stimulus IDs."""
+        if (
+            self.cellpose_import is None
+            or not self.cellpose_import.stimulus_to_cellpose_mapping
+        ):
+            return
+
+        stim_ids = sorted(self.cellpose_import.stimulus_to_cellpose_mapping.keys())
+        mapping_str = ",".join(str(stim) for stim in stim_ids)
+        self.custom_mapping_line.setText(mapping_str)
+
+        for button in self.mapping_buttons.buttons():
+            if button.text() == "Custom":
+                button.setChecked(True)
+                break
+
     def _on_replace_toggled(self, checked: bool) -> None:
         self.append_data = not checked
+
+    def _build_cellpose_legend(self) -> list[tuple[int, tuple[int, int, int]]]:
+        """Compute legend entries that match the stored Cellpose overlay colors."""
+        if (
+            self.cellpose_import is None
+            or self.cellpose_import.segmentation_array is None
+        ):
+            return []
+
+        segmentation = self.cellpose_import.segmentation_array
+        unique_ids = np.unique(segmentation)
+        neuron_ids = unique_ids[unique_ids > 0]
+        if neuron_ids.size == 0:
+            return []
+
+        colors = neuron_indices_to_colors(neuron_ids)
+        legend: list[tuple[int, tuple[int, int, int]]] = []
+        for cell_id, color in zip(neuron_ids, colors, strict=True):
+            rgb = (int(color[0] * 255), int(color[1] * 255), int(color[2] * 255))
+            legend.append((int(cell_id), rgb))
+        return legend
 
     def _load_overlay_from_cellpose(self) -> None:
         if self.overlay_widget is None:
@@ -254,9 +292,11 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             return
 
         try:
+            legend = self._build_cellpose_legend()
             self.overlay_widget.set_overlay(
                 self.cellpose_import.overlay_image,
                 self.cellpose_import.segmentation_array,
+                legend_data=legend,
                 original_cellpose_ids=self.cellpose_import.original_cellpose_ids,
                 stimulus_to_cellpose_mapping=self.cellpose_import.stimulus_to_cellpose_mapping,
             )
@@ -331,6 +371,9 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                     button.setChecked(True)
                     break
             self.custom_neuron_id_line.setText(str(self.extracted_neuron_id))
+            if not self.custom_mapping_line.text().strip():
+                # Default stim ID target to the detected neuron ID
+                self.custom_mapping_line.setText(str(self.extracted_neuron_id))
 
         if self.npy_data.ndim not in (1, 2):
             raise ValueError(
@@ -370,6 +413,13 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         checked = self.mapping_buttons.checkedButton()
         return checked.text() if checked is not None else "Linear"
 
+    def _target_neuron_ids(self) -> list[int]:
+        """Get target neuron IDs based on current mapping strategy."""
+        strategy = self._get_mapping_strategy()
+        if strategy == "Custom":
+            return self._parse_stim_neuron_ids(self.custom_mapping_line.text())
+        return self._parse_neuron_ids(self.custom_neuron_id_line.text())
+
     def _set_file_sections_visible(self, visible: bool) -> None:
         for group in (self.preview_group, self.options_group, self.spike_group):
             if group is not None:
@@ -385,26 +435,17 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 min(self.height(), getattr(self, "compact_height", self.height())),
             )
 
-    def _parse_custom_mapping(self, mapping_str: str) -> dict[int, int]:
-        """Parse custom mapping string like '1:12,2:3' into {1: 12, 2: 3}"""
-        mapping: dict[int, int] = {}
+    def _parse_stim_neuron_ids(self, mapping_str: str) -> list[int]:
+        """Parse comma-separated stimulus IDs into a list of ints."""
         if not mapping_str.strip():
-            return mapping
+            raise ValueError("Stimulus IDs cannot be empty")
 
         try:
-            pairs = mapping_str.split(",")
-            for pair in pairs:
-                pair = pair.strip()
-                if ":" not in pair:
-                    continue
-                stim_key_str, cellpose_id_str = pair.split(":", 1)
-                stim_key = int(stim_key_str.strip())
-                cellpose_id = int(cellpose_id_str.strip())
-                mapping[stim_key] = cellpose_id
-        except (ValueError, IndexError) as exc:
-            raise ValueError(f"Invalid custom mapping format: {exc}") from exc
-
-        return mapping
+            return [
+                int(part.strip()) for part in mapping_str.split(",") if part.strip()
+            ]
+        except ValueError as exc:
+            raise ValueError(f"Invalid stimulus ID format: {exc}") from exc
 
     def _parse_neuron_ids(self, neuron_ids_str: str) -> list[int]:
         """Parse comma-separated neuron IDs string into list of integers."""
@@ -445,7 +486,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         # Deal with the multi-neuron extend/replace situation: Double check importing makes sense.
         # Check which neurons we're trying to import
-        neuron_ids_to_import = self._parse_neuron_ids(self.custom_neuron_id_line.text())
+        neuron_ids_to_import = self._target_neuron_ids()
         existing_neuron_indices = set(existing_trace_data.indices)
 
         # Check existing status for each neuron being imported
@@ -479,25 +520,10 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             )
 
     def _generate_stimulus_mapping(self, strategy: str) -> dict[int, int]:
-        """Generate stimulus-to-cellpose mapping based on strategy"""
-        if (
-            self.cellpose_import is None
-            or self.cellpose_import.original_cellpose_ids is None
-        ):
-            return {}
-
-        original_ids = self.cellpose_import.original_cellpose_ids
-
-        if strategy == "Linear":
-            # Map stimulus IDs 1,2,3... to cellpose IDs in order
-            return {
-                i + 1: int(cellpose_id) for i, cellpose_id in enumerate(original_ids)
-            }
-        elif strategy == "Custom":
-            # Parse custom mapping string
-            return self._parse_custom_mapping(self.custom_mapping_line.text())
-        else:
-            return {}
+        """Return any existing Cellpose stimulus mapping (no manual editing here)."""
+        if self.cellpose_import and self.cellpose_import.stimulus_to_cellpose_mapping:
+            return dict(self.cellpose_import.stimulus_to_cellpose_mapping)
+        return {}
 
     def import_data(self) -> None:
         if self.npy_data is None:
@@ -544,7 +570,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             raise ValueError("No NPY data loaded")
 
         # Parse neuron IDs from the UI
-        neuron_ids = self._parse_neuron_ids(self.custom_neuron_id_line.text())
+        neuron_ids = self._target_neuron_ids()
 
         # Validate data dimensions match neuron count
         if self.npy_data.ndim == 1:

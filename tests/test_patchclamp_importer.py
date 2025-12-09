@@ -23,7 +23,7 @@ def _generate_patchclamp_trace(
     # Random interval spikes
     if num_spikes > 0:
         min_interval_samples = int(0.1 * sampling_rate)
-        spike_positions = []
+        spike_positions: list[int] = []
 
         for _ in range(num_spikes):
             # Find valid position
@@ -68,10 +68,7 @@ def _trace_data_exists_for_index(
     trace_data_list: list[TraceData], neuron_index: int
 ) -> bool:
     """Check if trace data exists for a given neuron index."""
-    for trace_data in trace_data_list:
-        if neuron_index in trace_data.indices:
-            return True
-    return False
+    return any(neuron_index in trace_data.indices for trace_data in trace_data_list)
 
 
 def _spike_data_exists_for_index(
@@ -110,6 +107,7 @@ def test_load_single_npy_file(tmp_path, qtbot):
     # Verify neuron ID extracted from filename
     assert dialog.extracted_neuron_id == 42
     assert dialog.custom_neuron_id_line.text() == "42"
+    assert dialog.custom_mapping_line.text() == "42"
 
     # Verify UI state
     assert dialog.import_button.isEnabled()
@@ -420,8 +418,6 @@ def _generate_two_neuron_patchclamp_trace(
     noise_std: float = 2.0,
 ) -> np.ndarray:
     """Generate synthetic patch clamp recording for two neurons (2D array)."""
-    n_samples = int(duration_sec * sampling_rate)
-
     # Create two neuron traces
     trace_1 = _generate_patchclamp_trace(
         duration_sec,
@@ -630,7 +626,7 @@ def test_import_single_then_double_extend_mode_error(tmp_path, qtbot):
     # Should raise validation error due to mixed existing (15) and new (17) neurons
     try:
         dialog2.import_data()
-        assert False, (
+        raise AssertionError(
             "Should raise error in extend mode with mixed existing/new neurons"
         )
     except Exception as e:
@@ -691,8 +687,8 @@ def test_import_new_neurons_extend_mode_with_existing_data_error(
     dialog2.accept = lambda: None
     try:
         dialog2.import_data()
-        assert False == "Import should have thrown an error by this point."
-    except:
+        raise AssertionError("Import should have thrown an error by this point.")
+    except Exception:
         pass  # we expect an error
     assert len(dialog2.imported_trace_data) == 0
 
