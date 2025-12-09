@@ -66,15 +66,13 @@ def detect_spikes_threshold(
     for neuron_idx in range(n_neurons_to_process):
         neuron_data = processed_data[neuron_idx, :]
 
-        # Use existing voltage trace detection with peak method
+        # Suite2p uses basic threshold agian now
         spike_result = detect_spikes_voltage_trace(
             neuron_data,
             neuron_id=neuron_idx,
             dt=dt,
-            detection_method="peak",
-            peak_height_threshold=threshold,
-            peak_prominence=0.5,
-            min_spike_interval=0.001,
+            detection_method="threshold",
+            threshold_multiplier=threshold,
         )
 
         if len(spike_result.spike_indices) > 0:
@@ -108,6 +106,7 @@ def _normalize_per_neuron(data: npt.NDArray[Any]) -> npt.NDArray[Any]:
     return (data - min_vals) / ranges
 
 
+# todo: Refactor this into two functions again. no need to share parameters between threshold/peak detection here.
 def detect_spikes_voltage_trace(
     voltage_trace: npt.NDArray[Any],
     *,
@@ -116,7 +115,7 @@ def detect_spikes_voltage_trace(
     threshold_method: str = "mean_plus_std",
     threshold_multiplier: float = 3.0,
     min_spike_interval: float = 0.001,
-    detection_method: str = "peak",
+    detection_method: str = "threshold",
     peak_height_threshold: float = 3.0,
     peak_prominence: float = 0.5,
     peak_distance: int | None = None,

@@ -13,6 +13,7 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 import neuroseq.save_options
+from neuroseq.data import TraceData
 from neuroseq.example_models import default_model
 from neuroseq.example_models import example_models
 from neuroseq.gui import Gui
@@ -674,9 +675,6 @@ def test_integration_modeleditor_delete_restore(
 
 def test_gui_import_suite2p_data_dialog(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
     """Test the Suite2p import dialog opens and applies imported data"""
-    import numpy as np
-
-    from neuroseq.data import TraceData
 
     gui = Gui()
     gui.show()
@@ -693,7 +691,13 @@ def test_gui_import_suite2p_data_dialog(monkeypatch: MonkeyPatch, qtbot: QtBot) 
         def exec(self):
             # Simulate successful import by calling the import_handler
             test_traces = np.random.rand(5, 100)
-            trace_data = TraceData("test_traces", test_traces, "units", dt=1.0 / 30.0)
+            trace_data = TraceData(
+                "test_traces",
+                test_traces,
+                np.arange(0, test_traces.shape[0], dtype=np.uint32),
+                "units",
+                dt=1.0 / 30.0,
+            )
             self.import_handler(self.experiment_name, [trace_data], False)
             return QtWidgets.QDialog.DialogCode.Accepted
 
@@ -703,6 +707,5 @@ def test_gui_import_suite2p_data_dialog(monkeypatch: MonkeyPatch, qtbot: QtBot) 
     # Call the button method - this should successfully import data via the handler
     gui.btn_import_suite2p_data_clicked()
 
-    # The test passes if no exception was raised and the dialog completed
-    # The actual data storage is handled by gui.model.add_experimental_data()
-    # which is tested separately in experiment tests
+    assert gui.model.b2_model.network["trace"].v.shape == (5, 100)
+    gui.close()
