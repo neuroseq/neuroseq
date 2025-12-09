@@ -599,15 +599,17 @@ class Gui(QtWidgets.QMainWindow):
                     f"experiment_exists={dialog.experiment_name in self.model.experiments}"
                 )
 
-                if not dialog.append_data and dialog.neurons_to_replace:
-                    # Replace mode: remove only the specific neurons being imported
-                    if dialog.experiment_name in self.model.experiments:
-                        self.logger.info(
-                            f"Removing neurons {dialog.neurons_to_replace} before import"
-                        )
-                        self._remove_neurons_from_experiment(
-                            dialog.experiment_name, dialog.neurons_to_replace
-                        )
+                if (
+                    not dialog.append_data
+                    and dialog.neurons_to_replace
+                    and dialog.experiment_name in self.model.experiments
+                ):
+                    self.logger.info(
+                        f"Removing neurons {dialog.neurons_to_replace} before import"
+                    )
+                    self._remove_neurons_from_experiment(
+                        dialog.experiment_name, dialog.neurons_to_replace
+                    )
 
                 # Always use append mode to enable neuron merging (whether replacing specific neurons or extending)
                 append_mode = True
