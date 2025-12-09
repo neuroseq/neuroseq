@@ -35,7 +35,7 @@ def timed_array_with_new_data(
 
 
 def get_downsample_factor(
-    n_floats: float, max_ram_mb: int, bits_per_float: int = 64
+    n_floats: int, max_ram_mb: int, bits_per_float: int = 64
 ) -> int:
     """Calculate the downsample factor for a given number of floats and maximum allowed RAM usage in MB."""
     if n_floats < 0 or max_ram_mb <= 0:
@@ -49,27 +49,26 @@ def get_downsample_factor(
 def construct_synapse_matrix(
     monitor: b2.StateMonitor, variable: str, max_ram_mb: int
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Constructs N_s x N_t x t timeseries of synapse matrices and timestamps from a Brian2 StateMonitor of synapse variables.
+    """Constructs n x n x t timeseries of synapse matrices and timestamps from a Brian2 StateMonitor of synapse variables.
 
-    Where N_s is the number of source neurons, N_t is the number of target neurons, and t is the number of timestamps.
+    Where n is the largest index of any source or target neuron + 1, and t is the number of timestamps.
 
     Automatically downsamples the data if it exceeds the maximum RAM limit.
     """
     synapse_group = monitor.source
-    # neuron_group = synapse_group.source
     values = monitor.variables[variable].get_value().T
-    N = max(max(synapse_group.i), max(synapse_group.j)) + 1
+    n = max(np.max(synapse_group.i), np.max(synapse_group.j)) + 1
     n_timestamps = values.shape[1]
     if n_timestamps == 0:
         return np.array([]), np.array([])
-    n_floats = N * N * float(n_timestamps)
+    n_floats = n * n * n_timestamps
     downsample_factor = get_downsample_factor(n_floats, max_ram_mb, bits_per_float=32)
     if downsample_factor > 1:
         logging.info(
-            f"Downsampling {N}x{N}x{n_timestamps} matrix by factor {downsample_factor} due to max RAM limit of {max_ram_mb} MB"
+            f"Downsampling {n}x{n}x{n_timestamps} matrix by factor {downsample_factor} due to max RAM limit of {max_ram_mb} MB"
         )
     matrix = np.zeros(
-        (N, N, values[0, ::downsample_factor].shape[0]),
+        (n, n, values[0, ::downsample_factor].shape[0]),
         dtype=np.float32,
     )
     for i, j, value in zip(
