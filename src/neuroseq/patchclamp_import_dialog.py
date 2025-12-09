@@ -113,10 +113,12 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         first_button.setChecked(True)
         options_layout.addRow("Mapping strategy:", mapping_layout)
 
-        self.custom_neuron_id_spin = QtWidgets.QSpinBox()
-        self.custom_neuron_id_spin.setMinimum(0)
-        self.custom_neuron_id_spin.setMaximum(999)
-        self.custom_neuron_id_spin.setValue(10)
+        self.custom_neuron_id_line = QtWidgets.QLineEdit()
+        self.custom_neuron_id_line.setPlaceholderText("e.g., 10 or 12,15")
+        self.custom_neuron_id_line.setText("10")
+        self.custom_neuron_id_line.setToolTip(
+            "Single neuron ID (e.g., 10) or comma-separated list (e.g., 12,15)"
+        )
 
         self.custom_mapping_line = QtWidgets.QLineEdit()
         self.custom_mapping_line.setPlaceholderText(
@@ -125,12 +127,14 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.custom_mapping_line.setVisible(False)
 
         custom_layout = QtWidgets.QVBoxLayout()
-        custom_layout.addWidget(self.custom_neuron_id_spin)
+        custom_layout.addWidget(self.custom_neuron_id_line)
         custom_layout.addWidget(self.custom_mapping_line)
         self.custom_widget = QtWidgets.QWidget()
         self.custom_widget.setLayout(custom_layout)
 
-        self.custom_mapping_label = QtWidgets.QLabel("Custom mapping:")
+        self.custom_mapping_label = QtWidgets.QLabel(
+            "Custom mapping (stim:cellpose ID):"
+        )
         self.custom_mapping_label.setVisible(False)
         self.custom_widget.setVisible(False)
 
@@ -138,7 +142,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         # Replace/extend data option
         self.replace_checkbox = QtWidgets.QCheckBox(
-            "Replace existing data for this neuron ID instead of extending"
+            "Replace existing data for these neuron IDs instead of extending"
         )
         self.replace_checkbox.setChecked(not self.append_data)
         self.replace_checkbox.setToolTip(
@@ -232,10 +236,10 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         if is_custom and self.cellpose_import is not None:
             self.custom_mapping_line.setVisible(True)
-            self.custom_neuron_id_spin.setVisible(False)
+            self.custom_neuron_id_line.setVisible(False)
         elif is_custom:
             self.custom_mapping_line.setVisible(False)
-            self.custom_neuron_id_spin.setVisible(True)
+            self.custom_neuron_id_line.setVisible(True)
 
     def _on_replace_toggled(self, checked: bool) -> None:
         self.append_data = not checked
@@ -326,17 +330,19 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 if button.text() == "Custom":
                     button.setChecked(True)
                     break
-            self.custom_neuron_id_spin.setValue(self.extracted_neuron_id)
+            self.custom_neuron_id_line.setText(str(self.extracted_neuron_id))
 
-        if self.npy_data.ndim != 1:
+        if self.npy_data.ndim not in (1, 2):
             raise ValueError(
-                "NumPy patchclamp data must be 1D (single neuron recording)"
+                f"NumPy patchclamp data must be 1D (single neuron) or 2D (multiple neurons), got {self.npy_data.ndim}D"
             )
 
-        # Set default sampling rate for patch clamp recordings (10kHz as mentioned)
+        # Pathclamp has a higher hz in general
         self.sampling_rate_spin.setValue(10000.0)
 
-    def _update_preview(self) -> None:
+    def _update_preview(
+        self,
+    ) -> None:  # important to have so the user can figure out mistakes
         lines = []
 
         if self.npy_data is not None:
@@ -400,6 +406,20 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         return mapping
 
+    def _parse_neuron_ids(self, neuron_ids_str: str) -> list[int]:
+        """Parse comma-separated neuron IDs string into list of integers."""
+        if not neuron_ids_str.strip():
+            raise ValueError("Neuron IDs cannot be empty")
+
+        try:
+            # Split by comma and strip whitespace
+            parts = [part.strip() for part in neuron_ids_str.split(",") if part.strip()]
+            if not parts:
+                raise ValueError("No valid neuron IDs found")
+            return [int(part) for part in parts]
+        except ValueError as exc:
+            raise ValueError(f"Invalid neuron ID format: {exc}") from exc
+
     def _validate_append_import(self) -> None:
         """Validate that we can safely append data in extend mode."""
         if self.model is None:
@@ -423,21 +443,36 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             # No existing data, safe to proceed
             return
 
+        # Deal with the multi-neuron extend/replace situation: Double check importing makes sense.
         # Check which neurons we're trying to import
-        neuron_id = self.custom_neuron_id_spin.value()
+        neuron_ids_to_import = self._parse_neuron_ids(self.custom_neuron_id_line.text())
         existing_neuron_indices = set(existing_trace_data.indices)
 
-        if neuron_id in existing_neuron_indices:
-            # This neuron already exists, which is fine for extension
-            return
+        # Check existing status for each neuron being imported
+        importing_existing = [
+            nid for nid in neuron_ids_to_import if nid in existing_neuron_indices
+        ]
+        importing_new = [
+            nid for nid in neuron_ids_to_import if nid not in existing_neuron_indices
+        ]
 
-        # Check if there are multiple neurons being imported with mixed existing/new status
-        # For now, we're importing one neuron at a time, but this logic prepares for multiple
-        if len(existing_neuron_indices) > 0:
-            # We have existing data for some neurons but not others
-            # In extend mode, this could cause timestamp misalignment
+        # In extend mode, if we have both existing and new neurons in the same import,
+        # this could cause timestamp misalignment
+        if len(importing_existing) > 0 and len(importing_new) > 0:
             raise ValueError(
-                f"Cannot extend data when importing neuron {neuron_id} - "
+                f"Cannot extend data when importing both existing neurons {importing_existing} "
+                f"and new neurons {importing_new} together. "
+                f"This would cause timestamp misalignment. Use 'Replace' mode instead, "
+                f"or import all neurons with the same timeline separately."
+            )
+
+        # If importing only new neurons but existing data exists for other neurons
+        if (
+            len(importing_new) == len(neuron_ids_to_import)
+            and len(existing_neuron_indices) > 0
+        ):
+            raise ValueError(
+                f"Cannot extend data when importing new neurons {importing_new} - "
                 f"existing neurons {sorted(existing_neuron_indices)} already have data. "
                 f"This would cause timestamp misalignment. Use 'Replace' mode instead, "
                 f"or import all neurons with the same timeline."
@@ -504,78 +539,113 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 f"Error importing data:\n{exc}",
             )
 
-    # todo: needs to be able to accomodate multiple neurons
     def _import_npy_data(self, sampling_rate: float, dt: float) -> None:
         if self.npy_data is None:
             raise ValueError("No NPY data loaded")
 
-        neuron_id = self.custom_neuron_id_spin.value()
+        # Parse neuron IDs from the UI
+        neuron_ids = self._parse_neuron_ids(self.custom_neuron_id_line.text())
+
+        # Validate data dimensions match neuron count
+        if self.npy_data.ndim == 1:
+            # Single trace - can only import to one neuron
+            if len(neuron_ids) > 1:
+                raise ValueError(
+                    f"Single trace data cannot be imported to multiple neurons {neuron_ids}"
+                )
+            trace_data_rows = [self.npy_data]
+        elif self.npy_data.ndim == 2:
+            # Multiple traces - check if we have enough rows
+            if self.npy_data.shape[0] != len(neuron_ids):
+                raise ValueError(
+                    f"Data has {self.npy_data.shape[0]} rows but {len(neuron_ids)} neuron IDs specified"
+                )
+            trace_data_rows = [self.npy_data[i] for i in range(self.npy_data.shape[0])]
+        else:
+            raise ValueError(f"Unsupported data dimensions: {self.npy_data.shape}")
 
         # Track neurons being imported for potential replacement
         if not self.append_data:
-            self.neurons_to_replace.add(neuron_id)
+            self.neurons_to_replace.update(neuron_ids)
 
-        self.logger.debug(
-            "Detecting spikes for patchclamp neuron %d: dt=%.6f height=%.2f prominence=%.2f min_interval=%.4f distance=%d width=%d",
-            neuron_id,
-            dt,
-            self.peak_height_spin.value(),
-            self.peak_prominence_spin.value(),
-            self.min_interval_spin.value(),
-            self.peak_distance_spin.value(),
-            self.peak_width_spin.value(),
-        )
+        # Import data for each neuron
+        all_traces = []
+        all_neuron_indices = []
 
-        # Use peak detection for spike detection
-        spike_data = detect_spikes_voltage_trace(
-            self.npy_data,
-            neuron_id=neuron_id,
-            dt=dt,
-            detection_method="peak",
-            peak_height_threshold=self.peak_height_spin.value(),
-            peak_prominence=self.peak_prominence_spin.value(),
-            min_spike_interval=self.min_interval_spin.value(),
-            peak_distance=self.peak_distance_spin.value(),
-            peak_width=self.peak_width_spin.value(),
-        )
+        for i, neuron_id in enumerate(neuron_ids):
+            trace_data = trace_data_rows[i]
 
-        # Use consistent name for all patch clamp spike data to enable merging
-        spike_data.name = "Patch Clamp Spikes"
+            self.logger.debug(
+                "Detecting spikes for patchclamp neuron %d: dt=%.6f height=%.2f prominence=%.2f min_interval=%.4f distance=%d width=%d",
+                neuron_id,
+                dt,
+                self.peak_height_spin.value(),
+                self.peak_prominence_spin.value(),
+                self.min_interval_spin.value(),
+                self.peak_distance_spin.value(),
+                self.peak_width_spin.value(),
+            )
 
-        # Create trace data (single neuron, so reshape to 2D)
-        trace_array = self.npy_data.reshape(1, -1)
-        neuron_indices = np.array([neuron_id], dtype=np.uint32)
+            # Use peak detection for spike detection
+            spike_data = detect_spikes_voltage_trace(
+                trace_data,
+                neuron_id=neuron_id,
+                dt=dt,
+                detection_method="peak",
+                peak_height_threshold=self.peak_height_spin.value(),
+                peak_prominence=self.peak_prominence_spin.value(),
+                min_spike_interval=self.min_interval_spin.value(),
+                peak_distance=self.peak_distance_spin.value(),
+                peak_width=self.peak_width_spin.value(),
+            )
+
+            # Use consistent name for all patch clamp spike data to enable merging
+            spike_data.name = "Patch Clamp Spikes"
+            self.imported_spike_data.append(spike_data)
+
+            # Collect trace data for combined TraceData object
+            all_traces.append(trace_data)
+            all_neuron_indices.append(neuron_id)
+
+            self.logger.debug(
+                "Patchclamp import complete for neuron=%d spikes=%d trace_len=%d dt=%.6f",
+                neuron_id,
+                len(spike_data.spike_times),
+                len(trace_data),
+                dt,
+            )
+
+        # Create combined trace data for all imported neurons
+        trace_array = np.array(all_traces)
+        neuron_indices_array = np.array(all_neuron_indices, dtype=np.uint32)
         trace_data = TraceData(
             name="Patch Clamp Traces",  # Use consistent name for all patch clamp data
             traces=trace_array,
-            indices=neuron_indices,
+            indices=neuron_indices_array,
             units="mV",
             dt=dt,
         )
-
-        self.imported_spike_data.append(spike_data)
         self.imported_trace_data.append(trace_data)
-        self.logger.debug(
-            "Patchclamp import complete: neuron=%d spikes=%d trace_len=%d dt=%.6f",
-            neuron_id,
-            len(spike_data.spike_times),
-            trace_array.shape[1],
-            dt,
-        )
         # todo: Liam/James to discuss/figure out saving the trace data in a sparse way (but still with gaps between, most likely by mapping e.g. 27:0, 5:1 would mean: show in stim arr pos 27 the value of traces data arr itself 0, and 5 value of traces data arr 1, and there would be in that case a 2x(timestamps) length array.
 
-        if len(spike_data.spike_times) > 0:
+        # Check if any neurons had spikes detected
+        total_spikes = sum(
+            len(sd.spike_times) for sd in self.imported_spike_data[-len(neuron_ids) :]
+        )
+        if total_spikes > 0:
+            neuron_list = ", ".join(map(str, neuron_ids))
             QtWidgets.QMessageBox.information(
                 self,
                 "Import Successful",
-                f"Imported {len(spike_data.spike_times)} spikes and trace data from neuron {neuron_id}\n"
-                f"Duration: {len(self.npy_data) / sampling_rate:.1f} seconds at {sampling_rate:.0f} Hz.",
+                f"Imported {total_spikes} spikes and trace data from neuron(s) {neuron_list}\n"
+                f"Duration: {trace_array.shape[1] / sampling_rate:.1f} seconds at {sampling_rate:.0f} Hz.",
             )
         else:
+            neuron_list = ", ".join(map(str, neuron_ids))
             QtWidgets.QMessageBox.warning(
                 self,
                 "No Spikes Detected",
-                f"No spikes were detected in the recording for neuron {neuron_id}.\n"
+                f"No spikes were detected in the recording for neuron(s) {neuron_list}.\n"
                 f"You may need to adjust the detection parameters.",
             )
 
