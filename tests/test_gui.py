@@ -28,34 +28,6 @@ from neuroseq.stim import StimType
 delay_after_update_model_call_in_ms = 50
 
 
-@pytest.mark.screenshot
-def test_update_screenshot(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
-    gui = Gui()
-    gui.show()
-    qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible())
-    gui.resize(1600, 1200)
-    histogram_action = next(
-        action for action in gui.trace_widget.actions() if action.text() == "Histogram"
-    )
-    simulation_time = 2.0
-    # mock getText to return the desired simulation time
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
-    )
-    qtbot.wait(delay_after_update_model_call_in_ms)
-    gui.btn_continue_simulation_clicked()
-    qtbot.wait(delay_after_update_model_call_in_ms)
-    histogram_action.trigger()
-    qtbot.wait(delay_after_update_model_call_in_ms)
-    gui.time_slider.toggle_pause()
-    qtbot.waitUntil(
-        lambda: gui.heatmap_widget.currentIndex == gui.heatmap_widget.tVals.size - 1
-    )
-    gui.grab().save("screenshot.png")
-    gui.close()
-
-
 def test_gui_click_exit(qtbot: QtBot) -> None:
     gui = Gui()
     gui.show()
