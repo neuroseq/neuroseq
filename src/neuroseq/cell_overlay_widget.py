@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 from collections.abc import Iterable
@@ -46,6 +47,7 @@ class OverlayView(QtWidgets.QWidget):
         self.overlay_graphic = None
         self.segmentation_graphic = None
         self.text = None
+        self.stim_to_cellpose: dict[int, int] = {}
         self.setLayout(layout)
         self.subplot = self.figure[0, 0]
         self.subplot.frame.plane.visible = False
@@ -65,12 +67,14 @@ class OverlayView(QtWidgets.QWidget):
         overlay_image: np.ndarray | None,
         segmentation: np.ndarray | None,
         legend_data: Iterable[tuple[int, tuple[int, int, int]]] | None = None,
+        stim_to_cellpose: dict[int, int] | None = None,
     ) -> None:
         previous_shape = self._overlay_shape
         previous_camera_state = self._capture_view_state()
         self.subplot.clear()
         self.overlay_image = overlay_image
         self.segmentation = segmentation
+        self.stim_to_cellpose = stim_to_cellpose or {}
         self.overlay_graphic = None
         self.segmentation_graphic = None
         self.text = None
@@ -137,13 +141,29 @@ class OverlayView(QtWidgets.QWidget):
                     y_coords, x_coords = np.where(mask)
                     center_y = float(np.mean(y_coords))
                     center_x = float(np.mean(x_coords))
+                    stim_id = int(cell_id)
+                    cellpose_id = self.stim_to_cellpose.get(stim_id, stim_id)
                     self.subplot.add_text(
-                        f"{cell_id}",
-                        font_size=5,
+                        f"{stim_id}",
+                        font_size=6,
                         offset=(center_x, center_y, 200.0),
-                        face_color=(0.0, 0.0, 0.0),
-                        outline_color=(1.0, 1.0, 1.0),
-                        outline_thickness=3.0,
+                        face_color=(1.0, 1.0, 1.0),
+                        outline_color=(0.0, 0.0, 0.0),
+                        outline_thickness=2.0,
+                        center=True,
+                        screen_space=False,
+                    )
+                    self.subplot.add_text(
+                        f"({cellpose_id})",
+                        font_size=4,
+                        offset=(
+                            center_x + (7.2 if cellpose_id < 100 else 9.7),
+                            center_y,
+                            200.0,
+                        ),  # support up to 1k cells in the image preview in theory
+                        face_color=(0.8, 0.8, 0.8),
+                        outline_color=(0.0, 0.0, 0.0),
+                        outline_thickness=1.0,
                         center=True,
                         screen_space=False,
                     )
@@ -309,7 +329,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.legend_data: list[tuple[int, tuple[int, int, int]]] = []
         self.original_cellpose_ids: np.ndarray | None = None
         self.stimulus_to_cellpose_mapping: dict[int, int] | None = None
-        self.show_stimulus_ids = True  # Default to stimulus IDs
+        self.show_stimulus_ids = True  # Always show stimulus IDs when available
         self._tracked_window: QtWidgets.QWidget | None = None
         self._window_handle = None
         self._last_target_size: tuple[int, int] | None = None
@@ -317,6 +337,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
 
     def _setup_ui(self) -> None:
         layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 10)
 
         self.overlay_view = OverlayView()
         self.overlay_view.setSizePolicy(
@@ -325,14 +346,6 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         )
         self.overlay_view.setMinimumHeight(600)
         layout.addWidget(self.overlay_view)
-
-        # Add toggle checkbox for ID display mode
-        self.id_toggle_checkbox = QtWidgets.QCheckBox(
-            "Show stimulus IDs (default: original cellpose IDs)"
-        )
-        self.id_toggle_checkbox.setChecked(self.show_stimulus_ids)
-        self.id_toggle_checkbox.toggled.connect(self._on_id_toggle_changed)
-        layout.addWidget(self.id_toggle_checkbox)
 
         self.legend_scroll = QtWidgets.QScrollArea()
         self.legend_scroll.setWidgetResizable(True)
@@ -346,17 +359,15 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         layout.addWidget(self.legend_scroll)
         self._update_overlay_scale()
 
-    def _on_id_toggle_changed(self, checked: bool) -> None:
-        """Handle toggle between stimulus IDs and original cellpose IDs"""
-        self.show_stimulus_ids = checked
-        self._update_overlay_display()
-
     def _update_overlay_display(self) -> None:
         """Update the overlay display with current ID mode"""
         display_segmentation = self._get_display_segmentation()
         display_legend = self._get_display_legend(display_segmentation)
         self.overlay_view.add_overlay_data(
-            self.overlay_image, display_segmentation, display_legend
+            self.overlay_image,
+            display_segmentation,
+            display_legend,
+            self.stimulus_to_cellpose_mapping,
         )
         self._update_legend(display_legend)
 
@@ -366,22 +377,19 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             return None
 
         if not self.show_stimulus_ids or self.stimulus_to_cellpose_mapping is None:
-            # Show original cellpose IDs (convert 0-based back to 1-based)
             display_seg = self.segmentation.copy()
             return display_seg
-        else:
-            # Show stimulus IDs based on mapping (with stims)
-            display_seg = np.zeros_like(self.segmentation)
-            # Create reverse mapping from cellpose ID to stimulus ID
-            cellpose_to_stimulus = {
-                v: k for k, v in self.stimulus_to_cellpose_mapping.items()
-            }
 
-            for cellpose_id, stimulus_id in cellpose_to_stimulus.items():
-                mask = self.segmentation == cellpose_id
-                display_seg[mask] = stimulus_id
+        display_seg = np.zeros_like(self.segmentation)
+        cellpose_to_stimulus = {
+            v: k for k, v in self.stimulus_to_cellpose_mapping.items()
+        }
 
-            return display_seg
+        for cellpose_id, stimulus_id in cellpose_to_stimulus.items():
+            mask = self.segmentation == cellpose_id
+            display_seg[mask] = stimulus_id
+
+        return display_seg
 
     def _get_display_legend(
         self, display_segmentation: np.ndarray | None
@@ -390,27 +398,24 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         if display_segmentation is None:
             return []
 
-        # If no legend data was provided, fall back to computing from the display data
-        if not self.legend_data:
-            return self._compute_default_legend(display_segmentation)
+        if self.legend_data:
+            if self.show_stimulus_ids and self.stimulus_to_cellpose_mapping:
+                cellpose_to_stimulus = {
+                    v: k for k, v in self.stimulus_to_cellpose_mapping.items()
+                }
+                remapped: list[tuple[int, tuple[int, int, int]]] = []
+                for cellpose_id, rgb in self.legend_data:
+                    stim_id = cellpose_to_stimulus.get(cellpose_id)
+                    if stim_id is None:
+                        continue
+                    remapped.append((int(stim_id), rgb))
+                if remapped:
+                    remapped.sort(key=lambda item: item[0])
+                    return remapped
+            return self.legend_data
 
-        # When showing stimulus IDs, remap legend entries to stimulus IDs but keep colors
-        if self.show_stimulus_ids and self.stimulus_to_cellpose_mapping:
-            cellpose_to_stimulus = {
-                v: k for k, v in self.stimulus_to_cellpose_mapping.items()
-            }
-            remapped: list[tuple[int, tuple[int, int, int]]] = []
-            for cellpose_id, rgb in self.legend_data:
-                stim_id = cellpose_to_stimulus.get(cellpose_id)
-                if stim_id is None:
-                    continue
-                remapped.append((int(stim_id), rgb))
-
-            if remapped:
-                remapped.sort(key=lambda item: item[0])
-                return remapped
-
-        return self.legend_data
+        # Fallback: compute default legend for displayed segmentation
+        return self._compute_default_legend(display_segmentation)
 
     def set_overlay(
         self,
@@ -425,13 +430,6 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.legend_data = list(legend_data or [])
         self.original_cellpose_ids = original_cellpose_ids
         self.stimulus_to_cellpose_mapping = stimulus_to_cellpose_mapping
-
-        # Show/hide toggle checkbox based on whether mapping data is available
-        has_mapping = (
-            original_cellpose_ids is not None
-            and stimulus_to_cellpose_mapping is not None
-        )
-        self.id_toggle_checkbox.setVisible(has_mapping)
 
         self._update_overlay_display()
         self._update_overlay_scale()
@@ -469,8 +467,10 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         if not legend:
             return
 
+        legend_entries = self._build_text_entries(legend)
+
         cols = 4
-        for i, (cell_id, rgb) in enumerate(legend):
+        for i, entry in enumerate(legend_entries):
             row = i // cols
             col = i % cols
             item_widget = QtWidgets.QWidget()
@@ -480,12 +480,21 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
 
             color_label = QtWidgets.QLabel()
             color_label.setFixedSize(16, 16)
-            color_label.setPixmap(self._color_chip_pixmap(rgb))
-            text_label = QtWidgets.QLabel(f"Cell {cell_id}")
-            text_label.setFixedHeight(16)
-            text_label.setStyleSheet(
-                "QLabel { color: black; background-color: transparent; }"
+            color_label.setPixmap(self._color_chip_pixmap(entry["rgb"]))
+
+            stim_id = entry["stim_id"]
+            cellpose_id = entry["cellpose_id"]
+            stim_style = "color: black; font-weight: bold;"
+            cellpose_style = (
+                "color: rgb(185, 185, 185); font-size: 60%; font-weight: normal;"
             )
+            text_label = QtWidgets.QLabel()
+            text_label.setFixedHeight(18)
+            text_label.setText(
+                f"<span style='{stim_style}'>{stim_id}</span>"
+                f"<span style='{cellpose_style}'> ({cellpose_id})</span>"
+            )
+            text_label.setStyleSheet("QLabel { background-color: transparent; }")
 
             item_layout.addWidget(color_label)
             item_layout.addWidget(text_label)
@@ -508,13 +517,29 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             legend.append((int(cell_id), rgb_255))
         return legend
 
+    def _build_text_entries(
+        self, display_legend: list[tuple[int, tuple[int, int, int]]]
+    ) -> list[dict]:
+        """Create combined legend entries with stim and cellpose IDs."""
+        entries: list[dict] = []
+        cellpose_lookup: dict[int, int] = {}
+        if self.stimulus_to_cellpose_mapping:
+            cellpose_lookup = {
+                stim: cp for stim, cp in self.stimulus_to_cellpose_mapping.items()
+            }
+
+        for stim_id, rgb in sorted(display_legend, key=lambda x: x[0]):
+            cellpose_id = cellpose_lookup.get(stim_id, stim_id)
+            entries.append({"stim_id": stim_id, "cellpose_id": cellpose_id, "rgb": rgb})
+        return entries
+
     def _apply_legend_theme(self) -> None:
         """Ensure legend backgrounds/text stay readable against overlays."""
-        self.legend_widget.setStyleSheet("color: black;")
+        self.legend_widget.setStyleSheet("background-color: white; color: black;")
         self.legend_scroll.setStyleSheet("QScrollArea { border: none; }")
         viewport = self.legend_scroll.viewport()
         if viewport is not None:
-            viewport.setStyleSheet("")
+            viewport.setStyleSheet("background-color: white;")
 
     def _color_chip_pixmap(self, rgb: tuple[int, int, int]) -> QtGui.QPixmap:
         """Create a color chip showing 50% color over black."""
@@ -536,10 +561,15 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self._update_overlay_scale()
 
     def eventFilter(self, obj, event) -> bool:
-        if obj is self._tracked_window and event.type() in (
-            QtCore.QEvent.Type.Resize,
-            QtCore.QEvent.Type.Move,
-            QtCore.QEvent.Type.ScreenChangeInternal,
+        if (
+            obj is self._tracked_window
+            and hasattr(event, "type")
+            and event.type()
+            in (
+                QtCore.QEvent.Type.Resize,
+                QtCore.QEvent.Type.Move,
+                QtCore.QEvent.Type.ScreenChangeInternal,
+            )
         ):
             self._update_overlay_scale()
         return super().eventFilter(obj, event)
@@ -568,16 +598,12 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             return
 
         if self._window_handle is not None and self._window_handle is not handle:
-            try:
+            with contextlib.suppress(Exception):
                 self._window_handle.screenChanged.disconnect(self._update_overlay_scale)
-            except Exception:
-                pass
         self._window_handle = handle
-        try:
-            handle.screenChanged.connect(self._update_overlay_scale)
-        except Exception:
+        with contextlib.suppress(Exception):
             # May already be connected; ignore duplicate connection errors
-            pass
+            handle.screenChanged.connect(self._update_overlay_scale)
 
     def _update_overlay_scale(self, *_args) -> None:
         """Scale overlay view to 70% of the current window height with minimum 600px."""

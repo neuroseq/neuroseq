@@ -37,11 +37,11 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.setWindowTitle("Import Cellpose Data")
         self.setModal(True)
 
-        # Set width to at least 1200px or 90% of screen width, whichever is larger
         screen = QtWidgets.QApplication.primaryScreen()
-        screen_width = screen.availableGeometry().width()
-        target_width = max(1200, int(0.9 * screen_width))
-        self.resize(target_width, 600)
+        available = screen.availableGeometry()
+        # Use the maximum available window size
+        self.setGeometry(available)
+        self.setWindowState(self.windowState() | QtCore.Qt.WindowState.WindowMaximized)
 
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -213,11 +213,15 @@ class CellposeImportDialog(QtWidgets.QDialog):
             pairs = mapping_str.split(",")
             for pair in pairs:
                 pair = pair.strip()
-                if ":" not in pair:
+                if not pair or ":" not in pair:
                     continue
                 stim_key_str, cellpose_id_str = pair.split(":", 1)
-                stim_key = int(stim_key_str.strip())
-                cellpose_id = int(cellpose_id_str.strip())
+                stim_key_str = stim_key_str.strip()
+                cellpose_id_str = cellpose_id_str.strip()
+                if not stim_key_str or not cellpose_id_str:
+                    continue
+                stim_key = int(stim_key_str)
+                cellpose_id = int(cellpose_id_str)
                 mapping[stim_key] = cellpose_id
         except (ValueError, IndexError) as exc:
             raise ValueError(f"Invalid custom mapping format: {exc}") from exc
