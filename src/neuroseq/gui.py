@@ -103,9 +103,7 @@ class Gui(QtWidgets.QMainWindow):
             self.stim_editor.stim_widget,
             self.trace_widget,
             self.spike_widget,
-            self.data_widget.trace_widget,
-            self.data_widget.spike_widget,
-            self.data_widget.heatmap_widget,
+            self.data_widget,
             self.heatmap_widget,
         ]
         for widget in self.plot_widgets:
@@ -314,18 +312,18 @@ class Gui(QtWidgets.QMainWindow):
             )
             self.progress_dialog.reset()
             return
-        self.update_model(model)
+        self.update_model(model, reset_autoscale=True)
 
     @with_wait_cursor
-    def update_model(self, model: Model) -> None:
+    def update_model(self, model: Model, reset_autoscale=False) -> None:
         self.model = model
-        self.controller.max_height = 1
-        self.controller.max_width = 1
+        if reset_autoscale:
+            self.controller.max_height = 1
+            self.controller.max_width = 1
         self.stim_console.set_model(self.model)
         self.continue_simulation_action.setText("&Run simulation")
-        self.trace_widget.clear_data()
-        self.spike_widget.clear_data()
-        self.heatmap_widget.clear_data()
+        for widget in self.plot_widgets:
+            widget.clear_data(reset_autoscale=reset_autoscale)
         self.controller.clear_grid_lines()
         self.stim_editor.set_model(self.model)
         if self.model is not None:

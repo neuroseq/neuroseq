@@ -37,7 +37,7 @@ class StimWidget(TimeseriesWidget):
         self.stim_type = StimType.Excitation
 
     def set_data(self, stim_array: StimArray | None = None) -> None:
-        self.clear_data()
+        self.clear_data(reset_autoscale=False)
         if stim_array is None:
             return
         self.data_values = stim_array.values
@@ -61,6 +61,7 @@ class StimWidget(TimeseriesWidget):
         self.n_neurons = stim_array.values.shape[1]
         self.n_timestamps = stim_array.values.shape[0]
         self.post_set_data()
+        self.autoscale = False
 
     def set_background_data(self, stim_array: StimArray | None = None) -> None:
         if stim_array is None:

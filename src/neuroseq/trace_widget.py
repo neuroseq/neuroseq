@@ -177,3 +177,4 @@ class TraceWidget(TimeseriesWidget):
         for i, line in enumerate(self.graphic.graphics):
             line.offset = (line.offset[0], self.data.indices[i], line.offset[2])
         self.post_set_data()
+        self.autoscale = False

@@ -93,12 +93,15 @@ class HeatmapWidget(FPLWidget):
         self.hlut: fpl.HistogramLUTTool | None = None
         self.timestamps: np.ndarray | None = None
         self.logger = logging.getLogger(__name__)
+        self.autoscale = True
 
     def heatmap_norm_dialog(self):
         HeatmapNormDialog(self).exec()
 
-    def clear_data(self) -> None:
+    def clear_data(self, reset_autoscale=True) -> None:
         super().clear_data()
+        if reset_autoscale:
+            self.autoscale = True
         self.data = None
         self.idx = 0
         self.subtract_idx = None
@@ -138,9 +141,11 @@ class HeatmapWidget(FPLWidget):
         self.subplot.docks["right"].size = 80
         self.subplot.docks["right"].auto_scale(maintain_aspect=False)
         self.subplot.docks["right"].controller.enabled = False
-        self.subplot.auto_scale(zoom=1.0, maintain_aspect=True)
+        if self.autoscale:
+            self.subplot.auto_scale(zoom=1.0, maintain_aspect=True)
+        self.autoscale = False
 
-    def set_time_ms(self, time_ms: float) -> None:
+    def set_time_ms(self, time_ms: int) -> None:
         """Set the time to display: data from the closest timestamp to the given time is displayed."""
         if (
             self.data is None

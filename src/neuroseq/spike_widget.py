@@ -53,3 +53,4 @@ class SpikeWidget(TimeseriesWidget):
             uniform_size=True,
         )
         self.post_set_data()
+        self.autoscale = False
