@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import numpy as np
 from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
@@ -11,79 +10,6 @@ from qtpy.compat import getopenfilename
 from neuroseq.cell_overlay_widget import CellOverlayWidget
 from neuroseq.importer_cellpose import CellPoseImporter
 from neuroseq.importer_cellpose import CellposeImportResult
-
-
-class CellposeMappingPreviewDialog(QtWidgets.QDialog):
-    """Dialog to preview custom cellpose mapping before import."""
-
-    def __init__(
-        self,
-        parent: QtWidgets.QWidget | None = None,
-        overlay_image: np.ndarray | None = None,
-        segmentation_data: np.ndarray | None = None,
-        legend_data: list[tuple[int, tuple[int, int, int]]] | None = None,
-        original_cellpose_ids: np.ndarray | None = None,
-        stimulus_mapping: dict[int, int] | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self.overlay_image = overlay_image
-        self.segmentation_data = segmentation_data
-        self.legend_data = legend_data or []
-        self.original_cellpose_ids = original_cellpose_ids
-        self.stimulus_mapping = stimulus_mapping
-        self.result: str | None = None
-        self._setup_ui()
-
-    def _setup_ui(self) -> None:
-        self.setWindowTitle("Custom Mapping Preview")
-        self.setModal(True)
-
-        # Set dialog size to be large enough for preview
-        screen = QtWidgets.QApplication.primaryScreen()
-        screen_width = screen.availableGeometry().width()
-        screen_height = screen.availableGeometry().height()
-        target_width = max(1000, int(0.8 * screen_width))
-        target_height = max(700, int(0.8 * screen_height))
-        self.resize(target_width, target_height)
-
-        layout = QtWidgets.QVBoxLayout(self)
-
-        # Preview widget
-        self.preview_widget = CellOverlayWidget("Custom Mapping Preview")
-        self.preview_widget.set_overlay(
-            self.overlay_image,
-            self.segmentation_data,
-            self.legend_data,
-            self.original_cellpose_ids,
-            self.stimulus_mapping,
-        )
-        layout.addWidget(self.preview_widget)
-
-        # Button layout
-        button_layout = QtWidgets.QHBoxLayout()
-        button_layout.addStretch()
-
-        self.edit_button = QtWidgets.QPushButton("Edit further")
-        self.edit_button.clicked.connect(self._edit_further)
-        button_layout.addWidget(self.edit_button)
-
-        self.import_button = QtWidgets.QPushButton("Import")
-        self.import_button.clicked.connect(self._import_confirmed)
-        self.import_button.setDefault(True)
-        button_layout.addWidget(self.import_button)
-
-        layout.addLayout(button_layout)
-
-    def _edit_further(self) -> None:
-        self.result = "edit"
-        self.reject()
-
-    def _import_confirmed(self) -> None:
-        self.result = "import"
-        self.accept()
-
-    def get_result(self) -> str | None:
-        return self.result
 
 
 class CellposeImportDialog(QtWidgets.QDialog):
@@ -100,8 +26,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.image_path: Path | None = None
         self.segmentation_path: Path | None = None
         self.importer = CellPoseImporter()
-        self.overlay_widget = CellOverlayWidget("Color-coded Preview")
+        self.overlay_widget = CellOverlayWidget("")
         self.existing_data = existing_data
+        self.file_selection_container: QtWidgets.QWidget | None = None
+        self.main_content_container: QtWidgets.QWidget | None = None
         self._setup_ui()
         self._load_existing_data_if_available()
 
@@ -117,12 +45,16 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         layout = QtWidgets.QVBoxLayout(self)
 
+        self.file_selection_container = QtWidgets.QWidget()
+        selection_layout = QtWidgets.QVBoxLayout(self.file_selection_container)
+        selection_layout.setContentsMargins(0, 0, 0, 0)
+
         instructions = QtWidgets.QLabel(
             "Select a PNG/TIFF image and corresponding CSV or NPY segmentation file. "
             "The segmentation file should contain pixel-by-pixel segmentation IDs."
         )
         instructions.setWordWrap(True)
-        layout.addWidget(instructions)
+        selection_layout.addWidget(instructions)
 
         # Create horizontal layout for file selection and info
         top_horizontal_layout = QtWidgets.QHBoxLayout()
@@ -163,7 +95,13 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         top_horizontal_layout.addWidget(self.info_group, stretch=1)
 
-        layout.addLayout(top_horizontal_layout)
+        selection_layout.addLayout(top_horizontal_layout)
+        layout.addWidget(self.file_selection_container)
+
+        # Main content (hidden until both files are selected)
+        self.main_content_container = QtWidgets.QWidget()
+        main_content_layout = QtWidgets.QVBoxLayout(self.main_content_container)
+        main_content_layout.setContentsMargins(0, 0, 0, 0)
 
         # Add ID mapping options
         mapping_group = QtWidgets.QGroupBox("ID Mapping Options")
@@ -188,6 +126,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.custom_mapping_line.setPlaceholderText(
             "e.g., 1:12,2:3 (stimkey:cellposeId)"
         )
+        self.custom_mapping_line.textChanged.connect(
+            self._on_custom_mapping_text_changed
+        )
         self.custom_mapping_line.setVisible(False)
         self.custom_mapping_row_index = mapping_layout.rowCount()
         self.custom_mapping_label = QtWidgets.QLabel("Custom mapping:")
@@ -199,11 +140,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
             if hasattr(abstract_button, "toggled"):
                 abstract_button.toggled.connect(self._on_mapping_changed)
 
-        layout.addWidget(mapping_group)
-
-        # Limit preview height to make room for other controls
+        # Place overlay first so the visual is top-most
         self.overlay_widget.setMinimumHeight(400)
-        layout.addWidget(self.overlay_widget)
+        main_content_layout.addWidget(self.overlay_widget)
+        main_content_layout.addWidget(mapping_group)
 
         button_layout = QtWidgets.QHBoxLayout()
 
@@ -222,7 +162,19 @@ class CellposeImportDialog(QtWidgets.QDialog):
         cancel_button.clicked.connect(self.reject)
         button_layout.addWidget(cancel_button)
 
-        layout.addLayout(button_layout)
+        main_content_layout.addLayout(button_layout)
+        layout.addWidget(self.main_content_container)
+        self.main_content_container.setVisible(False)
+        self._set_ui_loaded_state(False)
+
+    def _set_ui_loaded_state(self, loaded: bool) -> None:
+        """Toggle between pre-selection and post-selection UI."""
+        if self.file_selection_container is not None:
+            self.file_selection_container.setVisible(not loaded)
+        if self.main_content_container is not None:
+            self.main_content_container.setVisible(loaded)
+        if not loaded and hasattr(self, "import_button"):
+            self.import_button.setEnabled(False)
 
     def _on_mapping_changed(self) -> None:
         """Handle toggle between mapping strategies"""
@@ -237,6 +189,14 @@ class CellposeImportDialog(QtWidgets.QDialog):
             and self.importer.overlay_image is not None
         ):
             self._update_preview_mapping()
+
+    def _on_custom_mapping_text_changed(self, _text: str) -> None:
+        """Refresh preview live while editing custom mapping."""
+        if self._get_mapping_strategy() != "Custom":
+            return
+        if self.importer.segmentation_data is None:
+            return
+        self._update_preview_mapping()
 
     def _get_mapping_strategy(self) -> str:
         """Get the currently selected mapping strategy"""
@@ -351,12 +311,14 @@ class CellposeImportDialog(QtWidgets.QDialog):
     def _check_files_loaded(self) -> None:
         if self.importer.image_data is None or self.importer.segmentation_data is None:
             self.import_button.setEnabled(False)
+            self._set_ui_loaded_state(False)
             return
 
         try:
             self.importer.validate_dimensions()
             self.importer.generate_overlay()
             self.import_button.setEnabled(True)
+            self._set_ui_loaded_state(True)
             # Generate preview mapping to show in overlay
             mapping_strategy = self._get_mapping_strategy()
             preview_mapping = (
@@ -377,6 +339,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.critical(self, "Dimension Mismatch", str(exc))
             self._update_info(error=str(exc))
             self.import_button.setEnabled(False)
+            self._set_ui_loaded_state(False)
 
     def _update_info(self, error: str | None = None) -> None:
         info = self.importer.get_info()
@@ -420,26 +383,6 @@ class CellposeImportDialog(QtWidgets.QDialog):
             # Generate stimulus-to-cellpose mapping based on selected strategy
             mapping_strategy = self._get_mapping_strategy()
             stimulus_mapping = self._generate_stimulus_mapping(mapping_strategy)
-
-            # Show preview of custom mapping if Custom is selected
-            if mapping_strategy == "Custom" and stimulus_mapping:
-                preview_dialog = CellposeMappingPreviewDialog(
-                    self,
-                    self.importer.overlay_image,
-                    self.importer.segmentation_data,
-                    self.importer.get_legend_data(),
-                    self.importer._original_cellpose_ids,
-                    stimulus_mapping,
-                )
-                preview_dialog.exec()
-
-                result = preview_dialog.get_result()
-                if result == "edit":
-                    # User wants to edit further - return to dialog
-                    return
-                elif result != "import":
-                    # User cancelled or closed dialog
-                    return
 
             self._imported_data = self.importer.create_result(
                 self.image_path, stimulus_mapping
@@ -511,6 +454,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             # Update preview
             self._update_preview_mapping()
             self._update_info()
+            self._set_ui_loaded_state(True)
 
         except Exception as exc:
             self.logger.warning("Failed to load existing cellpose data: %s", exc)
@@ -549,6 +493,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
             # Clear button remains visible
             self.import_button.setEnabled(False)
+            self._set_ui_loaded_state(False)
 
             # Clear preview
             self.overlay_widget.set_overlay(None, None)
