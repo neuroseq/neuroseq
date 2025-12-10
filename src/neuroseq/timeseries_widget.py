@@ -60,7 +60,6 @@ class TimeseriesWidget(FPLWidget):
         self.show_text = True
         self.timeline = Timeline()
         self.grid_lines: GridLines | None = None
-        self.autoscale = True
 
         self.context_menu = QtWidgets.QMenu("Custom analysis", self)
         for custom_analysis_type in CustomAnalysisType:
@@ -127,12 +126,6 @@ class TimeseriesWidget(FPLWidget):
             super().contextMenuEvent(event)
 
     def post_set_data(self):
-        self.controller.max_height = max(self.controller.max_height, self.n_neurons)
-        self.controller.max_width = max(
-            self.controller.max_width, self.n_timestamps * self.dt_ms
-        )
-        if self.autoscale:
-            self.subplot.auto_scale(zoom=1.0, maintain_aspect=False)
         self.subplot.grids = False
         self.subplot.axes.y.ticks = np.arange(0, self.n_neurons, 1)
         self.subplot.axes.y.points.visible = False
@@ -152,10 +145,10 @@ class TimeseriesWidget(FPLWidget):
         self._set_light_mode()
         self.roi.visible = False
 
-    def clear_data(self, reset_autoscale=True) -> None:
+    def clear_data(self) -> None:
+        if self.controller is not None and self.grid_lines is not None:
+            self.controller.remove_grid_lines(self.grid_lines)
         super().clear_data()
-        if reset_autoscale:
-            self.autoscale = True
         self.hover_slice_graphic = None
         self.background_graphics = []
         self.data = None

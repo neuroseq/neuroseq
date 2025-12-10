@@ -57,8 +57,8 @@ def construct_synapse_matrix(
     """
     synapse_group = monitor.source
     values = monitor.variables[variable].get_value().T
-    n = max(np.max(synapse_group.i), np.max(synapse_group.j)) + 1
-    n_timestamps = values.shape[1]
+    n = int(max(np.max(synapse_group.i), np.max(synapse_group.j)) + 1)
+    n_timestamps = int(values.shape[1])
     if n_timestamps == 0:
         return np.array([]), np.array([])
     n_floats = n * n * n_timestamps

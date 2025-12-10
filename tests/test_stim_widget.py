@@ -133,6 +133,7 @@ def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: StimArray) -> Non
     assert stim_widget.n_neurons == 0
     n_timestamps = positive_stims.values.shape[0]
     n_neurons = positive_stims.values.shape[1]
+    controller.set_limits(n_timestamps * positive_stims.dt, n_neurons)
     stim_widget.set_data(positive_stims)
     # toggle selection text on and off again
     stim_widget.toggle_selection_text()
@@ -192,6 +193,7 @@ def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
     assert stim_widget.n_neurons == 0
     n_timestamps = positive_stims.values.shape[0]
     n_neurons = positive_stims.values.shape[1]
+    controller.set_limits(n_timestamps * positive_stims.dt, n_neurons)
     stim_widget.set_data(positive_stims)
     assert stim_widget.n_neurons == n_neurons
     assert stim_widget.dt_ms == 1000 * positive_stims.dt

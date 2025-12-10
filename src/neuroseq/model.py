@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import math
 import pathlib
@@ -35,7 +37,8 @@ class Model:
         self.stim_arrays: dict[str, StimArray] = {}
 
         self.max_ram_synapse_plot_matrix = 256
-        self.max_time_secs = 1.0
+        self.max_time_secs = 0.0
+        self.max_neurons = 0
 
         self.logger = logging.getLogger(__name__)
         if filepath:
@@ -52,17 +55,8 @@ class Model:
                 )
                 self.experiments = load_from_zip("experimental_data", zf)
                 self.stim_arrays = load_from_zip("stim_arrays", zf)
-            for experiment in self.experiments.values():
-                for data in experiment:
-                    if isinstance(data, TraceData):
-                        self.max_time_secs = max(
-                            self.max_time_secs, data.dt * data.traces.shape[1]
-                        )
-            for stim_array in self.stim_arrays.values():
-                self.max_time_secs = max(
-                    self.max_time_secs, stim_array.dt * stim_array.values.shape[0]
-                )
             self.name = filepath.stem
+        self.update_limits()
 
     def get_data_names(
         self, data_type: type[TraceData | SpikeData | SynapseData]
@@ -145,10 +139,12 @@ class Model:
 
     def add_stim_array(self, stim_array: StimArray):
         self.stim_arrays[stim_array.name] = stim_array
+        self.update_limits()
 
     def delete_stim_array(self, name: str):
         if name in self.stim_arrays:
             del self.stim_arrays[name]
+        self.update_limits()
 
     def update_stim_array_properties(
         self, name: str, n_neurons: int, stim_type: StimType, units: str, dt: float
@@ -172,25 +168,30 @@ class Model:
                 mode="constant",
                 constant_values=0,
             )
+        self.update_limits()
 
     def rename_stim_array(self, name: str, new_name: str):
         stim_array = self.stim_arrays.pop(name)
         stim_array.name = new_name
         self.stim_arrays[stim_array.name] = stim_array
 
-    def update_max_time_secs(self):
-        self.max_time_secs = 1.0
+    def update_limits(self):
+        self.max_time_secs = self.b2_model.get_sim_time_secs()
+        self.max_neurons = self.b2_model.get_max_neurons()
         for experiment in self.experiments.values():
             for data in experiment:
                 if isinstance(data, TraceData):
                     self.max_time_secs = max(
                         self.max_time_secs, data.dt * data.traces.shape[1]
                     )
+                    self.max_neurons = max(
+                        self.max_neurons, int(np.max(data.indices) + 1)
+                    )
         for stim_array in self.stim_arrays.values():
             self.max_time_secs = max(
                 self.max_time_secs, stim_array.dt * stim_array.values.shape[0]
             )
-        self.pad_stim_arrays(total_time_seconds=self.max_time_secs)
+            self.max_neurons = max(self.max_neurons, int(stim_array.values.shape[1]))
 
     def add_experimental_data(
         self,
@@ -215,7 +216,7 @@ class Model:
                 f"Adding experimental data for experiment '{experiment_name}'"
             )
             self.experiments[experiment_name] = list(new_data)
-            self.update_max_time_secs()
+            self.update_limits()
             return
         if experiment_name not in self.experiments:
             self.logger.warning(
@@ -260,7 +261,7 @@ class Model:
                     f"'{data.name}' not found when trying to append - adding new data instead of appending."
                 )
                 self.experiments[experiment_name].append(data)
-        self.update_max_time_secs()
+        self.update_limits()
 
     def pad_stim_arrays(self, total_time_seconds: float):
         """
@@ -279,6 +280,7 @@ class Model:
                     self.stim_arrays[name].values = np.pad(
                         stim_array.values, pad_width=((0, n_pad), (0, 0))
                     )
+        self.update_limits()
 
     def trim_stim_arrays(self, total_time_seconds: float):
         """
@@ -295,6 +297,7 @@ class Model:
                     self.stim_arrays[name].values = stim_array.values[
                         :new_n_timestamps, :
                     ]
+        self.update_limits()
 
     def trim_stim_array_would_delete_data(self, total_time_seconds: float) -> bool:
         """
@@ -316,9 +319,13 @@ class Model:
         report: Callable | None = None,
         stim_array_padding_seconds: float = 0.0,
     ) -> None:
-        sim_time = self.b2_model.run_simulation(time_seconds, self.stim_arrays, report)
-        self.max_time_secs = max(self.max_time_secs, sim_time)
-        self.pad_stim_arrays(sim_time + stim_array_padding_seconds)
+        self.pad_stim_arrays(
+            self.b2_model.get_sim_time_secs()
+            + time_seconds
+            + stim_array_padding_seconds
+        )
+        self.b2_model.run_simulation(time_seconds, self.stim_arrays, report)
+        self.update_limits()
 
     def save(
         self,

@@ -139,7 +139,7 @@ class TraceWidget(TimeseriesWidget):
         self,
         data: TraceData | None = None,
     ) -> None:
-        self.subplot.clear()
+        self.clear_data()
         if data is None:
             self.subplot.title = "Traces"
             return
@@ -177,4 +177,3 @@ class TraceWidget(TimeseriesWidget):
         for i, line in enumerate(self.graphic.graphics):
             line.offset = (line.offset[0], self.data.indices[i], line.offset[2])
         self.post_set_data()
-        self.autoscale = False

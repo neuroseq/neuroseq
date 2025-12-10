@@ -133,13 +133,14 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_synapse.currentTextChanged.connect(self.set_synapse)
         self.cmb_spike.currentTextChanged.connect(self.set_spike)
         self.cmb_data.currentTextChanged.connect(self.set_data)
-        self.stim_editor.max_time_modified.connect(self.update_slider_time_max)
+        self.stim_editor.limits_modified.connect(self.update_limits)
         if filename is not None:
             self.load_model(filename)
         else:
             self.load_model(default_model())
 
-    def update_slider_time_max(self) -> None:
+    def update_limits(self) -> None:
+        self.controller.set_limits(self.model.max_time_secs, self.model.max_neurons)
         self.time_slider.set_max_time_secs(self.model.max_time_secs)
 
     def _custom_analysis(
@@ -172,8 +173,8 @@ class Gui(QtWidgets.QMainWindow):
             self.continue_simulation_action.setText("&Continue simulation")
         else:
             self.continue_simulation_action.setText("&Run simulation")
-        self.update_slider_time_max()
         self.stim_editor.set_model(self.model, keep_undo_history)
+        self.update_limits()
         self._update_combo_boxes()
 
     def _update_combo_box(
@@ -290,6 +291,7 @@ class Gui(QtWidgets.QMainWindow):
         mdiag = ModelEditorDialog(self.model.b2_model, parent=self)
         if mdiag.exec():
             self.model.b2_model = mdiag.b2model
+            self.model.update_limits()
             self.update_model(self.model)
 
     @with_wait_cursor
@@ -312,23 +314,20 @@ class Gui(QtWidgets.QMainWindow):
             )
             self.progress_dialog.reset()
             return
-        self.update_model(model, reset_autoscale=True)
+        self.update_model(model, reset_controller=True)
 
     @with_wait_cursor
-    def update_model(self, model: Model, reset_autoscale=False) -> None:
+    def update_model(self, model: Model, reset_controller=False) -> None:
         self.model = model
-        if reset_autoscale:
-            self.controller.max_height = 1
-            self.controller.max_width = 1
+        if reset_controller:
+            self.controller.reset()
         self.stim_console.set_model(self.model)
         self.continue_simulation_action.setText("&Run simulation")
         for widget in self.plot_widgets:
-            widget.clear_data(reset_autoscale=reset_autoscale)
-        self.controller.clear_grid_lines()
+            widget.clear_data()
         self.stim_editor.set_model(self.model)
         if self.model is not None:
             self.stim_console.set_stims(self.stim_editor.stims_dict)
-        self.update_slider_time_max()
         self._update_combo_boxes()
 
     @with_wait_cursor

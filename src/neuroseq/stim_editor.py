@@ -41,7 +41,7 @@ class SelectMode(Enum):
 class StimEditor(QtWidgets.QWidget):
     """A GUI to edit 2-d numpy arrays of neuron stimuli interactively using mouse and keyboard input."""
 
-    max_time_modified = QtCore.Signal()
+    limits_modified = QtCore.Signal()
 
     def __init__(
         self,
@@ -138,6 +138,7 @@ class StimEditor(QtWidgets.QWidget):
         if not have_stims:
             self.current_stim_modifier = None
             return
+        self.limits_modified.emit()
         self.cmb_stim.addItems(list(self.stims_dict.keys()))
         if stim_to_select in self.stims_dict:
             self.cmb_stim.setCurrentText(stim_to_select)
@@ -198,7 +199,6 @@ class StimEditor(QtWidgets.QWidget):
             )
             return
         self.set_model(self.model, keep_undo_history=True)
-        self.max_time_modified.emit()
 
     def trim_stim_array(self) -> None:
         if self.current_stim_modifier is None or self.model is None:
@@ -251,7 +251,6 @@ class StimEditor(QtWidgets.QWidget):
         self.trim_stim_array_secs = trim_seconds_as_float
         self.model.trim_stim_arrays(new_length_secs)
         self.set_model(self.model, keep_undo_history=False)
-        self.max_time_modified.emit()
 
     def _stim_values_updated(self) -> None:
         if self.current_stim_modifier is None:
@@ -628,12 +627,14 @@ class StimEditor(QtWidgets.QWidget):
             parent=self,
         )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
-            self.model.stim_arrays[dialog.name] = StimArray(
-                dialog.name,
-                dialog.stim_type,
-                np.zeros((n_timestamps, dialog.n_neurons)),
-                dialog.units,
-                dialog.dt,
+            self.model.add_stim_array(
+                StimArray(
+                    dialog.name,
+                    dialog.stim_type,
+                    np.zeros((n_timestamps, dialog.n_neurons)),
+                    dialog.units,
+                    dialog.dt,
+                )
             )
             self.set_model(self.model, stim_to_select=dialog.name)
 
@@ -671,7 +672,7 @@ class StimEditor(QtWidgets.QWidget):
             )
             == QtWidgets.QMessageBox.StandardButton.Yes
         ):
-            del self.model.stim_arrays[self.current_stim_modifier.stim_array.name]
+            self.model.delete_stim_array(self.current_stim_modifier.stim_array.name)
             self.set_model(self.model)
 
     def _add_actions(self, toolbar: QtWidgets.QToolBar, menu: QtWidgets.QMenu) -> None:
