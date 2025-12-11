@@ -28,6 +28,7 @@ from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.import_dialog import Suite2pImportDialog
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.model import Model
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
@@ -318,12 +319,16 @@ class Gui(QtWidgets.QMainWindow):
             )
             self.progress_dialog.reset()
             return
-        self.last_cellpose_import = model.cellpose_data
+        self.last_cellpose_import = clone_cellpose_result(model.cellpose_data)
+        if model is not None:
+            model.cellpose_data = self.last_cellpose_import
         self.update_model(model)
 
     @with_wait_cursor
     def update_model(self, model: Model) -> None:
-        self.last_cellpose_import = model.cellpose_data
+        self.last_cellpose_import = clone_cellpose_result(model.cellpose_data)
+        if model is not None:
+            model.cellpose_data = self.last_cellpose_import
         self.model = model
         self.controller.max_height = 1
         self.controller.max_width = 1
@@ -572,9 +577,10 @@ class Gui(QtWidgets.QMainWindow):
     def btn_import_cellpose_data_clicked(self) -> None:
         dialog = CellposeImportDialog(self, existing_data=self.last_cellpose_import)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
-            self.last_cellpose_import = dialog.get_imported_data()
+            imported = clone_cellpose_result(dialog.get_imported_data())
+            self.last_cellpose_import = imported
             if self.model is not None:
-                self.model.cellpose_data = self.last_cellpose_import
+                self.model.cellpose_data = imported
             QtWidgets.QMessageBox.information(
                 self,
                 "Cellpose import",
@@ -589,6 +595,14 @@ class Gui(QtWidgets.QMainWindow):
             if not dialog.imported_data:
                 return
             try:
+                if dialog.cellpose_import is not None:
+                    # keep GUI/model copies in sync with any updated stimulus mapping
+                    self.last_cellpose_import = clone_cellpose_result(
+                        dialog.cellpose_import
+                    )
+                    if self.model is not None:
+                        self.model.cellpose_data = self.last_cellpose_import
+
                 # For patch clamp imports, handle replace mode properly:
                 # - Replace mode: remove only the specific neuron IDs being imported, then add new data
                 # - Append mode: just append/merge the new data

@@ -25,6 +25,40 @@ class CellposeImportResult:
     stimulus_to_cellpose_mapping: dict[int, int] | None = None
 
 
+def clone_cellpose_result(
+    result: CellposeImportResult | None,
+) -> CellposeImportResult | None:
+    """Return a defensive copy of a CellposeImportResult."""
+    if result is None:
+        return None
+
+    return CellposeImportResult(
+        image_path=result.image_path,
+        segmentation_array=(
+            None
+            if result.segmentation_array is None
+            else np.array(result.segmentation_array, copy=True)
+        ),
+        overlay_image=(
+            None
+            if result.overlay_image is None
+            else np.array(result.overlay_image, copy=True)
+        ),
+        trace_data=result.trace_data,
+        spike_data=result.spike_data,
+        original_cellpose_ids=(
+            None
+            if result.original_cellpose_ids is None
+            else np.array(result.original_cellpose_ids, copy=True)
+        ),
+        stimulus_to_cellpose_mapping=(
+            None
+            if result.stimulus_to_cellpose_mapping is None
+            else dict(result.stimulus_to_cellpose_mapping)
+        ),
+    )
+
+
 def prepare_cellpose_traces(
     traces: np.ndarray,
     *,
