@@ -9,7 +9,6 @@ import brian2.numpy_ as np
 import fastplotlib as fpl
 import pygfx
 from qtpy import QtCore
-from qtpy import QtGui
 from qtpy import QtWidgets
 
 from neuroseq.utils import neuron_indices_to_colors
@@ -346,19 +345,9 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         )
         self.overlay_view.setMinimumHeight(600)
         layout.addWidget(self.overlay_view)
-
-        self.legend_scroll = QtWidgets.QScrollArea()
-        self.legend_scroll.setWidgetResizable(True)
-        self.legend_scroll.setMaximumHeight(140)
-        self.legend_widget = QtWidgets.QWidget()
-        self.legend_layout = QtWidgets.QGridLayout(self.legend_widget)
-        self.legend_layout.setContentsMargins(4, 4, 4, 4)
-        self.legend_layout.setSpacing(6)
-        self.legend_scroll.setWidget(self.legend_widget)
-        self._apply_legend_theme()
-        layout.addWidget(self.legend_scroll)
         self._update_overlay_scale()
 
+    # todo: Delete all this. remove legend.
     def _update_overlay_display(self) -> None:
         """Update the overlay display with current ID mode"""
         display_segmentation = self._get_display_segmentation()
@@ -369,7 +358,6 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             display_legend,
             self.stimulus_to_cellpose_mapping,
         )
-        self._update_legend(display_legend)
 
     def _get_display_segmentation(self) -> np.ndarray | None:
         """Get segmentation array with appropriate IDs for current display mode"""
@@ -439,68 +427,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.segmentation = None
         self.legend_data = []
         self.overlay_view.add_overlay_data(None, None)
-        self._clear_legend()
         self._update_overlay_scale()
-
-    def _clear_legend(self) -> None:
-        for i in reversed(range(self.legend_layout.count())):
-            child = self.legend_layout.itemAt(i).widget()
-            if child:
-                child.setParent(None)
-
-    def _update_legend(
-        self, legend_data: Iterable[tuple[int, tuple[int, int, int]]] | None = None
-    ) -> None:
-        self._clear_legend()
-        if self.segmentation is None:
-            return
-
-        legend = (
-            list(legend_data)
-            if legend_data is not None
-            else (
-                self.legend_data
-                if self.legend_data
-                else self._compute_default_legend(self.segmentation)
-            )
-        )
-        if not legend:
-            return
-
-        legend_entries = self._build_text_entries(legend)
-
-        cols = 4
-        for i, entry in enumerate(legend_entries):
-            row = i // cols
-            col = i % cols
-            item_widget = QtWidgets.QWidget()
-            item_layout = QtWidgets.QHBoxLayout(item_widget)
-            item_layout.setContentsMargins(2, 2, 2, 2)
-            item_layout.setSpacing(4)
-
-            color_label = QtWidgets.QLabel()
-            color_label.setFixedSize(16, 16)
-            color_label.setPixmap(self._color_chip_pixmap(entry["rgb"]))
-
-            stim_id = entry["stim_id"]
-            cellpose_id = entry["cellpose_id"]
-            stim_style = "color: black; font-weight: bold;"
-            cellpose_style = (
-                "color: rgb(185, 185, 185); font-size: 60%; font-weight: normal;"
-            )
-            text_label = QtWidgets.QLabel()
-            text_label.setFixedHeight(18)
-            text_label.setText(
-                f"<span style='{stim_style}'>{stim_id}</span>"
-                f"<span style='{cellpose_style}'> ({cellpose_id})</span>"
-            )
-            text_label.setStyleSheet("QLabel { background-color: transparent; }")
-
-            item_layout.addWidget(color_label)
-            item_layout.addWidget(text_label)
-            item_layout.addStretch()
-
-            self.legend_layout.addWidget(item_widget, row, col)
 
     def _compute_default_legend(
         self, segmentation: np.ndarray
@@ -516,44 +443,6 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             rgb_255 = (int(color[0] * 255), int(color[1] * 255), int(color[2] * 255))
             legend.append((int(cell_id), rgb_255))
         return legend
-
-    def _build_text_entries(
-        self, display_legend: list[tuple[int, tuple[int, int, int]]]
-    ) -> list[dict]:
-        """Create combined legend entries with stim and cellpose IDs."""
-        entries: list[dict] = []
-        cellpose_lookup: dict[int, int] = {}
-        if self.stimulus_to_cellpose_mapping:
-            cellpose_lookup = {
-                stim: cp for stim, cp in self.stimulus_to_cellpose_mapping.items()
-            }
-
-        for stim_id, rgb in sorted(display_legend, key=lambda x: x[0]):
-            cellpose_id = cellpose_lookup.get(stim_id, stim_id)
-            entries.append({"stim_id": stim_id, "cellpose_id": cellpose_id, "rgb": rgb})
-        return entries
-
-    def _apply_legend_theme(self) -> None:
-        """Ensure legend backgrounds/text stay readable against overlays."""
-        self.legend_widget.setStyleSheet("background-color: white; color: black;")
-        self.legend_scroll.setStyleSheet("QScrollArea { border: none; }")
-        viewport = self.legend_scroll.viewport()
-        if viewport is not None:
-            viewport.setStyleSheet("background-color: white;")
-
-    def _color_chip_pixmap(self, rgb: tuple[int, int, int]) -> QtGui.QPixmap:
-        """Create a color chip showing 50% color over black."""
-        size = 16
-        pixmap = QtGui.QPixmap(size, size)
-        pixmap.fill(QtGui.QColor(0, 0, 0))
-        painter = QtGui.QPainter(pixmap)
-        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, False)
-        overlay_color = QtGui.QColor(int(rgb[0]), int(rgb[1]), int(rgb[2]), 128)
-        painter.fillRect(0, 0, size, size, overlay_color)
-        painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255)))
-        painter.drawRect(0, 0, size - 1, size - 1)
-        painter.end()
-        return pixmap
 
     def showEvent(self, event) -> None:
         super().showEvent(event)

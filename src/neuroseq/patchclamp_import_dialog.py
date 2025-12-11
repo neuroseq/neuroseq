@@ -8,11 +8,9 @@ import brian2.numpy_ as np
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
-from neuroseq.cell_overlay_widget import CellOverlayWidget
 from neuroseq.data import TraceData
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.spike_detection import detect_spikes_voltage_trace
-from neuroseq.utils import neuron_indices_to_colors
 
 
 class PatchClampImportDialog(QtWidgets.QDialog):
@@ -38,12 +36,10 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.file_path: Path | None = None
         self.npy_data: np.ndarray | None = None
         self.extracted_neuron_id: int | None = None
-        self.overlay_widget: CellOverlayWidget | None = None
         self.preview_group: QtWidgets.QGroupBox | None = None
         self.options_group: QtWidgets.QGroupBox | None = None
         self.spike_group: QtWidgets.QGroupBox | None = None
         self._setup_ui()
-        self._load_overlay_from_cellpose()
         self._apply_existing_stim_mapping()
 
     def _setup_ui(self) -> None:
@@ -52,26 +48,11 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         screen = QtWidgets.QApplication.primaryScreen()
         screen_width = screen.availableGeometry().width()
-        self.full_width = min(1200, int(0.9 * screen_width))
-        self.compact_width = min(820, int(0.55 * screen_width))
-        self.full_height = 540
-        self.compact_height = 320
-
-        initial_width = (
-            self.full_width if self.cellpose_import is not None else self.compact_width
-        )
-        initial_height = (
-            self.full_height
-            if self.cellpose_import is not None
-            else self.compact_height
-        )
-        self.resize(initial_width, initial_height)
+        self.dialog_width = min(820, int(0.55 * screen_width))
+        self.dialog_height = 320
+        self.resize(self.dialog_width, self.dialog_height)
 
         layout = QtWidgets.QVBoxLayout(self)
-
-        if self.cellpose_import is not None:
-            self.overlay_widget = CellOverlayWidget("Cell overlay preview")
-            layout.addWidget(self.overlay_widget)
 
         file_group = QtWidgets.QGroupBox("Select .npy patchclamp file")
         file_layout = QtWidgets.QHBoxLayout(file_group)
@@ -261,51 +242,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
     def _on_replace_toggled(self, checked: bool) -> None:
         self.append_data = not checked
 
-    def _build_cellpose_legend(self) -> list[tuple[int, tuple[int, int, int]]]:
-        """Compute legend entries that match the stored Cellpose overlay colors."""
-        if (
-            self.cellpose_import is None
-            or self.cellpose_import.segmentation_array is None
-        ):
-            return []
-
-        segmentation = self.cellpose_import.segmentation_array
-        unique_ids = np.unique(segmentation)
-        neuron_ids = unique_ids[unique_ids > 0]
-        if neuron_ids.size == 0:
-            return []
-
-        colors = neuron_indices_to_colors(neuron_ids)
-        legend: list[tuple[int, tuple[int, int, int]]] = []
-        for cell_id, color in zip(neuron_ids, colors, strict=True):
-            rgb = (int(color[0] * 255), int(color[1] * 255), int(color[2] * 255))
-            legend.append((int(cell_id), rgb))
-        return legend
-
-    def _load_overlay_from_cellpose(self) -> None:
-        if self.overlay_widget is None:
-            return
-        if self.cellpose_import is None:
-            self.overlay_widget.set_empty_message(
-                "Import Cellpose segmentation to see the overlay here."
-            )
-            return
-
-        try:
-            legend = self._build_cellpose_legend()
-            self.overlay_widget.set_overlay(
-                self.cellpose_import.overlay_image,
-                self.cellpose_import.segmentation_array,
-                legend_data=legend,
-                original_cellpose_ids=self.cellpose_import.original_cellpose_ids,
-                stimulus_to_cellpose_mapping=self.cellpose_import.stimulus_to_cellpose_mapping,
-            )
-        except Exception as exc:
-            self.logger.warning("Could not display Cellpose overlay: %s", exc)
-            self.overlay_widget.set_empty_message(
-                "Cellpose overlay could not be displayed."
-            )
-
     def _browse_file(self) -> None:
         filename, _ = getopenfilename(
             self,
@@ -426,13 +362,8 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 group.setVisible(visible)
         if visible:
             self.resize(
-                max(self.width(), getattr(self, "full_width", self.width())),
-                max(self.height(), getattr(self, "full_height", self.height())),
-            )
-        elif self.cellpose_import is None:
-            self.resize(
-                min(self.width(), getattr(self, "compact_width", self.width())),
-                min(self.height(), getattr(self, "compact_height", self.height())),
+                max(self.width(), getattr(self, "dialog_width", self.width())),
+                max(self.height(), getattr(self, "dialog_height", self.height())),
             )
 
     def _parse_stim_neuron_ids(self, mapping_str: str) -> list[int]:
