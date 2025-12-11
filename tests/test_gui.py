@@ -12,14 +12,14 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-import neuroseq.save_options
+import neuroseq
 from neuroseq.example_models import default_model
 from neuroseq.example_models import example_models
 from neuroseq.gui import Gui
 from neuroseq.model import Model
 from neuroseq.model_editor import EditableSynapseTree
 from neuroseq.model_editor import ModelEditorDialog
-from neuroseq.save_options import SaveOptions
+from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
@@ -130,7 +130,7 @@ def test_gui_open(monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_path: Path) -> Non
     model_path = tmp_path / "model.nseq"
     model.save(
         model_path,
-        SaveOptions(
+        SaveLoadOptions(
             include_stim_arrays=True,
             include_model=True,
             include_simulation_data=False,
@@ -160,8 +160,16 @@ def test_gui_open(monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_path: Path) -> Non
     gui.close()
 
 
-class MockSaveOptionsDialog:
-    save_options = SaveOptions(True, True, True, True)
+class MockSaveLoadOptionsDialog:
+    options = SaveLoadOptions(
+        include_stim_arrays=True,
+        include_model=True,
+        include_simulation_data=True,
+        include_experimental_data=True,
+    )
+
+    def __init__(self, *args, **kwargs) -> None:
+        pass
 
     def exec(self) -> bool:
         return True
@@ -181,10 +189,14 @@ def test_gui_save(
     # the gui will add the .nseq extension automatically
     filename = filename_without_extension.with_suffix(".nseq")
     assert not filename.exists()
+    MockSaveLoadOptionsDialog.options.include_stim_arrays = True
+    MockSaveLoadOptionsDialog.options.include_model = True
+    MockSaveLoadOptionsDialog.options.include_simulation_data = True
+    MockSaveLoadOptionsDialog.options.include_experimental_data = True
     monkeypatch.setattr(
         neuroseq.gui,
-        "SaveOptionsDialog",
-        MockSaveOptionsDialog,
+        "SaveLoadOptionsDialog",
+        MockSaveLoadOptionsDialog,
     )
     # mock getSaveFileName to return the desired filename
     monkeypatch.setattr(
@@ -205,6 +217,56 @@ def test_gui_save(
     assert (
         mfx_ornstein.b2_model.monitors.keys() == loaded_model.b2_model.monitors.keys()
     )
+    gui.close()
+
+
+def test_gui_import(
+    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_ornstein: Model
+) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    # create a nseq file to import from
+    model = example_models[list(sorted(example_models.keys()))[-1]]()
+    model_path = tmp_path / "model.nseq"
+    model.save(
+        model_path,
+        SaveLoadOptions(
+            include_stim_arrays=True,
+            include_model=True,
+            include_simulation_data=False,
+            include_experimental_data=False,
+        ),
+    )
+    gui.update_model(mfx_ornstein)
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    # mock getOpenFileName to return the desired filename
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getOpenFileName",
+        lambda *args: (f"{model_path}", True),
+    )
+    MockSaveLoadOptionsDialog.options.include_stim_arrays = True
+    MockSaveLoadOptionsDialog.options.include_model = False
+    MockSaveLoadOptionsDialog.options.include_simulation_data = False
+    MockSaveLoadOptionsDialog.options.include_experimental_data = False
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "SaveLoadOptionsDialog",
+        MockSaveLoadOptionsDialog,
+    )
+    gui.btn_import_clicked()
+    # b2model is not modified
+    assert (
+        mfx_ornstein.b2_model.neurongroups.keys()
+        == gui.model.b2_model.neurongroups.keys()
+    )
+    assert mfx_ornstein.b2_model.synapses.keys() == gui.model.b2_model.synapses.keys()
+    assert mfx_ornstein.b2_model.monitors.keys() == gui.model.b2_model.monitors.keys()
+    # but stim arrays are imported
+    assert gui.model.stim_arrays.keys() == model.stim_arrays.keys()
     gui.close()
 
 

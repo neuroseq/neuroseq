@@ -18,7 +18,7 @@ from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.io import append_to_zip
 from neuroseq.io import load_from_zip
-from neuroseq.save_options import SaveOptions
+from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.utils import append_data
@@ -56,6 +56,38 @@ class Model:
                 self.experiments = load_from_zip("experimental_data", zf)
                 self.stim_arrays = load_from_zip("stim_arrays", zf)
             self.name = filepath.stem
+        self.update_limits()
+
+    def import_model(
+        self,
+        filepath: str | pathlib.Path,
+        options: SaveLoadOptions,
+        report: Callable[[int], None] | None = None,
+    ) -> None:
+        filepath = pathlib.Path(filepath)
+        self.logger.info(f"Importing components from '{filepath}' into existing model")
+        with zipfile.ZipFile(filepath, "r", zipfile.ZIP_DEFLATED) as zf:
+            if options.include_model:
+                self.logger.info("  - importing b2_model")
+                self.b2_model = B2Model()
+                b2_model_data = load_from_zip("b2_model", zf)
+                if (
+                    options.include_simulation_data
+                    and "b2_stored_state.pkl" in zf.namelist()
+                ):
+                    self.logger.info("  - importing simulation data")
+                    b2_stored_state = pickle.loads(zf.read("b2_stored_state.pkl"))
+                else:
+                    b2_stored_state = {}
+                self.b2_model = B2Model.from_dict(
+                    b2_model_data, b2_stored_state, report
+                )
+            if options.include_experimental_data:
+                self.logger.info("  - importing experimental data")
+                self.experiments = load_from_zip("experimental_data", zf)
+            if options.include_stim_arrays:
+                self.logger.info("  - importing stim arrays")
+                self.stim_arrays = load_from_zip("stim_arrays", zf)
         self.update_limits()
 
     def get_data_names(
@@ -330,7 +362,7 @@ class Model:
     def save(
         self,
         filepath: str | pathlib.Path,
-        options: SaveOptions,
+        options: SaveLoadOptions,
     ) -> None:
         """
         Saves the model to a zipfile which contains
@@ -344,7 +376,7 @@ class Model:
         ----------
         filepath : str | pathlib.Path
             path to the file where the current model should be stored
-        options: SaveOptions
+        options: SaveLoadOptions
             options for what to include in the saved model
         """
 

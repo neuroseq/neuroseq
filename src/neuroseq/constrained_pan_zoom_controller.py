@@ -156,6 +156,8 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         self.grid_lines.append(gridlines)
 
     def remove_grid_lines(self, gridlines: GridLines):
+        if not self.grid_lines:
+            return
         try:
             self.grid_lines.remove(gridlines)
         except ValueError:

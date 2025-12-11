@@ -6,7 +6,7 @@ import pytest
 
 from neuroseq.example_models import example_models
 from neuroseq.model import Model
-from neuroseq.save_options import SaveOptions
+from neuroseq.save_load_options import SaveLoadOptions
 
 
 @pytest.mark.parametrize(
@@ -17,7 +17,7 @@ def test_example_models(model_generator, tmp_path: pathlib.Path) -> None:
     # do a short simulation
     model.run_simulation(0.01)
     # check we can save and re-load the model
-    save_options = SaveOptions(True, True, True, True)
+    save_options = SaveLoadOptions(True, True, True, True)
     model.save(tmp_path / "model.nseq", save_options)
     model2 = Model(tmp_path / "model.nseq")
     # check saved model matches original
