@@ -177,22 +177,3 @@ class TraceWidget(TimeseriesWidget):
         for i, line in enumerate(self.graphic.graphics):
             line.offset = (line.offset[0], self.data.indices[i], line.offset[2])
         self.post_set_data()
-
-        """
-        Like in spike_widget.py I had this code:
-
-        ids = (
-            data.indices
-            if data.indices is not None
-            else np.arange(self.n_neurons, dtype=np.int32)
-        )
-        colors_rgba_float = neuron_indices_to_colors(ids)
-        colors_rgba = (colors_rgba_float * 255).astype(np.uint8)
-        colors_normalized = colors_rgba.astype(np.float32) / 255.0
-
-        self.graphic = self.subplot.add_line_collection(
-            data,
-            colors=colors_normalized,
-            thickness=2,
-        )
-        """

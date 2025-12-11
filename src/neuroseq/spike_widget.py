@@ -53,16 +53,3 @@ class SpikeWidget(TimeseriesWidget):
             uniform_size=True,
         )
         self.post_set_data()
-        """
-        Alternate implementation (for some reason I thought this was needed
-        but at time of merge am not sure. Keeping it briefly):
-        ids = (
-            data.spike_indices - data.spike_indices.min()
-            if data.spike_indices.size > 0
-            else data.spike_indices
-        )
-        colors_rgba_float = neuron_indices_to_colors(ids)
-        colors_rgba = (colors_rgba_float * 255).astype(np.uint8)
-        colors_normalized = colors_rgba.astype(np.float32) / 255.0
-
-"""
