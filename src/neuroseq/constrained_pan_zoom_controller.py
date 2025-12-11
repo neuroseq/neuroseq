@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import brian2.numpy_ as np
 import pygfx
 from qtpy import QtWidgets
@@ -29,39 +31,54 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         self.max_width = 1.0
         self.min_height = 1.0
         self.max_height = 1.0
+        self.initialized = False
         self.x_scroll_bar: QtWidgets.QScrollBar | None = None
         self.y_scroll_bar: QtWidgets.QScrollBar | None = None
         self.grid_lines: list[GridLines] = []
         super().__init__(*args, **kwargs)
 
+    def reset(self):
+        self.max_width = 1.0
+        self.max_height = 1.0
+        self.grid_lines.clear()
+        self.initialized = False
+
+    def set_limits(self, max_time_secs: float, max_neurons: int) -> None:
+        if max_time_secs <= 0.0 or max_neurons <= 0:
+            return
+        self.max_width = 1000.0 * max_time_secs
+        self.max_height = float(max_neurons)
+        state = self._get_camera_state()
+        if not self.initialized:
+            # first use of controller: set initial camera state to show all data
+            state["width"] = self.max_width
+            state["height"] = self.max_height
+            state["position"] = (0.5 * self.max_width, 0.5 * self.max_height - 0.5, 1.0)
+            # ensure sufficient depth such that all graphics are visible
+            state["depth"] = 1000.0
+            state["zoom"] = 1.0
+            # allow independent x and y zoom
+            state["maintain_aspect"] = False
+            state["depth_range"] = None
+            self.initialized = True
+        self._set_camera_state(state)
+        self._update_cameras()
+
     def _set_camera_state(self, new_state):
         """Override the _set_camera_state method
-        - limit the width, height and position to keep the data visible
+        - limit the width, height and position to prevent scrolling or zooming beyond the data
         - update the scroll bars if they are connected
         - hide or show sub-gridlines based on the current zoom level
         """
-        if "position" in new_state:
-            current_state = self._get_camera_state()
-            half_width = 0.5 * current_state["width"]
-            half_height = 0.5 * current_state["height"]
-            x = np.clip(
-                new_state["position"][0], half_width, self.max_width - half_width
-            )
-            y = np.clip(
-                new_state["position"][1],
-                half_height - 0.5,
-                self.max_height - half_height - 0.5,
-            )
-            new_state["position"] = (x, y, new_state["position"][2])
-            self._set_scroll_bar_position(
-                self.x_scroll_bar, (x - half_width) / self.max_width
-            )
-            self._set_scroll_bar_position(
-                self.y_scroll_bar, 1 - (y + 0.5 + half_height) / self.max_height
-            )
+        current_state = self._get_camera_state()
+        # width constraints
         if "width" in new_state:
             new_state["width"] = float(
-                np.clip(new_state["width"], self.min_width, self.max_width)
+                np.clip(
+                    new_state["width"],
+                    self.min_width,
+                    self.max_width,
+                )
             )
             self._set_scroll_bar_size(
                 self.x_scroll_bar, new_state["width"] / self.max_width
@@ -69,13 +86,40 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
             for grid_line in self.grid_lines:
                 if grid_line is not None:
                     grid_line.set_current_time_extent(new_state["width"])
+        else:
+            new_state["width"] = current_state["width"]
+        # height constraints
         if "height" in new_state:
             new_state["height"] = float(
-                np.clip(new_state["height"], self.min_height, self.max_height)
+                np.clip(
+                    new_state["height"],
+                    self.min_height,
+                    self.max_height,
+                )
             )
             self._set_scroll_bar_size(
                 self.y_scroll_bar, new_state["height"] / self.max_height
             )
+        else:
+            new_state["height"] = current_state["height"]
+        # position constraints
+        if "position" not in new_state:
+            new_state["position"] = current_state["position"]
+        half_width = 0.5 * new_state["width"]
+        half_height = 0.5 * new_state["height"]
+        x = np.clip(new_state["position"][0], half_width, self.max_width - half_width)
+        y = np.clip(
+            new_state["position"][1],
+            half_height - 0.5,
+            self.max_height - half_height - 0.5,
+        )
+        new_state["position"] = (x, y, new_state["position"][2])
+        self._set_scroll_bar_position(
+            self.x_scroll_bar, (x - half_width) / self.max_width
+        )
+        self._set_scroll_bar_position(
+            self.y_scroll_bar, 1 - (y + 0.5 + half_height) / self.max_height
+        )
         super()._set_camera_state(new_state)
 
     def _set_scroll_bar_position(
@@ -111,8 +155,11 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
     def add_grid_lines(self, gridlines: GridLines):
         self.grid_lines.append(gridlines)
 
-    def clear_grid_lines(self):
-        self.grid_lines.clear()
+    def remove_grid_lines(self, gridlines: GridLines):
+        try:
+            self.grid_lines.remove(gridlines)
+        except ValueError:
+            logging.warning("GridLines not found in controller list")
 
     def connect_x_scroll_bar(self, scroll_bar: QtWidgets.QScrollBar):
         self.x_scroll_bar = scroll_bar
