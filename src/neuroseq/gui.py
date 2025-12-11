@@ -29,7 +29,7 @@ from neuroseq.import_dialog import Suite2pImportDialog
 from neuroseq.model import Model
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
-from neuroseq.save_options import SaveOptionsDialog
+from neuroseq.save_load_options import SaveLoadOptionsDialog
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim_console import StimConsole
 from neuroseq.stim_editor import StimEditor
@@ -238,9 +238,40 @@ class Gui(QtWidgets.QMainWindow):
         if filename != "":
             self.load_model(filename)
 
+    def btn_import_clicked(self) -> None:
+        filename, _ = getopenfilename(
+            self,
+            "import from model",
+            "model.nseq",
+            "neuroseq model (*.nseq)",
+        )
+        if filename == "":
+            return
+        options_dialog = SaveLoadOptionsDialog(action="Import")
+        if not options_dialog.exec():
+            return
+        try:
+            self.progress_dialog.setLabelText("Importing from model...")
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+            self.model.import_model(
+                filename, options_dialog.options, report=self._update_load_progress
+            )
+            QtWidgets.QApplication.restoreOverrideCursor()
+        except Exception as e:
+            QtWidgets.QApplication.restoreOverrideCursor()
+            self.logger.warning(f"Failed to import from model {filename}: {e}")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Import error",
+                f"Could not import from file '{filename}': {e}",
+            )
+            self.progress_dialog.reset()
+            return
+        self.update_model(self.model)
+
     def btn_save_clicked(self) -> None:
-        save_options_dialog = SaveOptionsDialog()
-        if not save_options_dialog.exec():
+        options_dialog = SaveLoadOptionsDialog(action="Save")
+        if not options_dialog.exec():
             return
         filename, _ = getsavefilename(
             self,
@@ -255,7 +286,7 @@ class Gui(QtWidgets.QMainWindow):
             filename = filename.with_suffix(".nseq")
         try:
             QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
-            self.model.save(filename, save_options_dialog.save_options)
+            self.model.save(filename, options_dialog.options)
             QtWidgets.QApplication.restoreOverrideCursor()
         except Exception as e:
             QtWidgets.QApplication.restoreOverrideCursor()
@@ -709,6 +740,14 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             shortcut="Ctrl+O",
             icon=qta.icon("mdi6.folder-open"),
+        )
+        add_action(
+            "&Import from model",
+            self.btn_import_clicked,
+            menu,
+            toolbar,
+            shortcut="None",
+            icon=qta.icon("mdi6.file-import"),
         )
         add_action(
             "&Save model",

@@ -10,7 +10,7 @@ from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.example_models import default_model
 from neuroseq.model import Model
-from neuroseq.save_options import SaveOptions
+from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
@@ -159,7 +159,7 @@ def test_save_load(model_nmda: Model, tmp_path: Path) -> None:
     model_nmda.add_experimental_data("test_experiment", experimental_data)
 
     # save model including everything
-    save_options = SaveOptions(True, True, True, True)
+    save_options = SaveLoadOptions(True, True, True, True)
     model_nmda.save(tmp_file, save_options)
 
     reconstructed_model = Model(tmp_file)
