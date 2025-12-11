@@ -10,6 +10,7 @@ from qtpy.compat import getopenfilename
 from neuroseq.cell_overlay_widget import CellOverlayWidget
 from neuroseq.importer_cellpose import CellPoseImporter
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importer_cellpose import clone_cellpose_result
 
 
 class CellposeImportDialog(QtWidgets.QDialog):
@@ -27,7 +28,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.segmentation_path: Path | None = None
         self.importer = CellPoseImporter()
         self.overlay_widget = CellOverlayWidget("")
-        self.existing_data = existing_data
+        # Use a defensive copy so the preview can't mutate the stored instance
+        self.existing_data = clone_cellpose_result(existing_data)
         self.file_selection_container: QtWidgets.QWidget | None = None
         self.main_content_container: QtWidgets.QWidget | None = None
         self._setup_ui()
@@ -255,7 +257,6 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.overlay_widget.set_overlay(
                 self.importer.overlay_image,
                 self.importer.segmentation_data,
-                self.importer.get_legend_data(),
                 self.importer._original_cellpose_ids,
                 preview_mapping,
             )
@@ -334,7 +335,6 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.overlay_widget.set_overlay(
                 self.importer.overlay_image,
                 self.importer.segmentation_data,
-                self.importer.get_legend_data(),
                 self.importer._original_cellpose_ids,
                 preview_mapping,
             )
@@ -417,7 +417,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
     def get_imported_data(self) -> CellposeImportResult | None:
         """Return the last successfully imported data payload."""
-        return self._imported_data
+        return clone_cellpose_result(self._imported_data)
 
     def _load_existing_data_if_available(self) -> None:
         """Load existing cellpose data if available"""

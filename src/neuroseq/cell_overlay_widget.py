@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 import logging
 import math
-from collections.abc import Iterable
 
 import brian2.numpy_ as np
 import fastplotlib as fpl
@@ -65,7 +64,6 @@ class OverlayView(QtWidgets.QWidget):
         self,
         overlay_image: np.ndarray | None,
         segmentation: np.ndarray | None,
-        legend_data: Iterable[tuple[int, tuple[int, int, int]]] | None = None,
         stim_to_cellpose: dict[int, int] | None = None,
     ) -> None:
         previous_shape = self._overlay_shape
@@ -86,13 +84,6 @@ class OverlayView(QtWidgets.QWidget):
 
         if overlay_image is None:
             return
-
-        legend_lookup: dict[int, tuple[float, float, float]] = {}
-        if legend_data:
-            legend_lookup = {
-                int(cell_id): (rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0)
-                for cell_id, rgb in legend_data
-            }
 
         # keep the overlay view simple: hide axes and grids
         self.subplot.axes.visible = False
@@ -118,8 +109,7 @@ class OverlayView(QtWidgets.QWidget):
                 rgb = np.zeros((*segmentation.shape, 4))
                 for i, neuron_id in enumerate(neuron_ids):
                     mask = segmentation == neuron_id
-                    color = legend_lookup.get(int(neuron_id), tuple(id_colors[i][:3]))
-                    rgb[mask, :3] = color
+                    rgb[mask, :3] = tuple(id_colors[i][:3])
 
                 rgb[:, :, 3] = 0.4  # alpha for all cells
                 rgb[segmentation == 0, 3] = 0  # transparent background
@@ -325,7 +315,6 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.logger = logging.getLogger(__name__)
         self.overlay_image: np.ndarray | None = None
         self.segmentation: np.ndarray | None = None
-        self.legend_data: list[tuple[int, tuple[int, int, int]]] = []
         self.original_cellpose_ids: np.ndarray | None = None
         self.stimulus_to_cellpose_mapping: dict[int, int] | None = None
         self.show_stimulus_ids = True  # Always show stimulus IDs when available
@@ -347,15 +336,12 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         layout.addWidget(self.overlay_view)
         self._update_overlay_scale()
 
-    # todo: Delete all this. remove legend.
     def _update_overlay_display(self) -> None:
         """Update the overlay display with current ID mode"""
         display_segmentation = self._get_display_segmentation()
-        display_legend = self._get_display_legend(display_segmentation)
         self.overlay_view.add_overlay_data(
             self.overlay_image,
             display_segmentation,
-            display_legend,
             self.stimulus_to_cellpose_mapping,
         )
 
@@ -379,43 +365,15 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
 
         return display_seg
 
-    def _get_display_legend(
-        self, display_segmentation: np.ndarray | None
-    ) -> list[tuple[int, tuple[int, int, int]]]:
-        """Build legend entries that match the currently displayed IDs and colors."""
-        if display_segmentation is None:
-            return []
-
-        if self.legend_data:
-            if self.show_stimulus_ids and self.stimulus_to_cellpose_mapping:
-                cellpose_to_stimulus = {
-                    v: k for k, v in self.stimulus_to_cellpose_mapping.items()
-                }
-                remapped: list[tuple[int, tuple[int, int, int]]] = []
-                for cellpose_id, rgb in self.legend_data:
-                    stim_id = cellpose_to_stimulus.get(cellpose_id)
-                    if stim_id is None:
-                        continue
-                    remapped.append((int(stim_id), rgb))
-                if remapped:
-                    remapped.sort(key=lambda item: item[0])
-                    return remapped
-            return self.legend_data
-
-        # Fallback: compute default legend for displayed segmentation
-        return self._compute_default_legend(display_segmentation)
-
     def set_overlay(
         self,
         overlay_image: np.ndarray | None,
         segmentation: np.ndarray | None,
-        legend_data: Iterable[tuple[int, tuple[int, int, int]]] | None = None,
         original_cellpose_ids: np.ndarray | None = None,
         stimulus_to_cellpose_mapping: dict[int, int] | None = None,
     ) -> None:
         self.overlay_image = overlay_image
         self.segmentation = segmentation
-        self.legend_data = list(legend_data or [])
         self.original_cellpose_ids = original_cellpose_ids
         self.stimulus_to_cellpose_mapping = stimulus_to_cellpose_mapping
 
@@ -425,24 +383,8 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
     def set_empty_message(self, message: str) -> None:
         self.overlay_image = None
         self.segmentation = None
-        self.legend_data = []
         self.overlay_view.add_overlay_data(None, None)
         self._update_overlay_scale()
-
-    def _compute_default_legend(
-        self, segmentation: np.ndarray
-    ) -> list[tuple[int, tuple[int, int, int]]]:
-        unique_ids = np.unique(segmentation)
-        neuron_ids = unique_ids[unique_ids > 0]
-        if neuron_ids.size == 0:
-            return []
-        zero_based = neuron_ids - neuron_ids.min()
-        colors = neuron_indices_to_colors(zero_based)
-        legend = []
-        for cell_id, color in zip(neuron_ids, colors, strict=True):
-            rgb_255 = (int(color[0] * 255), int(color[1] * 255), int(color[2] * 255))
-            legend.append((int(cell_id), rgb_255))
-        return legend
 
     def showEvent(self, event) -> None:
         super().showEvent(event)

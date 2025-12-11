@@ -132,6 +132,25 @@ def test_load_npy_without_neuron_id(tmp_path, qtbot):
     assert dialog.custom_neuron_id_line.text() == "10"
 
 
+def test_single_row_uses_filename_for_stimulus_id(tmp_path, qtbot):
+    """Single-row files should only expose one target ID derived from the filename."""
+    trace_data = _generate_patchclamp_trace(duration_sec=1.0, sampling_rate=1000.0)
+
+    npy_path = tmp_path / "single_trace_neuronID_77.npy"
+    np.save(npy_path, trace_data)
+
+    dialog = PatchClampImportDialog()
+    qtbot.addWidget(dialog)
+
+    # Pre-fill with an invalid multi-ID mapping to ensure it gets reduced
+    dialog.custom_mapping_line.setText("1,2,3")
+
+    dialog.load_file(str(npy_path))
+
+    assert dialog.custom_mapping_line.text() == "77"
+    assert dialog.custom_neuron_id_line.text() == "77"
+
+
 def test_import_single_npy_to_correct_index(tmp_path, qtbot):
     """Test importing a single .npy file and verifying it exists at the correct index."""
     trace_data = _generate_patchclamp_trace(
@@ -438,6 +457,27 @@ def _generate_two_neuron_patchclamp_trace(
 
     # Stack into 2D array (2 neurons x n_samples)
     return np.vstack([trace_1, trace_2])
+
+
+def test_multi_row_mapping_trims_to_row_count(tmp_path, qtbot):
+    """Target stimulus IDs should not exceed the number of rows in the file."""
+    two_neuron_data = _generate_two_neuron_patchclamp_trace(
+        duration_sec=0.2, sampling_rate=1000.0, num_spikes_per_neuron=1
+    )
+
+    npy_path = tmp_path / "two_neuron_patch_recording.npy"
+    np.save(npy_path, two_neuron_data)
+
+    dialog = PatchClampImportDialog()
+    qtbot.addWidget(dialog)
+
+    # Pretend the UI had more IDs than rows before loading
+    dialog.custom_mapping_line.setText("5,6,7,8")
+
+    dialog.load_file(str(npy_path))
+
+    assert dialog.custom_mapping_line.text() == "5,6"
+    assert dialog.custom_neuron_id_line.text() == "5,6"
 
 
 def test_import_two_neuron_npy_file(tmp_path, qtbot):

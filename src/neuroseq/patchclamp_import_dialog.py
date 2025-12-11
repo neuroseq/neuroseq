@@ -8,8 +8,10 @@ import brian2.numpy_ as np
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
+from neuroseq.cell_overlay_widget import CellOverlayWidget
 from neuroseq.data import TraceData
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.spike_detection import detect_spikes_voltage_trace
 
 
@@ -24,7 +26,8 @@ class PatchClampImportDialog(QtWidgets.QDialog):
     ) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
-        self.cellpose_import = cellpose_import
+        # Work on a copy so we don't mutate the caller's stored data
+        self.cellpose_import = clone_cellpose_result(cellpose_import)
         self.model = model
         self.imported_spike_data: list = []
         self.imported_trace_data: list = []
@@ -36,11 +39,14 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.file_path: Path | None = None
         self.npy_data: np.ndarray | None = None
         self.extracted_neuron_id: int | None = None
+        self.data_row_count: int = 0
+        self.overlay_widget: CellOverlayWidget | None = None
         self.preview_group: QtWidgets.QGroupBox | None = None
         self.options_group: QtWidgets.QGroupBox | None = None
         self.spike_group: QtWidgets.QGroupBox | None = None
         self._setup_ui()
         self._apply_existing_stim_mapping()
+        self._populate_cellpose_preview()
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("Import Patch Clamp Data")
@@ -48,11 +54,29 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         screen = QtWidgets.QApplication.primaryScreen()
         screen_width = screen.availableGeometry().width()
-        self.dialog_width = min(820, int(0.55 * screen_width))
-        self.dialog_height = 320
+        screen_height = screen.availableGeometry().height()
+        self.dialog_width = min(1400, int(0.9 * screen_width))
+        self.dialog_height = min(900, int(0.8 * screen_height))
         self.resize(self.dialog_width, self.dialog_height)
 
-        layout = QtWidgets.QVBoxLayout(self)
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setSpacing(12)
+
+        max_half_width = int(screen_width * 0.5)
+
+        self.overlay_widget = CellOverlayWidget("Cellpose Preview")
+        self.overlay_widget.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Expanding,
+        )
+        self.overlay_widget.setMaximumWidth(max_half_width)
+        layout.addWidget(self.overlay_widget, stretch=1)
+
+        right_container = QtWidgets.QWidget()
+        right_container.setMaximumWidth(max_half_width)
+        right_layout = QtWidgets.QVBoxLayout(right_container)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
 
         file_group = QtWidgets.QGroupBox("Select .npy patchclamp file")
         file_layout = QtWidgets.QHBoxLayout(file_group)
@@ -64,7 +88,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         file_layout.addWidget(self.file_path_label, stretch=1)
         file_layout.addWidget(browse_button)
 
-        layout.addWidget(file_group)
+        right_layout.addWidget(file_group)
 
         self.preview_group = QtWidgets.QGroupBox("Data Preview")
         preview_layout = QtWidgets.QVBoxLayout(self.preview_group)
@@ -72,7 +96,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.preview_text.setReadOnly(True)
         self.preview_text.setMaximumHeight(140)
         preview_layout.addWidget(self.preview_text)
-        layout.addWidget(self.preview_group)
+        right_layout.addWidget(self.preview_group)
 
         self.options_group = QtWidgets.QGroupBox("Import Options")
         options_layout = QtWidgets.QFormLayout(self.options_group)
@@ -192,8 +216,8 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.peak_width_spin.setToolTip("Minimum width of peaks in samples")
         spike_layout.addRow("Peak width:", self.peak_width_spin)
 
-        layout.addWidget(self.options_group)
-        layout.addWidget(self.spike_group)
+        right_layout.addWidget(self.options_group)
+        right_layout.addWidget(self.spike_group)
 
         button_layout = QtWidgets.QHBoxLayout()
         self.import_button = QtWidgets.QPushButton("Import")
@@ -205,8 +229,32 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         cancel_button.clicked.connect(self.reject)
         button_layout.addWidget(cancel_button)
 
-        layout.addLayout(button_layout)
+        button_layout.addStretch()
+        right_layout.addLayout(button_layout)
+        layout.addWidget(right_container, stretch=1)
         self._set_file_sections_visible(False)
+
+    def _populate_cellpose_preview(self) -> None:
+        """Fill the left-hand preview with Cellpose data if available."""
+        if self.overlay_widget is None:
+            return
+
+        if (
+            self.cellpose_import is None
+            or self.cellpose_import.overlay_image is None
+            or self.cellpose_import.segmentation_array is None
+        ):
+            self.overlay_widget.set_empty_message(
+                "Load Cellpose segmentation first to preview cells."
+            )
+            return
+
+        self.overlay_widget.set_overlay(
+            self.cellpose_import.overlay_image,
+            self.cellpose_import.segmentation_array,
+            self.cellpose_import.original_cellpose_ids,
+            self.cellpose_import.stimulus_to_cellpose_mapping,
+        )
 
     def _on_mapping_changed(self) -> None:
         mapping_strategy = self._get_mapping_strategy()
@@ -261,6 +309,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             # Clear previous data
             self.npy_data = None
             self.extracted_neuron_id = None
+            self.data_row_count = 0
 
             if self.file_path.suffix.lower() == ".npy":
                 self._load_npy_file(filename)
@@ -315,6 +364,11 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             raise ValueError(
                 f"NumPy patchclamp data must be 1D (single neuron) or 2D (multiple neurons), got {self.npy_data.ndim}D"
             )
+
+        self.data_row_count = (
+            1 if self.npy_data.ndim == 1 else int(self.npy_data.shape[0])
+        )
+        self._update_target_stimulus_ids()
 
         # Pathclamp has a higher hz in general
         self.sampling_rate_spin.setValue(10000.0)
@@ -378,6 +432,16 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         except ValueError as exc:
             raise ValueError(f"Invalid stimulus ID format: {exc}") from exc
 
+    def _safe_parse_stimulus_ids(self) -> list[int]:
+        """Parse stimulus IDs without raising, used for prefilling defaults."""
+        text = self.custom_mapping_line.text()
+        if not text.strip():
+            return []
+        try:
+            return self._parse_stim_neuron_ids(text)
+        except Exception:
+            return []
+
     def _parse_neuron_ids(self, neuron_ids_str: str) -> list[int]:
         """Parse comma-separated neuron IDs string into list of integers."""
         if not neuron_ids_str.strip():
@@ -391,6 +455,50 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             return [int(part) for part in parts]
         except ValueError as exc:
             raise ValueError(f"Invalid neuron ID format: {exc}") from exc
+
+    def _safe_parse_neuron_ids(self) -> list[int]:
+        """Parse neuron IDs without raising, used for prefilling defaults."""
+        text = self.custom_neuron_id_line.text()
+        if not text.strip():
+            return []
+        try:
+            return self._parse_neuron_ids(text)
+        except Exception:
+            return []
+
+    def _update_target_stimulus_ids(self) -> None:
+        """Limit target stimulus IDs to the number of traces in the loaded data."""
+        if self.npy_data is None:
+            return
+
+        row_count = 1 if self.npy_data.ndim == 1 else int(self.npy_data.shape[0])
+        self.data_row_count = row_count
+
+        if row_count == 1 and self.extracted_neuron_id is not None:
+            target_ids = [self.extracted_neuron_id]
+        elif row_count == 1:
+            target_ids = self._safe_parse_stimulus_ids()
+            if not target_ids:
+                target_ids = self._safe_parse_neuron_ids()
+            if not target_ids:
+                target_ids = [1]
+            else:
+                target_ids = [target_ids[0]]
+        else:
+            target_ids = self._safe_parse_stimulus_ids()
+            if target_ids:
+                target_ids = target_ids[:row_count]
+                # Pad with sequential IDs if we truncated a shorter list
+                next_id = (target_ids[-1] + 1) if target_ids else 1
+                while len(target_ids) < row_count:
+                    target_ids.append(next_id)
+                    next_id += 1
+            else:
+                target_ids = list(range(1, row_count + 1))
+
+        mapping_str = ",".join(str(tid) for tid in target_ids)
+        self.custom_mapping_line.setText(mapping_str)
+        self.custom_neuron_id_line.setText(mapping_str)
 
     def _validate_append_import(self) -> None:
         """Validate that we can safely append data in extend mode."""
