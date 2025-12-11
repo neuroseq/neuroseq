@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import math
 
 import brian2.numpy_ as np
 import fastplotlib as fpl
@@ -66,8 +65,7 @@ class OverlayView(QtWidgets.QWidget):
         segmentation: np.ndarray | None,
         stim_to_cellpose: dict[int, int] | None = None,
     ) -> None:
-        previous_shape = self._overlay_shape
-        previous_camera_state = self._capture_view_state()
+        cam_state = self.subplot.camera.__getstate__()
         self.subplot.clear()
         self.overlay_image = overlay_image
         self.segmentation = segmentation
@@ -168,114 +166,7 @@ class OverlayView(QtWidgets.QWidget):
                 anchor="bottom-right",
                 screen_space=True,
             )
-
-        self._set_base_camera_state(
-            position=(
-                previous_camera_state.get("position")
-                if (
-                    previous_camera_state is not None
-                    and previous_shape == self._overlay_shape
-                )
-                else None
-            )
-        )
-        if (
-            previous_camera_state is not None
-            and previous_shape == self._overlay_shape
-            and self.base_camera_state is not None
-        ):
-            previous_width = float(previous_camera_state.get("width", 0.0))
-            if previous_width > 0:
-                base_width = float(self.base_camera_state.get("width", 0.0))
-                self.zoom_factor = max(base_width / previous_width, 0.1)
-        self._apply_zoom(self.zoom_factor, force=True)
-
-    def _capture_view_state(self) -> dict | None:
-        """Return the current camera state for restoring pan/zoom."""
-        if self.overlay_image is None:
-            return None
-
-        cam_state = self.subplot.camera.get_state()
-        if not cam_state:
-            return None
-
-        position = cam_state.get("position", (0.0, 0.0, 0.0))
-        # guarantee 3-tuple for safety
-        position = (
-            float(position[0]),
-            float(position[1]),
-            float(position[2]) if len(position) > 2 else 0.0,
-        )
-
-        return {
-            "width": float(cam_state.get("width", 0.0)),
-            "height": float(cam_state.get("height", 0.0)),
-            "position": position,
-            "maintain_aspect": bool(cam_state.get("maintain_aspect", True)),
-        }
-
-    def _set_base_camera_state(
-        self, position: tuple[float, float, float] | None = None
-    ) -> None:
-        """Store a base camera state centered on the image (or provided position)."""
-        if self.overlay_image is None:
-            self.base_camera_state = None
-            return
-
-        height, width = self.overlay_image.shape[:2]
-        cam_state = self.subplot.camera.get_state()
-        camera_z = float(cam_state.get("position", (0.0, 0.0, 0.0))[2])
-        maintain_aspect = bool(cam_state.get("maintain_aspect", True))
-
-        center_x = float(position[0]) if position is not None else float(width) / 2.0
-        center_y = float(position[1]) if position is not None else float(height) / 2.0
-        center_x = float(np.clip(center_x, 0, width))
-        center_y = float(np.clip(center_y, 0, height))
-
-        self.base_camera_state = {
-            "width": float(width),
-            "height": float(height),
-            "position": (center_x, center_y, camera_z),
-            "maintain_aspect": maintain_aspect,
-        }
-        self.subplot.axes.visible = False
-        self.subplot.grids = False
-        self.subplot.toolbar = False
-
-    def _reset_camera(self) -> None:
-        """Fit the camera to the image and apply the current zoom factor."""
-        if self.overlay_image is None:
-            self.base_camera_state = None
-            self._overlay_shape = None
-            return
-
-        self._set_base_camera_state()
-        self._apply_zoom(self.zoom_factor, force=True)
-
-    def set_zoom_factor(self, zoom_factor: float) -> None:
-        """Zoom the camera while keeping pixelated rendering."""
-        self._apply_zoom(zoom_factor)
-
-    def _apply_zoom(self, zoom_factor: float, force: bool = False) -> None:
-        if self.base_camera_state is None:
-            return
-
-        zoom = max(zoom_factor, 0.1)
-        if not force and math.isclose(zoom, self.zoom_factor, rel_tol=1e-3):
-            return
-
-        self.zoom_factor = zoom
-        cam_state = dict(self.base_camera_state)
-        cam_state["maintain_aspect"] = True
-        cam_state["width"] = self.base_camera_state["width"] / zoom
-        cam_state["height"] = self.base_camera_state["height"] / zoom
-        cam_state["position"] = (
-            self.base_camera_state["position"][0],
-            self.base_camera_state["position"][1],
-            self.subplot.camera.get_state().get("position", (0.0, 0.0, 0.0))[2],
-        )
-        self.subplot.camera.set_state(cam_state)
-        self.figure.renderer.request_draw()
+        self.subplot.camera.__setstate__(cam_state)  # won't work
 
     def pointer_move(self, ev: pygfx.PointerEvent) -> None:
         if self.text is None or self.segmentation is None:
