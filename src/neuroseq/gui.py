@@ -13,6 +13,7 @@ from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
 from neuroseq import __version__
+from neuroseq.console_widget import ConsoleWidget
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
@@ -31,7 +32,6 @@ from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.save_load_options import SaveLoadOptionsDialog
 from neuroseq.spike_widget import SpikeWidget
-from neuroseq.stim_console import StimConsole
 from neuroseq.stim_editor import StimEditor
 from neuroseq.time_slider_widget import TimeSliderWidget
 from neuroseq.timeseries_widget import TimeseriesWidget
@@ -79,8 +79,8 @@ class Gui(QtWidgets.QMainWindow):
         split_left_right.addWidget(self.heatmap_widget)
         self.custom_analysis_widget = CustomAnalysisWidget(parent=self)
         split_left_right.addWidget(self.custom_analysis_widget)
-        self.stim_console = StimConsole(parent=self)
-        split_left_right.addWidget(self.stim_console)
+        self.console_widget = ConsoleWidget(parent=self)
+        split_left_right.addWidget(self.console_widget)
         split_left_right.setSizes([1000, 1000, 1000])
         # main vertical splitter layout
         split_vertical = QtWidgets.QSplitter(
@@ -118,9 +118,7 @@ class Gui(QtWidgets.QMainWindow):
         self.showMaximized()
         self._create_progressbar()
         # connect widgets
-        self.stim_console.sig_stims_values_dict_updated.connect(
-            self.stim_editor.update_stim_values_dict
-        )
+        self.console_widget.console_command_entered.connect(self._update_data)
         self.trace_widget.custom_analysis_requested.connect(self._custom_analysis)
         self.data_widget.trace_widget.custom_analysis_requested.connect(
             self._custom_analysis
@@ -168,7 +166,7 @@ class Gui(QtWidgets.QMainWindow):
                 data, analysis_type, neuron_slice, time_slice
             )
 
-    def _update_data(self, keep_undo_history: bool) -> None:
+    def _update_data(self, keep_undo_history: bool = False) -> None:
         if self.model.b2_model.network.t > 0:
             self.continue_simulation_action.setText("&Continue simulation")
         else:
@@ -352,13 +350,12 @@ class Gui(QtWidgets.QMainWindow):
         self.model = model
         if reset_controller:
             self.controller.reset()
-        self.stim_console.set_model(self.model)
+        self.console_widget.set_model(self.model)
         self.continue_simulation_action.setText("&Run simulation")
         for widget in self.plot_widgets:
             widget.clear_data()
         self.stim_editor.set_model(self.model)
-        if self.model is not None:
-            self.stim_console.set_stims(self.stim_editor.stims_dict)
+        self.console_widget.set_model(self.model)
         self._update_combo_boxes()
 
     @with_wait_cursor
@@ -879,7 +876,7 @@ class Gui(QtWidgets.QMainWindow):
                 "mdi6.chart-histogram",
                 True,
             ),
-            ("&Console", self.stim_console, "mdi6.console", True),
+            ("&Console", self.console_widget, "mdi6.console", True),
         ]:
             add_action(
                 f"Show {name}",

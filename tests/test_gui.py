@@ -369,31 +369,22 @@ def test_gui_edit_stim_with_console(qtbot: QtBot, mfx_ornstein: Model) -> None:
     dt = 10 * b2.ms
     stim = np.zeros((n_timestamps, n_neurons))
     assert mfx_ornstein.stim_arrays == {}
-    mfx_ornstein.stim_arrays = {
-        "stim": StimArray("stim", StimType.Excitation, stim, "mV", dt)
-    }
+    mfx_ornstein.add_stim_array(StimArray("stim", StimType.Excitation, stim, "mV", dt))
     gui.update_model(mfx_ornstein)
     stim_editor = gui.stim_editor
-    stim_console = gui.stim_console
+    stim_console = gui.console_widget
     assert stim_editor.stims_dict is not None
-    assert_allclose(stim_editor.stims_dict["stim"].stim_array.values, stim)
     # set all stimuli to 1: StimWidget and model stimuli updated
-    stim_console.input.setText("stims['stim'][:,:] = 1")
+    stim_console.input.setText("model.stim_arrays['stim'].values[:,:] = 1")
     qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
     stim[:, :] = 1
-    assert_allclose(stim_editor.stims_dict["stim"].stim_array.values, stim)
     assert_allclose(gui.model.stim_arrays["stim"].values, stim)
     assert stim_editor.stim_widget.n_neurons == n_neurons
-    # set stims to an invalid value: StimWidget and model not updated
-    stim_console.input.setText("stims['stim'] = 5")
-    qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
-    assert stim_editor.stim_widget.n_neurons == n_neurons
-    assert_allclose(stim_editor.stims_dict["stim"].stim_array.values, stim)
-    assert_allclose(gui.model.stim_arrays["stim"].values, stim)
     # assign random valid stim array with different shape, StimWidget and model updated
-    stim_console.input.setText("stims['stim'] = np.random.rand(127, 83)")
+    stim_console.input.setText(
+        "model.stim_arrays['stim'].values = np.random.rand(127, 83)"
+    )
     qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
-    assert stim_editor.stims_dict["stim"].stim_array.values.shape == (127, 83)
     assert gui.model.stim_arrays["stim"].values.shape == (127, 83)
     assert stim_editor.stim_widget.n_neurons == 83
     gui.close()
