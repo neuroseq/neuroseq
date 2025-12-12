@@ -41,8 +41,6 @@ class OverlayView(QtWidgets.QWidget):
         layout.addWidget(self.widget)
         self.overlay_image: np.ndarray | None = None
         self.segmentation: np.ndarray | None = None
-        self.overlay_graphic = None
-        self.segmentation_graphic = None
         self.text = None
         self.stim_to_cellpose: dict[int, int] = {}
         self.setLayout(layout)
@@ -54,9 +52,6 @@ class OverlayView(QtWidgets.QWidget):
         self.resize(800, 800)
         self.logger = logging.getLogger(__name__)
         self.mouse_pos: np.ndarray | None = None
-        self.base_camera_state: dict | None = None
-        self.zoom_factor = 2.5
-        self._overlay_shape: tuple[int, int] | None = None
         self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
 
     def add_overlay_data(
@@ -65,20 +60,10 @@ class OverlayView(QtWidgets.QWidget):
         segmentation: np.ndarray | None,
         stim_to_cellpose: dict[int, int] | None = None,
     ) -> None:
-        cam_state = self.subplot.camera.__getstate__()
-        self.subplot.clear()
         self.overlay_image = overlay_image
         self.segmentation = segmentation
         self.stim_to_cellpose = stim_to_cellpose or {}
-        self.overlay_graphic = None
-        self.segmentation_graphic = None
         self.text = None
-        self.base_camera_state = None
-        self._overlay_shape = (
-            (overlay_image.shape[0], overlay_image.shape[1])
-            if overlay_image is not None
-            else None
-        )
 
         if overlay_image is None:
             return
@@ -89,10 +74,8 @@ class OverlayView(QtWidgets.QWidget):
         self.subplot.toolbar = False
         self.subplot.camera.maintain_aspect = True
 
-        self.overlay_graphic = self.subplot.add_image(
-            overlay_image,
-            interpolation="nearest",
-        )
+        # todo 11
+        self.subplot.add_image(overlay_image, interpolation="nearest")
 
         if segmentation is not None:
             unique_ids = np.unique(segmentation)
@@ -113,11 +96,8 @@ class OverlayView(QtWidgets.QWidget):
                 rgb[segmentation == 0, 3] = 0  # transparent background
             else:
                 rgb = np.zeros((*segmentation.shape, 4))
-            self.segmentation_graphic = self.subplot.add_image(
-                rgb, interpolation="nearest"
-            )
+            self.subplot.add_image(rgb, interpolation="nearest")
 
-            unique_ids = np.unique(segmentation)
             if feature_flag_text:
                 for cell_id in unique_ids:
                     if cell_id == 0:
@@ -166,7 +146,6 @@ class OverlayView(QtWidgets.QWidget):
                 anchor="bottom-right",
                 screen_space=True,
             )
-        self.subplot.camera.__setstate__(cam_state)  # won't work
 
     def pointer_move(self, ev: pygfx.PointerEvent) -> None:
         if self.text is None or self.segmentation is None:

@@ -198,11 +198,7 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                 if original_cellpose_ids is not None:
                     with _zf.open(original_cellpose_ids) as fp:
                         loaded_original_ids = np.load(fp)
-                mapping = (
-                    {int(k): int(v) for k, v in stimulus_to_cellpose_mapping.items()}
-                    if stimulus_to_cellpose_mapping is not None
-                    else None
-                )
+
                 return CellposeImportResult(
                     image_path=Path(image_path),
                     segmentation_array=loaded_segmentation,
@@ -210,7 +206,7 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                     trace_data=trace_data,
                     spike_data=spike_data,
                     original_cellpose_ids=loaded_original_ids,
-                    stimulus_to_cellpose_mapping=mapping,
+                    stimulus_to_cellpose_mapping=stimulus_to_cellpose_mapping,
                 )
             case _:
                 return dct
