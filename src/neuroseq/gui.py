@@ -274,7 +274,7 @@ class Gui(QtWidgets.QMainWindow):
         filename, _ = getsavefilename(
             self,
             "Save model",
-            f"{self.model.name}.nseq",
+            str(self.model.filepath) if self.model.filepath else "model.nseq",
             "neuroseq model (*.nseq)",
         )
         if filename == "":
@@ -295,6 +295,7 @@ class Gui(QtWidgets.QMainWindow):
                 f"Could not save file '{filename}': {e}",
             )
             return
+        self._update_window_title()
 
     def btn_export_clicked(self) -> None:
         filename, _ = getsavefilename(
@@ -330,9 +331,9 @@ class Gui(QtWidgets.QMainWindow):
             if not isinstance(model, Model):
                 filename = pathlib.Path(model)
                 model = Model(filename, report=self._update_load_progress)
-                self.logger.info(f"Model {self.model.name} loaded from {filename}")
+                self.logger.info(f"Model loaded from {filename}")
             else:
-                self.logger.info(f"Model {self.model.name} loaded from Model object")
+                self.logger.info("Model loaded from Model object")
         except Exception as e:
             self.logger.warning(f"Failed to load model from file {filename}: {e}")
             self.logger.exception(e)
@@ -345,9 +346,16 @@ class Gui(QtWidgets.QMainWindow):
             return
         self.update_model(model, reset_controller=True)
 
+    def _update_window_title(self) -> None:
+        if self.model.filepath is not None:
+            self.setWindowTitle(f"{self.model.filepath} - Neuroseq")
+        else:
+            self.setWindowTitle("Neuroseq")
+
     @with_wait_cursor
     def update_model(self, model: Model, reset_controller=False) -> None:
         self.model = model
+        self._update_window_title()
         if reset_controller:
             self.controller.reset()
         self.console_widget.set_model(self.model)

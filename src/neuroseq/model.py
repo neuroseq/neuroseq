@@ -28,10 +28,10 @@ from neuroseq.utils import save_store_name
 class Model:
     def __init__(
         self,
-        filepath: str | pathlib.Path = "",
+        filepath: str | pathlib.Path | None = None,
         report: Callable[[int], None] | None = None,
     ) -> None:
-        self.name = "model"
+        self.filepath = None
         self.b2_model: B2Model = B2Model()
         self.experiments: dict[str, list[Data]] = {}
         self.stim_arrays: dict[str, StimArray] = {}
@@ -42,7 +42,7 @@ class Model:
 
         self.logger = logging.getLogger(__name__)
         if filepath:
-            filepath = pathlib.Path(filepath)
+            self.filepath = pathlib.Path(filepath)
             self.logger.info(f"Loading model from '{filepath}'")
             with zipfile.ZipFile(filepath, "r", zipfile.ZIP_DEFLATED) as zf:
                 b2_model_data = load_from_zip("b2_model", zf)
@@ -55,7 +55,6 @@ class Model:
                 )
                 self.experiments = load_from_zip("experimental_data", zf)
                 self.stim_arrays = load_from_zip("stim_arrays", zf)
-            self.name = filepath.stem
         self.update_limits()
 
     def import_model(
@@ -394,3 +393,4 @@ class Model:
                 )
             if options.include_experimental_data:
                 append_to_zip(self.experiments, "experimental_data", zf)
+        self.filepath = pathlib.Path(filepath)

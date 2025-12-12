@@ -136,6 +136,7 @@ def test_add_experimental_data_append_invalid() -> None:
 
 def test_save_load(model_nmda: Model, tmp_path: Path) -> None:
     tmp_file = tmp_path / "model.nseq"
+    assert model_nmda.filepath is None
 
     # simulate for 1 second, save checkpoint, then simulate for another second
     model_nmda.run_simulation(0.1)
@@ -161,8 +162,10 @@ def test_save_load(model_nmda: Model, tmp_path: Path) -> None:
     # save model including everything
     save_options = SaveLoadOptions(True, True, True, True)
     model_nmda.save(tmp_file, save_options)
+    assert model_nmda.filepath == tmp_file
 
     reconstructed_model = Model(tmp_file)
+    assert reconstructed_model.filepath == tmp_file
 
     assert reconstructed_model.b2_model.seed == model_nmda.b2_model.seed
     assert (

@@ -206,7 +206,10 @@ def test_gui_save(
     )
     gui.btn_save_clicked()
     assert filename.exists()
+    assert gui.model.filepath == filename
+    assert str(filename) in gui.windowTitle()
     loaded_model = Model(filename)
+    assert loaded_model.filepath == gui.model.filepath
     assert (
         mfx_ornstein.b2_model.neurongroups.keys()
         == loaded_model.b2_model.neurongroups.keys()
