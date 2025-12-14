@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+import numpy as np
 from qtpy import QtCore
 from qtpy import QtWidgets
 
@@ -68,6 +69,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         # Buttons for patch clamp
         data_buttons_layout = QtWidgets.QHBoxLayout()
         self.btn_export_trace = QtWidgets.QPushButton("Export as a file")
+        self.btn_export_trace.clicked.connect(self._export_trace_data)
         self.btn_add_trace = QtWidgets.QPushButton("Add to the project")
         data_buttons_layout.addWidget(self.btn_export_trace)
         data_buttons_layout.addWidget(self.btn_add_trace)
@@ -166,3 +168,48 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         self.preview_text.setPlainText(
             "\n".join(preview_lines) if preview_lines else "No data selected"
         )
+
+    def _export_trace_data(self) -> None:
+        """Export selected trace data to a file."""
+        trace_name = self.data_patch_clamp_combo.currentText()
+        if not trace_name:
+            QtWidgets.QMessageBox.warning(
+                self, "No Data Selected", "Please select trace data to export."
+            )
+            return
+
+        trace_data = self.model.get_data(trace_name, TraceData)
+        if not trace_data:
+            QtWidgets.QMessageBox.warning(
+                self, "Data Not Found", f"Could not find trace data: {trace_name}"
+            )
+            return
+
+        # Open file dialog
+        file_path, selected_filter = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Export Trace Data",
+            f"{trace_name}.npy",
+            "NumPy Array (*.npy);;CSV File (*.csv)",
+        )
+
+        if not file_path:
+            return
+
+        try:
+            if file_path.endswith(".npy"):
+                np.save(file_path, trace_data.traces)
+            elif file_path.endswith(".csv"):
+                np.savetxt(file_path, trace_data.traces, delimiter=",")
+            else:
+                np.savetxt(file_path, trace_data.traces)
+
+            self.logger.info(f"Exported trace data to {file_path}")
+            QtWidgets.QMessageBox.information(
+                self, "Export Successful", f"Trace data exported to:\n{file_path}"
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to export trace data: {e}")
+            QtWidgets.QMessageBox.critical(
+                self, "Export Failed", f"Failed to export trace data:\n{str(e)}"
+            )
