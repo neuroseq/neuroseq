@@ -861,6 +861,9 @@ class ModelEditorDialog(QtWidgets.QDialog):
             parent widget, by default None
         """
         super().__init__(parent=parent)
+
+        self.setWindowTitle("Model Editor")
+
         self.b2model = B2Model.from_dict(
             b2model.to_dict(), b2model.network._stored_state
         )
