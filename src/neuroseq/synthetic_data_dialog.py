@@ -130,22 +130,15 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         if trace_name:
             trace_data = self.model.get_data(trace_name, TraceData)
             if trace_data:
-                # shape = trace_data.traces.shape
-                # dt = trace_data.traces.dt
-                # units = trace_data.units
-                preview_lines.append(f"Patch Clamp: {trace_name}")
-                # preview_lines.append(f"  Number of neurons: {shape[0]}")
-                # preview_lines.append(f"  Duration in seconds: {shape[1] * dt:.2f}")
-                # preview_lines.append(f"  Units: {units}")
-                # indices = trace_data.indices
-                # preview_lines.append(f"  Neuron indices: {indices[0]} to {indices[-1]}")
-
-                # preview_lines.append(
-                #    f"  Time range: {trace_data.time[0]:.2f}–{trace_data.time[-1]:.2f} ms"
-                # )
-                # preview_lines.append(
-                #    f"  Value range: {trace_data.data.min():.3f}–{trace_data.data.max():.3f}"
-                # )
+                shape = trace_data.traces.shape
+                dt = trace_data.dt
+                units = trace_data.units
+                indices = trace_data.indices
+                preview_lines.append(f"Traces: {trace_name}")
+                preview_lines.append(f"  Number of neurons: {shape[0]}")
+                preview_lines.append(f"  Duration in seconds: {shape[1] * dt:.2f}")
+                preview_lines.append(f"  Units: {units}")
+                preview_lines.append(f"  Neuron indices: {indices[0]} to {indices[-1]}")
 
         # Imaging preview
         spike_name = self.data_imaging_combo.currentText()
@@ -154,22 +147,10 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             if spike_data:
                 if preview_lines:
                     preview_lines.append("")
-                preview_lines.append(f"Imaging: {spike_name}")
-                # preview_lines.append(f"  Neurons: {len(spike_data.neuron_ids)}")
-                # total_spikes = sum(
-                #     len(times) for times in spike_data.spike_times.values()
-                # )
-                # preview_lines.append(f"  Total spikes: {total_spikes}")
-                # if spike_data.spike_times:
-                #     all_spike_times = [
-                #         t
-                #         for times in spike_data.spike_times.values()
-                #         for t in times
-                #     ]
-                #     if all_spike_times:
-                #         preview_lines.append(
-                #             f"  Time range: {min(all_spike_times):.2f}–{max(all_spike_times):.2f} ms"
-                #         )
+
+                shape = spike_data.spike_times.shape
+                preview_lines.append(f"Spikes: {spike_name}")
+                preview_lines.append(f"  Number of spikes: {shape[0]}")
 
         self.preview_text.setPlainText(
             "\n".join(preview_lines) if preview_lines else "No data selected"
