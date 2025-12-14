@@ -927,6 +927,29 @@ class ModelEditorDialog(QtWidgets.QDialog):
             layout.addWidget(separator, 0, i + col_add - 1, layout.rowCount(), 1)
             i += col_add
 
+        seed_widget = QtWidgets.QWidget(self)
+        seed_layout = QtWidgets.QHBoxLayout(seed_widget)
+        seed_label = QtWidgets.QLabel("Seed:", parent=self)
+        self.seed_spin = QtWidgets.QSpinBox(parent=self)
+        self.seed_spin.setRange(0, 2**31 - 1)
+
+        try:
+            self.seed_spin.setValue(int(self.b2model.seed))
+        except Exception:
+            self.seed_spin.setValue(123)
+
+        seed_layout.addWidget(seed_label)
+        seed_layout.addWidget(self.seed_spin)
+
+        # place the seed widget above the dialog button box, spanning columns
+        layout.addWidget(
+            seed_widget,
+            layout.rowCount(),
+            0,
+            1,
+            layout.columnCount(),
+        )
+
         layout.addWidget(
             self.button_box,
             layout.rowCount(),
@@ -948,6 +971,15 @@ class ModelEditorDialog(QtWidgets.QDialog):
         """
         self.logger.info(f"accept model editions {self.b2model.must_be_rebuilt}")
         try:
+            # apply any changed seed value to the brian2 RNG and the model
+            try:
+                new_seed = int(self.seed_spin.value())
+                self.b2model.seed = new_seed
+                b2.seed(new_seed)
+            except Exception:
+                # ignore seed setting errors and proceed with rebuild
+                self.logger.debug("Failed to set new seed from widget")
+
             if self.b2model.must_be_rebuilt:
                 self.logger.info("rebuilding model after change")
                 self.b2model.assemble_network()  # keep underlying network in sync
