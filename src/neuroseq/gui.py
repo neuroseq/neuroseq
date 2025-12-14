@@ -269,9 +269,7 @@ class Gui(QtWidgets.QMainWindow):
         self.update_model(self.model)
 
     def btn_generate_synthetic_data_clicked(self) -> None:
-        dialog = SyntheticDataDialog(
-            trace_widget=self.trace_widget, spike_widget=self.spike_widget, parent=self
-        )
+        dialog = SyntheticDataDialog(self.model, parent=self)
         dialog.exec()
 
     def btn_save_clicked(self) -> None:
