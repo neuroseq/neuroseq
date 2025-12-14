@@ -186,10 +186,11 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             return
 
         # Open file dialog
+
         file_path, selected_filter = QtWidgets.QFileDialog.getSaveFileName(
             self,
             "Export Trace Data",
-            f"{trace_name}.npy",
+            f"{trace_name}_patch_clamp.npy",
             "NumPy Array (*.npy);;CSV File (*.csv)",
         )
 
