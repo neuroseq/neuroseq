@@ -36,6 +36,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         # Patch clamp
 
         data_patch_clamp_group = QtWidgets.QGroupBox("Patch clamp")
+        data_patch_clamp_group_layout = QtWidgets.QVBoxLayout()
 
         data_inner_layout = QtWidgets.QHBoxLayout()
         data_label = QtWidgets.QLabel("Select traces:")
@@ -62,7 +63,17 @@ class SyntheticDataDialog(QtWidgets.QDialog):
 
         data_inner_layout.addWidget(data_label)
         data_inner_layout.addWidget(self.data_patch_clamp_combo)
-        data_patch_clamp_group.setLayout(data_inner_layout)
+        data_patch_clamp_group_layout.addLayout(data_inner_layout)
+
+        # Buttons for patch clamp
+        data_buttons_layout = QtWidgets.QHBoxLayout()
+        self.btn_export_trace = QtWidgets.QPushButton("Export as a file")
+        self.btn_add_trace = QtWidgets.QPushButton("Add to the project")
+        data_buttons_layout.addWidget(self.btn_export_trace)
+        data_buttons_layout.addWidget(self.btn_add_trace)
+        data_patch_clamp_group_layout.addLayout(data_buttons_layout)
+
+        data_patch_clamp_group.setLayout(data_patch_clamp_group_layout)
 
         layout.addWidget(data_patch_clamp_group)
 
