@@ -8,7 +8,7 @@ from qtpy import QtWidgets
 
 
 class FPLWidget(QtWidgets.QWidget):
-    """A base class for widgets that use fastplotlib to display data."""
+    """A Qwidget implementing base class for widgets that use fastplotlib to display data."""
 
     def __init__(
         self,
@@ -17,11 +17,12 @@ class FPLWidget(QtWidgets.QWidget):
     ) -> None:
         super().__init__(parent)
         self.controller = controller
-        self.figure: fpl.Figure = fpl.Figure(
+        self.figure: fpl.Figure = fpl.Figure( # all of these objects hacve oen figure - parent self renders it correctly
+            # - the subplot then controls the drawn part/graphic
             controllers=controller, canvas_kwargs={"parent": self}
         )
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 0, 0, 0) # no margin, no spacing
         layout.setSpacing(0)
         self.widget = self.figure.show()
         layout.addWidget(self.widget)
@@ -29,7 +30,9 @@ class FPLWidget(QtWidgets.QWidget):
         self.subplot: Subplot = self.figure[0, 0]
         self._set_light_mode()
         self.setMinimumSize(QtCore.QSize(100, 100))
-        self.resize(800, 600)
+        self.resize(800, 600) # I am not sure why this does not resize e.g. the neuron ones, those adapt to screen size.
+        # is this important or could this be changed?  # I think this is ignored by TimeseiresWidget because
+        # the vertical space is limited/in a QLayout so it is reduced
 
     def _set_light_mode(self) -> None:
         # some of these currently require accessing private attributes: should refactor when fastplotlib allows setting these colors directly
@@ -48,6 +51,9 @@ class FPLWidget(QtWidgets.QWidget):
         self.subplot.axes._y._line.material.color = "k"
         self.subplot.axes._x._points.material.color = "k"
         self.subplot.axes._y._points.material.color = "k"
+
+    # todo: cellpose equivalent? Note these basically invert the grid/library colours (default black text on white, swap to white on black)
+    # but they do mean things then appear which we might not need to appear fro e.g. CellposeOverlayWidget
 
     def clear_data(self) -> None:
         self.subplot.clear()

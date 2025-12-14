@@ -12,10 +12,15 @@ from qtpy import QtWidgets
 
 from neuroseq.utils import neuron_indices_to_colors
 
-feature_flag_text = True  # todo: remove.
+
+'''
+Plan for refactor:
+
+- "Inherit" from FLPWidget instead, then overwrite details / call set_light_mode if needed
+- Delete the legend code, believe this is already done on another pr.
+'''
 
 
-# todo: this is a bit slow to render, not sure right now why. Need to test: initial zoom.
 class OverlayView(QtWidgets.QWidget):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -26,7 +31,10 @@ class OverlayView(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+
+        # these 4 lines above are just duplicated from FPLWiget and won't be neede if we use that.
         self.widget = self.figure.show()
+
 
         # Hide any fastplotlib toolbars/controls
         if hasattr(self.widget, "toolbar"):
@@ -37,14 +45,24 @@ class OverlayView(QtWidgets.QWidget):
             self.widget.menubar.hide()
         if hasattr(self.widget, "_menubar"):
             self.widget._menubar.hide()
+        # todo: Refactor - make this a function on FPLWidget.
 
         layout.addWidget(self.widget)
+        # todo: Group these into "overlay_data" as an object class
+        # class OverlayData:
+        #   overlay_image: np.ndarray
+        #   segmentation: np.ndarray
+        #   overlay_graphic
+        #   text
+
+        # ... and: todo: save and update the text itself when modifying the mappings
         self.overlay_image: np.ndarray | None = None
         self.segmentation: np.ndarray | None = None
         self.overlay_graphic = None
         self.segmentation_graphic = None
         self.text = None
         self.setLayout(layout)
+        # again semi-duplicated from fpl_widget or should be moved there
         self.subplot = self.figure[0, 0]
         self.subplot.frame.plane.visible = False
         self.subplot.frame.resize_handle.visible = False
@@ -52,12 +70,14 @@ class OverlayView(QtWidgets.QWidget):
         self.setMinimumSize(QtCore.QSize(200, 200))
         self.resize(800, 800)
         self.widget.setMinimumHeight(1000)
-        self.logger = logging.getLogger(__name__)
-        self.mouse_pos: np.ndarray | None = None
-        self.base_camera_state: dict | None = None
+        self.logger = logging.getLogger(__name__) # remove this local logger when we can just import/use a central logger (like on Mondey)
+        self.mouse_pos: np.ndarray | None = None # remove
+        self.base_camera_state: dict | None = None # remove
         self.zoom_factor = 2.5
-        self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
+        self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move") # keep this here.
 
+
+# except for legend data(which will be removed), this will use the new OverlayData class.
     def add_overlay_data(
         self,
         overlay_image: np.ndarray | None,
@@ -118,43 +138,41 @@ class OverlayView(QtWidgets.QWidget):
             )
 
             unique_ids = np.unique(segmentation)
-            print("Unique IDs:")
-            print(unique_ids)
-            if feature_flag_text:
-                for cell_id in unique_ids:
-                    if cell_id == 0:
-                        continue
-                    mask = segmentation == cell_id
-                    if not np.any(mask):
-                        continue
-                    y_coords, x_coords = np.where(mask)
-                    center_y = float(np.mean(y_coords))
-                    center_x = float(np.mean(x_coords))
-                    self.subplot.add_text(
-                        f"{cell_id}",
-                        font_size=5,
-                        offset=(center_x, center_y, 200.0),
-                        face_color=(0.0, 0.0, 0.0),
-                        outline_color=(1.0, 1.0, 1.0),
-                        outline_thickness=3.0,
-                        center=True,
-                        screen_space=False,
-                    )
-
-                self.text = self.subplot.add_text(
-                    "",
-                    font_size=24,
-                    offset=(8.0, 4.0, 200.0),
+            for cell_id in unique_ids:
+                if cell_id == 0:
+                    continue
+                mask = segmentation == cell_id
+                if not np.any(mask):
+                    continue
+                y_coords, x_coords = np.where(mask)
+                center_y = float(np.mean(y_coords))
+                center_x = float(np.mean(x_coords))
+                self.subplot.add_text(
+                    f"{cell_id}",
+                    font_size=5,
+                    offset=(center_x, center_y, 200.0),
                     face_color=(0.0, 0.0, 0.0),
                     outline_color=(1.0, 1.0, 1.0),
                     outline_thickness=3.0,
-                    center=False,
-                    anchor="bottom-right",
-                    screen_space=True,
+                    center=True,
+                    screen_space=False,
                 )
+
+            self.text = self.subplot.add_text(
+                "",
+                font_size=24,
+                offset=(8.0, 4.0, 200.0),
+                face_color=(0.0, 0.0, 0.0),
+                outline_color=(1.0, 1.0, 1.0),
+                outline_thickness=3.0,
+                center=False,
+                anchor="bottom-right",
+                screen_space=True,
+            )
 
         self._reset_camera()
 
+    # this ought to be simplified.
     def _reset_camera(self) -> None:
         """Fit the camera to the image and apply the current zoom factor."""
         if self.overlay_image is None:
@@ -168,7 +186,7 @@ class OverlayView(QtWidgets.QWidget):
         self.base_camera_state = {
             "width": float(width),
             "height": float(height),
-            "position": (float(width) / 2.0, float(height) / 2.0, camera_z),
+            "position": (float(width) / 2.0, float(height) / 2.0, camera_z), # just records to restore.
             "maintain_aspect": maintain_aspect,
         }
         self.subplot.axes.visible = False
@@ -190,7 +208,7 @@ class OverlayView(QtWidgets.QWidget):
 
         self.zoom_factor = zoom
         cam_state = dict(self.base_camera_state)
-        cam_state["maintain_aspect"] = True
+        cam_state["maintain_aspect"] = True # important
         cam_state["width"] = self.base_camera_state["width"] / zoom
         cam_state["height"] = self.base_camera_state["height"] / zoom
         cam_state["position"] = (
@@ -201,7 +219,7 @@ class OverlayView(QtWidgets.QWidget):
         self.subplot.camera.set_state(cam_state)
         self.figure.renderer.request_draw()
 
-    def pointer_move(self, ev: pygfx.PointerEvent) -> None:
+    def pointer_move(self, ev: pygfx.PointerEvent) -> None: # this works well, based on Liams code, no need for changes
         if self.text is None or self.segmentation is None:
             return
         self.mouse_pos = self.subplot.map_screen_to_world(ev)
@@ -236,9 +254,9 @@ class OverlayView(QtWidgets.QWidget):
 class CellOverlayWidget(QtWidgets.QGroupBox):
     def __init__(self, title: str = "Color-coded Preview") -> None:
         super().__init__(title)
-        self.logger = logging.getLogger(__name__)
+        self.logger = logging.getLogger(__name__) # same here in terms of removingthis unnecessary local logger, centralize it to one import.
         self.overlay_image: np.ndarray | None = None
-        self.segmentation: np.ndarray | None = None
+        self.segmentation: np.ndarray | None = None # should be pased the OverlayData
         self.legend_data: list[tuple[int, tuple[int, int, int]]] = []
         self.original_cellpose_ids: np.ndarray | None = None
         self.stimulus_to_cellpose_mapping: dict[int, int] | None = None
@@ -252,17 +270,18 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.overlay_view.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Expanding,
-        )
+        ) # this worked but is confusing in terms of the cdoe
         layout.addWidget(self.overlay_view)
 
         # Add toggle checkbox for ID display mode
         self.id_toggle_checkbox = QtWidgets.QCheckBox(
             "Show stimulus IDs (default: original cellpose IDs)"
         )
-        self.id_toggle_checkbox.setChecked(self.show_stimulus_ids)
+        self.id_toggle_checkbox.setChecked(self.show_stimulus_ids) # already removed on the other branch
         self.id_toggle_checkbox.toggled.connect(self._on_id_toggle_changed)
         layout.addWidget(self.id_toggle_checkbox)
 
+        # irrelevant as legend will be deleted
         self.legend_scroll = QtWidgets.QScrollArea()
         self.legend_scroll.setWidgetResizable(True)
         self.legend_scroll.setMaximumHeight(140)

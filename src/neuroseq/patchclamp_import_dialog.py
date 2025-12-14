@@ -261,6 +261,8 @@ class PatchClampImportDialog(QtWidgets.QDialog):
     def _on_replace_toggled(self, checked: bool) -> None:
         self.append_data = not checked
 
+
+    # Reduce duplication / refactor this with cellpose modal
     def _build_cellpose_legend(self) -> list[tuple[int, tuple[int, int, int]]]:
         """Compute legend entries that match the stored Cellpose overlay colors."""
         if (
