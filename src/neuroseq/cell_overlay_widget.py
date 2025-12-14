@@ -367,6 +367,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         original_cellpose_ids: np.ndarray | None = None,
         stimulus_to_cellpose_mapping: dict[int, int] | None = None,
     ) -> None:
+        # todo: should use OverlayData too.
         self.overlay_image = overlay_image
         self.segmentation = segmentation
         self.legend_data = list(legend_data or [])
@@ -389,12 +390,14 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.overlay_view.add_overlay_data(None, None)
         self._clear_legend()
 
+    # todo: delete
     def _clear_legend(self) -> None:
         for i in reversed(range(self.legend_layout.count())):
             child = self.legend_layout.itemAt(i).widget()
             if child:
                 child.setParent(None)
 
+    # todo: delete
     def _update_legend(
         self, legend_data: Iterable[tuple[int, tuple[int, int, int]]] | None = None
     ) -> None:
@@ -442,6 +445,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
 
             self.legend_layout.addWidget(item_widget, row, col)
 
+    # todo: delete
     def _compute_default_legend(
         self, segmentation: np.ndarray
     ) -> list[tuple[int, tuple[int, int, int]]]:
@@ -457,6 +461,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             legend.append((int(cell_id), rgb_255))
         return legend
 
+    # todo: delete
     def _apply_legend_theme(self) -> None:
         """Ensure legend backgrounds/text stay readable against overlays."""
         self.legend_widget.setStyleSheet("background-color: black; color: white;")
