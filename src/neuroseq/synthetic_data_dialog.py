@@ -66,6 +66,22 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         data_inner_layout.addWidget(self.data_patch_clamp_combo)
         data_patch_clamp_group_layout.addLayout(data_inner_layout)
 
+        # Noise value selector
+        noise_layout = QtWidgets.QHBoxLayout()
+        noise_label = QtWidgets.QLabel("Noise (mV):")
+        noise_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
+        self.noise_spinbox = QtWidgets.QDoubleSpinBox()
+        self.noise_spinbox.setRange(0.0, 10.0)
+        self.noise_spinbox.setValue(0.5)
+        self.noise_spinbox.setSingleStep(0.1)
+        self.noise_spinbox.setDecimals(2)
+        self.noise_spinbox.setToolTip(
+            "Noise level in millivolts to add to the trace data"
+        )
+        noise_layout.addWidget(noise_label)
+        noise_layout.addWidget(self.noise_spinbox)
+        data_patch_clamp_group_layout.addLayout(noise_layout)
+
         # Buttons for patch clamp
         data_buttons_layout = QtWidgets.QHBoxLayout()
         self.btn_export_trace = QtWidgets.QPushButton("Export as a file")
@@ -145,12 +161,13 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             if trace_data:
                 shape = trace_data.traces.shape
                 dt = trace_data.dt
-                units = trace_data.units
+                # units = trace_data.units
                 indices = trace_data.indices
                 preview_lines.append(f"Traces: {trace_name}")
                 preview_lines.append(f"  Number of neurons: {shape[0]}")
                 preview_lines.append(f"  Duration in seconds: {shape[1] * dt:.2f}")
-                preview_lines.append(f"  Units: {units}")
+                # preview_lines.append(f"  Units: {units}")
+                preview_lines.append("  Units: mV")  # hardcoded
                 preview_lines.append(f"  Neuron indices: {indices[0]} to {indices[-1]}")
 
         # Imaging preview
