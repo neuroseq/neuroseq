@@ -130,8 +130,16 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         if trace_name:
             trace_data = self.model.get_data(trace_name, TraceData)
             if trace_data:
+                # shape = trace_data.traces.shape
+                # dt = trace_data.traces.dt
+                # units = trace_data.units
                 preview_lines.append(f"Patch Clamp: {trace_name}")
-                preview_lines.append(f"  Size of the traces: {trace_data.traces.shape}")
+                # preview_lines.append(f"  Number of neurons: {shape[0]}")
+                # preview_lines.append(f"  Duration in seconds: {shape[1] * dt:.2f}")
+                # preview_lines.append(f"  Units: {units}")
+                # indices = trace_data.indices
+                # preview_lines.append(f"  Neuron indices: {indices[0]} to {indices[-1]}")
+
                 # preview_lines.append(
                 #    f"  Time range: {trace_data.time[0]:.2f}–{trace_data.time[-1]:.2f} ms"
                 # )
