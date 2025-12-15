@@ -245,6 +245,64 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             "\n".join(preview_lines) if preview_lines else "No data selected"
         )
 
+    def _generate_synthetic_patch_clamptraces(
+        self,
+        trace_data: TraceData,
+        indices: np.ndarray | None,
+        noise_amplitude: float,
+    ) -> np.ndarray | None:
+        """Filter trace data by indices and add Gaussian noise.
+
+        Args:
+            trace_data: The trace data to filter.
+            indices: Array of indices to extract, or None to export all traces.
+            noise_amplitude: Standard deviation of Gaussian noise to add (in mV).
+
+        Returns:
+            The filtered and noised traces, or None if validation fails.
+        """
+        # Check if trace data has non-consecutive indices
+        if len(trace_data.indices) > 1:
+            indices_diff = np.diff(trace_data.indices)
+            if not np.all(indices_diff == 1):
+                reply = QtWidgets.QMessageBox.warning(
+                    self,
+                    "Non-consecutive Indices",
+                    f"The trace data has non-consecutive neuron indices: {trace_data.indices}\n\n"
+                    "This may cause issues when interpreting the exported data as the current implementation expects consecutive indices. "
+                    "Do you want to continue with the export?",
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.No,
+                )
+                if reply == QtWidgets.QMessageBox.No:
+                    return None
+
+        # Filter trace data to only include selected indices
+        if indices is not None:
+            # Validate that all requested indices are within bounds
+            max_idx = trace_data.traces.shape[0] - 1
+            invalid_indices = indices[indices > max_idx]
+            if len(invalid_indices) > 0:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Invalid Indices",
+                    f"Some indices are out of bounds. Maximum index is {max_idx}.\n"
+                    f"Invalid indices: {invalid_indices}",
+                )
+                return None
+            traces_to_export = trace_data.traces[indices]
+        else:
+            # Export all traces if no indices specified
+            traces_to_export = trace_data.traces
+
+        # Add gaussian noise with amplitude from the noise spinbox
+        noise_amplitude_with_units = noise_amplitude * b2.mV
+        traces_to_export = traces_to_export + np.random.normal(
+            0, noise_amplitude_with_units, traces_to_export.shape
+        )
+
+        return traces_to_export
+
     def _export_trace_data(self) -> None:
         """Export selected trace data to a file."""
         trace_name = self.data_patch_clamp_combo.currentText()
@@ -270,45 +328,12 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             )
             return
 
-        # Check if trace data has non-consecutive indices
-        if len(trace_data.indices) > 1:
-            indices_diff = np.diff(trace_data.indices)
-            if not np.all(indices_diff == 1):
-                reply = QtWidgets.QMessageBox.warning(
-                    self,
-                    "Non-consecutive Indices",
-                    f"The trace data has non-consecutive neuron indices: {trace_data.indices}\n\n"
-                    "This may cause issues when interpreting the exported data as the current implementation expects consecutive indices. "
-                    "Do you want to continue with the export?",
-                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-                    QtWidgets.QMessageBox.No,
-                )
-                if reply == QtWidgets.QMessageBox.No:
-                    return
-
-        # Filter trace data to only include selected indices
-        if indices is not None:
-            # Validate that all requested indices are within bounds
-            max_idx = trace_data.traces.shape[0] - 1
-            invalid_indices = indices[indices > max_idx]
-            if len(invalid_indices) > 0:
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "Invalid Indices",
-                    f"Some indices are out of bounds. Maximum index is {max_idx}.\n"
-                    f"Invalid indices: {invalid_indices}",
-                )
-                return
-            traces_to_export = trace_data.traces[indices]
-        else:
-            # Export all traces if no indices specified
-            traces_to_export = trace_data.traces
-
-        # Add gaussian noise with amplitude from the noise spinbox
-        noise_amplitude = self.noise_spinbox.value() * b2.mV
-        traces_to_export = traces_to_export + np.random.normal(
-            0, noise_amplitude, traces_to_export.shape
+        # Filter and add noise to traces
+        traces_to_export = self._generate_synthetic_patch_clamptraces(
+            trace_data, indices, self.noise_spinbox.value()
         )
+        if traces_to_export is None:
+            return
 
         # Open file dialog
 
