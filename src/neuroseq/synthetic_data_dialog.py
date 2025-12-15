@@ -163,6 +163,48 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         # Initial preview update
         self._update_preview()
 
+    def _parse_indices(self, index_string: str) -> np.ndarray | None:
+        """Parse comma-separated indices and ranges into a numpy array.
+        Args:
+            index_string: String containing indices and/or ranges (e.g., "0,1,5-15,20")
+        Returns:
+            Numpy array of parsed indices, or None if empty string
+        """
+        index_string = index_string.strip()
+        if not index_string:
+            return None
+
+        indices: list[int] = []
+        parts = index_string.split(",")
+
+        for part in parts:
+            part = part.strip()
+            if "-" in part:
+                # Handle range (e.g., "5-15")
+                try:
+                    start, end = part.split("-")
+                    start_idx = int(start.strip())
+                    end_idx = int(end.strip())
+                    if start_idx > end_idx:
+                        raise ValueError(
+                            f"Invalid range '{part}': start of the range must be <= than the end of the range"
+                        )
+                    indices.extend(range(start_idx, end_idx + 1))
+                except ValueError as e:
+                    if "invalid literal" in str(e):
+                        raise ValueError(f"Invalid range format: '{part}'") from None
+                    raise
+            else:
+                # Handle single index
+                try:
+                    indices.append(int(part))
+                except ValueError:
+                    raise ValueError(f"Invalid index: '{part}'") from None
+
+        # Remove duplicates and sort
+        indices = sorted(set(indices))
+        return np.array(indices, dtype=int)
+
     def _update_preview(self) -> None:
         """Update the data preview based on current selections."""
         preview_lines = []
