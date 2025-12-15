@@ -31,6 +31,13 @@ class FPLWidget(QtWidgets.QWidget):
         self.setMinimumSize(QtCore.QSize(100, 100))
         self.resize(800, 600)
 
+    def hide_controls(self) -> None:
+        """Hide any fastplotlib toolbars/menus for minimal displays."""
+        for attr in ("toolbar", "_toolbar", "menubar", "_menubar"):
+            widget = getattr(self.widget, attr, None)
+            if widget is not None:
+                widget.hide()
+
     def _set_light_mode(self) -> None:
         # some of these currently require accessing private attributes: should refactor when fastplotlib allows setting these colors directly
         self.subplot.background_color = "w"
