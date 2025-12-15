@@ -1,49 +1,58 @@
 from __future__ import annotations
 
 import contextlib
-import math
-from dataclasses import dataclass
+import logging
 
 import brian2.numpy_ as np
+import fastplotlib as fpl
 import pygfx
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from neuroseq.fpl_widget import FPLWidget
 from neuroseq.utils import neuron_indices_to_colors
 
-
-@dataclass
-class _CameraState:
-    width: float
-    height: float
-    position: tuple[float, float, float]
+feature_flag_text = True  # todo: remove.
 
 
-class OverlayView(FPLWidget):
+# todo: this is a bit slow to render, not sure right now why. Need to test: initial zoom.
+class OverlayView(QtWidgets.QWidget):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
-        super().__init__(parent=parent)
-        self.hide_controls()
+        super().__init__(parent)
+        # Suppress subplot title text by providing an empty name
+        self.figure: fpl.Figure = fpl.Figure(
+            canvas_kwargs={"parent": self}, names=[None]
+        )
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 10)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self.widget = self.figure.show()
+
+        # Hide any fastplotlib toolbars/controls
+        if hasattr(self.widget, "toolbar"):
+            self.widget.toolbar.hide()
+        if hasattr(self.widget, "_toolbar"):
+            self.widget._toolbar.hide()
+        if hasattr(self.widget, "menubar"):
+            self.widget.menubar.hide()
+        if hasattr(self.widget, "_menubar"):
+            self.widget._menubar.hide()
+
+        layout.addWidget(self.widget)
         self.overlay_image: np.ndarray | None = None
         self.segmentation: np.ndarray | None = None
         self.text = None
         self.stim_to_cellpose: dict[int, int] = {}
-        self.base_camera_state: _CameraState | None = None
-        self.zoom_factor = 2.5
-        self._configure_subplot()
-        self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
-        self.setMinimumSize(QtCore.QSize(200, 200))
-        # keep renderer/swapchain in sync with widget size
-        self._sync_canvas_size(self.size())
-
-    def _configure_subplot(self) -> None:
+        self.setLayout(layout)
+        self.subplot = self.figure[0, 0]
         self.subplot.frame.plane.visible = False
         self.subplot.frame.resize_handle.visible = False
         self.subplot.title.text = ""
-        self.subplot.axes.visible = False
-        self.subplot.grids = False
-        self.subplot.toolbar = False
-        self.subplot.camera.maintain_aspect = True
+        self.setMinimumSize(QtCore.QSize(200, 200))
+        self.resize(800, 800)
+        self.logger = logging.getLogger(__name__)
+        self.mouse_pos: np.ndarray | None = None
+        self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
 
     def add_overlay_data(
         self,
@@ -51,159 +60,102 @@ class OverlayView(FPLWidget):
         segmentation: np.ndarray | None,
         stim_to_cellpose: dict[int, int] | None = None,
     ) -> None:
-        self.subplot.clear()
-        self._configure_subplot()
         self.overlay_image = overlay_image
         self.segmentation = segmentation
         self.stim_to_cellpose = stim_to_cellpose or {}
         self.text = None
-        self.base_camera_state = None
 
         if overlay_image is None:
-            self.figure.renderer.request_draw()
             return
 
+        # keep the overlay view simple: hide axes and grids
+        self.subplot.axes.visible = False
+        self.subplot.grids = False
+        self.subplot.toolbar = False
+        self.subplot.camera.maintain_aspect = True
+
+        # todo 11
         self.subplot.add_image(overlay_image, interpolation="nearest")
 
         if segmentation is not None:
-            color_image = self._build_segmentation_colors(segmentation)
-            self.subplot.add_image(color_image, interpolation="nearest")
-            self._add_cell_labels(segmentation)
-            self.text = self._create_hover_label()
+            unique_ids = np.unique(segmentation)
+            neuron_ids = unique_ids[
+                unique_ids > 0
+            ]  # exclude background, same as legend
 
-        self._reset_camera()
+            if len(neuron_ids) > 0:
+                zero_based_ids = neuron_ids - neuron_ids.min()
+                id_colors = neuron_indices_to_colors(zero_based_ids)
 
-    def _build_segmentation_colors(self, segmentation: np.ndarray) -> np.ndarray:
-        rgb = np.zeros((*segmentation.shape, 4))
-        neuron_ids = np.unique(segmentation)
-        neuron_ids = neuron_ids[neuron_ids > 0]
-        if neuron_ids.size == 0:
-            return rgb
+                rgb = np.zeros((*segmentation.shape, 4))
+                for i, neuron_id in enumerate(neuron_ids):
+                    mask = segmentation == neuron_id
+                    rgb[mask, :3] = tuple(id_colors[i][:3])
 
-        zero_based_ids = neuron_ids - neuron_ids.min()
-        id_colors = neuron_indices_to_colors(zero_based_ids)
+                rgb[:, :, 3] = 0.4  # alpha for all cells
+                rgb[segmentation == 0, 3] = 0  # transparent background
+            else:
+                rgb = np.zeros((*segmentation.shape, 4))
+            self.subplot.add_image(rgb, interpolation="nearest")
 
-        for i, neuron_id in enumerate(neuron_ids):
-            mask = segmentation == neuron_id
-            rgb[mask, :3] = tuple(id_colors[i][:3])
+            if feature_flag_text:
+                for cell_id in unique_ids:
+                    if cell_id == 0:
+                        continue
+                    mask = segmentation == cell_id
+                    if not np.any(mask):
+                        continue
+                    y_coords, x_coords = np.where(mask)
+                    center_y = float(np.mean(y_coords))
+                    center_x = float(np.mean(x_coords))
+                    stim_id = int(cell_id)
+                    cellpose_id = self.stim_to_cellpose.get(stim_id, stim_id)
+                    self.subplot.add_text(
+                        f"{stim_id}",
+                        font_size=6,
+                        offset=(center_x, center_y, 200.0),
+                        face_color=(1.0, 1.0, 1.0),
+                        outline_color=(0.0, 0.0, 0.0),
+                        outline_thickness=2.0,
+                        center=True,
+                        screen_space=False,
+                    )
+                    self.subplot.add_text(
+                        f"({cellpose_id})",
+                        font_size=4,
+                        offset=(
+                            center_x + (7.2 if cellpose_id < 100 else 9.7),
+                            center_y,
+                            200.0,
+                        ),  # support up to 1k cells in the image preview in theory
+                        face_color=(0.8, 0.8, 0.8),
+                        outline_color=(0.0, 0.0, 0.0),
+                        outline_thickness=1.0,
+                        center=True,
+                        screen_space=False,
+                    )
 
-        rgb[:, :, 3] = 0.4
-        rgb[segmentation == 0, 3] = 0
-        return rgb
-
-    def _add_cell_labels(self, segmentation: np.ndarray) -> None:
-        for cell_id in np.unique(segmentation):
-            if cell_id == 0:
-                continue
-
-            mask = segmentation == cell_id
-            if not np.any(mask):
-                continue
-
-            y_coords, x_coords = np.where(mask)
-            center_y = float(np.mean(y_coords))
-            center_x = float(np.mean(x_coords))
-            stim_id = int(cell_id)
-            cellpose_id = self.stim_to_cellpose.get(stim_id, stim_id)
-            self.subplot.add_text(
-                f"{stim_id}",
-                font_size=6,
-                offset=(center_x, center_y, 200.0),
-                face_color=(1.0, 1.0, 1.0),
-                outline_color=(0.0, 0.0, 0.0),
-                outline_thickness=2.0,
-                center=True,
-                screen_space=False,
+            self.text = self.subplot.add_text(
+                "",
+                font_size=24,
+                offset=(8.0, 4.0, 200.0),
+                face_color=(0.0, 0.0, 0.0),
+                outline_color=(1.0, 1.0, 1.0),
+                outline_thickness=3.0,
+                center=False,
+                anchor="bottom-right",
+                screen_space=True,
             )
-            self.subplot.add_text(
-                f"({cellpose_id})",
-                font_size=4,
-                offset=(
-                    center_x + (7.2 if cellpose_id < 100 else 9.7),
-                    center_y,
-                    200.0,
-                ),
-                face_color=(0.8, 0.8, 0.8),
-                outline_color=(0.0, 0.0, 0.0),
-                outline_thickness=1.0,
-                center=True,
-                screen_space=False,
-            )
-
-    def _create_hover_label(self):
-        return self.subplot.add_text(
-            "",
-            font_size=24,
-            offset=(8.0, 4.0, 200.0),
-            face_color=(0.0, 0.0, 0.0),
-            outline_color=(1.0, 1.0, 1.0),
-            outline_thickness=3.0,
-            center=False,
-            anchor="bottom-right",
-            screen_space=True,
-        )
-
-    def _reset_camera(self) -> None:
-        if self.overlay_image is None:
-            self.base_camera_state = None
-            return
-
-        height, width = self.overlay_image.shape[:2]
-        cam_state = self.subplot.camera.get_state()
-        camera_z = float(cam_state.get("position", (0.0, 0.0, 0.0))[2])
-        self.base_camera_state = _CameraState(
-            width=float(width),
-            height=float(height),
-            position=(float(width) / 2.0, float(height) / 2.0, camera_z),
-        )
-        self._apply_zoom(self.zoom_factor, force=True)
-
-    def set_zoom_factor(self, zoom_factor: float) -> None:
-        self._apply_zoom(zoom_factor)
-
-    def _apply_zoom(self, zoom_factor: float, force: bool = False) -> None:
-        if self.base_camera_state is None:
-            return
-
-        zoom = float(zoom_factor)
-        if not force and math.isclose(self.zoom_factor, zoom):
-            return
-
-        self.zoom_factor = zoom
-        cam_state: dict[str, float | tuple[float, float, float]] = {
-            "width": self.base_camera_state.width / zoom,
-            "height": self.base_camera_state.height / zoom,
-            "position": (
-                self.base_camera_state.position[0],
-                self.base_camera_state.position[1],
-                self.base_camera_state.position[2] * zoom,
-            ),
-        }
-        self.subplot.camera.set_state(cam_state)
-        self.figure.renderer.request_draw()
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        self._sync_canvas_size(event.size())
-
-    def _sync_canvas_size(self, size: QtCore.QSize) -> None:
-        width = max(1, int(size.width()))
-        height = max(1, int(size.height()))
-        with contextlib.suppress(Exception):
-            self.figure.canvas.set_logical_size(width, height)
-        self.figure.renderer.request_draw()
 
     def pointer_move(self, ev: pygfx.PointerEvent) -> None:
         if self.text is None or self.segmentation is None:
             return
-
-        mouse_pos = self.subplot.map_screen_to_world(ev)
-        if mouse_pos is None:
+        self.mouse_pos = self.subplot.map_screen_to_world(ev)
+        if self.mouse_pos is None:
             self.text.visible = False
             return
-
-        x = int(mouse_pos[0])
-        y = int(mouse_pos[1])
+        x = int(self.mouse_pos[0])
+        y = int(self.mouse_pos[1])
         if (
             x < 0
             or y < 0
@@ -212,27 +164,33 @@ class OverlayView(FPLWidget):
         ):
             self.text.visible = False
             return
-
         neuron_index = self.segmentation[y, x]
         if neuron_index == 0:
             self.text.visible = False
             return
-
         self.text.visible = True
-        self.text.offset = (mouse_pos[0], mouse_pos[1], 200)
+        self.text.offset = (self.mouse_pos[0], self.mouse_pos[1], 200)
         self.text.text = f"{neuron_index}"
+
+    def closeEvent(self, event):
+        if self.figure is not None:
+            self.figure.close()
+            self.figure = None
+        super().closeEvent(event)
 
 
 class CellOverlayWidget(QtWidgets.QGroupBox):
     def __init__(self, title: str = "Color-coded Preview") -> None:
         super().__init__(title)
+        self.logger = logging.getLogger(__name__)
         self.overlay_image: np.ndarray | None = None
         self.segmentation: np.ndarray | None = None
         self.original_cellpose_ids: np.ndarray | None = None
         self.stimulus_to_cellpose_mapping: dict[int, int] | None = None
+        self.show_stimulus_ids = True  # Always show stimulus IDs when available
         self._tracked_window: QtWidgets.QWidget | None = None
         self._window_handle = None
-        self._has_overlay = False
+        self._last_target_size: tuple[int, int] | None = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -242,13 +200,14 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.overlay_view = OverlayView()
         self.overlay_view.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
-            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.Fixed,
         )
-        self.overlay_view.setMinimumHeight(200)
+        self.overlay_view.setMinimumHeight(600)
         layout.addWidget(self.overlay_view)
-        # let layouts manage sizing; avoid manual fixed canvas sizes
+        self._update_overlay_scale()
 
     def _update_overlay_display(self) -> None:
+        """Update the overlay display with current ID mode"""
         display_segmentation = self._get_display_segmentation()
         self.overlay_view.add_overlay_data(
             self.overlay_image,
@@ -257,11 +216,13 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         )
 
     def _get_display_segmentation(self) -> np.ndarray | None:
+        """Get segmentation array with appropriate IDs for current display mode"""
         if self.segmentation is None:
             return None
 
-        if self.stimulus_to_cellpose_mapping is None:
-            return self.segmentation.copy()
+        if not self.show_stimulus_ids or self.stimulus_to_cellpose_mapping is None:
+            display_seg = self.segmentation.copy()
+            return display_seg
 
         display_seg = np.zeros_like(self.segmentation)
         cellpose_to_stimulus = {
@@ -286,21 +247,19 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.original_cellpose_ids = original_cellpose_ids
         self.stimulus_to_cellpose_mapping = stimulus_to_cellpose_mapping
 
-        self._has_overlay = overlay_image is not None and segmentation is not None
         self._update_overlay_display()
+        self._update_overlay_scale()
 
     def set_empty_message(self, message: str) -> None:
         self.overlay_image = None
         self.segmentation = None
-        self.stimulus_to_cellpose_mapping = None
-        self._has_overlay = False
         self.overlay_view.add_overlay_data(None, None)
-        # keep placeholder compact until data is loaded; no fixed sizing
+        self._update_overlay_scale()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self._ensure_window_tracking()
-        # sizing handled by layout
+        self._update_overlay_scale()
 
     def eventFilter(self, obj, event) -> bool:
         if (
@@ -348,5 +307,31 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             handle.screenChanged.connect(self._update_overlay_scale)
 
     def _update_overlay_scale(self, *_args) -> None:
-        """Sizing is handled by Qt layouts; no manual scaling required."""
-        return
+        """Scale overlay view to 70% of the current window height with minimum 600px."""
+        self._ensure_window_tracking()
+        window = self.window()
+        if window is not None:
+            available_height = window.height()
+        else:
+            screen = self._get_current_screen()
+            if screen is None:
+                return
+            available_height = screen.availableGeometry().height()
+
+        target_height = max(600, int(available_height * 0.7))
+        aspect_ratio = 1.0
+        if self.overlay_image is not None and self.overlay_image.shape[0] > 0:
+            aspect_ratio = max(
+                float(self.overlay_image.shape[1]) / float(self.overlay_image.shape[0]),
+                0.1,
+            )
+        target_width = max(1, int(target_height * aspect_ratio))
+        target_size = (target_width, target_height)
+        if self._last_target_size == target_size:
+            return
+
+        self._last_target_size = target_size
+        self.overlay_view.setFixedSize(target_width, target_height)
+        self.overlay_view.widget.setFixedSize(target_width, target_height)
+        self.overlay_view.updateGeometry()
+        self.overlay_view.widget.updateGeometry()
