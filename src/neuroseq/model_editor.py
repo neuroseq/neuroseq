@@ -977,8 +977,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
             # apply any changed seed value to the brian2 RNG and the model
             try:
                 new_seed = int(self.seed_spin.value())
-                self.b2model.seed = new_seed
-                b2.seed(new_seed)
+                self.b2model.set_seed(new_seed)
             except Exception as e:
                 # ignore seed setting errors and proceed with rebuild
                 self.logger.debug("Failed to set new seed from widget")

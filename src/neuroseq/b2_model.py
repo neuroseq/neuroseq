@@ -711,6 +711,19 @@ class B2Model:
         self.logger = logging.getLogger(__name__)
         self.logger.info("Model creation complete")
 
+    def set_seed(self, new_seed: int) -> None:
+        """
+        Set the seed for the brian2 RNG system.
+
+        Parameters
+        ----------
+        seed : int
+            Seed value to set
+        """
+        self.seed = new_seed
+        b2.seed(new_seed)
+        self.logger.info(f"Set new seed: {new_seed}")
+
     @property
     def name(self) -> str:
         return self.network.name
