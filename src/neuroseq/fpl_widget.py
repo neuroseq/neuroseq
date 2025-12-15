@@ -49,6 +49,12 @@ class FPLWidget(QtWidgets.QWidget):
         self.subplot.axes._x._points.material.color = "k"
         self.subplot.axes._y._points.material.color = "k"
 
+    def hide_controls(self) -> None:
+        for attr in ("toolbar", "_toolbar", "menubar", "_menubar"):
+            widget = getattr(self.widget, attr, None)
+            if widget is not None:
+                widget.hide()
+
     def clear_data(self) -> None:
         self.subplot.clear()
         for dock in self.subplot.docks.values():

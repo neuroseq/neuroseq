@@ -32,6 +32,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.existing_data = clone_cellpose_result(existing_data)
         self.file_selection_container: QtWidgets.QWidget | None = None
         self.main_content_container: QtWidgets.QWidget | None = None
+        self._initial_dialog_size: QtCore.QSize | None = None
         self._setup_ui()
         self._load_existing_data_if_available()
 
@@ -41,9 +42,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         screen = QtWidgets.QApplication.primaryScreen()
         available = screen.availableGeometry()
-        # Use the maximum available window size
-        self.setGeometry(available)
-        self.setWindowState(self.windowState() | QtCore.Qt.WindowState.WindowMaximized)
+        default_width = int(available.width() * 0.6)
+        default_height = int(available.height() * 0.5)
+        self._initial_dialog_size = QtCore.QSize(default_width, default_height)
+        self.resize(self._initial_dialog_size)
+        self.setMinimumSize(640, 400)
+        self.setSizeGripEnabled(True)
 
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -177,6 +181,13 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.main_content_container.setVisible(loaded)
         if not loaded and hasattr(self, "import_button"):
             self.import_button.setEnabled(False)
+        if loaded:
+            # Give the preview room once both files are selected
+            self.showMaximized()
+        elif self._initial_dialog_size is not None:
+            # Start smaller so the initial prompt is not full-height
+            self.showNormal()  # for somer eason this doesn't work
+            self.resize(self._initial_dialog_size)
 
     def _on_mapping_changed(self) -> None:
         """Handle toggle between mapping strategies"""
