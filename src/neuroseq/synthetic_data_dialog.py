@@ -269,6 +269,22 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             )
             return
 
+        # Check if trace data has non-consecutive indices
+        if len(trace_data.indices) > 1:
+            indices_diff = np.diff(trace_data.indices)
+            if not np.all(indices_diff == 1):
+                reply = QtWidgets.QMessageBox.warning(
+                    self,
+                    "Non-consecutive Indices",
+                    f"The trace data has non-consecutive neuron indices: {trace_data.indices}\n\n"
+                    "This may cause issues when interpreting the exported data as the current implementation expects consecutive indices. "
+                    "Do you want to continue with the export?",
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.No,
+                )
+                if reply == QtWidgets.QMessageBox.No:
+                    return
+
         # Filter trace data to only include selected indices
         if indices is not None:
             # Validate that all requested indices are within bounds
