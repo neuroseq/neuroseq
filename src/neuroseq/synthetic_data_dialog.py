@@ -260,6 +260,33 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             )
             return
 
+        # Parse indices from the index selector
+        try:
+            indices = self._parse_indices(self.index_lineedit.text())
+        except ValueError as e:
+            QtWidgets.QMessageBox.warning(
+                self, "Invalid Indices", f"Invalid index format:\n{str(e)}"
+            )
+            return
+
+        # Filter trace data to only include selected indices
+        if indices is not None:
+            # Validate that all requested indices are within bounds
+            max_idx = trace_data.traces.shape[0] - 1
+            invalid_indices = indices[indices > max_idx]
+            if len(invalid_indices) > 0:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Invalid Indices",
+                    f"Some indices are out of bounds. Maximum index is {max_idx}.\n"
+                    f"Invalid indices: {invalid_indices}",
+                )
+                return
+            traces_to_export = trace_data.traces[indices]
+        else:
+            # Export all traces if no indices specified
+            traces_to_export = trace_data.traces
+
         # Open file dialog
 
         file_path, selected_filter = QtWidgets.QFileDialog.getSaveFileName(
@@ -274,11 +301,11 @@ class SyntheticDataDialog(QtWidgets.QDialog):
 
         try:
             if file_path.endswith(".npy"):
-                np.save(file_path, trace_data.traces)
+                np.save(file_path, traces_to_export)
             elif file_path.endswith(".csv"):
-                np.savetxt(file_path, trace_data.traces, delimiter=",")
+                np.savetxt(file_path, traces_to_export, delimiter=",")
             else:
-                np.savetxt(file_path, trace_data.traces)
+                np.savetxt(file_path, traces_to_export)
 
             self.logger.info(f"Exported trace data to {file_path}")
             QtWidgets.QMessageBox.information(
