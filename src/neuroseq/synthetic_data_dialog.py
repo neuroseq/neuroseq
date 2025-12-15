@@ -100,7 +100,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         # Buttons for patch clamp
         data_buttons_layout = QtWidgets.QHBoxLayout()
         self.btn_export_trace = QtWidgets.QPushButton("Export as a file")
-        self.btn_export_trace.clicked.connect(self._export_trace_data)
+        self.btn_export_trace.clicked.connect(self._export_patch_clamp_data)
         self.btn_add_trace = QtWidgets.QPushButton("Add to the project")
         self.btn_add_trace.clicked.connect(self._add_trace_to_project)
         data_buttons_layout.addWidget(self.btn_export_trace)
@@ -305,7 +305,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
 
         return traces_to_export
 
-    def _export_trace_data(self) -> None:
+    def _export_patch_clamp_data(self) -> None:
         """Export selected trace data to a file."""
         trace_name = self.data_patch_clamp_combo.currentText()
         if not trace_name:
@@ -341,7 +341,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
 
         file_path, selected_filter = QtWidgets.QFileDialog.getSaveFileName(
             self,
-            "Export Trace Data",
+            "Export Patch Clamp Data",
             f"{trace_name}_patch_clamp.npy",
             "NumPy Array (*.npy);;CSV File (*.csv)",
         )
@@ -357,14 +357,14 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             else:
                 np.savetxt(file_path, traces_to_export)
 
-            self.logger.info(f"Exported trace data to {file_path}")
+            self.logger.info(f"Exported patch clamp data to {file_path}")
             QtWidgets.QMessageBox.information(
-                self, "Export Successful", f"Trace data exported to:\n{file_path}"
+                self, "Export Successful", f"Patch clamp data exported to:\n{file_path}"
             )
         except Exception as e:
-            self.logger.error(f"Failed to export trace data: {e}")
+            self.logger.error(f"Failed to export patch clamp data: {e}")
             QtWidgets.QMessageBox.critical(
-                self, "Export Failed", f"Failed to export trace data:\n{str(e)}"
+                self, "Export Failed", f"Failed to export patch clamp data:\n{str(e)}"
             )
 
     def _add_trace_to_project(self) -> None:
