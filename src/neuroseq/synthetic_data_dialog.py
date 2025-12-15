@@ -181,7 +181,10 @@ class SyntheticDataDialog(QtWidgets.QDialog):
                 preview_lines.append(f"  Duration in seconds: {shape[1] * dt:.2f}")
                 # preview_lines.append(f"  Units: {units}")
                 preview_lines.append("  Units: mV")  # hardcoded
-                preview_lines.append(f"  Neuron indices: {indices[0]} to {indices[-1]}")
+                preview_lines.append(
+                    f"  Neuron indices (range): from {indices[0]} to {indices[-1]}"
+                )
+                preview_lines.append(f"  Neuron indices (full list): {indices}")
 
         # Imaging preview
         spike_name = self.data_imaging_combo.currentText()
