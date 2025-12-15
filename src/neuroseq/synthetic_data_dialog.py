@@ -7,6 +7,7 @@ import numpy as np
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.model import Model
 
@@ -113,16 +114,15 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         ### Imaging
 
         data_imaging_group = QtWidgets.QGroupBox("Imaging")
-        data_imaging_group_layout = QtWidgets.QVBoxLayout()
 
         data_inner_layout = QtWidgets.QHBoxLayout()
-        data_label = QtWidgets.QLabel("Select traces:")
+        data_label = QtWidgets.QLabel("Select spikes:")
         data_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
         self.data_imaging_combo = QtWidgets.QComboBox()
         self.data_imaging_combo.setToolTip(
             "Select a dataset from the model (simulation or experimental)"
         )
-        data_names = self.model.get_data_names(TraceData)
+        data_names = self.model.get_data_names(SpikeData)
         # populate with all data names from model
         # data_names: list[str] = []
         # data_names.extend(self.model.get_data_names(TraceData))
@@ -140,48 +140,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
 
         data_inner_layout.addWidget(data_label)
         data_inner_layout.addWidget(self.data_imaging_combo)
-        data_imaging_group_layout.addLayout(data_inner_layout)
-
-        # Noise value selector for imaging
-        imaging_noise_layout = QtWidgets.QHBoxLayout()
-        imaging_noise_label = QtWidgets.QLabel("Noise (mV):")
-        imaging_noise_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
-        self.imaging_noise_spinbox = QtWidgets.QDoubleSpinBox()
-        self.imaging_noise_spinbox.setRange(0.0, 10.0)
-        self.imaging_noise_spinbox.setValue(0.5)
-        self.imaging_noise_spinbox.setSingleStep(0.1)
-        self.imaging_noise_spinbox.setDecimals(2)
-        self.imaging_noise_spinbox.setToolTip(
-            "Noise level in millivolts to add to the trace data"
-        )
-        imaging_noise_layout.addWidget(imaging_noise_label)
-        imaging_noise_layout.addWidget(self.imaging_noise_spinbox)
-        data_imaging_group_layout.addLayout(imaging_noise_layout)
-
-        # Index selector for imaging
-        imaging_index_layout = QtWidgets.QHBoxLayout()
-        imaging_index_label = QtWidgets.QLabel("Indexes to import:")
-        imaging_index_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
-        self.imaging_index_lineedit = QtWidgets.QLineEdit()
-        self.imaging_index_lineedit.setPlaceholderText("e.g., 0,1,5-15,20")
-        self.imaging_index_lineedit.setToolTip(
-            "Comma-separated neuron indexes and/or ranges (e.g., 0,1,5-15,20). Leave empty for all."
-        )
-        imaging_index_layout.addWidget(imaging_index_label)
-        imaging_index_layout.addWidget(self.imaging_index_lineedit)
-        data_imaging_group_layout.addLayout(imaging_index_layout)
-
-        # Buttons for imaging
-        imaging_buttons_layout = QtWidgets.QHBoxLayout()
-        self.btn_export_imaging = QtWidgets.QPushButton("Export as a file")
-        self.btn_export_imaging.clicked.connect(self._export_imaging_data)
-        self.btn_add_imaging = QtWidgets.QPushButton("Add to the project")
-        self.btn_add_imaging.clicked.connect(self._add_imaging_to_project)
-        imaging_buttons_layout.addWidget(self.btn_export_imaging)
-        imaging_buttons_layout.addWidget(self.btn_add_imaging)
-        data_imaging_group_layout.addLayout(imaging_buttons_layout)
-
-        data_imaging_group.setLayout(data_imaging_group_layout)
+        data_imaging_group.setLayout(data_inner_layout)
         layout.addWidget(data_imaging_group)
 
         # Data Preview
@@ -273,24 +232,16 @@ class SyntheticDataDialog(QtWidgets.QDialog):
                 preview_lines.append(f"  Neuron indices (full list): {indices}")
 
         # Imaging preview
-        imaging_name = self.data_imaging_combo.currentText()
-        if imaging_name:
-            imaging_data = self.model.get_data(imaging_name, TraceData)
-            if imaging_data:
+        spike_name = self.data_imaging_combo.currentText()
+        if spike_name:
+            spike_data = self.model.get_data(spike_name, SpikeData)
+            if spike_data:
                 if preview_lines:
                     preview_lines.append("")
 
-                shape = imaging_data.traces.shape
-                dt = imaging_data.dt
-                indices = imaging_data.indices
-                preview_lines.append(f"Imaging Traces: {imaging_name}")
-                preview_lines.append(f"  Number of neurons: {shape[0]}")
-                preview_lines.append(f"  Duration in seconds: {shape[1] * dt:.2f}")
-                preview_lines.append("  Units: mV")  # hardcoded
-                preview_lines.append(
-                    f"  Neuron indices (range): from {indices[0]} to {indices[-1]}"
-                )
-                preview_lines.append(f"  Neuron indices (full list): {indices}")
+                shape = spike_data.spike_times.shape
+                preview_lines.append(f"Spikes: {spike_name}")
+                preview_lines.append(f"  Number of spikes: {shape[0]}")
 
         self.preview_text.setPlainText(
             "\n".join(preview_lines) if preview_lines else "No data selected"
@@ -486,141 +437,4 @@ class SyntheticDataDialog(QtWidgets.QDialog):
                 self,
                 "Add Failed",
                 f"Failed to add trace data to project:\n{str(e)}",
-            )
-
-    def _export_imaging_data(self) -> None:
-        """Export selected imaging trace data to a file."""
-        imaging_name = self.data_imaging_combo.currentText()
-        if not imaging_name:
-            QtWidgets.QMessageBox.warning(
-                self, "No Data Selected", "Please select imaging trace data to export."
-            )
-            return
-
-        imaging_data = self.model.get_data(imaging_name, TraceData)
-        if not imaging_data:
-            QtWidgets.QMessageBox.warning(
-                self, "Data Not Found", f"Could not find trace data: {imaging_name}"
-            )
-            return
-
-        # Parse indices from the index selector
-        try:
-            indices = self._parse_indices(self.imaging_index_lineedit.text())
-        except ValueError as e:
-            QtWidgets.QMessageBox.warning(
-                self, "Invalid Indices", f"Invalid index format:\n{str(e)}"
-            )
-            return
-
-        # Filter and add noise to traces
-        traces_to_export = self._generate_synthetic_patch_clamp_traces(
-            imaging_data, indices, self.imaging_noise_spinbox.value()
-        )
-        if traces_to_export is None:
-            return
-
-        # Open file dialog
-        file_path, selected_filter = QtWidgets.QFileDialog.getSaveFileName(
-            self,
-            "Export Imaging Trace Data",
-            f"{imaging_name}_imaging.npy",
-            "NumPy Array (*.npy);;CSV File (*.csv)",
-        )
-
-        if not file_path:
-            return
-
-        try:
-            if file_path.endswith(".npy"):
-                np.save(file_path, traces_to_export)
-            elif file_path.endswith(".csv"):
-                np.savetxt(file_path, traces_to_export, delimiter=",")
-            else:
-                np.savetxt(file_path, traces_to_export)
-
-            self.logger.info(f"Exported imaging trace data to {file_path}")
-            QtWidgets.QMessageBox.information(
-                self,
-                "Export Successful",
-                f"Imaging trace data exported to:\n{file_path}",
-            )
-        except Exception as e:
-            self.logger.error(f"Failed to export imaging trace data: {e}")
-            QtWidgets.QMessageBox.critical(
-                self, "Export Failed", f"Failed to export imaging trace data:\n{str(e)}"
-            )
-
-    def _add_imaging_to_project(self) -> None:
-        """Add generated synthetic imaging trace data to the project as experimental data."""
-        imaging_name = self.data_imaging_combo.currentText()
-        if not imaging_name:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "No Data Selected",
-                "Please select imaging trace data to generate.",
-            )
-            return
-
-        imaging_data = self.model.get_data(imaging_name, TraceData)
-        if not imaging_data:
-            QtWidgets.QMessageBox.warning(
-                self, "Data Not Found", f"Could not find trace data: {imaging_name}"
-            )
-            return
-
-        # Parse indices from the index selector
-        try:
-            indices = self._parse_indices(self.imaging_index_lineedit.text())
-        except ValueError as e:
-            QtWidgets.QMessageBox.warning(
-                self, "Invalid Indices", f"Invalid index format:\n{str(e)}"
-            )
-            return
-
-        # Filter and add noise to traces
-        traces_to_add = self._generate_synthetic_patch_clamp_traces(
-            imaging_data, indices, self.imaging_noise_spinbox.value()
-        )
-        if traces_to_add is None:
-            return
-
-        # Determine the indices for the new data
-        new_indices = indices if indices is not None else imaging_data.indices
-
-        # Create a unique experiment name
-        base_experiment_name = "Synthetic imaging data"
-        experiment_name = base_experiment_name
-        counter = 1
-        while experiment_name in self.model.experiments:
-            experiment_name = f"{base_experiment_name} {counter}"
-            counter += 1
-
-        # Create new TraceData object with the synthetic data
-        new_trace_data = TraceData(
-            name="Imaging",
-            traces=traces_to_add,
-            indices=new_indices,
-            dt=imaging_data.dt,
-            units=imaging_data.units,
-        )
-
-        # Add to model
-        try:
-            self.model.add_experimental_data(experiment_name, [new_trace_data])
-            self.data_added = True  # Mark that data was added
-            self.logger.info(
-                f"Added synthetic imaging trace data to experiment '{experiment_name}'"
-            )
-            QtWidgets.QMessageBox.information(
-                self,
-                "Data Added",
-                f"Synthetic imaging trace data added to experiment:\n{experiment_name}",
-            )
-        except Exception as e:
-            self.logger.error(f"Failed to add imaging trace data to project: {e}")
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Add Failed",
-                f"Failed to add imaging trace data to project:\n{str(e)}",
             )
