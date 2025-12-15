@@ -14,7 +14,7 @@ from pytest import MonkeyPatch
 from pytest_mock import MockerFixture
 
 from neuroseq.b2_model import B2Model
-from neuroseq.model import Model
+from neuroseq.project import Project
 from neuroseq.stim import StimArray
 
 
@@ -45,14 +45,14 @@ def test_reconstruct_mfx_nmda_serialized(mfx_nmda_as_dict: dict) -> None:
     assert "M" in model.network.get_states()
 
 
-def test_define_equation(mfx: B2Model) -> None:
-    assert mfx.neurongroups == {}
+def test_define_equation(b2model: B2Model) -> None:
+    assert b2model.neurongroups == {}
 
-    mfx.define_equation("P", "dge/dt = -ge*(1./taue) : siemens")
+    b2model.define_equation("P", "dge/dt = -ge*(1./taue) : siemens")
 
-    assert mfx.neurongroups["P"]["model"] == "dge/dt = -ge*(1./taue) : siemens"
+    assert b2model.neurongroups["P"]["model"] == "dge/dt = -ge*(1./taue) : siemens"
     assert all(
-        f in mfx.functions["neurongroups"]["P"]
+        f in b2model.functions["neurongroups"]["P"]
         for f in [
             "rename",
             "delete",
@@ -60,7 +60,7 @@ def test_define_equation(mfx: B2Model) -> None:
     )
 
     assert all(
-        f in mfx.functions["neurongroups"]["P"]["model"]
+        f in b2model.functions["neurongroups"]["P"]["model"]
         for f in ["delete", "modify", "rename"]
     )
 
@@ -68,41 +68,41 @@ def test_define_equation(mfx: B2Model) -> None:
         ValueError,
         match="Equation must have a colon that separates equation and unit or an equal sign",
     ):
-        mfx.define_equation("P", "dge/dt -ge*(1./taue)")
+        b2model.define_equation("P", "dge/dt -ge*(1./taue)")
 
     with pytest.raises(
         ValueError,
         match="Equation must have a colon that separates equation and unit or an equal sign",
     ):
-        mfx.define_equation("P", "-ge*(1./taue) siemens")
+        b2model.define_equation("P", "-ge*(1./taue) siemens")
 
 
-def test_define_dt(mfx: B2Model) -> None:
-    assert mfx.neurongroups == {}
+def test_define_dt(b2model: B2Model) -> None:
+    assert b2model.neurongroups == {}
     standard_dt = b2.defaultclock.dt
 
-    mfx.define_dt("neurons", 0.1 * b2.ms)
-    mfx.define_synapse_dt("S", 0.75 * b2.ms)
-    mfx.define_monitor_dt("M", 10 * b2.ms)
+    b2model.define_dt("neurons", 0.1 * b2.ms)
+    b2model.define_synapse_dt("S", 0.75 * b2.ms)
+    b2model.define_monitor_dt("M", 10 * b2.ms)
 
     assert b2.defaultclock.dt == standard_dt
-    assert np.isclose(mfx.neurongroups["neurons"]["dt"].base, 0.0001)
-    assert mfx.neurongroups["neurons"]["dt"].has_same_dimensions(0.1 * b2.ms)
-    assert np.isclose(mfx.synapses["S"]["dt"].base, 0.00075)
-    assert mfx.synapses["S"]["dt"].has_same_dimensions(0.75 * b2.ms)
-    assert np.isclose(mfx.monitors["M"]["dt"].base, 0.01)
-    assert mfx.monitors["M"]["dt"].has_same_dimensions(0.01 * b2.second)
+    assert np.isclose(b2model.neurongroups["neurons"]["dt"].base, 0.0001)
+    assert b2model.neurongroups["neurons"]["dt"].has_same_dimensions(0.1 * b2.ms)
+    assert np.isclose(b2model.synapses["S"]["dt"].base, 0.00075)
+    assert b2model.synapses["S"]["dt"].has_same_dimensions(0.75 * b2.ms)
+    assert np.isclose(b2model.monitors["M"]["dt"].base, 0.01)
+    assert b2model.monitors["M"]["dt"].has_same_dimensions(0.01 * b2.second)
 
 
-def test_define_parameter(mfx: B2Model) -> None:
-    assert mfx.parameters == {}
-    mfx.define_parameter("taue", 5 * b2.ms)
-    mfx.define_parameter("taui", 10 * b2.ms)
-    mfx.define_parameter("area", 20000 * b2.umetre**2)
+def test_define_parameter(b2model: B2Model) -> None:
+    assert b2model.parameters == {}
+    b2model.define_parameter("taue", 5 * b2.ms)
+    b2model.define_parameter("taui", 10 * b2.ms)
+    b2model.define_parameter("area", 20000 * b2.umetre**2)
     timed_array = b2.TimedArray(np.random.rand(10, 100) * b2.mS, dt=1 * b2.ms)
-    mfx.define_parameter("stim", timed_array)
+    b2model.define_parameter("stim", timed_array)
 
-    assert mfx.parameters == {
+    assert b2model.parameters == {
         "taue": 5 * b2.ms,
         "taui": 10 * b2.ms,
         "area": 20000 * b2.umetre**2,
@@ -110,33 +110,33 @@ def test_define_parameter(mfx: B2Model) -> None:
     }
 
 
-def test_define_threshold(mfx: B2Model) -> None:
-    assert mfx.neurongroups == {}
-    mfx.define_threshold("P", "v > 10 * mV")
-    assert mfx.neurongroups["P"]["th"] == "v > 10 * mV"
+def test_define_threshold(b2model: B2Model) -> None:
+    assert b2model.neurongroups == {}
+    b2model.define_threshold("P", "v > 10 * mV")
+    assert b2model.neurongroups["P"]["th"] == "v > 10 * mV"
 
 
-def test_define_solver_method(mfx: B2Model) -> None:
-    assert mfx.neurongroups == {}
-    mfx.define_solver_method("P", "euler")
-    assert mfx.neurongroups["P"]["method"] == "euler"
+def test_define_solver_method(b2model: B2Model) -> None:
+    assert b2model.neurongroups == {}
+    b2model.define_solver_method("P", "euler")
+    assert b2model.neurongroups["P"]["method"] == "euler"
 
 
-def test_define_refractory(mfx: B2Model) -> None:
-    assert mfx.neurongroups == {}
-    mfx.define_refractory("P", 5 * b2.ms)
-    assert mfx.neurongroups["P"]["refractory"] == 5 * b2.ms
+def test_define_refractory(b2model: B2Model) -> None:
+    assert b2model.neurongroups == {}
+    b2model.define_refractory("P", 5 * b2.ms)
+    assert b2model.neurongroups["P"]["refractory"] == 5 * b2.ms
 
 
-def test_define_neuron_number(mfx: B2Model) -> None:
-    assert mfx.neurongroups == {}
-    mfx.define_neuronnumber("P", 100)
-    assert mfx.neurongroups["P"]["neuronnumber"] == 100
+def test_define_neuron_number(b2model: B2Model) -> None:
+    assert b2model.neurongroups == {}
+    b2model.define_neuronnumber("P", 100)
+    assert b2model.neurongroups["P"]["neuronnumber"] == 100
 
 
-def test_assemble_neurongroup_exception(mfx: B2Model) -> None:
+def test_assemble_neurongroup_exception(b2model: B2Model) -> None:
     with pytest.raises(RuntimeError, match="Error in assembling neuron group N"):
-        mfx._assemble_neurongroup("N")
+        b2model._assemble_neurongroup("N")
 
 
 def test_rename_neurongroup(b2_model_nmda: B2Model) -> None:
@@ -592,8 +592,8 @@ def test_define_monitor_exception(
         mfx._assemble_monitor("M")
 
 
-def test_define_init(mfx_ornstein: Model) -> None:
-    mfx = mfx_ornstein
+def test_define_init(project_ornstein: Project) -> None:
+    mfx = project_ornstein
 
     b2.seed(4321)
     N = b2.NeuronGroup(
@@ -623,10 +623,10 @@ def test_define_init(mfx_ornstein: Model) -> None:
 
 
 def test_ornstein_uhlenbeck(
-    mfx_ornstein: Model, test_stim_arrays: dict[str, StimArray]
+    project_ornstein: Project, test_stim_arrays: dict[str, StimArray]
 ) -> None:
     b2.seed(4321)
-    mfx_ornstein.b2_model.run_simulation(1, test_stim_arrays)
+    project_ornstein.b2_model.run_simulation(1, test_stim_arrays)
 
     b2.seed(4321)
     N = b2.NeuronGroup(
@@ -637,7 +637,7 @@ def test_ornstein_uhlenbeck(
         dy/dt = -y/tau + sqrt(2*sigma**2/tau)*xi : 1
         """,
         method="euler",
-        dt=mfx_ornstein.b2_model.neurongroups["neurongroup"]["dt"],
+        dt=project_ornstein.b2_model.neurongroups["neurongroup"]["dt"],
     )
 
     N.tau = np.array([1, 0.8, 0.6, 0.3, 0.1]) * b2.second
@@ -655,10 +655,10 @@ def test_ornstein_uhlenbeck(
     network.run(1 * b2.second)
 
     assert np.allclose(
-        M.t / b2.second, mfx_ornstein.b2_model.network["M"].t / b2.second
+        M.t / b2.second, project_ornstein.b2_model.network["M"].t / b2.second
     )
-    assert np.allclose(M.y[1], mfx_ornstein.b2_model.network["M"].y[1])
-    assert np.allclose(M.y[0], mfx_ornstein.b2_model.network["M"].y[0])
+    assert np.allclose(M.y[1], project_ornstein.b2_model.network["M"].y[1])
+    assert np.allclose(M.y[0], project_ornstein.b2_model.network["M"].y[0])
 
 
 def test_ornstein_uhlenbeck_other_dt() -> None:
@@ -911,93 +911,93 @@ def test_assemble_network(b2_model_nmda, monkeypatch: MonkeyPatch) -> None:
 
 def test_hdf5(
     tmp_path: Path,
-    mfx_ornstein: Model,
+    project_ornstein: Project,
 ) -> None:
-    mfx_ornstein.run_simulation(10)
+    project_ornstein.run_simulation(10)
 
-    mfx_ornstein.b2_model.save_to_h5(tmp_path / "data.h5")
+    project_ornstein.b2_model.save_to_h5(tmp_path / "data.h5")
 
     data = None
 
-    assert len(mfx_ornstein.b2_model.checkpoints) > 0
+    assert len(project_ornstein.b2_model.checkpoints) > 0
 
     with h5py.File(Path(tmp_path, "data.h5"), "r") as h5file:
         data = h5file["M"]["y"][:]
 
-    assert np.allclose(data, mfx_ornstein.b2_model.network["M"].y)
+    assert np.allclose(data, project_ornstein.b2_model.network["M"].y)
 
     with pytest.raises(ValueError, match="Path fakepath/data.h5 does not exist"):
-        mfx_ornstein.b2_model.save_to_h5("fakepath/data.h5")
+        project_ornstein.b2_model.save_to_h5("fakepath/data.h5")
 
-    mfx_ornstein.b2_model.monitors = {}
+    project_ornstein.b2_model.monitors = {}
 
     with pytest.raises(
         RuntimeError, match="Error, cannot save data when no monitors are defined"
     ):
-        mfx_ornstein.b2_model.save_to_h5(tmp_path / "data.h5")
+        project_ornstein.b2_model.save_to_h5(tmp_path / "data.h5")
 
-    mfx_ornstein.b2_model.assemble_network()
+    project_ornstein.b2_model.assemble_network()
 
-    assert len(mfx_ornstein.b2_model.checkpoints) == 0
+    assert len(project_ornstein.b2_model.checkpoints) == 0
 
 
-def test_logger(caplog: pytest.LogCaptureFixture, mfx_ornstein: Model) -> None:
+def test_logger(caplog: pytest.LogCaptureFixture, project_ornstein: Project) -> None:
     caplog.set_level(logging.INFO, logger="neuroseq.b2_model")
-    mfx_ornstein.run_simulation(1)
+    project_ornstein.run_simulation(1)
 
     logs = [record.message for record in caplog.records]
     assert "run the system for 1" in logs[0]
 
 
-def test_store_restore(mfx_ornstein: Model) -> None:
+def test_store_restore(project_ornstein: Project) -> None:
     sim_time = 10 * b2.ms
-    assert len(mfx_ornstein.b2_model.checkpoints) == 0
-    mfx_ornstein.run_simulation(sim_time / b2.second)
+    assert len(project_ornstein.b2_model.checkpoints) == 0
+    project_ornstein.run_simulation(sim_time / b2.second)
     # default initial state checkpoint is made on first simulation if no other checkpoints are made
-    assert len(mfx_ornstein.b2_model.checkpoints) == 1
+    assert len(project_ornstein.b2_model.checkpoints) == 1
     assert (
-        mfx_ornstein.b2_model.network["M"].t[-1]
-        == sim_time - mfx_ornstein.b2_model.neurongroups["neurongroup"]["dt"]
+        project_ornstein.b2_model.network["M"].t[-1]
+        == sim_time - project_ornstein.b2_model.neurongroups["neurongroup"]["dt"]
     )
     # restore initial state
-    mfx_ornstein.b2_model.restore(mfx_ornstein.b2_model.checkpoints[0])
-    assert len(mfx_ornstein.b2_model.network["M"].t) == 0
+    project_ornstein.b2_model.restore(project_ornstein.b2_model.checkpoints[0])
+    assert len(project_ornstein.b2_model.network["M"].t) == 0
     # store two new checkpoints
-    mfx_ornstein.run_simulation(sim_time / b2.second)
+    project_ornstein.run_simulation(sim_time / b2.second)
     assert (
-        mfx_ornstein.b2_model.network["M"].t[-1]
-        == sim_time - mfx_ornstein.b2_model.neurongroups["neurongroup"]["dt"]
+        project_ornstein.b2_model.network["M"].t[-1]
+        == sim_time - project_ornstein.b2_model.neurongroups["neurongroup"]["dt"]
     )
-    mfx_ornstein.b2_model.store("t1")
-    assert len(mfx_ornstein.b2_model.checkpoints) == 2
-    mfx_ornstein.run_simulation(sim_time / b2.second)
+    project_ornstein.b2_model.store("t1")
+    assert len(project_ornstein.b2_model.checkpoints) == 2
+    project_ornstein.run_simulation(sim_time / b2.second)
     assert (
-        mfx_ornstein.b2_model.network["M"].t[-1]
-        == 2 * sim_time - mfx_ornstein.b2_model.neurongroups["neurongroup"]["dt"]
+        project_ornstein.b2_model.network["M"].t[-1]
+        == 2 * sim_time - project_ornstein.b2_model.neurongroups["neurongroup"]["dt"]
     )
-    mfx_ornstein.b2_model.store("t2")
-    assert len(mfx_ornstein.b2_model.checkpoints) == 3
+    project_ornstein.b2_model.store("t2")
+    assert len(project_ornstein.b2_model.checkpoints) == 3
     # restore second checkpoint
-    mfx_ornstein.b2_model.restore("t1")
+    project_ornstein.b2_model.restore("t1")
     assert (
-        mfx_ornstein.b2_model.network["M"].t[-1]
-        == sim_time - mfx_ornstein.b2_model.neurongroups["neurongroup"]["dt"]
+        project_ornstein.b2_model.network["M"].t[-1]
+        == sim_time - project_ornstein.b2_model.neurongroups["neurongroup"]["dt"]
     )
     # overwrite existing checkpoint
-    assert len(mfx_ornstein.b2_model.checkpoints) == 3
-    mfx_ornstein.b2_model.store("t2")
-    assert len(mfx_ornstein.b2_model.checkpoints) == 3
+    assert len(project_ornstein.b2_model.checkpoints) == 3
+    project_ornstein.b2_model.store("t2")
+    assert len(project_ornstein.b2_model.checkpoints) == 3
     # restore initial state
-    mfx_ornstein.b2_model.restore(mfx_ornstein.b2_model.checkpoints[0])
-    assert len(mfx_ornstein.b2_model.network["M"].t) == 0
+    project_ornstein.b2_model.restore(project_ornstein.b2_model.checkpoints[0])
+    assert len(project_ornstein.b2_model.network["M"].t) == 0
     # restore non-existing checkpoint
     with pytest.raises(ValueError, match=".*'idontexist'.*"):
-        mfx_ornstein.b2_model.restore("idontexist")
+        project_ornstein.b2_model.restore("idontexist")
 
 
-def test_default_group_addition(mfx_ornstein) -> None:
-    mfx_ornstein.b2_model.define_default_neurongroup()
-    assert mfx_ornstein.b2_model.neurongroups["new_neurongroup"] == {
+def test_default_group_addition(project_ornstein) -> None:
+    project_ornstein.b2_model.define_default_neurongroup()
+    assert project_ornstein.b2_model.neurongroups["new_neurongroup"] == {
         "neuronnumber": 0,
         "model": "dx/dt = y : 1",
         "method": "-",
@@ -1007,8 +1007,8 @@ def test_default_group_addition(mfx_ornstein) -> None:
         "refractory": "0",
     }
 
-    mfx_ornstein.b2_model.define_default_synapse()
-    assert mfx_ornstein.b2_model.synapses["new_synapse"] == {
+    project_ornstein.b2_model.define_default_synapse()
+    assert project_ornstein.b2_model.synapses["new_synapse"] == {
         "origin": "-",
         "target": "-",
         "model": "dx/dt = y : 1",
@@ -1021,16 +1021,16 @@ def test_default_group_addition(mfx_ornstein) -> None:
         "on_post": "x=y",
     }
 
-    mfx_ornstein.b2_model.define_default_monitor()
-    assert mfx_ornstein.b2_model.monitors["new_monitor"] == {
+    project_ornstein.b2_model.define_default_monitor()
+    assert project_ornstein.b2_model.monitors["new_monitor"] == {
         "type": "-",
         "source": "-",
         "variable": "-",
         "dt": None,
     }
 
-    mfx_ornstein.b2_model.define_default_parameter()
-    assert mfx_ornstein.b2_model.parameters["new_parameter"] is None
+    project_ornstein.b2_model.define_default_parameter()
+    assert project_ornstein.b2_model.parameters["new_parameter"] is None
 
-    mfx_ornstein.b2_model.define_default_init()
-    assert mfx_ornstein.b2_model.initials["group"]["value"] is None
+    project_ornstein.b2_model.define_default_init()
+    assert project_ornstein.b2_model.initials["group"]["value"] is None

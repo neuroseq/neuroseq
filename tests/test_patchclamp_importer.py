@@ -321,7 +321,7 @@ def test_import_single_then_extend_timeline(tmp_path, qtbot):
     mock_model.experiments = {}
 
     # First import (initial data)
-    dialog1 = PatchClampImportDialog(model=mock_model)
+    dialog1 = PatchClampImportDialog(project=mock_model)
     qtbot.addWidget(dialog1)
 
     dialog1.load_file(str(first_npy))
@@ -345,7 +345,7 @@ def test_import_single_then_extend_timeline(tmp_path, qtbot):
     dialog1.close()
 
     # Second import in EXTEND mode
-    dialog2 = PatchClampImportDialog(model=mock_model)
+    dialog2 = PatchClampImportDialog(project=mock_model)
     qtbot.addWidget(dialog2)
 
     dialog2.load_file(str(second_npy))
@@ -389,7 +389,7 @@ def test_import_single_then_replace_timeline(tmp_path, qtbot):
     mock_model.experiments = {}
 
     # First import
-    dialog1 = PatchClampImportDialog(model=mock_model)
+    dialog1 = PatchClampImportDialog(project=mock_model)
     qtbot.addWidget(dialog1)
 
     dialog1.load_file(str(first_npy))
@@ -411,7 +411,7 @@ def test_import_single_then_replace_timeline(tmp_path, qtbot):
     dialog1.close()
 
     # Second import in REPLACE mode
-    dialog2 = PatchClampImportDialog(model=mock_model)
+    dialog2 = PatchClampImportDialog(project=mock_model)
     qtbot.addWidget(dialog2)
 
     dialog2.load_file(str(replacement_npy))
@@ -574,7 +574,7 @@ def test_import_single_then_double_replace_mode(tmp_path, qtbot):
     mock_model.experiments = {}
 
     # First import: single neuron 15
-    dialog1 = PatchClampImportDialog(model=mock_model)
+    dialog1 = PatchClampImportDialog(project=mock_model)
     qtbot.addWidget(dialog1)
 
     dialog1.load_file(str(single_npy))
@@ -597,7 +597,7 @@ def test_import_single_then_double_replace_mode(tmp_path, qtbot):
     dialog1.close()
 
     # Second import: double neurons 15,17 in REPLACE mode
-    dialog2 = PatchClampImportDialog(model=mock_model)
+    dialog2 = PatchClampImportDialog(project=mock_model)
     qtbot.addWidget(dialog2)
 
     dialog2.load_file(str(double_npy))
@@ -639,7 +639,7 @@ def test_import_single_then_double_extend_mode_error(tmp_path, qtbot):
     mock_model.experiments = {}
 
     # First import: single neuron 15
-    dialog1 = PatchClampImportDialog(model=mock_model)
+    dialog1 = PatchClampImportDialog(project=mock_model)
     qtbot.addWidget(dialog1)
 
     dialog1.load_file(str(single_npy))
@@ -656,7 +656,7 @@ def test_import_single_then_double_extend_mode_error(tmp_path, qtbot):
     dialog1.close()
 
     # Second import: try double neurons 15,17 in EXTEND mode (should fail)
-    dialog2 = PatchClampImportDialog(model=mock_model)
+    dialog2 = PatchClampImportDialog(project=mock_model)
     qtbot.addWidget(dialog2)
 
     dialog2.load_file(str(double_npy))
@@ -694,7 +694,7 @@ def test_import_new_neurons_extend_mode_with_existing_data_error(
     mock_model.experiments = {}
 
     # First import: neuron 15
-    dialog1 = PatchClampImportDialog(model=mock_model)
+    dialog1 = PatchClampImportDialog(project=mock_model)
     qtbot.addWidget(dialog1)
 
     dialog1.load_file(str(single_npy))
@@ -711,7 +711,7 @@ def test_import_new_neurons_extend_mode_with_existing_data_error(
     dialog1.close()
 
     # Second import: try new neurons 20,25 in EXTEND mode (should fail because 15 exists)
-    dialog2 = PatchClampImportDialog(model=mock_model)
+    dialog2 = PatchClampImportDialog(project=mock_model)
     qtbot.addWidget(dialog2)
 
     dialog2.load_file(str(different_npy))
@@ -752,7 +752,7 @@ def test_import_existing_neurons_only_extend_mode_success(tmp_path, qtbot):
     mock_model.experiments = {}
 
     # First import: neurons 15,17
-    dialog1 = PatchClampImportDialog(model=mock_model)
+    dialog1 = PatchClampImportDialog(project=mock_model)
     qtbot.addWidget(dialog1)
 
     dialog1.load_file(str(original_npy))
@@ -769,7 +769,7 @@ def test_import_existing_neurons_only_extend_mode_success(tmp_path, qtbot):
     dialog1.close()
 
     # Second import: same neurons 15,17 in EXTEND mode (should work)
-    dialog2 = PatchClampImportDialog(model=mock_model)
+    dialog2 = PatchClampImportDialog(project=mock_model)
     qtbot.addWidget(dialog2)
 
     dialog2.load_file(str(extension_npy))

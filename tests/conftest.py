@@ -10,7 +10,7 @@ import pytest
 from qtpy import QtWidgets
 
 from neuroseq.b2_model import B2Model
-from neuroseq.model import Model
+from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.utils import init_brian2_logging
@@ -269,12 +269,12 @@ def reference_parameters() -> dict[str, Any]:
 
 
 @pytest.fixture()
-def mfx() -> B2Model:
+def b2model() -> B2Model:
     return B2Model()
 
 
 @pytest.fixture
-def mfx_ornstein() -> Model:
+def project_ornstein() -> Project:
     eqs = """
         tau : second
         sigma : 1
@@ -306,9 +306,9 @@ def mfx_ornstein() -> Model:
 
     b2_model.must_be_rebuilt = False
 
-    model = Model()
-    model.b2_model = b2_model
-    return model
+    project = Project()
+    project.b2_model = b2_model
+    return project
 
 
 @pytest.fixture
@@ -377,15 +377,15 @@ def b2_model_nmda() -> B2Model:
 
 
 @pytest.fixture
-def model_nmda(b2_model_nmda: B2Model) -> Model:
-    model = Model()
-    model.b2_model = b2_model_nmda
-    return model
+def project_nmda(b2_model_nmda: B2Model) -> Project:
+    project = Project()
+    project.b2_model = b2_model_nmda
+    return project
 
 
 @pytest.fixture
 def mfx_parameterized(
-    mfx: B2Model, reference_parameters: dict[str, Any]
+    b2model: B2Model, reference_parameters: dict[str, Any]
 ) -> tuple[B2Model, dict[str, Any]]:
     b2.seed(reference_parameters["seed"])
     n = 30
@@ -393,15 +393,15 @@ def mfx_parameterized(
     refractory = 3 * b2.ms
     method = "exponential_euler"
     dt = 0.1 * b2.ms
-    mfx.define_equation("P", reference_parameters["eqs"])
-    mfx.define_neuronnumber("P", n)
-    mfx.define_threshold("P", threshold)
-    mfx.define_refractory("P", refractory)
-    mfx.define_dt("P", dt)
-    mfx.define_solver_method("P", method)
-    mfx._assemble_neurongroup("P")
+    b2model.define_equation("P", reference_parameters["eqs"])
+    b2model.define_neuronnumber("P", n)
+    b2model.define_threshold("P", threshold)
+    b2model.define_refractory("P", refractory)
+    b2model.define_dt("P", dt)
+    b2model.define_solver_method("P", method)
+    b2model._assemble_neurongroup("P")
 
-    return mfx, reference_parameters
+    return b2model, reference_parameters
 
 
 @pytest.fixture()
@@ -463,11 +463,11 @@ def mfx_with_synapse(
 
 
 @pytest.fixture
-def test_model() -> Model:
-    model = Model()
+def test_project() -> Project:
+    project = Project()
 
     # define Brian2 model
-    b2_model = model.b2_model
+    b2_model = project.b2_model
 
     nneurons = 30
     nneurons_exc = 24
@@ -605,7 +605,7 @@ we= clip(we + Apre, -gmax, gmax)
         units="siemens",
         dt=0.001,
     )
-    model.add_stim_array(stim_array)
+    project.add_stim_array(stim_array)
 
     stim_inh = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
     stim_inh[800:802, :nneurons_exc] = 1
@@ -616,6 +616,6 @@ we= clip(we + Apre, -gmax, gmax)
         units="siemens",
         dt=0.001,
     )
-    model.add_stim_array(stim_array_inh)
+    project.add_stim_array(stim_array_inh)
 
-    return model
+    return project

@@ -16,6 +16,7 @@ from neuroseq.importer_patchclamp import PeakDetectionParams
 from neuroseq.importer_patchclamp import generate_stimulus_mapping
 from neuroseq.importer_patchclamp import import_patchclamp_data
 from neuroseq.importer_patchclamp import validate_append_import
+from neuroseq.project import Project
 
 
 class PatchClampImportDialog(QtWidgets.QDialog):
@@ -24,14 +25,14 @@ class PatchClampImportDialog(QtWidgets.QDialog):
     def __init__(
         self,
         cellpose_import: CellposeImportResult | None = None,
-        model=None,
+        project: Project | None = None,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         # Work on a copy so we don't mutate the caller's stored data
         self.cellpose_import = clone_cellpose_result(cellpose_import)
-        self.model = model
+        self.project = project
         self.imported_spike_data: list = []
         self.imported_trace_data: list = []
         self.experiment_name = "PatchClamp Import"
@@ -768,7 +769,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             # Validate import if in append mode
             if self.append_data:
                 validate_append_import(
-                    self.model,
+                    self.project,
                     self.experiment_name,
                     neuron_ids,
                 )
