@@ -239,9 +239,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         if strategy == "Linear":
             # Map stimulus IDs 1,2,3... to cellpose IDs in order
-            return {
-                i + 1: int(cellpose_id) for i, cellpose_id in enumerate(original_ids)
-            }
+            return {i: int(cellpose_id) for i, cellpose_id in enumerate(original_ids)}
         elif strategy == "Custom":
             # Parse custom mapping string
             return self._parse_custom_mapping(self.custom_mapping_line.text())

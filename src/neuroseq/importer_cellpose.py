@@ -210,13 +210,14 @@ class CellPoseImporter:
         path = Path(filename)
         try:
             segmentation = self._read_segmentation_file(path)
-            self.segmentation_data = self._validate_segmentation(segmentation)
+            segmentation = self._validate_segmentation(segmentation)
+            self.segmentation_data = self._shift_to_zero_based(segmentation)
 
             unique_ids = np.unique(self.segmentation_data)
-            self._original_cellpose_ids = unique_ids[unique_ids > 0]
+            self._original_cellpose_ids = unique_ids[unique_ids >= 0]
 
             self.logger.info(
-                "Loaded segmentation from %s: %s (background kept at 0, cells preserved)",
+                "Loaded segmentation from %s: %s (shifted to 0-based IDs, background is -1)",
                 path.suffix.lower(),
                 self.segmentation_data.shape,
             )
@@ -283,8 +284,8 @@ class CellPoseImporter:
             return {}
 
         unique_ids = np.unique(self.segmentation_data)
-        n_background = np.sum(self.segmentation_data == 0)
-        n_neurons = len(unique_ids[unique_ids > 0])
+        n_background = np.sum(self.segmentation_data < 0)
+        n_neurons = len(unique_ids[unique_ids >= 0])
 
         info = {
             "image_shape": self.image_data.shape,
@@ -296,8 +297,8 @@ class CellPoseImporter:
 
         if n_neurons > 0:
             info["neuron_id_range"] = (
-                unique_ids[unique_ids > 0].min(),
-                unique_ids[unique_ids > 0].max(),
+                unique_ids[unique_ids >= 0].min(),
+                unique_ids[unique_ids >= 0].max(),
             )
         if self.trace_data is not None:
             info["trace_neurons"] = self.trace_data.traces.shape[0]
@@ -390,7 +391,7 @@ class CellPoseImporter:
             return
 
         unique_ids = np.unique(self.segmentation_data)
-        neuron_ids = unique_ids[unique_ids > 0]
+        neuron_ids = unique_ids[unique_ids >= 0]
         if neuron_ids.size == 0:
             self._neuron_ids = None
             self._neuron_colors = None
@@ -517,10 +518,19 @@ class CellPoseImporter:
         if seg.ndim != 2:
             raise ValueError(f"Expected 2D array, got {seg.ndim}D array")
 
-        if np.any(seg < 0):
-            raise ValueError("Segmentation data contains negative values")
+        if np.any(seg < -1):
+            raise ValueError(
+                "Segmentation data contains values below -1 after shifting"
+            )
 
         if not np.isfinite(seg).all():
             raise ValueError("Segmentation data contains non-finite values")
 
+        return seg
+
+    @staticmethod
+    def _shift_to_zero_based(segmentation: np.ndarray) -> np.ndarray:
+        """Convert 1-based cell IDs to 0-based, set background to -1."""
+        seg = np.array(segmentation, copy=True, dtype=np.int32)
+        seg[seg >= 0] -= 1
         return seg
