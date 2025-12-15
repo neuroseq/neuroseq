@@ -979,9 +979,10 @@ class ModelEditorDialog(QtWidgets.QDialog):
                 new_seed = int(self.seed_spin.value())
                 self.b2model.seed = new_seed
                 b2.seed(new_seed)
-            except Exception:
+            except Exception as e:
                 # ignore seed setting errors and proceed with rebuild
                 self.logger.debug("Failed to set new seed from widget")
+                self.logger.exception(e)
 
             if self.b2model.must_be_rebuilt:
                 self.logger.info("rebuilding model after change")
