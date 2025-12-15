@@ -87,9 +87,9 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         index_label = QtWidgets.QLabel("Indexes to import:")
         index_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
         self.index_lineedit = QtWidgets.QLineEdit()
-        self.index_lineedit.setPlaceholderText("e.g., 0,1,2,5,10")
+        self.index_lineedit.setPlaceholderText("e.g., 0,1,5-15,20")
         self.index_lineedit.setToolTip(
-            "Comma-separated neuron indexes to import (leave empty for all)"
+            "Comma-separated neuron indexes and/or ranges (e.g., 0,1,5-15,20). Leave empty for all."
         )
         index_layout.addWidget(index_label)
         index_layout.addWidget(self.index_lineedit)
