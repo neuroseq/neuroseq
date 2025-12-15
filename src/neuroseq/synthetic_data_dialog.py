@@ -28,6 +28,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.model = model
+        self.data_added = False  # Track if data was added to the project
 
         self.setWindowTitle("Generate Synthetic Data")
         self.setModal(True)
@@ -101,6 +102,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         self.btn_export_trace = QtWidgets.QPushButton("Export as a file")
         self.btn_export_trace.clicked.connect(self._export_trace_data)
         self.btn_add_trace = QtWidgets.QPushButton("Add to the project")
+        self.btn_add_trace.clicked.connect(self._add_trace_to_project)
         data_buttons_layout.addWidget(self.btn_export_trace)
         data_buttons_layout.addWidget(self.btn_add_trace)
         data_patch_clamp_group_layout.addLayout(data_buttons_layout)
@@ -245,7 +247,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             "\n".join(preview_lines) if preview_lines else "No data selected"
         )
 
-    def _generate_synthetic_patch_clamptraces(
+    def _generate_synthetic_patch_clamp_traces(
         self,
         trace_data: TraceData,
         indices: np.ndarray | None,
@@ -329,7 +331,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             return
 
         # Filter and add noise to traces
-        traces_to_export = self._generate_synthetic_patch_clamptraces(
+        traces_to_export = self._generate_synthetic_patch_clamp_traces(
             trace_data, indices, self.noise_spinbox.value()
         )
         if traces_to_export is None:
@@ -363,4 +365,76 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             self.logger.error(f"Failed to export trace data: {e}")
             QtWidgets.QMessageBox.critical(
                 self, "Export Failed", f"Failed to export trace data:\n{str(e)}"
+            )
+
+    def _add_trace_to_project(self) -> None:
+        """Add generated synthetic trace data to the project as experimental data."""
+        trace_name = self.data_patch_clamp_combo.currentText()
+        if not trace_name:
+            QtWidgets.QMessageBox.warning(
+                self, "No Data Selected", "Please select trace data to generate."
+            )
+            return
+
+        trace_data = self.model.get_data(trace_name, TraceData)
+        if not trace_data:
+            QtWidgets.QMessageBox.warning(
+                self, "Data Not Found", f"Could not find trace data: {trace_name}"
+            )
+            return
+
+        # Parse indices from the index selector
+        try:
+            indices = self._parse_indices(self.index_lineedit.text())
+        except ValueError as e:
+            QtWidgets.QMessageBox.warning(
+                self, "Invalid Indices", f"Invalid index format:\n{str(e)}"
+            )
+            return
+
+        # Filter and add noise to traces
+        traces_to_add = self._generate_synthetic_patch_clamp_traces(
+            trace_data, indices, self.noise_spinbox.value()
+        )
+        if traces_to_add is None:
+            return
+
+        # Determine the indices for the new data
+        new_indices = indices if indices is not None else trace_data.indices
+
+        # Create a unique experiment name
+        base_experiment_name = "Synthetic data"
+        experiment_name = base_experiment_name
+        counter = 1
+        while experiment_name in self.model.experiments:
+            experiment_name = f"{base_experiment_name} {counter}"
+            counter += 1
+
+        # Create new TraceData object with the synthetic data
+        new_trace_data = TraceData(
+            name="Patch clamp",
+            traces=traces_to_add,
+            indices=new_indices,
+            dt=trace_data.dt,
+            units=trace_data.units,
+        )
+
+        # Add to model
+        try:
+            self.model.add_experimental_data(experiment_name, [new_trace_data])
+            self.data_added = True  # Mark that data was added
+            self.logger.info(
+                f"Added synthetic trace data to experiment '{experiment_name}'"
+            )
+            QtWidgets.QMessageBox.information(
+                self,
+                "Data Added",
+                f"Synthetic trace data added to experiment:\n{experiment_name}",
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to add trace data to project: {e}")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Add Failed",
+                f"Failed to add trace data to project:\n{str(e)}",
             )

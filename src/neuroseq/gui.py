@@ -271,6 +271,9 @@ class Gui(QtWidgets.QMainWindow):
     def btn_generate_synthetic_data_clicked(self) -> None:
         dialog = SyntheticDataDialog(self.model, parent=self)
         dialog.exec()
+        # Refresh combo boxes if new data was added
+        if dialog.data_added:
+            self._update_combo_boxes()
 
     def btn_save_clicked(self) -> None:
         options_dialog = SaveLoadOptionsDialog(action="Save")
