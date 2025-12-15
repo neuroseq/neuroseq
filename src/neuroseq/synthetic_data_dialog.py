@@ -82,6 +82,19 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         noise_layout.addWidget(self.noise_spinbox)
         data_patch_clamp_group_layout.addLayout(noise_layout)
 
+        # Index selector
+        index_layout = QtWidgets.QHBoxLayout()
+        index_label = QtWidgets.QLabel("Indexes to import:")
+        index_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
+        self.index_lineedit = QtWidgets.QLineEdit()
+        self.index_lineedit.setPlaceholderText("e.g., 0,1,2,5,10")
+        self.index_lineedit.setToolTip(
+            "Comma-separated neuron indexes to import (leave empty for all)"
+        )
+        index_layout.addWidget(index_label)
+        index_layout.addWidget(self.index_lineedit)
+        data_patch_clamp_group_layout.addLayout(index_layout)
+
         # Buttons for patch clamp
         data_buttons_layout = QtWidgets.QHBoxLayout()
         self.btn_export_trace = QtWidgets.QPushButton("Export as a file")
