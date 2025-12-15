@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+import brian2 as b2
 import numpy as np
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -302,6 +303,12 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         else:
             # Export all traces if no indices specified
             traces_to_export = trace_data.traces
+
+        # Add gaussian noise with amplitude from the noise spinbox
+        noise_amplitude = self.noise_spinbox.value() * b2.mV
+        traces_to_export = traces_to_export + np.random.normal(
+            0, noise_amplitude, traces_to_export.shape
+        )
 
         # Open file dialog
 
