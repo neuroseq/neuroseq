@@ -172,6 +172,19 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         num_neurons_layout.addWidget(self.num_neurons_spinbox)
         data_imaging_group_layout.addLayout(num_neurons_layout)
 
+        # Index selector for imaging
+        imaging_index_layout = QtWidgets.QHBoxLayout()
+        imaging_index_label = QtWidgets.QLabel("Indexes to import:")
+        imaging_index_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
+        self.imaging_index_lineedit = QtWidgets.QLineEdit()
+        self.imaging_index_lineedit.setPlaceholderText("e.g., 0,1,5-15,20")
+        self.imaging_index_lineedit.setToolTip(
+            "Comma-separated neuron indexes and/or ranges (e.g., 0,1,5-15,20). Leave empty for all."
+        )
+        imaging_index_layout.addWidget(imaging_index_label)
+        imaging_index_layout.addWidget(self.imaging_index_lineedit)
+        data_imaging_group_layout.addLayout(imaging_index_layout)
+
         # Buttons for imaging
         imaging_buttons_layout = QtWidgets.QHBoxLayout()
         self.btn_export_imaging = QtWidgets.QPushButton("Export as a file")
@@ -549,6 +562,15 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             )
             return
 
+        # Parse indices from the imaging index selector
+        try:
+            indices = self._parse_indices(self.imaging_index_lineedit.text())
+        except ValueError as e:
+            QtWidgets.QMessageBox.warning(
+                self, "Invalid Indices", f"Invalid index format:\n{str(e)}"
+            )
+            return
+
         # Create a unique experiment name
         base_experiment_name = "Synthetic data"
         experiment_name = base_experiment_name
@@ -563,13 +585,16 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         n_timepoints = int(duration / dt)
         num_neurons = self.num_neurons_spinbox.value()
         imaging_traces = np.zeros((num_neurons, n_timepoints))
-        indecies = np.arange(num_neurons)
+
+        indices = np.arange(num_neurons) if indices is None else indices
+
+        imaging_traces = imaging_traces[indices]
 
         # Create new TraceData object with the synthetic data
         imaging_data = TraceData(
             name="Imaging",
             traces=imaging_traces,
-            indices=indecies,
+            indices=indices,
             dt=dt,
             units="1",
         )
