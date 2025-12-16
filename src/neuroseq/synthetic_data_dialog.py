@@ -412,6 +412,88 @@ class SyntheticDataDialog(QtWidgets.QDialog):
 
         return decayed_traces
 
+    def _generate_synthetic_imaging_traces(
+        self,
+        spike_data: SpikeData,
+        indices: np.ndarray | None,
+    ) -> tuple[np.ndarray, np.ndarray, float]:
+        """Generate synthetic imaging traces from spike data.
+
+        Args:
+            spike_data: The spike data to convert to imaging traces.
+            indices: Array of indices to extract, or None to generate all traces.
+
+        Returns:
+            Tuple of (imaging_traces, indices, dt_downsample)
+        """
+        # Calculate number of time points based on recording duration
+        duration = self.recording_duration_spinbox.value()  # in seconds
+        dt = 0.0001  # in seconds (0.1 ms)
+        n_timepoints = int(duration / dt)
+        num_neurons = self.num_neurons_spinbox.value()
+        imaging_traces = np.zeros((num_neurons, n_timepoints))
+
+        # Get imaging parameters from UI widgets
+        F0 = self.f0_spinbox.value()  # baseline mean fluorescence in photoelectrons
+        lognornal_mean = self.lognormal_mean_spinbox.value()
+        lognormal_sigma = self.lognormal_sigma_spinbox.value()
+        normalization_factor = np.exp(lognornal_mean + (lognormal_sigma**2) / 2)
+
+        dF_F = self.df_f_spinbox.value()
+        dF_F_variability = self.df_f_var_spinbox.value()
+        decay_time_constant = self.decay_time_spinbox.value()  # seconds
+        sampling_rate = self.sampling_rate_spinbox.value()  # Hz
+        dt_downsample = 1.0 / sampling_rate  # seconds
+
+        photelectron_noise_factor = (
+            self.photoelectron_noise_spinbox.value()
+        )  # 1 - corresponds to Poisson noise only
+
+        # Insert 1s at spike positions (can be improved for large N if done after the selection of indices)
+        for i, spike_time in enumerate(spike_data.spike_times):
+            neuron_idx = spike_data.spike_indices[i]
+            if neuron_idx < num_neurons:
+                time_idx = int(spike_time / dt)
+                if 0 <= time_idx < n_timepoints:
+                    imaging_traces[neuron_idx, time_idx] = np.random.normal(
+                        dF_F, dF_F_variability
+                    )  # simulate variability in calcium amplitude
+
+        indices = np.arange(num_neurons) if indices is None else indices
+
+        imaging_traces = imaging_traces[indices]
+
+        # Apply decay dynamics: each element is based on previous value * decay factor
+        # Rising time is ignored as at sampling rate of 30 Hz it is negligible for most practical purposes
+        # quenching factor is also ignored for now (short experiments with low photobleaching approximation)
+        # both will incroduce extra terms in the apply_temporal_decay function
+        decay_factor = np.exp(
+            -dt / decay_time_constant
+        )  # Constant multiplication factor for temporal decay
+        imaging_traces = self._apply_temporal_decay(imaging_traces, decay_factor) + 1
+
+        # Downsample to imaging sampling rate
+        # The mean of the signal can vary depending on downsampling strategy
+        # During experiment the exact value will likely depend on the position of the neuron within the frame
+        downsample_factor = int(dt_downsample / dt)
+        imaging_traces = imaging_traces[:, ::downsample_factor]
+
+        imaging_traces = imaging_traces * F0  # Convert to fluorescence units
+
+        for i in range(imaging_traces.shape[0]):
+            # Apply lognormal variability to each neuron
+            lognormal_variability = (
+                np.random.lognormal(lognornal_mean, lognormal_sigma)
+                / normalization_factor
+            )
+            imaging_traces[i, :] *= lognormal_variability
+
+        imaging_traces = np.random.poisson(
+            imaging_traces * photelectron_noise_factor
+        )  # Apply Poisson noise
+
+        return imaging_traces, indices, dt_downsample
+
     def _update_preview(self) -> None:
         """Update the data preview based on current selections."""
         preview_lines = []
@@ -728,71 +810,10 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             experiment_name = f"{base_experiment_name} {counter}"
             counter += 1
 
-        # Calculate number of time points based on recording duration
-        duration = self.recording_duration_spinbox.value()  # in seconds
-        dt = 0.0001  # in seconds (0.1 ms)
-        n_timepoints = int(duration / dt)
-        num_neurons = self.num_neurons_spinbox.value()
-        imaging_traces = np.zeros((num_neurons, n_timepoints))
-
-        # Get imaging parameters from UI widgets
-        F0 = self.f0_spinbox.value()  # baseline mean fluorescence in photoelectrons
-        lognornal_mean = self.lognormal_mean_spinbox.value()
-        lognormal_sigma = self.lognormal_sigma_spinbox.value()
-        normalization_factor = np.exp(lognornal_mean + (lognormal_sigma**2) / 2)
-
-        dF_F = self.df_f_spinbox.value()
-        dF_F_variability = self.df_f_var_spinbox.value()
-        decay_time_constant = self.decay_time_spinbox.value()  # seconds
-        sampling_rate = self.sampling_rate_spinbox.value()  # Hz
-        dt_downsample = 1.0 / sampling_rate  # seconds
-
-        photelectron_noise_factor = (
-            self.photoelectron_noise_spinbox.value()
-        )  # 1 - corresponds to Poisson noise only
-
-        # Insert 1s at spike positions (can be improved for large N if done after the selection of indices)
-        for i, spike_time in enumerate(spike_data.spike_times):
-            neuron_idx = spike_data.spike_indices[i]
-            if neuron_idx < num_neurons:
-                time_idx = int(spike_time / dt)
-                if 0 <= time_idx < n_timepoints:
-                    imaging_traces[neuron_idx, time_idx] = np.random.normal(
-                        dF_F, dF_F_variability
-                    )  # simulate variability in calcium amplitude
-
-        indices = np.arange(num_neurons) if indices is None else indices
-
-        imaging_traces = imaging_traces[indices]
-
-        # Apply decay dynamics: each element is based on previous value * decay factor
-        # Rising time is ignored as at sampling rate of 30 Hz it is negligible for most practical purposes
-        # quenching factor is also ignored for now (short experiments with low photobleaching approximation)
-        # both will incroduce extra terms in the apply_temporal_decay function
-        decay_factor = np.exp(
-            -dt / decay_time_constant
-        )  # Constant multiplication factor for temporal decay
-        imaging_traces = self._apply_temporal_decay(imaging_traces, decay_factor) + 1
-
-        # Downsample to imaging sampling rate
-        # The mean of the signal can vary depending on downsampling strategy
-        # During experiment the exact value will likely depend on the position of the neuron within the frame
-        downsample_factor = int(dt_downsample / dt)
-        imaging_traces = imaging_traces[:, ::downsample_factor]
-
-        imaging_traces = imaging_traces * F0  # Convert to fluorescence units
-
-        for i in range(imaging_traces.shape[0]):
-            # Apply lognormal variability to each neuron
-            lognormal_variability = (
-                np.random.lognormal(lognornal_mean, lognormal_sigma)
-                / normalization_factor
-            )
-            imaging_traces[i, :] *= lognormal_variability
-
-        imaging_traces = np.random.poisson(
-            imaging_traces * photelectron_noise_factor
-        )  # Apply Poisson noise
+        # Generate synthetic imaging traces
+        imaging_traces, indices, dt_downsample = (
+            self._generate_synthetic_imaging_traces(spike_data, indices)
+        )
 
         # Create new TraceData object with the synthetic data
         imaging_data = TraceData(
