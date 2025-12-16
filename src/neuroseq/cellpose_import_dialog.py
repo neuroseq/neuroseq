@@ -418,9 +418,6 @@ class CellposeImportDialog(QtWidgets.QDialog):
         try:
             # Generate stimulus-to-cellpose mapping based on selected strategy
             mapping_strategy = self._get_mapping_strategy()
-            linear_offset = (
-                self._get_linear_offset() if mapping_strategy == "Linear" else 0
-            )
             stimulus_mapping = self._generate_stimulus_mapping(mapping_strategy)
 
             self._imported_data = self.importer.create_result(
@@ -437,6 +434,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 f"Detected {info['n_neurons']} neurons with IDs: {unique_ids}\n"
                 f"Mapping strategy: {mapping_strategy}"
             )
+            linear_offset = self._get_linear_offset()
             if mapping_strategy == "Linear" and linear_offset:
                 success_msg += f" (offset {linear_offset})"
 

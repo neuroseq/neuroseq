@@ -29,7 +29,7 @@ class OverlayView(FPLWidget):
         self.text = None
         self.stim_to_cellpose: dict[int, int] = {}
         self.base_camera_state: CameraState | None = None
-        self.zoom_factor = 2.5
+        self.zoom_factor = 1
         self._configure_subplot()
         self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
         self.setMinimumSize(QtCore.QSize(200, 200))
@@ -119,7 +119,17 @@ class OverlayView(FPLWidget):
         self, segmentation: np.ndarray, stim_to_cellpose: dict[int, int]
     ) -> None:
         reverse_mapping = {v: k for k, v in stim_to_cellpose.items()}
-        for cell_id in np.unique(segmentation):
+        mapping_keys = set(stim_to_cellpose.keys())
+        unique_ids = np.unique(segmentation)
+
+        # Detect whether the segmentation contains stimulus IDs (mapping keys) or cellpose IDs (mapping values).
+        segmentation_is_stim = False
+        if mapping_keys:
+            positive_ids = [int(cid) for cid in unique_ids if cid >= 0]
+            if positive_ids and all(cid in mapping_keys for cid in positive_ids):
+                segmentation_is_stim = True
+
+        for cell_id in unique_ids:
             if cell_id < 0:
                 continue
 
@@ -130,8 +140,12 @@ class OverlayView(FPLWidget):
             y_coords, x_coords = np.where(mask)
             center_y = float(np.mean(y_coords))
             center_x = float(np.mean(x_coords))
-            stim_id = reverse_mapping.get(cell_id, cell_id)
-            cellpose_id = stim_to_cellpose.get(cell_id, cell_id)
+            if segmentation_is_stim:
+                stim_id = int(cell_id)
+                cellpose_id = stim_to_cellpose.get(int(cell_id), int(cell_id))
+            else:
+                stim_id = reverse_mapping.get(cell_id, cell_id)
+                cellpose_id = cell_id
 
             # Primary stim ID label
             self.subplot.add_text(
@@ -428,7 +442,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
                 return
             available_height = screen.availableGeometry().height()
 
-        target_height = max(600, int(available_height * 0.7))
+        target_height = max(600, int(available_height * 0.86))
         aspect_ratio = 1.0
         if self.overlay_image is not None and self.overlay_image.shape[0] > 0:
             aspect_ratio = max(
