@@ -766,7 +766,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         file_path, selected_filter = QtWidgets.QFileDialog.getSaveFileName(
             self,
             "Export Imaging Data",
-            f"{spike_name}_imaging.npy",
+            "F.npy",  # TODO: better to creat a separate folder for imaging data
             "NumPy Array (*.npy);;CSV File (*.csv)",
         )
 
