@@ -263,6 +263,37 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         indices = sorted(set(indices))
         return np.array(indices, dtype=int)
 
+    def _apply_temporal_decay(
+        self, traces: np.ndarray, decay_factor: float
+    ) -> np.ndarray:
+        """Apply temporal decay to imaging traces.
+
+        Each element at position t is calculated based on the previous value at t-1
+        multiplied by a decay factor, plus the current spike indicator.
+        This simulates calcium imaging dynamics where the signal decays over time.
+
+        Args:
+            traces: Input array of shape (n_neurons, n_timepoints) with spike indicators
+            decay_factor: Constant multiplication factor for temporal decay (0 < factor <= 1)
+
+        Returns:
+            Processed array with temporal decay applied to all rows simultaneously
+        """
+        # Create output array with same shape
+        decayed_traces = np.zeros_like(traces, dtype=float)
+
+        # First column is the same as input (no previous value)
+        decayed_traces[:, 0] = traces[:, 0]
+
+        # For each subsequent time point, calculate based on previous value
+        # Process all rows at the same time using vectorized operations
+        for t in range(1, traces.shape[1]):
+            decayed_traces[:, t] = (
+                decayed_traces[:, t - 1] * decay_factor + traces[:, t]
+            )
+
+        return decayed_traces
+
     def _update_preview(self) -> None:
         """Update the data preview based on current selections."""
         preview_lines = []
@@ -586,7 +617,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         num_neurons = self.num_neurons_spinbox.value()
         imaging_traces = np.zeros((num_neurons, n_timepoints))
 
-        # Insert 1s at spike positions
+        # Insert 1s at spike positions (can be improved for large N if done after the selection of indices)
         for i, spike_time in enumerate(spike_data.spike_times):
             neuron_idx = spike_data.spike_indices[i]
             if neuron_idx < num_neurons:
@@ -597,6 +628,13 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         indices = np.arange(num_neurons) if indices is None else indices
 
         imaging_traces = imaging_traces[indices]
+
+        # Apply decay dynamics: each element is based on previous value * decay factor
+        # Rising time is ignored as at sampling rate of 30 Hz it is negligible for most practical purposes
+        decay_factor = np.exp(
+            -dt / 0.05
+        )  # Constant multiplication factor for temporal decay
+        imaging_traces = self._apply_temporal_decay(imaging_traces, decay_factor)
 
         # Create new TraceData object with the synthetic data
         imaging_data = TraceData(
