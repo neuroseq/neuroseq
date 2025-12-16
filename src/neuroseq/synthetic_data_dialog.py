@@ -257,7 +257,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
 
         # Lognormal sigma selector
         lognormal_layout = QtWidgets.QHBoxLayout()
-        lognormal_label = QtWidgets.QLabel("Lognormal sigma:")
+        lognormal_label = QtWidgets.QLabel("Lognormal sigma (F0 distribution):")
         lognormal_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
         self.lognormal_sigma_spinbox = QtWidgets.QDoubleSpinBox()
         self.lognormal_sigma_spinbox.setRange(0.0, 2.0)
@@ -273,7 +273,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
 
         # Lognormal mean selector
         lognormal_mean_layout = QtWidgets.QHBoxLayout()
-        lognormal_mean_label = QtWidgets.QLabel("Lognormal mean:")
+        lognormal_mean_label = QtWidgets.QLabel("Lognormal mean (F0 distribution):")
         lognormal_mean_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
         self.lognormal_mean_spinbox = QtWidgets.QDoubleSpinBox()
         self.lognormal_mean_spinbox.setRange(-5.0, 5.0)
