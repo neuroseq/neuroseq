@@ -617,13 +617,24 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         num_neurons = self.num_neurons_spinbox.value()
         imaging_traces = np.zeros((num_neurons, n_timepoints))
 
+        F0 = 100  # baseline mean fluorescence
+        lognornal_mean = 0.0
+        lognormal_sigma = 0.25
+        normalization_factor = np.exp(lognornal_mean + (lognormal_sigma**2) / 2)
+
+        dF_F = 0.4
+        dF_F_variability = 0.04
+        decay_time_constant = 0.05  # seconds
+
         # Insert 1s at spike positions (can be improved for large N if done after the selection of indices)
         for i, spike_time in enumerate(spike_data.spike_times):
             neuron_idx = spike_data.spike_indices[i]
             if neuron_idx < num_neurons:
                 time_idx = int(spike_time / dt)
                 if 0 <= time_idx < n_timepoints:
-                    imaging_traces[neuron_idx, time_idx] = 1
+                    imaging_traces[neuron_idx, time_idx] = np.random.normal(
+                        dF_F, dF_F_variability
+                    )  # simulate variability in calcium amplitude
 
         indices = np.arange(num_neurons) if indices is None else indices
 
@@ -631,10 +642,21 @@ class SyntheticDataDialog(QtWidgets.QDialog):
 
         # Apply decay dynamics: each element is based on previous value * decay factor
         # Rising time is ignored as at sampling rate of 30 Hz it is negligible for most practical purposes
+        # quenching factor is also ignored for now (short experiments with low photobleaching approximation)
+        # both will incroduce extra terms in the apply_temporal_decay function
         decay_factor = np.exp(
-            -dt / 0.05
+            -dt / decay_time_constant
         )  # Constant multiplication factor for temporal decay
-        imaging_traces = self._apply_temporal_decay(imaging_traces, decay_factor)
+        imaging_traces = self._apply_temporal_decay(imaging_traces, decay_factor) + 1
+        imaging_traces = imaging_traces * F0  # Convert to fluorescence units
+
+        for i in range(imaging_traces.shape[0]):
+            # Apply lognormal variability to each neuron
+            lognormal_variability = (
+                np.random.lognormal(lognornal_mean, lognormal_sigma)
+                / normalization_factor
+            )
+            imaging_traces[i, :] *= lognormal_variability
 
         # Create new TraceData object with the synthetic data
         imaging_data = TraceData(
