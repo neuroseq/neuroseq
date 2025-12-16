@@ -586,6 +586,14 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         num_neurons = self.num_neurons_spinbox.value()
         imaging_traces = np.zeros((num_neurons, n_timepoints))
 
+        # Insert 1s at spike positions
+        for i, spike_time in enumerate(spike_data.spike_times):
+            neuron_idx = spike_data.spike_indices[i]
+            if neuron_idx < num_neurons:
+                time_idx = int(spike_time / dt)
+                if 0 <= time_idx < n_timepoints:
+                    imaging_traces[neuron_idx, time_idx] = 1
+
         indices = np.arange(num_neurons) if indices is None else indices
 
         imaging_traces = imaging_traces[indices]
