@@ -185,6 +185,124 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         imaging_index_layout.addWidget(self.imaging_index_lineedit)
         data_imaging_group_layout.addLayout(imaging_index_layout)
 
+        # F0 selector
+        f0_layout = QtWidgets.QHBoxLayout()
+        f0_label = QtWidgets.QLabel("F0 (photoelectrons):")
+        f0_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
+        self.f0_spinbox = QtWidgets.QDoubleSpinBox()
+        self.f0_spinbox.setRange(1.0, 100000.0)
+        self.f0_spinbox.setValue(1000.0)
+        self.f0_spinbox.setSingleStep(100.0)
+        self.f0_spinbox.setDecimals(1)
+        self.f0_spinbox.setToolTip("Baseline mean fluorescence in photoelectrons")
+        f0_layout.addWidget(f0_label)
+        f0_layout.addWidget(self.f0_spinbox)
+        data_imaging_group_layout.addLayout(f0_layout)
+
+        # dF/F selector
+        df_f_layout = QtWidgets.QHBoxLayout()
+        df_f_label = QtWidgets.QLabel("dF/F:")
+        df_f_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
+        self.df_f_spinbox = QtWidgets.QDoubleSpinBox()
+        self.df_f_spinbox.setRange(0.0, 10.0)
+        self.df_f_spinbox.setValue(0.4)
+        self.df_f_spinbox.setSingleStep(0.1)
+        self.df_f_spinbox.setDecimals(2)
+        self.df_f_spinbox.setToolTip("Mean relative fluorescence change per spike")
+        df_f_layout.addWidget(df_f_label)
+        df_f_layout.addWidget(self.df_f_spinbox)
+        data_imaging_group_layout.addLayout(df_f_layout)
+
+        # dF/F variability selector
+        df_f_var_layout = QtWidgets.QHBoxLayout()
+        df_f_var_label = QtWidgets.QLabel("dF/F variability:")
+        df_f_var_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
+        self.df_f_var_spinbox = QtWidgets.QDoubleSpinBox()
+        self.df_f_var_spinbox.setRange(0.0, 1.0)
+        self.df_f_var_spinbox.setValue(0.04)
+        self.df_f_var_spinbox.setSingleStep(0.01)
+        self.df_f_var_spinbox.setDecimals(3)
+        self.df_f_var_spinbox.setToolTip("Standard deviation of dF/F per spike")
+        df_f_var_layout.addWidget(df_f_var_label)
+        df_f_var_layout.addWidget(self.df_f_var_spinbox)
+        data_imaging_group_layout.addLayout(df_f_var_layout)
+
+        # Decay time constant selector
+        decay_layout = QtWidgets.QHBoxLayout()
+        decay_label = QtWidgets.QLabel("Decay time (s):")
+        decay_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
+        self.decay_time_spinbox = QtWidgets.QDoubleSpinBox()
+        self.decay_time_spinbox.setRange(0.001, 10.0)
+        self.decay_time_spinbox.setValue(0.05)
+        self.decay_time_spinbox.setSingleStep(0.01)
+        self.decay_time_spinbox.setDecimals(3)
+        self.decay_time_spinbox.setToolTip("Calcium decay time constant in seconds")
+        decay_layout.addWidget(decay_label)
+        decay_layout.addWidget(self.decay_time_spinbox)
+        data_imaging_group_layout.addLayout(decay_layout)
+
+        # Sampling rate selector
+        sampling_layout = QtWidgets.QHBoxLayout()
+        sampling_label = QtWidgets.QLabel("Sampling rate (Hz):")
+        sampling_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
+        self.sampling_rate_spinbox = QtWidgets.QDoubleSpinBox()
+        self.sampling_rate_spinbox.setRange(0.1, 10000.0)
+        self.sampling_rate_spinbox.setValue(30.0)
+        self.sampling_rate_spinbox.setSingleStep(1.0)
+        self.sampling_rate_spinbox.setDecimals(1)
+        self.sampling_rate_spinbox.setToolTip("Imaging sampling rate in Hz")
+        sampling_layout.addWidget(sampling_label)
+        sampling_layout.addWidget(self.sampling_rate_spinbox)
+        data_imaging_group_layout.addLayout(sampling_layout)
+
+        # Lognormal sigma selector
+        lognormal_layout = QtWidgets.QHBoxLayout()
+        lognormal_label = QtWidgets.QLabel("Lognormal sigma:")
+        lognormal_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
+        self.lognormal_sigma_spinbox = QtWidgets.QDoubleSpinBox()
+        self.lognormal_sigma_spinbox.setRange(0.0, 2.0)
+        self.lognormal_sigma_spinbox.setValue(0.25)
+        self.lognormal_sigma_spinbox.setSingleStep(0.05)
+        self.lognormal_sigma_spinbox.setDecimals(2)
+        self.lognormal_sigma_spinbox.setToolTip(
+            "Lognormal distribution sigma for neuron-to-neuron fluorescence variability"
+        )
+        lognormal_layout.addWidget(lognormal_label)
+        lognormal_layout.addWidget(self.lognormal_sigma_spinbox)
+        data_imaging_group_layout.addLayout(lognormal_layout)
+
+        # Lognormal mean selector
+        lognormal_mean_layout = QtWidgets.QHBoxLayout()
+        lognormal_mean_label = QtWidgets.QLabel("Lognormal mean:")
+        lognormal_mean_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
+        self.lognormal_mean_spinbox = QtWidgets.QDoubleSpinBox()
+        self.lognormal_mean_spinbox.setRange(-5.0, 5.0)
+        self.lognormal_mean_spinbox.setValue(0.0)
+        self.lognormal_mean_spinbox.setSingleStep(0.1)
+        self.lognormal_mean_spinbox.setDecimals(2)
+        self.lognormal_mean_spinbox.setToolTip(
+            "Lognormal distribution mean for neuron-to-neuron fluorescence variability"
+        )
+        lognormal_mean_layout.addWidget(lognormal_mean_label)
+        lognormal_mean_layout.addWidget(self.lognormal_mean_spinbox)
+        data_imaging_group_layout.addLayout(lognormal_mean_layout)
+
+        # Photoelectron noise factor selector
+        noise_factor_layout = QtWidgets.QHBoxLayout()
+        noise_factor_label = QtWidgets.QLabel("Photoelectron noise factor:")
+        noise_factor_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
+        self.photoelectron_noise_spinbox = QtWidgets.QDoubleSpinBox()
+        self.photoelectron_noise_spinbox.setRange(0.0, 10.0)
+        self.photoelectron_noise_spinbox.setValue(1.0)
+        self.photoelectron_noise_spinbox.setSingleStep(0.1)
+        self.photoelectron_noise_spinbox.setDecimals(2)
+        self.photoelectron_noise_spinbox.setToolTip(
+            "Multiplicative factor for Poisson noise (1.0 = pure Poisson noise)"
+        )
+        noise_factor_layout.addWidget(noise_factor_label)
+        noise_factor_layout.addWidget(self.photoelectron_noise_spinbox)
+        data_imaging_group_layout.addLayout(noise_factor_layout)
+
         # Buttons for imaging
         imaging_buttons_layout = QtWidgets.QHBoxLayout()
         self.btn_export_imaging = QtWidgets.QPushButton("Export as a file")
@@ -617,18 +735,21 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         num_neurons = self.num_neurons_spinbox.value()
         imaging_traces = np.zeros((num_neurons, n_timepoints))
 
-        F0 = 1000  # baseline mean fluorescence in photoelectrons
-        lognornal_mean = 0.0
-        lognormal_sigma = 0.25
+        # Get imaging parameters from UI widgets
+        F0 = self.f0_spinbox.value()  # baseline mean fluorescence in photoelectrons
+        lognornal_mean = self.lognormal_mean_spinbox.value()
+        lognormal_sigma = self.lognormal_sigma_spinbox.value()
         normalization_factor = np.exp(lognornal_mean + (lognormal_sigma**2) / 2)
 
-        dF_F = 0.4
-        dF_F_variability = 0.04
-        decay_time_constant = 0.05  # seconds
-        sampling_rate = 30.0  # Hz
+        dF_F = self.df_f_spinbox.value()
+        dF_F_variability = self.df_f_var_spinbox.value()
+        decay_time_constant = self.decay_time_spinbox.value()  # seconds
+        sampling_rate = self.sampling_rate_spinbox.value()  # Hz
         dt_downsample = 1.0 / sampling_rate  # seconds
 
-        photelectron_noise_factor = 1.0  # 1 - corresponds to Poisson noise only
+        photelectron_noise_factor = (
+            self.photoelectron_noise_spinbox.value()
+        )  # 1 - corresponds to Poisson noise only
 
         # Insert 1s at spike positions (can be improved for large N if done after the selection of indices)
         for i, spike_time in enumerate(spike_data.spike_times):
