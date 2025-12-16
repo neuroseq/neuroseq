@@ -270,10 +270,6 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         layout.addWidget(self.overlay_view)
         self._update_overlay_scale()
 
-    def _on_id_toggle_changed(self, checked: bool) -> None:
-        self.show_stimulus_ids = checked
-        self._update_overlay_display()
-
     def _update_overlay_display(self) -> None:
         display_segmentation = self._get_display_segmentation()
         display_legend = self._get_display_legend(display_segmentation)
@@ -344,7 +340,6 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             original_cellpose_ids is not None
             and stimulus_to_cellpose_mapping is not None
         )
-        self.id_toggle_checkbox.setVisible(has_mapping)
         self._update_overlay_display()
         self._update_overlay_scale()
 
@@ -354,7 +349,6 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.legend_data = []
         self.original_cellpose_ids = None
         self.stimulus_to_cellpose_mapping = None
-        self.id_toggle_checkbox.setVisible(False)
         self.overlay_view.add_overlay_data(None, None)
         self._update_overlay_scale()
 

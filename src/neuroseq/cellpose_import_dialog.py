@@ -123,6 +123,14 @@ class CellposeImportDialog(QtWidgets.QDialog):
             first_button.setChecked(True)
         mapping_layout.addRow("Mapping strategy:", strategy_layout)
 
+        # Linear offset input
+        self.linear_offset_spin = QtWidgets.QSpinBox()
+        self.linear_offset_spin.setRange(0, 1000000)
+        self.linear_offset_spin.setValue(0)
+        self.linear_offset_spin.valueChanged.connect(self._on_linear_offset_changed)
+        self.linear_offset_label = QtWidgets.QLabel("Linear First-cellpose-ID offset:")
+        mapping_layout.addRow(self.linear_offset_label, self.linear_offset_spin)
+
         # Custom mapping input
         self.custom_mapping_line = QtWidgets.QLineEdit()
         self.custom_mapping_line.setPlaceholderText(
@@ -184,6 +192,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
         is_custom = mapping_strategy == "Custom"
         self.custom_mapping_line.setVisible(is_custom)
         self.custom_mapping_label.setVisible(is_custom)
+        self.linear_offset_spin.setVisible(not is_custom)
+        self.linear_offset_label.setVisible(not is_custom)
 
         # Update preview if data is loaded
         if (
@@ -200,10 +210,26 @@ class CellposeImportDialog(QtWidgets.QDialog):
             return
         self._update_preview_mapping()
 
+    def _on_linear_offset_changed(self, _value: int) -> None:
+        """Refresh preview when linear offset changes."""
+        if self._get_mapping_strategy() != "Linear":
+            return
+        if self.importer.segmentation_data is None:
+            return
+        self._update_preview_mapping()
+
     def _get_mapping_strategy(self) -> str:
         """Get the currently selected mapping strategy"""
         checked = self.mapping_buttons.checkedButton()
         return checked.text() if checked is not None else "Linear"
+
+    def _get_linear_offset(self) -> int:
+        """Return the selected linear offset (defaults to 0)."""
+        return (
+            int(self.linear_offset_spin.value())
+            if hasattr(self, "linear_offset_spin")
+            else 0
+        )
 
     def _parse_custom_mapping(self, mapping_str: str) -> dict[int, int]:
         """Parse custom mapping string like '1:12,2:3' into {1: 12, 2: 3}"""
@@ -238,8 +264,16 @@ class CellposeImportDialog(QtWidgets.QDialog):
         original_ids = self.importer._original_cellpose_ids
 
         if strategy == "Linear":
-            # Map stimulus IDs 1,2,3... to cellpose IDs in order
-            return {i: int(cellpose_id) for i, cellpose_id in enumerate(original_ids)}
+            offset = self._get_linear_offset()
+            offset = max(0, offset)
+            # Map stimulus ID = cellpose_id - offset (leaving gaps if IDs are missing)
+            mapping: dict[int, int] = {}
+            for cellpose_id in original_ids:
+                if cellpose_id < offset:
+                    continue
+                stim_id = int(cellpose_id - offset)
+                mapping[stim_id] = int(cellpose_id)
+            return mapping
         elif strategy == "Custom":
             # Parse custom mapping string
             return self._parse_custom_mapping(self.custom_mapping_line.text())
@@ -384,6 +418,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
         try:
             # Generate stimulus-to-cellpose mapping based on selected strategy
             mapping_strategy = self._get_mapping_strategy()
+            linear_offset = (
+                self._get_linear_offset() if mapping_strategy == "Linear" else 0
+            )
             stimulus_mapping = self._generate_stimulus_mapping(mapping_strategy)
 
             self._imported_data = self.importer.create_result(
@@ -400,6 +437,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 f"Detected {info['n_neurons']} neurons with IDs: {unique_ids}\n"
                 f"Mapping strategy: {mapping_strategy}"
             )
+            if mapping_strategy == "Linear" and linear_offset:
+                success_msg += f" (offset {linear_offset})"
 
             if stimulus_mapping:
                 success_msg += f"\nStimulus mapping: {dict(list(stimulus_mapping.items())[:5])}{'...' if len(stimulus_mapping) > 5 else ''}"
@@ -486,6 +525,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.segmentation_path_label.setText("No segmentation file selected")
             self.segmentation_path_label.setStyleSheet("QLabel { color: gray; }")
             self.custom_mapping_line.clear()
+            self.linear_offset_spin.setValue(0)
 
             # Reset to Linear mapping
             for button in self.mapping_buttons.buttons():
