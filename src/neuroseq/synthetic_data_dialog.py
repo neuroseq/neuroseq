@@ -733,7 +733,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             )
 
     def _export_imaging_data(self) -> None:
-        """Export selected spike data to a file."""
+        """Export synthetic imaging data generated from spike data to a file."""
         spike_name = self.data_imaging_combo.currentText()
         if not spike_name:
             QtWidgets.QMessageBox.warning(
@@ -748,6 +748,20 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             )
             return
 
+        # Parse indices from the imaging index selector
+        try:
+            indices = self._parse_indices(self.imaging_index_lineedit.text())
+        except ValueError as e:
+            QtWidgets.QMessageBox.warning(
+                self, "Invalid Indices", f"Invalid index format:\n{str(e)}"
+            )
+            return
+
+        # Generate synthetic imaging traces
+        imaging_traces, indices, dt_downsample = (
+            self._generate_synthetic_imaging_traces(spike_data, indices)
+        )
+
         # Open file dialog
         file_path, selected_filter = QtWidgets.QFileDialog.getSaveFileName(
             self,
@@ -761,11 +775,11 @@ class SyntheticDataDialog(QtWidgets.QDialog):
 
         try:
             if file_path.endswith(".npy"):
-                np.save(file_path, spike_data.spike_times)
+                np.save(file_path, imaging_traces)
             elif file_path.endswith(".csv"):
-                np.savetxt(file_path, spike_data.spike_times, delimiter=",")
+                np.savetxt(file_path, imaging_traces, delimiter=",")
             else:
-                np.savetxt(file_path, spike_data.spike_times)
+                np.savetxt(file_path, imaging_traces)
 
             self.logger.info(f"Exported imaging data to {file_path}")
             QtWidgets.QMessageBox.information(
