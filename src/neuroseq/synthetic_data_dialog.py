@@ -522,16 +522,21 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             experiment_name = f"{base_experiment_name} {counter}"
             counter += 1
 
-        # Create new SpikeData object
-        new_spike_data = SpikeData(
+        imaging_traces = np.zeros((40, 100))
+        indecies = np.arange(40)
+
+        # Create new TraceData object with the synthetic data
+        imaging_data = TraceData(
             name="Imaging",
-            spike_times=spike_data.spike_times,
-            spike_indices=spike_data.spike_indices,
+            traces=imaging_traces,
+            indices=indecies,
+            dt=0.0001,
+            units="1",
         )
 
         # Add to model
         try:
-            self.model.add_experimental_data(experiment_name, [new_spike_data])
+            self.model.add_experimental_data(experiment_name, [imaging_data])
             self.data_added = True  # Mark that data was added
             self.logger.info(
                 f"Added synthetic spike data to experiment '{experiment_name}'"
