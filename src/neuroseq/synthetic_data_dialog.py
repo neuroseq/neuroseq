@@ -114,6 +114,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         ### Imaging
 
         data_imaging_group = QtWidgets.QGroupBox("Imaging")
+        data_imaging_group_layout = QtWidgets.QVBoxLayout()
 
         data_inner_layout = QtWidgets.QHBoxLayout()
         data_label = QtWidgets.QLabel("Select spikes:")
@@ -140,7 +141,19 @@ class SyntheticDataDialog(QtWidgets.QDialog):
 
         data_inner_layout.addWidget(data_label)
         data_inner_layout.addWidget(self.data_imaging_combo)
-        data_imaging_group.setLayout(data_inner_layout)
+        data_imaging_group_layout.addLayout(data_inner_layout)
+
+        # Buttons for imaging
+        imaging_buttons_layout = QtWidgets.QHBoxLayout()
+        self.btn_export_imaging = QtWidgets.QPushButton("Export as a file")
+        self.btn_export_imaging.clicked.connect(self._export_imaging_data)
+        self.btn_add_imaging = QtWidgets.QPushButton("Add to the project")
+        self.btn_add_imaging.clicked.connect(self._add_imaging_to_project)
+        imaging_buttons_layout.addWidget(self.btn_export_imaging)
+        imaging_buttons_layout.addWidget(self.btn_add_imaging)
+        data_imaging_group_layout.addLayout(imaging_buttons_layout)
+
+        data_imaging_group.setLayout(data_imaging_group_layout)
         layout.addWidget(data_imaging_group)
 
         # Data Preview
@@ -258,6 +271,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         Args:
             trace_data: The trace data to filter.
             indices: Array of indices to extract, or None to export all traces.
+
             noise_amplitude: Standard deviation of Gaussian noise to add (in mV).
 
         Returns:
@@ -310,7 +324,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         trace_name = self.data_patch_clamp_combo.currentText()
         if not trace_name:
             QtWidgets.QMessageBox.warning(
-                self, "No Data Selected", "Please select trace data to export."
+                self, "No Data Selected", "Please select trace data."
             )
             return
 
@@ -372,7 +386,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         trace_name = self.data_patch_clamp_combo.currentText()
         if not trace_name:
             QtWidgets.QMessageBox.warning(
-                self, "No Data Selected", "Please select trace data to generate."
+                self, "No Data Selected", "Please select trace data."
             )
             return
 
@@ -437,4 +451,100 @@ class SyntheticDataDialog(QtWidgets.QDialog):
                 self,
                 "Add Failed",
                 f"Failed to add trace data to project:\n{str(e)}",
+            )
+
+    def _export_imaging_data(self) -> None:
+        """Export selected spike data to a file."""
+        spike_name = self.data_imaging_combo.currentText()
+        if not spike_name:
+            QtWidgets.QMessageBox.warning(
+                self, "No Data Selected", "Please select spike data."
+            )
+            return
+
+        spike_data = self.model.get_data(spike_name, SpikeData)
+        if not spike_data:
+            QtWidgets.QMessageBox.warning(
+                self, "Data Not Found", f"Could not find spike data: {spike_name}"
+            )
+            return
+
+        # Open file dialog
+        file_path, selected_filter = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Export Imaging Data",
+            f"{spike_name}_imaging.npy",
+            "NumPy Array (*.npy);;CSV File (*.csv)",
+        )
+
+        if not file_path:
+            return
+
+        try:
+            if file_path.endswith(".npy"):
+                np.save(file_path, spike_data.spike_times)
+            elif file_path.endswith(".csv"):
+                np.savetxt(file_path, spike_data.spike_times, delimiter=",")
+            else:
+                np.savetxt(file_path, spike_data.spike_times)
+
+            self.logger.info(f"Exported imaging data to {file_path}")
+            QtWidgets.QMessageBox.information(
+                self, "Export Successful", f"Imaging data exported to:\n{file_path}"
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to export imaging data: {e}")
+            QtWidgets.QMessageBox.critical(
+                self, "Export Failed", f"Failed to export imaging data:\n{str(e)}"
+            )
+
+    def _add_imaging_to_project(self) -> None:
+        """Add spike data to the project as experimental data."""
+        spike_name = self.data_imaging_combo.currentText()
+        if not spike_name:
+            QtWidgets.QMessageBox.warning(
+                self, "No Data Selected", "Please select spike data."
+            )
+            return
+
+        spike_data = self.model.get_data(spike_name, SpikeData)
+        if not spike_data:
+            QtWidgets.QMessageBox.warning(
+                self, "Data Not Found", f"Could not find spike data: {spike_name}"
+            )
+            return
+
+        # Create a unique experiment name
+        base_experiment_name = "Synthetic data"
+        experiment_name = base_experiment_name
+        counter = 1
+        while experiment_name in self.model.experiments:
+            experiment_name = f"{base_experiment_name} {counter}"
+            counter += 1
+
+        # Create new SpikeData object
+        new_spike_data = SpikeData(
+            name="Imaging",
+            spike_times=spike_data.spike_times,
+            spike_indices=spike_data.spike_indices,
+        )
+
+        # Add to model
+        try:
+            self.model.add_experimental_data(experiment_name, [new_spike_data])
+            self.data_added = True  # Mark that data was added
+            self.logger.info(
+                f"Added synthetic spike data to experiment '{experiment_name}'"
+            )
+            QtWidgets.QMessageBox.information(
+                self,
+                "Data Added",
+                f"Synthetic spike data added to experiment:\n{experiment_name}",
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to add spike data to project: {e}")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Add Failed",
+                f"Failed to add spike data to project:\n{str(e)}",
             )
