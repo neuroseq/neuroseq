@@ -159,6 +159,19 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         duration_layout.addWidget(self.recording_duration_spinbox)
         data_imaging_group_layout.addLayout(duration_layout)
 
+        # Number of neurons selector
+        num_neurons_layout = QtWidgets.QHBoxLayout()
+        num_neurons_label = QtWidgets.QLabel("Number of neurons:")
+        num_neurons_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
+        self.num_neurons_spinbox = QtWidgets.QSpinBox()
+        self.num_neurons_spinbox.setRange(1, 10000)
+        self.num_neurons_spinbox.setValue(40)
+        self.num_neurons_spinbox.setSingleStep(1)
+        self.num_neurons_spinbox.setToolTip("Number of neurons in the imaging session")
+        num_neurons_layout.addWidget(num_neurons_label)
+        num_neurons_layout.addWidget(self.num_neurons_spinbox)
+        data_imaging_group_layout.addLayout(num_neurons_layout)
+
         # Buttons for imaging
         imaging_buttons_layout = QtWidgets.QHBoxLayout()
         self.btn_export_imaging = QtWidgets.QPushButton("Export as a file")
@@ -538,15 +551,20 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             experiment_name = f"{base_experiment_name} {counter}"
             counter += 1
 
-        imaging_traces = np.zeros((40, 100))
-        indecies = np.arange(40)
+        # Calculate number of time points based on recording duration
+        duration = self.recording_duration_spinbox.value()  # in seconds
+        dt = 0.0001  # in seconds (0.1 ms)
+        n_timepoints = int(duration / dt)
+        num_neurons = self.num_neurons_spinbox.value()
+        imaging_traces = np.zeros((num_neurons, n_timepoints))
+        indecies = np.arange(num_neurons)
 
         # Create new TraceData object with the synthetic data
         imaging_data = TraceData(
             name="Imaging",
             traces=imaging_traces,
             indices=indecies,
-            dt=0.0001,
+            dt=dt,
             units="1",
         )
 
