@@ -143,6 +143,22 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         data_inner_layout.addWidget(self.data_imaging_combo)
         data_imaging_group_layout.addLayout(data_inner_layout)
 
+        # Recording duration selector
+        duration_layout = QtWidgets.QHBoxLayout()
+        duration_label = QtWidgets.QLabel("Recording duration (s):")
+        duration_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
+        self.recording_duration_spinbox = QtWidgets.QDoubleSpinBox()
+        self.recording_duration_spinbox.setRange(0.1, 1000.0)
+        self.recording_duration_spinbox.setValue(10.0)
+        self.recording_duration_spinbox.setSingleStep(1.0)
+        self.recording_duration_spinbox.setDecimals(2)
+        self.recording_duration_spinbox.setToolTip(
+            "Duration of the recording in seconds"
+        )
+        duration_layout.addWidget(duration_label)
+        duration_layout.addWidget(self.recording_duration_spinbox)
+        data_imaging_group_layout.addLayout(duration_layout)
+
         # Buttons for imaging
         imaging_buttons_layout = QtWidgets.QHBoxLayout()
         self.btn_export_imaging = QtWidgets.QPushButton("Export as a file")
