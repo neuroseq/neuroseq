@@ -617,7 +617,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         num_neurons = self.num_neurons_spinbox.value()
         imaging_traces = np.zeros((num_neurons, n_timepoints))
 
-        F0 = 100  # baseline mean fluorescence in photoelectrons
+        F0 = 1000  # baseline mean fluorescence in photoelectrons
         lognornal_mean = 0.0
         lognormal_sigma = 0.25
         normalization_factor = np.exp(lognornal_mean + (lognormal_sigma**2) / 2)
@@ -625,6 +625,8 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         dF_F = 0.4
         dF_F_variability = 0.04
         decay_time_constant = 0.05  # seconds
+        sampling_rate = 30.0  # Hz
+        dt_downsample = 1.0 / sampling_rate  # seconds
 
         photelectron_noise_factor = 1.0  # 1 - corresponds to Poisson noise only
 
@@ -650,6 +652,13 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             -dt / decay_time_constant
         )  # Constant multiplication factor for temporal decay
         imaging_traces = self._apply_temporal_decay(imaging_traces, decay_factor) + 1
+
+        # Downsample to imaging sampling rate
+        # The mean of the signal can vary depending on downsampling strategy
+        # During experiment the exact value will likely depend on the position of the neuron within the frame
+        downsample_factor = int(dt_downsample / dt)
+        imaging_traces = imaging_traces[:, ::downsample_factor]
+
         imaging_traces = imaging_traces * F0  # Convert to fluorescence units
 
         for i in range(imaging_traces.shape[0]):
@@ -669,7 +678,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             name="Imaging",
             traces=imaging_traces,
             indices=indices,
-            dt=dt,
+            dt=dt_downsample,
             units="1",
         )
 
