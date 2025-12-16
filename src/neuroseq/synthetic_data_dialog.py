@@ -148,7 +148,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         duration_label = QtWidgets.QLabel("Recording duration (s):")
         duration_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
         self.recording_duration_spinbox = QtWidgets.QDoubleSpinBox()
-        self.recording_duration_spinbox.setRange(0.1, 1000.0)
+        self.recording_duration_spinbox.setRange(0.1, 1000000.0)
         self.recording_duration_spinbox.setValue(10.0)
         self.recording_duration_spinbox.setSingleStep(1.0)
         self.recording_duration_spinbox.setDecimals(2)
@@ -164,8 +164,8 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         num_neurons_label = QtWidgets.QLabel("Number of neurons:")
         num_neurons_label.setAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
         self.num_neurons_spinbox = QtWidgets.QSpinBox()
-        self.num_neurons_spinbox.setRange(1, 10000)
-        self.num_neurons_spinbox.setValue(40)
+        self.num_neurons_spinbox.setRange(1, 1000000)
+        self.num_neurons_spinbox.setValue(10)
         self.num_neurons_spinbox.setSingleStep(1)
         self.num_neurons_spinbox.setToolTip("Number of neurons in the imaging session")
         num_neurons_layout.addWidget(num_neurons_label)
@@ -272,6 +272,12 @@ class SyntheticDataDialog(QtWidgets.QDialog):
                     f"  Neuron indices (range): from {indices[0]} to {indices[-1]}"
                 )
                 preview_lines.append(f"  Neuron indices (full list): {indices}")
+
+                # Update default values for recording duration and number of neurons
+                duration_seconds = shape[1] * dt
+                num_neurons = shape[0]
+                self.recording_duration_spinbox.setValue(duration_seconds)
+                self.num_neurons_spinbox.setValue(num_neurons)
 
         # Imaging preview
         spike_name = self.data_imaging_combo.currentText()
