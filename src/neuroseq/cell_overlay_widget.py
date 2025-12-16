@@ -28,6 +28,8 @@ class OverlayView(FPLWidget):
         self.segmentation: np.ndarray | None = None
         self.text = None
         self.stim_to_cellpose: dict[int, int] = {}
+        self.show_cellpose_ids = True
+        self.show_stimulus_ids = False
         self.base_camera_state: CameraState | None = None
         self.zoom_factor = 1
         self._configure_subplot()
@@ -49,6 +51,9 @@ class OverlayView(FPLWidget):
         segmentation: np.ndarray | None,
         legend_data: Iterable[tuple[int, tuple[int, int, int]]] | None = None,
         stim_to_cellpose: dict[int, int] | None = None,
+        show_segmentation: bool = True,
+        show_cellpose_ids: bool = True,
+        show_stimulus_ids: bool = False,
     ) -> None:
         previous_shape = (
             self.overlay_image.shape[:2] if self.overlay_image is not None else None
@@ -63,6 +68,8 @@ class OverlayView(FPLWidget):
         self.text = None
         self.base_camera_state = None
         self.stim_to_cellpose = stim_to_cellpose or {}
+        self.show_cellpose_ids = show_cellpose_ids
+        self.show_stimulus_ids = show_stimulus_ids
 
         if overlay_image is None:
             self.figure.renderer.request_draw()
@@ -71,9 +78,15 @@ class OverlayView(FPLWidget):
         self.subplot.add_image(overlay_image, interpolation="nearest")
 
         if segmentation is not None:
-            color_image = self._build_segmentation_colors(segmentation, legend_data)
-            self.subplot.add_image(color_image, interpolation="nearest")
-            self._add_cell_labels(segmentation, self.stim_to_cellpose)
+            if show_segmentation:
+                color_image = self._build_segmentation_colors(segmentation, legend_data)
+                self.subplot.add_image(color_image, interpolation="nearest")
+            self._add_cell_labels(
+                segmentation,
+                self.stim_to_cellpose,
+                show_cellpose_ids,
+                show_stimulus_ids,
+            )
             self.text = self._create_hover_label()
 
         same_shape = (
@@ -116,18 +129,17 @@ class OverlayView(FPLWidget):
         return rgb
 
     def _add_cell_labels(
-        self, segmentation: np.ndarray, stim_to_cellpose: dict[int, int]
+        self,
+        segmentation: np.ndarray,
+        stim_to_cellpose: dict[int, int],
+        show_cellpose_ids: bool,
+        show_stimulus_ids: bool,
     ) -> None:
-        reverse_mapping = {v: k for k, v in stim_to_cellpose.items()}
-        mapping_keys = set(stim_to_cellpose.keys())
-        unique_ids = np.unique(segmentation)
+        if not show_cellpose_ids and not show_stimulus_ids:
+            return
 
-        # Detect whether the segmentation contains stimulus IDs (mapping keys) or cellpose IDs (mapping values).
-        segmentation_is_stim = False
-        if mapping_keys:
-            positive_ids = [int(cid) for cid in unique_ids if cid >= 0]
-            if positive_ids and all(cid in mapping_keys for cid in positive_ids):
-                segmentation_is_stim = True
+        reverse_mapping = {v: k for k, v in stim_to_cellpose.items()}
+        unique_ids = np.unique(segmentation)
 
         for cell_id in unique_ids:
             if cell_id < 0:
@@ -140,34 +152,37 @@ class OverlayView(FPLWidget):
             y_coords, x_coords = np.where(mask)
             center_y = float(np.mean(y_coords))
             center_x = float(np.mean(x_coords))
-            if segmentation_is_stim:
-                stim_id = int(cell_id)
-                cellpose_id = stim_to_cellpose.get(int(cell_id), int(cell_id))
-            else:
-                stim_id = reverse_mapping.get(cell_id, cell_id)
-                cellpose_id = cell_id
+            stim_id = reverse_mapping.get(cell_id, cell_id)
+            cellpose_id = cell_id
 
-            # Primary stim ID label
-            self.subplot.add_text(
-                f"{stim_id}",
-                font_size=4,
-                offset=(center_x, center_y, 200.0),
-                face_color=(0.0, 0.0, 0.0),
-                outline_color=(1.0, 1.0, 1.0),
-                outline_thickness=3.0,
-                center=True,
-                screen_space=False,
-            )
-            # Secondary cellpose ID label
-            self.subplot.add_text(
-                f"{cellpose_id}",
-                font_size=3,
-                offset=(center_x + 5.0, center_y, 200.0),
-                face_color=(0.3, 0.3, 0.3),
-                outline_color=(0.8, 0.8, 0.8),
-                outline_thickness=0.4,  # and deliberately not centered.
-                screen_space=False,
-            )
+            base_offset = (center_x, center_y, 200.0)
+            secondary_offset = (center_x + 5.0, center_y, 200.0)
+            stim_offset = base_offset
+            cellpose_offset = secondary_offset if show_stimulus_ids else base_offset
+            stim_font_size = 5 if show_cellpose_ids else 6
+            cellpose_font_size = 3 if show_stimulus_ids else 5
+
+            if show_cellpose_ids:
+                self.subplot.add_text(
+                    f"{cellpose_id}",
+                    font_size=cellpose_font_size,
+                    offset=cellpose_offset,
+                    face_color=(0.0, 0.0, 0.0),
+                    outline_color=(1.0, 1.0, 1.0),
+                    outline_thickness=3.0,
+                    center=True,
+                    screen_space=False,
+                )
+            if show_stimulus_ids:
+                self.subplot.add_text(
+                    f"{stim_id}",
+                    font_size=stim_font_size,
+                    offset=stim_offset,
+                    face_color=(0.3, 0.3, 0.3),
+                    outline_color=(0.8, 0.8, 0.8),
+                    outline_thickness=0.6,
+                    screen_space=False,
+                )
 
     def _create_hover_label(self):
         return self.subplot.add_text(
@@ -249,23 +264,38 @@ class OverlayView(FPLWidget):
             self.text.visible = False
             return
 
+        if not self.show_cellpose_ids and not self.show_stimulus_ids:
+            self.text.visible = False
+            return
+
         reverse_mapping = {v: k for k, v in self.stim_to_cellpose.items()}
         stim_id = reverse_mapping.get(neuron_index, neuron_index)
+        cellpose_id = int(neuron_index)
+
+        if self.show_stimulus_ids and not self.show_cellpose_ids:
+            hover_text = f"{stim_id}"
+        elif self.show_cellpose_ids and not self.show_stimulus_ids:
+            hover_text = f"{cellpose_id}"
+        else:
+            hover_text = f"{cellpose_id} / {stim_id}"
 
         self.text.visible = True
         self.text.offset = (mouse_pos[0], mouse_pos[1], 200)
-        self.text.text = f"{stim_id}"
+        self.text.text = hover_text
 
 
 class CellOverlayWidget(QtWidgets.QGroupBox):
     def __init__(self, title: str = "Color-coded Preview") -> None:
         super().__init__(title)
         self.overlay_image: np.ndarray | None = None
+        self.base_image: np.ndarray | None = None
         self.segmentation: np.ndarray | None = None
         self.legend_data: list[tuple[int, tuple[int, int, int]]] = []
         self.original_cellpose_ids: np.ndarray | None = None
         self.stimulus_to_cellpose_mapping: dict[int, int] | None = None
-        self.show_stimulus_ids = True  # delet enot hceck box removed?
+        self.show_cellpose_ids = True
+        self.show_stimulus_ids = False
+        self.show_segmentation = True
         self._tracked_window: QtWidgets.QWidget | None = None
         self._window_handle = None
         self._last_target_size: tuple[int, int] | None = None
@@ -286,12 +316,22 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
 
     def _update_overlay_display(self) -> None:
         display_segmentation = self._get_display_segmentation()
-        display_legend = self._get_display_legend(display_segmentation)
+        display_legend = (
+            []
+            if not self.show_segmentation
+            else self._get_display_legend(display_segmentation)
+        )
+        image_to_show = (
+            self.overlay_image if self.show_segmentation else self.base_image
+        ) or self.overlay_image
         self.overlay_view.add_overlay_data(
-            self.overlay_image,
+            image_to_show,
             display_segmentation,
             display_legend,
             self.stimulus_to_cellpose_mapping,
+            show_segmentation=self.show_segmentation,
+            show_cellpose_ids=self.show_cellpose_ids,
+            show_stimulus_ids=self.show_stimulus_ids,
         )
 
     def _get_display_segmentation(self) -> np.ndarray | None:
@@ -339,32 +379,52 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
     def set_overlay(
         self,
         overlay_image: np.ndarray | None,
+        base_image: np.ndarray | None = None,
         segmentation: np.ndarray | None,
         original_cellpose_ids: np.ndarray | None = None,
         stimulus_to_cellpose_mapping: dict[int, int] | None = None,
         legend_data: Iterable[tuple[int, tuple[int, int, int]]] | None = None,
     ) -> None:
         self.overlay_image = overlay_image
+        self.base_image = base_image
         self.segmentation = segmentation
         self.legend_data = list(legend_data or [])
         self.original_cellpose_ids = original_cellpose_ids
         self.stimulus_to_cellpose_mapping = stimulus_to_cellpose_mapping
 
-        has_mapping = (
-            original_cellpose_ids is not None
-            and stimulus_to_cellpose_mapping is not None
-        )
         self._update_overlay_display()
         self._update_overlay_scale()
 
     def set_empty_message(self, message: str) -> None:
         self.overlay_image = None
+        self.base_image = None
         self.segmentation = None
         self.legend_data = []
         self.original_cellpose_ids = None
         self.stimulus_to_cellpose_mapping = None
-        self.overlay_view.add_overlay_data(None, None)
+        self.overlay_view.add_overlay_data(
+            None,
+            None,
+            show_segmentation=self.show_segmentation,
+            show_cellpose_ids=self.show_cellpose_ids,
+            show_stimulus_ids=self.show_stimulus_ids,
+        )
         self._update_overlay_scale()
+
+    def set_display_options(
+        self,
+        *,
+        show_cellpose_ids: bool | None = None,
+        show_stimulus_ids: bool | None = None,
+        show_segmentation: bool | None = None,
+    ) -> None:
+        if show_cellpose_ids is not None:
+            self.show_cellpose_ids = show_cellpose_ids
+        if show_stimulus_ids is not None:
+            self.show_stimulus_ids = show_stimulus_ids
+        if show_segmentation is not None:
+            self.show_segmentation = show_segmentation
+        self._update_overlay_display()
 
     def _compute_segementation_colors(
         self, segmentation: np.ndarray
@@ -442,7 +502,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
                 return
             available_height = screen.availableGeometry().height()
 
-        target_height = max(600, int(available_height * 0.86))
+        target_height = max(600, int(available_height * 0.84))
         aspect_ratio = 1.0
         if self.overlay_image is not None and self.overlay_image.shape[0] > 0:
             aspect_ratio = max(

@@ -33,6 +33,8 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.imported_trace_data: list = []
         self.experiment_name = "PatchClamp Import"
         self.append_data = False
+        self._auto_stimulus_ids: list[int] = []
+        self._auto_from_cellpose = False
         self.neurons_to_replace: set[int] = (
             set()
         )  # Track which neurons should be replaced
@@ -251,6 +253,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         self.overlay_widget.set_overlay(
             self.cellpose_import.overlay_image,
+            None,
             self.cellpose_import.segmentation_array,
             self.cellpose_import.original_cellpose_ids,
             self.cellpose_import.stimulus_to_cellpose_mapping,
@@ -282,10 +285,10 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         mapping_str = ",".join(str(stim) for stim in stim_ids)
         self.custom_mapping_line.setText(mapping_str)
 
-        for button in self.mapping_buttons.buttons():
-            if button.text() == "Custom":
-                button.setChecked(True)
-                break
+        self._set_mapping_strategy("Custom")
+        if len(stim_ids) > 1:
+            self._auto_stimulus_ids = stim_ids
+            self._auto_from_cellpose = True
 
     def _on_replace_toggled(self, checked: bool) -> None:
         self.append_data = not checked
@@ -310,6 +313,8 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             self.npy_data = None
             self.extracted_neuron_id = None
             self.data_row_count = 0
+            self._auto_stimulus_ids = []
+            self._auto_from_cellpose = False
 
             if self.file_path.suffix.lower() == ".npy":
                 self._load_npy_file(filename)
@@ -351,10 +356,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 filename,
             )
             # Auto-select Custom mapping and set the neuron ID
-            for button in self.mapping_buttons.buttons():
-                if button.text() == "Custom":
-                    button.setChecked(True)
-                    break
+            self._set_mapping_strategy("Custom")
             self.custom_neuron_id_line.setText(str(self.extracted_neuron_id))
             if not self.custom_mapping_line.text().strip():
                 # Default stim ID target to the detected neuron ID
@@ -368,6 +370,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.data_row_count = (
             1 if self.npy_data.ndim == 1 else int(self.npy_data.shape[0])
         )
+        self._apply_cellpose_mapping_defaults(self.data_row_count)
         self._update_target_stimulus_ids()
 
         # Pathclamp has a higher hz in general
@@ -393,6 +396,22 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             duration_sec = self.npy_data.shape[0] / 10000.0
             lines.append(f"  duration: {duration_sec:.1f} seconds at 10kHz")
             lines.append("")
+
+            target_ids = []
+            if self._get_mapping_strategy() == "Custom":
+                target_ids = self._safe_parse_stimulus_ids()
+            else:
+                target_ids = self._safe_parse_neuron_ids()
+            if len(target_ids) > 1:
+                suffix = (
+                    " (auto from Cellpose mapping)"
+                    if self._auto_from_cellpose
+                    and target_ids == self._auto_stimulus_ids
+                    else ""
+                )
+                lines.append(
+                    f"Target stimulus IDs: {', '.join(map(str, target_ids))}{suffix}"
+                )
         else:
             self.preview_text.clear()
             return
@@ -409,6 +428,28 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         if strategy == "Custom":
             return self._parse_stim_neuron_ids(self.custom_mapping_line.text())
         return self._parse_neuron_ids(self.custom_neuron_id_line.text())
+
+    def _apply_cellpose_mapping_defaults(self, row_count: int) -> None:
+        """Use Cellpose stimulus IDs in ascending order to prefill multi-row targets."""
+        stim_ids = self._get_cellpose_stim_ids()
+        if len(stim_ids) < 2 or row_count < 2:
+            return
+
+        derived_ids = stim_ids[:row_count]
+        self.custom_mapping_line.setText(",".join(str(stim) for stim in derived_ids))
+        self.custom_neuron_id_line.setText(self.custom_mapping_line.text())
+        self._set_mapping_strategy("Custom")
+        self._auto_stimulus_ids = derived_ids
+        self._auto_from_cellpose = True
+
+    def _get_cellpose_stim_ids(self) -> list[int]:
+        """Return sorted stimulus IDs from an existing Cellpose mapping."""
+        if (
+            self.cellpose_import is None
+            or not self.cellpose_import.stimulus_to_cellpose_mapping
+        ):
+            return []
+        return sorted(self.cellpose_import.stimulus_to_cellpose_mapping.keys())
 
     def _set_file_sections_visible(self, visible: bool) -> None:
         for group in (self.preview_group, self.options_group, self.spike_group):
@@ -466,11 +507,18 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         except Exception:
             return []
 
+    def _set_mapping_strategy(self, target: str) -> None:
+        for button in self.mapping_buttons.buttons():
+            if button.text() == target:
+                button.setChecked(True)
+                break
+
     def _update_target_stimulus_ids(self) -> None:
         """Limit target stimulus IDs to the number of traces in the loaded data."""
         if self.npy_data is None:
             return
 
+        auto_from_cellpose = False
         row_count = 1 if self.npy_data.ndim == 1 else int(self.npy_data.shape[0])
         self.data_row_count = row_count
 
@@ -486,6 +534,13 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 target_ids = [target_ids[0]]
         else:
             target_ids = self._safe_parse_stimulus_ids()
+            auto_from_cellpose = False
+            if not target_ids:
+                # Default to sorted Cellpose stim IDs when available
+                cellpose_ids = self._get_cellpose_stim_ids()
+                if cellpose_ids:
+                    target_ids = cellpose_ids[:row_count]
+                    auto_from_cellpose = True
             if target_ids:
                 target_ids = target_ids[:row_count]
                 # Pad with sequential IDs if we truncated a shorter list
@@ -499,6 +554,8 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         mapping_str = ",".join(str(tid) for tid in target_ids)
         self.custom_mapping_line.setText(mapping_str)
         self.custom_neuron_id_line.setText(mapping_str)
+        self._auto_from_cellpose = auto_from_cellpose and len(target_ids) > 1
+        self._auto_stimulus_ids = target_ids if self._auto_from_cellpose else []
 
     def _validate_append_import(self) -> None:
         """Validate that we can safely append data in extend mode."""

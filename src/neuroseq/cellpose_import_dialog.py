@@ -153,6 +153,24 @@ class CellposeImportDialog(QtWidgets.QDialog):
         # Place overlay first so the visual is top-most
         self.overlay_widget.setMinimumHeight(400)
         main_content_layout.addWidget(self.overlay_widget)
+
+        checkbox_layout = QtWidgets.QHBoxLayout()
+        checkbox_layout.setContentsMargins(4, 0, 4, 0)
+        self.show_cellpose_checkbox = QtWidgets.QCheckBox("Show Cellpose IDs")
+        self.show_cellpose_checkbox.setChecked(True)
+        self.show_stimulus_checkbox = QtWidgets.QCheckBox("Show Stimulus IDs")
+        self.show_stimulus_checkbox.setChecked(False)
+        self.show_segmentation_checkbox = QtWidgets.QCheckBox("Show segmentation")
+        self.show_segmentation_checkbox.setChecked(True)
+        for checkbox in (
+            self.show_cellpose_checkbox,
+            self.show_stimulus_checkbox,
+            self.show_segmentation_checkbox,
+        ):
+            checkbox.toggled.connect(self._on_display_toggle_changed)
+            checkbox_layout.addWidget(checkbox)
+        checkbox_layout.addStretch(1)
+        main_content_layout.addLayout(checkbox_layout)
         main_content_layout.addWidget(mapping_group)
 
         button_layout = QtWidgets.QHBoxLayout()
@@ -176,6 +194,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         layout.addWidget(self.main_content_container)
         self.main_content_container.setVisible(False)
         self._set_ui_loaded_state(False)
+        self._on_display_toggle_changed()
 
     def _set_ui_loaded_state(self, loaded: bool) -> None:
         """Toggle between pre-selection and post-selection UI."""
@@ -194,6 +213,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.custom_mapping_label.setVisible(is_custom)
         self.linear_offset_spin.setVisible(not is_custom)
         self.linear_offset_label.setVisible(not is_custom)
+
+        if is_custom and not self.show_stimulus_checkbox.isChecked():
+            self.show_stimulus_checkbox.setChecked(True)
 
         # Update preview if data is loaded
         if (
@@ -217,6 +239,14 @@ class CellposeImportDialog(QtWidgets.QDialog):
         if self.importer.segmentation_data is None:
             return
         self._update_preview_mapping()
+
+    def _on_display_toggle_changed(self) -> None:
+        """Sync overlay display options with the checkboxes."""
+        self.overlay_widget.set_display_options(
+            show_cellpose_ids=self.show_cellpose_checkbox.isChecked(),
+            show_stimulus_ids=self.show_stimulus_checkbox.isChecked(),
+            show_segmentation=self.show_segmentation_checkbox.isChecked(),
+        )
 
     def _get_mapping_strategy(self) -> str:
         """Get the currently selected mapping strategy"""
@@ -265,14 +295,16 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         if strategy == "Linear":
             offset = self._get_linear_offset()
-            offset = max(0, offset)
             # Map stimulus ID = cellpose_id - offset (leaving gaps if IDs are missing)
             mapping: dict[int, int] = {}
             for cellpose_id in original_ids:
                 if cellpose_id < offset:
-                    continue
+                    continue  # should start with (if offset 5) cellpose ID 5 and map to stim ID 1.
                 stim_id = int(cellpose_id - offset)
-                mapping[stim_id] = int(cellpose_id)
+                mapping[stim_id] = int(
+                    cellpose_id
+                )  # not sure why we see "1:1", "2:2", but then conspiciously from 5, "5:1". Need to solve.
+                # think cell-stim are swapped in ordering on map vs this calculation.
             return mapping
         elif strategy == "Custom":
             # Parse custom mapping string
@@ -288,6 +320,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
             self.overlay_widget.set_overlay(
                 self.importer.overlay_image,
+                self.importer.image_data,
                 self.importer.segmentation_data,
                 self.importer._original_cellpose_ids,
                 preview_mapping,
@@ -366,6 +399,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
             self.overlay_widget.set_overlay(
                 self.importer.overlay_image,
+                self.importer.image_data,
                 self.importer.segmentation_data,
                 self.importer._original_cellpose_ids,
                 preview_mapping,
@@ -431,7 +465,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             success_msg = (
                 f"Successfully imported Cellpose data.\n"
                 f"Image: {info['image_shape']}\n"
-                f"Detected {info['n_neurons']} neurons with IDs: {unique_ids}\n"
+                f"Detected {len(unique_ids)} neurons\n"
                 f"Mapping strategy: {mapping_strategy}"
             )
             linear_offset = self._get_linear_offset()
@@ -536,5 +570,5 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self._set_ui_loaded_state(False)
 
             # Clear preview
-            self.overlay_widget.set_overlay(None, None)
+            self.overlay_widget.set_overlay(None, None, None)
             self._hide_info()
