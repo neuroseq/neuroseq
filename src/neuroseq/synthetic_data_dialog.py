@@ -102,7 +102,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         self.btn_export_trace = QtWidgets.QPushButton("Export as a file")
         self.btn_export_trace.clicked.connect(self._export_patch_clamp_data)
         self.btn_add_trace = QtWidgets.QPushButton("Add to the project")
-        self.btn_add_trace.clicked.connect(self._add_trace_to_project)
+        self.btn_add_trace.clicked.connect(self._add_patch_clamp_to_project)
         data_buttons_layout.addWidget(self.btn_export_trace)
         data_buttons_layout.addWidget(self.btn_add_trace)
         data_patch_clamp_group_layout.addLayout(data_buttons_layout)
@@ -416,7 +416,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
                 self, "Export Failed", f"Failed to export patch clamp data:\n{str(e)}"
             )
 
-    def _add_trace_to_project(self) -> None:
+    def _add_patch_clamp_to_project(self) -> None:
         """Add generated synthetic trace data to the project as experimental data."""
         trace_name = self.data_patch_clamp_combo.currentText()
         if not trace_name:
