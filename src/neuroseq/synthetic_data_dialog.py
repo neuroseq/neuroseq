@@ -617,7 +617,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         num_neurons = self.num_neurons_spinbox.value()
         imaging_traces = np.zeros((num_neurons, n_timepoints))
 
-        F0 = 100  # baseline mean fluorescence
+        F0 = 100  # baseline mean fluorescence in photoelectrons
         lognornal_mean = 0.0
         lognormal_sigma = 0.25
         normalization_factor = np.exp(lognornal_mean + (lognormal_sigma**2) / 2)
@@ -625,6 +625,8 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         dF_F = 0.4
         dF_F_variability = 0.04
         decay_time_constant = 0.05  # seconds
+
+        photelectron_noise_factor = 1.0  # 1 - corresponds to Poisson noise only
 
         # Insert 1s at spike positions (can be improved for large N if done after the selection of indices)
         for i, spike_time in enumerate(spike_data.spike_times):
@@ -657,6 +659,10 @@ class SyntheticDataDialog(QtWidgets.QDialog):
                 / normalization_factor
             )
             imaging_traces[i, :] *= lognormal_variability
+
+        imaging_traces = np.random.poisson(
+            imaging_traces * photelectron_noise_factor
+        )  # Apply Poisson noise
 
         # Create new TraceData object with the synthetic data
         imaging_data = TraceData(
