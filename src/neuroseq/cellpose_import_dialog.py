@@ -35,15 +35,16 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self._setup_ui()
         self._load_existing_data_if_available()
 
-    def _setup_ui(self) -> None:
-        self.setWindowTitle("Import Cellpose Data")
-        self.setModal(True)
-
+    def _maximise_screen(self) -> None:
         screen = QtWidgets.QApplication.primaryScreen()
         available = screen.availableGeometry()
         # Use the maximum available window size
         self.setGeometry(available)
         self.setWindowState(self.windowState() | QtCore.Qt.WindowState.WindowMaximized)
+
+    def _setup_ui(self) -> None:
+        self.setWindowTitle("Import Cellpose Data")
+        self.setModal(True)
 
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -202,8 +203,41 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.file_selection_container.setVisible(not loaded)
         if self.main_content_container is not None:
             self.main_content_container.setVisible(loaded)
+            if loaded:
+                self._maximise_screen()
         if not loaded and hasattr(self, "import_button"):
             self.import_button.setEnabled(False)
+
+    def _reset_importer_state(self, clear_existing_data: bool = False) -> None:
+        """Return dialog to initial state after an importer failure."""
+        self._imported_data = None
+        if clear_existing_data:
+            self.existing_data = None
+
+        self.importer = CellPoseImporter()
+        self.image_path = None
+        self.segmentation_path = None
+
+        self.image_path_label.setText("No image selected")
+        self.image_path_label.setStyleSheet("QLabel { color: gray; }")
+        self.segmentation_path_label.setText("No segmentation file selected")
+        self.segmentation_path_label.setStyleSheet("QLabel { color: gray; }")
+        self.custom_mapping_line.clear()
+        self.linear_offset_spin.setValue(0)
+
+        for button in self.mapping_buttons.buttons():
+            if button.text() == "Linear":
+                button.setChecked(True)
+                break
+
+        self.show_cellpose_checkbox.setChecked(True)
+        self.show_stimulus_checkbox.setChecked(False)
+        self.show_segmentation_checkbox.setChecked(True)
+        self._on_display_toggle_changed()
+
+        self.overlay_widget.set_overlay(None, None, None, None, None, None)
+        self._hide_info()
+        self._set_ui_loaded_state(False)
 
     def _on_mapping_changed(self) -> None:
         """Handle toggle between mapping strategies"""
@@ -320,10 +354,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
             self.overlay_widget.set_overlay(
                 self.importer.overlay_image,
-                self.importer.image_data,
                 self.importer.segmentation_data,
                 self.importer._original_cellpose_ids,
                 preview_mapping,
+                base_image=self.importer.image_data,
             )
         except Exception as exc:
             self.logger.warning("Error updating preview mapping: %s", exc)
@@ -361,7 +395,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.critical(
                 self, "Error Loading Image", f"Could not load {filename}:\n{exc}"
             )
-            self._update_info(error=str(exc))
+            self._reset_importer_state()
 
     def _load_segmentation_file(self, filename: str) -> None:
         try:
@@ -376,7 +410,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.critical(
                 self, "Error Loading Segmentation", f"Could not load {filename}:\n{exc}"
             )
-            self._update_info(error=str(exc))
+            self._reset_importer_state()
 
     def _check_files_loaded(self) -> None:
         if self.importer.image_data is None or self.importer.segmentation_data is None:
@@ -399,17 +433,19 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
             self.overlay_widget.set_overlay(
                 self.importer.overlay_image,
-                self.importer.image_data,
                 self.importer.segmentation_data,
                 self.importer._original_cellpose_ids,
                 preview_mapping,
+                base_image=self.importer.image_data,
             )
             self._hide_info()
-        except ValueError as exc:
-            QtWidgets.QMessageBox.critical(self, "Dimension Mismatch", str(exc))
-            self._update_info(error=str(exc))
-            self.import_button.setEnabled(False)
-            self._set_ui_loaded_state(False)
+        except Exception as exc:
+            self.logger.exception("Error preparing cellpose preview")
+            title = (
+                "Dimension Mismatch" if isinstance(exc, ValueError) else "Import Error"
+            )
+            QtWidgets.QMessageBox.critical(self, title, str(exc))
+            self._reset_importer_state()
 
     def _update_info(self, error: str | None = None) -> None:
         info = self.importer.get_info()
@@ -483,6 +519,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.critical(
                 self, "Import Error", f"Error importing Cellpose data:\n{exc}"
             )
+            self._reset_importer_state()
 
     def get_imported_data(self) -> CellposeImportResult | None:
         """Return the last successfully imported data payload."""
@@ -502,19 +539,29 @@ class CellposeImportDialog(QtWidgets.QDialog):
             # Load the existing image and segmentation data
             self.importer.restore_from_result(self.existing_data)
 
-            # Pre-fill custom mapping if available
-            if self.existing_data.stimulus_to_cellpose_mapping:
-                mapping_str = ",".join(
-                    [
-                        f"{stim_id}:{cellpose_id}"
-                        for stim_id, cellpose_id in self.existing_data.stimulus_to_cellpose_mapping.items()
-                    ]
+            # Pre-fill mapping if available, prefer Linear when mapping is identity
+            mapping = self.existing_data.stimulus_to_cellpose_mapping or {}
+            if mapping:
+                mapping_items = list(mapping.items())
+                is_identity = all(
+                    stim_id == cellpose_id for stim_id, cellpose_id in mapping_items
                 )
-                self.custom_mapping_line.setText(mapping_str)
 
-                # Set to Custom mapping mode
+                if not is_identity:
+                    mapping_str = ",".join(
+                        [
+                            f"{stim_id}:{cellpose_id}"
+                            for stim_id, cellpose_id in mapping_items
+                        ]
+                    )
+                    self.custom_mapping_line.setText(mapping_str)
+                else:
+                    self.custom_mapping_line.clear()
+                    self.linear_offset_spin.setValue(0)
+
+                target_mode = "Linear" if is_identity else "Custom"
                 for button in self.mapping_buttons.buttons():
-                    if button.text() == "Custom":
+                    if button.text() == target_mode:
                         button.setChecked(True)
                         break
 
@@ -531,6 +578,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         except Exception as exc:
             self.logger.warning("Failed to load existing cellpose data: %s", exc)
+            self._reset_importer_state(clear_existing_data=True)
 
     def _clear_existing_data(self) -> None:
         """Clear cellpose data after confirmation"""
@@ -544,31 +592,4 @@ class CellposeImportDialog(QtWidgets.QDialog):
         )
 
         if reply == QtWidgets.QMessageBox.StandardButton.Yes:
-            # Reset all data
-            self.existing_data = None
-            self.image_path = None
-            self.segmentation_path = None
-            self.importer = CellPoseImporter()
-            self._imported_data = None
-
-            # Reset UI
-            self.image_path_label.setText("No image selected")
-            self.image_path_label.setStyleSheet("QLabel { color: gray; }")
-            self.segmentation_path_label.setText("No segmentation file selected")
-            self.segmentation_path_label.setStyleSheet("QLabel { color: gray; }")
-            self.custom_mapping_line.clear()
-            self.linear_offset_spin.setValue(0)
-
-            # Reset to Linear mapping
-            for button in self.mapping_buttons.buttons():
-                if button.text() == "Linear":
-                    button.setChecked(True)
-                    break
-
-            # Clear button remains visible
-            self.import_button.setEnabled(False)
-            self._set_ui_loaded_state(False)
-
-            # Clear preview
-            self.overlay_widget.set_overlay(None, None, None)
-            self._hide_info()
+            self._reset_importer_state(clear_existing_data=True)

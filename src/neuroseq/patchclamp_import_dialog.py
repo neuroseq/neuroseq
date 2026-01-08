@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 import brian2.numpy_ as np
+from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
@@ -46,6 +47,11 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.preview_group: QtWidgets.QGroupBox | None = None
         self.options_group: QtWidgets.QGroupBox | None = None
         self.spike_group: QtWidgets.QGroupBox | None = None
+        self.overlay_stack: QtWidgets.QStackedWidget | None = None
+        self.overlay_placeholder: QtWidgets.QLabel | None = None
+        self.file_group: QtWidgets.QGroupBox | None = None
+        self.file_status_label: QtWidgets.QLabel | None = None
+        self.button_row: QtWidgets.QWidget | None = None
         self._setup_ui()
         self._apply_existing_stim_mapping()
         self._populate_cellpose_preview()
@@ -66,22 +72,30 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         max_half_width = int(screen_width * 0.5)
 
+        left_container = QtWidgets.QWidget()
+        left_layout = QtWidgets.QVBoxLayout(left_container)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(8)
+
+        self.overlay_stack = QtWidgets.QStackedWidget()
+        self.overlay_stack.setMaximumWidth(max_half_width)
         self.overlay_widget = CellOverlayWidget("Cellpose Preview")
         self.overlay_widget.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Expanding,
         )
         self.overlay_widget.setMaximumWidth(max_half_width)
-        layout.addWidget(self.overlay_widget, stretch=1)
+        self.overlay_placeholder = QtWidgets.QLabel("No cellpose data yet")
+        self.overlay_placeholder.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.overlay_placeholder.setStyleSheet("QLabel { color: gray; }")
+        self.overlay_placeholder.setWordWrap(True)
+        self.overlay_stack.addWidget(self.overlay_placeholder)
+        self.overlay_stack.addWidget(self.overlay_widget)
+        left_layout.addWidget(self.overlay_stack, stretch=1)
+        left_layout.addStretch()
 
-        right_container = QtWidgets.QWidget()
-        right_container.setMaximumWidth(max_half_width)
-        right_layout = QtWidgets.QVBoxLayout(right_container)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(8)
-
-        file_group = QtWidgets.QGroupBox("Select .npy patchclamp file")
-        file_layout = QtWidgets.QHBoxLayout(file_group)
+        self.file_group = QtWidgets.QGroupBox("Select .npy patchclamp file")
+        file_layout = QtWidgets.QHBoxLayout(self.file_group)
 
         self.file_path_label = QtWidgets.QLabel("No file selected")
         self.file_path_label.setStyleSheet("QLabel { color: gray; }")
@@ -90,7 +104,14 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         file_layout.addWidget(self.file_path_label, stretch=1)
         file_layout.addWidget(browse_button)
 
-        right_layout.addWidget(file_group)
+        left_layout.addWidget(self.file_group)
+        layout.addWidget(left_container, stretch=1)
+
+        right_container = QtWidgets.QWidget()
+        right_container.setMaximumWidth(max_half_width)
+        right_layout = QtWidgets.QVBoxLayout(right_container)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
 
         self.preview_group = QtWidgets.QGroupBox("Data Preview")
         preview_layout = QtWidgets.QVBoxLayout(self.preview_group)
@@ -221,7 +242,16 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         right_layout.addWidget(self.options_group)
         right_layout.addWidget(self.spike_group)
 
-        button_layout = QtWidgets.QHBoxLayout()
+        self.button_row = QtWidgets.QWidget()
+        button_layout = QtWidgets.QHBoxLayout(self.button_row)
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        self.file_status_label = QtWidgets.QLabel("No file selected")
+        self.file_status_label.setStyleSheet("QLabel { color: gray; }")
+        self.file_status_label.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Preferred,
+        )
+        button_layout.addWidget(self.file_status_label, stretch=1)
         self.import_button = QtWidgets.QPushButton("Import")
         self.import_button.setEnabled(False)
         self.import_button.clicked.connect(self.import_data)
@@ -232,13 +262,14 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         button_layout.addWidget(cancel_button)
 
         button_layout.addStretch()
-        right_layout.addLayout(button_layout)
+        right_layout.addWidget(self.button_row)
         layout.addWidget(right_container, stretch=1)
         self._set_file_sections_visible(False)
+        self._set_file_selector_visible(True)
 
     def _populate_cellpose_preview(self) -> None:
         """Fill the left-hand preview with Cellpose data if available."""
-        if self.overlay_widget is None:
+        if self.overlay_widget is None or self.overlay_stack is None:
             return
 
         if (
@@ -246,18 +277,24 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             or self.cellpose_import.overlay_image is None
             or self.cellpose_import.segmentation_array is None
         ):
-            self.overlay_widget.set_empty_message(
-                "Load Cellpose segmentation first to preview cells."
-            )
+            self._show_overlay_placeholder("No cellpose data yet")
             return
 
+        self.overlay_stack.setCurrentWidget(self.overlay_widget)
         self.overlay_widget.set_overlay(
             self.cellpose_import.overlay_image,
-            None,
             self.cellpose_import.segmentation_array,
             self.cellpose_import.original_cellpose_ids,
             self.cellpose_import.stimulus_to_cellpose_mapping,
         )
+
+    def _show_overlay_placeholder(self, message: str) -> None:
+        """Show a text placeholder instead of an empty overlay preview."""
+        if self.overlay_stack is None or self.overlay_placeholder is None:
+            return
+
+        self.overlay_placeholder.setText(message)
+        self.overlay_stack.setCurrentWidget(self.overlay_placeholder)
 
     def _on_mapping_changed(self) -> None:
         mapping_strategy = self._get_mapping_strategy()
@@ -308,6 +345,9 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             self.file_path = Path(filename)
             self.file_path_label.setText(self.file_path.name)
             self.file_path_label.setStyleSheet("QLabel { color: black; }")
+            if self.file_status_label is not None:
+                self.file_status_label.setText(self.file_path.name)
+                self.file_status_label.setStyleSheet("QLabel { color: black; }")
 
             # Clear previous data
             self.npy_data = None
@@ -324,6 +364,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             self._update_preview()
             self.import_button.setEnabled(True)
             self._set_file_sections_visible(True)
+            self._set_file_selector_visible(False)
         except Exception as exc:
             self.logger.exception("Error loading patch clamp file")
             QtWidgets.QMessageBox.critical(
@@ -333,6 +374,10 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             )
             self.import_button.setEnabled(False)
             self._set_file_sections_visible(False)
+            self._set_file_selector_visible(True)
+            if self.file_status_label is not None:
+                self.file_status_label.setText("No file selected")
+                self.file_status_label.setStyleSheet("QLabel { color: gray; }")
 
     def _load_npy_file(self, filename: str) -> None:
         self.npy_data = np.load(filename)
@@ -455,11 +500,17 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         for group in (self.preview_group, self.options_group, self.spike_group):
             if group is not None:
                 group.setVisible(visible)
+        if self.button_row is not None:
+            self.button_row.setVisible(visible)
         if visible:
             self.resize(
                 max(self.width(), getattr(self, "dialog_width", self.width())),
                 max(self.height(), getattr(self, "dialog_height", self.height())),
             )
+
+    def _set_file_selector_visible(self, visible: bool) -> None:
+        if self.file_group is not None:
+            self.file_group.setVisible(visible)
 
     def _parse_stim_neuron_ids(self, mapping_str: str) -> list[int]:
         """Parse comma-separated stimulus IDs into a list of ints."""
@@ -528,10 +579,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             target_ids = self._safe_parse_stimulus_ids()
             if not target_ids:
                 target_ids = self._safe_parse_neuron_ids()
-            if not target_ids:
-                target_ids = [1]
-            else:
-                target_ids = [target_ids[0]]
+            target_ids = [1] if not target_ids else [target_ids[0]]
         else:
             target_ids = self._safe_parse_stimulus_ids()
             auto_from_cellpose = False

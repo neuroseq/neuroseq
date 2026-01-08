@@ -223,9 +223,9 @@ class OverlayView(FPLWidget):
 
         zoom = zoom_factor
         if not force:
-            zoom = max(0.1, min(zoom_factor, 10.0))
+            zoom = max(1, min(zoom_factor, 10.0))
 
-        self.zoom_factor = zoom
+        self.zoom_factor = int(zoom)
         cam_state: CameraState = {
             "width": base_state["width"] / zoom,
             "height": base_state["height"] / zoom,
@@ -321,9 +321,10 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             if not self.show_segmentation
             else self._get_display_legend(display_segmentation)
         )
-        image_to_show = (
-            self.overlay_image if self.show_segmentation else self.base_image
-        ) or self.overlay_image
+        if self.show_segmentation or self.base_image is None:
+            image_to_show = self.overlay_image
+        else:
+            image_to_show = self.base_image or self.overlay_image
         self.overlay_view.add_overlay_data(
             image_to_show,
             display_segmentation,
@@ -379,18 +380,18 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
     def set_overlay(
         self,
         overlay_image: np.ndarray | None,
-        base_image: np.ndarray | None = None,
         segmentation: np.ndarray | None,
         original_cellpose_ids: np.ndarray | None = None,
         stimulus_to_cellpose_mapping: dict[int, int] | None = None,
         legend_data: Iterable[tuple[int, tuple[int, int, int]]] | None = None,
+        base_image: np.ndarray | None = None,
     ) -> None:
         self.overlay_image = overlay_image
-        self.base_image = base_image
         self.segmentation = segmentation
         self.legend_data = list(legend_data or [])
         self.original_cellpose_ids = original_cellpose_ids
         self.stimulus_to_cellpose_mapping = stimulus_to_cellpose_mapping
+        self.base_image = base_image
 
         self._update_overlay_display()
         self._update_overlay_scale()

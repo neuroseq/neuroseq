@@ -241,7 +241,10 @@ class CellPoseImporter:
         if (
             self.image_data.shape[0] != self.segmentation_data.shape[0]
             or self.image_data.shape[1] != self.segmentation_data.shape[1]
-        ):
+        ):  # Sometimes this error occurs but then reselecting the right file would get
+            # "The truth value of an array with more than one element is ambigous ... Use a.any() or a.all()
+            # it is a bit tricky to manage and avoid stale state without confusing the user this wya, therefore we wipe
+
             raise ValueError(
                 f"Image dimensions {self.image_data.shape[:2]} do not match "
                 f"segmentation dimensions {self.segmentation_data.shape}"
