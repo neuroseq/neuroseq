@@ -59,6 +59,13 @@ def clone_cellpose_result(
     )
 
 
+def is_identity_mapping(mapping: dict[int, int] | None) -> bool:
+    """Return True if all stimulus IDs map to the same cellpose IDs (identity)."""
+    if not mapping:
+        return False
+    return all(stim_id == cellpose_id for stim_id, cellpose_id in mapping.items())
+
+
 def prepare_cellpose_traces(
     traces: np.ndarray,
     *,
@@ -394,7 +401,7 @@ class CellPoseImporter:
             return
 
         unique_ids = np.unique(self.segmentation_data)
-        neuron_ids = unique_ids[unique_ids >= 0]
+        neuron_ids = unique_ids[unique_ids >= 0]  # treat negatives as background
         if neuron_ids.size == 0:
             self._neuron_ids = None
             self._neuron_colors = None

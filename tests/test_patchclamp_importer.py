@@ -24,14 +24,17 @@ def _generate_patchclamp_trace(
     if num_spikes > 0:
         min_interval_samples = int(0.1 * sampling_rate)
         spike_positions: list[int] = []
+        # Clamp interval so randint has a valid range even for short traces
+        max_valid_start = n_samples - min_interval_samples
+        if max_valid_start <= min_interval_samples:
+            min_interval_samples = max(1, n_samples // 4)
+            max_valid_start = max(min_interval_samples + 1, n_samples)
 
         for _ in range(num_spikes):
             # Find valid position
             attempts = 0
             while attempts < 100:
-                pos = np.random.randint(
-                    min_interval_samples, n_samples - min_interval_samples
-                )
+                pos = np.random.randint(min_interval_samples, max_valid_start)
                 if (
                     not spike_positions
                     or min(abs(pos - sp) for sp in spike_positions)

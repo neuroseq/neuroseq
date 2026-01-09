@@ -46,6 +46,11 @@ def test_prepare_suite2p_traces_works_without_fneu(suite2p_import_data_dir):
 def test_prepare_suite2p_spikes_respects_threshold_and_limits_neurons(
     suite2p_import_data_dir,
 ):
+    """
+
+    :param suite2p_import_data_dir:
+    :return:
+    """
     spike_data = np.load(suite2p_import_data_dir / "spks.npy")
     dt = 1 / 30.0
 

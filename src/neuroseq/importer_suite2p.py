@@ -111,12 +111,15 @@ def prepare_suite2p_spikes(
         threshold,
         max_neurons,
     )
+    normalized_spikes, _, _ = compute_normalized_suite2p_spikes(spike_data)
+
     result = detect_spikes_threshold(
-        spike_data,
+        normalized_spikes,
         dt=dt,
         threshold=threshold,
+        threshold_method="absolute",
         max_neurons=max_neurons,
-        normalize_per_neuron=True,
+        normalize_per_neuron=False,
     )
     logger.debug(
         "Spike detection complete: %d spikes across %d neurons",

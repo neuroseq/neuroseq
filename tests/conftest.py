@@ -38,6 +38,25 @@ def pytest_collection_modifyitems(config, items):
                 item.add_marker(pytest.mark.skip(reason="Skipping screenshot update"))
 
 
+@pytest.fixture(autouse=True)
+def suppress_message_boxes(monkeypatch):
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "information",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.Ok,
+    )
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "warning",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.Ok,
+    )
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "critical",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.Ok,
+    )
+
+
 # replace all .exec() calls with .show() to avoid blocking the tests
 @pytest.fixture(autouse=True)
 def patch_b2w_exec_show(monkeypatch: pytest.MonkeyPatch) -> None:

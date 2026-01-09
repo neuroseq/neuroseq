@@ -206,7 +206,14 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                     trace_data=trace_data,
                     spike_data=spike_data,
                     original_cellpose_ids=loaded_original_ids,
-                    stimulus_to_cellpose_mapping=stimulus_to_cellpose_mapping,
+                    stimulus_to_cellpose_mapping=(
+                        None
+                        if stimulus_to_cellpose_mapping is None
+                        else {
+                            int(k): int(v)
+                            for k, v in stimulus_to_cellpose_mapping.items()
+                        }
+                    ),
                 )
             case _:
                 return dct

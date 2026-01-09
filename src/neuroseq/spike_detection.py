@@ -17,16 +17,18 @@ def detect_spikes_threshold(
     *,
     dt: float,
     threshold: float,
+    threshold_method: str = "absolute",
     max_neurons: int | None = None,
     normalize_per_neuron: bool = True,
 ) -> SpikeData:
     """
-    Detect spikes using find_peaks method on preprocessed data.
+    Detect spikes using a simple absolute/mean+std cutoff on each neuron's trace.
 
     Args:
         spike_data: 2D array (neurons, timepoints) or 1D array (single neuron)
         dt: Time step between samples
-        threshold: Detection threshold (0-1 if normalized) - used as height_threshold multiplier
+        threshold: Detection threshold. With threshold_method='absolute' it is a fixed cutoff (default).
+        threshold_method: 'absolute' (default) or 'mean_plus_std'
         max_neurons: Maximum neurons to process (None = all)
         normalize_per_neuron: Whether to normalize each neuron's data to [0,1]
 
@@ -63,21 +65,32 @@ def detect_spikes_threshold(
     all_neuron_indices = []
     all_spike_times = []
 
+    min_samples_between_spikes = 1
+
     for neuron_idx in range(n_neurons_to_process):
         neuron_data = processed_data[neuron_idx, :]
 
-        # Suite2p uses basic threshold agian now
-        spike_result = detect_spikes_voltage_trace(
-            neuron_data,
-            neuron_id=neuron_idx,
-            dt=dt,
-            detection_method="threshold",
-            threshold_multiplier=threshold,
-        )
+        if threshold_method == "absolute":
+            cutoff = threshold
+        elif threshold_method == "mean_plus_std":
+            cutoff = float(np.mean(neuron_data) + threshold * np.std(neuron_data))
+        else:
+            raise ValueError("threshold_method must be 'absolute' or 'mean_plus_std'")
 
-        if len(spike_result.spike_indices) > 0:
-            all_neuron_indices.append(spike_result.spike_indices)
-            all_spike_times.append(spike_result.spike_times)
+        potential_spikes = np.where(neuron_data > cutoff)[0]
+        filtered_spikes: list[int] = []
+        if len(potential_spikes) > 0:
+            filtered_spikes = [int(potential_spikes[0])]
+            for spike_idx in potential_spikes[1:]:
+                if spike_idx - filtered_spikes[-1] > min_samples_between_spikes:
+                    filtered_spikes.append(int(spike_idx))
+
+        spike_indices = np.array(filtered_spikes, dtype=np.int32)
+        if spike_indices.size > 0:
+            spike_times = spike_indices.astype(np.float32) * dt
+            neuron_indices = np.full(spike_indices.shape, neuron_idx, dtype=np.int32)
+            all_neuron_indices.append(neuron_indices)
+            all_spike_times.append(spike_times)
 
     if all_neuron_indices:
         final_neuron_indices = np.concatenate(all_neuron_indices)

@@ -326,9 +326,6 @@ class Gui(QtWidgets.QMainWindow):
 
     @with_wait_cursor
     def update_model(self, model: Model) -> None:
-        self.last_cellpose_import = clone_cellpose_result(model.cellpose_data)
-        if model is not None:
-            model.cellpose_data = self.last_cellpose_import
         self.model = model
         self.controller.max_height = 1
         self.controller.max_width = 1
@@ -341,6 +338,9 @@ class Gui(QtWidgets.QMainWindow):
         self.stim_editor.set_model(self.model)
         if self.model is not None:
             self.stim_console.set_stims(self.stim_editor.stims_dict)
+        if self.model is not None:
+            self.last_cellpose_import = clone_cellpose_result(self.model.cellpose_data)
+            self.model.cellpose_data = self.last_cellpose_import
         self.update_slider_time_max()
         self._update_combo_boxes()
 
@@ -549,6 +549,7 @@ class Gui(QtWidgets.QMainWindow):
         self._load_external_simulation_function(filename)
 
     def _select_experiment_data(self, experiment_name):
+        """Select the experiment within the GUI, for example after an import."""
         for cmb in (self.cmb_trace, self.cmb_spike, self.cmb_synapse, self.cmb_data):
             for i in range(cmb.count()):
                 if cmb.itemText(i).startswith(f"{experiment_name} ::"):

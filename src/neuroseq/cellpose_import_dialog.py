@@ -11,6 +11,7 @@ from neuroseq.cell_overlay_widget import CellOverlayWidget
 from neuroseq.importer_cellpose import CellPoseImporter
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
+from neuroseq.importer_cellpose import is_identity_mapping
 
 
 class CellposeImportDialog(QtWidgets.QDialog):
@@ -542,16 +543,11 @@ class CellposeImportDialog(QtWidgets.QDialog):
             # Pre-fill mapping if available, prefer Linear when mapping is identity
             mapping = self.existing_data.stimulus_to_cellpose_mapping or {}
             if mapping:
-                mapping_items = list(mapping.items())
-                is_identity = all(
-                    stim_id == cellpose_id for stim_id, cellpose_id in mapping_items
-                )
-
-                if not is_identity:
+                if not is_identity_mapping(mapping):
                     mapping_str = ",".join(
                         [
                             f"{stim_id}:{cellpose_id}"
-                            for stim_id, cellpose_id in mapping_items
+                            for stim_id, cellpose_id in mapping.items()
                         ]
                     )
                     self.custom_mapping_line.setText(mapping_str)
@@ -559,7 +555,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
                     self.custom_mapping_line.clear()
                     self.linear_offset_spin.setValue(0)
 
-                target_mode = "Linear" if is_identity else "Custom"
+                target_mode = "Linear" if is_identity_mapping(mapping) else "Custom"
                 for button in self.mapping_buttons.buttons():
                     if button.text() == target_mode:
                         button.setChecked(True)
