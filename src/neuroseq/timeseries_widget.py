@@ -133,11 +133,6 @@ class TimeseriesWidget(FPLWidget):
             super().contextMenuEvent(event)
 
     def post_set_data(self):
-        self.controller.max_height = max(self.controller.max_height, self.n_neurons)
-        self.controller.max_width = max(
-            self.controller.max_width, self.n_timestamps * self.dt_ms
-        )
-        self.subplot.auto_scale(zoom=1.0, maintain_aspect=False)
         self.subplot.grids = False
         self.subplot.axes.y.ticks = np.arange(0, self.n_neurons, 1)
         self.subplot.axes.y.points.visible = False
@@ -158,6 +153,8 @@ class TimeseriesWidget(FPLWidget):
         self.roi.visible = False
 
     def clear_data(self) -> None:
+        if self.controller is not None and self.grid_lines is not None:
+            self.controller.remove_grid_lines(self.grid_lines)
         super().clear_data()
         self.hover_slice_graphic = None
         self.background_graphics = []

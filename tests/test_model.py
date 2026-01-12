@@ -11,7 +11,7 @@ from neuroseq.data import TraceData
 from neuroseq.example_models import default_model
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.model import Model
-from neuroseq.save_options import SaveOptions
+from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
@@ -137,6 +137,7 @@ def test_add_experimental_data_append_invalid() -> None:
 
 def test_save_load(model_nmda: Model, tmp_path: Path) -> None:
     tmp_file = tmp_path / "model.nseq"
+    assert model_nmda.filepath is None
 
     # simulate for 1 second, save checkpoint, then simulate for another second
     model_nmda.run_simulation(0.1)
@@ -160,10 +161,12 @@ def test_save_load(model_nmda: Model, tmp_path: Path) -> None:
     model_nmda.add_experimental_data("test_experiment", experimental_data)
 
     # save model including everything
-    save_options = SaveOptions(True, True, True, True)
+    save_options = SaveLoadOptions(True, True, True, True)
     model_nmda.save(tmp_file, save_options)
+    assert model_nmda.filepath == tmp_file
 
     reconstructed_model = Model(tmp_file)
+    assert reconstructed_model.filepath == tmp_file
 
     assert reconstructed_model.b2_model.seed == model_nmda.b2_model.seed
     assert (
@@ -276,7 +279,7 @@ def test_cellpose_data_persisted(tmp_path: Path) -> None:
     )
 
     save_path = tmp_path / "cellpose_model.nseq"
-    model.save(save_path, SaveOptions(True, True, False, True))
+    model.save(save_path, SaveLoadOptions(True, True, False, True))
 
     loaded_cellpose = Model(save_path).cellpose_data
 

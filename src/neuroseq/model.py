@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import math
 import pathlib
@@ -17,7 +19,7 @@ from neuroseq.data import TraceData
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.io import append_to_zip
 from neuroseq.io import load_from_zip
-from neuroseq.save_options import SaveOptions
+from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.utils import append_data
@@ -27,21 +29,22 @@ from neuroseq.utils import save_store_name
 class Model:
     def __init__(
         self,
-        filepath: str | pathlib.Path = "",
+        filepath: str | pathlib.Path | None = None,
         report: Callable[[int], None] | None = None,
     ) -> None:
-        self.name = "model"
+        self.filepath = None
         self.b2_model: B2Model = B2Model()
         self.experiments: dict[str, list[Data]] = {}
         self.stim_arrays: dict[str, StimArray] = {}
         self.cellpose_data: CellposeImportResult | None = None
 
         self.max_ram_synapse_plot_matrix = 256
-        self.max_time_secs = 1.0
+        self.max_time_secs = 0.0
+        self.max_neurons = 0
 
         self.logger = logging.getLogger(__name__)
         if filepath:
-            filepath = pathlib.Path(filepath)
+            self.filepath = pathlib.Path(filepath)
             self.logger.info(f"Loading model from '{filepath}'")
             with zipfile.ZipFile(filepath, "r", zipfile.ZIP_DEFLATED) as zf:
                 b2_model_data = load_from_zip("b2_model", zf)
@@ -55,19 +58,44 @@ class Model:
                 self.experiments = load_from_zip("experimental_data", zf)
                 self.stim_arrays = load_from_zip("stim_arrays", zf)
                 cellpose_payload = load_from_zip("cellpose_data", zf)
+                # todo: Check load_from_zip after merge and see if we need the isinstance check or if laod_from_zip handles a presence check, or can..
+                # For now we will onyl keep it as a dict anyway, probably going forward also even if we support multiple cellpose imports at once.
                 if isinstance(cellpose_payload, dict):
                     self.cellpose_data = cellpose_payload.get("cellpose_import")
-            for experiment in self.experiments.values():
-                for data in experiment:
-                    if isinstance(data, TraceData):
-                        self.max_time_secs = max(
-                            self.max_time_secs, data.dt * data.traces.shape[1]
-                        )
-            for stim_array in self.stim_arrays.values():
-                self.max_time_secs = max(
-                    self.max_time_secs, stim_array.dt * stim_array.values.shape[0]
+
+        self.update_limits()
+
+    def import_model(
+        self,
+        filepath: str | pathlib.Path,
+        options: SaveLoadOptions,
+        report: Callable[[int], None] | None = None,
+    ) -> None:
+        filepath = pathlib.Path(filepath)
+        self.logger.info(f"Importing components from '{filepath}' into existing model")
+        with zipfile.ZipFile(filepath, "r", zipfile.ZIP_DEFLATED) as zf:
+            if options.include_model:
+                self.logger.info("  - importing b2_model")
+                self.b2_model = B2Model()
+                b2_model_data = load_from_zip("b2_model", zf)
+                if (
+                    options.include_simulation_data
+                    and "b2_stored_state.pkl" in zf.namelist()
+                ):
+                    self.logger.info("  - importing simulation data")
+                    b2_stored_state = pickle.loads(zf.read("b2_stored_state.pkl"))
+                else:
+                    b2_stored_state = {}
+                self.b2_model = B2Model.from_dict(
+                    b2_model_data, b2_stored_state, report
                 )
-            self.name = filepath.stem
+            if options.include_experimental_data:
+                self.logger.info("  - importing experimental data")
+                self.experiments = load_from_zip("experimental_data", zf)
+            if options.include_stim_arrays:
+                self.logger.info("  - importing stim arrays")
+                self.stim_arrays = load_from_zip("stim_arrays", zf)
+        self.update_limits()
 
     def get_data_names(
         self, data_type: type[TraceData | SpikeData | SynapseData]
@@ -150,10 +178,12 @@ class Model:
 
     def add_stim_array(self, stim_array: StimArray):
         self.stim_arrays[stim_array.name] = stim_array
+        self.update_limits()
 
     def delete_stim_array(self, name: str):
         if name in self.stim_arrays:
             del self.stim_arrays[name]
+        self.update_limits()
 
     def update_stim_array_properties(
         self, name: str, n_neurons: int, stim_type: StimType, units: str, dt: float
@@ -177,25 +207,30 @@ class Model:
                 mode="constant",
                 constant_values=0,
             )
+        self.update_limits()
 
     def rename_stim_array(self, name: str, new_name: str):
         stim_array = self.stim_arrays.pop(name)
         stim_array.name = new_name
         self.stim_arrays[stim_array.name] = stim_array
 
-    def update_max_time_secs(self):
-        self.max_time_secs = 1.0
+    def update_limits(self):
+        self.max_time_secs = self.b2_model.get_sim_time_secs()
+        self.max_neurons = self.b2_model.get_max_neurons()
         for experiment in self.experiments.values():
             for data in experiment:
                 if isinstance(data, TraceData):
                     self.max_time_secs = max(
                         self.max_time_secs, data.dt * data.traces.shape[1]
                     )
+                    self.max_neurons = max(
+                        self.max_neurons, int(np.max(data.indices) + 1)
+                    )
         for stim_array in self.stim_arrays.values():
             self.max_time_secs = max(
                 self.max_time_secs, stim_array.dt * stim_array.values.shape[0]
             )
-        self.pad_stim_arrays(total_time_seconds=self.max_time_secs)
+            self.max_neurons = max(self.max_neurons, int(stim_array.values.shape[1]))
 
     def add_experimental_data(
         self,
@@ -220,7 +255,7 @@ class Model:
                 f"Adding experimental data for experiment '{experiment_name}'"
             )
             self.experiments[experiment_name] = list(new_data)
-            self.update_max_time_secs()
+            self.update_limits()
             return
         if experiment_name not in self.experiments:
             self.logger.warning(
@@ -265,7 +300,7 @@ class Model:
                     f"'{data.name}' not found when trying to append - adding new data instead of appending."
                 )
                 self.experiments[experiment_name].append(data)
-        self.update_max_time_secs()
+        self.update_limits()
 
     def pad_stim_arrays(self, total_time_seconds: float):
         """
@@ -284,6 +319,7 @@ class Model:
                     self.stim_arrays[name].values = np.pad(
                         stim_array.values, pad_width=((0, n_pad), (0, 0))
                     )
+        self.update_limits()
 
     def trim_stim_arrays(self, total_time_seconds: float):
         """
@@ -300,6 +336,7 @@ class Model:
                     self.stim_arrays[name].values = stim_array.values[
                         :new_n_timestamps, :
                     ]
+        self.update_limits()
 
     def trim_stim_array_would_delete_data(self, total_time_seconds: float) -> bool:
         """
@@ -321,14 +358,18 @@ class Model:
         report: Callable | None = None,
         stim_array_padding_seconds: float = 0.0,
     ) -> None:
-        sim_time = self.b2_model.run_simulation(time_seconds, self.stim_arrays, report)
-        self.max_time_secs = max(self.max_time_secs, sim_time)
-        self.pad_stim_arrays(sim_time + stim_array_padding_seconds)
+        self.pad_stim_arrays(
+            self.b2_model.get_sim_time_secs()
+            + time_seconds
+            + stim_array_padding_seconds
+        )
+        self.b2_model.run_simulation(time_seconds, self.stim_arrays, report)
+        self.update_limits()
 
     def save(
         self,
         filepath: str | pathlib.Path,
-        options: SaveOptions,
+        options: SaveLoadOptions,
     ) -> None:
         """
         Saves the model to a zipfile which contains
@@ -342,7 +383,7 @@ class Model:
         ----------
         filepath : str | pathlib.Path
             path to the file where the current model should be stored
-        options: SaveOptions
+        options: SaveLoadOptions
             options for what to include in the saved model
         """
 
@@ -358,9 +399,11 @@ class Model:
                     "b2_stored_state.pkl",
                     pickle.dumps(self.b2_model.network._stored_state, protocol=4),
                 )
+            # Todo: We could consider another option for cellpose data. I originally leaned towards that, but after merging  #388 and #390 this cellpose data may be in experimental data anyway, and seems inextricably related to it.
             if options.include_experimental_data:
                 append_to_zip(self.experiments, "experimental_data", zf)
                 if self.cellpose_data is not None:
                     append_to_zip(
                         {"cellpose_import": self.cellpose_data}, "cellpose_data", zf
                     )
+        self.filepath = pathlib.Path(filepath)

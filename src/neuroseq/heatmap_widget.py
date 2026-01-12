@@ -140,7 +140,7 @@ class HeatmapWidget(FPLWidget):
         self.subplot.docks["right"].controller.enabled = False
         self.subplot.auto_scale(zoom=1.0, maintain_aspect=True)
 
-    def set_time_ms(self, time_ms: float) -> None:
+    def set_time_ms(self, time_ms: int) -> None:
         """Set the time to display: data from the closest timestamp to the given time is displayed."""
         if (
             self.data is None

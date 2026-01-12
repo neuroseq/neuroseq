@@ -38,6 +38,11 @@ class DataWidget(QtWidgets.QWidget):
         self.spike_widget.clear_data()
         self.heatmap_widget.clear_data()
 
+    def set_time_ms(self, time_ms: int) -> None:
+        self.trace_widget.set_time_ms(time_ms)
+        self.spike_widget.set_time_ms(time_ms)
+        self.heatmap_widget.set_time_ms(time_ms)
+
     def set_data(self, data: TraceData | SpikeData | SynapseData | None) -> None:
         self.clear_data()
         if isinstance(data, TraceData):
@@ -49,3 +54,8 @@ class DataWidget(QtWidgets.QWidget):
         elif isinstance(data, SynapseData):
             self.stacked_widget.setCurrentWidget(self.heatmap_widget)
             self.heatmap_widget.set_data(data)
+
+    def closeEvent(self, event):
+        self.trace_widget.closeEvent(event)
+        self.spike_widget.closeEvent(event)
+        self.heatmap_widget.closeEvent(event)

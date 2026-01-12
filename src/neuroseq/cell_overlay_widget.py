@@ -494,14 +494,16 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
 
     def _update_overlay_scale(self, *_args) -> None:
         self._ensure_window_tracking()
-        window = self.window()
-        if window is not None:
-            available_height = window.height()
-        else:
-            screen = self._get_current_screen()
-            if screen is None:
-                return
-            available_height = screen.availableGeometry().height()
+        available_height = self.height()
+        if available_height <= 0:
+            window = self.window()
+            if window is not None:
+                available_height = window.height()
+            else:
+                screen = self._get_current_screen()
+                if screen is None:
+                    return
+                available_height = screen.availableGeometry().height()
 
         target_height = max(600, int(available_height * 0.84))
         aspect_ratio = 1.0

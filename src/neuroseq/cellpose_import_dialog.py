@@ -135,6 +135,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         # Custom mapping input
         self.custom_mapping_line = QtWidgets.QLineEdit()
+        self.custom_mapping_line.setMinimumWidth(260)
+        self.custom_mapping_line.setMinimumHeight(28)
         self.custom_mapping_line.setPlaceholderText(
             "e.g., 1:12,2:3 (stimkey:cellposeId)"
         )

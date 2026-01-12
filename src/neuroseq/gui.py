@@ -14,6 +14,7 @@ from qtpy.compat import getsavefilename
 
 from neuroseq import __version__
 from neuroseq.cellpose_import_dialog import CellposeImportDialog
+from neuroseq.console_widget import ConsoleWidget
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
@@ -33,9 +34,8 @@ from neuroseq.model import Model
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
-from neuroseq.save_options import SaveOptionsDialog
+from neuroseq.save_load_options import SaveLoadOptionsDialog
 from neuroseq.spike_widget import SpikeWidget
-from neuroseq.stim_console import StimConsole
 from neuroseq.stim_editor import StimEditor
 from neuroseq.time_slider_widget import TimeSliderWidget
 from neuroseq.timeseries_widget import TimeseriesWidget
@@ -83,8 +83,8 @@ class Gui(QtWidgets.QMainWindow):
         split_left_right.addWidget(self.heatmap_widget)
         self.custom_analysis_widget = CustomAnalysisWidget(parent=self)
         split_left_right.addWidget(self.custom_analysis_widget)
-        self.stim_console = StimConsole(parent=self)
-        split_left_right.addWidget(self.stim_console)
+        self.console_widget = ConsoleWidget(parent=self)
+        split_left_right.addWidget(self.console_widget)
         split_left_right.setSizes([1000, 1000, 1000])
         # main vertical splitter layout
         split_vertical = QtWidgets.QSplitter(
@@ -107,9 +107,7 @@ class Gui(QtWidgets.QMainWindow):
             self.stim_editor.stim_widget,
             self.trace_widget,
             self.spike_widget,
-            self.data_widget.trace_widget,
-            self.data_widget.spike_widget,
-            self.data_widget.heatmap_widget,
+            self.data_widget,
             self.heatmap_widget,
         ]
         for widget in self.plot_widgets:
@@ -124,9 +122,7 @@ class Gui(QtWidgets.QMainWindow):
         self.showMaximized()
         self._create_progressbar()
         # connect widgets
-        self.stim_console.sig_stims_values_dict_updated.connect(
-            self.stim_editor.update_stim_values_dict
-        )
+        self.console_widget.console_command_entered.connect(self._update_data)
         self.trace_widget.custom_analysis_requested.connect(self._custom_analysis)
         self.data_widget.trace_widget.custom_analysis_requested.connect(
             self._custom_analysis
@@ -139,14 +135,17 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_synapse.currentTextChanged.connect(self.set_synapse)
         self.cmb_spike.currentTextChanged.connect(self.set_spike)
         self.cmb_data.currentTextChanged.connect(self.set_data)
-        self.stim_editor.max_time_modified.connect(self.update_slider_time_max)
+        self.stim_editor.limits_modified.connect(self.update_limits)
         self.last_cellpose_import: CellposeImportResult | None = None
         if filename is not None:
             self.load_model(filename)
         else:
             self.load_model(default_model())
 
-    def update_slider_time_max(self) -> None:
+    def update_limits(self) -> None:
+        self.controller.set_graphic_window_to_limits(
+            self.model.max_time_secs, self.model.max_neurons
+        )
         self.time_slider.set_max_time_secs(self.model.max_time_secs)
 
     def _custom_analysis(
@@ -174,13 +173,13 @@ class Gui(QtWidgets.QMainWindow):
                 data, analysis_type, neuron_slice, time_slice
             )
 
-    def _update_data(self, keep_undo_history: bool) -> None:
+    def _update_data(self, keep_undo_history: bool = False) -> None:
         if self.model.b2_model.network.t > 0:
             self.continue_simulation_action.setText("&Continue simulation")
         else:
             self.continue_simulation_action.setText("&Run simulation")
-        self.update_slider_time_max()
         self.stim_editor.set_model(self.model, keep_undo_history)
+        self.update_limits()
         self._update_combo_boxes()
 
     def _update_combo_box(
@@ -244,14 +243,45 @@ class Gui(QtWidgets.QMainWindow):
         if filename != "":
             self.load_model(filename)
 
+    def btn_import_clicked(self) -> None:
+        filename, _ = getopenfilename(
+            self,
+            "import from model",
+            "model.nseq",
+            "neuroseq model (*.nseq)",
+        )
+        if filename == "":
+            return
+        options_dialog = SaveLoadOptionsDialog(action="Import")
+        if not options_dialog.exec():
+            return
+        try:
+            self.progress_dialog.setLabelText("Importing from model...")
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+            self.model.import_model(
+                filename, options_dialog.options, report=self._update_load_progress
+            )
+            QtWidgets.QApplication.restoreOverrideCursor()
+        except Exception as e:
+            QtWidgets.QApplication.restoreOverrideCursor()
+            self.logger.warning(f"Failed to import from model {filename}: {e}")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Import error",
+                f"Could not import from file '{filename}': {e}",
+            )
+            self.progress_dialog.reset()
+            return
+        self.update_model(self.model)
+
     def btn_save_clicked(self) -> None:
-        save_options_dialog = SaveOptionsDialog()
-        if not save_options_dialog.exec():
+        options_dialog = SaveLoadOptionsDialog(action="Save")
+        if not options_dialog.exec():
             return
         filename, _ = getsavefilename(
             self,
             "Save model",
-            f"{self.model.name}.nseq",
+            str(self.model.filepath) if self.model.filepath else "model.nseq",
             "neuroseq model (*.nseq)",
         )
         if filename == "":
@@ -261,7 +291,7 @@ class Gui(QtWidgets.QMainWindow):
             filename = filename.with_suffix(".nseq")
         try:
             QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
-            self.model.save(filename, save_options_dialog.save_options)
+            self.model.save(filename, options_dialog.options)
             QtWidgets.QApplication.restoreOverrideCursor()
         except Exception as e:
             QtWidgets.QApplication.restoreOverrideCursor()
@@ -272,6 +302,7 @@ class Gui(QtWidgets.QMainWindow):
                 f"Could not save file '{filename}': {e}",
             )
             return
+        self._update_window_title()
 
     def btn_export_clicked(self) -> None:
         filename, _ = getsavefilename(
@@ -297,6 +328,7 @@ class Gui(QtWidgets.QMainWindow):
         mdiag = ModelEditorDialog(self.model.b2_model, parent=self)
         if mdiag.exec():
             self.model.b2_model = mdiag.b2model
+            self.model.update_limits()
             self.update_model(self.model)
 
     @with_wait_cursor
@@ -306,9 +338,9 @@ class Gui(QtWidgets.QMainWindow):
             if not isinstance(model, Model):
                 filename = pathlib.Path(model)
                 model = Model(filename, report=self._update_load_progress)
-                self.logger.info(f"Model {self.model.name} loaded from {filename}")
+                self.logger.info(f"Model loaded from {filename}")
             else:
-                self.logger.info(f"Model {self.model.name} loaded from Model object")
+                self.logger.info("Model loaded from Model object")
         except Exception as e:
             self.logger.warning(f"Failed to load model from file {filename}: {e}")
             self.logger.exception(e)
@@ -322,26 +354,31 @@ class Gui(QtWidgets.QMainWindow):
         self.last_cellpose_import = clone_cellpose_result(model.cellpose_data)
         if model is not None:
             model.cellpose_data = self.last_cellpose_import
-        self.update_model(model)
+        self.update_model(model, reset_controller=True)
+
+    def _update_window_title(self) -> None:
+        if self.model.filepath is not None:
+            self.setWindowTitle(f"{self.model.filepath} - Neuroseq")
+        else:
+            self.setWindowTitle("Neuroseq")
 
     @with_wait_cursor
-    def update_model(self, model: Model) -> None:
+    def update_model(self, model: Model, reset_controller=False) -> None:
         self.model = model
-        self.controller.max_height = 1
-        self.controller.max_width = 1
-        self.stim_console.set_model(self.model)
+        self._update_window_title()
+        if reset_controller:
+            self.controller.reset()
+        self.console_widget.set_model(self.model)
         self.continue_simulation_action.setText("&Run simulation")
-        self.trace_widget.clear_data()
-        self.spike_widget.clear_data()
-        self.heatmap_widget.clear_data()
-        self.controller.clear_grid_lines()
-        self.stim_editor.set_model(self.model)
+        for widget in self.plot_widgets:
+            widget.clear_data()
         if self.model is not None:
-            self.stim_console.set_stims(self.stim_editor.stims_dict)
-        if self.model is not None:
+            # todo: Check how console_widget.set_model / stim_editor handles None model, as it used to be null checked prior to a commit on main that this is mergning into
             self.last_cellpose_import = clone_cellpose_result(self.model.cellpose_data)
             self.model.cellpose_data = self.last_cellpose_import
-        self.update_slider_time_max()
+
+        self.stim_editor.set_model(self.model)
+        self.console_widget.set_model(self.model)
         self._update_combo_boxes()
 
     @with_wait_cursor
@@ -811,6 +848,14 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.folder-open"),
         )
         add_action(
+            "&Import from model",
+            self.btn_import_clicked,
+            menu,
+            toolbar,
+            shortcut="None",
+            icon=qta.icon("mdi6.file-import"),
+        )
+        add_action(
             "&Save model",
             self.btn_save_clicked,
             menu,
@@ -956,7 +1001,7 @@ class Gui(QtWidgets.QMainWindow):
                 "mdi6.chart-histogram",
                 True,
             ),
-            ("&Console", self.stim_console, "mdi6.console", True),
+            ("&Console", self.console_widget, "mdi6.console", True),
         ]:
             add_action(
                 f"Show {name}",
