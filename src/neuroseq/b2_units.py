@@ -50,7 +50,16 @@ def str_to_quantity(string: str) -> b2.Quantity | str:
 
 
 def display_units(quantity: b2.Quantity) -> str:
-    unit_str = b2.Quantity(1, dim=quantity.dim).in_best_unit(python_code=False)
-    if unit_str[0:3] == "1. ":
-        unit_str = unit_str[3:]  # remove leading "1. " for dimensionless units
-    return unit_str
+    # Handle the case where quantity might not be a proper Brian2 Quantity
+    if not isinstance(quantity, b2.Quantity):
+        # If it's a plain number or array (dimensionless), return empty string
+        return "1. "
+
+    try:
+        unit_str = b2.Quantity(1, dim=quantity.dim).in_best_unit(python_code=False)
+        if unit_str[0:3] == "1. ":
+            unit_str = unit_str[3:]  # remove leading "1. " for dimensionless units
+        return unit_str
+    except (AttributeError, TypeError):
+        # If we can't get dimensions, assume dimensionless
+        return ""
