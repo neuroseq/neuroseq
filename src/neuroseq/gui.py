@@ -143,9 +143,7 @@ class Gui(QtWidgets.QMainWindow):
             self.load_model(default_model())
 
     def update_limits(self) -> None:
-        self.controller.set_graphic_window_to_limits(
-            self.model.max_time_secs, self.model.max_neurons
-        )
+        self.controller.set_limits(self.model.max_time_secs, self.model.max_neurons)
         self.time_slider.set_max_time_secs(self.model.max_time_secs)
 
     def _custom_analysis(

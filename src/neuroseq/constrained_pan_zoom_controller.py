@@ -43,9 +43,7 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         self.grid_lines.clear()
         self.initialized = False
 
-    def set_graphic_window_to_limits(
-        self, max_time_secs: float, max_neurons: int
-    ) -> None:
+    def set_limits(self, max_time_secs: float, max_neurons: int) -> None:
         if max_time_secs <= 0.0 or max_neurons <= 0:
             return
         self.max_width = 1000.0 * max_time_secs
