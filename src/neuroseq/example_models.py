@@ -1129,7 +1129,7 @@ def pyrho_6state_chr2_model() -> Model:
     b2_model = model.b2_model
 
     dt = 0.1 * b2.ms
-    tfinal = 2000 * b2.ms
+    tfinal = 1000 * b2.ms
 
     # Number of neurons
     N = 10
