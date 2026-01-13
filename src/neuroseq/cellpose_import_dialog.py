@@ -12,6 +12,7 @@ from neuroseq.cell_overlay_widget import CellOverlayWidget
 from neuroseq.importer_cellpose import CellPoseImporter
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
+from neuroseq.importer_cellpose import generate_linear_stimulus_mapping
 from neuroseq.importer_cellpose import is_identity_mapping
 
 
@@ -338,16 +339,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         if strategy == "Linear":
             offset = self._get_linear_offset()
-            # Start stimulus IDs at 0 once the chosen cellpose offset is reached.
-            mapping: dict[int, int] = {}
-            eligible_ids = [
-                int(cellpose_id)
-                for cellpose_id in original_ids
-                if cellpose_id >= offset
-            ]
-            for stim_id, cellpose_id in enumerate(eligible_ids):
-                mapping[stim_id] = cellpose_id
-            return mapping
+            return generate_linear_stimulus_mapping(original_ids, offset)
         elif strategy == "Custom":
             # Parse custom mapping string
             return self._parse_custom_mapping(self.custom_mapping_line.text())

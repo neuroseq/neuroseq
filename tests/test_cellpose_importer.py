@@ -6,6 +6,7 @@ import numpy as np
 from PIL import Image
 
 from neuroseq.importer_cellpose import CellPoseImporter
+from neuroseq.importer_cellpose import generate_linear_stimulus_mapping
 from neuroseq.utils import neuron_indices_to_colors
 
 """
@@ -292,6 +293,12 @@ def test_custom_stim_cellpose_mapping(tmp_path):
         parsed_mapping[stim_key] = cellpose_id
 
     assert parsed_mapping == stim_to_cellpose_mapping
+
+
+def test_linear_mapping_offset_starts_at_zero():
+    original_ids = np.array([1, 3, 4, 7], dtype=np.int32)
+    mapping = generate_linear_stimulus_mapping(original_ids, offset=3)
+    assert mapping == {0: 3, 1: 4, 2: 7}
 
 
 def test_custom_mapping_parsing_edge_cases():

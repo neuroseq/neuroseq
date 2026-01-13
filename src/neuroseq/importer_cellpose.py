@@ -66,6 +66,18 @@ def is_identity_mapping(mapping: dict[int, int] | None) -> bool:
     return all(stim_id == cellpose_id for stim_id, cellpose_id in mapping.items())
 
 
+def generate_linear_stimulus_mapping(
+    original_ids: np.ndarray | None, offset: int
+) -> dict[int, int]:
+    """Map stimulus IDs to cellpose IDs starting at the selected offset."""
+    if original_ids is None:
+        return {}
+    eligible_ids = [
+        int(cellpose_id) for cellpose_id in original_ids if cellpose_id >= offset
+    ]
+    return {stim_id: cellpose_id for stim_id, cellpose_id in enumerate(eligible_ids)}
+
+
 def prepare_cellpose_traces(
     traces: np.ndarray,
     *,
