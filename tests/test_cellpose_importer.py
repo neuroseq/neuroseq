@@ -95,7 +95,8 @@ def test_load_segmentation_npy(tmp_path):
 
     assert importer.segmentation_data is not None
     assert importer.segmentation_data.dtype == np.int32
-    np.testing.assert_array_equal(importer.segmentation_data, segmentation)
+    expected = segmentation - 1
+    np.testing.assert_array_equal(importer.segmentation_data, expected)
 
 
 def test_load_suite2p_segmentation(tmp_path):
@@ -142,7 +143,8 @@ def test_load_suite2p_segmentation(tmp_path):
     assert importer.segmentation_data.dtype == np.int32
 
     expected = np.array(
-        [[1, 1, 0, 0], [1, 1, 0, 0], [0, 0, 2, 2], [0, 0, 2, 2]], dtype=np.int32
+        [[0, 0, -1, -1], [0, 0, -1, -1], [-1, -1, 1, 1], [-1, -1, 1, 1]],
+        dtype=np.int32,
     )
 
     np.testing.assert_array_equal(importer.segmentation_data, expected)
@@ -171,9 +173,10 @@ def test_load_csv_masks_segmentation(tmp_path):
     assert importer.segmentation_data is not None
     assert importer.segmentation_data.shape == (5, 5)
     assert importer.segmentation_data.dtype == np.int32
-    np.testing.assert_array_equal(importer.segmentation_data, segmentation)
+    expected = segmentation - 1
+    np.testing.assert_array_equal(importer.segmentation_data, expected)
 
-    expected_unique = np.array([0, 1, 2, 3, 4])
+    expected_unique = np.array([-1, 0, 1, 2, 3])
     actual_unique = np.unique(importer.segmentation_data)
     np.testing.assert_array_equal(actual_unique, expected_unique)
 
@@ -214,12 +217,15 @@ def test_cellpose_patchclamp_visual_integration(tmp_path):
     assert cellpose_result.segmentation_array.shape == (50, 50)
 
     # Verify overlay image is properly generated (should be blend of image and segmentation colors)
-    np.testing.assert_array_equal(cellpose_result.segmentation_array, segmentation)
+    expected_segmentation = segmentation - 1
+    np.testing.assert_array_equal(
+        cellpose_result.segmentation_array, expected_segmentation
+    )
 
     # Test that the importer computed neuron colors for visual display
     assert importer._neuron_ids is not None
     assert importer._neuron_colors is not None
-    expected_ids = [1, 2, 3]
+    expected_ids = [0, 1, 2]
     np.testing.assert_array_equal(importer._neuron_ids, expected_ids)
     assert importer._neuron_colors.shape == (3, 3)  # 3 neurons, RGB colors
 
@@ -240,11 +246,11 @@ def test_cellpose_patchclamp_visual_integration(tmp_path):
     assert not np.array_equal(cellpose_result.overlay_image, test_image)
 
     # Test that background pixels (segmentation == 0) exist in overlay
-    background_mask = segmentation == 0
+    background_mask = importer.segmentation_data == -1
     assert np.any(background_mask)
 
     # Test that cell pixels have different colors from background in overlay
-    cell_mask = segmentation > 0
+    cell_mask = importer.segmentation_data >= 0
     assert np.any(cell_mask)
 
     # Verify that the overlay properly blends original image with colorized segmentation
@@ -275,16 +281,16 @@ def test_custom_stim_cellpose_mapping(tmp_path):
     importer.validate_dimensions()
     importer.generate_overlay()
 
-    stim_to_cellpose_mapping = {1: 3, 5: 7, 9: 12}
+    stim_to_cellpose_mapping = {1: 2, 5: 6, 9: 11}
     cellpose_result = importer.create_result(image_path, stim_to_cellpose_mapping)
 
     assert cellpose_result.stimulus_to_cellpose_mapping == stim_to_cellpose_mapping
-    expected_cellpose_ids = [3, 7, 12]
+    expected_cellpose_ids = [2, 6, 11]
     for cellpose_id in expected_cellpose_ids:
         assert cellpose_id in cellpose_result.original_cellpose_ids
 
     # Test mapping parsing logic (simulates dialog parsing)
-    mapping_str = "1:3,5:7,9:12"
+    mapping_str = "1:2,5:6,9:11"
     parsed_mapping = {}
     for pair in mapping_str.split(","):
         stim_key_str, cellpose_id_str = pair.split(":", 1)
@@ -365,7 +371,7 @@ def test_cellpose_overlay_color_pixels(tmp_path):
     assert len(legend_data) == 3
 
     for cell_id, expected_rgb in legend_data:
-        cell_mask = segmentation == cell_id
+        cell_mask = importer.segmentation_data == cell_id
         if np.any(cell_mask):
             actual_pixels = importer.overlay_image[cell_mask]
             actual_rgb = actual_pixels[0]
@@ -405,8 +411,8 @@ def test_cellpose_preview_pixel_differences(tmp_path):
 
     np.testing.assert_array_equal(importer.image_data, original_image)
 
-    bg_mask = segmentation == 0
-    cell_mask = segmentation == 1
+    bg_mask = importer.segmentation_data == -1
+    cell_mask = importer.segmentation_data == 0
 
     bg_pixels = importer.overlay_image[bg_mask]
     original_bg_pixels = original_image[bg_mask]
@@ -448,7 +454,8 @@ def test_restore_from_result_preserves_colors(tmp_path):
 
     assert restored.overlay_image is not None
     assert restored.segmentation_data is not None
-    np.testing.assert_array_equal(restored.segmentation_data, segmentation)
+    expected_segmentation = segmentation - 1
+    np.testing.assert_array_equal(restored.segmentation_data, expected_segmentation)
 
     restored_legend = restored.get_legend_data()
     assert restored_legend == original_legend

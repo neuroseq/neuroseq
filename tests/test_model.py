@@ -262,9 +262,9 @@ def test_save_load(model_nmda: Model, tmp_path: Path) -> None:
 
 def test_cellpose_data_persisted(tmp_path: Path) -> None:
     model = Model()
-    segmentation = np.array([[0, 1], [2, 0]], dtype=np.int32)
+    segmentation = np.array([[-1, 0], [1, -1]], dtype=np.int32)
     overlay = np.zeros((2, 2, 3), dtype=np.uint8)
-    original_ids = np.array([1, 2], dtype=np.int32)
+    original_ids = np.array([0, 1], dtype=np.int32)
     image_path = tmp_path / "image.png"
     image_path.write_bytes(b"placeholder")
 
@@ -275,7 +275,7 @@ def test_cellpose_data_persisted(tmp_path: Path) -> None:
         trace_data=None,
         spike_data=None,
         original_cellpose_ids=original_ids,
-        stimulus_to_cellpose_mapping={1: 2},
+        stimulus_to_cellpose_mapping={1: 1},
     )
 
     save_path = tmp_path / "cellpose_model.nseq"
@@ -288,7 +288,7 @@ def test_cellpose_data_persisted(tmp_path: Path) -> None:
     np.testing.assert_array_equal(loaded_cellpose.segmentation_array, segmentation)
     np.testing.assert_array_equal(loaded_cellpose.overlay_image, overlay)
     np.testing.assert_array_equal(loaded_cellpose.original_cellpose_ids, original_ids)
-    assert loaded_cellpose.stimulus_to_cellpose_mapping == {1: 2}
+    assert loaded_cellpose.stimulus_to_cellpose_mapping == {1: 1}
 
 
 def test_stim_array_simulation_padding() -> None:
