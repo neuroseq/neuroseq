@@ -138,7 +138,9 @@ class TimeseriesWidget(FPLWidget):
         self.subplot.toolbar = False
         self.subplot.add_graphic(self.roi, center=False)
         self.subplot.add_graphic(self.timeline, center=False)
-        self.grid_lines = GridLines(self.n_neurons, self.n_timestamps * self.dt_ms)
+        self.grid_lines = GridLines(
+            self.figure, self.n_neurons, self.n_timestamps * self.dt_ms
+        )
         self.subplot.add_graphic(self.grid_lines, center=False)
         self.controller.add_grid_lines(self.grid_lines)
         self.subplot.add_graphic(self.text, center=False)

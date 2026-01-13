@@ -44,10 +44,15 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         self.initialized = False
 
     def set_limits(self, max_time_secs: float, max_neurons: int) -> None:
+        logging.warning(f"Set limits {max_time_secs}, {max_neurons}")
         if max_time_secs <= 0.0 or max_neurons <= 0:
             return
         self.max_width = 1000.0 * max_time_secs
         self.max_height = float(max_neurons)
+        for grid_line in self.grid_lines:
+            if grid_line is not None:
+                logging.warning("Resizing grid lines")
+                grid_line.resize(int(self.max_height), self.max_width)
         state = self._get_camera_state()
         if not self.initialized:
             # first use of controller: set initial camera state to show all data

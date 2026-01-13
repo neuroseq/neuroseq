@@ -1,15 +1,16 @@
 import numpy as np
 import pygfx
 import pylinalg
+from fastplotlib import Figure
 from fastplotlib import Graphic
 
 DTYPE = "f4"
 
 
-def generate_gridlines(
-    n_neurons: int, time_ms: float, dt_ms: float, thickness: float
-) -> pygfx.Line:
-    """Generate vertical gridlines for a timeseries plot."""
+def generate_gridline_geometry(
+    n_neurons: int, time_ms: float, dt_ms: float
+) -> pygfx.Geometry:
+    """Generate geometry for vertical gridlines for a timeseries plot."""
     n_x = int(time_ms / dt_ms) + 1
     coords = np.zeros((2 * n_x, 3), dtype=DTYPE)
 
@@ -21,8 +22,15 @@ def generate_gridlines(
     coords[1 : 2 * n_x : 2, 1] = n_neurons - 0.5
     coords[:, 2] = 199.0
 
+    return pygfx.Geometry(positions=coords)
+
+
+def generate_gridlines(
+    n_neurons: int, time_ms: float, dt_ms: float, thickness: float
+) -> pygfx.Line:
+    """Generate vertical gridlines for a timeseries plot."""
     color = pygfx.Color((0.6, 0.6, 0.6, 0.3))
-    geometry = pygfx.Geometry(positions=coords)
+    geometry = generate_gridline_geometry(n_neurons, time_ms, dt_ms)
     material = pygfx.LineSegmentMaterial(thickness=thickness, aa=True, color=color)
     return pygfx.Line(geometry, material)
 
@@ -45,9 +53,10 @@ def generate_stripes(n_neurons: int, time_ms: float) -> pygfx.InstancedMesh:
 
 
 class GridLines(Graphic):
-    def __init__(self, n_neurons: int, time_ms: float):
+    def __init__(self, figure: Figure, n_neurons: int, time_ms: float):
         """Create gridlines for a timeseries plot."""
         super().__init__()
+        self.figure = figure
         group = pygfx.Group()
         if n_neurons > 1:
             group.add(generate_stripes(n_neurons, time_ms))
@@ -68,3 +77,14 @@ class GridLines(Graphic):
         self.gridline_10ms.visible = time_ms < 2500.0
         self.gridline_100ms.visible = time_ms < 25000.0
         self.gridline_1000ms.visible = time_ms < 250000.0
+
+    def resize(self, n_neurons: int, time_ms: float):
+        self.gridline_1ms.geometry = generate_gridline_geometry(n_neurons, time_ms, 1)
+        self.gridline_10ms.geometry = generate_gridline_geometry(n_neurons, time_ms, 10)
+        self.gridline_100ms.geometry = generate_gridline_geometry(
+            n_neurons, time_ms, 100
+        )
+        self.gridline_1000ms.geometry = generate_gridline_geometry(
+            n_neurons, time_ms, 1000
+        )
+        self.figure.canvas.request_draw()
