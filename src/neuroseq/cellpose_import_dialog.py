@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 from qtpy import QtCore
@@ -21,6 +22,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self,
         parent: QtWidgets.QWidget | None = None,
         existing_data: CellposeImportResult | None = None,
+        delete_handler: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
@@ -31,6 +33,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.overlay_widget = CellOverlayWidget("")
         # Use a defensive copy so the preview can't mutate the stored instance
         self.existing_data = clone_cellpose_result(existing_data)
+        self.delete_handler = delete_handler
         self.file_selection_container: QtWidgets.QWidget | None = None
         self.main_content_container: QtWidgets.QWidget | None = None
         self._setup_ui()
@@ -179,9 +182,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         button_layout = QtWidgets.QHBoxLayout()
 
-        self.clear_button = QtWidgets.QPushButton("Clear Data")
-        self.clear_button.clicked.connect(self._clear_existing_data)
-        button_layout.addWidget(self.clear_button)
+        self.delete_button = QtWidgets.QPushButton("Delete Cellpose Data")
+        self.delete_button.setEnabled(self.existing_data is not None)
+        self.delete_button.clicked.connect(self._delete_existing_data)
+        button_layout.addWidget(self.delete_button)
 
         button_layout.addStretch()
 
@@ -216,6 +220,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self._imported_data = None
         if clear_existing_data:
             self.existing_data = None
+            if hasattr(self, "delete_button"):
+                self.delete_button.setEnabled(False)
 
         self.importer = CellPoseImporter()
         self.image_path = None
@@ -332,16 +338,15 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         if strategy == "Linear":
             offset = self._get_linear_offset()
-            # Map stimulus ID = cellpose_id - offset (leaving gaps if IDs are missing)
+            # Start stimulus IDs at 0 once the chosen cellpose offset is reached.
             mapping: dict[int, int] = {}
-            for cellpose_id in original_ids:
-                if cellpose_id < offset:
-                    continue  # should start with (if offset 5) cellpose ID 5 and map to stim ID 1.
-                stim_id = int(cellpose_id - offset)
-                mapping[stim_id] = int(
-                    cellpose_id
-                )  # not sure why we see "1:1", "2:2", but then conspiciously from 5, "5:1". Need to solve.
-                # think cell-stim are swapped in ordering on map vs this calculation.
+            eligible_ids = [
+                int(cellpose_id)
+                for cellpose_id in original_ids
+                if cellpose_id >= offset
+            ]
+            for stim_id, cellpose_id in enumerate(eligible_ids):
+                mapping[stim_id] = cellpose_id
             return mapping
         elif strategy == "Custom":
             # Parse custom mapping string
@@ -566,7 +571,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
             # Update UI
             self.segmentation_path_label.setText("(from existing data)")
             self.segmentation_path_label.setStyleSheet("QLabel { color: blue; }")
-            # Clear button is now always visible
+            if hasattr(self, "delete_button"):
+                self.delete_button.setEnabled(True)
             self.import_button.setEnabled(True)
 
             # Update preview
@@ -578,16 +584,18 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.logger.warning("Failed to load existing cellpose data: %s", exc)
             self._reset_importer_state(clear_existing_data=True)
 
-    def _clear_existing_data(self) -> None:
-        """Clear cellpose data after confirmation"""
+    def _delete_existing_data(self) -> None:
+        """Delete stored cellpose data after confirmation."""
         reply = QtWidgets.QMessageBox.question(
             self,
-            "Clear Data",
-            "Are you sure you want to clear all cellpose data? This cannot be undone.",
+            "Delete Cellpose Data",
+            "Are you sure you want to delete all cellpose data? This cannot be undone.",
             QtWidgets.QMessageBox.StandardButton.Yes
             | QtWidgets.QMessageBox.StandardButton.No,
             QtWidgets.QMessageBox.StandardButton.No,
         )
 
         if reply == QtWidgets.QMessageBox.StandardButton.Yes:
+            if self.delete_handler is not None:
+                self.delete_handler()
             self._reset_importer_state(clear_existing_data=True)

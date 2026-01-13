@@ -613,7 +613,11 @@ class Gui(QtWidgets.QMainWindow):
         self.model.add_experimental_data(experiment_name, data, append)
 
     def btn_import_cellpose_data_clicked(self) -> None:
-        dialog = CellposeImportDialog(self, existing_data=self.last_cellpose_import)
+        dialog = CellposeImportDialog(
+            self,
+            existing_data=self.last_cellpose_import,
+            delete_handler=self._delete_cellpose_data,
+        )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             imported = clone_cellpose_result(dialog.get_imported_data())
             self.last_cellpose_import = imported
@@ -624,6 +628,12 @@ class Gui(QtWidgets.QMainWindow):
                 "Cellpose import",
                 "Cellpose segmentation loaded. Now ready for Patchclamp import",
             )
+
+    def _delete_cellpose_data(self) -> None:
+        """Remove stored cellpose data from both GUI and model."""
+        self.last_cellpose_import = None
+        if self.model is not None:
+            self.model.cellpose_data = None
 
     def btn_import_patchclamp_data_clicked(self) -> None:
         dialog = PatchClampImportDialog(

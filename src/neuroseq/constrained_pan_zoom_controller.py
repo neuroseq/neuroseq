@@ -35,6 +35,7 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         self.x_scroll_bar: QtWidgets.QScrollBar | None = None
         self.y_scroll_bar: QtWidgets.QScrollBar | None = None
         self.grid_lines: list[GridLines] = []
+        self.logger: logging.Logger = logging.getLogger(__name__)
         super().__init__(*args, **kwargs)
 
     def reset(self):
@@ -48,10 +49,12 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
     ) -> None:
         if max_time_secs <= 0.0 or max_neurons <= 0:
             return
+        self.logger.info("Setting CZC to window limits")
         self.max_width = 1000.0 * max_time_secs
         self.max_height = float(max_neurons)
         state = self._get_camera_state()
         if not self.initialized:
+            self.logger.info("Setting to initial defaults")
             # first use of controller: set initial camera state to show all data
             state["width"] = self.max_width
             state["height"] = self.max_height

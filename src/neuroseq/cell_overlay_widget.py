@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 from collections.abc import Iterable
 from typing import TypedDict
 
@@ -287,6 +288,7 @@ class OverlayView(FPLWidget):
 class CellOverlayWidget(QtWidgets.QGroupBox):
     def __init__(self, title: str = "Color-coded Preview") -> None:
         super().__init__(title)
+        self.logger = logging.getLogger(__name__)
         self.overlay_image: np.ndarray | None = None
         self.base_image: np.ndarray | None = None
         self.segmentation: np.ndarray | None = None
@@ -494,18 +496,34 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
 
     def _update_overlay_scale(self, *_args) -> None:
         self._ensure_window_tracking()
-        available_height = self.height()
+        margins = self.contentsMargins()
+        available_height = self.height() - margins.top() - margins.bottom()
+        available_width = self.width() - margins.left() - margins.right()
+        logging.info(
+            "Upon render: height %s - top %s - bottom %s = %s; "
+            "width %s - left %s - right %s = %s",
+            self.height(),
+            margins.top(),
+            margins.bottom(),
+            available_height,
+            self.width(),
+            margins.left(),
+            margins.right(),
+            available_width,
+        )
         if available_height <= 0:
             window = self.window()
             if window is not None:
                 available_height = window.height()
+                available_width = window.width()
             else:
                 screen = self._get_current_screen()
                 if screen is None:
                     return
                 available_height = screen.availableGeometry().height()
+                available_width = screen.availableGeometry().width()
 
-        target_height = max(600, int(available_height * 0.84))
+        target_height = int(available_height * 0.84)
         aspect_ratio = 1.0
         if self.overlay_image is not None and self.overlay_image.shape[0] > 0:
             aspect_ratio = max(
@@ -514,6 +532,14 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             )
         target_width = max(1, int(target_height * aspect_ratio))
         target_size = (target_width, target_height)
+
+        logging.info(
+            "Upon render: height %s / width %s. Target width %s ",
+            available_height,
+            available_width,
+            target_width,
+        )
+
         if self._last_target_size == target_size:
             return
 
