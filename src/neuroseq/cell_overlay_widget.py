@@ -310,7 +310,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.overlay_view = OverlayView()
         self.overlay_view.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
-            QtWidgets.QSizePolicy.Policy.Fixed,
+            QtWidgets.QSizePolicy.Policy.Expanding,
         )
         self.overlay_view.setMinimumHeight(600)
         layout.addWidget(self.overlay_view)
@@ -523,28 +523,41 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
                 available_height = screen.availableGeometry().height()
                 available_width = screen.availableGeometry().width()
 
-        target_height = int(available_height * 0.84)
+        target_height = int(available_height * 0.95)
+        target_width = int(available_width * 0.98)
         aspect_ratio = 1.0
         if self.overlay_image is not None and self.overlay_image.shape[0] > 0:
             aspect_ratio = max(
                 float(self.overlay_image.shape[1]) / float(self.overlay_image.shape[0]),
                 0.1,
             )
-        target_width = max(1, int(target_height * aspect_ratio))
-        target_size = (target_width, target_height)
 
+        if self.overlay_image is not None and self.overlay_image.shape[0] > 0:
+            width_from_height = int(target_height * aspect_ratio)
+            height_from_width = int(target_width / aspect_ratio)
+            if width_from_height <= target_width:
+                final_width = max(1, width_from_height)
+                final_height = max(1, target_height)
+            else:
+                final_width = max(1, target_width)
+                final_height = max(1, height_from_width)
+        else:
+            final_width = max(1, target_width)
+            final_height = max(1, target_height)
+
+        target_size = (final_width, final_height)
         logging.info(
             "Upon render: height %s / width %s. Target width %s ",
             available_height,
             available_width,
-            target_width,
+            final_width,
         )
 
         if self._last_target_size == target_size:
             return
 
         self._last_target_size = target_size
-        self.overlay_view.setFixedSize(target_width, target_height)
-        self.overlay_view.widget.setFixedSize(target_width, target_height)
+        self.overlay_view.setFixedSize(final_width, final_height)
+        self.overlay_view.widget.setFixedSize(final_width, final_height)
         self.overlay_view.updateGeometry()
         self.overlay_view.widget.updateGeometry()

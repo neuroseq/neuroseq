@@ -32,6 +32,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.segmentation_path: Path | None = None
         self.importer = CellPoseImporter()
         self.overlay_widget = CellOverlayWidget("")
+        self.overlay_widget.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Expanding,
+        )
         # Use a defensive copy so the preview can't mutate the stored instance
         self.existing_data = clone_cellpose_result(existing_data)
         self.delete_handler = delete_handler
@@ -140,7 +144,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
         # Custom mapping input
         self.custom_mapping_line = QtWidgets.QLineEdit()
         self.custom_mapping_line.setMinimumWidth(260)
-        self.custom_mapping_line.setMinimumHeight(28)
+        self.custom_mapping_line.setMinimumHeight(
+            36
+        )  # make it larger, ideally we'd make font larger too.
         self.custom_mapping_line.setPlaceholderText(
             "e.g., 1:12,2:3 (stimkey:cellposeId)"
         )
@@ -160,7 +166,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         # Place overlay first so the visual is top-most
         self.overlay_widget.setMinimumHeight(400)
-        main_content_layout.addWidget(self.overlay_widget)
+        main_content_layout.addWidget(self.overlay_widget, stretch=1)
 
         checkbox_layout = QtWidgets.QHBoxLayout()
         checkbox_layout.setContentsMargins(4, 0, 4, 0)

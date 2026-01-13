@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import logging
+import contextlib
 
 import brian2.numpy_ as np
 import pygfx
@@ -35,7 +35,6 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         self.x_scroll_bar: QtWidgets.QScrollBar | None = None
         self.y_scroll_bar: QtWidgets.QScrollBar | None = None
         self.grid_lines: list[GridLines] = []
-        self.logger: logging.Logger = logging.getLogger(__name__)
         super().__init__(*args, **kwargs)
 
     def reset(self):
@@ -49,12 +48,10 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
     ) -> None:
         if max_time_secs <= 0.0 or max_neurons <= 0:
             return
-        self.logger.info("Setting CZC to window limits")
         self.max_width = 1000.0 * max_time_secs
         self.max_height = float(max_neurons)
         state = self._get_camera_state()
         if not self.initialized:
-            self.logger.info("Setting to initial defaults")
             # first use of controller: set initial camera state to show all data
             state["width"] = self.max_width
             state["height"] = self.max_height
@@ -77,12 +74,6 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         - Clamps the width/height and position.
         """
         current_state = self._get_camera_state()
-        logging.info(
-            "Incoming camera state: width=%s height=%s position=%s",
-            new_state.get("width"),
-            new_state.get("height"),
-            new_state.get("position"),
-        )
         # width constraints
         if "width" in new_state:
             new_state["width"] = float(
@@ -91,12 +82,6 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
                     self.min_width,
                     self.max_width,
                 )
-            )
-            logging.info(
-                "Clamped width: %s (min=%s max=%s)",
-                new_state["width"],
-                self.min_width,
-                self.max_width,
             )
             self._set_scroll_bar_size(
                 self.x_scroll_bar, new_state["width"] / self.max_width
@@ -115,12 +100,6 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
                     self.max_height,
                 )
             )
-            logging.info(
-                "Clamped height: %s (min=%s max=%s)",
-                new_state["height"],
-                self.min_height,
-                self.max_height,
-            )
             self._set_scroll_bar_size(
                 self.y_scroll_bar, new_state["height"] / self.max_height
             )
@@ -128,11 +107,7 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
             new_state["height"] = current_state["height"]
         # position constraints
         if "position" not in new_state:
-            logging.info("Using old position still for camera in pan/zoom controller.")
             new_state["position"] = current_state["position"]
-        else:
-            logging.info("New position for camera..")
-            logging.info(new_state["position"])
         half_width = 0.5 * new_state["width"]
         half_height = 0.5 * new_state["height"]
         x = np.clip(new_state["position"][0], half_width, self.max_width - half_width)
@@ -142,12 +117,6 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
             self.max_height - half_height - 0.5,
         )
         new_state["position"] = (x, y, new_state["position"][2])
-        logging.info(
-            "Clamped position: %s (half_width=%s half_height=%s)",
-            new_state["position"],
-            half_width,
-            half_height,
-        )
         self._set_scroll_bar_position(
             self.x_scroll_bar, (x - half_width) / self.max_width
         )
@@ -192,10 +161,8 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
     def remove_grid_lines(self, gridlines: GridLines):
         if not self.grid_lines:
             return
-        try:
+        with contextlib.suppress(ValueError):
             self.grid_lines.remove(gridlines)
-        except ValueError:
-            logging.warning("GridLines not found in controller list")
 
     def connect_x_scroll_bar(self, scroll_bar: QtWidgets.QScrollBar):
         self.x_scroll_bar = scroll_bar

@@ -124,6 +124,10 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         left_layout.setSpacing(8)
 
         self.overlay_stack = QtWidgets.QStackedWidget()
+        self.overlay_stack.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Expanding,
+        )
         self.overlay_stack.setMaximumWidth(max_half_width)
         self.overlay_widget = CellOverlayWidget("Cellpose Preview")
         self.overlay_widget.setSizePolicy(
