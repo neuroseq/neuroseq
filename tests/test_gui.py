@@ -735,5 +735,9 @@ def test_gui_import_suite2p_data_dialog(monkeypatch: MonkeyPatch, qtbot: QtBot) 
     # Call the button method - this should successfully import data via the handler
     gui.btn_import_suite2p_data_clicked()
 
-    assert gui.model.b2_model.network["trace"].v.shape == (5, 100)
+    imported = gui.model.experiments.get("test_experiment")
+    assert imported is not None
+    trace_data = next((d for d in imported if isinstance(d, TraceData)), None)
+    assert trace_data is not None
+    assert trace_data.traces.shape == (5, 100)
     gui.close()
