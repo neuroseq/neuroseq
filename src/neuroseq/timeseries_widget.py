@@ -180,6 +180,7 @@ class TimeseriesWidget(FPLWidget):
             self.selection_in_progress = True
         elif self.mode == InteractMode.DRAW:
             self.mouse_drag_neuron_index = math.floor(self.mouse_pos[1] + 0.5)
+            self.mouse_drag_time_index = math.floor(self.mouse_pos[0] / self.dt_ms)
             self.mouse_dragged.emit(
                 self.mouse_drag_neuron_index,
                 self.mouse_drag_neuron_index,
