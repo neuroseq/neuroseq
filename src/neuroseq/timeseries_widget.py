@@ -7,7 +7,6 @@ import brian2.numpy_ as np
 import fastplotlib as fpl
 import pygfx
 import qtawesome as qta
-from fastplotlib.layouts import Subplot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
@@ -17,7 +16,6 @@ from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.fpl_widget import FPLWidget
 from neuroseq.gridlines import GridLines
-from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.region_of_interest import RegionOfInterest
 from neuroseq.text import Text
 from neuroseq.timeline import Timeline
@@ -49,10 +47,7 @@ class TimeseriesWidget(FPLWidget):
     def __init__(
         self, controller: pygfx.Controller, parent: QtWidgets.QWidget | None = None
     ) -> None:
-        # provisonally included
         super().__init__(controller=controller, parent=parent)
-        self.heatmap_widget: HeatmapWidget | None = None
-        self.controller = controller
         self.graphic: fpl.ImageGraphic | fpl.LineStack | fpl.ScatterGraphic | None = (
             None
         )
@@ -65,8 +60,6 @@ class TimeseriesWidget(FPLWidget):
         self.show_text = True
         self.timeline = Timeline()
         self.grid_lines: GridLines | None = None
-        self.subplot: Subplot = self.figure[0, 0]
-        self._set_light_mode()
 
         self.context_menu = QtWidgets.QMenu("Custom analysis", self)
         for custom_analysis_type in CustomAnalysisType:
@@ -179,8 +172,8 @@ class TimeseriesWidget(FPLWidget):
             self.roi.visible = True
             self.selection_in_progress = True
         elif self.mode == InteractMode.DRAW:
-            self.mouse_drag_neuron_index = math.floor(self.mouse_pos[1] + 0.5)
             self.mouse_drag_time_index = math.floor(self.mouse_pos[0] / self.dt_ms)
+            self.mouse_drag_neuron_index = math.floor(self.mouse_pos[1] + 0.5)
             self.mouse_dragged.emit(
                 self.mouse_drag_neuron_index,
                 self.mouse_drag_neuron_index,
