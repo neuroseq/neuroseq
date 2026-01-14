@@ -16,6 +16,7 @@ from neuroseq.data import Data
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
+from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.io import append_to_zip
 from neuroseq.io import load_from_zip
 from neuroseq.save_load_options import SaveLoadOptions
@@ -35,6 +36,7 @@ class Model:
         self.b2_model: B2Model = B2Model()
         self.experiments: dict[str, list[Data]] = {}
         self.stim_arrays: dict[str, StimArray] = {}
+        self.cellpose_data: CellposeImportResult | None = None
 
         self.max_ram_synapse_plot_matrix = 256
         self.max_time_secs = 0.0
@@ -55,6 +57,10 @@ class Model:
                 )
                 self.experiments = load_from_zip("experimental_data", zf)
                 self.stim_arrays = load_from_zip("stim_arrays", zf)
+                self.cellpose_data = load_from_zip("cellpose_data", zf).get(
+                    "cellpose_import"
+                )
+
         self.update_limits()
 
     def import_model(
@@ -391,6 +397,11 @@ class Model:
                     "b2_stored_state.pkl",
                     pickle.dumps(self.b2_model.network._stored_state, protocol=4),
                 )
+            # Todo: We could consider another option for cellpose data. I originally leaned towards that, but after merging  #388 and #390 this cellpose data may be in experimental data anyway, and seems inextricably related to it.
             if options.include_experimental_data:
                 append_to_zip(self.experiments, "experimental_data", zf)
+                if self.cellpose_data is not None:
+                    append_to_zip(
+                        {"cellpose_import": self.cellpose_data}, "cellpose_data", zf
+                    )
         self.filepath = pathlib.Path(filepath)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import logging
+import contextlib
 
 import brian2.numpy_ as np
 import pygfx
@@ -69,6 +69,7 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         - limit the width, height and position to prevent scrolling or zooming beyond the data
         - update the scroll bars if they are connected
         - hide or show sub-gridlines based on the current zoom level
+        - Clamps the width/height and position.
         """
         current_state = self._get_camera_state()
         # width constraints
@@ -158,10 +159,8 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
     def remove_grid_lines(self, gridlines: GridLines):
         if not self.grid_lines:
             return
-        try:
+        with contextlib.suppress(ValueError):
             self.grid_lines.remove(gridlines)
-        except ValueError:
-            logging.warning("GridLines not found in controller list")
 
     def connect_x_scroll_bar(self, scroll_bar: QtWidgets.QScrollBar):
         self.x_scroll_bar = scroll_bar

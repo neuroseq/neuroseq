@@ -13,6 +13,7 @@ from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
 from neuroseq import __version__
+from neuroseq.cellpose_import_dialog import CellposeImportDialog
 from neuroseq.console_widget import ConsoleWidget
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.custom_analysis_widget import CustomAnalysisType
@@ -27,8 +28,11 @@ from neuroseq.example_models import example_models
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.import_dialog import Suite2pImportDialog
+from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.model import Model
 from neuroseq.model_editor import ModelEditorDialog
+from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.save_load_options import SaveLoadOptionsDialog
 from neuroseq.spike_widget import SpikeWidget
@@ -132,6 +136,7 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_spike.currentTextChanged.connect(self.set_spike)
         self.cmb_data.currentTextChanged.connect(self.set_data)
         self.stim_editor.limits_modified.connect(self.update_limits)
+        self.last_cellpose_import: CellposeImportResult | None = None
         if filename is not None:
             self.load_model(filename)
         else:
@@ -344,6 +349,9 @@ class Gui(QtWidgets.QMainWindow):
             )
             self.progress_dialog.reset()
             return
+        self.last_cellpose_import = clone_cellpose_result(model.cellpose_data)
+        if model is not None:
+            model.cellpose_data = self.last_cellpose_import
         self.update_model(model, reset_controller=True)
 
     def _update_window_title(self) -> None:
@@ -362,6 +370,11 @@ class Gui(QtWidgets.QMainWindow):
         self.continue_simulation_action.setText("&Run simulation")
         for widget in self.plot_widgets:
             widget.clear_data()
+        if self.model is not None:
+            # todo: Check how console_widget.set_model / stim_editor handles None model, as it used to be null checked prior to a commit on main that this is mergning into
+            self.last_cellpose_import = clone_cellpose_result(self.model.cellpose_data)
+            self.model.cellpose_data = self.last_cellpose_import
+
         self.stim_editor.set_model(self.model)
         self.console_widget.set_model(self.model)
         self._update_combo_boxes()
@@ -571,6 +584,7 @@ class Gui(QtWidgets.QMainWindow):
         self._load_external_simulation_function(filename)
 
     def _select_experiment_data(self, experiment_name):
+        """Select the experiment within the GUI, for example after an import."""
         for cmb in (self.cmb_trace, self.cmb_spike, self.cmb_synapse, self.cmb_data):
             for i in range(cmb.count()):
                 if cmb.itemText(i).startswith(f"{experiment_name} ::"):
@@ -578,21 +592,100 @@ class Gui(QtWidgets.QMainWindow):
                     break
 
     def btn_import_suite2p_data_clicked(self) -> None:
-        """Open dialog to import Suite2p traces (and optional spikes)"""
-        dialog = Suite2pImportDialog(self)
+        """Open dialog to import experimental traces/spikes from Suite2p/CSV data"""
+        # possibly: pass in existing experiment data to the dialog to let it do sanity checks & auto-fill the offset?
+        dialog = Suite2pImportDialog(
+            self,
+            import_handler=self._apply_imported_experimental_data,
+        )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
-            # possibly: pass in existing experiment data to the dialog to let it do sanity checks & auto-fill the offset?
+            self.update_model(self.model)
+            self._select_experiment_data(dialog.experiment_name)
+
+    def _apply_imported_experimental_data(
+        self,
+        experiment_name: str,
+        data: list[TraceData | SpikeData],
+        append: bool,
+    ) -> None:
+        self.model.add_experimental_data(experiment_name, data, append)
+
+    def btn_import_cellpose_data_clicked(self) -> None:
+        dialog = CellposeImportDialog(
+            self,
+            existing_data=self.last_cellpose_import,
+            delete_handler=self._delete_cellpose_data,
+        )
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            imported = clone_cellpose_result(dialog.get_imported_data())
+            self.last_cellpose_import = imported
+            if self.model is not None:
+                self.model.cellpose_data = imported
+            QtWidgets.QMessageBox.information(
+                self,
+                "Cellpose import",
+                "Cellpose segmentation loaded. Now ready for Patchclamp import",
+            )
+
+    def _delete_cellpose_data(self) -> None:
+        """Remove stored cellpose data from both GUI and model."""
+        self.last_cellpose_import = None
+        if self.model is not None:
+            self.model.cellpose_data = None
+
+    def btn_import_patchclamp_data_clicked(self) -> None:
+        dialog = PatchClampImportDialog(
+            cellpose_import=self.last_cellpose_import, model=self.model, parent=self
+        )
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            if not dialog.imported_data:
+                return
             try:
-                self.model.add_experimental_data(
-                    dialog.experiment_name, dialog.imported_data, dialog.append_data
+                if dialog.cellpose_import is not None:
+                    # keep GUI/model copies in sync with any updated stimulus mapping
+                    self.last_cellpose_import = clone_cellpose_result(
+                        dialog.cellpose_import
+                    )
+                    if self.model is not None:
+                        self.model.cellpose_data = self.last_cellpose_import
+
+                # For patch clamp imports, handle replace mode properly:
+                # - Replace mode: remove only the specific neuron IDs being imported, then add new data
+                # - Append mode: just append/merge the new data
+
+                self.logger.info(
+                    f"Patch clamp import: dialog.append_data={dialog.append_data}, "
+                    f"neurons_to_replace={dialog.neurons_to_replace}, "
+                    f"experiment_exists={dialog.experiment_name in self.model.experiments}"
                 )
-            except Exception as e:
+
+                if (
+                    not dialog.append_data
+                    and dialog.neurons_to_replace
+                    and dialog.experiment_name in self.model.experiments
+                ):
+                    self.logger.info(
+                        f"Removing neurons {dialog.neurons_to_replace} before import"
+                    )
+                    self._remove_neurons_from_experiment(
+                        dialog.experiment_name, dialog.neurons_to_replace
+                    )
+
+                # Always use append mode to enable neuron merging (whether replacing specific neurons or extending)
+                append_mode = True
+
+                self.logger.info(f"Using append_mode={append_mode}")
+
+                self.model.add_experimental_data(
+                    dialog.experiment_name, dialog.imported_data, append_mode
+                )
+            except Exception as exc:
                 QtWidgets.QMessageBox.critical(
                     self,
-                    "Data import error",
-                    f"Could not import Suite2p data: {e}",
+                    "Patch clamp import error",
+                    f"Could not import patch clamp data: {exc}",
                 )
-                self.logger.exception(e)
+                self.logger.exception(exc)
                 return
             self.update_model(self.model)
             self._select_experiment_data(dialog.experiment_name)
@@ -672,6 +765,22 @@ class Gui(QtWidgets.QMainWindow):
             f"NeuroSeq\n\nVersion {__version__}\n\n"
             + "https://github.com/ssciwr/neuroseq",
         )
+
+    def _remove_neurons_from_experiment(
+        self, experiment_name: str, neurons_to_remove: set[int]
+    ) -> None:
+        """Remove specific neurons from an experiment's data."""
+        if experiment_name not in self.model.experiments:
+            return
+
+        from neuroseq.data import SpikeData
+        from neuroseq.data import TraceData
+        from neuroseq.utils import remove_neurons_from_data
+
+        # Remove neurons from each data object in the experiment
+        for data in self.model.experiments[experiment_name]:
+            if isinstance(data, (TraceData, SpikeData)):
+                remove_neurons_from_data(data, neurons_to_remove)
 
     def _create_progressbar(self) -> None:
         self.progress_dialog = QtWidgets.QProgressDialog(
@@ -785,6 +894,22 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="Ctrl+Shift+I",
+            icon=qta.icon("mdi6.import"),
+        )
+        add_action(
+            "Import Cellpose &Segmentation",
+            self.btn_import_cellpose_data_clicked,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon=qta.icon("mdi6.image-edit-outline"),
+        )
+        add_action(
+            "Import &Patch Clamp Data",
+            self.btn_import_patchclamp_data_clicked,
+            menu,
+            toolbar,
+            shortcut=None,
             icon=qta.icon("mdi6.import"),
         )
         menu.addSeparator()

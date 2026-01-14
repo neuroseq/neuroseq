@@ -9,6 +9,7 @@ from brian2.tests.utils import assert_allclose
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.example_models import default_model
+from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.model import Model
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stim import StimArray
@@ -257,6 +258,37 @@ def test_save_load(model_nmda: Model, tmp_path: Path) -> None:
         model_nmda.b2_model.network["Mn"].g,
         reconstructed_model.b2_model.network["Mn"].g,
     )
+
+
+def test_cellpose_data_persisted(tmp_path: Path) -> None:
+    model = Model()
+    segmentation = np.array([[-1, 0], [1, -1]], dtype=np.int32)
+    overlay = np.zeros((2, 2, 3), dtype=np.uint8)
+    original_ids = np.array([0, 1], dtype=np.int32)
+    image_path = tmp_path / "image.png"
+    image_path.write_bytes(b"placeholder")
+
+    model.cellpose_data = CellposeImportResult(
+        image_path=image_path,
+        segmentation_array=segmentation,
+        overlay_image=overlay,
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=original_ids,
+        stimulus_to_cellpose_mapping={1: 1},
+    )
+
+    save_path = tmp_path / "cellpose_model.nseq"
+    model.save(save_path, SaveLoadOptions(True, True, False, True))
+
+    loaded_cellpose = Model(save_path).cellpose_data
+
+    assert loaded_cellpose is not None
+    assert loaded_cellpose.image_path == image_path
+    np.testing.assert_array_equal(loaded_cellpose.segmentation_array, segmentation)
+    np.testing.assert_array_equal(loaded_cellpose.overlay_image, overlay)
+    np.testing.assert_array_equal(loaded_cellpose.original_cellpose_ids, original_ids)
+    assert loaded_cellpose.stimulus_to_cellpose_mapping == {1: 1}
 
 
 def test_stim_array_simulation_padding() -> None:

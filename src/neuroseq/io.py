@@ -1,6 +1,7 @@
 import json
 import zipfile
 from io import BytesIO
+from pathlib import Path
 
 import brian2 as b2
 import numpy as np
@@ -10,6 +11,7 @@ from neuroseq.b2_units import value_unit_str_to_quantity
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
+from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.stim import StimArray
 
 
@@ -74,6 +76,28 @@ def _json_encoder_factory(zf: zipfile.ZipFile):
                         "values": _save_array(zf, obj.name, obj.values),
                         "units": obj.units,
                         "dt": obj.dt,
+                    }
+                case CellposeImportResult():
+                    segmentation_path = _save_array(
+                        zf, "cellpose_segmentation", obj.segmentation_array
+                    )
+                    overlay_path = _save_array(
+                        zf, "cellpose_overlay", obj.overlay_image
+                    )
+                    original_ids_path = None
+                    if obj.original_cellpose_ids is not None:
+                        original_ids_path = _save_array(
+                            zf, "cellpose_original_ids", obj.original_cellpose_ids
+                        )
+                    return {
+                        "!CellposeImportResult": True,
+                        "image_path": str(obj.image_path),
+                        "segmentation_array": segmentation_path,
+                        "overlay_image": overlay_path,
+                        "trace_data": obj.trace_data,
+                        "spike_data": obj.spike_data,
+                        "original_cellpose_ids": original_ids_path,
+                        "stimulus_to_cellpose_mapping": obj.stimulus_to_cellpose_mapping,
                     }
                 case b2.Quantity():
                     value, unit = quantity_to_value_unit_str(obj)
@@ -156,6 +180,41 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                 with _zf.open(timestamps) as fp:
                     loaded_timestamps = np.load(fp)
                 return SynapseData(name, loaded_values, loaded_timestamps)
+            case {
+                "!CellposeImportResult": True,
+                "image_path": image_path,
+                "segmentation_array": segmentation_array,
+                "overlay_image": overlay_image,
+                "trace_data": trace_data,
+                "spike_data": spike_data,
+                "original_cellpose_ids": original_cellpose_ids,
+                "stimulus_to_cellpose_mapping": stimulus_to_cellpose_mapping,
+            }:
+                with _zf.open(segmentation_array) as fp:
+                    loaded_segmentation = np.load(fp)
+                with _zf.open(overlay_image) as fp:
+                    loaded_overlay = np.load(fp)
+                loaded_original_ids = None
+                if original_cellpose_ids is not None:
+                    with _zf.open(original_cellpose_ids) as fp:
+                        loaded_original_ids = np.load(fp)
+
+                return CellposeImportResult(
+                    image_path=Path(image_path),
+                    segmentation_array=loaded_segmentation,
+                    overlay_image=loaded_overlay,
+                    trace_data=trace_data,
+                    spike_data=spike_data,
+                    original_cellpose_ids=loaded_original_ids,
+                    stimulus_to_cellpose_mapping=(
+                        None
+                        if stimulus_to_cellpose_mapping is None
+                        else {
+                            int(k): int(v)
+                            for k, v in stimulus_to_cellpose_mapping.items()
+                        }
+                    ),
+                )
             case _:
                 return dct
 

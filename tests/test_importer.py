@@ -3,10 +3,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from neuroseq.importer import compute_normalized_suite2p_spikes
-from neuroseq.importer import compute_normalized_suite2p_traces
-from neuroseq.importer import prepare_suite2p_spikes
-from neuroseq.importer import prepare_suite2p_traces
+from neuroseq.importer_suite2p import compute_normalized_suite2p_spikes
+from neuroseq.importer_suite2p import compute_normalized_suite2p_traces
+from neuroseq.importer_suite2p import prepare_suite2p_spikes
+from neuroseq.importer_suite2p import prepare_suite2p_traces
 
 
 def test_prepare_suite2p_traces_produces_widget_payload(suite2p_import_data_dir):
@@ -46,6 +46,11 @@ def test_prepare_suite2p_traces_works_without_fneu(suite2p_import_data_dir):
 def test_prepare_suite2p_spikes_respects_threshold_and_limits_neurons(
     suite2p_import_data_dir,
 ):
+    """
+
+    :param suite2p_import_data_dir:
+    :return:
+    """
     spike_data = np.load(suite2p_import_data_dir / "spks.npy")
     dt = 1 / 30.0
 
@@ -64,7 +69,16 @@ def test_prepare_suite2p_spikes_respects_threshold_and_limits_neurons(
     normalized_spikes, _, _ = compute_normalized_suite2p_spikes(spike_data)
     trimmed_data = normalized_spikes[:4, :]
     values = trimmed_data[data.spike_indices, time_indices]
-    assert np.all(values >= threshold)
+    assert np.all(
+        values >= threshold
+    )  # detected a regression here. we now see resutls like:
+    """
+    >       assert np.all(values >= threshold)
+    E       assert np.False_
+    E        +  where np.False_ = <function all at 0x7cdef276f170>(array([0.5150124 , 0.9885168 , 0.10664748, 1.        , 0.6523537 ,\n       0.29718414, 0.1466293 , 0.26053137, 0.27846375, 0.25474724,\n       0.61752146, 0.30598238, 0.8945163 , 0.6416693 , 0.7615432 ,\n       0.89310557, 0.63276815, 0.9714045 , 0.46945933, 0.9162624 ,\n       0.550443  , 0.37802076, 0.17140116, 0.86899847, 0.33517653,\n       0.8196693 , 0.9928306 , 0.11396623, 0.8070358 , 0.11437435,\n       0.22229856, 0.85346013, 0.5908078 , 0.96274316, 0.89447355,\n       0.15064798, 0.45507854, 0.5350444 , 0.37590244, 0.8332498 ,\n       0.8441347 , 0.27324748, 0.08113655, 0.12833838, 0.4851915 ,\n       0.5017272 , 0.41835028, 0.7761316 , 0.46966183, 0.73085123,\n       0.42288566, 0.44247127, 0.10338625, 0.75927824, 0.85167545,\n       0.3469438 , 0.16358255, 0.9367483 , 0.41809708, 0.9016271 ,\n       0.9760032 , 0.11841686, 0.8308901 , 0.78086966, 0.596526  ,\n       1.        , 0.4547433 , 0.79808   , 0.7351832 , 0.39820093,\n       0.64166254, 0.78691816, 0.23727685, 0.8046875 , 0.67822224,\n       0.2657009 , 0.49587592, 0.968925  , 0.9777021 , 0.20871072,\n       0.27458408, 0.8248748 , 0.46612424, 0.14335115, 0.8712204 ,\n       0.14624012, 1.        , 0.26103976, 0.6518295 , 0.39677134,\n       0.13394874, 0.42202446, 0.19508348, 0.77223694, 0.9870696 ,\n       0.7319426 , 0.7622101 , 0.8651438 , 0.99697423, 0.18572904,\n       0.07031433, 0.21974424, 0.98191375, 0.20109744, 0.19966218,\n       0.7262079 , 0.10114086, 0.28988844, 0.34453458, 0.8660409 ,\n       0.9977638 , 0.5780134 , 0.43784592, 0.46107855, 0.27956823,\n       0.27754351, 0.47518986, 0.20581415, 0.17566703, 0.19999686,\n       0.7853043 , 0.5963357 , 0.9012837 , 0.98581576, 0.1916846 ,\n       0.6310945 , 1.        , 0.9486884 , 0.8517052 , 0.90641105,\n       0.17229426, 0.8523556 , 0.22446194, 0.36487725, 0.6750837 ,\n       0.20915009, 0.5802005 , 0.05367818, 0.9929934 , 0.98066473,\n       0.4278413 , 0.3707346 , 0.10823226, 0.48071438, 0.7209617 ,\n       0.8351283 , 0.74016964], dtype=float32) >= 0.2)
+
+    """
+    # We need to disentangle the different thresholding functions in the codebase
 
     high_threshold_data = prepare_suite2p_spikes(
         spike_data,
