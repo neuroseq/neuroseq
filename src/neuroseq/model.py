@@ -57,11 +57,9 @@ class Model:
                 )
                 self.experiments = load_from_zip("experimental_data", zf)
                 self.stim_arrays = load_from_zip("stim_arrays", zf)
-                cellpose_payload = load_from_zip("cellpose_data", zf)
-                # todo: Check load_from_zip after merge and see if we need the isinstance check or if laod_from_zip handles a presence check, or can..
-                # For now we will onyl keep it as a dict anyway, probably going forward also even if we support multiple cellpose imports at once.
-                if isinstance(cellpose_payload, dict):
-                    self.cellpose_data = cellpose_payload.get("cellpose_import")
+                self.cellpose_data = load_from_zip("cellpose_data", zf).get(
+                    "cellpose_import"
+                )
 
         self.update_limits()
 
