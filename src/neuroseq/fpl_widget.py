@@ -63,11 +63,10 @@ class FPLWidget(QtWidgets.QWidget):
         self.subplot.grids = False
         self.subplot.axes.y.ticks = {}
         self.subplot.axes.x.ticks = {}
-        # Keep axes visible by default; subclasses can override visibility as needed
-        self.subplot.axes.y.points.visible = True
-        self.subplot.axes.y.line.visible = True
-        self.subplot.axes.x.points.visible = True
-        self.subplot.axes.x.line.visible = True
+        self.subplot.axes.y.points.visible = False
+        self.subplot.axes.y.line.visible = False
+        self.subplot.axes.x.points.visible = False
+        self.subplot.axes.x.line.visible = False
         self.subplot.toolbar = False
 
     def closeEvent(self, event):
