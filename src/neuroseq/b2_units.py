@@ -53,7 +53,7 @@ def display_units(quantity: b2.Quantity) -> str:
     # Handle the case where quantity might not be a proper Brian2 Quantity
     if not isinstance(quantity, b2.Quantity):
         # If it's a plain number or array (dimensionless), return empty string
-        return "1. "
+        return ""
 
     try:
         unit_str = b2.Quantity(1, dim=quantity.dim).in_best_unit(python_code=False)
