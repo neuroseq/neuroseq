@@ -24,7 +24,7 @@ class SpikeWidget(TimeseriesWidget):
         self.subplot.title = "Spikes"
 
     def set_data(self, data: SpikeData | None) -> None:
-        self.subplot.clear()
+        self.clear_data()
         if data is None or data.spike_times.shape[0] == 0:
             self.subplot.title = "Spikes"
             return
@@ -53,4 +53,3 @@ class SpikeWidget(TimeseriesWidget):
             uniform_size=True,
         )
         self.post_set_data()
-        self.autoscale = False

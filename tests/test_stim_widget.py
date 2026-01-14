@@ -133,6 +133,7 @@ def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: StimArray) -> Non
     assert stim_widget.n_neurons == 0
     n_timestamps = positive_stims.values.shape[0]
     n_neurons = positive_stims.values.shape[1]
+    controller.set_limits(n_timestamps * positive_stims.dt, n_neurons)
     stim_widget.set_data(positive_stims)
     # toggle selection text on and off again
     stim_widget.toggle_selection_text()
@@ -192,6 +193,7 @@ def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
     assert stim_widget.n_neurons == 0
     n_timestamps = positive_stims.values.shape[0]
     n_neurons = positive_stims.values.shape[1]
+    controller.set_limits(n_timestamps * positive_stims.dt, n_neurons)
     stim_widget.set_data(positive_stims)
     assert stim_widget.n_neurons == n_neurons
     assert stim_widget.dt_ms == 1000 * positive_stims.dt
@@ -206,7 +208,7 @@ def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
     # mouse clicks
     stim_widget.setFocus()
     with qtbot.waitSignal(stim_widget.mouse_clicked) as signal:
-        mouse_click(qtbot, stim_widget, QtCore.QPoint(x0, y0))
+        mouse_click(qtbot, stim_widget.figure.canvas, QtCore.QPoint(x0, y0))
     neuron_index_offset, time_index, mouse_button = signal.args
     assert 0 < time_index / n_timestamps < 0.4
     assert 0 < neuron_index_offset / n_neurons < 1.0

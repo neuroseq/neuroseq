@@ -26,9 +26,6 @@ class DataWidget(QtWidgets.QWidget):
         layout.addWidget(self.stacked_widget)
         self.trace_widget = TraceWidget(controller=controller, parent=self)
         self.spike_widget = SpikeWidget(controller=controller, parent=self)
-        # the plots in this widget should never autoscale
-        self.trace_widget.autoscale = False
-        self.spike_widget.autoscale = False
         self.heatmap_widget = HeatmapWidget(parent=self)
         self.stacked_widget.addWidget(self.trace_widget)
         self.stacked_widget.addWidget(self.spike_widget)
@@ -36,11 +33,10 @@ class DataWidget(QtWidgets.QWidget):
         self.stacked_widget.setCurrentWidget(self.trace_widget)
         self.resize(800, 600)
 
-    def clear_data(self, reset_autoscale=False) -> None:
-        # we never want to reset autoscale for the widgets in this wrapper widget
-        self.trace_widget.clear_data(reset_autoscale=False)
-        self.spike_widget.clear_data(reset_autoscale=False)
-        self.heatmap_widget.clear_data(reset_autoscale=False)
+    def clear_data(self) -> None:
+        self.trace_widget.clear_data()
+        self.spike_widget.clear_data()
+        self.heatmap_widget.clear_data()
 
     def set_time_ms(self, time_ms: int) -> None:
         self.trace_widget.set_time_ms(time_ms)

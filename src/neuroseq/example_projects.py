@@ -1,34 +1,34 @@
 import brian2 as b2
 import brian2.numpy_ as np
 
-from neuroseq.model import Model
+from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
-example_models = {}
+example_projects = {}
 
 
-def register_example_model(name: str):
+def register_example_project(name: str):
     """
-    Decorator used to register example model generator functions so that they will be displayed in the GUI
+    Decorator used to register example project generator functions so that they will be displayed in the GUI
 
     Args:
         name: The name shown in the GUI (e.g., "Non-linear").
     """
 
     def decorator(func):
-        example_models[name] = func
+        example_projects[name] = func
         return func
 
     return decorator
 
 
-@register_example_model("Getting Started Model")
-def default_model() -> Model:
-    model = Model()
+@register_example_project("Getting Started Project")
+def default_project() -> Project:
+    project = Project()
 
     # define Brian2 model
-    b2_model = model.b2_model
+    b2_model = project.b2_model
 
     nneurons = 40
     nneurons_exc = 32
@@ -166,7 +166,7 @@ we= clip(we + Apre, -gmax, gmax)
         units="siemens",
         dt=0.001,
     )
-    model.add_stim_array(stim_array)
+    project.add_stim_array(stim_array)
 
     stim_inh = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
     stim_inh[800:802, :nneurons_exc] = 1
@@ -177,17 +177,17 @@ we= clip(we + Apre, -gmax, gmax)
         units="siemens",
         dt=0.001,
     )
-    model.add_stim_array(stim_array_inh)
+    project.add_stim_array(stim_array_inh)
 
-    return model
+    return project
 
 
-@register_example_model("non_linear")
-def non_linear() -> Model:
-    model = Model()
+@register_example_project("non_linear")
+def non_linear() -> Project:
+    project = Project()
 
     # define Brian2 model
-    b2_model = model.b2_model
+    b2_model = project.b2_model
 
     b2_model.define_parameter("a", 1 / (10 * b2.ms))
     b2_model.define_parameter("b", 1 / (10 * b2.ms))
@@ -233,15 +233,15 @@ def non_linear() -> Model:
     b2_model.define_init("S", "w", [1.0, 10.0])
     b2_model.define_init("neuron_input", "v", [0.0, 0.5])
 
-    return model
+    return project
 
 
-@register_example_model("Hodgkin-Huxley Neuron")
-def single_hh_neuron() -> Model:
-    model = Model()
+@register_example_project("Hodgkin-Huxley Neuron")
+def single_hh_neuron() -> Project:
+    project = Project()
 
     # define Brian2 model
-    b2_model = model.b2_model
+    b2_model = project.b2_model
 
     b2_model.define_parameter("area", 20000 * b2.umetre**2)
     b2_model.define_parameter(
@@ -329,7 +329,7 @@ def single_hh_neuron() -> Model:
         units="pA",
         dt=0.001,
     )
-    model.add_stim_array(i_external)
+    project.add_stim_array(i_external)
 
     exc_stim = np.zeros((3100, 1), dtype="float")
     exc_stim[:, :] = 0
@@ -345,7 +345,7 @@ def single_hh_neuron() -> Model:
         units="1",
         dt=0.001,
     )
-    model.add_stim_array(exc_stimulation)
+    project.add_stim_array(exc_stimulation)
 
     inh_stim = np.zeros((3100, 1), dtype="float")
     inh_stim[:, :] = 0
@@ -361,17 +361,17 @@ def single_hh_neuron() -> Model:
         units="1",
         dt=0.001,
     )
-    model.add_stim_array(inh_stimulation)
+    project.add_stim_array(inh_stimulation)
 
-    return model
+    return project
 
 
-@register_example_model("Leaky-Integrate-and-Fire Neuron")
-def single_lif_neuron_many_stims() -> Model:
-    model = Model()
+@register_example_project("Leaky-Integrate-and-Fire Neuron")
+def single_lif_neuron_many_stims() -> Project:
+    project = Project()
 
     # define Brian2 model
-    b2_model = model.b2_model
+    b2_model = project.b2_model
 
     # parameters
     b2_model.define_parameter("v0", -70 * b2.mV)
@@ -438,7 +438,7 @@ def single_lif_neuron_many_stims() -> Model:
         units="pA",
         dt=0.001,
     )
-    model.add_stim_array(i_external)
+    project.add_stim_array(i_external)
 
     exc_stim = np.zeros((int(tfinal / b2.ms), 1), dtype="float")
     exc_stim[:, :] = 0
@@ -454,7 +454,7 @@ def single_lif_neuron_many_stims() -> Model:
         units="mwatt / um2",
         dt=0.001,
     )
-    model.add_stim_array(exc_stimulation)
+    project.add_stim_array(exc_stimulation)
 
     inh_stim = np.zeros((int(tfinal / b2.ms), 1), dtype="float")
     inh_stim[:, :] = 0
@@ -470,16 +470,16 @@ def single_lif_neuron_many_stims() -> Model:
         units="mwatt / um2",
         dt=0.001,
     )
-    model.add_stim_array(inh_stimulation)
-    return model
+    project.add_stim_array(inh_stimulation)
+    return project
 
 
-@register_example_model("Network of Hodgkin-Huxley Neurons")
-def hh_neuron_with_synapses() -> Model:
-    model = Model()
+@register_example_project("Network of Hodgkin-Huxley Neurons")
+def hh_neuron_with_synapses() -> Project:
+    project = Project()
 
     # define Brian2 model
-    b2_model = model.b2_model
+    b2_model = project.b2_model
 
     nneurons = 4000
     nneurons_exc = 3200
@@ -647,7 +647,7 @@ def hh_neuron_with_synapses() -> Model:
         units="pA",
         dt=0.001,
     )
-    model.add_stim_array(i_external)
+    project.add_stim_array(i_external)
 
     exc_stimulation = StimArray(
         name="Exc_stimulation",
@@ -656,7 +656,7 @@ def hh_neuron_with_synapses() -> Model:
         units="mwatt / um2",
         dt=0.001,
     )
-    model.add_stim_array(exc_stimulation)
+    project.add_stim_array(exc_stimulation)
 
     inh_stimulation = StimArray(
         name="Inh_stimulation",
@@ -665,16 +665,16 @@ def hh_neuron_with_synapses() -> Model:
         units="mwatt / um2",
         dt=0.001,
     )
-    model.add_stim_array(inh_stimulation)
+    project.add_stim_array(inh_stimulation)
 
-    return model
+    return project
 
 
-def hh_neurons_ei_model() -> Model:
-    model = Model()
+def hh_neurons_ei_model() -> Project:
+    project = Project()
 
     # define Brian2 model
-    b2_model = model.b2_model
+    b2_model = project.b2_model
 
     nneurons = 30
     nneurons_exc = 24
@@ -779,7 +779,7 @@ def hh_neurons_ei_model() -> Model:
         units="pA",
         dt=0.001,
     )
-    model.add_stim_array(i_external)
+    project.add_stim_array(i_external)
 
     exc_stim = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
     exc_stim[:, :] = 0
@@ -791,7 +791,7 @@ def hh_neurons_ei_model() -> Model:
         units="mwatt / um2",
         dt=0.001,
     )
-    model.add_stim_array(exc_stimulation)
+    project.add_stim_array(exc_stimulation)
 
     inh_stim = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
     inh_stim[:, :] = 0
@@ -803,16 +803,16 @@ def hh_neurons_ei_model() -> Model:
         units="mwatt / um2",
         dt=0.001,
     )
-    model.add_stim_array(inh_stimulation)
+    project.add_stim_array(inh_stimulation)
 
-    return model
+    return project
 
 
-def single_lif_neuron() -> Model:
-    model = Model()
+def single_lif_neuron() -> Project:
+    project = Project()
 
     # define Brian2 model
-    b2_model = model.b2_model
+    b2_model = project.b2_model
 
     # parameters
     b2_model.define_parameter("v0", -70 * b2.mV)
@@ -860,16 +860,16 @@ def single_lif_neuron() -> Model:
         units="pA",
         dt=0.001,
     )
-    model.add_stim_array(stim_array)
+    project.add_stim_array(stim_array)
 
-    return model
+    return project
 
 
-def single_lif_neuron_without_stim() -> Model:
-    model = Model()
+def single_lif_neuron_without_stim() -> Project:
+    project = Project()
 
     # define Brian2 model
-    b2_model = model.b2_model
+    b2_model = project.b2_model
 
     # parameters
     b2_model.define_parameter("v0", -65 * b2.mV)
@@ -903,15 +903,15 @@ def single_lif_neuron_without_stim() -> Model:
     b2_model.define_monitor_type("mon", "SpikeMonitor")
     b2_model.define_monitor_variable("mon", "v")
 
-    return model
+    return project
 
 
-@register_example_model("Network of Hodgkin-Huxley Neurons with STDP")
-def hh_neuron_with_plasticity() -> Model:
-    model = Model()
+@register_example_project("Network of Hodgkin-Huxley Neurons with STDP")
+def hh_neuron_with_plasticity() -> Project:
+    project = Project()
 
     # define Brian2 model
-    b2_model = model.b2_model
+    b2_model = project.b2_model
 
     nneurons = 4000
     nneurons_exc = 3200
@@ -1096,7 +1096,7 @@ def hh_neuron_with_plasticity() -> Model:
         units="pA",
         dt=0.001,
     )
-    model.add_stim_array(i_external)
+    project.add_stim_array(i_external)
 
     exc_stimulation = StimArray(
         name="Exc_stimulation",
@@ -1105,7 +1105,7 @@ def hh_neuron_with_plasticity() -> Model:
         units="mwatt / um2",
         dt=0.001,
     )
-    model.add_stim_array(exc_stimulation)
+    project.add_stim_array(exc_stimulation)
 
     inh_stimulation = StimArray(
         name="Inh_stimulation",
@@ -1114,19 +1114,19 @@ def hh_neuron_with_plasticity() -> Model:
         units="mwatt / um2",
         dt=0.001,
     )
-    model.add_stim_array(inh_stimulation)
+    project.add_stim_array(inh_stimulation)
 
-    return model
+    return project
 
 
-@register_example_model("ChR2 in HEK293")
-def pyrho_6state_chr2_model() -> Model:
+@register_example_project("ChR2 in HEK293")
+def pyrho_6state_chr2_project() -> Project:
     """
     PyRho 6-state ChR2 optogenetic model based on published parameters.
     Implements optogenetic stimulation with detailed channelrhodopsin dynamics.
     """
-    model = Model()
-    b2_model = model.b2_model
+    project = Project()
+    b2_model = project.b2_model
 
     dt = 0.1 * b2.ms
     tfinal = 1000 * b2.ms
@@ -1261,6 +1261,6 @@ def pyrho_6state_chr2_model() -> Model:
         units="1",
         dt=0.001,
     )
-    model.add_stim_array(stim_array)
+    project.add_stim_array(stim_array)
 
-    return model
+    return project

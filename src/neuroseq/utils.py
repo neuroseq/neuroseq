@@ -57,8 +57,8 @@ def construct_synapse_matrix(
     """
     synapse_group = monitor.source
     values = monitor.variables[variable].get_value().T
-    n = max(np.max(synapse_group.i), np.max(synapse_group.j)) + 1
-    n_timestamps = values.shape[1]
+    n = int(max(np.max(synapse_group.i), np.max(synapse_group.j)) + 1)
+    n_timestamps = int(values.shape[1])
     if n_timestamps == 0:
         return np.array([]), np.array([])
     n_floats = n * n * n_timestamps
@@ -91,6 +91,31 @@ def neuron_indices_to_colors(indices: np.ndarray) -> np.ndarray:
     a = 23234
     m = 32749
     return colormap(np.mod(np.asarray(indices) * a, m) / m)
+
+
+'''
+I updated to
+
+def neuron_indices_to_colors(indices: np.ndarray | None) -> np.ndarray:
+    """Transform neuron indices to RGBA colors in a fixed pseudo-random order.
+
+    A given index always maps to the same color, but nearby indices map to different colors.
+    """
+    if indices is None or len(indices) == 0:
+        return np.zeros((0, 4), dtype=np.float32)
+
+    colormap = Colormap("matlab:hsv")
+    # values of a and m from table 2 of
+    # https://www.ams.org/journals/mcom/1999-68-225/S0025-5718-99-00996-5/S0025-5718-99-00996-5.pdf
+    a = 23234
+    m = 32749
+    normalized = np.mod(np.asarray(indices) * a, m) / m
+    return np.asarray(colormap(normalized), dtype=np.float32)
+
+may be better to undo that, given the way spike/trace data is handled
+in the PR
+
+'''
 
 
 def init_brian2_logging(log_level: str = "ERROR") -> None:
@@ -206,21 +231,53 @@ def append_data(
     if type(existing_data) is not type(new_data):
         raise TypeError("existing_data and new_data must be of the same type.")
     if isinstance(existing_data, TraceData) and isinstance(new_data, TraceData):
-        if existing_data.traces.shape[0] != new_data.traces.shape[0]:
-            raise ValueError(
-                f"Cannot append TraceData with different number of neurons: {existing_data.traces.shape[0]} != {new_data.traces.shape[0]}"
-            )
         if existing_data.dt != new_data.dt:
             raise ValueError(
                 f"Cannot append TraceData with different dt: {existing_data.dt} != {new_data.dt}"
             )
-        if existing_data.traces.shape[1] * existing_data.dt != time_offset_seconds:
-            raise ValueError(
-                f"Time offset {time_offset_seconds} does not match the length of the existing trace data {existing_data.traces.shape[1] * existing_data.dt}."
-            )
-        existing_data.traces = np.concatenate(
-            (existing_data.traces, new_data.traces), axis=1
+
+        # Check if we're merging neurons (different indices) vs time-extending same neurons
+        existing_indices = set(existing_data.indices)
+        new_indices = set(new_data.indices)
+
+        logging.getLogger(__name__).info(
+            f"Appending TraceData: existing_indices={existing_indices}, new_indices={new_indices}"
         )
+
+        if existing_indices.intersection(new_indices):
+            # Some neurons overlap - this is time extension for existing neurons
+            if existing_data.traces.shape[0] != new_data.traces.shape[0]:
+                raise ValueError(
+                    f"Cannot append TraceData with different number of neurons: {existing_data.traces.shape[0]} != {new_data.traces.shape[0]}"
+                )
+            if existing_data.traces.shape[1] * existing_data.dt != time_offset_seconds:
+                raise ValueError(
+                    f"Time offset {time_offset_seconds} does not match the length of the existing trace data {existing_data.traces.shape[1] * existing_data.dt}."
+                )
+            existing_data.traces = np.concatenate(
+                (existing_data.traces, new_data.traces), axis=1
+            )
+        else:
+            # No overlap - this is adding new neurons to the same dataset
+            # Merge the traces by expanding the neuron dimension
+            existing_n_neurons, existing_n_timepoints = existing_data.traces.shape
+            new_n_neurons, new_n_timepoints = new_data.traces.shape
+
+            logging.getLogger(__name__).debug(
+                f"Merging neurons: existing shape={existing_data.traces.shape}, new shape={new_data.traces.shape}"
+            )
+
+            # Combine traces and indices
+            existing_data.traces = np.concatenate(
+                (existing_data.traces, new_data.traces), axis=0
+            )
+            existing_data.indices = np.concatenate(
+                (existing_data.indices, new_data.indices), axis=0
+            )
+
+            logging.getLogger(__name__).debug(
+                f"After merging: shape={existing_data.traces.shape}, indices={existing_data.indices}"
+            )
     elif isinstance(existing_data, SpikeData) and isinstance(new_data, SpikeData):
         existing_data.spike_indices = np.concatenate(
             (existing_data.spike_indices, new_data.spike_indices), axis=0
@@ -229,6 +286,51 @@ def append_data(
             (existing_data.spike_times, new_data.spike_times + time_offset_seconds),
             axis=0,
         )
+
+
+def remove_neurons_from_data(
+    data: TraceData | SpikeData, neuron_indices_to_remove: set[int]
+) -> None:
+    """Remove specific neurons from TraceData or SpikeData in-place.
+
+    Parameters
+    ----------
+    data : TraceData | SpikeData
+        Data to remove neurons from
+    neuron_indices_to_remove : set[int]
+        Set of neuron indices to remove
+    """
+    if isinstance(data, TraceData):
+        # Find which positions in the arrays correspond to neurons we want to keep
+        indices_to_keep = []
+        for i, neuron_idx in enumerate(data.indices):
+            if neuron_idx not in neuron_indices_to_remove:
+                indices_to_keep.append(i)
+
+        if indices_to_keep:
+            # Keep only the specified neuron traces and indices
+            data.traces = data.traces[indices_to_keep, :]
+            data.indices = data.indices[indices_to_keep]
+        else:
+            # All neurons removed - create empty arrays with correct shape
+            data.traces = np.zeros((0, data.traces.shape[1]), dtype=data.traces.dtype)
+            data.indices = np.array([], dtype=data.indices.dtype)
+
+    elif isinstance(data, SpikeData):
+        # Find which spike events belong to neurons we want to keep
+        spikes_to_keep = []
+        for i, neuron_idx in enumerate(data.spike_indices):
+            if neuron_idx not in neuron_indices_to_remove:
+                spikes_to_keep.append(i)
+
+        if spikes_to_keep:
+            # Keep only spikes from specified neurons
+            data.spike_indices = data.spike_indices[spikes_to_keep]
+            data.spike_times = data.spike_times[spikes_to_keep]
+        else:
+            # All spikes removed - create empty arrays
+            data.spike_indices = np.array([], dtype=data.spike_indices.dtype)
+            data.spike_times = np.array([], dtype=data.spike_times.dtype)
 
 
 def getSimulationTime(parent: QtWidgets.QWidget | None = None) -> float | None:

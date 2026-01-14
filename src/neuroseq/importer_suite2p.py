@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import brian2.numpy_ as np
@@ -7,6 +8,9 @@ import numpy.typing as npt
 
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
+from neuroseq.spike_detection import detect_spikes_threshold
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_array_per_neuron(
@@ -84,7 +88,7 @@ def prepare_suite2p_traces(
     return TraceData(
         "Suite2p contrasting traces",
         normalized_traces[:n_neurons_to_import, :],
-        np.arange(n_neurons_to_import, dtype=np.uint32),
+        np.arange(n_neurons_to_import, dtype=np.uint32),  # indices arg for the traces
         "units",
         dt,
     )
@@ -98,21 +102,28 @@ def prepare_suite2p_spikes(
     max_neurons: int,
 ) -> SpikeData:
     """
-    Create SpikeData from Suite2p spks.npy data.
+    Create SpikeData from Suite2p spks.npy data using shared spike detection.
     """
-    if max_neurons <= 0:
-        raise ValueError("max_neurons must be positive")
-
-    if dt <= 0:
-        raise ValueError("dt must be positive")
-
-    n_neurons, n_timesteps = spike_data.shape
-    n_neurons_to_import = min(max_neurons, n_neurons)
+    logger.debug(
+        "Preparing Suite2p spikes: shape=%s dt=%.6f threshold=%.4f max_neurons=%s",
+        getattr(spike_data, "shape", None),
+        dt,
+        threshold,
+        max_neurons,
+    )
     normalized_spikes, _, _ = compute_normalized_suite2p_spikes(spike_data)
-    trimmed_data = normalized_spikes[:n_neurons_to_import, :]
 
-    mask = trimmed_data >= threshold
-    neuron_indices, time_indices = np.nonzero(mask)
-    spike_times = time_indices * dt
-
-    return SpikeData("Suite2p spikes", neuron_indices, spike_times)
+    result = detect_spikes_threshold(
+        normalized_spikes,
+        dt=dt,
+        threshold=threshold,
+        threshold_method="absolute",
+        max_neurons=max_neurons,
+        normalize_per_neuron=False,
+    )
+    logger.debug(
+        "Spike detection complete: %d spikes across %d neurons",
+        len(result.spike_indices),
+        len(np.unique(result.spike_indices)) if result.spike_indices.size else 0,
+    )
+    return result

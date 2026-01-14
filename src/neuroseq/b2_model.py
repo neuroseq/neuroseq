@@ -711,6 +711,19 @@ class B2Model:
         self.logger = logging.getLogger(__name__)
         self.logger.info("Model creation complete")
 
+    def set_seed(self, new_seed: int) -> None:
+        """
+        Set the seed for the brian2 RNG system.
+
+        Parameters
+        ----------
+        seed : int
+            Seed value to set
+        """
+        self.seed = new_seed
+        b2.seed(new_seed)
+        self.logger.info(f"Set new seed: {new_seed}")
+
     @property
     def name(self) -> str:
         return self.network.name
@@ -2142,7 +2155,7 @@ class B2Model:
         time_seconds: float,
         stim_arrays: dict[str, StimArray],
         report: Callable | None = None,
-    ) -> float:
+    ) -> None:
         """
         Run the fully defined simulation
 
@@ -2156,11 +2169,6 @@ class B2Model:
             A dictionary of stimulus arrays to be used in the simulation
         report : Callable | None, optional
             A callable function to report progress, by default None
-
-        Returns
-        -------
-        float
-            The current simulation time in seconds
         """
         if self.must_be_rebuilt:
             network_name = self.network.name if self.network else "Network"
@@ -2181,7 +2189,6 @@ class B2Model:
             namespace=namespace,
         )
         self.logger.info(f"run the system for {time_seconds}s")
-        return float(self.network.t / b2.second)
 
     def store(self, checkpoint: str) -> None:
         """
@@ -2346,6 +2353,18 @@ class B2Model:
             monitor, variable_name, max_ram_mb
         )
         return SynapseData(synapse_name, values, timestamps)
+
+    def get_sim_time_secs(self) -> float:
+        if self.network is not None:
+            return float(self.network.t / b2.second)
+        return 0.0
+
+    def get_max_neurons(self) -> int:
+        max_neurons = 0
+        for obj in self.network.objects:
+            if isinstance(obj, b2.NeuronGroup):
+                max_neurons = max(max_neurons, obj.N)
+        return max_neurons
 
     def to_dict(self) -> dict[Any, Any]:
         states = self.network.get_states(read_only_variables=False)

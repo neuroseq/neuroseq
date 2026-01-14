@@ -12,48 +12,21 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-import neuroseq.save_options
-from neuroseq.example_models import default_model
-from neuroseq.example_models import example_models
+import neuroseq
+from neuroseq.data import TraceData
+from neuroseq.example_projects import default_project
+from neuroseq.example_projects import example_projects
 from neuroseq.gui import Gui
-from neuroseq.model import Model
 from neuroseq.model_editor import EditableSynapseTree
 from neuroseq.model_editor import ModelEditorDialog
-from neuroseq.save_options import SaveOptions
+from neuroseq.project import Project
+from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
 # no obvious signal to wait for after the model is updated to know when the GUI is ready,
 # so for now we just wait for a fixed time
 delay_after_update_model_call_in_ms = 50
-
-
-@pytest.mark.screenshot
-def test_update_screenshot(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
-    gui = Gui()
-    gui.show()
-    qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible())
-    gui.resize(1600, 1200)
-    histogram_action = next(
-        action for action in gui.trace_widget.actions() if action.text() == "Histogram"
-    )
-    simulation_time = 2.0
-    # mock getText to return the desired simulation time
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
-    )
-    qtbot.wait(delay_after_update_model_call_in_ms)
-    gui.btn_continue_simulation_clicked()
-    qtbot.wait(delay_after_update_model_call_in_ms)
-    histogram_action.trigger()
-    qtbot.wait(delay_after_update_model_call_in_ms)
-    gui.time_slider.toggle_pause()
-    qtbot.waitUntil(
-        lambda: gui.heatmap_widget.currentIndex == gui.heatmap_widget.tVals.size - 1
-    )
-    gui.grab().save("screenshot.png")
-    gui.close()
 
 
 def test_gui_click_exit(qtbot: QtBot) -> None:
@@ -67,10 +40,10 @@ def test_gui_click_exit(qtbot: QtBot) -> None:
 
 
 def test_gui_simulate_and_playback(
-    monkeypatch: MonkeyPatch, qtbot: QtBot, test_model: Model
+    monkeypatch: MonkeyPatch, qtbot: QtBot, test_project: Project
 ) -> None:
     gui = Gui()
-    gui.load_model(test_model)
+    gui.load_project(test_project)
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -134,18 +107,22 @@ def test_gui_new(tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot) -> None
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
-    model = default_model()
+    project = default_project()
     # GUI loads default model if no model file is provided:
-    assert gui.model.b2_model.parameters.keys() == model.b2_model.parameters.keys()
-    assert gui.model.b2_model.neurongroups.keys() == model.b2_model.neurongroups.keys()
-    assert gui.model.b2_model.synapses.keys() == model.b2_model.synapses.keys()
-    assert gui.model.b2_model.monitors.keys() == model.b2_model.monitors.keys()
+    assert gui.project.b2_model.parameters.keys() == project.b2_model.parameters.keys()
+    assert (
+        gui.project.b2_model.neurongroups.keys() == project.b2_model.neurongroups.keys()
+    )
+    assert gui.project.b2_model.synapses.keys() == project.b2_model.synapses.keys()
+    assert gui.project.b2_model.monitors.keys() == project.b2_model.monitors.keys()
     # File -> New also loads the default model:
     gui.btn_new_clicked()
-    assert gui.model.b2_model.parameters.keys() == model.b2_model.parameters.keys()
-    assert gui.model.b2_model.neurongroups.keys() == model.b2_model.neurongroups.keys()
-    assert gui.model.b2_model.synapses.keys() == model.b2_model.synapses.keys()
-    assert gui.model.b2_model.monitors.keys() == model.b2_model.monitors.keys()
+    assert gui.project.b2_model.parameters.keys() == project.b2_model.parameters.keys()
+    assert (
+        gui.project.b2_model.neurongroups.keys() == project.b2_model.neurongroups.keys()
+    )
+    assert gui.project.b2_model.synapses.keys() == project.b2_model.synapses.keys()
+    assert gui.project.b2_model.monitors.keys() == project.b2_model.monitors.keys()
     gui.close()
 
 
@@ -154,11 +131,11 @@ def test_gui_open(monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_path: Path) -> Non
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
-    model = example_models[list(sorted(example_models.keys()))[-1]]()
-    model_path = tmp_path / "model.nseq"
-    model.save(
-        model_path,
-        SaveOptions(
+    project = example_projects[list(sorted(example_projects.keys()))[-1]]()
+    project_path = tmp_path / "model.nseq"
+    project.save(
+        project_path,
+        SaveLoadOptions(
             include_stim_arrays=True,
             include_model=True,
             include_simulation_data=False,
@@ -168,51 +145,63 @@ def test_gui_open(monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_path: Path) -> Non
     monkeypatch.setattr(
         QtWidgets.QFileDialog,
         "getOpenFileName",
-        lambda *args: (f"{model_path}", True),
+        lambda *args: (f"{project_path}", True),
     )
     gui.btn_open_clicked()
 
-    assert gui.model.b2_model.parameters is not None
-    assert list(gui.model.b2_model.parameters.keys()) == list(
-        model.b2_model.parameters.keys()
+    assert gui.project.b2_model.parameters is not None
+    assert list(gui.project.b2_model.parameters.keys()) == list(
+        project.b2_model.parameters.keys()
     )
-    assert list(gui.model.b2_model.neurongroups.keys()) == list(
-        model.b2_model.neurongroups.keys()
+    assert list(gui.project.b2_model.neurongroups.keys()) == list(
+        project.b2_model.neurongroups.keys()
     )
-    assert list(gui.model.b2_model.synapses.keys()) == list(
-        model.b2_model.synapses.keys()
+    assert list(gui.project.b2_model.synapses.keys()) == list(
+        project.b2_model.synapses.keys()
     )
-    assert list(gui.model.b2_model.monitors.keys()) == list(
-        model.b2_model.monitors.keys()
+    assert list(gui.project.b2_model.monitors.keys()) == list(
+        project.b2_model.monitors.keys()
     )
     gui.close()
 
 
-class MockSaveOptionsDialog:
-    save_options = SaveOptions(True, True, True, True)
+class MockSaveLoadOptionsDialog:
+    options = SaveLoadOptions(
+        include_stim_arrays=True,
+        include_model=True,
+        include_simulation_data=True,
+        include_experimental_data=True,
+    )
+
+    def __init__(self, *args, **kwargs) -> None:
+        pass
 
     def exec(self) -> bool:
         return True
 
 
 def test_gui_save(
-    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_ornstein: Model
+    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, project_ornstein: Project
 ) -> None:
     gui = Gui()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)
-    gui.update_model(mfx_ornstein)
+    gui.update_project(project_ornstein)
     qtbot.wait(delay_after_update_model_call_in_ms)
     filename_without_extension = tmp_path / "test"
     # the gui will add the .nseq extension automatically
     filename = filename_without_extension.with_suffix(".nseq")
     assert not filename.exists()
+    MockSaveLoadOptionsDialog.options.include_stim_arrays = True
+    MockSaveLoadOptionsDialog.options.include_model = True
+    MockSaveLoadOptionsDialog.options.include_simulation_data = True
+    MockSaveLoadOptionsDialog.options.include_experimental_data = True
     monkeypatch.setattr(
         neuroseq.gui,
-        "SaveOptionsDialog",
-        MockSaveOptionsDialog,
+        "SaveLoadOptionsDialog",
+        MockSaveLoadOptionsDialog,
     )
     # mock getSaveFileName to return the desired filename
     monkeypatch.setattr(
@@ -222,22 +211,83 @@ def test_gui_save(
     )
     gui.btn_save_clicked()
     assert filename.exists()
-    loaded_model = Model(filename)
+    assert gui.project.filepath == filename
+    assert str(filename) in gui.windowTitle()
+    loaded_model = Project(filename)
+    assert loaded_model.filepath == gui.project.filepath
     assert (
-        mfx_ornstein.b2_model.neurongroups.keys()
+        project_ornstein.b2_model.neurongroups.keys()
         == loaded_model.b2_model.neurongroups.keys()
     )
     assert (
-        mfx_ornstein.b2_model.synapses.keys() == loaded_model.b2_model.synapses.keys()
+        project_ornstein.b2_model.synapses.keys()
+        == loaded_model.b2_model.synapses.keys()
     )
     assert (
-        mfx_ornstein.b2_model.monitors.keys() == loaded_model.b2_model.monitors.keys()
+        project_ornstein.b2_model.monitors.keys()
+        == loaded_model.b2_model.monitors.keys()
     )
     gui.close()
 
 
+def test_gui_import(
+    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, project_ornstein: Project
+) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    # create a nseq file to import from
+    project = example_projects[list(sorted(example_projects.keys()))[-1]]()
+    model_path = tmp_path / "model.nseq"
+    project.save(
+        model_path,
+        SaveLoadOptions(
+            include_stim_arrays=True,
+            include_model=True,
+            include_simulation_data=False,
+            include_experimental_data=False,
+        ),
+    )
+    gui.update_project(project_ornstein)
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    # mock getOpenFileName to return the desired filename
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getOpenFileName",
+        lambda *args: (f"{model_path}", True),
+    )
+    MockSaveLoadOptionsDialog.options.include_stim_arrays = True
+    MockSaveLoadOptionsDialog.options.include_model = False
+    MockSaveLoadOptionsDialog.options.include_simulation_data = False
+    MockSaveLoadOptionsDialog.options.include_experimental_data = False
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "SaveLoadOptionsDialog",
+        MockSaveLoadOptionsDialog,
+    )
+    gui.btn_import_clicked()
+    # b2model is not modified
+    assert (
+        project_ornstein.b2_model.neurongroups.keys()
+        == gui.project.b2_model.neurongroups.keys()
+    )
+    assert (
+        project_ornstein.b2_model.synapses.keys()
+        == gui.project.b2_model.synapses.keys()
+    )
+    assert (
+        project_ornstein.b2_model.monitors.keys()
+        == gui.project.b2_model.monitors.keys()
+    )
+    # but stim arrays are imported
+    assert gui.project.stim_arrays.keys() == project.stim_arrays.keys()
+    gui.close()
+
+
 def test_gui_export_with_simulation_data(
-    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, mfx_ornstein: Model
+    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, project_ornstein: Project
 ) -> None:
     gui = Gui()
     gui.show()
@@ -259,14 +309,14 @@ def test_gui_export_with_simulation_data(
     gui.close()
 
 
-def test_gui_export_empty_model(
+def test_gui_export_empty_project(
     tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list
 ) -> None:
     gui = Gui()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
-    gui.update_model(Model())
+    gui.update_project(Project())
     filename = tmp_path / "test.h5"
     assert not filename.exists()
     assert len(qmessagebox_calls) == 0
@@ -286,7 +336,7 @@ def test_gui_checkpoints(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
     qtbot: QtBot,
-    mfx_ornstein: Model,
+    project_ornstein: Project,
     qmessagebox_calls: list,
 ) -> None:
     gui = Gui()
@@ -304,10 +354,10 @@ def test_gui_checkpoints(
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("test", True)
     )
-    gui.update_model(mfx_ornstein)
+    gui.update_project(project_ornstein)
     qtbot.wait(delay_after_update_model_call_in_ms)
     gui.btn_store_checkpoint_clicked()
-    assert "test" in gui.model.b2_model.checkpoints
+    assert "test" in gui.project.b2_model.checkpoints
     # simulate
     simulation_time = 0.1
     monkeypatch.setattr(
@@ -316,16 +366,16 @@ def test_gui_checkpoints(
     gui.btn_continue_simulation_clicked()
     assert "run" not in gui.continue_simulation_action.text().lower()
     assert "continue" in gui.continue_simulation_action.text().lower()
-    assert gui.model.b2_model.network["M"].t[-1] == approx(simulation_time, rel=1e-2)
+    assert gui.project.b2_model.network["M"].t[-1] == approx(simulation_time, rel=1e-2)
     # restore checkpoint
     gui.btn_restore_checkpoint_clicked()
     assert "run" in gui.continue_simulation_action.text().lower()
     assert "continue" not in gui.continue_simulation_action.text().lower()
-    assert len(gui.model.b2_model.network["M"].t) == 0
+    assert len(gui.project.b2_model.network["M"].t) == 0
     gui.close()
 
 
-def test_gui_edit_stim_with_console(qtbot: QtBot, mfx_ornstein: Model) -> None:
+def test_gui_edit_stim_with_console(qtbot: QtBot, project_ornstein: Project) -> None:
     gui = Gui()
     gui.show()
     qtbot.addWidget(gui)
@@ -334,33 +384,26 @@ def test_gui_edit_stim_with_console(qtbot: QtBot, mfx_ornstein: Model) -> None:
     n_timestamps = 100
     dt = 10 * b2.ms
     stim = np.zeros((n_timestamps, n_neurons))
-    assert mfx_ornstein.stim_arrays == {}
-    mfx_ornstein.stim_arrays = {
-        "stim": StimArray("stim", StimType.Excitation, stim, "mV", dt)
-    }
-    gui.update_model(mfx_ornstein)
+    assert project_ornstein.stim_arrays == {}
+    project_ornstein.add_stim_array(
+        StimArray("stim", StimType.Excitation, stim, "mV", dt)
+    )
+    gui.update_project(project_ornstein)
     stim_editor = gui.stim_editor
-    stim_console = gui.stim_console
+    stim_console = gui.console_widget
     assert stim_editor.stims_dict is not None
-    assert_allclose(stim_editor.stims_dict["stim"].stim_array.values, stim)
     # set all stimuli to 1: StimWidget and model stimuli updated
-    stim_console.input.setText("stims['stim'][:,:] = 1")
+    stim_console.input.setText("project.stim_arrays['stim'].values[:,:] = 1")
     qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
     stim[:, :] = 1
-    assert_allclose(stim_editor.stims_dict["stim"].stim_array.values, stim)
-    assert_allclose(gui.model.stim_arrays["stim"].values, stim)
+    assert_allclose(gui.project.stim_arrays["stim"].values, stim)
     assert stim_editor.stim_widget.n_neurons == n_neurons
-    # set stims to an invalid value: StimWidget and model not updated
-    stim_console.input.setText("stims['stim'] = 5")
-    qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
-    assert stim_editor.stim_widget.n_neurons == n_neurons
-    assert_allclose(stim_editor.stims_dict["stim"].stim_array.values, stim)
-    assert_allclose(gui.model.stim_arrays["stim"].values, stim)
     # assign random valid stim array with different shape, StimWidget and model updated
-    stim_console.input.setText("stims['stim'] = np.random.rand(127, 83)")
+    stim_console.input.setText(
+        "project.stim_arrays['stim'].values = np.random.rand(127, 83)"
+    )
     qtbot.keyPress(stim_console.input, QtCore.Qt.Key.Key_Enter)
-    assert stim_editor.stims_dict["stim"].stim_array.values.shape == (127, 83)
-    assert gui.model.stim_arrays["stim"].values.shape == (127, 83)
+    assert gui.project.stim_arrays["stim"].values.shape == (127, 83)
     assert stim_editor.stim_widget.n_neurons == 83
     gui.close()
 
@@ -370,10 +413,10 @@ def test_gui_synapse_ram_limit(
     qtbot: QtBot,
     qmessagebox_calls: list,
     tmp_config_dir,
-    test_model: Model,
+    test_project: Project,
 ) -> None:
     gui = Gui()
-    gui.load_model(test_model)
+    gui.load_project(test_project)
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -515,10 +558,13 @@ def test_gui_restore_settings_on_restart(
 
 
 def test_gui_playback_speed(
-    monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list, test_model: Model
+    monkeypatch: MonkeyPatch,
+    qtbot: QtBot,
+    qmessagebox_calls: list,
+    test_project: Project,
 ) -> None:
     gui = Gui()
-    gui.load_model(test_model)
+    gui.load_project(test_project)
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -599,10 +645,10 @@ def test_gui_simulate_external_model(
 
 
 def test_integration_modeleditor_delete_restore(
-    qtbot: QtBot, qmessagebox_calls: list, test_model: Model
+    qtbot: QtBot, qmessagebox_calls: list, test_project: Project
 ) -> None:
     gui = Gui()
-    gui.load_model(test_model)
+    gui.load_project(test_project)
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(gui.isVisible)
@@ -615,7 +661,7 @@ def test_integration_modeleditor_delete_restore(
     qtbot.addWidget(modeleditor)
     qtbot.waitUntil(modeleditor.isVisible)
 
-    assert gui.model.b2_model is not modeleditor.b2model
+    assert gui.project.b2_model is not modeleditor.b2model
 
     # find synapse tree
     synapsetree = modeleditor.findChild(EditableSynapseTree)
@@ -636,7 +682,7 @@ def test_integration_modeleditor_delete_restore(
 
     # assert Ce is gone from the model in the model editor, but still in the GUI model
     assert "Ce" not in modeleditor.b2model.synapses
-    assert "Ce" in gui.model.b2_model.synapses
+    assert "Ce" in gui.project.b2_model.synapses
 
     # try to accept, error
     qtbot.mouseClick(
@@ -662,11 +708,53 @@ def test_integration_modeleditor_delete_restore(
     qtbot.wait(delay_after_update_model_call_in_ms)
 
     # assert that Ce is in the definition and in the network -> restoring old state works
-    assert "Ce" in gui.model.b2_model.synapses
+    assert "Ce" in gui.project.b2_model.synapses
 
     # run the model and make sure it works as it should
-    gui.model.run_simulation(0.1)
-    assert gui.model.b2_model.network["Ce"] is not None
+    gui.project.run_simulation(0.1)
+    assert gui.project.b2_model.network["Ce"] is not None
 
-    assert gui.model.b2_model.network["trace"].v.shape == (30, 1000)
+    assert gui.project.b2_model.network["trace"].v.shape == (30, 1000)
+    gui.close()
+
+
+def test_gui_import_suite2p_data_dialog(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
+    """Test the Suite2p import dialog opens and applies imported data"""
+
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+
+    # Mock the Suite2pImportDialog to return accepted and have test data
+    class MockSuite2pImportDialog:
+        def __init__(self, parent=None, import_handler=None):
+            self.parent = parent
+            self.import_handler = import_handler
+            self.experiment_name = "test_experiment"
+
+        def exec(self):
+            # Simulate successful import by calling the import_handler
+            test_traces = np.random.rand(5, 100)
+            trace_data = TraceData(
+                "test_traces",
+                test_traces,
+                np.arange(0, test_traces.shape[0], dtype=np.uint32),
+                "units",
+                dt=1.0 / 30.0,
+            )
+            self.import_handler(self.experiment_name, [trace_data], False)
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    # Mock the Suite2pImportDialog class
+    monkeypatch.setattr("neuroseq.gui.Suite2pImportDialog", MockSuite2pImportDialog)
+
+    # Call the button method - this should successfully import data via the handler
+    gui.btn_import_suite2p_data_clicked()
+
+    imported = gui.project.experiments.get("test_experiment")
+    assert imported is not None
+    trace_data = next((d for d in imported if isinstance(d, TraceData)), None)
+    assert trace_data is not None
+    assert trace_data.traces.shape == (5, 100)
     gui.close()

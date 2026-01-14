@@ -13,6 +13,8 @@ from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
 from neuroseq import __version__
+from neuroseq.cellpose_import_dialog import CellposeImportDialog
+from neuroseq.console_widget import ConsoleWidget
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
@@ -21,17 +23,19 @@ from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.data_widget import DataWidget
-from neuroseq.example_models import default_model
-from neuroseq.example_models import example_models
+from neuroseq.example_projects import default_project
+from neuroseq.example_projects import example_projects
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.import_dialog import Suite2pImportDialog
-from neuroseq.model import Model
+from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.model_editor import ModelEditorDialog
+from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
+from neuroseq.project import Project
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
-from neuroseq.save_options import SaveOptionsDialog
+from neuroseq.save_load_options import SaveLoadOptionsDialog
 from neuroseq.spike_widget import SpikeWidget
-from neuroseq.stim_console import StimConsole
 from neuroseq.stim_editor import StimEditor
 from neuroseq.time_slider_widget import TimeSliderWidget
 from neuroseq.timeseries_widget import TimeseriesWidget
@@ -51,7 +55,7 @@ class Gui(QtWidgets.QMainWindow):
         self.status_bar = QtWidgets.QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.addPermanentWidget(ResourceMonitorLabel())
-        self.model = Model()
+        self.project = Project()
         self.external_simulation_function: Callable | None = None
         self.setWindowTitle("NeuroSeq")
         self.cmb_trace = QtWidgets.QComboBox()
@@ -79,8 +83,8 @@ class Gui(QtWidgets.QMainWindow):
         split_left_right.addWidget(self.heatmap_widget)
         self.custom_analysis_widget = CustomAnalysisWidget(parent=self)
         split_left_right.addWidget(self.custom_analysis_widget)
-        self.stim_console = StimConsole(parent=self)
-        split_left_right.addWidget(self.stim_console)
+        self.console_widget = ConsoleWidget(parent=self)
+        split_left_right.addWidget(self.console_widget)
         split_left_right.setSizes([1000, 1000, 1000])
         # main vertical splitter layout
         split_vertical = QtWidgets.QSplitter(
@@ -118,9 +122,7 @@ class Gui(QtWidgets.QMainWindow):
         self.showMaximized()
         self._create_progressbar()
         # connect widgets
-        self.stim_console.sig_stims_values_dict_updated.connect(
-            self.stim_editor.update_stim_values_dict
-        )
+        self.console_widget.console_command_entered.connect(self._update_data)
         self.trace_widget.custom_analysis_requested.connect(self._custom_analysis)
         self.data_widget.trace_widget.custom_analysis_requested.connect(
             self._custom_analysis
@@ -133,14 +135,16 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_synapse.currentTextChanged.connect(self.set_synapse)
         self.cmb_spike.currentTextChanged.connect(self.set_spike)
         self.cmb_data.currentTextChanged.connect(self.set_data)
-        self.stim_editor.max_time_modified.connect(self.update_slider_time_max)
+        self.stim_editor.limits_modified.connect(self.update_limits)
+        self.last_cellpose_import: CellposeImportResult | None = None
         if filename is not None:
-            self.load_model(filename)
+            self.load_project(filename)
         else:
-            self.load_model(default_model())
+            self.load_project(default_project())
 
-    def update_slider_time_max(self) -> None:
-        self.time_slider.set_max_time_secs(self.model.max_time_secs)
+    def update_limits(self) -> None:
+        self.controller.set_limits(self.project.max_time_secs, self.project.max_neurons)
+        self.time_slider.set_max_time_secs(self.project.max_time_secs)
 
     def _custom_analysis(
         self,
@@ -167,13 +171,13 @@ class Gui(QtWidgets.QMainWindow):
                 data, analysis_type, neuron_slice, time_slice
             )
 
-    def _update_data(self, keep_undo_history: bool) -> None:
-        if self.model.b2_model.network.t > 0:
+    def _update_data(self, keep_undo_history: bool = False) -> None:
+        if self.project.b2_model.network.t > 0:
             self.continue_simulation_action.setText("&Continue simulation")
         else:
             self.continue_simulation_action.setText("&Run simulation")
-        self.update_slider_time_max()
-        self.stim_editor.set_model(self.model, keep_undo_history)
+        self.stim_editor.set_project(self.project, keep_undo_history)
+        self.update_limits()
         self._update_combo_boxes()
 
     def _update_combo_box(
@@ -183,8 +187,8 @@ class Gui(QtWidgets.QMainWindow):
     ) -> None:
         cmb_text = cmb.currentText()
         cmb.clear()
-        if self.model is not None:
-            add_items_to_combobox(cmb, self.model.get_data_names(data_type))
+        if self.project is not None:
+            add_items_to_combobox(cmb, self.project.get_data_names(data_type))
             cmb.setCurrentText(cmb_text)
 
     def _update_combo_boxes(self) -> None:
@@ -193,12 +197,12 @@ class Gui(QtWidgets.QMainWindow):
         self._update_combo_box(self.cmb_synapse, SynapseData)
         cmb_data_text = self.cmb_data.currentText()
         self.cmb_data.clear()
-        if self.model is not None:
+        if self.project is not None:
             add_items_to_combobox(
                 self.cmb_data,
-                [f"{d} [trace]" for d in self.model.get_data_names(TraceData)]
-                + [f"{d} [spike]" for d in self.model.get_data_names(SpikeData)]
-                + [f"{d} [synapse]" for d in self.model.get_data_names(SynapseData)],
+                [f"{d} [trace]" for d in self.project.get_data_names(TraceData)]
+                + [f"{d} [spike]" for d in self.project.get_data_names(SpikeData)]
+                + [f"{d} [synapse]" for d in self.project.get_data_names(SynapseData)],
             )
             self.cmb_data.setCurrentText(cmb_data_text)
 
@@ -225,27 +229,58 @@ class Gui(QtWidgets.QMainWindow):
         self.progress_dialog.setValue(completed_percent)
 
     def btn_new_clicked(self) -> None:
-        self.load_model(default_model())
+        self.load_project(default_project())
 
     def btn_open_clicked(self) -> None:
         filename, _ = getopenfilename(
             self,
-            "load model",
-            "model.nseq",
-            "neuroseq model (*.nseq)",
+            "load project",
+            "project.nseq",
+            "neuroseq project (*.nseq)",
         )
         if filename != "":
-            self.load_model(filename)
+            self.load_project(filename)
+
+    def btn_import_clicked(self) -> None:
+        filename, _ = getopenfilename(
+            self,
+            "import from project",
+            "project.nseq",
+            "neuroseq project (*.nseq)",
+        )
+        if filename == "":
+            return
+        options_dialog = SaveLoadOptionsDialog(action="Import")
+        if not options_dialog.exec():
+            return
+        try:
+            self.progress_dialog.setLabelText("Importing from project...")
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+            self.project.import_project(
+                filename, options_dialog.options, report=self._update_load_progress
+            )
+            QtWidgets.QApplication.restoreOverrideCursor()
+        except Exception as e:
+            QtWidgets.QApplication.restoreOverrideCursor()
+            self.logger.warning(f"Failed to import from project {filename}: {e}")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Import error",
+                f"Could not import from file '{filename}': {e}",
+            )
+            self.progress_dialog.reset()
+            return
+        self.update_project(self.project)
 
     def btn_save_clicked(self) -> None:
-        save_options_dialog = SaveOptionsDialog()
-        if not save_options_dialog.exec():
+        options_dialog = SaveLoadOptionsDialog(action="Save")
+        if not options_dialog.exec():
             return
         filename, _ = getsavefilename(
             self,
-            "Save model",
-            f"{self.model.name}.nseq",
-            "neuroseq model (*.nseq)",
+            "Save project",
+            str(self.project.filepath) if self.project.filepath else "project.nseq",
+            "neuroseq project (*.nseq)",
         )
         if filename == "":
             return
@@ -254,7 +289,7 @@ class Gui(QtWidgets.QMainWindow):
             filename = filename.with_suffix(".nseq")
         try:
             QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
-            self.model.save(filename, save_options_dialog.save_options)
+            self.project.save(filename, options_dialog.options)
             QtWidgets.QApplication.restoreOverrideCursor()
         except Exception as e:
             QtWidgets.QApplication.restoreOverrideCursor()
@@ -265,6 +300,7 @@ class Gui(QtWidgets.QMainWindow):
                 f"Could not save file '{filename}': {e}",
             )
             return
+        self._update_window_title()
 
     def btn_export_clicked(self) -> None:
         filename, _ = getsavefilename(
@@ -276,7 +312,7 @@ class Gui(QtWidgets.QMainWindow):
         if filename == "":
             return
         try:
-            self.model.b2_model.save_to_h5(filename)
+            self.project.b2_model.save_to_h5(filename)
         except Exception as e:
             self.logger.warning(f"Failed to export to file {filename}: {e}")
             QtWidgets.QMessageBox.critical(
@@ -287,77 +323,90 @@ class Gui(QtWidgets.QMainWindow):
             return
 
     def btn_edit_clicked(self) -> None:
-        mdiag = ModelEditorDialog(self.model.b2_model, parent=self)
+        mdiag = ModelEditorDialog(self.project.b2_model, parent=self)
         if mdiag.exec():
-            self.model.b2_model = mdiag.b2model
-            self.update_model(self.model)
+            self.project.b2_model = mdiag.b2model
+            self.project.update_limits()
+            self.update_project(self.project)
 
     @with_wait_cursor
-    def load_model(self, model: str | pathlib.Path | Model) -> None:
+    def load_project(self, project: str | pathlib.Path | Project) -> None:
         try:
-            self.progress_dialog.setLabelText("Loading model...")
-            if not isinstance(model, Model):
-                filename = pathlib.Path(model)
-                model = Model(filename, report=self._update_load_progress)
-                self.logger.info(f"Model {self.model.name} loaded from {filename}")
+            self.progress_dialog.setLabelText("Loading project...")
+            if not isinstance(project, Project):
+                filename = pathlib.Path(project)
+                project = Project(filename, report=self._update_load_progress)
+                self.logger.info(f"Project loaded from {filename}")
             else:
-                self.logger.info(f"Model {self.model.name} loaded from Model object")
+                self.logger.info("Project loaded from Project object")
         except Exception as e:
-            self.logger.warning(f"Failed to load model from file {filename}: {e}")
+            self.logger.warning(f"Failed to load project from file {filename}: {e}")
             self.logger.exception(e)
             QtWidgets.QMessageBox.critical(
                 self,
-                "Model construction error",
-                f"Could not load model from file '{filename}': {e}",
+                "Project load error",
+                f"Could not load project from file '{filename}': {e}",
             )
             self.progress_dialog.reset()
             return
-        self.update_model(model, reset_autoscale=True)
+        self.last_cellpose_import = clone_cellpose_result(project.cellpose_data)
+        if project is not None:
+            project.cellpose_data = self.last_cellpose_import
+        self.update_project(project, reset_controller=True)
+
+    def _update_window_title(self) -> None:
+        if self.project.filepath is not None:
+            self.setWindowTitle(f"{self.project.filepath} - Neuroseq")
+        else:
+            self.setWindowTitle("Neuroseq")
 
     @with_wait_cursor
-    def update_model(self, model: Model, reset_autoscale=False) -> None:
-        self.model = model
-        if reset_autoscale:
-            self.controller.max_height = 1
-            self.controller.max_width = 1
-        self.stim_console.set_model(self.model)
+    def update_project(self, project: Project, reset_controller=False) -> None:
+        self.project = project
+        self._update_window_title()
+        if reset_controller:
+            self.controller.reset()
+        self.console_widget.set_project(self.project)
         self.continue_simulation_action.setText("&Run simulation")
         for widget in self.plot_widgets:
-            widget.clear_data(reset_autoscale=reset_autoscale)
-        self.controller.clear_grid_lines()
-        self.stim_editor.set_model(self.model)
-        if self.model is not None:
-            self.stim_console.set_stims(self.stim_editor.stims_dict)
-        self.update_slider_time_max()
+            widget.clear_data()
+        if self.project is not None:
+            self.last_cellpose_import = clone_cellpose_result(
+                self.project.cellpose_data
+            )
+            self.project.cellpose_data = self.last_cellpose_import
+
+        self.stim_editor.set_project(self.project)
+        self.console_widget.set_project(self.project)
         self._update_combo_boxes()
 
     @with_wait_cursor
     def set_neuron(self, cmb_name: str) -> None:
-        data = self.model.get_data(cmb_name, TraceData)
+        data = self.project.get_data(cmb_name, TraceData)
         self.trace_widget.set_data(data)
 
     @with_wait_cursor
     def set_synapse(self, cmb_name: str) -> None:
-        self.model.max_ram_synapse_plot_matrix = (
+        self.project.max_ram_synapse_plot_matrix = (
             self.settings.max_ram_synapse_plot_matrix
         )
-        data = self.model.get_data(cmb_name, SynapseData)
+        data = self.project.get_data(cmb_name, SynapseData)
         self.heatmap_widget.set_data(data)
 
     @with_wait_cursor
     def set_spike(self, cmb_name: str) -> None:
-        data = self.model.get_data(cmb_name, SpikeData)
+        data = self.project.get_data(cmb_name, SpikeData)
         self.spike_widget.set_data(data)
 
     @with_wait_cursor
     def set_data(self, cmb_name: str) -> None:
         data: TraceData | SpikeData | SynapseData | None = None
         if cmb_name.endswith(" [trace]"):
-            data = self.model.get_data(cmb_name[:-8], TraceData)
+            data = self.project.get_data(cmb_name[:-8], TraceData)
         elif cmb_name.endswith(" [spike]"):
-            data = self.model.get_data(cmb_name[:-8], SpikeData)
+            data = self.project.get_data(cmb_name[:-8], SpikeData)
         elif cmb_name.endswith(" [synapse]"):
-            data = self.model.get_data(cmb_name[:-10], SynapseData)
+            data = self.project.get_data(cmb_name[:-10], SynapseData)
         self.data_widget.set_data(data)
 
     def btn_exit_clicked(self) -> None:
@@ -368,17 +417,17 @@ class Gui(QtWidgets.QMainWindow):
             self,
             "Store simulation checkpoint",
             "Store the current simulation state as a named checkpoint.\nEnter a new name, or select an existing checkpoint to overwrite:",
-            [f"Checkpoint {len(self.model.b2_model.checkpoints) + 1}"]
-            + self.model.b2_model.checkpoints,
+            [f"Checkpoint {len(self.project.b2_model.checkpoints) + 1}"]
+            + self.project.b2_model.checkpoints,
             current=0,
             editable=True,
         )
         if not ok:
             return
-        self.model.b2_model.store(checkpoint)
+        self.project.b2_model.store(checkpoint)
 
     def btn_restore_checkpoint_clicked(self) -> None:
-        if len(self.model.b2_model.checkpoints) == 0:
+        if len(self.project.b2_model.checkpoints) == 0:
             QtWidgets.QMessageBox.information(
                 self,
                 "No simulation checkpoints",
@@ -389,14 +438,14 @@ class Gui(QtWidgets.QMainWindow):
             self,
             "Restore simulation checkpoint",
             "Restore simulation checkpoint",
-            self.model.b2_model.checkpoints,
+            self.project.b2_model.checkpoints,
             current=0,
             editable=False,
         )
         if not ok:
             return
         try:
-            self.model.b2_model.restore(checkpoint)
+            self.project.b2_model.restore(checkpoint)
             self._update_data(keep_undo_history=False)
         except ValueError as error:
             QtWidgets.QMessageBox.critical(self, "Error", f"{error}")
@@ -411,7 +460,7 @@ class Gui(QtWidgets.QMainWindow):
             self.progress_dialog.setValue(0)
             self.progress_dialog.setVisible(True)
             QtCore.QCoreApplication.processEvents()
-            self.model.run_simulation(
+            self.project.run_simulation(
                 simulation_time,
                 report=self._update_simulation_progress,
                 stim_array_padding_seconds=self.settings.stim_padding_secs,
@@ -432,8 +481,8 @@ class Gui(QtWidgets.QMainWindow):
             return
         try:
             # pre-emptively pad timed arrays before simulating
-            self.model.pad_stim_arrays(total_time_seconds=simulation_time)
-            self.stim_editor.set_model(self.model)
+            self.project.pad_stim_arrays(total_time_seconds=simulation_time)
+            self.stim_editor.set_project(self.project)
             stims_dict = {
                 k: {"array": v.stim_array.values, "dt": v.stim_array.dt}
                 for k, v in self.stim_editor.stims_dict.items()
@@ -448,8 +497,8 @@ class Gui(QtWidgets.QMainWindow):
             self.logger.info(
                 f"External simulation complete, returned {len(data)} data objects"
             )
-            self.model.add_experimental_data("External Simulation", data, False)
-            self.update_model(self.model)
+            self.project.add_experimental_data("External Simulation", data, False)
+            self.update_project(self.project)
             self._select_experiment_data("External Simulation")
         except Exception as e:
             QtWidgets.QMessageBox.critical(
@@ -536,6 +585,7 @@ class Gui(QtWidgets.QMainWindow):
         self._load_external_simulation_function(filename)
 
     def _select_experiment_data(self, experiment_name):
+        """Select the experiment within the GUI, for example after an import."""
         for cmb in (self.cmb_trace, self.cmb_spike, self.cmb_synapse, self.cmb_data):
             for i in range(cmb.count()):
                 if cmb.itemText(i).startswith(f"{experiment_name} ::"):
@@ -543,23 +593,102 @@ class Gui(QtWidgets.QMainWindow):
                     break
 
     def btn_import_suite2p_data_clicked(self) -> None:
-        """Open dialog to import Suite2p traces (and optional spikes)"""
-        dialog = Suite2pImportDialog(self)
+        """Open dialog to import experimental traces/spikes from Suite2p/CSV data"""
+        # possibly: pass in existing experiment data to the dialog to let it do sanity checks & auto-fill the offset?
+        dialog = Suite2pImportDialog(
+            self,
+            import_handler=self._apply_imported_experimental_data,
+        )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
-            # possibly: pass in existing experiment data to the dialog to let it do sanity checks & auto-fill the offset?
+            self.update_project(self.project)
+            self._select_experiment_data(dialog.experiment_name)
+
+    def _apply_imported_experimental_data(
+        self,
+        experiment_name: str,
+        data: list[TraceData | SpikeData],
+        append: bool,
+    ) -> None:
+        self.project.add_experimental_data(experiment_name, data, append)
+
+    def btn_import_cellpose_data_clicked(self) -> None:
+        dialog = CellposeImportDialog(
+            self,
+            existing_data=self.last_cellpose_import,
+            delete_handler=self._delete_cellpose_data,
+        )
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            imported = clone_cellpose_result(dialog.get_imported_data())
+            self.last_cellpose_import = imported
+            if self.project is not None:
+                self.project.cellpose_data = imported
+            QtWidgets.QMessageBox.information(
+                self,
+                "Cellpose import",
+                "Cellpose segmentation loaded. Now ready for Patchclamp import",
+            )
+
+    def _delete_cellpose_data(self) -> None:
+        """Remove stored cellpose data from both GUI and project."""
+        self.last_cellpose_import = None
+        if self.project is not None:
+            self.project.cellpose_data = None
+
+    def btn_import_patchclamp_data_clicked(self) -> None:
+        dialog = PatchClampImportDialog(
+            cellpose_import=self.last_cellpose_import, project=self.project, parent=self
+        )
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            if not dialog.imported_data:
+                return
             try:
-                self.model.add_experimental_data(
-                    dialog.experiment_name, dialog.imported_data, dialog.append_data
+                if dialog.cellpose_import is not None:
+                    # keep GUI/project copies in sync with any updated stimulus mapping
+                    self.last_cellpose_import = clone_cellpose_result(
+                        dialog.cellpose_import
+                    )
+                    if self.project is not None:
+                        self.project.cellpose_data = self.last_cellpose_import
+
+                # For patch clamp imports, handle replace mode properly:
+                # - Replace mode: remove only the specific neuron IDs being imported, then add new data
+                # - Append mode: just append/merge the new data
+
+                self.logger.info(
+                    f"Patch clamp import: dialog.append_data={dialog.append_data}, "
+                    f"neurons_to_replace={dialog.neurons_to_replace}, "
+                    f"experiment_exists={dialog.experiment_name in self.project.experiments}"
                 )
-            except Exception as e:
+
+                if (
+                    not dialog.append_data
+                    and dialog.neurons_to_replace
+                    and dialog.experiment_name in self.project.experiments
+                ):
+                    self.logger.info(
+                        f"Removing neurons {dialog.neurons_to_replace} before import"
+                    )
+                    self._remove_neurons_from_experiment(
+                        dialog.experiment_name, dialog.neurons_to_replace
+                    )
+
+                # Always use append mode to enable neuron merging (whether replacing specific neurons or extending)
+                append_mode = True
+
+                self.logger.info(f"Using append_mode={append_mode}")
+
+                self.project.add_experimental_data(
+                    dialog.experiment_name, dialog.imported_data, append_mode
+                )
+            except Exception as exc:
                 QtWidgets.QMessageBox.critical(
                     self,
-                    "Data import error",
-                    f"Could not import Suite2p data: {e}",
+                    "Patch clamp import error",
+                    f"Could not import patch clamp data: {exc}",
                 )
-                self.logger.exception(e)
+                self.logger.exception(exc)
                 return
-            self.update_model(self.model)
+            self.update_project(self.project)
             self._select_experiment_data(dialog.experiment_name)
 
     def connect_external_simulation_function_with_brian2(self) -> None:
@@ -638,6 +767,22 @@ class Gui(QtWidgets.QMainWindow):
             + "https://github.com/ssciwr/neuroseq",
         )
 
+    def _remove_neurons_from_experiment(
+        self, experiment_name: str, neurons_to_remove: set[int]
+    ) -> None:
+        """Remove specific neurons from an experiment's data."""
+        if experiment_name not in self.project.experiments:
+            return
+
+        from neuroseq.data import SpikeData
+        from neuroseq.data import TraceData
+        from neuroseq.utils import remove_neurons_from_data
+
+        # Remove neurons from each data object in the experiment
+        for data in self.project.experiments[experiment_name]:
+            if isinstance(data, (TraceData, SpikeData)):
+                remove_neurons_from_data(data, neurons_to_remove)
+
     def _create_progressbar(self) -> None:
         self.progress_dialog = QtWidgets.QProgressDialog(
             "Simulating...", "", 0, 100, self
@@ -694,17 +839,17 @@ class Gui(QtWidgets.QMainWindow):
             shortcut="Ctrl+N",
             icon=qta.icon("mdi6.file"),
         )
-        # add "open example model" item to the file menu which opens a sub-menu containing the example models from src/neuroseq/example_models
-        example_models_menu = menu.addMenu("&Open example model")
-        for name, generator in example_models.items():
+        # add "open example project" item to the file menu which opens a sub-menu containing the example projects from src/neuroseq/example_projects
+        example_projects_menu = menu.addMenu("&Open example project")
+        for name, generator in example_projects.items():
             add_action(
                 name,
-                lambda checked, _generator=generator: self.load_model(_generator()),
-                example_models_menu,
+                lambda checked, _generator=generator: self.load_project(_generator()),
+                example_projects_menu,
                 None,
             )
         add_action(
-            "&Open model",
+            "&Open project",
             self.btn_open_clicked,
             menu,
             toolbar,
@@ -712,7 +857,15 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.folder-open"),
         )
         add_action(
-            "&Save model",
+            "&Import from project",
+            self.btn_import_clicked,
+            menu,
+            toolbar,
+            shortcut="None",
+            icon=qta.icon("mdi6.file-import"),
+        )
+        add_action(
+            "&Save project",
             self.btn_save_clicked,
             menu,
             toolbar,
@@ -742,6 +895,22 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="Ctrl+Shift+I",
+            icon=qta.icon("mdi6.import"),
+        )
+        add_action(
+            "Import Cellpose &Segmentation",
+            self.btn_import_cellpose_data_clicked,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon=qta.icon("mdi6.image-edit-outline"),
+        )
+        add_action(
+            "Import &Patch Clamp Data",
+            self.btn_import_patchclamp_data_clicked,
+            menu,
+            toolbar,
+            shortcut=None,
             icon=qta.icon("mdi6.import"),
         )
         menu.addSeparator()
@@ -841,7 +1010,7 @@ class Gui(QtWidgets.QMainWindow):
                 "mdi6.chart-histogram",
                 True,
             ),
-            ("&Console", self.stim_console, "mdi6.console", True),
+            ("&Console", self.console_widget, "mdi6.console", True),
         ]:
             add_action(
                 f"Show {name}",
