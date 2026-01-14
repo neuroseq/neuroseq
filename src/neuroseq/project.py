@@ -26,7 +26,7 @@ from neuroseq.utils import append_data
 from neuroseq.utils import save_store_name
 
 
-class Model:
+class Project:
     def __init__(
         self,
         filepath: str | pathlib.Path | None = None,
@@ -45,7 +45,7 @@ class Model:
         self.logger = logging.getLogger(__name__)
         if filepath:
             self.filepath = pathlib.Path(filepath)
-            self.logger.info(f"Loading model from '{filepath}'")
+            self.logger.info(f"Loading project from '{filepath}'")
             with zipfile.ZipFile(filepath, "r", zipfile.ZIP_DEFLATED) as zf:
                 b2_model_data = load_from_zip("b2_model", zf)
                 if "b2_stored_state.pkl" in zf.namelist():
@@ -63,14 +63,16 @@ class Model:
 
         self.update_limits()
 
-    def import_model(
+    def import_project(
         self,
         filepath: str | pathlib.Path,
         options: SaveLoadOptions,
         report: Callable[[int], None] | None = None,
     ) -> None:
         filepath = pathlib.Path(filepath)
-        self.logger.info(f"Importing components from '{filepath}' into existing model")
+        self.logger.info(
+            f"Importing components from '{filepath}' into existing project"
+        )
         with zipfile.ZipFile(filepath, "r", zipfile.ZIP_DEFLATED) as zf:
             if options.include_model:
                 self.logger.info("  - importing b2_model")
@@ -138,7 +140,7 @@ class Model:
         data_type: type[Data],
     ) -> Data | None:
         """
-        Get experimental data from the model
+        Get experimental data from the project
 
         Parameters
         ----------
@@ -237,7 +239,7 @@ class Model:
         append: bool = False,
     ):
         """
-        Add experimental data to the model
+        Add experimental data to the project
 
         Parameters
         ----------
@@ -302,7 +304,7 @@ class Model:
 
     def pad_stim_arrays(self, total_time_seconds: float):
         """
-        Pad all StimArrays in the model to a length of total_time_seconds
+        Pad all StimArrays in the project to a length of total_time_seconds
         """
         for name, stim_array in self.stim_arrays.items():
             if stim_array.values.ndim > 1:
@@ -321,7 +323,7 @@ class Model:
 
     def trim_stim_arrays(self, total_time_seconds: float):
         """
-        Trim all StimArrays in the model to a length of total_time_seconds
+        Trim all StimArrays in the project to a length of total_time_seconds
         """
         for name, stim_array in self.stim_arrays.items():
             if stim_array.values.ndim > 1:
@@ -338,7 +340,7 @@ class Model:
 
     def trim_stim_array_would_delete_data(self, total_time_seconds: float) -> bool:
         """
-        Check whether trimming all StimArrays in the model to a length of total_time_seconds would delete data
+        Check whether trimming all StimArrays in the project to a length of total_time_seconds would delete data
         """
         for stim_array in self.stim_arrays.values():
             if stim_array.values.ndim > 1:
@@ -370,7 +372,7 @@ class Model:
         options: SaveLoadOptions,
     ) -> None:
         """
-        Saves the model to a zipfile which contains
+        Saves the project to a zipfile which contains
             - and optional stim_arrays.json file representing the StimArrays
             - an optional b2_model.json file representing the B2Model
             - an optional pickle file for the stored_state containing the B2Model simulation checkpoints
@@ -380,9 +382,9 @@ class Model:
         Parameters
         ----------
         filepath : str | pathlib.Path
-            path to the file where the current model should be stored
+            path to the file where the current project should be stored
         options: SaveLoadOptions
-            options for what to include in the saved model
+            options for what to include in the saved project
         """
 
         with zipfile.ZipFile(filepath, "w", zipfile.ZIP_DEFLATED) as zf:
