@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 dependencies = [
     "brian2",
     "matplotlib",
-    "pillow==11.3.0",
+    "pillow",
     "numpy",
     "scipy",
     "qtpy",
