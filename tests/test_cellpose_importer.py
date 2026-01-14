@@ -194,14 +194,10 @@ def test_cellpose_patchclamp_visual_integration(tmp_path):
     image_path = tmp_path / "test_image.png"
     seg_path = tmp_path / "segmentation.npy"
 
-    from PIL import Image
-
     Image.fromarray(test_image).save(image_path)
     np.save(seg_path, segmentation)
 
     # Import cellpose data
-    from neuroseq.importer_cellpose import CellPoseImporter
-
     importer = CellPoseImporter()
     importer.load_image_file(str(image_path))
     importer.load_segmentation_file(seg_path)
@@ -261,10 +257,6 @@ def test_cellpose_patchclamp_visual_integration(tmp_path):
 
 def test_custom_stim_cellpose_mapping(tmp_path):
     """Test custom mapping between stimulus IDs and cellpose IDs (stim:cellpose format)."""
-    from PIL import Image
-
-    from neuroseq.importer_cellpose import CellPoseImporter
-
     test_image = np.random.randint(50, 150, (40, 40, 3), dtype=np.uint8)
     segmentation = np.zeros((40, 40), dtype=np.int32)
     segmentation[5:15, 5:15] = 3
@@ -342,10 +334,6 @@ def test_custom_mapping_parsing_edge_cases():
 
 def test_cellpose_overlay_color_pixels(tmp_path):
     """Test that cellpose overlay contains exact expected colors matching legend."""
-    from PIL import Image
-
-    from neuroseq.importer_cellpose import CellPoseImporter
-
     test_image = np.zeros((30, 30, 3), dtype=np.uint8)
 
     segmentation = np.zeros((30, 30), dtype=np.int32)
@@ -388,10 +376,6 @@ def test_cellpose_overlay_color_pixels(tmp_path):
 
 def test_cellpose_preview_pixel_differences(tmp_path):
     """Test that cellpose preview shows 50% blend and background unchanged."""
-    from PIL import Image
-
-    from neuroseq.importer_cellpose import CellPoseImporter
-
     original_image = np.full((20, 20, 3), 100, dtype=np.uint8)
 
     segmentation = np.zeros((20, 20), dtype=np.int32)
@@ -426,10 +410,6 @@ def test_cellpose_preview_pixel_differences(tmp_path):
 
 def test_restore_from_result_preserves_colors(tmp_path):
     """Reopening existing cellpose data should keep legend colors aligned with stored overlay."""
-    from PIL import Image
-
-    from neuroseq.importer_cellpose import CellPoseImporter
-
     base_image = np.full((16, 16, 3), 50, dtype=np.uint8)
     segmentation = np.zeros((16, 16), dtype=np.int32)
     segmentation[0:8, 0:8] = 1
