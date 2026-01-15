@@ -625,7 +625,7 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(
                 self,
                 "Cellpose import",
-                "Cellpose segmentation loaded. Now ready for Patchclamp import",
+                "Cellpose segmentation loaded.",
             )
 
     def _delete_cellpose_data(self) -> None:
