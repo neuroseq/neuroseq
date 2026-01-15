@@ -172,6 +172,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         checkbox_layout.setContentsMargins(4, 0, 4, 0)
         self.show_cellpose_checkbox = QtWidgets.QCheckBox("Show Cellpose IDs")
         self.show_cellpose_checkbox.setChecked(True)
+        self.show_cellpose_checkbox.setEnabled(False)
         self.show_stimulus_checkbox = QtWidgets.QCheckBox("Show Stimulus IDs")
         self.show_stimulus_checkbox.setChecked(False)
         self.show_segmentation_checkbox = QtWidgets.QCheckBox("Show segmentation")
@@ -293,7 +294,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
     def _on_display_toggle_changed(self) -> None:
         """Sync overlay display options with the checkboxes."""
         self.overlay_widget.set_display_options(
-            show_cellpose_ids=self.show_cellpose_checkbox.isChecked(),
+            show_cellpose_ids=True,
             show_stimulus_ids=self.show_stimulus_checkbox.isChecked(),
             show_segmentation=self.show_segmentation_checkbox.isChecked(),
         )

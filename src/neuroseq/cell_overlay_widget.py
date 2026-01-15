@@ -55,6 +55,7 @@ class OverlayView(FPLWidget):
         show_segmentation: bool = True,
         show_cellpose_ids: bool = True,
         show_stimulus_ids: bool = False,
+        label_segmentation: np.ndarray | None = None,
     ) -> None:
         previous_shape = (
             self.overlay_image.shape[:2] if self.overlay_image is not None else None
@@ -65,7 +66,10 @@ class OverlayView(FPLWidget):
         self.subplot.clear()
         self._configure_subplot()
         self.overlay_image = overlay_image
-        self.segmentation = segmentation
+        segmentation_for_display = segmentation
+        self.segmentation = (
+            label_segmentation if label_segmentation is not None else segmentation
+        )
         self.text = None
         self.base_camera_state = None
         self.stim_to_cellpose = stim_to_cellpose or {}
@@ -78,12 +82,14 @@ class OverlayView(FPLWidget):
 
         self.subplot.add_image(overlay_image, interpolation="nearest")
 
-        if segmentation is not None:
+        if segmentation_for_display is not None:
             if show_segmentation:
-                color_image = self._build_segmentation_colors(segmentation, legend_data)
+                color_image = self._build_segmentation_colors(
+                    segmentation_for_display, legend_data
+                )
                 self.subplot.add_image(color_image, interpolation="nearest")
             self._add_cell_labels(
-                segmentation,
+                self.segmentation,
                 self.stim_to_cellpose,
                 show_cellpose_ids,
                 show_stimulus_ids,
@@ -153,7 +159,7 @@ class OverlayView(FPLWidget):
             y_coords, x_coords = np.where(mask)
             center_y = float(np.mean(y_coords))
             center_x = float(np.mean(x_coords))
-            stim_id = reverse_mapping.get(cell_id, cell_id)
+            stim_id = reverse_mapping.get(cell_id)
             cellpose_id = cell_id
 
             base_offset = (center_x, center_y, 200.0)
@@ -174,7 +180,7 @@ class OverlayView(FPLWidget):
                     center=True,
                     screen_space=False,
                 )
-            if show_stimulus_ids:
+            if show_stimulus_ids and stim_id is not None:
                 self.subplot.add_text(
                     f"{stim_id}",
                     font_size=stim_font_size,
@@ -270,15 +276,18 @@ class OverlayView(FPLWidget):
             return
 
         reverse_mapping = {v: k for k, v in self.stim_to_cellpose.items()}
-        stim_id = reverse_mapping.get(neuron_index, neuron_index)
+        stim_id = reverse_mapping.get(neuron_index)
         cellpose_id = int(neuron_index)
 
-        if self.show_stimulus_ids and not self.show_cellpose_ids:
-            hover_text = f"{stim_id}"
-        elif self.show_cellpose_ids and not self.show_stimulus_ids:
-            hover_text = f"{cellpose_id}"
-        else:
+        if self.show_cellpose_ids and self.show_stimulus_ids and stim_id is not None:
             hover_text = f"{cellpose_id} / {stim_id}"
+        elif self.show_cellpose_ids:
+            hover_text = f"{cellpose_id}"
+        elif self.show_stimulus_ids and stim_id is not None:
+            hover_text = f"{stim_id}"
+        else:
+            self.text.visible = False
+            return
 
         self.text.visible = True
         self.text.offset = (mouse_pos[0], mouse_pos[1], 200)
@@ -335,6 +344,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             show_segmentation=self.show_segmentation,
             show_cellpose_ids=self.show_cellpose_ids,
             show_stimulus_ids=self.show_stimulus_ids,
+            label_segmentation=self.segmentation,
         )
 
     def _get_display_segmentation(self) -> np.ndarray | None:
