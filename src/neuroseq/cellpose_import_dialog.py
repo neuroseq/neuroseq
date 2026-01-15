@@ -44,12 +44,14 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self._setup_ui()
         self._load_existing_data_if_available()
 
-    def _maximise_screen(self) -> None:
-        screen = QtWidgets.QApplication.primaryScreen()
-        available = screen.availableGeometry()
+    def _set_screen_size(self) -> None:
+        # screen = QtWidgets.QApplication.primaryScreen()
+        # available = screen.availableGeometry()
         # Use the maximum available window size
-        self.setGeometry(available)
-        self.setWindowState(self.windowState() | QtCore.Qt.WindowState.WindowMaximized)
+        # self.setGeometry(available)
+        # self.setWindowState(self.windowState() | QtCore.Qt.WindowState.WindowMaximized)
+        # Use minimal window size
+        self.resize(200, 500)
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("Import Cellpose Data")
@@ -218,7 +220,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         if self.main_content_container is not None:
             self.main_content_container.setVisible(loaded)
             if loaded:
-                self._maximise_screen()
+                self._set_screen_size()
         if not loaded and hasattr(self, "import_button"):
             self.import_button.setEnabled(False)
 
