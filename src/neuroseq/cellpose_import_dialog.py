@@ -171,10 +171,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
         checkbox_layout = QtWidgets.QHBoxLayout()
         checkbox_layout.setContentsMargins(4, 0, 4, 0)
         self.show_cellpose_checkbox = QtWidgets.QCheckBox("Show Cellpose IDs")
-        self.show_cellpose_checkbox.setChecked(True)
-        self.show_cellpose_checkbox.setEnabled(False)
+        self.show_cellpose_checkbox.setChecked(False)
+        self.show_cellpose_checkbox.setEnabled(True)
         self.show_stimulus_checkbox = QtWidgets.QCheckBox("Show Stimulus IDs")
-        self.show_stimulus_checkbox.setChecked(False)
+        self.show_stimulus_checkbox.setChecked(True)
         self.show_segmentation_checkbox = QtWidgets.QCheckBox("Show segmentation")
         self.show_segmentation_checkbox.setChecked(True)
         for checkbox in (
@@ -210,6 +210,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         layout.addWidget(self.main_content_container)
         self.main_content_container.setVisible(False)
         self._set_ui_loaded_state(False)
+        self._apply_linear_offset_display(self._get_linear_offset())
         self._on_display_toggle_changed()
 
     def _set_ui_loaded_state(self, loaded: bool) -> None:
@@ -247,8 +248,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 button.setChecked(True)
                 break
 
-        self.show_cellpose_checkbox.setChecked(True)
-        self.show_stimulus_checkbox.setChecked(False)
+        self._apply_linear_offset_display(self._get_linear_offset())
         self.show_segmentation_checkbox.setChecked(True)
         self._on_display_toggle_changed()
 
@@ -267,6 +267,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         if is_custom and not self.show_stimulus_checkbox.isChecked():
             self.show_stimulus_checkbox.setChecked(True)
+        if not is_custom:
+            self._apply_linear_offset_display(self._get_linear_offset())
 
         # Update preview if data is loaded
         if (
@@ -287,6 +289,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         """Refresh preview when linear offset changes."""
         if self._get_mapping_strategy() != "Linear":
             return
+        self._apply_linear_offset_display(self._get_linear_offset())
         if self.importer.segmentation_data is None:
             return
         self._update_preview_mapping()
@@ -294,10 +297,16 @@ class CellposeImportDialog(QtWidgets.QDialog):
     def _on_display_toggle_changed(self) -> None:
         """Sync overlay display options with the checkboxes."""
         self.overlay_widget.set_display_options(
-            show_cellpose_ids=True,
+            show_cellpose_ids=self.show_cellpose_checkbox.isChecked(),
             show_stimulus_ids=self.show_stimulus_checkbox.isChecked(),
             show_segmentation=self.show_segmentation_checkbox.isChecked(),
         )
+
+    def _apply_linear_offset_display(self, offset: int) -> None:
+        """Set default ID visibility based on the linear offset value."""
+        show_cellpose = offset != 0
+        self.show_cellpose_checkbox.setChecked(show_cellpose)
+        self.show_stimulus_checkbox.setChecked(True)
 
     def _get_mapping_strategy(self) -> str:
         """Get the currently selected mapping strategy"""

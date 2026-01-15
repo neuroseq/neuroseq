@@ -163,7 +163,7 @@ class OverlayView(FPLWidget):
             cellpose_id = cell_id
 
             base_offset = (center_x, center_y, 200.0)
-            secondary_offset = (center_x + 5.0, center_y, 200.0)
+            secondary_offset = (center_x + 7.25, center_y, 200.0)
             stim_offset = base_offset
             cellpose_offset = secondary_offset if show_stimulus_ids else base_offset
             stim_font_size = 5 if show_cellpose_ids else 6
@@ -174,8 +174,8 @@ class OverlayView(FPLWidget):
                     f"{cellpose_id}",
                     font_size=cellpose_font_size,
                     offset=cellpose_offset,
-                    face_color=(0.0, 0.0, 0.0),
-                    outline_color=(1.0, 1.0, 1.0),
+                    face_color=(0.25, 0.25, 0.25),
+                    outline_color=(0.9, 0.9, 0.9),
                     outline_thickness=3.0,
                     center=True,
                     screen_space=False,
@@ -185,8 +185,8 @@ class OverlayView(FPLWidget):
                     f"{stim_id}",
                     font_size=stim_font_size,
                     offset=stim_offset,
-                    face_color=(0.3, 0.3, 0.3),
-                    outline_color=(0.8, 0.8, 0.8),
+                    face_color=(0.0, 0.0, 0.0),
+                    outline_color=(1.0, 1.0, 1.0),
                     outline_thickness=0.6,
                     screen_space=False,
                 )
@@ -335,7 +335,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         if self.show_segmentation or self.base_image is None:
             image_to_show = self.overlay_image
         else:
-            image_to_show = self.base_image or self.overlay_image
+            image_to_show = self.base_image
         self.overlay_view.add_overlay_data(
             image_to_show,
             display_segmentation,
