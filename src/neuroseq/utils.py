@@ -3,8 +3,10 @@ from __future__ import annotations
 import functools
 import logging
 from collections.abc import Callable
+from collections.abc import Iterable
 from enum import Enum
 from typing import Any
+from typing import TypeVar
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -278,7 +280,7 @@ def append_data(
                 new_data.values,
                 existing_data.values[idx1:],
             ],
-            axis=0,
+            axis=2,
         )
         existing_data.timestamps = safe_concat(
             [
@@ -383,3 +385,17 @@ def get_cmap(stim_type: StimType, alpha: float = 1.0) -> Colormap:
             )
         case _:
             return Colormap([(1.0, 1.0, 1.0, 0.0), (0.0, 0.0, 0.0, alpha)])
+
+
+T = TypeVar("T")
+
+
+def find_by_name_and_type(
+    data: Iterable[object],
+    name: str,
+    cls: type[T],
+) -> T | None:
+    return next(
+        (d for d in data if isinstance(d, cls) and getattr(d, "name", None) == name),
+        None,
+    )

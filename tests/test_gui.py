@@ -595,6 +595,16 @@ def test_gui_playback_speed(
     gui.close()
 
 
+class MockImportExperimentDialog:
+    append_to_experiment = False
+
+    def __init__(self, *args, **kwargs) -> None:
+        pass
+
+    def exec(self) -> bool:
+        return True
+
+
 def test_gui_simulate_external_model(
     monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list
 ) -> None:
@@ -620,6 +630,11 @@ def test_gui_simulate_external_model(
         QtWidgets.QInputDialog,
         "getText",
         lambda *args: (f"{simulation_time_secs}", True),
+    )
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "ImportExperimentDialog",
+        MockImportExperimentDialog,
     )
     gui.btn_do_external_simulation_clicked()
     qtbot.wait(delay_after_update_model_call_in_ms)

@@ -29,6 +29,7 @@ from neuroseq.example_projects import example_projects
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.import_dialog import Suite2pImportDialog
+from neuroseq.import_experiment_dialog import ImportExperimentDialog
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.model_editor import ModelEditorDialog
@@ -476,6 +477,31 @@ class Gui(QtWidgets.QMainWindow):
             return
         self._update_data(keep_undo_history=True)
 
+    def _append_experimental_data(self, experiment: Experiment) -> None:
+        try:
+            dialog = ImportExperimentDialog(experiment, self.project, parent=self)
+            if not dialog.exec():
+                return
+            if dialog.append_to_experiment:
+                self.project.append_experimental_data(
+                    dialog.append_experiment_name,
+                    dialog.experiment.duration,
+                    dialog.experiment.data,
+                    dialog.offset,
+                )
+            else:
+                self.project.add_experiment(experiment)
+            self.update_project(self.project)
+            self._select_experiment_data(experiment.name)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Data import error",
+                f"Could not import data: {e}",
+            )
+            self.logger.exception(e)
+            return
+
     @with_wait_cursor
     def _do_external_simulation(self, simulation_time: float):
         if self.external_simulation_function is None:
@@ -498,11 +524,6 @@ class Gui(QtWidgets.QMainWindow):
             self.logger.info(
                 f"External simulation complete, returned {experiment.duration}s experiment '{experiment.name}' with {len(experiment.data)} data objects"
             )
-            # for now just replace any existing experiment with the same name
-            self.project.experiments.pop(experiment.name, None)
-            self.project.add_experimental_data(experiment)
-            self.update_project(self.project)
-            self._select_experiment_data("External Simulation")
         except Exception as e:
             QtWidgets.QMessageBox.critical(
                 self,
@@ -510,6 +531,9 @@ class Gui(QtWidgets.QMainWindow):
                 f"Could not run external simulation: {e}",
             )
             self.logger.exception(e)
+            return
+        QtWidgets.QApplication.restoreOverrideCursor()
+        self._append_experimental_data(experiment)
 
     def btn_do_external_simulation_clicked(self) -> None:
         if self.external_simulation_function is None:
@@ -599,9 +623,7 @@ class Gui(QtWidgets.QMainWindow):
         """Open dialog to import experimental traces/spikes from Suite2p/CSV data"""
         dialog = Suite2pImportDialog(self)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
-            # for now just replace any existing experiment with the same name
-            self.project.experiments.pop(dialog.experiment_name, None)
-            self.project.add_experimental_data(
+            self._append_experimental_data(
                 Experiment(
                     dialog.experiment_name,
                     dialog.experiment_duration,
@@ -609,8 +631,6 @@ class Gui(QtWidgets.QMainWindow):
                     dialog.imported_data,
                 )
             )
-            self.update_project(self.project)
-            self._select_experiment_data(dialog.experiment_name)
 
     def btn_import_cellpose_data_clicked(self) -> None:
         dialog = CellposeImportDialog(
@@ -650,9 +670,7 @@ class Gui(QtWidgets.QMainWindow):
                     )
                     if self.project is not None:
                         self.project.cellpose_data = self.last_cellpose_import
-                # for now just replace any existing experiment with the same name
-                self.project.experiments.pop(dialog.experiment_name, None)
-                self.project.add_experimental_data(
+                self._append_experimental_data(
                     Experiment(
                         dialog.experiment_name,
                         dialog.experiment_duration,
@@ -668,8 +686,6 @@ class Gui(QtWidgets.QMainWindow):
                 )
                 self.logger.exception(exc)
                 return
-            self.update_project(self.project)
-            self._select_experiment_data(dialog.experiment_name)
 
     def connect_external_simulation_function_with_brian2(self) -> None:
         self._load_external_simulation_function(
