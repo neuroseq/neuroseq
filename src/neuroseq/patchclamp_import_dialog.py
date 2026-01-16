@@ -15,8 +15,6 @@ from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_patchclamp import PeakDetectionParams
 from neuroseq.importer_patchclamp import generate_stimulus_mapping
 from neuroseq.importer_patchclamp import import_patchclamp_data
-from neuroseq.importer_patchclamp import validate_append_import
-from neuroseq.project import Project
 
 
 class PatchClampImportDialog(QtWidgets.QDialog):
@@ -25,23 +23,18 @@ class PatchClampImportDialog(QtWidgets.QDialog):
     def __init__(
         self,
         cellpose_import: CellposeImportResult | None = None,
-        project: Project | None = None,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         # Work on a copy so we don't mutate the caller's stored data
         self.cellpose_import = clone_cellpose_result(cellpose_import)
-        self.project = project
         self.imported_spike_data: list = []
         self.imported_trace_data: list = []
         self.experiment_name = "PatchClamp Import"
-        self.append_data = False
+        self.experiment_duration: float = 0.0
         self._auto_stimulus_ids: list[int] = []
         self._auto_from_cellpose = False
-        self.neurons_to_replace: set[int] = (
-            set()
-        )  # Track which neurons should be replaced
         self.file_path: Path | None = None
         self.npy_data: np.ndarray | None = None
         self.extracted_neuron_id: int | None = None
@@ -227,18 +220,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         options_layout.addRow(self.custom_mapping_label, self.custom_widget)
         options_layout.addRow("", self.custom_mapping_hint)
 
-        # Replace/extend data option
-        self.replace_checkbox = QtWidgets.QCheckBox(
-            "Replace existing data for these neuron IDs instead of extending"
-        )
-        self.replace_checkbox.setChecked(not self.append_data)
-        self.replace_checkbox.setToolTip(
-            "When enabled, imported data will overwrite existing traces/spikes "
-            "for the specified neuron ID. When disabled, data will be appended/extended."
-        )
-        self.replace_checkbox.toggled.connect(self._on_replace_toggled)
-        options_layout.addRow(self.replace_checkbox)
-
         # Connect radio buttons to show/hide custom mapping input
         for button in self.mapping_buttons.buttons():
             button.toggled.connect(self._on_mapping_changed)
@@ -390,9 +371,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             self._auto_stimulus_ids = stim_ids
             self._auto_from_cellpose = True
         self._update_custom_mapping_hint()
-
-    def _on_replace_toggled(self, checked: bool) -> None:
-        self.append_data = not checked
 
     def _browse_file(self) -> None:
         filename, _ = getopenfilename(
@@ -766,14 +744,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             if self.cellpose_import is not None:
                 self.cellpose_import.stimulus_to_cellpose_mapping = stimulus_mapping
 
-            # Validate import if in append mode
-            if self.append_data:
-                validate_append_import(
-                    self.project,
-                    self.experiment_name,
-                    neuron_ids,
-                )
-
             detection_params = PeakDetectionParams(
                 peak_height=self.peak_height_spin.value(),
                 peak_prominence=self.peak_prominence_spin.value(),
@@ -790,15 +760,13 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 logger=self.logger,
             )
 
-            if not self.append_data:
-                self.neurons_to_replace.update(neuron_ids)
-
             self.imported_spike_data.extend(spike_data_list)
             self.imported_trace_data.append(trace_data)
 
             total_spikes = sum(len(sd.spike_times) for sd in spike_data_list)
             neuron_list = ", ".join(map(str, neuron_ids))
             duration_seconds = trace_data.traces.shape[1] / sampling_rate
+            self.experiment_duration = duration_seconds
 
             if total_spikes > 0:
                 QtWidgets.QMessageBox.information(

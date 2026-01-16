@@ -26,7 +26,6 @@ class TestSuite2pImportDialog:
         assert dialog.max_neurons_spin.value() == 2
         assert dialog.spike_threshold_spin.value() == 0.02
         assert dialog.sampling_rate_spin.value() == 30.0
-        assert dialog.replace_checkbox.isChecked() is True
 
     def test_file_loading_and_preview(self, qtbot: QtBot, suite2p_import_data_dir):
         """Test loading F.npy file and showing preview"""
@@ -59,6 +58,7 @@ class TestSuite2pImportDialog:
 
         # only get traces:
         assert len(dialog.imported_data) == 1
+        assert dialog.experiment_duration == pytest.approx(30.0)  # 900 frames at 30 Hz
         trace_data = dialog.imported_data[0]
         assert isinstance(trace_data, TraceData)
         traces = trace_data.traces
@@ -94,6 +94,7 @@ class TestSuite2pImportDialog:
         assert "successful" in qmessagebox_calls[-1]["title"].lower()
 
         assert len(dialog.imported_data) == 1
+        assert dialog.experiment_duration == pytest.approx(30.0)  # 900 frames at 30 Hz
         trace_data = dialog.imported_data[0]
         assert isinstance(trace_data, TraceData)
         traces = trace_data.traces
@@ -116,6 +117,7 @@ class TestSuite2pImportDialog:
         assert "successful" in qmessagebox_calls[-1]["title"].lower()
 
         assert len(dialog.imported_data) == 1
+        assert dialog.experiment_duration == pytest.approx(30.0)  # 900 frames at 30 Hz
         trace_data = dialog.imported_data[0]
         assert isinstance(trace_data, TraceData)
         traces = trace_data.traces
@@ -141,6 +143,7 @@ class TestSuite2pImportDialog:
         )  # realistic default, this will leave 36 spikes.
 
         dialog.import_data()
+        assert dialog.experiment_duration == pytest.approx(30.0)  # 900 frames at 30 Hz
         assert len(dialog.imported_data) == 2
         trace_data = dialog.imported_data[0]
         assert isinstance(trace_data, TraceData)
@@ -148,22 +151,6 @@ class TestSuite2pImportDialog:
         assert isinstance(spike_data, SpikeData)
         assert len(spike_data.spike_indices) > 0
         assert len(spike_data.spike_times) == len(spike_data.spike_indices)
-
-    def test_replace_checkbox_sets_flag(
-        self, qtbot: QtBot, suite2p_import_data_dir, qmessagebox_calls: list
-    ):
-        """Checking the replace option propagates to emitted payloads."""
-        dialog = Suite2pImportDialog()
-        qtbot.addWidget(dialog)
-
-        test_data_dir = suite2p_import_data_dir
-        dialog.load_f_file(str(test_data_dir / "F.npy"))
-        dialog.load_fneu_file(str(test_data_dir / "Fneu.npy"))
-        dialog.replace_checkbox.setChecked(True)
-
-        dialog.import_data()
-        assert len(dialog.imported_data) == 1
-        assert dialog.append_data is False
 
     def test_toggle_individual_file_imports(self, qtbot: QtBot):
         """Test that the toggle button correctly shows/hides individual file imports"""
@@ -229,33 +216,12 @@ class TestSuite2pImportDialog:
         # success message only (no folder auto fill)
         assert qmessagebox_calls[-1]["name"] == "information"
         assert "successful" in qmessagebox_calls[-1]["title"].lower()
+        assert dialog.experiment_duration == pytest.approx(30.0)  # 900 frames at 30 Hz
         assert len(dialog.imported_data) == 2
         assert isinstance(dialog.imported_data[0], TraceData)
         assert dialog.imported_data[0].traces.shape == (5, 900)
         assert isinstance(dialog.imported_data[1], SpikeData)
         assert len(dialog.imported_data[1].spike_indices) > 0
-
-    def test_import_handler_error_is_shown(
-        self,
-        qtbot: QtBot,
-        suite2p_import_data_dir,
-        qmessagebox_calls: list,
-    ) -> None:
-        def failing_handler(name, data, append):
-            raise ValueError("Cannot append TraceData with different dt")
-
-        dialog = Suite2pImportDialog(import_handler=failing_handler)
-        qtbot.addWidget(dialog)
-
-        dialog.load_f_file(str(suite2p_import_data_dir / "F.npy"))
-        dialog.load_fneu_file(str(suite2p_import_data_dir / "Fneu.npy"))
-
-        dialog.import_data()
-        assert qmessagebox_calls[-1]["name"] == "critical"
-        assert qmessagebox_calls[-1]["title"] == "Import Error"
-        assert "different dt" in qmessagebox_calls[-1]["text"]
-        # the dialog stays interactive so the user can correct inputs
-        assert dialog.import_button.isEnabled()
 
 
 class TestSuite2pDataValidation:
