@@ -161,35 +161,109 @@ class OverlayView(FPLWidget):
             center_x = float(np.mean(x_coords))
             stim_id = reverse_mapping.get(cell_id)
             cellpose_id = cell_id
+            stim_display_id = stim_id if stim_id is not None else cellpose_id
+            mismatch = stim_id is not None and stim_id != cellpose_id
+            cellpose_visible = show_cellpose_ids
+            stim_visible = show_stimulus_ids
+
+            if not cellpose_visible and not stim_visible:
+                continue
 
             base_offset = (center_x, center_y, 200.0)
             secondary_offset = (center_x + 7.25, center_y, 200.0)
             stim_offset = base_offset
-            cellpose_offset = secondary_offset if show_stimulus_ids else base_offset
-            stim_font_size = 5 if show_cellpose_ids else 6
-            cellpose_font_size = 3 if show_stimulus_ids else 5
+            cellpose_offset = secondary_offset if stim_visible else base_offset
+            stim_font_size = 5 if cellpose_visible else 6
+            cellpose_font_size = 3 if stim_visible else 5
+            if mismatch:
+                stim_font_size *= 1.55
+                cellpose_font_size *= 1.55
+                stim_offset = (
+                    center_x - (stim_font_size * 0.3),
+                    center_y,
+                    200.0,
+                )
 
-            if show_cellpose_ids:
+            if cellpose_visible:
+                cellpose_text = f"{cellpose_id}"
+                cellpose_face = (0.3, 0.6, 0.95) if mismatch else (0.25, 0.25, 0.25)
+                cellpose_outline = (0.9, 0.9, 0.9)
+                cellpose_outline_thickness = 5.0 if mismatch else 3.0
                 self.subplot.add_text(
-                    f"{cellpose_id}",
+                    cellpose_text,
                     font_size=cellpose_font_size,
                     offset=cellpose_offset,
-                    face_color=(0.25, 0.25, 0.25),
-                    outline_color=(0.9, 0.9, 0.9),
-                    outline_thickness=3.0,
+                    face_color=cellpose_face,
+                    outline_color=cellpose_outline,
+                    outline_thickness=cellpose_outline_thickness,
                     center=True,
                     screen_space=False,
                 )
-            if show_stimulus_ids and stim_id is not None:
+                if mismatch:
+                    self._add_bold_text(
+                        cellpose_text,
+                        cellpose_font_size,
+                        cellpose_offset,
+                        center=True,
+                        face_color=cellpose_face,
+                        outline_color=cellpose_outline,
+                        outline_thickness=cellpose_outline_thickness,
+                        screen_space=False,
+                    )
+            if stim_visible:
+                stim_text = f"{stim_display_id}"
+                stim_face = (0.25, 0.55, 0.9) if mismatch else (0.0, 0.0, 0.0)
+                stim_outline = (1.0, 1.0, 1.0)
+                stim_outline_thickness = 1.2 if mismatch else 0.6
                 self.subplot.add_text(
-                    f"{stim_id}",
+                    stim_text,
                     font_size=stim_font_size,
                     offset=stim_offset,
-                    face_color=(0.0, 0.0, 0.0),
-                    outline_color=(1.0, 1.0, 1.0),
-                    outline_thickness=0.6,
+                    face_color=stim_face,
+                    outline_color=stim_outline,
+                    outline_thickness=stim_outline_thickness,
                     screen_space=False,
                 )
+                if mismatch:
+                    self._add_bold_text(
+                        stim_text,
+                        stim_font_size,
+                        stim_offset,
+                        center=False,
+                        face_color=stim_face,
+                        outline_color=stim_outline,
+                        outline_thickness=stim_outline_thickness,
+                        screen_space=False,
+                    )
+
+    def _add_bold_text(
+        self,
+        text: str,
+        font_size: float,
+        offset: tuple[float, float, float],
+        *,
+        center: bool,
+        face_color: tuple[float, float, float],
+        outline_color: tuple[float, float, float],
+        outline_thickness: float,
+        screen_space: bool,
+    ) -> None:
+        bold_offsets = (
+            (offset[0] + (font_size * 0.18), offset[1], offset[2]),
+            (offset[0] + (font_size * 0.08), offset[1] + (font_size * 0.08), offset[2]),
+            (offset[0] + (font_size * 0.2), offset[1] + (font_size * 0.02), offset[2]),
+        )
+        for bold_offset in bold_offsets:
+            self.subplot.add_text(
+                text,
+                font_size=font_size,
+                offset=bold_offset,
+                face_color=face_color,
+                outline_color=outline_color,
+                outline_thickness=outline_thickness,
+                center=center,
+                screen_space=screen_space,
+            )
 
     def _create_hover_label(self):
         return self.subplot.add_text(
@@ -278,13 +352,16 @@ class OverlayView(FPLWidget):
         reverse_mapping = {v: k for k, v in self.stim_to_cellpose.items()}
         stim_id = reverse_mapping.get(neuron_index)
         cellpose_id = int(neuron_index)
+        stim_display_id = stim_id if stim_id is not None else cellpose_id
+        cellpose_visible = self.show_cellpose_ids
+        stim_visible = self.show_stimulus_ids
 
-        if self.show_cellpose_ids and self.show_stimulus_ids and stim_id is not None:
-            hover_text = f"{cellpose_id} / {stim_id}"
-        elif self.show_cellpose_ids:
+        if cellpose_visible and stim_visible:
+            hover_text = f"{stim_display_id} / {cellpose_id}"
+        elif stim_visible:
+            hover_text = f"{stim_display_id}"
+        elif cellpose_visible:
             hover_text = f"{cellpose_id}"
-        elif self.show_stimulus_ids and stim_id is not None:
-            hover_text = f"{stim_id}"
         else:
             self.text.visible = False
             return
