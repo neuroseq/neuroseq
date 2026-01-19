@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import logging
 from collections.abc import Iterable
+from typing import Protocol
 from typing import TypedDict
 
 import brian2.numpy_ as np
@@ -21,6 +22,27 @@ class CameraState(TypedDict):
     maintain_aspect: bool
 
 
+Color = tuple[float, float, float] | tuple[float, float, float, float]
+
+
+class TextGraphic(Protocol):
+    text: str
+    font_size: float
+    offset: tuple[float, float, float]
+    face_color: Color
+    outline_color: Color
+    outline_thickness: float
+    visible: bool
+
+
+class LabelGraphics(TypedDict):
+    stim: TextGraphic
+    cellpose: TextGraphic
+    stim_bold: list[TextGraphic]
+    cellpose_bold: list[TextGraphic]
+    all: list[TextGraphic]
+
+
 class OverlayView(FPLWidget):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent=parent)
@@ -35,7 +57,7 @@ class OverlayView(FPLWidget):
         self._image_graphic = None
         self._segmentation_graphic = None
         self._label_centers: dict[int, tuple[float, float]] = {}
-        self._label_graphics: dict[int, dict[str, list]] = {}
+        self._label_graphics: dict[int, LabelGraphics] = {}
         self._label_segmentation_id: int | None = None
         self._segmentation_shape: tuple[int, int] | None = None
         self.base_camera_state: CameraState | None = None
@@ -116,7 +138,8 @@ class OverlayView(FPLWidget):
                     self._segmentation_shape = segmentation_for_display.shape[:2]
                 else:
                     self._segmentation_graphic.data = color_image
-                self._segmentation_graphic.visible = True
+                if self._segmentation_graphic is not None:
+                    self._segmentation_graphic.visible = True
             elif self._segmentation_graphic is not None:
                 self._segmentation_graphic.visible = False
 
@@ -155,7 +178,7 @@ class OverlayView(FPLWidget):
 
     def _clear_label_graphics(self) -> None:
         for graphic_set in self._label_graphics.values():
-            for graphic in graphic_set.get("all", []):
+            for graphic in graphic_set["all"]:
                 with contextlib.suppress(Exception):
                     self.subplot.remove_graphic(graphic)
         self._label_graphics = {}
@@ -164,7 +187,7 @@ class OverlayView(FPLWidget):
 
     def _hide_label_graphics(self) -> None:
         for graphic_set in self._label_graphics.values():
-            for graphic in graphic_set.get("all", []):
+            for graphic in graphic_set["all"]:
                 graphic.visible = False
 
     def _ensure_label_graphics(self) -> None:
@@ -228,7 +251,12 @@ class OverlayView(FPLWidget):
                 )
                 for _ in range(3)
             ]
-            all_graphics = [cellpose, stim, *stim_bold, *cellpose_bold]
+            all_graphics: list[TextGraphic] = [
+                cellpose,
+                stim,
+                *stim_bold,
+                *cellpose_bold,
+            ]
             for graphic in all_graphics:
                 graphic.visible = False
 
@@ -328,16 +356,15 @@ class OverlayView(FPLWidget):
             mismatch = stim_id is not None and stim_id != cellpose_id
             cellpose_visible = show_cellpose_ids
             stim_visible = show_stimulus_ids
-            if stim_visible and cellpose_visible and stim_id is not None:
-                if stim_id == cellpose_id:
-                    cellpose_visible = False
+            if stim_visible and cellpose_visible and stim_id == cellpose_id:
+                cellpose_visible = False
 
             base_offset = (center_x, center_y, 200.0)
             secondary_offset = (center_x + 7.25, center_y, 200.0)
             stim_offset = base_offset
             cellpose_offset = secondary_offset if stim_visible else base_offset
-            stim_font_size = 5 if cellpose_visible else 6
-            cellpose_font_size = 3 if stim_visible else 5
+            stim_font_size = 5.0 if cellpose_visible else 6.0
+            cellpose_font_size = 3.0 if stim_visible else 5.0
             size_scale = 1.35 if highlight else 1.0
             stim_font_size *= size_scale
             cellpose_font_size *= size_scale
@@ -350,6 +377,8 @@ class OverlayView(FPLWidget):
 
             if cellpose_visible:
                 cellpose_text = f"{cellpose_id}"
+                cellpose_face: Color
+                cellpose_outline: Color
                 if outdated_cellpose:
                     cellpose_face = (0.31, 0.31, 0.31, 0.6)
                     cellpose_outline = (0.8, 0.8, 0.8, 0.6)
@@ -413,12 +442,12 @@ class OverlayView(FPLWidget):
 
     def _update_bold_graphics(
         self,
-        graphics: list,
+        graphics: list[TextGraphic],
         text: str,
         font_size: float,
         offset: tuple[float, float, float],
-        face_color: tuple[float, float, float],
-        outline_color: tuple[float, float, float],
+        face_color: Color,
+        outline_color: Color,
         outline_thickness: float,
         visible: bool,
     ) -> None:
