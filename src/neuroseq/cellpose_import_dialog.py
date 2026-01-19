@@ -4,6 +4,7 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
+import numpy as np
 from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
@@ -30,6 +31,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self._imported_data: CellposeImportResult | None = None
         self.image_path: Path | None = None
         self.segmentation_path: Path | None = None
+        self._base_segmentation_data: np.ndarray | None = None
         self.importer = CellPoseImporter()
         self.overlay_widget = CellOverlayWidget("")
         self.overlay_widget.setSizePolicy(
@@ -155,7 +157,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
         )
         self.custom_mapping_line.setVisible(False)
         self.custom_mapping_row_index = mapping_layout.rowCount()
-        self.custom_mapping_label = QtWidgets.QLabel("Custom mapping:")
+        self.custom_mapping_label = QtWidgets.QLabel(
+            "Custom mapping (stimulus:cellpose):"
+        )
         self.custom_mapping_label.setStyleSheet("QLabel { color: #3b7dd8; }")
         self.custom_mapping_label.setVisible(False)
         mapping_layout.addRow(self.custom_mapping_label, self.custom_mapping_line)
@@ -171,20 +175,11 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         checkbox_layout = QtWidgets.QHBoxLayout()
         checkbox_layout.setContentsMargins(4, 0, 4, 0)
-        self.show_cellpose_checkbox = QtWidgets.QCheckBox("Show Cellpose IDs")
-        self.show_cellpose_checkbox.setChecked(True)
-        self.show_cellpose_checkbox.setEnabled(True)
-        self.show_stimulus_checkbox = QtWidgets.QCheckBox("Show Stimulus IDs")
-        self.show_stimulus_checkbox.setChecked(True)
-        self.show_segmentation_checkbox = QtWidgets.QCheckBox("Show segmentation")
-        self.show_segmentation_checkbox.setChecked(True)
-        for checkbox in (
-            self.show_cellpose_checkbox,
-            self.show_stimulus_checkbox,
-            self.show_segmentation_checkbox,
-        ):
-            checkbox.toggled.connect(self._on_display_toggle_changed)
-            checkbox_layout.addWidget(checkbox)
+        self.show_labels_checkbox = QtWidgets.QCheckBox("Show labels")
+        self.show_labels_checkbox.setChecked(True)
+        self.show_labels_checkbox.setEnabled(True)
+        self.show_labels_checkbox.toggled.connect(self._on_display_toggle_changed)
+        checkbox_layout.addWidget(self.show_labels_checkbox)
         checkbox_layout.addStretch(1)
         main_content_layout.addLayout(checkbox_layout)
         main_content_layout.addWidget(mapping_group)
@@ -235,6 +230,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.importer = CellPoseImporter()
         self.image_path = None
         self.segmentation_path = None
+        self._base_segmentation_data = None
 
         self.image_path_label.setText("No image selected")
         self.image_path_label.setStyleSheet("QLabel { color: gray; }")
@@ -242,13 +238,11 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.segmentation_path_label.setStyleSheet("QLabel { color: gray; }")
         self.custom_mapping_line.clear()
         self.linear_offset_spin.setValue(0)
-
         for button in self.mapping_buttons.buttons():
             if button.text() == "Linear":
                 button.setChecked(True)
                 break
 
-        self.show_segmentation_checkbox.setChecked(True)
         self._on_display_toggle_changed()
 
         self.overlay_widget.set_overlay(None, None, None, None, None, None)
@@ -289,10 +283,15 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
     def _on_display_toggle_changed(self) -> None:
         """Sync overlay display options with the checkboxes."""
+        show_labels = (
+            self.show_labels_checkbox.isChecked()
+            if hasattr(self, "show_labels_checkbox")
+            else True
+        )
         self.overlay_widget.set_display_options(
-            show_cellpose_ids=self.show_cellpose_checkbox.isChecked(),
-            show_stimulus_ids=self.show_stimulus_checkbox.isChecked(),
-            show_segmentation=self.show_segmentation_checkbox.isChecked(),
+            show_cellpose_ids=show_labels,
+            show_stimulus_ids=show_labels,
+            show_segmentation=True,
         )
 
     def _get_mapping_strategy(self) -> str:
@@ -360,10 +359,18 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 self.importer.segmentation_data,
                 self.importer._original_cellpose_ids,
                 preview_mapping,
+                highlight_mappings=(mapping_strategy == "Custom"),
                 base_image=self.importer.image_data,
             )
         except Exception as exc:
             self.logger.warning("Error updating preview mapping: %s", exc)
+
+    def _apply_segmentation_transformations(self) -> None:
+        if self._base_segmentation_data is None:
+            return
+        seg = np.array(self._base_segmentation_data, copy=True)
+        self.importer.segmentation_data = seg
+        self.importer.generate_overlay()
 
     def _browse_image_file(self) -> None:
         filename, _ = getopenfilename(
@@ -407,6 +414,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.segmentation_path_label.setStyleSheet("QLabel { color: black; }")
 
             self.importer.load_segmentation_file(filename)
+            self._base_segmentation_data = np.array(
+                self.importer.segmentation_data, copy=True
+            )
             self._check_files_loaded()
         except Exception as exc:
             self.logger.exception("Error loading segmentation file")
@@ -423,7 +433,11 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         try:
             self.importer.validate_dimensions()
-            self.importer.generate_overlay()
+            if self._base_segmentation_data is None:
+                self._base_segmentation_data = np.array(
+                    self.importer.segmentation_data, copy=True
+                )
+            self._apply_segmentation_transformations()
             self.import_button.setEnabled(True)
             self._set_ui_loaded_state(True)
             # Generate preview mapping to show in overlay
@@ -439,6 +453,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 self.importer.segmentation_data,
                 self.importer._original_cellpose_ids,
                 preview_mapping,
+                highlight_mappings=(mapping_strategy == "Custom"),
                 base_image=self.importer.image_data,
             )
             self._hide_info()
@@ -541,6 +556,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
             # Load the existing image and segmentation data
             self.importer.restore_from_result(self.existing_data)
+            self._base_segmentation_data = (
+                None
+                if self.importer.segmentation_data is None
+                else np.array(self.importer.segmentation_data, copy=True)
+            )
+            self._apply_segmentation_transformations()
 
             # Pre-fill mapping if available, prefer Linear when mapping is identity
             mapping = self.existing_data.stimulus_to_cellpose_mapping or {}

@@ -93,7 +93,7 @@ def generate_stimulus_mapping(
     if strategy == "Custom" and stim_ids:
         stim_sequence = list(stim_ids)
     else:
-        stim_sequence = list(range(1, row_count + 1))
+        stim_sequence = list(range(row_count))
 
     mapping: dict[int, int] = {}
     for stim_id, cellpose_id in zip(stim_sequence, original_ids, strict=False):

@@ -137,18 +137,23 @@ class CellPoseImporter:
         self._neuron_ids: np.ndarray | None = None
         self._neuron_colors: np.ndarray | None = None
         self._original_cellpose_ids: np.ndarray | None = None
+        self._csv_background_zero = False
 
     def load_image_file(
         self,
         filename: str | Path,
+        *,
+        tiff_strategy: str = "mean",
     ) -> None:
-        """load PNG or TIFF image file. TIFF stacks use mean projection."""
+        """load PNG or TIFF image file. TIFF stacks use configurable projection."""
         path = Path(filename)
         suffix = path.suffix.lower()
         try:
             with Image.open(path) as pil_image:
                 if suffix in {".tif", ".tiff"}:
-                    self.image_data = self._load_mean_tiff(pil_image)
+                    self.image_data = self._load_tiff_with_strategy(
+                        pil_image, tiff_strategy
+                    )
                 else:
                     self.image_data = self._pil_to_rgb_array(pil_image)
 
@@ -164,18 +169,15 @@ class CellPoseImporter:
             image = image.convert("RGB")
         return np.array(image)
 
-    def _load_mean_tiff(self, image: Image.Image) -> np.ndarray:
-        """Average all frames of a TIFF stack per pixel, then normalize to display range."""
-        # Load all frames into memory
+    def _load_tiff_with_strategy(self, image: Image.Image, strategy: str) -> np.ndarray:
+        """Project a TIFF stack with a chosen strategy, then normalize to display range."""
         frames = []
         for frame in ImageSequence.Iterator(image):
-            frame_array = self._frame_to_rgb_float(frame)
-            frames.append(frame_array)
+            frames.append(self._frame_to_rgb_float(frame))
 
         if not frames:
             raise ValueError("TIF file contains no frames")
 
-        # Ensure all frames have same shape
         first_shape = frames[0].shape
         for i, frame in enumerate(frames):
             if frame.shape != first_shape:
@@ -184,7 +186,42 @@ class CellPoseImporter:
                 )
 
         frame_stack = np.stack(frames, axis=0)
-        result = np.mean(frame_stack, axis=0)
+        strategy_key = strategy.lower().strip()
+
+        if strategy_key == "mean":
+            result = np.mean(frame_stack, axis=0)
+        elif strategy_key == "median":
+            result = np.median(frame_stack, axis=0)
+        elif strategy_key == "min":
+            result = np.min(frame_stack, axis=0)
+        elif strategy_key == "max":
+            result = np.max(frame_stack, axis=0)
+        elif strategy_key == "sum":
+            result = np.sum(frame_stack, axis=0)
+        elif strategy_key == "std":
+            result = np.std(frame_stack, axis=0)
+        elif strategy_key == "first":
+            result = frame_stack[0]
+        elif strategy_key == "middle":
+            result = frame_stack[frame_stack.shape[0] // 2]
+        elif strategy_key == "last":
+            result = frame_stack[-1]
+        elif strategy_key.startswith("frame_"):
+            try:
+                frame_idx = int(strategy_key.split("_", 1)[1])
+            except ValueError as exc:
+                raise ValueError(f"Invalid frame specification: {strategy}") from exc
+            if frame_idx < 0 or frame_idx >= frame_stack.shape[0]:
+                raise ValueError(
+                    f"Frame index {frame_idx} out of range [0, {frame_stack.shape[0] - 1}]"
+                )
+            result = frame_stack[frame_idx]
+        elif strategy_key == "p10":
+            result = np.percentile(frame_stack, 10, axis=0)
+        elif strategy_key == "p90":
+            result = np.percentile(frame_stack, 90, axis=0)
+        else:
+            raise ValueError(f"Unsupported TIFF strategy: {strategy}")
 
         return self._scale_float_image_to_uint8(result)
 
@@ -228,18 +265,33 @@ class CellPoseImporter:
         """Load segmentation file saved as CSV or NPY."""
         path = Path(filename)
         try:
-            segmentation = self._read_segmentation_file(path)
-            segmentation = self._validate_segmentation(segmentation)
-            self.segmentation_data = self._shift_to_zero_based(segmentation)
+            if path.suffix.lower() == ".csv":
+                segmentation = self._read_csv_segmentation(path)
+                segmentation = self._validate_csv_segmentation(segmentation)
+                self.segmentation_data = self._shift_to_zero_based(segmentation)
+                self._csv_background_zero = False
 
-            unique_ids = np.unique(self.segmentation_data)
-            self._original_cellpose_ids = unique_ids[unique_ids >= 0]
+                unique_ids = np.unique(self.segmentation_data)
+                self._original_cellpose_ids = unique_ids[unique_ids >= 0]
 
-            self.logger.info(
-                "Loaded segmentation from %s: %s (shifted to 0-based IDs, background is -1)",
-                path.suffix.lower(),
-                self.segmentation_data.shape,
-            )
+                self.logger.info(
+                    "Loaded CSV segmentation: %s (shifted to 0-based IDs, background is -1)",
+                    self.segmentation_data.shape,
+                )
+            else:
+                segmentation = self._read_segmentation_file(path)
+                segmentation = self._validate_segmentation(segmentation)
+                self.segmentation_data = self._shift_to_zero_based(segmentation)
+                self._csv_background_zero = False
+
+                unique_ids = np.unique(self.segmentation_data)
+                self._original_cellpose_ids = unique_ids[unique_ids >= 0]
+
+                self.logger.info(
+                    "Loaded segmentation from %s: %s (shifted to 0-based IDs, background is -1)",
+                    path.suffix.lower(),
+                    self.segmentation_data.shape,
+                )
         except Exception as exc:
             self.logger.exception("Error loading segmentation file")
             raise ValueError(f"Could not load {filename}: {exc}") from exc
@@ -306,8 +358,12 @@ class CellPoseImporter:
             return {}
 
         unique_ids = np.unique(self.segmentation_data)
-        n_background = np.sum(self.segmentation_data < 0)
-        n_neurons = len(unique_ids[unique_ids >= 0])
+        if self._csv_background_zero:
+            n_background = np.sum(self.segmentation_data == 0)
+            n_neurons = len(unique_ids[unique_ids > 0])
+        else:
+            n_background = np.sum(self.segmentation_data < 0)
+            n_neurons = len(unique_ids[unique_ids >= 0])
 
         info = {
             "image_shape": self.image_data.shape,
@@ -318,10 +374,16 @@ class CellPoseImporter:
         }
 
         if n_neurons > 0:
-            info["neuron_id_range"] = (
-                unique_ids[unique_ids >= 0].min(),
-                unique_ids[unique_ids >= 0].max(),
-            )
+            if self._csv_background_zero:
+                info["neuron_id_range"] = (
+                    unique_ids[unique_ids > 0].min(),
+                    unique_ids[unique_ids > 0].max(),
+                )
+            else:
+                info["neuron_id_range"] = (
+                    unique_ids[unique_ids >= 0].min(),
+                    unique_ids[unique_ids >= 0].max(),
+                )
         if self.trace_data is not None:
             info["trace_neurons"] = self.trace_data.traces.shape[0]
             info["trace_timepoints"] = self.trace_data.traces.shape[1]
@@ -413,14 +475,36 @@ class CellPoseImporter:
             return
 
         unique_ids = np.unique(self.segmentation_data)
-        neuron_ids = unique_ids[unique_ids >= 0]  # treat negatives as background
+        if self._csv_background_zero:
+            neuron_ids = unique_ids[unique_ids > 0]
+        else:
+            neuron_ids = unique_ids[unique_ids >= 0]  # treat negatives as background
         if neuron_ids.size == 0:
             self._neuron_ids = None
             self._neuron_colors = None
             return
 
         self._neuron_ids = neuron_ids
-        self._neuron_colors = self._compute_neuron_colors(neuron_ids)
+        if self._csv_background_zero:
+            color_indices = neuron_ids - neuron_ids.min()
+        else:
+            color_indices = neuron_ids
+        self._neuron_colors = self._compute_neuron_colors(color_indices)
+
+    @staticmethod
+    def _read_csv_segmentation(path: Path) -> np.ndarray:
+        return np.loadtxt(path, delimiter=",", dtype=np.int32)
+
+    @staticmethod
+    def _validate_csv_segmentation(segmentation: np.ndarray) -> np.ndarray:
+        seg = np.asarray(segmentation, dtype=np.int32)
+        if seg.ndim != 2:
+            raise ValueError(f"Expected 2D array, got {seg.ndim}D array")
+        if np.any(seg < 0):
+            raise ValueError("Segmentation data contains negative values")
+        if not np.isfinite(seg).all():
+            raise ValueError("Segmentation data contains non-finite values")
+        return seg
 
     @staticmethod
     def _validate_trace_data(trace_data: TraceData) -> None:
