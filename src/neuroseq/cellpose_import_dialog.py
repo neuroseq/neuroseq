@@ -180,6 +180,11 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.show_labels_checkbox.setEnabled(True)
         self.show_labels_checkbox.toggled.connect(self._on_display_toggle_changed)
         checkbox_layout.addWidget(self.show_labels_checkbox)
+        self.show_segmentation_checkbox = QtWidgets.QCheckBox("Show segmentation")
+        self.show_segmentation_checkbox.setChecked(True)
+        self.show_segmentation_checkbox.setEnabled(True)
+        self.show_segmentation_checkbox.toggled.connect(self._on_display_toggle_changed)
+        checkbox_layout.addWidget(self.show_segmentation_checkbox)
         checkbox_layout.addStretch(1)
         main_content_layout.addLayout(checkbox_layout)
         main_content_layout.addWidget(mapping_group)
@@ -288,10 +293,15 @@ class CellposeImportDialog(QtWidgets.QDialog):
             if hasattr(self, "show_labels_checkbox")
             else True
         )
+        show_segmentation = (
+            self.show_segmentation_checkbox.isChecked()
+            if hasattr(self, "show_segmentation_checkbox")
+            else True
+        )
         self.overlay_widget.set_display_options(
             show_cellpose_ids=show_labels,
             show_stimulus_ids=show_labels,
-            show_segmentation=True,
+            show_segmentation=show_segmentation,
         )
 
     def _get_mapping_strategy(self) -> str:
