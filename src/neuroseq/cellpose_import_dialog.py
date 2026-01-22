@@ -612,6 +612,29 @@ class CellposeImportDialog(QtWidgets.QDialog):
             # Generate stimulus-to-cellpose mapping based on selected strategy
             mapping_strategy = self._get_mapping_strategy()
             stimulus_mapping = self._generate_stimulus_mapping(mapping_strategy)
+            if mapping_strategy == "Custom":
+                missing_ids = _missing_cellpose_ids_in_range(stimulus_mapping)
+                if missing_ids:
+                    message = (
+                        "Are you sure you want to import a cellpose mapping with "
+                        "non-contigous cellpose IDs? Suite2p data can only be "
+                        "imported up to the amount of contigous cellpose IDs, "
+                        "but you can import your current mapping now anyway if you prefer."
+                    )
+                    confirm_box = QtWidgets.QMessageBox(self)
+                    confirm_box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+                    confirm_box.setWindowTitle("Non-contiguous Cellpose IDs")
+                    confirm_box.setText(message)
+                    import_button = confirm_box.addButton(
+                        "Import now anyway", QtWidgets.QMessageBox.ButtonRole.AcceptRole
+                    )
+                    continue_button = confirm_box.addButton(
+                        "Continue editing", QtWidgets.QMessageBox.ButtonRole.RejectRole
+                    )
+                    confirm_box.setDefaultButton(continue_button)
+                    confirm_box.exec()
+                    if confirm_box.clickedButton() != import_button:
+                        return
 
             self._imported_data = self.importer.create_result(
                 self.image_path, stimulus_mapping
