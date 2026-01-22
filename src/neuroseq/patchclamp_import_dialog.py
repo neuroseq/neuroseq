@@ -196,7 +196,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         self.custom_neuron_id_line = QtWidgets.QLineEdit()
         self.custom_neuron_id_line.setPlaceholderText("e.g., 10 or 12,15")
-        self.custom_neuron_id_line.setText("10")
+        self.custom_neuron_id_line.setText("0")
         self.custom_neuron_id_line.setToolTip(
             "Single neuron ID (e.g., 10) or comma-separated list (e.g., 12,15)"
         )

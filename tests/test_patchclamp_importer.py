@@ -132,8 +132,8 @@ def test_load_npy_without_neuron_id(tmp_path, qtbot):
 
     assert dialog.npy_data is not None
     assert dialog.extracted_neuron_id is None
-    assert dialog.custom_mapping_line.text() == "1"
-    assert dialog.custom_neuron_id_line.text() == "1"
+    assert dialog.custom_mapping_line.text() == "0"
+    assert dialog.custom_neuron_id_line.text() == "0"
 
 
 def test_single_row_uses_filename_for_stimulus_id(tmp_path, qtbot):
