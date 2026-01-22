@@ -32,6 +32,21 @@ def _highest_one_to_one_cellpose_prefix(mapping: dict[int, int]) -> int:
     return highest
 
 
+def _missing_cellpose_ids_in_range(mapping: dict[int, int]) -> list[int]:
+    if not mapping:
+        return []
+    cellpose_ids = sorted({int(cellpose_id) for cellpose_id in mapping.values()})
+    if not cellpose_ids:
+        return []
+    min_id = cellpose_ids[0]
+    max_id = cellpose_ids[-1]
+    return [
+        cellpose_id
+        for cellpose_id in range(min_id, max_id + 1)
+        if cellpose_id not in cellpose_ids
+    ]
+
+
 class CellposeImportDialog(QtWidgets.QDialog):
     """Dialog for importing Cellpose segmentation data with PNG/TIFF image overlay."""
 
@@ -184,6 +199,23 @@ class CellposeImportDialog(QtWidgets.QDialog):
         )
         self.mapping_validation_label.setStyleSheet("QLabel { color: #666666; }")
         mapping_layout.addRow(self.mapping_validation_label)
+
+        self.mapping_missing_label = QtWidgets.QLabel(
+            "Missing cellpose IDs in range: none"
+        )
+        self.mapping_missing_label.setStyleSheet("QLabel { color: #666666; }")
+        mapping_layout.addRow(self.mapping_missing_label)
+
+        self.mapping_help_link = QtWidgets.QLabel(
+            '<a href="mapping-help">Help: mapping Suite2p rows to cellpose IDs</a>'
+        )
+        self.mapping_help_link.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self.mapping_help_link.setTextInteractionFlags(
+            QtCore.Qt.TextInteractionFlag.TextBrowserInteraction
+        )
+        self.mapping_help_link.setOpenExternalLinks(False)
+        self.mapping_help_link.linkActivated.connect(self._show_mapping_help)
+        mapping_layout.addRow(self.mapping_help_link)
 
         # Connect radio buttons to show/hide custom mapping input
         for abstract_button in self.mapping_buttons.buttons():
@@ -406,14 +438,36 @@ class CellposeImportDialog(QtWidgets.QDialog):
             mapping_strategy = self._get_mapping_strategy()
             mapping = self._generate_stimulus_mapping(mapping_strategy)
             highest = _highest_one_to_one_cellpose_prefix(mapping)
-            suffix = "none" if highest < 0 else str(highest)
+            suffix = "none" if highest < 0 else str(highest + 1)
             self.mapping_validation_label.setText(
-                f"Cellpose data sufficient for {suffix + 1} Suite2p data rows(1:1)"
+                f"Cellpose data sufficient for {suffix} Suite2p data rows(1:1)"
+            )
+            missing = _missing_cellpose_ids_in_range(mapping)
+            if missing:
+                missing_text = ", ".join(str(cellpose_id) for cellpose_id in missing)
+            else:
+                missing_text = "none"
+            self.mapping_missing_label.setText(
+                f"Please specify these missing cellpose IDs in your mapping: {missing_text}"
             )
         except Exception:
             self.mapping_validation_label.setText(
-                "1:1 mappings ensured up to cellpose ID: invalid"
+                "Cellpose mapping assessment could not be completed"
             )
+            self.mapping_missing_label.setText(
+                ""  # make nothing appear as the above will appear in any case.
+            )
+
+    def _show_mapping_help(self) -> None:
+        QtWidgets.QMessageBox.information(
+            self,
+            "Mapping help",
+            "Cellpose IDs start from 0. To import N rows of Suite2p data, you need the first N cellpose IDs assigned "
+            "contiguously (0..N-1). This is determined by the cellpose side of each mapping pair (the number on the right "
+            "of the ':'). Make sure you have N mappings in total and that those right-hand values cover 0..N-1 without gaps.\n\n"
+            "Example (wrong): '0:2, 1:3, 2:0' assigns cellpose IDs 2, 3, 0 and misses cellpose ID 1. "
+            "That means row 1 of Suite2p data (cellpose ID 1) has no stimulus ID to map to.",
+        )
 
     def _apply_segmentation_transformations(self) -> None:
         if self._base_segmentation_data is None:
