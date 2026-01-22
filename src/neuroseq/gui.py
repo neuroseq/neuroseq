@@ -621,7 +621,14 @@ class Gui(QtWidgets.QMainWindow):
 
     def btn_import_suite2p_data_clicked(self) -> None:
         """Open dialog to import experimental traces/spikes from Suite2p/CSV data"""
-        dialog = Suite2pImportDialog(self)
+        stimulus_mapping = (
+            None
+            if self.last_cellpose_import is None
+            else self.last_cellpose_import.stimulus_to_cellpose_mapping
+        )
+        dialog = Suite2pImportDialog(
+            self, stimulus_to_cellpose_mapping=stimulus_mapping
+        )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self._append_experimental_data(
                 Experiment(

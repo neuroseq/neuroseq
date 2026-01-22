@@ -74,6 +74,7 @@ def prepare_suite2p_traces(
     *,
     max_neurons: int,
     sampling_rate: float = 30.0,
+    stimulus_to_cellpose_mapping: dict[int, int] | None = None,
 ) -> TraceData:
     """Create TraceData from Suite2p fluorescence data."""
 
@@ -85,10 +86,14 @@ def prepare_suite2p_traces(
     n_neurons_to_import = min(max_neurons, n_neurons)
     normalized_traces, _, _ = compute_normalized_suite2p_traces(f_data, fneu_data)
 
+    indices = _resolve_suite2p_indices(
+        n_neurons_to_import, stimulus_to_cellpose_mapping
+    )
+
     return TraceData(
         "Suite2p contrasting traces",
         normalized_traces[:n_neurons_to_import, :],
-        np.arange(n_neurons_to_import, dtype=np.uint32),  # indices arg for the traces
+        indices,  # indices arg for the traces
         "units",
         dt,
     )
@@ -100,6 +105,7 @@ def prepare_suite2p_spikes(
     dt: float,
     threshold: float,
     max_neurons: int,
+    stimulus_to_cellpose_mapping: dict[int, int] | None = None,
 ) -> SpikeData:
     """
     Create SpikeData from Suite2p spks.npy data using shared spike detection.
@@ -121,9 +127,56 @@ def prepare_suite2p_spikes(
         max_neurons=max_neurons,
         normalize_per_neuron=False,
     )
+    if stimulus_to_cellpose_mapping:
+        n_neurons = min(max_neurons, spike_data.shape[0])
+        indices = _resolve_suite2p_indices(n_neurons, stimulus_to_cellpose_mapping)
+        if result.spike_indices.size:
+            remapped_indices = indices[result.spike_indices]
+        else:
+            remapped_indices = result.spike_indices.astype(indices.dtype, copy=True)
+        result = SpikeData(result.name, remapped_indices, result.spike_times)
     logger.debug(
         "Spike detection complete: %d spikes across %d neurons",
         len(result.spike_indices),
         len(np.unique(result.spike_indices)) if result.spike_indices.size else 0,
     )
     return result
+
+
+def _resolve_suite2p_indices(
+    n_neurons_to_import: int,
+    stimulus_to_cellpose_mapping: dict[int, int] | None,
+) -> npt.NDArray[Any]:
+    if not stimulus_to_cellpose_mapping:
+        return np.arange(n_neurons_to_import, dtype=np.uint32)
+
+    cellpose_to_stim: dict[int, int] = {}
+    duplicate_cellpose_ids: set[int] = set()
+    for stim_id, cellpose_id in stimulus_to_cellpose_mapping.items():
+        if cellpose_id in cellpose_to_stim:
+            duplicate_cellpose_ids.add(int(cellpose_id))
+            continue
+        cellpose_to_stim[int(cellpose_id)] = int(stim_id)
+
+    required_cellpose_ids = list(range(n_neurons_to_import))
+    missing_cellpose_ids = [
+        cellpose_id
+        for cellpose_id in required_cellpose_ids
+        if cellpose_id not in cellpose_to_stim
+    ]
+
+    if duplicate_cellpose_ids or missing_cellpose_ids:
+        raise ValueError(
+            "Suite2p mapping must be 1:1 for cellpose IDs "
+            f"0..{n_neurons_to_import - 1}. "
+            f"Missing cellpose IDs: {missing_cellpose_ids or 'none'}. "
+            f"Duplicate cellpose IDs: {sorted(duplicate_cellpose_ids) or 'none'}."
+        )
+    stim_ids = [cellpose_to_stim[cellpose_id] for cellpose_id in required_cellpose_ids]
+    if len(set(stim_ids)) != len(stim_ids):
+        raise ValueError(
+            "Suite2p mapping must be 1:1 for cellpose IDs "
+            f"0..{n_neurons_to_import - 1}. "
+            "Duplicate stimulus IDs detected in the required range."
+        )
+    return np.asarray(stim_ids, dtype=np.uint32)

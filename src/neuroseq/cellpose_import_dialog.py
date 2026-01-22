@@ -17,6 +17,21 @@ from neuroseq.importer_cellpose import generate_linear_stimulus_mapping
 from neuroseq.importer_cellpose import is_identity_mapping
 
 
+def _highest_one_to_one_cellpose_prefix(mapping: dict[int, int]) -> int:
+    if not mapping:
+        return -1
+
+    cellpose_counts: dict[int, int] = {}
+    for cellpose_id in mapping.values():
+        cellpose_id = int(cellpose_id)
+        cellpose_counts[cellpose_id] = cellpose_counts.get(cellpose_id, 0) + 1
+
+    highest = -1
+    while cellpose_counts.get(highest + 1, 0) == 1:
+        highest += 1
+    return highest
+
+
 class CellposeImportDialog(QtWidgets.QDialog):
     """Dialog for importing Cellpose segmentation data with PNG/TIFF image overlay."""
 
@@ -164,6 +179,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.custom_mapping_label.setVisible(False)
         mapping_layout.addRow(self.custom_mapping_label, self.custom_mapping_line)
 
+        self.mapping_validation_label = QtWidgets.QLabel(
+            "1:1 mappings ensured up to cellpose ID: none"
+        )
+        self.mapping_validation_label.setStyleSheet("QLabel { color: #666666; }")
+        mapping_layout.addRow(self.mapping_validation_label)
+
         # Connect radio buttons to show/hide custom mapping input
         for abstract_button in self.mapping_buttons.buttons():
             if hasattr(abstract_button, "toggled"):
@@ -269,6 +290,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             and self.importer.overlay_image is not None
         ):
             self._update_preview_mapping()
+        self._update_mapping_helper()
 
     def _on_custom_mapping_text_changed(self, _text: str) -> None:
         """Refresh preview live while editing custom mapping."""
@@ -277,6 +299,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         if self.importer.segmentation_data is None:
             return
         self._update_preview_mapping()
+        self._update_mapping_helper()
 
     def _on_linear_offset_changed(self, _value: int) -> None:
         """Refresh preview when linear offset changes."""
@@ -285,6 +308,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         if self.importer.segmentation_data is None:
             return
         self._update_preview_mapping()
+        self._update_mapping_helper()
 
     def _on_display_toggle_changed(self) -> None:
         """Sync overlay display options with the checkboxes."""
@@ -374,6 +398,22 @@ class CellposeImportDialog(QtWidgets.QDialog):
             )
         except Exception as exc:
             self.logger.warning("Error updating preview mapping: %s", exc)
+
+    def _update_mapping_helper(self) -> None:
+        if not hasattr(self, "mapping_validation_label"):
+            return
+        try:
+            mapping_strategy = self._get_mapping_strategy()
+            mapping = self._generate_stimulus_mapping(mapping_strategy)
+            highest = _highest_one_to_one_cellpose_prefix(mapping)
+            suffix = "none" if highest < 0 else str(highest)
+            self.mapping_validation_label.setText(
+                f"Cellpose data sufficient for {suffix + 1} Suite2p data rows(1:1)"
+            )
+        except Exception:
+            self.mapping_validation_label.setText(
+                "1:1 mappings ensured up to cellpose ID: invalid"
+            )
 
     def _apply_segmentation_transformations(self) -> None:
         if self._base_segmentation_data is None:
@@ -466,6 +506,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 highlight_mappings=(mapping_strategy == "Custom"),
                 base_image=self.importer.image_data,
             )
+            self._update_mapping_helper()
             self._hide_info()
         except Exception as exc:
             self.logger.exception("Error preparing cellpose preview")

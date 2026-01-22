@@ -20,6 +20,8 @@ class Suite2pImportDialog(QtWidgets.QDialog):
     def __init__(
         self,
         parent: QtWidgets.QWidget | None = None,
+        *,
+        stimulus_to_cellpose_mapping: dict[int, int] | None = None,
     ) -> None:
         super().__init__(parent)
 
@@ -38,6 +40,11 @@ class Suite2pImportDialog(QtWidgets.QDialog):
         self.spike_data: np.ndarray | None = None
         self.stat_data: np.ndarray | None = None
         self._auto_detected_files: list[str] = []
+        self.stimulus_to_cellpose_mapping = (
+            None
+            if stimulus_to_cellpose_mapping is None
+            else dict(stimulus_to_cellpose_mapping)
+        )
         self._setup_ui()
 
     # -- UI helpers -----------------------------------------------------
@@ -569,6 +576,7 @@ class Suite2pImportDialog(QtWidgets.QDialog):
                 self.fneu_data,
                 max_neurons=max_neurons,
                 sampling_rate=sampling_rate,
+                stimulus_to_cellpose_mapping=self.stimulus_to_cellpose_mapping,
             )
 
             self.imported_data = [traces]
@@ -581,6 +589,7 @@ class Suite2pImportDialog(QtWidgets.QDialog):
                     dt=dt,
                     threshold=threshold,
                     max_neurons=max_neurons,
+                    stimulus_to_cellpose_mapping=self.stimulus_to_cellpose_mapping,
                 )
                 self.imported_data.append(spike_data)
                 self.logger.debug(

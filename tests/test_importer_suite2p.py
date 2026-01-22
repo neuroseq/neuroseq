@@ -43,6 +43,49 @@ def test_prepare_suite2p_traces_works_without_fneu(suite2p_import_data_dir):
     np.testing.assert_allclose(data.traces, expected_traces[:2, :])
 
 
+def test_prepare_suite2p_traces_respects_stimulus_mapping():
+    f_data = np.array([[0.0, 1.0], [2.0, 3.0], [4.0, 5.0]], dtype=np.float32)
+    mapping = {10: 0, 11: 1, 12: 2}
+
+    data = prepare_suite2p_traces(
+        f_data,
+        None,
+        max_neurons=3,
+        sampling_rate=30.0,
+        stimulus_to_cellpose_mapping=mapping,
+    )
+
+    assert np.array_equal(data.indices, np.array([10, 11, 12], dtype=np.uint32))
+
+
+def test_prepare_suite2p_traces_requires_contiguous_cellpose_ids():
+    f_data = np.array([[0.0, 1.0], [2.0, 3.0], [4.0, 5.0]], dtype=np.float32)
+    mapping = {0: 5, 1: 4, 2: 3}  # missing cellpose IDs 0..2
+
+    with pytest.raises(ValueError, match="cellpose IDs 0..2"):
+        prepare_suite2p_traces(
+            f_data,
+            None,
+            max_neurons=3,
+            sampling_rate=30.0,
+            stimulus_to_cellpose_mapping=mapping,
+        )
+
+
+def test_prepare_suite2p_traces_rejects_duplicate_cellpose_ids():
+    f_data = np.array([[0.0, 1.0], [2.0, 3.0], [4.0, 5.0]], dtype=np.float32)
+    mapping = {0: 0, 1: 0, 2: 2}  # duplicate cellpose ID 0
+
+    with pytest.raises(ValueError, match="Duplicate cellpose IDs"):
+        prepare_suite2p_traces(
+            f_data,
+            None,
+            max_neurons=3,
+            sampling_rate=30.0,
+            stimulus_to_cellpose_mapping=mapping,
+        )
+
+
 def test_prepare_suite2p_spikes_respects_threshold_and_limits_neurons(
     suite2p_import_data_dir,
 ):
@@ -87,3 +130,25 @@ def test_prepare_suite2p_spikes_respects_threshold_and_limits_neurons(
         max_neurons=4,
     )
     assert len(high_threshold_data.spike_indices) == 0
+
+
+def test_prepare_suite2p_spikes_remaps_indices_with_mapping():
+    spike_data = np.array(
+        [
+            [0.0, 0.9, 0.0],
+            [0.0, 0.0, 0.8],
+            [0.7, 0.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    mapping = {10: 0, 11: 1, 12: 2}
+
+    data = prepare_suite2p_spikes(
+        spike_data,
+        dt=1.0,
+        threshold=0.5,
+        max_neurons=3,
+        stimulus_to_cellpose_mapping=mapping,
+    )
+
+    assert np.array_equal(data.spike_indices, np.array([10, 11, 12], dtype=np.uint32))
