@@ -13,7 +13,6 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 import neuroseq
-from neuroseq.data import TraceData
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
 from neuroseq.gui import Gui
@@ -596,6 +595,16 @@ def test_gui_playback_speed(
     gui.close()
 
 
+class MockImportExperimentDialog:
+    append_to_experiment = False
+
+    def __init__(self, *args, **kwargs) -> None:
+        pass
+
+    def exec(self) -> bool:
+        return True
+
+
 def test_gui_simulate_external_model(
     monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list
 ) -> None:
@@ -621,6 +630,11 @@ def test_gui_simulate_external_model(
         QtWidgets.QInputDialog,
         "getText",
         lambda *args: (f"{simulation_time_secs}", True),
+    )
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "ImportExperimentDialog",
+        MockImportExperimentDialog,
     )
     gui.btn_do_external_simulation_clicked()
     qtbot.wait(delay_after_update_model_call_in_ms)
@@ -715,46 +729,4 @@ def test_integration_modeleditor_delete_restore(
     assert gui.project.b2_model.network["Ce"] is not None
 
     assert gui.project.b2_model.network["trace"].v.shape == (30, 1000)
-    gui.close()
-
-
-def test_gui_import_suite2p_data_dialog(monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
-    """Test the Suite2p import dialog opens and applies imported data"""
-
-    gui = Gui()
-    gui.show()
-    qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible())
-
-    # Mock the Suite2pImportDialog to return accepted and have test data
-    class MockSuite2pImportDialog:
-        def __init__(self, parent=None, import_handler=None):
-            self.parent = parent
-            self.import_handler = import_handler
-            self.experiment_name = "test_experiment"
-
-        def exec(self):
-            # Simulate successful import by calling the import_handler
-            test_traces = np.random.rand(5, 100)
-            trace_data = TraceData(
-                "test_traces",
-                test_traces,
-                np.arange(0, test_traces.shape[0], dtype=np.uint32),
-                "units",
-                dt=1.0 / 30.0,
-            )
-            self.import_handler(self.experiment_name, [trace_data], False)
-            return QtWidgets.QDialog.DialogCode.Accepted
-
-    # Mock the Suite2pImportDialog class
-    monkeypatch.setattr("neuroseq.gui.Suite2pImportDialog", MockSuite2pImportDialog)
-
-    # Call the button method - this should successfully import data via the handler
-    gui.btn_import_suite2p_data_clicked()
-
-    imported = gui.project.experiments.get("test_experiment")
-    assert imported is not None
-    trace_data = next((d for d in imported if isinstance(d, TraceData)), None)
-    assert trace_data is not None
-    assert trace_data.traces.shape == (5, 100)
     gui.close()

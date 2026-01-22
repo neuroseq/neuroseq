@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
@@ -107,9 +108,10 @@ def test_load_single_npy_file(tmp_path, qtbot):
     assert dialog.npy_data.dtype == trace_data.dtype
     np.testing.assert_array_equal(dialog.npy_data, trace_data)
 
-    # Default mapping should start at stim ID 0
-    assert dialog.extracted_neuron_id is None
-    assert dialog.custom_mapping_line.text() == "0"
+    # Filename neuron ID should be used as the default target
+    assert dialog.extracted_neuron_id == 42
+    assert dialog.custom_mapping_line.text() == "42"
+    assert dialog.custom_neuron_id_line.text() == "42"
 
     # Verify UI state
     assert dialog.import_button.isEnabled()
@@ -130,11 +132,12 @@ def test_load_npy_without_neuron_id(tmp_path, qtbot):
 
     assert dialog.npy_data is not None
     assert dialog.extracted_neuron_id is None
-    assert dialog.custom_mapping_line.text() == "0"
+    assert dialog.custom_mapping_line.text() == "1"
+    assert dialog.custom_neuron_id_line.text() == "1"
 
 
 def test_single_row_uses_filename_for_stimulus_id(tmp_path, qtbot):
-    """Single-row files should default to stim ID 0 even if filename has an index."""
+    """Single-row files should default to the filename-derived stimulus ID when available."""
     trace_data = _generate_patchclamp_trace(duration_sec=1.0, sampling_rate=1000.0)
 
     npy_path = tmp_path / "single_trace_neuronID_77.npy"
@@ -148,7 +151,8 @@ def test_single_row_uses_filename_for_stimulus_id(tmp_path, qtbot):
 
     dialog.load_file(str(npy_path))
 
-    assert dialog.custom_mapping_line.text() == "0"
+    assert dialog.custom_mapping_line.text() == "77"
+    assert dialog.custom_neuron_id_line.text() == "77"
 
 
 def test_import_single_npy_to_correct_index(tmp_path, qtbot):
@@ -171,6 +175,7 @@ def test_import_single_npy_to_correct_index(tmp_path, qtbot):
     dialog.load_file(str(npy_path))
 
     # Set target stimulus ID to 15
+    dialog._set_mapping_strategy("Custom")
     dialog.custom_mapping_line.setText("15")
 
     # Set reasonable detection parameters
@@ -215,6 +220,7 @@ def test_import_data_functionality(tmp_path, qtbot):
     qtbot.addWidget(dialog)
 
     dialog.load_file(str(npy_path))
+    dialog._set_mapping_strategy("Custom")
     dialog.custom_mapping_line.setText("25")
     dialog.sampling_rate_spin.setValue(1000.0)
     dialog.peak_height_spin.setValue(2.0)
@@ -243,30 +249,30 @@ def test_import_data_functionality(tmp_path, qtbot):
     assert abs(trace_data_imported.dt - 0.001) < 1e-6  # 1/1000
 
 
-def test_different_sampling_rates(tmp_path, qtbot):
+@pytest.mark.parametrize("sampling_rate", [1000.0, 5000.0, 10000.0])
+def test_different_sampling_rates(tmp_path, qtbot, sampling_rate: float):
     """Test with different sampling rates."""
-    for sampling_rate in [1000.0, 5000.0, 10000.0, 20000.0]:
-        trace_data = _generate_patchclamp_trace(
-            duration_sec=0.5, sampling_rate=sampling_rate, num_spikes=1
-        )
+    trace_data = _generate_patchclamp_trace(
+        duration_sec=2.195, sampling_rate=sampling_rate, num_spikes=1
+    )
 
-        npy_path = tmp_path / f"test_{int(sampling_rate)}hz.npy"
-        np.save(npy_path, trace_data)
+    npy_path = tmp_path / f"test_{int(sampling_rate)}hz.npy"
+    np.save(npy_path, trace_data)
 
-        dialog = PatchClampImportDialog()
-        qtbot.addWidget(dialog)
+    dialog = PatchClampImportDialog()
+    qtbot.addWidget(dialog)
 
-        dialog.load_file(str(npy_path))
-        dialog.sampling_rate_spin.setValue(sampling_rate)
+    dialog.load_file(str(npy_path))
+    dialog.sampling_rate_spin.setValue(sampling_rate)
 
-        expected_dt = 1.0 / sampling_rate
+    expected_dt = 1.0 / sampling_rate
 
-        dialog.accept = lambda: None
-        dialog.import_data()
+    dialog.accept = lambda: None
+    dialog.import_data()
 
-        if len(dialog.imported_trace_data) > 0:
-            actual_dt = dialog.imported_trace_data[0].dt
-            assert abs(actual_dt - expected_dt) < 1e-4
+    actual_dt = dialog.imported_trace_data[0].dt
+    assert actual_dt == pytest.approx(expected_dt)
+    assert dialog.experiment_duration == pytest.approx(2.195)
 
 
 def test_preview_text_content(tmp_path, qtbot):
@@ -287,6 +293,7 @@ def test_preview_text_content(tmp_path, qtbot):
 
     # Check that preview contains expected information
     assert f"{trace_data.shape[0]} timepoints" in preview_text
+    assert "extracted neuron ID: 123" in preview_text
     assert "duration:" in preview_text
     assert str(np.mean(trace_data))[:5] in preview_text
 
@@ -318,6 +325,7 @@ def test_import_single_then_extend_timeline(tmp_path, qtbot):
     qtbot.addWidget(dialog1)
 
     dialog1.load_file(str(first_npy))
+    dialog1._set_mapping_strategy("Custom")
     dialog1.sampling_rate_spin.setValue(1000.0)
     dialog1.custom_mapping_line.setText("15")
     dialog1.replace_checkbox.setChecked(True)  # Replace mode for first import
@@ -342,6 +350,7 @@ def test_import_single_then_extend_timeline(tmp_path, qtbot):
     qtbot.addWidget(dialog2)
 
     dialog2.load_file(str(second_npy))
+    dialog2._set_mapping_strategy("Custom")
     dialog2.sampling_rate_spin.setValue(1000.0)
     dialog2.custom_mapping_line.setText("15")
     dialog2.replace_checkbox.setChecked(False)  # EXTEND mode
@@ -386,6 +395,7 @@ def test_import_single_then_replace_timeline(tmp_path, qtbot):
     qtbot.addWidget(dialog1)
 
     dialog1.load_file(str(first_npy))
+    dialog1._set_mapping_strategy("Custom")
     dialog1.sampling_rate_spin.setValue(1000.0)
     dialog1.custom_mapping_line.setText("15")
     dialog1.replace_checkbox.setChecked(True)  # Replace mode
@@ -408,6 +418,7 @@ def test_import_single_then_replace_timeline(tmp_path, qtbot):
     qtbot.addWidget(dialog2)
 
     dialog2.load_file(str(replacement_npy))
+    dialog2._set_mapping_strategy("Custom")
     dialog2.sampling_rate_spin.setValue(1000.0)
     dialog2.custom_mapping_line.setText("15")
     dialog2.replace_checkbox.setChecked(True)  # REPLACE mode
@@ -472,7 +483,8 @@ def test_multi_row_mapping_trims_to_row_count(tmp_path, qtbot):
 
     dialog.load_file(str(npy_path))
 
-    assert dialog.custom_mapping_line.text() == "0,1"
+    assert dialog.custom_mapping_line.text() == "5,6"
+    assert dialog.custom_neuron_id_line.text() == "5,6"
 
 
 def test_import_two_neuron_npy_file(tmp_path, qtbot):
@@ -491,7 +503,7 @@ def test_import_two_neuron_npy_file(tmp_path, qtbot):
     dialog.load_file(str(npy_path))
 
     # Set up for two neurons
-    dialog.custom_mapping_line.setText("15,17")
+    dialog.custom_neuron_id_line.setText("15,17")
     dialog.sampling_rate_spin.setValue(1000.0)
     dialog.peak_height_spin.setValue(2.0)
 
@@ -512,6 +524,8 @@ def test_import_two_neuron_npy_file(tmp_path, qtbot):
     ]
     assert 15 in spike_neuron_ids and 17 in spike_neuron_ids
 
+    assert dialog.experiment_duration == pytest.approx(1.0)
+
     dialog.close()
 
 
@@ -528,7 +542,7 @@ def test_import_two_neuron_wrong_id_count(tmp_path, qtbot):
     dialog.load_file(str(npy_path))
 
     # Try to import with wrong number of IDs (should be 2, not 1)
-    dialog.custom_mapping_line.setText("15")  # Only one ID for two traces
+    dialog.custom_neuron_id_line.setText("15")  # Only one ID for two traces
     dialog.sampling_rate_spin.setValue(1000.0)
 
     dialog.accept = lambda: None
@@ -570,6 +584,7 @@ def test_import_single_then_double_replace_mode(tmp_path, qtbot):
     qtbot.addWidget(dialog1)
 
     dialog1.load_file(str(single_npy))
+    dialog1._set_mapping_strategy("Custom")
     dialog1.custom_mapping_line.setText("15")
     dialog1.sampling_rate_spin.setValue(1000.0)
     dialog1.replace_checkbox.setChecked(True)  # Replace mode
@@ -593,6 +608,7 @@ def test_import_single_then_double_replace_mode(tmp_path, qtbot):
     qtbot.addWidget(dialog2)
 
     dialog2.load_file(str(double_npy))
+    dialog2._set_mapping_strategy("Custom")
     dialog2.custom_mapping_line.setText("15,17")
     dialog2.sampling_rate_spin.setValue(1000.0)
     dialog2.replace_checkbox.setChecked(True)  # REPLACE mode
@@ -635,6 +651,7 @@ def test_import_single_then_double_extend_mode_error(tmp_path, qtbot):
     qtbot.addWidget(dialog1)
 
     dialog1.load_file(str(single_npy))
+    dialog1._set_mapping_strategy("Custom")
     dialog1.custom_mapping_line.setText("15")
     dialog1.sampling_rate_spin.setValue(1000.0)
     dialog1.replace_checkbox.setChecked(True)  # Replace mode
@@ -652,6 +669,7 @@ def test_import_single_then_double_extend_mode_error(tmp_path, qtbot):
     qtbot.addWidget(dialog2)
 
     dialog2.load_file(str(double_npy))
+    dialog2._set_mapping_strategy("Custom")
     dialog2.custom_mapping_line.setText("15,17")
     dialog2.sampling_rate_spin.setValue(1000.0)
     dialog2.replace_checkbox.setChecked(False)  # EXTEND mode
@@ -659,8 +677,8 @@ def test_import_single_then_double_extend_mode_error(tmp_path, qtbot):
     dialog2.accept = lambda: None
 
     # Should raise validation error due to mixed existing (15) and new (17) neurons
-    dialog2.import_data()
-    # todo: Assert an error QT Dialog appeared about this. We show the user that error.
+    with pytest.raises(ValueError):
+        dialog2.import_data()
     dialog2.close()
 
 
@@ -690,6 +708,7 @@ def test_import_new_neurons_extend_mode_with_existing_data_error(
     qtbot.addWidget(dialog1)
 
     dialog1.load_file(str(single_npy))
+    dialog1._set_mapping_strategy("Custom")
     dialog1.custom_mapping_line.setText("15")
     dialog1.sampling_rate_spin.setValue(1000.0)
     dialog1.replace_checkbox.setChecked(True)
@@ -707,16 +726,14 @@ def test_import_new_neurons_extend_mode_with_existing_data_error(
     qtbot.addWidget(dialog2)
 
     dialog2.load_file(str(different_npy))
+    dialog2._set_mapping_strategy("Custom")
     dialog2.custom_mapping_line.setText("20,25")
     dialog2.sampling_rate_spin.setValue(1000.0)
     dialog2.replace_checkbox.setChecked(False)  # EXTEND mode
 
     dialog2.accept = lambda: None
-    try:
+    with pytest.raises(ValueError):
         dialog2.import_data()
-        raise AssertionError("Import should have thrown an error by this point.")
-    except Exception:
-        pass  # we expect an error
     assert len(dialog2.imported_trace_data) == 0
 
     dialog2.close()
@@ -748,6 +765,7 @@ def test_import_existing_neurons_only_extend_mode_success(tmp_path, qtbot):
     qtbot.addWidget(dialog1)
 
     dialog1.load_file(str(original_npy))
+    dialog1._set_mapping_strategy("Custom")
     dialog1.custom_mapping_line.setText("15,17")
     dialog1.sampling_rate_spin.setValue(1000.0)
     dialog1.replace_checkbox.setChecked(True)
@@ -765,6 +783,7 @@ def test_import_existing_neurons_only_extend_mode_success(tmp_path, qtbot):
     qtbot.addWidget(dialog2)
 
     dialog2.load_file(str(extension_npy))
+    dialog2._set_mapping_strategy("Custom")
     dialog2.custom_mapping_line.setText("15,17")
     dialog2.sampling_rate_spin.setValue(1000.0)
     dialog2.replace_checkbox.setChecked(False)  # EXTEND mode

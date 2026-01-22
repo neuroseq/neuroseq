@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from pathlib import Path
 
 import brian2.numpy_ as np
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
-from neuroseq.data import SpikeData
-from neuroseq.data import TraceData
+from neuroseq.data import Data
 from neuroseq.importer_suite2p import compute_normalized_suite2p_spikes
 from neuroseq.importer_suite2p import compute_normalized_suite2p_traces
 from neuroseq.importer_suite2p import prepare_suite2p_spikes
@@ -22,15 +20,12 @@ class Suite2pImportDialog(QtWidgets.QDialog):
     def __init__(
         self,
         parent: QtWidgets.QWidget | None = None,
-        import_handler: Callable[[str, list[TraceData | SpikeData], bool], None]
-        | None = None,
     ) -> None:
         super().__init__(parent)
 
         self.experiment_name: str = "Suite2p Import"
-        self.append_data: bool = False
-        self.imported_data: list[TraceData | SpikeData] = []
-        self._import_handler = import_handler
+        self.experiment_duration: float = 0.0
+        self.imported_data: list[Data] = []
 
         self.logger = logging.getLogger(__name__)
         self.data_directory_path: Path | None = None
@@ -170,16 +165,6 @@ class Suite2pImportDialog(QtWidgets.QDialog):
             lambda _: self._update_spike_preview()
         )
         options_layout.addRow("Spike threshold:", self.spike_threshold_spin)
-
-        self.replace_checkbox = QtWidgets.QCheckBox(
-            "Replace existing trace/spike data instead of appending"
-        )
-        self.replace_checkbox.setChecked(not self.append_data)
-        self.replace_checkbox.setToolTip(
-            "When enabled, imported Suite2p traces or spikes will overwrite the "
-            "current data for this experiment, rather than being concatenated to it."
-        )
-        options_layout.addRow(self.replace_checkbox)
 
         layout.addWidget(options_group)
 
@@ -561,18 +546,17 @@ class Suite2pImportDialog(QtWidgets.QDialog):
             return
 
         try:
-            self.append_data = not self.replace_checkbox.isChecked()
             sampling_rate = float(self.sampling_rate_spin.value())
             if sampling_rate <= 0.0:
                 raise ValueError("Sample rate must be positive")
             dt = 1.0 / sampling_rate
             max_neurons = self.max_neurons_spin.value()
             n_neurons, n_timepoints = self.f_data.shape
+            self.experiment_duration = n_timepoints * dt
             n_neurons_to_import = min(max_neurons, n_neurons)
 
             self.logger.debug(
-                "Importing Suite2p data: append=%s sample_rate=%.3fHz dt=%.6f max_neurons=%d f_shape=%s spks_shape=%s",
-                self.append_data,
+                "Importing Suite2p data: sample_rate=%.3fHz dt=%.6f max_neurons=%d f_shape=%s spks_shape=%s",
                 sampling_rate,
                 dt,
                 max_neurons,
@@ -587,7 +571,7 @@ class Suite2pImportDialog(QtWidgets.QDialog):
                 sampling_rate=sampling_rate,
             )
 
-            payload: list[TraceData | SpikeData] = [traces]
+            self.imported_data = [traces]
 
             spike_summary = ""
             if self.spike_data is not None:
@@ -598,31 +582,13 @@ class Suite2pImportDialog(QtWidgets.QDialog):
                     threshold=threshold,
                     max_neurons=max_neurons,
                 )
-                payload.append(spike_data)
+                self.imported_data.append(spike_data)
                 self.logger.debug(
                     "Spike import ready: %d events at threshold %.3f",
                     len(spike_data.spike_indices),
                     threshold,
                 )
                 spike_summary = f"\nSpikes: {len(spike_data.spike_indices)} events ≥ {threshold:.3f}"
-
-            self.imported_data = payload
-
-            if self._import_handler is not None:
-                try:
-                    self._import_handler(
-                        self.experiment_name,
-                        payload,
-                        self.append_data,
-                    )
-                except Exception as exc:  # bubble import issues before closing dialog
-                    self.logger.exception("Error applying imported data")
-                    QtWidgets.QMessageBox.critical(
-                        self,
-                        "Import Error",
-                        f"Could not add data to experiment:\n{exc}",
-                    )
-                    return
 
             QtWidgets.QMessageBox.information(
                 self,

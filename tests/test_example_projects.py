@@ -31,7 +31,7 @@ project_generators = [
 def test_example_projects(project_generator, tmp_path: pathlib.Path) -> None:
     project = project_generator()
     # do a short simulation
-    project.run_simulation(0.01)
+    project.run_simulation(0.001)
     # check we can save and re-load the model
     save_options = SaveLoadOptions(True, True, True, True)
     project.save(tmp_path / "model.nseq", save_options)

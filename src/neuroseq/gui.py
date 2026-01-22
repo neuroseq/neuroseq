@@ -19,6 +19,7 @@ from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomControlle
 from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.custom_analysis_widget import CustomAnalysisWindow
+from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
@@ -28,6 +29,7 @@ from neuroseq.example_projects import example_projects
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.import_dialog import Suite2pImportDialog
+from neuroseq.import_experiment_dialog import ImportExperimentDialog
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.model_editor import ModelEditorDialog
@@ -475,6 +477,31 @@ class Gui(QtWidgets.QMainWindow):
             return
         self._update_data(keep_undo_history=True)
 
+    def _append_experimental_data(self, experiment: Experiment) -> None:
+        try:
+            dialog = ImportExperimentDialog(experiment, self.project, parent=self)
+            if not dialog.exec():
+                return
+            if dialog.append_to_experiment:
+                self.project.append_experimental_data(
+                    dialog.append_experiment_name,
+                    dialog.experiment.duration,
+                    dialog.experiment.data,
+                    dialog.offset,
+                )
+            else:
+                self.project.add_experiment(experiment)
+            self.update_project(self.project)
+            self._select_experiment_data(experiment.name)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Data import error",
+                f"Could not import data: {e}",
+            )
+            self.logger.exception(e)
+            return
+
     @with_wait_cursor
     def _do_external_simulation(self, simulation_time: float):
         if self.external_simulation_function is None:
@@ -490,16 +517,13 @@ class Gui(QtWidgets.QMainWindow):
             self.logger.info(
                 f"Running external simulation function for {simulation_time} seconds"
             )
-            data = self.external_simulation_function(
+            experiment = self.external_simulation_function(
                 stims_dict,
                 simulation_time,
             )
             self.logger.info(
-                f"External simulation complete, returned {len(data)} data objects"
+                f"External simulation complete, returned {experiment.duration}s experiment '{experiment.name}' with {len(experiment.data)} data objects"
             )
-            self.project.add_experimental_data("External Simulation", data, False)
-            self.update_project(self.project)
-            self._select_experiment_data("External Simulation")
         except Exception as e:
             QtWidgets.QMessageBox.critical(
                 self,
@@ -507,6 +531,9 @@ class Gui(QtWidgets.QMainWindow):
                 f"Could not run external simulation: {e}",
             )
             self.logger.exception(e)
+            return
+        QtWidgets.QApplication.restoreOverrideCursor()
+        self._append_experimental_data(experiment)
 
     def btn_do_external_simulation_clicked(self) -> None:
         if self.external_simulation_function is None:
@@ -594,22 +621,16 @@ class Gui(QtWidgets.QMainWindow):
 
     def btn_import_suite2p_data_clicked(self) -> None:
         """Open dialog to import experimental traces/spikes from Suite2p/CSV data"""
-        # possibly: pass in existing experiment data to the dialog to let it do sanity checks & auto-fill the offset?
-        dialog = Suite2pImportDialog(
-            self,
-            import_handler=self._apply_imported_experimental_data,
-        )
+        dialog = Suite2pImportDialog(self)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
-            self.update_project(self.project)
-            self._select_experiment_data(dialog.experiment_name)
-
-    def _apply_imported_experimental_data(
-        self,
-        experiment_name: str,
-        data: list[TraceData | SpikeData],
-        append: bool,
-    ) -> None:
-        self.project.add_experimental_data(experiment_name, data, append)
+            self._append_experimental_data(
+                Experiment(
+                    dialog.experiment_name,
+                    dialog.experiment_duration,
+                    [],
+                    dialog.imported_data,
+                )
+            )
 
     def btn_import_cellpose_data_clicked(self) -> None:
         dialog = CellposeImportDialog(
@@ -636,7 +657,9 @@ class Gui(QtWidgets.QMainWindow):
 
     def btn_import_patchclamp_data_clicked(self) -> None:
         dialog = PatchClampImportDialog(
-            cellpose_import=self.last_cellpose_import, project=self.project, parent=self
+            cellpose_import=self.last_cellpose_import,
+            project=self.project,
+            parent=self,
         )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             if not dialog.imported_data:
@@ -649,36 +672,13 @@ class Gui(QtWidgets.QMainWindow):
                     )
                     if self.project is not None:
                         self.project.cellpose_data = self.last_cellpose_import
-
-                # For patch clamp imports, handle replace mode properly:
-                # - Replace mode: remove only the specific neuron IDs being imported, then add new data
-                # - Append mode: just append/merge the new data
-
-                self.logger.info(
-                    f"Patch clamp import: dialog.append_data={dialog.append_data}, "
-                    f"neurons_to_replace={dialog.neurons_to_replace}, "
-                    f"experiment_exists={dialog.experiment_name in self.project.experiments}"
-                )
-
-                if (
-                    not dialog.append_data
-                    and dialog.neurons_to_replace
-                    and dialog.experiment_name in self.project.experiments
-                ):
-                    self.logger.info(
-                        f"Removing neurons {dialog.neurons_to_replace} before import"
+                self._append_experimental_data(
+                    Experiment(
+                        dialog.experiment_name,
+                        dialog.experiment_duration,
+                        [],
+                        dialog.imported_data,
                     )
-                    self._remove_neurons_from_experiment(
-                        dialog.experiment_name, dialog.neurons_to_replace
-                    )
-
-                # Always use append mode to enable neuron merging (whether replacing specific neurons or extending)
-                append_mode = True
-
-                self.logger.info(f"Using append_mode={append_mode}")
-
-                self.project.add_experimental_data(
-                    dialog.experiment_name, dialog.imported_data, append_mode
                 )
             except Exception as exc:
                 QtWidgets.QMessageBox.critical(
@@ -688,8 +688,6 @@ class Gui(QtWidgets.QMainWindow):
                 )
                 self.logger.exception(exc)
                 return
-            self.update_project(self.project)
-            self._select_experiment_data(dialog.experiment_name)
 
     def connect_external_simulation_function_with_brian2(self) -> None:
         self._load_external_simulation_function(
@@ -766,22 +764,6 @@ class Gui(QtWidgets.QMainWindow):
             f"NeuroSeq\n\nVersion {__version__}\n\n"
             + "https://github.com/ssciwr/neuroseq",
         )
-
-    def _remove_neurons_from_experiment(
-        self, experiment_name: str, neurons_to_remove: set[int]
-    ) -> None:
-        """Remove specific neurons from an experiment's data."""
-        if experiment_name not in self.project.experiments:
-            return
-
-        from neuroseq.data import SpikeData
-        from neuroseq.data import TraceData
-        from neuroseq.utils import remove_neurons_from_data
-
-        # Remove neurons from each data object in the experiment
-        for data in self.project.experiments[experiment_name]:
-            if isinstance(data, (TraceData, SpikeData)):
-                remove_neurons_from_data(data, neurons_to_remove)
 
     def _create_progressbar(self) -> None:
         self.progress_dialog = QtWidgets.QProgressDialog(
