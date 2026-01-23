@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from qtpy import QtWidgets
 
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
@@ -627,7 +628,7 @@ def test_import_single_then_double_replace_mode(tmp_path, qtbot):
     dialog2.close()
 
 
-def test_import_single_then_double_extend_mode_error(tmp_path, qtbot):
+def test_import_single_then_double_extend_mode_error(tmp_path, qtbot, monkeypatch):
     """Test importing single neuron, then double (mixed existing/new) in EXTEND mode should fail."""
     from unittest.mock import MagicMock
 
@@ -676,14 +677,26 @@ def test_import_single_then_double_extend_mode_error(tmp_path, qtbot):
 
     dialog2.accept = lambda: None
 
-    # Should raise validation error due to mixed existing (15) and new (17) neurons
-    with pytest.raises(ValueError):
-        dialog2.import_data()
+    captured = {}
+
+    def _capture_critical(_parent, title, text):
+        captured["title"] = title
+        captured["text"] = text
+
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox, "critical", _capture_critical, raising=True
+    )
+
+    dialog2.import_data()
+    assert "Error importing data" in captured.get("text", "")
+    assert "Cannot extend data when importing both existing neurons" in captured.get(
+        "text", ""
+    )
     dialog2.close()
 
 
 def test_import_new_neurons_extend_mode_with_existing_data_error(
-    tmp_path, qtbot, caplog
+    tmp_path, qtbot, caplog, monkeypatch
 ):
     """Test importing new neurons in EXTEND mode when existing data exists should fail."""
     from unittest.mock import MagicMock
@@ -732,8 +745,19 @@ def test_import_new_neurons_extend_mode_with_existing_data_error(
     dialog2.replace_checkbox.setChecked(False)  # EXTEND mode
 
     dialog2.accept = lambda: None
-    with pytest.raises(ValueError):
-        dialog2.import_data()
+    captured = {}
+
+    def _capture_critical(_parent, title, text):
+        captured["title"] = title
+        captured["text"] = text
+
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox, "critical", _capture_critical, raising=True
+    )
+
+    dialog2.import_data()
+    assert "Error importing data" in captured.get("text", "")
+    assert "Cannot extend data when importing new neurons" in captured.get("text", "")
     assert len(dialog2.imported_trace_data) == 0
 
     dialog2.close()
