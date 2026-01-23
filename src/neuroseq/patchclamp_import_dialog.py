@@ -195,7 +195,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         options_layout.addRow("Mapping strategy:", mapping_layout)
 
         self.custom_neuron_id_line = QtWidgets.QLineEdit()
-        self.custom_neuron_id_line.setPlaceholderText("e.g., 10 or 12,15")
+        self.custom_neuron_id_line.setPlaceholderText("e.g., 0 or 0,1")
         self.custom_neuron_id_line.setText("0")
         self.custom_neuron_id_line.setToolTip(
             "Single neuron ID (e.g., 10) or comma-separated list (e.g., 12,15)"
@@ -203,7 +203,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         self.custom_mapping_line = QtWidgets.QLineEdit()
         self.custom_mapping_line.setPlaceholderText(
-            "Comma-separated stimulus IDs (e.g., 12,14 or 12:0,14:1)"
+            "Comma-separated stimulus IDs (e.g., 0,1 or 0:0,1:1)"
         )
         self.custom_mapping_line.textChanged.connect(
             lambda _text: self._update_custom_mapping_hint()
@@ -700,7 +700,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             target_ids = self._safe_parse_stimulus_ids()
             if not target_ids:
                 target_ids = self._safe_parse_neuron_ids()
-            target_ids = [1] if not target_ids else [target_ids[0]]
+            target_ids = [0] if not target_ids else [target_ids[0]]
         else:
             target_ids = self._safe_parse_stimulus_ids()
             auto_from_cellpose = False
@@ -718,11 +718,14 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                     target_ids.append(next_id)
                     next_id += 1
             else:
-                target_ids = list(range(1, row_count + 1))
+                target_ids = list(range(row_count))
 
         mapping_str = self._format_stimulus_display(target_ids)
         self.custom_mapping_line.setText(mapping_str)
         self.custom_neuron_id_line.setText(",".join(str(tid) for tid in target_ids))
+        self.custom_mapping_label.setText(
+            f"Enter {len(target_ids)} Target stimulus ID(s) (0 indexed):"
+        )
         self._auto_from_cellpose = auto_from_cellpose and len(target_ids) > 1
         self._auto_stimulus_ids = target_ids if self._auto_from_cellpose else []
         self._update_custom_mapping_hint()
