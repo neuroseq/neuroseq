@@ -83,24 +83,6 @@ def generate_stimulus_mapping(
 
     existing_mapping = cellpose_import.stimulus_to_cellpose_mapping or {}
 
-    if strategy == "Custom" and stim_ids:
-        reverse_mapping = {
-            cellpose: stim for stim, cellpose in existing_mapping.items()
-        }
-        mapping: dict[int, int] = {}
-        assigned_stim_ids: set[int] = set()
-        for cellpose_id in stim_ids:
-            cellpose_id_int = int(cellpose_id)
-            stim_id = int(reverse_mapping.get(cellpose_id_int, cellpose_id_int))
-            if stim_id in assigned_stim_ids:
-                raise ValueError(
-                    "Custom mapping would assign stimulus ID "
-                    f"{stim_id} to multiple patchclamp rows."
-                )
-            assigned_stim_ids.add(stim_id)
-            mapping[stim_id] = cellpose_id_int
-        return mapping
-
     if existing_mapping:
         return dict(existing_mapping)
 
