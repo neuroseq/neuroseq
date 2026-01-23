@@ -534,7 +534,11 @@ def test_custom_mapping_cellpose_id_input_maps_to_stim_ids(tmp_path, qtbot):
         trace_data=None,
         spike_data=None,
         original_cellpose_ids=np.array([2, 3], dtype=int),
-        stimulus_to_cellpose_mapping={7: 2, 11: 3},
+        stimulus_to_cellpose_mapping={
+            7: 2,
+            11: 3,
+        },  # For manual testing, it's pretty handy that you can paste this
+        # into the Cellpose modal directly as the Custom mapping.
     )
 
     dialog = PatchClampImportDialog(cellpose_import=cellpose_import)

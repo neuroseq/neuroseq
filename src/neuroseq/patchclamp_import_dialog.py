@@ -534,18 +534,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             else:
                 target_ids = self._safe_parse_neuron_ids()
             if len(target_ids) > 1:
-                label = (
-                    "Target cellpose IDs"
-                    if self._get_mapping_strategy() == "Custom"
-                    else "Target stimulus IDs"
-                )
-                suffix = (
-                    " (auto from Cellpose mapping)"
-                    if self._auto_from_cellpose
-                    and target_ids == self._auto_stimulus_ids
-                    else ""
-                )
-                lines.append(f"{label}: {', '.join(map(str, target_ids))}{suffix}")
+                lines.append(f"Specify {len(target_ids)} IDs to import")
         else:
             self.preview_text.clear()
             return
