@@ -511,6 +511,53 @@ def test_custom_mapping_overrides_existing_cellpose_mapping():
     assert mapping == {5: 10, 6: 11}
 
 
+"""
+ Giving "2, 3" as input should mean the 0th (first) patchclamp data looks up cellpose ID 2, which should be inspected in the mapping. Cellpose ID 2
+  might be linked to Stim ID 7 for example. That is the ID the data should be written to for the first row. The cellpose ID 3 might map to sitm ID 11,
+  so the SECOND row of data would go to stim ID 11. This test catches any regression with this "double-lookup"
+  """
+
+
+# Deliberately failing, TDD style
+def test_custom_mapping_cellpose_id_input_maps_to_stim_ids(tmp_path, qtbot):
+    """Custom input '2,3' should map via existing stim->cellpose mapping."""
+    two_neuron_data = _generate_two_neuron_patchclamp_trace(
+        duration_sec=0.2, sampling_rate=1000.0, num_spikes_per_neuron=1
+    )
+    npy_path = tmp_path / "two_neuron_patch_recording.npy"
+    np.save(npy_path, two_neuron_data)
+
+    cellpose_import = CellposeImportResult(
+        image_path=tmp_path / "image.png",
+        segmentation_array=np.zeros((2, 2), dtype=int),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.array([2, 3], dtype=int),
+        stimulus_to_cellpose_mapping={7: 2, 11: 3},
+    )
+
+    dialog = PatchClampImportDialog(cellpose_import=cellpose_import)
+    qtbot.addWidget(dialog)
+    dialog.load_file(str(npy_path))
+
+    dialog._set_mapping_strategy("Custom")
+    dialog.custom_mapping_line.setText("2, 3")
+    dialog.sampling_rate_spin.setValue(1000.0)
+    dialog.peak_height_spin.setValue(2.0)
+    dialog.peak_prominence_spin.setValue(1.0)
+
+    dialog.accept = lambda: None
+    dialog.import_data()
+
+    assert _trace_data_exists_for_index(dialog.imported_trace_data, 7)
+    assert _trace_data_exists_for_index(dialog.imported_trace_data, 11)
+    assert _spike_data_exists_for_index(dialog.imported_spike_data, 7)
+    assert _spike_data_exists_for_index(dialog.imported_spike_data, 11)
+    assert not _trace_data_exists_for_index(dialog.imported_trace_data, 2)
+    assert not _trace_data_exists_for_index(dialog.imported_trace_data, 3)
+
+
 def test_multi_row_defaults_are_zero_indexed_with_cellpose_ids(tmp_path, qtbot):
     two_neuron_data = _generate_two_neuron_patchclamp_trace(
         duration_sec=0.2, sampling_rate=1000.0, num_spikes_per_neuron=1
