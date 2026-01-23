@@ -203,7 +203,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         self.custom_mapping_line = QtWidgets.QLineEdit()
         self.custom_mapping_line.setPlaceholderText(
-            "Comma-separated stimulus IDs (e.g., 0,1 or 0:0,1:1)"
+            "Comma-separated cellpose IDs (e.g., 2,3 or 0:2,1:3)"
         )
         self.custom_mapping_line.textChanged.connect(
             lambda _text: self._update_custom_mapping_hint()
@@ -216,7 +216,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.custom_widget = QtWidgets.QWidget()
         self.custom_widget.setLayout(custom_layout)
 
-        self.custom_mapping_label = QtWidgets.QLabel("Target stimulus IDs:")
+        self.custom_mapping_label = QtWidgets.QLabel("Target cellpose IDs:")
         self.custom_mapping_label.setVisible(False)
         self.custom_widget.setVisible(False)
         self.custom_mapping_hint = QtWidgets.QLabel("")
@@ -534,15 +534,18 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             else:
                 target_ids = self._safe_parse_neuron_ids()
             if len(target_ids) > 1:
+                label = (
+                    "Target cellpose IDs"
+                    if self._get_mapping_strategy() == "Custom"
+                    else "Target stimulus IDs"
+                )
                 suffix = (
                     " (auto from Cellpose mapping)"
                     if self._auto_from_cellpose
                     and target_ids == self._auto_stimulus_ids
                     else ""
                 )
-                lines.append(
-                    f"Target stimulus IDs: {', '.join(map(str, target_ids))}{suffix}"
-                )
+                lines.append(f"{label}: {', '.join(map(str, target_ids))}{suffix}")
         else:
             self.preview_text.clear()
             return
@@ -557,8 +560,29 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         """Get target neuron IDs based on current mapping strategy."""
         strategy = self._get_mapping_strategy()
         if strategy == "Custom":
-            return self._parse_stim_neuron_ids(self.custom_mapping_line.text())
+            return self._resolve_custom_target_ids(self._safe_parse_stimulus_ids())
         return self._parse_neuron_ids(self.custom_neuron_id_line.text())
+
+    def _resolve_custom_target_ids(self, cellpose_ids: list[int]) -> list[int]:
+        """Resolve custom cellpose IDs to stimulus IDs, ensuring uniqueness."""
+        mapping = (
+            self.cellpose_import.stimulus_to_cellpose_mapping
+            if self.cellpose_import is not None
+            else {}
+        ) or {}
+        reverse_mapping = {cellpose: stim for stim, cellpose in mapping.items()}
+        assigned_stim_ids: set[int] = set()
+        stim_ids: list[int] = []
+        for cellpose_id in cellpose_ids:
+            stim_id = int(reverse_mapping.get(int(cellpose_id), int(cellpose_id)))
+            if stim_id in assigned_stim_ids:
+                raise ValueError(
+                    "Custom mapping would assign stimulus ID "
+                    f"{stim_id} to multiple patchclamp rows."
+                )
+            assigned_stim_ids.add(stim_id)
+            stim_ids.append(stim_id)
+        return stim_ids
 
     def _apply_cellpose_mapping_defaults(self, row_count: int) -> None:
         """Use Cellpose stimulus IDs in ascending order to prefill multi-row targets."""
@@ -628,7 +652,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             self.file_group.setVisible(visible)
 
     def _parse_stim_neuron_ids(self, mapping_str: str) -> list[int]:
-        """Parse comma-separated stimulus IDs into a list of ints."""
+        """Parse comma-separated cellpose IDs into a list of ints."""
         if not mapping_str.strip():
             raise ValueError("Stimulus IDs cannot be empty")
 
@@ -639,7 +663,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 if not part:
                     continue
                 if ":" in part:
-                    part = part.split(":", 1)[0].strip()
+                    part = part.split(":", 1)[1].strip()
                 stim_ids.append(int(part))
             return stim_ids
         except ValueError as exc:
@@ -723,9 +747,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         mapping_str = self._format_stimulus_display(target_ids)
         self.custom_mapping_line.setText(mapping_str)
         self.custom_neuron_id_line.setText(",".join(str(tid) for tid in target_ids))
-        self.custom_mapping_label.setText(
-            f"Enter {len(target_ids)} Target stimulus ID(s) (0 indexed):"
-        )
+        self.custom_mapping_label.setText(f"Enter {len(target_ids)} Cellpose ID(s):")
         self._auto_from_cellpose = auto_from_cellpose and len(target_ids) > 1
         self._auto_stimulus_ids = target_ids if self._auto_from_cellpose else []
         self._update_custom_mapping_hint()

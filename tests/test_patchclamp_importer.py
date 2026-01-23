@@ -508,7 +508,7 @@ def test_custom_mapping_overrides_existing_cellpose_mapping():
         cellpose_import, "Custom", data_row_count=2, stim_ids=[5, 6]
     )
 
-    assert mapping == {5: 10, 6: 11}
+    assert mapping == {5: 5, 6: 6}
 
 
 """
@@ -556,6 +556,54 @@ def test_custom_mapping_cellpose_id_input_maps_to_stim_ids(tmp_path, qtbot):
     assert _spike_data_exists_for_index(dialog.imported_spike_data, 11)
     assert not _trace_data_exists_for_index(dialog.imported_trace_data, 2)
     assert not _trace_data_exists_for_index(dialog.imported_trace_data, 3)
+
+
+def test_custom_mapping_duplicate_stimulus_ids_error(tmp_path, qtbot, monkeypatch):
+    """Custom mapping should error if multiple rows resolve to the same stim ID."""
+    traces = []
+    for _ in range(4):
+        traces.append(
+            _generate_patchclamp_trace(
+                duration_sec=0.2, sampling_rate=1000.0, num_spikes=1
+            )
+        )
+    four_neuron_data = np.vstack(traces)
+    npy_path = tmp_path / "four_neuron_patch_recording.npy"
+    np.save(npy_path, four_neuron_data)
+
+    cellpose_import = CellposeImportResult(
+        image_path=tmp_path / "image.png",
+        segmentation_array=np.zeros((2, 2), dtype=int),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.array([1, 3, 6, 10], dtype=int),
+        stimulus_to_cellpose_mapping={3: 1},
+    )
+
+    dialog = PatchClampImportDialog(cellpose_import=cellpose_import)
+    qtbot.addWidget(dialog)
+    dialog.load_file(str(npy_path))
+
+    dialog._set_mapping_strategy("Custom")
+    dialog.custom_mapping_line.setText("1,3,6,10")
+    dialog.sampling_rate_spin.setValue(1000.0)
+    dialog.peak_height_spin.setValue(2.0)
+    dialog.peak_prominence_spin.setValue(1.0)
+
+    captured = {}
+
+    def _capture_critical(_parent, title, text):
+        captured["title"] = title
+        captured["text"] = text
+
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox, "critical", _capture_critical, raising=True
+    )
+
+    dialog.import_data()
+
+    assert "Custom mapping would assign stimulus ID 3" in captured.get("text", "")
 
 
 def test_multi_row_defaults_are_zero_indexed_with_cellpose_ids(tmp_path, qtbot):
