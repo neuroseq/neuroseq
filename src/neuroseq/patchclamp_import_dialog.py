@@ -736,7 +736,9 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         mapping_str = self._format_stimulus_display(target_ids)
         self.custom_mapping_line.setText(mapping_str)
         self.custom_neuron_id_line.setText(",".join(str(tid) for tid in target_ids))
-        self.custom_mapping_label.setText(f"Enter {len(target_ids)} Cellpose ID(s):")
+        self.custom_mapping_label.setText(
+            f"Enter {len(target_ids)} Cellpose IDs (The smaller ID in the preview):"
+        )
         self._auto_from_cellpose = auto_from_cellpose and len(target_ids) > 1
         self._auto_stimulus_ids = target_ids if self._auto_from_cellpose else []
         self._update_custom_mapping_hint()

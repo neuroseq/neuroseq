@@ -492,7 +492,7 @@ def test_multi_row_mapping_trims_to_row_count(tmp_path, qtbot):
     assert dialog.custom_neuron_id_line.text() == "5,6"
 
 
-def test_custom_mapping_overrides_existing_cellpose_mapping():
+def test_custom_mapping_keeps_existing_cellpose_mapping():
     existing_mapping = {0: 10, 1: 11}
     cellpose_import = CellposeImportResult(
         image_path=Path("image.png"),
@@ -508,19 +508,18 @@ def test_custom_mapping_overrides_existing_cellpose_mapping():
         cellpose_import, "Custom", data_row_count=2, stim_ids=[5, 6]
     )
 
-    assert mapping == {5: 5, 6: 6}
+    assert mapping == existing_mapping
 
 
 """
- Giving "2, 3" as input should mean the 0th (first) patchclamp data looks up cellpose ID 2, which should be inspected in the mapping. Cellpose ID 2
-  might be linked to Stim ID 7 for example. That is the ID the data should be written to for the first row. The cellpose ID 3 might map to sitm ID 11,
-  so the SECOND row of data would go to stim ID 11. This test catches any regression with this "double-lookup"
+ Giving "2, 3" as input should mean the 0th (first) patchclamp data targets stim ID 2.
+ This should NOT be remapped via the cellpose mapping. Cellpose is context-only here.
   """
 
 
 # Deliberately failing, TDD style
-def test_custom_mapping_cellpose_id_input_maps_to_stim_ids(tmp_path, qtbot):
-    """Custom input '2,3' should map via existing stim->cellpose mapping."""
+def test_custom_mapping_stim_id_input_uses_stim_ids_directly(tmp_path, qtbot):
+    """Custom input '2,3' should import to stim IDs 2 and 3, even with mapping."""
     two_neuron_data = _generate_two_neuron_patchclamp_trace(
         duration_sec=0.2, sampling_rate=1000.0, num_spikes_per_neuron=1
     )
@@ -554,12 +553,12 @@ def test_custom_mapping_cellpose_id_input_maps_to_stim_ids(tmp_path, qtbot):
     dialog.accept = lambda: None
     dialog.import_data()
 
-    assert _trace_data_exists_for_index(dialog.imported_trace_data, 7)
-    assert _trace_data_exists_for_index(dialog.imported_trace_data, 11)
-    assert _spike_data_exists_for_index(dialog.imported_spike_data, 7)
-    assert _spike_data_exists_for_index(dialog.imported_spike_data, 11)
-    assert not _trace_data_exists_for_index(dialog.imported_trace_data, 2)
-    assert not _trace_data_exists_for_index(dialog.imported_trace_data, 3)
+    assert _trace_data_exists_for_index(dialog.imported_trace_data, 2)
+    assert _trace_data_exists_for_index(dialog.imported_trace_data, 3)
+    assert _spike_data_exists_for_index(dialog.imported_spike_data, 2)
+    assert _spike_data_exists_for_index(dialog.imported_spike_data, 3)
+    assert not _trace_data_exists_for_index(dialog.imported_trace_data, 7)
+    assert not _trace_data_exists_for_index(dialog.imported_trace_data, 11)
 
 
 def test_custom_mapping_duplicate_stimulus_ids_error(tmp_path, qtbot, monkeypatch):
@@ -590,7 +589,7 @@ def test_custom_mapping_duplicate_stimulus_ids_error(tmp_path, qtbot, monkeypatc
     dialog.load_file(str(npy_path))
 
     dialog._set_mapping_strategy("Custom")
-    dialog.custom_mapping_line.setText("1,3,6,10")
+    dialog.custom_mapping_line.setText("3,3,6,10")
     dialog.sampling_rate_spin.setValue(1000.0)
     dialog.peak_height_spin.setValue(2.0)
     dialog.peak_prominence_spin.setValue(1.0)
@@ -631,7 +630,7 @@ def test_multi_row_defaults_are_zero_indexed_with_cellpose_ids(tmp_path, qtbot):
     qtbot.addWidget(dialog)
     dialog.load_file(str(npy_path))
 
-    assert dialog.custom_mapping_line.text() == "0:10,1:11"
+    assert dialog.custom_mapping_line.text() == "0,1"
 
 
 def test_import_two_neuron_npy_file(tmp_path, qtbot):
