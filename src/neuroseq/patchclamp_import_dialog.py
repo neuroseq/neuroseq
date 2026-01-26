@@ -114,37 +114,32 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.dialog_height = min(900, int(0.8 * screen_height))
         self.resize(self.dialog_width, self.dialog_height)
 
-        layout = QtWidgets.QHBoxLayout(self)
-        layout.setSpacing(12)
+        self.main_layout = QtWidgets.QHBoxLayout(self)
+        self.main_layout.setSpacing(12)
 
-        maximum_preview_width = int(screen_width * 0.6)
-        maximum_details_width = int(screen_width * 0.4)
-
-        left_container = QtWidgets.QWidget()
-        left_layout = QtWidgets.QVBoxLayout(left_container)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(8)
+        self.left_container = QtWidgets.QWidget()
+        self.left_layout = QtWidgets.QVBoxLayout(self.left_container)
+        self.left_layout.setContentsMargins(0, 0, 0, 0)
+        self.left_layout.setSpacing(8)
 
         self.overlay_stack = QtWidgets.QStackedWidget()
         self.overlay_stack.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Expanding,
         )
-        self.overlay_stack.setMaximumWidth(maximum_preview_width)
         self.overlay_widget = CellOverlayWidget("Cellpose Preview")
         self.overlay_widget.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Expanding,
         )
-        self.overlay_widget.setMaximumWidth(maximum_preview_width)
         self.overlay_placeholder = QtWidgets.QLabel("No cellpose data yet")
         self.overlay_placeholder.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.overlay_placeholder.setStyleSheet("QLabel { color: gray; }")
         self.overlay_placeholder.setWordWrap(True)
         self.overlay_stack.addWidget(self.overlay_placeholder)
         self.overlay_stack.addWidget(self.overlay_widget)
-        left_layout.addWidget(self.overlay_stack, stretch=1)
-        left_layout.addStretch()
+        self.left_layout.addWidget(self.overlay_stack, stretch=1)
+        self.left_layout.addStretch()
 
         self.file_group = QtWidgets.QGroupBox("Select .npy patchclamp file")
         file_layout = QtWidgets.QHBoxLayout(self.file_group)
@@ -156,14 +151,13 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         file_layout.addWidget(self.file_path_label, stretch=1)
         file_layout.addWidget(browse_button)
 
-        left_layout.addWidget(self.file_group)
-        layout.addWidget(left_container, stretch=3)
+        self.left_layout.addWidget(self.file_group)
+        self.main_layout.addWidget(self.left_container, stretch=3)
 
-        right_container = QtWidgets.QWidget()
-        right_container.setMaximumWidth(maximum_details_width)
-        right_layout = QtWidgets.QVBoxLayout(right_container)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(8)
+        self.right_container = QtWidgets.QWidget()
+        self.right_layout = QtWidgets.QVBoxLayout(self.right_container)
+        self.right_layout.setContentsMargins(0, 0, 0, 0)
+        self.right_layout.setSpacing(8)
 
         self.preview_group = QtWidgets.QGroupBox("Data Preview")
         preview_layout = QtWidgets.QVBoxLayout(self.preview_group)
@@ -171,7 +165,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.preview_text.setReadOnly(True)
         self.preview_text.setMaximumHeight(140)
         preview_layout.addWidget(self.preview_text)
-        right_layout.addWidget(self.preview_group)
+        self.right_layout.addWidget(self.preview_group)
 
         self.options_group = QtWidgets.QGroupBox("Import Options")
         options_layout = QtWidgets.QFormLayout(self.options_group)
@@ -311,8 +305,8 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         )
         spike_layout.addRow("Peak width:", self.peak_width_spin)
 
-        right_layout.addWidget(self.options_group)
-        right_layout.addWidget(self.spike_group)
+        self.right_layout.addWidget(self.options_group)
+        self.right_layout.addWidget(self.spike_group)
 
         self.button_row = QtWidgets.QWidget()
         button_layout = QtWidgets.QHBoxLayout(self.button_row)
@@ -335,7 +329,28 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         button_layout.addStretch()
         right_layout.addWidget(self.button_row)
-        layout.addWidget(right_container, stretch=2)
+        self.main_layout.addWidget(self.right_container, stretch=2)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self.left_container is None or self.right_container is None:
+            return
+        left_width = int(self.width() * 0.6)
+        right_width = max(1, self.width() - left_width)
+        self.left_container.setMaximumWidth(left_width)
+        self.right_container.setMaximumWidth(right_width)
+        if self.overlay_stack is None or self.file_group is None:
+            return
+        available_height = (
+            self.left_container.height()
+            - self.file_group.height()
+            - self.left_layout.spacing()
+        )
+        square_size = min(left_width, available_height)
+        if square_size > 0:
+            self.overlay_stack.setFixedSize(square_size, square_size)
+            if self.overlay_widget is not None:
+                self.overlay_widget.setFixedSize(square_size, square_size)
         self._set_file_sections_visible(False)
         self._set_file_selector_visible(True)
 

@@ -93,4 +93,4 @@ class FullScreenFPLWidget(FPLWidget):
         if screen is None:
             return
         available = screen.availableGeometry()
-        self.setFixedSize(available.width() - 100, available.height() - 100)
+        self.setFixedSize(available.width() - 200, available.height() - 200)
