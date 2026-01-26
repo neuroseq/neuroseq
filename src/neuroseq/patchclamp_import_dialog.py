@@ -766,7 +766,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         pairs = ", ".join(
             f"{stim_id}->{mapping[stim_id]}" for stim_id in sorted(mapping.keys())
         )
-        self.custom_mapping_preview.setText(f"Stim->Cellpose mapping: {pairs}")
+        self.custom_mapping_preview.setText(f"Stim->Cellpose mapping:\n{pairs}")
         self.custom_mapping_preview.setVisible(self._get_mapping_strategy() == "Custom")
 
     def import_data(self) -> None:
