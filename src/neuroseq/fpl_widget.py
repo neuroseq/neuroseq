@@ -95,4 +95,4 @@ class FullScreenFPLWidget(FPLWidget):
         available = screen.availableGeometry()
         print("Available size:")
         print(available.size())
-        self.setFixedSize(available.height(), available.width())
+        self.setFixedSize(available.height() - 100, available.width() - 100)
