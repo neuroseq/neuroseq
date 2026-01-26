@@ -38,6 +38,8 @@ class TextGraphic(Protocol):
 class LabelGraphics(TypedDict):
     stim: TextGraphic
     cellpose: TextGraphic
+    stim_strike: TextGraphic
+    cellpose_strike: TextGraphic
     stim_bold: list[TextGraphic]
     cellpose_bold: list[TextGraphic]
     all: list[TextGraphic]
@@ -225,6 +227,16 @@ class OverlayView(FPLWidget):
                 center=False,
                 screen_space=False,
             )
+            stim_strike = self.subplot.add_text(
+                "",
+                font_size=1,
+                offset=base_offset,
+                face_color=(0.0, 0.0, 0.0),
+                outline_color=(1.0, 1.0, 1.0),
+                outline_thickness=0.6,
+                center=False,
+                screen_space=False,
+            )
             stim_bold = [
                 self.subplot.add_text(
                     "",
@@ -238,6 +250,16 @@ class OverlayView(FPLWidget):
                 )
                 for _ in range(3)
             ]
+            cellpose_strike = self.subplot.add_text(
+                "",
+                font_size=1,
+                offset=base_offset,
+                face_color=(0.25, 0.25, 0.25),
+                outline_color=(0.9, 0.9, 0.9),
+                outline_thickness=3.0,
+                center=False,
+                screen_space=False,
+            )
             cellpose_bold = [
                 self.subplot.add_text(
                     "",
@@ -254,6 +276,8 @@ class OverlayView(FPLWidget):
             all_graphics: list[TextGraphic] = [
                 cellpose,
                 stim,
+                stim_strike,
+                cellpose_strike,
                 *stim_bold,
                 *cellpose_bold,
             ]
@@ -263,6 +287,8 @@ class OverlayView(FPLWidget):
             self._label_graphics[cell_id] = {
                 "stim": stim,
                 "cellpose": cellpose,
+                "stim_strike": stim_strike,
+                "cellpose_strike": cellpose_strike,
                 "stim_bold": stim_bold,
                 "cellpose_bold": cellpose_bold,
                 "all": all_graphics,
@@ -342,6 +368,12 @@ class OverlayView(FPLWidget):
             stim_id = reverse_mapping.get(cell_id)
             cellpose_id = cell_id
             stim_display_id = stim_id if stim_id is not None else cellpose_id
+            mapped_elsewhere = (
+                cellpose_id in stim_to_cellpose
+                and stim_to_cellpose.get(cellpose_id) != cellpose_id
+            )
+            default_mapping = stim_id is None and stim_display_id == cellpose_id
+            cross_out_default = default_mapping and mapped_elsewhere
             highlight = (
                 self.highlight_mappings
                 and stim_id is not None
@@ -397,6 +429,15 @@ class OverlayView(FPLWidget):
                 cellpose_graphic.outline_color = cellpose_outline
                 cellpose_graphic.outline_thickness = cellpose_outline_thickness
                 cellpose_graphic.visible = True
+                self._update_strike_graphic(
+                    graphics["cellpose_strike"],
+                    cellpose_font_size,
+                    cellpose_offset,
+                    cellpose_face,
+                    cellpose_outline,
+                    cellpose_outline_thickness,
+                    cross_out_default and not stim_visible,
+                )
                 self._update_bold_graphics(
                     graphics["cellpose_bold"],
                     cellpose_text,
@@ -409,6 +450,7 @@ class OverlayView(FPLWidget):
                 )
             else:
                 graphics["cellpose"].visible = False
+                graphics["cellpose_strike"].visible = False
                 for graphic in graphics["cellpose_bold"]:
                     graphic.visible = False
 
@@ -425,6 +467,15 @@ class OverlayView(FPLWidget):
                 stim_graphic.outline_color = stim_outline
                 stim_graphic.outline_thickness = stim_outline_thickness
                 stim_graphic.visible = True
+                self._update_strike_graphic(
+                    graphics["stim_strike"],
+                    stim_font_size,
+                    stim_offset,
+                    stim_face,
+                    stim_outline,
+                    stim_outline_thickness,
+                    cross_out_default,
+                )
                 self._update_bold_graphics(
                     graphics["stim_bold"],
                     stim_text,
@@ -437,6 +488,7 @@ class OverlayView(FPLWidget):
                 )
             else:
                 graphics["stim"].visible = False
+                graphics["stim_strike"].visible = False
                 for graphic in graphics["stim_bold"]:
                     graphic.visible = False
 
@@ -466,6 +518,24 @@ class OverlayView(FPLWidget):
             graphic.outline_color = outline_color
             graphic.outline_thickness = outline_thickness
             graphic.visible = visible
+
+    def _update_strike_graphic(
+        self,
+        graphic: TextGraphic,
+        font_size: float,
+        offset: tuple[float, float, float],
+        face_color: Color,
+        outline_color: Color,
+        outline_thickness: float,
+        visible: bool,
+    ) -> None:
+        graphic.text = "\u2014"
+        graphic.font_size = font_size
+        graphic.offset = offset
+        graphic.face_color = face_color
+        graphic.outline_color = outline_color
+        graphic.outline_thickness = outline_thickness
+        graphic.visible = visible
 
     def _create_hover_label(self):
         return self.subplot.add_text(
