@@ -75,3 +75,24 @@ class FPLWidget(QtWidgets.QWidget):
             self.figure.close()
             self.figure = None
         super().closeEvent(event)
+
+
+class FullScreenFPLWidget(FPLWidget):
+    """FPLWidget that sizes itself to the available screen on show."""
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent=parent)
+        self.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Expanding,
+        )
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        screen = QtWidgets.QApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        print("Available size:")
+        print(available.size())
+        self.setFixedSize(available.height(), available.width())
