@@ -529,12 +529,12 @@ class OverlayView(FPLWidget):
         outline_thickness: float,
         visible: bool,
     ) -> None:
-        graphic.text = "\u2014"
-        graphic.font_size = font_size
-        graphic.offset = offset
+        graphic.text = "\u2501"
+        graphic.font_size = font_size * 0.95
+        graphic.offset = (offset[0], offset[1] - (font_size * 0.12), offset[2])
         graphic.face_color = face_color
         graphic.outline_color = outline_color
-        graphic.outline_thickness = outline_thickness
+        graphic.outline_thickness = outline_thickness * 1.4
         graphic.visible = visible
 
     def _create_hover_label(self):
