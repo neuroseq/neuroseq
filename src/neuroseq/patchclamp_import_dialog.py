@@ -117,7 +117,8 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         layout = QtWidgets.QHBoxLayout(self)
         layout.setSpacing(12)
 
-        max_half_width = int(screen_width * 0.5)
+        maximum_preview_width = int(screen_width * 0.6)
+        maximum_details_width = int(screen_width * 0.4)
 
         left_container = QtWidgets.QWidget()
         left_layout = QtWidgets.QVBoxLayout(left_container)
@@ -129,13 +130,13 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Expanding,
         )
-        self.overlay_stack.setMaximumWidth(max_half_width)
+        self.overlay_stack.setMaximumWidth(maximum_preview_width)
         self.overlay_widget = CellOverlayWidget("Cellpose Preview")
         self.overlay_widget.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Expanding,
         )
-        self.overlay_widget.setMaximumWidth(max_half_width)
+        self.overlay_widget.setMaximumWidth(maximum_preview_width)
         self.overlay_placeholder = QtWidgets.QLabel("No cellpose data yet")
         self.overlay_placeholder.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.overlay_placeholder.setStyleSheet("QLabel { color: gray; }")
@@ -156,10 +157,10 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         file_layout.addWidget(browse_button)
 
         left_layout.addWidget(self.file_group)
-        layout.addWidget(left_container, stretch=1)
+        layout.addWidget(left_container, stretch=3)
 
         right_container = QtWidgets.QWidget()
-        right_container.setMaximumWidth(max_half_width)
+        right_container.setMaximumWidth(maximum_details_width)
         right_layout = QtWidgets.QVBoxLayout(right_container)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(8)
@@ -334,7 +335,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         button_layout.addStretch()
         right_layout.addWidget(self.button_row)
-        layout.addWidget(right_container, stretch=1)
+        layout.addWidget(right_container, stretch=2)
         self._set_file_sections_visible(False)
         self._set_file_selector_visible(True)
 
