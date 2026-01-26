@@ -39,6 +39,7 @@ from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.save_load_options import SaveLoadOptionsDialog
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim_editor import StimEditor
+from neuroseq.test_preview_dialog import TestPreviewDialog
 from neuroseq.time_slider_widget import TimeSliderWidget
 from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.trace_widget import TraceWidget
@@ -649,6 +650,10 @@ class Gui(QtWidgets.QMainWindow):
                 "Cellpose segmentation loaded.",
             )
 
+    def btn_open_preview_test_dialog_clicked(self) -> None:
+        dialog = TestPreviewDialog(self)
+        dialog.exec()
+
     def _delete_cellpose_data(self) -> None:
         """Remove stored cellpose data from both GUI and project."""
         self.last_cellpose_import = None
@@ -886,6 +891,14 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             shortcut=None,
             icon=qta.icon("mdi6.image-edit-outline"),
+        )
+        add_action(
+            "Open Cellpose &Preview Dialog",
+            self.btn_open_preview_test_dialog_clicked,
+            menu,
+            toolbar,
+            shortcut="Ctrl+Shift+O",
+            icon=qta.icon("mdi6.open-in-new"),
         )
         add_action(
             "Import &Patch Clamp Data",
