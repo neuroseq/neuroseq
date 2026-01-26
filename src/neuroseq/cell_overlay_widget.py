@@ -8,6 +8,7 @@ from typing import TypedDict
 
 import brian2.numpy_ as np
 import pygfx
+from fastplotlib import Graphic
 from qtpy import QtCore
 from qtpy import QtWidgets
 
@@ -35,14 +36,30 @@ class TextGraphic(Protocol):
     visible: bool
 
 
+class StrikeGraphic(Protocol):
+    line: pygfx.Line
+    visible: bool
+
+
 class LabelGraphics(TypedDict):
     stim: TextGraphic
     cellpose: TextGraphic
-    stim_strike: TextGraphic
-    cellpose_strike: TextGraphic
+    stim_strike: StrikeGraphic
+    cellpose_strike: StrikeGraphic
     stim_bold: list[TextGraphic]
     cellpose_bold: list[TextGraphic]
-    all: list[TextGraphic]
+    all: list[object]
+
+
+class StrikeLine(Graphic):
+    def __init__(self) -> None:
+        super().__init__()
+        positions = np.zeros((2, 3), dtype=np.float32)
+        material = pygfx.LineMaterial(
+            thickness=2.0, color=pygfx.Color(0.0, 0.0, 0.0, 1.0)
+        )
+        self.line = pygfx.Line(pygfx.Geometry(positions=positions), material=material)
+        self._set_world_object(self.line)
 
 
 class OverlayView(FPLWidget):
@@ -227,16 +244,8 @@ class OverlayView(FPLWidget):
                 center=False,
                 screen_space=False,
             )
-            stim_strike = self.subplot.add_text(
-                "",
-                font_size=1,
-                offset=base_offset,
-                face_color=(0.0, 0.0, 0.0),
-                outline_color=(1.0, 1.0, 1.0),
-                outline_thickness=0.6,
-                center=False,
-                screen_space=False,
-            )
+            stim_strike = StrikeLine()
+            self.subplot.add_graphic(stim_strike, center=False)
             stim_bold = [
                 self.subplot.add_text(
                     "",
@@ -250,16 +259,8 @@ class OverlayView(FPLWidget):
                 )
                 for _ in range(3)
             ]
-            cellpose_strike = self.subplot.add_text(
-                "",
-                font_size=1,
-                offset=base_offset,
-                face_color=(0.25, 0.25, 0.25),
-                outline_color=(0.9, 0.9, 0.9),
-                outline_thickness=3.0,
-                center=False,
-                screen_space=False,
-            )
+            cellpose_strike = StrikeLine()
+            self.subplot.add_graphic(cellpose_strike, center=False)
             cellpose_bold = [
                 self.subplot.add_text(
                     "",
@@ -273,7 +274,7 @@ class OverlayView(FPLWidget):
                 )
                 for _ in range(3)
             ]
-            all_graphics: list[TextGraphic] = [
+            all_graphics: list[object] = [
                 cellpose,
                 stim,
                 stim_strike,
@@ -431,11 +432,10 @@ class OverlayView(FPLWidget):
                 cellpose_graphic.visible = True
                 self._update_strike_graphic(
                     graphics["cellpose_strike"],
+                    cellpose_text,
                     cellpose_font_size,
                     cellpose_offset,
                     cellpose_face,
-                    cellpose_outline,
-                    cellpose_outline_thickness,
                     cross_out_default and not stim_visible,
                 )
                 self._update_bold_graphics(
@@ -469,11 +469,10 @@ class OverlayView(FPLWidget):
                 stim_graphic.visible = True
                 self._update_strike_graphic(
                     graphics["stim_strike"],
+                    stim_text,
                     stim_font_size,
                     stim_offset,
                     stim_face,
-                    stim_outline,
-                    stim_outline_thickness,
                     cross_out_default,
                 )
                 self._update_bold_graphics(
@@ -521,21 +520,24 @@ class OverlayView(FPLWidget):
 
     def _update_strike_graphic(
         self,
-        graphic: TextGraphic,
+        graphic: StrikeGraphic,
+        text: str,
         font_size: float,
         offset: tuple[float, float, float],
         face_color: Color,
-        outline_color: Color,
-        outline_thickness: float,
         visible: bool,
     ) -> None:
-        graphic.text = "\u2501"
-        graphic.font_size = font_size * 0.95
-        graphic.offset = (offset[0], offset[1] - (font_size * 0.12), offset[2])
-        graphic.face_color = face_color
-        graphic.outline_color = outline_color
-        graphic.outline_thickness = outline_thickness * 1.4
         graphic.visible = visible
+        if not visible:
+            return
+        strike_y = offset[1] - (font_size * 0.18)
+        half_len = max(font_size * 0.4, font_size * 0.3 * len(text))
+        positions = graphic.line.geometry.positions.data
+        positions[0] = (offset[0] - half_len, strike_y, offset[2])
+        positions[1] = (offset[0] + half_len, strike_y, offset[2])
+        graphic.line.geometry.positions.update_range()
+        graphic.line.material.color = pygfx.Color(*face_color)
+        graphic.line.material.thickness = max(1.0, font_size * 0.22)
 
     def _create_hover_label(self):
         return self.subplot.add_text(
