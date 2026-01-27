@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import fastplotlib as fpl
 import pygfx
 from fastplotlib.layouts import Subplot
@@ -16,6 +18,7 @@ class FPLWidget(QtWidgets.QWidget):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self.logger = logging.getLogger(__name__)
         self.controller = controller
         self.figure: fpl.Figure = fpl.Figure(
             controllers=controller, canvas_kwargs={"parent": self}
@@ -93,4 +96,9 @@ class FullScreenFPLWidget(FPLWidget):
         if screen is None:
             return
         available = screen.availableGeometry()
+        self.logger.debug(
+            "Setting fixed size, max w/h (-200 from these): %s %s",
+            available.width(),
+            available.height(),
+        )
         self.setFixedSize(available.width() - 200, available.height() - 200)

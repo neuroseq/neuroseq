@@ -12,7 +12,7 @@ from fastplotlib import Graphic
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from neuroseq.fpl_widget import FPLWidget
+from neuroseq.fpl_widget import FullScreenFPLWidget
 from neuroseq.utils import neuron_indices_to_colors
 
 
@@ -71,7 +71,7 @@ class StrikeLine(Graphic):
         self._set_world_object(self.line)
 
 
-class OverlayView(FPLWidget):
+class OverlayView(FullScreenFPLWidget):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent=parent)
         self.hide_controls()
