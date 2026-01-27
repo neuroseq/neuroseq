@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import fastplotlib as fpl
 import pygfx
 from fastplotlib.layouts import Subplot
@@ -16,6 +18,7 @@ class FPLWidget(QtWidgets.QWidget):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self.logger = logging.getLogger(__name__)
         self.controller = controller
         self.figure: fpl.Figure = fpl.Figure(
             controllers=controller, canvas_kwargs={"parent": self}
@@ -75,3 +78,34 @@ class FPLWidget(QtWidgets.QWidget):
             self.figure.close()
             self.figure = None
         super().closeEvent(event)
+
+
+class FullScreenFPLWidget(FPLWidget):
+    """FPLWidget that sizes itself to the available screen on show."""
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent=parent)
+        self.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Expanding,
+        )
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if not self.isWindow():
+            return
+        window = self.window()
+        window_handle = window.windowHandle() if window is not None else None
+        screen = window_handle.screen() if window_handle is not None else None
+        if screen is None:
+            screen = QtWidgets.QApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        scale = screen.devicePixelRatio()
+        target_width = int((available.width() - 400) * scale)
+        target_height = int((available.height() - 400) * scale)
+        self.setFixedSize(
+            target_width,
+            target_height,
+        )

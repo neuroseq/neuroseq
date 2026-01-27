@@ -117,6 +117,21 @@ def with_wait_cursor(func: Callable) -> Callable:
     return with_wait_cursor_wrapper
 
 
+def get_primary_available_geometry() -> QtCore.QRect | None:
+    screen = QtWidgets.QApplication.screenAt(QtGui.QCursor.pos())
+    if screen is None:
+        screen = QtWidgets.QApplication.primaryScreen()
+    if screen is None:
+        return None
+    return screen.availableGeometry()
+
+
+def is_vertical_screen(available: QtCore.QRect | None, ratio: float = 0.8) -> bool:
+    if available is None or available.height() <= 0:
+        return False
+    return available.width() < ratio * available.height()
+
+
 def add_action(
     name: str,
     callback: Callable,

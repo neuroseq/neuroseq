@@ -8,10 +8,11 @@ from typing import TypedDict
 
 import brian2.numpy_ as np
 import pygfx
+from fastplotlib import Graphic
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from neuroseq.fpl_widget import FPLWidget
+from neuroseq.fpl_widget import FullScreenFPLWidget
 from neuroseq.utils import neuron_indices_to_colors
 
 
@@ -35,15 +36,42 @@ class TextGraphic(Protocol):
     visible: bool
 
 
+class StrikeGraphic(Protocol):
+    line: pygfx.Line
+    visible: bool
+
+
+class VisibleGraphic(Protocol):
+    visible: bool
+
+
+class ImageGraphic(Protocol):
+    data: np.ndarray
+    visible: bool
+
+
 class LabelGraphics(TypedDict):
     stim: TextGraphic
     cellpose: TextGraphic
+    stim_strike: StrikeGraphic
+    cellpose_strike: StrikeGraphic
     stim_bold: list[TextGraphic]
     cellpose_bold: list[TextGraphic]
-    all: list[TextGraphic]
+    all: list[VisibleGraphic]
 
 
-class OverlayView(FPLWidget):
+class StrikeLine(Graphic):
+    def __init__(self) -> None:
+        super().__init__()
+        positions = np.zeros((2, 3), dtype=np.float32)
+        material = pygfx.LineMaterial(
+            thickness=2.0, color=pygfx.Color(0.0, 0.0, 0.0, 1.0)
+        )
+        self.line = pygfx.Line(pygfx.Geometry(positions=positions), material=material)
+        self._set_world_object(self.line)
+
+
+class OverlayView(FullScreenFPLWidget):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent=parent)
         self.hide_controls()
@@ -54,8 +82,8 @@ class OverlayView(FPLWidget):
         self.show_cellpose_ids = True
         self.show_stimulus_ids = False
         self.highlight_mappings = True
-        self._image_graphic = None
-        self._segmentation_graphic = None
+        self._image_graphic: ImageGraphic | None = None
+        self._segmentation_graphic: ImageGraphic | None = None
         self._label_centers: dict[int, tuple[float, float]] = {}
         self._label_graphics: dict[int, LabelGraphics] = {}
         self._label_segmentation_id: int | None = None
@@ -225,6 +253,8 @@ class OverlayView(FPLWidget):
                 center=False,
                 screen_space=False,
             )
+            stim_strike = StrikeLine()
+            self.subplot.add_graphic(stim_strike, center=False)
             stim_bold = [
                 self.subplot.add_text(
                     "",
@@ -238,6 +268,8 @@ class OverlayView(FPLWidget):
                 )
                 for _ in range(3)
             ]
+            cellpose_strike = StrikeLine()
+            self.subplot.add_graphic(cellpose_strike, center=False)
             cellpose_bold = [
                 self.subplot.add_text(
                     "",
@@ -251,9 +283,11 @@ class OverlayView(FPLWidget):
                 )
                 for _ in range(3)
             ]
-            all_graphics: list[TextGraphic] = [
+            all_graphics: list[VisibleGraphic] = [
                 cellpose,
                 stim,
+                stim_strike,
+                cellpose_strike,
                 *stim_bold,
                 *cellpose_bold,
             ]
@@ -263,6 +297,8 @@ class OverlayView(FPLWidget):
             self._label_graphics[cell_id] = {
                 "stim": stim,
                 "cellpose": cellpose,
+                "stim_strike": stim_strike,
+                "cellpose_strike": cellpose_strike,
                 "stim_bold": stim_bold,
                 "cellpose_bold": cellpose_bold,
                 "all": all_graphics,
@@ -342,6 +378,12 @@ class OverlayView(FPLWidget):
             stim_id = reverse_mapping.get(cell_id)
             cellpose_id = cell_id
             stim_display_id = stim_id if stim_id is not None else cellpose_id
+            mapped_elsewhere = (
+                cellpose_id in stim_to_cellpose
+                and stim_to_cellpose.get(cellpose_id) != cellpose_id
+            )
+            default_mapping = stim_id is None and stim_display_id == cellpose_id
+            cross_out_default = default_mapping and mapped_elsewhere
             highlight = (
                 self.highlight_mappings
                 and stim_id is not None
@@ -397,6 +439,14 @@ class OverlayView(FPLWidget):
                 cellpose_graphic.outline_color = cellpose_outline
                 cellpose_graphic.outline_thickness = cellpose_outline_thickness
                 cellpose_graphic.visible = True
+                self._update_strike_graphic(
+                    graphics["cellpose_strike"],
+                    cellpose_text,
+                    cellpose_font_size,
+                    cellpose_offset,
+                    cellpose_face,
+                    cross_out_default and not stim_visible,
+                )
                 self._update_bold_graphics(
                     graphics["cellpose_bold"],
                     cellpose_text,
@@ -409,6 +459,7 @@ class OverlayView(FPLWidget):
                 )
             else:
                 graphics["cellpose"].visible = False
+                graphics["cellpose_strike"].visible = False
                 for graphic in graphics["cellpose_bold"]:
                     graphic.visible = False
 
@@ -425,6 +476,14 @@ class OverlayView(FPLWidget):
                 stim_graphic.outline_color = stim_outline
                 stim_graphic.outline_thickness = stim_outline_thickness
                 stim_graphic.visible = True
+                self._update_strike_graphic(
+                    graphics["stim_strike"],
+                    stim_text,
+                    stim_font_size,
+                    stim_offset,
+                    stim_face,
+                    cross_out_default,
+                )
                 self._update_bold_graphics(
                     graphics["stim_bold"],
                     stim_text,
@@ -437,6 +496,7 @@ class OverlayView(FPLWidget):
                 )
             else:
                 graphics["stim"].visible = False
+                graphics["stim_strike"].visible = False
                 for graphic in graphics["stim_bold"]:
                     graphic.visible = False
 
@@ -466,6 +526,27 @@ class OverlayView(FPLWidget):
             graphic.outline_color = outline_color
             graphic.outline_thickness = outline_thickness
             graphic.visible = visible
+
+    def _update_strike_graphic(
+        self,
+        graphic: StrikeGraphic,
+        text: str,
+        font_size: float,
+        offset: tuple[float, float, float],
+        face_color: Color,
+        visible: bool,
+    ) -> None:
+        graphic.visible = visible
+        if not visible:
+            return
+        strike_y = offset[1] - (font_size * 0.18)
+        half_len = max(font_size * 0.4, font_size * 0.3 * len(text))
+        positions = graphic.line.geometry.positions.data
+        positions[0] = (offset[0] - half_len, strike_y, offset[2])
+        positions[1] = (offset[0] + half_len, strike_y, offset[2])
+        graphic.line.geometry.positions.update_range()
+        graphic.line.material.color = pygfx.Color(*face_color)
+        graphic.line.material.thickness = max(1.0, font_size * 0.22)
 
     def _create_hover_label(self):
         return self.subplot.add_text(

@@ -81,8 +81,10 @@ def generate_stimulus_mapping(
     if cellpose_import is None:
         return {}
 
-    if cellpose_import.stimulus_to_cellpose_mapping:
-        return dict(cellpose_import.stimulus_to_cellpose_mapping)
+    existing_mapping = cellpose_import.stimulus_to_cellpose_mapping or {}
+
+    if existing_mapping:
+        return dict(existing_mapping)
 
     if cellpose_import.original_cellpose_ids is None:
         return {}
@@ -90,16 +92,13 @@ def generate_stimulus_mapping(
     original_ids = cellpose_import.original_cellpose_ids
     row_count = data_row_count or len(original_ids)
 
-    if strategy == "Custom" and stim_ids:
-        stim_sequence = list(stim_ids)
-    else:
-        stim_sequence = list(range(row_count))
+    stim_sequence = list(range(row_count))
 
-    mapping: dict[int, int] = {}
+    temp_mapping: dict[int, int] = {}
     for stim_id, cellpose_id in zip(stim_sequence, original_ids, strict=False):
-        mapping[int(stim_id)] = int(cellpose_id)
+        temp_mapping[int(stim_id)] = int(cellpose_id)
 
-    return mapping
+    return temp_mapping
 
 
 def import_patchclamp_data(

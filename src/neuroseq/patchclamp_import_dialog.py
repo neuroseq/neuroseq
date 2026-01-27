@@ -10,12 +10,15 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
 from neuroseq.cell_overlay_widget import CellOverlayWidget
+from neuroseq.data import SpikeData
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_patchclamp import PeakDetectionParams
 from neuroseq.importer_patchclamp import generate_stimulus_mapping
 from neuroseq.importer_patchclamp import import_patchclamp_data
 from neuroseq.importer_patchclamp import validate_append_import
+from neuroseq.utils import get_primary_available_geometry
+from neuroseq.utils import is_vertical_screen
 
 
 class PatchClampImportDialog(QtWidgets.QDialog):
@@ -54,9 +57,23 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.file_group: QtWidgets.QGroupBox | None = None
         self.file_status_label: QtWidgets.QLabel | None = None
         self.button_row: QtWidgets.QWidget | None = None
+        self.custom_mapping_preview: QtWidgets.QLabel | None = None
+        self._has_maximised = False
+        self._vertical_layout = False
         self._setup_ui()
         self._apply_existing_stim_mapping()
         self._populate_cellpose_preview()
+
+    def _maximise_screen(self) -> None:
+        available = get_primary_available_geometry()
+        if available is None:
+            return
+        adjusted = available.adjusted(50, 50, -50, -50)
+        self.setGeometry(adjusted)
+        self.setWindowState(self.windowState() | QtCore.Qt.WindowState.WindowMaximized)
+
+    def _should_use_vertical_layout(self) -> bool:
+        return is_vertical_screen(get_primary_available_geometry())
 
     @staticmethod
     def _double_spinbox(
@@ -106,43 +123,36 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.setWindowTitle("Import Patch Clamp Data")
         self.setModal(True)
 
-        screen = QtWidgets.QApplication.primaryScreen()
-        screen_width = screen.availableGeometry().width()
-        screen_height = screen.availableGeometry().height()
-        self.dialog_width = min(1400, int(0.9 * screen_width))
-        self.dialog_height = min(900, int(0.8 * screen_height))
-        self.resize(self.dialog_width, self.dialog_height)
+        self._vertical_layout = self._should_use_vertical_layout()
+        if self._vertical_layout:
+            self.main_layout = QtWidgets.QVBoxLayout(self)
+        else:
+            self.main_layout = QtWidgets.QHBoxLayout(self)
+        self.main_layout.setSpacing(12)
 
-        layout = QtWidgets.QHBoxLayout(self)
-        layout.setSpacing(12)
-
-        max_half_width = int(screen_width * 0.5)
-
-        left_container = QtWidgets.QWidget()
-        left_layout = QtWidgets.QVBoxLayout(left_container)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(8)
+        self.left_container = QtWidgets.QWidget()
+        self.left_layout = QtWidgets.QVBoxLayout(self.left_container)
+        self.left_layout.setContentsMargins(0, 0, 0, 0)
+        self.left_layout.setSpacing(8)
 
         self.overlay_stack = QtWidgets.QStackedWidget()
         self.overlay_stack.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Expanding,
         )
-        self.overlay_stack.setMaximumWidth(max_half_width)
         self.overlay_widget = CellOverlayWidget("Cellpose Preview")
         self.overlay_widget.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Expanding,
         )
-        self.overlay_widget.setMaximumWidth(max_half_width)
         self.overlay_placeholder = QtWidgets.QLabel("No cellpose data yet")
         self.overlay_placeholder.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.overlay_placeholder.setStyleSheet("QLabel { color: gray; }")
         self.overlay_placeholder.setWordWrap(True)
         self.overlay_stack.addWidget(self.overlay_placeholder)
         self.overlay_stack.addWidget(self.overlay_widget)
-        left_layout.addWidget(self.overlay_stack, stretch=1)
-        left_layout.addStretch()
+        self.left_layout.addWidget(self.overlay_stack, stretch=1)
+        self.left_layout.addStretch()
 
         self.file_group = QtWidgets.QGroupBox("Select .npy patchclamp file")
         file_layout = QtWidgets.QHBoxLayout(self.file_group)
@@ -154,14 +164,13 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         file_layout.addWidget(self.file_path_label, stretch=1)
         file_layout.addWidget(browse_button)
 
-        left_layout.addWidget(self.file_group)
-        layout.addWidget(left_container, stretch=1)
+        self.left_layout.addWidget(self.file_group)
+        self.main_layout.addWidget(self.left_container, stretch=3)
 
-        right_container = QtWidgets.QWidget()
-        right_container.setMaximumWidth(max_half_width)
-        right_layout = QtWidgets.QVBoxLayout(right_container)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(8)
+        self.right_container = QtWidgets.QWidget()
+        self.right_layout = QtWidgets.QVBoxLayout(self.right_container)
+        self.right_layout.setContentsMargins(0, 0, 0, 0)
+        self.right_layout.setSpacing(8)
 
         self.preview_group = QtWidgets.QGroupBox("Data Preview")
         preview_layout = QtWidgets.QVBoxLayout(self.preview_group)
@@ -169,7 +178,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.preview_text.setReadOnly(True)
         self.preview_text.setMaximumHeight(140)
         preview_layout.addWidget(self.preview_text)
-        right_layout.addWidget(self.preview_group)
+        self.right_layout.addWidget(self.preview_group)
 
         self.options_group = QtWidgets.QGroupBox("Import Options")
         options_layout = QtWidgets.QFormLayout(self.options_group)
@@ -195,15 +204,15 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         options_layout.addRow("Mapping strategy:", mapping_layout)
 
         self.custom_neuron_id_line = QtWidgets.QLineEdit()
-        self.custom_neuron_id_line.setPlaceholderText("e.g., 10 or 12,15")
-        self.custom_neuron_id_line.setText("10")
+        self.custom_neuron_id_line.setPlaceholderText("e.g., 0 or 0,1")
+        self.custom_neuron_id_line.setText("0")
         self.custom_neuron_id_line.setToolTip(
             "Single neuron ID (e.g., 10) or comma-separated list (e.g., 12,15)"
         )
 
         self.custom_mapping_line = QtWidgets.QLineEdit()
         self.custom_mapping_line.setPlaceholderText(
-            "Comma-separated stimulus IDs (e.g., 12,14 or 12:0,14:1)"
+            "Comma-separated stim IDs (e.g., 2,3)"
         )
         self.custom_mapping_line.textChanged.connect(
             lambda _text: self._update_custom_mapping_hint()
@@ -213,10 +222,15 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         custom_layout = QtWidgets.QVBoxLayout()
         custom_layout.addWidget(self.custom_neuron_id_line)
         custom_layout.addWidget(self.custom_mapping_line)
+        self.custom_mapping_preview = QtWidgets.QLabel("")
+        self.custom_mapping_preview.setWordWrap(True)
+        self.custom_mapping_preview.setStyleSheet("QLabel { color: gray; }")
+        self.custom_mapping_preview.setVisible(False)
+        custom_layout.addWidget(self.custom_mapping_preview)
         self.custom_widget = QtWidgets.QWidget()
         self.custom_widget.setLayout(custom_layout)
 
-        self.custom_mapping_label = QtWidgets.QLabel("Target stimulus IDs:")
+        self.custom_mapping_label = QtWidgets.QLabel("Target stim IDs:")
         self.custom_mapping_label.setVisible(False)
         self.custom_widget.setVisible(False)
         self.custom_mapping_hint = QtWidgets.QLabel("")
@@ -304,8 +318,8 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         )
         spike_layout.addRow("Peak width:", self.peak_width_spin)
 
-        right_layout.addWidget(self.options_group)
-        right_layout.addWidget(self.spike_group)
+        self.right_layout.addWidget(self.options_group)
+        self.right_layout.addWidget(self.spike_group)
 
         self.button_row = QtWidgets.QWidget()
         button_layout = QtWidgets.QHBoxLayout(self.button_row)
@@ -327,10 +341,44 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         button_layout.addWidget(cancel_button)
 
         button_layout.addStretch()
-        right_layout.addWidget(self.button_row)
-        layout.addWidget(right_container, stretch=1)
-        self._set_file_sections_visible(False)
-        self._set_file_selector_visible(True)
+        self.right_layout.addWidget(self.button_row)
+        self.main_layout.addWidget(self.right_container, stretch=2)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self.left_container is None or self.right_container is None:
+            return
+        if self._vertical_layout:
+            self.left_container.setMaximumWidth(self.width())
+            self.right_container.setMaximumWidth(self.width())
+            left_width = self.left_container.width()
+        else:
+            left_width = int(self.width() * 0.6)
+            right_width = max(1, self.width() - left_width)
+            self.left_container.setMaximumWidth(left_width)
+            self.right_container.setMaximumWidth(right_width)
+        if self.overlay_stack is None or self.file_group is None:
+            return
+        available_height = (
+            self.left_container.height()
+            - self.file_group.height()
+            - self.left_layout.spacing()
+        )
+        square_size = min(left_width, available_height)
+        if square_size > 0:
+            self.overlay_stack.setFixedSize(square_size, square_size)
+            if self.overlay_widget is not None:
+                self.overlay_widget.setFixedSize(square_size, square_size)
+        if self.npy_data is None:
+            self._set_file_sections_visible(False)
+            self._set_file_selector_visible(True)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._has_maximised:
+            return
+        self._has_maximised = True
+        self._maximise_screen()
 
     def _populate_cellpose_preview(self) -> None:
         """Fill the left-hand preview with Cellpose data if available."""
@@ -369,6 +417,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.custom_mapping_label.setVisible(is_custom)
         self.custom_widget.setVisible(is_custom)
         self._update_custom_mapping_hint()
+        self._update_custom_mapping_preview()
 
         if is_custom:
             self.custom_mapping_line.setVisible(True)
@@ -403,8 +452,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         mapping = self.cellpose_import.stimulus_to_cellpose_mapping
         stim_ids = sorted(mapping.keys())
-        mapping_str = ",".join(f"{stim_id}:{mapping[stim_id]}" for stim_id in stim_ids)
-        self.custom_mapping_line.setText(mapping_str)
+        self.custom_mapping_line.setText(",".join(str(stim) for stim in stim_ids))
         self.custom_neuron_id_line.setText(",".join(str(stim) for stim in stim_ids))
 
         self._set_mapping_strategy("Custom")
@@ -412,6 +460,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             self._auto_stimulus_ids = stim_ids
             self._auto_from_cellpose = True
         self._update_custom_mapping_hint()
+        self._update_custom_mapping_preview()
 
     def _on_replace_toggled(self, checked: bool) -> None:
         self.append_data = not checked
@@ -534,15 +583,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             else:
                 target_ids = self._safe_parse_neuron_ids()
             if len(target_ids) > 1:
-                suffix = (
-                    " (auto from Cellpose mapping)"
-                    if self._auto_from_cellpose
-                    and target_ids == self._auto_stimulus_ids
-                    else ""
-                )
-                lines.append(
-                    f"Target stimulus IDs: {', '.join(map(str, target_ids))}{suffix}"
-                )
+                lines.append(f"Specify {len(target_ids)} IDs to import")
         else:
             self.preview_text.clear()
             return
@@ -557,8 +598,23 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         """Get target neuron IDs based on current mapping strategy."""
         strategy = self._get_mapping_strategy()
         if strategy == "Custom":
-            return self._parse_stim_neuron_ids(self.custom_mapping_line.text())
+            return self._resolve_custom_target_ids(self._safe_parse_stimulus_ids())
         return self._parse_neuron_ids(self.custom_neuron_id_line.text())
+
+    def _resolve_custom_target_ids(self, stim_ids: list[int]) -> list[int]:
+        """Validate custom stim IDs, ensuring uniqueness."""
+        assigned_stim_ids: set[int] = set()
+        resolved_ids: list[int] = []
+        for stim_id in stim_ids:
+            stim_id = int(stim_id)
+            if stim_id in assigned_stim_ids:
+                raise ValueError(
+                    "Custom mapping would assign stimulus ID "
+                    f"{stim_id} to multiple patchclamp rows."
+                )
+            assigned_stim_ids.add(stim_id)
+            resolved_ids.append(stim_id)
+        return resolved_ids
 
     def _apply_cellpose_mapping_defaults(self, row_count: int) -> None:
         """Use Cellpose stimulus IDs in ascending order to prefill multi-row targets."""
@@ -573,6 +629,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self._auto_stimulus_ids = derived_ids
         self._auto_from_cellpose = True
         self._update_custom_mapping_hint()
+        self._update_custom_mapping_preview()
 
     def _get_cellpose_stim_ids(self) -> list[int]:
         """Return sorted stimulus IDs from an existing Cellpose mapping."""
@@ -583,33 +640,9 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             return []
         return sorted(self.cellpose_import.stimulus_to_cellpose_mapping.keys())
 
-    def _cellpose_id_for_stim(self, stim_id: int, stim_index: int) -> int | None:
-        """Return the cellpose ID aligned with a given stimulus ID when available."""
-        if self.cellpose_import is None:
-            return None
-
-        mapping = self.cellpose_import.stimulus_to_cellpose_mapping
-        if mapping:
-            return mapping.get(stim_id)
-
-        if (
-            self.cellpose_import.original_cellpose_ids is not None
-            and 0 <= stim_index < len(self.cellpose_import.original_cellpose_ids)
-        ):
-            return int(self.cellpose_import.original_cellpose_ids[stim_index])
-
-        return None
-
     def _format_stimulus_display(self, stim_ids: list[int]) -> str:
-        """Format stimulus IDs as 'stim:cellpose' when cellpose IDs are known."""
-        parts: list[str] = []
-        for idx, stim_id in enumerate(stim_ids):
-            cellpose_id = self._cellpose_id_for_stim(stim_id, idx)
-            if cellpose_id is None:
-                parts.append(str(stim_id))
-            else:
-                parts.append(f"{stim_id}:{cellpose_id}")
-        return ",".join(parts)
+        """Format stimulus IDs for display."""
+        return ",".join(str(stim_id) for stim_id in stim_ids)
 
     def _set_file_sections_visible(self, visible: bool) -> None:
         for group in (self.preview_group, self.options_group, self.spike_group):
@@ -628,7 +661,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             self.file_group.setVisible(visible)
 
     def _parse_stim_neuron_ids(self, mapping_str: str) -> list[int]:
-        """Parse comma-separated stimulus IDs into a list of ints."""
+        """Parse comma-separated stim IDs into a list of ints."""
         if not mapping_str.strip():
             raise ValueError("Stimulus IDs cannot be empty")
 
@@ -700,7 +733,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             target_ids = self._safe_parse_stimulus_ids()
             if not target_ids:
                 target_ids = self._safe_parse_neuron_ids()
-            target_ids = [1] if not target_ids else [target_ids[0]]
+            target_ids = [0] if not target_ids else [target_ids[0]]
         else:
             target_ids = self._safe_parse_stimulus_ids()
             auto_from_cellpose = False
@@ -718,14 +751,18 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                     target_ids.append(next_id)
                     next_id += 1
             else:
-                target_ids = list(range(1, row_count + 1))
+                target_ids = list(range(row_count))
 
         mapping_str = self._format_stimulus_display(target_ids)
         self.custom_mapping_line.setText(mapping_str)
         self.custom_neuron_id_line.setText(",".join(str(tid) for tid in target_ids))
+        self.custom_mapping_label.setText(
+            f"Enter {len(target_ids)} stim IDs (matching the preview):"
+        )
         self._auto_from_cellpose = auto_from_cellpose and len(target_ids) > 1
         self._auto_stimulus_ids = target_ids if self._auto_from_cellpose else []
         self._update_custom_mapping_hint()
+        self._update_custom_mapping_preview()
 
     def _update_custom_mapping_hint(self) -> None:
         """Show a hint when custom mapping count mismatches neuron count."""
@@ -754,6 +791,25 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             self.custom_mapping_hint.setVisible(True)
         else:
             self.custom_mapping_hint.setVisible(False)
+
+    def _update_custom_mapping_preview(self) -> None:
+        if self.custom_mapping_preview is None:
+            return
+        if (
+            self.cellpose_import is None
+            or not self.cellpose_import.stimulus_to_cellpose_mapping
+        ):
+            self.custom_mapping_preview.setVisible(False)
+            return
+        mapping = self.cellpose_import.stimulus_to_cellpose_mapping
+        if len(mapping) >= 20:
+            self.custom_mapping_preview.setVisible(False)
+            return
+        pairs = ", ".join(
+            f"{stim_id}->{mapping[stim_id]}" for stim_id in sorted(mapping.keys())
+        )
+        self.custom_mapping_preview.setText(f"Stim->Cellpose mapping:\n{pairs}")
+        self.custom_mapping_preview.setVisible(self._get_mapping_strategy() == "Custom")
 
     def import_data(self) -> None:
         if self.npy_data is None:
@@ -847,4 +903,27 @@ class PatchClampImportDialog(QtWidgets.QDialog):
     @property
     def imported_data(self) -> list:
         """Combined imported spike and trace data."""
-        return self.imported_spike_data + self.imported_trace_data
+        spike_data = None
+        if self.imported_spike_data:
+            if len(self.imported_spike_data) == 1:
+                spike_data = self.imported_spike_data[0]
+            else:
+                spike_indices = np.concatenate(
+                    [sd.spike_indices for sd in self.imported_spike_data]
+                )
+                spike_times = np.concatenate(
+                    [sd.spike_times for sd in self.imported_spike_data]
+                )
+                if spike_times.size > 1:
+                    order = np.argsort(spike_times)
+                    spike_times = spike_times[order]
+                    spike_indices = spike_indices[order]
+                spike_data = SpikeData(
+                    "Patch Clamp Spikes",
+                    spike_indices.astype(np.uint32),
+                    spike_times.astype(np.float32),
+                )
+        data = []
+        if spike_data is not None:
+            data.append(spike_data)
+        return data + self.imported_trace_data

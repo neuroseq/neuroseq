@@ -15,6 +15,8 @@ from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_cellpose import generate_linear_stimulus_mapping
 from neuroseq.importer_cellpose import is_identity_mapping
+from neuroseq.utils import get_primary_available_geometry
+from neuroseq.utils import is_vertical_screen
 
 
 def _highest_one_to_one_cellpose_prefix(mapping: dict[int, int]) -> int:
@@ -73,15 +75,27 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.delete_handler = delete_handler
         self.file_selection_container: QtWidgets.QWidget | None = None
         self.main_content_container: QtWidgets.QWidget | None = None
+        self.left_container: QtWidgets.QWidget | None = None
+        self.right_container: QtWidgets.QWidget | None = None
+        self.left_layout: QtWidgets.QVBoxLayout | None = None
+        self.checkbox_container: QtWidgets.QWidget | None = None
+        self.mapping_group: QtWidgets.QGroupBox | None = None
+        self.main_content_layout: QtWidgets.QHBoxLayout | None = None
+        self._vertical_layout = False
         self._setup_ui()
         self._load_existing_data_if_available()
 
     def _maximise_screen(self) -> None:
-        screen = QtWidgets.QApplication.primaryScreen()
-        available = screen.availableGeometry()
-        # Use the maximum available window size
-        self.setGeometry(available)
+        available = get_primary_available_geometry()
+        if available is None:
+            return
+        adjusted = available.adjusted(50, 50, -50, -50)
+        # Use the maximum available window size with a 100px margin
+        self.setGeometry(adjusted)
         self.setWindowState(self.windowState() | QtCore.Qt.WindowState.WindowMaximized)
+
+    def _should_use_vertical_layout(self) -> bool:
+        return is_vertical_screen(get_primary_available_geometry())
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("Import Cellpose Data")
@@ -144,12 +158,21 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         # Main content (hidden until both files are selected)
         self.main_content_container = QtWidgets.QWidget()
-        main_content_layout = QtWidgets.QVBoxLayout(self.main_content_container)
-        main_content_layout.setContentsMargins(0, 0, 0, 0)
+        self._vertical_layout = self._should_use_vertical_layout()
+        if self._vertical_layout:
+            self.main_content_layout = QtWidgets.QVBoxLayout(
+                self.main_content_container
+            )
+        else:
+            self.main_content_layout = QtWidgets.QHBoxLayout(
+                self.main_content_container
+            )
+        self.main_content_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_content_layout.setSpacing(16)
 
         # Add ID mapping options
-        mapping_group = QtWidgets.QGroupBox("ID Mapping Options")
-        mapping_layout = QtWidgets.QFormLayout(mapping_group)
+        self.mapping_group = QtWidgets.QGroupBox("ID Mapping Options")
+        mapping_layout = QtWidgets.QFormLayout(self.mapping_group)
 
         # Strategy selection
         strategy_layout = QtWidgets.QHBoxLayout()
@@ -223,10 +246,16 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 abstract_button.toggled.connect(self._on_mapping_changed)
 
         # Place overlay first so the visual is top-most
-        self.overlay_widget.setMinimumHeight(400)
-        main_content_layout.addWidget(self.overlay_widget, stretch=1)
+        self.left_container = QtWidgets.QWidget()
+        self.left_layout = QtWidgets.QVBoxLayout(self.left_container)
+        self.left_layout.setContentsMargins(0, 0, 0, 0)
+        self.left_layout.setSpacing(8)
 
-        checkbox_layout = QtWidgets.QHBoxLayout()
+        self.overlay_widget.setMinimumHeight(400)
+        self.left_layout.addWidget(self.overlay_widget, stretch=1)
+
+        self.checkbox_container = QtWidgets.QWidget()
+        checkbox_layout = QtWidgets.QHBoxLayout(self.checkbox_container)
         checkbox_layout.setContentsMargins(4, 0, 4, 0)
         self.show_labels_checkbox = QtWidgets.QCheckBox("Show labels")
         self.show_labels_checkbox.setChecked(True)
@@ -239,8 +268,15 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.show_segmentation_checkbox.toggled.connect(self._on_display_toggle_changed)
         checkbox_layout.addWidget(self.show_segmentation_checkbox)
         checkbox_layout.addStretch(1)
-        main_content_layout.addLayout(checkbox_layout)
-        main_content_layout.addWidget(mapping_group)
+        self.left_layout.addWidget(self.checkbox_container)
+
+        self.main_content_layout.addWidget(self.left_container, stretch=3)
+        self.right_container = QtWidgets.QWidget()
+        right_layout = QtWidgets.QVBoxLayout(self.right_container)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
+        right_layout.addWidget(self.mapping_group)
+        right_layout.addStretch(1)
 
         button_layout = QtWidgets.QHBoxLayout()
 
@@ -260,7 +296,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
         cancel_button.clicked.connect(self.reject)
         button_layout.addWidget(cancel_button)
 
-        main_content_layout.addLayout(button_layout)
+        right_layout.addLayout(button_layout)
+        self.main_content_layout.addWidget(self.right_container, stretch=2)
         layout.addWidget(self.main_content_container)
         self.main_content_container.setVisible(False)
         self._set_ui_loaded_state(False)
@@ -276,6 +313,38 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 self._maximise_screen()
         if not loaded and hasattr(self, "import_button"):
             self.import_button.setEnabled(False)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if (
+            self.main_content_container is None
+            or not self.main_content_container.isVisible()
+        ):
+            return
+        if (
+            self.left_container is None
+            or self.right_container is None
+            or self.checkbox_container is None
+            or self.left_layout is None
+        ):
+            return
+        if self._vertical_layout:
+            self.left_container.setMaximumWidth(self.main_content_container.width())
+            self.right_container.setMaximumWidth(self.main_content_container.width())
+            left_width = self.left_container.width()
+        else:
+            left_width = int(self.main_content_container.width() * 0.6)
+            right_width = max(1, self.main_content_container.width() - left_width)
+            self.left_container.setMaximumWidth(left_width)
+            self.right_container.setMaximumWidth(right_width)
+        available_height = (
+            self.left_container.height()
+            - self.checkbox_container.height()
+            - self.left_layout.spacing()
+        )
+        square_size = min(left_width, available_height)
+        if square_size > 0:
+            self.overlay_widget.setFixedSize(square_size, square_size)
 
     def _reset_importer_state(self, clear_existing_data: bool = False) -> None:
         """Return dialog to initial state after an importer failure."""
