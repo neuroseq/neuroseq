@@ -103,15 +103,8 @@ class FullScreenFPLWidget(FPLWidget):
             return
         available = screen.availableGeometry()
         scale = screen.devicePixelRatio()
-        self.logger.info(
-            "Setting fixed size, max w/h (-200 from these): %s %s, scale: %s",
-            available.width(),
-            available.height(),
-            scale,
-        )
         target_width = int((available.width() - 400) * scale)
         target_height = int((available.height() - 400) * scale)
-        self.logger.info("Setting fixed size to: %s %s", target_width, target_height)
         self.setFixedSize(
             target_width,
             target_height,
