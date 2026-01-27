@@ -92,6 +92,8 @@ class FullScreenFPLWidget(FPLWidget):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        if not self.isWindow():
+            return
         window = self.window()
         window_handle = window.windowHandle() if window is not None else None
         screen = window_handle.screen() if window_handle is not None else None
@@ -107,8 +109,8 @@ class FullScreenFPLWidget(FPLWidget):
             available.height(),
             scale,
         )
-        target_width = int((available.width() - 200) * scale)
-        target_height = int((available.height() - 200) * scale)
+        target_width = int((available.width() - 400) * scale)
+        target_height = int((available.height() - 400) * scale)
         self.logger.info("Setting fixed size to: %s %s", target_width, target_height)
         self.setFixedSize(
             target_width,

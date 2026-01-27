@@ -53,7 +53,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self._load_existing_data_if_available()
 
     def _maximise_screen(self) -> None:
-        screen = QtWidgets.QApplication.primaryScreen()
+        window_handle = self.windowHandle()
+        screen = window_handle.screen() if window_handle is not None else None
+        if screen is None:
+            screen = QtWidgets.QApplication.primaryScreen()
+        if screen is None:
+            return
         available = screen.availableGeometry()
         # Use the maximum available window size
         self.setGeometry(available)
