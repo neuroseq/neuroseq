@@ -55,9 +55,22 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.file_status_label: QtWidgets.QLabel | None = None
         self.button_row: QtWidgets.QWidget | None = None
         self.custom_mapping_preview: QtWidgets.QLabel | None = None
+        self._has_maximised = False
         self._setup_ui()
         self._apply_existing_stim_mapping()
         self._populate_cellpose_preview()
+
+    def _maximise_screen(self) -> None:
+        window_handle = self.windowHandle()
+        screen = window_handle.screen() if window_handle is not None else None
+        if screen is None:
+            screen = QtWidgets.QApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        adjusted = available.adjusted(50, 50, -50, -50)
+        self.setGeometry(adjusted)
+        self.setWindowState(self.windowState() | QtCore.Qt.WindowState.WindowMaximized)
 
     @staticmethod
     def _double_spinbox(
@@ -106,13 +119,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
     def _setup_ui(self) -> None:
         self.setWindowTitle("Import Patch Clamp Data")
         self.setModal(True)
-
-        screen = QtWidgets.QApplication.primaryScreen()
-        screen_width = screen.availableGeometry().width()
-        screen_height = screen.availableGeometry().height()
-        self.dialog_width = min(1400, int(0.9 * screen_width))
-        self.dialog_height = min(900, int(0.8 * screen_height))
-        self.resize(self.dialog_width, self.dialog_height)
 
         self.main_layout = QtWidgets.QHBoxLayout(self)
         self.main_layout.setSpacing(12)
@@ -351,8 +357,16 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             self.overlay_stack.setFixedSize(square_size, square_size)
             if self.overlay_widget is not None:
                 self.overlay_widget.setFixedSize(square_size, square_size)
-        self._set_file_sections_visible(False)
-        self._set_file_selector_visible(True)
+        if self.npy_data is None:
+            self._set_file_sections_visible(False)
+            self._set_file_selector_visible(True)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._has_maximised:
+            return
+        self._has_maximised = True
+        self._maximise_screen()
 
     def _populate_cellpose_preview(self) -> None:
         """Fill the left-hand preview with Cellpose data if available."""
