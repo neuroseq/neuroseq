@@ -41,6 +41,15 @@ class StrikeGraphic(Protocol):
     visible: bool
 
 
+class VisibleGraphic(Protocol):
+    visible: bool
+
+
+class ImageGraphic(Protocol):
+    data: np.ndarray
+    visible: bool
+
+
 class LabelGraphics(TypedDict):
     stim: TextGraphic
     cellpose: TextGraphic
@@ -48,7 +57,7 @@ class LabelGraphics(TypedDict):
     cellpose_strike: StrikeGraphic
     stim_bold: list[TextGraphic]
     cellpose_bold: list[TextGraphic]
-    all: list[object]
+    all: list[VisibleGraphic]
 
 
 class StrikeLine(Graphic):
@@ -73,8 +82,8 @@ class OverlayView(FPLWidget):
         self.show_cellpose_ids = True
         self.show_stimulus_ids = False
         self.highlight_mappings = True
-        self._image_graphic = None
-        self._segmentation_graphic = None
+        self._image_graphic: ImageGraphic | None = None
+        self._segmentation_graphic: ImageGraphic | None = None
         self._label_centers: dict[int, tuple[float, float]] = {}
         self._label_graphics: dict[int, LabelGraphics] = {}
         self._label_segmentation_id: int | None = None
@@ -274,7 +283,7 @@ class OverlayView(FPLWidget):
                 )
                 for _ in range(3)
             ]
-            all_graphics: list[object] = [
+            all_graphics: list[VisibleGraphic] = [
                 cellpose,
                 stim,
                 stim_strike,

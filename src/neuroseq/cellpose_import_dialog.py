@@ -256,6 +256,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.left_container is None
             or self.right_container is None
             or self.checkbox_container is None
+            or self.left_layout is None
         ):
             return
         left_width = int(self.main_content_container.width() * 0.6)

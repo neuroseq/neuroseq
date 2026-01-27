@@ -328,7 +328,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         button_layout.addWidget(cancel_button)
 
         button_layout.addStretch()
-        right_layout.addWidget(self.button_row)
+        self.right_layout.addWidget(self.button_row)
         self.main_layout.addWidget(self.right_container, stretch=2)
 
     def resizeEvent(self, event) -> None:
