@@ -16,6 +16,8 @@ from neuroseq.importer_patchclamp import PeakDetectionParams
 from neuroseq.importer_patchclamp import generate_stimulus_mapping
 from neuroseq.importer_patchclamp import import_patchclamp_data
 from neuroseq.importer_patchclamp import validate_append_import
+from neuroseq.utils import get_primary_available_geometry
+from neuroseq.utils import is_vertical_screen
 
 
 class PatchClampImportDialog(QtWidgets.QDialog):
@@ -62,25 +64,15 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self._populate_cellpose_preview()
 
     def _maximise_screen(self) -> None:
-        window_handle = self.windowHandle()
-        screen = window_handle.screen() if window_handle is not None else None
-        if screen is None:
-            screen = QtWidgets.QApplication.primaryScreen()
-        if screen is None:
+        available = get_primary_available_geometry()
+        if available is None:
             return
-        available = screen.availableGeometry()
         adjusted = available.adjusted(50, 50, -50, -50)
         self.setGeometry(adjusted)
         self.setWindowState(self.windowState() | QtCore.Qt.WindowState.WindowMaximized)
 
     def _should_use_vertical_layout(self) -> bool:
-        screen = QtWidgets.QApplication.primaryScreen()
-        if screen is None:
-            return False
-        available = screen.availableGeometry()
-        if available.height() <= 0:
-            return False
-        return available.width() < 0.8 * available.height()
+        return is_vertical_screen(get_primary_available_geometry())
 
     @staticmethod
     def _double_spinbox(

@@ -15,6 +15,8 @@ from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_cellpose import generate_linear_stimulus_mapping
 from neuroseq.importer_cellpose import is_identity_mapping
+from neuroseq.utils import get_primary_available_geometry
+from neuroseq.utils import is_vertical_screen
 
 
 class CellposeImportDialog(QtWidgets.QDialog):
@@ -54,26 +56,16 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self._load_existing_data_if_available()
 
     def _maximise_screen(self) -> None:
-        window_handle = self.windowHandle()
-        screen = window_handle.screen() if window_handle is not None else None
-        if screen is None:
-            screen = QtWidgets.QApplication.primaryScreen()
-        if screen is None:
+        available = get_primary_available_geometry()
+        if available is None:
             return
-        available = screen.availableGeometry()
         adjusted = available.adjusted(50, 50, -50, -50)
         # Use the maximum available window size with a 100px margin
         self.setGeometry(adjusted)
         self.setWindowState(self.windowState() | QtCore.Qt.WindowState.WindowMaximized)
 
     def _should_use_vertical_layout(self) -> bool:
-        screen = QtWidgets.QApplication.primaryScreen()
-        if screen is None:
-            return False
-        available = screen.availableGeometry()
-        if available.height() <= 0:
-            return False
-        return available.width() < 0.8 * available.height()
+        return is_vertical_screen(get_primary_available_geometry())
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("Import Cellpose Data")
