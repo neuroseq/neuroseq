@@ -92,13 +92,25 @@ class FullScreenFPLWidget(FPLWidget):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        screen = QtWidgets.QApplication.primaryScreen()
+        window = self.window()
+        window_handle = window.windowHandle() if window is not None else None
+        screen = window_handle.screen() if window_handle is not None else None
+        if screen is None:
+            screen = QtWidgets.QApplication.primaryScreen()
         if screen is None:
             return
         available = screen.availableGeometry()
-        self.logger.debug(
-            "Setting fixed size, max w/h (-200 from these): %s %s",
+        scale = screen.devicePixelRatio()
+        self.logger.info(
+            "Setting fixed size, max w/h (-200 from these): %s %s, scale: %s",
             available.width(),
             available.height(),
+            scale,
         )
-        self.setFixedSize(available.width() - 200, available.height() - 200)
+        target_width = int((available.width() - 200) * scale)
+        target_height = int((available.height() - 200) * scale)
+        self.logger.info("Setting fixed size to: %s %s", target_width, target_height)
+        self.setFixedSize(
+            target_width,
+            target_height,
+        )
