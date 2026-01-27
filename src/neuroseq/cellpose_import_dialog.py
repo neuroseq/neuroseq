@@ -49,6 +49,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.checkbox_container: QtWidgets.QWidget | None = None
         self.mapping_group: QtWidgets.QGroupBox | None = None
         self.main_content_layout: QtWidgets.QHBoxLayout | None = None
+        self._vertical_layout = False
         self._setup_ui()
         self._load_existing_data_if_available()
 
@@ -64,6 +65,15 @@ class CellposeImportDialog(QtWidgets.QDialog):
         # Use the maximum available window size with a 100px margin
         self.setGeometry(adjusted)
         self.setWindowState(self.windowState() | QtCore.Qt.WindowState.WindowMaximized)
+
+    def _should_use_vertical_layout(self) -> bool:
+        screen = QtWidgets.QApplication.primaryScreen()
+        if screen is None:
+            return False
+        available = screen.availableGeometry()
+        if available.height() <= 0:
+            return False
+        return available.width() < 0.8 * available.height()
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("Import Cellpose Data")
@@ -126,7 +136,15 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         # Main content (hidden until both files are selected)
         self.main_content_container = QtWidgets.QWidget()
-        self.main_content_layout = QtWidgets.QHBoxLayout(self.main_content_container)
+        self._vertical_layout = self._should_use_vertical_layout()
+        if self._vertical_layout:
+            self.main_content_layout = QtWidgets.QVBoxLayout(
+                self.main_content_container
+            )
+        else:
+            self.main_content_layout = QtWidgets.QHBoxLayout(
+                self.main_content_container
+            )
         self.main_content_layout.setContentsMargins(0, 0, 0, 0)
         self.main_content_layout.setSpacing(16)
 
@@ -265,10 +283,15 @@ class CellposeImportDialog(QtWidgets.QDialog):
             or self.left_layout is None
         ):
             return
-        left_width = int(self.main_content_container.width() * 0.6)
-        right_width = max(1, self.main_content_container.width() - left_width)
-        self.left_container.setMaximumWidth(left_width)
-        self.right_container.setMaximumWidth(right_width)
+        if self._vertical_layout:
+            self.left_container.setMaximumWidth(self.main_content_container.width())
+            self.right_container.setMaximumWidth(self.main_content_container.width())
+            left_width = self.left_container.width()
+        else:
+            left_width = int(self.main_content_container.width() * 0.6)
+            right_width = max(1, self.main_content_container.width() - left_width)
+            self.left_container.setMaximumWidth(left_width)
+            self.right_container.setMaximumWidth(right_width)
         available_height = (
             self.left_container.height()
             - self.checkbox_container.height()

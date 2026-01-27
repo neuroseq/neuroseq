@@ -56,6 +56,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.button_row: QtWidgets.QWidget | None = None
         self.custom_mapping_preview: QtWidgets.QLabel | None = None
         self._has_maximised = False
+        self._vertical_layout = False
         self._setup_ui()
         self._apply_existing_stim_mapping()
         self._populate_cellpose_preview()
@@ -71,6 +72,15 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         adjusted = available.adjusted(50, 50, -50, -50)
         self.setGeometry(adjusted)
         self.setWindowState(self.windowState() | QtCore.Qt.WindowState.WindowMaximized)
+
+    def _should_use_vertical_layout(self) -> bool:
+        screen = QtWidgets.QApplication.primaryScreen()
+        if screen is None:
+            return False
+        available = screen.availableGeometry()
+        if available.height() <= 0:
+            return False
+        return available.width() < 0.8 * available.height()
 
     @staticmethod
     def _double_spinbox(
@@ -120,7 +130,11 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.setWindowTitle("Import Patch Clamp Data")
         self.setModal(True)
 
-        self.main_layout = QtWidgets.QHBoxLayout(self)
+        self._vertical_layout = self._should_use_vertical_layout()
+        if self._vertical_layout:
+            self.main_layout = QtWidgets.QVBoxLayout(self)
+        else:
+            self.main_layout = QtWidgets.QHBoxLayout(self)
         self.main_layout.setSpacing(12)
 
         self.left_container = QtWidgets.QWidget()
@@ -341,10 +355,15 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         super().resizeEvent(event)
         if self.left_container is None or self.right_container is None:
             return
-        left_width = int(self.width() * 0.6)
-        right_width = max(1, self.width() - left_width)
-        self.left_container.setMaximumWidth(left_width)
-        self.right_container.setMaximumWidth(right_width)
+        if self._vertical_layout:
+            self.left_container.setMaximumWidth(self.width())
+            self.right_container.setMaximumWidth(self.width())
+            left_width = self.left_container.width()
+        else:
+            left_width = int(self.width() * 0.6)
+            right_width = max(1, self.width() - left_width)
+            self.left_container.setMaximumWidth(left_width)
+            self.right_container.setMaximumWidth(right_width)
         if self.overlay_stack is None or self.file_group is None:
             return
         available_height = (
