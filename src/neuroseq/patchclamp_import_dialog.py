@@ -10,6 +10,7 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
 from neuroseq.cell_overlay_widget import CellOverlayWidget
+from neuroseq.data import SpikeData
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_patchclamp import PeakDetectionParams
@@ -902,4 +903,27 @@ class PatchClampImportDialog(QtWidgets.QDialog):
     @property
     def imported_data(self) -> list:
         """Combined imported spike and trace data."""
-        return self.imported_spike_data + self.imported_trace_data
+        spike_data = None
+        if self.imported_spike_data:
+            if len(self.imported_spike_data) == 1:
+                spike_data = self.imported_spike_data[0]
+            else:
+                spike_indices = np.concatenate(
+                    [sd.spike_indices for sd in self.imported_spike_data]
+                )
+                spike_times = np.concatenate(
+                    [sd.spike_times for sd in self.imported_spike_data]
+                )
+                if spike_times.size > 1:
+                    order = np.argsort(spike_times)
+                    spike_times = spike_times[order]
+                    spike_indices = spike_indices[order]
+                spike_data = SpikeData(
+                    "Patch Clamp Spikes",
+                    spike_indices.astype(np.uint32),
+                    spike_times.astype(np.float32),
+                )
+        data = []
+        if spike_data is not None:
+            data.append(spike_data)
+        return data + self.imported_trace_data
