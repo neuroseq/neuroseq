@@ -14,6 +14,7 @@ from neuroseq.importer_suite2p import prepare_suite2p_spikes
 from neuroseq.importer_suite2p import prepare_suite2p_traces
 
 
+# todo: Rename this file once merged (to avoid merge-rename issue)
 class Suite2pImportDialog(QtWidgets.QDialog):
     """Dialog for importing Suite2p (npy) or CSV traces/spikes with folder auto-detect."""
 
@@ -25,7 +26,7 @@ class Suite2pImportDialog(QtWidgets.QDialog):
     ) -> None:
         super().__init__(parent)
 
-        self.experiment_name: str = "Suite2p Import"
+        self.experiment_name: str = "Suite2p"
         self.experiment_duration: float = 0.0
         self.imported_data: list[Data] = []
 
