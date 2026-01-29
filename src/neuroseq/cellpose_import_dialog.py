@@ -108,6 +108,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
         seg_layout.addWidget(self.segmentation_path_label, stretch=1)
         seg_layout.addWidget(browse_seg_button)
         file_layout.addRow("Segmentation CSV/NPY:", seg_layout)
+        file_group.setMinimumHeight(
+            file_layout.sizeHint().height() + 50
+        )  # Ensure it does nto get clipped vertically
 
         top_horizontal_layout.addWidget(file_group, stretch=2)
 
