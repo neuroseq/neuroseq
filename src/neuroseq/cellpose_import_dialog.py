@@ -19,21 +19,6 @@ from neuroseq.utils import get_primary_available_geometry
 from neuroseq.utils import is_vertical_screen
 
 
-def _highest_one_to_one_cellpose_prefix(mapping: dict[int, int]) -> int:
-    if not mapping:
-        return -1
-
-    cellpose_counts: dict[int, int] = {}
-    for cellpose_id in mapping.values():
-        cellpose_id = int(cellpose_id)
-        cellpose_counts[cellpose_id] = cellpose_counts.get(cellpose_id, 0) + 1
-
-    highest = -1
-    while cellpose_counts.get(highest + 1, 0) == 1:
-        highest += 1
-    return highest
-
-
 def _missing_cellpose_ids_in_range(mapping: dict[int, int]) -> list[int]:
     if not mapping:
         return []
@@ -217,16 +202,20 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.custom_mapping_label.setVisible(False)
         mapping_layout.addRow(self.custom_mapping_label, self.custom_mapping_line)
 
-        self.mapping_validation_label = QtWidgets.QLabel(
-            "1:1 mappings ensured up to cellpose ID: none"
-        )
-        self.mapping_validation_label.setStyleSheet("QLabel { color: #666666; }")
-        mapping_layout.addRow(self.mapping_validation_label)
+        self.mapping_ids_label = QtWidgets.QLabel("IDs mapped: 0")
+        self.mapping_ids_label.setStyleSheet("QLabel { color: #666666; }")
+        self.show_missing_button = QtWidgets.QPushButton("Show missing")
+        self.show_missing_button.setCheckable(True)
+        self.show_missing_button.toggled.connect(self._update_mapping_helper)
+        ids_layout = QtWidgets.QHBoxLayout()
+        ids_layout.addWidget(self.mapping_ids_label)
+        ids_layout.addWidget(self.show_missing_button)
+        ids_layout.addStretch(1)
+        mapping_layout.addRow(ids_layout)
 
-        self.mapping_missing_label = QtWidgets.QLabel(
-            "Missing cellpose IDs in range: none"
-        )
+        self.mapping_missing_label = QtWidgets.QLabel("")
         self.mapping_missing_label.setStyleSheet("QLabel { color: #666666; }")
+        self.mapping_missing_label.setVisible(False)
         mapping_layout.addRow(self.mapping_missing_label)
 
         self.mapping_help_link = QtWidgets.QLabel(
@@ -302,6 +291,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.main_content_container.setVisible(False)
         self._set_ui_loaded_state(False)
         self._on_display_toggle_changed()
+        self._on_mapping_changed()
 
     def _set_ui_loaded_state(self, loaded: bool) -> None:
         """Toggle between pre-selection and post-selection UI."""
@@ -384,6 +374,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.custom_mapping_label.setVisible(is_custom)
         self.linear_offset_spin.setVisible(not is_custom)
         self.linear_offset_label.setVisible(not is_custom)
+        self.show_missing_button.setVisible(is_custom)
+        self.mapping_help_link.setVisible(is_custom)
+        if not is_custom:
+            self.show_missing_button.setChecked(False)
 
         # Update preview if data is loaded
         if (
@@ -501,31 +495,33 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.logger.warning("Error updating preview mapping: %s", exc)
 
     def _update_mapping_helper(self) -> None:
-        if not hasattr(self, "mapping_validation_label"):
+        if not hasattr(self, "mapping_ids_label"):
             return
         try:
             mapping_strategy = self._get_mapping_strategy()
             mapping = self._generate_stimulus_mapping(mapping_strategy)
-            highest = _highest_one_to_one_cellpose_prefix(mapping)
-            suffix = "none" if highest < 0 else str(highest + 1)
-            self.mapping_validation_label.setText(
-                f"Cellpose data sufficient for {suffix} Suite2p data rows(1:1)"
-            )
+            mapped_count = len(mapping)
+            self.mapping_ids_label.setText(f"IDs mapped: {mapped_count}")
+
+            if mapping_strategy != "Custom":
+                self.mapping_missing_label.setVisible(False)
+                return
+
+            if not self.show_missing_button.isChecked():
+                self.mapping_missing_label.setVisible(False)
+                return
+
             missing = _missing_cellpose_ids_in_range(mapping)
-            if missing:
-                missing_text = ", ".join(str(cellpose_id) for cellpose_id in missing)
-            else:
-                missing_text = "none"
-            self.mapping_missing_label.setText(
-                f"Please specify these missing cellpose IDs in your mapping: {missing_text}"
+            missing_text = (
+                ", ".join(str(cellpose_id) for cellpose_id in missing)
+                if missing
+                else "none"
             )
+            self.mapping_missing_label.setText(f"Missing Cellpose IDs: {missing_text}")
+            self.mapping_missing_label.setVisible(True)
         except Exception:
-            self.mapping_validation_label.setText(
-                "Cellpose mapping assessment could not be completed"
-            )
-            self.mapping_missing_label.setText(
-                ""  # make nothing appear as the above will appear in any case.
-            )
+            self.mapping_ids_label.setText("IDs mapped: 0")
+            self.mapping_missing_label.setVisible(False)
 
     def _show_mapping_help(self) -> None:
         QtWidgets.QMessageBox.information(
