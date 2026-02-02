@@ -318,6 +318,8 @@ class Project:
         duration_seconds: float,
         new_data: Sequence[TraceData | SpikeData | SynapseData],
         time_offset_seconds: float,
+        *,
+        keep_in_sync: bool = False,
     ):
         """
         Append new experimental data to an existing experiment
@@ -359,7 +361,11 @@ class Project:
                     f"  - appending '{datum.name}' to '{datum.name}' at {time_offset_seconds}s"
                 )
                 append_data(
-                    existing_datum, datum, duration_seconds, time_offset_seconds
+                    existing_datum,
+                    datum,
+                    duration_seconds,
+                    time_offset_seconds,
+                    keep_in_sync=keep_in_sync,
                 )
             else:
                 self.logger.warning(

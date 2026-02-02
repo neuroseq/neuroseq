@@ -511,7 +511,6 @@ def test_custom_mapping_keeps_existing_cellpose_mapping():
   """
 
 
-# Deliberately failing, TDD style
 def test_custom_mapping_stim_id_input_uses_stim_ids_directly(tmp_path, qtbot):
     """Custom input '2,3' should import to stim IDs 2 and 3, even with mapping."""
     two_neuron_data = _generate_two_neuron_patchclamp_trace(
