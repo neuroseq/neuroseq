@@ -350,6 +350,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.custom_mapping_label.setVisible(is_custom)
         self.linear_offset_spin.setVisible(not is_custom)
         self.linear_offset_label.setVisible(not is_custom)
+        if hasattr(self, "guidance_label"):
+            self.guidance_label.setVisible(is_custom)
 
         # Update preview if data is loaded
         if (
