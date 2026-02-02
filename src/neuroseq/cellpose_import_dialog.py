@@ -194,6 +194,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         for abstract_button in self.mapping_buttons.buttons():
             if hasattr(abstract_button, "toggled"):
                 abstract_button.toggled.connect(self._on_mapping_changed)
+        self._last_mapping_strategy = "Linear"
 
         # Place overlay first so the visual is top-most
         self.left_container = QtWidgets.QWidget()
@@ -330,6 +331,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         """Handle toggle between mapping strategies"""
         mapping_strategy = self._get_mapping_strategy()
         is_custom = mapping_strategy == "Custom"
+        self.custom_mapping_line.clear()  # avoid data leaking.. before data from Custom mapping could taint Linear mapping if switched back.
         self.custom_mapping_line.setVisible(is_custom)
         self.custom_mapping_label.setVisible(is_custom)
         self.linear_offset_spin.setVisible(not is_custom)
@@ -341,6 +343,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             and self.importer.overlay_image is not None
         ):
             self._update_preview_mapping()
+        self._last_mapping_strategy = mapping_strategy
 
     def _on_custom_mapping_text_changed(self, _text: str) -> None:
         """Refresh preview live while editing custom mapping."""
