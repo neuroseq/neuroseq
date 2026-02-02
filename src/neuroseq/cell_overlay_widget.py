@@ -54,9 +54,7 @@ class LabelGraphics(TypedDict):
     stim: TextGraphic
     cellpose: TextGraphic
     stim_strike: StrikeGraphic
-    cellpose_strike: StrikeGraphic
-    stim_bold: list[TextGraphic]
-    cellpose_bold: list[TextGraphic]
+    cellpose_bold: TextGraphic
     all: list[VisibleGraphic]
 
 
@@ -65,7 +63,7 @@ class StrikeLine(Graphic):
         super().__init__()
         positions = np.zeros((2, 3), dtype=np.float32)
         material = pygfx.LineMaterial(
-            thickness=2.0, color=pygfx.Color(0.0, 0.0, 0.0, 1.0)
+            thickness=20.0, color=pygfx.Color(0.0, 0.0, 0.0, 1.0)
         )
         self.line = pygfx.Line(pygfx.Geometry(positions=positions), material=material)
         self._set_world_object(self.line)
@@ -255,41 +253,21 @@ class OverlayView(FullScreenFPLWidget):
             )
             stim_strike = StrikeLine()
             self.subplot.add_graphic(stim_strike, center=False)
-            stim_bold = [
-                self.subplot.add_text(
-                    "",
-                    font_size=1,
-                    offset=base_offset,
-                    face_color=(0.0, 0.0, 0.0),
-                    outline_color=(1.0, 1.0, 1.0),
-                    outline_thickness=0.6,
-                    center=False,
-                    screen_space=False,
-                )
-                for _ in range(3)
-            ]
-            cellpose_strike = StrikeLine()
-            self.subplot.add_graphic(cellpose_strike, center=False)
-            cellpose_bold = [
-                self.subplot.add_text(
-                    "",
-                    font_size=1,
-                    offset=base_offset,
-                    face_color=(0.25, 0.25, 0.25),
-                    outline_color=(0.9, 0.9, 0.9),
-                    outline_thickness=3.0,
-                    center=False,
-                    screen_space=False,
-                )
-                for _ in range(3)
-            ]
+            cellpose_bold = self.subplot.add_text(
+                "",
+                font_size=1,
+                offset=base_offset,
+                face_color=(0.25, 0.25, 0.25),
+                outline_color=(0.9, 0.9, 0.9),
+                outline_thickness=3.0,
+                center=False,
+                screen_space=False,
+            )
             all_graphics: list[VisibleGraphic] = [
                 cellpose,
                 stim,
                 stim_strike,
-                cellpose_strike,
-                *stim_bold,
-                *cellpose_bold,
+                cellpose_bold,
             ]
             for graphic in all_graphics:
                 graphic.visible = False
@@ -298,8 +276,6 @@ class OverlayView(FullScreenFPLWidget):
                 "stim": stim,
                 "cellpose": cellpose,
                 "stim_strike": stim_strike,
-                "cellpose_strike": cellpose_strike,
-                "stim_bold": stim_bold,
                 "cellpose_bold": cellpose_bold,
                 "all": all_graphics,
             }
@@ -439,14 +415,6 @@ class OverlayView(FullScreenFPLWidget):
                 cellpose_graphic.outline_color = cellpose_outline
                 cellpose_graphic.outline_thickness = cellpose_outline_thickness
                 cellpose_graphic.visible = True
-                self._update_strike_graphic(
-                    graphics["cellpose_strike"],
-                    cellpose_text,
-                    cellpose_font_size,
-                    cellpose_offset,
-                    cellpose_face,
-                    cross_out_default and not stim_visible,
-                )
                 self._update_bold_graphics(
                     graphics["cellpose_bold"],
                     cellpose_text,
@@ -459,9 +427,7 @@ class OverlayView(FullScreenFPLWidget):
                 )
             else:
                 graphics["cellpose"].visible = False
-                graphics["cellpose_strike"].visible = False
-                for graphic in graphics["cellpose_bold"]:
-                    graphic.visible = False
+                graphics["cellpose_bold"].visible = False
 
             if stim_visible:
                 stim_text = f"{stim_display_id}"
@@ -484,25 +450,13 @@ class OverlayView(FullScreenFPLWidget):
                     stim_face,
                     cross_out_default,
                 )
-                self._update_bold_graphics(
-                    graphics["stim_bold"],
-                    stim_text,
-                    stim_font_size,
-                    stim_offset,
-                    stim_face,
-                    stim_outline,
-                    stim_outline_thickness,
-                    False,
-                )
             else:
                 graphics["stim"].visible = False
                 graphics["stim_strike"].visible = False
-                for graphic in graphics["stim_bold"]:
-                    graphic.visible = False
 
     def _update_bold_graphics(
         self,
-        graphics: list[TextGraphic],
+        graphic: TextGraphic,
         text: str,
         font_size: float,
         offset: tuple[float, float, float],
@@ -511,21 +465,20 @@ class OverlayView(FullScreenFPLWidget):
         outline_thickness: float,
         visible: bool,
     ) -> None:
-        if not graphics:
+        if not graphic:
             return
-        bold_offsets = (
-            (offset[0] + (font_size * 0.18), offset[1], offset[2]),
-            (offset[0] + (font_size * 0.08), offset[1] + (font_size * 0.08), offset[2]),
-            (offset[0] + (font_size * 0.2), offset[1] + (font_size * 0.02), offset[2]),
+        bold_offset = (
+            offset[0] + (font_size * 0.18),
+            offset[1],
+            offset[2],
         )
-        for graphic, bold_offset in zip(graphics, bold_offsets, strict=False):
-            graphic.text = text
-            graphic.font_size = font_size
-            graphic.offset = bold_offset
-            graphic.face_color = face_color
-            graphic.outline_color = outline_color
-            graphic.outline_thickness = outline_thickness
-            graphic.visible = visible
+        graphic.text = text
+        graphic.font_size = font_size
+        graphic.offset = bold_offset
+        graphic.face_color = face_color
+        graphic.outline_color = outline_color
+        graphic.outline_thickness = outline_thickness
+        graphic.visible = visible
 
     def _update_strike_graphic(
         self,
