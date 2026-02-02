@@ -505,7 +505,7 @@ def test_custom_mapping_keeps_existing_cellpose_mapping():
     )
 
     mapping = generate_stimulus_mapping(
-        cellpose_import, "Custom", data_row_count=2, stim_ids=[5, 6]
+        cellpose_import, data_row_count=2, stim_ids=[5, 6]
     )
 
     assert mapping == existing_mapping

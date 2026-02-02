@@ -14,7 +14,6 @@ from neuroseq.data import SpikeData
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_patchclamp import PeakDetectionParams
-from neuroseq.importer_patchclamp import generate_stimulus_mapping
 from neuroseq.importer_patchclamp import import_patchclamp_data
 from neuroseq.importer_patchclamp import validate_append_import
 from neuroseq.utils import get_primary_available_geometry
@@ -192,8 +191,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             suffix="Hz",
         )
         options_layout.addRow("Sampling rate:", self.sampling_rate_spin)
-
-        mapping_layout = QtWidgets.QHBoxLayout()
 
         self.custom_neuron_id_line = QtWidgets.QLineEdit()
         self.custom_neuron_id_line.setPlaceholderText("e.g., 0 or 0,1")
@@ -433,7 +430,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.custom_mapping_line.setText(",".join(str(stim) for stim in stim_ids))
         self.custom_neuron_id_line.setText(",".join(str(stim) for stim in stim_ids))
 
-        self._set_mapping_strategy("Custom")
         if len(stim_ids) > 1:
             self._auto_stimulus_ids = stim_ids
             self._auto_from_cellpose = True
@@ -513,8 +509,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 self.extracted_neuron_id,
                 filename,
             )
-            # Auto-select Custom mapping and set the neuron ID
-            self._set_mapping_strategy("Custom")
+            # set the neuron ID
             self.custom_neuron_id_line.setText(str(self.extracted_neuron_id))
             if not self.custom_mapping_line.text().strip():
                 # Default stim ID target to the detected neuron ID
@@ -588,7 +583,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         derived_ids = stim_ids[:row_count]
         self.custom_mapping_line.setText(self._format_stimulus_display(derived_ids))
         self.custom_neuron_id_line.setText(",".join(str(stim) for stim in derived_ids))
-        self._set_mapping_strategy("Custom")
         self._auto_stimulus_ids = derived_ids
         self._auto_from_cellpose = True
         self._update_custom_mapping_hint()
@@ -674,12 +668,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             return self._parse_neuron_ids(text)
         except Exception:
             return []
-
-    def _set_mapping_strategy(self, target: str) -> None:
-        for button in self.mapping_buttons.buttons():
-            if button.text() == target:
-                button.setChecked(True)
-                break
 
     def _update_target_stimulus_ids(self) -> None:
         """Limit target stimulus IDs to the number of traces in the loaded data."""
@@ -775,23 +763,23 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 self.neurons_to_replace = list(neuron_ids)
 
             # Generate and store the stimulus-to-cellpose mapping
-            stimulus_mapping = generate_stimulus_mapping(
-                self.cellpose_import,
-                "Custom",  # todo: No need to pass this, simplify.
-                self.data_row_count,
-                self._safe_parse_stimulus_ids(),
-            )
+            ## todo: review need of mapping generate function now
+            # stimulus_mapping = generate_stimulus_mapping(
+            #     self.cellpose_import,
+            #     self.data_row_count,
+            #     self._safe_parse_stimulus_ids(),
+            # )
 
             self.logger.debug(
-                "Importing patchclamp data: sampling_rate=%.2fHz dt=%.6f mapping_keys=%s",
+                "Importing patchclamp data: sampling_rate=%.2fHz dt=%.6f",
                 sampling_rate,
                 dt,
-                sorted(stimulus_mapping.keys()),
             )
 
             # Update cellpose import with the mapping
             if self.cellpose_import is not None:
-                self.cellpose_import.stimulus_to_cellpose_mapping = stimulus_mapping
+                pass  # self.cellpose_import.stimulus_to_cellpose_mapping = stimulus_mapping
+            # todo: review need of mapping generate function now
 
             detection_params = PeakDetectionParams(
                 peak_height=self.peak_height_spin.value(),
