@@ -180,7 +180,6 @@ def test_import_single_npy_to_correct_index(tmp_path, qtbot):
     dialog.load_file(str(npy_path))
 
     # Set target stimulus ID to 15
-    dialog._set_mapping_strategy("Custom")
     dialog.custom_mapping_line.setText("15")
 
     # Set reasonable detection parameters
@@ -225,7 +224,6 @@ def test_import_data_functionality(tmp_path, qtbot):
     qtbot.addWidget(dialog)
 
     dialog.load_file(str(npy_path))
-    dialog._set_mapping_strategy("Custom")
     dialog.custom_mapping_line.setText("25")
     dialog.sampling_rate_spin.setValue(1000.0)
     dialog.peak_height_spin.setValue(2.0)
@@ -330,7 +328,6 @@ def test_import_single_then_extend_timeline(tmp_path, qtbot):
     qtbot.addWidget(dialog1)
 
     dialog1.load_file(str(first_npy))
-    dialog1._set_mapping_strategy("Custom")
     dialog1.sampling_rate_spin.setValue(1000.0)
     dialog1.custom_mapping_line.setText("15")
     dialog1.replace_checkbox.setChecked(True)  # Replace mode for first import
@@ -355,7 +352,6 @@ def test_import_single_then_extend_timeline(tmp_path, qtbot):
     qtbot.addWidget(dialog2)
 
     dialog2.load_file(str(second_npy))
-    dialog2._set_mapping_strategy("Custom")
     dialog2.sampling_rate_spin.setValue(1000.0)
     dialog2.custom_mapping_line.setText("15")
     dialog2.replace_checkbox.setChecked(False)  # EXTEND mode
@@ -400,7 +396,6 @@ def test_import_single_then_replace_timeline(tmp_path, qtbot):
     qtbot.addWidget(dialog1)
 
     dialog1.load_file(str(first_npy))
-    dialog1._set_mapping_strategy("Custom")
     dialog1.sampling_rate_spin.setValue(1000.0)
     dialog1.custom_mapping_line.setText("15")
     dialog1.replace_checkbox.setChecked(True)  # Replace mode
@@ -423,7 +418,6 @@ def test_import_single_then_replace_timeline(tmp_path, qtbot):
     qtbot.addWidget(dialog2)
 
     dialog2.load_file(str(replacement_npy))
-    dialog2._set_mapping_strategy("Custom")
     dialog2.sampling_rate_spin.setValue(1000.0)
     dialog2.custom_mapping_line.setText("15")
     dialog2.replace_checkbox.setChecked(True)  # REPLACE mode
@@ -544,7 +538,6 @@ def test_custom_mapping_stim_id_input_uses_stim_ids_directly(tmp_path, qtbot):
     qtbot.addWidget(dialog)
     dialog.load_file(str(npy_path))
 
-    dialog._set_mapping_strategy("Custom")
     dialog.custom_mapping_line.setText("2, 3")
     dialog.sampling_rate_spin.setValue(1000.0)
     dialog.peak_height_spin.setValue(2.0)
@@ -588,7 +581,6 @@ def test_custom_mapping_duplicate_stimulus_ids_error(tmp_path, qtbot, monkeypatc
     qtbot.addWidget(dialog)
     dialog.load_file(str(npy_path))
 
-    dialog._set_mapping_strategy("Custom")
     dialog.custom_mapping_line.setText("3,3,6,10")
     dialog.sampling_rate_spin.setValue(1000.0)
     dialog.peak_height_spin.setValue(2.0)
@@ -730,7 +722,6 @@ def test_import_single_then_double_replace_mode(tmp_path, qtbot):
     qtbot.addWidget(dialog1)
 
     dialog1.load_file(str(single_npy))
-    dialog1._set_mapping_strategy("Custom")
     dialog1.custom_mapping_line.setText("15")
     dialog1.sampling_rate_spin.setValue(1000.0)
     dialog1.replace_checkbox.setChecked(True)  # Replace mode
@@ -754,7 +745,6 @@ def test_import_single_then_double_replace_mode(tmp_path, qtbot):
     qtbot.addWidget(dialog2)
 
     dialog2.load_file(str(double_npy))
-    dialog2._set_mapping_strategy("Custom")
     dialog2.custom_mapping_line.setText("15,17")
     dialog2.sampling_rate_spin.setValue(1000.0)
     dialog2.replace_checkbox.setChecked(True)  # REPLACE mode
@@ -797,7 +787,6 @@ def test_import_single_then_double_extend_mode_error(tmp_path, qtbot, monkeypatc
     qtbot.addWidget(dialog1)
 
     dialog1.load_file(str(single_npy))
-    dialog1._set_mapping_strategy("Custom")
     dialog1.custom_mapping_line.setText("15")
     dialog1.sampling_rate_spin.setValue(1000.0)
     dialog1.replace_checkbox.setChecked(True)  # Replace mode
@@ -815,7 +804,6 @@ def test_import_single_then_double_extend_mode_error(tmp_path, qtbot, monkeypatc
     qtbot.addWidget(dialog2)
 
     dialog2.load_file(str(double_npy))
-    dialog2._set_mapping_strategy("Custom")
     dialog2.custom_mapping_line.setText("15,17")
     dialog2.sampling_rate_spin.setValue(1000.0)
     dialog2.replace_checkbox.setChecked(False)  # EXTEND mode
@@ -866,7 +854,6 @@ def test_import_new_neurons_extend_mode_with_existing_data_error(
     qtbot.addWidget(dialog1)
 
     dialog1.load_file(str(single_npy))
-    dialog1._set_mapping_strategy("Custom")
     dialog1.custom_mapping_line.setText("15")
     dialog1.sampling_rate_spin.setValue(1000.0)
     dialog1.replace_checkbox.setChecked(True)
@@ -884,7 +871,6 @@ def test_import_new_neurons_extend_mode_with_existing_data_error(
     qtbot.addWidget(dialog2)
 
     dialog2.load_file(str(different_npy))
-    dialog2._set_mapping_strategy("Custom")
     dialog2.custom_mapping_line.setText("20,25")
     dialog2.sampling_rate_spin.setValue(1000.0)
     dialog2.replace_checkbox.setChecked(False)  # EXTEND mode
@@ -934,7 +920,6 @@ def test_import_existing_neurons_only_extend_mode_success(tmp_path, qtbot):
     qtbot.addWidget(dialog1)
 
     dialog1.load_file(str(original_npy))
-    dialog1._set_mapping_strategy("Custom")
     dialog1.custom_mapping_line.setText("15,17")
     dialog1.sampling_rate_spin.setValue(1000.0)
     dialog1.replace_checkbox.setChecked(True)
@@ -952,7 +937,6 @@ def test_import_existing_neurons_only_extend_mode_success(tmp_path, qtbot):
     qtbot.addWidget(dialog2)
 
     dialog2.load_file(str(extension_npy))
-    dialog2._set_mapping_strategy("Custom")
     dialog2.custom_mapping_line.setText("15,17")
     dialog2.sampling_rate_spin.setValue(1000.0)
     dialog2.replace_checkbox.setChecked(False)  # EXTEND mode
