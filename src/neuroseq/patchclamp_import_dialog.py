@@ -14,7 +14,6 @@ from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_patchclamp import PeakDetectionParams
 from neuroseq.importer_patchclamp import import_patchclamp_data
-from neuroseq.importer_patchclamp import validate_append_import
 from neuroseq.utils import get_primary_available_geometry
 from neuroseq.utils import is_vertical_screen
 
@@ -39,7 +38,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.experiment_duration: float = 0.0
         self._auto_stimulus_ids: list[int] = []
         self._auto_from_cellpose = False
-        self.append_data = True
+        self.append_data = False
         self.neurons_to_replace: list[int] = []
         self.file_path: Path | None = None
         self.npy_data: np.ndarray | None = None
@@ -220,17 +219,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.show_stimulus_checkbox.setChecked(True)
         self.show_stimulus_checkbox.toggled.connect(self._on_show_stimulus_toggled)
         options_layout.addRow(self.show_stimulus_checkbox)
-
-        self.replace_checkbox = QtWidgets.QCheckBox(
-            "Replace existing data for these neuron IDs instead of extending"
-        )
-        self.replace_checkbox.setChecked(not self.append_data)
-        self.replace_checkbox.setToolTip(
-            "When enabled, imported data will overwrite existing traces/spikes "
-            "for the specified neuron ID. When disabled, data will be appended/extended."
-        )
-        self.replace_checkbox.toggled.connect(self._on_replace_toggled)
-        options_layout.addRow(self.replace_checkbox)
 
         self.spike_group = QtWidgets.QGroupBox("Peak Detection Parameters")
         spike_layout = QtWidgets.QFormLayout(self.spike_group)
@@ -418,9 +406,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             self._auto_stimulus_ids = stim_ids
             self._auto_from_cellpose = True
         self._update_custom_mapping_hint()
-
-    def _on_replace_toggled(self, checked: bool) -> None:
-        self.append_data = not checked
 
     def _browse_file(self) -> None:
         filename, _ = getopenfilename(
@@ -684,15 +669,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             neuron_ids = self._resolve_custom_target_ids(
                 self._safe_parse_stimulus_ids()
             )
-            if self.append_data:
-                validate_append_import(
-                    self.project,
-                    self.experiment_name,
-                    neuron_ids,
-                )
-                self.neurons_to_replace = []
-            else:
-                self.neurons_to_replace = list(neuron_ids)
+            self.neurons_to_replace = list(neuron_ids)
 
             # Generate and store the stimulus-to-cellpose mapping
             ## todo: review need of mapping generate function now
