@@ -209,3 +209,53 @@ def test_trace_widget(qtbot: QtBot) -> None:
     assert trace_widget.selected_neuron_slice is None
     assert trace_widget.selected_time_slice is None
     trace_widget.close()
+
+
+def test_trace_widget_gridlines_use_controller_limits(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.show()
+    qtbot.waitUntil(lambda: trace_widget.isVisible())
+    n_neurons = 5
+    n_timestamps = 50
+    dt = 0.001
+    data = TraceData(
+        name="traces",
+        traces=np.random.rand(n_neurons, n_timestamps).astype(np.float32),
+        indices=np.arange(n_neurons, dtype=np.uint32),
+        dt=dt,
+        units="mV",
+    )
+    controller.set_limits(max_time_secs=1.0, max_neurons=n_neurons)
+    trace_widget.set_data(data)
+    assert trace_widget.grid_lines is not None
+    assert trace_widget.grid_lines.time_ms == pytest.approx(controller.max_width)
+    positions = trace_widget.grid_lines.gridline_10ms.geometry.positions.data
+    assert np.max(positions[:, 0]) == pytest.approx(controller.max_width)
+    trace_widget.close()
+
+
+def test_trace_widget_gridlines_use_controller_neuron_limit(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.show()
+    qtbot.waitUntil(lambda: trace_widget.isVisible())
+    n_neurons = 3
+    n_timestamps = 20
+    dt = 0.001
+    data = TraceData(
+        name="traces",
+        traces=np.random.rand(n_neurons, n_timestamps).astype(np.float32),
+        indices=np.arange(n_neurons, dtype=np.uint32),
+        dt=dt,
+        units="mV",
+    )
+    controller.set_limits(max_time_secs=0.1, max_neurons=10)
+    trace_widget.set_data(data)
+    assert trace_widget.grid_lines is not None
+    assert trace_widget.grid_lines.n_neurons == 10
+    positions = trace_widget.grid_lines.gridline_10ms.geometry.positions.data
+    assert np.max(positions[:, 1]) == pytest.approx(controller.max_height - 0.5)
+    trace_widget.close()
