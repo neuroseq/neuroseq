@@ -43,7 +43,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.neurons_to_replace: list[int] = []
         self.file_path: Path | None = None
         self.npy_data: np.ndarray | None = None
-        self.extracted_neuron_id: int | None = None
         self.data_row_count: int = 0
         self.overlay_widget: CellOverlayWidget | None = None
         self.show_stimulus_checkbox: QtWidgets.QCheckBox | None = None
@@ -444,7 +443,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
             # Clear previous data
             self.npy_data = None
-            self.extracted_neuron_id = None
             self.data_row_count = 0
             self._auto_stimulus_ids = []
             self._auto_from_cellpose = False
@@ -511,8 +509,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             lines.append(
                 f"  range {np.min(self.npy_data):.3f} to {np.max(self.npy_data):.3f}"
             )
-            if self.extracted_neuron_id is not None:
-                lines.append(f"  extracted neuron ID: {self.extracted_neuron_id}")
 
             # Calculate duration at 10kHz
             duration_sec = self.npy_data.shape[0] / 10000.0
@@ -618,9 +614,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         row_count = 1 if self.npy_data.ndim == 1 else int(self.npy_data.shape[0])
         self.data_row_count = row_count
 
-        if row_count == 1 and self.extracted_neuron_id is not None:
-            target_ids = [self.extracted_neuron_id]
-        elif row_count == 1:
+        if row_count == 1:
             target_ids = self._safe_parse_stimulus_ids()
             target_ids = [0] if not target_ids else [target_ids[0]]
         else:
