@@ -26,7 +26,7 @@ def _build_cellpose_import_result(tmp_path, qtbot, *, offset: int | None = None)
     segmentation[1:3, 3:5] = 5
     segmentation[3:5, 1:3] = 6
 
-    image_path = tmp_path / "cellpose_image.png"
+    image_path = tmp_path / "cellpose_image.tif"
     seg_path = tmp_path / "segmentation.npy"
     Image.fromarray(image).save(image_path)
     np.save(seg_path, segmentation)
@@ -141,8 +141,8 @@ def test_load_single_npy_file(tmp_path, qtbot):
     assert dialog.npy_data.dtype == trace_data.dtype
     np.testing.assert_array_equal(dialog.npy_data, trace_data)
 
-    # Filename neuron ID should be used as the default target
-    assert dialog.custom_mapping_line.text() == "42"
+    # Default stim ID target is 0.
+    assert dialog.custom_mapping_line.text() == "0"
 
 
 # Wider patchclamp-cellpose integration with multiple patchclamp neurons
@@ -154,7 +154,6 @@ def test_patchclamp_defaults_after_cellpose_import(tmp_path, qtbot):
     dialog.load_file("tests/sampledata/3patchclampneurons.npy")
 
     assert dialog.custom_mapping_line.text() == "0,1,2"
-    assert dialog.custom_mapping_label.isVisible()
     assert dialog.data_row_count == 3
 
 

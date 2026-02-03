@@ -370,7 +370,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
     def _on_mapping_changed(self) -> None:
         # Decide on if we need both the below.
-        self.custom_mapping_label.setVisible(True)
+        self.custom_mapping_label.setVisible(True)  # todo: refactor to remove this.
         self.custom_widget.setVisible(True)
         self._update_custom_mapping_hint()
 

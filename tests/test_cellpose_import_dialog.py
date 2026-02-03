@@ -6,10 +6,6 @@ from pytestqt.qtbot import QtBot
 
 from neuroseq.cellpose_import_dialog import CellposeImportDialog
 
-"""
-AI-Generated
-"""
-
 
 def _make_cellpose_dialog(tmp_path, qtbot: QtBot) -> CellposeImportDialog:
     dialog = CellposeImportDialog()
@@ -20,7 +16,7 @@ def _make_cellpose_dialog(tmp_path, qtbot: QtBot) -> CellposeImportDialog:
     segmentation[1:3, 1:3] = 1
     segmentation[3:5, 3:5] = 4
 
-    image_path = tmp_path / "cellpose_image.png"
+    image_path = tmp_path / "cellpose_image.tif"
     seg_path = tmp_path / "segmentation.npy"
     Image.fromarray(image).save(image_path)
     np.save(seg_path, segmentation)
