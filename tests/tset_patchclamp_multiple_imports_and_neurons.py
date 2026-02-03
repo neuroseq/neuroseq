@@ -120,12 +120,15 @@ def test_gui_patchclamp_append_doubles_duration(qtbot, monkeypatch):
     trace = _get_patchclamp_trace(gui.project.experiments["PatchClamp Import"])
     expected_timepoints = raw.shape[1] * 2
     expected_indices = np.array([0, 1, 2], dtype=np.uint32)
-    first_column_matches = np.array_equal(trace.traces[:, 0], raw[:, 0])
-    last_column_matches = np.array_equal(trace.traces[:, -1], raw[:, -1])
+    trace_first_timepoint = trace.traces[:, 0]
+    trace_last_timepoint = trace.traces[:, -1]
+    raw_first_timepoint = raw[:, 0]
+    raw_last_timepoint = raw[:, -1]
 
     assert trace.traces.shape[1] == expected_timepoints
     assert np.array_equal(trace.indices, expected_indices)
-    assert first_column_matches and last_column_matches
+    assert np.array_equal(trace_first_timepoint, raw_first_timepoint)
+    assert np.array_equal(trace_last_timepoint, raw_last_timepoint)
 
 
 # next: need to assert errors occur when you try to extend with two specific neurons (only if Andrey doesn't want this).

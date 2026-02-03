@@ -43,9 +43,11 @@ def test_cellpose_dialog_linear_offset_preview_mapping(tmp_path, qtbot: QtBot):
     dialog.linear_offset_spin.setValue(3)
 
     mapping = dialog.overlay_widget.stimulus_to_cellpose_mapping or {}
-    base_id = int(np.min(dialog.importer._original_cellpose_ids))
-    first_key = min(mapping) if mapping else -1
+    original_ids = dialog.importer._original_cellpose_ids
+    assert original_ids is not None
+    min_original_id = int(np.min(original_ids))
+    first_mapping_key = min(mapping) if mapping else -1
 
     assert mapping != {}
-    assert first_key == 0
-    assert mapping[first_key] == base_id + 3
+    assert first_mapping_key == 0
+    assert mapping[first_mapping_key] == min_original_id + 3
