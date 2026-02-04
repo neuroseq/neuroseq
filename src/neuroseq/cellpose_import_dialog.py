@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -84,6 +86,14 @@ class CellposeImportDialog(QtWidgets.QDialog):
         )
         instructions.setWordWrap(True)
         selection_layout.addWidget(instructions)
+
+        # Add button to run cellpose
+        cellpose_button_layout = QtWidgets.QHBoxLayout()
+        cellpose_button_layout.addStretch()
+        run_cellpose_button = QtWidgets.QPushButton("Run Cellpose")
+        run_cellpose_button.clicked.connect(self._run_cellpose)
+        cellpose_button_layout.addWidget(run_cellpose_button)
+        selection_layout.addLayout(cellpose_button_layout)
 
         # Create horizontal layout for file selection and info
         top_horizontal_layout = QtWidgets.QHBoxLayout()
@@ -492,6 +502,30 @@ class CellposeImportDialog(QtWidgets.QDialog):
         )
         if filename:
             self._load_segmentation_file(filename)
+
+    def _run_cellpose(self) -> None:
+        """Launch the cellpose application from the current Python environment."""
+        try:
+            # Use subprocess to run cellpose as a GUI application in the background
+            # The -m cellpose flag runs cellpose as a module, which includes the GUI
+            subprocess.Popen(
+                [sys.executable, "-m", "cellpose"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            # QtWidgets.QMessageBox.information(
+            #    self,
+            #    "Cellpose Launched",
+            #    "Cellpose GUI has been launched in the current environment.",
+            # )
+        except Exception as exc:
+            self.logger.exception("Failed to launch cellpose")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Failed to launch Cellpose",
+                f"Could not launch Cellpose:\n{exc}\n\n"
+                "Make sure cellpose is installed in the current Python environment.",
+            )
 
     def _load_image_file(self, filename: str) -> None:
         try:
