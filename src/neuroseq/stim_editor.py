@@ -196,7 +196,7 @@ class StimEditor(QtWidgets.QWidget):
                 f"Error padding stim arrays: '{e}'",
             )
             return
-        self.set_project(self.project, keep_undo_history=True)
+        self.set_project(self.project, keep_undo_history=False)
 
     def trim_stim_array(self) -> None:
         if self.current_stim_modifier is None or self.project is None:
