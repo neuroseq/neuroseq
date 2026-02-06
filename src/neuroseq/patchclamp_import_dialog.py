@@ -738,3 +738,8 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         if spike_data is not None:
             data.append(spike_data)
         return data + self.imported_trace_data
+
+    def closeEvent(self, event):
+        # explicitly close all fastplotlib figures to avoid renderer trying to access them after they have been destroyed
+        self.overlay_widget.close()
+        super().closeEvent(event)

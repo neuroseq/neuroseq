@@ -140,6 +140,7 @@ def test_load_single_npy_file(tmp_path, qtbot):
 
     # Default stim ID target is 0.
     assert dialog.custom_mapping_line.text() == "0"
+    dialog.close()
 
 
 # Wider patchclamp-cellpose integration with multiple patchclamp neurons
@@ -152,6 +153,7 @@ def test_patchclamp_defaults_after_cellpose_import(tmp_path, qtbot):
 
     assert dialog.custom_mapping_line.text() == "0,1,2"
     assert dialog.data_row_count == 3
+    dialog.close()
 
 
 def test_patchclamp_defaults_with_linear_offset_mapping(tmp_path, qtbot):
@@ -173,6 +175,7 @@ def test_patchclamp_defaults_with_linear_offset_mapping(tmp_path, qtbot):
     assert dialog.import_button.isEnabled()
     assert "3patchclampneurons.npy" in dialog.file_path_label.text()
     assert dialog.custom_mapping_line.text() == "0,1,2"
+    dialog.close()
 
 
 def test_import_single_npy_to_correct_index(tmp_path, qtbot):
@@ -219,6 +222,7 @@ def test_import_single_npy_to_correct_index(tmp_path, qtbot):
     # Verify correct neuron ID in imported data
     assert dialog.imported_trace_data[0].indices[0] == 15
     assert 15 in dialog.imported_spike_data[0].spike_indices
+    dialog.close()
 
 
 def test_import_data_functionality(tmp_path, qtbot):
@@ -265,6 +269,7 @@ def test_import_data_functionality(tmp_path, qtbot):
     assert trace_data_imported.indices[0] == 25
     assert trace_data_imported.units == "mV"
     assert abs(trace_data_imported.dt - 0.001) < 1e-6  # 1/1000
+    dialog.close()
 
 
 @pytest.mark.parametrize("sampling_rate", [1000.0, 5000.0, 10000.0])
@@ -291,6 +296,7 @@ def test_different_sampling_rates(tmp_path, qtbot, sampling_rate: float):
     actual_dt = dialog.imported_trace_data[0].dt
     assert actual_dt == pytest.approx(expected_dt)
     assert dialog.experiment_duration == pytest.approx(2.195)
+    dialog.close()
 
 
 def test_preview_text_content(tmp_path, qtbot):
@@ -314,6 +320,7 @@ def test_preview_text_content(tmp_path, qtbot):
     assert "NPY DATA:" in preview_text
     assert "duration:" in preview_text
     assert str(np.mean(trace_data))[:5] in preview_text
+    dialog.close()
 
 
 def _generate_two_neuron_patchclamp_trace(
@@ -365,6 +372,7 @@ def test_multi_row_mapping_trims_to_row_count(tmp_path, qtbot):
     dialog.load_file(str(npy_path))
 
     assert dialog.custom_mapping_line.text() == "5,6"
+    dialog.close()
 
 
 """
@@ -413,6 +421,7 @@ def test_custom_mapping_stim_id_input_uses_stim_ids_directly(tmp_path, qtbot):
     assert _spike_data_exists_for_index(dialog.imported_spike_data, 3)
     assert not _trace_data_exists_for_index(dialog.imported_trace_data, 7)
     assert not _trace_data_exists_for_index(dialog.imported_trace_data, 11)
+    dialog.close()
 
 
 def test_custom_mapping_duplicate_stimulus_ids_error(tmp_path, qtbot, monkeypatch):
@@ -460,6 +469,7 @@ def test_custom_mapping_duplicate_stimulus_ids_error(tmp_path, qtbot, monkeypatc
     dialog.import_data()
 
     assert "Custom mapping would assign stimulus ID 3" in captured.get("text", "")
+    dialog.close()
 
 
 def test_multi_row_defaults_are_zero_indexed_with_cellpose_ids(tmp_path, qtbot):
@@ -484,6 +494,7 @@ def test_multi_row_defaults_are_zero_indexed_with_cellpose_ids(tmp_path, qtbot):
     dialog.load_file(str(npy_path))
 
     assert dialog.custom_mapping_line.text() == "0,1"
+    dialog.close()
 
 
 def test_import_two_neuron_npy_file(tmp_path, qtbot):

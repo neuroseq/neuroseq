@@ -36,6 +36,7 @@ def test_cellpose_dialog_linear_offset_persisted(
     assert dialog.linear_offset_spin.value() == 3
     assert dialog._get_linear_offset() == 3
     assert len(qmessagebox_calls) == 0
+    dialog.close()
 
 
 def test_cellpose_dialog_linear_offset_preview_mapping(tmp_path, qtbot: QtBot):
@@ -51,3 +52,4 @@ def test_cellpose_dialog_linear_offset_preview_mapping(tmp_path, qtbot: QtBot):
     assert mapping != {}
     assert first_mapping_key == 0
     assert mapping[first_mapping_key] == min_original_id + 3
+    dialog.close()

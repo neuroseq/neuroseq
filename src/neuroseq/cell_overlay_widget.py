@@ -817,3 +817,8 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.overlay_view.widget.setFixedSize(final_width, final_height)
         self.overlay_view.updateGeometry()
         self.overlay_view.widget.updateGeometry()
+
+    def closeEvent(self, event):
+        # explicitly close all fastplotlib figures to avoid renderer trying to access them after they have been destroyed
+        self.overlay_view.close()
+        super().closeEvent(event)
