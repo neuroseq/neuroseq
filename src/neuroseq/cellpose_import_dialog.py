@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import logging
 import subprocess
 import sys
@@ -505,6 +506,13 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
     def _run_cellpose(self) -> None:
         """Launch the cellpose application from the current Python environment."""
+        if importlib.util.find_spec("cellpose") is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Install Cellpose",
+                "Cellpose is not installed in the current Python environment, please install it.\n\n",
+            )
+            return
         try:
             # Use subprocess to run cellpose as a GUI application in the background
             # The -m cellpose flag runs cellpose as a module, which includes the GUI
@@ -513,6 +521,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+            # todo: Ask Andrey if we can remove this commented code.
             # QtWidgets.QMessageBox.information(
             #    self,
             #    "Cellpose Launched",
