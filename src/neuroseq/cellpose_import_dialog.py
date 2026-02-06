@@ -19,6 +19,7 @@ from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_cellpose import generate_linear_stimulus_mapping
 from neuroseq.importer_cellpose import is_identity_mapping
+from neuroseq.mapping_validation import ensure_unique_ids
 from neuroseq.utils import get_primary_available_geometry
 from neuroseq.utils import is_vertical_screen
 
@@ -422,6 +423,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
     def _parse_custom_mapping(self, mapping_str: str) -> dict[int, int]:
         """Parse custom mapping string like '1:12,2:3' into {1: 12, 2: 3}"""
         mapping: dict[int, int] = {}
+        stim_keys: list[int] = []
         if not mapping_str.strip():
             return mapping
 
@@ -438,7 +440,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
                     continue
                 stim_key = int(stim_key_str)
                 cellpose_id = int(cellpose_id_str)
+                stim_keys.append(stim_key)
                 mapping[stim_key] = cellpose_id
+            ensure_unique_ids(
+                stim_keys,
+                "Custom mapping would assign stimulus ID {value} more than once.",
+            )
         except (ValueError, IndexError) as exc:
             raise ValueError(f"Invalid custom mapping format: {exc}") from exc
 

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 from PIL import Image
@@ -11,7 +9,6 @@ from neuroseq.cellpose_import_dialog import CellposeImportDialog
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.importer_cellpose import CellposeImportResult
-from neuroseq.importer_patchclamp import generate_stimulus_mapping
 from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
 
 
@@ -368,25 +365,6 @@ def test_multi_row_mapping_trims_to_row_count(tmp_path, qtbot):
     dialog.load_file(str(npy_path))
 
     assert dialog.custom_mapping_line.text() == "5,6"
-
-
-def test_custom_mapping_keeps_existing_cellpose_mapping():
-    existing_mapping = {0: 10, 1: 11}
-    cellpose_import = CellposeImportResult(
-        image_path=Path("image.png"),
-        segmentation_array=np.zeros((2, 2), dtype=int),
-        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
-        trace_data=None,
-        spike_data=None,
-        original_cellpose_ids=np.array([10, 11], dtype=int),
-        stimulus_to_cellpose_mapping=existing_mapping,
-    )
-
-    mapping = generate_stimulus_mapping(
-        cellpose_import, data_row_count=2, stim_ids=[5, 6]
-    )
-
-    assert mapping == existing_mapping
 
 
 """

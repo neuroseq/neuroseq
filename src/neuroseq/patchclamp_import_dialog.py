@@ -14,6 +14,7 @@ from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_patchclamp import PeakDetectionParams
 from neuroseq.importer_patchclamp import import_patchclamp_data
+from neuroseq.mapping_validation import ensure_unique_ids
 from neuroseq.utils import get_primary_available_geometry
 from neuroseq.utils import is_vertical_screen
 
@@ -506,21 +507,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         self.preview_text.setPlainText("\n".join(lines).strip())
 
-    def _resolve_custom_target_ids(self, stim_ids: list[int]) -> list[int]:
-        """Validate custom stim IDs, ensuring uniqueness."""
-        assigned_stim_ids: set[int] = set()
-        resolved_ids: list[int] = []
-        for stim_id in stim_ids:
-            stim_id = int(stim_id)
-            if stim_id in assigned_stim_ids:
-                raise ValueError(
-                    "Custom mapping would assign stimulus ID "
-                    f"{stim_id} to multiple patchclamp rows."
-                )
-            assigned_stim_ids.add(stim_id)
-            resolved_ids.append(stim_id)
-        return resolved_ids
-
     def _apply_cellpose_mapping_defaults(self, row_count: int) -> None:
         """Use Cellpose stimulus IDs in ascending order to prefill multi-row targets."""
         stim_ids = self._get_cellpose_stim_ids()
@@ -666,29 +652,17 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 raise ValueError("Sampling rate must be positive")
             dt = 1.0 / sampling_rate
 
-            neuron_ids = self._resolve_custom_target_ids(
-                self._safe_parse_stimulus_ids()
+            neuron_ids = ensure_unique_ids(
+                self._safe_parse_stimulus_ids(),
+                "Custom mapping would assign stimulus ID {value} to multiple patchclamp rows.",
             )
             self.neurons_to_replace = list(neuron_ids)
-
-            # Generate and store the stimulus-to-cellpose mapping
-            ## todo: review need of mapping generate function now
-            # stimulus_mapping = generate_stimulus_mapping(
-            #     self.cellpose_import,
-            #     self.data_row_count,
-            #     self._safe_parse_stimulus_ids(),
-            # )
 
             self.logger.debug(
                 "Importing patchclamp data: sampling_rate=%.2fHz dt=%.6f",
                 sampling_rate,
                 dt,
             )
-
-            # Update cellpose import with the mapping
-            if self.cellpose_import is not None:
-                pass  # self.cellpose_import.stimulus_to_cellpose_mapping = stimulus_mapping
-            # todo: review need of mapping generate function now
 
             detection_params = PeakDetectionParams(
                 peak_height=self.peak_height_spin.value(),
