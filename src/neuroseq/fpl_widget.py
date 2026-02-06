@@ -75,7 +75,8 @@ class FPLWidget(QtWidgets.QWidget):
     def closeEvent(self, event):
         if self.figure is not None:
             # stop the renderer before closing the widget otherwise it may try to render to the deleted object
-            self.figure.close()
+            if hasattr(self.figure, "close"):
+                self.figure.close()
             self.figure = None
         super().closeEvent(event)
 

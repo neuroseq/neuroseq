@@ -515,14 +515,13 @@ class OverlayView(FullScreenFPLWidget):
         reverse_mapping = {v: k for k, v in self.stim_to_cellpose.items()}
         stim_id = reverse_mapping.get(neuron_index)
         cellpose_id = int(neuron_index)
-        stim_display_id = stim_id if stim_id is not None else cellpose_id
         cellpose_visible = self.show_cellpose_ids
-        stim_visible = self.show_stimulus_ids
+        stim_visible = self.show_stimulus_ids and stim_id is not None
 
         if cellpose_visible and stim_visible:
-            hover_text = f"{stim_display_id} / {cellpose_id}"
+            hover_text = f"{stim_id} / {cellpose_id}"
         elif stim_visible:
-            hover_text = f"{stim_display_id}"
+            hover_text = f"{stim_id}"
         elif cellpose_visible:
             hover_text = f"{cellpose_id}"
         else:
