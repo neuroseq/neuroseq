@@ -9,7 +9,6 @@ import numpy.typing as npt
 
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
-from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.spike_detection import detect_spikes_voltage_trace
 
 
@@ -69,35 +68,6 @@ def validate_append_import(
             f"This would cause timestamp misalignment. Use 'Replace' mode instead, "
             f"or import all neurons with the same timeline."
         )
-
-
-def generate_stimulus_mapping(
-    cellpose_import: CellposeImportResult | None,
-    data_row_count: int,
-    stim_ids: Sequence[int],  # why are these given, if they are unused.
-) -> dict[int, int]:
-    """Create stimulus->cellpose mapping consistent with Cellpose data."""
-    if cellpose_import is None:
-        return {}
-
-    existing_mapping = cellpose_import.stimulus_to_cellpose_mapping or {}
-
-    if existing_mapping:
-        return dict(existing_mapping)
-
-    if cellpose_import.original_cellpose_ids is None:
-        return {}
-
-    original_ids = cellpose_import.original_cellpose_ids
-    row_count = data_row_count or len(original_ids)
-
-    stim_sequence = list(range(row_count))
-
-    temp_mapping: dict[int, int] = {}
-    for stim_id, cellpose_id in zip(stim_sequence, original_ids, strict=False):
-        temp_mapping[int(stim_id)] = int(cellpose_id)
-
-    return temp_mapping
 
 
 def import_patchclamp_data(
