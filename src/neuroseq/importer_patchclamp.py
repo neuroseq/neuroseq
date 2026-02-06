@@ -128,9 +128,10 @@ def import_patchclamp_data(
     all_neuron_indices: list[int] = []
     imported_spike_data: list[SpikeData] = []
 
-    for i, neuron_id in enumerate(neuron_ids):
-        trace_row = trace_data_rows[i]
-
+    ordered_pairs = sorted(
+        zip(neuron_ids, trace_data_rows, strict=False), key=lambda pair: pair[0]
+    )
+    for neuron_id, trace_row in ordered_pairs:
         if logger:
             logger.debug(
                 "Detecting spikes for patchclamp neuron %d: dt=%.6f height=%.2f prominence=%.2f min_interval=%.4f distance=%d width=%d",
