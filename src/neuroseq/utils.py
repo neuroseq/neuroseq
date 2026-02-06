@@ -239,8 +239,20 @@ def append_data(
             raise ValueError(
                 f"Cannot append TraceData with different dt: {existing_data.dt} != {new_data.dt}"
             )
-        if keep_in_sync and not np.array_equal(existing_data.indices, new_data.indices):
-            existing_data.indices = np.array(new_data.indices, copy=True)
+        if not np.array_equal(existing_data.indices, new_data.indices):
+            existing_ids = [int(idx) for idx in existing_data.indices]
+            new_ids = [int(idx) for idx in new_data.indices]
+            if set(existing_ids) == set(new_ids):
+                index_map = {idx: i for i, idx in enumerate(new_ids)}
+                order = [index_map[idx] for idx in existing_ids]
+                new_data.traces = new_data.traces[order, :]
+                new_data.indices = np.array(existing_data.indices, copy=True)
+            elif set(existing_ids).intersection(new_ids):
+                raise ValueError(
+                    "Cannot append TraceData with partial overlap of neuron indices"
+                )
+            elif keep_in_sync:
+                existing_data.indices = np.array(new_data.indices, copy=True)
         if existing_data.traces.shape[0] != new_data.traces.shape[0]:
             if keep_in_sync:
                 existing_data.traces = np.array(new_data.traces, copy=True)
