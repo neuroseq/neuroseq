@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import logging
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
@@ -99,6 +102,14 @@ class CellposeImportDialog(QtWidgets.QDialog):
         instructions.setWordWrap(True)
         selection_layout.addWidget(instructions)
 
+        # Add button to run cellpose
+        cellpose_button_layout = QtWidgets.QHBoxLayout()
+        cellpose_button_layout.addStretch()
+        run_cellpose_button = QtWidgets.QPushButton("Run Cellpose")
+        run_cellpose_button.clicked.connect(self._run_cellpose)
+        cellpose_button_layout.addWidget(run_cellpose_button)
+        selection_layout.addLayout(cellpose_button_layout)
+
         # Create horizontal layout for file selection and info
         top_horizontal_layout = QtWidgets.QHBoxLayout()
 
@@ -123,6 +134,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
         seg_layout.addWidget(self.segmentation_path_label, stretch=1)
         seg_layout.addWidget(browse_seg_button)
         file_layout.addRow("Segmentation CSV/NPY:", seg_layout)
+        file_group.setMinimumHeight(
+            file_layout.sizeHint().height() + 50
+        )  # Ensure it does nto get clipped vertically
 
         top_horizontal_layout.addWidget(file_group, stretch=2)
 
@@ -233,6 +247,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         for abstract_button in self.mapping_buttons.buttons():
             if hasattr(abstract_button, "toggled"):
                 abstract_button.toggled.connect(self._on_mapping_changed)
+        self._last_mapping_strategy = "Linear"
 
         # Place overlay first so the visual is top-most
         self.left_container = QtWidgets.QWidget()
@@ -265,6 +280,19 @@ class CellposeImportDialog(QtWidgets.QDialog):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(8)
         right_layout.addWidget(self.mapping_group)
+        guidance_path = (
+            Path(__file__).resolve().parents[2]
+            / "examplary_data"
+            / "cellpose_guidance.png"
+        )
+        self.guidance_label = QtWidgets.QLabel()
+        self.guidance_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        if guidance_path.exists():
+            self.guidance_label.setPixmap(QtGui.QPixmap(str(guidance_path)))
+        else:
+            self.guidance_label.setVisible(False)
+        right_layout.addWidget(self.guidance_label)
+        self.guidance_label.setVisible(self._get_mapping_strategy() == "Custom")
         right_layout.addStretch(1)
 
         button_layout = QtWidgets.QHBoxLayout()
@@ -370,6 +398,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         """Handle toggle between mapping strategies"""
         mapping_strategy = self._get_mapping_strategy()
         is_custom = mapping_strategy == "Custom"
+        self.custom_mapping_line.clear()  # avoid data leaking.. before data from Custom mapping could taint Linear mapping if switched back.
         self.custom_mapping_line.setVisible(is_custom)
         self.custom_mapping_label.setVisible(is_custom)
         self.linear_offset_spin.setVisible(not is_custom)
@@ -378,6 +407,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.mapping_help_link.setVisible(is_custom)
         if not is_custom:
             self.show_missing_button.setChecked(False)
+        if hasattr(self, "guidance_label"):
+            self.guidance_label.setVisible(is_custom)
 
         # Update preview if data is loaded
         if (
@@ -386,6 +417,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         ):
             self._update_preview_mapping()
         self._update_mapping_helper()
+        self._last_mapping_strategy = mapping_strategy
 
     def _on_custom_mapping_text_changed(self, _text: str) -> None:
         """Refresh preview live while editing custom mapping."""
@@ -561,6 +593,30 @@ class CellposeImportDialog(QtWidgets.QDialog):
         if filename:
             self._load_segmentation_file(filename)
 
+    def _run_cellpose(self) -> None:
+        """Launch the cellpose application from the current Python environment"""
+        try:
+            # Use subprocess to run cellpose as a GUI application in the background
+            # The -m cellpose flag runs cellpose as a module, which includes the GUI
+            subprocess.Popen(
+                [sys.executable, "-m", "cellpose"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            # QtWidgets.QMessageBox.information(
+            #    self,
+            #    "Cellpose Launched",
+            #    "Cellpose GUI has been launched in the current environment.",
+            # )
+        except Exception as exc:
+            self.logger.exception("Failed to launch cellpose")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Failed to launch Cellpose",
+                f"Could not launch Cellpose:\n{exc}\n\n"
+                "Make sure cellpose is installed in the current Python environment.",
+            )
+
     def _load_image_file(self, filename: str) -> None:
         try:
             self.image_path = Path(filename)
@@ -682,8 +738,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 if missing_ids:
                     message = (
                         "Are you sure you want to import a cellpose mapping with "
-                        "non-contigous cellpose IDs? Suite2p data can only be "
-                        "imported up to the amount of contigous cellpose IDs, "
+                        "non-contiguous cellpose IDs? Suite2p data can only be "
+                        "imported up to the amount of contiguous cellpose IDs, "
                         "but you can import your current mapping now anyway if you prefer."
                     )
                     confirm_box = QtWidgets.QMessageBox(self)
@@ -691,10 +747,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
                     confirm_box.setWindowTitle("Non-contiguous Cellpose IDs")
                     confirm_box.setText(message)
                     import_button = confirm_box.addButton(
-                        "Import now anyway", QtWidgets.QMessageBox.ButtonRole.AcceptRole
+                        "Import now anyway",
+                        QtWidgets.QMessageBox.ButtonRole.AcceptRole,
                     )
                     continue_button = confirm_box.addButton(
-                        "Continue editing", QtWidgets.QMessageBox.ButtonRole.RejectRole
+                        "Continue editing",
+                        QtWidgets.QMessageBox.ButtonRole.RejectRole,
                     )
                     confirm_box.setDefaultButton(continue_button)
                     confirm_box.exec()

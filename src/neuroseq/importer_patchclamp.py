@@ -73,9 +73,8 @@ def validate_append_import(
 
 def generate_stimulus_mapping(
     cellpose_import: CellposeImportResult | None,
-    strategy: str,
     data_row_count: int,
-    stim_ids: Sequence[int],
+    stim_ids: Sequence[int],  # why are these given, if they are unused.
 ) -> dict[int, int]:
     """Create stimulus->cellpose mapping consistent with Cellpose data."""
     if cellpose_import is None:

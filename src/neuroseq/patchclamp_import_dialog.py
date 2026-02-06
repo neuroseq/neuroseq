@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
 
 import brian2.numpy_ as np
@@ -14,9 +13,7 @@ from neuroseq.data import SpikeData
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_patchclamp import PeakDetectionParams
-from neuroseq.importer_patchclamp import generate_stimulus_mapping
 from neuroseq.importer_patchclamp import import_patchclamp_data
-from neuroseq.importer_patchclamp import validate_append_import
 from neuroseq.utils import get_primary_available_geometry
 from neuroseq.utils import is_vertical_screen
 
@@ -41,11 +38,10 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.experiment_duration: float = 0.0
         self._auto_stimulus_ids: list[int] = []
         self._auto_from_cellpose = False
-        self.append_data = True
+        self.append_data = False
         self.neurons_to_replace: list[int] = []
         self.file_path: Path | None = None
         self.npy_data: np.ndarray | None = None
-        self.extracted_neuron_id: int | None = None
         self.data_row_count: int = 0
         self.overlay_widget: CellOverlayWidget | None = None
         self.show_stimulus_checkbox: QtWidgets.QCheckBox | None = None
@@ -193,49 +189,26 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         )
         options_layout.addRow("Sampling rate:", self.sampling_rate_spin)
 
-        mapping_layout = QtWidgets.QHBoxLayout()
-        self.mapping_buttons = QtWidgets.QButtonGroup(self)
-        for option in ("Linear", "Custom"):
-            button = QtWidgets.QRadioButton(option)
-            self.mapping_buttons.addButton(button)
-            mapping_layout.addWidget(button)
-        first_button = self.mapping_buttons.buttons()[0]
-        first_button.setChecked(True)
-        options_layout.addRow("Mapping strategy:", mapping_layout)
-
-        self.custom_neuron_id_line = QtWidgets.QLineEdit()
-        self.custom_neuron_id_line.setPlaceholderText("e.g., 0 or 0,1")
-        self.custom_neuron_id_line.setText("0")
-        self.custom_neuron_id_line.setToolTip(
-            "Single neuron ID (e.g., 10) or comma-separated list (e.g., 12,15)"
-        )
-
         self.custom_mapping_line = QtWidgets.QLineEdit()
         self.custom_mapping_line.setPlaceholderText(
             "Comma-separated stim IDs (e.g., 2,3)"
         )
-        self.custom_mapping_line.textChanged.connect(
-            lambda _text: self._update_custom_mapping_hint()
-        )
-        self.custom_mapping_line.setVisible(False)
+        self.custom_mapping_line.setVisible(True)  # not needed?
 
         custom_layout = QtWidgets.QVBoxLayout()
-        custom_layout.addWidget(self.custom_neuron_id_line)
         custom_layout.addWidget(self.custom_mapping_line)
         self.custom_mapping_preview = QtWidgets.QLabel("")
         self.custom_mapping_preview.setWordWrap(True)
         self.custom_mapping_preview.setStyleSheet("QLabel { color: gray; }")
-        self.custom_mapping_preview.setVisible(False)
+        self.custom_mapping_preview.setVisible(True)  # not needed?
         custom_layout.addWidget(self.custom_mapping_preview)
         self.custom_widget = QtWidgets.QWidget()
         self.custom_widget.setLayout(custom_layout)
 
-        self.custom_mapping_label = QtWidgets.QLabel("Target stim IDs:")
-        self.custom_mapping_label.setVisible(False)
-        self.custom_widget.setVisible(False)
+        self.custom_mapping_label = QtWidgets.QLabel("Specify stim IDs to import:")
+        self.custom_mapping_label.setVisible(True)  # not needed?
+        self.custom_widget.setVisible(True)  # not needed?
         self.custom_mapping_hint = QtWidgets.QLabel("")
-        self.custom_mapping_hint.setStyleSheet("QLabel { color: gray; }")
-        self.custom_mapping_hint.setVisible(False)
 
         options_layout.addRow(self.custom_mapping_label, self.custom_widget)
         options_layout.addRow("", self.custom_mapping_hint)
@@ -246,21 +219,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.show_stimulus_checkbox.setChecked(True)
         self.show_stimulus_checkbox.toggled.connect(self._on_show_stimulus_toggled)
         options_layout.addRow(self.show_stimulus_checkbox)
-
-        self.replace_checkbox = QtWidgets.QCheckBox(
-            "Replace existing data for these neuron IDs instead of extending"
-        )
-        self.replace_checkbox.setChecked(not self.append_data)
-        self.replace_checkbox.setToolTip(
-            "When enabled, imported data will overwrite existing traces/spikes "
-            "for the specified neuron ID. When disabled, data will be appended/extended."
-        )
-        self.replace_checkbox.toggled.connect(self._on_replace_toggled)
-        options_layout.addRow(self.replace_checkbox)
-
-        # Connect radio buttons to show/hide custom mapping input
-        for button in self.mapping_buttons.buttons():
-            button.toggled.connect(self._on_mapping_changed)
 
         self.spike_group = QtWidgets.QGroupBox("Peak Detection Parameters")
         spike_layout = QtWidgets.QFormLayout(self.spike_group)
@@ -411,20 +369,10 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.overlay_stack.setCurrentWidget(self.overlay_placeholder)
 
     def _on_mapping_changed(self) -> None:
-        mapping_strategy = self._get_mapping_strategy()
-        is_custom = mapping_strategy == "Custom"
-
-        self.custom_mapping_label.setVisible(is_custom)
-        self.custom_widget.setVisible(is_custom)
+        # Decide on if we need both the below.
+        self.custom_mapping_label.setVisible(True)  # todo: refactor to remove this.
+        self.custom_widget.setVisible(True)
         self._update_custom_mapping_hint()
-        self._update_custom_mapping_preview()
-
-        if is_custom:
-            self.custom_mapping_line.setVisible(True)
-            self.custom_neuron_id_line.setVisible(False)
-        else:
-            self.custom_mapping_line.setVisible(False)
-            self.custom_neuron_id_line.setVisible(True)
 
     def _on_show_stimulus_toggled(self) -> None:
         self._apply_overlay_display_options()
@@ -453,17 +401,11 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         mapping = self.cellpose_import.stimulus_to_cellpose_mapping
         stim_ids = sorted(mapping.keys())
         self.custom_mapping_line.setText(",".join(str(stim) for stim in stim_ids))
-        self.custom_neuron_id_line.setText(",".join(str(stim) for stim in stim_ids))
 
-        self._set_mapping_strategy("Custom")
         if len(stim_ids) > 1:
             self._auto_stimulus_ids = stim_ids
             self._auto_from_cellpose = True
         self._update_custom_mapping_hint()
-        self._update_custom_mapping_preview()
-
-    def _on_replace_toggled(self, checked: bool) -> None:
-        self.append_data = not checked
 
     def _browse_file(self) -> None:
         filename, _ = getopenfilename(
@@ -486,7 +428,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
             # Clear previous data
             self.npy_data = None
-            self.extracted_neuron_id = None
             self.data_row_count = 0
             self._auto_stimulus_ids = []
             self._auto_from_cellpose = False
@@ -526,22 +467,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             float(np.max(self.npy_data)),
         )
 
-        # Extract neuron ID from filename if possible
-        neuron_id_match = re.search(r"neuronID_(\d+)", Path(filename).name)
-        if neuron_id_match:
-            self.extracted_neuron_id = int(neuron_id_match.group(1))
-            self.logger.debug(
-                "Extracted neuron ID %d from filename %s",
-                self.extracted_neuron_id,
-                filename,
-            )
-            # Auto-select Custom mapping and set the neuron ID
-            self._set_mapping_strategy("Custom")
-            self.custom_neuron_id_line.setText(str(self.extracted_neuron_id))
-            if not self.custom_mapping_line.text().strip():
-                # Default stim ID target to the detected neuron ID
-                self.custom_mapping_line.setText(str(self.extracted_neuron_id))
-
         if self.npy_data.ndim not in (1, 2):
             raise ValueError(
                 f"NumPy patchclamp data must be 1D (single neuron) or 2D (multiple neurons), got {self.npy_data.ndim}D"
@@ -569,37 +494,17 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             lines.append(
                 f"  range {np.min(self.npy_data):.3f} to {np.max(self.npy_data):.3f}"
             )
-            if self.extracted_neuron_id is not None:
-                lines.append(f"  extracted neuron ID: {self.extracted_neuron_id}")
 
             # Calculate duration at 10kHz
             duration_sec = self.npy_data.shape[0] / 10000.0
             lines.append(f"  duration: {duration_sec:.1f} seconds at 10kHz")
             lines.append("")
 
-            target_ids = []
-            if self._get_mapping_strategy() == "Custom":
-                target_ids = self._safe_parse_stimulus_ids()
-            else:
-                target_ids = self._safe_parse_neuron_ids()
-            if len(target_ids) > 1:
-                lines.append(f"Specify {len(target_ids)} IDs to import")
         else:
             self.preview_text.clear()
             return
 
         self.preview_text.setPlainText("\n".join(lines).strip())
-
-    def _get_mapping_strategy(self) -> str:
-        checked = self.mapping_buttons.checkedButton()
-        return checked.text() if checked is not None else "Linear"
-
-    def _target_neuron_ids(self) -> list[int]:
-        """Get target neuron IDs based on current mapping strategy."""
-        strategy = self._get_mapping_strategy()
-        if strategy == "Custom":
-            return self._resolve_custom_target_ids(self._safe_parse_stimulus_ids())
-        return self._parse_neuron_ids(self.custom_neuron_id_line.text())
 
     def _resolve_custom_target_ids(self, stim_ids: list[int]) -> list[int]:
         """Validate custom stim IDs, ensuring uniqueness."""
@@ -624,12 +529,9 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         derived_ids = stim_ids[:row_count]
         self.custom_mapping_line.setText(self._format_stimulus_display(derived_ids))
-        self.custom_neuron_id_line.setText(",".join(str(stim) for stim in derived_ids))
-        self._set_mapping_strategy("Custom")
         self._auto_stimulus_ids = derived_ids
         self._auto_from_cellpose = True
         self._update_custom_mapping_hint()
-        self._update_custom_mapping_preview()
 
     def _get_cellpose_stim_ids(self) -> list[int]:
         """Return sorted stimulus IDs from an existing Cellpose mapping."""
@@ -688,36 +590,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         except Exception:
             return []
 
-    def _parse_neuron_ids(self, neuron_ids_str: str) -> list[int]:
-        """Parse comma-separated neuron IDs string into list of integers."""
-        if not neuron_ids_str.strip():
-            raise ValueError("Neuron IDs cannot be empty")
-
-        try:
-            # Split by comma and strip whitespace
-            parts = [part.strip() for part in neuron_ids_str.split(",") if part.strip()]
-            if not parts:
-                raise ValueError("No valid neuron IDs found")
-            return [int(part) for part in parts]
-        except ValueError as exc:
-            raise ValueError(f"Invalid neuron ID format: {exc}") from exc
-
-    def _safe_parse_neuron_ids(self) -> list[int]:
-        """Parse neuron IDs without raising, used for prefilling defaults."""
-        text = self.custom_neuron_id_line.text()
-        if not text.strip():
-            return []
-        try:
-            return self._parse_neuron_ids(text)
-        except Exception:
-            return []
-
-    def _set_mapping_strategy(self, target: str) -> None:
-        for button in self.mapping_buttons.buttons():
-            if button.text() == target:
-                button.setChecked(True)
-                break
-
     def _update_target_stimulus_ids(self) -> None:
         """Limit target stimulus IDs to the number of traces in the loaded data."""
         if self.npy_data is None:
@@ -727,12 +599,8 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         row_count = 1 if self.npy_data.ndim == 1 else int(self.npy_data.shape[0])
         self.data_row_count = row_count
 
-        if row_count == 1 and self.extracted_neuron_id is not None:
-            target_ids = [self.extracted_neuron_id]
-        elif row_count == 1:
+        if row_count == 1:
             target_ids = self._safe_parse_stimulus_ids()
-            if not target_ids:
-                target_ids = self._safe_parse_neuron_ids()
             target_ids = [0] if not target_ids else [target_ids[0]]
         else:
             target_ids = self._safe_parse_stimulus_ids()
@@ -755,22 +623,18 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         mapping_str = self._format_stimulus_display(target_ids)
         self.custom_mapping_line.setText(mapping_str)
-        self.custom_neuron_id_line.setText(",".join(str(tid) for tid in target_ids))
+        label_count = len(target_ids)
+        label_suffix = "ID" if label_count == 1 else "IDs"
         self.custom_mapping_label.setText(
-            f"Enter {len(target_ids)} stim IDs (matching the preview):"
+            f"Specify {label_count} {label_suffix} to import:"
         )
         self._auto_from_cellpose = auto_from_cellpose and len(target_ids) > 1
         self._auto_stimulus_ids = target_ids if self._auto_from_cellpose else []
         self._update_custom_mapping_hint()
-        self._update_custom_mapping_preview()
 
     def _update_custom_mapping_hint(self) -> None:
         """Show a hint when custom mapping count mismatches neuron count."""
         if self.custom_mapping_hint is None:
-            return
-
-        if self.npy_data is None or self._get_mapping_strategy() != "Custom":
-            self.custom_mapping_hint.setVisible(False)
             return
 
         row_count = self.data_row_count or 0
@@ -792,25 +656,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         else:
             self.custom_mapping_hint.setVisible(False)
 
-    def _update_custom_mapping_preview(self) -> None:
-        if self.custom_mapping_preview is None:
-            return
-        if (
-            self.cellpose_import is None
-            or not self.cellpose_import.stimulus_to_cellpose_mapping
-        ):
-            self.custom_mapping_preview.setVisible(False)
-            return
-        mapping = self.cellpose_import.stimulus_to_cellpose_mapping
-        if len(mapping) >= 20:
-            self.custom_mapping_preview.setVisible(False)
-            return
-        pairs = ", ".join(
-            f"{stim_id}->{mapping[stim_id]}" for stim_id in sorted(mapping.keys())
-        )
-        self.custom_mapping_preview.setText(f"Stim->Cellpose mapping:\n{pairs}")
-        self.custom_mapping_preview.setVisible(self._get_mapping_strategy() == "Custom")
-
     def import_data(self) -> None:
         if self.npy_data is None:
             return
@@ -821,37 +666,29 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 raise ValueError("Sampling rate must be positive")
             dt = 1.0 / sampling_rate
 
-            neuron_ids = self._target_neuron_ids()
-            if self.append_data:
-                validate_append_import(
-                    self.project,
-                    self.experiment_name,
-                    neuron_ids,
-                )
-                self.neurons_to_replace = []
-            else:
-                self.neurons_to_replace = list(neuron_ids)
+            neuron_ids = self._resolve_custom_target_ids(
+                self._safe_parse_stimulus_ids()
+            )
+            self.neurons_to_replace = list(neuron_ids)
 
             # Generate and store the stimulus-to-cellpose mapping
-            mapping_strategy = self._get_mapping_strategy()
-            stimulus_mapping = generate_stimulus_mapping(
-                self.cellpose_import,
-                mapping_strategy,
-                self.data_row_count,
-                self._safe_parse_stimulus_ids(),
-            )
+            ## todo: review need of mapping generate function now
+            # stimulus_mapping = generate_stimulus_mapping(
+            #     self.cellpose_import,
+            #     self.data_row_count,
+            #     self._safe_parse_stimulus_ids(),
+            # )
 
             self.logger.debug(
-                "Importing patchclamp data: sampling_rate=%.2fHz dt=%.6f mapping_strategy=%s mapping_keys=%s",
+                "Importing patchclamp data: sampling_rate=%.2fHz dt=%.6f",
                 sampling_rate,
                 dt,
-                mapping_strategy,
-                sorted(stimulus_mapping.keys()),
             )
 
             # Update cellpose import with the mapping
             if self.cellpose_import is not None:
-                self.cellpose_import.stimulus_to_cellpose_mapping = stimulus_mapping
+                pass  # self.cellpose_import.stimulus_to_cellpose_mapping = stimulus_mapping
+            # todo: review need of mapping generate function now
 
             detection_params = PeakDetectionParams(
                 peak_height=self.peak_height_spin.value(),

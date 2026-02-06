@@ -4,13 +4,41 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from PIL import Image
 from qtpy import QtWidgets
 
+from neuroseq.cellpose_import_dialog import CellposeImportDialog
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_patchclamp import generate_stimulus_mapping
 from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
+
+
+# For
+def _build_cellpose_import_result(tmp_path, qtbot, *, offset: int | None = None):
+    dialog = CellposeImportDialog()
+    qtbot.addWidget(dialog)
+
+    image = np.zeros((6, 6, 3), dtype=np.uint8)
+    segmentation = np.zeros((6, 6), dtype=np.int32)
+    segmentation[1:3, 1:3] = 4
+    segmentation[1:3, 3:5] = 5
+    segmentation[3:5, 1:3] = 6
+
+    image_path = tmp_path / "cellpose_image.tif"
+    seg_path = tmp_path / "segmentation.npy"
+    Image.fromarray(image).save(image_path)
+    np.save(seg_path, segmentation)
+
+    dialog._load_image_file(str(image_path))
+    dialog._load_segmentation_file(str(seg_path))
+    if offset is not None:
+        dialog.linear_offset_spin.setValue(offset)
+
+    dialog.accept = lambda: None
+    dialog._import_data()
+    return dialog.get_imported_data()
 
 
 def _generate_patchclamp_trace(
@@ -113,51 +141,41 @@ def test_load_single_npy_file(tmp_path, qtbot):
     assert dialog.npy_data.dtype == trace_data.dtype
     np.testing.assert_array_equal(dialog.npy_data, trace_data)
 
-    # Filename neuron ID should be used as the default target
-    assert dialog.extracted_neuron_id == 42
-    assert dialog.custom_mapping_line.text() == "42"
-    assert dialog.custom_neuron_id_line.text() == "42"
+    # Default stim ID target is 0.
+    assert dialog.custom_mapping_line.text() == "0"
+
+
+# Wider patchclamp-cellpose integration with multiple patchclamp neurons
+def test_patchclamp_defaults_after_cellpose_import(tmp_path, qtbot):
+    cellpose_import = _build_cellpose_import_result(tmp_path, qtbot)
+    dialog = PatchClampImportDialog(cellpose_import=cellpose_import)
+    qtbot.addWidget(dialog)
+
+    dialog.load_file("tests/sampledata/3patchclampneurons.npy")
+
+    assert dialog.custom_mapping_line.text() == "0,1,2"
+    assert dialog.data_row_count == 3
+
+
+def test_patchclamp_defaults_with_linear_offset_mapping(tmp_path, qtbot):
+    tested_offset = 3
+    cellpose_import = _build_cellpose_import_result(
+        tmp_path, qtbot, offset=tested_offset
+    )
+    dialog = PatchClampImportDialog(cellpose_import=cellpose_import)
+    qtbot.addWidget(dialog)
+
+    dialog.load_file("tests/sampledata/3patchclampneurons.npy")
+    mapping = cellpose_import.stimulus_to_cellpose_mapping or {}
+
+    assert mapping != {}
+    assert mapping.get(0) == tested_offset
+    assert mapping.get(2) == tested_offset + 2
 
     # Verify UI state
     assert dialog.import_button.isEnabled()
-    assert "patch_clamp_recording_neuronID_42.npy" in dialog.file_path_label.text()
-
-
-def test_load_npy_without_neuron_id(tmp_path, qtbot):
-    """Test loading patch clamp file without neuron ID in filename."""
-    trace_data = _generate_patchclamp_trace(duration_sec=2.0, num_spikes=1)
-
-    npy_path = tmp_path / "recording_data.npy"
-    np.save(npy_path, trace_data)
-
-    dialog = PatchClampImportDialog()
-    qtbot.addWidget(dialog)
-
-    dialog.load_file(str(npy_path))
-
-    assert dialog.npy_data is not None
-    assert dialog.extracted_neuron_id is None
-    assert dialog.custom_mapping_line.text() == "0"
-    assert dialog.custom_neuron_id_line.text() == "0"
-
-
-def test_single_row_uses_filename_for_stimulus_id(tmp_path, qtbot):
-    """Single-row files should default to the filename-derived stimulus ID when available."""
-    trace_data = _generate_patchclamp_trace(duration_sec=1.0, sampling_rate=1000.0)
-
-    npy_path = tmp_path / "single_trace_neuronID_77.npy"
-    np.save(npy_path, trace_data)
-
-    dialog = PatchClampImportDialog()
-    qtbot.addWidget(dialog)
-
-    # Pre-fill with an invalid multi-ID mapping to ensure it gets reduced
-    dialog.custom_mapping_line.setText("1,2,3")
-
-    dialog.load_file(str(npy_path))
-
-    assert dialog.custom_mapping_line.text() == "77"
-    assert dialog.custom_neuron_id_line.text() == "77"
+    assert "3patchclampneurons.npy" in dialog.file_path_label.text()
+    assert dialog.custom_mapping_line.text() == "0,1,2"
 
 
 def test_import_single_npy_to_correct_index(tmp_path, qtbot):
@@ -180,7 +198,6 @@ def test_import_single_npy_to_correct_index(tmp_path, qtbot):
     dialog.load_file(str(npy_path))
 
     # Set target stimulus ID to 15
-    dialog._set_mapping_strategy("Custom")
     dialog.custom_mapping_line.setText("15")
 
     # Set reasonable detection parameters
@@ -225,7 +242,6 @@ def test_import_data_functionality(tmp_path, qtbot):
     qtbot.addWidget(dialog)
 
     dialog.load_file(str(npy_path))
-    dialog._set_mapping_strategy("Custom")
     dialog.custom_mapping_line.setText("25")
     dialog.sampling_rate_spin.setValue(1000.0)
     dialog.peak_height_spin.setValue(2.0)
@@ -298,146 +314,9 @@ def test_preview_text_content(tmp_path, qtbot):
 
     # Check that preview contains expected information
     assert f"{trace_data.shape[0]} timepoints" in preview_text
-    assert "extracted neuron ID: 123" in preview_text
+    assert "NPY DATA:" in preview_text
     assert "duration:" in preview_text
     assert str(np.mean(trace_data))[:5] in preview_text
-
-
-def test_import_single_then_extend_timeline(tmp_path, qtbot):
-    """Test importing single neuron data, then extending it with more data."""
-    from unittest.mock import MagicMock
-
-    # Create first recording (1 second at 1000Hz = 1000 samples)
-    first_trace = _generate_patchclamp_trace(
-        duration_sec=1.0, sampling_rate=1000.0, baseline=-70.0, num_spikes=2
-    )
-    first_npy = tmp_path / "patch_neuronID_15_part1.npy"
-    np.save(first_npy, first_trace)
-
-    # Create second recording (0.5 seconds at same rate = 500 samples)
-    second_trace = _generate_patchclamp_trace(
-        duration_sec=0.5, sampling_rate=1000.0, baseline=-70.0, num_spikes=1
-    )
-    second_npy = tmp_path / "patch_neuronID_15_part2.npy"
-    np.save(second_npy, second_trace)
-
-    # Mock model to simulate existing data
-    mock_model = MagicMock()
-    mock_model.experiments = {}
-
-    # First import (initial data)
-    dialog1 = PatchClampImportDialog(project=mock_model)
-    qtbot.addWidget(dialog1)
-
-    dialog1.load_file(str(first_npy))
-    dialog1._set_mapping_strategy("Custom")
-    dialog1.sampling_rate_spin.setValue(1000.0)
-    dialog1.custom_mapping_line.setText("15")
-    dialog1.replace_checkbox.setChecked(True)  # Replace mode for first import
-
-    dialog1.accept = lambda: None
-    dialog1.import_data()
-
-    # Verify first import
-    assert len(dialog1.imported_trace_data) == 1
-    first_imported = dialog1.imported_trace_data[0]
-    assert first_imported.indices[0] == 15
-    assert first_imported.traces.shape[1] == 1000  # 1000 samples
-    assert abs(first_imported.dt - 0.001) < 1e-6  # 1/1000 Hz
-
-    # Simulate data being added to model (normally done by GUI)
-    mock_model.experiments["PatchClamp Import"] = dialog1.imported_data
-
-    dialog1.close()
-
-    # Second import in EXTEND mode
-    dialog2 = PatchClampImportDialog(project=mock_model)
-    qtbot.addWidget(dialog2)
-
-    dialog2.load_file(str(second_npy))
-    dialog2._set_mapping_strategy("Custom")
-    dialog2.sampling_rate_spin.setValue(1000.0)
-    dialog2.custom_mapping_line.setText("15")
-    dialog2.replace_checkbox.setChecked(False)  # EXTEND mode
-
-    dialog2.accept = lambda: None
-    dialog2.import_data()
-
-    # Verify second import extends the data
-    assert len(dialog2.imported_trace_data) == 1
-    second_imported = dialog2.imported_trace_data[0]
-    assert second_imported.indices[0] == 15
-    assert second_imported.traces.shape[1] == 500  # New data is 500 samples
-    assert abs(second_imported.dt - 0.001) < 1e-6
-
-    dialog2.close()
-
-
-def test_import_single_then_replace_timeline(tmp_path, qtbot):
-    """Test importing single neuron data, then replacing it with different data."""
-    from unittest.mock import MagicMock
-
-    # Create first recording (2 seconds at 1000Hz = 2000 samples)
-    first_trace = _generate_patchclamp_trace(
-        duration_sec=2.0, sampling_rate=1000.0, baseline=-70.0, num_spikes=4
-    )
-    first_npy = tmp_path / "patch_neuronID_15_original.npy"
-    np.save(first_npy, first_trace)
-
-    # Create replacement recording (1 second at same rate = 1000 samples)
-    replacement_trace = _generate_patchclamp_trace(
-        duration_sec=1.0, sampling_rate=1000.0, baseline=-70.0, num_spikes=2
-    )
-    replacement_npy = tmp_path / "patch_neuronID_15_replacement.npy"
-    np.save(replacement_npy, replacement_trace)
-
-    # Mock model
-    mock_model = MagicMock()
-    mock_model.experiments = {}
-
-    # First import
-    dialog1 = PatchClampImportDialog(project=mock_model)
-    qtbot.addWidget(dialog1)
-
-    dialog1.load_file(str(first_npy))
-    dialog1._set_mapping_strategy("Custom")
-    dialog1.sampling_rate_spin.setValue(1000.0)
-    dialog1.custom_mapping_line.setText("15")
-    dialog1.replace_checkbox.setChecked(True)  # Replace mode
-
-    dialog1.accept = lambda: None
-    dialog1.import_data()
-
-    # Verify first import (2 seconds)
-    assert len(dialog1.imported_trace_data) == 1
-    first_imported = dialog1.imported_trace_data[0]
-    assert first_imported.traces.shape[1] == 2000  # 2000 samples
-
-    # Simulate data being added to model
-    mock_model.experiments["PatchClamp Import"] = dialog1.imported_data
-
-    dialog1.close()
-
-    # Second import in REPLACE mode
-    dialog2 = PatchClampImportDialog(project=mock_model)
-    qtbot.addWidget(dialog2)
-
-    dialog2.load_file(str(replacement_npy))
-    dialog2._set_mapping_strategy("Custom")
-    dialog2.sampling_rate_spin.setValue(1000.0)
-    dialog2.custom_mapping_line.setText("15")
-    dialog2.replace_checkbox.setChecked(True)  # REPLACE mode
-
-    dialog2.accept = lambda: None
-    dialog2.import_data()
-
-    # Verify replacement data (should be 1 second, not 2)
-    assert len(dialog2.imported_trace_data) == 1
-    second_imported = dialog2.imported_trace_data[0]
-    assert second_imported.traces.shape[1] == 1000  # Only 1000 samples (replacement)
-    assert 15 in dialog2.neurons_to_replace  # Neuron marked for replacement
-
-    dialog2.close()
 
 
 def _generate_two_neuron_patchclamp_trace(
@@ -489,7 +368,6 @@ def test_multi_row_mapping_trims_to_row_count(tmp_path, qtbot):
     dialog.load_file(str(npy_path))
 
     assert dialog.custom_mapping_line.text() == "5,6"
-    assert dialog.custom_neuron_id_line.text() == "5,6"
 
 
 def test_custom_mapping_keeps_existing_cellpose_mapping():
@@ -505,7 +383,7 @@ def test_custom_mapping_keeps_existing_cellpose_mapping():
     )
 
     mapping = generate_stimulus_mapping(
-        cellpose_import, "Custom", data_row_count=2, stim_ids=[5, 6]
+        cellpose_import, data_row_count=2, stim_ids=[5, 6]
     )
 
     assert mapping == existing_mapping
@@ -517,7 +395,6 @@ def test_custom_mapping_keeps_existing_cellpose_mapping():
   """
 
 
-# Deliberately failing, TDD style
 def test_custom_mapping_stim_id_input_uses_stim_ids_directly(tmp_path, qtbot):
     """Custom input '2,3' should import to stim IDs 2 and 3, even with mapping."""
     two_neuron_data = _generate_two_neuron_patchclamp_trace(
@@ -544,7 +421,6 @@ def test_custom_mapping_stim_id_input_uses_stim_ids_directly(tmp_path, qtbot):
     qtbot.addWidget(dialog)
     dialog.load_file(str(npy_path))
 
-    dialog._set_mapping_strategy("Custom")
     dialog.custom_mapping_line.setText("2, 3")
     dialog.sampling_rate_spin.setValue(1000.0)
     dialog.peak_height_spin.setValue(2.0)
@@ -588,7 +464,6 @@ def test_custom_mapping_duplicate_stimulus_ids_error(tmp_path, qtbot, monkeypatc
     qtbot.addWidget(dialog)
     dialog.load_file(str(npy_path))
 
-    dialog._set_mapping_strategy("Custom")
     dialog.custom_mapping_line.setText("3,3,6,10")
     dialog.sampling_rate_spin.setValue(1000.0)
     dialog.peak_height_spin.setValue(2.0)
@@ -649,7 +524,7 @@ def test_import_two_neuron_npy_file(tmp_path, qtbot):
     dialog.load_file(str(npy_path))
 
     # Set up for two neurons
-    dialog.custom_neuron_id_line.setText("15,17")
+    dialog.custom_mapping_line.setText("15,17")
     dialog.sampling_rate_spin.setValue(1000.0)
     dialog.peak_height_spin.setValue(2.0)
 
@@ -688,7 +563,7 @@ def test_import_two_neuron_wrong_id_count(tmp_path, qtbot):
     dialog.load_file(str(npy_path))
 
     # Try to import with wrong number of IDs (should be 2, not 1)
-    dialog.custom_neuron_id_line.setText("15")  # Only one ID for two traces
+    dialog.custom_mapping_line.setText("15")  # Only one ID for two traces
     dialog.sampling_rate_spin.setValue(1000.0)
 
     dialog.accept = lambda: None
@@ -702,269 +577,3 @@ def test_import_two_neuron_wrong_id_count(tmp_path, qtbot):
         pass  # Expected error
 
     dialog.close()
-
-
-def test_import_single_then_double_replace_mode(tmp_path, qtbot):
-    """Test importing single neuron, then double (including same neuron) in REPLACE mode - Should always be fine"""
-    from unittest.mock import MagicMock
-
-    # Single neuron trace (neuron 15)
-    single_trace = _generate_patchclamp_trace(
-        duration_sec=1.0, sampling_rate=1000.0, num_spikes=2
-    )
-    single_npy = tmp_path / "single_neuron_15.npy"
-    np.save(single_npy, single_trace)
-
-    # Double neuron trace (neurons 15 and 17)
-    double_trace = _generate_two_neuron_patchclamp_trace(
-        duration_sec=1.5, sampling_rate=1000.0, num_spikes_per_neuron=3
-    )
-    double_npy = tmp_path / "double_neuron_15_17.npy"
-    np.save(double_npy, double_trace)
-
-    mock_model = MagicMock()
-    mock_model.experiments = {}
-
-    # First import: single neuron 15
-    dialog1 = PatchClampImportDialog(project=mock_model)
-    qtbot.addWidget(dialog1)
-
-    dialog1.load_file(str(single_npy))
-    dialog1._set_mapping_strategy("Custom")
-    dialog1.custom_mapping_line.setText("15")
-    dialog1.sampling_rate_spin.setValue(1000.0)
-    dialog1.replace_checkbox.setChecked(True)  # Replace mode
-
-    dialog1.accept = lambda: None
-    dialog1.import_data()
-
-    # Verify first import
-    assert len(dialog1.imported_trace_data) == 1
-    first_trace = dialog1.imported_trace_data[0]
-    assert 15 in first_trace.indices
-    assert first_trace.traces.shape[1] == 1000  # 1 second
-
-    # Simulate data added to model
-    mock_model.experiments["PatchClamp Import"] = dialog1.imported_data
-
-    dialog1.close()
-
-    # Second import: double neurons 15,17 in REPLACE mode
-    dialog2 = PatchClampImportDialog(project=mock_model)
-    qtbot.addWidget(dialog2)
-
-    dialog2.load_file(str(double_npy))
-    dialog2._set_mapping_strategy("Custom")
-    dialog2.custom_mapping_line.setText("15,17")
-    dialog2.sampling_rate_spin.setValue(1000.0)
-    dialog2.replace_checkbox.setChecked(True)  # REPLACE mode
-
-    dialog2.accept = lambda: None
-    dialog2.import_data()
-
-    # Verify replace mode worked
-    assert len(dialog2.imported_trace_data) == 1
-    double_trace_imported = dialog2.imported_trace_data[0]
-    assert double_trace_imported.traces.shape[0] == 2  # Two neurons
-    assert double_trace_imported.traces.shape[1] == 1500  # 1.5 seconds
-    assert 15 in double_trace_imported.indices and 17 in double_trace_imported.indices
-    assert 15 in dialog2.neurons_to_replace  # Neuron 15 marked for replacement
-
-    dialog2.close()
-
-
-def test_import_single_then_double_extend_mode_error(tmp_path, qtbot, monkeypatch):
-    """Test importing single neuron, then double (mixed existing/new) in EXTEND mode should fail."""
-    from unittest.mock import MagicMock
-
-    # Single neuron trace (neuron 15)
-    single_trace = _generate_patchclamp_trace(duration_sec=1.0, sampling_rate=1000.0)
-    single_npy = tmp_path / "single_neuron_15.npy"
-    np.save(single_npy, single_trace)
-
-    # Double neuron trace (neurons 15 and 17)
-    double_trace = _generate_two_neuron_patchclamp_trace(
-        duration_sec=1.0, sampling_rate=1000.0
-    )
-    double_npy = tmp_path / "double_neuron_15_17.npy"
-    np.save(double_npy, double_trace)
-
-    mock_model = MagicMock()
-    mock_model.experiments = {}
-
-    # First import: single neuron 15
-    dialog1 = PatchClampImportDialog(project=mock_model)
-    qtbot.addWidget(dialog1)
-
-    dialog1.load_file(str(single_npy))
-    dialog1._set_mapping_strategy("Custom")
-    dialog1.custom_mapping_line.setText("15")
-    dialog1.sampling_rate_spin.setValue(1000.0)
-    dialog1.replace_checkbox.setChecked(True)  # Replace mode
-
-    dialog1.accept = lambda: None
-    dialog1.import_data()
-
-    # Simulate data added to model
-    mock_model.experiments["PatchClamp Import"] = dialog1.imported_data
-
-    dialog1.close()
-
-    # Second import: try double neurons 15,17 in EXTEND mode (should fail)
-    dialog2 = PatchClampImportDialog(project=mock_model)
-    qtbot.addWidget(dialog2)
-
-    dialog2.load_file(str(double_npy))
-    dialog2._set_mapping_strategy("Custom")
-    dialog2.custom_mapping_line.setText("15,17")
-    dialog2.sampling_rate_spin.setValue(1000.0)
-    dialog2.replace_checkbox.setChecked(False)  # EXTEND mode
-
-    dialog2.accept = lambda: None
-
-    captured = {}
-
-    def _capture_critical(_parent, title, text):
-        captured["title"] = title
-        captured["text"] = text
-
-    monkeypatch.setattr(
-        QtWidgets.QMessageBox, "critical", _capture_critical, raising=True
-    )
-
-    dialog2.import_data()
-    assert "Error importing data" in captured.get("text", "")
-    assert "Cannot extend data when importing both existing neurons" in captured.get(
-        "text", ""
-    )
-    dialog2.close()
-
-
-def test_import_new_neurons_extend_mode_with_existing_data_error(
-    tmp_path, qtbot, caplog, monkeypatch
-):
-    """Test importing new neurons in EXTEND mode when existing data exists should fail."""
-    from unittest.mock import MagicMock
-
-    # Single neuron trace (neuron 15)
-    single_trace = _generate_patchclamp_trace(duration_sec=1.0, sampling_rate=1000.0)
-    single_npy = tmp_path / "single_neuron_15.npy"
-    np.save(single_npy, single_trace)
-
-    # Different neurons trace (neurons 20,25)
-    different_trace = _generate_two_neuron_patchclamp_trace(
-        duration_sec=1.0, sampling_rate=1000.0
-    )
-    different_npy = tmp_path / "different_neurons_20_25.npy"
-    np.save(different_npy, different_trace)
-
-    mock_model = MagicMock()
-    mock_model.experiments = {}
-
-    # First import: neuron 15
-    dialog1 = PatchClampImportDialog(project=mock_model)
-    qtbot.addWidget(dialog1)
-
-    dialog1.load_file(str(single_npy))
-    dialog1._set_mapping_strategy("Custom")
-    dialog1.custom_mapping_line.setText("15")
-    dialog1.sampling_rate_spin.setValue(1000.0)
-    dialog1.replace_checkbox.setChecked(True)
-
-    dialog1.accept = lambda: None
-    dialog1.import_data()
-
-    # Simulate data added to model
-    mock_model.experiments["PatchClamp Import"] = dialog1.imported_data
-
-    dialog1.close()
-
-    # Second import: try new neurons 20,25 in EXTEND mode (should fail because 15 exists)
-    dialog2 = PatchClampImportDialog(project=mock_model)
-    qtbot.addWidget(dialog2)
-
-    dialog2.load_file(str(different_npy))
-    dialog2._set_mapping_strategy("Custom")
-    dialog2.custom_mapping_line.setText("20,25")
-    dialog2.sampling_rate_spin.setValue(1000.0)
-    dialog2.replace_checkbox.setChecked(False)  # EXTEND mode
-
-    dialog2.accept = lambda: None
-    captured = {}
-
-    def _capture_critical(_parent, title, text):
-        captured["title"] = title
-        captured["text"] = text
-
-    monkeypatch.setattr(
-        QtWidgets.QMessageBox, "critical", _capture_critical, raising=True
-    )
-
-    dialog2.import_data()
-    assert "Error importing data" in captured.get("text", "")
-    assert "Cannot extend data when importing new neurons" in captured.get("text", "")
-    assert len(dialog2.imported_trace_data) == 0
-
-    dialog2.close()
-
-
-def test_import_existing_neurons_only_extend_mode_success(tmp_path, qtbot):
-    """Test importing only existing neurons in EXTEND mode should succeed."""
-    from unittest.mock import MagicMock
-
-    # Two neuron trace (neurons 15,17)
-    original_trace = _generate_two_neuron_patchclamp_trace(
-        duration_sec=1.0, sampling_rate=1000.0
-    )
-    original_npy = tmp_path / "original_neurons_15_17.npy"
-    np.save(original_npy, original_trace)
-
-    # Extension for same neurons
-    extension_trace = _generate_two_neuron_patchclamp_trace(
-        duration_sec=0.5, sampling_rate=1000.0
-    )
-    extension_npy = tmp_path / "extension_neurons_15_17.npy"
-    np.save(extension_npy, extension_trace)
-
-    mock_model = MagicMock()
-    mock_model.experiments = {}
-
-    # First import: neurons 15,17
-    dialog1 = PatchClampImportDialog(project=mock_model)
-    qtbot.addWidget(dialog1)
-
-    dialog1.load_file(str(original_npy))
-    dialog1._set_mapping_strategy("Custom")
-    dialog1.custom_mapping_line.setText("15,17")
-    dialog1.sampling_rate_spin.setValue(1000.0)
-    dialog1.replace_checkbox.setChecked(True)
-
-    dialog1.accept = lambda: None
-    dialog1.import_data()
-
-    # Simulate data added to model
-    mock_model.experiments["PatchClamp Import"] = dialog1.imported_data
-
-    dialog1.close()
-
-    # Second import: same neurons 15,17 in EXTEND mode (should work)
-    dialog2 = PatchClampImportDialog(project=mock_model)
-    qtbot.addWidget(dialog2)
-
-    dialog2.load_file(str(extension_npy))
-    dialog2._set_mapping_strategy("Custom")
-    dialog2.custom_mapping_line.setText("15,17")
-    dialog2.sampling_rate_spin.setValue(1000.0)
-    dialog2.replace_checkbox.setChecked(False)  # EXTEND mode
-
-    dialog2.accept = lambda: None
-    dialog2.import_data()  # Should not raise error
-
-    # Verify extension worked
-    assert len(dialog2.imported_trace_data) == 1
-    extended_trace = dialog2.imported_trace_data[0]
-    assert extended_trace.traces.shape[0] == 2  # Two neurons
-    assert extended_trace.traces.shape[1] == 500  # 0.5 seconds extension
-    assert 15 in extended_trace.indices and 17 in extended_trace.indices
-
-    dialog2.close()

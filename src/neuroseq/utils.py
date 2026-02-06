@@ -209,6 +209,8 @@ def append_data(
     new_data: TraceData | SpikeData | SynapseData,
     data_duration_seconds: float,
     time_offset_seconds: float,
+    *,
+    keep_in_sync: bool = False,
 ):
     """Append new data in-place to the existing data, overwriting the existing data if the time ranges overlap.
 
@@ -237,7 +239,12 @@ def append_data(
             raise ValueError(
                 f"Cannot append TraceData with different dt: {existing_data.dt} != {new_data.dt}"
             )
+        if keep_in_sync and not np.array_equal(existing_data.indices, new_data.indices):
+            existing_data.indices = np.array(new_data.indices, copy=True)
         if existing_data.traces.shape[0] != new_data.traces.shape[0]:
+            if keep_in_sync:
+                existing_data.traces = np.array(new_data.traces, copy=True)
+                return
             raise ValueError(
                 f"Cannot append TraceData with different number of neurons: {existing_data.traces.shape[0]} != {new_data.traces.shape[0]}"
             )
