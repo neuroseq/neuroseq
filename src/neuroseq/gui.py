@@ -39,6 +39,7 @@ from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.save_load_options import SaveLoadOptionsDialog
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim_editor import StimEditor
+from neuroseq.synthetic_data_dialog import SyntheticDataDialog
 from neuroseq.time_slider_widget import TimeSliderWidget
 from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.trace_widget import TraceWidget
@@ -273,6 +274,13 @@ class Gui(QtWidgets.QMainWindow):
             self.progress_dialog.reset()
             return
         self.update_project(self.project)
+
+    def btn_generate_synthetic_data_clicked(self) -> None:
+        dialog = SyntheticDataDialog(self.project, parent=self)
+        dialog.exec()
+        # Refresh combo boxes if new data was added
+        if dialog.data_added:
+            self._update_combo_boxes()
 
     def btn_save_clicked(self) -> None:
         options_dialog = SaveLoadOptionsDialog(action="Save")
@@ -876,6 +884,16 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             shortcut="Ctrl+Shift+I",
             icon=qta.icon("mdi6.import"),
+        )
+        add_action(
+            "Generate Synthetic &Data...",
+            self.btn_generate_synthetic_data_clicked,
+            menu,
+            toolbar,
+            shortcut="Ctrl+G",
+            icon=qta.icon("mdi6.microsoft-xbox-controller-view")
+            if hasattr(qta, "icon")
+            else None,
         )
         add_action(
             "Import Cellpose &Segmentation",
