@@ -7,10 +7,15 @@ from typing import Any
 import brian2 as b2
 import brian2.numpy_ as np
 import pytest
+from numpy.typing import NDArray
 from qtpy import QtWidgets
 
 from neuroseq.b2_model import B2Model
-from neuroseq.model import Model
+from neuroseq.data import Experiment
+from neuroseq.data import SpikeData
+from neuroseq.data import SynapseData
+from neuroseq.data import TraceData
+from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.utils import init_brian2_logging
@@ -36,6 +41,25 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "screenshot" in item.keywords:
                 item.add_marker(pytest.mark.skip(reason="Skipping screenshot update"))
+
+
+@pytest.fixture(autouse=True)
+def suppress_message_boxes(monkeypatch):
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "information",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.Ok,
+    )
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "warning",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.Ok,
+    )
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "critical",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.Ok,
+    )
 
 
 # replace all .exec() calls with .show() to avoid blocking the tests
@@ -125,6 +149,14 @@ def suite2p_import_data_dir(
     np.save(data_dir / "F.npy", f_data)
     np.save(data_dir / "Fneu.npy", fneu_data)
     np.save(data_dir / "spks.npy", spike_data)
+    # optional metadata file
+    stat_data = np.zeros(5, dtype=object)
+    np.save(data_dir / "stat.npy", stat_data)
+
+    # CSV fallbacks for less advanced users
+    np.savetxt(data_dir / "F.csv", f_data, delimiter=",")
+    np.savetxt(data_dir / "Fneu.csv", fneu_data, delimiter=",")
+    np.savetxt(data_dir / "spks.csv", spike_data, delimiter=",")
 
     return data_dir
 
@@ -242,12 +274,12 @@ def reference_parameters() -> dict[str, Any]:
 
 
 @pytest.fixture()
-def mfx() -> B2Model:
+def b2model() -> B2Model:
     return B2Model()
 
 
 @pytest.fixture
-def mfx_ornstein() -> Model:
+def project_ornstein() -> Project:
     eqs = """
         tau : second
         sigma : 1
@@ -279,9 +311,9 @@ def mfx_ornstein() -> Model:
 
     b2_model.must_be_rebuilt = False
 
-    model = Model()
-    model.b2_model = b2_model
-    return model
+    project = Project()
+    project.b2_model = b2_model
+    return project
 
 
 @pytest.fixture
@@ -350,15 +382,15 @@ def b2_model_nmda() -> B2Model:
 
 
 @pytest.fixture
-def model_nmda(b2_model_nmda: B2Model) -> Model:
-    model = Model()
-    model.b2_model = b2_model_nmda
-    return model
+def project_nmda(b2_model_nmda: B2Model) -> Project:
+    project = Project()
+    project.b2_model = b2_model_nmda
+    return project
 
 
 @pytest.fixture
 def mfx_parameterized(
-    mfx: B2Model, reference_parameters: dict[str, Any]
+    b2model: B2Model, reference_parameters: dict[str, Any]
 ) -> tuple[B2Model, dict[str, Any]]:
     b2.seed(reference_parameters["seed"])
     n = 30
@@ -366,15 +398,15 @@ def mfx_parameterized(
     refractory = 3 * b2.ms
     method = "exponential_euler"
     dt = 0.1 * b2.ms
-    mfx.define_equation("P", reference_parameters["eqs"])
-    mfx.define_neuronnumber("P", n)
-    mfx.define_threshold("P", threshold)
-    mfx.define_refractory("P", refractory)
-    mfx.define_dt("P", dt)
-    mfx.define_solver_method("P", method)
-    mfx._assemble_neurongroup("P")
+    b2model.define_equation("P", reference_parameters["eqs"])
+    b2model.define_neuronnumber("P", n)
+    b2model.define_threshold("P", threshold)
+    b2model.define_refractory("P", refractory)
+    b2model.define_dt("P", dt)
+    b2model.define_solver_method("P", method)
+    b2model._assemble_neurongroup("P")
 
-    return mfx, reference_parameters
+    return b2model, reference_parameters
 
 
 @pytest.fixture()
@@ -436,11 +468,11 @@ def mfx_with_synapse(
 
 
 @pytest.fixture
-def test_model() -> Model:
-    model = Model()
+def test_project() -> Project:
+    project = Project()
 
     # define Brian2 model
-    b2_model = model.b2_model
+    b2_model = project.b2_model
 
     nneurons = 30
     nneurons_exc = 24
@@ -578,7 +610,7 @@ we= clip(we + Apre, -gmax, gmax)
         units="siemens",
         dt=0.001,
     )
-    model.add_stim_array(stim_array)
+    project.add_stim_array(stim_array)
 
     stim_inh = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
     stim_inh[800:802, :nneurons_exc] = 1
@@ -589,6 +621,101 @@ we= clip(we + Apre, -gmax, gmax)
         units="siemens",
         dt=0.001,
     )
-    model.add_stim_array(stim_array_inh)
+    project.add_stim_array(stim_array_inh)
 
-    return model
+    return project
+
+
+@pytest.fixture
+def make_spike_data():
+    def f(
+        name="test_spikes", n_neurons=20, n_spikes=100, max_time_secs=1.0
+    ) -> SpikeData:
+        spike_indices = np.random.randint(
+            low=0, high=n_neurons, size=n_spikes, dtype=np.uint32
+        )
+        spike_times = (
+            max_time_secs
+            * (np.arange(n_spikes) / (n_spikes + 1) + 0.2 * np.random.rand(n_spikes))
+        ).astype(np.float32)
+        return SpikeData(
+            name=name, spike_indices=spike_indices, spike_times=spike_times
+        )
+
+    return f
+
+
+@pytest.fixture
+def make_trace_data():
+    def f(
+        name="test_traces",
+        n_neurons=20,
+        n_timestamps=1000,
+        indices: NDArray[np.float32] | None = None,
+        dt=0.001,
+        units="mV",
+    ) -> TraceData:
+        if indices is None:
+            indices = np.arange(n_neurons, dtype=np.uint32)
+        return TraceData(
+            name=name,
+            traces=np.random.random_sample((n_neurons, n_timestamps)).astype(
+                np.float32
+            ),
+            indices=indices,
+            dt=dt,
+            units=units,
+        )
+
+    return f
+
+
+@pytest.fixture
+def make_synapse_data():
+    def f(
+        name="test_synapses", n_i=12, n_j=12, n_timestamps=2, max_time_secs=1.0
+    ) -> SynapseData:
+        return SynapseData(
+            name=name,
+            values=np.random.random_sample((n_i, n_j, n_timestamps)).astype(np.float32),
+            timestamps=np.linspace(0, max_time_secs, n_timestamps).astype(np.float32),
+        )
+
+    return f
+
+
+@pytest.fixture
+def test_experiment(make_trace_data, make_spike_data) -> Experiment:
+    return Experiment(
+        "test_exp",
+        1.0,
+        [0.0, 0.5, 1.0],
+        [
+            make_trace_data(n_neurons=5, n_timestamps=1000, dt=0.001),
+            make_spike_data(n_neurons=5, max_time_secs=1.0),
+        ],
+    )
+
+
+@pytest.fixture
+def test_experiments(make_trace_data, make_spike_data) -> list[Experiment]:
+    return [
+        Experiment(
+            "e1",
+            0.2,
+            [0.0, 0.2],
+            [
+                make_trace_data(n_neurons=3, n_timestamps=200, dt=0.001),
+                make_spike_data(n_neurons=3, max_time_secs=0.2),
+            ],
+        ),
+        Experiment(
+            "e2",
+            0.5,
+            [0.0, 0.15, 0.35, 0.5],
+            [
+                make_trace_data(n_neurons=5, n_timestamps=500, dt=0.001),
+                make_spike_data(n_neurons=5, max_time_secs=0.5),
+            ],
+        ),
+    ]

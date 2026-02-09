@@ -208,7 +208,7 @@ def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
     # mouse clicks
     stim_widget.setFocus()
     with qtbot.waitSignal(stim_widget.mouse_clicked) as signal:
-        mouse_click(qtbot, stim_widget, QtCore.QPoint(x0, y0))
+        mouse_click(qtbot, stim_widget.figure.canvas, QtCore.QPoint(x0, y0))
     neuron_index_offset, time_index, mouse_button = signal.args
     assert 0 < time_index / n_timestamps < 0.4
     assert 0 < neuron_index_offset / n_neurons < 1.0

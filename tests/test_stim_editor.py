@@ -12,7 +12,7 @@ from qtpy import QtWidgets
 
 import neuroseq
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
-from neuroseq.model import Model
+from neuroseq.project import Project
 from neuroseq.stim import DrawStim
 from neuroseq.stim import DrawStimType
 from neuroseq.stim import StimArray
@@ -45,8 +45,8 @@ def test_stim_editor_no_data(qtbot: QtBot) -> None:
 
 
 def test_stim_editor_zoom_pan(qtbot: QtBot) -> None:
-    model = Model()
-    model.stim_arrays = {
+    project = Project()
+    project.stim_arrays = {
         "a": StimArray(
             "a", neuroseq.stim.StimType.Excitation, np.zeros((127, 17)), "mV", 0.001
         )
@@ -58,7 +58,7 @@ def test_stim_editor_zoom_pan(qtbot: QtBot) -> None:
     qtbot.addWidget(stim_editor)
     stim_editor.show()
     qtbot.waitUntil(lambda: stim_editor.isVisible())
-    stim_editor.set_model(model)
+    stim_editor.set_project(project)
     # zoom/pan using the sliders and zoom buttons
     delay = 50
     for _ in range(4):
@@ -85,8 +85,8 @@ def test_stim_editor_zoom_pan(qtbot: QtBot) -> None:
 def test_stim_editor_pad_and_trim(
     monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list
 ):
-    model = Model()
-    model.stim_arrays = {
+    project = Project()
+    project.stim_arrays = {
         "a": StimArray(
             "a",
             neuroseq.stim.StimType.Excitation,
@@ -102,7 +102,7 @@ def test_stim_editor_pad_and_trim(
     qtbot.addWidget(stim_editor)
     stim_editor.show()
     qtbot.waitUntil(lambda: stim_editor.isVisible())
-    stim_editor.set_model(model)
+    stim_editor.set_project(project)
     # pad with invalid number of seconds
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getText", lambda *args: ("notanumber", True)
@@ -181,12 +181,12 @@ def test_stim_editor_actions(
 ) -> None:
     n_neurons = 10
     n_timestamps = 20
-    model = Model()
+    project = Project()
     arr = np.ones((n_timestamps, n_neurons))
     selection = np.random.randint(3, size=(5, 2))
     selection_inverted = 2 - selection
     arr[2:7, 1:3] = selection
-    model.stim_arrays = {
+    project.stim_arrays = {
         "a": StimArray("a", neuroseq.stim.StimType.Excitation, arr, "mV", 0.001)
     }
     monkeypatch.setattr(
@@ -205,7 +205,7 @@ def test_stim_editor_actions(
     assert not stim_editor.action_undo.isEnabled()
     assert not stim_editor.action_redo.isEnabled()
     assert len(stim_editor.stims_dict) == 0
-    stim_editor.set_model(model)
+    stim_editor.set_project(project)
     stim_editor.set_mode(InteractMode.SELECT)
     assert "a" in stim_editor.stims_dict
     assert_allclose(stim_editor.stims_dict["a"].stim_array.values, arr)

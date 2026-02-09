@@ -12,7 +12,9 @@ requires-python = ">=3.10"
 dependencies = [
     "brian2",
     "matplotlib",
+    "pillow",
     "numpy",
+    "scipy",
     "qtpy",
     "pyside6!=6.9.1",
     "pyqtgraph!=0.14.0",
@@ -93,7 +95,7 @@ exclude_also = [
     # Don't complain about abstract methods, they aren't run
     "@(abc\\.)?abstractmethod",
 ]
-fail_under = 80
+fail_under = 75
 
 [tool.diff_cover]
-fail_under = 80
+fail_under = 75

@@ -8,7 +8,7 @@ from pyqtgraph.console.repl_widget import ReplWidget
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from neuroseq.model import Model
+from neuroseq.project import Project
 
 
 class ConsoleWidget(ReplWidget):
@@ -22,36 +22,36 @@ class ConsoleWidget(ReplWidget):
         self.namespace_dict: dict[str, Any] = {
             "np": np,
             "b2": b2,
-            "model": None,
+            "project": None,
         }
         self._print_intro()
 
     def _print_intro(self) -> None:
         self.output.insertPlainText(
-            "This is a Python console where you can interact directly with the Model using the 'model' variable.\n"
+            "This is a Python console where you can interact directly with the Model using the 'project' variable.\n"
         )
         self.output.insertPlainText(
             "Here are some examples you can try entering below:\n\n"
         )
         self.write(
-            ">>> model.stim_arrays['stimulus'].values[::10,::2] = 1", style="command"
+            ">>> project.stim_arrays['stimulus'].values[::10,::2] = 1", style="command"
         )
         self.output.insertPlainText("\n")
         self.write(
-            ">>> model.stim_arrays['stimulus'].values = np.random.randint(3,size=(1000, 80))",
+            ">>> project.stim_arrays['stimulus'].values = np.random.randint(3,size=(1000, 80))",
             style="command",
         )
         self.output.insertPlainText(
             "\n\nNumpy is available as np, brian2 as b2, and indentation can be done with a single space.\n\n\n"
         )
 
-    def set_model(self, model: Model) -> None:
-        self.namespace_dict["model"] = model
+    def set_project(self, project: Project) -> None:
+        self.namespace_dict["project"] = project
 
     def namespace(self) -> dict[str, Any]:
         return self.namespace_dict
 
     def runCmd(self, cmd: str) -> None:
         super().runCmd(cmd)
-        self.namespace()["model"].update_limits()
+        self.namespace()["project"].update_limits()
         self.console_command_entered.emit()

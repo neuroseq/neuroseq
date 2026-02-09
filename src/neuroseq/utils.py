@@ -3,8 +3,10 @@ from __future__ import annotations
 import functools
 import logging
 from collections.abc import Callable
+from collections.abc import Iterable
 from enum import Enum
 from typing import Any
+from typing import TypeVar
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -180,19 +182,29 @@ def update_nested_dict(original: dict[Any, Any], updates: Any) -> None:
             original[key] = value
 
 
+def safe_concat(arrays: list[np.ndarray], axis=0) -> np.ndarray:
+    """
+    Concatenate a list of NumPy arrays along the given axis, ignoring any arrays that are empty (size == 0).
+    """
+    return np.concatenate([a for a in arrays if a.size > 0], axis=axis)
+
+
 def append_data(
     existing_data: TraceData | SpikeData | SynapseData,
     new_data: TraceData | SpikeData | SynapseData,
+    data_duration_seconds: float,
     time_offset_seconds: float,
 ):
-    """Append new trace or spike data in-place to the existing data
+    """Append new data in-place to the existing data, overwriting the existing data if the time ranges overlap.
 
     Parameters
     ----------
     existing_data : TraceData | SpikeData | SynapseData
-        Existing trace or spike data to append to.
+        Existing data to append to.
     new_data : TraceData | SpikeData | SynapseData
         New trace or spike data to append.
+    data_duration_seconds: float
+        Duration in seconds of the new data being appended.
     time_offset_seconds: float
         Time offset in seconds to apply to the timestamps in the new data when appending
 
@@ -204,31 +216,125 @@ def append_data(
         If existing_data and new_data are not of the same type.
     """
     if type(existing_data) is not type(new_data):
-        raise TypeError("existing_data and new_data must be of the same type.")
+        raise TypeError("Existing data and new data must be of the same type.")
     if isinstance(existing_data, TraceData) and isinstance(new_data, TraceData):
-        if existing_data.traces.shape[0] != new_data.traces.shape[0]:
-            raise ValueError(
-                f"Cannot append TraceData with different number of neurons: {existing_data.traces.shape[0]} != {new_data.traces.shape[0]}"
-            )
         if existing_data.dt != new_data.dt:
             raise ValueError(
                 f"Cannot append TraceData with different dt: {existing_data.dt} != {new_data.dt}"
             )
-        if existing_data.traces.shape[1] * existing_data.dt != time_offset_seconds:
+        if existing_data.traces.shape[0] != new_data.traces.shape[0]:
             raise ValueError(
-                f"Time offset {time_offset_seconds} does not match the length of the existing trace data {existing_data.traces.shape[1] * existing_data.dt}."
+                f"Cannot append TraceData with different number of neurons: {existing_data.traces.shape[0]} != {new_data.traces.shape[0]}"
             )
-        existing_data.traces = np.concatenate(
-            (existing_data.traces, new_data.traces), axis=1
+        idx0 = int(time_offset_seconds / existing_data.dt)
+        idx1 = int((time_offset_seconds + data_duration_seconds) / existing_data.dt)
+        existing_data.traces = safe_concat(
+            [
+                existing_data.traces[:, 0:idx0],
+                new_data.traces,
+                existing_data.traces[:, idx1:],
+            ],
+            axis=1,
         )
     elif isinstance(existing_data, SpikeData) and isinstance(new_data, SpikeData):
-        existing_data.spike_indices = np.concatenate(
-            (existing_data.spike_indices, new_data.spike_indices), axis=0
+        # find the index of the last spike time in the existing data before the time offset
+        idx0 = np.searchsorted(
+            existing_data.spike_times, time_offset_seconds, side="left"
         )
-        existing_data.spike_times = np.concatenate(
-            (existing_data.spike_times, new_data.spike_times + time_offset_seconds),
+        # find the index of the first spike time in the existing data after the time offset + duration
+        idx1 = np.searchsorted(
+            existing_data.spike_times,
+            time_offset_seconds + data_duration_seconds,
+            side="left",
+        )
+        existing_data.spike_indices = safe_concat(
+            [
+                existing_data.spike_indices[0:idx0],
+                new_data.spike_indices,
+                existing_data.spike_indices[idx1:],
+            ],
             axis=0,
         )
+        existing_data.spike_times = safe_concat(
+            [
+                existing_data.spike_times[0:idx0],
+                new_data.spike_times + time_offset_seconds,
+                existing_data.spike_times[idx1:],
+            ],
+            axis=0,
+        )
+    elif isinstance(existing_data, SynapseData) and isinstance(new_data, SynapseData):
+        # find the index of the last timestamp in the existing data before the time offset
+        idx0 = np.searchsorted(
+            existing_data.timestamps, time_offset_seconds, side="left"
+        )
+        # find the index of the first timestamp in the existing data after the time offset + duration
+        idx1 = np.searchsorted(
+            existing_data.timestamps,
+            time_offset_seconds + data_duration_seconds,
+            side="left",
+        )
+        existing_data.values = safe_concat(
+            [
+                existing_data.values[0:idx0],
+                new_data.values,
+                existing_data.values[idx1:],
+            ],
+            axis=2,
+        )
+        existing_data.timestamps = safe_concat(
+            [
+                existing_data.timestamps[0:idx0],
+                new_data.timestamps + time_offset_seconds,
+                existing_data.timestamps[idx1:],
+            ],
+            axis=0,
+        )
+
+
+def remove_neurons_from_data(
+    data: TraceData | SpikeData, neuron_indices_to_remove: set[int]
+) -> None:
+    """Remove specific neurons from TraceData or SpikeData in-place.
+
+    Parameters
+    ----------
+    data : TraceData | SpikeData
+        Data to remove neurons from
+    neuron_indices_to_remove : set[int]
+        Set of neuron indices to remove
+    """
+    if isinstance(data, TraceData):
+        # Find which positions in the arrays correspond to neurons we want to keep
+        indices_to_keep = []
+        for i, neuron_idx in enumerate(data.indices):
+            if neuron_idx not in neuron_indices_to_remove:
+                indices_to_keep.append(i)
+
+        if indices_to_keep:
+            # Keep only the specified neuron traces and indices
+            data.traces = data.traces[indices_to_keep, :]
+            data.indices = data.indices[indices_to_keep]
+        else:
+            # All neurons removed - create empty arrays with correct shape
+            data.traces = np.zeros((0, data.traces.shape[1]), dtype=data.traces.dtype)
+            data.indices = np.array([], dtype=data.indices.dtype)
+
+    elif isinstance(data, SpikeData):
+        # Find which spike events belong to neurons we want to keep
+        spikes_to_keep = []
+        for i, neuron_idx in enumerate(data.spike_indices):
+            if neuron_idx not in neuron_indices_to_remove:
+                spikes_to_keep.append(i)
+
+        if spikes_to_keep:
+            # Keep only spikes from specified neurons
+            data.spike_indices = data.spike_indices[spikes_to_keep]
+            data.spike_times = data.spike_times[spikes_to_keep]
+        else:
+            # All spikes removed - create empty arrays
+            data.spike_indices = np.array([], dtype=data.spike_indices.dtype)
+            data.spike_times = np.array([], dtype=data.spike_times.dtype)
 
 
 def getSimulationTime(parent: QtWidgets.QWidget | None = None) -> float | None:
@@ -279,3 +385,17 @@ def get_cmap(stim_type: StimType, alpha: float = 1.0) -> Colormap:
             )
         case _:
             return Colormap([(1.0, 1.0, 1.0, 0.0), (0.0, 0.0, 0.0, alpha)])
+
+
+T = TypeVar("T")
+
+
+def find_by_name_and_type(
+    data: Iterable[object],
+    name: str,
+    cls: type[T],
+) -> T | None:
+    return next(
+        (d for d in data if isinstance(d, cls) and getattr(d, "name", None) == name),
+        None,
+    )
