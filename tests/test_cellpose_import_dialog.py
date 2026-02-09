@@ -53,3 +53,14 @@ def test_cellpose_dialog_linear_offset_preview_mapping(tmp_path, qtbot: QtBot):
     assert first_mapping_key == 0
     assert mapping[first_mapping_key] == min_original_id + 3
     dialog.close()
+
+
+def test_cellpose_dialog_custom_mapping_restores_on_reopen(tmp_path, qtbot: QtBot):
+    dialog = _make_cellpose_dialog(tmp_path, qtbot)
+    mapping = {1: 4, 2: 1}
+    result = dialog.importer.create_result(dialog.image_path, mapping)
+    reopened = CellposeImportDialog(existing_data=result)
+    qtbot.addWidget(reopened)
+    assert reopened._get_mapping_strategy() == "Custom"
+    assert reopened.custom_mapping_line.text().replace(" ", "") == "1:4,2:1"
+    assert reopened.overlay_widget.stimulus_to_cellpose_mapping == mapping
