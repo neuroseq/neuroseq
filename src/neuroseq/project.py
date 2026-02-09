@@ -405,6 +405,48 @@ class Project:
         self.experiments[experiment.name] = experiment
         self.update_limits()
 
+    def add_experimental_data(
+        self,
+        experiment_name: str,
+        data_list: list[TraceData | SpikeData | SynapseData],
+    ):
+        """
+        Add experimental data as a new experiment to the project.
+
+        Parameters
+        ----------
+        experiment_name : str
+            Name of the experiment to create
+        data_list : list[TraceData | SpikeData | SynapseData]
+            List of data objects to add to the experiment
+
+        Raises
+        ------
+        ValueError
+            If an experiment with the same name already exists
+        """
+        if not data_list:
+            raise ValueError("Cannot create experiment with empty data list")
+
+        # Calculate duration from the data
+        # All data should have the same duration, so we use the first one
+        from neuroseq.data import TraceData
+
+        duration = (
+            len(data_list[0].traces) * data_list[0].dt
+            if isinstance(data_list[0], TraceData)
+            else 0.0
+        )
+
+        # Create and add the experiment
+        experiment = Experiment(
+            name=experiment_name,
+            duration=duration,
+            timepoints=[],
+            data=data_list,
+        )
+        self.add_experiment(experiment)
+
     def pad_stim_arrays(self, total_time_seconds: float):
         """
         Pad all StimArrays in the project to a length of total_time_seconds

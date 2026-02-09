@@ -9,7 +9,7 @@ from qtpy import QtWidgets
 
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
-from neuroseq.model import Model
+from neuroseq.project import Project
 
 
 class SyntheticDataDialog(QtWidgets.QDialog):
@@ -22,7 +22,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
 
     def __init__(
         self,
-        model: Model,
+        model: Project,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)

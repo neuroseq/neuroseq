@@ -276,7 +276,7 @@ class Gui(QtWidgets.QMainWindow):
         self.update_project(self.project)
 
     def btn_generate_synthetic_data_clicked(self) -> None:
-        dialog = SyntheticDataDialog(self.model, parent=self)
+        dialog = SyntheticDataDialog(self.project, parent=self)
         dialog.exec()
         # Refresh combo boxes if new data was added
         if dialog.data_added:
@@ -894,6 +894,8 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.microsoft-xbox-controller-view")
             if hasattr(qta, "icon")
             else None,
+        )
+        add_action(
             "Import Cellpose &Segmentation",
             self.btn_import_cellpose_data_clicked,
             menu,
