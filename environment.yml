@@ -16,7 +16,6 @@ dependencies:
   - pyparsing !=3.2.4
   - psutil
   - nvidia-ml-py
-  - cellpose[gui] == 3.1
   # test deps
   - pytest
   - pytest-qt

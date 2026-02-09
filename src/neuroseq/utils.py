@@ -209,7 +209,6 @@ def append_data(
     new_data: TraceData | SpikeData | SynapseData,
     data_duration_seconds: float,
     time_offset_seconds: float,
-    *,
     keep_in_sync: bool = False,
 ):
     """Append new data in-place to the existing data, overwriting the existing data if the time ranges overlap.
