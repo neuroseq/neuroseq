@@ -511,9 +511,10 @@ class EditableParameterTree(ParameterTree):
         if self.itemAt(ev.pos()):
             super().contextMenuEvent(ev)
         else:
-            menu = QtWidgets.QMenu(self)
-            menu.addAction(self.add_item_action)
-            menu.exec(self.mapToGlobal(ev.pos()))
+            # menu = QtWidgets.QMenu(self)
+            # menu.addAction(self.add_item_action)
+            # menu.exec(self.mapToGlobal(ev.pos()))
+            pass
 
 
 class EditableSynapseTree(EditableParameterTree):
@@ -830,13 +831,11 @@ class EditableNeurongroupTree(EditableParameterTree):
         if self.itemAt(ev.pos()):
             super().contextMenuEvent(ev)
         else:
-            menu = QtWidgets.QMenu(self)
-
-            menu.addAction(self.add_neurongroup_action)
-
-            menu.addAction(self.add_neuronsubgroup_action)
-
-            menu.exec(self.mapToGlobal(ev.pos()))
+            # menu = QtWidgets.QMenu(self)
+            # menu.addAction(self.add_neurongroup_action)
+            # menu.addAction(self.add_neuronsubgroup_action)
+            # menu.exec(self.mapToGlobal(ev.pos()))
+            pass
 
 
 class ModelEditorDialog(QtWidgets.QDialog):
@@ -914,6 +913,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
 
             add_group_button = QtWidgets.QPushButton("New " + k[0 : len(k) - 1], self)
             add_group_button.clicked.connect(tree._add_item)
+            add_group_button.setVisible(False)
             layout.addWidget(add_group_button, 0, i + 1)
             col_add = 0
             if k == "Neurongroups":
@@ -921,6 +921,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
                 add_group_button_sub = QtWidgets.QPushButton("New Subgroup", self)
                 layout.addWidget(add_group_button_sub, 0, i + 2)
                 add_group_button_sub.clicked.connect(tree._add_neuronsubgroup)
+                add_group_button_sub.setVisible(False)
             else:
                 col_add = 3
             layout.addWidget(tree, 1, i, 1, col_add - 1)
