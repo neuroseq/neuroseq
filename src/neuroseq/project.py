@@ -271,11 +271,6 @@ class Project:
                         f"Cannot append data '{datum.name}': data with this name and type "
                         f"does not exist in experiment '{experiment_name}'"
                     )
-                if existing_trace.traces.shape[0] != datum.traces.shape[0]:
-                    return (
-                        f"Cannot append trace data '{datum.name}': number of neurons does not match "
-                        f"({existing_trace.traces.shape[0]} != {datum.traces.shape[0]})"
-                    )
                 if existing_trace.dt != datum.dt:
                     return (
                         f"Cannot append trace data '{datum.name}': dt does not match "
@@ -285,8 +280,12 @@ class Project:
                 new_ids = set(map(int, datum.indices))
                 overlap_ids = existing_ids.intersection(new_ids)
                 if overlap_ids and existing_ids != new_ids:
+                    overlap_list = sorted(overlap_ids)
+                    existing_only = sorted(existing_ids - new_ids)
+                    new_only = sorted(new_ids - existing_ids)
                     return (
-                        f"Cannot append trace data '{datum.name}': neuron IDs partially overlap. "
+                        f"Cannot append trace data '{datum.name}': neuron IDs partially overlap "
+                        f"(overlap={overlap_list}, existing_only={existing_only}, incoming_only={new_only}). "
                         "Either replace the same set of neurons or import a fully disjoint set on the same timeline."
                     )
                 if not overlap_ids:
@@ -299,7 +298,7 @@ class Project:
                     ):
                         return (
                             f"Cannot append trace data '{datum.name}': disjoint neuron IDs require offset 0 "
-                            "and a full timeline match."
+                            f"and a full timeline match (incoming={sorted(new_ids)}, existing={sorted(existing_ids)})."
                         )
             elif isinstance(datum, SpikeData):
                 existing_spike = find_by_name_and_type(
@@ -316,13 +315,20 @@ class Project:
                 new_ids = set(map(int, datum.spike_indices))
                 overlap_ids = existing_ids.intersection(new_ids)
                 if overlap_ids and existing_ids != new_ids:
+                    overlap_list = sorted(overlap_ids)
+                    existing_only = sorted(existing_ids - new_ids)
+                    new_only = sorted(new_ids - existing_ids)
                     return (
-                        f"Cannot append spike data '{datum.name}': neuron IDs partially overlap. "
+                        f"Cannot append spike data '{datum.name}': neuron IDs partially overlap "
+                        f"(overlap={overlap_list}, existing_only={existing_only}, incoming_only={new_only}). "
                         "Either replace the same set of neurons or import a fully disjoint set on the same timeline."
                     )
                 if not overlap_ids and existing_ids and new_ids:
                     if time_offset_seconds != 0.0:
-                        return f"Cannot append spike data '{datum.name}': disjoint neuron IDs require offset 0."
+                        return (
+                            f"Cannot append spike data '{datum.name}': disjoint neuron IDs require offset 0 "
+                            f"(incoming={sorted(new_ids)}, existing={sorted(existing_ids)})."
+                        )
             elif isinstance(datum, SynapseData):
                 existing_synapse = find_by_name_and_type(
                     existing_experiment.data,

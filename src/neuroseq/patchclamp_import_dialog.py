@@ -659,6 +659,8 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         for group in (self.preview_group, self.options_group, self.spike_group):
             if group is not None:
                 group.setVisible(visible)
+        if self.overlay_stack is not None:
+            self.overlay_stack.setVisible(visible)
         if self.button_row is not None:
             self.button_row.setVisible(visible)
         if visible:
