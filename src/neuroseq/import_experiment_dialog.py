@@ -202,6 +202,8 @@ class ImportExperimentDialog(QtWidgets.QDialog):
             if existing_datum is None:
                 return False
             if isinstance(datum, TraceData):
+                if not isinstance(existing_datum, TraceData):
+                    return False
                 if existing_datum.dt != datum.dt:
                     return False
                 if set(map(int, existing_datum.indices)) != set(
@@ -209,11 +211,15 @@ class ImportExperimentDialog(QtWidgets.QDialog):
                 ):
                     return False
             elif isinstance(datum, SpikeData):
+                if not isinstance(existing_datum, SpikeData):
+                    return False
                 if set(map(int, existing_datum.spike_indices)) != set(
                     map(int, datum.spike_indices)
                 ):
                     return False
             elif isinstance(datum, SynapseData):
+                if not isinstance(existing_datum, SynapseData):
+                    return False
                 if (
                     existing_datum.values.shape[0] != datum.values.shape[0]
                     or existing_datum.values.shape[1] != datum.values.shape[1]
@@ -225,7 +231,6 @@ class ImportExperimentDialog(QtWidgets.QDialog):
         error = self.project.issues_with_appending_experimental_data(
             self.append_experiment_name,
             self.experiment.data,
-            self.experiment.duration,
             self.offset,
         )
         self.lbl_error.setText(error)

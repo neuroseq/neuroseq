@@ -1,6 +1,7 @@
 import logging
 
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 
 from neuroseq.data_widget import DataWidget
@@ -11,20 +12,20 @@ from neuroseq.timeseries_widget import TimeseriesWidget
 class HandleTooltipSlider(QtWidgets.QSlider):
     """A QSlider that shows a tooltip above the handle with the current value in milliseconds."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(QtCore.Qt.Orientation.Horizontal, parent)
         self.setPageStep(1000)  # 1 second in milliseconds
         self.setMouseTracking(True)
 
-    def mouseMoveEvent(self, event):
+    def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         super().mouseMoveEvent(event)
         self.show_handle_tooltip()
 
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         super().mousePressEvent(event)
         self.show_handle_tooltip()
 
-    def show_handle_tooltip(self):
+    def show_handle_tooltip(self) -> None:
         opt = QtWidgets.QStyleOptionSlider()
         self.initStyleOption(opt)
         handle_rect = self.style().subControlRect(
@@ -42,7 +43,7 @@ class HandleTooltipSlider(QtWidgets.QSlider):
 class TimeSliderWidget(QtWidgets.QWidget):
     """A widget that provides a time slider to control playback of timeseries data."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.relative_playback_speed = 1.0
@@ -64,7 +65,9 @@ class TimeSliderWidget(QtWidgets.QWidget):
         self.elapsed_timer = QtCore.QElapsedTimer()
         self.setMaximumHeight(32)
 
-    def connect_widget(self, widget: TimeseriesWidget | HeatmapWidget | DataWidget):
+    def connect_widget(
+        self, widget: TimeseriesWidget | HeatmapWidget | DataWidget
+    ) -> None:
         self.widgets.append(widget)
 
     def set_max_time_secs(self, max_time_secs: float) -> None:
@@ -99,7 +102,7 @@ class TimeSliderWidget(QtWidgets.QWidget):
         self.t_playback_start_ms = self.t_ms
         self.slider.setValue(self.t_ms)
 
-    def _tick(self):
+    def _tick(self) -> None:
         if not self.timer.isActive():
             return
 
@@ -115,7 +118,7 @@ class TimeSliderWidget(QtWidgets.QWidget):
         self.t_ms = new_t_ms
         self.slider.setValue(self.t_ms)
 
-    def _value_changed(self, value):
+    def _value_changed(self, value: int) -> None:
         self.t_ms = value
         for widget in self.widgets:
             widget.set_time_ms(value)

@@ -237,8 +237,7 @@ class Project:
         self,
         experiment_name: str,
         new_data: Sequence[TraceData | SpikeData | SynapseData],
-        duration_seconds: float,
-        time_offset_seconds: float,
+        time_offset_seconds: float = 0.0,
     ) -> str:
         """
         Check for any issues with appending additional experimental data to an existing experiment
@@ -249,6 +248,8 @@ class Project:
             Name of the experiment to append to
         new_data : Sequence[TraceData | SpikeData | SynapseData]
             List of data objects to be appended to the experiment
+        time_offset_seconds : float
+            Time in seconds at which to insert the new data.
 
         Returns
         -------
@@ -323,12 +324,16 @@ class Project:
                         f"(overlap={overlap_list}, existing_only={existing_only}, incoming_only={new_only}). "
                         "Either replace the same set of neurons or import a fully disjoint set on the same timeline."
                     )
-                if not overlap_ids and existing_ids and new_ids:
-                    if time_offset_seconds != 0.0:
-                        return (
-                            f"Cannot append spike data '{datum.name}': disjoint neuron IDs require offset 0 "
-                            f"(incoming={sorted(new_ids)}, existing={sorted(existing_ids)})."
-                        )
+                if (
+                    not overlap_ids
+                    and existing_ids
+                    and new_ids
+                    and time_offset_seconds != 0.0
+                ):
+                    return (
+                        f"Cannot append spike data '{datum.name}': disjoint neuron IDs require offset 0 "
+                        f"(incoming={sorted(new_ids)}, existing={sorted(existing_ids)})."
+                    )
             elif isinstance(datum, SynapseData):
                 existing_synapse = find_by_name_and_type(
                     existing_experiment.data,

@@ -432,6 +432,7 @@ def test_issues_with_appending_experimental_data_valid(
                 make_trace_data(n_neurons=5, n_timestamps=100, dt=0.001),
                 make_spike_data(n_neurons=5, max_time_secs=0.10),
             ],
+            0.0,
         )
         == ""
     )
@@ -453,7 +454,9 @@ def test_issues_with_appending_experimental_data_invalid(
 
     # experiment doesn't exist
     assert "exist" in project_nmda.issues_with_appending_experimental_data(
-        "nonexistent_exp", []
+        "nonexistent_exp",
+        [],
+        0.0,
     )
 
     # data names match but types do not
@@ -463,6 +466,7 @@ def test_issues_with_appending_experimental_data_invalid(
             make_spike_data(name="test_traces", n_neurons=5, max_time_secs=0.20),
             make_spike_data(n_neurons=5, max_time_secs=0.20),
         ],
+        0.0,
     )
 
     # data names don't match
@@ -472,6 +476,7 @@ def test_issues_with_appending_experimental_data_invalid(
             make_trace_data(n_neurons=5, n_timestamps=100, dt=0.001, name="wrong_name"),
             make_spike_data(n_neurons=5, max_time_secs=0.10),
         ],
+        0.0,
     )
 
     # number of neurons don't match
@@ -481,6 +486,7 @@ def test_issues_with_appending_experimental_data_invalid(
             make_trace_data(n_neurons=6, n_timestamps=100, dt=0.001),
             make_spike_data(n_neurons=6, max_time_secs=0.10),
         ],
+        0.0,
     )
 
     # dt doesn't match
@@ -490,4 +496,5 @@ def test_issues_with_appending_experimental_data_invalid(
             make_trace_data(n_neurons=5, n_timestamps=100, dt=0.002),
             make_spike_data(n_neurons=5, max_time_secs=0.10),
         ],
+        0.0,
     )

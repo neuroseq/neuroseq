@@ -294,18 +294,13 @@ def append_data(
         existing_ids = set(map(int, existing_data.spike_indices))
         new_ids = set(map(int, new_data.spike_indices))
         overlap_ids = existing_ids.intersection(new_ids)
-        disjoint = not overlap_ids and existing_ids and new_ids
 
-        if disjoint and time_offset_seconds != 0.0:
-            raise ValueError(
-                "Cannot append disjoint spike neuron IDs with a non-zero offset."
-            )
         if overlap_ids and existing_ids != new_ids:
             raise ValueError(
                 "Cannot append SpikeData when neuron IDs partially overlap. Either replace the same set of neurons or import a fully disjoint set on the same timeline."
             )
 
-        if disjoint or not existing_ids:
+        if not existing_ids:
             existing_data.spike_indices = safe_concat(
                 [existing_data.spike_indices, new_data.spike_indices], axis=0
             )
