@@ -174,12 +174,13 @@ class ImportExperimentDialog(QtWidgets.QDialog):
             return
         self.append_experiment_name = self.existing_experiments[index].name
         timepoints = list(self.existing_experiments[index].timepoints)
+        can_replace_at_zero = self._can_replace_at_zero(index)
         option_labels = []
         for i, timepoint in enumerate(timepoints):
             label = f"{timepoint * 1000:.5g} ms"
             if i == len(timepoints) - 1:
                 label = f"{label} (Append)"
-            if len(timepoints) == 2 and i == 0:
+            if len(timepoints) == 2 and i == 0 and can_replace_at_zero:
                 label = f"{label} (replace data)"
             option_labels.append(label)
         self.cmb_offset.addItems(option_labels)
@@ -203,13 +204,42 @@ class ImportExperimentDialog(QtWidgets.QDialog):
 
     def new_name_text_edited(self, text: str) -> None:
         self.experiment.name = text
-        if self.experiment.name in [
-            experiment.name for experiment in self.existing_experiments
-        ]:
-            self.lbl_error.setText(
-                f"An experiment with name '{self.experiment.name}' already exists."
-            )
-            self.save_button.setEnabled(False)
-        else:
-            self.lbl_error.clear()
-            self.save_button.setEnabled(True)
+        self.lbl_error.clear()
+        self.save_button.setEnabled(True)
+
+    def _can_replace_at_zero(self, experiment_index: int) -> bool:
+        if experiment_index < 0 or experiment_index >= len(self.existing_experiments):
+            return False
+        existing_experiment = self.existing_experiments[experiment_index]
+        if (
+            not existing_experiment.timepoints
+            or 0.0 not in existing_experiment.timepoints
+        ):
+            return False
+        for datum in self.experiment.data:
+            existing_datum = None
+            for existing in existing_experiment.data:
+                if existing.name == datum.name and isinstance(existing, type(datum)):
+                    existing_datum = existing
+                    break
+            if existing_datum is None:
+                return False
+            if isinstance(datum, TraceData):
+                if existing_datum.dt != datum.dt:
+                    return False
+                if set(map(int, existing_datum.indices)) != set(
+                    map(int, datum.indices)
+                ):
+                    return False
+            elif isinstance(datum, SpikeData):
+                if set(map(int, existing_datum.spike_indices)) != set(
+                    map(int, datum.spike_indices)
+                ):
+                    return False
+            elif isinstance(datum, SynapseData):
+                if (
+                    existing_datum.values.shape[0] != datum.values.shape[0]
+                    or existing_datum.values.shape[1] != datum.values.shape[1]
+                ):
+                    return False
+        return True
