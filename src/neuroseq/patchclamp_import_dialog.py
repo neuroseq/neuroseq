@@ -302,32 +302,12 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         button_layout.addStretch()
         self.right_layout.addWidget(self.button_row)
         self.main_layout.addWidget(self.right_container, stretch=2)
+        self._maximise_screen()
+        self._sync_overlay_size()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        if self.left_container is None or self.right_container is None:
-            return
-        if self._vertical_layout:
-            self.left_container.setMaximumWidth(self.width())
-            self.right_container.setMaximumWidth(self.width())
-            left_width = self.left_container.width()
-        else:
-            left_width = int(self.width() * 0.6)
-            right_width = max(1, self.width() - left_width)
-            self.left_container.setMaximumWidth(left_width)
-            self.right_container.setMaximumWidth(right_width)
-        if self.overlay_stack is None or self.file_group is None:
-            return
-        available_height = (
-            self.left_container.height()
-            - self.file_group.height()
-            - self.left_layout.spacing()
-        )
-        square_size = min(left_width, available_height)
-        if square_size > 0:
-            self.overlay_stack.setFixedSize(square_size, square_size)
-            if self.overlay_widget is not None:
-                self.overlay_widget.setFixedSize(square_size, square_size)
+        self._sync_overlay_size()
         if self.npy_data is None:
             self._set_file_sections_visible(False)
             self._set_file_selector_visible(True)
@@ -338,6 +318,49 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             return
         self._has_maximised = True
         self._maximise_screen()
+        self._sync_overlay_size()
+        QtCore.QTimer.singleShot(0, self._sync_overlay_size)
+
+    def _sync_overlay_size(self) -> None:
+        # wait until everyting is ready, activate and then proceed; this keeps consistent between
+        # (A) Cellpose initial, (B) Cellpose reload(not initial import/flip), (C) Patchclamp open
+        if self.left_container is None or self.right_container is None:
+            return
+        if self.overlay_stack is None or self.file_group is None:
+            return
+        if self.left_layout is None:
+            return
+        if self.main_layout is not None:
+            self.main_layout.activate()
+        self.left_layout.activate()
+        main_rect = self.contentsRect()
+        if main_rect.width() < 100 or main_rect.height() < 100:
+            return  # Strange bug where QT restricts fastplotlib via dialog size. Always gets a second update, so this avoids it.
+        # with more time I will investgiate this and remove it at source preferably to resolving here.
+        if self._vertical_layout:  # this needs to adapt to moving across screen and when the application is across two screens
+            # known bug that the background neuroseq application when behind cellpose preview causes awkward cross-screen
+            # view. Hoped this would resolve it but it does nto get at the core issue (some kind of tying to the main window)
+            self.left_container.setMaximumWidth(main_rect.width())
+            self.right_container.setMaximumWidth(main_rect.width())
+            left_width = self.left_container.contentsRect().width()
+        else:
+            left_width = int(main_rect.width() * 0.6)
+            right_width = max(1, main_rect.width() - left_width)
+            self.left_container.setMaximumWidth(left_width)
+            self.right_container.setMaximumWidth(right_width)
+        left_rect = self.left_container.contentsRect()
+        available_height = (
+            left_rect.height() - self.file_group.height() - self.left_layout.spacing()
+        )
+        square_size = min(left_width, available_height)
+        if square_size <= 0:
+            return
+        self.overlay_stack.setFixedSize(square_size, square_size)
+        if self.overlay_widget is not None:
+            self.overlay_widget.setFixedSize(square_size, square_size)
+        self.overlay_stack.updateGeometry()
+        if self.overlay_widget is not None:
+            self.overlay_widget.updateGeometry()
 
     def _populate_cellpose_preview(self) -> None:
         """Fill the left-hand preview with Cellpose data if available."""

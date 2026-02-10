@@ -473,6 +473,10 @@ class CellPoseImporter:
             if result.overlay_image is None
             else np.array(result.overlay_image, copy=True)
         )
+        suffix = result.image_path.suffix.lower()
+        self._segmentation_flipped_for_tiff = (
+            suffix in {".tif", ".tiff"} and self.segmentation_data is not None
+        )
 
         # Attempt to reload the original image; fall back to stored overlay if unavailable.
         self.image_data = None
