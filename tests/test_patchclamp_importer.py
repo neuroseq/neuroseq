@@ -401,6 +401,7 @@ def test_custom_mapping_stim_id_input_uses_stim_ids_directly(tmp_path, qtbot):
             11: 3,
         },  # For manual testing, it's pretty handy that you can paste this
         # into the Cellpose modal directly as the Custom mapping.
+        mapping_strategy="Custom",
     )
 
     dialog = PatchClampImportDialog(cellpose_import=cellpose_import)
@@ -445,6 +446,7 @@ def test_custom_mapping_duplicate_stimulus_ids_error(tmp_path, qtbot, monkeypatc
         spike_data=None,
         original_cellpose_ids=np.array([1, 3, 6, 10], dtype=int),
         stimulus_to_cellpose_mapping={3: 1},
+        mapping_strategy="Custom",
     )
 
     dialog = PatchClampImportDialog(cellpose_import=cellpose_import)
@@ -487,6 +489,7 @@ def test_multi_row_defaults_are_zero_indexed_with_cellpose_ids(tmp_path, qtbot):
         spike_data=None,
         original_cellpose_ids=np.array([10, 11], dtype=int),
         stimulus_to_cellpose_mapping=None,
+        mapping_strategy="Linear",
     )
 
     dialog = PatchClampImportDialog(cellpose_import=cellpose_import)

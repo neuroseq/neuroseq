@@ -274,7 +274,9 @@ def test_custom_stim_cellpose_mapping(tmp_path):
     importer.generate_overlay()
 
     stim_to_cellpose_mapping = {1: 2, 5: 6, 9: 11}
-    cellpose_result = importer.create_result(image_path, stim_to_cellpose_mapping)
+    cellpose_result = importer.create_result(
+        image_path, stim_to_cellpose_mapping, mapping_strategy="Custom"
+    )
 
     assert cellpose_result.stimulus_to_cellpose_mapping == stim_to_cellpose_mapping
     expected_cellpose_ids = [2, 6, 11]
