@@ -23,6 +23,8 @@ class CellposeImportResult:
     spike_data: SpikeData | None
     original_cellpose_ids: np.ndarray | None = None
     stimulus_to_cellpose_mapping: dict[int, int] | None = None
+    mapping_strategy: str | None = None
+    linear_offset: int | None = None
 
 
 def clone_cellpose_result(
@@ -56,6 +58,8 @@ def clone_cellpose_result(
             if result.stimulus_to_cellpose_mapping is None
             else dict(result.stimulus_to_cellpose_mapping)
         ),
+        mapping_strategy=result.mapping_strategy,
+        linear_offset=result.linear_offset,
     )
 
 
@@ -138,6 +142,8 @@ class CellPoseImporter:
         self._neuron_colors: np.ndarray | None = None
         self._original_cellpose_ids: np.ndarray | None = None
         self._csv_background_zero = False
+        self._image_is_tiff = False
+        self._segmentation_flipped_for_tiff = False
 
     def load_image_file(
         self,
@@ -151,13 +157,21 @@ class CellPoseImporter:
         try:
             with Image.open(path) as pil_image:
                 if suffix in {".tif", ".tiff"}:
+                    self._image_is_tiff = True
                     self.image_data = self._load_tiff_with_strategy(
                         pil_image, tiff_strategy
                     )
+                    self.image_data = np.flipud(self.image_data)
                 else:
+                    self._image_is_tiff = False
                     self.image_data = self._pil_to_rgb_array(pil_image)
 
-            self.logger.info("Loaded image data: %s", self.image_data.shape)
+            self.logger.info(
+                "Loaded image data: %s (tiff=%s)",
+                self.image_data.shape,
+                self._image_is_tiff,
+            )
+            self._align_orientation_segmentation_for_tiff()
         except Exception as exc:
             self.logger.exception("Error loading image file")
             raise ValueError(f"Could not load {filename}: {exc}") from exc
@@ -292,9 +306,22 @@ class CellPoseImporter:
                     path.suffix.lower(),
                     self.segmentation_data.shape,
                 )
+            self._align_orientation_segmentation_for_tiff()
         except Exception as exc:
             self.logger.exception("Error loading segmentation file")
             raise ValueError(f"Could not load {filename}: {exc}") from exc
+
+    def _align_orientation_segmentation_for_tiff(self) -> None:
+        # Establish the same orientation that Fiji uses.
+        if not self._image_is_tiff:
+            return
+        if self.segmentation_data is None:
+            return
+        if self._segmentation_flipped_for_tiff:
+            return
+        self.segmentation_data = np.flipud(self.segmentation_data)
+        self._segmentation_flipped_for_tiff = True
+        self.logger.info("Flipped segmentation vertically to match TIFF image.")
 
     def set_trace_data(self, trace_data: TraceData) -> None:
         self._validate_trace_data(trace_data)
@@ -411,6 +438,9 @@ class CellPoseImporter:
         self,
         image_path: Path,
         stimulus_to_cellpose_mapping: dict[int, int] | None = None,
+        *,
+        mapping_strategy: str = "Linear",
+        linear_offset: int = 0,
     ) -> CellposeImportResult:
         """Create import result after successful processing."""
         if self.segmentation_data is None or self.overlay_image is None:
@@ -424,6 +454,8 @@ class CellPoseImporter:
             spike_data=self.spike_data,
             original_cellpose_ids=self._original_cellpose_ids,
             stimulus_to_cellpose_mapping=stimulus_to_cellpose_mapping,
+            mapping_strategy=mapping_strategy,
+            linear_offset=linear_offset,
         )
 
     def restore_from_result(self, result: CellposeImportResult) -> None:
