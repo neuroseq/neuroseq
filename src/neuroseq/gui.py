@@ -477,9 +477,7 @@ class Gui(QtWidgets.QMainWindow):
             return
         self._update_data(keep_undo_history=True)
 
-    def _append_experimental_data(
-        self, experiment: Experiment, keep_in_sync: bool = False
-    ) -> None:
+    def _append_experimental_data(self, experiment: Experiment) -> None:
         try:
             dialog = ImportExperimentDialog(experiment, self.project, parent=self)
             if not dialog.exec():
@@ -490,7 +488,6 @@ class Gui(QtWidgets.QMainWindow):
                     dialog.experiment.duration,
                     dialog.experiment.data,
                     dialog.offset,
-                    keep_in_sync=keep_in_sync,
                 )
             else:
                 self.project.add_experiment(experiment)
@@ -681,8 +678,7 @@ class Gui(QtWidgets.QMainWindow):
                         dialog.experiment_duration,
                         [],
                         dialog.imported_data,
-                    ),
-                    keep_in_sync=True,
+                    )
                 )
             except Exception as exc:
                 QtWidgets.QMessageBox.critical(

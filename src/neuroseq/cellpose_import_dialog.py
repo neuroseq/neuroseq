@@ -65,7 +65,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         available = self._get_available_geometry(screen)
         if available is None:
             return
-        adjusted = available.adjusted(50, 50, -50, -50)
+        adjusted = available.adjusted(70, 70, -70, -70)
         # Use the maximum available window size with a 100px margin
         self.setGeometry(adjusted)
         self.setWindowState(self.windowState() | QtCore.Qt.WindowState.WindowMaximized)

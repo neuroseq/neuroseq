@@ -68,7 +68,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         available = self._get_available_geometry(screen)
         if available is None:
             return
-        adjusted = available.adjusted(50, 50, -50, -50)
+        adjusted = available.adjusted(70, 70, -70, -70)
         self.setGeometry(adjusted)
         self.setWindowState(self.windowState() | QtCore.Qt.WindowState.WindowMaximized)
 
@@ -324,7 +324,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         button_layout.addStretch()
         self.right_layout.addWidget(self.button_row)
         self.main_layout.addWidget(self.right_container, stretch=2)
-        self._apply_screen_layout(self._get_screen_for_window())
+        # Defer sizing until the dialog is shown so the window manager can apply it.
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -335,9 +335,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        if self._has_maximised:
-            return
-        self._has_maximised = True
         self._apply_screen_layout(self._get_screen_for_window())
 
     def moveEvent(self, event) -> None:
@@ -522,6 +519,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
     def load_file(self, filename: str) -> None:
         try:
+            self._apply_screen_layout(self._get_screen_for_window())
             self.file_path = Path(filename)
             self.file_path_label.setText(self.file_path.name)
             self.file_path_label.setStyleSheet("QLabel { color: black; }")
@@ -544,6 +542,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             self.import_button.setEnabled(True)
             self._set_file_sections_visible(True)
             self._set_file_selector_visible(False)
+            self._apply_screen_layout(self._get_screen_for_window())
         except Exception as exc:
             self.logger.exception("Error loading patch clamp file")
             QtWidgets.QMessageBox.critical(

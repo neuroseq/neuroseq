@@ -53,20 +53,12 @@ def validate_append_import(
         nid for nid in neuron_ids_to_import if nid not in existing_neuron_indices
     ]
 
+    # allow no crossover with existing neuron ids
     if importing_existing and importing_new:
         raise ValueError(
             f"Cannot extend data when importing both existing neurons {importing_existing} "
             f"and new neurons {importing_new} together. "
-            f"This would cause timestamp misalignment. Use 'Replace' mode instead, "
-            f"or import all neurons with the same timeline separately."
-        )
-
-    if importing_new and existing_neuron_indices:
-        raise ValueError(
-            f"Cannot extend data when importing new neurons {importing_new} - "
-            f"existing neurons {sorted(existing_neuron_indices)} already have data. "
-            f"This would cause timestamp misalignment. Use 'Replace' mode instead, "
-            f"or import all neurons with the same timeline."
+            "Either replace the same set of neurons or import a fully disjoint set on the same timeline."
         )
 
 

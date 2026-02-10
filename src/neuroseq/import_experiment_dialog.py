@@ -56,10 +56,9 @@ class ImportExperimentDialog(QtWidgets.QDialog):
 
         self.rad_new = QtWidgets.QRadioButton("Create new experiment")
         self.layout.addWidget(self.rad_new)
-        self.rad_append = QtWidgets.QRadioButton("Append to existing experiment")
+        self.rad_append = QtWidgets.QRadioButton("Apply to existing experiment")
         self.layout.addWidget(self.rad_append)
         self.rad_new.setChecked(True)
-        self.rad_new.setChecked(False)
 
         self.new_box = QtWidgets.QWidget()
         layout_new_box = QtWidgets.QVBoxLayout(self.new_box)
@@ -107,9 +106,32 @@ class ImportExperimentDialog(QtWidgets.QDialog):
         self.cmb_offset.currentIndexChanged.connect(self.cmb_offset_index_changed)
         self.save_button.clicked.connect(self.accept)
         self.cancel_button.clicked.connect(self.reject)
-        self.cmb_experiments_index_changed(0)
-        self.new_name_text_edited(self.txt_new_name.text())
+        self._apply_default_selection()
         self.resize(800, 600)
+
+    def _apply_default_selection(self) -> None:
+        if not self.existing_experiments:
+            self.rad_new.setChecked(True)
+            self.cmb_experiments_index_changed(0)
+            self.new_name_text_edited(self.txt_new_name.text())
+            return
+
+        matching_index = next(
+            (
+                i
+                for i, experiment in enumerate(self.existing_experiments)
+                if experiment.name == self.experiment.name
+            ),
+            -1,
+        )
+        if matching_index >= 0:
+            self.rad_append.setChecked(True)
+            self.cmb_experiments.setCurrentIndex(matching_index)
+            self.cmb_experiments_index_changed(matching_index)
+        else:
+            self.rad_new.setChecked(True)
+            self.cmb_experiments_index_changed(0)
+        self.new_name_text_edited(self.txt_new_name.text())
 
     def rad_new_append_toggled(self):
         self.append_to_experiment = self.rad_append.isChecked()
@@ -132,25 +154,45 @@ class ImportExperimentDialog(QtWidgets.QDialog):
             self.offset = 0.0
             return
         self.offset = self.existing_experiments[experiment_index].timepoints[index]
+        self.lbl_error.setText(
+            self.project.issues_with_appending_experimental_data(
+                self.append_experiment_name,
+                self.experiment.data,
+                self.experiment.duration,
+                self.offset,
+            )
+        )
+        if self.lbl_error.text() != "":
+            self.save_button.setEnabled(False)
+        else:
+            self.lbl_error.clear()
+            self.save_button.setEnabled(True)
 
     def cmb_experiments_index_changed(self, index: int) -> None:
         self.cmb_offset.clear()
         if index < 0 or index >= len(self.existing_experiments):
             return
         self.append_experiment_name = self.existing_experiments[index].name
-        self.cmb_offset.addItems(
-            [
-                f"{timepoint * 1000:.5g} ms"
-                for timepoint in self.existing_experiments[index].timepoints
-            ]
-        )
+        timepoints = list(self.existing_experiments[index].timepoints)
+        option_labels = []
+        for i, timepoint in enumerate(timepoints):
+            label = f"{timepoint * 1000:.5g} ms"
+            if i == len(timepoints) - 1:
+                label = f"{label} (Append)"
+            if len(timepoints) == 2 and i == 0:
+                label = f"{label} (replace data)"
+            option_labels.append(label)
+        self.cmb_offset.addItems(option_labels)
         # select the last timepoint by default
         if self.cmb_offset.count() > 0:
             self.cmb_offset.setCurrentIndex(self.cmb_offset.count() - 1)
         # check if appending this data to the selected experiment is valid
         self.lbl_error.setText(
             self.project.issues_with_appending_experimental_data(
-                self.append_experiment_name, self.experiment.data
+                self.append_experiment_name,
+                self.experiment.data,
+                self.experiment.duration,
+                self.offset,
             )
         )
         if self.lbl_error.text() != "":
