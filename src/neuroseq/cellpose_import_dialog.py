@@ -494,8 +494,14 @@ class CellposeImportDialog(QtWidgets.QDialog):
     ) -> None:
         target_mode = mapping_strategy or "Linear"
         if target_mode == "Custom" and mapping:
+            filtered_pairs = [
+                (stim_id, cellpose_id)
+                for stim_id, cellpose_id in mapping.items()
+                if stim_id != cellpose_id
+            ]
+            filtered_pairs.sort(key=lambda pair: pair[0])
             mapping_str = ",".join(
-                [f"{stim_id}:{cellpose_id}" for stim_id, cellpose_id in mapping.items()]
+                [f"{stim_id}:{cellpose_id}" for stim_id, cellpose_id in filtered_pairs]
             )
             self.custom_mapping_line.setText(mapping_str)
         if target_mode == "Linear":
@@ -821,6 +827,24 @@ class CellposeImportDialog(QtWidgets.QDialog):
             # Generate stimulus-to-cellpose mapping based on selected strategy
             mapping_strategy = self._get_mapping_strategy()
             stimulus_mapping = self._generate_stimulus_mapping(mapping_strategy)
+            if mapping_strategy == "Custom":
+                original_ids = (
+                    []
+                    if self.importer._original_cellpose_ids is None
+                    else [
+                        int(cellpose_id)
+                        for cellpose_id in self.importer._original_cellpose_ids
+                    ]
+                )
+                mapped_cellpose_ids = set(stimulus_mapping.values())
+                mapped_stim_ids = set(stimulus_mapping.keys())
+                for cellpose_id in original_ids:
+                    if (
+                        cellpose_id in mapped_cellpose_ids
+                        or cellpose_id in mapped_stim_ids
+                    ):
+                        continue
+                    stimulus_mapping[cellpose_id] = cellpose_id
             stored_mapping = stimulus_mapping if mapping_strategy == "Custom" else None
 
             self._imported_data = self.importer.create_result(
