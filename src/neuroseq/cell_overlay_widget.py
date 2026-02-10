@@ -547,23 +547,43 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.show_stimulus_ids = False
         self.show_segmentation = True
         self.highlight_mappings = True
-        self._tracked_window: QtWidgets.QWidget | None = None
-        self._window_handle = None
-        self._last_target_size: tuple[int, int] | None = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 10)
 
-        self.overlay_view = OverlayView()
+        self.overlay_view = OverlayView(self)
         self.overlay_view.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Expanding,
         )
-        self.overlay_view.setMinimumHeight(600)
         layout.addWidget(self.overlay_view)
-        self._update_overlay_scale()
+        self.logger.info(
+            "overlay ui: widget=%sx%s view=%sx%s",
+            self.width(),
+            self.height(),
+            self.overlay_view.width(),
+            self.overlay_view.height(),
+        )
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        target_width = max(1, self.width())
+        target_height = max(1, self.height())
+        self.overlay_view.setFixedSize(target_width, target_height)
+        self.overlay_view.widget.setFixedSize(target_width, target_height)
+        self.overlay_view.updateGeometry()
+        self.overlay_view.widget.updateGeometry()
+        self.logger.info(
+            "overlay resize: widget=%sx%s view=%sx%s canvas=%sx%s",
+            self.width(),
+            self.height(),
+            self.overlay_view.width(),
+            self.overlay_view.height(),
+            self.overlay_view.widget.width(),
+            self.overlay_view.widget.height(),
+        )
 
     def _update_overlay_display(self) -> None:
         display_segmentation = self._get_display_segmentation()
@@ -640,6 +660,16 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         base_image: np.ndarray | None = None,
         highlight_mappings: bool | None = None,
     ) -> None:
+        self.logger.info(
+            "set_overlay: image=%s seg=%s widget=%sx%s show_seg=%s show_cellpose=%s show_stim=%s",
+            None if overlay_image is None else overlay_image.shape,
+            None if segmentation is None else segmentation.shape,
+            self.width(),
+            self.height(),
+            self.show_segmentation,
+            self.show_cellpose_ids,
+            self.show_stimulus_ids,
+        )
         self.overlay_image = overlay_image
         self.segmentation = segmentation
         self.legend_data = list(legend_data or [])
@@ -650,7 +680,6 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             self.highlight_mappings = highlight_mappings
 
         self._update_overlay_display()
-        self._update_overlay_scale()
 
     def set_empty_message(self, message: str) -> None:
         self.overlay_image = None
@@ -668,7 +697,13 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             show_stimulus_ids=self.show_stimulus_ids,
             highlight_mappings=self.highlight_mappings,
         )
-        self._update_overlay_scale()
+        self.logger.info(
+            "set_empty_message: widget=%sx%s view=%sx%s",
+            self.width(),
+            self.height(),
+            self.overlay_view.width(),
+            self.overlay_view.height(),
+        )
 
     def set_display_options(
         self,
@@ -701,122 +736,6 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             rgb_255 = (int(color[0] * 255), int(color[1] * 255), int(color[2] * 255))
             legend.append((int(cell_id), rgb_255))
         return legend
-
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        self._ensure_window_tracking()
-        self._update_overlay_scale()
-
-    def eventFilter(self, obj, event) -> bool:
-        if (
-            obj is self._tracked_window
-            and hasattr(event, "type")
-            and event.type()
-            in (
-                QtCore.QEvent.Type.Resize,
-                QtCore.QEvent.Type.Move,
-                QtCore.QEvent.Type.ScreenChangeInternal,
-            )
-        ):
-            self._update_overlay_scale()
-        return super().eventFilter(obj, event)
-
-    def _get_current_screen(self):
-        window = self.window()
-        if window is not None:
-            handle = window.windowHandle()
-            if handle is not None and handle.screen() is not None:
-                return handle.screen()
-        return QtWidgets.QApplication.primaryScreen()
-
-    def _ensure_window_tracking(self) -> None:
-        window = self.window()
-        if window is None or window is self._tracked_window:
-            return
-
-        if self._tracked_window is not None:
-            self._tracked_window.removeEventFilter(self)
-        self._tracked_window = window
-        self._tracked_window.installEventFilter(self)
-
-        handle = window.windowHandle()
-        if handle is None:
-            return
-
-        if self._window_handle is not None and self._window_handle is not handle:
-            with contextlib.suppress(Exception):
-                self._window_handle.screenChanged.disconnect(self._update_overlay_scale)
-        self._window_handle = handle
-        with contextlib.suppress(Exception):
-            handle.screenChanged.connect(self._update_overlay_scale)
-
-    def _update_overlay_scale(self, *_args) -> None:
-        self._ensure_window_tracking()
-        margins = self.contentsMargins()
-        available_height = self.height() - margins.top() - margins.bottom()
-        available_width = self.width() - margins.left() - margins.right()
-        logging.info(
-            "Upon render: height %s - top %s - bottom %s = %s; "
-            "width %s - left %s - right %s = %s",
-            self.height(),
-            margins.top(),
-            margins.bottom(),
-            available_height,
-            self.width(),
-            margins.left(),
-            margins.right(),
-            available_width,
-        )
-        if available_height <= 0:
-            window = self.window()
-            if window is not None:
-                available_height = window.height()
-                available_width = window.width()
-            else:
-                screen = self._get_current_screen()
-                if screen is None:
-                    return
-                available_height = screen.availableGeometry().height()
-                available_width = screen.availableGeometry().width()
-
-        target_height = int(available_height * 0.95)
-        target_width = int(available_width * 0.98)
-        aspect_ratio = 1.0
-        if self.overlay_image is not None and self.overlay_image.shape[0] > 0:
-            aspect_ratio = max(
-                float(self.overlay_image.shape[1]) / float(self.overlay_image.shape[0]),
-                0.1,
-            )
-
-        if self.overlay_image is not None and self.overlay_image.shape[0] > 0:
-            width_from_height = int(target_height * aspect_ratio)
-            height_from_width = int(target_width / aspect_ratio)
-            if width_from_height <= target_width:
-                final_width = max(1, width_from_height)
-                final_height = max(1, target_height)
-            else:
-                final_width = max(1, target_width)
-                final_height = max(1, height_from_width)
-        else:
-            final_width = max(1, target_width)
-            final_height = max(1, target_height)
-
-        target_size = (final_width, final_height)
-        logging.info(
-            "Upon render: height %s / width %s. Target width %s ",
-            available_height,
-            available_width,
-            final_width,
-        )
-
-        if self._last_target_size == target_size:
-            return
-
-        self._last_target_size = target_size
-        self.overlay_view.setFixedSize(final_width, final_height)
-        self.overlay_view.widget.setFixedSize(final_width, final_height)
-        self.overlay_view.updateGeometry()
-        self.overlay_view.widget.updateGeometry()
 
     def closeEvent(self, event):
         # explicitly close all fastplotlib figures to avoid renderer trying to access them after they have been destroyed

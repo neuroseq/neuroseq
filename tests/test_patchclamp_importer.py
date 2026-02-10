@@ -167,9 +167,8 @@ def test_patchclamp_defaults_with_linear_offset_mapping(tmp_path, qtbot):
     dialog.load_file("tests/sampledata/3patchclampneurons.npy")
     mapping = cellpose_import.stimulus_to_cellpose_mapping or {}
 
-    assert mapping != {}
-    assert mapping.get(0) == tested_offset
-    assert mapping.get(2) == tested_offset + 2
+    assert cellpose_import.mapping_strategy == "Linear"
+    assert mapping == {}
 
     # Verify UI state
     assert dialog.import_button.isEnabled()

@@ -18,7 +18,6 @@ from neuroseq.importer_cellpose import CellPoseImporter
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_cellpose import generate_linear_stimulus_mapping
-from neuroseq.importer_cellpose import is_identity_mapping
 from neuroseq.mapping_validation import ensure_unique_ids
 from neuroseq.utils import get_primary_available_geometry
 from neuroseq.utils import is_vertical_screen
@@ -288,11 +287,38 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.main_content_container.setVisible(loaded)
             if loaded:
                 self._maximise_screen()
+                QtCore.QTimer.singleShot(0, self._sync_overlay_size)
+                self.logger.info(
+                    "cellpose ui loaded: window=%sx%s main=%sx%s",
+                    self.width(),
+                    self.height(),
+                    self.main_content_container.width(),
+                    self.main_content_container.height(),
+                )
         if not loaded and hasattr(self, "import_button"):
             self.import_button.setEnabled(False)
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if (
+            self.main_content_container is not None
+            and self.main_content_container.isVisible()
+        ):
+            self._maximise_screen()
+            QtCore.QTimer.singleShot(0, self._sync_overlay_size)
+            self.logger.info(
+                "cellpose showEvent: window=%sx%s main=%sx%s",
+                self.width(),
+                self.height(),
+                self.main_content_container.width(),
+                self.main_content_container.height(),
+            )
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self._sync_overlay_size()
+
+    def _sync_overlay_size(self) -> None:
         if (
             self.main_content_container is None
             or not self.main_content_container.isVisible()
@@ -305,23 +331,51 @@ class CellposeImportDialog(QtWidgets.QDialog):
             or self.left_layout is None
         ):
             return
+        main_rect = self.main_content_container.contentsRect()
+        if main_rect.width() < 100 or main_rect.height() < 100:
+            self.logger.info(
+                "cellpose dialog resize: skip tiny main rect=%sx%s",
+                main_rect.width(),
+                main_rect.height(),
+            )
+            return
         if self._vertical_layout:
-            self.left_container.setMaximumWidth(self.main_content_container.width())
-            self.right_container.setMaximumWidth(self.main_content_container.width())
-            left_width = self.left_container.width()
+            self.left_container.setMaximumWidth(main_rect.width())
+            self.right_container.setMaximumWidth(main_rect.width())
+            left_width = self.left_container.contentsRect().width()
         else:
-            left_width = int(self.main_content_container.width() * 0.6)
-            right_width = max(1, self.main_content_container.width() - left_width)
+            left_width = int(main_rect.width() * 0.6)
+            right_width = max(1, main_rect.width() - left_width)
             self.left_container.setMaximumWidth(left_width)
             self.right_container.setMaximumWidth(right_width)
+        left_rect = self.left_container.contentsRect()
         available_height = (
-            self.left_container.height()
+            left_rect.height()
             - self.checkbox_container.height()
             - self.left_layout.spacing()
         )
         square_size = min(left_width, available_height)
         if square_size > 0:
             self.overlay_widget.setFixedSize(square_size, square_size)
+        else:
+            self.logger.info(
+                "cellpose dialog resize: skip square=%s left_rect=%sx%s checkbox=%s",
+                square_size,
+                left_rect.width(),
+                left_rect.height(),
+                self.checkbox_container.height(),
+            )
+            return
+        self.logger.info(
+            "cellpose dialog resize: main=%sx%s left=%sx%s right=%sx%s square=%s",
+            main_rect.width(),
+            main_rect.height(),
+            left_rect.width(),
+            left_rect.height(),
+            self.right_container.contentsRect().width(),
+            self.right_container.contentsRect().height(),
+            square_size,
+        )
 
     def _reset_importer_state(self, clear_existing_data: bool = False) -> None:
         """Return dialog to initial state after an importer failure."""
@@ -340,7 +394,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.image_path_label.setStyleSheet("QLabel { color: gray; }")
         self.segmentation_path_label.setText("No segmentation file selected")
         self.segmentation_path_label.setStyleSheet("QLabel { color: gray; }")
-        self.custom_mapping_line.clear()
+        # self.custom_mapping_line.clear()
         self.linear_offset_spin.setValue(0)
         for button in self.mapping_buttons.buttons():
             if button.text() == "Linear":
@@ -353,11 +407,26 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self._hide_info()
         self._set_ui_loaded_state(False)
 
+    def _apply_existing_mapping(
+        self, mapping: dict[int, int], mapping_strategy: str, linear_offset: int
+    ) -> None:
+        target_mode = mapping_strategy or "Linear"
+        if target_mode == "Custom" and mapping:
+            mapping_str = ",".join(
+                [f"{stim_id}:{cellpose_id}" for stim_id, cellpose_id in mapping.items()]
+            )
+            self.custom_mapping_line.setText(mapping_str)
+        if target_mode == "Linear":
+            self.linear_offset_spin.setValue(int(linear_offset or 0))
+        for button in self.mapping_buttons.buttons():
+            if button.text() == target_mode:
+                button.setChecked(True)
+                break
+
     def _on_mapping_changed(self) -> None:
         """Handle toggle between mapping strategies"""
         mapping_strategy = self._get_mapping_strategy()
         is_custom = mapping_strategy == "Custom"
-        self.custom_mapping_line.clear()  # avoid data leaking.. before data from Custom mapping could taint Linear mapping if switched back.
         self.custom_mapping_line.setVisible(is_custom)
         self.custom_mapping_label.setVisible(is_custom)
         self.linear_offset_spin.setVisible(not is_custom)
@@ -599,6 +668,18 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 else {}
             )
 
+            self.logger.info(
+                "cellpose preview: image=%s seg=%s overlay=%sx%s mapping=%s",
+                None
+                if self.importer.image_data is None
+                else self.importer.image_data.shape,
+                None
+                if self.importer.segmentation_data is None
+                else self.importer.segmentation_data.shape,
+                self.overlay_widget.width(),
+                self.overlay_widget.height(),
+                mapping_strategy,
+            )
             self.overlay_widget.set_overlay(
                 self.importer.overlay_image,
                 self.importer.segmentation_data,
@@ -658,9 +739,13 @@ class CellposeImportDialog(QtWidgets.QDialog):
             # Generate stimulus-to-cellpose mapping based on selected strategy
             mapping_strategy = self._get_mapping_strategy()
             stimulus_mapping = self._generate_stimulus_mapping(mapping_strategy)
+            stored_mapping = stimulus_mapping if mapping_strategy == "Custom" else None
 
             self._imported_data = self.importer.create_result(
-                self.image_path, stimulus_mapping
+                self.image_path,
+                stored_mapping,
+                mapping_strategy=mapping_strategy,
+                linear_offset=self._get_linear_offset(),
             )
 
             info = self.importer.get_info()
@@ -677,7 +762,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             if mapping_strategy == "Linear" and linear_offset:
                 success_msg += f" (offset {linear_offset})"
 
-            if stimulus_mapping:
+            if mapping_strategy == "Custom" and stimulus_mapping:
                 success_msg += f"\nStimulus mapping: {dict(list(stimulus_mapping.items())[:5])}{'...' if len(stimulus_mapping) > 5 else ''}"
 
             QtWidgets.QMessageBox.information(self, "Import Successful", success_msg)
@@ -714,26 +799,18 @@ class CellposeImportDialog(QtWidgets.QDialog):
             )
             self._apply_segmentation_transformations()
 
-            # Pre-fill mapping if available, prefer Linear when mapping is identity
             mapping = self.existing_data.stimulus_to_cellpose_mapping or {}
-            if mapping:
-                if not is_identity_mapping(mapping):
-                    mapping_str = ",".join(
-                        [
-                            f"{stim_id}:{cellpose_id}"
-                            for stim_id, cellpose_id in mapping.items()
-                        ]
-                    )
-                    self.custom_mapping_line.setText(mapping_str)
-                else:
-                    self.custom_mapping_line.clear()
-                    self.linear_offset_spin.setValue(0)
-
-                target_mode = "Linear" if is_identity_mapping(mapping) else "Custom"
-                for button in self.mapping_buttons.buttons():
-                    if button.text() == target_mode:
-                        button.setChecked(True)
-                        break
+            mapping_strategy = getattr(self.existing_data, "mapping_strategy", "")
+            if not mapping_strategy:
+                mapping_strategy = "Custom" if mapping else "Linear"
+            linear_offset = getattr(self.existing_data, "linear_offset", 0)
+            self._apply_existing_mapping(mapping, mapping_strategy, linear_offset)
+            self.logger.info(
+                "cellpose restore: strategy=%s mapping=%s linear_offset=%s",
+                mapping_strategy,
+                "custom" if mapping else "none",
+                linear_offset,
+            )
 
             # Update UI
             self.segmentation_path_label.setText("(from existing data)")
