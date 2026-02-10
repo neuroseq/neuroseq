@@ -76,10 +76,11 @@ def generate_linear_stimulus_mapping(
     """Map stimulus IDs to cellpose IDs starting at the selected offset."""
     if original_ids is None:
         return {}
-    eligible_ids = [
-        int(cellpose_id) for cellpose_id in original_ids if cellpose_id >= offset
-    ]
-    return {stim_id: cellpose_id for stim_id, cellpose_id in enumerate(eligible_ids)}
+    ordered_ids = [int(cellpose_id) for cellpose_id in original_ids]
+    first_ids = [cellpose_id for cellpose_id in ordered_ids if cellpose_id >= offset]
+    wrapped_ids = [cellpose_id for cellpose_id in ordered_ids if cellpose_id < offset]
+    mapped_ids = first_ids + wrapped_ids
+    return {stim_id: cellpose_id for stim_id, cellpose_id in enumerate(mapped_ids)}
 
 
 def prepare_cellpose_traces(

@@ -384,6 +384,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
             return
         available = screen.availableGeometry()
         frame = self.frameGeometry()
+        max_height = max(0, available.height() - 150)
+        if frame.height() > max_height:
+            self.resize(frame.width(), max_height)
+            frame = self.frameGeometry()
         if available.contains(frame):
             return
         new_x = min(max(frame.x(), available.left()), available.right() - frame.width())
@@ -925,10 +929,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 self.delete_button.setEnabled(True)
             self.import_button.setEnabled(True)
 
+            self._set_ui_loaded_state(True)
             # Update preview
             self._update_preview_mapping()
             self._update_info()
-            self._set_ui_loaded_state(True)
 
         except Exception as exc:
             self.logger.warning("Failed to load existing cellpose data: %s", exc)

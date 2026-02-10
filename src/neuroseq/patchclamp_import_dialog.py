@@ -648,8 +648,8 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         if original_ids is None:
             return []
         offset = int(getattr(self.cellpose_import, "linear_offset", 0) or 0)
-        eligible = [int(cell_id) for cell_id in original_ids if cell_id >= offset]
-        return sorted(eligible)
+        mapping = generate_linear_stimulus_mapping(original_ids, offset)
+        return sorted(mapping.keys())
 
     # now generates Linear mapping identity itself for the preview widget here, rather than cellpose generating it
     # and passing it around like a custom mapping

@@ -299,7 +299,7 @@ def test_custom_stim_cellpose_mapping(tmp_path):
 def test_linear_mapping_offset_starts_at_zero():
     original_ids = np.array([1, 3, 4, 7], dtype=np.int32)
     mapping = generate_linear_stimulus_mapping(original_ids, offset=3)
-    assert mapping == {0: 3, 1: 4, 2: 7}
+    assert mapping == {0: 3, 1: 4, 2: 7, 3: 1}
 
 
 def test_custom_mapping_parsing_edge_cases():
