@@ -5,6 +5,7 @@ from pathlib import Path
 
 import brian2.numpy_ as np
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
@@ -57,20 +58,39 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.custom_mapping_preview: QtWidgets.QLabel | None = None
         self._has_maximised = False
         self._vertical_layout = False
+        self._is_adjusting_position = False
+        self._current_screen: QtGui.QScreen | None = None
         self._setup_ui()
         self._apply_existing_stim_mapping()
         self._populate_cellpose_preview()
 
-    def _maximise_screen(self) -> None:
-        available = get_primary_available_geometry()
+    def _maximise_screen(self, screen: QtGui.QScreen | None = None) -> None:
+        available = self._get_available_geometry(screen)
         if available is None:
             return
         adjusted = available.adjusted(50, 50, -50, -50)
         self.setGeometry(adjusted)
         self.setWindowState(self.windowState() | QtCore.Qt.WindowState.WindowMaximized)
 
-    def _should_use_vertical_layout(self) -> bool:
-        return is_vertical_screen(get_primary_available_geometry())
+    def _get_available_geometry(
+        self, screen: QtGui.QScreen | None = None
+    ) -> QtCore.QRect | None:
+        if screen is not None:
+            return screen.availableGeometry()
+        return get_primary_available_geometry()
+
+    def _get_screen_for_window(self) -> QtGui.QScreen | None:
+        window = self.windowHandle()
+        screen = window.screen() if window is not None else None
+        if screen is None:
+            frame = self.frameGeometry()
+            screen = QtGui.QGuiApplication.screenAt(frame.center())
+        if screen is None:
+            screen = QtGui.QGuiApplication.primaryScreen()
+        return screen
+
+    def _should_use_vertical_layout(self, screen: QtGui.QScreen | None = None) -> bool:
+        return is_vertical_screen(self._get_available_geometry(screen))  # updates
 
     @staticmethod
     def _double_spinbox(
@@ -121,10 +141,12 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.setModal(True)
 
         self._vertical_layout = self._should_use_vertical_layout()
-        if self._vertical_layout:
-            self.main_layout = QtWidgets.QVBoxLayout(self)
-        else:
-            self.main_layout = QtWidgets.QHBoxLayout(self)
+        direction = (
+            QtWidgets.QBoxLayout.Direction.TopToBottom
+            if self._vertical_layout
+            else QtWidgets.QBoxLayout.Direction.LeftToRight
+        )
+        self.main_layout = QtWidgets.QBoxLayout(direction, self)
         self.main_layout.setSpacing(12)
 
         self.left_container = QtWidgets.QWidget()
@@ -302,8 +324,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         button_layout.addStretch()
         self.right_layout.addWidget(self.button_row)
         self.main_layout.addWidget(self.right_container, stretch=2)
-        self._maximise_screen()
-        self._sync_overlay_size()
+        self._apply_screen_layout(self._get_screen_for_window())
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -317,9 +338,68 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         if self._has_maximised:
             return
         self._has_maximised = True
-        self._maximise_screen()
+        self._apply_screen_layout(self._get_screen_for_window())
+
+    def moveEvent(self, event) -> None:
+        super().moveEvent(event)
+        self._handle_screen_change()
+
+    def _handle_screen_change(self) -> None:
+        if self._is_adjusting_position:
+            return
+        screen = self._get_screen_for_window()
+        if screen is None:
+            return
+        if screen != self._current_screen:
+            self._current_screen = screen
+            self._apply_screen_layout(screen)
+            return
+        self._ensure_on_screen(screen)
+
+    def _apply_screen_layout(self, screen: QtGui.QScreen | None) -> None:
+        """
+        Align the dialog layout and size to the target screen orientation
+        and resync the preview when moving across monitors.
+        """
+        if screen is None:
+            return
+        self._current_screen = screen
+        desired_vertical = self._should_use_vertical_layout(screen)
+        if self.main_layout is not None and isinstance(
+            self.main_layout, QtWidgets.QBoxLayout
+        ):
+            direction = (
+                QtWidgets.QBoxLayout.Direction.TopToBottom
+                if desired_vertical
+                else QtWidgets.QBoxLayout.Direction.LeftToRight
+            )
+            self.main_layout.setDirection(direction)
+        self._vertical_layout = desired_vertical
+        self._is_adjusting_position = True
+        self._maximise_screen(screen)
+        self._is_adjusting_position = False
         self._sync_overlay_size()
-        QtCore.QTimer.singleShot(0, self._sync_overlay_size)
+
+    def _ensure_on_screen(self, screen: QtGui.QScreen | None = None) -> None:
+        if self._is_adjusting_position:
+            return
+        if screen is None:
+            screen = self._get_screen_for_window()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        frame = self.frameGeometry()
+        if available.contains(frame):
+            return
+        new_x = min(max(frame.x(), available.left()), available.right() - frame.width())
+        new_y = min(
+            max(frame.y(), available.top()), available.bottom() - frame.height()
+        )
+        if new_x == frame.x() and new_y == frame.y():
+            return
+        self._is_adjusting_position = True
+        self.move(new_x, new_y)
+        self._is_adjusting_position = False
 
     def _sync_overlay_size(self) -> None:
         # wait until everyting is ready, activate and then proceed; this keeps consistent between

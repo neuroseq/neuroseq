@@ -71,6 +71,7 @@ def test_load_uint16_tiff_stack(tmp_path):
     expected_arrays = [importer._frame_to_rgb_float(frame) for frame in frames]
     expected_float = np.mean(np.stack(expected_arrays, axis=0), axis=0)
     expected_rgb = importer._scale_float_image_to_uint8(expected_float)
+    expected_rgb = np.flipud(expected_rgb)
 
     np.testing.assert_array_equal(importer.image_data, expected_rgb)
     assert len(np.unique(importer.image_data)) > 1

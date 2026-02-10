@@ -56,11 +56,13 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.mapping_group: QtWidgets.QGroupBox | None = None
         self.main_content_layout: QtWidgets.QHBoxLayout | None = None
         self._vertical_layout = False
+        self._is_adjusting_position = False
+        self._current_screen: QtGui.QScreen | None = None
         self._setup_ui()
         self._load_existing_data_if_available()
 
-    def _maximise_screen(self) -> None:
-        available = get_primary_available_geometry()
+    def _maximise_screen(self, screen: QtGui.QScreen | None = None) -> None:
+        available = self._get_available_geometry(screen)
         if available is None:
             return
         adjusted = available.adjusted(50, 50, -50, -50)
@@ -68,8 +70,25 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.setGeometry(adjusted)
         self.setWindowState(self.windowState() | QtCore.Qt.WindowState.WindowMaximized)
 
-    def _should_use_vertical_layout(self) -> bool:
-        return is_vertical_screen(get_primary_available_geometry())
+    def _get_available_geometry(
+        self, screen: QtGui.QScreen | None = None
+    ) -> QtCore.QRect | None:
+        if screen is not None:
+            return screen.availableGeometry()
+        return get_primary_available_geometry()
+
+    def _get_screen_for_window(self) -> QtGui.QScreen | None:
+        window = self.windowHandle()
+        screen = window.screen() if window is not None else None
+        if screen is None:
+            frame = self.frameGeometry()
+            screen = QtGui.QGuiApplication.screenAt(frame.center())
+        if screen is None:
+            screen = QtGui.QGuiApplication.primaryScreen()
+        return screen
+
+    def _should_use_vertical_layout(self, screen: QtGui.QScreen | None = None) -> bool:
+        return is_vertical_screen(self._get_available_geometry(screen))
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("Import Cellpose Data")
@@ -144,14 +163,15 @@ class CellposeImportDialog(QtWidgets.QDialog):
         # Main content (hidden until both files are selected)
         self.main_content_container = QtWidgets.QWidget()
         self._vertical_layout = self._should_use_vertical_layout()
-        if self._vertical_layout:
-            self.main_content_layout = QtWidgets.QVBoxLayout(
-                self.main_content_container
-            )
-        else:
-            self.main_content_layout = QtWidgets.QHBoxLayout(
-                self.main_content_container
-            )
+        direction = (
+            QtWidgets.QBoxLayout.Direction.TopToBottom
+            if self._vertical_layout
+            else QtWidgets.QBoxLayout.Direction.LeftToRight
+        )
+        self.main_content_layout = QtWidgets.QBoxLayout(
+            direction,
+            self.main_content_container,
+        )
         self.main_content_layout.setContentsMargins(0, 0, 0, 0)
         self.main_content_layout.setSpacing(16)
 
@@ -288,8 +308,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         if self.main_content_container is not None:
             self.main_content_container.setVisible(loaded)
             if loaded:
-                self._maximise_screen()
-                QtCore.QTimer.singleShot(0, self._sync_overlay_size)
+                self._apply_screen_layout(self._get_screen_for_window())
                 self.logger.info(
                     "cellpose ui loaded: window=%sx%s main=%sx%s",
                     self.width(),
@@ -306,8 +325,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.main_content_container is not None
             and self.main_content_container.isVisible()
         ):
-            self._maximise_screen()
-            QtCore.QTimer.singleShot(0, self._sync_overlay_size)
+            self._apply_screen_layout(self._get_screen_for_window())
             self.logger.info(
                 "cellpose showEvent: window=%sx%s main=%sx%s",
                 self.width(),
@@ -315,6 +333,68 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 self.main_content_container.width(),
                 self.main_content_container.height(),
             )
+
+    def moveEvent(self, event) -> None:
+        super().moveEvent(event)
+        self._handle_screen_change()
+
+    def _handle_screen_change(self) -> None:
+        if self._is_adjusting_position:
+            return
+        screen = self._get_screen_for_window()
+        if screen is None:
+            return
+        if screen != self._current_screen:
+            self._current_screen = screen
+            self._apply_screen_layout(screen)
+            return
+        self._ensure_on_screen(screen)
+
+    def _apply_screen_layout(self, screen: QtGui.QScreen | None) -> None:
+        """
+        Ensure the dialog layout and size match the target screen orientation
+        and resync the overlay preview after moving between monitors.
+        OCcurs as user crosses screen boundaries, which keeps to max their pointer y position from the top, so they can snap the window.
+        """
+        if screen is None:
+            return
+        self._current_screen = screen
+        desired_vertical = self._should_use_vertical_layout(screen)
+        if self.main_content_layout is not None and isinstance(
+            self.main_content_layout, QtWidgets.QBoxLayout
+        ):
+            direction = (
+                QtWidgets.QBoxLayout.Direction.TopToBottom
+                if desired_vertical
+                else QtWidgets.QBoxLayout.Direction.LeftToRight
+            )
+            self.main_content_layout.setDirection(direction)
+        self._vertical_layout = desired_vertical
+        self._is_adjusting_position = True
+        self._maximise_screen(screen)
+        self._is_adjusting_position = False
+        self._sync_overlay_size()
+
+    def _ensure_on_screen(self, screen: QtGui.QScreen | None = None) -> None:
+        if self._is_adjusting_position:
+            return
+        if screen is None:
+            screen = self._get_screen_for_window()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        frame = self.frameGeometry()
+        if available.contains(frame):
+            return
+        new_x = min(max(frame.x(), available.left()), available.right() - frame.width())
+        new_y = min(
+            max(frame.y(), available.top()), available.bottom() - frame.height()
+        )
+        if new_x == frame.x() and new_y == frame.y():
+            return
+        self._is_adjusting_position = True
+        self.move(new_x, new_y)
+        self._is_adjusting_position = False
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
