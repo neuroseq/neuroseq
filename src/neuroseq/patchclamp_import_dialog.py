@@ -357,7 +357,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             self.cellpose_import.overlay_image,
             self.cellpose_import.segmentation_array,
             self.cellpose_import.original_cellpose_ids,
-            self.cellpose_import.stimulus_to_cellpose_mapping,
+            self._get_cellpose_overlay_mapping(),
         )
         self._apply_overlay_display_options()
 
@@ -393,10 +393,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
     def _apply_existing_stim_mapping(self) -> None:
         """Prefill custom mapping when Cellpose data already has stimulus IDs."""
-        if (
-            self.cellpose_import is None
-            or not self.cellpose_import.stimulus_to_cellpose_mapping
-        ):
+        if not self._has_custom_cellpose_mapping():
             return
 
         mapping = self.cellpose_import.stimulus_to_cellpose_mapping
@@ -521,12 +518,29 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
     def _get_cellpose_stim_ids(self) -> list[int]:
         """Return sorted stimulus IDs from an existing Cellpose mapping."""
-        if (
-            self.cellpose_import is None
-            or not self.cellpose_import.stimulus_to_cellpose_mapping
-        ):
-            return []
+        if not self._has_custom_cellpose_mapping():
+            return []  # Linear: Just get nothing here presently.
         return sorted(self.cellpose_import.stimulus_to_cellpose_mapping.keys())
+
+    def _has_custom_cellpose_mapping(self) -> bool:
+        if self.cellpose_import is None:
+            return False
+        strategy = getattr(self.cellpose_import, "mapping_strategy", "")
+        return strategy == "Custom"
+
+    def _get_cellpose_overlay_mapping(self) -> dict[int, int] | None:
+        if self.cellpose_import is None:
+            return None
+        mapping = self.cellpose_import.stimulus_to_cellpose_mapping
+        strategy = getattr(self.cellpose_import, "mapping_strategy", "")
+        if not strategy:
+            strategy = "Custom" if mapping else "Linear"
+        if strategy == "Custom" and mapping:
+            return mapping
+        original_ids = self.cellpose_import.original_cellpose_ids
+        if original_ids is None:
+            return None
+        return {int(cell_id): int(cell_id) for cell_id in original_ids}
 
     def _format_stimulus_display(self, stim_ids: list[int]) -> str:
         """Format stimulus IDs for display."""
