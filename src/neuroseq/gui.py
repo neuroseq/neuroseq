@@ -334,6 +334,7 @@ class Gui(QtWidgets.QMainWindow):
 
     def btn_manage_experiments_clicked(self) -> None:
         dialog = ExperimentsManagerDialog(self.project, parent=self)
+        dialog.experiments_changed.connect(lambda: self.update_project(self.project))
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             # Update the GUI with changes made in the dialog
             self.update_project(self.project)

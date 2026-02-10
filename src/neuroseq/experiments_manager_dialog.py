@@ -12,6 +12,8 @@ from neuroseq.project import Project
 class ExperimentsManagerDialog(QtWidgets.QDialog):
     """A dialog that allows the user to view and manage all experiments in the project."""
 
+    experiments_changed = QtCore.Signal()
+
     def __init__(
         self,
         project: Project,
@@ -177,6 +179,7 @@ class ExperimentsManagerDialog(QtWidgets.QDialog):
             self.info_label.setText(
                 f"Total: {len(self.project.experiments)} experiment(s)"
             )
+            self.experiments_changed.emit()
 
             # Show success message
             if len(experiments_to_delete) == 1:
