@@ -13,6 +13,7 @@ from neuroseq.cell_overlay_widget import CellOverlayWidget
 from neuroseq.data import SpikeData
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
+from neuroseq.importer_cellpose import generate_linear_stimulus_mapping
 from neuroseq.importer_patchclamp import PeakDetectionParams
 from neuroseq.importer_patchclamp import import_patchclamp_data
 from neuroseq.mapping_validation import ensure_unique_ids
@@ -622,18 +623,33 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
     def _get_cellpose_stim_ids(self) -> list[int]:
         """Return sorted stimulus IDs from an existing Cellpose mapping."""
-        if not self._has_custom_cellpose_mapping():
-            return []  # Linear: Just get nothing here presently.
         if self.cellpose_import is None:
             return []
         mapping = self.cellpose_import.stimulus_to_cellpose_mapping or {}
-        return sorted(mapping.keys())
+        strategy = getattr(self.cellpose_import, "mapping_strategy", "")
+        if not strategy:
+            strategy = "Custom" if mapping else "Linear"
+        if strategy == "Custom":
+            return sorted(mapping.keys())
+        if strategy == "Linear":
+            return self._get_linear_cellpose_ids()
+        return []
 
     def _has_custom_cellpose_mapping(self) -> bool:
         if self.cellpose_import is None:
             return False
         strategy = getattr(self.cellpose_import, "mapping_strategy", "")
         return strategy == "Custom"
+
+    def _get_linear_cellpose_ids(self) -> list[int]:
+        if self.cellpose_import is None:
+            return []
+        original_ids = self.cellpose_import.original_cellpose_ids
+        if original_ids is None:
+            return []
+        offset = int(getattr(self.cellpose_import, "linear_offset", 0) or 0)
+        eligible = [int(cell_id) for cell_id in original_ids if cell_id >= offset]
+        return sorted(eligible)
 
     # now generates Linear mapping identity itself for the preview widget here, rather than cellpose generating it
     # and passing it around like a custom mapping
@@ -646,6 +662,10 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             strategy = "Custom" if mapping else "Linear"
         if strategy == "Custom" and mapping:
             return mapping
+        if strategy == "Linear":
+            original_ids = self.cellpose_import.original_cellpose_ids
+            offset = int(getattr(self.cellpose_import, "linear_offset", 0) or 0)
+            return generate_linear_stimulus_mapping(original_ids, offset)
         original_ids = self.cellpose_import.original_cellpose_ids
         if original_ids is None:
             return None

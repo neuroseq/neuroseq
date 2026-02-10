@@ -142,6 +142,7 @@ class ImportExperimentDialog(QtWidgets.QDialog):
         self.cmb_offset.setEnabled(self.append_to_experiment)
         if self.append_to_experiment:
             self.cmb_experiments_index_changed(self.cmb_experiments.currentIndex())
+            self._refresh_append_error()
         else:
             self.new_name_text_edited(self.txt_new_name.text())
 
@@ -154,19 +155,7 @@ class ImportExperimentDialog(QtWidgets.QDialog):
             self.offset = 0.0
             return
         self.offset = self.existing_experiments[experiment_index].timepoints[index]
-        self.lbl_error.setText(
-            self.project.issues_with_appending_experimental_data(
-                self.append_experiment_name,
-                self.experiment.data,
-                self.experiment.duration,
-                self.offset,
-            )
-        )
-        if self.lbl_error.text() != "":
-            self.save_button.setEnabled(False)
-        else:
-            self.lbl_error.clear()
-            self.save_button.setEnabled(True)
+        self._refresh_append_error()
 
     def cmb_experiments_index_changed(self, index: int) -> None:
         self.cmb_offset.clear()
@@ -186,21 +175,9 @@ class ImportExperimentDialog(QtWidgets.QDialog):
         self.cmb_offset.addItems(option_labels)
         # select the last timepoint by default
         if self.cmb_offset.count() > 0:
-            self.cmb_offset.setCurrentIndex(self.cmb_offset.count() - 1)
+            self.cmb_offset.setCurrentIndex(0)
         # check if appending this data to the selected experiment is valid
-        self.lbl_error.setText(
-            self.project.issues_with_appending_experimental_data(
-                self.append_experiment_name,
-                self.experiment.data,
-                self.experiment.duration,
-                self.offset,
-            )
-        )
-        if self.lbl_error.text() != "":
-            self.save_button.setEnabled(False)
-        else:
-            self.lbl_error.clear()
-            self.save_button.setEnabled(True)
+        self._refresh_append_error()
 
     def new_name_text_edited(self, text: str) -> None:
         self.experiment.name = text
@@ -243,3 +220,13 @@ class ImportExperimentDialog(QtWidgets.QDialog):
                 ):
                     return False
         return True
+
+    def _refresh_append_error(self) -> None:
+        error = self.project.issues_with_appending_experimental_data(
+            self.append_experiment_name,
+            self.experiment.data,
+            self.experiment.duration,
+            self.offset,
+        )
+        self.lbl_error.setText(error)
+        self.save_button.setEnabled(error == "")

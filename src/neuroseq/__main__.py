@@ -9,6 +9,9 @@ from qtpy import API_NAME
 from qtpy import QtWidgets
 
 from neuroseq.gui import Gui
+from neuroseq.profiling import configure_profiling
+from neuroseq.profiling import start_profiling
+from neuroseq.profiling import stop_profiling
 from neuroseq.utils import init_brian2_logging
 
 
@@ -30,8 +33,29 @@ from neuroseq.utils import init_brian2_logging
     help="Log to this file instead of the console",
     show_default=True,
 )
+@click.option(
+    "--profile",
+    is_flag=True,
+    default=False,
+    help="Enable cProfile and write stats on exit",
+    show_default=True,
+)
+@click.option(
+    "--profile-output",
+    default=pathlib.Path("neuroseq.prof"),
+    type=click.Path(path_type=pathlib.Path, dir_okay=False, writable=True),
+    help="Output file for cProfile stats",
+    show_default=True,
+)
 @click.argument("filename", required=False)
-def main(log_level: str, log_file: pathlib.Path, filename: str | None) -> None:
+def main(
+    log_level: str,
+    log_file: pathlib.Path,
+    profile: bool,
+    profile_output: pathlib.Path,
+    filename: str | None,
+) -> None:
+    configure_profiling(profile, profile_output)
     init_brian2_logging()
     logging.basicConfig(
         level=log_level,
@@ -45,7 +69,11 @@ def main(log_level: str, log_file: pathlib.Path, filename: str | None) -> None:
     app = QtWidgets.QApplication(sys.argv)
     gui = Gui(filename=filename)
     gui.show()
-    app.exec()
+    start_profiling()
+    try:
+        app.exec()
+    finally:
+        stop_profiling()
 
 
 if __name__ == "__main__":

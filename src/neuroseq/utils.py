@@ -18,6 +18,7 @@ from qtpy import QtWidgets
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
+from neuroseq.profiling import profile_section
 from neuroseq.stim import StimType
 
 save_store_name = "___current-simulation-state-at-save-time___"
@@ -57,31 +58,34 @@ def construct_synapse_matrix(
 
     Automatically downsamples the data if it exceeds the maximum RAM limit.
     """
-    synapse_group = monitor.source
-    values = monitor.variables[variable].get_value().T
-    n = int(max(np.max(synapse_group.i), np.max(synapse_group.j)) + 1)
-    n_timestamps = int(values.shape[1])
-    if n_timestamps == 0:
-        return np.array([]), np.array([])
-    n_floats = n * n * n_timestamps
-    downsample_factor = get_downsample_factor(n_floats, max_ram_mb, bits_per_float=32)
-    if downsample_factor > 1:
-        logging.info(
-            f"Downsampling {n}x{n}x{n_timestamps} matrix by factor {downsample_factor} due to max RAM limit of {max_ram_mb} MB"
+    with profile_section("synapse.construct_matrix"):
+        synapse_group = monitor.source
+        values = monitor.variables[variable].get_value().T
+        n = int(max(np.max(synapse_group.i), np.max(synapse_group.j)) + 1)
+        n_timestamps = int(values.shape[1])
+        if n_timestamps == 0:
+            return np.array([]), np.array([])
+        n_floats = n * n * n_timestamps
+        downsample_factor = get_downsample_factor(
+            n_floats, max_ram_mb, bits_per_float=32
         )
-    matrix = np.zeros(
-        (n, n, values[0, ::downsample_factor].shape[0]),
-        dtype=np.float32,
-    )
-    for i, j, value in zip(
-        synapse_group.i,
-        synapse_group.j,
-        values[:, ::downsample_factor],
-        strict=True,
-    ):
-        matrix[i, j, :] = value
-    timestamps = (monitor.t / b2.second)[::downsample_factor]
-    return matrix, timestamps
+        if downsample_factor > 1:
+            logging.info(
+                f"Downsampling {n}x{n}x{n_timestamps} matrix by factor {downsample_factor} due to max RAM limit of {max_ram_mb} MB"
+            )
+        matrix = np.zeros(
+            (n, n, values[0, ::downsample_factor].shape[0]),
+            dtype=np.float32,
+        )
+        for i, j, value in zip(
+            synapse_group.i,
+            synapse_group.j,
+            values[:, ::downsample_factor],
+            strict=True,
+        ):
+            matrix[i, j, :] = value
+        timestamps = (monitor.t / b2.second)[::downsample_factor]
+        return matrix, timestamps
 
 
 def neuron_indices_to_colors(indices: np.ndarray) -> np.ndarray:

@@ -142,8 +142,7 @@ class CellPoseImporter:
         self._neuron_colors: np.ndarray | None = None
         self._original_cellpose_ids: np.ndarray | None = None
         self._csv_background_zero = False
-        self._image_is_tiff = False
-        self._segmentation_flipped_for_tiff = False
+        self._segmentation_flipped_for_image = False
 
     def load_image_file(
         self,
@@ -155,19 +154,16 @@ class CellPoseImporter:
         try:
             with Image.open(path) as pil_image:
                 if suffix in {".tif", ".tiff"}:
-                    self._image_is_tiff = True
                     self.image_data = self._load_tiff_with_strategy(pil_image)
-                    self.image_data = np.flipud(self.image_data)
                 else:
-                    self._image_is_tiff = False
                     self.image_data = self._pil_to_rgb_array(pil_image)
 
+            self.image_data = np.flipud(self.image_data)
             self.logger.info(
-                "Loaded image data: %s (tiff=%s)",
+                "Loaded image data: %s (flipped vertically)",
                 self.image_data.shape,
-                self._image_is_tiff,
             )
-            self._align_orientation_segmentation_for_tiff()
+            self._align_orientation_segmentation()
         except Exception as exc:
             self.logger.exception("Error loading image file")
             raise ValueError(f"Could not load {filename}: {exc}") from exc
@@ -267,22 +263,20 @@ class CellPoseImporter:
                     path.suffix.lower(),
                     self.segmentation_data.shape,
                 )
-            self._align_orientation_segmentation_for_tiff()
+            self._align_orientation_segmentation()
         except Exception as exc:
             self.logger.exception("Error loading segmentation file")
             raise ValueError(f"Could not load {filename}: {exc}") from exc
 
-    def _align_orientation_segmentation_for_tiff(self) -> None:
+    def _align_orientation_segmentation(self) -> None:
         # Establish the same orientation that Fiji uses.
-        if not self._image_is_tiff:
-            return
         if self.segmentation_data is None:
             return
-        if self._segmentation_flipped_for_tiff:
+        if self._segmentation_flipped_for_image:
             return
         self.segmentation_data = np.flipud(self.segmentation_data)
-        self._segmentation_flipped_for_tiff = True
-        self.logger.info("Flipped segmentation vertically to match TIFF image.")
+        self._segmentation_flipped_for_image = True
+        self.logger.info("Flipped segmentation vertically to match image orientation.")
 
     def set_trace_data(self, trace_data: TraceData) -> None:
         self._validate_trace_data(trace_data)
@@ -434,10 +428,7 @@ class CellPoseImporter:
             if result.overlay_image is None
             else np.array(result.overlay_image, copy=True)
         )
-        suffix = result.image_path.suffix.lower()
-        self._segmentation_flipped_for_tiff = (
-            suffix in {".tif", ".tiff"} and self.segmentation_data is not None
-        )
+        self._segmentation_flipped_for_image = self.segmentation_data is not None
 
         # Attempt to reload the original image; fall back to stored overlay if unavailable.
         self.image_data = None

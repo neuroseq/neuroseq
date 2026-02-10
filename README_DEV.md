@@ -49,6 +49,18 @@ uv run neuroseq
 
 (if you are not using uv, just run `neuroseq`)
 
+To run with profiling:
+
+```bash
+uv run neuroseq --profile --profile-output latest.prof
+```
+
+and to see the results:
+
+```bash
+ uv run snakeviz latest.prof
+```
+
 To run the test suite:
 
 ```bash

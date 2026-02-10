@@ -6,6 +6,7 @@ import pygfx
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+from neuroseq.profiling import profile_section
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.timeseries_widget import TimeseriesWidget
@@ -40,27 +41,28 @@ class StimWidget(TimeseriesWidget):
         self.clear_data()
         if stim_array is None:
             return
-        self.data_values = stim_array.values
-        self.stim_type = stim_array.stim_type
-        self.vmin = 0.0
-        self.vmax = np.max(np.abs(stim_array.values))
-        if self.vmax == 0:
-            self.vmax = 1.0
-        if self.stim_type == StimType.External:
-            self.vmin = -self.vmax
-        self.units = "" if stim_array.units == "1" else stim_array.units
-        self.graphic = self.subplot.add_image(
-            stim_array.values.T,
-            vmin=self.vmin,
-            vmax=self.vmax,
-            cmap=get_cmap(self.stim_type),
-            offset=(0.5, 0, 0),
-        )
-        # todo: properly support dt_ms != 1 (currently we share the camera with other widgets, but add_image has fixed integer x-axis spacing, so the bounds of the shared camera is only correct if dt_ms=1)
-        self.dt_ms = stim_array.dt * 1000.0  # convert to milliseconds
-        self.n_neurons = stim_array.values.shape[1]
-        self.n_timestamps = stim_array.values.shape[0]
-        self.post_set_data()
+        with profile_section("stim_widget.set_data"):
+            self.data_values = stim_array.values
+            self.stim_type = stim_array.stim_type
+            self.vmin = 0.0
+            self.vmax = np.max(np.abs(stim_array.values))
+            if self.vmax == 0:
+                self.vmax = 1.0
+            if self.stim_type == StimType.External:
+                self.vmin = -self.vmax
+            self.units = "" if stim_array.units == "1" else stim_array.units
+            self.graphic = self.subplot.add_image(
+                stim_array.values.T,
+                vmin=self.vmin,
+                vmax=self.vmax,
+                cmap=get_cmap(self.stim_type),
+                offset=(0.5, 0, 0),
+            )
+            # todo: properly support dt_ms != 1 (currently we share the camera with other widgets, but add_image has fixed integer x-axis spacing, so the bounds of the shared camera is only correct if dt_ms=1)
+            self.dt_ms = stim_array.dt * 1000.0  # convert to milliseconds
+            self.n_neurons = stim_array.values.shape[1]
+            self.n_timestamps = stim_array.values.shape[0]
+            self.post_set_data()
 
     def set_background_data(self, stim_array: StimArray | None = None) -> None:
         if stim_array is None:

@@ -16,11 +16,43 @@ class TraceData:
         dt (float): The time step in seconds between consecutive timestamps.
     """
 
+    # this jump of 6.6GB is too much from suite2p.
+
+    # float 32
+
+    # is suite2p float32, and is patchclamp data float32?
+
+    # 1 hour x 60 x 32 x 4 bytes x 1
+    # 2 bytes per point in the CSV.
+    # 2x more... --> roughly 400, we see during import
+    # after import something strange.
+    # fastplotlib
+
+    # --> F/F/Spks ... 6 GB --> 18GB
+    # not true because F and Fneu get combined together
+    # 6.5GB.
+
+    # maybe stim gets sized up according to the traces
+    # 40*1 hour
+    # 3600000*40 = (multiple data types, excitation, inhibition, stimulation..)
+
     name: str
-    traces: NDArray[np.float32]
+    traces: NDArray[np.float32]  #
     indices: NDArray[np.uint32]
     units: str
     dt: float
+
+
+"""
+# as info: My default Neuroseq workstation PC(64GB, hefty GPU) has 0.18GB RAM usage, and uses 2.65GB with F.npy imported.
+# It takes 4 seconds to import that much data on a 64GB desktop.
+# On my AMD-2024 Laptop integrated GPU 64GB (so not a gaming laptop but fairly beefy) it takes:
+
+Laptop(with 64GB total, medium integrated GPU)@ 0.42GB --> 0.92 --> 4.17GB
+More importantly: unresponsively slow
+And after clicking "New" (should have wiped Traces/Spike sdata at least,but not stim) 3.85GB consumed
+points to stim before doing more profiling at least...
+"""
 
 
 @dataclass
