@@ -280,7 +280,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self._on_display_toggle_changed()
 
     def _set_ui_loaded_state(self, loaded: bool) -> None:
-        """Toggle between pre-selection and post-selection UI."""
+        """Toggle between pre-selection and post-selection UI, also used to help process in order expanding the preview
+        widget of the overlay only when the dialog is in a state we known is maximised (otherwise, the fastplotlib
+        full size widget(a custom class) can only be expanded to the dialog boundaries)"""
         if self.file_selection_container is not None:
             self.file_selection_container.setVisible(not loaded)
         if self.main_content_container is not None:

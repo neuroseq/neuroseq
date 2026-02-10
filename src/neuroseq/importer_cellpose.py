@@ -148,19 +148,15 @@ class CellPoseImporter:
     def load_image_file(
         self,
         filename: str | Path,
-        *,
-        tiff_strategy: str = "mean",
     ) -> None:
-        """load PNG or TIFF image file. TIFF stacks use configurable projection."""
+        """load PNG or TIFF image file. TIFF stacks use mean projection."""
         path = Path(filename)
         suffix = path.suffix.lower()
         try:
             with Image.open(path) as pil_image:
                 if suffix in {".tif", ".tiff"}:
                     self._image_is_tiff = True
-                    self.image_data = self._load_tiff_with_strategy(
-                        pil_image, tiff_strategy
-                    )
+                    self.image_data = self._load_tiff_with_strategy(pil_image)
                     self.image_data = np.flipud(self.image_data)
                 else:
                     self._image_is_tiff = False
@@ -183,8 +179,8 @@ class CellPoseImporter:
             image = image.convert("RGB")
         return np.array(image)
 
-    def _load_tiff_with_strategy(self, image: Image.Image, strategy: str) -> np.ndarray:
-        """Project a TIFF stack with a chosen strategy, then normalize to display range."""
+    def _load_tiff_with_strategy(self, image: Image.Image) -> np.ndarray:
+        """Project a TIFF stack with mean projection, then normalize to display range."""
         frames = []
         for frame in ImageSequence.Iterator(image):
             frames.append(self._frame_to_rgb_float(frame))
@@ -200,42 +196,7 @@ class CellPoseImporter:
                 )
 
         frame_stack = np.stack(frames, axis=0)
-        strategy_key = strategy.lower().strip()
-
-        if strategy_key == "mean":
-            result = np.mean(frame_stack, axis=0)
-        elif strategy_key == "median":
-            result = np.median(frame_stack, axis=0)
-        elif strategy_key == "min":
-            result = np.min(frame_stack, axis=0)
-        elif strategy_key == "max":
-            result = np.max(frame_stack, axis=0)
-        elif strategy_key == "sum":
-            result = np.sum(frame_stack, axis=0)
-        elif strategy_key == "std":
-            result = np.std(frame_stack, axis=0)
-        elif strategy_key == "first":
-            result = frame_stack[0]
-        elif strategy_key == "middle":
-            result = frame_stack[frame_stack.shape[0] // 2]
-        elif strategy_key == "last":
-            result = frame_stack[-1]
-        elif strategy_key.startswith("frame_"):
-            try:
-                frame_idx = int(strategy_key.split("_", 1)[1])
-            except ValueError as exc:
-                raise ValueError(f"Invalid frame specification: {strategy}") from exc
-            if frame_idx < 0 or frame_idx >= frame_stack.shape[0]:
-                raise ValueError(
-                    f"Frame index {frame_idx} out of range [0, {frame_stack.shape[0] - 1}]"
-                )
-            result = frame_stack[frame_idx]
-        elif strategy_key == "p10":
-            result = np.percentile(frame_stack, 10, axis=0)
-        elif strategy_key == "p90":
-            result = np.percentile(frame_stack, 90, axis=0)
-        else:
-            raise ValueError(f"Unsupported TIFF strategy: {strategy}")
+        result = np.mean(frame_stack, axis=0)
 
         return self._scale_float_image_to_uint8(result)
 

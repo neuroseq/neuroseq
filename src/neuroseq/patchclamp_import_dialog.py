@@ -419,7 +419,9 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         if not self._has_custom_cellpose_mapping():
             return
 
-        mapping = self.cellpose_import.stimulus_to_cellpose_mapping
+        if self.cellpose_import is None:
+            return
+        mapping = self.cellpose_import.stimulus_to_cellpose_mapping or {}
         stim_ids = sorted(mapping.keys())
         self.custom_mapping_line.setText(",".join(str(stim) for stim in stim_ids))
 
@@ -543,7 +545,10 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         """Return sorted stimulus IDs from an existing Cellpose mapping."""
         if not self._has_custom_cellpose_mapping():
             return []  # Linear: Just get nothing here presently.
-        return sorted(self.cellpose_import.stimulus_to_cellpose_mapping.keys())
+        if self.cellpose_import is None:
+            return []
+        mapping = self.cellpose_import.stimulus_to_cellpose_mapping or {}
+        return sorted(mapping.keys())
 
     def _has_custom_cellpose_mapping(self) -> bool:
         if self.cellpose_import is None:
@@ -551,12 +556,14 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         strategy = getattr(self.cellpose_import, "mapping_strategy", "")
         return strategy == "Custom"
 
+    # now generates Linear mapping identity itself for the preview widget here, rather than cellpose generating it
+    # and passing it around like a custom mapping
     def _get_cellpose_overlay_mapping(self) -> dict[int, int] | None:
         if self.cellpose_import is None:
             return None
         mapping = self.cellpose_import.stimulus_to_cellpose_mapping
         strategy = getattr(self.cellpose_import, "mapping_strategy", "")
-        if not strategy:
+        if not strategy:  # these 4 lines below should never execute now, need to confirm later and remove -  todo.
             strategy = "Custom" if mapping else "Linear"
         if strategy == "Custom" and mapping:
             return mapping
