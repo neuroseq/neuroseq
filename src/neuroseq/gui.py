@@ -26,6 +26,7 @@ from neuroseq.data import TraceData
 from neuroseq.data_widget import DataWidget
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
+from neuroseq.experiments_manager_dialog import ExperimentsManagerDialog
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.import_dialog import Suite2pImportDialog
@@ -329,6 +330,12 @@ class Gui(QtWidgets.QMainWindow):
         if mdiag.exec():
             self.project.b2_model = mdiag.b2model
             self.project.update_limits()
+            self.update_project(self.project)
+
+    def btn_manage_experiments_clicked(self) -> None:
+        dialog = ExperimentsManagerDialog(self.project, parent=self)
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            # Update the GUI with changes made in the dialog
             self.update_project(self.project)
 
     @with_wait_cursor
@@ -1063,6 +1070,15 @@ class Gui(QtWidgets.QMainWindow):
     def _create_action_experiment(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
     ) -> None:
+        add_action(
+            "&Manage Experiments",
+            self.btn_manage_experiments_clicked,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon=qta.icon("mdi6.beaker"),
+        )
+        menu.addSeparator()
         add_action(
             "&Connect external stimulation function",
             self.connect_external_simulation_function,
