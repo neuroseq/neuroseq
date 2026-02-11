@@ -39,6 +39,7 @@ from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.save_load_options import SaveLoadOptionsDialog
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim_editor import StimEditor
+from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.synthetic_data_dialog import SyntheticDataDialog
 from neuroseq.time_slider_widget import TimeSliderWidget
 from neuroseq.timeseries_widget import TimeseriesWidget
@@ -720,6 +721,11 @@ class Gui(QtWidgets.QMainWindow):
             )
             self.logger.exception(e)
 
+    def open_stimulation_generator_dialog(self) -> None:
+        """Open the stimulation script generator dialog."""
+        dialog = StimulationGeneratorDialog(self.project, parent=self)
+        dialog.exec()
+
     def choose_brian2_backend(self) -> None:
         backends = ["cython", "numpy"]
         try:
@@ -1079,6 +1085,15 @@ class Gui(QtWidgets.QMainWindow):
     def _create_action_experiment(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
     ) -> None:
+        add_action(
+            "&Generate stimulation scripts",
+            self.open_stimulation_generator_dialog,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon=qta.icon("mdi6.file-code"),
+        )
+        menu.addSeparator()
         add_action(
             "&Connect external stimulation function",
             self.connect_external_simulation_function,
