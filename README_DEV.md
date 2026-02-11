@@ -57,4 +57,4 @@ uv run pytest
 
 ## Connection to Holo4D profile
 
-C:\ProgramData\ROE\SysCon 2\2.7.2\profiles\Holo4D\_Backups\0\Sequence Manager\Experiments\
+C:\ProgramData\ROE\SysCon 2\2.7.2\profiles\Holo4D\Sequence Manager\Experiments\NeuroSeq_tests
