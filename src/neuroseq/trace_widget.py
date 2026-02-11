@@ -104,7 +104,7 @@ class TraceWidget(TimeseriesWidget):
 
     def get_normalized_trace_data(self) -> np.ndarray:
         if self.data is None or not isinstance(self.data, TraceData):
-            return np.array([], dtype=np.float32)
+            return np.array([], dtype=np.float16)
         # replace any NaN values with zero for normalisation
         traces = np.nan_to_num(self.data.traces, copy=True, nan=0.0)
         if self.offset_by_median:
@@ -122,7 +122,7 @@ class TraceWidget(TimeseriesWidget):
         data = norm * self.data.traces.astype(np.float32) + offset[:, np.newaxis]
         if self.clip:
             np.clip(data, -0.5, 0.5, out=data)
-        return data
+        return data.astype(np.float16, copy=False)
 
     def replot_traces(self) -> None:
         """Update the plotted traces based on the current normalization settings."""
@@ -153,7 +153,7 @@ class TraceWidget(TimeseriesWidget):
         self.n_timestamps = data.traces.shape[1]
         # convert timestamps to milliseconds and stack to produce a format suitable for line_stack
         # todo: should be possible to re-use the same timestamps for all traces?
-        timestamps_ms = np.arange(data.traces.shape[1], dtype=np.float32) * np.float32(
+        timestamps_ms = np.arange(data.traces.shape[1], dtype=np.float16) * np.float16(
             data.dt * 1000.0
         )
         tiled_timestamps_ms = np.tile(
@@ -167,7 +167,7 @@ class TraceWidget(TimeseriesWidget):
                 normalized_traces,
             ],
             axis=2,
-            dtype=np.float32,
+            dtype=np.float16,
         )
         self.graphic = self.subplot.add_line_collection(
             data,
