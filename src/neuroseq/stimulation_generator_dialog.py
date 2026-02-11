@@ -144,7 +144,174 @@ PostTiming_us1=20000
 timelinezoomfactor=23
 timelineviewposx=0
 timelineviewposy=0
-TotalEditorGroups=0"""
+TotalEditorGroups=0
+[0]
+ID=3
+type=Entity
+TotalTimings=1
+TimelineInfo0_TimelineIndex=0
+TimelineInfo0_starttime=4999800
+TimelineInfo0_description=
+TimelineInfo0_repeats=599
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0.246
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Entity0_Type=0
+Entity0_Filled=False
+Entity0_CenterX=214.0635
+Entity0_CenterY=318.5917
+Entity0_CenterZ=0
+Entity0_Rotation=0
+Entity0_ScaleX=1
+Entity0_ScaleY=1
+Entity0_ScaleZ=1
+Entity0_VertexCount=0
+Entity0_reversed=False
+[/0]
+[1]
+ID=2
+type=Entity
+TotalTimings=1
+TimelineInfo0_TimelineIndex=1
+TimelineInfo0_starttime=4999800
+TimelineInfo0_description=
+TimelineInfo0_repeats=1800
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0.246
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Entity1_Type=0
+Entity1_Filled=False
+Entity1_CenterX=270.3961
+Entity1_CenterY=334.2396
+Entity1_CenterZ=0
+Entity1_Rotation=0
+Entity1_ScaleX=1
+Entity1_ScaleY=1
+Entity1_ScaleZ=1
+Entity1_VertexCount=0
+Entity1_reversed=False
+[/1]
+[2]
+ID=4
+type=Entity
+TotalTimings=1
+TimelineInfo0_TimelineIndex=0
+TimelineInfo0_starttime=14999400
+TimelineInfo0_description=
+TimelineInfo0_repeats=600
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0.246
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Entity2_Type=0
+Entity2_Filled=False
+Entity2_CenterX=163.3643
+Entity2_CenterY=179.6381
+Entity2_CenterZ=0
+Entity2_Rotation=0
+Entity2_ScaleX=1
+Entity2_ScaleY=1
+Entity2_ScaleZ=1
+Entity2_VertexCount=0
+Entity2_reversed=False
+[/2]
+[3]
+ID=5
+type=Entity
+TotalTimings=1
+TimelineInfo0_TimelineIndex=0
+TimelineInfo0_starttime=25015666
+TimelineInfo0_description=
+TimelineInfo0_repeats=600
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0.246
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Entity3_Type=0
+Entity3_Filled=False
+Entity3_CenterX=313.5843
+Entity3_CenterY=157.1051
+Entity3_CenterZ=0
+Entity3_Rotation=0
+Entity3_ScaleX=1
+Entity3_ScaleY=1
+Entity3_ScaleZ=1
+Entity3_VertexCount=0
+Entity3_reversed=False
+[/3]
+[4]
+ID=6
+type=Entity
+TotalTimings=1
+TimelineInfo0_TimelineIndex=0
+TimelineInfo0_starttime=35031932
+TimelineInfo0_description=
+TimelineInfo0_repeats=600
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0.246
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Entity4_Type=0
+Entity4_Filled=False
+Entity4_CenterX=112.665
+Entity4_CenterY=340.4988
+Entity4_CenterZ=0
+Entity4_Rotation=0
+Entity4_ScaleX=1
+Entity4_ScaleY=1
+Entity4_ScaleZ=1
+Entity4_VertexCount=0
+Entity4_reversed=False
+[/4]
+[5]
+ID=1
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=5
+TimelineInfo0_starttime=845278.6875
+TimelineInfo0_description=
+TimelineInfo0_repeats=958
+TimelineInfo0_LightsourceCount=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=Holo4D TTL Out 1
+[/5]
+[6]
+ID=7
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=2
+TimelineInfo0_starttime=4937302.5
+TimelineInfo0_description=
+TimelineInfo0_repeats=77357
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=dummy_1_0 RMI In
+[/6]
+[7]
+ID=8
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=6
+TimelineInfo0_starttime=4917511.625
+TimelineInfo0_description=
+TimelineInfo0_repeats=77092
+TimelineInfo0_LightsourceCount=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=Holo4D TTL Out 2
+[/7]
+"""
         self.config_data_edit.setPlainText(default_config)
         config_layout.addWidget(self.config_data_edit)
 
@@ -263,6 +430,7 @@ TotalEditorGroups=0"""
                 stim_array=stim_array,
                 stim_name=stim_name,
                 hardware_type=hardware_type,
+                cellpose_data=self.project.cellpose_data,
             )
 
             # Determine file extension based on hardware type
@@ -301,35 +469,48 @@ TotalEditorGroups=0"""
         stim_array,
         stim_name: str,
         hardware_type: str,
+        cellpose_data,
     ) -> str:
         """Generate the script content based on hardware type."""
-        return self._generate_holo4d_script(stim_array, stim_name)
+        return self._generate_holo4d_script(stim_array, stim_name, cellpose_data)
 
-    def _generate_holo4d_script(self, stim_array, stim_name: str) -> str:
+    def _generate_holo4d_script(self, stim_array, stim_name: str, cellpose_data) -> str:
         """Generate HOLO4D holographic stimulation script."""
         # Start with HOLO4D configuration data
         config_data = self.config_data_edit.toPlainText()
         script = config_data + "\n\n"
 
-        script += """# Main stimulation loop
-"""
+        # Append cellpose segmentation data if available
+        # if cellpose_data is not None:
+        #     script += "\n\n# ========== CELLPOSE SEGMENTATION DATA ==========\n"
+        #     script += f"# Image path: {cellpose_data.image_path}\n"
+        #     script += f"# Segmentation array shape: {cellpose_data.segmentation_array.shape}\n"
+        #     if cellpose_data.original_cellpose_ids is not None:
+        #         script += f"# Number of cells: {len(cellpose_data.original_cellpose_ids)}\n"
+        #         script += "# Original Cellpose IDs: "
+        #         script += ",".join(str(id) for id in cellpose_data.original_cellpose_ids)
+        #         script += "\n"
+        #     if cellpose_data.stimulus_to_cellpose_mapping is not None:
+        #         script += "# Stimulus to Cellpose mapping:\n"
+        #         for stim_id, cellpose_id in cellpose_data.stimulus_to_cellpose_mapping.items():
+        #             script += f"#   Stimulus {stim_id} -> Cellpose {cellpose_id}\n"
 
         # Append stimulation array data at the end
-        script += "\n\n# ========== STIMULATION DATA ==========\n"
-        script += f"# Stimulation Array: {stim_name}\n"
-        script += f"# Shape: {stim_array.values.shape} (timesteps x neurons)\n"
-        script += f"# Units: {stim_array.units}\n"
-        script += f"# Timestep (dt): {stim_array.dt}s\n"
-        script += (
-            "# Data format: Each row represents a timestep, each column a neuron\n\n"
-        )
+        # script += "\n\n# ========== STIMULATION DATA ==========\n"
+        # script += f"# Stimulation Array: {stim_name}\n"
+        # script += f"# Shape: {stim_array.values.shape} (timesteps x neurons)\n"
+        # script += f"# Units: {stim_array.units}\n"
+        # script += f"# Timestep (dt): {stim_array.dt}s\n"
+        # script += (
+        #     "# Data format: Each row represents a timestep, each column a neuron\n\n"
+        # )
 
         # Convert array data to string representation
-        script += "# BEGIN DATA\n"
-        for _t_idx, timestep_values in enumerate(stim_array.values):
-            # Format each timestep as a comma-separated line
-            values_str = ",".join(f"{val:.6f}" for val in timestep_values)
-            script += f"{values_str}\n"
-        script += "# END DATA\n"
+        # script += "# BEGIN DATA\n"
+        # for _t_idx, timestep_values in enumerate(stim_array.values):
+        #     # Format each timestep as a comma-separated line
+        #     values_str = ",".join(f"{val:.6f}" for val in timestep_values)
+        #     script += f"{values_str}\n"
+        # script += "# END DATA\n"
 
         return script
