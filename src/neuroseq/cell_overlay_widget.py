@@ -518,8 +518,21 @@ class OverlayView(FullScreenFPLWidget):
         cellpose_visible = self.show_cellpose_ids
         stim_visible = self.show_stimulus_ids and stim_id is not None
 
-        if cellpose_visible and stim_visible:
-            hover_text = f"{stim_id} / {cellpose_id}"
+        mapped_elsewhere = (
+            cellpose_id in self.stim_to_cellpose
+            and self.stim_to_cellpose.get(cellpose_id) != cellpose_id
+        )
+        overwritten = (
+            self.show_stimulus_ids
+            and cellpose_visible
+            and stim_id is None
+            and mapped_elsewhere
+        )
+
+        if overwritten:
+            hover_text = f"Overwritten | ({cellpose_id})"
+        elif cellpose_visible and stim_visible:
+            hover_text = f"{stim_id}:{cellpose_id}"
         elif stim_visible:
             hover_text = f"{stim_id}"
         elif cellpose_visible:
