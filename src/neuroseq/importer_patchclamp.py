@@ -25,13 +25,16 @@ def validate_append_import(
     model: object,
     experiment_name: str,
     neuron_ids_to_import: Sequence[int],
-) -> None:
-    """Ensure append mode will not misalign timestamps."""
+) -> str | None:
+    """Validate patchclamp append behavior and return a disjoint warning if needed."""
     if model is None:
-        return
+        return None
 
     existing_experiments = getattr(model, "experiments", {})
-    existing_data = existing_experiments.get(experiment_name, [])
+    existing_experiment = existing_experiments.get(experiment_name)
+    if existing_experiment is None:
+        return None
+    existing_data = getattr(existing_experiment, "data", [])
 
     existing_trace_data = None
     for data in existing_data:
@@ -43,9 +46,9 @@ def validate_append_import(
             break
 
     if existing_trace_data is None:
-        return
+        return None
 
-    existing_neuron_indices = set(existing_trace_data.indices)
+    existing_neuron_indices = set(map(int, existing_trace_data.indices))
     importing_existing = [
         nid for nid in neuron_ids_to_import if nid in existing_neuron_indices
     ]
@@ -60,6 +63,12 @@ def validate_append_import(
             f"and new neurons {importing_new} together. "
             "Either replace the same set of neurons or import a fully disjoint set on the same timeline."
         )
+    if importing_new and not importing_existing and existing_neuron_indices:
+        return (
+            f"Patchclamp import is disjoint for experiment '{experiment_name}' "
+            f"(incoming={sorted(importing_new)}, existing={sorted(existing_neuron_indices)})."
+        )
+    return None
 
 
 def import_patchclamp_data(

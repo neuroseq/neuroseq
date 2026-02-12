@@ -518,7 +518,8 @@ class OverlayView(FullScreenFPLWidget):
         cellpose_visible = self.show_cellpose_ids
         stim_visible = self.show_stimulus_ids and stim_id is not None
 
-        mapped_elsewhere = (
+        mapped_elsewhere = (  # this is correct: if this current cellpose ID (The original ID) has a stim ID in
+            # stim_to_cellpose, and it's not this one, a remapping has happened.
             cellpose_id in self.stim_to_cellpose
             and self.stim_to_cellpose.get(cellpose_id) != cellpose_id
         )

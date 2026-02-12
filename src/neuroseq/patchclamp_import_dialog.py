@@ -16,6 +16,7 @@ from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_cellpose import generate_linear_stimulus_mapping
 from neuroseq.importer_patchclamp import PeakDetectionParams
 from neuroseq.importer_patchclamp import import_patchclamp_data
+from neuroseq.importer_patchclamp import validate_append_import
 from neuroseq.mapping_validation import ensure_unique_ids
 from neuroseq.utils import get_primary_available_geometry
 from neuroseq.utils import is_vertical_screen
@@ -632,7 +633,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         if strategy == "Custom":
             return sorted(mapping.keys())
         if strategy == "Linear":
-            return self._get_linear_cellpose_ids()
+            return self._get_linear_ids()
         return []
 
     def _has_custom_cellpose_mapping(self) -> bool:
@@ -641,7 +642,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         strategy = getattr(self.cellpose_import, "mapping_strategy", "")
         return strategy == "Custom"
 
-    def _get_linear_cellpose_ids(self) -> list[int]:
+    def _get_linear_ids(self) -> list[int]:
         if self.cellpose_import is None:
             return []
         original_ids = self.cellpose_import.original_cellpose_ids
@@ -649,7 +650,9 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             return []
         offset = int(getattr(self.cellpose_import, "linear_offset", 0) or 0)
         mapping = generate_linear_stimulus_mapping(original_ids, offset)
-        return sorted(mapping.keys())
+        return sorted(
+            mapping.keys()
+        )  # this returns stim IDs with .keys, as it's a stim_to_cellpose-like dict.
 
     # now generates Linear mapping identity itself for the preview widget here, rather than cellpose generating it
     # and passing it around like a custom mapping
@@ -802,6 +805,22 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 "Custom mapping would assign stimulus ID {value} to multiple patchclamp rows.",
             )
             self.neurons_to_replace = list(neuron_ids)
+            append_warning = validate_append_import(
+                self.project,
+                self.experiment_name,
+                neuron_ids,
+            )
+            if append_warning:
+                reply = QtWidgets.QMessageBox.question(
+                    self,
+                    "Are you sure?",
+                    f"{append_warning}\n\nThis import is disjoint. Are you sure you want to continue?",
+                    QtWidgets.QMessageBox.StandardButton.Yes
+                    | QtWidgets.QMessageBox.StandardButton.No,
+                    QtWidgets.QMessageBox.StandardButton.No,
+                )
+                if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+                    return
 
             self.logger.debug(
                 "Importing patchclamp data: sampling_rate=%.2fHz dt=%.6f",
