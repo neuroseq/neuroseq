@@ -188,50 +188,35 @@ class ImportExperimentDialog(QtWidgets.QDialog):
         if experiment_index < 0 or experiment_index >= len(self.existing_experiments):
             return False
         existing_experiment = self.existing_experiments[experiment_index]
-        if (
-            not existing_experiment.timepoints
-            or 0.0 not in existing_experiment.timepoints
-        ):
+        existing_trace_count = sum(
+            datum.traces.shape[0]
+            for datum in existing_experiment.data
+            if isinstance(datum, TraceData)
+        )
+        incoming_trace_count = sum(
+            datum.traces.shape[0]
+            for datum in self.experiment.data
+            if isinstance(datum, TraceData)
+        )
+        if existing_trace_count != incoming_trace_count:
             return False
-        for datum in self.experiment.data:
-            existing_datum = None
-            for existing in existing_experiment.data:
-                if existing.name == datum.name and isinstance(existing, type(datum)):
-                    existing_datum = existing
-                    break
-            if existing_datum is None:
-                return False
-            if isinstance(datum, TraceData):
-                if not isinstance(existing_datum, TraceData):
-                    return False
-                if existing_datum.dt != datum.dt:
-                    return False
-                if set(map(int, existing_datum.indices)) != set(
-                    map(int, datum.indices)
-                ):
-                    return False
-            elif isinstance(datum, SpikeData):
-                if not isinstance(existing_datum, SpikeData):
-                    return False
-                if set(map(int, existing_datum.spike_indices)) != set(
-                    map(int, datum.spike_indices)
-                ):
-                    return False
-            elif isinstance(datum, SynapseData):
-                if not isinstance(existing_datum, SynapseData):
-                    return False
-                if (
-                    existing_datum.values.shape[0] != datum.values.shape[0]
-                    or existing_datum.values.shape[1] != datum.values.shape[1]
-                ):
-                    return False
-        return True
+
+        existing_spike_count = sum(
+            len(datum.spike_indices)
+            for datum in existing_experiment.data
+            if isinstance(datum, SpikeData)
+        )
+        incoming_spike_count = sum(
+            len(datum.spike_indices)
+            for datum in self.experiment.data
+            if isinstance(datum, SpikeData)
+        )
+        return existing_spike_count == incoming_spike_count
 
     def _refresh_append_error(self) -> None:
         error = self.project.issues_with_appending_experimental_data(
             self.append_experiment_name,
             self.experiment.data,
-            self.offset,
         )
         self.lbl_error.setText(error)
         self.save_button.setEnabled(error == "")
