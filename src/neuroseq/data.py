@@ -43,18 +43,6 @@ class TraceData:
     dt: float
 
 
-"""
-# as info: My default Neuroseq workstation PC(64GB, hefty GPU) has 0.18GB RAM usage, and uses 2.65GB with F.npy imported.
-# It takes 4 seconds to import that much data on a 64GB desktop.
-# On my AMD-2024 Laptop integrated GPU 64GB (so not a gaming laptop but fairly beefy) it takes:
-
-Laptop(with 64GB total, medium integrated GPU)@ 0.42GB --> 0.92 --> 4.17GB
-More importantly: unresponsively slow
-And after clicking "New" (should have wiped Traces/Spike sdata at least,but not stim) 3.85GB consumed
-points to stim before doing more profiling at least...
-"""
-
-
 @dataclass
 class SpikeData:
     """A data class representing a set of neuron spikes.
