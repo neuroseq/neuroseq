@@ -410,6 +410,8 @@ class Gui(QtWidgets.QMainWindow):
 
     @with_wait_cursor
     def set_data(self, cmb_name: str) -> None:
+        if not self.data_widget.isVisible():
+            return
         data: TraceData | SpikeData | SynapseData | None = None
         if cmb_name.endswith(" [trace]"):
             data = self.project.get_data(cmb_name[:-8], TraceData)
@@ -418,6 +420,13 @@ class Gui(QtWidgets.QMainWindow):
         elif cmb_name.endswith(" [synapse]"):
             data = self.project.get_data(cmb_name[:-10], SynapseData)
         self.data_widget.set_data(data)
+
+    def _set_view_widget_visible(
+        self, widget: QtWidgets.QWidget, visible: bool
+    ) -> None:
+        widget.setVisible(visible)
+        if widget is self.data_widget and visible:
+            self.set_data(self.cmb_data.currentText())
 
     def btn_exit_clicked(self) -> None:
         self.close()
@@ -1004,7 +1013,7 @@ class Gui(QtWidgets.QMainWindow):
         ]:
             add_action(
                 f"Show {name}",
-                lambda toggled, w=widget: w.setVisible(toggled),
+                lambda toggled, w=widget: self._set_view_widget_visible(w, toggled),
                 menu,
                 toolbar,
                 icon=qta.icon(f"{icon}"),
