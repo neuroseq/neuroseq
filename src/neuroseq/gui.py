@@ -411,6 +411,8 @@ class Gui(QtWidgets.QMainWindow):
     @with_wait_cursor
     def set_data(self, cmb_name: str) -> None:
         data: TraceData | SpikeData | SynapseData | None = None
+        if cmb_name.endswith(" [trace]") and not self.data_widget.isVisible():
+            return
         if cmb_name.endswith(" [trace]"):
             data = self.project.get_data(cmb_name[:-8], TraceData)
         elif cmb_name.endswith(" [spike]"):
@@ -1004,7 +1006,7 @@ class Gui(QtWidgets.QMainWindow):
         ]:
             add_action(
                 f"Show {name}",
-                lambda toggled, w=widget: w.setVisible(toggled),
+                lambda toggled, w=widget: self._set_widget_visible(w, toggled),
                 menu,
                 toolbar,
                 icon=qta.icon(f"{icon}"),
@@ -1020,6 +1022,11 @@ class Gui(QtWidgets.QMainWindow):
             checkable=True,
             is_checked=True,
         )
+
+    def _set_widget_visible(self, widget: QtWidgets.QWidget, toggled: bool) -> None:
+        widget.setVisible(toggled)
+        if toggled and widget is self.data_widget:
+            self.set_data(self.cmb_data.currentText())
 
     def _create_actions_settings(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None
