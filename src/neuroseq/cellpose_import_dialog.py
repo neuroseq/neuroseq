@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import importlib.util
 import logging
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
+import numpy as np
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
@@ -13,7 +18,9 @@ from neuroseq.importer_cellpose import CellPoseImporter
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_cellpose import generate_linear_stimulus_mapping
-from neuroseq.importer_cellpose import is_identity_mapping
+from neuroseq.mapping_validation import ensure_unique_ids
+from neuroseq.utils import get_primary_available_geometry
+from neuroseq.utils import is_vertical_screen
 
 
 class CellposeImportDialog(QtWidgets.QDialog):
@@ -30,6 +37,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self._imported_data: CellposeImportResult | None = None
         self.image_path: Path | None = None
         self.segmentation_path: Path | None = None
+        self._base_segmentation_data: np.ndarray | None = None
         self.importer = CellPoseImporter()
         self.overlay_widget = CellOverlayWidget("")
         self.overlay_widget.setSizePolicy(
@@ -41,15 +49,46 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.delete_handler = delete_handler
         self.file_selection_container: QtWidgets.QWidget | None = None
         self.main_content_container: QtWidgets.QWidget | None = None
+        self.left_container: QtWidgets.QWidget | None = None
+        self.right_container: QtWidgets.QWidget | None = None
+        self.left_layout: QtWidgets.QVBoxLayout | None = None
+        self.checkbox_container: QtWidgets.QWidget | None = None
+        self.mapping_group: QtWidgets.QGroupBox | None = None
+        self.main_content_layout: QtWidgets.QHBoxLayout | None = None
+        self._vertical_layout = False
+        self._is_adjusting_position = False
+        self._current_screen: QtGui.QScreen | None = None
         self._setup_ui()
         self._load_existing_data_if_available()
 
-    def _maximise_screen(self) -> None:
-        screen = QtWidgets.QApplication.primaryScreen()
-        available = screen.availableGeometry()
-        # Use the maximum available window size
-        self.setGeometry(available)
+    def _maximise_screen(self, screen: QtGui.QScreen | None = None) -> None:
+        available = self._get_available_geometry(screen)
+        if available is None:
+            return
+        adjusted = available.adjusted(70, 70, -70, -70)
+        # Use the maximum available window size with a 100px margin
+        self.setGeometry(adjusted)
         self.setWindowState(self.windowState() | QtCore.Qt.WindowState.WindowMaximized)
+
+    def _get_available_geometry(
+        self, screen: QtGui.QScreen | None = None
+    ) -> QtCore.QRect | None:
+        if screen is not None:
+            return screen.availableGeometry()
+        return get_primary_available_geometry()
+
+    def _get_screen_for_window(self) -> QtGui.QScreen | None:
+        window = self.windowHandle()
+        screen = window.screen() if window is not None else None
+        if screen is None:
+            frame = self.frameGeometry()
+            screen = QtGui.QGuiApplication.screenAt(frame.center())
+        if screen is None:
+            screen = QtGui.QGuiApplication.primaryScreen()
+        return screen
+
+    def _should_use_vertical_layout(self, screen: QtGui.QScreen | None = None) -> bool:
+        return is_vertical_screen(self._get_available_geometry(screen))
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("Import Cellpose Data")
@@ -67,6 +106,14 @@ class CellposeImportDialog(QtWidgets.QDialog):
         )
         instructions.setWordWrap(True)
         selection_layout.addWidget(instructions)
+
+        # Add button to run cellpose
+        cellpose_button_layout = QtWidgets.QHBoxLayout()
+        cellpose_button_layout.addStretch()
+        run_cellpose_button = QtWidgets.QPushButton("Run Cellpose")
+        run_cellpose_button.clicked.connect(self._run_cellpose)
+        cellpose_button_layout.addWidget(run_cellpose_button)
+        selection_layout.addLayout(cellpose_button_layout)
 
         # Create horizontal layout for file selection and info
         top_horizontal_layout = QtWidgets.QHBoxLayout()
@@ -92,6 +139,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
         seg_layout.addWidget(self.segmentation_path_label, stretch=1)
         seg_layout.addWidget(browse_seg_button)
         file_layout.addRow("Segmentation CSV/NPY:", seg_layout)
+        file_group.setMinimumHeight(
+            file_layout.sizeHint().height() + 50
+        )  # Ensure it does nto get clipped vertically
 
         top_horizontal_layout.addWidget(file_group, stretch=2)
 
@@ -112,12 +162,22 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         # Main content (hidden until both files are selected)
         self.main_content_container = QtWidgets.QWidget()
-        main_content_layout = QtWidgets.QVBoxLayout(self.main_content_container)
-        main_content_layout.setContentsMargins(0, 0, 0, 0)
+        self._vertical_layout = self._should_use_vertical_layout()
+        direction = (
+            QtWidgets.QBoxLayout.Direction.TopToBottom
+            if self._vertical_layout
+            else QtWidgets.QBoxLayout.Direction.LeftToRight
+        )
+        self.main_content_layout = QtWidgets.QBoxLayout(
+            direction,
+            self.main_content_container,
+        )
+        self.main_content_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_content_layout.setSpacing(16)
 
         # Add ID mapping options
-        mapping_group = QtWidgets.QGroupBox("ID Mapping Options")
-        mapping_layout = QtWidgets.QFormLayout(mapping_group)
+        self.mapping_group = QtWidgets.QGroupBox("ID Mapping Options")
+        mapping_layout = QtWidgets.QFormLayout(self.mapping_group)
 
         # Strategy selection
         strategy_layout = QtWidgets.QHBoxLayout()
@@ -155,7 +215,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
         )
         self.custom_mapping_line.setVisible(False)
         self.custom_mapping_row_index = mapping_layout.rowCount()
-        self.custom_mapping_label = QtWidgets.QLabel("Custom mapping:")
+        self.custom_mapping_label = QtWidgets.QLabel(
+            "Custom mapping (stimulus:cellpose):"
+        )
+        self.custom_mapping_label.setStyleSheet("QLabel { color: #3b7dd8; }")
         self.custom_mapping_label.setVisible(False)
         mapping_layout.addRow(self.custom_mapping_label, self.custom_mapping_line)
 
@@ -163,29 +226,53 @@ class CellposeImportDialog(QtWidgets.QDialog):
         for abstract_button in self.mapping_buttons.buttons():
             if hasattr(abstract_button, "toggled"):
                 abstract_button.toggled.connect(self._on_mapping_changed)
+        self._last_mapping_strategy = "Linear"
 
         # Place overlay first so the visual is top-most
-        self.overlay_widget.setMinimumHeight(400)
-        main_content_layout.addWidget(self.overlay_widget, stretch=1)
+        self.left_container = QtWidgets.QWidget()
+        self.left_layout = QtWidgets.QVBoxLayout(self.left_container)
+        self.left_layout.setContentsMargins(0, 0, 0, 0)
+        self.left_layout.setSpacing(8)
 
-        checkbox_layout = QtWidgets.QHBoxLayout()
+        self.overlay_widget.setMinimumHeight(400)
+        self.left_layout.addWidget(self.overlay_widget, stretch=1)
+
+        self.checkbox_container = QtWidgets.QWidget()
+        checkbox_layout = QtWidgets.QHBoxLayout(self.checkbox_container)
         checkbox_layout.setContentsMargins(4, 0, 4, 0)
-        self.show_cellpose_checkbox = QtWidgets.QCheckBox("Show Cellpose IDs")
-        self.show_cellpose_checkbox.setChecked(True)
-        self.show_stimulus_checkbox = QtWidgets.QCheckBox("Show Stimulus IDs")
-        self.show_stimulus_checkbox.setChecked(False)
+        self.show_labels_checkbox = QtWidgets.QCheckBox("Show labels")
+        self.show_labels_checkbox.setChecked(True)
+        self.show_labels_checkbox.setEnabled(True)
+        self.show_labels_checkbox.toggled.connect(self._on_display_toggle_changed)
+        checkbox_layout.addWidget(self.show_labels_checkbox)
         self.show_segmentation_checkbox = QtWidgets.QCheckBox("Show segmentation")
         self.show_segmentation_checkbox.setChecked(True)
-        for checkbox in (
-            self.show_cellpose_checkbox,
-            self.show_stimulus_checkbox,
-            self.show_segmentation_checkbox,
-        ):
-            checkbox.toggled.connect(self._on_display_toggle_changed)
-            checkbox_layout.addWidget(checkbox)
+        self.show_segmentation_checkbox.setEnabled(True)
+        self.show_segmentation_checkbox.toggled.connect(self._on_display_toggle_changed)
+        checkbox_layout.addWidget(self.show_segmentation_checkbox)
         checkbox_layout.addStretch(1)
-        main_content_layout.addLayout(checkbox_layout)
-        main_content_layout.addWidget(mapping_group)
+        self.left_layout.addWidget(self.checkbox_container)
+
+        self.main_content_layout.addWidget(self.left_container, stretch=3)
+        self.right_container = QtWidgets.QWidget()
+        right_layout = QtWidgets.QVBoxLayout(self.right_container)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
+        right_layout.addWidget(self.mapping_group)
+        guidance_path = (
+            Path(__file__).resolve().parents[2]
+            / "examplary_data"
+            / "cellpose_guidance.png"
+        )
+        self.guidance_label = QtWidgets.QLabel()
+        self.guidance_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        if guidance_path.exists():
+            self.guidance_label.setPixmap(QtGui.QPixmap(str(guidance_path)))
+        else:
+            self.guidance_label.setVisible(False)
+        right_layout.addWidget(self.guidance_label)
+        self.guidance_label.setVisible(self._get_mapping_strategy() == "Custom")
+        right_layout.addStretch(1)
 
         button_layout = QtWidgets.QHBoxLayout()
 
@@ -205,22 +292,176 @@ class CellposeImportDialog(QtWidgets.QDialog):
         cancel_button.clicked.connect(self.reject)
         button_layout.addWidget(cancel_button)
 
-        main_content_layout.addLayout(button_layout)
+        right_layout.addLayout(button_layout)
+        self.main_content_layout.addWidget(self.right_container, stretch=2)
         layout.addWidget(self.main_content_container)
         self.main_content_container.setVisible(False)
         self._set_ui_loaded_state(False)
         self._on_display_toggle_changed()
 
     def _set_ui_loaded_state(self, loaded: bool) -> None:
-        """Toggle between pre-selection and post-selection UI."""
+        """Toggle between pre-selection and post-selection UI, also used to help process in order expanding the preview
+        widget of the overlay only when the dialog is in a state we known is maximised (otherwise, the fastplotlib
+        full size widget(a custom class) can only be expanded to the dialog boundaries)"""
         if self.file_selection_container is not None:
             self.file_selection_container.setVisible(not loaded)
         if self.main_content_container is not None:
             self.main_content_container.setVisible(loaded)
             if loaded:
-                self._maximise_screen()
+                self._apply_screen_layout(self._get_screen_for_window())
+                self.logger.info(
+                    "cellpose ui loaded: window=%sx%s main=%sx%s",
+                    self.width(),
+                    self.height(),
+                    self.main_content_container.width(),
+                    self.main_content_container.height(),
+                )
         if not loaded and hasattr(self, "import_button"):
             self.import_button.setEnabled(False)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if (
+            self.main_content_container is not None
+            and self.main_content_container.isVisible()
+        ):
+            self._apply_screen_layout(self._get_screen_for_window())
+            self.logger.info(
+                "cellpose showEvent: window=%sx%s main=%sx%s",
+                self.width(),
+                self.height(),
+                self.main_content_container.width(),
+                self.main_content_container.height(),
+            )
+
+    def moveEvent(self, event) -> None:
+        super().moveEvent(event)
+        self._handle_screen_change()
+
+    def _handle_screen_change(self) -> None:
+        if self._is_adjusting_position:
+            return
+        screen = self._get_screen_for_window()
+        if screen is None:
+            return
+        if screen != self._current_screen:
+            self._current_screen = screen
+            self._apply_screen_layout(screen)
+            return
+        self._ensure_on_screen(screen)
+
+    def _apply_screen_layout(self, screen: QtGui.QScreen | None) -> None:
+        """
+        Ensure the dialog layout and size match the target screen orientation
+        and resync the overlay preview after moving between monitors.
+        OCcurs as user crosses screen boundaries, which keeps to max their pointer y position from the top, so they can snap the window.
+        """
+        if screen is None:
+            return
+        self._current_screen = screen
+        desired_vertical = self._should_use_vertical_layout(screen)
+        if self.main_content_layout is not None and isinstance(
+            self.main_content_layout, QtWidgets.QBoxLayout
+        ):
+            direction = (
+                QtWidgets.QBoxLayout.Direction.TopToBottom
+                if desired_vertical
+                else QtWidgets.QBoxLayout.Direction.LeftToRight
+            )
+            self.main_content_layout.setDirection(direction)
+        self._vertical_layout = desired_vertical
+        self._is_adjusting_position = True
+        self._maximise_screen(screen)
+        self._is_adjusting_position = False
+        self._sync_overlay_size()
+
+    def _ensure_on_screen(self, screen: QtGui.QScreen | None = None) -> None:
+        if self._is_adjusting_position:
+            return
+        if screen is None:
+            screen = self._get_screen_for_window()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        frame = self.frameGeometry()
+        max_height = max(0, available.height() - 150)
+        if frame.height() > max_height:
+            self.resize(frame.width(), max_height)
+            frame = self.frameGeometry()
+        if available.contains(frame):
+            return
+        new_x = min(max(frame.x(), available.left()), available.right() - frame.width())
+        new_y = min(
+            max(frame.y(), available.top()), available.bottom() - frame.height()
+        )
+        if new_x == frame.x() and new_y == frame.y():
+            return
+        self._is_adjusting_position = True
+        self.move(new_x, new_y)
+        self._is_adjusting_position = False
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._sync_overlay_size()
+
+    def _sync_overlay_size(self) -> None:
+        if (
+            self.main_content_container is None
+            or not self.main_content_container.isVisible()
+        ):
+            return
+        if (
+            self.left_container is None
+            or self.right_container is None
+            or self.checkbox_container is None
+            or self.left_layout is None
+        ):
+            return
+        main_rect = self.main_content_container.contentsRect()
+        if main_rect.width() < 100 or main_rect.height() < 100:
+            self.logger.info(
+                "cellpose dialog resize: skip tiny main rect=%sx%s",
+                main_rect.width(),
+                main_rect.height(),
+            )
+            return
+        if self._vertical_layout:
+            self.left_container.setMaximumWidth(main_rect.width())
+            self.right_container.setMaximumWidth(main_rect.width())
+            left_width = self.left_container.contentsRect().width()
+        else:
+            left_width = int(main_rect.width() * 0.6)
+            right_width = max(1, main_rect.width() - left_width)
+            self.left_container.setMaximumWidth(left_width)
+            self.right_container.setMaximumWidth(right_width)
+        left_rect = self.left_container.contentsRect()
+        available_height = (
+            left_rect.height()
+            - self.checkbox_container.height()
+            - self.left_layout.spacing()
+        )
+        square_size = min(left_width, available_height)
+        if square_size > 0:
+            self.overlay_widget.setFixedSize(square_size, square_size)
+        else:
+            self.logger.info(
+                "cellpose dialog resize: skip square=%s left_rect=%sx%s checkbox=%s",
+                square_size,
+                left_rect.width(),
+                left_rect.height(),
+                self.checkbox_container.height(),
+            )
+            return
+        self.logger.info(
+            "cellpose dialog resize: main=%sx%s left=%sx%s right=%sx%s square=%s",
+            main_rect.width(),
+            main_rect.height(),
+            left_rect.width(),
+            left_rect.height(),
+            self.right_container.contentsRect().width(),
+            self.right_container.contentsRect().height(),
+            square_size,
+        )
 
     def _reset_importer_state(self, clear_existing_data: bool = False) -> None:
         """Return dialog to initial state after an importer failure."""
@@ -233,27 +474,46 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.importer = CellPoseImporter()
         self.image_path = None
         self.segmentation_path = None
+        self._base_segmentation_data = None
 
         self.image_path_label.setText("No image selected")
         self.image_path_label.setStyleSheet("QLabel { color: gray; }")
         self.segmentation_path_label.setText("No segmentation file selected")
         self.segmentation_path_label.setStyleSheet("QLabel { color: gray; }")
-        self.custom_mapping_line.clear()
+        # self.custom_mapping_line.clear()
         self.linear_offset_spin.setValue(0)
-
         for button in self.mapping_buttons.buttons():
             if button.text() == "Linear":
                 button.setChecked(True)
                 break
 
-        self.show_cellpose_checkbox.setChecked(True)
-        self.show_stimulus_checkbox.setChecked(False)
-        self.show_segmentation_checkbox.setChecked(True)
         self._on_display_toggle_changed()
 
         self.overlay_widget.set_overlay(None, None, None, None, None, None)
         self._hide_info()
         self._set_ui_loaded_state(False)
+
+    def _apply_existing_mapping(
+        self, mapping: dict[int, int], mapping_strategy: str, linear_offset: int
+    ) -> None:
+        target_mode = mapping_strategy or "Linear"
+        if target_mode == "Custom" and mapping:
+            filtered_pairs = [
+                (stim_id, cellpose_id)
+                for stim_id, cellpose_id in mapping.items()
+                if stim_id != cellpose_id
+            ]
+            filtered_pairs.sort(key=lambda pair: pair[0])
+            mapping_str = ",".join(
+                [f"{stim_id}:{cellpose_id}" for stim_id, cellpose_id in filtered_pairs]
+            )
+            self.custom_mapping_line.setText(mapping_str)
+        if target_mode == "Linear":
+            self.linear_offset_spin.setValue(int(linear_offset or 0))
+        for button in self.mapping_buttons.buttons():
+            if button.text() == target_mode:
+                button.setChecked(True)
+                break
 
     def _on_mapping_changed(self) -> None:
         """Handle toggle between mapping strategies"""
@@ -263,9 +523,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.custom_mapping_label.setVisible(is_custom)
         self.linear_offset_spin.setVisible(not is_custom)
         self.linear_offset_label.setVisible(not is_custom)
-
-        if is_custom and not self.show_stimulus_checkbox.isChecked():
-            self.show_stimulus_checkbox.setChecked(True)
+        if hasattr(self, "guidance_label"):
+            self.guidance_label.setVisible(is_custom)
 
         # Update preview if data is loaded
         if (
@@ -273,6 +532,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             and self.importer.overlay_image is not None
         ):
             self._update_preview_mapping()
+        self._last_mapping_strategy = mapping_strategy
 
     def _on_custom_mapping_text_changed(self, _text: str) -> None:
         """Refresh preview live while editing custom mapping."""
@@ -292,10 +552,20 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
     def _on_display_toggle_changed(self) -> None:
         """Sync overlay display options with the checkboxes."""
+        show_labels = (
+            self.show_labels_checkbox.isChecked()
+            if hasattr(self, "show_labels_checkbox")
+            else True
+        )
+        show_segmentation = (
+            self.show_segmentation_checkbox.isChecked()
+            if hasattr(self, "show_segmentation_checkbox")
+            else True
+        )
         self.overlay_widget.set_display_options(
-            show_cellpose_ids=self.show_cellpose_checkbox.isChecked(),
-            show_stimulus_ids=self.show_stimulus_checkbox.isChecked(),
-            show_segmentation=self.show_segmentation_checkbox.isChecked(),
+            show_cellpose_ids=show_labels,
+            show_stimulus_ids=show_labels,
+            show_segmentation=show_segmentation,
         )
 
     def _get_mapping_strategy(self) -> str:
@@ -314,6 +584,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
     def _parse_custom_mapping(self, mapping_str: str) -> dict[int, int]:
         """Parse custom mapping string like '1:12,2:3' into {1: 12, 2: 3}"""
         mapping: dict[int, int] = {}
+        stim_keys: list[int] = []
         if not mapping_str.strip():
             return mapping
 
@@ -330,7 +601,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
                     continue
                 stim_key = int(stim_key_str)
                 cellpose_id = int(cellpose_id_str)
+                stim_keys.append(stim_key)
                 mapping[stim_key] = cellpose_id
+            ensure_unique_ids(
+                stim_keys,
+                "Custom mapping would assign stimulus ID {value} more than once.",
+            )
         except (ValueError, IndexError) as exc:
             raise ValueError(f"Invalid custom mapping format: {exc}") from exc
 
@@ -363,10 +639,18 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 self.importer.segmentation_data,
                 self.importer._original_cellpose_ids,
                 preview_mapping,
+                highlight_mappings=(mapping_strategy == "Custom"),
                 base_image=self.importer.image_data,
             )
         except Exception as exc:
             self.logger.warning("Error updating preview mapping: %s", exc)
+
+    def _apply_segmentation_transformations(self) -> None:
+        if self._base_segmentation_data is None:
+            return
+        seg = np.array(self._base_segmentation_data, copy=True)
+        self.importer.segmentation_data = seg
+        self.importer.generate_overlay()
 
     def _browse_image_file(self) -> None:
         filename, _ = getopenfilename(
@@ -387,6 +671,38 @@ class CellposeImportDialog(QtWidgets.QDialog):
         )
         if filename:
             self._load_segmentation_file(filename)
+
+    def _run_cellpose(self) -> None:
+        """Launch the cellpose application from the current Python environment."""
+        if importlib.util.find_spec("cellpose") is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Install Cellpose",
+                "Cellpose is not installed in the current Python environment, please install it.\n\n",
+            )
+            return
+        try:
+            # Use subprocess to run cellpose as a GUI application in the background
+            # The -m cellpose flag runs cellpose as a module, which includes the GUI
+            subprocess.Popen(
+                [sys.executable, "-m", "cellpose"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            # todo: Ask Andrey if we can remove this commented code.
+            # QtWidgets.QMessageBox.information(
+            #    self,
+            #    "Cellpose Launched",
+            #    "Cellpose GUI has been launched in the current environment.",
+            # )
+        except Exception as exc:
+            self.logger.exception("Failed to launch cellpose")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Failed to launch Cellpose",
+                f"Could not launch Cellpose:\n{exc}\n\n"
+                "Make sure cellpose is installed in the current Python environment.",
+            )
 
     def _load_image_file(self, filename: str) -> None:
         try:
@@ -410,6 +726,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.segmentation_path_label.setStyleSheet("QLabel { color: black; }")
 
             self.importer.load_segmentation_file(filename)
+            self._base_segmentation_data = np.array(
+                self.importer.segmentation_data, copy=True
+            )
             self._check_files_loaded()
         except Exception as exc:
             self.logger.exception("Error loading segmentation file")
@@ -426,7 +745,11 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         try:
             self.importer.validate_dimensions()
-            self.importer.generate_overlay()
+            if self._base_segmentation_data is None:
+                self._base_segmentation_data = np.array(
+                    self.importer.segmentation_data, copy=True
+                )
+            self._apply_segmentation_transformations()
             self.import_button.setEnabled(True)
             self._set_ui_loaded_state(True)
             # Generate preview mapping to show in overlay
@@ -437,11 +760,24 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 else {}
             )
 
+            self.logger.info(
+                "cellpose preview: image=%s seg=%s overlay=%sx%s mapping=%s",
+                None
+                if self.importer.image_data is None
+                else self.importer.image_data.shape,
+                None
+                if self.importer.segmentation_data is None
+                else self.importer.segmentation_data.shape,
+                self.overlay_widget.width(),
+                self.overlay_widget.height(),
+                mapping_strategy,
+            )
             self.overlay_widget.set_overlay(
                 self.importer.overlay_image,
                 self.importer.segmentation_data,
                 self.importer._original_cellpose_ids,
                 preview_mapping,
+                highlight_mappings=(mapping_strategy == "Custom"),
                 base_image=self.importer.image_data,
             )
             self._hide_info()
@@ -495,9 +831,31 @@ class CellposeImportDialog(QtWidgets.QDialog):
             # Generate stimulus-to-cellpose mapping based on selected strategy
             mapping_strategy = self._get_mapping_strategy()
             stimulus_mapping = self._generate_stimulus_mapping(mapping_strategy)
+            if mapping_strategy == "Custom":
+                original_ids = (
+                    []
+                    if self.importer._original_cellpose_ids is None
+                    else [
+                        int(cellpose_id)
+                        for cellpose_id in self.importer._original_cellpose_ids
+                    ]
+                )
+                mapped_cellpose_ids = set(stimulus_mapping.values())
+                mapped_stim_ids = set(stimulus_mapping.keys())
+                for cellpose_id in original_ids:
+                    if (
+                        cellpose_id in mapped_cellpose_ids
+                        or cellpose_id in mapped_stim_ids
+                    ):
+                        continue
+                    stimulus_mapping[cellpose_id] = cellpose_id
+            stored_mapping = stimulus_mapping if mapping_strategy == "Custom" else None
 
             self._imported_data = self.importer.create_result(
-                self.image_path, stimulus_mapping
+                self.image_path,
+                stored_mapping,
+                mapping_strategy=mapping_strategy,
+                linear_offset=self._get_linear_offset(),
             )
 
             info = self.importer.get_info()
@@ -514,7 +872,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             if mapping_strategy == "Linear" and linear_offset:
                 success_msg += f" (offset {linear_offset})"
 
-            if stimulus_mapping:
+            if mapping_strategy == "Custom" and stimulus_mapping:
                 success_msg += f"\nStimulus mapping: {dict(list(stimulus_mapping.items())[:5])}{'...' if len(stimulus_mapping) > 5 else ''}"
 
             QtWidgets.QMessageBox.information(self, "Import Successful", success_msg)
@@ -544,27 +902,25 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
             # Load the existing image and segmentation data
             self.importer.restore_from_result(self.existing_data)
+            self._base_segmentation_data = (
+                None
+                if self.importer.segmentation_data is None
+                else np.array(self.importer.segmentation_data, copy=True)
+            )
+            self._apply_segmentation_transformations()
 
-            # Pre-fill mapping if available, prefer Linear when mapping is identity
             mapping = self.existing_data.stimulus_to_cellpose_mapping or {}
-            if mapping:
-                if not is_identity_mapping(mapping):
-                    mapping_str = ",".join(
-                        [
-                            f"{stim_id}:{cellpose_id}"
-                            for stim_id, cellpose_id in mapping.items()
-                        ]
-                    )
-                    self.custom_mapping_line.setText(mapping_str)
-                else:
-                    self.custom_mapping_line.clear()
-                    self.linear_offset_spin.setValue(0)
-
-                target_mode = "Linear" if is_identity_mapping(mapping) else "Custom"
-                for button in self.mapping_buttons.buttons():
-                    if button.text() == target_mode:
-                        button.setChecked(True)
-                        break
+            mapping_strategy = getattr(self.existing_data, "mapping_strategy", "")
+            if not mapping_strategy:
+                mapping_strategy = "Custom" if mapping else "Linear"
+            linear_offset = getattr(self.existing_data, "linear_offset", 0)
+            self._apply_existing_mapping(mapping, mapping_strategy, linear_offset)
+            self.logger.info(
+                "cellpose restore: strategy=%s mapping=%s linear_offset=%s",
+                mapping_strategy,
+                "custom" if mapping else "none",
+                linear_offset,
+            )
 
             # Update UI
             self.segmentation_path_label.setText("(from existing data)")
@@ -573,10 +929,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 self.delete_button.setEnabled(True)
             self.import_button.setEnabled(True)
 
+            self._set_ui_loaded_state(True)
             # Update preview
             self._update_preview_mapping()
             self._update_info()
-            self._set_ui_loaded_state(True)
 
         except Exception as exc:
             self.logger.warning("Failed to load existing cellpose data: %s", exc)

@@ -1,0 +1,70 @@
+from __future__ import annotations
+
+import numpy as np
+from PIL import Image
+from pytestqt.qtbot import QtBot
+
+from neuroseq.cellpose_import_dialog import CellposeImportDialog
+
+
+def _make_cellpose_dialog(tmp_path, qtbot: QtBot) -> CellposeImportDialog:
+    dialog = CellposeImportDialog()
+    qtbot.addWidget(dialog)
+
+    image = np.zeros((6, 6, 3), dtype=np.uint8)
+    segmentation = np.zeros((6, 6), dtype=np.int32)
+    segmentation[1:3, 1:3] = 1
+    segmentation[3:5, 3:5] = 4
+
+    image_path = tmp_path / "cellpose_image.tif"
+    seg_path = tmp_path / "segmentation.npy"
+    Image.fromarray(image).save(image_path)
+    np.save(seg_path, segmentation)
+
+    dialog._load_image_file(str(image_path))
+    dialog._load_segmentation_file(str(seg_path))
+
+    return dialog
+
+
+def test_cellpose_dialog_linear_offset_persisted(
+    tmp_path, qtbot: QtBot, qmessagebox_calls: list
+):
+    dialog = _make_cellpose_dialog(tmp_path, qtbot)
+    dialog.linear_offset_spin.setValue(3)
+
+    assert dialog.linear_offset_spin.value() == 3
+    assert dialog._get_linear_offset() == 3
+    assert len(qmessagebox_calls) == 0
+    dialog.close()
+
+
+def test_cellpose_dialog_linear_offset_preview_mapping(tmp_path, qtbot: QtBot):
+    dialog = _make_cellpose_dialog(tmp_path, qtbot)
+    dialog.linear_offset_spin.setValue(3)
+
+    mapping = dialog.overlay_widget.stimulus_to_cellpose_mapping or {}
+    original_ids = dialog.importer._original_cellpose_ids
+    assert original_ids is not None
+    min_original_id = int(np.min(original_ids))
+    first_mapping_key = min(mapping) if mapping else -1
+
+    assert mapping != {}
+    assert first_mapping_key == 0
+    assert mapping[first_mapping_key] == min_original_id + 3
+    assert mapping.get(1) == min_original_id
+    dialog.close()
+
+
+def test_cellpose_dialog_custom_mapping_restores_on_reopen(tmp_path, qtbot: QtBot):
+    dialog = _make_cellpose_dialog(tmp_path, qtbot)
+    mapping = {1: 4, 2: 1}
+    assert dialog.image_path is not None
+    result = dialog.importer.create_result(
+        dialog.image_path, mapping, mapping_strategy="Custom"
+    )
+    reopened = CellposeImportDialog(existing_data=result)
+    qtbot.addWidget(reopened)
+    assert reopened._get_mapping_strategy() == "Custom"
+    assert reopened.custom_mapping_line.text().replace(" ", "") == "1:4,2:1"
+    assert reopened.overlay_widget.stimulus_to_cellpose_mapping == mapping

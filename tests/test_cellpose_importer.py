@@ -71,6 +71,7 @@ def test_load_uint16_tiff_stack(tmp_path):
     expected_arrays = [importer._frame_to_rgb_float(frame) for frame in frames]
     expected_float = np.mean(np.stack(expected_arrays, axis=0), axis=0)
     expected_rgb = importer._scale_float_image_to_uint8(expected_float)
+    expected_rgb = np.flipud(expected_rgb)
 
     np.testing.assert_array_equal(importer.image_data, expected_rgb)
     assert len(np.unique(importer.image_data)) > 1
@@ -274,7 +275,9 @@ def test_custom_stim_cellpose_mapping(tmp_path):
     importer.generate_overlay()
 
     stim_to_cellpose_mapping = {1: 2, 5: 6, 9: 11}
-    cellpose_result = importer.create_result(image_path, stim_to_cellpose_mapping)
+    cellpose_result = importer.create_result(
+        image_path, stim_to_cellpose_mapping, mapping_strategy="Custom"
+    )
 
     assert cellpose_result.stimulus_to_cellpose_mapping == stim_to_cellpose_mapping
     expected_cellpose_ids = [2, 6, 11]
@@ -296,7 +299,7 @@ def test_custom_stim_cellpose_mapping(tmp_path):
 def test_linear_mapping_offset_starts_at_zero():
     original_ids = np.array([1, 3, 4, 7], dtype=np.int32)
     mapping = generate_linear_stimulus_mapping(original_ids, offset=3)
-    assert mapping == {0: 3, 1: 4, 2: 7}
+    assert mapping == {0: 3, 1: 4, 2: 7, 3: 1}
 
 
 def test_custom_mapping_parsing_edge_cases():

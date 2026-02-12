@@ -23,6 +23,8 @@ class CellposeImportResult:
     spike_data: SpikeData | None
     original_cellpose_ids: np.ndarray | None = None
     stimulus_to_cellpose_mapping: dict[int, int] | None = None
+    mapping_strategy: str | None = None
+    linear_offset: int | None = None
 
 
 def clone_cellpose_result(
@@ -56,6 +58,8 @@ def clone_cellpose_result(
             if result.stimulus_to_cellpose_mapping is None
             else dict(result.stimulus_to_cellpose_mapping)
         ),
+        mapping_strategy=result.mapping_strategy,
+        linear_offset=result.linear_offset,
     )
 
 
@@ -72,10 +76,11 @@ def generate_linear_stimulus_mapping(
     """Map stimulus IDs to cellpose IDs starting at the selected offset."""
     if original_ids is None:
         return {}
-    eligible_ids = [
-        int(cellpose_id) for cellpose_id in original_ids if cellpose_id >= offset
-    ]
-    return {stim_id: cellpose_id for stim_id, cellpose_id in enumerate(eligible_ids)}
+    ordered_ids = [int(cellpose_id) for cellpose_id in original_ids]
+    first_ids = [cellpose_id for cellpose_id in ordered_ids if cellpose_id >= offset]
+    wrapped_ids = [cellpose_id for cellpose_id in ordered_ids if cellpose_id < offset]
+    mapped_ids = first_ids + wrapped_ids
+    return {stim_id: cellpose_id for stim_id, cellpose_id in enumerate(mapped_ids)}
 
 
 def prepare_cellpose_traces(
@@ -137,6 +142,8 @@ class CellPoseImporter:
         self._neuron_ids: np.ndarray | None = None
         self._neuron_colors: np.ndarray | None = None
         self._original_cellpose_ids: np.ndarray | None = None
+        self._csv_background_zero = False
+        self._segmentation_flipped_for_image = False
 
     def load_image_file(
         self,
@@ -148,11 +155,16 @@ class CellPoseImporter:
         try:
             with Image.open(path) as pil_image:
                 if suffix in {".tif", ".tiff"}:
-                    self.image_data = self._load_mean_tiff(pil_image)
+                    self.image_data = self._load_tiff_with_strategy(pil_image)
                 else:
                     self.image_data = self._pil_to_rgb_array(pil_image)
 
-            self.logger.info("Loaded image data: %s", self.image_data.shape)
+            self.image_data = np.flipud(self.image_data)
+            self.logger.info(
+                "Loaded image data: %s (flipped vertically)",
+                self.image_data.shape,
+            )
+            self._align_orientation_segmentation()
         except Exception as exc:
             self.logger.exception("Error loading image file")
             raise ValueError(f"Could not load {filename}: {exc}") from exc
@@ -164,18 +176,15 @@ class CellPoseImporter:
             image = image.convert("RGB")
         return np.array(image)
 
-    def _load_mean_tiff(self, image: Image.Image) -> np.ndarray:
-        """Average all frames of a TIFF stack per pixel, then normalize to display range."""
-        # Load all frames into memory
+    def _load_tiff_with_strategy(self, image: Image.Image) -> np.ndarray:
+        """Project a TIFF stack with mean projection, then normalize to display range."""
         frames = []
         for frame in ImageSequence.Iterator(image):
-            frame_array = self._frame_to_rgb_float(frame)
-            frames.append(frame_array)
+            frames.append(self._frame_to_rgb_float(frame))
 
         if not frames:
             raise ValueError("TIF file contains no frames")
 
-        # Ensure all frames have same shape
         first_shape = frames[0].shape
         for i, frame in enumerate(frames):
             if frame.shape != first_shape:
@@ -228,21 +237,47 @@ class CellPoseImporter:
         """Load segmentation file saved as CSV or NPY."""
         path = Path(filename)
         try:
-            segmentation = self._read_segmentation_file(path)
-            segmentation = self._validate_segmentation(segmentation)
-            self.segmentation_data = self._shift_to_zero_based(segmentation)
+            if path.suffix.lower() == ".csv":
+                segmentation = self._read_csv_segmentation(path)
+                segmentation = self._validate_csv_segmentation(segmentation)
+                self.segmentation_data = self._shift_to_zero_based(segmentation)
+                self._csv_background_zero = False
 
-            unique_ids = np.unique(self.segmentation_data)
-            self._original_cellpose_ids = unique_ids[unique_ids >= 0]
+                unique_ids = np.unique(self.segmentation_data)
+                self._original_cellpose_ids = unique_ids[unique_ids >= 0]
 
-            self.logger.info(
-                "Loaded segmentation from %s: %s (shifted to 0-based IDs, background is -1)",
-                path.suffix.lower(),
-                self.segmentation_data.shape,
-            )
+                self.logger.info(
+                    "Loaded CSV segmentation: %s (shifted to 0-based IDs, background is -1)",
+                    self.segmentation_data.shape,
+                )
+            else:
+                segmentation = self._read_segmentation_file(path)
+                segmentation = self._validate_segmentation(segmentation)
+                self.segmentation_data = self._shift_to_zero_based(segmentation)
+                self._csv_background_zero = False
+
+                unique_ids = np.unique(self.segmentation_data)
+                self._original_cellpose_ids = unique_ids[unique_ids >= 0]
+
+                self.logger.info(
+                    "Loaded segmentation from %s: %s (shifted to 0-based IDs, background is -1)",
+                    path.suffix.lower(),
+                    self.segmentation_data.shape,
+                )
+            self._align_orientation_segmentation()
         except Exception as exc:
             self.logger.exception("Error loading segmentation file")
             raise ValueError(f"Could not load {filename}: {exc}") from exc
+
+    def _align_orientation_segmentation(self) -> None:
+        # Establish the same orientation that Fiji uses.
+        if self.segmentation_data is None:
+            return
+        if self._segmentation_flipped_for_image:
+            return
+        self.segmentation_data = np.flipud(self.segmentation_data)
+        self._segmentation_flipped_for_image = True
+        self.logger.info("Flipped segmentation vertically to match image orientation.")
 
     def set_trace_data(self, trace_data: TraceData) -> None:
         self._validate_trace_data(trace_data)
@@ -306,8 +341,12 @@ class CellPoseImporter:
             return {}
 
         unique_ids = np.unique(self.segmentation_data)
-        n_background = np.sum(self.segmentation_data < 0)
-        n_neurons = len(unique_ids[unique_ids >= 0])
+        if self._csv_background_zero:
+            n_background = np.sum(self.segmentation_data == 0)
+            n_neurons = len(unique_ids[unique_ids > 0])
+        else:
+            n_background = np.sum(self.segmentation_data < 0)
+            n_neurons = len(unique_ids[unique_ids >= 0])
 
         info = {
             "image_shape": self.image_data.shape,
@@ -318,10 +357,16 @@ class CellPoseImporter:
         }
 
         if n_neurons > 0:
-            info["neuron_id_range"] = (
-                unique_ids[unique_ids >= 0].min(),
-                unique_ids[unique_ids >= 0].max(),
-            )
+            if self._csv_background_zero:
+                info["neuron_id_range"] = (
+                    unique_ids[unique_ids > 0].min(),
+                    unique_ids[unique_ids > 0].max(),
+                )
+            else:
+                info["neuron_id_range"] = (
+                    unique_ids[unique_ids >= 0].min(),
+                    unique_ids[unique_ids >= 0].max(),
+                )
         if self.trace_data is not None:
             info["trace_neurons"] = self.trace_data.traces.shape[0]
             info["trace_timepoints"] = self.trace_data.traces.shape[1]
@@ -349,6 +394,9 @@ class CellPoseImporter:
         self,
         image_path: Path,
         stimulus_to_cellpose_mapping: dict[int, int] | None = None,
+        *,
+        mapping_strategy: str = "Linear",
+        linear_offset: int = 0,
     ) -> CellposeImportResult:
         """Create import result after successful processing."""
         if self.segmentation_data is None or self.overlay_image is None:
@@ -362,6 +410,8 @@ class CellPoseImporter:
             spike_data=self.spike_data,
             original_cellpose_ids=self._original_cellpose_ids,
             stimulus_to_cellpose_mapping=stimulus_to_cellpose_mapping,
+            mapping_strategy=mapping_strategy,
+            linear_offset=linear_offset,
         )
 
     def restore_from_result(self, result: CellposeImportResult) -> None:
@@ -379,6 +429,7 @@ class CellPoseImporter:
             if result.overlay_image is None
             else np.array(result.overlay_image, copy=True)
         )
+        self._segmentation_flipped_for_image = self.segmentation_data is not None
 
         # Attempt to reload the original image; fall back to stored overlay if unavailable.
         self.image_data = None
@@ -413,14 +464,36 @@ class CellPoseImporter:
             return
 
         unique_ids = np.unique(self.segmentation_data)
-        neuron_ids = unique_ids[unique_ids >= 0]  # treat negatives as background
+        if self._csv_background_zero:
+            neuron_ids = unique_ids[unique_ids > 0]
+        else:
+            neuron_ids = unique_ids[unique_ids >= 0]  # treat negatives as background
         if neuron_ids.size == 0:
             self._neuron_ids = None
             self._neuron_colors = None
             return
 
         self._neuron_ids = neuron_ids
-        self._neuron_colors = self._compute_neuron_colors(neuron_ids)
+        if self._csv_background_zero:
+            color_indices = neuron_ids - neuron_ids.min()
+        else:
+            color_indices = neuron_ids
+        self._neuron_colors = self._compute_neuron_colors(color_indices)
+
+    @staticmethod
+    def _read_csv_segmentation(path: Path) -> np.ndarray:
+        return np.loadtxt(path, delimiter=",", dtype=np.int32)
+
+    @staticmethod
+    def _validate_csv_segmentation(segmentation: np.ndarray) -> np.ndarray:
+        seg = np.asarray(segmentation, dtype=np.int32)
+        if seg.ndim != 2:
+            raise ValueError(f"Expected 2D array, got {seg.ndim}D array")
+        if np.any(seg < 0):
+            raise ValueError("Segmentation data contains negative values")
+        if not np.isfinite(seg).all():
+            raise ValueError("Segmentation data contains non-finite values")
+        return seg
 
     @staticmethod
     def _validate_trace_data(trace_data: TraceData) -> None:

@@ -2,10 +2,40 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from PIL import Image
+from qtpy import QtWidgets
 
+from neuroseq.cellpose_import_dialog import CellposeImportDialog
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
+from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
+
+
+# For
+def _build_cellpose_import_result(tmp_path, qtbot, *, offset: int | None = None):
+    dialog = CellposeImportDialog()
+    qtbot.addWidget(dialog)
+
+    image = np.zeros((6, 6, 3), dtype=np.uint8)
+    segmentation = np.zeros((6, 6), dtype=np.int32)
+    segmentation[1:3, 1:3] = 4
+    segmentation[1:3, 3:5] = 5
+    segmentation[3:5, 1:3] = 6
+
+    image_path = tmp_path / "cellpose_image.tif"
+    seg_path = tmp_path / "segmentation.npy"
+    Image.fromarray(image).save(image_path)
+    np.save(seg_path, segmentation)
+
+    dialog._load_image_file(str(image_path))
+    dialog._load_segmentation_file(str(seg_path))
+    if offset is not None:
+        dialog.linear_offset_spin.setValue(offset)
+
+    dialog.accept = lambda: None
+    dialog._import_data()
+    return dialog.get_imported_data()
 
 
 def _generate_patchclamp_trace(
@@ -108,51 +138,43 @@ def test_load_single_npy_file(tmp_path, qtbot):
     assert dialog.npy_data.dtype == trace_data.dtype
     np.testing.assert_array_equal(dialog.npy_data, trace_data)
 
-    # Verify neuron ID extracted from filename
-    assert dialog.extracted_neuron_id == 42
-    assert dialog.custom_neuron_id_line.text() == "42"
-    assert dialog.custom_mapping_line.text() == "42"
+    # Default stim ID target is 0.
+    assert dialog.custom_mapping_line.text() == "0"
+    dialog.close()
+
+
+# Wider patchclamp-cellpose integration with multiple patchclamp neurons
+def test_patchclamp_defaults_after_cellpose_import(tmp_path, qtbot):
+    cellpose_import = _build_cellpose_import_result(tmp_path, qtbot)
+    dialog = PatchClampImportDialog(cellpose_import=cellpose_import)
+    qtbot.addWidget(dialog)
+
+    dialog.load_file("tests/sampledata/3patchclampneurons.npy")
+
+    assert dialog.custom_mapping_line.text() == "0,1,2"
+    assert dialog.data_row_count == 3
+    dialog.close()
+
+
+def test_patchclamp_defaults_with_linear_offset_mapping(tmp_path, qtbot):
+    tested_offset = 3
+    cellpose_import = _build_cellpose_import_result(
+        tmp_path, qtbot, offset=tested_offset
+    )
+    dialog = PatchClampImportDialog(cellpose_import=cellpose_import)
+    qtbot.addWidget(dialog)
+
+    dialog.load_file("tests/sampledata/3patchclampneurons.npy")
+    mapping = cellpose_import.stimulus_to_cellpose_mapping or {}
+
+    assert cellpose_import.mapping_strategy == "Linear"
+    assert mapping == {}
 
     # Verify UI state
     assert dialog.import_button.isEnabled()
-    assert "patch_clamp_recording_neuronID_42.npy" in dialog.file_path_label.text()
-
-
-def test_load_npy_without_neuron_id(tmp_path, qtbot):
-    """Test loading patch clamp file without neuron ID in filename."""
-    trace_data = _generate_patchclamp_trace(duration_sec=2.0, num_spikes=1)
-
-    npy_path = tmp_path / "recording_data.npy"
-    np.save(npy_path, trace_data)
-
-    dialog = PatchClampImportDialog()
-    qtbot.addWidget(dialog)
-
-    dialog.load_file(str(npy_path))
-
-    assert dialog.npy_data is not None
-    assert dialog.extracted_neuron_id is None
-    # Default value should remain - visually this sometimes disappears
-    assert dialog.custom_neuron_id_line.text() == "10"
-
-
-def test_single_row_uses_filename_for_stimulus_id(tmp_path, qtbot):
-    """Single-row files should only expose one target ID derived from the filename."""
-    trace_data = _generate_patchclamp_trace(duration_sec=1.0, sampling_rate=1000.0)
-
-    npy_path = tmp_path / "single_trace_neuronID_77.npy"
-    np.save(npy_path, trace_data)
-
-    dialog = PatchClampImportDialog()
-    qtbot.addWidget(dialog)
-
-    # Pre-fill with an invalid multi-ID mapping to ensure it gets reduced
-    dialog.custom_mapping_line.setText("1,2,3")
-
-    dialog.load_file(str(npy_path))
-
-    assert dialog.custom_mapping_line.text() == "77"
-    assert dialog.custom_neuron_id_line.text() == "77"
+    assert "3patchclampneurons.npy" in dialog.file_path_label.text()
+    assert dialog.custom_mapping_line.text() == "0,1,2"
+    dialog.close()
 
 
 def test_import_single_npy_to_correct_index(tmp_path, qtbot):
@@ -174,12 +196,8 @@ def test_import_single_npy_to_correct_index(tmp_path, qtbot):
 
     dialog.load_file(str(npy_path))
 
-    # Set Custom mapping to neuron ID 15
-    for button in dialog.mapping_buttons.buttons():
-        if button.text() == "Custom":
-            button.setChecked(True)
-            break
-    dialog.custom_neuron_id_line.setText("15")
+    # Set target stimulus ID to 15
+    dialog.custom_mapping_line.setText("15")
 
     # Set reasonable detection parameters
     dialog.sampling_rate_spin.setValue(1000.0)
@@ -203,6 +221,7 @@ def test_import_single_npy_to_correct_index(tmp_path, qtbot):
     # Verify correct neuron ID in imported data
     assert dialog.imported_trace_data[0].indices[0] == 15
     assert 15 in dialog.imported_spike_data[0].spike_indices
+    dialog.close()
 
 
 def test_import_data_functionality(tmp_path, qtbot):
@@ -223,6 +242,7 @@ def test_import_data_functionality(tmp_path, qtbot):
     qtbot.addWidget(dialog)
 
     dialog.load_file(str(npy_path))
+    dialog.custom_mapping_line.setText("25")
     dialog.sampling_rate_spin.setValue(1000.0)
     dialog.peak_height_spin.setValue(2.0)
     dialog.peak_prominence_spin.setValue(1.0)
@@ -248,6 +268,7 @@ def test_import_data_functionality(tmp_path, qtbot):
     assert trace_data_imported.indices[0] == 25
     assert trace_data_imported.units == "mV"
     assert abs(trace_data_imported.dt - 0.001) < 1e-6  # 1/1000
+    dialog.close()
 
 
 @pytest.mark.parametrize("sampling_rate", [1000.0, 5000.0, 10000.0])
@@ -274,6 +295,7 @@ def test_different_sampling_rates(tmp_path, qtbot, sampling_rate: float):
     actual_dt = dialog.imported_trace_data[0].dt
     assert actual_dt == pytest.approx(expected_dt)
     assert dialog.experiment_duration == pytest.approx(2.195)
+    dialog.close()
 
 
 def test_preview_text_content(tmp_path, qtbot):
@@ -294,9 +316,10 @@ def test_preview_text_content(tmp_path, qtbot):
 
     # Check that preview contains expected information
     assert f"{trace_data.shape[0]} timepoints" in preview_text
-    assert "extracted neuron ID: 123" in preview_text
+    assert "NPY DATA:" in preview_text
     assert "duration:" in preview_text
     assert str(np.mean(trace_data))[:5] in preview_text
+    dialog.close()
 
 
 def _generate_two_neuron_patchclamp_trace(
@@ -348,7 +371,132 @@ def test_multi_row_mapping_trims_to_row_count(tmp_path, qtbot):
     dialog.load_file(str(npy_path))
 
     assert dialog.custom_mapping_line.text() == "5,6"
-    assert dialog.custom_neuron_id_line.text() == "5,6"
+    dialog.close()
+
+
+"""
+ Giving "2, 3" as input should mean the 0th (first) patchclamp data targets stim ID 2.
+ This should NOT be remapped via the cellpose mapping. Cellpose is context-only here.
+  """
+
+
+def test_custom_mapping_stim_id_input_uses_stim_ids_directly(tmp_path, qtbot):
+    """Custom input '2,3' should import to stim IDs 2 and 3, even with mapping."""
+    two_neuron_data = _generate_two_neuron_patchclamp_trace(
+        duration_sec=0.2, sampling_rate=1000.0, num_spikes_per_neuron=1
+    )
+    npy_path = tmp_path / "two_neuron_patch_recording.npy"
+    np.save(npy_path, two_neuron_data)
+
+    cellpose_import = CellposeImportResult(
+        image_path=tmp_path / "image.png",
+        segmentation_array=np.zeros((2, 2), dtype=int),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.array([2, 3], dtype=int),
+        stimulus_to_cellpose_mapping={
+            7: 2,
+            11: 3,
+        },  # For manual testing, it's pretty handy that you can paste this
+        # into the Cellpose modal directly as the Custom mapping.
+        mapping_strategy="Custom",
+    )
+
+    dialog = PatchClampImportDialog(cellpose_import=cellpose_import)
+    qtbot.addWidget(dialog)
+    dialog.load_file(str(npy_path))
+
+    dialog.custom_mapping_line.setText("2, 3")
+    dialog.sampling_rate_spin.setValue(1000.0)
+    dialog.peak_height_spin.setValue(2.0)
+    dialog.peak_prominence_spin.setValue(1.0)
+
+    dialog.accept = lambda: None
+    dialog.import_data()
+
+    assert _trace_data_exists_for_index(dialog.imported_trace_data, 2)
+    assert _trace_data_exists_for_index(dialog.imported_trace_data, 3)
+    assert _spike_data_exists_for_index(dialog.imported_spike_data, 2)
+    assert _spike_data_exists_for_index(dialog.imported_spike_data, 3)
+    assert not _trace_data_exists_for_index(dialog.imported_trace_data, 7)
+    assert not _trace_data_exists_for_index(dialog.imported_trace_data, 11)
+    dialog.close()
+
+
+def test_custom_mapping_duplicate_stimulus_ids_error(tmp_path, qtbot, monkeypatch):
+    """Custom mapping should error if multiple rows resolve to the same stim ID."""
+    traces = []
+    for _ in range(4):
+        traces.append(
+            _generate_patchclamp_trace(
+                duration_sec=0.2, sampling_rate=1000.0, num_spikes=1
+            )
+        )
+    four_neuron_data = np.vstack(traces)
+    npy_path = tmp_path / "four_neuron_patch_recording.npy"
+    np.save(npy_path, four_neuron_data)
+
+    cellpose_import = CellposeImportResult(
+        image_path=tmp_path / "image.png",
+        segmentation_array=np.zeros((2, 2), dtype=int),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.array([1, 3, 6, 10], dtype=int),
+        stimulus_to_cellpose_mapping={3: 1},
+        mapping_strategy="Custom",
+    )
+
+    dialog = PatchClampImportDialog(cellpose_import=cellpose_import)
+    qtbot.addWidget(dialog)
+    dialog.load_file(str(npy_path))
+
+    dialog.custom_mapping_line.setText("3,3,6,10")
+    dialog.sampling_rate_spin.setValue(1000.0)
+    dialog.peak_height_spin.setValue(2.0)
+    dialog.peak_prominence_spin.setValue(1.0)
+
+    captured = {}
+
+    def _capture_critical(_parent, title, text):
+        captured["title"] = title
+        captured["text"] = text
+
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox, "critical", _capture_critical, raising=True
+    )
+
+    dialog.import_data()
+
+    assert "Custom mapping would assign stimulus ID 3" in captured.get("text", "")
+    dialog.close()
+
+
+def test_multi_row_defaults_are_zero_indexed_with_cellpose_ids(tmp_path, qtbot):
+    two_neuron_data = _generate_two_neuron_patchclamp_trace(
+        duration_sec=0.2, sampling_rate=1000.0, num_spikes_per_neuron=1
+    )
+    npy_path = tmp_path / "two_neuron_patch_recording.npy"
+    np.save(npy_path, two_neuron_data)
+
+    cellpose_import = CellposeImportResult(
+        image_path=tmp_path / "image.png",
+        segmentation_array=np.zeros((2, 2), dtype=int),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.array([10, 11], dtype=int),
+        stimulus_to_cellpose_mapping=None,
+        mapping_strategy="Linear",
+    )
+
+    dialog = PatchClampImportDialog(cellpose_import=cellpose_import)
+    qtbot.addWidget(dialog)
+    dialog.load_file(str(npy_path))
+
+    assert dialog.custom_mapping_line.text() == "0,1"
+    dialog.close()
 
 
 def test_import_two_neuron_npy_file(tmp_path, qtbot):
@@ -367,7 +515,7 @@ def test_import_two_neuron_npy_file(tmp_path, qtbot):
     dialog.load_file(str(npy_path))
 
     # Set up for two neurons
-    dialog.custom_neuron_id_line.setText("15,17")
+    dialog.custom_mapping_line.setText("15,17")
     dialog.sampling_rate_spin.setValue(1000.0)
     dialog.peak_height_spin.setValue(2.0)
 
@@ -406,7 +554,7 @@ def test_import_two_neuron_wrong_id_count(tmp_path, qtbot):
     dialog.load_file(str(npy_path))
 
     # Try to import with wrong number of IDs (should be 2, not 1)
-    dialog.custom_neuron_id_line.setText("15")  # Only one ID for two traces
+    dialog.custom_mapping_line.setText("15")  # Only one ID for two traces
     dialog.sampling_rate_spin.setValue(1000.0)
 
     dialog.accept = lambda: None

@@ -453,7 +453,8 @@ def test_issues_with_appending_experimental_data_invalid(
 
     # experiment doesn't exist
     assert "exist" in project_nmda.issues_with_appending_experimental_data(
-        "nonexistent_exp", []
+        "nonexistent_exp",
+        [],
     )
 
     # data names match but types do not

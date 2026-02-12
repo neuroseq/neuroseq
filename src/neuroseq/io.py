@@ -107,6 +107,8 @@ def _json_encoder_factory(zf: zipfile.ZipFile):
                         "spike_data": obj.spike_data,
                         "original_cellpose_ids": original_ids_path,
                         "stimulus_to_cellpose_mapping": obj.stimulus_to_cellpose_mapping,
+                        "mapping_strategy": obj.mapping_strategy,
+                        "linear_offset": obj.linear_offset,
                     }
                 case b2.Quantity():
                     value, unit = quantity_to_value_unit_str(obj)
@@ -189,6 +191,45 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                 with _zf.open(timestamps) as fp:
                     loaded_timestamps = np.load(fp)
                 return SynapseData(name, loaded_values, loaded_timestamps)
+            case {
+                "!CellposeImportResult": True,
+                "image_path": image_path,
+                "segmentation_array": segmentation_array,
+                "overlay_image": overlay_image,
+                "trace_data": trace_data,
+                "spike_data": spike_data,
+                "original_cellpose_ids": original_cellpose_ids,
+                "stimulus_to_cellpose_mapping": stimulus_to_cellpose_mapping,
+                "mapping_strategy": mapping_strategy,
+                "linear_offset": linear_offset,
+            }:
+                with _zf.open(segmentation_array) as fp:
+                    loaded_segmentation = np.load(fp)
+                with _zf.open(overlay_image) as fp:
+                    loaded_overlay = np.load(fp)
+                loaded_original_ids = None
+                if original_cellpose_ids is not None:
+                    with _zf.open(original_cellpose_ids) as fp:
+                        loaded_original_ids = np.load(fp)
+
+                return CellposeImportResult(
+                    image_path=Path(image_path),
+                    segmentation_array=loaded_segmentation,
+                    overlay_image=loaded_overlay,
+                    trace_data=trace_data,
+                    spike_data=spike_data,
+                    original_cellpose_ids=loaded_original_ids,
+                    stimulus_to_cellpose_mapping=(
+                        None
+                        if stimulus_to_cellpose_mapping is None
+                        else {
+                            int(k): int(v)
+                            for k, v in stimulus_to_cellpose_mapping.items()
+                        }
+                    ),
+                    mapping_strategy=mapping_strategy,
+                    linear_offset=int(linear_offset),
+                )
             case {
                 "!CellposeImportResult": True,
                 "image_path": image_path,
