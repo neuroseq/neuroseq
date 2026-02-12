@@ -26,7 +26,7 @@ def validate_append_import(
     experiment_name: str,
     neuron_ids_to_import: Sequence[int],
 ) -> str | None:
-    """Validate patchclamp append behavior and return a disjoint warning if needed."""
+    """Validate patchclamp append behavior and return a warning if needed."""
     if model is None:
         return None
 
@@ -58,10 +58,9 @@ def validate_append_import(
 
     # allow no crossover with existing neuron ids
     if importing_existing and importing_new:
-        raise ValueError(
-            f"Cannot extend data when importing both existing neurons {importing_existing} "
-            f"and new neurons {importing_new} together. "
-            "Either replace the same set of neurons or import a fully disjoint set on the same timeline."
+        return (
+            "You are importing into some of the existing data and with some separate "
+            f"totally new data, is that deliberate? (totally new={importing_new}, existing={importing_existing})"
         )
     if importing_new and not importing_existing and existing_neuron_indices:
         return (

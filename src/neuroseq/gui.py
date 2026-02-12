@@ -507,7 +507,7 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(
                 self,
                 "Data import error",
-                f"Could not import data: {e}",
+                f"Could not import data to Stim IDs: {e}",
             )
             self.logger.exception(e)
             return

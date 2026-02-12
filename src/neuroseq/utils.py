@@ -263,21 +263,23 @@ def append_data(
             )
             return
 
-        if existing_id_set != new_id_set:
-            raise ValueError(
-                "Cannot append TraceData when neuron IDs partially overlap. Either replace the same set of neurons or import a fully disjoint set on the same timeline."
-            )
-
-        if not np.array_equal(existing_ids, new_ids):
-            # reorder incoming traces to match existing indices for safe replacement
-            index_map = {int(idx): i for i, idx in enumerate(new_ids)}
-            new_order = [index_map[int(idx)] for idx in existing_ids]
-            new_traces = new_data.traces[new_order, :]
-        else:
-            new_traces = new_data.traces
-
         idx0 = int(time_offset_seconds / existing_data.dt)
-        idx1 = int((time_offset_seconds + data_duration_seconds) / existing_data.dt)
+        idx1 = idx0 + new_data.traces.shape[1]
+        segment = existing_data.traces[:, idx0:idx1]
+        new_traces = np.zeros(
+            (existing_data.traces.shape[0], new_data.traces.shape[1]),
+            dtype=existing_data.traces.dtype,
+        )
+        if segment.size > 0:
+            new_traces[:, : segment.shape[1]] = segment
+
+        existing_index_map = {int(idx): i for i, idx in enumerate(existing_ids)}
+        new_index_map = {int(idx): i for i, idx in enumerate(new_ids)}
+        for overlap_id in overlap_ids:
+            new_traces[existing_index_map[overlap_id], :] = new_data.traces[
+                new_index_map[overlap_id], :
+            ]
+
         existing_data.traces = safe_concat(
             [
                 existing_data.traces[:, 0:idx0],
@@ -286,17 +288,30 @@ def append_data(
             ],
             axis=1,
         )
+        new_only_ids = [idx for idx in map(int, new_ids) if idx not in existing_id_set]
+        if new_only_ids:
+            final_len = existing_data.traces.shape[1]
+            new_rows = np.zeros(
+                (len(new_only_ids), final_len), dtype=existing_data.traces.dtype
+            )
+            for row_i, neuron_id in enumerate(new_only_ids):
+                new_rows[row_i, idx0:idx1] = new_data.traces[
+                    new_index_map[neuron_id], :
+                ]
+            existing_data.traces = safe_concat([existing_data.traces, new_rows], axis=0)
+            existing_data.indices = safe_concat(
+                [
+                    existing_data.indices,
+                    np.array(new_only_ids, dtype=existing_data.indices.dtype),
+                ],
+                axis=0,
+            )
     elif isinstance(existing_data, SpikeData) and isinstance(new_data, SpikeData):
         existing_ids = set(map(int, existing_data.spike_indices))
         new_ids = set(map(int, new_data.spike_indices))
         overlap_ids = existing_ids.intersection(new_ids)
 
-        if overlap_ids and existing_ids != new_ids:
-            raise ValueError(
-                "Cannot append SpikeData when neuron IDs partially overlap. Either replace the same set of neurons or import a fully disjoint set on the same timeline."
-            )
-
-        if not existing_ids:
+        if not overlap_ids:
             existing_data.spike_indices = safe_concat(
                 [existing_data.spike_indices, new_data.spike_indices], axis=0
             )
@@ -313,32 +328,30 @@ def append_data(
                 existing_data.spike_indices = existing_data.spike_indices[order]
             return
 
-        # find the index of the last spike time in the existing data before the time offset
-        idx0 = np.searchsorted(
-            existing_data.spike_times, time_offset_seconds, side="left"
+        overlap_id_mask = np.isin(
+            existing_data.spike_indices,
+            np.array(sorted(overlap_ids), dtype=existing_data.spike_indices.dtype),
         )
-        # find the index of the first spike time in the existing data after the time offset + duration
-        idx1 = np.searchsorted(
-            existing_data.spike_times,
-            time_offset_seconds + data_duration_seconds,
-            side="left",
+        replace_window_mask = (existing_data.spike_times >= time_offset_seconds) & (
+            existing_data.spike_times < time_offset_seconds + data_duration_seconds
         )
+        keep_existing_mask = ~(overlap_id_mask & replace_window_mask)
+
         existing_data.spike_indices = safe_concat(
-            [
-                existing_data.spike_indices[0:idx0],
-                new_data.spike_indices,
-                existing_data.spike_indices[idx1:],
-            ],
+            [existing_data.spike_indices[keep_existing_mask], new_data.spike_indices],
             axis=0,
         )
         existing_data.spike_times = safe_concat(
             [
-                existing_data.spike_times[0:idx0],
+                existing_data.spike_times[keep_existing_mask],
                 new_data.spike_times + time_offset_seconds,
-                existing_data.spike_times[idx1:],
             ],
             axis=0,
         )
+        if existing_data.spike_times.size > 1:
+            order = np.argsort(existing_data.spike_times)
+            existing_data.spike_times = existing_data.spike_times[order]
+            existing_data.spike_indices = existing_data.spike_indices[order]
     elif isinstance(existing_data, SynapseData) and isinstance(new_data, SynapseData):
         # find the index of the last timestamp in the existing data before the time offset
         idx0 = np.searchsorted(

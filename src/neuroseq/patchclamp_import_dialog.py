@@ -814,7 +814,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
                 reply = QtWidgets.QMessageBox.question(
                     self,
                     "Are you sure?",
-                    f"{append_warning}\n\nThis import is disjoint. Are you sure you want to continue?",
+                    f"{append_warning}\n\nAre you sure you want to continue?",
                     QtWidgets.QMessageBox.StandardButton.Yes
                     | QtWidgets.QMessageBox.StandardButton.No,
                     QtWidgets.QMessageBox.StandardButton.No,
