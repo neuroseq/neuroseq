@@ -153,7 +153,7 @@ class TraceWidget(TimeseriesWidget):
         self.n_timestamps = data.traces.shape[1]
         # convert timestamps to milliseconds and stack to produce a format suitable for line_stack
         # todo: should be possible to re-use the same timestamps for all traces?
-        timestamps_ms = np.arange(data.traces.shape[1], dtype=np.float16) * np.float16(
+        timestamps_ms = np.arange(data.traces.shape[1], dtype=np.float32) * np.float32(
             data.dt * 1000.0
         )
         tiled_timestamps_ms = np.tile(
@@ -167,7 +167,7 @@ class TraceWidget(TimeseriesWidget):
                 normalized_traces,
             ],
             axis=2,
-            dtype=np.float16,
+            dtype=np.float32,
         )
         self.graphic = self.subplot.add_line_collection(
             data,
