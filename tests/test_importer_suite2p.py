@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from neuroseq.importer_suite2p import _resolve_suite2p_indices
 from neuroseq.importer_suite2p import compute_normalized_suite2p_spikes
 from neuroseq.importer_suite2p import compute_normalized_suite2p_traces
 from neuroseq.importer_suite2p import prepare_suite2p_spikes
@@ -87,3 +88,42 @@ def test_prepare_suite2p_spikes_respects_threshold_and_limits_neurons(
         max_neurons=4,
     )
     assert len(high_threshold_data.spike_indices) == 0
+
+
+def test_resolve_suite2p_indices_uses_identity_for_missing_ids() -> None:
+    indices = _resolve_suite2p_indices(
+        4,
+        {
+            7: 1,
+            4: 0,
+        },
+    )
+    np.testing.assert_array_equal(indices, np.array([4, 7, 2, 3], dtype=np.uint32))
+
+
+def test_resolve_suite2p_indices_rejects_duplicate_target_stim_ids() -> None:
+    with pytest.raises(ValueError, match="Resolved stimulus IDs are not unique"):
+        _resolve_suite2p_indices(
+            2,
+            {
+                1: 0,
+            },
+        )
+
+
+def test_prepare_suite2p_spikes_remaps_indices_by_cellpose_order() -> None:
+    spike_data = np.zeros((2, 4), dtype=np.float32)
+    spike_data[0, 1] = 1.0
+    spike_data[1, 2] = 1.0
+
+    result = prepare_suite2p_spikes(
+        spike_data,
+        dt=1.0,
+        threshold=0.5,
+        max_neurons=2,
+        stimulus_to_cellpose_mapping={4: 0, 7: 1},
+    )
+
+    np.testing.assert_array_equal(
+        result.spike_indices, np.array([4, 7], dtype=np.uint32)
+    )
