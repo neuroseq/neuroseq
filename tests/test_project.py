@@ -579,6 +579,8 @@ def test_issues_with_appending_experimental_data_invalid(
     )
 
     # number of neurons don't match
+    """
+    # "Stale" because now we do allow this, having mismatching numbers of neurons (which this I believe used to assert against)
     assert "neurons" in project_nmda.issues_with_appending_experimental_data(
         "exp",
         [
@@ -586,6 +588,7 @@ def test_issues_with_appending_experimental_data_invalid(
             make_spike_data(n_neurons=6, max_time_secs=0.10),
         ],
     )
+    """
 
     # dt doesn't match
     assert "dt" in project_nmda.issues_with_appending_experimental_data(
