@@ -890,14 +890,6 @@ class Gui(QtWidgets.QMainWindow):
         )
         menu.addSeparator()
         add_action(
-            "Import Suite2p &Data",
-            self.btn_import_suite2p_data_clicked,
-            menu,
-            toolbar,
-            shortcut="Ctrl+Shift+I",
-            icon=qta.icon("mdi6.import"),
-        )
-        add_action(
             "Generate Synthetic &Data...",
             self.btn_generate_synthetic_data_clicked,
             menu,
@@ -906,6 +898,15 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.microsoft-xbox-controller-view")
             if hasattr(qta, "icon")
             else None,
+        )
+        menu.addSeparator()
+        add_action(
+            "Import Suite2p &Data",
+            self.btn_import_suite2p_data_clicked,
+            menu,
+            toolbar,
+            shortcut="Ctrl+Shift+I",
+            icon=qta.icon("mdi6.import"),
         )
         add_action(
             "Import Cellpose &Segmentation",
