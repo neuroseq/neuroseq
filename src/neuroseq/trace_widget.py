@@ -146,8 +146,13 @@ class TraceWidget(TimeseriesWidget):
         self.logger.info(
             f"{data.traces.shape} traces with dt={data.dt}s and units={data.units}"
         )
+        # self.subplot.title = f"Traces: {data * V.name}"
         self.subplot.title = f"Traces: {data.name}"
         self.data = data
+        # Store the original trace data (transposed) for mouse hover value display
+        # Shape needs to be (n_timesteps, n_neurons) for pointer_move to index correctly
+        self.data_values = data.traces.T.astype(np.float32)
+        self.units = data.units
         self.n_neurons = np.max(data.indices) + 1
         self.dt_ms = data.dt * 1000.0  # convert to milliseconds
         self.n_timestamps = data.traces.shape[1]
