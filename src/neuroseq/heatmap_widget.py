@@ -4,6 +4,7 @@ import logging
 
 import brian2.numpy_ as np
 import fastplotlib as fpl
+import pygfx
 from qtpy import QtCore
 from qtpy import QtWidgets
 
@@ -91,6 +92,7 @@ class HeatmapWidget(FPLWidget):
         self.subtract_idx: int | None = None
         self.ig: fpl.ImageGraphic | None = None
         self.hlut: fpl.HistogramLUTTool | None = None
+        self.hover_text: fpl.TextGraphic | None = None
         self.timestamps: np.ndarray | None = None
         self._base_camera_width: float | None = None
         self._base_camera_height: float | None = None
@@ -100,6 +102,7 @@ class HeatmapWidget(FPLWidget):
         self._axis_update_timer.setInterval(100)
         self._axis_update_timer.timeout.connect(self._update_index_axes_from_zoom)
         self._axis_update_timer.start()
+        self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
         self.logger = logging.getLogger(__name__)
 
     def heatmap_norm_dialog(self):
@@ -112,11 +115,22 @@ class HeatmapWidget(FPLWidget):
         self.subtract_idx = None
         self.ig = None
         self.hlut = None
+        self.hover_text = None
         self.timestamps = None
         self._base_camera_width = None
         self._base_camera_height = None
         self._last_camera_width = None
         self._last_camera_height = None
+
+    @staticmethod
+    def _hover_text_for_position(
+        x: float, y: float, n_i: int, n_j: int
+    ) -> tuple[int, int, str] | None:
+        i = int(x)
+        j = int(y)
+        if i < 0 or j < 0 or i >= n_i or j >= n_j:
+            return None
+        return i, j, f"pre i={i}, post j={j}"
 
     @staticmethod
     def _tick_step_from_scale(scale_factor: float) -> int:
@@ -208,6 +222,18 @@ class HeatmapWidget(FPLWidget):
         self.subplot.docks["right"].size = 80
         self.subplot.docks["right"].auto_scale(maintain_aspect=False)
         self.subplot.docks["right"].controller.enabled = False
+        self.hover_text = self.subplot.add_text(
+            "",
+            font_size=14,
+            offset=(8.0, 4.0, 200.0),
+            face_color=(0.0, 0.0, 0.0),
+            outline_color=(1.0, 1.0, 1.0),
+            outline_thickness=2.0,
+            center=False,
+            anchor="bottom-right",
+            screen_space=True,
+        )
+        self.hover_text.visible = False
         self.subplot.auto_scale(zoom=1.0, maintain_aspect=True)
         camera_state = self.subplot.camera.get_state()
         self._base_camera_width = float(camera_state.get("width", 1.0))
@@ -215,6 +241,27 @@ class HeatmapWidget(FPLWidget):
         self._last_camera_width = None
         self._last_camera_height = None
         self._update_index_axes_from_zoom()
+
+    def pointer_move(self, ev: pygfx.PointerEvent) -> None:
+        if self.data is None or self.hover_text is None:
+            return
+        mouse_pos = self.subplot.map_screen_to_world(ev)
+        if mouse_pos is None:
+            self.hover_text.visible = False
+            return
+        hover_text = self._hover_text_for_position(
+            x=float(mouse_pos[0]),
+            y=float(mouse_pos[1]),
+            n_i=self.data.shape[2],
+            n_j=self.data.shape[1],
+        )
+        if hover_text is None:
+            self.hover_text.visible = False
+            return
+        i, j, text = hover_text
+        self.hover_text.offset = (float(i), float(j), 200.0)
+        self.hover_text.text = text
+        self.hover_text.visible = True
 
     def set_time_ms(self, time_ms: int) -> None:
         """Set the time to display: data from the closest timestamp to the given time is displayed."""
