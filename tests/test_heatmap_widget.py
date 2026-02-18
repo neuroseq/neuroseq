@@ -157,3 +157,32 @@ def test_heatmap_widget_set_time_ms(qtbot: QtBot, make_synapse_data) -> None:
         heatmap_widget.set_time_ms(time_ms)
         assert heatmap_widget.idx == idx
     heatmap_widget.close()
+
+
+def test_heatmap_widget_shows_xy_index_ticks(qtbot: QtBot, make_synapse_data) -> None:
+    heatmap_widget = HeatmapWidget()
+    qtbot.addWidget(heatmap_widget)
+    heatmap_widget.show()
+    qtbot.waitUntil(lambda: heatmap_widget.isVisible())
+    data = make_synapse_data("synapse", n_i=6, n_j=4, n_timestamps=3)
+    heatmap_widget.set_data(data)
+    x_ticks = np.asarray(heatmap_widget.subplot.axes.x.ticks)
+    y_ticks = np.asarray(heatmap_widget.subplot.axes.y.ticks)
+    assert np.array_equal(x_ticks, np.array([0, 5]))
+    assert np.array_equal(y_ticks, np.array([0, 3]))
+    assert heatmap_widget.subplot.axes.x.line.visible
+    assert heatmap_widget.subplot.axes.y.line.visible
+    heatmap_widget.close()
+
+
+@pytest.mark.parametrize(
+    ("scale_factor", "expected_step"),
+    [(1.0, 100), (4.99, 100), (5.0, 10), (9.99, 10), (10.0, 1), (20.0, 1)],
+)
+def test_heatmap_tick_step_from_scale(scale_factor: float, expected_step: int) -> None:
+    assert HeatmapWidget._tick_step_from_scale(scale_factor) == expected_step
+
+
+def test_heatmap_tick_positions_include_last_index() -> None:
+    ticks = HeatmapWidget._tick_positions(size=106, step=100)
+    assert np.array_equal(ticks, np.array([0, 100, 105]))

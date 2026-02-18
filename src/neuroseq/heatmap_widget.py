@@ -92,6 +92,14 @@ class HeatmapWidget(FPLWidget):
         self.ig: fpl.ImageGraphic | None = None
         self.hlut: fpl.HistogramLUTTool | None = None
         self.timestamps: np.ndarray | None = None
+        self._base_camera_width: float | None = None
+        self._base_camera_height: float | None = None
+        self._last_camera_width: float | None = None
+        self._last_camera_height: float | None = None
+        self._axis_update_timer = QtCore.QTimer(self)
+        self._axis_update_timer.setInterval(100)
+        self._axis_update_timer.timeout.connect(self._update_index_axes_from_zoom)
+        self._axis_update_timer.start()
         self.logger = logging.getLogger(__name__)
 
     def heatmap_norm_dialog(self):
@@ -105,6 +113,68 @@ class HeatmapWidget(FPLWidget):
         self.ig = None
         self.hlut = None
         self.timestamps = None
+        self._base_camera_width = None
+        self._base_camera_height = None
+        self._last_camera_width = None
+        self._last_camera_height = None
+
+    @staticmethod
+    def _tick_step_from_scale(scale_factor: float) -> int:
+        if scale_factor >= 10.0:
+            return 1
+        if scale_factor >= 5.0:
+            return 10
+        return 100
+
+    @staticmethod
+    def _tick_positions(size: int, step: int) -> np.ndarray:
+        if size <= 0:
+            return np.array([], dtype=int)
+        ticks = np.arange(0, size, max(1, step), dtype=int)
+        if ticks.size == 0 or ticks[-1] != size - 1:
+            ticks = np.append(ticks, size - 1)
+        return ticks
+
+    def _set_index_axes(self, n_x: int, n_y: int, step_x: int, step_y: int) -> None:
+        self.subplot.axes.x.ticks = self._tick_positions(n_x, step_x)
+        self.subplot.axes.y.ticks = self._tick_positions(n_y, step_y)
+        self.subplot.axes.x.tick_format = lambda x, x_min, x_max: f"{x:.0f}"
+        self.subplot.axes.y.tick_format = lambda y, y_min, y_max: f"{y:.0f}"
+        self.subplot.axes.x.min_tick_distance = 25
+        self.subplot.axes.y.min_tick_distance = 25
+        self.subplot.axes.x.line.visible = True
+        self.subplot.axes.y.line.visible = True
+
+    def _update_index_axes_from_zoom(self) -> None:
+        if self.data is None:
+            return
+        camera_state = self.subplot.camera.get_state()
+        width = float(camera_state.get("width", 0.0))
+        height = float(camera_state.get("height", 0.0))
+        if width <= 0.0 or height <= 0.0:
+            return
+        if self._base_camera_width is None or self._base_camera_height is None:
+            self._base_camera_width = width
+            self._base_camera_height = height
+        if (
+            self._last_camera_width == width
+            and self._last_camera_height == height
+            and self.subplot.axes.x.ticks is not None
+            and self.subplot.axes.y.ticks is not None
+        ):
+            return
+        scale_x = self._base_camera_width / width
+        scale_y = self._base_camera_height / height
+        step_x = self._tick_step_from_scale(scale_x)
+        step_y = self._tick_step_from_scale(scale_y)
+        self._set_index_axes(
+            n_x=self.data.shape[2],
+            n_y=self.data.shape[1],
+            step_x=step_x,
+            step_y=step_y,
+        )
+        self._last_camera_width = width
+        self._last_camera_height = height
 
     def set_data(
         self,
@@ -139,6 +209,12 @@ class HeatmapWidget(FPLWidget):
         self.subplot.docks["right"].auto_scale(maintain_aspect=False)
         self.subplot.docks["right"].controller.enabled = False
         self.subplot.auto_scale(zoom=1.0, maintain_aspect=True)
+        camera_state = self.subplot.camera.get_state()
+        self._base_camera_width = float(camera_state.get("width", 1.0))
+        self._base_camera_height = float(camera_state.get("height", 1.0))
+        self._last_camera_width = None
+        self._last_camera_height = None
+        self._update_index_axes_from_zoom()
 
     def set_time_ms(self, time_ms: int) -> None:
         """Set the time to display: data from the closest timestamp to the given time is displayed."""
