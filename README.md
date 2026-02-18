@@ -1,4 +1,4 @@
-# NeuroSeq
+# NeuroSeq - Neuronal Sequencer
 
 [![CI](https://github.com/ssciwr/neuroseq/actions/workflows/ci.yml/badge.svg)](https://github.com/ssciwr/neuroseq/actions/workflows/ci.yml)
 
@@ -53,6 +53,14 @@ After installing, you should be able to run the following command to launch the 
 neuroseq
 ```
 
+## Documentation
+
+- Getting started
+- Control of simulations
+- Examples
+- Control of experiments
+- Import of experimental data
+  
 ## GUI Console
 
 The GUI console is a text box at the bottom of the GUI that can be used to run Python code.
