@@ -116,6 +116,19 @@ class TimeseriesWidget(FPLWidget):
         self.roi.text.visible = self.show_text
         self.text.visible = self.show_text
 
+    def _create_y_tick_formatter(self):
+        # """Create a y-axis tick formatter that prevents label repetition."""
+        state = {"last_label": None}
+
+        def format_tick(y, y_min, y_max):
+            label = f"{int(round(y))}"
+            if label == state["last_label"]:
+                return ""
+            state["last_label"] = label
+            return label
+
+        return format_tick
+
     def contextMenuEvent(self, event):
         if (
             self.mode == InteractMode.SELECT
@@ -127,9 +140,11 @@ class TimeseriesWidget(FPLWidget):
 
     def post_set_data(self):
         self.subplot.grids = False
-        self.subplot.axes.y.ticks = np.arange(0, self.n_neurons, 1)
+        self.subplot.axes.y.ticks = None
         self.subplot.axes.y.points.visible = False
         self.subplot.axes.y.line.visible = False
+        self.subplot.axes.y.min_tick_distance = 20
+        self.subplot.axes.y.tick_format = self._create_y_tick_formatter()
         self.subplot.axes.x.ticks = None
         self.subplot.axes.x.points.visible = False
         self.subplot.axes.x.line.visible = False
