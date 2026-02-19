@@ -6,24 +6,28 @@ from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
 example_projects = {}
+example_project_sections = {}
 
 
-def register_example_project(name: str):
+def register_example_project(name: str, section: str | None = None):
     """
     Decorator used to register example project generator functions so that they will be displayed in the GUI
 
     Args:
         name: The name shown in the GUI (e.g., "Non-linear").
+        section: Optional submenu section in "Open example project".
     """
 
     def decorator(func):
         example_projects[name] = func
+        if section is not None:
+            example_project_sections[name] = section
         return func
 
     return decorator
 
 
-@register_example_project("Getting Started Project")
+@register_example_project("Getting Started Project", section="Basics")
 def default_project() -> Project:
     project = Project()
 
@@ -182,7 +186,7 @@ we= clip(we + Apre, -gmax, gmax)
     return project
 
 
-@register_example_project("non_linear")
+@register_example_project("non_linear", section="Basics")
 def non_linear() -> Project:
     project = Project()
 
@@ -236,7 +240,7 @@ def non_linear() -> Project:
     return project
 
 
-@register_example_project("Hodgkin-Huxley Neuron")
+@register_example_project("Hodgkin-Huxley Neuron", section="Single Neuron")
 def single_hh_neuron() -> Project:
     project = Project()
 
@@ -366,7 +370,7 @@ def single_hh_neuron() -> Project:
     return project
 
 
-@register_example_project("Leaky-Integrate-and-Fire Neuron")
+@register_example_project("Leaky-Integrate-and-Fire Neuron", section="Single Neuron")
 def single_lif_neuron_many_stims() -> Project:
     project = Project()
 
@@ -474,7 +478,7 @@ def single_lif_neuron_many_stims() -> Project:
     return project
 
 
-@register_example_project("Network of Hodgkin-Huxley Neurons")
+@register_example_project("Network of Hodgkin-Huxley Neurons", section="Network")
 def hh_neuron_with_synapses() -> Project:
     project = Project()
 
@@ -907,7 +911,9 @@ def single_lif_neuron_without_stim() -> Project:
     return project
 
 
-@register_example_project("Network of Hodgkin-Huxley Neurons with STDP")
+@register_example_project(
+    "Network of Hodgkin-Huxley Neurons with STDP", section="Network"
+)
 def hh_neuron_with_plasticity() -> Project:
     project = Project()
 
@@ -1123,7 +1129,7 @@ def hh_neuron_with_plasticity() -> Project:
     return project
 
 
-@register_example_project("ChR2 in HEK293")
+@register_example_project("ChR2 in HEK293", section="Optogenetics")
 def pyrho_6state_chr2_project() -> Project:
     """
     PyRho 6-state ChR2 optogenetic model based on published parameters.

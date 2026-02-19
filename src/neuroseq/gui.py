@@ -25,6 +25,7 @@ from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.data_widget import DataWidget
 from neuroseq.example_projects import default_project
+from neuroseq.example_projects import example_project_sections
 from neuroseq.example_projects import example_projects
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
@@ -832,11 +833,18 @@ class Gui(QtWidgets.QMainWindow):
         )
         # add "open example project" item to the file menu which opens a sub-menu containing the example projects from src/neuroseq/example_projects
         example_projects_menu = menu.addMenu("&Open example project")
+        section_menus: dict[str, QtWidgets.QMenu] = {}
         for name, generator in example_projects.items():
+            target_menu = example_projects_menu
+            section = example_project_sections.get(name)
+            if section is not None:
+                if section not in section_menus:
+                    section_menus[section] = example_projects_menu.addMenu(section)
+                target_menu = section_menus[section]
             add_action(
                 name,
                 lambda checked, _generator=generator: self.load_project(_generator()),
-                example_projects_menu,
+                target_menu,
                 None,
             )
         add_action(
