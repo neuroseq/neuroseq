@@ -124,13 +124,16 @@ class HeatmapWidget(FPLWidget):
 
     @staticmethod
     def _hover_text_for_position(
-        x: float, y: float, n_i: int, n_j: int
+        x: float, y: float, n_i: int, n_j: int, value: float | None = None
     ) -> tuple[int, int, str] | None:
         i = int(np.floor(x + 0.5))
         j = int(np.floor(y + 0.5))
         if i < 0 or j < 0 or i >= n_i or j >= n_j:
             return None
-        return i, j, f"pre i={i}, post j={j}"
+        text = f"pre i={i}, post j={j}"
+        if value is not None:
+            text += f", value={value:.4g}"
+        return i, j, text
 
     @staticmethod
     def _tick_step_from_scale(scale_factor: float) -> int:
@@ -258,7 +261,11 @@ class HeatmapWidget(FPLWidget):
         if hover_text is None:
             self.hover_text.visible = False
             return
-        i, j, text = hover_text
+        i, j, _ = hover_text
+        value = float(self.data[self.idx, j, i])
+        if self.subtract_idx is not None:
+            value -= float(self.data[self.subtract_idx, j, i])
+        text = f"pre i={i}, post j={j}, value={value:.4g}"
         self.hover_text.offset = (float(i), float(j), 200.0)
         self.hover_text.text = text
         self.hover_text.visible = True
