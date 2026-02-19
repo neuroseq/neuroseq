@@ -797,13 +797,14 @@ class Gui(QtWidgets.QMainWindow):
         self.addToolBar(self.toolbar_playback)
         self.menu_view = menu.addMenu("&View")
         self.toolbar_view = QtWidgets.QToolBar("View")
-        self.addToolBar(self.toolbar_view)
         self.toolbar_data = QtWidgets.QToolBar("Data")
         self.addToolBar(self.toolbar_data)
 
         self.menu_experiment = menu.addMenu("&Experiment")
         self.toolbar_experiment = QtWidgets.QToolBar("Experiment")
         self.addToolBar(self.toolbar_experiment)
+        self.addToolBarBreak()
+        self.addToolBar(self.toolbar_view)
 
         self.menu_settings = menu.addMenu("&Settings")
         self.menu_help = menu.addMenu("&Help")
