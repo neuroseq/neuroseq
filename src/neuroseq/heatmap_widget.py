@@ -126,8 +126,8 @@ class HeatmapWidget(FPLWidget):
     def _hover_text_for_position(
         x: float, y: float, n_i: int, n_j: int
     ) -> tuple[int, int, str] | None:
-        i = int(x)
-        j = int(y)
+        i = int(np.floor(x + 0.5))
+        j = int(np.floor(y + 0.5))
         if i < 0 or j < 0 or i >= n_i or j >= n_j:
             return None
         return i, j, f"pre i={i}, post j={j}"
