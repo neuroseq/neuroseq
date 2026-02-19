@@ -164,6 +164,26 @@ def test_gui_open(monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_path: Path) -> Non
     gui.close()
 
 
+def test_gui_toggle_grid(qtbot: QtBot) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    widgets = [
+        gui.stim_editor.stim_widget,
+        gui.trace_widget,
+        gui.spike_widget,
+        gui.data_widget.trace_widget,
+        gui.data_widget.spike_widget,
+    ]
+    assert all(widget.show_grid for widget in widgets)
+    gui.toggle_grid(False)
+    assert all(not widget.show_grid for widget in widgets)
+    gui.toggle_grid(True)
+    assert all(widget.show_grid for widget in widgets)
+    gui.close()
+
+
 class MockSaveLoadOptionsDialog:
     options = SaveLoadOptions(
         include_stim_arrays=True,

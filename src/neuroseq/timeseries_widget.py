@@ -60,6 +60,7 @@ class TimeseriesWidget(FPLWidget):
         self.show_text = True
         self.timeline = Timeline()
         self.grid_lines: GridLines | None = None
+        self.show_grid = True
 
         self.context_menu = QtWidgets.QMenu("Custom analysis", self)
         for custom_analysis_type in CustomAnalysisType:
@@ -116,6 +117,11 @@ class TimeseriesWidget(FPLWidget):
         self.roi.text.visible = self.show_text
         self.text.visible = self.show_text
 
+    def set_grid_visible(self, is_visible: bool) -> None:
+        self.show_grid = is_visible
+        if self.grid_lines is not None:
+            self.grid_lines.visible = is_visible
+
     def _create_y_tick_formatter(self):
         # """Create a y-axis tick formatter that prevents label repetition."""
         state = {"last_label": None}
@@ -160,6 +166,7 @@ class TimeseriesWidget(FPLWidget):
             max_neurons = max(max_neurons, int(self.controller.max_height))
         self.grid_lines = GridLines(max_neurons, max_time_ms)
         self.subplot.add_graphic(self.grid_lines, center=False)
+        self.grid_lines.visible = self.show_grid
         self.controller.add_grid_lines(self.grid_lines)
         self.subplot.add_graphic(self.text, center=False)
         self._set_light_mode()

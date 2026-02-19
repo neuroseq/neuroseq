@@ -581,6 +581,16 @@ class Gui(QtWidgets.QMainWindow):
         ]:
             widget.toggle_selection_text()
 
+    def toggle_grid(self, is_visible: bool) -> None:
+        for widget in [
+            self.stim_editor.stim_widget,
+            self.trace_widget,
+            self.spike_widget,
+            self.data_widget.trace_widget,
+            self.data_widget.spike_widget,
+        ]:
+            widget.set_grid_visible(is_visible)
+
     def choose_max_ram_synapse_plot_matrix(self) -> None:
         new_max_ram, ok = QtWidgets.QInputDialog.getText(
             self,
@@ -1007,6 +1017,15 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             icon=qta.icon("mdi6.format-text"),
+            checkable=True,
+            is_checked=True,
+        )
+        add_action(
+            "Toggle Grid",
+            self.toggle_grid,
+            menu,
+            toolbar,
+            icon=qta.icon("mdi6.grid"),
             checkable=True,
             is_checked=True,
         )
