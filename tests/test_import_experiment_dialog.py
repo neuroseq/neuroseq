@@ -16,6 +16,7 @@ def test_import_experiment_dialog(
 ) -> None:
     for experiment in test_experiments:
         project_nmda.add_experiment(experiment)
+    test_experiment.name = test_experiments[0].name
     dialog = ImportExperimentDialog(test_experiment, project_nmda)
     qtbot.addWidget(dialog)
     dialog.show()
@@ -25,11 +26,12 @@ def test_import_experiment_dialog(
     assert dialog.cmb_experiments.itemText(0) == test_experiments[0].name
     assert dialog.cmb_experiments.itemText(1) == test_experiments[1].name
 
-    # set the name to clash with an existing experiment
-    dialog.txt_new_name.setText(test_experiments[0].name)
-    dialog.new_name_text_edited(dialog.txt_new_name.text())
-    assert not dialog.save_button.isEnabled()
-    # set the name to a unique name
+    # Matching experiment name at dialog open should preselect append mode itself
+    assert dialog.rad_append.isChecked()
+
+    # Switch to option to insert into new experiment that we will input a name for ourselves...
+    dialog.rad_new.setChecked(True)
+    dialog.rad_new_append_toggled()
     dialog.txt_new_name.setText("Unique Experiment Name")
     dialog.new_name_text_edited(dialog.txt_new_name.text())
     assert dialog.save_button.isEnabled()
@@ -44,7 +46,7 @@ def test_import_experiment_dialog(
     assert dialog.cmb_experiments.currentText() == test_experiments[0].name
     assert dialog.cmb_offset.count() == 2
     assert dialog.cmb_offset.itemText(0) == "0 ms"
-    assert dialog.cmb_offset.itemText(1) == "200 ms"
+    assert dialog.cmb_offset.itemText(1) == "200 ms (Append)"
     # select the first offset
     dialog.cmb_offset.setCurrentIndex(0)
     assert dialog.offset == pytest.approx(0.0)
