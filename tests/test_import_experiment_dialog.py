@@ -45,7 +45,7 @@ def test_import_experiment_dialog(
     assert dialog.cmb_experiments.count() == len(test_experiments)
     assert dialog.cmb_experiments.currentText() == test_experiments[0].name
     assert dialog.cmb_offset.count() == 2
-    assert dialog.cmb_offset.itemText(0) == "0 ms"
+    assert dialog.cmb_offset.itemText(0) == "0 ms (partially replace + insert)"
     assert dialog.cmb_offset.itemText(1) == "200 ms (Append)"
     # select the first offset
     dialog.cmb_offset.setCurrentIndex(0)
@@ -59,6 +59,10 @@ def test_import_experiment_dialog(
     dialog.cmb_experiments_index_changed(dialog.cmb_experiments.currentIndex())
     assert dialog.append_experiment_name == test_experiments[1].name
     assert dialog.cmb_offset.count() == 4
+    assert dialog.cmb_offset.itemText(0) == "0 ms (overwrite)"
+    assert dialog.cmb_offset.itemText(2) == "350 ms (overwrite)"
+    assert dialog.cmb_offset.currentIndex() == 3
+    assert dialog.offset == pytest.approx(0.5)
     # select 0.35 offset
     dialog.cmb_offset.setCurrentIndex(2)
     assert dialog.offset == pytest.approx(0.35)
