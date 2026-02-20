@@ -84,7 +84,6 @@ class TraceNormDialog(QtWidgets.QDialog):
 
 class TraceWidget(TimeseriesWidget):
     """A widget that displays a set of traces stacked vertically.
-
     traces should be a 2d array, where the first index is the neuron index and the second index is the time index.
     """
 
