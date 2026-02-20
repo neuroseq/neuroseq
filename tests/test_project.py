@@ -149,11 +149,12 @@ def test_append_experimental_data() -> None:
 def test_add_experimental_data_append_invalid() -> None:
     project = Project()
     project.add_experiment(_make_experiment(n_neurons=6, dt=0.2))
-    with pytest.raises(ValueError) as excinfo:
-        project.append_experimental_data(
-            "test_experiment", 3.7, _make_experiment(n_neurons=7, dt=0.2).data, 3.7
-        )
-    assert "neurons" in str(excinfo.value)
+    # Now allowed and should not raise:
+    # with pytest.raises(ValueError) as excinfo:
+    #     project.append_experimental_data(
+    #         "test_experiment", 3.7, _make_experiment(n_neurons=7, dt=0.2).data, 3.7
+    #     )
+    # assert "neurons" in str(excinfo.value)
     with pytest.raises(ValueError) as excinfo:
         project.append_experimental_data(
             "test_experiment", 3.7, _make_experiment(n_neurons=6, dt=0.15).data, 3.7
@@ -475,14 +476,7 @@ def test_issues_with_appending_experimental_data_invalid(
         ],
     )
 
-    # number of neurons don't match
-    assert "neurons" in project_nmda.issues_with_appending_experimental_data(
-        "exp",
-        [
-            make_trace_data(n_neurons=6, n_timestamps=100, dt=0.001),
-            make_spike_data(n_neurons=6, max_time_secs=0.10),
-        ],
-    )
+    # number of neurons is now allowed to mismatch with current data with replacing
 
     # dt doesn't match
     assert "dt" in project_nmda.issues_with_appending_experimental_data(
