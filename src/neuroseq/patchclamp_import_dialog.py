@@ -47,6 +47,10 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.file_path: Path | None = None
         self.npy_data: np.ndarray | None = None
         self.data_row_count: int = 0
+        self.main_layout: QtWidgets.QBoxLayout | None = None
+        self.left_container: QtWidgets.QWidget | None = None
+        self.right_container: QtWidgets.QWidget | None = None
+        self.left_layout: QtWidgets.QVBoxLayout | None = None
         self.overlay_widget: CellOverlayWidget | None = None
         self.show_stimulus_checkbox: QtWidgets.QCheckBox | None = None
         self.preview_group: QtWidgets.QGroupBox | None = None
