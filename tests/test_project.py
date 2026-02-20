@@ -162,6 +162,24 @@ def test_add_experimental_data_append_invalid() -> None:
     assert "dt" in str(excinfo.value)
 
 
+def test_append_experimental_data_disjoint_neurons_with_offset_raises() -> None:
+    project = Project()
+    project.add_experiment(_make_experiment(n_neurons=6, dt=0.2))
+    disjoint_data = _make_experiment(n_neurons=6, dt=0.2).data
+    assert isinstance(disjoint_data[0], TraceData)
+    assert isinstance(disjoint_data[1], SpikeData)
+    disjoint_data[0].indices = disjoint_data[0].indices + 100
+    disjoint_data[1].spike_indices = disjoint_data[1].spike_indices + 100
+    with pytest.raises(ValueError) as excinfo:
+        project.append_experimental_data("test_experiment", 7.4, disjoint_data, 0.2)
+    assert "non-overlapping neuron IDs" in str(excinfo.value)
+    assert project.experiments["test_experiment"].data[0].traces.shape == (6, 37)
+    assert np.array_equal(
+        project.experiments["test_experiment"].data[0].indices,
+        np.arange(6, dtype=np.uint32),
+    )
+
+
 def test_save_load(
     project_nmda: Project, tmp_path: Path, test_experiment: Experiment
 ) -> None:

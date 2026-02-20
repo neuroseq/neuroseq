@@ -13,6 +13,11 @@ def _suppress_message_boxes(monkeypatch) -> None:
     monkeypatch.setattr(QtWidgets.QMessageBox, "information", lambda *_, **__: None)
     monkeypatch.setattr(QtWidgets.QMessageBox, "warning", lambda *_, **__: None)
     monkeypatch.setattr(QtWidgets.QMessageBox, "critical", lambda *_, **__: None)
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *_, **__: QtWidgets.QMessageBox.StandardButton.Yes,
+    )
 
 
 def _get_patchclamp_trace(experiment) -> TraceData:
