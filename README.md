@@ -60,7 +60,7 @@ neuroseq
 - Examples
 - Control of experiments
 - Import of experimental data
-  
+
 ## GUI Console
 
 The GUI console is a text box at the bottom of the GUI that can be used to run Python code.
