@@ -173,9 +173,13 @@ def test_append_experimental_data_disjoint_neurons_with_offset_raises() -> None:
     with pytest.raises(ValueError) as excinfo:
         project.append_experimental_data("test_experiment", 7.4, disjoint_data, 0.2)
     assert "non-overlapping neuron IDs" in str(excinfo.value)
-    assert project.experiments["test_experiment"].data[0].traces.shape == (6, 37)
+    trace_data = project.experiments["test_experiment"].data[0]
+    assert isinstance(
+        trace_data, TraceData
+    )  # sanity check, and before we have pre-commit typing errors.
+    assert trace_data.traces.shape == (6, 37)
     assert np.array_equal(
-        project.experiments["test_experiment"].data[0].indices,
+        trace_data.indices,
         np.arange(6, dtype=np.uint32),
     )
 
