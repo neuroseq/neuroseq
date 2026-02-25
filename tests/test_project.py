@@ -174,7 +174,7 @@ def test_append_experimental_data_disjoint_spikes_are_additive() -> None:
     spikes = project.experiments["test_experiment"].data[1]
     assert isinstance(trace, TraceData)
     assert isinstance(spikes, SpikeData)
-    assert project.experiments["test_experiment"].data[0].traces.shape[0] == 4
+    assert trace.traces.shape[0] == 4
     assert set(map(int, trace.indices)) == {0, 1, 4, 77}
     assert len(spikes.spike_indices) == 4
     assert set(map(int, spikes.spike_indices)) == {0, 1, 4, 77}
