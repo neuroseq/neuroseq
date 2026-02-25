@@ -13,6 +13,15 @@ from neuroseq.stim_widget import StimWidget
 from neuroseq.utils import InteractMode
 
 
+def get_event_target(widget):
+    # return a windowHandle() for the widget if it exists, otherwise return the widget itself
+    # note that rendercanvas Qt backend may wrap the real interactive widget inside `canvas._subwidget`
+    # so we first check for that and use the subwidget instead if present
+    widget = getattr(widget, "_subwidget", widget)
+    handle = widget.windowHandle()
+    return handle if handle is not None else widget
+
+
 def mouse_click(
     qtbot: QtBot,
     widget: QtGui.QWidget,
@@ -22,7 +31,7 @@ def mouse_click(
 ) -> None:
     qtbot.wait(delay_ms)
     qtbot.mouseClick(
-        widget.windowHandle(),
+        get_event_target(widget),
         button,
         pos=pos,
     )
@@ -38,10 +47,10 @@ def mouse_click_and_drag(
     intermediate_points=4,
 ) -> None:
     qtbot.wait(delay_ms)
-    qtbot.mouseMove(widget.windowHandle(), pos=start)
+    qtbot.mouseMove(get_event_target(widget), pos=start)
     qtbot.wait(delay_ms)
     qtbot.mousePress(
-        widget.windowHandle(),
+        get_event_target(widget),
         button,
         pos=start,
     )
@@ -53,7 +62,7 @@ def mouse_click_and_drag(
     ):
         qtbot.wait(delay_ms)
         qtbot.mouseMove(
-            widget.windowHandle(),
+            get_event_target(widget),
             pos=QtCore.QPoint(int(x), int(y)),
         )
     qtbot.wait(delay_ms)

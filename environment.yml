@@ -2,7 +2,7 @@ name: neuroseq
 channels:
   - conda-forge
 dependencies:
-  - python=3.13
+  - python
   - brian2
   - numpy
   - qtpy
