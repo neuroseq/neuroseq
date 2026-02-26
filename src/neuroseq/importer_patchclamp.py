@@ -56,11 +56,11 @@ def validate_append_import(
         nid for nid in neuron_ids_to_import if nid not in existing_neuron_indices
     ]
 
-    # allow no crossover with existing neuron ids
-    if importing_existing and importing_new:
+    if importing_existing:
+        overlap_ids = ", ".join(map(str, sorted(set(importing_existing))))
         return (
-            "You are importing into some of the existing data and with some separate "
-            f"totally new data, is that deliberate? (totally new={importing_new}, existing={importing_existing})"
+            "Some of the Neuron IDs you specified to import for already have "
+            f"data({overlap_ids}). Data will be overwriten for these neurons. Are you sure?"
         )
     if importing_new and not importing_existing and existing_neuron_indices:
         return (

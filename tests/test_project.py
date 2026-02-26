@@ -146,19 +146,144 @@ def test_append_experimental_data() -> None:
     )
 
 
+def test_append_experimental_data_disjoint_spikes_are_additive() -> None:
+    project = Project()
+    existing_ids = np.array([0, 1], dtype=np.uint32)
+    totally_disjoint_ids = np.array([4, 77], dtype=np.uint32)
+
+    existing = _make_experiment(n_neurons=2, n_timestamps=10, dt=0.1)
+    assert isinstance(existing.data[0], TraceData)
+    assert isinstance(existing.data[1], SpikeData)
+    existing.data[0].indices = existing_ids
+    existing.data[1].spike_indices = existing_ids
+    existing.data[1].spike_times = np.array([0.1, 0.6], dtype=np.float32)
+    project.add_experiment(existing)
+
+    disjoint = _make_experiment(n_neurons=2, n_timestamps=10, dt=0.1)
+    assert isinstance(disjoint.data[0], TraceData)
+    assert isinstance(disjoint.data[1], SpikeData)
+    disjoint.data[0].indices = totally_disjoint_ids
+    disjoint.data[1].spike_indices = totally_disjoint_ids
+    disjoint.data[1].spike_times = np.array([0.2, 0.4], dtype=np.float32)
+
+    project.append_experimental_data(
+        "test_experiment", disjoint.duration, disjoint.data, 0.0
+    )
+
+    trace = project.experiments["test_experiment"].data[0]
+    spikes = project.experiments["test_experiment"].data[1]
+    assert isinstance(trace, TraceData)
+    assert isinstance(spikes, SpikeData)
+    assert trace.traces.shape[0] == 4
+    assert set(map(int, trace.indices)) == {0, 1, 4, 77}
+    assert len(spikes.spike_indices) == 4
+    assert set(map(int, spikes.spike_indices)) == {0, 1, 4, 77}
+
+
 def test_add_experimental_data_append_invalid() -> None:
     project = Project()
     project.add_experiment(_make_experiment(n_neurons=6, dt=0.2))
+    issue = project.issues_with_appending_experimental_data(
+        "test_experiment",
+        _make_experiment(n_neurons=7, dt=0.2).data,
+    )
+    assert issue == ""
+    issue = project.issues_with_appending_experimental_data(
+        "test_experiment",
+        _make_experiment(n_neurons=6, dt=0.15).data,
+    )
+    assert "dt" in issue
+
+
+# split trace and spike assertions for partial overlap behavior.
+def test_append_experimental_data_partial_overlap_traces_replaces_and_adds() -> None:
+    project = Project()
+    existing_ids = np.array([0, 1], dtype=np.uint32)
+    partially_overlapping_ids = np.array([0, 10], dtype=np.uint32)
+
+    existing = _make_experiment(n_neurons=2, n_timestamps=10, dt=0.1)
+    assert isinstance(existing.data[0], TraceData)
+    assert isinstance(existing.data[1], SpikeData)
+    existing.data[0].indices = existing_ids
+    existing.data[0].traces = np.array([[1.0] * 10, [2.0] * 10], dtype=np.float32)
+    existing.data[1].spike_indices = np.array([0, 1, 1], dtype=np.uint32)
+    existing.data[1].spike_times = np.array([0.1, 0.4, 0.8], dtype=np.float32)
+    project.add_experiment(existing)
+
+    incoming = _make_experiment(n_neurons=2, n_timestamps=10, dt=0.1)
+    assert isinstance(incoming.data[0], TraceData)
+    assert isinstance(incoming.data[1], SpikeData)
+    incoming.data[0].indices = partially_overlapping_ids
+    incoming.data[0].traces = np.array([[9.0] * 10, [8.0] * 10], dtype=np.float32)
+    incoming.data[1].spike_indices = partially_overlapping_ids
+    incoming.data[1].spike_times = np.array([0.2, 0.3], dtype=np.float32)
+
+    project.append_experimental_data(
+        "test_experiment", incoming.duration, incoming.data, 0.0
+    )
+
+    trace = project.experiments["test_experiment"].data[0]
+    assert isinstance(trace, TraceData)
+    row_of = {int(neuron): i for i, neuron in enumerate(trace.indices)}
+    assert set(map(int, trace.indices)) == {0, 1, 10}
+    assert trace.traces.shape[0] == 3
+    assert np.all(trace.traces[row_of[0], :] == 9.0)
+    assert np.all(trace.traces[row_of[1], :] == 2.0)
+    assert np.all(trace.traces[row_of[10], :] == 8.0)
+
+
+# split trace and spike assertions for partial overlap behavior.
+def test_append_experimental_data_partial_overlap_spikes_replaces_and_adds() -> None:
+    project = Project()
+    existing_ids = np.array([0, 1], dtype=np.uint32)
+    partially_overlapping_ids = np.array([0, 10], dtype=np.uint32)
+
+    existing = _make_experiment(n_neurons=2, n_timestamps=10, dt=0.1)
+    assert isinstance(existing.data[0], TraceData)
+    assert isinstance(existing.data[1], SpikeData)
+    existing.data[0].indices = existing_ids
+    existing.data[1].spike_indices = existing_ids
+    existing.data[1].spike_times = np.array([0.1, 0.8], dtype=np.float32)
+    project.add_experiment(existing)
+
+    incoming = _make_experiment(n_neurons=2, n_timestamps=10, dt=0.1)
+    assert isinstance(incoming.data[0], TraceData)
+    assert isinstance(incoming.data[1], SpikeData)
+    incoming.data[0].indices = partially_overlapping_ids
+    incoming.data[1].spike_indices = partially_overlapping_ids
+    incoming.data[1].spike_times = np.array([0.2, 0.3], dtype=np.float32)
+
+    project.append_experimental_data(
+        "test_experiment", incoming.duration, incoming.data, 0.0
+    )
+
+    spikes = project.experiments["test_experiment"].data[1]
+    assert isinstance(spikes, SpikeData)
+    assert set(map(int, spikes.spike_indices)) == {0, 1, 10}
+    assert len(spikes.spike_indices) == 3
+    assert np.sum(spikes.spike_indices == 1) == 1
+
+
+def test_append_experimental_data_disjoint_neurons_with_offset_raises() -> None:
+    project = Project()
+    project.add_experiment(_make_experiment(n_neurons=6, dt=0.2))
+    disjoint_data = _make_experiment(n_neurons=6, dt=0.2).data
+    assert isinstance(disjoint_data[0], TraceData)
+    assert isinstance(disjoint_data[1], SpikeData)
+    disjoint_data[0].indices = disjoint_data[0].indices + 100
+    disjoint_data[1].spike_indices = disjoint_data[1].spike_indices + 100
     with pytest.raises(ValueError) as excinfo:
-        project.append_experimental_data(
-            "test_experiment", 3.7, _make_experiment(n_neurons=7, dt=0.2).data, 3.7
-        )
-    assert "neurons" in str(excinfo.value)
-    with pytest.raises(ValueError) as excinfo:
-        project.append_experimental_data(
-            "test_experiment", 3.7, _make_experiment(n_neurons=6, dt=0.15).data, 3.7
-        )
-    assert "dt" in str(excinfo.value)
+        project.append_experimental_data("test_experiment", 7.4, disjoint_data, 0.2)
+    assert "non-overlapping neuron IDs" in str(excinfo.value)
+    trace_data = project.experiments["test_experiment"].data[0]
+    assert isinstance(
+        trace_data, TraceData
+    )  # sanity check, and before we have pre-commit typing errors.
+    assert trace_data.traces.shape == (6, 37)
+    assert np.array_equal(
+        trace_data.indices,
+        np.arange(6, dtype=np.uint32),
+    )
 
 
 def test_save_load(
@@ -475,14 +600,7 @@ def test_issues_with_appending_experimental_data_invalid(
         ],
     )
 
-    # number of neurons don't match
-    assert "neurons" in project_nmda.issues_with_appending_experimental_data(
-        "exp",
-        [
-            make_trace_data(n_neurons=6, n_timestamps=100, dt=0.001),
-            make_spike_data(n_neurons=6, max_time_secs=0.10),
-        ],
-    )
+    # number of neurons is now allowed to mismatch with current data with replacing
 
     # dt doesn't match
     assert "dt" in project_nmda.issues_with_appending_experimental_data(

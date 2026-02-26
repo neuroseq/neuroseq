@@ -163,19 +163,19 @@ class ImportExperimentDialog(QtWidgets.QDialog):
             return
         self.append_experiment_name = self.existing_experiments[index].name
         timepoints = list(self.existing_experiments[index].timepoints)
-        can_replace_at_zero = self._can_replace_at_zero(index)
         option_labels = []
         for i, timepoint in enumerate(timepoints):
             label = f"{timepoint * 1000:.5g} ms"
             if i == len(timepoints) - 1:
                 label = f"{label} (Append)"
-            if len(timepoints) == 2 and i == 0 and can_replace_at_zero:
-                label = f"{label} (replace data)"
+            else:
+                label = f"{label} ({self._insert_mode_label(index, timepoint)})"
             option_labels.append(label)
         self.cmb_offset.addItems(option_labels)
-        # select the last timepoint by default
+        # if there is only start/end, default to start; otherwise default to append
         if self.cmb_offset.count() > 0:
-            self.cmb_offset.setCurrentIndex(0)
+            default_offset_index = 0 if len(timepoints) <= 2 else len(timepoints) - 1
+            self.cmb_offset.setCurrentIndex(default_offset_index)
         # check if appending this data to the selected experiment is valid
         self._refresh_append_error()
 
@@ -184,34 +184,53 @@ class ImportExperimentDialog(QtWidgets.QDialog):
         self.lbl_error.clear()
         self.save_button.setEnabled(True)
 
-    def _can_replace_at_zero(self, experiment_index: int) -> bool:
+    def _insert_mode_label(self, experiment_index: int, offset: float) -> str:
         if experiment_index < 0 or experiment_index >= len(self.existing_experiments):
-            return False
+            return "partially replace + insert"
         existing_experiment = self.existing_experiments[experiment_index]
-        existing_trace_count = sum(
-            datum.traces.shape[0]
-            for datum in existing_experiment.data
-            if isinstance(datum, TraceData)
-        )
-        incoming_trace_count = sum(
-            datum.traces.shape[0]
-            for datum in self.experiment.data
-            if isinstance(datum, TraceData)
-        )
-        if existing_trace_count != incoming_trace_count:
-            return False
+        if offset >= existing_experiment.duration:
+            return "Append"
 
-        existing_spike_count = sum(
-            len(datum.spike_indices)
-            for datum in existing_experiment.data
-            if isinstance(datum, SpikeData)
-        )
-        incoming_spike_count = sum(
-            len(datum.spike_indices)
-            for datum in self.experiment.data
-            if isinstance(datum, SpikeData)
-        )
-        return existing_spike_count == incoming_spike_count
+        has_overlap = False
+        has_new_only = False
+
+        for new_datum in self.experiment.data:
+            existing_datum = next(
+                (
+                    datum
+                    for datum in existing_experiment.data
+                    if datum.name == new_datum.name and type(datum) is type(new_datum)
+                ),
+                None,
+            )
+            if existing_datum is None:
+                continue
+            if isinstance(existing_datum, TraceData) and isinstance(
+                new_datum, TraceData
+            ):
+                existing_ids = set(map(int, existing_datum.indices))
+                new_ids = set(map(int, new_datum.indices))
+            elif isinstance(existing_datum, SpikeData) and isinstance(
+                new_datum, SpikeData
+            ):
+                existing_ids = set(map(int, existing_datum.spike_indices))
+                new_ids = set(map(int, new_datum.spike_indices))
+            elif isinstance(existing_datum, SynapseData) and isinstance(
+                new_datum, SynapseData
+            ):
+                return "overwrite"
+            else:
+                continue
+            if existing_ids & new_ids:
+                has_overlap = True
+            if new_ids - existing_ids:
+                has_new_only = True
+
+        if has_overlap and has_new_only:
+            return "partially replace + insert"
+        if has_overlap:
+            return "overwrite"
+        return "insert alongside existing data"
 
     def _refresh_append_error(self) -> None:
         error = self.project.issues_with_appending_experimental_data(

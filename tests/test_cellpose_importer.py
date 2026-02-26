@@ -6,6 +6,7 @@ import numpy as np
 from PIL import Image
 
 from neuroseq.importer_cellpose import CellPoseImporter
+from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_cellpose import generate_linear_stimulus_mapping
 from neuroseq.utils import neuron_indices_to_colors
 
@@ -96,7 +97,7 @@ def test_load_segmentation_npy(tmp_path):
 
     assert importer.segmentation_data is not None
     assert importer.segmentation_data.dtype == np.int32
-    expected = segmentation - 1
+    expected = np.flipud(segmentation - 1)
     np.testing.assert_array_equal(importer.segmentation_data, expected)
 
 
@@ -147,6 +148,7 @@ def test_load_suite2p_segmentation(tmp_path):
         [[0, 0, -1, -1], [0, 0, -1, -1], [-1, -1, 1, 1], [-1, -1, 1, 1]],
         dtype=np.int32,
     )
+    expected = np.flipud(expected)
 
     np.testing.assert_array_equal(importer.segmentation_data, expected)
 
@@ -174,10 +176,13 @@ def test_load_csv_masks_segmentation(tmp_path):
     assert importer.segmentation_data is not None
     assert importer.segmentation_data.shape == (5, 5)
     assert importer.segmentation_data.dtype == np.int32
-    expected = segmentation - 1
+    expected = np.flipud(segmentation - 1)
     np.testing.assert_array_equal(importer.segmentation_data, expected)
 
-    expected_unique = np.array([-1, 0, 1, 2, 3])
+    expected_unique = np.array(
+        [-1, 0, 1, 2, 3]
+    )  # -1 represents background here now, it is 0 in cellpose by default.
+    # We want however the first cell (1 in cellpose) to map to 0 indexed 0th stim ID for imports by default. Hence the change.
     actual_unique = np.unique(importer.segmentation_data)
     np.testing.assert_array_equal(actual_unique, expected_unique)
 
@@ -214,7 +219,7 @@ def test_cellpose_patchclamp_visual_integration(tmp_path):
     assert cellpose_result.segmentation_array.shape == (50, 50)
 
     # Verify overlay image is properly generated (should be blend of image and segmentation colors)
-    expected_segmentation = segmentation - 1
+    expected_segmentation = np.flipud(segmentation - 1)
     np.testing.assert_array_equal(
         cellpose_result.segmentation_array, expected_segmentation
     )
@@ -411,7 +416,7 @@ def test_cellpose_preview_pixel_differences(tmp_path):
         assert not np.array_equal(cell_pixels, original_cell_pixels)
 
 
-def test_restore_from_result_preserves_colors(tmp_path):
+def test_restore_from_result_preserves_colors_without_custom_mapping(tmp_path):
     """Reopening existing cellpose data should keep legend colors aligned with stored overlay."""
     base_image = np.full((16, 16, 3), 50, dtype=np.uint8)
     segmentation = np.zeros((16, 16), dtype=np.int32)
@@ -437,7 +442,11 @@ def test_restore_from_result_preserves_colors(tmp_path):
 
     assert restored.overlay_image is not None
     assert restored.segmentation_data is not None
-    expected_segmentation = segmentation - 1
+    expected_segmentation = np.flipud(
+        segmentation - 1
+    )  # the cellpose Seg IDs build from top-left towards bottom-right
+    # creating a grid (at least in our implementation of grid drawing uses coordinates based on bottom-left to top-right)
+    # so we flip vertically, but horizontal remains the same. These tests in general need to adapt to that.
     np.testing.assert_array_equal(restored.segmentation_data, expected_segmentation)
 
     restored_legend = restored.get_legend_data()
@@ -449,3 +458,37 @@ def test_restore_from_result_preserves_colors(tmp_path):
         assert np.any(mask)
         pixels = restored.overlay_image[mask]
         assert np.all(pixels == expected_rgb)
+
+
+def test_restore_from_result_preserves_custom_mapping(tmp_path):
+    base_image = np.full((16, 16, 3), 80, dtype=np.uint8)
+    segmentation = np.zeros((16, 16), dtype=np.int32)
+    segmentation[1:8, 1:8] = 2
+    segmentation[9:15, 9:15] = 5
+
+    image_path = tmp_path / "custom_image.png"
+    seg_path = tmp_path / "custom_seg.npy"
+    Image.fromarray(base_image).save(image_path)
+    np.save(seg_path, segmentation)
+
+    importer = CellPoseImporter()
+    importer.load_image_file(str(image_path))
+    importer.load_segmentation_file(seg_path)
+    importer.validate_dimensions()
+    importer.generate_overlay(opacity=1.0)
+
+    custom_mapping = {11: 1, 12: 4}
+    original_result = importer.create_result(
+        image_path,
+        custom_mapping,
+        mapping_strategy="Custom",
+    )
+    cloned_result = clone_cellpose_result(original_result)
+
+    restored = CellPoseImporter()
+    restored.restore_from_result(cloned_result)
+
+    assert cloned_result.mapping_strategy == "Custom"
+    assert cloned_result.stimulus_to_cellpose_mapping == custom_mapping
+    expected_segmentation = np.flipud(segmentation - 1)
+    np.testing.assert_array_equal(restored.segmentation_data, expected_segmentation)
