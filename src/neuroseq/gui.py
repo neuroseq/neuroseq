@@ -41,6 +41,7 @@ from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim_editor import StimEditor
 from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.synthetic_data_dialog import SyntheticDataDialog
+from neuroseq.syscon2_import_dialog import Syscon2ImportDialog
 from neuroseq.time_slider_widget import TimeSliderWidget
 from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.trace_widget import TraceWidget
@@ -658,6 +659,21 @@ class Gui(QtWidgets.QMainWindow):
                 "Cellpose segmentation loaded. Now ready for Patchclamp import",
             )
 
+    def btn_import_syscon2_seq_clicked(self) -> None:
+        if not self.project.stim_arrays:
+            QtWidgets.QMessageBox.information(
+                self,
+                "No stimulation entities",
+                "No stimulation data entities available. Create one before importing a SysCon2 sequence.",
+            )
+            return
+
+        dialog = Syscon2ImportDialog(self.project, parent=self)
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            self.update_project(self.project)
+            if dialog.selected_stim_name:
+                self.cmb_stim.setCurrentText(dialog.selected_stim_name)
+
     def _delete_cellpose_data(self) -> None:
         """Remove stored cellpose data from both GUI and project."""
         self.last_cellpose_import = None
@@ -916,6 +932,14 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             shortcut=None,
             icon=qta.icon("mdi6.import"),
+        )
+        add_action(
+            "Import SysCon2 .seq &File",
+            self.btn_import_syscon2_seq_clicked,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon=qta.icon("mdi6.file-import-outline"),
         )
         menu.addSeparator()
         add_action(
