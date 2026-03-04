@@ -6,7 +6,7 @@ This document explains how NeuroSeq works by scanning the repository code, espec
 - `external_simulation_example/*.py`
 - `tests/test_*.py`
 
-Scan date: 2026-03-03.
+Scan date: 2026-03-04.
 
 ## 1) What NeuroSeq is
 
@@ -49,6 +49,24 @@ Runtime entrypoint:
   - time slider.
 - Creates menus/toolbars and all action handlers.
 - Loads default project if no file was passed.
+
+#### 2.1.1 Default startup state (no file passed)
+
+When NeuroSeq starts without a project filename, `Gui.__init__` loads `default_project()` ("Getting Started Project").
+
+What is shown by default:
+
+- Main window opens maximized.
+- Visible panes: Stimuli, Traces, Spikes, Heatmap, Custom analysis, Console.
+- Hidden pane: generic `Data` pane (off by default).
+- Stim editor is populated immediately with the default stimulation arrays (`stimulus` and `stimulus_inh`), with the first stim selected.
+- Trace/Spike/Synapse comboboxes are populated from simulation monitors (`Simulation :: P / v`, `Simulation :: P`, `Simulation :: Ce / we`), but plots are initially effectively empty until simulation data is produced.
+
+Default theoretical model:
+
+- A conductance-based Hodgkin-Huxley style network model is loaded by default.
+- Neuron group `P` has 40 neurons (32 excitatory `Pe`, 8 inhibitory `Pi`) with HH gating dynamics (`m`, `n`, `h`) and excitatory/inhibitory conductance terms.
+- Synapses include recurrent excitatory `Ce` (with STDP via `Apre/Apost` and `we`) plus `Cei` and `Cie` connections between excitatory and inhibitory subgroups.
 
 ### 2.2 Project state in GUI
 
@@ -290,6 +308,18 @@ Core capabilities:
 Heatmap-like display of stim values with colormap depending on `StimType`.
 Supports background overlay of non-selected stim arrays.
 
+Color/intensity interpretation:
+
+- Color hue indicates stimulus type:
+  - excitation: magenta,
+  - inhibition: blue,
+  - external: diverging purple/green.
+- Brightness/opacity indicates amplitude magnitude relative to the selected array's current scale.
+- For excitation/inhibition arrays, `0` is transparent and larger positive values become more saturated/opaque.
+- For external arrays, display range is symmetric (`-vmax` to `+vmax`): negative values map toward purple, positive values toward green, and values near `0` are transparent.
+- Ramps appear as gradients because amplitude changes over time; constant-amplitude blocks appear as uniform color.
+- Non-selected stim arrays (when "Show all stim arrays" is enabled) are drawn as semi-transparent overlays.
+
 ### 8.4 Stim dialogs
 
 `stim_dialog.py`:
@@ -385,17 +415,219 @@ It clones the model via `B2Model.from_dict(...)`, edits clone state, and on acce
 
 ## 12) Example projects (`example_projects.py`)
 
-Registered GUI examples include:
+The GUI menu `File -> Open example project` shows only functions registered with `@register_example_project(...)`.
 
-- `Getting Started Project`: HH-like network with synapses and stimuli.
-- `non_linear`: compact nonlinear synapse dynamics demonstration.
-- `Hodgkin-Huxley Neuron`: single-neuron electrophysiology/opto-style stim arrays.
-- `Leaky-Integrate-and-Fire Neuron`: single LIF with multiple stim channels.
-- `Network of Hodgkin-Huxley Neurons`: larger E/I network with synapses.
-- `Network of Hodgkin-Huxley Neurons with STDP`: HH network + plasticity rules.
-- `ChR2 in HEK293`: PyRho 6-state ChR2 optogenetic model.
+Currently, 7 projects are selectable:
 
-These functions create fully configured `Project` instances by scripting `B2Model.define_*` plus stim arrays.
+### 12.1 `Getting Started Project`
+
+Purpose:
+
+- Small HH-style E/I network with explicit excitatory + inhibitory stimulation and plastic recurrent E-to-E synapses.
+
+Model:
+
+- 40 neurons total (`P`), split into `Pe` (32 excitatory) and `Pi` (8 inhibitory).
+- Hodgkin-Huxley membrane dynamics (`m`, `n`, `h`) with synaptic conductances `ge`/`gi` and optogenetic-like conductance inputs (`geopto`, `giopto`).
+- Threshold `v > -20 mV`, refractory `3 ms`, solver `exponential_euler`.
+
+Synapses:
+
+- `Ce`: `Pe -> Pe`, condition `i != j`, STDP-like variables `Apre`/`Apost`, weight `we`, clipping to `[-gmax, gmax]`.
+- `Cie`: `Pi -> Pe`, fixed inhibitory weight equation (`wi = 67 nS`), pre-event `gi += wi`.
+- `Cei`: `Pe -> Pi`, fixed excitatory weight equation (`we = 6 nS`), pre-event `ge += we`.
+
+Initialization and monitors:
+
+- Randomized initial `v`, `ge`, `gi`.
+- Monitors for trace (`P / v`), spikes (`P`), and synapse state (`Ce / we`).
+
+Stimuli:
+
+- `stimulus` (Excitation, units `siemens`, `dt=1 ms`): sparse pulses on excitatory neurons around 120 ms, 320 ms, and 520 ms.
+- `stimulus_inh` (Inhibition, units `siemens`, `dt=1 ms`): short inhibitory pulse around 800 ms on excitatory indices.
+
+### 12.2 `non_linear`
+
+Purpose:
+
+- Minimal nonlinear synapse demo (no stimulation arrays) to inspect synaptic state dynamics.
+
+Model:
+
+- Input group `neuron_input` with 2 neurons, ramping `v` (`dv/dt = 1/(10 ms)`), threshold/reset spiking.
+- Target group `neurons` with 1 neuron, state `g`, dynamics `dv/dt = (g-v)/(10 ms)`.
+
+Synapse:
+
+- `S` from input to target with nonlinear state equations:
+  - `dg_syn/dt = -a*g_syn + b*x*(1-g_syn)`
+  - `dx/dt = -c*x`
+  - `g_post = g_syn (summed)`
+  - `on_pre: x += w`
+
+Initialization and monitors:
+
+- Two synaptic weights initialized to `[1.0, 10.0]`.
+- Input neuron initial `v = [0.0, 0.5]` (phase offset).
+- Monitors `g` on synapse (`M`) and target neuron (`Mn`).
+
+### 12.3 `Hodgkin-Huxley Neuron`
+
+Purpose:
+
+- Single-neuron HH electrophysiology example showing response to external current plus excitatory/inhibitory optogenetic channels.
+
+Model:
+
+- 1 neuron (`neuron`) with HH gating (`m`, `n`, `h`), external current term `I_external(t,i)`, and optogenetic-like conductances from `Exc_stimulation`/`Inh_stimulation`.
+- Threshold `v > -20 mV`, refractory `2 ms`, solver `exponential_euler`, neuron `dt = 0.1 ms`.
+
+Initialization and monitors:
+
+- Randomized initial membrane potential around `El`.
+- State monitor for `v` and spike monitor.
+
+Stimuli (`tfinal = 3100 ms`, all `dt = 1 ms`):
+
+- `I_external` (`pA`): ramp segments plus constant steps (e.g., 200/400/600 pA windows).
+- `Exc_stimulation` (`1`): ramp and step blocks between ~1100 ms and 1999 ms.
+- `Inh_stimulation` (`1`): ramp and step blocks between ~2100 ms and 2999 ms.
+
+What the stim-panel color patterns mean for this project:
+
+- On load, the selected stim is typically `I_external` (first stim array), shown in the `External` colormap (diverging: negative=purple, zero=transparent/white, positive=green). Since `I_external` is non-negative here, its active windows appear in green shades.
+- By default, `Show all stim arrays` is enabled, so non-selected stim arrays are overlaid as semi-transparent background layers:
+  - excitation arrays are magenta,
+  - inhibition arrays are blue.
+- Therefore, for this project you usually see:
+  - green pattern blocks around ~100–999 ms (`I_external`),
+  - translucent magenta patterns around ~1100–1999 ms (`Exc_stimulation`),
+  - translucent blue patterns around ~2100–2999 ms (`Inh_stimulation`).
+- Ramps are rendered as color gradients; constant plateaus are rendered as flat-color rectangles.
+
+### 12.4 `Leaky-Integrate-and-Fire Neuron`
+
+Purpose:
+
+- Single-neuron LIF counterpart to the HH single-neuron example, with the same three stimulation channels.
+
+Model:
+
+- 1 neuron with:
+  - `dv/dt = -(v-v0)/tau + Rm*I_stim/tau`
+  - `I_stim = I_ext + I_opto_ext + I_opto_inh`
+  - `I_ext = I_external(t,i)`
+  - optogenetic current terms driven by `Exc_stimulation`/`Inh_stimulation`.
+- Threshold `v > -10 mV`, reset `v=-65 mV`, refractory `2 ms`, `dt=0.1 ms`.
+
+Initialization and monitors:
+
+- Initial `v = 5 mV`.
+- Trace monitor (`v`) and spike monitor.
+
+Stimuli (`tfinal = 3100 ms`, `dt=1 ms`):
+
+- Same temporal pattern style as the single HH project:
+  - `I_external` (`pA`) ramp/step protocol.
+  - `Exc_stimulation` (`mwatt / um2`) ramp/step blocks.
+  - `Inh_stimulation` (`mwatt / um2`) ramp/step blocks.
+
+### 12.5 `Network of Hodgkin-Huxley Neurons`
+
+Purpose:
+
+- Large-scale recurrent E/I HH network example for network-level activity and synapse monitoring.
+
+Model:
+
+- 4000 neurons total (`P`), split into `Pe` (3200 excitatory) and `Pi` (800 inhibitory).
+- HH dynamics with external current term and optogenetic conductance channels.
+- Threshold `v > -20 mV`, refractory `3 ms`, solver `exponential_euler`.
+
+Synapses:
+
+- `Ce`: `Pe -> P`, connection probability `0.02`, variable `we`.
+- `Ci`: `Pi -> P`, connection probability `0.02`, variable `wi`.
+- Pre rules:
+  - `Ce`: `ge += clip(we, 0*nS, 18*nS)`
+  - `Ci`: `gi += clip(wi, 0*nS, 210*nS)`
+
+Initialization and monitors:
+
+- Randomized initial `v`, `ge`, `gi`.
+- Randomized synaptic weights:
+  - `Ce.we = exp(0.25*randn())*6*nS`
+  - `Ci.wi = exp(0.25*randn())*67*nS`
+- Monitors for `P / v`, spikes, and `Ce / we`.
+
+Stimuli (`tfinal = 2000 ms`, `dt=1 ms`):
+
+- `I_external` (`pA`) initialized to zeros.
+- `Exc_stimulation` and `Inh_stimulation` (`mwatt / um2`) contain patterned pulse trains over subsets of neurons (early block-group pulses and later sequential pulses).
+
+### 12.6 `Network of Hodgkin-Huxley Neurons with STDP`
+
+Purpose:
+
+- Medium-size HH E/I network focused on recurrent excitatory plasticity (STDP) with synapse-state monitoring.
+
+Model:
+
+- 40 neurons total (`P`), split into `Pe` (32) and `Pi` (8).
+- HH dynamics with external current and optogenetic conductances.
+- Threshold `v > -20 mV`, refractory `3 ms`, solver `exponential_euler`.
+
+Synapses:
+
+- Plastic excitatory synapse `Ce` (`Pe -> P`):
+  - probability `0.02`, condition `i != j`
+  - state: `we`, `Apre`, `Apost`
+  - on-pre: increase `ge`, update `Apre`, update/clip `we`
+  - on-post: update `Apost`, update/clip `we`
+  - parameters: `taupre`, `taupost`, `dApre`, `dApost`, `gmax`.
+- Inhibitory synapse `Ci` (`Pi -> P`), probability `0.02`, pre rule `gi += clip(wi, 0*nS, 210*nS)`.
+
+Initialization and monitors:
+
+- Randomized initial `v`, `ge`, `gi`.
+- Randomized `Ce.we` and `Ci.wi`.
+- Monitors for `P / v`, spikes, and `Ce / we`.
+
+Stimuli (`tfinal = 2000 ms`, `dt=1 ms`):
+
+- `I_external` (`pA`) is zero baseline.
+- `Exc_stimulation` and `Inh_stimulation` (`mwatt / um2`) use the same pulse-pattern style as the non-STDP network example.
+
+### 12.7 `ChR2 in HEK293`
+
+Purpose:
+
+- Photocurrent-focused PyRho 6-state ChR2 model in a voltage-clamp-like setup across multiple clamp voltages.
+
+Model:
+
+- 10 neurons (`G0`), with `dt = 0.1 ms`, `tfinal = 1000 ms`.
+- Membrane equation in clamp form: `dv/dt = (E_vc-v)/tau_m`.
+- Full PyRho 6-state channel equations (`C_1`, `C_2`, `I_1`, `I_2`, `O_1`, `O_2`) with light-dependent transitions and photocurrent `I`.
+- Threshold `v > v_t0` with `v_t0 = 10000 mV` (effectively suppresses standard spiking behavior for this protocol), reset `v=E_m`, refractory `t_ref`.
+
+Initialization and monitors:
+
+- Per-neuron clamp potentials and initial voltages from `-100 mV` to `80 mV` (step `20 mV`).
+- Initial channel state mainly in `C_1`.
+- State monitors for:
+  - voltage (`v`)
+  - photocurrent (`I`)
+  - all channel states (`C_1`, `C_2`, `O_1`, `O_2`, `I_1`, `I_2`).
+
+Stimulus:
+
+- Single stim array `stim` (Excitation, units `1`, `dt=1 ms`) with square pulse amplitude `0.00442` from 100 ms to 700 ms.
+
+Notes:
+
+- Additional project-generating functions in `example_projects.py` are present but not registered, so they do not appear in the GUI example menu.
 
 ## 13) External simulation plugin interface
 
