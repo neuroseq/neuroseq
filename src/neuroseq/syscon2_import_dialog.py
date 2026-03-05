@@ -8,6 +8,7 @@ from qtpy.compat import getopenfilename
 
 from neuroseq.importer_syscon2 import SysconSequence
 from neuroseq.importer_syscon2 import get_timed_objects
+from neuroseq.importer_syscon2 import group_timed_objects_by_neuron_target
 from neuroseq.importer_syscon2 import import_sequence_into_stim_array
 from neuroseq.importer_syscon2 import parse_syscon2_seq_file
 
@@ -200,6 +201,12 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
     def _build_preview_text(self, sequence: SysconSequence) -> str:
         timed_shape_objects = get_timed_objects(sequence, include_non_shape=False)
         timed_all_objects = get_timed_objects(sequence, include_non_shape=True)
+        grouped_shape_objects = group_timed_objects_by_neuron_target(
+            sequence, include_non_shape=False
+        )
+        grouped_all_objects = group_timed_objects_by_neuron_target(
+            sequence, include_non_shape=True
+        )
 
         lines: list[str] = [
             f"Header version={sequence.header.get('version', '?')}",
@@ -207,7 +214,11 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
             f"Runs={sequence.header.get('runs', '?')}",
             f"Objects total={len(sequence.objects)}",
             f"Timed shape/entity objects={len(timed_shape_objects)}",
+            f"Estimated neuron channels (shape/entity)={len(grouped_shape_objects)}",
+            "Overlap-merged shape/entity objects="
+            f"{max(0, len(timed_shape_objects) - len(grouped_shape_objects))}",
             f"Timed objects (all types)={len(timed_all_objects)}",
+            f"Estimated neuron channels (all types)={len(grouped_all_objects)}",
             "",
             "First objects:",
         ]
@@ -246,10 +257,16 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
             )
             info_lines = [
                 f"Imported into '{stim_array.name}'.",
-                f"Mapped objects: {result.mapped_objects}/{result.eligible_objects}",
-                f"Dropped objects (insufficient target neurons): {result.dropped_objects}",
+                f"Eligible timed objects: {result.eligible_objects}",
+                f"Neuron channels after overlap grouping: {result.grouped_objects}",
+                f"Mapped neuron channels into target: {result.mapped_objects}",
+                f"Unmapped channels (insufficient target neurons): {result.dropped_objects}",
                 f"Generated timepoints: {result.generated_timepoints}",
             ]
+            if result.merged_objects > 0:
+                info_lines.append(
+                    f"Merged overlapping circular objects: {result.merged_objects}"
+                )
             if result.truncated_timepoints > 0:
                 info_lines.append(
                     f"Truncated timepoints: {result.truncated_timepoints}"

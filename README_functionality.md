@@ -17,6 +17,7 @@ NeuroSeq is a Qt desktop GUI around a Brian2 simulation model plus data import/e
 - run and continue simulations,
 - inspect traces/spikes/synapse matrices,
 - import experimental data (Suite2p, Cellpose, patch-clamp),
+- import SysCon2 `.seq` stimulation timelines into existing stim arrays,
 - save/load full projects,
 - run external simulation functions,
 - generate synthetic datasets.
@@ -386,6 +387,32 @@ The result is stored as `CellposeImportResult` in project state.
 - appends into existing experiment at selected timepoint,
   with validation/error messaging.
 
+### 9.5 SysCon2 `.seq` import (stimulation data)
+
+`syscon2_import_dialog.py` + `importer_syscon2.py`:
+
+- GUI entrypoint is `File -> Import SysCon2 .seq File`; import is only enabled when at least one stim array exists in the project.
+- Parser accepts `.seq` files whose first non-empty line is either `nohash` or a 16-byte hash string (`AA-BB-...` format).
+- Header is parsed as `key=value` lines before the first object block; required keys are `version`, `scanmode`, `runs`, `DeviceSequenceID`, `invertedportcnt`, `AutoTriggerRulesEnabled`, `AutoTriggerRulesCount`, `timelinezoomfactor`, `timelineviewposx`, `timelineviewposy`.
+- Object blocks must be `[index] ... [/index]`; malformed/mismatched block markers raise an import error.
+- Each object extracts timing from `TimelineInfo0_*`: `starttime` (us), `repeats`, `Stepsize`, and `Intensity_0`; values are clamped/sanitized (`start>=0`, `repeats>=0`, `step>=1`).
+- Eligibility defaults to timed `Shape`/`Entity` objects; optional dialog checkbox includes non-shape timed objects (`TTLPulse`, `WaitForTTL`, ...).
+- If `Intensity_0` is missing, default intensity is `1.0` for `Shape`/`Entity` and `0.0` for other object types.
+- Circular overlap-merging is applied for geometry type `2` (`..._Type=2`) on shape/entity objects so multiple objects can map to one neuron channel.
+- Circle radius is derived from center + `Vertex1` coordinates (with `Vertex0` fallback for compatibility if `Vertex1` is absent).
+- Two circles are treated as the same neuron target when `distance(centers) <= r1 + r2`; touching circles count as overlap, and overlap groups are transitive.
+- Mapping order is deterministic: grouped timed objects are assigned to neuron channels in file order; non-circular objects remain separate channels.
+- Event time conversion uses: `t_us = start_us + k * Stepsize * tick_resolution_us`, with default tick resolution `500 us` (user-configurable in dialog).
+- Sample index conversion uses `round(t / dt)` (`np.rint`) and de-duplicates identical indices produced by sub-sample timing.
+- For `Entity` objects, each event has default duration `16.666 ms` and fills `ceil(16.666ms / dt)` timepoints; non-entity events fill one timepoint.
+- If repeated/overlapping events hit the same channel/time window, amplitude merge uses `max(existing, incoming)`.
+- Safety cap limits each object to `500000` events during expansion; excess repeats are counted as truncated repeats in the result report.
+- Import target controls: `neuron_offset` chooses starting destination neuron column; channels beyond available target neurons are dropped and reported.
+- Time-axis handling: `extend_to_fit=True` grows the target stim array to imported duration; otherwise overflow is truncated and reported.
+- Value-write mode: `replace_existing=True` replaces destination values; otherwise imported values are merged with existing data by pointwise `max`.
+- Preview panel reports parsed header fields, object counts, timed-object counts, estimated grouped channels, and overlap-merged counts before import.
+- Completion dialog reports eligible objects, grouped channels, mapped/unmapped channels, generated timepoints, merged overlaps, and any truncation counters.
+
 ## 10) Synthetic data generation (`synthetic_data_dialog.py`)
 
 Two synthetic workflows:
@@ -704,6 +731,7 @@ The following table maps each `src/neuroseq` file to primary functionality.
 | `import_experiment_dialog.py`        | append-vs-new experiment import chooser                                  |
 | `importer_cellpose.py`               | cellpose loading, normalization, overlays, mapping payload               |
 | `importer_patchclamp.py`             | patch-clamp conversion and spike extraction pipeline                     |
+| `importer_syscon2.py`                | SysCon2 `.seq` parser, overlap grouping, and stim-array conversion       |
 | `importer_suite2p.py`                | suite2p contrast/normalize/convert pipeline                              |
 | `io.py`                              | zip/json/npy persistence and typed reconstruction                        |
 | `model_editor.py`                    | parameter-tree model editing dialog                                      |
@@ -722,6 +750,7 @@ The following table maps each `src/neuroseq` file to primary functionality.
 | `stim_intensity_dialog.py`           | draw-intensity profile dialog                                            |
 | `stim_widget.py`                     | stim image plot and overlays                                             |
 | `stimulation_generator_dialog.py`    | hardware script export dialog                                            |
+| `syscon2_import_dialog.py`           | GUI preview/options flow for SysCon2 `.seq` stim import                  |
 | `synthetic_data_dialog.py`           | synthetic patch/imaging data generation                                  |
 | `text.py`                            | hover text graphic                                                       |
 | `time_slider_widget.py`              | playback/seek timeline controller                                        |
@@ -738,7 +767,7 @@ The `tests/` folder validates major subsystems:
 - GUI integration/actions: `test_gui.py`, `test_gui_settings.py`.
 - Visualization widgets: trace/spike/heatmap/time-slider/gridlines/data-widget tests.
 - Editing tools: stim editor/dialog/intensity/modifier tests.
-- Importers/dialogs: suite2p, cellpose, patch-clamp, experiment import tests.
+- Importers/dialogs: suite2p, cellpose, patch-clamp, SysCon2, experiment import tests.
 - Persistence and project logic: `test_io.py`, `test_project.py`, `test_save_load_options.py`.
 - Utilities: `test_utils.py`.
 

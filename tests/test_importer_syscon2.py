@@ -137,6 +137,204 @@ Entity0_reversed=False
 """
 
 
+def _sample_seq_text_overlapping_circular_entities() -> str:
+    return """nohash
+version=3
+scanmode=Accurate
+runs=1
+DeviceSequenceID=1
+invertedportcnt=1
+inverted0=UGA-42 TTL Out 1
+AutoTriggerRulesEnabled=False
+AutoTriggerRulesCount=0
+timelinezoomfactor=10
+timelineviewposx=0
+timelineviewposy=0
+[0]
+ID=1
+type=Entity
+TotalTimings=1
+TimelineInfo0_TimelineIndex=0
+TimelineInfo0_starttime=0
+TimelineInfo0_description=
+TimelineInfo0_repeats=0
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=
+TimelineInfo0_Intensity_0=0.2
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Entity0_Type=2
+Entity0_CenterX=0
+Entity0_CenterY=0
+Entity0_CenterZ=0
+Entity0_VertexCount=2
+Entity0_Vertex0_X=1
+Entity0_Vertex0_Y=0
+Entity0_Vertex0_Z=0
+Entity0_Vertex1_X=10
+Entity0_Vertex1_Y=0
+Entity0_Vertex1_Z=0
+[/0]
+[1]
+ID=2
+type=Entity
+TotalTimings=1
+TimelineInfo0_TimelineIndex=0
+TimelineInfo0_starttime=1000
+TimelineInfo0_description=
+TimelineInfo0_repeats=0
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=
+TimelineInfo0_Intensity_0=0.7
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Entity1_Type=2
+Entity1_CenterX=15
+Entity1_CenterY=0
+Entity1_CenterZ=0
+Entity1_VertexCount=2
+Entity1_Vertex0_X=1
+Entity1_Vertex0_Y=0
+Entity1_Vertex0_Z=0
+Entity1_Vertex1_X=10
+Entity1_Vertex1_Y=0
+Entity1_Vertex1_Z=0
+[/1]
+[2]
+ID=3
+type=Entity
+TotalTimings=1
+TimelineInfo0_TimelineIndex=0
+TimelineInfo0_starttime=2000
+TimelineInfo0_description=
+TimelineInfo0_repeats=0
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=
+TimelineInfo0_Intensity_0=0.5
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Entity2_Type=2
+Entity2_CenterX=50
+Entity2_CenterY=0
+Entity2_CenterZ=0
+Entity2_VertexCount=2
+Entity2_Vertex0_X=1
+Entity2_Vertex0_Y=0
+Entity2_Vertex0_Z=0
+Entity2_Vertex1_X=10
+Entity2_Vertex1_Y=0
+Entity2_Vertex1_Z=0
+[/2]
+"""
+
+
+def _sample_seq_text_non_overlapping_circular_entities() -> str:
+    return """nohash
+version=3
+scanmode=Accurate
+runs=1
+DeviceSequenceID=1
+invertedportcnt=1
+inverted0=UGA-42 TTL Out 1
+AutoTriggerRulesEnabled=False
+AutoTriggerRulesCount=0
+timelinezoomfactor=10
+timelineviewposx=0
+timelineviewposy=0
+[0]
+ID=1
+type=Entity
+TotalTimings=1
+TimelineInfo0_TimelineIndex=0
+TimelineInfo0_starttime=0
+TimelineInfo0_description=
+TimelineInfo0_repeats=0
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=
+TimelineInfo0_Intensity_0=0.2
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Entity0_Type=2
+Entity0_CenterX=0
+Entity0_CenterY=0
+Entity0_CenterZ=0
+Entity0_VertexCount=2
+Entity0_Vertex0_X=30
+Entity0_Vertex0_Y=0
+Entity0_Vertex0_Z=0
+Entity0_Vertex1_X=10
+Entity0_Vertex1_Y=0
+Entity0_Vertex1_Z=0
+[/0]
+[1]
+ID=2
+type=Entity
+TotalTimings=1
+TimelineInfo0_TimelineIndex=0
+TimelineInfo0_starttime=1000
+TimelineInfo0_description=
+TimelineInfo0_repeats=0
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=
+TimelineInfo0_Intensity_0=0.7
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Entity1_Type=2
+Entity1_CenterX=25
+Entity1_CenterY=0
+Entity1_CenterZ=0
+Entity1_VertexCount=2
+Entity1_Vertex0_X=30
+Entity1_Vertex0_Y=0
+Entity1_Vertex0_Z=0
+Entity1_Vertex1_X=10
+Entity1_Vertex1_Y=0
+Entity1_Vertex1_Z=0
+[/1]
+"""
+
+
+def _sample_seq_text_single_entity() -> str:
+    return """nohash
+version=3
+scanmode=Accurate
+runs=1
+DeviceSequenceID=1
+invertedportcnt=1
+inverted0=UGA-42 TTL Out 1
+AutoTriggerRulesEnabled=False
+AutoTriggerRulesCount=0
+timelinezoomfactor=10
+timelineviewposx=0
+timelineviewposy=0
+[0]
+ID=1
+type=Entity
+TotalTimings=1
+TimelineInfo0_TimelineIndex=0
+TimelineInfo0_starttime=0
+TimelineInfo0_description=
+TimelineInfo0_repeats=0
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=
+TimelineInfo0_Intensity_0=0.42
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Entity0_Type=2
+Entity0_CenterX=0
+Entity0_CenterY=0
+Entity0_CenterZ=0
+Entity0_VertexCount=2
+Entity0_Vertex0_X=1
+Entity0_Vertex0_Y=0
+Entity0_Vertex0_Z=0
+Entity0_Vertex1_X=10
+Entity0_Vertex1_Y=0
+Entity0_Vertex1_Z=0
+[/0]
+"""
+
+
 def test_parse_syscon2_seq_file(tmp_path: Path) -> None:
     seq_path = tmp_path / "sample.seq"
     seq_path.write_text(_sample_seq_text(), encoding="utf-8")
@@ -219,6 +417,87 @@ def test_sequence_to_stim_values_include_non_shape(tmp_path: Path) -> None:
     assert result.eligible_objects == 3
     assert result.mapped_objects == 3
     assert result.dropped_objects == 0
+
+
+def test_sequence_to_stim_values_merges_overlapping_circular_entities(
+    tmp_path: Path,
+) -> None:
+    seq_path = tmp_path / "overlap_entities.seq"
+    seq_path.write_text(
+        _sample_seq_text_overlapping_circular_entities(),
+        encoding="utf-8",
+    )
+    sequence = parse_syscon2_seq_file(seq_path)
+
+    values, result = sequence_to_stim_values(
+        sequence,
+        dt_seconds=0.001,
+        n_neurons=8,
+        tick_resolution_us=500,
+        include_non_shape=False,
+    )
+
+    assert result.eligible_objects == 3
+    assert result.grouped_objects == 2
+    assert result.merged_objects == 1
+    assert result.mapped_objects == 2
+    assert result.dropped_objects == 0
+
+    # overlapping circles [0] and [1] map to the same neuron channel
+    assert values[0, 0] == 0.2
+    assert values[1, 0] == 0.7
+    # non-overlapping circle [2] maps to the next channel
+    assert values[2, 1] == 0.5
+    assert np.all(values[:, 2:] == 0.0)
+
+
+def test_sequence_to_stim_values_keeps_non_overlapping_circular_entities_separate(
+    tmp_path: Path,
+) -> None:
+    seq_path = tmp_path / "nonoverlap_entities.seq"
+    seq_path.write_text(
+        _sample_seq_text_non_overlapping_circular_entities(),
+        encoding="utf-8",
+    )
+    sequence = parse_syscon2_seq_file(seq_path)
+
+    values, result = sequence_to_stim_values(
+        sequence,
+        dt_seconds=0.001,
+        n_neurons=8,
+        tick_resolution_us=500,
+        include_non_shape=False,
+    )
+
+    assert result.eligible_objects == 2
+    assert result.grouped_objects == 2
+    assert result.merged_objects == 0
+    assert result.mapped_objects == 2
+    assert values[0, 0] == 0.2
+    assert values[1, 1] == 0.7
+
+
+def test_sequence_to_stim_values_entity_has_default_duration_16_666ms(
+    tmp_path: Path,
+) -> None:
+    seq_path = tmp_path / "single_entity.seq"
+    seq_path.write_text(_sample_seq_text_single_entity(), encoding="utf-8")
+    sequence = parse_syscon2_seq_file(seq_path)
+
+    values, result = sequence_to_stim_values(
+        sequence,
+        dt_seconds=0.001,
+        n_neurons=2,
+        tick_resolution_us=500,
+        include_non_shape=False,
+    )
+
+    # 16.666ms at dt=1ms -> ceil(16.666) = 17 samples
+    assert result.mapped_objects == 1
+    assert values.shape[0] >= 17
+    assert np.all(values[:17, 0] == 0.42)
+    assert np.all(values[17:, 0] == 0.0)
+    assert np.all(values[:, 1] == 0.0)
 
 
 def test_import_sequence_into_stim_array_extends_and_offsets(tmp_path: Path) -> None:

@@ -29,6 +29,7 @@ _REQUIRED_HEADER_KEYS = (
 )
 
 _MAPPABLE_SHAPE_TYPES = {"shape", "entity"}
+_ENTITY_DEFAULT_DURATION_SECONDS = 16.666e-3
 
 
 @dataclass
@@ -53,6 +54,8 @@ class SysconSequence:
 class SysconImportResult:
     total_objects: int
     eligible_objects: int
+    grouped_objects: int
+    merged_objects: int
     mapped_objects: int
     dropped_objects: int
     generated_timepoints: int
@@ -202,6 +205,165 @@ def get_timed_objects(
     return eligible
 
 
+@dataclass
+class _CircularObjectGeometry:
+    center_x: float
+    center_y: float
+    radius: float
+
+
+def _find_property_value_by_suffix(
+    properties: dict[str, str],
+    suffixes: tuple[str, ...],
+) -> str | None:
+    lower_keys = {key.lower(): value for key, value in properties.items()}
+    for suffix in suffixes:
+        for key, value in lower_keys.items():
+            if key.endswith(suffix):
+                return value
+    return None
+
+
+def _parse_shape_entity_geometry_type(obj: SysconSequenceObject) -> int | None:
+    for key, value in obj.properties.items():
+        lower_key = key.lower()
+        if not (lower_key.startswith("shape") or lower_key.startswith("entity")):
+            continue
+        if not lower_key.endswith("_type"):
+            continue
+        return _safe_int(value, default=-1)
+    return None
+
+
+def _extract_circular_geometry(
+    obj: SysconSequenceObject,
+) -> _CircularObjectGeometry | None:
+    # In SysCon2 files, circular ROIs are encoded as shape/entity type 2.
+    # The radius is defined by the center and Vertex1 coordinates, with
+    # vertex coordinates stored relative to the center.
+    shape_type = _parse_shape_entity_geometry_type(obj)
+    if shape_type != 2:
+        return None
+
+    center_x_raw = _find_property_value_by_suffix(
+        obj.properties, ("_centerx", "centerx")
+    )
+    center_y_raw = _find_property_value_by_suffix(
+        obj.properties, ("_centery", "centery")
+    )
+    vertex_x_raw = _find_property_value_by_suffix(
+        obj.properties, ("_vertex1_x", "_vertex1x", "vertex1_x", "vertex1x")
+    )
+    vertex_y_raw = _find_property_value_by_suffix(
+        obj.properties, ("_vertex1_y", "_vertex1y", "vertex1_y", "vertex1y")
+    )
+    # Compatibility fallback for sequences that only contain Vertex0.
+    if vertex_x_raw is None or vertex_y_raw is None:
+        vertex_x_raw = _find_property_value_by_suffix(
+            obj.properties, ("_vertex0_x", "_vertex0x", "vertex0_x", "vertex0x")
+        )
+        vertex_y_raw = _find_property_value_by_suffix(
+            obj.properties, ("_vertex0_y", "_vertex0y", "vertex0_y", "vertex0y")
+        )
+    if (
+        center_x_raw is None
+        or center_y_raw is None
+        or vertex_x_raw is None
+        or vertex_y_raw is None
+    ):
+        return None
+
+    center_x = _safe_float(center_x_raw, default=0.0)
+    center_y = _safe_float(center_y_raw, default=0.0)
+    vertex_x = _safe_float(vertex_x_raw, default=0.0)
+    vertex_y = _safe_float(vertex_y_raw, default=0.0)
+    radius = float(np.hypot(vertex_x, vertex_y))
+    if radius <= 0:
+        return None
+    return _CircularObjectGeometry(
+        center_x=center_x,
+        center_y=center_y,
+        radius=radius,
+    )
+
+
+def _event_duration_timepoints_for_object(
+    obj: SysconSequenceObject,
+    *,
+    dt_seconds: float,
+) -> int:
+    object_type = obj.object_type.strip().lower()
+    if object_type == "entity":
+        return max(1, int(np.ceil(_ENTITY_DEFAULT_DURATION_SECONDS / dt_seconds)))
+    return 1
+
+
+def _group_eligible_objects_by_target_neuron(
+    eligible_objects: list[SysconSequenceObject],
+) -> list[list[SysconSequenceObject]]:
+    if len(eligible_objects) == 0:
+        return []
+
+    circle_geometry_by_index: dict[int, _CircularObjectGeometry] = {}
+    for idx, obj in enumerate(eligible_objects):
+        geometry = _extract_circular_geometry(obj)
+        if geometry is not None:
+            circle_geometry_by_index[idx] = geometry
+
+    parent = list(range(len(eligible_objects)))
+
+    def find(idx: int) -> int:
+        while parent[idx] != idx:
+            parent[idx] = parent[parent[idx]]
+            idx = parent[idx]
+        return idx
+
+    def union(a: int, b: int) -> None:
+        root_a = find(a)
+        root_b = find(b)
+        if root_a != root_b:
+            parent[root_b] = root_a
+
+    circle_indices = sorted(circle_geometry_by_index.keys())
+    for i, idx_a in enumerate(circle_indices):
+        ga = circle_geometry_by_index[idx_a]
+        for idx_b in circle_indices[i + 1 :]:
+            gb = circle_geometry_by_index[idx_b]
+            distance = float(
+                np.hypot(ga.center_x - gb.center_x, ga.center_y - gb.center_y)
+            )
+            # If circles overlap or touch, treat as the same target neuron.
+            if distance <= (ga.radius + gb.radius):
+                union(idx_a, idx_b)
+
+    groups: list[list[SysconSequenceObject]] = []
+    root_to_group_index: dict[int, int] = {}
+    for idx, obj in enumerate(eligible_objects):
+        if idx in circle_geometry_by_index:
+            root = find(idx)
+            if root not in root_to_group_index:
+                root_to_group_index[root] = len(groups)
+                groups.append([])
+            groups[root_to_group_index[root]].append(obj)
+        else:
+            groups.append([obj])
+    return groups
+
+
+def group_timed_objects_by_neuron_target(
+    sequence: SysconSequence,
+    *,
+    include_non_shape: bool = False,
+) -> list[list[SysconSequenceObject]]:
+    """Group timed objects by target neuron.
+
+    Circular shape/entity objects that overlap are grouped together and mapped
+    to the same neuron channel.
+    """
+    eligible_objects = get_timed_objects(sequence, include_non_shape=include_non_shape)
+    return _group_eligible_objects_by_target_neuron(eligible_objects)
+
+
 def sequence_to_stim_values(
     sequence: SysconSequence,
     *,
@@ -218,51 +380,69 @@ def sequence_to_stim_values(
     if tick_resolution_us <= 0:
         raise ValueError("tick_resolution_us must be positive")
 
-    eligible_objects = get_timed_objects(sequence, include_non_shape=include_non_shape)
-    mapped_objects = min(n_neurons, len(eligible_objects))
+    grouped_objects = group_timed_objects_by_neuron_target(
+        sequence, include_non_shape=include_non_shape
+    )
+    eligible_objects_count = sum(len(group) for group in grouped_objects)
+    grouped_objects_count = len(grouped_objects)
+    mapped_objects = min(n_neurons, grouped_objects_count)
+    dropped_objects = grouped_objects_count - mapped_objects
 
     truncated_repeats = 0
-    max_time_us = 0
-    for obj in eligible_objects[:mapped_objects]:
-        event_count = obj.repeats + 1
-        if event_count > max_events_per_object:
-            truncated_repeats += event_count - max_events_per_object
-            event_count = max_events_per_object
-        if event_count <= 0:
-            continue
-        last_time_us = obj.start_time_us + (
-            (event_count - 1) * obj.step_size * tick_resolution_us
-        )
-        max_time_us = max(max_time_us, last_time_us)
+    max_timepoints = 1
+    for object_group in grouped_objects[:mapped_objects]:
+        for obj in object_group:
+            event_count = obj.repeats + 1
+            if event_count > max_events_per_object:
+                truncated_repeats += event_count - max_events_per_object
+                event_count = max_events_per_object
+            if event_count <= 0:
+                continue
+            last_time_us = obj.start_time_us + (
+                (event_count - 1) * obj.step_size * tick_resolution_us
+            )
+            last_time_index = int(np.rint((last_time_us * 1e-6) / dt_seconds))
+            duration_timepoints = _event_duration_timepoints_for_object(
+                obj, dt_seconds=dt_seconds
+            )
+            max_timepoints = max(max_timepoints, last_time_index + duration_timepoints)
 
-    n_timepoints = int(round(max_time_us * 1e-6 / dt_seconds)) + 1
-    n_timepoints = max(1, n_timepoints)
+    n_timepoints = max_timepoints
     values = np.zeros((n_timepoints, n_neurons), dtype=np.float32)
 
-    for neuron_idx, obj in enumerate(eligible_objects[:mapped_objects]):
-        event_count = obj.repeats + 1
-        if event_count > max_events_per_object:
-            event_count = max_events_per_object
-        if event_count <= 0:
-            continue
-        times_us = obj.start_time_us + np.arange(event_count, dtype=np.int64) * (
-            obj.step_size * tick_resolution_us
-        )
-        time_indices = np.rint((times_us * 1e-6) / dt_seconds).astype(np.int64)
-        valid_time_indices = np.unique(
-            time_indices[(time_indices >= 0) & (time_indices < n_timepoints)]
-        )
-        if valid_time_indices.size == 0:
-            continue
-        values[valid_time_indices, neuron_idx] = np.maximum(
-            values[valid_time_indices, neuron_idx], obj.intensity
-        )
+    for neuron_idx, object_group in enumerate(grouped_objects[:mapped_objects]):
+        for obj in object_group:
+            event_count = obj.repeats + 1
+            if event_count > max_events_per_object:
+                event_count = max_events_per_object
+            if event_count <= 0:
+                continue
+            times_us = obj.start_time_us + np.arange(event_count, dtype=np.int64) * (
+                obj.step_size * tick_resolution_us
+            )
+            time_indices = np.rint((times_us * 1e-6) / dt_seconds).astype(np.int64)
+            valid_time_indices = np.unique(
+                time_indices[(time_indices >= 0) & (time_indices < n_timepoints)]
+            )
+            if valid_time_indices.size == 0:
+                continue
+            duration_timepoints = _event_duration_timepoints_for_object(
+                obj, dt_seconds=dt_seconds
+            )
+            for time_index in valid_time_indices:
+                start_idx = int(time_index)
+                end_idx = min(n_timepoints, start_idx + duration_timepoints)
+                values[start_idx:end_idx, neuron_idx] = np.maximum(
+                    values[start_idx:end_idx, neuron_idx], obj.intensity
+                )
 
     result = SysconImportResult(
         total_objects=len(sequence.objects),
-        eligible_objects=len(eligible_objects),
+        eligible_objects=eligible_objects_count,
+        grouped_objects=grouped_objects_count,
+        merged_objects=max(0, eligible_objects_count - grouped_objects_count),
         mapped_objects=mapped_objects,
-        dropped_objects=len(eligible_objects) - mapped_objects,
+        dropped_objects=dropped_objects,
         generated_timepoints=n_timepoints,
         truncated_timepoints=0,
         truncated_repeats=truncated_repeats,
@@ -323,10 +503,11 @@ def import_sequence_into_stim_array(
 
     stim_array.values = target_values
     logger.info(
-        "Imported SysCon2 sequence into '%s': mapped=%d/%d objects, target shape=%s",
+        "Imported SysCon2 sequence into '%s': mapped_channels=%d/%d eligible_objects (merged=%d), target shape=%s",
         stim_array.name,
         result.mapped_objects,
         result.eligible_objects,
+        result.merged_objects,
         target_values.shape,
     )
     return result
