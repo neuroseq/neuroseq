@@ -206,12 +206,6 @@ def get_timed_objects(
     return eligible
 
 
-@dataclass
-class _CircularObjectGeometry:
-    center_x: float
-    center_y: float
-
-
 def _find_property_value_by_suffix(
     properties: dict[str, str],
     suffixes: tuple[str, ...],
@@ -235,9 +229,9 @@ def _parse_shape_entity_geometry_type(obj: SysconSequenceObject) -> int | None:
     return None
 
 
-def _extract_circular_geometry(
+def _extract_circular_entity_center(
     obj: SysconSequenceObject,
-) -> _CircularObjectGeometry | None:
+) -> tuple[float, float] | None:
     # In SysCon2 files, circular entities are encoded as type 2.
     # Objects are grouped by center-to-center distance only.
     if obj.object_type.strip().lower() != "entity":
@@ -258,10 +252,7 @@ def _extract_circular_geometry(
 
     center_x = _safe_float(center_x_raw, default=0.0)
     center_y = _safe_float(center_y_raw, default=0.0)
-    return _CircularObjectGeometry(
-        center_x=center_x,
-        center_y=center_y,
-    )
+    return (center_x, center_y)
 
 
 def _event_duration_timepoints_for_object(
@@ -281,11 +272,11 @@ def _group_eligible_objects_by_target_neuron(
     if len(eligible_objects) == 0:
         return []
 
-    circle_geometry_by_index: dict[int, _CircularObjectGeometry] = {}
+    circle_center_by_index: dict[int, tuple[float, float]] = {}
     for idx, obj in enumerate(eligible_objects):
-        geometry = _extract_circular_geometry(obj)
-        if geometry is not None:
-            circle_geometry_by_index[idx] = geometry
+        center = _extract_circular_entity_center(obj)
+        if center is not None:
+            circle_center_by_index[idx] = center
 
     parent = list(range(len(eligible_objects)))
 
@@ -301,14 +292,12 @@ def _group_eligible_objects_by_target_neuron(
         if root_a != root_b:
             parent[root_b] = root_a
 
-    circle_indices = sorted(circle_geometry_by_index.keys())
+    circle_indices = sorted(circle_center_by_index.keys())
     for i, idx_a in enumerate(circle_indices):
-        ga = circle_geometry_by_index[idx_a]
+        center_a_x, center_a_y = circle_center_by_index[idx_a]
         for idx_b in circle_indices[i + 1 :]:
-            gb = circle_geometry_by_index[idx_b]
-            distance = float(
-                np.hypot(ga.center_x - gb.center_x, ga.center_y - gb.center_y)
-            )
+            center_b_x, center_b_y = circle_center_by_index[idx_b]
+            distance = float(np.hypot(center_a_x - center_b_x, center_a_y - center_b_y))
             # If circle centers are within 1um, treat as the same target neuron.
             if distance <= _SAME_NEURON_MAX_CENTER_DISTANCE_UM:
                 union(idx_a, idx_b)
@@ -316,7 +305,7 @@ def _group_eligible_objects_by_target_neuron(
     groups: list[list[SysconSequenceObject]] = []
     root_to_group_index: dict[int, int] = {}
     for idx, obj in enumerate(eligible_objects):
-        if idx in circle_geometry_by_index:
+        if idx in circle_center_by_index:
             root = find(idx)
             if root not in root_to_group_index:
                 root_to_group_index[root] = len(groups)
