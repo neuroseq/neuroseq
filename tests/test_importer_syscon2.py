@@ -137,7 +137,7 @@ Entity0_reversed=False
 """
 
 
-def _sample_seq_text_overlapping_circular_entities() -> str:
+def _sample_seq_text_close_center_circular_entities() -> str:
     return """nohash
 version=3
 scanmode=Accurate
@@ -189,7 +189,7 @@ TimelineInfo0_Intensity_0=0.7
 TimelineInfo0_timelinegroupid=-1
 TimelineInfo0_Stepsize=1
 Entity1_Type=2
-Entity1_CenterX=15
+Entity1_CenterX=0.8
 Entity1_CenterY=0
 Entity1_CenterZ=0
 Entity1_VertexCount=2
@@ -214,7 +214,7 @@ TimelineInfo0_Intensity_0=0.5
 TimelineInfo0_timelinegroupid=-1
 TimelineInfo0_Stepsize=1
 Entity2_Type=2
-Entity2_CenterX=50
+Entity2_CenterX=2.5
 Entity2_CenterY=0
 Entity2_CenterZ=0
 Entity2_VertexCount=2
@@ -228,7 +228,7 @@ Entity2_Vertex1_Z=0
 """
 
 
-def _sample_seq_text_non_overlapping_circular_entities() -> str:
+def _sample_seq_text_far_center_circular_entities() -> str:
     return """nohash
 version=3
 scanmode=Accurate
@@ -280,7 +280,7 @@ TimelineInfo0_Intensity_0=0.7
 TimelineInfo0_timelinegroupid=-1
 TimelineInfo0_Stepsize=1
 Entity1_Type=2
-Entity1_CenterX=25
+Entity1_CenterX=1.2
 Entity1_CenterY=0
 Entity1_CenterZ=0
 Entity1_VertexCount=2
@@ -419,12 +419,12 @@ def test_sequence_to_stim_values_include_non_shape(tmp_path: Path) -> None:
     assert result.dropped_objects == 0
 
 
-def test_sequence_to_stim_values_merges_overlapping_circular_entities(
+def test_sequence_to_stim_values_merges_close_center_circular_entities(
     tmp_path: Path,
 ) -> None:
     seq_path = tmp_path / "overlap_entities.seq"
     seq_path.write_text(
-        _sample_seq_text_overlapping_circular_entities(),
+        _sample_seq_text_close_center_circular_entities(),
         encoding="utf-8",
     )
     sequence = parse_syscon2_seq_file(seq_path)
@@ -443,20 +443,20 @@ def test_sequence_to_stim_values_merges_overlapping_circular_entities(
     assert result.mapped_objects == 2
     assert result.dropped_objects == 0
 
-    # overlapping circles [0] and [1] map to the same neuron channel
+    # circles with center distance <= 1um map to the same neuron channel
     assert values[0, 0] == 0.2
     assert values[1, 0] == 0.7
-    # non-overlapping circle [2] maps to the next channel
+    # center distance > 1um maps to a different neuron channel
     assert values[2, 1] == 0.5
     assert np.all(values[:, 2:] == 0.0)
 
 
-def test_sequence_to_stim_values_keeps_non_overlapping_circular_entities_separate(
+def test_sequence_to_stim_values_keeps_far_center_circular_entities_separate(
     tmp_path: Path,
 ) -> None:
     seq_path = tmp_path / "nonoverlap_entities.seq"
     seq_path.write_text(
-        _sample_seq_text_non_overlapping_circular_entities(),
+        _sample_seq_text_far_center_circular_entities(),
         encoding="utf-8",
     )
     sequence = parse_syscon2_seq_file(seq_path)
@@ -475,6 +475,33 @@ def test_sequence_to_stim_values_keeps_non_overlapping_circular_entities_separat
     assert result.mapped_objects == 2
     assert values[0, 0] == 0.2
     assert values[1, 1] == 0.7
+
+
+def test_sequence_to_stim_values_does_not_merge_close_circular_shapes(
+    tmp_path: Path,
+) -> None:
+    seq_text = _sample_seq_text_close_center_circular_entities().replace(
+        "Entity", "Shape"
+    )
+    seq_path = tmp_path / "close_shapes.seq"
+    seq_path.write_text(seq_text, encoding="utf-8")
+    sequence = parse_syscon2_seq_file(seq_path)
+
+    values, result = sequence_to_stim_values(
+        sequence,
+        dt_seconds=0.001,
+        n_neurons=8,
+        tick_resolution_us=500,
+        include_non_shape=False,
+    )
+
+    assert result.eligible_objects == 3
+    assert result.grouped_objects == 3
+    assert result.merged_objects == 0
+    assert result.mapped_objects == 3
+    assert values[0, 0] == 0.2
+    assert values[1, 1] == 0.7
+    assert values[2, 2] == 0.5
 
 
 def test_sequence_to_stim_values_entity_has_default_duration_16_666ms(

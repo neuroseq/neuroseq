@@ -30,6 +30,7 @@ _REQUIRED_HEADER_KEYS = (
 
 _MAPPABLE_SHAPE_TYPES = {"shape", "entity"}
 _ENTITY_DEFAULT_DURATION_SECONDS = 16.666e-3
+_SAME_NEURON_MAX_CENTER_DISTANCE_UM = 1.0
 
 
 @dataclass
@@ -209,7 +210,6 @@ def get_timed_objects(
 class _CircularObjectGeometry:
     center_x: float
     center_y: float
-    radius: float
 
 
 def _find_property_value_by_suffix(
@@ -238,9 +238,11 @@ def _parse_shape_entity_geometry_type(obj: SysconSequenceObject) -> int | None:
 def _extract_circular_geometry(
     obj: SysconSequenceObject,
 ) -> _CircularObjectGeometry | None:
-    # In SysCon2 files, circular ROIs are encoded as shape/entity type 2.
-    # The radius is defined by the center and Vertex1 coordinates, with
-    # vertex coordinates stored relative to the center.
+    # In SysCon2 files, circular entities are encoded as type 2.
+    # Objects are grouped by center-to-center distance only.
+    if obj.object_type.strip().lower() != "entity":
+        return None
+
     shape_type = _parse_shape_entity_geometry_type(obj)
     if shape_type != 2:
         return None
@@ -251,39 +253,14 @@ def _extract_circular_geometry(
     center_y_raw = _find_property_value_by_suffix(
         obj.properties, ("_centery", "centery")
     )
-    vertex_x_raw = _find_property_value_by_suffix(
-        obj.properties, ("_vertex1_x", "_vertex1x", "vertex1_x", "vertex1x")
-    )
-    vertex_y_raw = _find_property_value_by_suffix(
-        obj.properties, ("_vertex1_y", "_vertex1y", "vertex1_y", "vertex1y")
-    )
-    # Compatibility fallback for sequences that only contain Vertex0.
-    if vertex_x_raw is None or vertex_y_raw is None:
-        vertex_x_raw = _find_property_value_by_suffix(
-            obj.properties, ("_vertex0_x", "_vertex0x", "vertex0_x", "vertex0x")
-        )
-        vertex_y_raw = _find_property_value_by_suffix(
-            obj.properties, ("_vertex0_y", "_vertex0y", "vertex0_y", "vertex0y")
-        )
-    if (
-        center_x_raw is None
-        or center_y_raw is None
-        or vertex_x_raw is None
-        or vertex_y_raw is None
-    ):
+    if center_x_raw is None or center_y_raw is None:
         return None
 
     center_x = _safe_float(center_x_raw, default=0.0)
     center_y = _safe_float(center_y_raw, default=0.0)
-    vertex_x = _safe_float(vertex_x_raw, default=0.0)
-    vertex_y = _safe_float(vertex_y_raw, default=0.0)
-    radius = float(np.hypot(vertex_x, vertex_y))
-    if radius <= 0:
-        return None
     return _CircularObjectGeometry(
         center_x=center_x,
         center_y=center_y,
-        radius=radius,
     )
 
 
@@ -332,8 +309,8 @@ def _group_eligible_objects_by_target_neuron(
             distance = float(
                 np.hypot(ga.center_x - gb.center_x, ga.center_y - gb.center_y)
             )
-            # If circles overlap or touch, treat as the same target neuron.
-            if distance <= (ga.radius + gb.radius):
+            # If circle centers are within 1um, treat as the same target neuron.
+            if distance <= _SAME_NEURON_MAX_CENTER_DISTANCE_UM:
                 union(idx_a, idx_b)
 
     groups: list[list[SysconSequenceObject]] = []
@@ -357,8 +334,8 @@ def group_timed_objects_by_neuron_target(
 ) -> list[list[SysconSequenceObject]]:
     """Group timed objects by target neuron.
 
-    Circular shape/entity objects that overlap are grouped together and mapped
-    to the same neuron channel.
+    Circular entities (type 2) with centers within 1um are grouped together
+    and mapped to the same neuron channel.
     """
     eligible_objects = get_timed_objects(sequence, include_non_shape=include_non_shape)
     return _group_eligible_objects_by_target_neuron(eligible_objects)

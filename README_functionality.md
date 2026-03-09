@@ -398,9 +398,9 @@ The result is stored as `CellposeImportResult` in project state.
 - Each object extracts timing from `TimelineInfo0_*`: `starttime` (us), `repeats`, `Stepsize`, and `Intensity_0`; values are clamped/sanitized (`start>=0`, `repeats>=0`, `step>=1`).
 - Eligibility defaults to timed `Shape`/`Entity` objects; optional dialog checkbox includes non-shape timed objects (`TTLPulse`, `WaitForTTL`, ...).
 - If `Intensity_0` is missing, default intensity is `1.0` for `Shape`/`Entity` and `0.0` for other object types.
-- Circular overlap-merging is applied for geometry type `2` (`..._Type=2`) on shape/entity objects so multiple objects can map to one neuron channel.
-- Circle radius is derived from center + `Vertex1` coordinates (with `Vertex0` fallback for compatibility if `Vertex1` is absent).
-- Two circles are treated as the same neuron target when `distance(centers) <= r1 + r2`; touching circles count as overlap, and overlap groups are transitive.
+- Circular-entity grouping is applied for geometry type `2` (`..._Type=2`) so multiple entities can map to one neuron channel.
+- Grouping uses center coordinates only (`CenterX`, `CenterY`); vertex/radius values are ignored for same-neuron detection.
+- Two circular entities are treated as the same neuron target when center distance is `<= 1.0 um`; if center distance is `> 1.0 um`, they map to different neurons.
 - Mapping order is deterministic: grouped timed objects are assigned to neuron channels in file order; non-circular objects remain separate channels.
 - Event time conversion uses: `t_us = start_us + k * Stepsize * tick_resolution_us`, with default tick resolution `500 us` (user-configurable in dialog).
 - Sample index conversion uses `round(t / dt)` (`np.rint`) and de-duplicates identical indices produced by sub-sample timing.
@@ -410,8 +410,8 @@ The result is stored as `CellposeImportResult` in project state.
 - Import target controls: `neuron_offset` chooses starting destination neuron column; channels beyond available target neurons are dropped and reported.
 - Time-axis handling: `extend_to_fit=True` grows the target stim array to imported duration; otherwise overflow is truncated and reported.
 - Value-write mode: `replace_existing=True` replaces destination values; otherwise imported values are merged with existing data by pointwise `max`.
-- Preview panel reports parsed header fields, object counts, timed-object counts, estimated grouped channels, and overlap-merged counts before import.
-- Completion dialog reports eligible objects, grouped channels, mapped/unmapped channels, generated timepoints, merged overlaps, and any truncation counters.
+- Preview panel reports parsed header fields, object counts, timed-object counts, estimated grouped channels, and center-distance merged counts before import.
+- Completion dialog reports eligible objects, grouped channels, mapped/unmapped channels, generated timepoints, merged circular entities, and any truncation counters.
 
 ## 10) Synthetic data generation (`synthetic_data_dialog.py`)
 
@@ -708,56 +708,56 @@ Important utilities:
 
 The following table maps each `src/neuroseq` file to primary functionality.
 
-| Module                               | Primary responsibility                                                   |
-| ------------------------------------ | ------------------------------------------------------------------------ |
-| `__init__.py`                        | package version export                                                   |
-| `__main__.py`                        | CLI entrypoint and Qt app bootstrap                                      |
-| `b2_model.py`                        | Brian2 model definition/assembly/simulation/serialization                |
-| `b2_units.py`                        | Brian2 quantity parsing/display helpers                                  |
-| `cell_overlay_widget.py`             | cellpose overlay visualization widget                                    |
-| `cellpose_import_dialog.py`          | GUI flow for cellpose image+seg import and mapping                       |
-| `console_widget.py`                  | embedded Python REPL bound to project                                    |
-| `constrained_pan_zoom_controller.py` | bounded camera + scrollbar sync                                          |
-| `custom_analysis_widget.py`          | histogram/hist2d analysis views                                          |
-| `data.py`                            | core dataclasses (`TraceData`, `SpikeData`, `SynapseData`, `Experiment`) |
-| `data_widget.py`                     | polymorphic trace/spike/heatmap container                                |
-| `example_projects.py`                | built-in preconfigured projects                                          |
-| `fpl_widget.py`                      | base fastplotlib Qt wrapper                                              |
-| `gridlines.py`                       | layered grid and stripes graphics                                        |
-| `gui.py`                             | main window/controller and action wiring                                 |
-| `gui_settings.py`                    | persistent app settings                                                  |
-| `heatmap_widget.py`                  | synapse matrix viewer over time                                          |
-| `import_dialog.py`                   | Suite2p/CSV import dialog                                                |
-| `import_experiment_dialog.py`        | append-vs-new experiment import chooser                                  |
-| `importer_cellpose.py`               | cellpose loading, normalization, overlays, mapping payload               |
-| `importer_patchclamp.py`             | patch-clamp conversion and spike extraction pipeline                     |
-| `importer_syscon2.py`                | SysCon2 `.seq` parser, overlap grouping, and stim-array conversion       |
-| `importer_suite2p.py`                | suite2p contrast/normalize/convert pipeline                              |
-| `io.py`                              | zip/json/npy persistence and typed reconstruction                        |
-| `model_editor.py`                    | parameter-tree model editing dialog                                      |
-| `patchclamp_import_dialog.py`        | patch-clamp import GUI and options                                       |
-| `pretty_print_enum.py`               | enum string formatting helpers                                           |
-| `project.py`                         | aggregate project state and orchestration                                |
-| `region_of_interest.py`              | ROI graphics + text                                                      |
-| `resource_monitor_label.py`          | CPU/RAM/GPU status label                                                 |
-| `save_load_options.py`               | save/import include-options dialog                                       |
-| `spike_detection.py`                 | threshold and peak-based spike detection                                 |
-| `spike_widget.py`                    | spike raster plot widget                                                 |
-| `stim.py`                            | stimulation dataclasses/enums                                            |
-| `stim_array_modifier.py`             | undo/redo action engine for stim edits                                   |
-| `stim_dialog.py`                     | stim metadata editor dialog                                              |
-| `stim_editor.py`                     | interactive stim editing workstation                                     |
-| `stim_intensity_dialog.py`           | draw-intensity profile dialog                                            |
-| `stim_widget.py`                     | stim image plot and overlays                                             |
-| `stimulation_generator_dialog.py`    | hardware script export dialog                                            |
-| `syscon2_import_dialog.py`           | GUI preview/options flow for SysCon2 `.seq` stim import                  |
-| `synthetic_data_dialog.py`           | synthetic patch/imaging data generation                                  |
-| `text.py`                            | hover text graphic                                                       |
-| `time_slider_widget.py`              | playback/seek timeline controller                                        |
-| `timeline.py`                        | current-time vertical marker graphic                                     |
-| `timeseries_widget.py`               | shared timeseries interaction base class                                 |
-| `trace_widget.py`                    | trace line-stack viewer                                                  |
-| `utils.py`                           | cross-cutting helpers                                                    |
+| Module                               | Primary responsibility                                                     |
+| ------------------------------------ | -------------------------------------------------------------------------- |
+| `__init__.py`                        | package version export                                                     |
+| `__main__.py`                        | CLI entrypoint and Qt app bootstrap                                        |
+| `b2_model.py`                        | Brian2 model definition/assembly/simulation/serialization                  |
+| `b2_units.py`                        | Brian2 quantity parsing/display helpers                                    |
+| `cell_overlay_widget.py`             | cellpose overlay visualization widget                                      |
+| `cellpose_import_dialog.py`          | GUI flow for cellpose image+seg import and mapping                         |
+| `console_widget.py`                  | embedded Python REPL bound to project                                      |
+| `constrained_pan_zoom_controller.py` | bounded camera + scrollbar sync                                            |
+| `custom_analysis_widget.py`          | histogram/hist2d analysis views                                            |
+| `data.py`                            | core dataclasses (`TraceData`, `SpikeData`, `SynapseData`, `Experiment`)   |
+| `data_widget.py`                     | polymorphic trace/spike/heatmap container                                  |
+| `example_projects.py`                | built-in preconfigured projects                                            |
+| `fpl_widget.py`                      | base fastplotlib Qt wrapper                                                |
+| `gridlines.py`                       | layered grid and stripes graphics                                          |
+| `gui.py`                             | main window/controller and action wiring                                   |
+| `gui_settings.py`                    | persistent app settings                                                    |
+| `heatmap_widget.py`                  | synapse matrix viewer over time                                            |
+| `import_dialog.py`                   | Suite2p/CSV import dialog                                                  |
+| `import_experiment_dialog.py`        | append-vs-new experiment import chooser                                    |
+| `importer_cellpose.py`               | cellpose loading, normalization, overlays, mapping payload                 |
+| `importer_patchclamp.py`             | patch-clamp conversion and spike extraction pipeline                       |
+| `importer_syscon2.py`                | SysCon2 `.seq` parser, center-distance grouping, and stim-array conversion |
+| `importer_suite2p.py`                | suite2p contrast/normalize/convert pipeline                                |
+| `io.py`                              | zip/json/npy persistence and typed reconstruction                          |
+| `model_editor.py`                    | parameter-tree model editing dialog                                        |
+| `patchclamp_import_dialog.py`        | patch-clamp import GUI and options                                         |
+| `pretty_print_enum.py`               | enum string formatting helpers                                             |
+| `project.py`                         | aggregate project state and orchestration                                  |
+| `region_of_interest.py`              | ROI graphics + text                                                        |
+| `resource_monitor_label.py`          | CPU/RAM/GPU status label                                                   |
+| `save_load_options.py`               | save/import include-options dialog                                         |
+| `spike_detection.py`                 | threshold and peak-based spike detection                                   |
+| `spike_widget.py`                    | spike raster plot widget                                                   |
+| `stim.py`                            | stimulation dataclasses/enums                                              |
+| `stim_array_modifier.py`             | undo/redo action engine for stim edits                                     |
+| `stim_dialog.py`                     | stim metadata editor dialog                                                |
+| `stim_editor.py`                     | interactive stim editing workstation                                       |
+| `stim_intensity_dialog.py`           | draw-intensity profile dialog                                              |
+| `stim_widget.py`                     | stim image plot and overlays                                               |
+| `stimulation_generator_dialog.py`    | hardware script export dialog                                              |
+| `syscon2_import_dialog.py`           | GUI preview/options flow for SysCon2 `.seq` stim import                    |
+| `synthetic_data_dialog.py`           | synthetic patch/imaging data generation                                    |
+| `text.py`                            | hover text graphic                                                         |
+| `time_slider_widget.py`              | playback/seek timeline controller                                          |
+| `timeline.py`                        | current-time vertical marker graphic                                       |
+| `timeseries_widget.py`               | shared timeseries interaction base class                                   |
+| `trace_widget.py`                    | trace line-stack viewer                                                    |
+| `utils.py`                           | cross-cutting helpers                                                      |
 
 ## 17) Test suite coverage map (high-level)
 

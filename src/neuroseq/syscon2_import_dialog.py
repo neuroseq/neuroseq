@@ -215,7 +215,7 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
             f"Objects total={len(sequence.objects)}",
             f"Timed shape/entity objects={len(timed_shape_objects)}",
             f"Estimated neuron channels (shape/entity)={len(grouped_shape_objects)}",
-            "Overlap-merged shape/entity objects="
+            "Center-merged circular entities (<=1um)="
             f"{max(0, len(timed_shape_objects) - len(grouped_shape_objects))}",
             f"Timed objects (all types)={len(timed_all_objects)}",
             f"Estimated neuron channels (all types)={len(grouped_all_objects)}",
@@ -258,14 +258,16 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
             info_lines = [
                 f"Imported into '{stim_array.name}'.",
                 f"Eligible timed objects: {result.eligible_objects}",
-                f"Neuron channels after overlap grouping: {result.grouped_objects}",
+                "Neuron channels after center-distance grouping: "
+                f"{result.grouped_objects}",
                 f"Mapped neuron channels into target: {result.mapped_objects}",
                 f"Unmapped channels (insufficient target neurons): {result.dropped_objects}",
                 f"Generated timepoints: {result.generated_timepoints}",
             ]
             if result.merged_objects > 0:
                 info_lines.append(
-                    f"Merged overlapping circular objects: {result.merged_objects}"
+                    "Merged circular entities by center distance (<=1um): "
+                    f"{result.merged_objects}"
                 )
             if result.truncated_timepoints > 0:
                 info_lines.append(
