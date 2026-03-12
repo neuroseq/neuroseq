@@ -335,6 +335,88 @@ Entity0_Vertex1_Z=0
 """
 
 
+def _sample_seq_text_entities_with_laser_ttl_durations() -> str:
+    return """nohash
+version=3
+scanmode=Accurate
+runs=1
+DeviceSequenceID=1
+invertedportcnt=1
+inverted0=dummy_1_0 RMI In
+AutoTriggerRulesEnabled=False
+AutoTriggerRulesCount=0
+timelinezoomfactor=10
+timelineviewposx=0
+timelineviewposy=0
+[0]
+ID=1
+type=Entity
+TotalTimings=1
+TimelineInfo0_TimelineIndex=0
+TimelineInfo0_starttime=0
+TimelineInfo0_description=
+TimelineInfo0_repeats=0
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0.4
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Entity0_Type=0
+Entity0_CenterX=0
+Entity0_CenterY=0
+Entity0_CenterZ=0
+[/0]
+[1]
+ID=2
+type=Entity
+TotalTimings=1
+TimelineInfo0_TimelineIndex=0
+TimelineInfo0_starttime=10000
+TimelineInfo0_description=
+TimelineInfo0_repeats=0
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0.7
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Entity1_Type=0
+Entity1_CenterX=10
+Entity1_CenterY=0
+Entity1_CenterZ=0
+[/1]
+[2]
+ID=3
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=1
+TimelineInfo0_starttime=1000
+TimelineInfo0_description=
+TimelineInfo0_repeats=3
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=dummy_1_0 RMI In
+[/2]
+[3]
+ID=4
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=2
+TimelineInfo0_starttime=11000
+TimelineInfo0_description=
+TimelineInfo0_repeats=7
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=dummy_1_0 RMI In
+[/3]
+"""
+
+
 def test_parse_syscon2_seq_file(tmp_path: Path) -> None:
     seq_path = tmp_path / "sample.seq"
     seq_path.write_text(_sample_seq_text(), encoding="utf-8")
@@ -525,6 +607,34 @@ def test_sequence_to_stim_values_entity_has_default_duration_16_666ms(
     assert np.all(values[:17, 0] == 0.42)
     assert np.all(values[17:, 0] == 0.0)
     assert np.all(values[:, 1] == 0.0)
+
+
+def test_sequence_to_stim_values_entity_duration_from_laser_ttl_pulses(
+    tmp_path: Path,
+) -> None:
+    seq_path = tmp_path / "entities_with_ttl.seq"
+    seq_path.write_text(
+        _sample_seq_text_entities_with_laser_ttl_durations(),
+        encoding="utf-8",
+    )
+    sequence = parse_syscon2_seq_file(seq_path)
+
+    values, result = sequence_to_stim_values(
+        sequence,
+        dt_seconds=0.001,
+        n_neurons=4,
+        tick_resolution_us=500,
+        include_non_shape=False,
+    )
+
+    assert result.mapped_objects == 2
+    # Entity[0] onset/duration from TTLPulse: start=1000us (idx 1), repeats=3 -> 2ms -> 2 samples.
+    assert np.all(values[1:3, 0] == 0.4)
+    assert np.all(values[0:1, 0] == 0.0)
+    assert np.all(values[3:11, 0] == 0.0)
+    # Entity[1] onset/duration from TTLPulse: start=11000us (idx 11), repeats=7 -> 4ms -> 4 samples.
+    assert np.all(values[11:15, 1] == 0.7)
+    assert np.all(values[:11, 1] == 0.0)
 
 
 def test_import_sequence_into_stim_array_extends_and_offsets(tmp_path: Path) -> None:

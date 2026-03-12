@@ -404,7 +404,9 @@ The result is stored as `CellposeImportResult` in project state.
 - Mapping order is deterministic: grouped timed objects are assigned to neuron channels in file order; non-circular objects remain separate channels.
 - Event time conversion uses: `t_us = start_us + k * Stepsize * tick_resolution_us`, with default tick resolution `500 us` (user-configurable in dialog).
 - Sample index conversion uses `round(t / dt)` (`np.rint`) and de-duplicates identical indices produced by sub-sample timing.
-- For `Entity` objects, each event has default duration `16.666 ms` and fills `ceil(16.666ms / dt)` timepoints; non-entity events fill one timepoint.
+- For `Entity` objects, onset and duration are first derived from matching laser `TTLPulse` entries (`type=TTLPulse` with laser `LightsourceID`): onset uses TTL `starttime`, and `duration_us = (repeats + 1) * tick_resolution_us`.
+- Entity-to-laser-pulse matching is done by lightsource ID compatibility plus nearest start-time ordering; if no laser TTL pulse can be matched, fallback uses entity `starttime` and duration `16.666 ms` (`ceil(16.666ms / dt)` timepoints).
+- Non-entity events fill one timepoint.
 - If repeated/overlapping events hit the same channel/time window, amplitude merge uses `max(existing, incoming)`.
 - Safety cap limits each object to `500000` events during expansion; excess repeats are counted as truncated repeats in the result report.
 - Import target controls: `neuron_offset` chooses starting destination neuron column; channels beyond available target neurons are dropped and reported.

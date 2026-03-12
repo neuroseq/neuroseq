@@ -64,6 +64,14 @@ class SysconImportResult:
     truncated_repeats: int
 
 
+@dataclass
+class _LaserTTLPulse:
+    block_index: int
+    start_time_us: int
+    duration_us: int
+    lightsource_ids: set[str]
+
+
 def _strip_comment(line: str) -> str:
     # The official .seq format does not support comments. We strip them so a
     # commented reference file can still be parsed for preview/import in NeuroSeq.
@@ -255,13 +263,145 @@ def _extract_circular_entity_center(
     return (center_x, center_y)
 
 
+def _extract_lightsource_ids(obj: SysconSequenceObject) -> set[str]:
+    lightsource_ids: set[str] = set()
+    for key, value in obj.properties.items():
+        if "_lightsourceid_" not in key.lower():
+            continue
+        stripped = value.strip()
+        if stripped != "":
+            lightsource_ids.add(stripped)
+    return lightsource_ids
+
+
+def _ttl_pulse_duration_us(
+    obj: SysconSequenceObject,
+    *,
+    tick_resolution_us: int,
+) -> int | None:
+    # Laser TTLPulse entries encode pulse duration in `repeats` units of system tick.
+    if obj.object_type.strip().lower() != "ttlpulse":
+        return None
+    if len(_extract_lightsource_ids(obj)) == 0:
+        # Not a laser timeline pulse (e.g., main-controller TTL outputs).
+        return None
+    duration_ticks = max(1, obj.repeats + 1)
+    return int(duration_ticks * tick_resolution_us)
+
+
+def _entity_timing_from_laser_ttl(
+    sequence: SysconSequence,
+    *,
+    dt_seconds: float,
+    tick_resolution_us: int,
+) -> dict[int, tuple[int, int]]:
+    """Map entity block indices to (start_us, duration_timepoints) from laser TTLPulse objects."""
+    entities = [
+        obj for obj in sequence.objects if obj.object_type.strip().lower() == "entity"
+    ]
+    if len(entities) == 0:
+        return {}
+
+    ttl_pulses: list[_LaserTTLPulse] = []
+    for obj in sequence.objects:
+        duration_us = _ttl_pulse_duration_us(obj, tick_resolution_us=tick_resolution_us)
+        if duration_us is None:
+            continue
+        ttl_pulses.append(
+            _LaserTTLPulse(
+                block_index=obj.block_index,
+                start_time_us=obj.start_time_us,
+                duration_us=duration_us,
+                lightsource_ids=_extract_lightsource_ids(obj),
+            )
+        )
+    if len(ttl_pulses) == 0:
+        return {}
+
+    entities_sorted = sorted(
+        entities, key=lambda obj: (obj.start_time_us, obj.block_index)
+    )
+    ttl_pulses.sort(key=lambda pulse: (pulse.start_time_us, pulse.block_index))
+    pulse_used = [False] * len(ttl_pulses)
+    timing_by_entity_block: dict[int, tuple[int, int]] = {}
+
+    for entity in entities_sorted:
+        entity_lightsources = _extract_lightsource_ids(entity)
+        best_pulse_idx: int | None = None
+        best_key: tuple[int, int, int, int] | None = None
+
+        for idx, pulse in enumerate(ttl_pulses):
+            if pulse_used[idx]:
+                continue
+            pulse_lightsources = pulse.lightsource_ids
+            if (
+                len(entity_lightsources) > 0
+                and len(pulse_lightsources) > 0
+                and not (entity_lightsources & pulse_lightsources)
+            ):
+                continue
+
+            pulse_start_us = pulse.start_time_us
+            delta_us = pulse_start_us - entity.start_time_us
+            # Prefer a TTL pulse that starts at/after the entity start; otherwise
+            # fall back to nearest by absolute distance.
+            is_before_entity = 1 if delta_us < 0 else 0
+            abs_delta_us = abs(delta_us)
+            candidate_key = (
+                is_before_entity,
+                abs_delta_us,
+                pulse_start_us,
+                pulse.block_index,
+            )
+            if best_key is None or candidate_key < best_key:
+                best_key = candidate_key
+                best_pulse_idx = idx
+
+        if best_pulse_idx is None:
+            continue
+
+        pulse_used[best_pulse_idx] = True
+        matched_start_us = ttl_pulses[best_pulse_idx].start_time_us
+        matched_duration_us = ttl_pulses[best_pulse_idx].duration_us
+        duration_timepoints = max(
+            1, int(np.ceil((matched_duration_us * 1e-6) / dt_seconds))
+        )
+        timing_by_entity_block[entity.block_index] = (
+            matched_start_us,
+            duration_timepoints,
+        )
+
+    return timing_by_entity_block
+
+
+def _event_start_time_us_for_object(
+    obj: SysconSequenceObject,
+    *,
+    entity_timing_by_block: dict[int, tuple[int, int]] | None = None,
+) -> int:
+    object_type = obj.object_type.strip().lower()
+    if (
+        object_type == "entity"
+        and entity_timing_by_block is not None
+        and obj.block_index in entity_timing_by_block
+    ):
+        return entity_timing_by_block[obj.block_index][0]
+    return obj.start_time_us
+
+
 def _event_duration_timepoints_for_object(
     obj: SysconSequenceObject,
     *,
     dt_seconds: float,
+    entity_timing_by_block: dict[int, tuple[int, int]] | None = None,
 ) -> int:
     object_type = obj.object_type.strip().lower()
     if object_type == "entity":
+        if (
+            entity_timing_by_block is not None
+            and obj.block_index in entity_timing_by_block
+        ):
+            return entity_timing_by_block[obj.block_index][1]
         return max(1, int(np.ceil(_ENTITY_DEFAULT_DURATION_SECONDS / dt_seconds)))
     return 1
 
@@ -349,6 +489,11 @@ def sequence_to_stim_values(
     grouped_objects = group_timed_objects_by_neuron_target(
         sequence, include_non_shape=include_non_shape
     )
+    entity_timing_by_block = _entity_timing_from_laser_ttl(
+        sequence,
+        dt_seconds=dt_seconds,
+        tick_resolution_us=tick_resolution_us,
+    )
     eligible_objects_count = sum(len(group) for group in grouped_objects)
     grouped_objects_count = len(grouped_objects)
     mapped_objects = min(n_neurons, grouped_objects_count)
@@ -364,12 +509,17 @@ def sequence_to_stim_values(
                 event_count = max_events_per_object
             if event_count <= 0:
                 continue
-            last_time_us = obj.start_time_us + (
+            event_start_time_us = _event_start_time_us_for_object(
+                obj, entity_timing_by_block=entity_timing_by_block
+            )
+            last_time_us = event_start_time_us + (
                 (event_count - 1) * obj.step_size * tick_resolution_us
             )
             last_time_index = int(np.rint((last_time_us * 1e-6) / dt_seconds))
             duration_timepoints = _event_duration_timepoints_for_object(
-                obj, dt_seconds=dt_seconds
+                obj,
+                dt_seconds=dt_seconds,
+                entity_timing_by_block=entity_timing_by_block,
             )
             max_timepoints = max(max_timepoints, last_time_index + duration_timepoints)
 
@@ -383,7 +533,10 @@ def sequence_to_stim_values(
                 event_count = max_events_per_object
             if event_count <= 0:
                 continue
-            times_us = obj.start_time_us + np.arange(event_count, dtype=np.int64) * (
+            event_start_time_us = _event_start_time_us_for_object(
+                obj, entity_timing_by_block=entity_timing_by_block
+            )
+            times_us = event_start_time_us + np.arange(event_count, dtype=np.int64) * (
                 obj.step_size * tick_resolution_us
             )
             time_indices = np.rint((times_us * 1e-6) / dt_seconds).astype(np.int64)
@@ -393,7 +546,9 @@ def sequence_to_stim_values(
             if valid_time_indices.size == 0:
                 continue
             duration_timepoints = _event_duration_timepoints_for_object(
-                obj, dt_seconds=dt_seconds
+                obj,
+                dt_seconds=dt_seconds,
+                entity_timing_by_block=entity_timing_by_block,
             )
             for time_index in valid_time_indices:
                 start_idx = int(time_index)
