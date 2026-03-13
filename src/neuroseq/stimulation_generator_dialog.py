@@ -8,8 +8,13 @@ import qtawesome as qta
 from qtpy import QtWidgets
 from qtpy.compat import getexistingdirectory
 
+from neuroseq.exporter_syscon2 import SysconExportReport
+from neuroseq.exporter_syscon2 import generate_syscon2_sequence_text
+
 if TYPE_CHECKING:
+    from neuroseq.importer_cellpose import CellposeImportResult
     from neuroseq.project import Project
+    from neuroseq.stim import StimArray
 
 
 class StimulationGeneratorDialog(QtWidgets.QDialog):
@@ -41,7 +46,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
 
         # Header description
         description_label = QtWidgets.QLabel(
-            "Generate stimulation scripts for your experiments."
+            "Generate SysCon2 stimulation scripts from stim arrays and Cellpose segmentation."
         )
         description_label.setWordWrap(True)
         main_layout.addWidget(description_label)
@@ -389,9 +394,9 @@ port=Holo4D TTL Out 2
             self.generate_button.setEnabled(True)
             self._log_status(f"Output folder set to: {self.output_folder}")
 
-    def _log_status(self, message: str) -> None:
+    def _log_status(self, message: str, *args: object) -> None:
         """Log a status message."""
-        self.logger.info(message)
+        self.logger.info(message, *args)
 
     def _generate_scripts(self) -> None:
         """Generate the hardware control scripts."""
@@ -426,7 +431,7 @@ port=Holo4D TTL Out 2
             script_name = self.name_edit.text() or "stimulation_script"
 
             # Generate script based on hardware type
-            script_content = self._generate_script_content(
+            script_content, export_report = self._generate_script_content(
                 stim_array=stim_array,
                 stim_name=stim_name,
                 hardware_type=hardware_type,
@@ -443,12 +448,38 @@ port=Holo4D TTL Out 2
                 f.write(script_content)
 
             self._log_status(f"✓ Generated: {script_filename}")
+            self._log_status(
+                "Export summary: segments=%d mapped_active_neurons=%d "
+                "unmapped_active_neurons=%d entity_lanes=%d objects=%d",
+                export_report.exported_segments,
+                export_report.mapped_active_neurons,
+                len(export_report.unmapped_active_neurons),
+                export_report.entity_lanes,
+                export_report.generated_objects,
+            )
+
+            report_lines = [
+                f"Successfully generated script in:\n{self.output_folder}",
+                "",
+                f"Exported segments: {export_report.exported_segments}/{export_report.total_segments}",
+                "Mapped active neurons: "
+                f"{export_report.mapped_active_neurons}/{export_report.active_neurons}",
+                f"Entity timeline lanes: {export_report.entity_lanes}",
+                f"Generated object blocks: {export_report.generated_objects}",
+            ]
+            if export_report.unmapped_active_neurons:
+                report_lines.append(
+                    "Skipped active neurons (unmapped): "
+                    + ", ".join(
+                        str(idx) for idx in export_report.unmapped_active_neurons
+                    )
+                )
 
             # Show success message
             QtWidgets.QMessageBox.information(
                 self,
                 "Scripts Generated",
-                f"Successfully generated script in:\n{self.output_folder}",
+                "\n".join(report_lines),
             )
 
         except Exception as e:
@@ -466,51 +497,32 @@ port=Holo4D TTL Out 2
 
     def _generate_script_content(
         self,
-        stim_array,
+        stim_array: StimArray,
         stim_name: str,
         hardware_type: str,
-        cellpose_data,
-    ) -> str:
+        cellpose_data: CellposeImportResult | None,
+    ) -> tuple[str, SysconExportReport]:
         """Generate the script content based on hardware type."""
+        if hardware_type != "HOLO4D":
+            raise ValueError(f"Unsupported hardware type: {hardware_type}")
         return self._generate_holo4d_script(stim_array, stim_name, cellpose_data)
 
-    def _generate_holo4d_script(self, stim_array, stim_name: str, cellpose_data) -> str:
-        """Generate HOLO4D holographic stimulation script."""
-        # Start with HOLO4D configuration data
+    def _generate_holo4d_script(
+        self,
+        stim_array: StimArray,
+        stim_name: str,
+        cellpose_data: CellposeImportResult | None,
+    ) -> tuple[str, SysconExportReport]:
+        """Generate HOLO4D SysCon2 sequence from stim-array/cellpose data."""
+        del (
+            stim_name
+        )  # currently used only for UI; exporter works on selected StimArray
         config_data = self.config_data_edit.toPlainText()
-        script = config_data + "\n\n"
-
-        # Append cellpose segmentation data if available
-        # if cellpose_data is not None:
-        #     script += "\n\n# ========== CELLPOSE SEGMENTATION DATA ==========\n"
-        #     script += f"# Image path: {cellpose_data.image_path}\n"
-        #     script += f"# Segmentation array shape: {cellpose_data.segmentation_array.shape}\n"
-        #     if cellpose_data.original_cellpose_ids is not None:
-        #         script += f"# Number of cells: {len(cellpose_data.original_cellpose_ids)}\n"
-        #         script += "# Original Cellpose IDs: "
-        #         script += ",".join(str(id) for id in cellpose_data.original_cellpose_ids)
-        #         script += "\n"
-        #     if cellpose_data.stimulus_to_cellpose_mapping is not None:
-        #         script += "# Stimulus to Cellpose mapping:\n"
-        #         for stim_id, cellpose_id in cellpose_data.stimulus_to_cellpose_mapping.items():
-        #             script += f"#   Stimulus {stim_id} -> Cellpose {cellpose_id}\n"
-
-        # Append stimulation array data at the end
-        # script += "\n\n# ========== STIMULATION DATA ==========\n"
-        # script += f"# Stimulation Array: {stim_name}\n"
-        # script += f"# Shape: {stim_array.values.shape} (timesteps x neurons)\n"
-        # script += f"# Units: {stim_array.units}\n"
-        # script += f"# Timestep (dt): {stim_array.dt}s\n"
-        # script += (
-        #     "# Data format: Each row represents a timestep, each column a neuron\n\n"
-        # )
-
-        # Convert array data to string representation
-        # script += "# BEGIN DATA\n"
-        # for _t_idx, timestep_values in enumerate(stim_array.values):
-        #     # Format each timestep as a comma-separated line
-        #     values_str = ",".join(f"{val:.6f}" for val in timestep_values)
-        #     script += f"{values_str}\n"
-        # script += "# END DATA\n"
-
-        return script
+        return generate_syscon2_sequence_text(
+            stim_array,
+            cellpose_data,
+            template_text=config_data,
+            tick_resolution_us=500,
+            active_threshold=0.0,
+            binary_intensity=1.0,
+        )

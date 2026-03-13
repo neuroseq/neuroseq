@@ -338,8 +338,14 @@ Current implementation status:
 
 - hardware type list currently only `HOLO4D`,
 - output extension currently always `.seq`,
-- exported content currently is the editable HOLO4D config text block,
-- additional appending of cellpose/stim data exists as commented code (inactive).
+- exports are generated from selected stim array + imported Cellpose segmentation using `exporter_syscon2.py`,
+- binary stimulation mode is used (`stim_value > 0` is ON, exported intensity fixed at `1.0`),
+- per-neuron segment compression is applied: contiguous ON samples become one exported segment,
+- active neurons without a valid stimulus->cellpose mapping are skipped and reported to the user,
+- target coordinates are derived from segmentation centroids for mapped cellpose IDs,
+- entity timeline lanes are assigned per mapped active neuron (`0..N-1`),
+- matching laser `TTLPulse` objects are written on separate lanes using `entity_lane + N`,
+- header/template fields are taken from the editable HOLO4D config block (lines before first object block), while object blocks are regenerated from stim/cellpose data.
 
 ## 9) Data import pipelines
 
@@ -732,6 +738,7 @@ The following table maps each `src/neuroseq` file to primary functionality.
 | `import_dialog.py`                   | Suite2p/CSV import dialog                                                  |
 | `import_experiment_dialog.py`        | append-vs-new experiment import chooser                                    |
 | `importer_cellpose.py`               | cellpose loading, normalization, overlays, mapping payload                 |
+| `exporter_syscon2.py`                | SysCon2 `.seq` export generation from stim arrays + cellpose segmentation  |
 | `importer_patchclamp.py`             | patch-clamp conversion and spike extraction pipeline                       |
 | `importer_syscon2.py`                | SysCon2 `.seq` parser, center-distance grouping, and stim-array conversion |
 | `importer_suite2p.py`                | suite2p contrast/normalize/convert pipeline                                |
@@ -777,7 +784,7 @@ This means the documented functionality above is not only implemented but broadl
 
 ## 18) Practical caveats observed in code
 
-- `stimulation_generator_dialog.py` currently exports mostly static/config text (`.seq`) despite taking stim/cellpose inputs.
+- SysCon2 export is currently binary-only (`ON/OFF`, fixed exported intensity `1.0`) and does not yet support multi-level intensity encoding.
 - `StimWidget` comments note `dt_ms != 1` caveat for shared camera assumptions with image-based x-spacing.
 - `utils.get_stim_type(...)` infers type from stim name as fallback heuristic.
 - Some experimental/support paths are explicitly marked as limited or less rigorously tested in comments (e.g., suite2p stat-to-seg conversion notes).
