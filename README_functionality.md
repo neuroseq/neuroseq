@@ -343,8 +343,15 @@ Current implementation status:
 - per-neuron segment compression is applied: contiguous ON samples become one exported segment,
 - active neurons without a valid stimulus->cellpose mapping are skipped and reported to the user,
 - target coordinates are derived from segmentation centroids for mapped cellpose IDs,
-- entity timeline lanes are assigned per mapped active neuron (`0..N-1`),
-- matching laser `TTLPulse` objects are written on separate lanes using `entity_lane + N`,
+- number of entity timelines is `N = max` simultaneously stimulated mapped neurons in the exported script,
+- first timelines (`0..N-1`) contain entity point objects (neurons),
+- next three timelines are fixed laser lanes (`940nm`, `1040nm`, `1140nm`), with exactly one active per script (currently `1140nm` by default),
+- `TTL Out 1` timeline always contains a 10ms startup pulse at `t=0` and mirrors all active-laser pulses; `TTL Out 2` is kept empty,
+- entity placement applies SLM constraints: first `16.66ms` after entity start is unusable, and entity duration is at least `33.32ms`,
+- dialog includes `Check Input Sanity` (dry-run validation) to verify translatability before file generation and to report warnings (e.g., unmapped active neurons, binary intensity coercion),
+- sanity check enforces SLM switch gap: consecutive stimulation runs with different active neuron sets must be separated by at least `16.66ms`,
+- when SLM-gap violations are detected, dialog offers: `Space Input Out` (right-shift with fixed array length), `Align Troublesome Stimuli (Left)`, or `Cancel`,
+- automatic fixes are applied through the StimEditor modifier path so standard undo/redo remains functional for the edited stim array,
 - header/template fields are taken from the editable HOLO4D config block (lines before first object block), while object blocks are regenerated from stim/cellpose data.
 
 ## 9) Data import pipelines
@@ -407,11 +414,13 @@ The result is stored as `CellposeImportResult` in project state.
 - Circular-entity grouping is applied for geometry type `2` (`..._Type=2`) so multiple entities can map to one neuron channel.
 - Grouping uses center coordinates only (`CenterX`, `CenterY`); vertex/radius values are ignored for same-neuron detection.
 - Two circular entities are treated as the same neuron target when center distance is `<= 1.0 um`; if center distance is `> 1.0 um`, they map to different neurons.
-- Mapping order is deterministic: grouped timed objects are assigned to neuron channels in file order; non-circular objects remain separate channels.
+- In Holo4D fixed-lane layout (detected via startup TTL Out pulse + laser timeline pulses), entity grouping uses center-distance for all entity point objects so repeated IDs at same coordinates map to one neuron channel.
+- Mapping order is deterministic: grouped timed objects are assigned to neuron channels in file order.
 - Event time conversion uses: `t_us = start_us + k * Stepsize * tick_resolution_us`, with default tick resolution `500 us` (user-configurable in dialog).
 - Sample index conversion uses `round(t / dt)` (`np.rint`) and de-duplicates identical indices produced by sub-sample timing.
-- For `Entity` objects, onset and duration are first derived from matching laser `TTLPulse` entries (`type=TTLPulse` with laser `LightsourceID`): onset uses TTL `starttime`, and `duration_us = (repeats + 1) * tick_resolution_us`.
-- Entity-to-laser-pulse matching is done by lightsource ID compatibility plus nearest start-time ordering; if no laser TTL pulse can be matched, fallback uses entity `starttime` and duration `16.666 ms` (`ceil(16.666ms / dt)` timepoints).
+- In Holo4D fixed-lane layout, pulses from the active laser timeline stimulate all entity objects whose usable windows contain the pulse (`usable_start = entity_start + 16.66ms`), and entity window duration comes from entity timeline `(repeats + 1) * stepsize`.
+- TTL output pulses (`LightsourceCount=0`) are ignored for stimulation reconstruction.
+- Legacy non-Holo4D files keep prior entity handling: nearest laser-TTL matching for onset/duration with fallback to `16.666ms`.
 - Non-entity events fill one timepoint.
 - If repeated/overlapping events hit the same channel/time window, amplitude merge uses `max(existing, incoming)`.
 - Safety cap limits each object to `500000` events during expansion; excess repeats are counted as truncated repeats in the result report.
@@ -784,7 +793,7 @@ This means the documented functionality above is not only implemented but broadl
 
 ## 18) Practical caveats observed in code
 
-- SysCon2 export is currently binary-only (`ON/OFF`, fixed exported intensity `1.0`) and does not yet support multi-level intensity encoding.
+- SysCon2 export is currently binary-only (`ON/OFF`, fixed exported intensity `1.0`) and uses `1140nm` as the active laser timeline by default (multi-level intensity and wavelength selection are not yet exposed in the GUI).
 - `StimWidget` comments note `dt_ms != 1` caveat for shared camera assumptions with image-based x-spacing.
 - `utils.get_stim_type(...)` infers type from stim name as fallback heuristic.
 - Some experimental/support paths are explicitly marked as limited or less rigorously tested in comments (e.g., suite2p stat-to-seg conversion notes).

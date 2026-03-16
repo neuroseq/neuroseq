@@ -2,14 +2,21 @@ from __future__ import annotations
 
 import logging
 import pathlib
+from enum import Enum
 from typing import TYPE_CHECKING
 
+import brian2.numpy_ as np
 import qtawesome as qta
 from qtpy import QtWidgets
 from qtpy.compat import getexistingdirectory
 
+from neuroseq.exporter_syscon2 import SlmGapViolation
 from neuroseq.exporter_syscon2 import SysconExportReport
+from neuroseq.exporter_syscon2 import align_stim_values_left_for_slm
+from neuroseq.exporter_syscon2 import check_syscon2_input_sanity
+from neuroseq.exporter_syscon2 import find_slm_gap_violations
 from neuroseq.exporter_syscon2 import generate_syscon2_sequence_text
+from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm
 
 if TYPE_CHECKING:
     from neuroseq.importer_cellpose import CellposeImportResult
@@ -345,6 +352,11 @@ port=Holo4D TTL Out 2
 
         # Buttons
         button_layout = QtWidgets.QHBoxLayout()
+        self.check_sanity_button = QtWidgets.QPushButton("Check Input Sanity")
+        self.check_sanity_button.setIcon(qta.icon("mdi6.clipboard-check-outline"))
+        self.check_sanity_button.clicked.connect(self._check_input_sanity)
+
+        button_layout.addWidget(self.check_sanity_button)
         button_layout.addStretch()
 
         self.generate_button = QtWidgets.QPushButton("Generate Scripts")
@@ -360,6 +372,11 @@ port=Holo4D TTL Out 2
         button_layout.addWidget(self.generate_button)
         button_layout.addWidget(self.close_button)
         main_layout.addLayout(button_layout)
+
+    class _SlmFixChoice(Enum):
+        SPACE_OUT = "space_out"
+        ALIGN_LEFT = "align_left"
+        CANCEL = "cancel"
 
     def _update_stim_info(self) -> None:
         """Update the stimulation info label based on current selection."""
@@ -490,6 +507,222 @@ port=Holo4D TTL Out 2
                 "Generation Failed",
                 f"Failed to generate a script:\n{str(e)}",
             )
+
+    def _check_input_sanity(self) -> None:
+        """Run a dry-run sanity check for SysCon2 translation inputs."""
+        stim_name = self.stim_combo.currentText()
+        if not stim_name or stim_name == "(No stimulation arrays available)":
+            QtWidgets.QMessageBox.warning(
+                self,
+                "No Stimulation Selected",
+                "Please select a valid stimulation array.",
+            )
+            return
+        if stim_name not in self.project.stim_arrays:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Sanity Check Failed",
+                f"Stimulation array '{stim_name}' not found in project.",
+            )
+            return
+
+        stim_array = self.project.stim_arrays[stim_name]
+        slm_gap_violations = find_slm_gap_violations(
+            stim_array,
+            active_threshold=0.0,
+        )
+        if slm_gap_violations:
+            choice = self._prompt_slm_gap_fix_choice(
+                slm_gap_violations,
+                dt_seconds=stim_array.dt,
+            )
+            if choice == self._SlmFixChoice.CANCEL:
+                return
+
+            if choice == self._SlmFixChoice.SPACE_OUT:
+                new_values, truncated_tail_samples = space_out_stim_values_for_slm(
+                    stim_array,
+                    active_threshold=0.0,
+                )
+                changed = self._replace_stim_values_preserving_undo(
+                    stim_name,
+                    new_values,
+                )
+                if not changed:
+                    return
+                if truncated_tail_samples > 0:
+                    self._log_status(
+                        "SLM spacing fix truncated %d tail timepoints.",
+                        truncated_tail_samples,
+                    )
+            else:
+                new_values, moved_runs = align_stim_values_left_for_slm(
+                    stim_array,
+                    active_threshold=0.0,
+                )
+                changed = self._replace_stim_values_preserving_undo(
+                    stim_name,
+                    new_values,
+                )
+                if not changed:
+                    return
+                self._log_status(
+                    "SLM align-left fix moved %d violating run(s).",
+                    moved_runs,
+                )
+
+            stim_array = self.project.stim_arrays[stim_name]
+            remaining_violations = find_slm_gap_violations(
+                stim_array,
+                active_threshold=0.0,
+            )
+            if remaining_violations:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Sanity Check Failed",
+                    "SLM gap violations remain after applying the selected fix.\n"
+                    "Please adjust the stimulus manually and retry.",
+                )
+                return
+
+        sanity_report = check_syscon2_input_sanity(
+            stim_array,
+            self.project.cellpose_data,
+            template_text=self.config_data_edit.toPlainText(),
+            tick_resolution_us=500,
+            active_threshold=0.0,
+            binary_intensity=1.0,
+        )
+
+        if not sanity_report.is_valid:
+            error_lines = ["Input sanity check failed."]
+            if sanity_report.errors:
+                error_lines.extend(["", "Errors:", *sanity_report.errors])
+            if sanity_report.warnings:
+                error_lines.extend(["", "Warnings:", *sanity_report.warnings])
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Sanity Check Failed",
+                "\n".join(error_lines),
+            )
+            return
+
+        assert sanity_report.export_report is not None
+        export_report = sanity_report.export_report
+        success_lines = [
+            "Input sanity check passed.",
+            "",
+            f"Exported segments: {export_report.exported_segments}/{export_report.total_segments}",
+            "Mapped active neurons: "
+            f"{export_report.mapped_active_neurons}/{export_report.active_neurons}",
+            f"Entity timeline lanes: {export_report.entity_lanes}",
+            f"Generated object blocks: {export_report.generated_objects}",
+        ]
+        if sanity_report.warnings:
+            success_lines.extend(["", "Warnings:", *sanity_report.warnings])
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Sanity Check Passed With Warnings",
+                "\n".join(success_lines),
+            )
+            return
+        QtWidgets.QMessageBox.information(
+            self,
+            "Sanity Check Passed",
+            "\n".join(success_lines),
+        )
+
+    def _prompt_slm_gap_fix_choice(
+        self,
+        violations: list[SlmGapViolation],
+        *,
+        dt_seconds: float,
+    ) -> _SlmFixChoice:
+        first_violation = violations[0]
+        gap_ms = first_violation.gap_samples * dt_seconds * 1e3
+        required_gap_ms = first_violation.required_gap_samples * dt_seconds * 1e3
+        text_lines = [
+            (
+                "Detected stimulation transitions that violate the SLM load-time rule "
+                "(minimum 16.66 ms between different consecutive neuron targets)."
+            ),
+            "",
+            f"Violations detected: {len(violations)}",
+            (
+                "Example: "
+                f"{first_violation.previous_neuron_indices} -> "
+                f"{first_violation.current_neuron_indices}, "
+                f"gap={gap_ms:.2f}ms (required {required_gap_ms:.2f}ms)"
+            ),
+            "",
+            "Choose how to resolve:",
+            "1) Space input out (by 16.66 ms)",
+            "2) Align troublesome stimuli (to the left)",
+            "3) Cancel",
+        ]
+        msg_box = QtWidgets.QMessageBox(self)
+        msg_box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+        msg_box.setWindowTitle("SLM Gap Violations Detected")
+        msg_box.setText("\n".join(text_lines))
+
+        space_button = msg_box.addButton(
+            "Space Input Out",
+            QtWidgets.QMessageBox.ButtonRole.ActionRole,
+        )
+        align_button = msg_box.addButton(
+            "Align Troublesome Stimuli (Left)",
+            QtWidgets.QMessageBox.ButtonRole.ActionRole,
+        )
+        cancel_button = msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
+        msg_box.setDefaultButton(cancel_button)
+        msg_box.exec()
+        clicked = msg_box.clickedButton()
+        if clicked == space_button:
+            return self._SlmFixChoice.SPACE_OUT
+        if clicked == align_button:
+            return self._SlmFixChoice.ALIGN_LEFT
+        return self._SlmFixChoice.CANCEL
+
+    def _replace_stim_values_preserving_undo(
+        self,
+        stim_name: str,
+        new_values: np.ndarray,
+    ) -> bool:
+        if stim_name not in self.project.stim_arrays:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Sanity Check Failed",
+                f"Stimulation array '{stim_name}' not found in project.",
+            )
+            return False
+
+        try:
+            parent_widget = self.parentWidget()
+            stim_editor = (
+                getattr(parent_widget, "stim_editor", None)
+                if parent_widget is not None
+                else None
+            )
+            if stim_editor is not None and hasattr(
+                stim_editor, "replace_stim_values_with_undo"
+            ):
+                stim_editor.replace_stim_values_with_undo(stim_name, new_values)
+            else:
+                target = self.project.stim_arrays[stim_name]
+                if target.values.shape != new_values.shape:
+                    raise ValueError(
+                        "Automatic SLM fixes require matching stim-array shape."
+                    )
+                target.values[:, :] = new_values
+            return True
+        except Exception as exc:
+            self.logger.error("Failed to apply SLM sanity fix: %s", exc, exc_info=True)
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Sanity Check Failed",
+                f"Could not apply automatic SLM fix:\n{exc}",
+            )
+            return False
 
     def _get_file_extension(self, hardware_type: str) -> str:
         """Get the appropriate file extension for the hardware type."""

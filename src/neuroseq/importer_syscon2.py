@@ -31,6 +31,7 @@ _REQUIRED_HEADER_KEYS = (
 _MAPPABLE_SHAPE_TYPES = {"shape", "entity"}
 _ENTITY_DEFAULT_DURATION_SECONDS = 16.666e-3
 _SAME_NEURON_MAX_CENTER_DISTANCE_UM = 1.0
+_HOLO4D_TTL_OUT_START_PULSE_MIN_US = 9_000
 
 
 @dataclass
@@ -406,6 +407,243 @@ def _event_duration_timepoints_for_object(
     return 1
 
 
+def _timeline_index_for_object(obj: SysconSequenceObject) -> int:
+    return _safe_int(obj.properties.get("TimelineInfo0_TimelineIndex"), default=0)
+
+
+def _extract_entity_center_any_shape(
+    obj: SysconSequenceObject,
+) -> tuple[float, float] | None:
+    if obj.object_type.strip().lower() != "entity":
+        return None
+    center_x_raw = _find_property_value_by_suffix(
+        obj.properties, ("_centerx", "centerx")
+    )
+    center_y_raw = _find_property_value_by_suffix(
+        obj.properties, ("_centery", "centery")
+    )
+    if center_x_raw is None or center_y_raw is None:
+        return None
+    return (
+        _safe_float(center_x_raw, default=0.0),
+        _safe_float(center_y_raw, default=0.0),
+    )
+
+
+def _group_entities_by_center_distance(
+    entities: list[SysconSequenceObject],
+) -> list[list[SysconSequenceObject]]:
+    if len(entities) == 0:
+        return []
+
+    parent = list(range(len(entities)))
+
+    def find(idx: int) -> int:
+        while parent[idx] != idx:
+            parent[idx] = parent[parent[idx]]
+            idx = parent[idx]
+        return idx
+
+    def union(a: int, b: int) -> None:
+        root_a = find(a)
+        root_b = find(b)
+        if root_a != root_b:
+            parent[root_b] = root_a
+
+    centers_by_index: dict[int, tuple[float, float]] = {}
+    for idx, obj in enumerate(entities):
+        center = _extract_entity_center_any_shape(obj)
+        if center is not None:
+            centers_by_index[idx] = center
+
+    centered_indices = sorted(centers_by_index.keys())
+    for i, idx_a in enumerate(centered_indices):
+        center_a_x, center_a_y = centers_by_index[idx_a]
+        for idx_b in centered_indices[i + 1 :]:
+            center_b_x, center_b_y = centers_by_index[idx_b]
+            distance = float(np.hypot(center_a_x - center_b_x, center_a_y - center_b_y))
+            if distance <= _SAME_NEURON_MAX_CENTER_DISTANCE_UM:
+                union(idx_a, idx_b)
+
+    grouped: list[list[SysconSequenceObject]] = []
+    root_to_group_idx: dict[int, int] = {}
+    for idx, obj in enumerate(entities):
+        root = find(idx) if idx in centers_by_index else idx
+        if root not in root_to_group_idx:
+            root_to_group_idx[root] = len(grouped)
+            grouped.append([])
+        grouped[root_to_group_idx[root]].append(obj)
+    return grouped
+
+
+def _merge_time_intervals_us(
+    intervals: list[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    if len(intervals) == 0:
+        return []
+    sorted_intervals = sorted(intervals, key=lambda item: (item[0], item[1]))
+    merged: list[tuple[int, int]] = []
+    current_start, current_end = sorted_intervals[0]
+    for start_us, end_us in sorted_intervals[1:]:
+        if start_us <= current_end:
+            current_end = max(current_end, end_us)
+            continue
+        merged.append((current_start, current_end))
+        current_start, current_end = start_us, end_us
+    merged.append((current_start, current_end))
+    return merged
+
+
+def _looks_like_holo4d_timeline_layout(
+    sequence: SysconSequence,
+    *,
+    tick_resolution_us: int,
+) -> bool:
+    entities = [
+        obj for obj in sequence.objects if obj.object_type.strip().lower() == "entity"
+    ]
+    if len(entities) == 0:
+        return False
+
+    laser_pulses = [
+        obj
+        for obj in sequence.objects
+        if _ttl_pulse_duration_us(obj, tick_resolution_us=tick_resolution_us)
+        is not None
+    ]
+    if len(laser_pulses) == 0:
+        return False
+
+    ttl_out_like = [
+        obj
+        for obj in sequence.objects
+        if obj.object_type.strip().lower() == "ttlpulse"
+        and len(_extract_lightsource_ids(obj)) == 0
+    ]
+    if len(ttl_out_like) == 0:
+        return False
+
+    has_start_pulse = any(
+        obj.start_time_us == 0
+        and (max(1, obj.repeats + 1) * tick_resolution_us)
+        >= _HOLO4D_TTL_OUT_START_PULSE_MIN_US
+        for obj in ttl_out_like
+    )
+    return has_start_pulse
+
+
+def _sequence_to_stim_values_holo4d_layout(
+    sequence: SysconSequence,
+    *,
+    dt_seconds: float,
+    n_neurons: int,
+    tick_resolution_us: int,
+) -> tuple[np.ndarray, SysconImportResult]:
+    entities = [
+        obj for obj in sequence.objects if obj.object_type.strip().lower() == "entity"
+    ]
+    grouped_entities = _group_entities_by_center_distance(
+        sorted(entities, key=lambda obj: (obj.start_time_us, obj.block_index))
+    )
+    grouped_objects_count = len(grouped_entities)
+    mapped_objects = min(n_neurons, grouped_objects_count)
+    dropped_objects = grouped_objects_count - mapped_objects
+
+    laser_pulses = [
+        obj
+        for obj in sequence.objects
+        if _ttl_pulse_duration_us(obj, tick_resolution_us=tick_resolution_us)
+        is not None
+    ]
+    pulses_by_timeline: dict[int, list[SysconSequenceObject]] = {}
+    for pulse in laser_pulses:
+        timeline_idx = _timeline_index_for_object(pulse)
+        pulses_by_timeline.setdefault(timeline_idx, []).append(pulse)
+    active_timeline_idx, active_timeline_pulses = sorted(
+        pulses_by_timeline.items(),
+        key=lambda item: (-len(item[1]), item[0]),
+    )[0]
+    _ = active_timeline_idx
+    pulse_intervals = _merge_time_intervals_us(
+        [
+            (
+                pulse.start_time_us,
+                pulse.start_time_us
+                + int(
+                    _ttl_pulse_duration_us(pulse, tick_resolution_us=tick_resolution_us)
+                    or 0
+                ),
+            )
+            for pulse in active_timeline_pulses
+        ]
+    )
+
+    entity_unusable_lead_us = int(np.ceil(_ENTITY_DEFAULT_DURATION_SECONDS * 1e6))
+    intervals_by_neuron: list[list[tuple[int, int, float]]] = [
+        [] for _ in range(mapped_objects)
+    ]
+    max_timepoints = 1
+    for neuron_idx, entity_group in enumerate(grouped_entities[:mapped_objects]):
+        for entity in entity_group:
+            entity_duration_ticks = max(1, (entity.repeats + 1) * entity.step_size)
+            entity_start_us = entity.start_time_us
+            entity_end_us = entity_start_us + (
+                entity_duration_ticks * tick_resolution_us
+            )
+            usable_start_us = entity_start_us + entity_unusable_lead_us
+            if entity_end_us <= usable_start_us:
+                continue
+            for pulse_start_us, pulse_end_us in pulse_intervals:
+                if pulse_end_us <= usable_start_us:
+                    continue
+                if pulse_start_us >= entity_end_us:
+                    break
+                effective_start_us = max(pulse_start_us, usable_start_us)
+                effective_end_us = min(pulse_end_us, entity_end_us)
+                if effective_end_us <= effective_start_us:
+                    continue
+
+                start_idx = int(np.rint((effective_start_us * 1e-6) / dt_seconds))
+                duration_timepoints = max(
+                    1,
+                    int(
+                        np.ceil(
+                            ((effective_end_us - effective_start_us) * 1e-6)
+                            / dt_seconds
+                        )
+                    ),
+                )
+                end_idx = start_idx + duration_timepoints
+                intervals_by_neuron[neuron_idx].append(
+                    (start_idx, end_idx, entity.intensity)
+                )
+                max_timepoints = max(max_timepoints, end_idx)
+
+    values = np.zeros((max_timepoints, n_neurons), dtype=np.float32)
+    for neuron_idx, intervals in enumerate(intervals_by_neuron):
+        for start_idx, end_idx, intensity in intervals:
+            start = max(0, start_idx)
+            end = min(values.shape[0], end_idx)
+            if end <= start:
+                continue
+            values[start:end, neuron_idx] = np.maximum(
+                values[start:end, neuron_idx], intensity
+            )
+
+    result = SysconImportResult(
+        total_objects=len(sequence.objects),
+        eligible_objects=len(entities),
+        grouped_objects=grouped_objects_count,
+        merged_objects=max(0, len(entities) - grouped_objects_count),
+        mapped_objects=mapped_objects,
+        dropped_objects=dropped_objects,
+        generated_timepoints=values.shape[0],
+        truncated_timepoints=0,
+        truncated_repeats=0,
+    )
+    return values, result
+
+
 def _group_eligible_objects_by_target_neuron(
     eligible_objects: list[SysconSequenceObject],
 ) -> list[list[SysconSequenceObject]]:
@@ -485,6 +723,16 @@ def sequence_to_stim_values(
         raise ValueError("n_neurons must be positive")
     if tick_resolution_us <= 0:
         raise ValueError("tick_resolution_us must be positive")
+
+    if _looks_like_holo4d_timeline_layout(
+        sequence, tick_resolution_us=tick_resolution_us
+    ):
+        return _sequence_to_stim_values_holo4d_layout(
+            sequence,
+            dt_seconds=dt_seconds,
+            n_neurons=n_neurons,
+            tick_resolution_us=tick_resolution_us,
+        )
 
     grouped_objects = group_timed_objects_by_neuron_target(
         sequence, include_non_shape=include_non_shape

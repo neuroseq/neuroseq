@@ -417,6 +417,248 @@ port=dummy_1_0 RMI In
 """
 
 
+def _sample_holo4d_layout_seq_text() -> str:
+    return """nohash
+version=3
+scanmode=Accurate
+runs=1
+DeviceSequenceID=1
+invertedportcnt=1
+inverted0=Holo4D TTL Out 1
+AutoTriggerRulesEnabled=False
+AutoTriggerRulesCount=0
+timelinezoomfactor=10
+timelineviewposx=0
+timelineviewposy=0
+[0]
+ID=1
+type=Entity
+TotalTimings=1
+TimelineInfo0_TimelineIndex=0
+TimelineInfo0_starttime=0
+TimelineInfo0_description=
+TimelineInfo0_repeats=100
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0.4
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Entity0_Type=0
+Entity0_CenterX=0
+Entity0_CenterY=0
+Entity0_CenterZ=0
+[/0]
+[1]
+ID=2
+type=Entity
+TotalTimings=1
+TimelineInfo0_TimelineIndex=1
+TimelineInfo0_starttime=0
+TimelineInfo0_description=
+TimelineInfo0_repeats=100
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0.7
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Entity1_Type=0
+Entity1_CenterX=10
+Entity1_CenterY=0
+Entity1_CenterZ=0
+[/1]
+[2]
+ID=3
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=4
+TimelineInfo0_starttime=10000
+TimelineInfo0_description=
+TimelineInfo0_repeats=1
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=dummy_1_0 RMI In
+[/2]
+[3]
+ID=4
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=4
+TimelineInfo0_starttime=20000
+TimelineInfo0_description=
+TimelineInfo0_repeats=1
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=dummy_1_0 RMI In
+[/3]
+[4]
+ID=5
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=5
+TimelineInfo0_starttime=0
+TimelineInfo0_description=
+TimelineInfo0_repeats=19
+TimelineInfo0_LightsourceCount=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=Holo4D TTL Out 1
+[/4]
+[5]
+ID=6
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=5
+TimelineInfo0_starttime=10000
+TimelineInfo0_description=
+TimelineInfo0_repeats=1
+TimelineInfo0_LightsourceCount=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=Holo4D TTL Out 1
+[/5]
+[6]
+ID=7
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=5
+TimelineInfo0_starttime=20000
+TimelineInfo0_description=
+TimelineInfo0_repeats=1
+TimelineInfo0_LightsourceCount=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=Holo4D TTL Out 1
+[/6]
+"""
+
+
+def _sample_holo4d_layout_same_center_seq_text() -> str:
+    return """nohash
+version=3
+scanmode=Accurate
+runs=1
+DeviceSequenceID=1
+invertedportcnt=1
+inverted0=Holo4D TTL Out 1
+AutoTriggerRulesEnabled=False
+AutoTriggerRulesCount=0
+timelinezoomfactor=10
+timelineviewposx=0
+timelineviewposy=0
+[0]
+ID=1
+type=Entity
+TotalTimings=1
+TimelineInfo0_TimelineIndex=0
+TimelineInfo0_starttime=0
+TimelineInfo0_description=
+TimelineInfo0_repeats=100
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0.5
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Entity0_Type=0
+Entity0_CenterX=5
+Entity0_CenterY=5
+Entity0_CenterZ=0
+[/0]
+[1]
+ID=2
+type=Entity
+TotalTimings=1
+TimelineInfo0_TimelineIndex=0
+TimelineInfo0_starttime=30000
+TimelineInfo0_description=
+TimelineInfo0_repeats=100
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0.5
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Entity1_Type=0
+Entity1_CenterX=5
+Entity1_CenterY=5
+Entity1_CenterZ=0
+[/1]
+[2]
+ID=3
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=3
+TimelineInfo0_starttime=20000
+TimelineInfo0_description=
+TimelineInfo0_repeats=1
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=dummy_1_0 RMI In
+[/2]
+[3]
+ID=4
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=3
+TimelineInfo0_starttime=50000
+TimelineInfo0_description=
+TimelineInfo0_repeats=1
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=dummy_1_0 RMI In
+[/3]
+[4]
+ID=5
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=4
+TimelineInfo0_starttime=0
+TimelineInfo0_description=
+TimelineInfo0_repeats=19
+TimelineInfo0_LightsourceCount=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=Holo4D TTL Out 1
+[/4]
+[5]
+ID=6
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=4
+TimelineInfo0_starttime=20000
+TimelineInfo0_description=
+TimelineInfo0_repeats=1
+TimelineInfo0_LightsourceCount=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=Holo4D TTL Out 1
+[/5]
+[6]
+ID=7
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=4
+TimelineInfo0_starttime=50000
+TimelineInfo0_description=
+TimelineInfo0_repeats=1
+TimelineInfo0_LightsourceCount=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=Holo4D TTL Out 1
+[/6]
+"""
+
+
 def test_parse_syscon2_seq_file(tmp_path: Path) -> None:
     seq_path = tmp_path / "sample.seq"
     seq_path.write_text(_sample_seq_text(), encoding="utf-8")
@@ -635,6 +877,54 @@ def test_sequence_to_stim_values_entity_duration_from_laser_ttl_pulses(
     # Entity[1] onset/duration from TTLPulse: start=11000us (idx 11), repeats=7 -> 4ms -> 4 samples.
     assert np.all(values[11:15, 1] == 0.7)
     assert np.all(values[:11, 1] == 0.0)
+
+
+def test_sequence_to_stim_values_holo4d_layout_uses_shared_laser_pulses(
+    tmp_path: Path,
+) -> None:
+    seq_path = tmp_path / "holo4d_layout.seq"
+    seq_path.write_text(_sample_holo4d_layout_seq_text(), encoding="utf-8")
+    sequence = parse_syscon2_seq_file(seq_path)
+
+    values, result = sequence_to_stim_values(
+        sequence,
+        dt_seconds=0.001,
+        n_neurons=3,
+        tick_resolution_us=500,
+        include_non_shape=False,
+    )
+
+    assert result.mapped_objects == 2
+    # First laser pulse at 10ms is ignored by SLM lead time (16.66ms).
+    assert np.all(values[10, :2] == 0.0)
+    # Second pulse at 20ms stimulates all active entity objects.
+    assert values[20, 0] == 0.4
+    assert values[20, 1] == 0.7
+    assert np.all(values[:, 2] == 0.0)
+
+
+def test_sequence_to_stim_values_holo4d_layout_merges_same_center_entities(
+    tmp_path: Path,
+) -> None:
+    seq_path = tmp_path / "holo4d_same_center.seq"
+    seq_path.write_text(_sample_holo4d_layout_same_center_seq_text(), encoding="utf-8")
+    sequence = parse_syscon2_seq_file(seq_path)
+
+    values, result = sequence_to_stim_values(
+        sequence,
+        dt_seconds=0.001,
+        n_neurons=2,
+        tick_resolution_us=500,
+        include_non_shape=False,
+    )
+
+    assert result.eligible_objects == 2
+    assert result.grouped_objects == 1
+    assert result.merged_objects == 1
+    assert result.mapped_objects == 1
+    assert values[20, 0] == 0.5
+    assert values[50, 0] == 0.5
+    assert np.all(values[:, 1] == 0.0)
 
 
 def test_import_sequence_into_stim_array_extends_and_offsets(tmp_path: Path) -> None:
