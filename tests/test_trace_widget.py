@@ -259,3 +259,32 @@ def test_trace_widget_gridlines_use_controller_neuron_limit(qtbot: QtBot) -> Non
     positions = trace_widget.grid_lines.gridline_10ms.geometry.positions.data
     assert np.max(positions[:, 1]) == pytest.approx(controller.max_height - 0.5)
     trace_widget.close()
+
+
+def test_trace_widget_set_grid_visible(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.show()
+    qtbot.waitUntil(lambda: trace_widget.isVisible())
+    data = TraceData(
+        name="traces",
+        traces=np.random.rand(4, 20).astype(np.float32),
+        indices=np.arange(4, dtype=np.uint32),
+        dt=0.001,
+        units="mV",
+    )
+    trace_widget.set_data(data)
+    assert trace_widget.grid_lines is not None
+    assert trace_widget.grid_lines.visible
+    trace_widget.set_grid_visible(False)
+    assert not trace_widget.show_grid
+    assert trace_widget.grid_lines is not None
+    assert not trace_widget.grid_lines.visible
+    trace_widget.set_data(data)
+    assert trace_widget.grid_lines is not None
+    assert not trace_widget.grid_lines.visible
+    trace_widget.set_grid_visible(True)
+    assert trace_widget.grid_lines is not None
+    assert trace_widget.grid_lines.visible
+    trace_widget.close()

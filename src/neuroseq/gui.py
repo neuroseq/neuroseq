@@ -25,6 +25,7 @@ from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.data_widget import DataWidget
 from neuroseq.example_projects import default_project
+from neuroseq.example_projects import example_project_sections
 from neuroseq.example_projects import example_projects
 from neuroseq.experiments_manager_dialog import ExperimentsManagerDialog
 from neuroseq.gui_settings import GuiSettings
@@ -599,6 +600,16 @@ class Gui(QtWidgets.QMainWindow):
         ]:
             widget.toggle_selection_text()
 
+    def toggle_grid(self, is_visible: bool) -> None:
+        for widget in [
+            self.stim_editor.stim_widget,
+            self.trace_widget,
+            self.spike_widget,
+            self.data_widget.trace_widget,
+            self.data_widget.spike_widget,
+        ]:
+            widget.set_grid_visible(is_visible)
+
     def choose_max_ram_synapse_plot_matrix(self) -> None:
         new_max_ram, ok = QtWidgets.QInputDialog.getText(
             self,
@@ -807,13 +818,14 @@ class Gui(QtWidgets.QMainWindow):
         self.addToolBar(self.toolbar_playback)
         self.menu_view = menu.addMenu("&View")
         self.toolbar_view = QtWidgets.QToolBar("View")
-        self.addToolBar(self.toolbar_view)
         self.toolbar_data = QtWidgets.QToolBar("Data")
         self.addToolBar(self.toolbar_data)
 
         self.menu_experiment = menu.addMenu("&Experiment")
         self.toolbar_experiment = QtWidgets.QToolBar("Experiment")
         self.addToolBar(self.toolbar_experiment)
+        self.addToolBarBreak()
+        self.addToolBar(self.toolbar_view)
 
         self.menu_settings = menu.addMenu("&Settings")
         self.menu_help = menu.addMenu("&Help")
@@ -841,11 +853,18 @@ class Gui(QtWidgets.QMainWindow):
         )
         # add "open example project" item to the file menu which opens a sub-menu containing the example projects from src/neuroseq/example_projects
         example_projects_menu = menu.addMenu("&Open example project")
+        section_menus: dict[str, QtWidgets.QMenu] = {}
         for name, generator in example_projects.items():
+            target_menu = example_projects_menu
+            section = example_project_sections.get(name)
+            if section is not None:
+                if section not in section_menus:
+                    section_menus[section] = example_projects_menu.addMenu(section)
+                target_menu = section_menus[section]
             add_action(
                 name,
                 lambda checked, _generator=generator: self.load_project(_generator()),
-                example_projects_menu,
+                target_menu,
                 None,
             )
         add_action(
@@ -1038,6 +1057,15 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             icon=qta.icon("mdi6.format-text"),
+            checkable=True,
+            is_checked=True,
+        )
+        add_action(
+            "Toggle Grid",
+            self.toggle_grid,
+            menu,
+            toolbar,
+            icon=qta.icon("mdi6.grid"),
             checkable=True,
             is_checked=True,
         )
