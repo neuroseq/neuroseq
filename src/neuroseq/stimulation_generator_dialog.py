@@ -10,12 +10,18 @@ import qtawesome as qta
 from qtpy import QtWidgets
 from qtpy.compat import getexistingdirectory
 
+from neuroseq.exporter_syscon2 import InitialSlmLoadViolation
+from neuroseq.exporter_syscon2 import SimultaneousDurationViolation
 from neuroseq.exporter_syscon2 import SlmGapViolation
 from neuroseq.exporter_syscon2 import SysconExportReport
 from neuroseq.exporter_syscon2 import align_stim_values_left_for_slm
 from neuroseq.exporter_syscon2 import check_syscon2_input_sanity
+from neuroseq.exporter_syscon2 import equalize_simultaneous_durations_to_min
+from neuroseq.exporter_syscon2 import find_initial_slm_load_violation
+from neuroseq.exporter_syscon2 import find_simultaneous_duration_violations
 from neuroseq.exporter_syscon2 import find_slm_gap_violations
 from neuroseq.exporter_syscon2 import generate_syscon2_sequence_text
+from neuroseq.exporter_syscon2 import shift_stim_values_right_for_initial_slm_load
 from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm
 
 if TYPE_CHECKING:
@@ -135,197 +141,33 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         self.config_data_edit = QtWidgets.QPlainTextEdit()
         self.config_data_edit.setMaximumHeight(150)
         self.config_data_edit.setToolTip("HOLO4D sequence configuration data")
-        default_config = """CC-D0-82-61-A8-44-C9-77-DC-C1-F4-75-86-F5-E8-7B
-version=2
-scanmode=Accurate
-runs=5
-DeviceSequenceID=0
-invertedportcnt=2
-inverted0=dummy_0_0 RMI In
-inverted1=dummy_2_0 RMI In
-AutoTriggerRulesEnabled=True
-AutoTriggerRulesCount=2
-SourceConnectorPort0=dummy_1_0 RMI In
-TargetConnectorPort0=Holo4D TTL Out 2
-PreTiming_us0=20000
-PostTiming_us0=20000
-SourceConnectorPort1=dummy_2_0 RMI In
-TargetConnectorPort1=Holo4D TTL Out 2
-PreTiming_us1=20000
-PostTiming_us1=20000
-timelinezoomfactor=23
-timelineviewposx=0
-timelineviewposy=0
-TotalEditorGroups=0
-[0]
-ID=3
-type=Entity
-TotalTimings=1
-TimelineInfo0_TimelineIndex=0
-TimelineInfo0_starttime=4999800
-TimelineInfo0_description=
-TimelineInfo0_repeats=599
-TimelineInfo0_LightsourceCount=1
-TimelineInfo0_LightsourceID_0=dummy_1_0
-TimelineInfo0_Intensity_0=0.246
-TimelineInfo0_timelinegroupid=-1
-TimelineInfo0_Stepsize=1
-Entity0_Type=0
-Entity0_Filled=False
-Entity0_CenterX=214.0635
-Entity0_CenterY=318.5917
-Entity0_CenterZ=0
-Entity0_Rotation=0
-Entity0_ScaleX=1
-Entity0_ScaleY=1
-Entity0_ScaleZ=1
-Entity0_VertexCount=0
-Entity0_reversed=False
-[/0]
-[1]
-ID=2
-type=Entity
-TotalTimings=1
-TimelineInfo0_TimelineIndex=1
-TimelineInfo0_starttime=4999800
-TimelineInfo0_description=
-TimelineInfo0_repeats=1800
-TimelineInfo0_LightsourceCount=1
-TimelineInfo0_LightsourceID_0=dummy_1_0
-TimelineInfo0_Intensity_0=0.246
-TimelineInfo0_timelinegroupid=-1
-TimelineInfo0_Stepsize=1
-Entity1_Type=0
-Entity1_Filled=False
-Entity1_CenterX=270.3961
-Entity1_CenterY=334.2396
-Entity1_CenterZ=0
-Entity1_Rotation=0
-Entity1_ScaleX=1
-Entity1_ScaleY=1
-Entity1_ScaleZ=1
-Entity1_VertexCount=0
-Entity1_reversed=False
-[/1]
-[2]
-ID=4
-type=Entity
-TotalTimings=1
-TimelineInfo0_TimelineIndex=0
-TimelineInfo0_starttime=14999400
-TimelineInfo0_description=
-TimelineInfo0_repeats=600
-TimelineInfo0_LightsourceCount=1
-TimelineInfo0_LightsourceID_0=dummy_1_0
-TimelineInfo0_Intensity_0=0.246
-TimelineInfo0_timelinegroupid=-1
-TimelineInfo0_Stepsize=1
-Entity2_Type=0
-Entity2_Filled=False
-Entity2_CenterX=163.3643
-Entity2_CenterY=179.6381
-Entity2_CenterZ=0
-Entity2_Rotation=0
-Entity2_ScaleX=1
-Entity2_ScaleY=1
-Entity2_ScaleZ=1
-Entity2_VertexCount=0
-Entity2_reversed=False
-[/2]
-[3]
-ID=5
-type=Entity
-TotalTimings=1
-TimelineInfo0_TimelineIndex=0
-TimelineInfo0_starttime=25015666
-TimelineInfo0_description=
-TimelineInfo0_repeats=600
-TimelineInfo0_LightsourceCount=1
-TimelineInfo0_LightsourceID_0=dummy_1_0
-TimelineInfo0_Intensity_0=0.246
-TimelineInfo0_timelinegroupid=-1
-TimelineInfo0_Stepsize=1
-Entity3_Type=0
-Entity3_Filled=False
-Entity3_CenterX=313.5843
-Entity3_CenterY=157.1051
-Entity3_CenterZ=0
-Entity3_Rotation=0
-Entity3_ScaleX=1
-Entity3_ScaleY=1
-Entity3_ScaleZ=1
-Entity3_VertexCount=0
-Entity3_reversed=False
-[/3]
-[4]
-ID=6
-type=Entity
-TotalTimings=1
-TimelineInfo0_TimelineIndex=0
-TimelineInfo0_starttime=35031932
-TimelineInfo0_description=
-TimelineInfo0_repeats=600
-TimelineInfo0_LightsourceCount=1
-TimelineInfo0_LightsourceID_0=dummy_1_0
-TimelineInfo0_Intensity_0=0.246
-TimelineInfo0_timelinegroupid=-1
-TimelineInfo0_Stepsize=1
-Entity4_Type=0
-Entity4_Filled=False
-Entity4_CenterX=112.665
-Entity4_CenterY=340.4988
-Entity4_CenterZ=0
-Entity4_Rotation=0
-Entity4_ScaleX=1
-Entity4_ScaleY=1
-Entity4_ScaleZ=1
-Entity4_VertexCount=0
-Entity4_reversed=False
-[/4]
-[5]
-ID=1
-type=TTLPulse
-TotalTimings=1
-TimelineInfo0_TimelineIndex=5
-TimelineInfo0_starttime=845278.6875
-TimelineInfo0_description=
-TimelineInfo0_repeats=958
-TimelineInfo0_LightsourceCount=0
-TimelineInfo0_timelinegroupid=-1
-TimelineInfo0_Stepsize=100
-port=Holo4D TTL Out 1
-[/5]
-[6]
-ID=7
-type=TTLPulse
-TotalTimings=1
-TimelineInfo0_TimelineIndex=2
-TimelineInfo0_starttime=4937302.5
-TimelineInfo0_description=
-TimelineInfo0_repeats=77357
-TimelineInfo0_LightsourceCount=1
-TimelineInfo0_LightsourceID_0=dummy_1_0
-TimelineInfo0_Intensity_0=0
-TimelineInfo0_timelinegroupid=-1
-TimelineInfo0_Stepsize=100
-port=dummy_1_0 RMI In
-[/6]
-[7]
-ID=8
-type=TTLPulse
-TotalTimings=1
-TimelineInfo0_TimelineIndex=6
-TimelineInfo0_starttime=4917511.625
-TimelineInfo0_description=
-TimelineInfo0_repeats=77092
-TimelineInfo0_LightsourceCount=0
-TimelineInfo0_timelinegroupid=-1
-TimelineInfo0_Stepsize=100
-port=Holo4D TTL Out 2
-[/7]
-"""
+        default_config = self._default_syscon2_config_text()
         self.config_data_edit.setPlainText(default_config)
         config_layout.addWidget(self.config_data_edit)
+
+        self.binary_mode_checkbox = QtWidgets.QCheckBox(
+            "Force binary export intensity (all ON samples -> 1.0)"
+        )
+        self.binary_mode_checkbox.setChecked(True)
+        self.binary_mode_checkbox.setToolTip(
+            "When unchecked, exported Shape intensities preserve input stim amplitudes "
+            "(clipped to [0, 1])."
+        )
+        config_layout.addWidget(self.binary_mode_checkbox)
+
+        laser_layout = QtWidgets.QHBoxLayout()
+        laser_label = QtWidgets.QLabel("Laser timeline:")
+        self.laser_combo = QtWidgets.QComboBox()
+        self.laser_combo.addItem("940 nm digital", 940)
+        self.laser_combo.addItem("1030 nm digital", 1030)
+        self.laser_combo.addItem("1140 nm digital", 1140)
+        self.laser_combo.setCurrentIndex(self.laser_combo.findData(1140))
+        self.laser_combo.setToolTip(
+            "Select which fixed laser timeline receives stimulation TTLPulses."
+        )
+        laser_layout.addWidget(laser_label)
+        laser_layout.addWidget(self.laser_combo)
+        config_layout.addLayout(laser_layout)
 
         config_group.setLayout(config_layout)
         main_layout.addWidget(config_group)
@@ -376,6 +218,14 @@ port=Holo4D TTL Out 2
     class _SlmFixChoice(Enum):
         SPACE_OUT = "space_out"
         ALIGN_LEFT = "align_left"
+        CANCEL = "cancel"
+
+    class _DurationFixChoice(Enum):
+        EQUALIZE_MIN = "equalize_min"
+        CANCEL = "cancel"
+
+    class _InitialSlmFixChoice(Enum):
+        SHIFT_RIGHT = "shift_right"
         CANCEL = "cancel"
 
     def _update_stim_info(self) -> None:
@@ -527,19 +377,104 @@ port=Holo4D TTL Out 2
             return
 
         stim_array = self.project.stim_arrays[stim_name]
+        duration_violations = find_simultaneous_duration_violations(
+            stim_array,
+            active_threshold=0.0,
+        )
+        if duration_violations:
+            duration_choice = self._prompt_duration_fix_choice(
+                duration_violations,
+                dt_seconds=stim_array.dt,
+            )
+            if duration_choice == self._DurationFixChoice.CANCEL:
+                return
+
+            new_values, trimmed_timepoints = equalize_simultaneous_durations_to_min(
+                stim_array,
+                active_threshold=0.0,
+            )
+            changed = self._replace_stim_values_preserving_undo(
+                stim_name,
+                new_values,
+            )
+            if not changed:
+                return
+            self._log_status(
+                "Simultaneous-duration equalization trimmed %d sample(s).",
+                trimmed_timepoints,
+            )
+
+            stim_array = self.project.stim_arrays[stim_name]
+            remaining_duration_violations = find_simultaneous_duration_violations(
+                stim_array,
+                active_threshold=0.0,
+            )
+            if remaining_duration_violations:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Sanity Check Failed",
+                    "Simultaneous duration violations remain after equalization.\n"
+                    "Please adjust the stimulus manually and retry.",
+                )
+                return
+
+        initial_slm_load_violation = find_initial_slm_load_violation(
+            stim_array,
+            active_threshold=0.0,
+        )
+        if initial_slm_load_violation is not None:
+            choice = self._prompt_initial_slm_start_fix_choice(
+                initial_slm_load_violation,
+                dt_seconds=stim_array.dt,
+            )
+            if choice == self._InitialSlmFixChoice.CANCEL:
+                return
+
+            new_values, truncated_tail_samples = (
+                shift_stim_values_right_for_initial_slm_load(
+                    stim_array,
+                )
+            )
+            changed = self._replace_stim_values_preserving_undo(
+                stim_name,
+                new_values,
+            )
+            if not changed:
+                return
+            if truncated_tail_samples > 0:
+                self._log_status(
+                    "Initial SLM-load shift truncated %d tail timepoints.",
+                    truncated_tail_samples,
+                )
+
+            stim_array = self.project.stim_arrays[stim_name]
+            remaining_initial_violation = find_initial_slm_load_violation(
+                stim_array,
+                active_threshold=0.0,
+            )
+            if remaining_initial_violation is not None:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Sanity Check Failed",
+                    "Initial SLM load-up violation remains after applying "
+                    "the selected fix.\n"
+                    "Please adjust the stimulus manually and retry.",
+                )
+                return
+
         slm_gap_violations = find_slm_gap_violations(
             stim_array,
             active_threshold=0.0,
         )
         if slm_gap_violations:
-            choice = self._prompt_slm_gap_fix_choice(
+            slm_fix_choice = self._prompt_slm_gap_fix_choice(
                 slm_gap_violations,
                 dt_seconds=stim_array.dt,
             )
-            if choice == self._SlmFixChoice.CANCEL:
+            if slm_fix_choice == self._SlmFixChoice.CANCEL:
                 return
 
-            if choice == self._SlmFixChoice.SPACE_OUT:
+            if slm_fix_choice == self._SlmFixChoice.SPACE_OUT:
                 new_values, truncated_tail_samples = space_out_stim_values_for_slm(
                     stim_array,
                     active_threshold=0.0,
@@ -585,6 +520,7 @@ port=Holo4D TTL Out 2
                 )
                 return
 
+        force_binary_intensity = self.binary_mode_checkbox.isChecked()
         sanity_report = check_syscon2_input_sanity(
             stim_array,
             self.project.cellpose_data,
@@ -592,6 +528,8 @@ port=Holo4D TTL Out 2
             tick_resolution_us=500,
             active_threshold=0.0,
             binary_intensity=1.0,
+            force_binary_intensity=force_binary_intensity,
+            active_laser_wavelength_nm=self._selected_laser_wavelength_nm(),
         )
 
         if not sanity_report.is_valid:
@@ -683,6 +621,95 @@ port=Holo4D TTL Out 2
             return self._SlmFixChoice.ALIGN_LEFT
         return self._SlmFixChoice.CANCEL
 
+    def _prompt_duration_fix_choice(
+        self,
+        violations: list[SimultaneousDurationViolation],
+        *,
+        dt_seconds: float,
+    ) -> _DurationFixChoice:
+        first_violation = violations[0]
+        start_ms = first_violation.start_idx * dt_seconds * 1e3
+        duration_summary = ", ".join(
+            f"neuron {neuron_idx}: {duration_idx * dt_seconds * 1e3:.2f}ms"
+            for neuron_idx, duration_idx in zip(
+                first_violation.neuron_indices,
+                first_violation.durations_idx,
+                strict=False,
+            )
+        )
+        min_duration_ms = first_violation.min_duration_idx * dt_seconds * 1e3
+
+        text_lines = [
+            (
+                "Detected simultaneous stimulation events with unequal durations. "
+                "All neurons stimulated together must have equal duration."
+            ),
+            "",
+            f"Violations detected: {len(violations)}",
+            f"Example at t={start_ms:.2f}ms: {duration_summary}",
+            f"Minimum duration in example: {min_duration_ms:.2f}ms",
+            "",
+            "Choose how to resolve:",
+            "1) Equalize (to lowest value)",
+            "2) Cancel",
+        ]
+        msg_box = QtWidgets.QMessageBox(self)
+        msg_box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+        msg_box.setWindowTitle("Unequal Simultaneous Durations Detected")
+        msg_box.setText("\n".join(text_lines))
+
+        equalize_button = msg_box.addButton(
+            "Equalize (to lowest value)",
+            QtWidgets.QMessageBox.ButtonRole.ActionRole,
+        )
+        cancel_button = msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
+        msg_box.setDefaultButton(cancel_button)
+        msg_box.exec()
+        clicked = msg_box.clickedButton()
+        if clicked == equalize_button:
+            return self._DurationFixChoice.EQUALIZE_MIN
+        return self._DurationFixChoice.CANCEL
+
+    def _prompt_initial_slm_start_fix_choice(
+        self,
+        violation: InitialSlmLoadViolation,
+        *,
+        dt_seconds: float,
+    ) -> _InitialSlmFixChoice:
+        first_start_ms = violation.first_active_idx * dt_seconds * 1e3
+        required_start_ms = violation.required_start_idx * dt_seconds * 1e3
+        shift_ms = required_start_ms
+        text_lines = [
+            (
+                "Detected stimulation too close to experiment start. "
+                "SysCon2 requires at least 16.66 ms before first stimulation "
+                "for initial SLM load-up."
+            ),
+            "",
+            f"First stimulation starts at: {first_start_ms:.2f}ms",
+            f"Required minimum start: {required_start_ms:.2f}ms",
+            "",
+            "Choose how to resolve:",
+            f"1) Translate all inputs right by {shift_ms:.2f} ms",
+            "2) Cancel",
+        ]
+        msg_box = QtWidgets.QMessageBox(self)
+        msg_box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+        msg_box.setWindowTitle("Initial SLM Load-Up Violation Detected")
+        msg_box.setText("\n".join(text_lines))
+
+        shift_button = msg_box.addButton(
+            "Translate All Inputs Right",
+            QtWidgets.QMessageBox.ButtonRole.ActionRole,
+        )
+        cancel_button = msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
+        msg_box.setDefaultButton(cancel_button)
+        msg_box.exec()
+        clicked = msg_box.clickedButton()
+        if clicked == shift_button:
+            return self._InitialSlmFixChoice.SHIFT_RIGHT
+        return self._InitialSlmFixChoice.CANCEL
+
     def _replace_stim_values_preserving_undo(
         self,
         stim_name: str,
@@ -711,16 +738,16 @@ port=Holo4D TTL Out 2
                 target = self.project.stim_arrays[stim_name]
                 if target.values.shape != new_values.shape:
                     raise ValueError(
-                        "Automatic SLM fixes require matching stim-array shape."
+                        "Automatic sanity fixes require matching stim-array shape."
                     )
                 target.values[:, :] = new_values
             return True
         except Exception as exc:
-            self.logger.error("Failed to apply SLM sanity fix: %s", exc, exc_info=True)
+            self.logger.error("Failed to apply sanity fix: %s", exc, exc_info=True)
             QtWidgets.QMessageBox.critical(
                 self,
                 "Sanity Check Failed",
-                f"Could not apply automatic SLM fix:\n{exc}",
+                f"Could not apply automatic sanity fix:\n{exc}",
             )
             return False
 
@@ -758,4 +785,37 @@ port=Holo4D TTL Out 2
             tick_resolution_us=500,
             active_threshold=0.0,
             binary_intensity=1.0,
+            force_binary_intensity=self.binary_mode_checkbox.isChecked(),
+            active_laser_wavelength_nm=self._selected_laser_wavelength_nm(),
         )
+
+    def _selected_laser_wavelength_nm(self) -> int:
+        current_data = self.laser_combo.currentData()
+        if current_data is None:
+            return 1140
+        return int(current_data)
+
+    def _default_syscon2_config_text(self) -> str:
+        imported_template = getattr(
+            self.project,
+            "syscon2_export_template_text",
+            None,
+        )
+        if imported_template:
+            return imported_template
+        return """nohash
+version=3
+scanmode=Accurate
+runs=1
+invertedportcnt=1
+inverted0=dummy_1_0 RMI In
+AutoTriggerRulesEnabled=False
+AutoTriggerRulesCount=1
+SourceConnectorPort0=dummy_1_0 RMI In
+TargetConnectorPort0=Holo4D TTL Out 2
+PreTiming_us0=20000
+PostTiming_us0=20000
+timelinezoomfactor=10
+timelineviewposx=0
+timelineviewposy=0
+"""

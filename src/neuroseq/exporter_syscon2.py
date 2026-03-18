@@ -18,11 +18,10 @@ _HEADER_HASH_RE = re.compile(r"^[0-9A-Fa-f]{2}(?:-[0-9A-Fa-f]{2}){15}$")
 _REQUIRED_HEADER_DEFAULTS: dict[str, str] = {
     "version": "3",
     "scanmode": "Accurate",
-    "runs": "0",
-    "DeviceSequenceID": "0",
-    "invertedportcnt": "0",
+    "runs": "1",
+    "invertedportcnt": "1",
     "AutoTriggerRulesEnabled": "False",
-    "AutoTriggerRulesCount": "0",
+    "AutoTriggerRulesCount": "1",
     "timelinezoomfactor": "10",
     "timelineviewposx": "0",
     "timelineviewposy": "0",
@@ -36,9 +35,16 @@ _DEFAULT_TTL_OUT_2_PORT = "Holo4D TTL Out 2"
 _SLM_LEAD_IN_US = 16_660
 _ENTITY_MIN_DURATION_US = 33_320
 _TTL_OUT_1_START_PULSE_US = 10_000
+_SYSCON2_TTL_PULSE_QUANTUM_US = 520.8125
+_SYSCON2_NEURON_OBJECT_QUANTUM_US = 16_666.0
+_SYSCON2_NEURON_OBJECT_QUANTUM_IN_TTL_UNITS = int(
+    round(_SYSCON2_NEURON_OBJECT_QUANTUM_US / _SYSCON2_TTL_PULSE_QUANTUM_US)
+)
 
-_SUPPORTED_LASER_WAVELENGTHS_NM = (940, 1040, 1140)
+_SUPPORTED_LASER_WAVELENGTHS_NM = (940, 1030, 1140)
+_LEGACY_LASER_WAVELENGTH_ALIASES_NM = {1040: 1030}
 _DEFAULT_ACTIVE_LASER_WAVELENGTH_NM = 1140
+_LASER_TIMELINE_OFFSETS = {940: 0, 1030: 1, 1140: 2}
 
 
 @dataclass(frozen=True)
@@ -53,6 +59,7 @@ class _MappedSegment:
     neuron_index: int
     start_tick: int
     end_tick: int
+    intensity: float
     center_x: float
     center_y: float
 
@@ -64,6 +71,7 @@ class _EntityWindow:
     stimulation_end_tick: int
     start_tick: int
     end_tick: int
+    intensity: float
     center_x: float
     center_y: float
 
@@ -75,6 +83,7 @@ class _ScheduledEntityWindow:
     stimulation_end_tick: int
     start_tick: int
     end_tick: int
+    intensity: float
     center_x: float
     center_y: float
     lane: int
@@ -124,6 +133,25 @@ class SlmGapViolation:
     required_gap_samples: int
 
 
+@dataclass(frozen=True)
+class InitialSlmLoadViolation:
+    first_active_idx: int
+    required_start_idx: int
+
+
+@dataclass(frozen=True)
+class SimultaneousDurationViolation:
+    start_idx: int
+    neuron_indices: tuple[int, ...]
+    durations_idx: tuple[int, ...]
+    min_duration_idx: int
+
+
+def _normalize_active_laser_wavelength_nm(wavelength_nm: int) -> int:
+    normalized = int(wavelength_nm)
+    return _LEGACY_LASER_WAVELENGTH_ALIASES_NM.get(normalized, normalized)
+
+
 def generate_syscon2_sequence_text(
     stim_array: StimArray,
     cellpose_data: CellposeImportResult | None,
@@ -132,24 +160,28 @@ def generate_syscon2_sequence_text(
     tick_resolution_us: int = 500,
     active_threshold: float = 0.0,
     binary_intensity: float = 1.0,
+    force_binary_intensity: bool = True,
     active_laser_wavelength_nm: int = _DEFAULT_ACTIVE_LASER_WAVELENGTH_NM,
 ) -> tuple[str, SysconExportReport]:
     """Generate SysCon2 `.seq` content from stim-array + Cellpose segmentation.
 
     Export model:
     - Binary mode: values > active_threshold are considered ON.
-    - First timelines are entity lanes (N = max simultaneously stimulated neurons).
-    - Next 3 timelines are fixed laser timelines (940, 1040, 1140 nm).
+    - First timelines are neuron lanes (N = max simultaneously stimulated neurons).
+    - Next 3 timelines are fixed laser timelines (940, 1030, 1140 nm).
     - Next 2 timelines are TTL outputs:
       TTL Out 1 mirrors laser pulses + initial 10ms pulse, TTL Out 2 empty.
-    - Entity objects include SLM lead-in and minimum placement duration constraints.
+    - Shape objects include SLM lead-in and 16.666ms-quantized placement constraints.
     """
     if stim_array.values.ndim != 2:
         raise ValueError("Stim array values must be 2D (timepoints x neurons)")
     if tick_resolution_us <= 0:
         raise ValueError("tick_resolution_us must be positive")
-    if binary_intensity < 0 or binary_intensity > 1:
+    if force_binary_intensity and (binary_intensity < 0 or binary_intensity > 1):
         raise ValueError("binary_intensity must be within [0, 1]")
+    active_laser_wavelength_nm = _normalize_active_laser_wavelength_nm(
+        active_laser_wavelength_nm
+    )
     if active_laser_wavelength_nm not in _SUPPORTED_LASER_WAVELENGTHS_NM:
         raise ValueError(
             "active_laser_wavelength_nm must be one of "
@@ -181,9 +213,10 @@ def generate_syscon2_sequence_text(
     )
 
     sample_us = float(stim_array.dt * 1e6)
-    lead_ticks = int(np.ceil(_SLM_LEAD_IN_US / float(tick_resolution_us)))
+    _ = tick_resolution_us
+    lead_ticks = int(np.ceil(_SLM_LEAD_IN_US / _SYSCON2_TTL_PULSE_QUANTUM_US))
     min_entity_duration_ticks = int(
-        np.ceil(_ENTITY_MIN_DURATION_US / float(tick_resolution_us))
+        np.ceil(_ENTITY_MIN_DURATION_US / _SYSCON2_TTL_PULSE_QUANTUM_US)
     )
 
     mapped_segments: list[_MappedSegment] = []
@@ -201,18 +234,30 @@ def generate_syscon2_sequence_text(
 
         mapped_active_neurons.add(segment.neuron_index)
         center_x, center_y = centroids[cellpose_id]
-        start_tick = (
-            int(np.rint((segment.start_idx * sample_us) / float(tick_resolution_us)))
-            + lead_ticks
+        # Deround GUI timing (ms grid) back to SysCon2 pulse quantum units.
+        start_tick = int(
+            np.rint((segment.start_idx * sample_us) / _SYSCON2_TTL_PULSE_QUANTUM_US)
         )
         duration_us = float(segment.duration_idx) * sample_us
-        duration_ticks = max(1, int(np.ceil(duration_us / float(tick_resolution_us))))
+        duration_ticks = max(
+            1, int(np.rint(duration_us / _SYSCON2_TTL_PULSE_QUANTUM_US))
+        )
         end_tick = start_tick + duration_ticks
+        if force_binary_intensity:
+            export_intensity = binary_intensity
+        else:
+            segment_values = stim_array.values[
+                segment.start_idx : segment.start_idx + segment.duration_idx,
+                segment.neuron_index,
+            ]
+            export_intensity = float(np.max(segment_values))
+            export_intensity = float(np.clip(export_intensity, 0.0, 1.0))
         mapped_segments.append(
             _MappedSegment(
                 neuron_index=segment.neuron_index,
                 start_tick=start_tick,
                 end_tick=end_tick,
+                intensity=export_intensity,
                 center_x=center_x,
                 center_y=center_y,
             )
@@ -242,51 +287,70 @@ def generate_syscon2_sequence_text(
 
     n_entity_lanes = max_simultaneous
     laser_timeline_base = n_entity_lanes
-    laser_timeline_offsets = {940: 0, 1040: 1, 1140: 2}
     laser_timeline_index = (
-        laser_timeline_base + laser_timeline_offsets[active_laser_wavelength_nm]
+        laser_timeline_base + _LASER_TIMELINE_OFFSETS[active_laser_wavelength_nm]
     )
     ttl_out1_timeline_index = laser_timeline_base + 3
     ttl_out2_timeline_index = laser_timeline_base + 4
     ttl_out_start_duration_ticks = max(
-        1, int(np.ceil(_TTL_OUT_1_START_PULSE_US / float(tick_resolution_us)))
+        1, int(np.rint(_TTL_OUT_1_START_PULSE_US / _SYSCON2_TTL_PULSE_QUANTUM_US))
     )
 
     object_blocks: list[list[str]] = []
     next_object_id = 1
 
-    for entity_counter, window in enumerate(scheduled_windows):
+    for shape_counter, window in enumerate(scheduled_windows):
         duration_ticks = max(1, window.end_tick - window.start_tick)
+        duration_shape_quanta = max(
+            2,
+            int(
+                np.ceil(
+                    duration_ticks / float(_SYSCON2_NEURON_OBJECT_QUANTUM_IN_TTL_UNITS)
+                )
+            ),
+        )
+        start_shape_quantum = int(
+            np.rint(
+                window.start_tick / float(_SYSCON2_NEURON_OBJECT_QUANTUM_IN_TTL_UNITS)
+            )
+        )
         object_blocks.append(
             _format_object_block(
                 object_id=next_object_id,
                 block_index=len(object_blocks),
-                object_type="Entity",
+                object_type="Shape",
                 properties=[
                     ("TotalTimings", "1"),
                     ("TimelineInfo0_TimelineIndex", str(window.lane)),
                     (
                         "TimelineInfo0_starttime",
-                        str(window.start_tick * tick_resolution_us),
+                        _format_time_us(
+                            start_shape_quantum * _SYSCON2_NEURON_OBJECT_QUANTUM_US
+                        ),
                     ),
                     ("TimelineInfo0_description", ""),
-                    ("TimelineInfo0_repeats", str(duration_ticks - 1)),
+                    (
+                        "TimelineInfo0_repeats",
+                        str(_shape_repeats_from_duration_quanta(duration_shape_quanta)),
+                    ),
                     ("TimelineInfo0_LightsourceCount", "1"),
                     ("TimelineInfo0_LightsourceID_0", lightsource_id),
-                    ("TimelineInfo0_Intensity_0", _format_float(binary_intensity)),
+                    ("TimelineInfo0_Intensity_0", _format_float(window.intensity)),
                     ("TimelineInfo0_timelinegroupid", "-1"),
-                    ("TimelineInfo0_Stepsize", "1"),
-                    (f"Entity{entity_counter}_Type", "0"),
-                    (f"Entity{entity_counter}_Filled", "False"),
-                    (f"Entity{entity_counter}_CenterX", _format_float(window.center_x)),
-                    (f"Entity{entity_counter}_CenterY", _format_float(window.center_y)),
-                    (f"Entity{entity_counter}_CenterZ", "0"),
-                    (f"Entity{entity_counter}_Rotation", "0"),
-                    (f"Entity{entity_counter}_ScaleX", "1"),
-                    (f"Entity{entity_counter}_ScaleY", "1"),
-                    (f"Entity{entity_counter}_ScaleZ", "1"),
-                    (f"Entity{entity_counter}_VertexCount", "0"),
-                    (f"Entity{entity_counter}_reversed", "False"),
+                    ("TimelineInfo0_Stepsize", "100"),
+                    (f"Shape{shape_counter}_Type", "0"),
+                    (f"Shape{shape_counter}_Filled", "False"),
+                    (f"Shape{shape_counter}_CenterX", _format_float(window.center_x)),
+                    (f"Shape{shape_counter}_CenterY", _format_float(window.center_y)),
+                    (f"Shape{shape_counter}_CenterZ", "0"),
+                    (f"Shape{shape_counter}_Rotation", "0"),
+                    (f"Shape{shape_counter}_Scale", "1"),
+                    (f"Shape{shape_counter}_VerticesCount", "0"),
+                    (f"Shape{shape_counter}_VerticesToDrawCount", "0"),
+                    (f"Shape{shape_counter}_TranslationVerticesCount", "0"),
+                    (f"Shape{shape_counter}_Reversed", "False"),
+                    (f"Shape{shape_counter}_GroupID", "-1"),
+                    (f"Shape{shape_counter}_Linewidth", "1"),
                 ],
             )
         )
@@ -301,7 +365,6 @@ def generate_syscon2_sequence_text(
                 timeline_index=laser_timeline_index,
                 start_tick=start_tick,
                 duration_ticks=duration_ticks,
-                tick_resolution_us=tick_resolution_us,
                 port=lightsource_port,
                 lightsource_id=lightsource_id,
                 include_lightsource=True,
@@ -317,7 +380,6 @@ def generate_syscon2_sequence_text(
             timeline_index=ttl_out1_timeline_index,
             start_tick=0,
             duration_ticks=ttl_out_start_duration_ticks,
-            tick_resolution_us=tick_resolution_us,
             port=ttl_out_1_port,
             lightsource_id="",
             include_lightsource=False,
@@ -333,7 +395,6 @@ def generate_syscon2_sequence_text(
                 timeline_index=ttl_out1_timeline_index,
                 start_tick=start_tick,
                 duration_ticks=duration_ticks,
-                tick_resolution_us=tick_resolution_us,
                 port=ttl_out_1_port,
                 lightsource_id="",
                 include_lightsource=False,
@@ -378,6 +439,7 @@ def check_syscon2_input_sanity(
     tick_resolution_us: int = 500,
     active_threshold: float = 0.0,
     binary_intensity: float = 1.0,
+    force_binary_intensity: bool = True,
     active_laser_wavelength_nm: int = _DEFAULT_ACTIVE_LASER_WAVELENGTH_NM,
 ) -> SysconInputSanityReport:
     """Run a dry-run validation for SysCon2 export without writing files."""
@@ -407,13 +469,38 @@ def check_syscon2_input_sanity(
                 "Negative stimulation values are exported as OFF "
                 "(binary ON/OFF uses values > threshold)."
             )
-        if active_values.size > 0 and not np.all(
-            np.isclose(active_values, binary_intensity)
-        ):
-            warnings.append(
-                "Binary export mode is enabled: all ON samples are exported "
-                f"with fixed intensity {binary_intensity:g}."
+        initial_slm_load_violation = find_initial_slm_load_violation(
+            stim_array,
+            active_threshold=active_threshold,
+            min_start_us=_SLM_LEAD_IN_US,
+        )
+        if initial_slm_load_violation is not None:
+            first_start_ms = (
+                initial_slm_load_violation.first_active_idx * stim_array.dt * 1e3
             )
+            required_start_ms = (
+                initial_slm_load_violation.required_start_idx * stim_array.dt * 1e3
+            )
+            errors.append(
+                "First stimulation starts too early for SLM initialization: "
+                f"{first_start_ms:.2f}ms (minimum {required_start_ms:.2f}ms)."
+            )
+        if force_binary_intensity:
+            if active_values.size > 0 and not np.all(
+                np.isclose(active_values, binary_intensity)
+            ):
+                warnings.append(
+                    "Binary export mode is enabled: all ON samples are exported "
+                    f"with fixed intensity {binary_intensity:g}."
+                )
+        else:
+            if active_values.size > 0 and (
+                np.any(active_values < 0.0) or np.any(active_values > 1.0)
+            ):
+                warnings.append(
+                    "Non-binary export mode preserves ON amplitudes but clips values "
+                    "outside [0, 1] to match SysCon2 intensity bounds."
+                )
 
     if errors:
         return SysconInputSanityReport(
@@ -431,6 +518,7 @@ def check_syscon2_input_sanity(
             tick_resolution_us=tick_resolution_us,
             active_threshold=active_threshold,
             binary_intensity=binary_intensity,
+            force_binary_intensity=force_binary_intensity,
             active_laser_wavelength_nm=active_laser_wavelength_nm,
         )
     except (TypeError, ValueError) as exc:
@@ -500,6 +588,67 @@ def find_slm_gap_violations(
             )
         )
     return violations
+
+
+def find_initial_slm_load_violation(
+    stim_array: StimArray,
+    *,
+    active_threshold: float = 0.0,
+    min_start_us: int = _SLM_LEAD_IN_US,
+) -> InitialSlmLoadViolation | None:
+    """Check whether first active stimulation starts before SLM load-up window."""
+    if stim_array.values.ndim != 2:
+        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+    if stim_array.dt <= 0:
+        raise ValueError("Stim array dt must be positive")
+    if min_start_us <= 0:
+        raise ValueError("min_start_us must be positive")
+
+    active_any = np.any(stim_array.values > active_threshold, axis=1)
+    active_indices = np.flatnonzero(active_any)
+    if active_indices.size == 0:
+        return None
+
+    first_active_idx = int(active_indices[0])
+    required_start_idx = int(np.ceil((min_start_us * 1e-6) / float(stim_array.dt)))
+    required_start_idx = max(1, required_start_idx)
+    if first_active_idx >= required_start_idx:
+        return None
+
+    return InitialSlmLoadViolation(
+        first_active_idx=first_active_idx,
+        required_start_idx=required_start_idx,
+    )
+
+
+def shift_stim_values_right_for_initial_slm_load(
+    stim_array: StimArray,
+    *,
+    min_start_us: int = _SLM_LEAD_IN_US,
+) -> tuple[np.ndarray, int]:
+    """Translate entire stim array to the right by the SLM load-up window.
+
+    Returns:
+      (new_values, truncated_tail_timepoints)
+    """
+    if stim_array.values.ndim != 2:
+        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+    if stim_array.dt <= 0:
+        raise ValueError("Stim array dt must be positive")
+    if min_start_us <= 0:
+        raise ValueError("min_start_us must be positive")
+
+    values = np.array(stim_array.values, copy=True)
+    n_timepoints = values.shape[0]
+    shift_samples = int(np.ceil((min_start_us * 1e-6) / float(stim_array.dt)))
+    shift_samples = max(1, shift_samples)
+
+    shifted = np.zeros_like(values)
+    if shift_samples < n_timepoints:
+        shifted[shift_samples:, :] = values[: n_timepoints - shift_samples, :]
+
+    truncated_tail_timepoints = min(shift_samples, n_timepoints)
+    return shifted, truncated_tail_timepoints
 
 
 def space_out_stim_values_for_slm(
@@ -607,6 +756,87 @@ def align_stim_values_left_for_slm(
         moved_run_count += 1
 
     return values, moved_run_count
+
+
+def find_simultaneous_duration_violations(
+    stim_array: StimArray,
+    *,
+    active_threshold: float = 0.0,
+) -> list[SimultaneousDurationViolation]:
+    """Find simultaneous stimulation starts with unequal per-neuron durations."""
+    if stim_array.values.ndim != 2:
+        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+
+    segments = _extract_active_segments(stim_array.values, active_threshold)
+    segments_by_start: dict[int, list[_StimSegment]] = defaultdict(list)
+    for segment in segments:
+        segments_by_start[segment.start_idx].append(segment)
+
+    violations: list[SimultaneousDurationViolation] = []
+    for start_idx in sorted(segments_by_start.keys()):
+        start_segments = sorted(
+            segments_by_start[start_idx],
+            key=lambda segment: segment.neuron_index,
+        )
+        if len(start_segments) < 2:
+            continue
+        durations_idx = tuple(int(segment.duration_idx) for segment in start_segments)
+        min_duration_idx = min(durations_idx)
+        if all(duration == min_duration_idx for duration in durations_idx):
+            continue
+        violations.append(
+            SimultaneousDurationViolation(
+                start_idx=int(start_idx),
+                neuron_indices=tuple(
+                    int(segment.neuron_index) for segment in start_segments
+                ),
+                durations_idx=durations_idx,
+                min_duration_idx=int(min_duration_idx),
+            )
+        )
+
+    return violations
+
+
+def equalize_simultaneous_durations_to_min(
+    stim_array: StimArray,
+    *,
+    active_threshold: float = 0.0,
+) -> tuple[np.ndarray, int]:
+    """Trim simultaneous starts so all participating neurons share the minimum duration.
+
+    Returns:
+      (new_values, trimmed_timepoints)
+    """
+    if stim_array.values.ndim != 2:
+        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+
+    values = np.array(stim_array.values, copy=True)
+    violations = find_simultaneous_duration_violations(
+        stim_array,
+        active_threshold=active_threshold,
+    )
+    if len(violations) == 0:
+        return values, 0
+
+    trimmed_timepoints = 0
+    n_timepoints = values.shape[0]
+    for violation in violations:
+        for neuron_idx, duration_idx in zip(
+            violation.neuron_indices,
+            violation.durations_idx,
+            strict=False,
+        ):
+            if duration_idx <= violation.min_duration_idx:
+                continue
+            trim_start = violation.start_idx + violation.min_duration_idx
+            trim_end = min(n_timepoints, violation.start_idx + duration_idx)
+            if trim_end <= trim_start:
+                continue
+            values[trim_start:trim_end, neuron_idx] = 0
+            trimmed_timepoints += trim_end - trim_start
+
+    return values, trimmed_timepoints
 
 
 def _build_active_set_runs(
@@ -769,9 +999,32 @@ def _build_entity_windows(
     lead_ticks: int,
     min_duration_ticks: int,
 ) -> list[_EntityWindow]:
+    del min_duration_ticks  # duration is enforced in shape-quanta below.
+
     segments_by_neuron: dict[int, list[_MappedSegment]] = defaultdict(list)
     for segment in mapped_segments:
         segments_by_neuron[segment.neuron_index].append(segment)
+
+    def _quantized_window_bounds(
+        stimulation_start_tick: int,
+        stimulation_end_tick: int,
+    ) -> tuple[int, int]:
+        raw_start_tick = max(0, stimulation_start_tick - lead_ticks)
+        start_shape_quantum = int(
+            np.floor(
+                raw_start_tick / float(_SYSCON2_NEURON_OBJECT_QUANTUM_IN_TTL_UNITS)
+            )
+        )
+        end_shape_quantum = int(
+            np.ceil(
+                stimulation_end_tick
+                / float(_SYSCON2_NEURON_OBJECT_QUANTUM_IN_TTL_UNITS)
+            )
+        )
+        end_shape_quantum = max(end_shape_quantum, start_shape_quantum + 2)
+        start_tick = start_shape_quantum * _SYSCON2_NEURON_OBJECT_QUANTUM_IN_TTL_UNITS
+        end_tick = end_shape_quantum * _SYSCON2_NEURON_OBJECT_QUANTUM_IN_TTL_UNITS
+        return start_tick, end_tick
 
     windows: list[_EntityWindow] = []
     for neuron_idx, neuron_segments in segments_by_neuron.items():
@@ -780,13 +1033,16 @@ def _build_entity_windows(
         )
         current_start = sorted_segments[0].start_tick
         current_end = sorted_segments[0].end_tick
+        current_intensity = sorted_segments[0].intensity
         center_x = sorted_segments[0].center_x
         center_y = sorted_segments[0].center_y
 
         for segment in sorted_segments[1:]:
             if _interval_overlaps_any(current_end, segment.start_tick, pulse_intervals):
-                entity_start = max(0, current_start - lead_ticks)
-                entity_end = max(current_end, entity_start + min_duration_ticks)
+                entity_start, entity_end = _quantized_window_bounds(
+                    current_start,
+                    current_end,
+                )
                 windows.append(
                     _EntityWindow(
                         neuron_index=neuron_idx,
@@ -794,19 +1050,24 @@ def _build_entity_windows(
                         stimulation_end_tick=current_end,
                         start_tick=entity_start,
                         end_tick=entity_end,
+                        intensity=current_intensity,
                         center_x=center_x,
                         center_y=center_y,
                     )
                 )
                 current_start = segment.start_tick
                 current_end = segment.end_tick
+                current_intensity = segment.intensity
                 center_x = segment.center_x
                 center_y = segment.center_y
                 continue
             current_end = max(current_end, segment.end_tick)
+            current_intensity = max(current_intensity, segment.intensity)
 
-        entity_start = max(0, current_start - lead_ticks)
-        entity_end = max(current_end, entity_start + min_duration_ticks)
+        entity_start, entity_end = _quantized_window_bounds(
+            current_start,
+            current_end,
+        )
         windows.append(
             _EntityWindow(
                 neuron_index=neuron_idx,
@@ -814,6 +1075,7 @@ def _build_entity_windows(
                 stimulation_end_tick=current_end,
                 start_tick=entity_start,
                 end_tick=entity_end,
+                intensity=current_intensity,
                 center_x=center_x,
                 center_y=center_y,
             )
@@ -877,6 +1139,7 @@ def _assign_entity_lanes(
                 stimulation_end_tick=window.stimulation_end_tick,
                 start_tick=window.start_tick,
                 end_tick=window.end_tick,
+                intensity=window.intensity,
                 center_x=window.center_x,
                 center_y=window.center_y,
                 lane=lane,
@@ -926,6 +1189,33 @@ def _build_header_lines(template_text: str) -> list[str]:
     for key, default_value in _REQUIRED_HEADER_DEFAULTS.items():
         if key not in ordered_header:
             ordered_header[key] = default_value
+
+    # Normalize to current SysCon2 v3-style header and drop known legacy clutter.
+    ordered_header["version"] = "3"
+    ordered_header.pop("DeviceSequenceID", None)
+    ordered_header.pop("TotalEditorGroups", None)
+
+    numbered_key_re = re.compile(
+        r"^(SourceConnectorPort|TargetConnectorPort|PreTiming_us|PostTiming_us|inverted)(\d+)$"
+    )
+    for key in list(ordered_header.keys()):
+        match = numbered_key_re.match(key)
+        if match is None:
+            continue
+        if int(match.group(2)) > 0:
+            del ordered_header[key]
+
+    ordered_header["invertedportcnt"] = "1"
+    if "inverted0" not in ordered_header:
+        ordered_header["inverted0"] = _DEFAULT_LIGHTSOURCE_PORT
+    if "SourceConnectorPort0" not in ordered_header:
+        ordered_header["SourceConnectorPort0"] = _DEFAULT_LIGHTSOURCE_PORT
+    if "TargetConnectorPort0" not in ordered_header:
+        ordered_header["TargetConnectorPort0"] = _DEFAULT_TTL_OUT_2_PORT
+    if "PreTiming_us0" not in ordered_header:
+        ordered_header["PreTiming_us0"] = "20000"
+    if "PostTiming_us0" not in ordered_header:
+        ordered_header["PostTiming_us0"] = "20000"
 
     lines = [first_line]
     lines.extend([f"{key}={value}" for key, value in ordered_header.items()])
@@ -1016,7 +1306,6 @@ def _format_ttl_pulse_block(
     timeline_index: int,
     start_tick: int,
     duration_ticks: int,
-    tick_resolution_us: int,
     port: str,
     lightsource_id: str,
     include_lightsource: bool,
@@ -1024,9 +1313,15 @@ def _format_ttl_pulse_block(
     properties: list[tuple[str, str]] = [
         ("TotalTimings", "1"),
         ("TimelineInfo0_TimelineIndex", str(timeline_index)),
-        ("TimelineInfo0_starttime", str(start_tick * tick_resolution_us)),
+        (
+            "TimelineInfo0_starttime",
+            _format_time_us(start_tick * _SYSCON2_TTL_PULSE_QUANTUM_US),
+        ),
         ("TimelineInfo0_description", ""),
-        ("TimelineInfo0_repeats", str(max(0, duration_ticks - 1))),
+        (
+            "TimelineInfo0_repeats",
+            str(_ttl_repeats_from_duration_ticks(duration_ticks)),
+        ),
         ("TimelineInfo0_LightsourceCount", "1" if include_lightsource else "0"),
     ]
     if include_lightsource:
@@ -1062,3 +1357,22 @@ def _format_object_block(
 
 def _format_float(value: float) -> str:
     return f"{value:.6f}".rstrip("0").rstrip(".")
+
+
+def _format_time_us(value_us: float) -> str:
+    rounded_int = int(np.rint(value_us))
+    if np.isclose(value_us, float(rounded_int), atol=1e-9, rtol=0.0):
+        return str(rounded_int)
+    return f"{value_us:.4f}".rstrip("0").rstrip(".")
+
+
+def _ttl_repeats_from_duration_ticks(duration_ticks: int) -> int:
+    # TTLPulse duration follows SysCon2 rule:
+    # duration = (repeats + 1) * TTL quantum.
+    return max(0, int(duration_ticks) - 1)
+
+
+def _shape_repeats_from_duration_quanta(duration_quanta: int) -> int:
+    # Shape duration follows SysCon2 rule:
+    # duration = (repeats + 2) * Shape quantum.
+    return max(0, int(duration_quanta) - 2)

@@ -10,6 +10,7 @@ from neuroseq.importer_syscon2 import sequence_to_stim_values
 from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
+from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.syscon2_import_dialog import Syscon2ImportDialog
 
 
@@ -659,6 +660,280 @@ port=Holo4D TTL Out 1
 """
 
 
+def _sample_holo4d_layout_three_short_pulses_seq_text() -> str:
+    return """nohash
+version=3
+scanmode=Accurate
+runs=1
+DeviceSequenceID=1
+invertedportcnt=1
+inverted0=Holo4D TTL Out 1
+AutoTriggerRulesEnabled=False
+AutoTriggerRulesCount=0
+timelinezoomfactor=10
+timelineviewposx=0
+timelineviewposy=0
+[0]
+ID=1
+type=Entity
+TotalTimings=1
+TimelineInfo0_TimelineIndex=0
+TimelineInfo0_starttime=0
+TimelineInfo0_description=
+TimelineInfo0_repeats=100
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0.6
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Entity0_Type=0
+Entity0_CenterX=0
+Entity0_CenterY=0
+Entity0_CenterZ=0
+[/0]
+[1]
+ID=2
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=3
+TimelineInfo0_starttime=20000
+TimelineInfo0_description=
+TimelineInfo0_repeats=3
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=dummy_1_0 RMI In
+[/1]
+[2]
+ID=3
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=3
+TimelineInfo0_starttime=23000
+TimelineInfo0_description=
+TimelineInfo0_repeats=3
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=dummy_1_0 RMI In
+[/2]
+[3]
+ID=4
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=3
+TimelineInfo0_starttime=26000
+TimelineInfo0_description=
+TimelineInfo0_repeats=3
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=dummy_1_0 RMI In
+[/3]
+[4]
+ID=5
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=4
+TimelineInfo0_starttime=0
+TimelineInfo0_description=
+TimelineInfo0_repeats=19
+TimelineInfo0_LightsourceCount=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=Holo4D TTL Out 1
+[/4]
+"""
+
+
+def _sample_holo4d_shape_lane_replacement_seq_text() -> str:
+    return """nohash
+version=3
+scanmode=Accurate
+runs=1
+DeviceSequenceID=1
+invertedportcnt=1
+inverted0=Holo4D TTL Out 1
+AutoTriggerRulesEnabled=False
+AutoTriggerRulesCount=0
+timelinezoomfactor=10
+timelineviewposx=0
+timelineviewposy=0
+[0]
+ID=1
+type=Shape
+TotalTimings=1
+TimelineInfo0_TimelineIndex=0
+TimelineInfo0_starttime=0
+TimelineInfo0_description=
+TimelineInfo0_repeats=120
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0.5
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Shape0_Type=0
+Shape0_CenterX=10
+Shape0_CenterY=10
+Shape0_CenterZ=0
+[/0]
+[1]
+ID=2
+type=Shape
+TotalTimings=1
+TimelineInfo0_TimelineIndex=1
+TimelineInfo0_starttime=0
+TimelineInfo0_description=
+TimelineInfo0_repeats=120
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0.5
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Shape1_Type=0
+Shape1_CenterX=20
+Shape1_CenterY=10
+Shape1_CenterZ=0
+[/1]
+[2]
+ID=3
+type=Shape
+TotalTimings=1
+TimelineInfo0_TimelineIndex=2
+TimelineInfo0_starttime=0
+TimelineInfo0_description=
+TimelineInfo0_repeats=120
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0.5
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Shape2_Type=0
+Shape2_CenterX=30
+Shape2_CenterY=10
+Shape2_CenterZ=0
+[/2]
+[3]
+ID=4
+type=Shape
+TotalTimings=1
+TimelineInfo0_TimelineIndex=0
+TimelineInfo0_starttime=30000
+TimelineInfo0_description=
+TimelineInfo0_repeats=120
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0.8
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Shape3_Type=0
+Shape3_CenterX=110
+Shape3_CenterY=10
+Shape3_CenterZ=0
+[/3]
+[4]
+ID=5
+type=Shape
+TotalTimings=1
+TimelineInfo0_TimelineIndex=1
+TimelineInfo0_starttime=30000
+TimelineInfo0_description=
+TimelineInfo0_repeats=120
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0.8
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Shape4_Type=0
+Shape4_CenterX=120
+Shape4_CenterY=10
+Shape4_CenterZ=0
+[/4]
+[5]
+ID=6
+type=Shape
+TotalTimings=1
+TimelineInfo0_TimelineIndex=2
+TimelineInfo0_starttime=30000
+TimelineInfo0_description=
+TimelineInfo0_repeats=120
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0.8
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=1
+Shape5_Type=0
+Shape5_CenterX=130
+Shape5_CenterY=10
+Shape5_CenterZ=0
+[/5]
+[6]
+ID=7
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=5
+TimelineInfo0_starttime=20000
+TimelineInfo0_description=
+TimelineInfo0_repeats=1
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=dummy_1_0 RMI In
+[/6]
+[7]
+ID=8
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=5
+TimelineInfo0_starttime=25000
+TimelineInfo0_description=
+TimelineInfo0_repeats=1
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=dummy_1_0 RMI In
+[/7]
+[8]
+ID=9
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=5
+TimelineInfo0_starttime=50000
+TimelineInfo0_description=
+TimelineInfo0_repeats=1
+TimelineInfo0_LightsourceCount=1
+TimelineInfo0_LightsourceID_0=dummy_1_0
+TimelineInfo0_Intensity_0=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=dummy_1_0 RMI In
+[/8]
+[9]
+ID=10
+type=TTLPulse
+TotalTimings=1
+TimelineInfo0_TimelineIndex=6
+TimelineInfo0_starttime=0
+TimelineInfo0_description=
+TimelineInfo0_repeats=19
+TimelineInfo0_LightsourceCount=0
+TimelineInfo0_timelinegroupid=-1
+TimelineInfo0_Stepsize=100
+port=Holo4D TTL Out 1
+[/9]
+"""
+
+
 def test_parse_syscon2_seq_file(tmp_path: Path) -> None:
     seq_path = tmp_path / "sample.seq"
     seq_path.write_text(_sample_seq_text(), encoding="utf-8")
@@ -694,6 +969,19 @@ def test_parse_syscon2_seq_file_v2_hash_header_and_entity(tmp_path: Path) -> Non
     assert values[1, 0] == 0.495
     assert values[2, 0] == 0.495
     assert values[3, 0] == 0.495
+
+
+def test_parse_syscon2_seq_file_accepts_missing_device_sequence_id(
+    tmp_path: Path,
+) -> None:
+    seq_text = _sample_seq_text().replace("DeviceSequenceID=1\n", "")
+    seq_path = tmp_path / "sample_missing_device_sequence_id.seq"
+    seq_path.write_text(seq_text, encoding="utf-8")
+
+    sequence = parse_syscon2_seq_file(seq_path)
+
+    assert sequence.header.get("DeviceSequenceID") == "0"
+    assert len(sequence.objects) == 3
 
 
 def test_sequence_to_stim_values_shape_only(tmp_path: Path) -> None:
@@ -903,6 +1191,35 @@ def test_sequence_to_stim_values_holo4d_layout_uses_shared_laser_pulses(
     assert np.all(values[:, 2] == 0.0)
 
 
+def test_sequence_to_stim_values_uses_pulse_path_even_with_shorter_startup_ttl(
+    tmp_path: Path,
+) -> None:
+    # Startup pulse becomes <9ms for tick_resolution_us=450, which previously
+    # forced a fallback to legacy mode; pulse-based mode should still be used.
+    seq_text = _sample_holo4d_layout_seq_text().replace(
+        "TimelineInfo0_repeats=19",
+        "TimelineInfo0_repeats=18",
+        1,
+    )
+    seq_path = tmp_path / "holo4d_layout_short_startup.seq"
+    seq_path.write_text(seq_text, encoding="utf-8")
+    sequence = parse_syscon2_seq_file(seq_path)
+
+    values, result = sequence_to_stim_values(
+        sequence,
+        dt_seconds=0.001,
+        n_neurons=3,
+        tick_resolution_us=450,
+        include_non_shape=False,
+    )
+
+    assert result.mapped_objects == 2
+    assert np.all(values[10, :2] == 0.0)
+    assert values[20, 0] == 0.4
+    assert values[20, 1] == 0.7
+    assert np.all(values[:, 2] == 0.0)
+
+
 def test_sequence_to_stim_values_holo4d_layout_merges_same_center_entities(
     tmp_path: Path,
 ) -> None:
@@ -925,6 +1242,72 @@ def test_sequence_to_stim_values_holo4d_layout_merges_same_center_entities(
     assert values[20, 0] == 0.5
     assert values[50, 0] == 0.5
     assert np.all(values[:, 1] == 0.0)
+
+
+def test_sequence_to_stim_values_holo4d_layout_keeps_individual_laser_pulses(
+    tmp_path: Path,
+) -> None:
+    seq_path = tmp_path / "holo4d_three_pulses.seq"
+    seq_path.write_text(
+        _sample_holo4d_layout_three_short_pulses_seq_text(),
+        encoding="utf-8",
+    )
+    sequence = parse_syscon2_seq_file(seq_path)
+
+    values, result = sequence_to_stim_values(
+        sequence,
+        dt_seconds=0.001,
+        n_neurons=2,
+        tick_resolution_us=500,
+        include_non_shape=False,
+    )
+
+    assert result.mapped_objects == 1
+    assert np.all(values[20:22, 0] == 0.6)
+    assert np.all(values[23:25, 0] == 0.6)
+    assert np.all(values[26:28, 0] == 0.6)
+    assert np.all(values[22:23, 0] == 0.0)
+    assert np.all(values[25:26, 0] == 0.0)
+    assert np.all(values[:, 1] == 0.0)
+
+
+def test_sequence_to_stim_values_holo4d_shape_lanes_replace_previous_objects(
+    tmp_path: Path,
+) -> None:
+    seq_path = tmp_path / "holo4d_shape_lane_replacement.seq"
+    seq_path.write_text(
+        _sample_holo4d_shape_lane_replacement_seq_text(),
+        encoding="utf-8",
+    )
+    sequence = parse_syscon2_seq_file(seq_path)
+
+    values, result = sequence_to_stim_values(
+        sequence,
+        dt_seconds=0.001,
+        n_neurons=8,
+        tick_resolution_us=500,
+        include_non_shape=False,
+    )
+
+    assert result.mapped_objects == 6
+
+    # First 3 shape lanes are active before lane replacement at 30ms.
+    assert values[20, 0] == 0.5
+    assert values[20, 1] == 0.5
+    assert values[20, 2] == 0.5
+    assert values[25, 0] == 0.5
+    assert values[25, 1] == 0.5
+    assert values[25, 2] == 0.5
+
+    # After replacement, only second 3 lanes respond.
+    assert values[50, 3] == 0.8
+    assert values[50, 4] == 0.8
+    assert values[50, 5] == 0.8
+    assert values[50, 0] == 0.0
+    assert values[50, 1] == 0.0
+    assert values[50, 2] == 0.0
+
+    assert np.all(values[:, 6:] == 0.0)
 
 
 def test_import_sequence_into_stim_array_extends_and_offsets(tmp_path: Path) -> None:
@@ -988,3 +1371,42 @@ def test_syscon2_import_dialog_imports_into_project(tmp_path: Path, qtbot) -> No
     assert stim_values[1, 0] == 0.3
     assert stim_values[6, 1] == 0.8
     assert stim_values[7, 1] == 0.8
+
+
+def test_syscon2_import_dialog_updates_generator_template_from_loaded_file(
+    tmp_path: Path,
+    qtbot,
+) -> None:
+    seq_path = tmp_path / "sample.seq"
+    seq_text = _sample_seq_text().replace(
+        "timelineviewposy=0\n",
+        "timelineviewposy=0\nSourceConnectorPort0=dummy_2_0 RMI In\n",
+    )
+    seq_path.write_text(seq_text, encoding="utf-8")
+
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            name="stimulus",
+            stim_type=StimType.Excitation,
+            values=np.zeros((5, 3), dtype=np.float32),
+            units="1",
+            dt=0.001,
+        )
+    )
+
+    import_dialog = Syscon2ImportDialog(project)
+    qtbot.addWidget(import_dialog)
+    import_dialog._load_file(str(seq_path))
+
+    assert project.syscon2_export_template_text is not None
+    assert (
+        "SourceConnectorPort0=dummy_2_0 RMI In" in project.syscon2_export_template_text
+    )
+
+    generator_dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(generator_dialog)
+    assert (
+        "SourceConnectorPort0=dummy_2_0 RMI In"
+        in generator_dialog.config_data_edit.toPlainText()
+    )

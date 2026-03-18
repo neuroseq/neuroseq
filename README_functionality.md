@@ -340,19 +340,27 @@ Current implementation status:
 - output extension currently always `.seq`,
 - exports are generated from selected stim array + imported Cellpose segmentation using `exporter_syscon2.py`,
 - binary stimulation mode is used (`stim_value > 0` is ON, exported intensity fixed at `1.0`),
-- per-neuron segment compression is applied: contiguous ON samples become one exported segment,
+- per-neuron segment compression is applied: contiguous ON samples become one exported segment, and these segments map directly to active-laser `TTLPulse` timing in `.seq`,
 - active neurons without a valid stimulus->cellpose mapping are skipped and reported to the user,
 - target coordinates are derived from segmentation centroids for mapped cellpose IDs,
-- number of entity timelines is `N = max` simultaneously stimulated mapped neurons in the exported script,
-- first timelines (`0..N-1`) contain entity point objects (neurons),
-- next three timelines are fixed laser lanes (`940nm`, `1040nm`, `1140nm`), with exactly one active per script (currently `1140nm` by default),
-- `TTL Out 1` timeline always contains a 10ms startup pulse at `t=0` and mirrors all active-laser pulses; `TTL Out 2` is kept empty,
-- entity placement applies SLM constraints: first `16.66ms` after entity start is unusable, and entity duration is at least `33.32ms`,
+- number of neuron timelines is `N = max` simultaneously stimulated mapped neurons in the exported script,
+- first timelines (`0..N-1`) contain `Shape` point objects (neurons),
+- next three timelines are fixed laser lanes (`940nm`, `1030nm`, `1140nm`), with exactly one active per script (user-selectable in exporter, default `1140nm`),
+- `TTL Out 1` timeline contains a startup pulse at `t=0` quantized to SysCon2 TTL units (`~9.895ms`) and mirrors all active-laser pulses; `TTL Out 2` is kept empty,
+- export timing uses SysCon2 pulse quantum `0.5208125ms` (`TTLPulse` duration: `(repeats + 1) * 0.5208125ms`), with derounding from GUI ms-grid back to this quantum,
+- neuron object quantum is `16.666ms` (`32 * 0.5208125ms`) and `Shape` duration is encoded as `(repeats + 2) * 16.666ms`,
+- shape placement applies SLM constraints (first `16.66ms` unusable) and aligns shape windows to 16.666ms boundaries so GUI stim timings reflect true laser pulses,
+- script generator now has intensity mode toggle:
+  - binary mode (`ON -> 1.0`) for standard stimulation exports,
+  - non-binary mode to preserve input stim amplitudes in exported shape intensities (clipped to `[0,1]`),
 - dialog includes `Check Input Sanity` (dry-run validation) to verify translatability before file generation and to report warnings (e.g., unmapped active neurons, binary intensity coercion),
+- sanity check enforces equal-duration rule for simultaneous starts; if violated, dialog offers: `Equalize (to lowest value)` or `Cancel`,
+- sanity check enforces initial SLM load-up: first stimulation must start at least `16.66ms` after experiment start; if violated, dialog offers: `Translate All Inputs Right (+16.66 ms)` or `Cancel`,
 - sanity check enforces SLM switch gap: consecutive stimulation runs with different active neuron sets must be separated by at least `16.66ms`,
 - when SLM-gap violations are detected, dialog offers: `Space Input Out` (right-shift with fixed array length), `Align Troublesome Stimuli (Left)`, or `Cancel`,
 - automatic fixes are applied through the StimEditor modifier path so standard undo/redo remains functional for the edited stim array,
-- header/template fields are taken from the editable HOLO4D config block (lines before first object block), while object blocks are regenerated from stim/cellpose data.
+- header/template fields are taken from the editable HOLO4D config block (lines before first object block), legacy v2-era keys are sanitized/removed, and object blocks are regenerated from stim/cellpose data.
+- when a SysCon2 file is loaded via import dialog, its header block is stored as the default export template for subsequent script generation in the same project/session.
 
 ## 9) Data import pipelines
 
@@ -406,19 +414,23 @@ The result is stored as `CellposeImportResult` in project state.
 
 - GUI entrypoint is `File -> Import SysCon2 .seq File`; import is only enabled when at least one stim array exists in the project.
 - Parser accepts `.seq` files whose first non-empty line is either `nohash` or a 16-byte hash string (`AA-BB-...` format).
-- Header is parsed as `key=value` lines before the first object block; required keys are `version`, `scanmode`, `runs`, `DeviceSequenceID`, `invertedportcnt`, `AutoTriggerRulesEnabled`, `AutoTriggerRulesCount`, `timelinezoomfactor`, `timelineviewposx`, `timelineviewposy`.
+- Header is parsed as `key=value` lines before the first object block; required keys are `version`, `scanmode`, `runs`, `invertedportcnt`, `AutoTriggerRulesEnabled`, `AutoTriggerRulesCount`, `timelinezoomfactor`, `timelineviewposx`, `timelineviewposy` (`DeviceSequenceID` is accepted when present and defaulted for compatibility when missing).
 - Object blocks must be `[index] ... [/index]`; malformed/mismatched block markers raise an import error.
-- Each object extracts timing from `TimelineInfo0_*`: `starttime` (us), `repeats`, `Stepsize`, and `Intensity_0`; values are clamped/sanitized (`start>=0`, `repeats>=0`, `step>=1`).
-- Eligibility defaults to timed `Shape`/`Entity` objects; optional dialog checkbox includes non-shape timed objects (`TTLPulse`, `WaitForTTL`, ...).
+- Each object extracts timing from `TimelineInfo0_*`: `starttime` (us, float), `repeats`, `Stepsize`, and `Intensity_0`; values are clamped/sanitized (`start>=0`, `repeats>=0`, `step>=1`).
+- Eligibility uses timed `Shape`/`Entity` objects only (non-shape timed objects are no longer an import option in the dialog).
 - If `Intensity_0` is missing, default intensity is `1.0` for `Shape`/`Entity` and `0.0` for other object types.
 - Circular-entity grouping is applied for geometry type `2` (`..._Type=2`) so multiple entities can map to one neuron channel.
 - Grouping uses center coordinates only (`CenterX`, `CenterY`); vertex/radius values are ignored for same-neuron detection.
 - Two circular entities are treated as the same neuron target when center distance is `<= 1.0 um`; if center distance is `> 1.0 um`, they map to different neurons.
-- In Holo4D fixed-lane layout (detected via startup TTL Out pulse + laser timeline pulses), entity grouping uses center-distance for all entity point objects so repeated IDs at same coordinates map to one neuron channel.
+- When laser `TTLPulse` entries are present, importer uses pulse-based fixed-lane reconstruction, and timed `Shape`/`Entity` point objects are treated as target lanes.
+- In that Holo4D path, center-distance grouping (`<= 1.0 um`) is applied to `Entity` point objects; `Shape` point objects remain distinct channels.
 - Mapping order is deterministic: grouped timed objects are assigned to neuron channels in file order.
-- Event time conversion uses: `t_us = start_us + k * Stepsize * tick_resolution_us`, with default tick resolution `500 us` (user-configurable in dialog).
+- For SysCon2 pulse-based imports, `TTLPulse` duration uses quantum timing `duration_us = (repeats + 1) * 520.8125`.
+- For SysCon2 `Shape` neuron objects, duration uses `duration_us = (repeats + 2) * 16666`.
+- `Stepsize` is preserved from file metadata but is not used for pulse/shape duration calculations in the pulse-based import path.
 - Sample index conversion uses `round(t / dt)` (`np.rint`) and de-duplicates identical indices produced by sub-sample timing.
-- In Holo4D fixed-lane layout, pulses from the active laser timeline stimulate all entity objects whose usable windows contain the pulse (`usable_start = entity_start + 16.66ms`), and entity window duration comes from entity timeline `(repeats + 1) * stepsize`.
+- In Holo4D fixed-lane layout, pulses from the active laser timeline are the true stimulation events; they stimulate point objects whose usable windows contain the pulse (`usable_start = object_start + 16.66ms`), and shape-window duration follows SysCon2 shape quantum rules.
+- If multiple point objects are present on the same lane timeline, a later object replaces the earlier one (earlier window is clipped at the next object start).
 - TTL output pulses (`LightsourceCount=0`) are ignored for stimulation reconstruction.
 - Legacy non-Holo4D files keep prior entity handling: nearest laser-TTL matching for onset/duration with fallback to `16.666ms`.
 - Non-entity events fill one timepoint.
@@ -793,7 +805,7 @@ This means the documented functionality above is not only implemented but broadl
 
 ## 18) Practical caveats observed in code
 
-- SysCon2 export is currently binary-only (`ON/OFF`, fixed exported intensity `1.0`) and uses `1140nm` as the active laser timeline by default (multi-level intensity and wavelength selection are not yet exposed in the GUI).
+- SysCon2 export supports binary and non-binary shape intensity modes, and GUI selection of active laser timeline (`940nm`, `1030nm`, `1140nm`; default `1140nm`).
 - `StimWidget` comments note `dt_ms != 1` caveat for shared camera assumptions with image-based x-spacing.
 - `utils.get_stim_type(...)` infers type from stim name as fallback heuristic.
 - Some experimental/support paths are explicitly marked as limited or less rigorously tested in comments (e.g., suite2p stat-to-seg conversion notes).

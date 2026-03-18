@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import re
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from qtpy import QtWidgets
@@ -15,6 +17,9 @@ from neuroseq.importer_syscon2 import parse_syscon2_seq_file
 if TYPE_CHECKING:
     from neuroseq.project import Project
     from neuroseq.stim import StimArray
+
+
+_BLOCK_START_RE = re.compile(r"^\[(\d+)\]$")
 
 
 class Syscon2ImportDialog(QtWidgets.QDialog):
@@ -88,12 +93,6 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
             "Typical values: 500us (Holo4D) or 50us (UGA-42)."
         )
         options_layout.addRow("System tick resolution:", self.tick_resolution_spin)
-
-        self.include_non_shape_checkbox = QtWidgets.QCheckBox(
-            "Include non-shape timed objects (TTLPulse, WaitForTTL, ...)"
-        )
-        self.include_non_shape_checkbox.setChecked(False)
-        options_layout.addRow(self.include_non_shape_checkbox)
 
         self.extend_checkbox = QtWidgets.QCheckBox(
             "Extend target stim array to fit imported duration"
@@ -180,6 +179,9 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
             self.file_label.setText(filename)
             self.file_label.setStyleSheet("QLabel { color: black; }")
             self.preview_text.setPlainText(self._build_preview_text(self.sequence))
+            template_text = self._extract_header_template_text(filename)
+            if template_text is not None:
+                self.project.syscon2_export_template_text = template_text
             self.info_label.setText(
                 "Review options and click Import to apply the sequence."
             )
@@ -198,14 +200,28 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
             )
         self._update_import_button_state()
 
+    def _extract_header_template_text(self, filename: str) -> str | None:
+        try:
+            text = Path(filename).read_text(encoding="utf-8")
+        except Exception:
+            return None
+
+        header_lines: list[str] = []
+        for raw_line in text.splitlines():
+            stripped = raw_line.strip()
+            if _BLOCK_START_RE.match(stripped):
+                break
+            if stripped == "":
+                continue
+            header_lines.append(stripped)
+        if not header_lines:
+            return None
+        return "\n".join(header_lines) + "\n"
+
     def _build_preview_text(self, sequence: SysconSequence) -> str:
         timed_shape_objects = get_timed_objects(sequence, include_non_shape=False)
-        timed_all_objects = get_timed_objects(sequence, include_non_shape=True)
         grouped_shape_objects = group_timed_objects_by_neuron_target(
             sequence, include_non_shape=False
-        )
-        grouped_all_objects = group_timed_objects_by_neuron_target(
-            sequence, include_non_shape=True
         )
 
         lines: list[str] = [
@@ -217,8 +233,6 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
             f"Estimated neuron channels (shape/entity)={len(grouped_shape_objects)}",
             "Center-merged circular entities (<=1um)="
             f"{max(0, len(timed_shape_objects) - len(grouped_shape_objects))}",
-            f"Timed objects (all types)={len(timed_all_objects)}",
-            f"Estimated neuron channels (all types)={len(grouped_all_objects)}",
             "",
             "First objects:",
         ]
@@ -250,7 +264,6 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
                 stim_array,
                 self.sequence,
                 tick_resolution_us=self.tick_resolution_spin.value(),
-                include_non_shape=self.include_non_shape_checkbox.isChecked(),
                 replace_existing=self.replace_checkbox.isChecked(),
                 extend_to_fit=self.extend_checkbox.isChecked(),
                 neuron_offset=self.neuron_offset_spin.value(),

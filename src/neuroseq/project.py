@@ -39,6 +39,7 @@ class Project:
         self.experiments: dict[str, Experiment] = {}
         self.stim_arrays: dict[str, StimArray] = {}
         self.cellpose_data: CellposeImportResult | None = None
+        self.syscon2_export_template_text: str | None = None
 
         self.max_ram_synapse_plot_matrix = 256
         self.max_time_secs = 0.0
