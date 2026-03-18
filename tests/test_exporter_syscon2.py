@@ -10,10 +10,12 @@ from neuroseq.exporter_syscon2 import equalize_simultaneous_durations_to_min
 from neuroseq.exporter_syscon2 import find_initial_slm_load_violation
 from neuroseq.exporter_syscon2 import find_simultaneous_duration_violations
 from neuroseq.exporter_syscon2 import find_slm_gap_violations
+from neuroseq.exporter_syscon2 import find_slm_off_on_overlap_violations
 from neuroseq.exporter_syscon2 import generate_syscon2_sequence_text
 from neuroseq.exporter_syscon2 import generate_syscon2_timeline_overview_png
 from neuroseq.exporter_syscon2 import shift_stim_values_right_for_initial_slm_load
 from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm
+from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm_off_on_overlap
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_syscon2 import parse_syscon2_seq_text
 from neuroseq.importer_syscon2 import sequence_to_stim_values
@@ -550,7 +552,7 @@ def test_check_syscon2_input_sanity_passes_for_valid_inputs() -> None:
 def test_check_syscon2_input_sanity_warns_for_unmapped_and_non_binary() -> None:
     values = np.zeros((30, 2), dtype=np.float32)
     values[20:22, 0] = 0.2
-    values[21:23, 1] = 0.8
+    values[20:22, 1] = 0.8
     stim_array = StimArray(
         name="stim",
         stim_type=StimType.Excitation,
@@ -621,6 +623,30 @@ def test_check_syscon2_input_sanity_fails_without_active_samples() -> None:
     )
 
 
+def test_check_syscon2_input_sanity_fails_when_off_state_overlaps_other_on() -> None:
+    values = np.zeros((120, 2), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    values[40:42, 0] = 1.0
+    values[40:42, 1] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=0.001,
+    )
+
+    sanity = check_syscon2_input_sanity(
+        stim_array,
+        _cellpose_result(mapping={0: 0, 1: 1}),
+        template_text=_template_header(),
+    )
+
+    assert not sanity.is_valid
+    assert sanity.export_report is None
+    assert any("off/on overlap" in error.lower() for error in sanity.errors)
+
+
 def test_find_slm_gap_violations_detects_short_gap_between_different_neurons() -> None:
     values = np.zeros((80, 2), dtype=np.float32)
     values[0:3, 0] = 1.0
@@ -639,6 +665,46 @@ def test_find_slm_gap_violations_detects_short_gap_between_different_neurons() -
     assert len(violations) == 1
     assert violations[0].gap_samples == 5
     assert violations[0].required_gap_samples == 17
+
+
+def test_find_slm_gap_violations_ignores_transitions_without_new_neurons() -> None:
+    values = np.zeros((80, 2), dtype=np.float32)
+    values[20:23, 0] = 1.0
+    values[20:23, 1] = 1.0
+    values[23:26, 0] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=0.001,
+    )
+
+    violations = find_slm_gap_violations(stim_array, active_threshold=0.0)
+
+    assert len(violations) == 0
+
+
+def test_find_slm_off_on_overlap_violations_detects_overlap() -> None:
+    values = np.zeros((120, 2), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    values[40:42, 0] = 1.0
+    values[40:42, 1] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=0.001,
+    )
+
+    violations = find_slm_off_on_overlap_violations(
+        stim_array,
+        active_threshold=0.0,
+    )
+
+    assert len(violations) >= 1
+    assert violations[0].required_shift_samples > 0
 
 
 def test_find_initial_slm_load_violation_detects_too_early_first_stimulus() -> None:
@@ -743,6 +809,66 @@ def test_align_stim_values_left_for_slm_resolves_violations() -> None:
 
     assert moved_runs > 0
     assert len(find_slm_gap_violations(resolved, active_threshold=0.0)) == 0
+
+
+def test_space_out_stim_values_for_slm_off_on_overlap_resolves_violations() -> None:
+    values = np.zeros((140, 2), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    values[40:42, 0] = 1.0
+    values[40:42, 1] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=0.001,
+    )
+
+    new_values, truncated_tail_samples = space_out_stim_values_for_slm_off_on_overlap(
+        stim_array,
+        active_threshold=0.0,
+    )
+    resolved = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=new_values,
+        units="1",
+        dt=0.001,
+    )
+
+    assert truncated_tail_samples > 0
+    assert len(find_slm_off_on_overlap_violations(resolved, active_threshold=0.0)) == 0
+
+
+def test_export_seq_restarts_and_aligns_objects_when_new_target_appears() -> None:
+    values = np.zeros((140, 2), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    values[60:62, 0] = 1.0
+    values[60:62, 1] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=0.001,
+    )
+
+    seq_text, _ = generate_syscon2_sequence_text(
+        stim_array,
+        _cellpose_result(mapping={0: 0, 1: 1}),
+        template_text=_template_header(),
+        tick_resolution_us=500,
+        active_threshold=0.0,
+        binary_intensity=1.0,
+        active_laser_wavelength_nm=1140,
+    )
+    sequence = parse_syscon2_seq_text(seq_text)
+    shapes = [obj for obj in sequence.objects if obj.object_type == "Shape"]
+    shape_starts = sorted(float(obj.start_time_us) for obj in shapes)
+
+    assert len(shapes) == 3
+    assert shape_starts[0] < shape_starts[1]
+    assert np.isclose(shape_starts[1], shape_starts[2])
 
 
 def test_find_simultaneous_duration_violations_detects_unequal_durations() -> None:

@@ -136,6 +136,18 @@ class SlmGapViolation:
 
 
 @dataclass(frozen=True)
+class SlmOffOnOverlapViolation:
+    phase_start_idx: int
+    phase_start_tick: int
+    off_neuron_index: int
+    on_neuron_index: int
+    overlap_start_tick: int
+    overlap_end_tick: int
+    required_shift_samples: int
+    required_shift_ticks: int
+
+
+@dataclass(frozen=True)
 class InitialSlmLoadViolation:
     first_active_idx: int
     required_start_idx: int
@@ -278,10 +290,10 @@ def generate_syscon2_sequence_text(
     max_simultaneous = _max_simultaneous_segments(mapped_segments)
     entity_windows = _build_entity_windows(
         mapped_segments,
-        pulse_intervals,
         lead_ticks=lead_ticks,
         min_duration_ticks=min_entity_duration_ticks,
     )
+    _validate_no_off_on_overlap(entity_windows, lead_ticks=lead_ticks)
     scheduled_windows = _assign_entity_lanes(entity_windows, max_simultaneous)
     scheduled_windows.sort(
         key=lambda window: (window.start_tick, window.lane, window.neuron_index)
@@ -311,11 +323,6 @@ def generate_syscon2_sequence_text(
                 )
             ),
         )
-        start_shape_quantum = int(
-            np.rint(
-                window.start_tick / float(_SYSCON2_NEURON_OBJECT_QUANTUM_IN_TTL_UNITS)
-            )
-        )
         object_blocks.append(
             _format_object_block(
                 object_id=next_object_id,
@@ -327,7 +334,7 @@ def generate_syscon2_sequence_text(
                     (
                         "TimelineInfo0_starttime",
                         _format_time_us(
-                            start_shape_quantum * _SYSCON2_NEURON_OBJECT_QUANTUM_US
+                            window.start_tick * _SYSCON2_TTL_PULSE_QUANTUM_US
                         ),
                     ),
                     ("TimelineInfo0_description", ""),
@@ -511,11 +518,27 @@ def generate_syscon2_timeline_overview_png(
             zorder=2,
         )
         ax.add_patch(rect)
+        if object_type in {"shape", "entity"}:
+            slm_lead_in_ms = _SLM_LEAD_IN_US / 1e3
+            lead_in_width_ms = min(display_duration_ms, slm_lead_in_ms)
+            if lead_in_width_ms > 0:
+                lead_in_rect = Rectangle(
+                    (start_ms, y - 0.32),
+                    lead_in_width_ms,
+                    0.64,
+                    facecolor="#bdbdbd",
+                    edgecolor="none",
+                    linewidth=0.0,
+                    alpha=0.95,
+                    zorder=3,
+                )
+                ax.add_patch(lead_in_rect)
 
     ax.set_xlim(0.0, max_end_ms * 1.04)
     ax.set_ylim(-0.8, len(timeline_indices) - 0.2)
     ax.set_yticks([y_by_timeline[idx] for idx in timeline_indices])
     ax.set_yticklabels([f"TL {idx}" for idx in timeline_indices])
+    ax.invert_yaxis()
     ax.set_xlabel("Time (ms)")
     ax.set_ylabel("Timeline")
     ax.set_title("SysCon2 Timeline Overview")
@@ -523,6 +546,7 @@ def generate_syscon2_timeline_overview_png(
 
     legend_handles = [
         Patch(facecolor="#2c7fb8", edgecolor="#2c7fb8", label="Shape/Entity"),
+        Patch(facecolor="#bdbdbd", edgecolor="#bdbdbd", label="SLM load-up (16.66ms)"),
         Patch(facecolor="#d95f0e", edgecolor="#d95f0e", label="TTLPulse"),
         Patch(facecolor="#636363", edgecolor="#636363", label="Other"),
     ]
@@ -594,6 +618,44 @@ def check_syscon2_input_sanity(
                 "First stimulation starts too early for SLM initialization: "
                 f"{first_start_ms:.2f}ms (minimum {required_start_ms:.2f}ms)."
             )
+        off_on_overlap_violations = find_slm_off_on_overlap_violations(
+            stim_array,
+            active_threshold=active_threshold,
+            min_gap_us=_SLM_LEAD_IN_US,
+        )
+        if off_on_overlap_violations:
+            first_overlap = off_on_overlap_violations[0]
+            required_shift_ms = (
+                first_overlap.required_shift_samples * stim_array.dt * 1e3
+            )
+            overlap_start_ms = (
+                first_overlap.overlap_start_tick * _SYSCON2_TTL_PULSE_QUANTUM_US / 1e3
+            )
+            overlap_end_ms = (
+                first_overlap.overlap_end_tick * _SYSCON2_TTL_PULSE_QUANTUM_US / 1e3
+            )
+            errors.append(
+                "SLM off/on overlap detected: "
+                f"off-neuron {first_overlap.off_neuron_index} overlaps ON interval of "
+                f"neuron {first_overlap.on_neuron_index} in "
+                f"[{overlap_start_ms:.2f}, {overlap_end_ms:.2f})ms. "
+                f"Space input right by at least {required_shift_ms:.2f}ms."
+            )
+        slm_gap_violations = find_slm_gap_violations(
+            stim_array,
+            active_threshold=active_threshold,
+            min_gap_us=_SLM_LEAD_IN_US,
+        )
+        if slm_gap_violations:
+            first_violation = slm_gap_violations[0]
+            gap_ms = first_violation.gap_samples * stim_array.dt * 1e3
+            required_gap_ms = first_violation.required_gap_samples * stim_array.dt * 1e3
+            errors.append(
+                "SLM new-target gap violation detected: "
+                f"{first_violation.previous_neuron_indices} -> "
+                f"{first_violation.current_neuron_indices}, gap={gap_ms:.2f}ms "
+                f"(required {required_gap_ms:.2f}ms)."
+            )
         if force_binary_intensity:
             if active_values.size > 0 and not np.all(
                 np.isclose(active_values, binary_intensity)
@@ -659,10 +721,11 @@ def find_slm_gap_violations(
     active_threshold: float = 0.0,
     min_gap_us: int = _SLM_LEAD_IN_US,
 ) -> list[SlmGapViolation]:
-    """Find short-gap transitions between different active neuron sets.
+    """Find short-gap transitions where a new neuron appears.
 
-    Consecutive stimulation runs with different active neuron sets must be at
-    least `min_gap_us` apart to satisfy SLM hologram loading constraints.
+    Consecutive non-empty stimulation runs where the current run introduces at
+    least one neuron not present in the previous run must be at least
+    `min_gap_us` apart to satisfy SLM hologram loading constraints.
     """
     if stim_array.values.ndim != 2:
         raise ValueError("Stim array values must be 2D (timepoints x neurons)")
@@ -679,7 +742,9 @@ def find_slm_gap_violations(
 
     violations: list[SlmGapViolation] = []
     for prev_run, current_run in zip(non_empty_runs, non_empty_runs[1:], strict=False):
-        if prev_run.neuron_indices == current_run.neuron_indices:
+        previous_neurons = set(prev_run.neuron_indices)
+        current_neurons = set(current_run.neuron_indices)
+        if len(current_neurons - previous_neurons) == 0:
             continue
         gap_samples = current_run.start_idx - prev_run.end_idx
         if gap_samples >= required_gap_samples:
@@ -697,6 +762,116 @@ def find_slm_gap_violations(
             )
         )
     return violations
+
+
+def find_slm_off_on_overlap_violations(
+    stim_array: StimArray,
+    *,
+    active_threshold: float = 0.0,
+    min_gap_us: int = _SLM_LEAD_IN_US,
+) -> list[SlmOffOnOverlapViolation]:
+    """Find SLM off/on overlap violations implied by current timing.
+
+    Whenever a new target phase starts, every active object in that phase has an
+    OFF interval of `min_gap_us` before becoming usable. That OFF interval must
+    not overlap the ON interval of any other neuron's object.
+    """
+    if stim_array.values.ndim != 2:
+        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+    if stim_array.dt <= 0:
+        raise ValueError("Stim array dt must be positive")
+    if min_gap_us <= 0:
+        raise ValueError("min_gap_us must be positive")
+
+    mapped_segments = _build_mapped_segments_for_timing(
+        stim_array,
+        active_threshold=active_threshold,
+    )
+    if len(mapped_segments) == 0:
+        return []
+
+    lead_ticks = int(np.ceil(min_gap_us / _SYSCON2_TTL_PULSE_QUANTUM_US))
+    min_entity_duration_ticks = int(
+        np.ceil(_ENTITY_MIN_DURATION_US / _SYSCON2_TTL_PULSE_QUANTUM_US)
+    )
+    windows = _build_entity_windows(
+        mapped_segments,
+        lead_ticks=lead_ticks,
+        min_duration_ticks=min_entity_duration_ticks,
+    )
+    if len(windows) <= 1:
+        return []
+
+    sample_us = float(stim_array.dt * 1e6)
+    by_phase_start: dict[int, SlmOffOnOverlapViolation] = {}
+
+    for off_window in windows:
+        phase_start_tick = off_window.start_tick + lead_ticks
+        off_start_tick = off_window.start_tick
+        off_end_tick = min(off_window.end_tick, phase_start_tick)
+        if off_end_tick <= off_start_tick:
+            continue
+
+        for on_window in windows:
+            if off_window is on_window:
+                continue
+            if off_window.neuron_index == on_window.neuron_index:
+                continue
+
+            on_start_tick = max(on_window.start_tick + lead_ticks, on_window.start_tick)
+            on_end_tick = on_window.end_tick
+            if on_end_tick <= on_start_tick:
+                continue
+            if off_end_tick <= on_start_tick or on_end_tick <= off_start_tick:
+                continue
+
+            overlap_start_tick = max(off_start_tick, on_start_tick)
+            overlap_end_tick = min(off_end_tick, on_end_tick)
+            required_phase_start_tick = on_end_tick + lead_ticks
+            required_shift_ticks = max(1, required_phase_start_tick - phase_start_tick)
+            required_shift_samples = max(
+                1,
+                int(
+                    np.ceil(
+                        required_shift_ticks * _SYSCON2_TTL_PULSE_QUANTUM_US / sample_us
+                    )
+                ),
+            )
+            phase_start_idx = max(
+                0,
+                int(
+                    np.rint(
+                        phase_start_tick * _SYSCON2_TTL_PULSE_QUANTUM_US / sample_us
+                    )
+                ),
+            )
+
+            candidate = SlmOffOnOverlapViolation(
+                phase_start_idx=phase_start_idx,
+                phase_start_tick=phase_start_tick,
+                off_neuron_index=off_window.neuron_index,
+                on_neuron_index=on_window.neuron_index,
+                overlap_start_tick=overlap_start_tick,
+                overlap_end_tick=overlap_end_tick,
+                required_shift_samples=required_shift_samples,
+                required_shift_ticks=required_shift_ticks,
+            )
+            previous = by_phase_start.get(phase_start_tick)
+            if (
+                previous is None
+                or candidate.required_shift_ticks > previous.required_shift_ticks
+            ):
+                by_phase_start[phase_start_tick] = candidate
+
+    return sorted(
+        by_phase_start.values(),
+        key=lambda violation: (
+            violation.phase_start_idx,
+            violation.phase_start_tick,
+            violation.off_neuron_index,
+            violation.on_neuron_index,
+        ),
+    )
 
 
 def find_initial_slm_load_violation(
@@ -867,6 +1042,57 @@ def align_stim_values_left_for_slm(
     return values, moved_run_count
 
 
+def space_out_stim_values_for_slm_off_on_overlap(
+    stim_array: StimArray,
+    *,
+    active_threshold: float = 0.0,
+    min_gap_us: int = _SLM_LEAD_IN_US,
+) -> tuple[np.ndarray, int]:
+    """Right-shift tail segments to eliminate SLM off/on overlap violations.
+
+    Returns:
+      (new_values, truncated_tail_samples)
+    """
+    if stim_array.values.ndim != 2:
+        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+    values = np.array(stim_array.values, copy=True)
+    n_timepoints = values.shape[0]
+    truncated_tail_samples = 0
+
+    max_iterations = max(1, n_timepoints * 2)
+    for _ in range(max_iterations):
+        tmp_stim_array = StimArray(
+            name=stim_array.name,
+            stim_type=stim_array.stim_type,
+            values=values,
+            units=stim_array.units,
+            dt=stim_array.dt,
+        )
+        violations = find_slm_off_on_overlap_violations(
+            tmp_stim_array,
+            active_threshold=active_threshold,
+            min_gap_us=min_gap_us,
+        )
+        if len(violations) == 0:
+            break
+
+        violation = violations[0]
+        shift_samples = violation.required_shift_samples
+        shift_start = violation.phase_start_idx
+        if shift_samples <= 0 or shift_start >= n_timepoints:
+            break
+
+        tail_before_shift = values[shift_start:, :].copy()
+        values[shift_start:, :] = 0
+        write_start = shift_start + shift_samples
+        if write_start < n_timepoints:
+            writable_rows = n_timepoints - write_start
+            values[write_start:, :] = tail_before_shift[:writable_rows, :]
+        truncated_tail_samples += min(shift_samples, tail_before_shift.shape[0])
+
+    return values, truncated_tail_samples
+
+
 def find_simultaneous_duration_violations(
     stim_array: StimArray,
     *,
@@ -1019,6 +1245,39 @@ def _extract_active_segments(
     return segments
 
 
+def _build_mapped_segments_for_timing(
+    stim_array: StimArray,
+    *,
+    active_threshold: float,
+) -> list[_MappedSegment]:
+    segments = _extract_active_segments(stim_array.values, active_threshold)
+    sample_us = float(stim_array.dt * 1e6)
+    mapped_segments: list[_MappedSegment] = []
+
+    for segment in segments:
+        start_tick = int(
+            np.rint((segment.start_idx * sample_us) / _SYSCON2_TTL_PULSE_QUANTUM_US)
+        )
+        duration_us = float(segment.duration_idx) * sample_us
+        duration_ticks = max(
+            1,
+            int(np.rint(duration_us / _SYSCON2_TTL_PULSE_QUANTUM_US)),
+        )
+        end_tick = start_tick + duration_ticks
+        mapped_segments.append(
+            _MappedSegment(
+                neuron_index=segment.neuron_index,
+                start_tick=start_tick,
+                end_tick=end_tick,
+                intensity=1.0,
+                center_x=0.0,
+                center_y=0.0,
+            )
+        )
+
+    return mapped_segments
+
+
 def _compute_cell_centroids(segmentation: np.ndarray) -> dict[int, tuple[float, float]]:
     if segmentation.ndim != 2:
         raise ValueError("Cellpose segmentation must be a 2D array")
@@ -1103,107 +1362,173 @@ def _max_simultaneous_segments(segments: list[_MappedSegment]) -> int:
 
 def _build_entity_windows(
     mapped_segments: list[_MappedSegment],
-    pulse_intervals: list[tuple[int, int]],
     *,
     lead_ticks: int,
     min_duration_ticks: int,
 ) -> list[_EntityWindow]:
     del min_duration_ticks  # duration is enforced in shape-quanta below.
+    if len(mapped_segments) == 0:
+        return []
 
     segments_by_neuron: dict[int, list[_MappedSegment]] = defaultdict(list)
     for segment in mapped_segments:
         segments_by_neuron[segment.neuron_index].append(segment)
+    for neuron_idx in list(segments_by_neuron.keys()):
+        segments_by_neuron[neuron_idx].sort(
+            key=lambda segment: (segment.start_tick, segment.end_tick)
+        )
 
-    def _quantized_window_bounds(
-        stimulation_start_tick: int,
-        stimulation_end_tick: int,
-    ) -> tuple[int, int]:
-        raw_start_tick = max(0, stimulation_start_tick - lead_ticks)
-        start_shape_quantum = int(
-            np.floor(
-                raw_start_tick / float(_SYSCON2_NEURON_OBJECT_QUANTUM_IN_TTL_UNITS)
-            )
-        )
-        end_shape_quantum = int(
-            np.ceil(
-                stimulation_end_tick
-                / float(_SYSCON2_NEURON_OBJECT_QUANTUM_IN_TTL_UNITS)
-            )
-        )
-        end_shape_quantum = max(end_shape_quantum, start_shape_quantum + 2)
-        start_tick = start_shape_quantum * _SYSCON2_NEURON_OBJECT_QUANTUM_IN_TTL_UNITS
-        end_tick = end_shape_quantum * _SYSCON2_NEURON_OBJECT_QUANTUM_IN_TTL_UNITS
-        return start_tick, end_tick
+    boundary_ticks = _find_new_target_appearance_ticks(mapped_segments)
+    first_stimulation_tick = min(segment.start_tick for segment in mapped_segments)
+    phase_starts = [first_stimulation_tick]
+    phase_starts.extend(
+        tick for tick in boundary_ticks if tick > first_stimulation_tick
+    )
+    phase_starts = sorted(set(phase_starts))
 
     windows: list[_EntityWindow] = []
-    for neuron_idx, neuron_segments in segments_by_neuron.items():
-        sorted_segments = sorted(
-            neuron_segments, key=lambda segment: (segment.start_tick, segment.end_tick)
-        )
-        current_start = sorted_segments[0].start_tick
-        current_end = sorted_segments[0].end_tick
-        current_intensity = sorted_segments[0].intensity
-        center_x = sorted_segments[0].center_x
-        center_y = sorted_segments[0].center_y
+    for phase_idx, phase_start in enumerate(phase_starts):
+        phase_end: int | None = None
+        if phase_idx + 1 < len(phase_starts):
+            phase_end = phase_starts[phase_idx + 1]
+        aligned_start_tick = max(0, phase_start - lead_ticks)
 
-        for segment in sorted_segments[1:]:
-            if _interval_overlaps_any(current_end, segment.start_tick, pulse_intervals):
-                entity_start, entity_end = _quantized_window_bounds(
-                    current_start,
-                    current_end,
-                )
-                windows.append(
-                    _EntityWindow(
-                        neuron_index=neuron_idx,
-                        stimulation_start_tick=current_start,
-                        stimulation_end_tick=current_end,
-                        start_tick=entity_start,
-                        end_tick=entity_end,
-                        intensity=current_intensity,
-                        center_x=center_x,
-                        center_y=center_y,
-                    )
-                )
-                current_start = segment.start_tick
-                current_end = segment.end_tick
-                current_intensity = segment.intensity
+        for neuron_idx, neuron_segments in segments_by_neuron.items():
+            stimulation_start_tick: int | None = None
+            stimulation_end_tick: int | None = None
+            max_intensity = 0.0
+            center_x = neuron_segments[0].center_x
+            center_y = neuron_segments[0].center_y
+
+            for segment in neuron_segments:
+                clipped_start = max(segment.start_tick, phase_start)
+                clipped_end = segment.end_tick
+                if phase_end is not None:
+                    clipped_end = min(clipped_end, phase_end)
+                if clipped_end <= clipped_start:
+                    continue
+                if stimulation_start_tick is None:
+                    stimulation_start_tick = clipped_start
+                    stimulation_end_tick = clipped_end
+                else:
+                    stimulation_start_tick = min(stimulation_start_tick, clipped_start)
+                    assert stimulation_end_tick is not None
+                    stimulation_end_tick = max(stimulation_end_tick, clipped_end)
+                max_intensity = max(max_intensity, segment.intensity)
                 center_x = segment.center_x
                 center_y = segment.center_y
-                continue
-            current_end = max(current_end, segment.end_tick)
-            current_intensity = max(current_intensity, segment.intensity)
 
-        entity_start, entity_end = _quantized_window_bounds(
-            current_start,
-            current_end,
-        )
-        windows.append(
-            _EntityWindow(
-                neuron_index=neuron_idx,
-                stimulation_start_tick=current_start,
-                stimulation_end_tick=current_end,
-                start_tick=entity_start,
-                end_tick=entity_end,
-                intensity=current_intensity,
-                center_x=center_x,
-                center_y=center_y,
+            if stimulation_start_tick is None or stimulation_end_tick is None:
+                continue
+
+            duration_ticks = max(1, stimulation_end_tick - aligned_start_tick)
+            duration_shape_quanta = max(
+                2,
+                int(
+                    np.ceil(
+                        duration_ticks
+                        / float(_SYSCON2_NEURON_OBJECT_QUANTUM_IN_TTL_UNITS)
+                    )
+                ),
             )
-        )
+            end_tick = (
+                aligned_start_tick
+                + duration_shape_quanta * _SYSCON2_NEURON_OBJECT_QUANTUM_IN_TTL_UNITS
+            )
+
+            windows.append(
+                _EntityWindow(
+                    neuron_index=neuron_idx,
+                    stimulation_start_tick=stimulation_start_tick,
+                    stimulation_end_tick=stimulation_end_tick,
+                    start_tick=aligned_start_tick,
+                    end_tick=end_tick,
+                    intensity=max_intensity,
+                    center_x=center_x,
+                    center_y=center_y,
+                )
+            )
     return windows
 
 
-def _interval_overlaps_any(
-    interval_start: int,
-    interval_end: int,
-    sorted_intervals: list[tuple[int, int]],
-) -> bool:
-    if interval_end <= interval_start:
-        return False
-    for start, end in sorted_intervals:
-        if end <= interval_start:
+def _find_new_target_appearance_ticks(
+    mapped_segments: list[_MappedSegment],
+) -> list[int]:
+    start_events: dict[int, list[int]] = defaultdict(list)
+    end_events: dict[int, list[int]] = defaultdict(list)
+    for segment in mapped_segments:
+        start_events[segment.start_tick].append(segment.neuron_index)
+        end_events[segment.end_tick].append(segment.neuron_index)
+
+    event_ticks = sorted(set(start_events.keys()) | set(end_events.keys()))
+    first_stimulation_tick = min(segment.start_tick for segment in mapped_segments)
+    active_counts: dict[int, int] = defaultdict(int)
+    last_non_empty_set: set[int] | None = None
+    boundaries: list[int] = []
+
+    for tick in event_ticks:
+        active_before_tick = {idx for idx, count in active_counts.items() if count > 0}
+        starting_neurons = set(start_events.get(tick, []))
+        introduces_new_target = False
+        if len(active_before_tick) > 0:
+            introduces_new_target = len(starting_neurons - active_before_tick) > 0
+        elif last_non_empty_set is not None:
+            introduces_new_target = len(starting_neurons - last_non_empty_set) > 0
+        if introduces_new_target and tick > first_stimulation_tick:
+            boundaries.append(tick)
+        if len(active_before_tick) > 0:
+            last_non_empty_set = set(active_before_tick)
+
+        for neuron_idx in end_events.get(tick, []):
+            next_count = active_counts[neuron_idx] - 1
+            if next_count <= 0:
+                active_counts.pop(neuron_idx, None)
+            else:
+                active_counts[neuron_idx] = next_count
+
+        for neuron_idx in start_events.get(tick, []):
+            active_counts[neuron_idx] = active_counts.get(neuron_idx, 0) + 1
+
+    return sorted(set(boundaries))
+
+
+def _validate_no_off_on_overlap(
+    windows: list[_EntityWindow],
+    *,
+    lead_ticks: int,
+) -> None:
+    if lead_ticks <= 0:
+        raise ValueError("lead_ticks must be positive")
+    if len(windows) <= 1:
+        return
+
+    for off_window in windows:
+        off_start = off_window.start_tick
+        off_end = min(off_window.end_tick, off_window.start_tick + lead_ticks)
+        if off_end <= off_start:
             continue
-        return not start >= interval_end
-    return False
+
+        for on_window in windows:
+            if off_window is on_window:
+                continue
+            if off_window.neuron_index == on_window.neuron_index:
+                continue
+            on_start = max(on_window.start_tick + lead_ticks, on_window.start_tick)
+            on_end = on_window.end_tick
+            if on_end <= on_start:
+                continue
+            if off_end <= on_start or on_end <= off_start:
+                continue
+
+            overlap_start = max(off_start, on_start)
+            overlap_end = min(off_end, on_end)
+            raise ValueError(
+                "Invalid stimulation for SysCon2 export: an SLM off-state interval "
+                "overlaps with another neuron's ON interval "
+                f"(off neuron={off_window.neuron_index}, "
+                f"on neuron={on_window.neuron_index}, "
+                f"overlap_ticks=[{overlap_start}, {overlap_end}))."
+            )
 
 
 def _assign_entity_lanes(
@@ -1215,8 +1540,9 @@ def _assign_entity_lanes(
     windows_sorted = sorted(
         windows,
         key=lambda window: (
+            window.start_tick,
+            window.end_tick,
             window.stimulation_start_tick,
-            window.stimulation_end_tick,
             window.neuron_index,
         ),
     )
@@ -1226,10 +1552,7 @@ def _assign_entity_lanes(
 
     scheduled: list[_ScheduledEntityWindow] = []
     for window in windows_sorted:
-        while (
-            len(active_lanes) > 0
-            and active_lanes[0][0] <= window.stimulation_start_tick
-        ):
+        while len(active_lanes) > 0 and active_lanes[0][0] <= window.start_tick:
             _, released_lane = heapq.heappop(active_lanes)
             heapq.heappush(available_lanes, released_lane)
 
@@ -1240,7 +1563,7 @@ def _assign_entity_lanes(
             )
 
         lane = heapq.heappop(available_lanes)
-        heapq.heappush(active_lanes, (window.stimulation_end_tick, lane))
+        heapq.heappush(active_lanes, (window.end_tick, lane))
         scheduled.append(
             _ScheduledEntityWindow(
                 neuron_index=window.neuron_index,

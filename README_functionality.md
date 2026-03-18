@@ -350,16 +350,19 @@ Current implementation status:
 - `TTL Out 1` timeline contains a startup pulse at `t=0` quantized to SysCon2 TTL units (`~9.895ms`) and mirrors all active-laser pulses; `TTL Out 2` is kept empty,
 - export timing uses SysCon2 pulse quantum `0.5208125ms` (`TTLPulse` duration: `(repeats + 1) * 0.5208125ms`), with derounding from GUI ms-grid back to this quantum,
 - neuron object quantum is `16.666ms` (`32 * 0.5208125ms`) and `Shape` duration is encoded as `(repeats + 2) * 16.666ms`,
-- shape placement applies SLM constraints (first `16.66ms` unusable) and aligns shape windows to 16.666ms boundaries so GUI stim timings reflect true laser pulses,
+- shape scheduling applies SLM phase constraints: first `16.66ms` of each `Shape` window are OFF, and when a new target appears (relative to the previous active set), current windows are closed and relevant neurons are restarted in a new phase with aligned OFF lead-in,
+- `Shape` start times are exported in TTL-quantum timing (`0.5208125ms` units) while duration still follows shape-quantum repeats (`(repeats + 2) * 16.666ms`),
 - script generator now has intensity mode toggle:
   - binary mode (`ON -> 1.0`) for standard stimulation exports,
   - non-binary mode to preserve input stim amplitudes in exported shape intensities (clipped to `[0,1]`),
 - dialog includes `Check Input Sanity` (dry-run validation) to verify translatability before file generation and to report warnings (e.g., unmapped active neurons, binary intensity coercion),
 - sanity check enforces equal-duration rule for simultaneous starts; if violated, dialog offers: `Equalize (to lowest value)` or `Cancel`,
 - sanity check enforces initial SLM load-up: first stimulation must start at least `16.66ms` after experiment start; if violated, dialog offers: `Translate All Inputs Right (+16.66 ms)` or `Cancel`,
-- sanity check enforces SLM switch gap: consecutive stimulation runs with different active neuron sets must be separated by at least `16.66ms`,
+- sanity check enforces SLM switch gap: consecutive non-empty runs that introduce at least one new target must be separated by at least `16.66ms`,
+- sanity check enforces SLM OFF/ON overlap rule: OFF lead-in of a new phase must not overlap ON interval of another neuron; when violated, dialog proposes right-shift spacing based on computed minimum required shift and offers `Space Input Right` or `Cancel`,
 - when SLM-gap violations are detected, dialog offers: `Space Input Out` (right-shift with fixed array length), `Align Troublesome Stimuli (Left)`, or `Cancel`,
-- automatic fixes are applied through the StimEditor modifier path so standard undo/redo remains functional for the edited stim array,
+- sanity fixes are applied iteratively with re-validation (duration -> initial load -> OFF/ON overlap -> SLM gap), so applying a later fix cannot silently invalidate an earlier rule,
+- automatic fixes are applied through the StimEditor modifier path in all fix branches so standard undo/redo remains functional for the edited stim array,
 - header/template fields are taken from the editable HOLO4D config block (lines before first object block), legacy v2-era keys are sanitized/removed, and object blocks are regenerated from stim/cellpose data.
 - when a SysCon2 file is loaded via import dialog, its header block is stored as the default export template for subsequent script generation in the same project/session.
 

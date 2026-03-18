@@ -13,6 +13,7 @@ from qtpy.compat import getexistingdirectory
 from neuroseq.exporter_syscon2 import InitialSlmLoadViolation
 from neuroseq.exporter_syscon2 import SimultaneousDurationViolation
 from neuroseq.exporter_syscon2 import SlmGapViolation
+from neuroseq.exporter_syscon2 import SlmOffOnOverlapViolation
 from neuroseq.exporter_syscon2 import SysconExportReport
 from neuroseq.exporter_syscon2 import align_stim_values_left_for_slm
 from neuroseq.exporter_syscon2 import check_syscon2_input_sanity
@@ -20,10 +21,12 @@ from neuroseq.exporter_syscon2 import equalize_simultaneous_durations_to_min
 from neuroseq.exporter_syscon2 import find_initial_slm_load_violation
 from neuroseq.exporter_syscon2 import find_simultaneous_duration_violations
 from neuroseq.exporter_syscon2 import find_slm_gap_violations
+from neuroseq.exporter_syscon2 import find_slm_off_on_overlap_violations
 from neuroseq.exporter_syscon2 import generate_syscon2_sequence_text
 from neuroseq.exporter_syscon2 import generate_syscon2_timeline_overview_png
 from neuroseq.exporter_syscon2 import shift_stim_values_right_for_initial_slm_load
 from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm
+from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm_off_on_overlap
 
 if TYPE_CHECKING:
     from neuroseq.importer_cellpose import CellposeImportResult
@@ -221,6 +224,10 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         ALIGN_LEFT = "align_left"
         CANCEL = "cancel"
 
+    class _SlmOffOnFixChoice(Enum):
+        SPACE_RIGHT = "space_right"
+        CANCEL = "cancel"
+
     class _DurationFixChoice(Enum):
         EQUALIZE_MIN = "equalize_min"
         CANCEL = "cancel"
@@ -387,107 +394,53 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             return
 
         stim_array = self.project.stim_arrays[stim_name]
-        duration_violations = find_simultaneous_duration_violations(
-            stim_array,
-            active_threshold=0.0,
-        )
-        if duration_violations:
-            duration_choice = self._prompt_duration_fix_choice(
-                duration_violations,
-                dt_seconds=stim_array.dt,
-            )
-            if duration_choice == self._DurationFixChoice.CANCEL:
-                return
-
-            new_values, trimmed_timepoints = equalize_simultaneous_durations_to_min(
+        max_fix_iterations = max(1, stim_array.values.shape[0] * 2)
+        for _ in range(max_fix_iterations):
+            duration_violations = find_simultaneous_duration_violations(
                 stim_array,
                 active_threshold=0.0,
             )
-            changed = self._replace_stim_values_preserving_undo(
-                stim_name,
-                new_values,
-            )
-            if not changed:
-                return
-            self._log_status(
-                "Simultaneous-duration equalization trimmed %d sample(s).",
-                trimmed_timepoints,
-            )
-
-            stim_array = self.project.stim_arrays[stim_name]
-            remaining_duration_violations = find_simultaneous_duration_violations(
-                stim_array,
-                active_threshold=0.0,
-            )
-            if remaining_duration_violations:
-                QtWidgets.QMessageBox.critical(
-                    self,
-                    "Sanity Check Failed",
-                    "Simultaneous duration violations remain after equalization.\n"
-                    "Please adjust the stimulus manually and retry.",
+            if duration_violations:
+                duration_choice = self._prompt_duration_fix_choice(
+                    duration_violations,
+                    dt_seconds=stim_array.dt,
                 )
-                return
+                if duration_choice == self._DurationFixChoice.CANCEL:
+                    return
 
-        initial_slm_load_violation = find_initial_slm_load_violation(
-            stim_array,
-            active_threshold=0.0,
-        )
-        if initial_slm_load_violation is not None:
-            choice = self._prompt_initial_slm_start_fix_choice(
-                initial_slm_load_violation,
-                dt_seconds=stim_array.dt,
-            )
-            if choice == self._InitialSlmFixChoice.CANCEL:
-                return
-
-            new_values, truncated_tail_samples = (
-                shift_stim_values_right_for_initial_slm_load(
-                    stim_array,
-                )
-            )
-            changed = self._replace_stim_values_preserving_undo(
-                stim_name,
-                new_values,
-            )
-            if not changed:
-                return
-            if truncated_tail_samples > 0:
-                self._log_status(
-                    "Initial SLM-load shift truncated %d tail timepoints.",
-                    truncated_tail_samples,
-                )
-
-            stim_array = self.project.stim_arrays[stim_name]
-            remaining_initial_violation = find_initial_slm_load_violation(
-                stim_array,
-                active_threshold=0.0,
-            )
-            if remaining_initial_violation is not None:
-                QtWidgets.QMessageBox.critical(
-                    self,
-                    "Sanity Check Failed",
-                    "Initial SLM load-up violation remains after applying "
-                    "the selected fix.\n"
-                    "Please adjust the stimulus manually and retry.",
-                )
-                return
-
-        slm_gap_violations = find_slm_gap_violations(
-            stim_array,
-            active_threshold=0.0,
-        )
-        if slm_gap_violations:
-            slm_fix_choice = self._prompt_slm_gap_fix_choice(
-                slm_gap_violations,
-                dt_seconds=stim_array.dt,
-            )
-            if slm_fix_choice == self._SlmFixChoice.CANCEL:
-                return
-
-            if slm_fix_choice == self._SlmFixChoice.SPACE_OUT:
-                new_values, truncated_tail_samples = space_out_stim_values_for_slm(
+                new_values, trimmed_timepoints = equalize_simultaneous_durations_to_min(
                     stim_array,
                     active_threshold=0.0,
+                )
+                changed = self._replace_stim_values_preserving_undo(
+                    stim_name,
+                    new_values,
+                )
+                if not changed:
+                    return
+                self._log_status(
+                    "Simultaneous-duration equalization trimmed %d sample(s).",
+                    trimmed_timepoints,
+                )
+                stim_array = self.project.stim_arrays[stim_name]
+                continue
+
+            initial_slm_load_violation = find_initial_slm_load_violation(
+                stim_array,
+                active_threshold=0.0,
+            )
+            if initial_slm_load_violation is not None:
+                choice = self._prompt_initial_slm_start_fix_choice(
+                    initial_slm_load_violation,
+                    dt_seconds=stim_array.dt,
+                )
+                if choice == self._InitialSlmFixChoice.CANCEL:
+                    return
+
+                new_values, truncated_tail_samples = (
+                    shift_stim_values_right_for_initial_slm_load(
+                        stim_array,
+                    )
                 )
                 changed = self._replace_stim_values_preserving_undo(
                     stim_name,
@@ -497,13 +450,29 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                     return
                 if truncated_tail_samples > 0:
                     self._log_status(
-                        "SLM spacing fix truncated %d tail timepoints.",
+                        "Initial SLM-load shift truncated %d tail timepoints.",
                         truncated_tail_samples,
                     )
-            else:
-                new_values, moved_runs = align_stim_values_left_for_slm(
-                    stim_array,
-                    active_threshold=0.0,
+                stim_array = self.project.stim_arrays[stim_name]
+                continue
+
+            off_on_overlap_violations = find_slm_off_on_overlap_violations(
+                stim_array,
+                active_threshold=0.0,
+            )
+            if off_on_overlap_violations:
+                off_on_choice = self._prompt_slm_off_on_overlap_fix_choice(
+                    off_on_overlap_violations,
+                    dt_seconds=stim_array.dt,
+                )
+                if off_on_choice == self._SlmOffOnFixChoice.CANCEL:
+                    return
+
+                new_values, truncated_tail_samples = (
+                    space_out_stim_values_for_slm_off_on_overlap(
+                        stim_array,
+                        active_threshold=0.0,
+                    )
                 )
                 changed = self._replace_stim_values_preserving_undo(
                     stim_name,
@@ -511,24 +480,100 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 )
                 if not changed:
                     return
-                self._log_status(
-                    "SLM align-left fix moved %d violating run(s).",
-                    moved_runs,
-                )
+                if truncated_tail_samples > 0:
+                    self._log_status(
+                        "SLM off/on-overlap spacing fix truncated %d tail timepoints.",
+                        truncated_tail_samples,
+                    )
+                stim_array = self.project.stim_arrays[stim_name]
+                continue
 
-            stim_array = self.project.stim_arrays[stim_name]
-            remaining_violations = find_slm_gap_violations(
+            slm_gap_violations = find_slm_gap_violations(
                 stim_array,
                 active_threshold=0.0,
             )
-            if remaining_violations:
-                QtWidgets.QMessageBox.critical(
-                    self,
-                    "Sanity Check Failed",
-                    "SLM gap violations remain after applying the selected fix.\n"
-                    "Please adjust the stimulus manually and retry.",
+            if slm_gap_violations:
+                slm_fix_choice = self._prompt_slm_gap_fix_choice(
+                    slm_gap_violations,
+                    dt_seconds=stim_array.dt,
                 )
-                return
+                if slm_fix_choice == self._SlmFixChoice.CANCEL:
+                    return
+
+                if slm_fix_choice == self._SlmFixChoice.SPACE_OUT:
+                    new_values, truncated_tail_samples = space_out_stim_values_for_slm(
+                        stim_array,
+                        active_threshold=0.0,
+                    )
+                    changed = self._replace_stim_values_preserving_undo(
+                        stim_name,
+                        new_values,
+                    )
+                    if not changed:
+                        return
+                    if truncated_tail_samples > 0:
+                        self._log_status(
+                            "SLM spacing fix truncated %d tail timepoints.",
+                            truncated_tail_samples,
+                        )
+                else:
+                    new_values, moved_runs = align_stim_values_left_for_slm(
+                        stim_array,
+                        active_threshold=0.0,
+                    )
+                    changed = self._replace_stim_values_preserving_undo(
+                        stim_name,
+                        new_values,
+                    )
+                    if not changed:
+                        return
+                    self._log_status(
+                        "SLM align-left fix moved %d violating run(s).",
+                        moved_runs,
+                    )
+
+                stim_array = self.project.stim_arrays[stim_name]
+                continue
+
+            break
+        else:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Sanity Check Failed",
+                "Automatic sanity-fix sequence did not converge.\n"
+                "Please adjust the stimulus manually and retry.",
+            )
+            return
+
+        remaining_duration_violations = find_simultaneous_duration_violations(
+            stim_array,
+            active_threshold=0.0,
+        )
+        remaining_initial_violation = find_initial_slm_load_violation(
+            stim_array,
+            active_threshold=0.0,
+        )
+        remaining_off_on_overlap_violations = find_slm_off_on_overlap_violations(
+            stim_array,
+            active_threshold=0.0,
+        )
+        remaining_slm_gap_violations = find_slm_gap_violations(
+            stim_array,
+            active_threshold=0.0,
+        )
+        if (
+            remaining_duration_violations
+            or remaining_initial_violation is not None
+            or remaining_off_on_overlap_violations
+            or remaining_slm_gap_violations
+        ):
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Sanity Check Failed",
+                "At least one sanity violation remains after applying selected fixes.\n"
+                "Please adjust the stimulus manually and retry.",
+            )
+            return
 
         force_binary_intensity = self.binary_mode_checkbox.isChecked()
         sanity_report = check_syscon2_input_sanity(
@@ -580,6 +625,52 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             "\n".join(success_lines),
         )
 
+    def _prompt_slm_off_on_overlap_fix_choice(
+        self,
+        violations: list[SlmOffOnOverlapViolation],
+        *,
+        dt_seconds: float,
+    ) -> _SlmOffOnFixChoice:
+        first_violation = violations[0]
+        required_shift_ms = first_violation.required_shift_samples * dt_seconds * 1e3
+        overlap_start_ms = first_violation.overlap_start_tick * 520.8125 / 1e3
+        overlap_end_ms = first_violation.overlap_end_tick * 520.8125 / 1e3
+        text_lines = [
+            (
+                "Detected SLM off/on overlap: the OFF phase of a newly started neuron "
+                "object overlaps the ON phase of another neuron object."
+            ),
+            "",
+            f"Violations detected: {len(violations)}",
+            (
+                "Example: "
+                f"off-neuron {first_violation.off_neuron_index} overlaps "
+                f"ON-neuron {first_violation.on_neuron_index} in "
+                f"[{overlap_start_ms:.2f}, {overlap_end_ms:.2f})ms"
+            ),
+            f"Proposed right spacing: {required_shift_ms:.2f}ms",
+            "",
+            "Choose how to resolve:",
+            f"1) Space input right by {required_shift_ms:.2f} ms",
+            "2) Cancel",
+        ]
+        msg_box = QtWidgets.QMessageBox(self)
+        msg_box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+        msg_box.setWindowTitle("SLM OFF/ON Overlap Detected")
+        msg_box.setText("\n".join(text_lines))
+
+        space_button = msg_box.addButton(
+            "Space Input Right",
+            QtWidgets.QMessageBox.ButtonRole.ActionRole,
+        )
+        cancel_button = msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
+        msg_box.setDefaultButton(cancel_button)
+        msg_box.exec()
+        clicked = msg_box.clickedButton()
+        if clicked == space_button:
+            return self._SlmOffOnFixChoice.SPACE_RIGHT
+        return self._SlmOffOnFixChoice.CANCEL
+
     def _prompt_slm_gap_fix_choice(
         self,
         violations: list[SlmGapViolation],
@@ -592,7 +683,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         text_lines = [
             (
                 "Detected stimulation transitions that violate the SLM load-time rule "
-                "(minimum 16.66 ms between different consecutive neuron targets)."
+                "(minimum 16.66 ms whenever a new neuron target appears)."
             ),
             "",
             f"Violations detected: {len(violations)}",
