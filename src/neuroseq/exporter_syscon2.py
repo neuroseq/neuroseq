@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import heapq
+import pathlib
 import re
 from collections import OrderedDict
 from collections import defaultdict
@@ -9,6 +10,7 @@ from dataclasses import dataclass
 import brian2.numpy_ as np
 
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importer_syscon2 import SysconSequenceObject
 from neuroseq.importer_syscon2 import parse_syscon2_seq_text
 from neuroseq.stim import StimArray
 
@@ -429,6 +431,113 @@ def generate_syscon2_sequence_text(
         ttl_out2_timeline_index=ttl_out2_timeline_index,
     )
     return sequence_text, report
+
+
+def generate_syscon2_timeline_overview_png(
+    sequence_text: str,
+    output_path: str | pathlib.Path,
+    *,
+    tick_resolution_us: int = 500,
+) -> pathlib.Path:
+    """Render a visual timeline overview PNG for a SysCon2 `.seq` text."""
+    if tick_resolution_us <= 0:
+        raise ValueError("tick_resolution_us must be positive")
+
+    sequence = parse_syscon2_seq_text(sequence_text)
+
+    timeline_entries: list[tuple[int, float, float, str]] = []
+    for obj in sequence.objects:
+        timeline_index_raw = obj.properties.get("TimelineInfo0_TimelineIndex")
+        if timeline_index_raw is None:
+            continue
+        try:
+            timeline_index = int(float(timeline_index_raw))
+        except ValueError:
+            continue
+
+        start_us = max(0.0, float(obj.start_time_us))
+        duration_us = _preview_object_duration_us(
+            obj,
+            tick_resolution_us=tick_resolution_us,
+        )
+        timeline_entries.append(
+            (
+                timeline_index,
+                start_us,
+                max(1e-6, duration_us),
+                obj.object_type.strip().lower(),
+            )
+        )
+
+    if len(timeline_entries) == 0:
+        raise ValueError("No timeline objects found to render overview PNG.")
+
+    timeline_indices = sorted({entry[0] for entry in timeline_entries})
+    y_by_timeline = {timeline: idx for idx, timeline in enumerate(timeline_indices)}
+    max_end_us = max(
+        start_us + duration_us for _, start_us, duration_us, _ in timeline_entries
+    )
+    max_end_ms = max(1.0, max_end_us / 1e3)
+
+    # Use Agg canvas directly for headless rendering in tests/servers.
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+    from matplotlib.patches import Patch
+    from matplotlib.patches import Rectangle
+
+    fig_height = max(3.0, 1.4 + 0.45 * len(timeline_indices))
+    fig = Figure(figsize=(12.0, fig_height), constrained_layout=True)
+    FigureCanvasAgg(fig)
+    ax = fig.add_subplot(111)
+
+    for timeline_idx in timeline_indices:
+        y = y_by_timeline[timeline_idx]
+        ax.hlines(y, 0.0, max_end_ms, colors="#d0d0d0", linewidth=0.8, zorder=0)
+
+    for timeline_idx, start_us, duration_us, object_type in timeline_entries:
+        y = y_by_timeline[timeline_idx]
+        start_ms = start_us / 1e3
+        duration_ms = duration_us / 1e3
+        display_duration_ms = max(duration_ms, 0.08)
+        color = _preview_object_color(object_type)
+        rect = Rectangle(
+            (start_ms, y - 0.32),
+            display_duration_ms,
+            0.64,
+            facecolor=color,
+            edgecolor=color,
+            linewidth=0.6,
+            alpha=0.9,
+            zorder=2,
+        )
+        ax.add_patch(rect)
+
+    ax.set_xlim(0.0, max_end_ms * 1.04)
+    ax.set_ylim(-0.8, len(timeline_indices) - 0.2)
+    ax.set_yticks([y_by_timeline[idx] for idx in timeline_indices])
+    ax.set_yticklabels([f"TL {idx}" for idx in timeline_indices])
+    ax.set_xlabel("Time (ms)")
+    ax.set_ylabel("Timeline")
+    ax.set_title("SysCon2 Timeline Overview")
+    ax.grid(axis="x", linestyle=":", linewidth=0.6, alpha=0.6)
+
+    legend_handles = [
+        Patch(facecolor="#2c7fb8", edgecolor="#2c7fb8", label="Shape/Entity"),
+        Patch(facecolor="#d95f0e", edgecolor="#d95f0e", label="TTLPulse"),
+        Patch(facecolor="#636363", edgecolor="#636363", label="Other"),
+    ]
+    ax.legend(
+        handles=legend_handles,
+        loc="upper right",
+        frameon=True,
+        framealpha=0.9,
+    )
+
+    output_path_obj = pathlib.Path(output_path)
+    output_path_obj.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path_obj, dpi=180)
+    fig.clear()
+    return output_path_obj
 
 
 def check_syscon2_input_sanity(
@@ -1376,3 +1485,32 @@ def _shape_repeats_from_duration_quanta(duration_quanta: int) -> int:
     # Shape duration follows SysCon2 rule:
     # duration = (repeats + 2) * Shape quantum.
     return max(0, int(duration_quanta) - 2)
+
+
+def _preview_object_duration_us(
+    obj: SysconSequenceObject,
+    *,
+    tick_resolution_us: int,
+) -> float:
+    object_type = obj.object_type.strip().lower()
+    repeats = max(0, int(obj.repeats))
+    step_size = max(1, int(obj.step_size))
+
+    if object_type == "ttlpulse":
+        return float(repeats + 1) * _SYSCON2_TTL_PULSE_QUANTUM_US
+    if object_type == "shape":
+        return float(max(2, repeats + 2)) * _SYSCON2_NEURON_OBJECT_QUANTUM_US
+    if object_type == "entity":
+        duration_ticks = max(1, (repeats + 1) * step_size)
+        return float(duration_ticks * tick_resolution_us)
+
+    duration_ticks = max(1, (repeats + 1) * step_size)
+    return float(duration_ticks * tick_resolution_us)
+
+
+def _preview_object_color(object_type: str) -> str:
+    if object_type in {"shape", "entity"}:
+        return "#2c7fb8"
+    if object_type == "ttlpulse":
+        return "#d95f0e"
+    return "#636363"

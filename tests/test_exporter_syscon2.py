@@ -11,6 +11,7 @@ from neuroseq.exporter_syscon2 import find_initial_slm_load_violation
 from neuroseq.exporter_syscon2 import find_simultaneous_duration_violations
 from neuroseq.exporter_syscon2 import find_slm_gap_violations
 from neuroseq.exporter_syscon2 import generate_syscon2_sequence_text
+from neuroseq.exporter_syscon2 import generate_syscon2_timeline_overview_png
 from neuroseq.exporter_syscon2 import shift_stim_values_right_for_initial_slm_load
 from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm
 from neuroseq.importer_cellpose import CellposeImportResult
@@ -316,6 +317,35 @@ def test_export_seq_shape_repeats_use_plus_two_quantum_rule() -> None:
     assert len(shapes) == 1
     assert shapes[0].repeats == 1
     assert np.isclose((shapes[0].repeats + 2) * 16_666.0, 49_998.0)
+
+
+def test_generate_syscon2_timeline_overview_png_writes_file(tmp_path: Path) -> None:
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=0.001,
+    )
+
+    seq_text, _ = generate_syscon2_sequence_text(
+        stim_array,
+        _cellpose_result(mapping={0: 0}),
+        template_text=_template_header(),
+        tick_resolution_us=500,
+        active_threshold=0.0,
+        binary_intensity=1.0,
+        active_laser_wavelength_nm=1140,
+    )
+
+    png_path = tmp_path / "overview.png"
+    returned = generate_syscon2_timeline_overview_png(seq_text, png_path)
+
+    assert returned == png_path
+    assert png_path.exists()
+    assert png_path.stat().st_size > 0
 
 
 def test_export_seq_accepts_legacy_1040_alias_as_1030_timeline() -> None:

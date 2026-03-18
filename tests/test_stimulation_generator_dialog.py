@@ -532,3 +532,30 @@ def test_stimulation_generator_dialog_uses_stim_editor_undo_path_for_duration_fi
     )
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "information"
+
+
+def test_stimulation_generator_dialog_generate_writes_seq_and_overview_png(
+    qtbot: QtBot,
+    tmp_path: Path,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    dialog = StimulationGeneratorDialog(
+        _build_project(values, mapping={0: 0}),
+    )
+    qtbot.addWidget(dialog)
+    dialog.output_folder = tmp_path
+    dialog.folder_edit.setText(str(tmp_path))
+    dialog.name_edit.setText("preview_export")
+
+    dialog._generate_scripts()
+
+    seq_path = tmp_path / "preview_export.seq"
+    png_path = tmp_path / "preview_export_overview.png"
+    assert seq_path.exists()
+    assert png_path.exists()
+    assert png_path.stat().st_size > 0
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "information"
+    assert "scripts generated" in qmessagebox_calls[0]["title"].lower()

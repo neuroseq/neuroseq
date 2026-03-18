@@ -21,6 +21,7 @@ from neuroseq.exporter_syscon2 import find_initial_slm_load_violation
 from neuroseq.exporter_syscon2 import find_simultaneous_duration_violations
 from neuroseq.exporter_syscon2 import find_slm_gap_violations
 from neuroseq.exporter_syscon2 import generate_syscon2_sequence_text
+from neuroseq.exporter_syscon2 import generate_syscon2_timeline_overview_png
 from neuroseq.exporter_syscon2 import shift_stim_values_right_for_initial_slm_load
 from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm
 
@@ -309,12 +310,19 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             extension = self._get_file_extension(hardware_type)
             script_filename = f"{script_name}{extension}"
             script_path = self.output_folder / script_filename
+            overview_filename = f"{script_name}_overview.png"
+            overview_path = self.output_folder / overview_filename
 
             # Write script file
             with open(script_path, "w", encoding="utf-8") as f:
                 f.write(script_content)
+            generate_syscon2_timeline_overview_png(
+                script_content,
+                overview_path,
+            )
 
             self._log_status(f"✓ Generated: {script_filename}")
+            self._log_status(f"✓ Generated: {overview_filename}")
             self._log_status(
                 "Export summary: segments=%d mapped_active_neurons=%d "
                 "unmapped_active_neurons=%d entity_lanes=%d objects=%d",
@@ -327,6 +335,8 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
 
             report_lines = [
                 f"Successfully generated script in:\n{self.output_folder}",
+                "",
+                f"Generated files: {script_filename}, {overview_filename}",
                 "",
                 f"Exported segments: {export_report.exported_segments}/{export_report.total_segments}",
                 "Mapped active neurons: "

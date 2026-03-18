@@ -338,6 +338,7 @@ Current implementation status:
 
 - hardware type list currently only `HOLO4D`,
 - output extension currently always `.seq`,
+- exporter also writes a timeline overview PNG (`<script_name>_overview.png`) alongside each `.seq`, visualizing timeline rows and object/pulse placement for quick ordering checks,
 - exports are generated from selected stim array + imported Cellpose segmentation using `exporter_syscon2.py`,
 - binary stimulation mode is used (`stim_value > 0` is ON, exported intensity fixed at `1.0`),
 - per-neuron segment compression is applied: contiguous ON samples become one exported segment, and these segments map directly to active-laser `TTLPulse` timing in `.seq`,
