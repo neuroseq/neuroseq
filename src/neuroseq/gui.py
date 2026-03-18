@@ -62,6 +62,8 @@ class Gui(QtWidgets.QMainWindow):
         self.status_bar.addPermanentWidget(ResourceMonitorLabel())
         self.project = Project()
         self.external_simulation_function: Callable | None = None
+        self.example_projects_menu: QtWidgets.QMenu | None = None
+        self.example_project_section_menus: dict[str, QtWidgets.QMenu] = {}
         self.setWindowTitle("NeuroSeq")
         self.cmb_trace = QtWidgets.QComboBox()
         self.cmb_trace.setMinimumWidth(120)
@@ -852,15 +854,17 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.file"),
         )
         # add "open example project" item to the file menu which opens a sub-menu containing the example projects from src/neuroseq/example_projects
-        example_projects_menu = menu.addMenu("&Open example project")
-        section_menus: dict[str, QtWidgets.QMenu] = {}
+        self.example_projects_menu = menu.addMenu("&Open example project")
+        self.example_project_section_menus = {}
         for name, generator in example_projects.items():
-            target_menu = example_projects_menu
+            target_menu = self.example_projects_menu
             section = example_project_sections.get(name)
             if section is not None:
-                if section not in section_menus:
-                    section_menus[section] = example_projects_menu.addMenu(section)
-                target_menu = section_menus[section]
+                if section not in self.example_project_section_menus:
+                    self.example_project_section_menus[section] = (
+                        self.example_projects_menu.addMenu(section)
+                    )
+                target_menu = self.example_project_section_menus[section]
             add_action(
                 name,
                 lambda checked, _generator=generator: self.load_project(_generator()),
