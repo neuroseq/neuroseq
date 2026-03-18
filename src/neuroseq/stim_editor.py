@@ -203,7 +203,7 @@ class StimEditor(QtWidgets.QWidget):
             return
         trim_seconds, ok = QtWidgets.QInputDialog.getText(
             self,
-            "Trim stim arrays",
+            "Trim stimulation arrays",
             "Seconds to trim from the stim arrays",
             QtWidgets.QLineEdit.EchoMode.Normal,
             "5.0",
