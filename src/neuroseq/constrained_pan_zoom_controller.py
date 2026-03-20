@@ -44,6 +44,8 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         self.initialized = False
 
     def set_limits(self, max_time_secs: float, max_neurons: int) -> None:
+        max_time_secs = float(max_time_secs)
+        max_neurons = int(max_neurons)
         if max_time_secs <= 0.0 or max_neurons <= 0:
             return
         self.max_width = 1000.0 * max_time_secs
@@ -76,54 +78,59 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         - Clamps the width/height and position.
         """
         current_state = self._get_camera_state()
+        min_width = float(self.min_width)
+        max_width = float(self.max_width)
+        min_height = float(self.min_height)
+        max_height = float(self.max_height)
         # width constraints
         if "width" in new_state:
             new_state["width"] = float(
                 np.clip(
-                    new_state["width"],
-                    self.min_width,
-                    self.max_width,
+                    float(new_state["width"]),
+                    min_width,
+                    max_width,
                 )
             )
-            self._set_scroll_bar_size(
-                self.x_scroll_bar, new_state["width"] / self.max_width
-            )
+            self._set_scroll_bar_size(self.x_scroll_bar, new_state["width"] / max_width)
             for grid_line in self.grid_lines:
                 if grid_line is not None:
                     grid_line.set_current_time_extent(new_state["width"])
         else:
-            new_state["width"] = current_state["width"]
+            new_state["width"] = float(current_state["width"])
         # height constraints
         if "height" in new_state:
             new_state["height"] = float(
                 np.clip(
-                    new_state["height"],
-                    self.min_height,
-                    self.max_height,
+                    float(new_state["height"]),
+                    min_height,
+                    max_height,
                 )
             )
             self._set_scroll_bar_size(
-                self.y_scroll_bar, new_state["height"] / self.max_height
+                self.y_scroll_bar, new_state["height"] / max_height
             )
         else:
-            new_state["height"] = current_state["height"]
+            new_state["height"] = float(current_state["height"])
         # position constraints
         if "position" not in new_state:
             new_state["position"] = current_state["position"]
+        pos_x = float(new_state["position"][0])
+        pos_y = float(new_state["position"][1])
+        pos_z = float(new_state["position"][2])
         half_width = 0.5 * new_state["width"]
         half_height = 0.5 * new_state["height"]
-        x = np.clip(new_state["position"][0], half_width, self.max_width - half_width)
-        y = np.clip(
-            new_state["position"][1],
-            half_height - 0.5,
-            self.max_height - half_height - 0.5,
+        x = float(np.clip(pos_x, half_width, max_width - half_width))
+        y = float(
+            np.clip(
+                pos_y,
+                half_height - 0.5,
+                max_height - half_height - 0.5,
+            )
         )
-        new_state["position"] = (x, y, new_state["position"][2])
+        new_state["position"] = (x, y, pos_z)
+        self._set_scroll_bar_position(self.x_scroll_bar, (x - half_width) / max_width)
         self._set_scroll_bar_position(
-            self.x_scroll_bar, (x - half_width) / self.max_width
-        )
-        self._set_scroll_bar_position(
-            self.y_scroll_bar, 1 - (y + 0.5 + half_height) / self.max_height
+            self.y_scroll_bar, 1 - (y + 0.5 + half_height) / max_height
         )
         super()._set_camera_state(new_state)
 
@@ -178,27 +185,45 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
 
     def x_scroll_event(self, value: int):
         state = self._get_camera_state()
-        half_width = 0.5 * state["width"]
+        width = float(state["width"])
+        max_width = float(self.max_width)
+        half_width = 0.5 * width
         # get fractional position of lower edge of the scroll bar
         fractional_pos = value / self.scroll_bar_steps
         # convert to center position of the new view
-        pos = fractional_pos * self.max_width + half_width
+        pos = fractional_pos * max_width + half_width
         # clip to valid range to account for rounding errors due to integer scroll bar values
-        x = np.clip(pos, half_width, self.max_width - half_width)
-        state["position"] = (x, state["position"][1], state["position"][2])
+        x = float(np.clip(pos, half_width, max_width - half_width))
+        state["position"] = (
+            x,
+            float(state["position"][1]),
+            float(state["position"][2]),
+        )
         super()._set_camera_state(state)
         self._update_cameras()
 
     def y_scroll_event(self, value: int):
         assert self.y_scroll_bar is not None
         state = self._get_camera_state()
-        half_height = 0.5 * state["height"]
+        height = float(state["height"])
+        max_height = float(self.max_height)
+        half_height = 0.5 * height
         # get fractional position of lower edge of the scroll bar (y scroll bar is inverted so subtract from max)
         fractional_pos = (self.y_scroll_bar.maximum() - value) / self.scroll_bar_steps
         # convert to center position of the new view (subtract 0.5 to account for 0.5 offset of neuron positions)
-        pos = fractional_pos * self.max_height + half_height - 0.5
+        pos = fractional_pos * max_height + half_height - 0.5
         # clip to valid range to account for rounding errors due to integer scroll bar values
-        y = np.clip(pos, half_height - 0.5, self.max_height - half_height - 0.5)
-        state["position"] = (state["position"][0], y, state["position"][2])
+        y = float(
+            np.clip(
+                pos,
+                half_height - 0.5,
+                max_height - half_height - 0.5,
+            )
+        )
+        state["position"] = (
+            float(state["position"][0]),
+            y,
+            float(state["position"][2]),
+        )
         super()._set_camera_state(state)
         self._update_cameras()

@@ -57,7 +57,7 @@ class StimWidget(TimeseriesWidget):
             offset=(0.5, 0, 0),
         )
         # todo: properly support dt_ms != 1 (currently we share the camera with other widgets, but add_image has fixed integer x-axis spacing, so the bounds of the shared camera is only correct if dt_ms=1)
-        self.dt_ms = stim_array.dt * 1000.0  # convert to milliseconds
+        self.dt_ms = float(stim_array.dt) * 1000.0  # convert to milliseconds
         self.n_neurons = stim_array.values.shape[1]
         self.n_timestamps = stim_array.values.shape[0]
         self.post_set_data()

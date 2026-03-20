@@ -651,7 +651,8 @@ class StimEditor(QtWidgets.QWidget):
             n_neurons = self.current_stim_modifier.stim_array.values.shape[1]
             units = self.current_stim_modifier.stim_array.units
             dt = self.current_stim_modifier.stim_array.dt
-        n_timestamps = int(self.project.max_time_secs / dt)
+        dt = float(dt)
+        n_timestamps = int(float(self.project.max_time_secs) / dt)
         stim_array = StimArray(
             "new_stim",
             stim_type,

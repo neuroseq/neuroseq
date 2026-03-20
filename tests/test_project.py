@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import brian2 as b2
 import brian2.numpy_ as np
 import pytest
 from brian2.tests.utils import assert_allclose
@@ -58,6 +59,23 @@ def test_add_experimental_data_overwrite_raises_error() -> None:
     assert project.experiments["test_experiment"].data[1].spike_indices.shape == (3,)
     assert project.experiments["test_experiment"].data[1].spike_times.shape == (3,)
     assert project.max_time_secs == pytest.approx(3.7, abs=0.01)
+
+
+def test_update_limits_normalizes_quantity_values_to_float() -> None:
+    project = Project()
+    project.experiments["legacy"] = Experiment("legacy", 2.0 * b2.second, [], [])
+    project.stim_arrays["legacy_stim"] = StimArray(
+        "legacy_stim",
+        StimType.Excitation,
+        np.zeros((8, 3), dtype=np.float32),
+        "nS",
+        0.5 * b2.second,
+    )
+    project.update_limits()
+
+    assert isinstance(project.max_time_secs, float)
+    assert project.max_time_secs == pytest.approx(4.0)
+    assert project.max_neurons == 3
 
 
 def test_append_experimental_data() -> None:
