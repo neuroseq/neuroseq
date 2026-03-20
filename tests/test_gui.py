@@ -38,6 +38,43 @@ def test_gui_click_exit(qtbot: QtBot) -> None:
     gui.close()
 
 
+def test_gui_open_example_project_menu_has_subsections(qtbot: QtBot) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+
+    open_example_project_menu = next(
+        action.menu()
+        for action in gui.menu_file.actions()
+        if action.menu() is not None
+        and action.text().replace("&", "") == "Open example project"
+    )
+
+    section_names = {
+        action.text().replace("&", "")
+        for action in open_example_project_menu.actions()
+        if action.menu() is not None
+    }
+    assert {"Basics", "Single Neuron", "Network", "Optogenetics"}.issubset(
+        section_names
+    )
+
+    basics_menu = next(
+        action.menu()
+        for action in open_example_project_menu.actions()
+        if action.menu() is not None and action.text().replace("&", "") == "Basics"
+    )
+    basics_entries = {
+        action.text().replace("&", "")
+        for action in basics_menu.actions()
+        if action.menu() is None
+    }
+    assert {"Getting Started Project", "non_linear"}.issubset(basics_entries)
+
+    gui.close()
+
+
 def test_gui_simulate_and_playback(
     monkeypatch: MonkeyPatch, qtbot: QtBot, test_project: Project
 ) -> None:
@@ -161,6 +198,26 @@ def test_gui_open(monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_path: Path) -> Non
     assert list(gui.project.b2_model.monitors.keys()) == list(
         project.b2_model.monitors.keys()
     )
+    gui.close()
+
+
+def test_gui_toggle_grid(qtbot: QtBot) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    widgets = [
+        gui.stim_editor.stim_widget,
+        gui.trace_widget,
+        gui.spike_widget,
+        gui.data_widget.trace_widget,
+        gui.data_widget.spike_widget,
+    ]
+    assert all(widget.show_grid for widget in widgets)
+    gui.toggle_grid(False)
+    assert all(not widget.show_grid for widget in widgets)
+    gui.toggle_grid(True)
+    assert all(widget.show_grid for widget in widgets)
     gui.close()
 
 

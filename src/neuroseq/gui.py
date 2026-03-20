@@ -25,7 +25,9 @@ from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.data_widget import DataWidget
 from neuroseq.example_projects import default_project
+from neuroseq.example_projects import example_project_sections
 from neuroseq.example_projects import example_projects
+from neuroseq.experiments_manager_dialog import ExperimentsManagerDialog
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.import_dialog import Suite2pImportDialog
@@ -341,6 +343,13 @@ class Gui(QtWidgets.QMainWindow):
             self.project.update_limits()
             self.update_project(self.project)
 
+    def btn_manage_experiments_clicked(self) -> None:
+        dialog = ExperimentsManagerDialog(self.project, parent=self)
+        dialog.experiments_changed.connect(lambda: self.update_project(self.project))
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            # Update the GUI with changes made in the dialog
+            self.update_project(self.project)
+
     @with_wait_cursor
     def load_project(self, project: str | pathlib.Path | Project) -> None:
         try:
@@ -413,6 +422,8 @@ class Gui(QtWidgets.QMainWindow):
     @with_wait_cursor
     def set_data(self, cmb_name: str) -> None:
         data: TraceData | SpikeData | SynapseData | None = None
+        if cmb_name.endswith(" [trace]") and not self.data_widget.isVisible():
+            return
         if cmb_name.endswith(" [trace]"):
             data = self.project.get_data(cmb_name[:-8], TraceData)
         elif cmb_name.endswith(" [spike]"):
@@ -507,7 +518,7 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(
                 self,
                 "Data import error",
-                f"Could not import data: {e}",
+                f"Could not import data to Stim IDs: {e}",
             )
             self.logger.exception(e)
             return
@@ -591,6 +602,16 @@ class Gui(QtWidgets.QMainWindow):
         ]:
             widget.toggle_selection_text()
 
+    def toggle_grid(self, is_visible: bool) -> None:
+        for widget in [
+            self.stim_editor.stim_widget,
+            self.trace_widget,
+            self.spike_widget,
+            self.data_widget.trace_widget,
+            self.data_widget.spike_widget,
+        ]:
+            widget.set_grid_visible(is_visible)
+
     def choose_max_ram_synapse_plot_matrix(self) -> None:
         new_max_ram, ok = QtWidgets.QInputDialog.getText(
             self,
@@ -656,7 +677,7 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(
                 self,
                 "Cellpose import",
-                "Cellpose segmentation loaded. Now ready for Patchclamp import",
+                "Cellpose segmentation loaded.",
             )
 
     def btn_import_syscon2_seq_clicked(self) -> None:
@@ -682,7 +703,9 @@ class Gui(QtWidgets.QMainWindow):
 
     def btn_import_patchclamp_data_clicked(self) -> None:
         dialog = PatchClampImportDialog(
-            cellpose_import=self.last_cellpose_import, parent=self
+            cellpose_import=self.last_cellpose_import,
+            project=self.project,
+            parent=self,
         )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             if not dialog.imported_data:
@@ -817,13 +840,14 @@ class Gui(QtWidgets.QMainWindow):
         self.addToolBar(self.toolbar_playback)
         self.menu_view = menu.addMenu("&View")
         self.toolbar_view = QtWidgets.QToolBar("View")
-        self.addToolBar(self.toolbar_view)
         self.toolbar_data = QtWidgets.QToolBar("Data")
         self.addToolBar(self.toolbar_data)
 
         self.menu_experiment = menu.addMenu("&Experiment")
         self.toolbar_experiment = QtWidgets.QToolBar("Experiment")
         self.addToolBar(self.toolbar_experiment)
+        self.addToolBarBreak()
+        self.addToolBar(self.toolbar_view)
 
         self.menu_settings = menu.addMenu("&Settings")
         self.menu_help = menu.addMenu("&Help")
@@ -851,11 +875,18 @@ class Gui(QtWidgets.QMainWindow):
         )
         # add "open example project" item to the file menu which opens a sub-menu containing the example projects from src/neuroseq/example_projects
         example_projects_menu = menu.addMenu("&Open example project")
+        section_menus: dict[str, QtWidgets.QMenu] = {}
         for name, generator in example_projects.items():
+            target_menu = example_projects_menu
+            section = example_project_sections.get(name)
+            if section is not None:
+                if section not in section_menus:
+                    section_menus[section] = example_projects_menu.addMenu(section)
+                target_menu = section_menus[section]
             add_action(
                 name,
                 lambda checked, _generator=generator: self.load_project(_generator()),
-                example_projects_menu,
+                target_menu,
                 None,
             )
         add_action(
@@ -900,14 +931,6 @@ class Gui(QtWidgets.QMainWindow):
         )
         menu.addSeparator()
         add_action(
-            "Import Suite2p &Data",
-            self.btn_import_suite2p_data_clicked,
-            menu,
-            toolbar,
-            shortcut="Ctrl+Shift+I",
-            icon=qta.icon("mdi6.import"),
-        )
-        add_action(
             "Generate Synthetic &Data...",
             self.btn_generate_synthetic_data_clicked,
             menu,
@@ -916,6 +939,15 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.microsoft-xbox-controller-view")
             if hasattr(qta, "icon")
             else None,
+        )
+        menu.addSeparator()
+        add_action(
+            "Import Suite2p &Data",
+            self.btn_import_suite2p_data_clicked,
+            menu,
+            toolbar,
+            shortcut="Ctrl+Shift+I",
+            icon=qta.icon("mdi6.import"),
         )
         add_action(
             "Import Cellpose &Segmentation",
@@ -1042,7 +1074,7 @@ class Gui(QtWidgets.QMainWindow):
         ]:
             add_action(
                 f"Show {name}",
-                lambda toggled, w=widget: w.setVisible(toggled),
+                lambda toggled, w=widget: self._set_widget_visible(w, toggled),
                 menu,
                 toolbar,
                 icon=qta.icon(f"{icon}"),
@@ -1058,6 +1090,20 @@ class Gui(QtWidgets.QMainWindow):
             checkable=True,
             is_checked=True,
         )
+        add_action(
+            "Toggle Grid",
+            self.toggle_grid,
+            menu,
+            toolbar,
+            icon=qta.icon("mdi6.grid"),
+            checkable=True,
+            is_checked=True,
+        )
+
+    def _set_widget_visible(self, widget: QtWidgets.QWidget, toggled: bool) -> None:
+        widget.setVisible(toggled)
+        if toggled and widget is self.data_widget:
+            self.set_data(self.cmb_data.currentText())
 
     def _create_actions_settings(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None
@@ -1116,6 +1162,12 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             shortcut=None,
             icon=qta.icon("mdi6.file-code"),
+            "&Manage Experiments",
+            self.btn_manage_experiments_clicked,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon=qta.icon("mdi6.beaker"),
         )
         menu.addSeparator()
         add_action(

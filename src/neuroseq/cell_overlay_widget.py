@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import logging
 from collections.abc import Iterable
+from typing import Protocol
 from typing import TypedDict
 
 import brian2.numpy_ as np
@@ -10,7 +11,7 @@ import pygfx
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from neuroseq.fpl_widget import FPLWidget
+from neuroseq.fpl_widget import FullScreenFPLWidget
 from neuroseq.utils import neuron_indices_to_colors
 
 
@@ -21,7 +22,36 @@ class CameraState(TypedDict):
     maintain_aspect: bool
 
 
-class OverlayView(FPLWidget):
+Color = tuple[float, float, float] | tuple[float, float, float, float]
+
+
+class TextGraphic(Protocol):
+    text: str
+    font_size: float
+    offset: tuple[float, float, float]
+    face_color: Color
+    outline_color: Color
+    outline_thickness: float
+    visible: bool
+
+
+class VisibleGraphic(Protocol):
+    visible: bool
+
+
+class ImageGraphic(Protocol):
+    data: np.ndarray
+    visible: bool
+
+
+class LabelGraphics(TypedDict):
+    stim: TextGraphic
+    stim_dash: TextGraphic
+    cellpose: TextGraphic
+    all: list[VisibleGraphic]
+
+
+class OverlayView(FullScreenFPLWidget):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent=parent)
         self.hide_controls()
@@ -31,6 +61,13 @@ class OverlayView(FPLWidget):
         self.stim_to_cellpose: dict[int, int] = {}
         self.show_cellpose_ids = True
         self.show_stimulus_ids = False
+        self.highlight_mappings = True
+        self._image_graphic: ImageGraphic | None = None
+        self._segmentation_graphic: ImageGraphic | None = None
+        self._label_centers: dict[int, tuple[float, float]] = {}
+        self._label_graphics: dict[int, LabelGraphics] = {}
+        self._label_segmentation_id: int | None = None
+        self._segmentation_shape: tuple[int, int] | None = None
         self.base_camera_state: CameraState | None = None
         self.zoom_factor = 1
         self._configure_subplot()
@@ -55,6 +92,8 @@ class OverlayView(FPLWidget):
         show_segmentation: bool = True,
         show_cellpose_ids: bool = True,
         show_stimulus_ids: bool = False,
+        highlight_mappings: bool = True,
+        label_segmentation: np.ndarray | None = None,
     ) -> None:
         previous_shape = (
             self.overlay_image.shape[:2] if self.overlay_image is not None else None
@@ -62,33 +101,66 @@ class OverlayView(FPLWidget):
         previous_camera_state = self.subplot.camera.get_state()
         previous_base_state = self.base_camera_state
 
-        self.subplot.clear()
-        self._configure_subplot()
         self.overlay_image = overlay_image
-        self.segmentation = segmentation
-        self.text = None
-        self.base_camera_state = None
+        segmentation_for_display = segmentation
+        self.segmentation = (
+            label_segmentation if label_segmentation is not None else segmentation
+        )
         self.stim_to_cellpose = stim_to_cellpose or {}
         self.show_cellpose_ids = show_cellpose_ids
         self.show_stimulus_ids = show_stimulus_ids
+        self.highlight_mappings = highlight_mappings
 
         if overlay_image is None:
+            self._reset_graphics(clear_subplot=True)
             self.figure.renderer.request_draw()
             return
 
-        self.subplot.add_image(overlay_image, interpolation="nearest")
-
-        if segmentation is not None:
-            if show_segmentation:
-                color_image = self._build_segmentation_colors(segmentation, legend_data)
-                self.subplot.add_image(color_image, interpolation="nearest")
-            self._add_cell_labels(
-                segmentation,
-                self.stim_to_cellpose,
-                show_cellpose_ids,
-                show_stimulus_ids,
+        shape_changed = (
+            previous_shape is None or previous_shape != overlay_image.shape[:2]
+        )
+        if shape_changed or self._image_graphic is None:
+            self._reset_graphics(clear_subplot=True)
+            self._configure_subplot()
+            self._image_graphic = self.subplot.add_image(
+                overlay_image, interpolation="nearest"
             )
-            self.text = self._create_hover_label()
+        else:
+            self._image_graphic.data = overlay_image
+
+        if segmentation_for_display is not None:
+            if show_segmentation:
+                color_image = self._build_segmentation_colors(
+                    segmentation_for_display, legend_data
+                )
+                if (
+                    self._segmentation_graphic is None
+                    or self._segmentation_shape != segmentation_for_display.shape[:2]
+                ):
+                    if self._segmentation_graphic is not None:
+                        with contextlib.suppress(Exception):
+                            self.subplot.remove_graphic(self._segmentation_graphic)
+                    self._segmentation_graphic = self.subplot.add_image(
+                        color_image, interpolation="nearest"
+                    )
+                    self._segmentation_shape = segmentation_for_display.shape[:2]
+                else:
+                    self._segmentation_graphic.data = color_image
+                if self._segmentation_graphic is not None:
+                    self._segmentation_graphic.visible = True
+            elif self._segmentation_graphic is not None:
+                self._segmentation_graphic.visible = False
+
+            self._ensure_label_graphics()
+            self._update_label_graphics(
+                self.stim_to_cellpose, show_cellpose_ids, show_stimulus_ids
+            )
+            if self.text is None:
+                self.text = self._create_hover_label()
+        else:
+            if self._segmentation_graphic is not None:
+                self._segmentation_graphic.visible = False
+            self._hide_label_graphics()
 
         same_shape = (
             previous_shape is not None
@@ -101,6 +173,105 @@ class OverlayView(FPLWidget):
             self.figure.renderer.request_draw()
         else:
             self._reset_camera()
+
+    def _reset_graphics(self, *, clear_subplot: bool = False) -> None:
+        if clear_subplot and getattr(self.subplot, "renderer", None) is not None:
+            self.subplot.clear()
+        self._image_graphic = None
+        self._segmentation_graphic = None
+        self._segmentation_shape = None
+        self.text = None
+        self.base_camera_state = None
+        self._clear_label_graphics()
+
+    def _clear_label_graphics(self) -> None:
+        for graphic_set in self._label_graphics.values():
+            for graphic in graphic_set["all"]:
+                with contextlib.suppress(Exception):
+                    self.subplot.remove_graphic(graphic)
+        self._label_graphics = {}
+        self._label_centers = {}
+        self._label_segmentation_id = None
+
+    def _hide_label_graphics(self) -> None:
+        for graphic_set in self._label_graphics.values():
+            for graphic in graphic_set["all"]:
+                graphic.visible = False
+
+    def _ensure_label_graphics(self) -> None:
+        if self.segmentation is None:
+            self._hide_label_graphics()
+            return
+
+        segmentation_id = id(self.segmentation)
+        if segmentation_id == self._label_segmentation_id:
+            return
+
+        self._clear_label_graphics()
+        self._label_segmentation_id = segmentation_id
+        self._label_centers = self._compute_label_centers(self.segmentation)
+
+        for cell_id, (center_x, center_y) in self._label_centers.items():
+            base_offset = (center_x, center_y, 200.0)
+            cellpose = self.subplot.add_text(
+                "",
+                font_size=1,
+                offset=base_offset,
+                face_color=(0.25, 0.25, 0.25),
+                outline_color=(0.9, 0.9, 0.9),
+                outline_thickness=3.0,
+                center=False,
+                screen_space=False,
+            )
+            stim = self.subplot.add_text(
+                "",
+                font_size=1,
+                offset=base_offset,
+                face_color=(0.0, 0.0, 0.0),
+                outline_color=(1.0, 1.0, 1.0),
+                outline_thickness=0.6,
+                center=False,
+                screen_space=False,
+            )
+            stim_dash = self.subplot.add_text(
+                "",
+                font_size=1,
+                offset=base_offset,
+                face_color=(0.0, 0.0, 0.0, 1.0),
+                outline_color=(1.0, 1.0, 1.0),
+                outline_thickness=0.6,
+                center=False,
+                screen_space=False,
+            )
+            all_graphics: list[VisibleGraphic] = [
+                cellpose,
+                stim,
+                stim_dash,
+            ]
+            for graphic in all_graphics:
+                graphic.visible = False
+
+            self._label_graphics[cell_id] = {
+                "stim": stim,
+                "stim_dash": stim_dash,
+                "cellpose": cellpose,
+                "all": all_graphics,
+            }
+
+    def _compute_label_centers(
+        self, segmentation: np.ndarray
+    ) -> dict[int, tuple[float, float]]:
+        centers: dict[int, tuple[float, float]] = {}
+        unique_ids = np.unique(segmentation)
+        for cell_id in unique_ids:
+            if cell_id < 0:
+                continue
+            mask = segmentation == cell_id
+            if not np.any(mask):
+                continue
+            y_coords, x_coords = np.where(mask)
+            centers[int(cell_id)] = (float(np.mean(x_coords)), float(np.mean(y_coords)))
+        return centers
 
     def _build_segmentation_colors(
         self,
@@ -136,54 +307,126 @@ class OverlayView(FPLWidget):
         show_cellpose_ids: bool,
         show_stimulus_ids: bool,
     ) -> None:
+        self._ensure_label_graphics()
+        self._update_label_graphics(
+            stim_to_cellpose, show_cellpose_ids, show_stimulus_ids
+        )
+
+    def _update_label_graphics(
+        self,
+        stim_to_cellpose: dict[int, int],
+        show_cellpose_ids: bool,
+        show_stimulus_ids: bool,
+    ) -> None:
         if not show_cellpose_ids and not show_stimulus_ids:
+            self._hide_label_graphics()
             return
 
         reverse_mapping = {v: k for k, v in stim_to_cellpose.items()}
-        unique_ids = np.unique(segmentation)
 
-        for cell_id in unique_ids:
-            if cell_id < 0:
+        for cell_id, graphics in self._label_graphics.items():
+            center = self._label_centers.get(cell_id)
+            if center is None:
                 continue
-
-            mask = segmentation == cell_id
-            if not np.any(mask):
-                continue
-
-            y_coords, x_coords = np.where(mask)
-            center_y = float(np.mean(y_coords))
-            center_x = float(np.mean(x_coords))
-            stim_id = reverse_mapping.get(cell_id, cell_id)
+            center_x, center_y = center
+            stim_id = reverse_mapping.get(cell_id)
             cellpose_id = cell_id
+            stim_display_id = stim_id if stim_id is not None else cellpose_id
+            mapped_elsewhere = (
+                cellpose_id in stim_to_cellpose
+                and stim_to_cellpose.get(cellpose_id) != cellpose_id
+            )
+            default_mapping = stim_id is None and stim_display_id == cellpose_id
+            cross_out_default = default_mapping and mapped_elsewhere
+            highlight = (
+                self.highlight_mappings
+                and stim_id is not None
+                and bool(stim_to_cellpose)
+            )
+            outdated_cellpose = False
+            if self.highlight_mappings and bool(stim_to_cellpose):
+                mapped_cellpose = stim_to_cellpose.get(cellpose_id)
+                outdated_cellpose = (
+                    mapped_cellpose is not None and mapped_cellpose != cellpose_id
+                )
+            mismatch = stim_id is not None and stim_id != cellpose_id
+            cellpose_visible = show_cellpose_ids
+            stim_visible = show_stimulus_ids
+            if stim_visible and cellpose_visible and stim_id == cellpose_id:
+                cellpose_visible = False
 
             base_offset = (center_x, center_y, 200.0)
-            secondary_offset = (center_x + 5.0, center_y, 200.0)
+            secondary_offset = (center_x + 7.25, center_y, 200.0)
             stim_offset = base_offset
-            cellpose_offset = secondary_offset if show_stimulus_ids else base_offset
-            stim_font_size = 5 if show_cellpose_ids else 6
-            cellpose_font_size = 3 if show_stimulus_ids else 5
+            cellpose_offset = secondary_offset if stim_visible else base_offset
+            stim_font_size = 5.0 if cellpose_visible else 6.0
+            cellpose_font_size = 3.0 if stim_visible else 5.0
+            size_scale = 1.35 if highlight else 1.0
+            stim_font_size *= size_scale
+            cellpose_font_size *= size_scale
+            if mismatch:
+                stim_offset = (
+                    center_x - (stim_font_size * 0.3),
+                    center_y,
+                    200.0,
+                )
 
-            if show_cellpose_ids:
-                self.subplot.add_text(
-                    f"{cellpose_id}",
-                    font_size=cellpose_font_size,
-                    offset=cellpose_offset,
-                    face_color=(0.0, 0.0, 0.0),
-                    outline_color=(1.0, 1.0, 1.0),
-                    outline_thickness=3.0,
-                    center=True,
-                    screen_space=False,
+            if cellpose_visible:
+                cellpose_text = f"{cellpose_id}"
+                cellpose_face: Color
+                cellpose_outline: Color
+                if outdated_cellpose:
+                    cellpose_face = (0.31, 0.31, 0.31, 0.6)
+                    cellpose_outline = (0.8, 0.8, 0.8, 0.6)
+                    cellpose_outline_thickness = 2.0
+                else:
+                    cellpose_face = (
+                        (0.3, 0.6, 0.95) if highlight else (0.25, 0.25, 0.25)
+                    )
+                    cellpose_outline = (0.9, 0.9, 0.9)
+                    cellpose_outline_thickness = 5.0 if mismatch else 3.0
+                cellpose_graphic = graphics["cellpose"]
+                cellpose_graphic.text = cellpose_text
+                cellpose_graphic.font_size = cellpose_font_size
+                cellpose_graphic.offset = cellpose_offset
+                cellpose_graphic.face_color = cellpose_face
+                cellpose_graphic.outline_color = cellpose_outline
+                cellpose_graphic.outline_thickness = cellpose_outline_thickness
+                cellpose_graphic.visible = True
+            else:
+                graphics["cellpose"].visible = False
+
+            if stim_visible:
+                stim_text = f"{stim_display_id}"
+                stim_face: Color = (0.25, 0.55, 0.9) if highlight else (0.0, 0.0, 0.0)
+                stim_outline: Color = (1.0, 1.0, 1.0)
+                stim_outline_thickness = 1.2 if mismatch else 0.6
+                if cross_out_default:
+                    stim_face = (*stim_face, 0.25)
+                    stim_outline = (*stim_outline, 0.25)
+                stim_graphic = graphics["stim"]
+                stim_graphic.text = stim_text
+                stim_graphic.font_size = stim_font_size
+                stim_graphic.offset = stim_offset
+                stim_graphic.face_color = stim_face
+                stim_graphic.outline_color = stim_outline
+                stim_graphic.outline_thickness = stim_outline_thickness
+                stim_graphic.visible = True
+                stim_dash = graphics["stim_dash"]
+                stim_dash.text = "-" * max(1, len(stim_text))
+                stim_dash.font_size = stim_font_size
+                stim_dash.offset = (
+                    stim_offset[0],
+                    stim_offset[1] + (stim_font_size * 0.15),
+                    stim_offset[2],
                 )
-            if show_stimulus_ids:
-                self.subplot.add_text(
-                    f"{stim_id}",
-                    font_size=stim_font_size,
-                    offset=stim_offset,
-                    face_color=(0.3, 0.3, 0.3),
-                    outline_color=(0.8, 0.8, 0.8),
-                    outline_thickness=0.6,
-                    screen_space=False,
-                )
+                stim_dash.face_color = (0.0, 0.0, 0.0, 1.0)
+                stim_dash.outline_color = (1.0, 1.0, 1.0, 1.0)
+                stim_dash.outline_thickness = max(1.0, stim_outline_thickness * 2.0)
+                stim_dash.visible = cross_out_default
+            else:
+                graphics["stim"].visible = False
+                graphics["stim_dash"].visible = False
 
     def _create_hover_label(self):
         return self.subplot.add_text(
@@ -270,15 +513,34 @@ class OverlayView(FPLWidget):
             return
 
         reverse_mapping = {v: k for k, v in self.stim_to_cellpose.items()}
-        stim_id = reverse_mapping.get(neuron_index, neuron_index)
+        stim_id = reverse_mapping.get(neuron_index)
         cellpose_id = int(neuron_index)
+        cellpose_visible = self.show_cellpose_ids
+        stim_visible = self.show_stimulus_ids and stim_id is not None
 
-        if self.show_stimulus_ids and not self.show_cellpose_ids:
+        mapped_elsewhere = (  # this is correct: if this current cellpose ID (The original ID) has a stim ID in
+            # stim_to_cellpose, and it's not this one, a remapping has happened.
+            cellpose_id in self.stim_to_cellpose
+            and self.stim_to_cellpose.get(cellpose_id) != cellpose_id
+        )
+        overwritten = (
+            self.show_stimulus_ids
+            and cellpose_visible
+            and stim_id is None
+            and mapped_elsewhere
+        )
+
+        if overwritten:
+            hover_text = f"Overwritten | ({cellpose_id})"
+        elif cellpose_visible and stim_visible:
+            hover_text = f"{stim_id}:{cellpose_id}"
+        elif stim_visible:
             hover_text = f"{stim_id}"
-        elif self.show_cellpose_ids and not self.show_stimulus_ids:
+        elif cellpose_visible:
             hover_text = f"{cellpose_id}"
         else:
-            hover_text = f"{cellpose_id} / {stim_id}"
+            self.text.visible = False
+            return
 
         self.text.visible = True
         self.text.offset = (mouse_pos[0], mouse_pos[1], 200)
@@ -298,23 +560,44 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.show_cellpose_ids = True
         self.show_stimulus_ids = False
         self.show_segmentation = True
-        self._tracked_window: QtWidgets.QWidget | None = None
-        self._window_handle = None
-        self._last_target_size: tuple[int, int] | None = None
+        self.highlight_mappings = True
         self._setup_ui()
 
     def _setup_ui(self) -> None:
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 10)
 
-        self.overlay_view = OverlayView()
+        self.overlay_view = OverlayView(self)
         self.overlay_view.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Expanding,
         )
-        self.overlay_view.setMinimumHeight(600)
         layout.addWidget(self.overlay_view)
-        self._update_overlay_scale()
+        self.logger.info(
+            "overlay ui: widget=%sx%s view=%sx%s",
+            self.width(),
+            self.height(),
+            self.overlay_view.width(),
+            self.overlay_view.height(),
+        )
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        target_width = max(1, self.width())
+        target_height = max(1, self.height())
+        self.overlay_view.setFixedSize(target_width, target_height)
+        self.overlay_view.widget.setFixedSize(target_width, target_height)
+        self.overlay_view.updateGeometry()
+        self.overlay_view.widget.updateGeometry()
+        self.logger.info(
+            "overlay resize: widget=%sx%s view=%sx%s canvas=%sx%s",
+            self.width(),
+            self.height(),
+            self.overlay_view.width(),
+            self.overlay_view.height(),
+            self.overlay_view.widget.width(),
+            self.overlay_view.widget.height(),
+        )
 
     def _update_overlay_display(self) -> None:
         display_segmentation = self._get_display_segmentation()
@@ -326,7 +609,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         if self.show_segmentation or self.base_image is None:
             image_to_show = self.overlay_image
         else:
-            image_to_show = self.base_image or self.overlay_image
+            image_to_show = self.base_image
         self.overlay_view.add_overlay_data(
             image_to_show,
             display_segmentation,
@@ -335,6 +618,8 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             show_segmentation=self.show_segmentation,
             show_cellpose_ids=self.show_cellpose_ids,
             show_stimulus_ids=self.show_stimulus_ids,
+            highlight_mappings=self.highlight_mappings,
+            label_segmentation=self.segmentation,
         )
 
     def _get_display_segmentation(self) -> np.ndarray | None:
@@ -387,16 +672,28 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         stimulus_to_cellpose_mapping: dict[int, int] | None = None,
         legend_data: Iterable[tuple[int, tuple[int, int, int]]] | None = None,
         base_image: np.ndarray | None = None,
+        highlight_mappings: bool | None = None,
     ) -> None:
+        self.logger.info(
+            "set_overlay: image=%s seg=%s widget=%sx%s show_seg=%s show_cellpose=%s show_stim=%s",
+            None if overlay_image is None else overlay_image.shape,
+            None if segmentation is None else segmentation.shape,
+            self.width(),
+            self.height(),
+            self.show_segmentation,
+            self.show_cellpose_ids,
+            self.show_stimulus_ids,
+        )
         self.overlay_image = overlay_image
         self.segmentation = segmentation
         self.legend_data = list(legend_data or [])
         self.original_cellpose_ids = original_cellpose_ids
         self.stimulus_to_cellpose_mapping = stimulus_to_cellpose_mapping
         self.base_image = base_image
+        if highlight_mappings is not None:
+            self.highlight_mappings = highlight_mappings
 
         self._update_overlay_display()
-        self._update_overlay_scale()
 
     def set_empty_message(self, message: str) -> None:
         self.overlay_image = None
@@ -405,14 +702,22 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.legend_data = []
         self.original_cellpose_ids = None
         self.stimulus_to_cellpose_mapping = None
+        self.highlight_mappings = True
         self.overlay_view.add_overlay_data(
             None,
             None,
             show_segmentation=self.show_segmentation,
             show_cellpose_ids=self.show_cellpose_ids,
             show_stimulus_ids=self.show_stimulus_ids,
+            highlight_mappings=self.highlight_mappings,
         )
-        self._update_overlay_scale()
+        self.logger.info(
+            "set_empty_message: widget=%sx%s view=%sx%s",
+            self.width(),
+            self.height(),
+            self.overlay_view.width(),
+            self.overlay_view.height(),
+        )
 
     def set_display_options(
         self,
@@ -446,118 +751,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             legend.append((int(cell_id), rgb_255))
         return legend
 
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        self._ensure_window_tracking()
-        self._update_overlay_scale()
-
-    def eventFilter(self, obj, event) -> bool:
-        if (
-            obj is self._tracked_window
-            and hasattr(event, "type")
-            and event.type()
-            in (
-                QtCore.QEvent.Type.Resize,
-                QtCore.QEvent.Type.Move,
-                QtCore.QEvent.Type.ScreenChangeInternal,
-            )
-        ):
-            self._update_overlay_scale()
-        return super().eventFilter(obj, event)
-
-    def _get_current_screen(self):
-        window = self.window()
-        if window is not None:
-            handle = window.windowHandle()
-            if handle is not None and handle.screen() is not None:
-                return handle.screen()
-        return QtWidgets.QApplication.primaryScreen()
-
-    def _ensure_window_tracking(self) -> None:
-        window = self.window()
-        if window is None or window is self._tracked_window:
-            return
-
-        if self._tracked_window is not None:
-            self._tracked_window.removeEventFilter(self)
-        self._tracked_window = window
-        self._tracked_window.installEventFilter(self)
-
-        handle = window.windowHandle()
-        if handle is None:
-            return
-
-        if self._window_handle is not None and self._window_handle is not handle:
-            with contextlib.suppress(Exception):
-                self._window_handle.screenChanged.disconnect(self._update_overlay_scale)
-        self._window_handle = handle
-        with contextlib.suppress(Exception):
-            handle.screenChanged.connect(self._update_overlay_scale)
-
-    def _update_overlay_scale(self, *_args) -> None:
-        self._ensure_window_tracking()
-        margins = self.contentsMargins()
-        available_height = self.height() - margins.top() - margins.bottom()
-        available_width = self.width() - margins.left() - margins.right()
-        logging.info(
-            "Upon render: height %s - top %s - bottom %s = %s; "
-            "width %s - left %s - right %s = %s",
-            self.height(),
-            margins.top(),
-            margins.bottom(),
-            available_height,
-            self.width(),
-            margins.left(),
-            margins.right(),
-            available_width,
-        )
-        if available_height <= 0:
-            window = self.window()
-            if window is not None:
-                available_height = window.height()
-                available_width = window.width()
-            else:
-                screen = self._get_current_screen()
-                if screen is None:
-                    return
-                available_height = screen.availableGeometry().height()
-                available_width = screen.availableGeometry().width()
-
-        target_height = int(available_height * 0.95)
-        target_width = int(available_width * 0.98)
-        aspect_ratio = 1.0
-        if self.overlay_image is not None and self.overlay_image.shape[0] > 0:
-            aspect_ratio = max(
-                float(self.overlay_image.shape[1]) / float(self.overlay_image.shape[0]),
-                0.1,
-            )
-
-        if self.overlay_image is not None and self.overlay_image.shape[0] > 0:
-            width_from_height = int(target_height * aspect_ratio)
-            height_from_width = int(target_width / aspect_ratio)
-            if width_from_height <= target_width:
-                final_width = max(1, width_from_height)
-                final_height = max(1, target_height)
-            else:
-                final_width = max(1, target_width)
-                final_height = max(1, height_from_width)
-        else:
-            final_width = max(1, target_width)
-            final_height = max(1, target_height)
-
-        target_size = (final_width, final_height)
-        logging.info(
-            "Upon render: height %s / width %s. Target width %s ",
-            available_height,
-            available_width,
-            final_width,
-        )
-
-        if self._last_target_size == target_size:
-            return
-
-        self._last_target_size = target_size
-        self.overlay_view.setFixedSize(final_width, final_height)
-        self.overlay_view.widget.setFixedSize(final_width, final_height)
-        self.overlay_view.updateGeometry()
-        self.overlay_view.widget.updateGeometry()
+    def closeEvent(self, event):
+        # explicitly close all fastplotlib figures to avoid renderer trying to access them after they have been destroyed
+        self.overlay_view.close()
+        super().closeEvent(event)

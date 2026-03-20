@@ -49,8 +49,24 @@ uv run neuroseq
 
 (if you are not using uv, just run `neuroseq`)
 
+To run with profiling:
+
+```bash
+uv run neuroseq --profile --profile-output latest.prof
+```
+
+and to see the results:
+
+```bash
+ uv run snakeviz latest.prof
+```
+
 To run the test suite:
 
 ```bash
 uv run pytest
 ```
+
+## Connection to Holo4D profile
+
+C:\ProgramData\ROE\SysCon 2\2.7.2\profiles\Holo4D\Sequence Manager\Experiments\NeuroSeq_tests

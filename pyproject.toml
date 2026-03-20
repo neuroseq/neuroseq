@@ -26,6 +26,7 @@ dependencies = [
     "platformdirs",
     "psutil",
     "nvidia-ml-py",
+    "cellpose[gui]",
 ]
 dynamic = ["version"]
 
@@ -43,7 +44,8 @@ dev = [
     "pytest-mock",
     "pytest-memray ; platform_system != 'Windows'",
     "diff-cover",
-    "mkdocs-material"
+    "mkdocs-material",
+    "memray>=1.17.2",
 ]
 
 [tool.hatch.version]

@@ -31,7 +31,11 @@ from neuroseq.utils import init_brian2_logging
     show_default=True,
 )
 @click.argument("filename", required=False)
-def main(log_level: str, log_file: pathlib.Path, filename: str | None) -> None:
+def main(
+    log_level: str,
+    log_file: pathlib.Path,
+    filename: str | None,
+) -> None:
     init_brian2_logging()
     logging.basicConfig(
         level=log_level,

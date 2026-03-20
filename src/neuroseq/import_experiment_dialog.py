@@ -56,10 +56,9 @@ class ImportExperimentDialog(QtWidgets.QDialog):
 
         self.rad_new = QtWidgets.QRadioButton("Create new experiment")
         self.layout.addWidget(self.rad_new)
-        self.rad_append = QtWidgets.QRadioButton("Append to existing experiment")
+        self.rad_append = QtWidgets.QRadioButton("Apply to existing experiment")
         self.layout.addWidget(self.rad_append)
         self.rad_new.setChecked(True)
-        self.rad_new.setChecked(False)
 
         self.new_box = QtWidgets.QWidget()
         layout_new_box = QtWidgets.QVBoxLayout(self.new_box)
@@ -107,9 +106,32 @@ class ImportExperimentDialog(QtWidgets.QDialog):
         self.cmb_offset.currentIndexChanged.connect(self.cmb_offset_index_changed)
         self.save_button.clicked.connect(self.accept)
         self.cancel_button.clicked.connect(self.reject)
-        self.cmb_experiments_index_changed(0)
-        self.new_name_text_edited(self.txt_new_name.text())
+        self._apply_default_selection()
         self.resize(800, 600)
+
+    def _apply_default_selection(self) -> None:
+        if not self.existing_experiments:
+            self.rad_new.setChecked(True)
+            self.cmb_experiments_index_changed(0)
+            self.new_name_text_edited(self.txt_new_name.text())
+            return
+
+        matching_index = next(
+            (
+                i
+                for i, experiment in enumerate(self.existing_experiments)
+                if experiment.name == self.experiment.name
+            ),
+            -1,
+        )
+        if matching_index >= 0:
+            self.rad_append.setChecked(True)
+            self.cmb_experiments.setCurrentIndex(matching_index)
+            self.cmb_experiments_index_changed(matching_index)
+        else:
+            self.rad_new.setChecked(True)
+            self.cmb_experiments_index_changed(0)
+        self.new_name_text_edited(self.txt_new_name.text())
 
     def rad_new_append_toggled(self):
         self.append_to_experiment = self.rad_append.isChecked()
@@ -120,6 +142,7 @@ class ImportExperimentDialog(QtWidgets.QDialog):
         self.cmb_offset.setEnabled(self.append_to_experiment)
         if self.append_to_experiment:
             self.cmb_experiments_index_changed(self.cmb_experiments.currentIndex())
+            self._refresh_append_error()
         else:
             self.new_name_text_edited(self.txt_new_name.text())
 
@@ -132,42 +155,87 @@ class ImportExperimentDialog(QtWidgets.QDialog):
             self.offset = 0.0
             return
         self.offset = self.existing_experiments[experiment_index].timepoints[index]
+        self._refresh_append_error()
 
     def cmb_experiments_index_changed(self, index: int) -> None:
         self.cmb_offset.clear()
         if index < 0 or index >= len(self.existing_experiments):
             return
         self.append_experiment_name = self.existing_experiments[index].name
-        self.cmb_offset.addItems(
-            [
-                f"{timepoint * 1000:.5g} ms"
-                for timepoint in self.existing_experiments[index].timepoints
-            ]
-        )
-        # select the last timepoint by default
+        timepoints = list(self.existing_experiments[index].timepoints)
+        option_labels = []
+        for i, timepoint in enumerate(timepoints):
+            label = f"{timepoint * 1000:.5g} ms"
+            if i == len(timepoints) - 1:
+                label = f"{label} (Append)"
+            else:
+                label = f"{label} ({self._insert_mode_label(index, timepoint)})"
+            option_labels.append(label)
+        self.cmb_offset.addItems(option_labels)
+        # if there is only start/end, default to start; otherwise default to append
         if self.cmb_offset.count() > 0:
-            self.cmb_offset.setCurrentIndex(self.cmb_offset.count() - 1)
+            default_offset_index = 0 if len(timepoints) <= 2 else len(timepoints) - 1
+            self.cmb_offset.setCurrentIndex(default_offset_index)
         # check if appending this data to the selected experiment is valid
-        self.lbl_error.setText(
-            self.project.issues_with_appending_experimental_data(
-                self.append_experiment_name, self.experiment.data
-            )
-        )
-        if self.lbl_error.text() != "":
-            self.save_button.setEnabled(False)
-        else:
-            self.lbl_error.clear()
-            self.save_button.setEnabled(True)
+        self._refresh_append_error()
 
     def new_name_text_edited(self, text: str) -> None:
         self.experiment.name = text
-        if self.experiment.name in [
-            experiment.name for experiment in self.existing_experiments
-        ]:
-            self.lbl_error.setText(
-                f"An experiment with name '{self.experiment.name}' already exists."
+        self.lbl_error.clear()
+        self.save_button.setEnabled(True)
+
+    def _insert_mode_label(self, experiment_index: int, offset: float) -> str:
+        if experiment_index < 0 or experiment_index >= len(self.existing_experiments):
+            return "partially replace + insert"
+        existing_experiment = self.existing_experiments[experiment_index]
+        if offset >= existing_experiment.duration:
+            return "Append"
+
+        has_overlap = False
+        has_new_only = False
+
+        for new_datum in self.experiment.data:
+            existing_datum = next(
+                (
+                    datum
+                    for datum in existing_experiment.data
+                    if datum.name == new_datum.name and type(datum) is type(new_datum)
+                ),
+                None,
             )
-            self.save_button.setEnabled(False)
-        else:
-            self.lbl_error.clear()
-            self.save_button.setEnabled(True)
+            if existing_datum is None:
+                continue
+            if isinstance(existing_datum, TraceData) and isinstance(
+                new_datum, TraceData
+            ):
+                existing_ids = set(map(int, existing_datum.indices))
+                new_ids = set(map(int, new_datum.indices))
+            elif isinstance(existing_datum, SpikeData) and isinstance(
+                new_datum, SpikeData
+            ):
+                existing_ids = set(map(int, existing_datum.spike_indices))
+                new_ids = set(map(int, new_datum.spike_indices))
+            elif isinstance(existing_datum, SynapseData) and isinstance(
+                new_datum, SynapseData
+            ):
+                return "overwrite"
+            else:
+                continue
+            if existing_ids & new_ids:
+                has_overlap = True
+            if new_ids - existing_ids:
+                has_new_only = True
+
+        if has_overlap and has_new_only:
+            return "partially replace + insert"
+        if has_overlap:
+            return "overwrite"
+        return "insert alongside existing data"
+
+    def _refresh_append_error(self) -> None:
+        error = self.project.issues_with_appending_experimental_data(
+            self.append_experiment_name,
+            self.experiment.data,
+        )
+        self.lbl_error.setText(error)
+        self.save_button.setEnabled(error == "")

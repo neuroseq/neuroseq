@@ -94,12 +94,57 @@ def prepare_suite2p_traces(
     )
 
 
+def _resolve_suite2p_indices(
+    n_neurons_to_import: int,
+    stimulus_to_cellpose_mapping: dict[int, int] | None,
+) -> npt.NDArray[Any]:
+    """
+    Resolve Suite2p row indices (Cellpose IDs) to stimulus IDs. From Branch 417 with improvements.
+    """
+    if n_neurons_to_import <= 0:
+        raise ValueError("n_neurons_to_import must be positive")
+
+    if not stimulus_to_cellpose_mapping:
+        return np.arange(n_neurons_to_import, dtype=np.uint32)
+
+    cellpose_to_stim: dict[int, int] = {}
+    duplicate_cellpose_ids: set[int] = set()
+    for stim_id, cellpose_id in stimulus_to_cellpose_mapping.items():
+        stim = int(stim_id)
+        cellpose = int(cellpose_id)
+        if cellpose in cellpose_to_stim:
+            duplicate_cellpose_ids.add(cellpose)
+            continue
+        cellpose_to_stim[cellpose] = stim
+
+    if duplicate_cellpose_ids:
+        duplicate_ids = ", ".join(
+            str(cell_id) for cell_id in sorted(duplicate_cellpose_ids)
+        )
+        raise ValueError(
+            f"stimulus_to_cellpose_mapping contains duplicate Cellpose IDs: {duplicate_ids}"
+        )
+
+    # Suite2p rows are expected to be ordered by Cellpose ID 0..N-1.
+    # Missing explicit mappings fall back to identity import (cellpose id -> same stim id).
+    stim_ids = [
+        cellpose_to_stim.get(cellpose_id, cellpose_id)
+        for cellpose_id in range(n_neurons_to_import)
+    ]
+    if len(set(stim_ids)) != len(stim_ids):
+        raise ValueError(
+            "Resolved stimulus IDs are not unique; check stimulus_to_cellpose_mapping for collisions"
+        )
+    return np.asarray(stim_ids, dtype=np.uint32)
+
+
 def prepare_suite2p_spikes(
     spike_data: npt.NDArray[Any],
     *,
     dt: float,
     threshold: float,
     max_neurons: int,
+    stimulus_to_cellpose_mapping: dict[int, int] | None = None,
 ) -> SpikeData:
     """
     Create SpikeData from Suite2p spks.npy data using shared spike detection.
@@ -121,6 +166,18 @@ def prepare_suite2p_spikes(
         max_neurons=max_neurons,
         normalize_per_neuron=False,
     )
+    if stimulus_to_cellpose_mapping:
+        n_neurons = min(max_neurons, spike_data.shape[0])
+        indices = _resolve_suite2p_indices(
+            n_neurons_to_import=n_neurons,
+            stimulus_to_cellpose_mapping=stimulus_to_cellpose_mapping,
+        )
+        if result.spike_indices.size:
+            remapped_indices = indices[result.spike_indices]
+        else:
+            remapped_indices = result.spike_indices.astype(indices.dtype, copy=True)
+        result = SpikeData(result.name, remapped_indices, result.spike_times)
+
     logger.debug(
         "Spike detection complete: %d spikes across %d neurons",
         len(result.spike_indices),

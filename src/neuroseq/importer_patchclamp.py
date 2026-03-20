@@ -9,7 +9,6 @@ import numpy.typing as npt
 
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
-from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.spike_detection import detect_spikes_voltage_trace
 
 
@@ -26,13 +25,16 @@ def validate_append_import(
     model: object,
     experiment_name: str,
     neuron_ids_to_import: Sequence[int],
-) -> None:
-    """Ensure append mode will not misalign timestamps."""
+) -> str | None:
+    """Validate patchclamp append behavior and return a warning if needed."""
     if model is None:
-        return
+        return None
 
     existing_experiments = getattr(model, "experiments", {})
-    existing_data = existing_experiments.get(experiment_name, [])
+    existing_experiment = existing_experiments.get(experiment_name)
+    if existing_experiment is None:
+        return None
+    existing_data = getattr(existing_experiment, "data", [])
 
     existing_trace_data = None
     for data in existing_data:
@@ -44,9 +46,9 @@ def validate_append_import(
             break
 
     if existing_trace_data is None:
-        return
+        return None
 
-    existing_neuron_indices = set(existing_trace_data.indices)
+    existing_neuron_indices = set(map(int, existing_trace_data.indices))
     importing_existing = [
         nid for nid in neuron_ids_to_import if nid in existing_neuron_indices
     ]
@@ -54,52 +56,18 @@ def validate_append_import(
         nid for nid in neuron_ids_to_import if nid not in existing_neuron_indices
     ]
 
-    if importing_existing and importing_new:
-        raise ValueError(
-            f"Cannot extend data when importing both existing neurons {importing_existing} "
-            f"and new neurons {importing_new} together. "
-            f"This would cause timestamp misalignment. Use 'Replace' mode instead, "
-            f"or import all neurons with the same timeline separately."
+    if importing_existing:
+        overlap_ids = ", ".join(map(str, sorted(set(importing_existing))))
+        return (
+            "Some of the Neuron IDs you specified to import for already have "
+            f"data({overlap_ids}). Data will be overwriten for these neurons. Are you sure?"
         )
-
-    if importing_new and existing_neuron_indices:
-        raise ValueError(
-            f"Cannot extend data when importing new neurons {importing_new} - "
-            f"existing neurons {sorted(existing_neuron_indices)} already have data. "
-            f"This would cause timestamp misalignment. Use 'Replace' mode instead, "
-            f"or import all neurons with the same timeline."
+    if importing_new and not importing_existing and existing_neuron_indices:
+        return (
+            f"Patchclamp import is disjoint for experiment '{experiment_name}' "
+            f"(incoming={sorted(importing_new)}, existing={sorted(existing_neuron_indices)})."
         )
-
-
-def generate_stimulus_mapping(
-    cellpose_import: CellposeImportResult | None,
-    strategy: str,
-    data_row_count: int,
-    stim_ids: Sequence[int],
-) -> dict[int, int]:
-    """Create stimulus->cellpose mapping consistent with Cellpose data."""
-    if cellpose_import is None:
-        return {}
-
-    if cellpose_import.stimulus_to_cellpose_mapping:
-        return dict(cellpose_import.stimulus_to_cellpose_mapping)
-
-    if cellpose_import.original_cellpose_ids is None:
-        return {}
-
-    original_ids = cellpose_import.original_cellpose_ids
-    row_count = data_row_count or len(original_ids)
-
-    if strategy == "Custom" and stim_ids:
-        stim_sequence = list(stim_ids)
-    else:
-        stim_sequence = list(range(1, row_count + 1))
-
-    mapping: dict[int, int] = {}
-    for stim_id, cellpose_id in zip(stim_sequence, original_ids, strict=False):
-        mapping[int(stim_id)] = int(cellpose_id)
-
-    return mapping
+    return None
 
 
 def import_patchclamp_data(
@@ -130,9 +98,10 @@ def import_patchclamp_data(
     all_neuron_indices: list[int] = []
     imported_spike_data: list[SpikeData] = []
 
-    for i, neuron_id in enumerate(neuron_ids):
-        trace_row = trace_data_rows[i]
-
+    ordered_pairs = sorted(
+        zip(neuron_ids, trace_data_rows, strict=False), key=lambda pair: pair[0]
+    )
+    for neuron_id, trace_row in ordered_pairs:
         if logger:
             logger.debug(
                 "Detecting spikes for patchclamp neuron %d: dt=%.6f height=%.2f prominence=%.2f min_interval=%.4f distance=%d width=%d",

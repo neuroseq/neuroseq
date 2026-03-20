@@ -16,8 +16,28 @@ class TraceData:
         dt (float): The time step in seconds between consecutive timestamps.
     """
 
+    # this jump of 6.6GB is too much from suite2p.
+
+    # float 32
+
+    # is suite2p float32, and is patchclamp data float32?
+
+    # 1 hour x 60 x 32 x 4 bytes x 1
+    # 2 bytes per point in the CSV.
+    # 2x more... --> roughly 400, we see during import
+    # after import something strange.
+    # fastplotlib
+
+    # --> F/F/Spks ... 6 GB --> 18GB
+    # not true because F and Fneu get combined together
+    # 6.5GB.
+
+    # maybe stim gets sized up according to the traces
+    # 40*1 hour
+    # 3600000*40 = (multiple data types, excitation, inhibition, stimulation..)
+
     name: str
-    traces: NDArray[np.float32]
+    traces: NDArray[np.float32]  #
     indices: NDArray[np.uint32]
     units: str
     dt: float

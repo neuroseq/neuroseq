@@ -84,7 +84,6 @@ class TraceNormDialog(QtWidgets.QDialog):
 
 class TraceWidget(TimeseriesWidget):
     """A widget that displays a set of traces stacked vertically.
-
     traces should be a 2d array, where the first index is the neuron index and the second index is the time index.
     """
 
@@ -104,7 +103,7 @@ class TraceWidget(TimeseriesWidget):
 
     def get_normalized_trace_data(self) -> np.ndarray:
         if self.data is None or not isinstance(self.data, TraceData):
-            return np.array([], dtype=np.float32)
+            return np.array([], dtype=np.float16)
         # replace any NaN values with zero for normalisation
         traces = np.nan_to_num(self.data.traces, copy=True, nan=0.0)
         if self.offset_by_median:
@@ -122,7 +121,7 @@ class TraceWidget(TimeseriesWidget):
         data = norm * self.data.traces.astype(np.float32) + offset[:, np.newaxis]
         if self.clip:
             np.clip(data, -0.5, 0.5, out=data)
-        return data
+        return data.astype(np.float16, copy=False)
 
     def replot_traces(self) -> None:
         """Update the plotted traces based on the current normalization settings."""
@@ -146,8 +145,15 @@ class TraceWidget(TimeseriesWidget):
         self.logger.info(
             f"{data.traces.shape} traces with dt={data.dt}s and units={data.units}"
         )
+        # self.subplot.title = f"Traces: {data * V.name}"
         self.subplot.title = f"Traces: {data.name}"
         self.data = data
+        # Store the original trace data (transposed) for mouse hover value display
+        # Shape needs to be (n_timesteps, n_neurons) for pointer_move to index correctly
+        self.data_values = (
+            data.traces.T.astype(np.float32) * 1000
+        )  # convert to mV for display
+        self.units = data.units if data.units else "mV"
         self.n_neurons = np.max(data.indices) + 1
         self.dt_ms = data.dt * 1000.0  # convert to milliseconds
         self.n_timestamps = data.traces.shape[1]

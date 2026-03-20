@@ -270,11 +270,6 @@ class Project:
                         f"Cannot append data '{datum.name}': data with this name and type "
                         f"does not exist in experiment '{experiment_name}'"
                     )
-                if existing_trace.traces.shape[0] != datum.traces.shape[0]:
-                    return (
-                        f"Cannot append trace data '{datum.name}': number of neurons does not match "
-                        f"({existing_trace.traces.shape[0]} != {datum.traces.shape[0]})"
-                    )
                 if existing_trace.dt != datum.dt:
                     return (
                         f"Cannot append trace data '{datum.name}': dt does not match "
