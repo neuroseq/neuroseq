@@ -156,6 +156,46 @@ class StimEditor(QtWidgets.QWidget):
                 self.project.stim_arrays[name].values = array_values
         self.set_project(self.project)
 
+    def replace_stim_values_with_undo(
+        self,
+        stim_name: str,
+        new_values: np.ndarray,
+    ) -> None:
+        """Replace one stim array content via the undoable modifier pathway."""
+        if stim_name not in self.stims_dict:
+            raise ValueError(f"Stimulus '{stim_name}' not found in stim editor.")
+        if self.project is None or stim_name not in self.project.stim_arrays:
+            raise ValueError(f"Stimulus '{stim_name}' not found in project.")
+
+        modifier = self.stims_dict[stim_name]
+        target_values = modifier.stim_array.values
+        if target_values.shape != new_values.shape:
+            raise ValueError(
+                "Stimulus replacement requires matching shape for undo support: "
+                f"current={target_values.shape}, new={new_values.shape}"
+            )
+
+        previous_selected_stim = self.cmb_stim.currentText()
+        if self.current_stim_modifier is not modifier:
+            self.cmb_stim.setCurrentText(stim_name)
+        if self.current_stim_modifier is None:
+            raise ValueError("No selected stimulus is available for modification.")
+
+        n_timepoints, n_neurons = target_values.shape
+        self.current_stim_modifier.do(
+            slice(0, n_neurons),
+            slice(0, n_timepoints),
+            np.array(new_values, copy=True),
+        )
+        self._stim_values_updated()
+
+        if (
+            previous_selected_stim
+            and previous_selected_stim in self.stims_dict
+            and previous_selected_stim != stim_name
+        ):
+            self.cmb_stim.setCurrentText(previous_selected_stim)
+
     def pad_stim_array(self) -> None:
         if self.current_stim_modifier is None or self.project is None:
             return
@@ -611,7 +651,8 @@ class StimEditor(QtWidgets.QWidget):
             n_neurons = self.current_stim_modifier.stim_array.values.shape[1]
             units = self.current_stim_modifier.stim_array.units
             dt = self.current_stim_modifier.stim_array.dt
-        n_timestamps = int(self.project.max_time_secs / dt)
+        dt = float(dt)
+        n_timestamps = int(float(self.project.max_time_secs) / dt)
         stim_array = StimArray(
             "new_stim",
             stim_type,

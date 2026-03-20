@@ -94,6 +94,23 @@ def test_stim_array_json(tmp_path: Path) -> None:
     assert d["s"].dt == read["s"].dt
 
 
+def test_stim_array_json_normalizes_quantity_dt_to_float(tmp_path: Path) -> None:
+    d = {
+        "s": StimArray(
+            "name",
+            StimType.External,
+            np.random.random_sample((10, 5)),
+            "mV",
+            0.01 * second,
+        )
+    }
+
+    read = _save_and_reload_json(d, tmp_path)
+
+    assert isinstance(read["s"].dt, float)
+    assert read["s"].dt == pytest.approx(0.01)
+
+
 def test_trace_data_json(tmp_path: Path) -> None:
     d = {
         "s": TraceData(
@@ -112,6 +129,23 @@ def test_trace_data_json(tmp_path: Path) -> None:
     assert np.allclose(d["s"].indices, read["s"].indices)
     assert d["s"].units == read["s"].units
     assert d["s"].dt == read["s"].dt
+
+
+def test_trace_data_json_normalizes_quantity_dt_to_float(tmp_path: Path) -> None:
+    d = {
+        "s": TraceData(
+            "name",
+            np.random.random_sample((10, 5)),
+            np.arange(4, 14, dtype=np.uint32),
+            "mV",
+            0.02 * second,
+        )
+    }
+
+    read = _save_and_reload_json(d, tmp_path)
+
+    assert isinstance(read["s"].dt, float)
+    assert read["s"].dt == pytest.approx(0.02)
 
 
 def test_spike_data_json(tmp_path: Path) -> None:
@@ -189,3 +223,21 @@ def test_experiment_json(tmp_path: Path) -> None:
     assert len(d["e"].data) == len(read["e"].data)
     for original, loaded in zip(d["e"].data, read["e"].data, strict=True):
         assert_equal(original, loaded)
+
+
+def test_experiment_json_normalizes_quantity_times_to_float(tmp_path: Path) -> None:
+    d = {
+        "e": Experiment(
+            "name",
+            10.0 * second,
+            [0.0 * second, 2.5 * second, 5.0 * second],
+            [],
+        )
+    }
+
+    read = _save_and_reload_json(d, tmp_path)
+
+    assert isinstance(read["e"].duration, float)
+    assert read["e"].duration == pytest.approx(10.0)
+    assert all(isinstance(t, float) for t in read["e"].timepoints)
+    assert np.allclose(read["e"].timepoints, [0.0, 2.5, 5.0])

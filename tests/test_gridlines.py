@@ -1,4 +1,6 @@
+import brian2 as b2
 import numpy as np
+import pytest
 
 from neuroseq.gridlines import GridLines
 
@@ -25,3 +27,18 @@ def test_gridlines_update_neuron_extent() -> None:
     assert _max_y(gridlines) == 3.5
     gridlines.update_neuron_extent(7)
     assert _max_y(gridlines) == 6.5
+
+
+def test_gridlines_update_time_extent_accepts_quantity() -> None:
+    gridlines = GridLines(n_neurons=4, time_ms=1000.0)
+    gridlines.update_time_extent(1.27 * b2.ksecond)
+    assert _max_x(gridlines) == pytest.approx(1270.0)
+
+
+def test_gridlines_set_current_time_extent_accepts_quantity() -> None:
+    gridlines = GridLines(n_neurons=4, time_ms=1000.0)
+    gridlines.set_current_time_extent(1.0 * b2.ksecond)
+    assert not gridlines.gridline_1ms.visible
+    assert gridlines.gridline_10ms.visible
+    assert gridlines.gridline_100ms.visible
+    assert gridlines.gridline_1000ms.visible

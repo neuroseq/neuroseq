@@ -28,6 +28,10 @@ from neuroseq.utils import find_by_name_and_type
 from neuroseq.utils import save_store_name
 
 
+def _to_seconds(value: float | int) -> float:
+    return float(value)
+
+
 class Project:
     def __init__(
         self,
@@ -39,6 +43,7 @@ class Project:
         self.experiments: dict[str, Experiment] = {}
         self.stim_arrays: dict[str, StimArray] = {}
         self.cellpose_data: CellposeImportResult | None = None
+        self.syscon2_export_template_text: str | None = None
 
         self.max_ram_synapse_plot_matrix = 256
         self.max_time_secs = 0.0
@@ -223,13 +228,16 @@ class Project:
         self.stim_arrays[stim_array.name] = stim_array
 
     def update_limits(self):
-        self.max_time_secs = self.b2_model.get_sim_time_secs()
-        self.max_neurons = self.b2_model.get_max_neurons()
+        self.max_time_secs = _to_seconds(self.b2_model.get_sim_time_secs())
+        self.max_neurons = int(self.b2_model.get_max_neurons())
         for experiment in self.experiments.values():
-            self.max_time_secs = max(self.max_time_secs, experiment.duration)
+            self.max_time_secs = max(
+                self.max_time_secs, _to_seconds(experiment.duration)
+            )
         for stim_array in self.stim_arrays.values():
             self.max_time_secs = max(
-                self.max_time_secs, stim_array.dt * stim_array.values.shape[0]
+                self.max_time_secs,
+                _to_seconds(stim_array.dt) * float(stim_array.values.shape[0]),
             )
             self.max_neurons = max(self.max_neurons, int(stim_array.values.shape[1]))
 

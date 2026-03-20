@@ -16,6 +16,10 @@ from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.stim import StimArray
 
 
+def _to_seconds(value: float | int) -> float:
+    return float(value)
+
+
 def _save_array(zf: zipfile.ZipFile, name: str, array: np.ndarray) -> str:
     npy_buffer = BytesIO()
     np.save(npy_buffer, array)
@@ -155,7 +159,13 @@ def _object_hook_factory(zf: zipfile.ZipFile):
             }:
                 with _zf.open(values) as fp:
                     loaded_values = np.load(fp)
-                return StimArray(name, stim_type, loaded_values, units, dt)
+                return StimArray(
+                    name,
+                    stim_type,
+                    loaded_values,
+                    units,
+                    _to_seconds(dt),
+                )
             case {
                 "!SpikeData": True,
                 "name": name,
@@ -179,7 +189,13 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                     loaded_traces = np.load(fp)
                 with _zf.open(indices) as fp:
                     loaded_indices = np.load(fp)
-                return TraceData(name, loaded_traces, loaded_indices, units, dt)
+                return TraceData(
+                    name,
+                    loaded_traces,
+                    loaded_indices,
+                    units,
+                    _to_seconds(dt),
+                )
             case {
                 "!SynapseData": True,
                 "name": name,
@@ -272,7 +288,12 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                 "timepoints": timepoints,
                 "data": data,
             }:
-                return Experiment(name, duration, timepoints, data)
+                return Experiment(
+                    name,
+                    _to_seconds(duration),
+                    [_to_seconds(t) for t in timepoints],
+                    data,
+                )
             case _:
                 return dct
 

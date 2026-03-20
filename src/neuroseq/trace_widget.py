@@ -155,12 +155,13 @@ class TraceWidget(TimeseriesWidget):
         )  # convert to mV for display
         self.units = data.units if data.units else "mV"
         self.n_neurons = np.max(data.indices) + 1
-        self.dt_ms = data.dt * 1000.0  # convert to milliseconds
+        self.dt_ms = float(data.dt) * 1000.0  # convert to milliseconds
         self.n_timestamps = data.traces.shape[1]
         # convert timestamps to milliseconds and stack to produce a format suitable for line_stack
         # todo: should be possible to re-use the same timestamps for all traces?
+        dt_ms = np.float32(self.dt_ms)
         timestamps_ms = np.arange(data.traces.shape[1], dtype=np.float32) * np.float32(
-            data.dt * 1000.0
+            dt_ms
         )
         tiled_timestamps_ms = np.tile(
             timestamps_ms,

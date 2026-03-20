@@ -71,7 +71,7 @@ class TimeSliderWidget(QtWidgets.QWidget):
         self.widgets.append(widget)
 
     def set_max_time_secs(self, max_time_secs: float) -> None:
-        self.t_max_ms = int(max_time_secs * 1000)
+        self.t_max_ms = int(float(max_time_secs) * 1000)
         self.slider.setMaximum(self.t_max_ms)
 
     def set_relative_playback_speed(self, relative_playback_speed: float) -> None:

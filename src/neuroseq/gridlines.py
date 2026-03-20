@@ -76,9 +76,9 @@ class GridLines(Graphic):
         self.set_current_time_extent(time_ms)
 
     def update_time_extent(self, time_ms: float) -> None:
+        time_ms = float(time_ms)
         if time_ms <= 0.0:
             return
-        time_ms = float(time_ms)
         if time_ms == self.time_ms:
             return
         self.time_ms = time_ms
@@ -124,6 +124,7 @@ class GridLines(Graphic):
 
     def set_current_time_extent(self, time_ms: float):
         """Set visibility of gridlines based on current time extent."""
+        time_ms = float(time_ms)
         self.gridline_1ms.visible = time_ms < 250.0
         self.gridline_10ms.visible = time_ms < 2500.0
         self.gridline_100ms.visible = time_ms < 25000.0

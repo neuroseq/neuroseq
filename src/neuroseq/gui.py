@@ -41,7 +41,9 @@ from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.save_load_options import SaveLoadOptionsDialog
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim_editor import StimEditor
+from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.synthetic_data_dialog import SyntheticDataDialog
+from neuroseq.syscon2_import_dialog import Syscon2ImportDialog
 from neuroseq.time_slider_widget import TimeSliderWidget
 from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.trace_widget import TraceWidget
@@ -71,6 +73,11 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_synapse.setMinimumWidth(120)
         self.cmb_data = QtWidgets.QComboBox()
         self.cmb_data.setMinimumWidth(120)
+        # Keep strong Python references to these menus/actions to avoid premature
+        # PySide object deletion on some platforms (notably macOS CI).
+        self.open_example_project_menu: QtWidgets.QMenu | None = None
+        self.open_example_project_section_menus: dict[str, QtWidgets.QMenu] = {}
+        self.open_example_project_actions: list[QtWidgets.QAction] = []
         self.controller = ConstrainedPanZoomController()
         self.trace_widget = TraceWidget(self.controller, parent=self)
         self.heatmap_widget = HeatmapWidget(parent=self)
@@ -148,8 +155,10 @@ class Gui(QtWidgets.QMainWindow):
             self.load_project(default_project())
 
     def update_limits(self) -> None:
-        self.controller.set_limits(self.project.max_time_secs, self.project.max_neurons)
-        self.time_slider.set_max_time_secs(self.project.max_time_secs)
+        max_time_secs = float(self.project.max_time_secs)
+        max_neurons = int(self.project.max_neurons)
+        self.controller.set_limits(max_time_secs, max_neurons)
+        self.time_slider.set_max_time_secs(max_time_secs)
 
     def _custom_analysis(
         self,
@@ -678,6 +687,21 @@ class Gui(QtWidgets.QMainWindow):
                 "Cellpose segmentation loaded.",
             )
 
+    def btn_import_syscon2_seq_clicked(self) -> None:
+        if not self.project.stim_arrays:
+            QtWidgets.QMessageBox.information(
+                self,
+                "No stimulation entities",
+                "No stimulation data entities available. Create one before importing a SysCon2 sequence.",
+            )
+            return
+
+        dialog = Syscon2ImportDialog(self.project, parent=self)
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            self.update_project(self.project)
+            if dialog.selected_stim_name:
+                self.cmb_stim.setCurrentText(dialog.selected_stim_name)
+
     def _delete_cellpose_data(self) -> None:
         """Remove stored cellpose data from both GUI and project."""
         self.last_cellpose_import = None
@@ -742,6 +766,11 @@ class Gui(QtWidgets.QMainWindow):
                 f"Could not load simulate function from {path}: {e}",
             )
             self.logger.exception(e)
+
+    def open_stimulation_generator_dialog(self) -> None:
+        """Open the stimulation script generator dialog."""
+        dialog = StimulationGeneratorDialog(self.project, parent=self)
+        dialog.exec()
 
     def choose_brian2_backend(self) -> None:
         backends = ["cython", "numpy"]
@@ -852,21 +881,27 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.file"),
         )
         # add "open example project" item to the file menu which opens a sub-menu containing the example projects from src/neuroseq/example_projects
-        example_projects_menu = menu.addMenu("&Open example project")
-        section_menus: dict[str, QtWidgets.QMenu] = {}
+        self.open_example_project_menu = menu.addMenu("&Open example project")
+        self.open_example_project_section_menus = {}
+        self.open_example_project_actions = []
         for name, generator in example_projects.items():
-            target_menu = example_projects_menu
+            target_menu = self.open_example_project_menu
             section = example_project_sections.get(name)
             if section is not None:
-                if section not in section_menus:
-                    section_menus[section] = example_projects_menu.addMenu(section)
-                target_menu = section_menus[section]
-            add_action(
+                if section not in self.open_example_project_section_menus:
+                    self.open_example_project_section_menus[section] = (
+                        self.open_example_project_menu.addMenu(section)
+                    )
+                target_menu = self.open_example_project_section_menus[section]
+            action = add_action(
                 name,
-                lambda checked, _generator=generator: self.load_project(_generator()),
+                lambda checked=False, _generator=generator: self.load_project(
+                    _generator()
+                ),
                 target_menu,
                 None,
             )
+            self.open_example_project_actions.append(action)
         add_action(
             "&Open project",
             self.btn_open_clicked,
@@ -942,6 +977,14 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             shortcut=None,
             icon=qta.icon("mdi6.import"),
+        )
+        add_action(
+            "Import SysCon2 .seq &File",
+            self.btn_import_syscon2_seq_clicked,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon=qta.icon("mdi6.file-import-outline"),
         )
         menu.addSeparator()
         add_action(
@@ -1125,6 +1168,14 @@ class Gui(QtWidgets.QMainWindow):
     def _create_action_experiment(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
     ) -> None:
+        add_action(
+            "&Generate stimulation scripts",
+            self.open_stimulation_generator_dialog,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon=qta.icon("mdi6.file-code"),
+        )
         add_action(
             "&Manage Experiments",
             self.btn_manage_experiments_clicked,

@@ -522,18 +522,26 @@ class B2Model:
         """
 
         ng = None
+        args = self.neurongroups.get(name)
         self.logger.info(f"assembling neurongroup '{name}'")
+        if args is None:
+            message = (
+                f"Error in assembling neuron group {name}: neuron group is not defined"
+            )
+            self.logger.critical(message)
+            raise RuntimeError(message)
+
         try:
             ng = b2.NeuronGroup(
-                self.neurongroups[name].get("neuronnumber", None),
-                self.neurongroups[name].get("model", None),
-                threshold=self.neurongroups[name].get("th", None),
-                refractory=self.neurongroups[name].get("refractory", False),
-                method=self.neurongroups[name].get("method", None),
+                args.get("neuronnumber", None),
+                args.get("model", None),
+                threshold=args.get("th", None),
+                refractory=args.get("refractory", False),
+                method=args.get("method", None),
                 namespace=self.parameters,
-                reset=self.neurongroups[name].get("reset", None),
+                reset=args.get("reset", None),
                 clock=b2.Clock(
-                    dt=self.neurongroups[name].get("dt", b2.defaultclock.dt),
+                    dt=args.get("dt", b2.defaultclock.dt),
                     name=f"clock_neurongroup_{name}",
                 ),
                 name=name,
