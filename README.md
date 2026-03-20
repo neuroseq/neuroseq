@@ -53,6 +53,12 @@ After installing, you should be able to run the following command to launch the 
 neuroseq
 ```
 
+To generate synthetic Cellpose test data (TIFF image + matching `.npy` segmentation):
+
+```bash
+neuroseq --generate-cellpose-test-data ./cellpose_test_grid.tif
+```
+
 ## Documentation
 
 - Getting started
@@ -80,6 +86,13 @@ Any changes you make to the stimuli will be checked for validity, and if valid t
 
 ```python
 >>> stims['stimulus'] = np.random.randint(2,size=(500, 24))
+```
+
+Example for generating a simple sequential stimulation pattern:
+
+```python
+>>> for i in range(100):
+...     project.stim_arrays['stimulus'].values[0+i*10:10+i*10,i] = 1
 ```
 
 If the changes are invalid, then an error message will be displayed in the console, and the model will not be modified, e.g.

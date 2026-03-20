@@ -6,7 +6,7 @@ This document explains how NeuroSeq works by scanning the repository code, espec
 - `external_simulation_example/*.py`
 - `tests/test_*.py`
 
-Scan date: 2026-03-04.
+Scan date: 2026-03-18.
 
 ## 1) What NeuroSeq is
 
@@ -32,9 +32,9 @@ Runtime entrypoint:
 
 `__main__.py`:
 
-- Parses CLI options (`--log-level`, `--log-file`, optional filename).
-- Initializes Brian2 logging preferences.
-- Builds `QApplication` and opens `Gui(filename=...)`.
+- Parses CLI options (`--log-level`, `--log-file`, optional filename) plus Cellpose test-data generation flags.
+- In normal mode, initializes Brian2 logging preferences, builds `QApplication`, and opens `Gui(filename=...)`.
+- In generation mode (`--generate-cellpose-test-data`), writes synthetic Cellpose TIFF + segmentation `.npy` and exits without launching Qt.
 
 `gui.py` constructor:
 
@@ -394,6 +394,16 @@ Current implementation status:
 
 The result is stored as `CellposeImportResult` in project state.
 
+### 9.2.1 Cellpose synthetic test-data generator (CLI)
+
+`__main__.py` + `cellpose_test_data.py`:
+
+- `neuroseq --generate-cellpose-test-data <output.tif>` creates synthetic Cellpose-compatible files and exits.
+- Default geometry is a `10 x 10` grid of circular targets with radius `10 px` and `10 px` gap.
+- Companion segmentation output is saved as `<stem>_segmentation.npy` by default, or explicitly via `--cellpose-segmentation-output`.
+- Generator options include `--cellpose-grid-rows`, `--cellpose-grid-cols`, `--cellpose-radius`, `--cellpose-gap`.
+- Generated segmentation uses Cellpose-style integer labeling (`0` background, targets labeled `1..N`).
+
 ### 9.3 Patch-clamp import
 
 `patchclamp_import_dialog.py` + `importer_patchclamp.py`:
@@ -744,11 +754,12 @@ The following table maps each `src/neuroseq` file to primary functionality.
 | Module                               | Primary responsibility                                                     |
 | ------------------------------------ | -------------------------------------------------------------------------- |
 | `__init__.py`                        | package version export                                                     |
-| `__main__.py`                        | CLI entrypoint and Qt app bootstrap                                        |
+| `__main__.py`                        | CLI entrypoint, Cellpose test-data generation, and Qt app bootstrap        |
 | `b2_model.py`                        | Brian2 model definition/assembly/simulation/serialization                  |
 | `b2_units.py`                        | Brian2 quantity parsing/display helpers                                    |
 | `cell_overlay_widget.py`             | cellpose overlay visualization widget                                      |
 | `cellpose_import_dialog.py`          | GUI flow for cellpose image+seg import and mapping                         |
+| `cellpose_test_data.py`              | synthetic Cellpose grid TIFF + segmentation generator                      |
 | `console_widget.py`                  | embedded Python REPL bound to project                                      |
 | `constrained_pan_zoom_controller.py` | bounded camera + scrollbar sync                                            |
 | `custom_analysis_widget.py`          | histogram/hist2d analysis views                                            |
@@ -797,7 +808,8 @@ The following table maps each `src/neuroseq` file to primary functionality.
 
 The `tests/` folder validates major subsystems:
 
-- Model core: `test_b2model.py`, `test_b2_units.py`, `test_main.py`.
+- Model core: `test_b2model.py`, `test_b2_units.py`.
+- CLI entrypoint + Cellpose test-data generation: `test_main.py`, `test_cellpose_test_data.py`.
 - GUI integration/actions: `test_gui.py`, `test_gui_settings.py`.
 - Visualization widgets: trace/spike/heatmap/time-slider/gridlines/data-widget tests.
 - Editing tools: stim editor/dialog/intensity/modifier tests.

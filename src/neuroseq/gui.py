@@ -1162,6 +1162,8 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             shortcut=None,
             icon=qta.icon("mdi6.file-code"),
+        )
+        add_action(
             "&Manage Experiments",
             self.btn_manage_experiments_clicked,
             menu,

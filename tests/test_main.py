@@ -3,8 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 from click.testing import CliRunner
+from PIL import Image
 
 from neuroseq.__main__ import main
 
@@ -27,8 +29,8 @@ class FakeQApplication:
 
 @pytest.fixture()
 def cli_runner_fake_gui(monkeypatch: pytest.MonkeyPatch) -> CliRunner:
-    monkeypatch.setattr("neuroseq.__main__.Gui", FakeGui)
-    monkeypatch.setattr("neuroseq.__main__.QtWidgets.QApplication", FakeQApplication)
+    monkeypatch.setattr("neuroseq.gui.Gui", FakeGui)
+    monkeypatch.setattr("qtpy.QtWidgets.QApplication", FakeQApplication)
     return CliRunner()
 
 
@@ -52,3 +54,58 @@ def test_main_logging_invalid(
     result = cli_runner_fake_gui.invoke(main, ["--log-level", log_level])
     assert "Error" in result.output
     assert result.exit_code != 0
+
+
+def test_generate_cellpose_test_data_cli(
+    tmp_path: Path, cli_runner_fake_gui: CliRunner
+) -> None:
+    image_path = tmp_path / "cellpose_grid.tiff"
+    segmentation_path = tmp_path / "cellpose_grid_masks.npy"
+
+    result = cli_runner_fake_gui.invoke(
+        main,
+        [
+            "--generate-cellpose-test-data",
+            str(image_path),
+            "--cellpose-segmentation-output",
+            str(segmentation_path),
+            "--cellpose-grid-rows",
+            "10",
+            "--cellpose-grid-cols",
+            "10",
+            "--cellpose-radius",
+            "10",
+            "--cellpose-gap",
+            "10",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert image_path.exists()
+    assert segmentation_path.exists()
+    assert str(image_path) in result.output
+    assert str(segmentation_path) in result.output
+
+    image_array = np.array(Image.open(image_path))
+    segmentation_array = np.load(segmentation_path)
+
+    assert image_array.shape == segmentation_array.shape
+    assert segmentation_array.dtype == np.int32
+    assert segmentation_array.max() == 100
+    assert np.unique(segmentation_array).shape[0] == 101
+
+
+def test_cellpose_segmentation_output_requires_image_path(
+    tmp_path: Path, cli_runner_fake_gui: CliRunner
+) -> None:
+    segmentation_path = tmp_path / "cellpose_grid_masks.npy"
+    result = cli_runner_fake_gui.invoke(
+        main,
+        [
+            "--cellpose-segmentation-output",
+            str(segmentation_path),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--generate-cellpose-test-data" in result.output
