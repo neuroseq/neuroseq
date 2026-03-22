@@ -81,7 +81,7 @@ The console also has a history feature, which can be accessed by pressing the up
 
 ### Stimuli editing
 
-The main purpose of the console is to allow users to modify the numpy arrays of stimuli using numpy and Python code.
+The console allows users to modify the numpy arrays of stimuli using numpy and Python code.
 Any changes you make to the stimuli will be checked for validity, and if valid then they will be updated in the model and the changes will be displayed in the GUI, e.g.
 
 ```python
@@ -104,18 +104,17 @@ If the changes are invalid, then an error message will be displayed in the conso
 
 ### Model editing
 
-It is also possible to modify other aspects of the model using the console, by interacting with the `model` object.
-Try `help(model)` to see what methods and attributes are available.
+It is also possible to modify other aspects of the model using the console, by interacting with the `project.b2_model` object.
+Try `help(project.b2_model)` to see what methods and attributes are available.
 
-### brian2 objects
+### Brian2 objects
 
 The objects from the underlying brian2 model can also be accessed. For example, you can get a list of monitors with
 
 ```python
->>> model.monitors.keys()
+>>> project.b2_model.monitors.keys()
 dict_keys(['Traces_v', 'spikemon', 'synmon'])
 ```
-
 And you can then get the underlying brian2 monitor object with e.g.
 
 ```python
