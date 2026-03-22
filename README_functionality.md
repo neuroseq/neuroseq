@@ -804,24 +804,4 @@ The following table maps each `src/neuroseq` file to primary functionality.
 | `trace_widget.py`                    | trace line-stack viewer                                                    |
 | `utils.py`                           | cross-cutting helpers                                                      |
 
-## 17) Test suite coverage map (high-level)
 
-The `tests/` folder validates major subsystems:
-
-- Model core: `test_b2model.py`, `test_b2_units.py`.
-- CLI entrypoint + Cellpose test-data generation: `test_main.py`, `test_cellpose_test_data.py`.
-- GUI integration/actions: `test_gui.py`, `test_gui_settings.py`.
-- Visualization widgets: trace/spike/heatmap/time-slider/gridlines/data-widget tests.
-- Editing tools: stim editor/dialog/intensity/modifier tests.
-- Importers/dialogs: suite2p, cellpose, patch-clamp, SysCon2, experiment import tests.
-- Persistence and project logic: `test_io.py`, `test_project.py`, `test_save_load_options.py`.
-- Utilities: `test_utils.py`.
-
-This means the documented functionality above is not only implemented but broadly unit/integration tested across core areas.
-
-## 18) Practical caveats observed in code
-
-- SysCon2 export supports binary and non-binary shape intensity modes, and GUI selection of active laser timeline (`940nm`, `1030nm`, `1140nm`; default `1140nm`).
-- `StimWidget` comments note `dt_ms != 1` caveat for shared camera assumptions with image-based x-spacing.
-- `utils.get_stim_type(...)` infers type from stim name as fallback heuristic.
-- Some experimental/support paths are explicitly marked as limited or less rigorously tested in comments (e.g., suite2p stat-to-seg conversion notes).

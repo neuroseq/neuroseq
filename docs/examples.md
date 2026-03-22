@@ -1,4 +1,4 @@
-# Examples
+# Examples of brian2 models
 
 The examples provide a list of brian2 models.
 The first set of models is tailored to the real neurobiological experiments,

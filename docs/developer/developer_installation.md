@@ -1,4 +1,4 @@
-# Developer Guide
+# Developer Guide on installation and use
 
 ## Developer Installation with uv
 
@@ -66,7 +66,3 @@ To run the test suite:
 ```bash
 uv run pytest
 ```
-
-## Connection to Holo4D profile
-
-C:\ProgramData\ROE\SysCon 2\2.7.2\profiles\Holo4D\Sequence Manager\Experiments\NeuroSeq_tests

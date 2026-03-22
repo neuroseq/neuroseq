@@ -4,13 +4,13 @@
 
 Private repository containing the neuroseq prototype GUI.
 
-![screenshot](screenshot.png)
+![screenshot](docs/images/screenshot.png)
 
 ## Installation
 
-### Conda
+## Conda
 
-It is recommended to use Anaconda environment (package manager) for the installation. It can be downloaded from the official webpage https://www.anaconda.com/.
+It is recommended to use Anaconda environment (package manager) for the installation. It can be downloaded from the [official webpage](https://www.anaconda.com/).
 
 Once Anaconda installed, create and activate a new environment in a command line:
 
@@ -21,7 +21,7 @@ conda activate neuroseq
 
 Alternatively, the new enviroment can be created within Anaconda Navigator. For this, open Anaconda Navigator and go to "Enviroments". Click "Create" button, write "neuroseq" as a name and select Python 3.10.
 
-### Installation of the neuroseq
+## Installation of the neuroseq
 
 If you have ssh authentication to GitHub set up you can install directly from this repository with pip:
 
@@ -37,13 +37,13 @@ cd neuroseq
 pip install .
 ```
 
-### How to install cython on Windows
+## How to install Cython on Windows
 
 To speed up simulations with cython on Windows one will need an installation of the Microsoft Visual C++ 14.0 or higher.
 
-See for further instructions on installation: https://stackoverflow.com/questions/60322655/how-to-use-cython-on-windows-10-with-python-3-8
+See this [stackoverflow post](https://stackoverflow.com/questions/60322655/how-to-use-cython-on-windows-10-with-python-3-8) for further instructions on installation: 
 
-Visual Studio 2022 is available here: [https://learn.microsoft.com/en-us/visualstudio/releases/2022/release-notes#17.10.5](https://visualstudio.microsoft.com/)
+Visual Studio 2022 is available [here](https://learn.microsoft.com/en-us/visualstudio/releases/2022/release-notes#17.10.5)
 
 ## Use
 
@@ -53,73 +53,12 @@ After installing, you should be able to run the following command to launch the 
 neuroseq
 ```
 
-To generate synthetic Cellpose test data (TIFF image + matching `.npy` segmentation):
-
-```bash
-neuroseq --generate-cellpose-test-data ./cellpose_test_grid.tif
-```
-
 ## Documentation
 
-- Getting started
-- Control of simulations
-- Examples
-- Control of experiments
-- Import of experimental data
+Documentation for the project is availible [docs/index.md](here).
 
-## GUI Console
+## Contributing and providing feed-back
 
-The GUI console is a text box at the bottom of the GUI that can be used to run Python code.
-The code is executed in the same Python environment as the GUI, with the following variables/objects made available (run dir() command to see the list):
+The NeuroSeq is an open-source project. Everyone can suggest and implement improvements as well as improve overall reliability and stability of its operation.
 
-- `np`: numpy
-- `b2`: brian2
-- `stims`: a dict of stimuli, each of which is a 2d numpy array
-- `model`: a class that defines the entire model
-
-The console also has a history feature, which can be accessed by pressing the up and down arrow keys.
-
-### Stimuli editing
-
-The main purpose of the console is to allow users to modify the numpy arrays of stimuli using numpy and Python code.
-Any changes you make to the stimuli will be checked for validity, and if valid then they will be updated in the model and the changes will be displayed in the GUI, e.g.
-
-```python
->>> stims['stimulus'] = np.random.randint(2,size=(500, 24))
-```
-
-Example for generating a simple sequential stimulation pattern:
-
-```python
->>> for i in range(100):
-...     project.stim_arrays['stimulus'].values[0+i*10:10+i*10,i] = 1
-```
-
-If the changes are invalid, then an error message will be displayed in the console, and the model will not be modified, e.g.
-
-```python
->>> stims['stimulus'] = np.random.randint(2,size=(5, 5, 5))
-    Invalid stims: expected dict[str, 1d or 2d numpy array], found dict with 3d numpy array for key 'stimulus'
-```
-
-### Model editing
-
-It is also possible to modify other aspects of the model using the console, by interacting with the `model` object.
-Try `help(model)` to see what methods and attributes are available.
-
-### brian2 objects
-
-The objects from the underlying brian2 model can also be accessed. For example, you can get a list of monitors with
-
-```python
->>> model.monitors.keys()
-dict_keys(['Traces_v', 'spikemon', 'synmon'])
-```
-
-And you can then get the underlying brian2 monitor object with e.g.
-
-```python
->>> monitor = model.get_monitor('Traces_v')['object']
-```
-
-Note that these objects should not be directly modified using the console, as it will cause the GUI and `model` to become out of sync with the underlying brian2 model.
+To report a bug or suggest a new feature functionality please open a new issue. To implement a new feature, please fork the repository, modify the code accordingly and open a discussion with core developers via submitting a pull request.
