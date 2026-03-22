@@ -8,7 +8,7 @@ Private repository containing the neuroseq prototype GUI.
 
 ## Installation
 
-## Conda
+### Conda
 
 It is recommended to use Anaconda environment (package manager) for the installation. It can be downloaded from the [official webpage](https://www.anaconda.com/).
 
@@ -21,7 +21,7 @@ conda activate neuroseq
 
 Alternatively, the new enviroment can be created within Anaconda Navigator. For this, open Anaconda Navigator and go to "Enviroments". Click "Create" button, write "neuroseq" as a name and select Python 3.10.
 
-## Installation of the neuroseq
+### Neuroseq
 
 If you have ssh authentication to GitHub set up you can install directly from this repository with pip:
 
@@ -36,7 +36,7 @@ git clone git@github.com:ssciwr/neuroseq.git
 cd neuroseq
 pip install .
 ```
-## How to install Cython on Windows
+### How to install Cython on Windows
 
 To speed up brian2 simulations with Cython on Windows one will need an installation of the Microsoft Visual C++ version 14.0 or higher.
 
@@ -44,7 +44,7 @@ See this [stackoverflow post](https://stackoverflow.com/questions/60322655/how-t
 
 Visual Studio 2022 is available [here](https://learn.microsoft.com/en-us/visualstudio/releases/2022/release-notes#17.10.5)
 
-## Use
+### Use
 
 After installing, you should be able to run the following command to launch the GUI:
 
@@ -52,11 +52,11 @@ After installing, you should be able to run the following command to launch the 
 neuroseq
 ```
 
-## Documentation
+### Documentation
 
 Documentation for the project is availible [here](docs/index.md).
 
-## Contributing and providing feed-back
+### Contributing and providing feed-back
 
 The NeuroSeq is an open-source project. Everyone can suggest and implement improvements as well as improve overall reliability and stability of its operation.
 
