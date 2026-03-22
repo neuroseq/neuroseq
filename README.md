@@ -54,7 +54,7 @@ neuroseq
 
 ## Documentation
 
-Documentation for the project is availible [docs/index.md](here).
+Documentation for the project is availible [here](docs/index.md).
 
 ## Contributing and providing feed-back
 
