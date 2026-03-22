@@ -36,10 +36,9 @@ git clone git@github.com:ssciwr/neuroseq.git
 cd neuroseq
 pip install .
 ```
-
 ## How to install Cython on Windows
 
-To speed up simulations with cython on Windows one will need an installation of the Microsoft Visual C++ 14.0 or higher.
+To speed up brian2 simulations with Cython on Windows one will need an installation of the Microsoft Visual C++ version 14.0 or higher.
 
 See this [stackoverflow post](https://stackoverflow.com/questions/60322655/how-to-use-cython-on-windows-10-with-python-3-8) for further instructions on installation: 
 
