@@ -12,6 +12,9 @@
 - [GUI overview](user_guide/gui_overview.md)
 - [Simulations](user_guide/simulations.md)
 - [Experiments](user_guide/experiments.md)
+- [Connecting simulations and experiments](user_guide/simulations_and_experiments.md)
+- [Importing Imaging Data](user_guide/importing_imaging_data.md)
+- [Multiphoton Holographic Stimulation](user_guide/multiphoton_holographic_stimulation.md)
 
 ### Examples
 

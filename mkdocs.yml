@@ -26,20 +26,19 @@ extra_javascript:
 nav:
   - Home: index.md
   - Getting Started:
-    - Installation: getting_started/installation.md
-    - Quickstart: getting_started/quickstart.md
+      - Installation: getting_started/installation.md
+      - Quickstart: getting_started/quickstart.md
   - User Guide:
-    - GUI Overview: user_guide/gui_overview.md
-    - Simulations: user_guide/simulations.md
-    - Experiments: user_guide/experiments.md
-    - Data Import:
-      - Cellpose Import: user_guide/import_cellpose.md
-      - Patch Clamp Import: user_guide/import_patchclamp.md
+      - GUI Overview: user_guide/gui_overview.md
+      - Simulations: user_guide/simulations.md
+      - Experiments: user_guide/experiments.md
+      - Importing Imaging Data: user_guide/importing_imaging_data.md
+      - Multiphoton Holographic Stimulation: user_guide/multiphoton_holographic_stimulation.md
   - Examples: examples.md
   - Developer Guide:
-    - Installation and use: developer/developer_installation.md
-    - Documentation: developer/documentation.md
-    - Miscellaneous: developer/miscellaneous.md
-    - Testing: developer/testing.md
-    - Contributing: developer/contributing.md
+      - Installation and use: developer/developer_installation.md
+      - Documentation: developer/documentation.md
+      - Miscellaneous: developer/miscellaneous.md
+      - Testing: developer/testing.md
+      - Contributing: developer/contributing.md
   - Troubleshooting: common_issues.md
