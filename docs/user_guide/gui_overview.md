@@ -6,17 +6,17 @@
 
 The main layout of NeuroSeq consist of several widgets: the main widget for modification (drawing) of stimulation patterns (1), the widgets for visulisation of neuronal activity in form of traces (2) or spikes (3), monitor of synaptic connectivity (4). It also include a pad to quickly show some relevant analysis plots (5) and a GUI console (6).
 
-Each widget can be shown and hidden in menu "View" or using the corresponding toolbar:
+Each widget can be shown or hidden in menu "View" by using the corresponding toolbar:
 
 ![Show/hide widgets](../images/toggle_widgets.png)
 
-In addition to elements 1-6, the toolbar also contains an additional, universal widget that can dupicate widget (2) or (3), useful for subsequent visulisation and data analysis. Addtionally, the button with capital "T" toggle and untoggle text annotation next to a mouse cursor.
+In addition to elements 1-6, the toolbar contains a universal widget that can dupicate widgets (2) and (3), useful for subsequent visulisation and data analysis. The button with capital "T" toggles and untoggles text annotation next to a mouse cursor.
 
-The project may contrain not only one, but several stimulation arrays. The user can select which one to show in the widget one, using a drop down manu in the first section of the folloing toolbar:
+The project may contrain not only one, but several stimulation arrays. The user can select which one to show in the widget one, using a drop down manu in the "Stim data:" section of the folloing toolbar:
 
 ![Data selection](../images/data_selection.png).
 
-Similarly, the trace, spike and synapce data may contain a list of different data entries (generated in computational, biologial or neuromorphic experiments) with corresponding drop down menues. "All data" correspond to universal widget where any data in a form of traces or spikes can be independently selected. Normalization of traces and synaptic monitors can be with buttons next to the corresponding drop down menues.
+Similarly, the trace, spike and synapce data may contain a list of different data entries (generated in computational, biologial or neuromorphic experiments) with corresponding drop down menues. "All data" corresponds to a universal widget where any data in a form of traces or spikes can be independently selected. Normalization of traces and synaptic monitors can be set with buttons next to the corresponding drop down menus.
 
 ![Data selection](../images/data_selection.png).
 
