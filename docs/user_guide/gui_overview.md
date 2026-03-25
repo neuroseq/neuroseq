@@ -6,6 +6,10 @@
 
 The main layout of NeuroSeq consist of several widgets: the main widget for modification (drawing) of stimulation patterns (1), the widgets for visulisation of neuronal activity in form of traces (2) or spikes (3), monitor of synaptic connectivity (4). It also include a pad to quickly show some relevant analysis plots (5) and a GUI console (6).
 
+The navigation in widgets (1-3) can be done with scrolling sliders or by holding a middle mouse button and moving the field of view of a given widget. By default, the field of new in all widgets is connected.
+
+Zooming in and zooming out is done by corresponding "+" and "-" buttons or by holding "ctrl" or "shift" buttons and rotating mouse wheel for x- and y-axis, respectively.
+
 Each widget can be shown or hidden in menu "View" by using the corresponding toolbar:
 
 ![Show/hide widgets](../images/toggle_widgets.png)
@@ -16,11 +20,35 @@ The project may contrain not only one, but several stimulation arrays. The user 
 
 ![Data selection](../images/data_selection.png).
 
-Similarly, the trace, spike and synapce data may contain a list of different data entries (generated in computational, biologial or neuromorphic experiments) with corresponding drop down menues. "All data" corresponds to a universal widget where any data in a form of traces or spikes can be independently selected. Normalization of traces and synaptic monitors can be set with buttons next to the corresponding drop down menus.
+Similarly, the trace, spike and synapce data may contain a list of different data entries (generated in computational, biologial or neuromorphic experiments) with corresponding drop down menues. "All data" corresponds to a universal widget where any data in a form of traces or spikes can be independently selected. 
 
 ![Data selection](../images/data_selection.png).
 
+ ## Stimulation editor
+
+The stimulatation pattern can be edited using the toolbar located at the left side of a main window. The editing can be operated in draw and select modes. In the drawing mode, the user can switch between "draw stimulus" and "erise stimulus" regimes and choose the amplitude and duration of the a drawn stimuli. The amplitude of a stimulus can be constant, gradient and log-gradient and random.
+
+[Picture]
+
+Mouse can be used for drawing stimuli: left click is drawing and right click is erising. In erise mode, the functionality of the left and right buttons is inverted.
+A longer stimulus can be drawing by holding a mouse button.
+
+The intensity of stimulation is coded with transparency and normalized on the maximum value in an array. 
+
+If "select mode" is active, the drawing options are not availible anymore, insteed other options are availible for selecting, copying, cutting, saving selected region and so on. The user can "do" and "undo" modifications in the editor using the corresponding buttons.
+
+The toolbar also contains a pad with for creating/deleting new stim arrays, modifying the properties of the existing stimulation array (name, type, number of neurons and physical units) and padding/trimming the duration of an existing array.
+
+The option "show all stim arrays" gives a possibility to show all stim arrays at the same time in one widget. In this case, the selected array remains the same, while other arrays will be shown in background with additional transparency applied.  
+
+## Neuron data: traces
+
+Once the simulation is run or trace data is exported, it became availible in drop down menu "Neuron data". 
+Normalization of traces can be set with buttons next it.
+
  
+
+
 
 
 
