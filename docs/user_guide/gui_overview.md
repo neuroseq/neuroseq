@@ -28,7 +28,7 @@ Similarly, the trace, spike and synapce data may contain a list of different dat
 
 The stimulatation pattern can be edited using the toolbar located at the left side of a main window. The editing can be operated in draw and select modes. In the drawing mode, the user can switch between "draw stimulus" and "erise stimulus" regimes and choose the amplitude and duration of the a drawn stimuli. The amplitude of a stimulus can be constant, gradient and log-gradient and random.
 
-[Picture]
+![Stimulus intensity](../images/amplitude_selection.png).
 
 Mouse can be used for drawing stimuli: left click is drawing and right click is erising. In erise mode, the functionality of the left and right buttons is inverted.
 A longer stimulus can be drawing by holding a mouse button.
