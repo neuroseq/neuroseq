@@ -41,18 +41,22 @@ The toolbar also contains a pad with for creating/deleting new stim arrays, modi
 
 The option "show all stim arrays" gives a possibility to show all stim arrays at the same time in one widget. In this case, the selected array remains the same, while other arrays will be shown in background with additional transparency applied.  
 
-## Neuron data: traces
+## Neuron data and spike data widgets 
 
-Once the simulation is run or trace data is exported, it became availible in drop down menu "Neuron data". 
-Normalization of traces can be set with buttons next it.
+Once the simulation is run or trace data is exported, it became availible in drop down menu "Neuron data". Natigation is done as described above. Normalization of traces can be set with buttons next it with a possibility to normalize traces on a median value and clip/upclip them to permit to restrict traces to the provided space for each neuron or provide a possibility to occupy an unlimited space within the widget. Spike data widget is analogous to the neuron data widget but constructed to represent binary spike events.
 
- 
+## Synaptic data widget
 
+The synaptic data widget contains the information about the states of synaptic connections in a given time point. Using the replay mechanism described below one can access the modifications of synapic changes.
 
+## Universal widget
 
+During analysis, it may be desirable to show an additional copy of the widget, for example, to compare two different periods or neuronal populations within the same widget and at the same time. For this a universal "all data" widget was constructed.
 
+## Analysis widget
 
-
+The user can select a given region of the "neuron data" widget and access an analysis menu by right click of a mouse, and choosing a desired analysis plot/routine.
+It can shown within "analysis widget" or opened in a new window.
 
 ## GUI Console
 
