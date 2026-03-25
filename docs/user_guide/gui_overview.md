@@ -26,14 +26,22 @@ Similarly, the trace, spike and synapce data may contain a list of different dat
 
  ## Stimulation editor
 
-The stimulatation pattern can be edited using the toolbar located at the left side of a main window. The editing can be operated in draw and select modes. In the drawing mode, the user can switch between "draw stimulus" and "erise stimulus" regimes and choose the amplitude and duration of the a drawn stimuli. The amplitude of a stimulus can be constant, gradient and log-gradient and random.
+The stimulatation pattern can be edited using the toolbar located at the left side of a main window. The editing can be operated in draw and select modes. 
 
-![Stimulus intensity](../images/amplitude_selection.png).
+![Draw mode](../images/draw_mode.png)
+
+![Select mode](../images/select_mode.png)
+
+In the drawing mode, the user can switch between "draw stimulus" and "erise stimulus" regimes and choose the amplitude and duration of the a drawn stimuli. The amplitude of a stimulus can be constant, gradient and log-gradient and random.
+
+![Amplitude selection](../images/amplitude_selection.png).
 
 Mouse can be used for drawing stimuli: left click is drawing and right click is erising. In erise mode, the functionality of the left and right buttons is inverted.
 A longer stimulus can be drawing by holding a mouse button.
 
-The intensity of stimulation is coded with transparency and normalized on the maximum value in an array. 
+The intensity of stimulation is coded with transparency and normalized on the maximum value in an array. In the following example the relative ampitudes of stimuli are shown as 1 : 0.75 : 0.5 : 0.25 : 0.125 :
+
+![Stimulus intensity](../images/stimulus_intensity.png).
 
 If "select mode" is active, the drawing options are not availible anymore, insteed other options are availible for selecting, copying, cutting, saving selected region and so on. The user can "do" and "undo" modifications in the editor using the corresponding buttons.
 
@@ -94,25 +102,22 @@ If the changes are invalid, then an error message will be displayed in the conso
     Invalid stims: expected dict[str, 1d or 2d numpy array], found dict with 3d numpy array for key 'stimulus'
 ```
 
-### Model editing
-
-It is also possible to modify other aspects of the model using the console, by interacting with the `model` object.
-Try `help(model)` to see what methods and attributes are available.
-
-### brian2 objects
+### Model and brian2 objects
 
 The objects from the underlying brian2 model can also be accessed. For example, you can get a list of monitors with
 
 ```python
->>> model.monitors.keys()
+>>> project.b2_model.monitors.keys()
 dict_keys(['Traces_v', 'spikemon', 'synmon'])
 ```
-
 And you can then get the underlying brian2 monitor object with e.g.
 
 ```python
->>> monitor = model.get_monitor('Traces_v')['object']
+>>> monitor = project.b2_model.get_monitor('Traces_v')['object']
 ```
 
 Note that these objects should not be directly modified using the console, as it will cause the GUI and `model` to become out of sync with the underlying brian2 model.
+
+It is also possible to modify other aspects of the model using the console, by interacting with the `project.b2_model` object.
+Try `help(project.b2_model)` to see what methods and attributes are available.
 
