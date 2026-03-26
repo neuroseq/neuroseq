@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import brian2.numpy_ as np
+from PIL import Image
 
 from neuroseq.exporter_syscon2 import align_stim_values_left_for_slm
 from neuroseq.exporter_syscon2 import check_syscon2_input_sanity
@@ -348,6 +349,63 @@ def test_generate_syscon2_timeline_overview_png_writes_file(tmp_path: Path) -> N
     assert returned == png_path
     assert png_path.exists()
     assert png_path.stat().st_size > 0
+
+
+def test_generate_syscon2_timeline_overview_png_scales_width_for_long_duration(
+    tmp_path: Path,
+) -> None:
+    short_values = np.zeros((2_000, 1), dtype=np.float32)
+    short_values[1_500:1_502, 0] = 1.0
+    short_stim = StimArray(
+        name="short",
+        stim_type=StimType.Excitation,
+        values=short_values,
+        units="1",
+        dt=0.001,
+    )
+    short_seq_text, _ = generate_syscon2_sequence_text(
+        short_stim,
+        _cellpose_result(mapping={0: 0}),
+        template_text=_template_header(),
+        tick_resolution_us=500,
+        active_threshold=0.0,
+        binary_intensity=1.0,
+        active_laser_wavelength_nm=1140,
+    )
+
+    long_values = np.zeros((120_000, 1), dtype=np.float32)
+    long_values[110_000:110_002, 0] = 1.0
+    long_stim = StimArray(
+        name="long",
+        stim_type=StimType.Excitation,
+        values=long_values,
+        units="1",
+        dt=0.001,
+    )
+    long_seq_text, _ = generate_syscon2_sequence_text(
+        long_stim,
+        _cellpose_result(mapping={0: 0}),
+        template_text=_template_header(),
+        tick_resolution_us=500,
+        active_threshold=0.0,
+        binary_intensity=1.0,
+        active_laser_wavelength_nm=1140,
+    )
+
+    short_png_path = tmp_path / "overview_short.png"
+    long_png_path = tmp_path / "overview_long.png"
+    generate_syscon2_timeline_overview_png(short_seq_text, short_png_path)
+    generate_syscon2_timeline_overview_png(long_seq_text, long_png_path)
+
+    with Image.open(short_png_path) as short_image:
+        short_width_px, short_height_px = short_image.size
+    with Image.open(long_png_path) as long_image:
+        long_width_px, long_height_px = long_image.size
+
+    assert short_height_px > 0
+    assert long_height_px > 0
+    assert long_width_px > short_width_px
+    assert long_width_px >= 3000
 
 
 def test_export_seq_accepts_legacy_1040_alias_as_1030_timeline() -> None:

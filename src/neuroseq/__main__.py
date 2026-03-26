@@ -75,6 +75,34 @@ from neuroseq.cellpose_test_data import save_cellpose_test_data
     show_default=True,
     help="Gap in pixels between adjacent circles in generated Cellpose test data.",
 )
+@click.option(
+    "--cellpose-square-size",
+    default=None,
+    type=click.IntRange(min=1),
+    help=(
+        "Optional square output size in pixels for generated Cellpose test data. "
+        "When set, radius and gap are auto-fitted while preserving rows/cols."
+    ),
+)
+@click.option(
+    "--cellpose-preserve-radius-gap/--cellpose-auto-fit-radius-gap",
+    default=False,
+    show_default=True,
+    help=(
+        "When --cellpose-square-size is set, preserve the provided "
+        "--cellpose-radius and --cellpose-gap instead of auto-fitting them."
+    ),
+)
+@click.option(
+    "--cellpose-preserve-radius-auto-gap",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help=(
+        "When --cellpose-square-size is set, preserve --cellpose-radius and "
+        "auto-fit only --cellpose-gap."
+    ),
+)
 @click.argument("filename", required=False)
 def main(
     log_level: str,
@@ -85,11 +113,27 @@ def main(
     cellpose_grid_cols: int,
     cellpose_radius: int,
     cellpose_gap: int,
+    cellpose_square_size: int | None,
+    cellpose_preserve_radius_gap: bool,
+    cellpose_preserve_radius_auto_gap: bool,
     filename: str | None,
 ) -> None:
     if test_cellpose_segmentation_path is not None and test_cellpose_image_path is None:
         raise click.UsageError(
             "--cellpose-segmentation-output requires --generate-cellpose-test-data"
+        )
+    if cellpose_preserve_radius_gap and cellpose_square_size is None:
+        raise click.UsageError(
+            "--cellpose-preserve-radius-gap requires --cellpose-square-size"
+        )
+    if cellpose_preserve_radius_auto_gap and cellpose_square_size is None:
+        raise click.UsageError(
+            "--cellpose-preserve-radius-auto-gap requires --cellpose-square-size"
+        )
+    if cellpose_preserve_radius_gap and cellpose_preserve_radius_auto_gap:
+        raise click.UsageError(
+            "--cellpose-preserve-radius-gap and --cellpose-preserve-radius-auto-gap "
+            "cannot be used together"
         )
 
     if test_cellpose_image_path is not None:
@@ -100,6 +144,9 @@ def main(
             cols=cellpose_grid_cols,
             radius=cellpose_radius,
             gap=cellpose_gap,
+            square_size=cellpose_square_size,
+            preserve_radius_gap=cellpose_preserve_radius_gap,
+            preserve_radius_auto_gap=cellpose_preserve_radius_auto_gap,
         )
         click.echo(
             "Generated Cellpose test data:\n"

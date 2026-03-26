@@ -39,6 +39,7 @@ _ENTITY_MIN_DURATION_US = 33_320
 _TTL_OUT_1_START_PULSE_US = 10_000
 _SYSCON2_TTL_PULSE_QUANTUM_US = 520.8125
 _SYSCON2_NEURON_OBJECT_QUANTUM_US = 16_666.0
+_TTL_PULSE_BOUNDARY_GUARD_TICKS = 1
 _SYSCON2_NEURON_OBJECT_QUANTUM_IN_TTL_UNITS = int(
     round(_SYSCON2_NEURON_OBJECT_QUANTUM_US / _SYSCON2_TTL_PULSE_QUANTUM_US)
 )
@@ -159,6 +160,17 @@ class SimultaneousDurationViolation:
     neuron_indices: tuple[int, ...]
     durations_idx: tuple[int, ...]
     min_duration_idx: int
+
+
+@dataclass(frozen=True)
+class GlobalSlmWindowViolation:
+    neuron_index: int
+    start_idx: int
+    duration_idx: int
+    start_tick: int
+    snapped_start_tick: int
+    shift_ticks: int
+    shift_samples: int
 
 
 def _normalize_active_laser_wavelength_nm(wavelength_nm: int) -> int:
@@ -292,11 +304,26 @@ def generate_syscon2_sequence_text(
         mapped_segments,
         lead_ticks=lead_ticks,
         min_duration_ticks=min_entity_duration_ticks,
+        pulse_guard_ticks=_TTL_PULSE_BOUNDARY_GUARD_TICKS,
     )
-    _validate_no_off_on_overlap(entity_windows, lead_ticks=lead_ticks)
+    _validate_pulse_bounds_within_entity_windows(
+        entity_windows,
+        lead_ticks=lead_ticks,
+        pulse_guard_ticks=_TTL_PULSE_BOUNDARY_GUARD_TICKS,
+    )
+    _validate_no_off_on_overlap(
+        entity_windows,
+        lead_ticks=lead_ticks,
+        pulse_guard_ticks=_TTL_PULSE_BOUNDARY_GUARD_TICKS,
+    )
     scheduled_windows = _assign_entity_lanes(entity_windows, max_simultaneous)
     scheduled_windows.sort(
         key=lambda window: (window.start_tick, window.lane, window.neuron_index)
+    )
+    _validate_laser_pulse_end_before_overlapping_shapes(
+        pulse_intervals,
+        scheduled_windows,
+        pulse_guard_ticks=_TTL_PULSE_BOUNDARY_GUARD_TICKS,
     )
 
     n_entity_lanes = max_simultaneous
@@ -453,6 +480,7 @@ def generate_syscon2_timeline_overview_png(
     sequence = parse_syscon2_seq_text(sequence_text)
 
     timeline_entries: list[tuple[int, float, float, str]] = []
+    timeline_objects: dict[int, list[SysconSequenceObject]] = defaultdict(list)
     for obj in sequence.objects:
         timeline_index_raw = obj.properties.get("TimelineInfo0_TimelineIndex")
         if timeline_index_raw is None:
@@ -461,6 +489,7 @@ def generate_syscon2_timeline_overview_png(
             timeline_index = int(float(timeline_index_raw))
         except ValueError:
             continue
+        timeline_objects[timeline_index].append(obj)
 
         start_us = max(0.0, float(obj.start_time_us))
         duration_us = _preview_object_duration_us(
@@ -480,36 +509,70 @@ def generate_syscon2_timeline_overview_png(
         raise ValueError("No timeline objects found to render overview PNG.")
 
     timeline_indices = sorted({entry[0] for entry in timeline_entries})
+    timeline_labels = _build_timeline_axis_labels(
+        timeline_indices,
+        timeline_objects=timeline_objects,
+    )
     y_by_timeline = {timeline: idx for idx, timeline in enumerate(timeline_indices)}
     max_end_us = max(
         start_us + duration_us for _, start_us, duration_us, _ in timeline_entries
     )
     max_end_ms = max(1.0, max_end_us / 1e3)
+    fig_height = max(3.0, 1.4 + 0.45 * len(timeline_indices))
+    fig_width = _compute_overview_figure_width_in(max_end_ms)
+    render_dpi = _compute_overview_render_dpi(
+        fig_width_inches=fig_width,
+        fig_height_inches=fig_height,
+    )
+    min_visible_duration_ms = _compute_overview_min_visible_duration_ms(
+        max_end_ms=max_end_ms,
+        fig_width_inches=fig_width,
+        dpi=render_dpi,
+    )
+    x_axis_scale, x_axis_label = _select_overview_time_axis(max_end_ms)
+    render_entries: list[tuple[int, float, float, float, str]] = []
+    max_display_end_ms = 1.0
+    for timeline_idx, start_us, duration_us, object_type in timeline_entries:
+        start_ms = start_us / 1e3
+        duration_ms = duration_us / 1e3
+        display_duration_ms = max(duration_ms, min_visible_duration_ms)
+        render_entries.append(
+            (timeline_idx, start_ms, duration_ms, display_duration_ms, object_type)
+        )
+        max_display_end_ms = max(max_display_end_ms, start_ms + display_duration_ms)
+    x_max = max(1.0, max_display_end_ms * x_axis_scale)
 
     # Use Agg canvas directly for headless rendering in tests/servers.
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.figure import Figure
     from matplotlib.patches import Patch
     from matplotlib.patches import Rectangle
+    from matplotlib.ticker import AutoMinorLocator
+    from matplotlib.ticker import MaxNLocator
+    from matplotlib.ticker import StrMethodFormatter
 
-    fig_height = max(3.0, 1.4 + 0.45 * len(timeline_indices))
-    fig = Figure(figsize=(12.0, fig_height), constrained_layout=True)
+    fig = Figure(figsize=(fig_width, fig_height), constrained_layout=True)
     FigureCanvasAgg(fig)
     ax = fig.add_subplot(111)
 
     for timeline_idx in timeline_indices:
         y = y_by_timeline[timeline_idx]
-        ax.hlines(y, 0.0, max_end_ms, colors="#d0d0d0", linewidth=0.8, zorder=0)
+        ax.hlines(y, 0.0, x_max, colors="#d0d0d0", linewidth=0.8, zorder=0)
 
-    for timeline_idx, start_us, duration_us, object_type in timeline_entries:
+    for (
+        timeline_idx,
+        start_ms,
+        _duration_ms,
+        display_duration_ms,
+        object_type,
+    ) in render_entries:
         y = y_by_timeline[timeline_idx]
-        start_ms = start_us / 1e3
-        duration_ms = duration_us / 1e3
-        display_duration_ms = max(duration_ms, 0.08)
+        start_x = start_ms * x_axis_scale
+        display_duration_x = display_duration_ms * x_axis_scale
         color = _preview_object_color(object_type)
         rect = Rectangle(
-            (start_ms, y - 0.32),
-            display_duration_ms,
+            (start_x, y - 0.32),
+            display_duration_x,
             0.64,
             facecolor=color,
             edgecolor=color,
@@ -519,12 +582,12 @@ def generate_syscon2_timeline_overview_png(
         )
         ax.add_patch(rect)
         if object_type in {"shape", "entity"}:
-            slm_lead_in_ms = _SLM_LEAD_IN_US / 1e3
-            lead_in_width_ms = min(display_duration_ms, slm_lead_in_ms)
-            if lead_in_width_ms > 0:
+            slm_lead_in_x = (_SLM_LEAD_IN_US / 1e3) * x_axis_scale
+            lead_in_width_x = min(display_duration_x, slm_lead_in_x)
+            if lead_in_width_x > 0:
                 lead_in_rect = Rectangle(
-                    (start_ms, y - 0.32),
-                    lead_in_width_ms,
+                    (start_x, y - 0.32),
+                    lead_in_width_x,
                     0.64,
                     facecolor="#bdbdbd",
                     edgecolor="none",
@@ -534,15 +597,42 @@ def generate_syscon2_timeline_overview_png(
                 )
                 ax.add_patch(lead_in_rect)
 
-    ax.set_xlim(0.0, max_end_ms * 1.04)
+    ax.set_xlim(0.0, x_max * 1.02)
     ax.set_ylim(-0.8, len(timeline_indices) - 0.2)
     ax.set_yticks([y_by_timeline[idx] for idx in timeline_indices])
-    ax.set_yticklabels([f"TL {idx}" for idx in timeline_indices])
+    ax.set_yticklabels([timeline_labels[idx] for idx in timeline_indices])
     ax.invert_yaxis()
-    ax.set_xlabel("Time (ms)")
+    ax.set_xlabel(x_axis_label)
     ax.set_ylabel("Timeline")
-    ax.set_title("SysCon2 Timeline Overview")
-    ax.grid(axis="x", linestyle=":", linewidth=0.6, alpha=0.6)
+    ax.set_title(
+        f"SysCon2 Timeline Overview ({_format_overview_duration_label(max_end_ms)})"
+    )
+    y_tick_fontsize = float(
+        np.clip(10.5 - 0.12 * max(0, len(timeline_indices) - 8), 7.0, 10.5)
+    )
+    ax.tick_params(axis="y", labelsize=y_tick_fontsize)
+    ax.tick_params(axis="x", labelsize=9.0)
+    major_tick_count = int(np.clip(np.rint(fig_width * 0.9), 6, 14))
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=major_tick_count, min_n_ticks=4))
+    ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+    tick_decimals = _overview_tick_decimals(x_max)
+    ax.xaxis.set_major_formatter(StrMethodFormatter(f"{{x:.{tick_decimals}f}}"))
+    ax.grid(axis="x", which="major", linestyle=":", linewidth=0.65, alpha=0.65)
+    ax.grid(axis="x", which="minor", linestyle=":", linewidth=0.35, alpha=0.35)
+    if min_visible_duration_ms > 0.15:
+        ax.text(
+            0.995,
+            -0.13,
+            (
+                "Short events are expanded to "
+                f">= {min_visible_duration_ms:.2f} ms for readability."
+            ),
+            transform=ax.transAxes,
+            ha="right",
+            va="top",
+            fontsize=8.0,
+            color="#545454",
+        )
 
     legend_handles = [
         Patch(facecolor="#2c7fb8", edgecolor="#2c7fb8", label="Shape/Entity"),
@@ -559,7 +649,7 @@ def generate_syscon2_timeline_overview_png(
 
     output_path_obj = pathlib.Path(output_path)
     output_path_obj.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path_obj, dpi=180)
+    fig.savefig(output_path_obj, dpi=render_dpi)
     fig.clear()
     return output_path_obj
 
@@ -655,6 +745,23 @@ def check_syscon2_input_sanity(
                 f"{first_violation.previous_neuron_indices} -> "
                 f"{first_violation.current_neuron_indices}, gap={gap_ms:.2f}ms "
                 f"(required {required_gap_ms:.2f}ms)."
+            )
+        global_window_violations = find_global_slm_window_violations(
+            stim_array,
+            active_threshold=active_threshold,
+        )
+        if global_window_violations:
+            first_global_window_violation = global_window_violations[0]
+            shift_ms = (
+                first_global_window_violation.shift_ticks
+                * _SYSCON2_TTL_PULSE_QUANTUM_US
+                / 1e3
+            )
+            warnings.append(
+                "Global 16.66ms alignment warning: "
+                f"{len(global_window_violations)} stimulation start(s) are off the "
+                "global SLM window grid. "
+                f"Example nearest correction: {shift_ms:+.3f}ms."
             )
         if force_binary_intensity:
             if active_values.size > 0 and not np.all(
@@ -798,15 +905,17 @@ def find_slm_off_on_overlap_violations(
         mapped_segments,
         lead_ticks=lead_ticks,
         min_duration_ticks=min_entity_duration_ticks,
+        pulse_guard_ticks=_TTL_PULSE_BOUNDARY_GUARD_TICKS,
     )
     if len(windows) <= 1:
         return []
 
     sample_us = float(stim_array.dt * 1e6)
+    pulse_guard_ticks = _TTL_PULSE_BOUNDARY_GUARD_TICKS
     by_phase_start: dict[int, SlmOffOnOverlapViolation] = {}
 
     for off_window in windows:
-        phase_start_tick = off_window.start_tick + lead_ticks
+        phase_start_tick = off_window.start_tick + lead_ticks + pulse_guard_ticks
         off_start_tick = off_window.start_tick
         off_end_tick = min(off_window.end_tick, phase_start_tick)
         if off_end_tick <= off_start_tick:
@@ -818,7 +927,10 @@ def find_slm_off_on_overlap_violations(
             if off_window.neuron_index == on_window.neuron_index:
                 continue
 
-            on_start_tick = max(on_window.start_tick + lead_ticks, on_window.start_tick)
+            on_start_tick = max(
+                on_window.start_tick + lead_ticks + pulse_guard_ticks,
+                on_window.start_tick,
+            )
             on_end_tick = on_window.end_tick
             if on_end_tick <= on_start_tick:
                 continue
@@ -827,7 +939,7 @@ def find_slm_off_on_overlap_violations(
 
             overlap_start_tick = max(off_start_tick, on_start_tick)
             overlap_end_tick = min(off_end_tick, on_end_tick)
-            required_phase_start_tick = on_end_tick + lead_ticks
+            required_phase_start_tick = on_end_tick + lead_ticks + pulse_guard_ticks
             required_shift_ticks = max(1, required_phase_start_tick - phase_start_tick)
             required_shift_samples = max(
                 1,
@@ -1174,6 +1286,158 @@ def equalize_simultaneous_durations_to_min(
     return values, trimmed_timepoints
 
 
+def find_global_slm_window_violations(
+    stim_array: StimArray,
+    *,
+    active_threshold: float = 0.0,
+    global_window_origin_tick: int = 0,
+) -> list[GlobalSlmWindowViolation]:
+    """Find pulse starts that do not align to global 16.666ms SLM windows.
+
+    Alignment target:
+      start_tick == global_window_origin_tick + lead_ticks + guard_ticks + 32*k
+    where `k` is any integer.
+    """
+    if stim_array.values.ndim != 2:
+        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+    if stim_array.dt <= 0:
+        raise ValueError("Stim array dt must be positive")
+
+    sample_us = float(stim_array.dt * 1e6)
+    lead_ticks = int(np.ceil(_SLM_LEAD_IN_US / _SYSCON2_TTL_PULSE_QUANTUM_US))
+    pulse_start_offset_ticks = lead_ticks + _TTL_PULSE_BOUNDARY_GUARD_TICKS
+    shape_quantum_ticks = _SYSCON2_NEURON_OBJECT_QUANTUM_IN_TTL_UNITS
+
+    violations: list[GlobalSlmWindowViolation] = []
+    for segment in _extract_active_segments(stim_array.values, active_threshold):
+        start_tick = int(
+            np.rint((segment.start_idx * sample_us) / _SYSCON2_TTL_PULSE_QUANTUM_US)
+        )
+        snapped_start_tick = _nearest_global_slm_window_start_tick(
+            start_tick,
+            global_window_origin_tick=global_window_origin_tick,
+            pulse_start_offset_ticks=pulse_start_offset_ticks,
+            shape_quantum_ticks=shape_quantum_ticks,
+        )
+        if start_tick == snapped_start_tick:
+            continue
+        shift_ticks = snapped_start_tick - start_tick
+        shift_samples = int(
+            np.rint(shift_ticks * _SYSCON2_TTL_PULSE_QUANTUM_US / sample_us)
+        )
+        violations.append(
+            GlobalSlmWindowViolation(
+                neuron_index=int(segment.neuron_index),
+                start_idx=int(segment.start_idx),
+                duration_idx=int(segment.duration_idx),
+                start_tick=start_tick,
+                snapped_start_tick=snapped_start_tick,
+                shift_ticks=shift_ticks,
+                shift_samples=shift_samples,
+            )
+        )
+
+    return sorted(
+        violations,
+        key=lambda violation: (
+            abs(violation.shift_ticks),
+            violation.start_tick,
+            violation.neuron_index,
+        ),
+    )
+
+
+def snap_stim_values_to_global_slm_windows(
+    stim_array: StimArray,
+    *,
+    active_threshold: float = 0.0,
+    global_window_origin_tick: int = 0,
+) -> tuple[np.ndarray, int, int]:
+    """Snap active segment starts to nearest global 16.666ms SLM window.
+
+    Returns:
+      (new_values, moved_segments, truncated_tail_timepoints)
+    """
+    if stim_array.values.ndim != 2:
+        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+    if stim_array.dt <= 0:
+        raise ValueError("Stim array dt must be positive")
+
+    values = np.array(stim_array.values, copy=True)
+    n_timepoints = values.shape[0]
+    sample_us = float(stim_array.dt * 1e6)
+    lead_ticks = int(np.ceil(_SLM_LEAD_IN_US / _SYSCON2_TTL_PULSE_QUANTUM_US))
+    pulse_start_offset_ticks = lead_ticks + _TTL_PULSE_BOUNDARY_GUARD_TICKS
+    shape_quantum_ticks = _SYSCON2_NEURON_OBJECT_QUANTUM_IN_TTL_UNITS
+
+    segments = _extract_active_segments(values, active_threshold)
+    if len(segments) == 0:
+        return values, 0, 0
+
+    snapped_values = np.array(values, copy=True)
+    for segment in segments:
+        start_idx = int(segment.start_idx)
+        end_idx = int(start_idx + segment.duration_idx)
+        snapped_values[start_idx:end_idx, segment.neuron_index] = 0
+
+    moved_segments = 0
+    truncated_tail_timepoints = 0
+    for segment in segments:
+        start_idx = int(segment.start_idx)
+        duration_idx = int(segment.duration_idx)
+        end_idx = int(start_idx + duration_idx)
+        neuron_index = int(segment.neuron_index)
+        block = values[start_idx:end_idx, neuron_index].copy()
+        if block.shape[0] == 0:
+            continue
+
+        start_tick = int(
+            np.rint((start_idx * sample_us) / _SYSCON2_TTL_PULSE_QUANTUM_US)
+        )
+        snapped_start_tick = _nearest_global_slm_window_start_tick(
+            start_tick,
+            global_window_origin_tick=global_window_origin_tick,
+            pulse_start_offset_ticks=pulse_start_offset_ticks,
+            shape_quantum_ticks=shape_quantum_ticks,
+        )
+        snapped_start_idx = max(
+            0,
+            int(
+                np.rint(snapped_start_tick * _SYSCON2_TTL_PULSE_QUANTUM_US / sample_us)
+            ),
+        )
+        if snapped_start_idx != start_idx:
+            moved_segments += 1
+
+        target_end_idx = snapped_start_idx + block.shape[0]
+        writable_end_idx = min(n_timepoints, target_end_idx)
+        if writable_end_idx > snapped_start_idx:
+            writable_rows = writable_end_idx - snapped_start_idx
+            snapped_values[snapped_start_idx:writable_end_idx, neuron_index] = (
+                np.maximum(
+                    snapped_values[snapped_start_idx:writable_end_idx, neuron_index],
+                    block[:writable_rows],
+                )
+            )
+        if target_end_idx > n_timepoints:
+            truncated_tail_timepoints += target_end_idx - n_timepoints
+
+    return snapped_values, moved_segments, truncated_tail_timepoints
+
+
+def _nearest_global_slm_window_start_tick(
+    start_tick: int,
+    *,
+    global_window_origin_tick: int,
+    pulse_start_offset_ticks: int,
+    shape_quantum_ticks: int,
+) -> int:
+    base_tick = global_window_origin_tick + pulse_start_offset_ticks
+    relative = start_tick - base_tick
+    nearest_slot = int(np.rint(relative / float(shape_quantum_ticks)))
+    return base_tick + nearest_slot * shape_quantum_ticks
+
+
 def _build_active_set_runs(
     values: np.ndarray,
     active_threshold: float,
@@ -1365,8 +1629,11 @@ def _build_entity_windows(
     *,
     lead_ticks: int,
     min_duration_ticks: int,
+    pulse_guard_ticks: int = 0,
 ) -> list[_EntityWindow]:
     del min_duration_ticks  # duration is enforced in shape-quanta below.
+    if pulse_guard_ticks < 0:
+        raise ValueError("pulse_guard_ticks must be non-negative")
     if len(mapped_segments) == 0:
         return []
 
@@ -1391,7 +1658,6 @@ def _build_entity_windows(
         phase_end: int | None = None
         if phase_idx + 1 < len(phase_starts):
             phase_end = phase_starts[phase_idx + 1]
-        aligned_start_tick = max(0, phase_start - lead_ticks)
 
         for neuron_idx, neuron_segments in segments_by_neuron.items():
             stimulation_start_tick: int | None = None
@@ -1421,7 +1687,14 @@ def _build_entity_windows(
             if stimulation_start_tick is None or stimulation_end_tick is None:
                 continue
 
-            duration_ticks = max(1, stimulation_end_tick - aligned_start_tick)
+            aligned_start_tick = max(
+                0,
+                stimulation_start_tick - lead_ticks - pulse_guard_ticks,
+            )
+            duration_ticks = max(
+                1,
+                stimulation_end_tick - aligned_start_tick + pulse_guard_ticks,
+            )
             duration_shape_quanta = max(
                 2,
                 int(
@@ -1496,15 +1769,21 @@ def _validate_no_off_on_overlap(
     windows: list[_EntityWindow],
     *,
     lead_ticks: int,
+    pulse_guard_ticks: int = 0,
 ) -> None:
     if lead_ticks <= 0:
         raise ValueError("lead_ticks must be positive")
+    if pulse_guard_ticks < 0:
+        raise ValueError("pulse_guard_ticks must be non-negative")
     if len(windows) <= 1:
         return
 
     for off_window in windows:
         off_start = off_window.start_tick
-        off_end = min(off_window.end_tick, off_window.start_tick + lead_ticks)
+        off_end = min(
+            off_window.end_tick,
+            off_window.start_tick + lead_ticks + pulse_guard_ticks,
+        )
         if off_end <= off_start:
             continue
 
@@ -1513,7 +1792,10 @@ def _validate_no_off_on_overlap(
                 continue
             if off_window.neuron_index == on_window.neuron_index:
                 continue
-            on_start = max(on_window.start_tick + lead_ticks, on_window.start_tick)
+            on_start = max(
+                on_window.start_tick + lead_ticks + pulse_guard_ticks,
+                on_window.start_tick,
+            )
             on_end = on_window.end_tick
             if on_end <= on_start:
                 continue
@@ -1529,6 +1811,91 @@ def _validate_no_off_on_overlap(
                 f"on neuron={on_window.neuron_index}, "
                 f"overlap_ticks=[{overlap_start}, {overlap_end}))."
             )
+
+
+def _validate_pulse_bounds_within_entity_windows(
+    windows: list[_EntityWindow],
+    *,
+    lead_ticks: int,
+    pulse_guard_ticks: int = 0,
+) -> None:
+    if lead_ticks <= 0:
+        raise ValueError("lead_ticks must be positive")
+    if pulse_guard_ticks < 0:
+        raise ValueError("pulse_guard_ticks must be non-negative")
+    if len(windows) == 0:
+        return
+
+    for window in windows:
+        expected_stimulation_start = window.start_tick + lead_ticks + pulse_guard_ticks
+        if window.stimulation_start_tick != expected_stimulation_start:
+            raise ValueError(
+                "Invalid stimulation for SysCon2 export: first associated laser pulse "
+                "must start exactly after lead-in + guard interval "
+                f"(neuron={window.neuron_index}, "
+                f"stimulation_start_tick={window.stimulation_start_tick}, "
+                f"expected_start_tick={expected_stimulation_start})."
+            )
+        max_stimulation_end = window.end_tick - pulse_guard_ticks
+        if window.stimulation_end_tick > max_stimulation_end:
+            raise ValueError(
+                "Invalid stimulation for SysCon2 export: laser pulse end is too "
+                "close to the end of the associated shape object "
+                f"(neuron={window.neuron_index}, "
+                f"stimulation_end_tick={window.stimulation_end_tick}, "
+                f"maximum_allowed_tick={max_stimulation_end})."
+            )
+
+
+def _validate_laser_pulse_end_before_overlapping_shapes(
+    pulse_intervals: list[tuple[int, int]],
+    scheduled_windows: list[_ScheduledEntityWindow],
+    *,
+    pulse_guard_ticks: int = 0,
+) -> None:
+    if pulse_guard_ticks < 0:
+        raise ValueError("pulse_guard_ticks must be non-negative")
+    if len(pulse_intervals) == 0:
+        return
+    if len(scheduled_windows) == 0:
+        raise ValueError(
+            "Invalid stimulation for SysCon2 export: laser pulses exist but no shape "
+            "windows were scheduled."
+        )
+
+    for pulse_start_tick, pulse_end_tick in pulse_intervals:
+        if pulse_end_tick <= pulse_start_tick:
+            raise ValueError(
+                "Invalid stimulation for SysCon2 export: encountered non-positive "
+                f"laser pulse interval [{pulse_start_tick}, {pulse_end_tick})."
+            )
+
+        overlapping_windows = [
+            window
+            for window in scheduled_windows
+            if not (
+                pulse_end_tick <= window.start_tick
+                or window.end_tick <= pulse_start_tick
+            )
+        ]
+        if len(overlapping_windows) == 0:
+            raise ValueError(
+                "Invalid stimulation for SysCon2 export: laser pulse interval does not "
+                "overlap any shape object "
+                f"(pulse_ticks=[{pulse_start_tick}, {pulse_end_tick}))."
+            )
+
+        for window in overlapping_windows:
+            latest_allowed_end_tick = window.end_tick - pulse_guard_ticks
+            if pulse_end_tick > latest_allowed_end_tick:
+                raise ValueError(
+                    "Invalid stimulation for SysCon2 export: laser pulse end exceeds "
+                    "the allowed end for an overlapping shape object "
+                    f"(pulse_ticks=[{pulse_start_tick}, {pulse_end_tick}), "
+                    f"shape_lane={window.lane}, neuron={window.neuron_index}, "
+                    f"shape_ticks=[{window.start_tick}, {window.end_tick}), "
+                    f"max_pulse_end_tick={latest_allowed_end_tick})."
+                )
 
 
 def _assign_entity_lanes(
@@ -1810,6 +2177,61 @@ def _shape_repeats_from_duration_quanta(duration_quanta: int) -> int:
     return max(0, int(duration_quanta) - 2)
 
 
+def _compute_overview_figure_width_in(max_end_ms: float) -> float:
+    # Keep long timelines legible without exploding image size.
+    target_ms_per_inch = 5000.0
+    return float(np.clip(max_end_ms / target_ms_per_inch, 12.0, 34.0))
+
+
+def _compute_overview_render_dpi(
+    *,
+    fig_width_inches: float,
+    fig_height_inches: float,
+) -> int:
+    base_dpi = 180.0
+    max_total_pixels = 28_000_000.0
+    required_dpi = np.sqrt(
+        max_total_pixels / max(1.0, fig_width_inches * fig_height_inches)
+    )
+    return int(np.clip(np.floor(required_dpi), 110.0, base_dpi))
+
+
+def _compute_overview_min_visible_duration_ms(
+    *,
+    max_end_ms: float,
+    fig_width_inches: float,
+    dpi: int,
+) -> float:
+    ms_per_pixel = max_end_ms / max(1.0, fig_width_inches * float(dpi))
+    return max(0.08, 1.25 * ms_per_pixel)
+
+
+def _select_overview_time_axis(max_end_ms: float) -> tuple[float, str]:
+    if max_end_ms >= 120_000.0:
+        return 1.0 / 60_000.0, "Time (min)"
+    if max_end_ms >= 8_000.0:
+        return 1.0 / 1_000.0, "Time (s)"
+    return 1.0, "Time (ms)"
+
+
+def _overview_tick_decimals(x_max: float) -> int:
+    if x_max >= 200.0:
+        return 0
+    if x_max >= 20.0:
+        return 1
+    if x_max >= 2.0:
+        return 2
+    return 3
+
+
+def _format_overview_duration_label(duration_ms: float) -> str:
+    if duration_ms >= 120_000.0:
+        return f"{duration_ms / 60_000.0:.1f} min"
+    if duration_ms >= 8_000.0:
+        return f"{duration_ms / 1_000.0:.1f} s"
+    return f"{duration_ms:.1f} ms"
+
+
 def _preview_object_duration_us(
     obj: SysconSequenceObject,
     *,
@@ -1837,3 +2259,124 @@ def _preview_object_color(object_type: str) -> str:
     if object_type == "ttlpulse":
         return "#d95f0e"
     return "#636363"
+
+
+def _extract_lightsource_ids_from_object(obj: SysconSequenceObject) -> set[str]:
+    ids: set[str] = set()
+    for key, value in obj.properties.items():
+        if "_lightsourceid_" not in key.lower():
+            continue
+        stripped = value.strip()
+        if stripped:
+            ids.add(stripped)
+    return ids
+
+
+def _build_timeline_axis_labels(
+    timeline_indices: list[int],
+    *,
+    timeline_objects: dict[int, list[SysconSequenceObject]],
+) -> dict[int, str]:
+    shape_timelines = sorted(
+        idx
+        for idx in timeline_indices
+        if any(
+            obj.object_type.strip().lower() in {"shape", "entity"}
+            for obj in timeline_objects.get(idx, [])
+        )
+    )
+    shape_lane_by_timeline = {
+        timeline_idx: lane_idx for lane_idx, timeline_idx in enumerate(shape_timelines)
+    }
+    inferred_holo4d_base = _infer_holo4d_timeline_base(shape_timelines)
+    explicit_holo4d_labels: dict[int, str] = {}
+    if inferred_holo4d_base is not None:
+        for wavelength_nm, offset in _LASER_TIMELINE_OFFSETS.items():
+            explicit_holo4d_labels[inferred_holo4d_base + offset] = (
+                f"Laser {wavelength_nm} nm"
+            )
+        explicit_holo4d_labels[inferred_holo4d_base + 3] = "TTL Out 1"
+        explicit_holo4d_labels[inferred_holo4d_base + 4] = "TTL Out 2"
+
+    labels: dict[int, str] = {}
+    for timeline_idx in timeline_indices:
+        objects = timeline_objects.get(timeline_idx, [])
+        lower_types = {obj.object_type.strip().lower() for obj in objects}
+
+        if timeline_idx in shape_lane_by_timeline:
+            lane_idx = shape_lane_by_timeline[timeline_idx]
+            labels[timeline_idx] = f"TL {timeline_idx} - Neuron lane {lane_idx}"
+            continue
+
+        explicit_name = explicit_holo4d_labels.get(timeline_idx)
+        ttl_objects = [
+            obj for obj in objects if obj.object_type.strip().lower() == "ttlpulse"
+        ]
+        if ttl_objects:
+            lightsource_ids = sorted(
+                {
+                    lightsource_id
+                    for obj in ttl_objects
+                    for lightsource_id in _extract_lightsource_ids_from_object(obj)
+                }
+            )
+            if lightsource_ids:
+                if explicit_name is not None:
+                    if len(lightsource_ids) == 1:
+                        labels[timeline_idx] = (
+                            f"TL {timeline_idx} - {explicit_name} ({lightsource_ids[0]})"
+                        )
+                    else:
+                        labels[timeline_idx] = f"TL {timeline_idx} - {explicit_name}"
+                elif len(lightsource_ids) == 1:
+                    labels[timeline_idx] = (
+                        f"TL {timeline_idx} - Laser ({lightsource_ids[0]})"
+                    )
+                else:
+                    labels[timeline_idx] = f"TL {timeline_idx} - Laser"
+                continue
+
+            ports = sorted(
+                {
+                    obj.properties.get("port", "").strip()
+                    for obj in ttl_objects
+                    if obj.properties.get("port", "").strip()
+                }
+            )
+            if len(ports) == 1:
+                port_label = ports[0]
+                if explicit_name is not None:
+                    labels[timeline_idx] = (
+                        f"TL {timeline_idx} - {explicit_name} ({port_label})"
+                    )
+                else:
+                    labels[timeline_idx] = f"TL {timeline_idx} - {port_label}"
+            else:
+                if explicit_name is not None:
+                    labels[timeline_idx] = f"TL {timeline_idx} - {explicit_name}"
+                else:
+                    labels[timeline_idx] = f"TL {timeline_idx} - TTL"
+            continue
+
+        if explicit_name is not None:
+            labels[timeline_idx] = f"TL {timeline_idx} - {explicit_name}"
+            continue
+
+        if len(lower_types) == 1:
+            object_type = next(iter(lower_types))
+            labels[timeline_idx] = f"TL {timeline_idx} - {object_type}"
+        elif len(lower_types) > 1:
+            labels[timeline_idx] = f"TL {timeline_idx} - mixed"
+        else:
+            labels[timeline_idx] = f"TL {timeline_idx}"
+
+    return labels
+
+
+def _infer_holo4d_timeline_base(shape_timelines: list[int]) -> int | None:
+    if len(shape_timelines) == 0:
+        return None
+    expected = list(range(shape_timelines[-1] + 1))
+    if shape_timelines != expected:
+        return None
+    return shape_timelines[-1] + 1

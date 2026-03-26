@@ -10,6 +10,7 @@ import qtawesome as qta
 from qtpy import QtWidgets
 from qtpy.compat import getexistingdirectory
 
+from neuroseq.exporter_syscon2 import GlobalSlmWindowViolation
 from neuroseq.exporter_syscon2 import InitialSlmLoadViolation
 from neuroseq.exporter_syscon2 import SimultaneousDurationViolation
 from neuroseq.exporter_syscon2 import SlmGapViolation
@@ -18,6 +19,7 @@ from neuroseq.exporter_syscon2 import SysconExportReport
 from neuroseq.exporter_syscon2 import align_stim_values_left_for_slm
 from neuroseq.exporter_syscon2 import check_syscon2_input_sanity
 from neuroseq.exporter_syscon2 import equalize_simultaneous_durations_to_min
+from neuroseq.exporter_syscon2 import find_global_slm_window_violations
 from neuroseq.exporter_syscon2 import find_initial_slm_load_violation
 from neuroseq.exporter_syscon2 import find_simultaneous_duration_violations
 from neuroseq.exporter_syscon2 import find_slm_gap_violations
@@ -25,6 +27,7 @@ from neuroseq.exporter_syscon2 import find_slm_off_on_overlap_violations
 from neuroseq.exporter_syscon2 import generate_syscon2_sequence_text
 from neuroseq.exporter_syscon2 import generate_syscon2_timeline_overview_png
 from neuroseq.exporter_syscon2 import shift_stim_values_right_for_initial_slm_load
+from neuroseq.exporter_syscon2 import snap_stim_values_to_global_slm_windows
 from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm
 from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm_off_on_overlap
 
@@ -236,6 +239,11 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         SHIFT_RIGHT = "shift_right"
         CANCEL = "cancel"
 
+    class _GlobalWindowFixChoice(Enum):
+        SNAP = "snap"
+        CONTINUE = "continue"
+        CANCEL = "cancel"
+
     def _update_stim_info(self) -> None:
         """Update the stimulation info label based on current selection."""
         stim_name = self.stim_combo.currentText()
@@ -395,7 +403,47 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
 
         stim_array = self.project.stim_arrays[stim_name]
         max_fix_iterations = max(1, stim_array.values.shape[0] * 2)
+        skip_global_window_autofix = False
         for _ in range(max_fix_iterations):
+            if not skip_global_window_autofix:
+                global_window_violations = find_global_slm_window_violations(
+                    stim_array,
+                    active_threshold=0.0,
+                )
+                if global_window_violations:
+                    global_window_choice = self._prompt_global_slm_window_fix_choice(
+                        global_window_violations,
+                    )
+                    if global_window_choice == self._GlobalWindowFixChoice.CANCEL:
+                        return
+                    if global_window_choice == self._GlobalWindowFixChoice.SNAP:
+                        (
+                            new_values,
+                            moved_segments,
+                            truncated_tail_timepoints,
+                        ) = snap_stim_values_to_global_slm_windows(
+                            stim_array,
+                            active_threshold=0.0,
+                        )
+                        changed = self._replace_stim_values_preserving_undo(
+                            stim_name,
+                            new_values,
+                        )
+                        if not changed:
+                            return
+                        self._log_status(
+                            "Global 16.66ms window snap moved %d segment(s).",
+                            moved_segments,
+                        )
+                        if truncated_tail_timepoints > 0:
+                            self._log_status(
+                                "Global-window snap truncated %d tail timepoints.",
+                                truncated_tail_timepoints,
+                            )
+                        stim_array = self.project.stim_arrays[stim_name]
+                        continue
+                    skip_global_window_autofix = True
+
             duration_violations = find_simultaneous_duration_violations(
                 stim_array,
                 active_threshold=0.0,
@@ -624,6 +672,56 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             "Sanity Check Passed",
             "\n".join(success_lines),
         )
+
+    def _prompt_global_slm_window_fix_choice(
+        self,
+        violations: list[GlobalSlmWindowViolation],
+    ) -> _GlobalWindowFixChoice:
+        first_violation = violations[0]
+        start_ms = first_violation.start_tick * 520.8125 / 1e3
+        snapped_start_ms = first_violation.snapped_start_tick * 520.8125 / 1e3
+        shift_ms = first_violation.shift_ticks * 520.8125 / 1e3
+        text_lines = [
+            (
+                "Detected stimulation starts outside global 16.66ms SLM windows "
+                "(sub-ms SysCon2 alignment grid)."
+            ),
+            "",
+            f"Violations detected: {len(violations)}",
+            (
+                "Example: "
+                f"neuron {first_violation.neuron_index}, "
+                f"start={start_ms:.3f}ms -> nearest allowed={snapped_start_ms:.3f}ms "
+                f"(delta {shift_ms:+.3f}ms)"
+            ),
+            "",
+            "Choose how to proceed:",
+            "1) Snap starts to nearest allowed global window (optional auto-fix)",
+            "2) Continue without this fix",
+            "3) Cancel",
+        ]
+        msg_box = QtWidgets.QMessageBox(self)
+        msg_box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+        msg_box.setWindowTitle("Global 16.66ms Window Misalignment Detected")
+        msg_box.setText("\n".join(text_lines))
+
+        snap_button = msg_box.addButton(
+            "Snap To Allowed Windows",
+            QtWidgets.QMessageBox.ButtonRole.ActionRole,
+        )
+        continue_button = msg_box.addButton(
+            "Continue Without Fix",
+            QtWidgets.QMessageBox.ButtonRole.ActionRole,
+        )
+        msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
+        msg_box.setDefaultButton(continue_button)
+        msg_box.exec()
+        clicked = msg_box.clickedButton()
+        if clicked == snap_button:
+            return self._GlobalWindowFixChoice.SNAP
+        if clicked == continue_button:
+            return self._GlobalWindowFixChoice.CONTINUE
+        return self._GlobalWindowFixChoice.CANCEL
 
     def _prompt_slm_off_on_overlap_fix_choice(
         self,

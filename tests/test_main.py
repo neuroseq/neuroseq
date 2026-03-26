@@ -95,6 +95,159 @@ def test_generate_cellpose_test_data_cli(
     assert np.unique(segmentation_array).shape[0] == 101
 
 
+def test_generate_cellpose_test_data_cli_square_size(
+    tmp_path: Path, cli_runner_fake_gui: CliRunner
+) -> None:
+    rows = 8
+    cols = 12
+    square_size = 1300
+    image_path = tmp_path / "cellpose_grid_square.tiff"
+    segmentation_path = tmp_path / "cellpose_grid_square_masks.npy"
+
+    result = cli_runner_fake_gui.invoke(
+        main,
+        [
+            "--generate-cellpose-test-data",
+            str(image_path),
+            "--cellpose-segmentation-output",
+            str(segmentation_path),
+            "--cellpose-grid-rows",
+            str(rows),
+            "--cellpose-grid-cols",
+            str(cols),
+            "--cellpose-radius",
+            "10",
+            "--cellpose-gap",
+            "10",
+            "--cellpose-square-size",
+            str(square_size),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert image_path.exists()
+    assert segmentation_path.exists()
+
+    image_array = np.array(Image.open(image_path))
+    segmentation_array = np.load(segmentation_path)
+
+    assert image_array.shape == (square_size, square_size)
+    assert segmentation_array.shape == (square_size, square_size)
+    assert segmentation_array.max() == rows * cols
+    assert np.unique(segmentation_array).shape[0] == (rows * cols) + 1
+
+
+def test_generate_cellpose_test_data_cli_square_size_preserve_radius_gap(
+    tmp_path: Path, cli_runner_fake_gui: CliRunner
+) -> None:
+    rows = 10
+    cols = 10
+    radius = 10
+    gap = 10
+    square_size = 1300
+    image_path = tmp_path / "cellpose_grid_square_fixed_geometry.tiff"
+    segmentation_path = tmp_path / "cellpose_grid_square_fixed_geometry_masks.npy"
+
+    result = cli_runner_fake_gui.invoke(
+        main,
+        [
+            "--generate-cellpose-test-data",
+            str(image_path),
+            "--cellpose-segmentation-output",
+            str(segmentation_path),
+            "--cellpose-grid-rows",
+            str(rows),
+            "--cellpose-grid-cols",
+            str(cols),
+            "--cellpose-radius",
+            str(radius),
+            "--cellpose-gap",
+            str(gap),
+            "--cellpose-square-size",
+            str(square_size),
+            "--cellpose-preserve-radius-gap",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert image_path.exists()
+    assert segmentation_path.exists()
+
+    image_array = np.array(Image.open(image_path))
+    segmentation_array = np.load(segmentation_path)
+    y1, x1 = np.where(segmentation_array == 1)
+    y2, x2 = np.where(segmentation_array == 2)
+    y_down, x_down = np.where(segmentation_array == (cols + 1))
+    center_1 = (x1.mean(), y1.mean())
+    center_2 = (x2.mean(), y2.mean())
+    center_down = (x_down.mean(), y_down.mean())
+
+    assert image_array.shape == (square_size, square_size)
+    assert segmentation_array.shape == (square_size, square_size)
+    assert segmentation_array.max() == rows * cols
+    assert np.unique(segmentation_array).shape[0] == (rows * cols) + 1
+    assert np.isclose(center_2[0] - center_1[0], (2 * radius) + gap)
+    assert np.isclose(center_down[1] - center_1[1], (2 * radius) + gap)
+
+
+def test_generate_cellpose_test_data_cli_square_size_preserve_radius_auto_gap(
+    tmp_path: Path, cli_runner_fake_gui: CliRunner
+) -> None:
+    rows = 8
+    cols = 12
+    radius = 10
+    square_size = 1300
+    expected_gap = min(
+        (square_size - (2 * radius * cols)) // (cols - 1),
+        (square_size - (2 * radius * rows)) // (rows - 1),
+    )
+    image_path = tmp_path / "cellpose_grid_square_fixed_radius_auto_gap.tiff"
+    segmentation_path = (
+        tmp_path / "cellpose_grid_square_fixed_radius_auto_gap_masks.npy"
+    )
+
+    result = cli_runner_fake_gui.invoke(
+        main,
+        [
+            "--generate-cellpose-test-data",
+            str(image_path),
+            "--cellpose-segmentation-output",
+            str(segmentation_path),
+            "--cellpose-grid-rows",
+            str(rows),
+            "--cellpose-grid-cols",
+            str(cols),
+            "--cellpose-radius",
+            str(radius),
+            "--cellpose-gap",
+            "1",
+            "--cellpose-square-size",
+            str(square_size),
+            "--cellpose-preserve-radius-auto-gap",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert image_path.exists()
+    assert segmentation_path.exists()
+
+    image_array = np.array(Image.open(image_path))
+    segmentation_array = np.load(segmentation_path)
+    y1, x1 = np.where(segmentation_array == 1)
+    y2, x2 = np.where(segmentation_array == 2)
+    y_down, x_down = np.where(segmentation_array == (cols + 1))
+    center_1 = (x1.mean(), y1.mean())
+    center_2 = (x2.mean(), y2.mean())
+    center_down = (x_down.mean(), y_down.mean())
+
+    assert image_array.shape == (square_size, square_size)
+    assert segmentation_array.shape == (square_size, square_size)
+    assert segmentation_array.max() == rows * cols
+    assert np.unique(segmentation_array).shape[0] == (rows * cols) + 1
+    assert np.isclose(center_2[0] - center_1[0], (2 * radius) + expected_gap)
+    assert np.isclose(center_down[1] - center_1[1], (2 * radius) + expected_gap)
+
+
 def test_cellpose_segmentation_output_requires_image_path(
     tmp_path: Path, cli_runner_fake_gui: CliRunner
 ) -> None:
@@ -109,3 +262,57 @@ def test_cellpose_segmentation_output_requires_image_path(
 
     assert result.exit_code != 0
     assert "--generate-cellpose-test-data" in result.output
+
+
+def test_cellpose_preserve_radius_gap_requires_square_size(
+    tmp_path: Path, cli_runner_fake_gui: CliRunner
+) -> None:
+    image_path = tmp_path / "cellpose_grid.tiff"
+    result = cli_runner_fake_gui.invoke(
+        main,
+        [
+            "--generate-cellpose-test-data",
+            str(image_path),
+            "--cellpose-preserve-radius-gap",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--cellpose-square-size" in result.output
+
+
+def test_cellpose_preserve_radius_auto_gap_requires_square_size(
+    tmp_path: Path, cli_runner_fake_gui: CliRunner
+) -> None:
+    image_path = tmp_path / "cellpose_grid.tiff"
+    result = cli_runner_fake_gui.invoke(
+        main,
+        [
+            "--generate-cellpose-test-data",
+            str(image_path),
+            "--cellpose-preserve-radius-auto-gap",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--cellpose-square-size" in result.output
+
+
+def test_cellpose_preserve_modes_are_mutually_exclusive(
+    tmp_path: Path, cli_runner_fake_gui: CliRunner
+) -> None:
+    image_path = tmp_path / "cellpose_grid.tiff"
+    result = cli_runner_fake_gui.invoke(
+        main,
+        [
+            "--generate-cellpose-test-data",
+            str(image_path),
+            "--cellpose-square-size",
+            "1300",
+            "--cellpose-preserve-radius-gap",
+            "--cellpose-preserve-radius-auto-gap",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "cannot be used together" in result.output

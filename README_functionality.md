@@ -6,7 +6,7 @@ This document explains how NeuroSeq works by scanning the repository code, espec
 - `external_simulation_example/*.py`
 - `tests/test_*.py`
 
-Scan date: 2026-03-18.
+Scan date: 2026-03-25.
 
 ## 1) What NeuroSeq is
 
@@ -338,33 +338,53 @@ Current implementation status:
 
 - hardware type list currently only `HOLO4D`,
 - output extension currently always `.seq`,
-- exporter also writes a timeline overview PNG (`<script_name>_overview.png`) alongside each `.seq`, visualizing timeline rows and object/pulse placement for quick ordering checks,
 - exports are generated from selected stim array + imported Cellpose segmentation using `exporter_syscon2.py`,
-- binary stimulation mode is used (`stim_value > 0` is ON, exported intensity fixed at `1.0`),
-- per-neuron segment compression is applied: contiguous ON samples become one exported segment, and these segments map directly to active-laser `TTLPulse` timing in `.seq`,
-- active neurons without a valid stimulus->cellpose mapping are skipped and reported to the user,
-- target coordinates are derived from segmentation centroids for mapped cellpose IDs,
-- number of neuron timelines is `N = max` simultaneously stimulated mapped neurons in the exported script,
-- first timelines (`0..N-1`) contain `Shape` point objects (neurons),
-- next three timelines are fixed laser lanes (`940nm`, `1030nm`, `1140nm`), with exactly one active per script (user-selectable in exporter, default `1140nm`),
-- `TTL Out 1` timeline contains a startup pulse at `t=0` quantized to SysCon2 TTL units (`~9.895ms`) and mirrors all active-laser pulses; `TTL Out 2` is kept empty,
-- export timing uses SysCon2 pulse quantum `0.5208125ms` (`TTLPulse` duration: `(repeats + 1) * 0.5208125ms`), with derounding from GUI ms-grid back to this quantum,
-- neuron object quantum is `16.666ms` (`32 * 0.5208125ms`) and `Shape` duration is encoded as `(repeats + 2) * 16.666ms`,
-- shape scheduling applies SLM phase constraints: first `16.66ms` of each `Shape` window are OFF, and when a new target appears (relative to the previous active set), current windows are closed and relevant neurons are restarted in a new phase with aligned OFF lead-in,
-- `Shape` start times are exported in TTL-quantum timing (`0.5208125ms` units) while duration still follows shape-quantum repeats (`(repeats + 2) * 16.666ms`),
-- script generator now has intensity mode toggle:
-  - binary mode (`ON -> 1.0`) for standard stimulation exports,
-  - non-binary mode to preserve input stim amplitudes in exported shape intensities (clipped to `[0,1]`),
-- dialog includes `Check Input Sanity` (dry-run validation) to verify translatability before file generation and to report warnings (e.g., unmapped active neurons, binary intensity coercion),
-- sanity check enforces equal-duration rule for simultaneous starts; if violated, dialog offers: `Equalize (to lowest value)` or `Cancel`,
-- sanity check enforces initial SLM load-up: first stimulation must start at least `16.66ms` after experiment start; if violated, dialog offers: `Translate All Inputs Right (+16.66 ms)` or `Cancel`,
-- sanity check enforces SLM switch gap: consecutive non-empty runs that introduce at least one new target must be separated by at least `16.66ms`,
-- sanity check enforces SLM OFF/ON overlap rule: OFF lead-in of a new phase must not overlap ON interval of another neuron; when violated, dialog proposes right-shift spacing based on computed minimum required shift and offers `Space Input Right` or `Cancel`,
-- when SLM-gap violations are detected, dialog offers: `Space Input Out` (right-shift with fixed array length), `Align Troublesome Stimuli (Left)`, or `Cancel`,
-- sanity fixes are applied iteratively with re-validation (duration -> initial load -> OFF/ON overlap -> SLM gap), so applying a later fix cannot silently invalidate an earlier rule,
-- automatic fixes are applied through the StimEditor modifier path in all fix branches so standard undo/redo remains functional for the edited stim array,
-- header/template fields are taken from the editable HOLO4D config block (lines before first object block), legacy v2-era keys are sanitized/removed, and object blocks are regenerated from stim/cellpose data.
-- when a SysCon2 file is loaded via import dialog, its header block is stored as the default export template for subsequent script generation in the same project/session.
+- exporter normalizes/sanitizes template header fields (SysCon2 v3 defaults, connector key cleanup, required timing fields) and auto-detects source/laser/TTL ports from template/header text,
+- export input segmentation pipeline is pulse-first:
+- contiguous ON samples (`stim_value > threshold`) are extracted per neuron as segments,
+- segments are mapped to SysCon2 TTL ticks using `round(time_us / 520.8125us)` for both segment start and duration,
+- active segments without valid stimulus->cellpose mapping are skipped and reported,
+- target coordinates come from Cellpose centroid lookup for mapped IDs,
+- segment intensity is either fixed binary (`1.0`) or preserved from input amplitude (clipped to `[0,1]`) depending on mode,
+- active-laser pulse intervals are the merged union of mapped segment intervals (touching intervals are merged: `start <= current_end`),
+- shape windows are inferred from mapped segment timing per neuron and per phase (phases split when a new target appears relative to the previous active set),
+- SLM lead/guard constants are enforced in TTL tick units:
+- lead-in is `16.66ms` (`32` TTL ticks at `520.8125us`),
+- boundary guard is `1` TTL tick (`0.5208125ms`),
+- for each inferred shape window:
+- `shape_start_tick = first_associated_pulse_start_tick - (lead_ticks + guard_ticks)`,
+- `shape_end_tick` is quantized upward to shape quanta (`32` TTL ticks, i.e. `16.666ms`) with minimum 2 quanta,
+- this guarantees `shape_end_tick - last_associated_pulse_end_tick >= 1` TTL tick,
+- hard exporter validations before writing blocks:
+- first associated pulse starts exactly at `shape_start + lead + guard`,
+- associated pulses end at least one TTL tick before shape end,
+- OFF portion of one shape (`[start, start+lead+guard)`) does not overlap another neuron's ON interval,
+- every merged laser pulse overlaps at least one scheduled shape window and ends before every overlapping shape's guarded end,
+- lane scheduling uses interval coloring (min-heap assignment) with lane count `N = max` simultaneously active mapped segments,
+- timeline layout is fixed:
+- `0..N-1` = shape/neuron lanes,
+- `N+0..N+2` = laser timelines (`940`, `1030`, `1140` nm),
+- `N+3` = `TTL Out 1`, `N+4` = `TTL Out 2`,
+- exactly one laser timeline is active per export (selector in dialog; default `1140nm`),
+- emitted block order is deterministic:
+- all shape blocks first (sorted by `start_tick, lane, neuron_index`),
+- active-laser `TTLPulse` blocks from merged pulse intervals,
+- `TTL Out 1` startup pulse at `t=0` (`~9.895ms`, 19 TTL ticks) plus mirrored laser pulses,
+- `TTL Out 2` intentionally empty,
+- object timing encoding rules:
+- `TTLPulse` duration = `(repeats + 1) * 520.8125us`,
+- `Shape` duration = `(repeats + 2) * 16.666ms`,
+- generated sequence text is parser-validated immediately (`parse_syscon2_seq_text`) and summarized via `SysconExportReport`,
+- exporter writes a timeline overview PNG (`<script_name>_overview.png`) showing rows, object spans, SLM lead-in overlay, and explicit timeline labels (`Neuron lane`, `Laser <wavelength>`, `TTL Out`/port when inferable); the renderer adapts figure width, time units, and minimum visible pulse width for long timelines to remain readable,
+- script generator sanity workflow (`Check Input Sanity`) runs iterative fix/check stages with undo-compatible stim replacement:
+- optional global 16.66ms alignment warning stage (fixed global SLM windows at `32` TTL-tick cadence, lead+guard offset),
+- optional auto-fix `Snap To Allowed Windows` (snap each segment start to nearest global window, keep duration/amplitude, report tail truncation),
+- simultaneous-start duration equalization option (`Equalize to lowest value`),
+- initial SLM load-up enforcement (first stimulation must start after lead-in window),
+- SLM switch-gap enforcement when introducing new targets,
+- SLM OFF/ON overlap enforcement with right-shift fix option,
+- if global-window warning is not fixed, sanity can still pass with warnings (not a hard failure),
+- header/template fields come from HOLO4D config text (lines before first object block); when a SysCon2 file is imported, its header block becomes the default export template for later script generation in the same project/session.
 
 ## 9) Data import pipelines
 
@@ -401,8 +421,66 @@ The result is stored as `CellposeImportResult` in project state.
 - `neuroseq --generate-cellpose-test-data <output.tif>` creates synthetic Cellpose-compatible files and exits.
 - Default geometry is a `10 x 10` grid of circular targets with radius `10 px` and `10 px` gap.
 - Companion segmentation output is saved as `<stem>_segmentation.npy` by default, or explicitly via `--cellpose-segmentation-output`.
-- Generator options include `--cellpose-grid-rows`, `--cellpose-grid-cols`, `--cellpose-radius`, `--cellpose-gap`.
+- Generator options include `--cellpose-grid-rows`, `--cellpose-grid-cols`, `--cellpose-radius`, `--cellpose-gap`, and optional `--cellpose-square-size`.
+- When `--cellpose-square-size` is set (for example `1300`), output is exactly `1300x1300`.
+- Default square behavior is auto-fit: rows/cols stay fixed while radius/gap are adjusted to fill the square canvas.
+- New fixed-geometry square behavior: add `--cellpose-preserve-radius-gap` to keep the exact `--cellpose-radius` and `--cellpose-gap`; the grid is centered in the square and generation fails if it does not fit.
+- New fixed-radius auto-gap behavior: add `--cellpose-preserve-radius-auto-gap` to keep `--cellpose-radius` fixed while auto-fitting only the gap from `rows/cols/radius/square-size`.
+- `--cellpose-auto-fit-radius-gap` can be passed explicitly to force the default auto-fit behavior.
 - Generated segmentation uses Cellpose-style integer labeling (`0` background, targets labeled `1..N`).
+
+Copy-paste examples:
+
+```bash
+# 1) Default test data (10x10, radius=10, gap=10)
+python -m neuroseq \
+  --generate-cellpose-test-data examplary_data/cellpose_default.tif
+```
+
+```bash
+# 2) Custom rows/cols/radius/gap and explicit segmentation output path
+python -m neuroseq \
+  --generate-cellpose-test-data examplary_data/cellpose_custom.tif \
+  --cellpose-segmentation-output examplary_data/cellpose_custom_segmentation.npy \
+  --cellpose-grid-rows 8 \
+  --cellpose-grid-cols 12 \
+  --cellpose-radius 7 \
+  --cellpose-gap 5
+```
+
+```bash
+# 3) Fixed square output (1300x1300) with default auto-fit radius/gap
+python -m neuroseq \
+  --generate-cellpose-test-data examplary_data/cellpose_1300_autofit.tif \
+  --cellpose-grid-rows 10 \
+  --cellpose-grid-cols 10 \
+  --cellpose-radius 10 \
+  --cellpose-gap 10 \
+  --cellpose-square-size 1300
+```
+
+```bash
+# 4) Fixed square output (1300x1300) with fixed radius/gap (no auto-fit)
+python -m neuroseq \
+  --generate-cellpose-test-data examplary_data/cellpose_1300_fixed.tif \
+  --cellpose-grid-rows 10 \
+  --cellpose-grid-cols 10 \
+  --cellpose-radius 10 \
+  --cellpose-gap 10 \
+  --cellpose-square-size 1300 \
+  --cellpose-preserve-radius-gap
+```
+
+```bash
+# 5) Fixed square output with fixed radius and auto-fitted gap
+python -m neuroseq \
+  --generate-cellpose-test-data examplary_data/cellpose_1300_fixed_radius_auto_gap.tif \
+  --cellpose-grid-rows 8 \
+  --cellpose-grid-cols 12 \
+  --cellpose-radius 10 \
+  --cellpose-square-size 1300 \
+  --cellpose-preserve-radius-auto-gap
+```
 
 ### 9.3 Patch-clamp import
 
@@ -803,5 +881,3 @@ The following table maps each `src/neuroseq` file to primary functionality.
 | `timeseries_widget.py`               | shared timeseries interaction base class                                   |
 | `trace_widget.py`                    | trace line-stack viewer                                                    |
 | `utils.py`                           | cross-cutting helpers                                                      |
-
-
