@@ -14,7 +14,7 @@ The generation of stimuli in Igor Pro environment is controled in "Routine Edito
 
 The environment also has its own file format .ibw to store a stimuli of arbitraty shape. Neuroseq can directly generate the files of this format and facilitates import to SutterPatch. In this case, .ibw file with a sequence can be directly imported into  
 
-
+[123](../images/SutterPatch_TemplateEditor.png)
 
 
 
