@@ -6,19 +6,65 @@
 
 The main layout of NeuroSeq consist of several widgets: the main widget for modification (drawing) of stimulation patterns (1), the widgets for visulisation of neuronal activity in form of traces (2) or spikes (3), monitor of synaptic connectivity (4). It also include a pad to quickly show some relevant analysis plots (5) and a GUI console (6).
 
-Each widget can be shown and hidden in menu "View" or using the corresponding toolbar:
+The navigation in widgets (1-3) can be done with scrolling sliders or by holding a middle mouse button and moving the field of view of a given widget. By default, the field of new in all widgets is connected.
+
+Zooming in and zooming out is done by corresponding "+" and "-" buttons or by holding "ctrl" or "shift" buttons and rotating mouse wheel for x- and y-axis, respectively.
+
+Each widget can be shown or hidden in menu "View" by using the corresponding toolbar:
 
 ![Show/hide widgets](../images/toggle_widgets.png)
 
-In addition to elements 1-6, the toolbar also contains an additional, universal widget that can dupicate widget (2) or (3), useful for subsequent visulisation and data analysis. Addtionally, the button with capital "T" toggle and untoggle text annotation next to a mouse cursor.
+In addition to elements 1-6, the toolbar contains a universal widget that can dupicate widgets (2) and (3), useful for subsequent visulisation and data analysis. The button with capital "T" toggles and untoggles text annotation next to a mouse cursor.
 
-The project may contrain not only one, but several stimulation arrays. The user can select which one to show in the widget one, using a drop down manu in the first section of the folloing toolbar:
+The project may contrain not only one, but several stimulation arrays. The user can select which one to show in the widget one, using a drop down manu in the "Stim data:" section of the folloing toolbar:
+
+![Data selection](../images/data_selection.png).
+
+Similarly, the trace, spike and synapce data may contain a list of different data entries (generated in computational, biologial or neuromorphic experiments) with corresponding drop down menues. "All data" corresponds to a universal widget where any data in a form of traces or spikes can be independently selected. 
 
 ![Data selection](../images/data_selection.png).
 
-Similarly, the trace, spike and synapce data may contain a list of different data entries (generated in computational, biologial or neuromorphic experiments) with corresponding drop down menues. "All data" correspond to universal widget where any data in a form of traces or spikes can be independently selected. Normalization of traces and synaptic monitors can be with buttons next to the corresponding drop down menues.
+ ## Stimulation editor
 
-![Data selection](../images/data_selection.png).
+The stimulatation pattern can be edited using the toolbar located at the left side of a main window. The editing can be operated in draw and select modes. 
+
+![Draw mode](../images/draw_mode.png)
+
+![Select mode](../images/select_mode.png)
+
+In the drawing mode, the user can switch between "draw stimulus" and "erise stimulus" regimes and choose the amplitude and duration of the a drawn stimuli. The amplitude of a stimulus can be constant, gradient and log-gradient and random.
+
+![Amplitude selection](../images/amplitude_selection.png).
+
+Mouse can be used for drawing stimuli: left click is drawing and right click is erising. In erise mode, the functionality of the left and right buttons is inverted.
+A longer stimulus can be drawing by holding a mouse button.
+
+The intensity of stimulation is coded with transparency and normalized on the maximum value in an array. In the following example the relative ampitudes of stimuli are shown as 1 : 0.75 : 0.5 : 0.25 : 0.125 :
+
+![Stimulus intensity](../images/stimulus_intensity.png).
+
+If "select mode" is active, the drawing options are not availible anymore, insteed other options are availible for selecting, copying, cutting, saving selected region and so on. The user can "do" and "undo" modifications in the editor using the corresponding buttons.
+
+The toolbar also contains a pad with for creating/deleting new stim arrays, modifying the properties of the existing stimulation array (name, type, number of neurons and physical units) and padding/trimming the duration of an existing array.
+
+The option "show all stim arrays" gives a possibility to show all stim arrays at the same time in one widget. In this case, the selected array remains the same, while other arrays will be shown in background with additional transparency applied.  
+
+## Neuron data and spike data widgets 
+
+Once the simulation is run or trace data is exported, it became availible in drop down menu "Neuron data". Natigation is done as described above. Normalization of traces can be set with buttons next it with a possibility to normalize traces on a median value and clip/upclip them to permit to restrict traces to the provided space for each neuron or provide a possibility to occupy an unlimited space within the widget. Spike data widget is analogous to the neuron data widget but constructed to represent binary spike events.
+
+## Synaptic data widget
+
+The synaptic data widget contains the information about the states of synaptic connections in a given time point. Using the replay mechanism described below one can access the modifications of synapic changes.
+
+## Universal widget
+
+During analysis, it may be desirable to show an additional copy of the widget, for example, to compare two different periods or neuronal populations within the same widget and at the same time. For this a universal "all data" widget was constructed.
+
+## Analysis widget
+
+The user can select a given region of the "neuron data" widget and access an analysis menu by right click of a mouse, and choosing a desired analysis plot/routine.
+It can shown within "analysis widget" or opened in a new window.
 
 ## GUI Console
 
@@ -56,24 +102,22 @@ If the changes are invalid, then an error message will be displayed in the conso
     Invalid stims: expected dict[str, 1d or 2d numpy array], found dict with 3d numpy array for key 'stimulus'
 ```
 
-### Model editing
-
-It is also possible to modify other aspects of the model using the console, by interacting with the `model` object.
-Try `help(model)` to see what methods and attributes are available.
-
-### brian2 objects
+### Model and brian2 objects
 
 The objects from the underlying brian2 model can also be accessed. For example, you can get a list of monitors with
 
 ```python
->>> model.monitors.keys()
+>>> project.b2_model.monitors.keys()
 dict_keys(['Traces_v', 'spikemon', 'synmon'])
 ```
-
 And you can then get the underlying brian2 monitor object with e.g.
 
 ```python
->>> monitor = model.get_monitor('Traces_v')['object']
+>>> monitor = project.b2_model.get_monitor('Traces_v')['object']
 ```
 
 Note that these objects should not be directly modified using the console, as it will cause the GUI and `model` to become out of sync with the underlying brian2 model.
+
+It is also possible to modify other aspects of the model using the console, by interacting with the `project.b2_model` object.
+Try `help(project.b2_model)` to see what methods and attributes are available.
+
