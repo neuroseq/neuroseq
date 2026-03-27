@@ -20,15 +20,9 @@ Similarly, the trace, spike and synapce data may contain a list of different dat
 
 ![Data selection](../images/data_selection.png).
 
- 
-
-
-
-
-
 ## GUI Console
 
-The GUI console is a text box at the bottom of the GUI that can be used to run a custom Python code. 
+The GUI console is a text box at the bottom of the GUI that can be used to run a custom Python code.
 
 The code is executed in the same Python environment as the GUI, with the following variables/objects made available (run dir() command to see the list):
 
@@ -83,4 +77,3 @@ And you can then get the underlying brian2 monitor object with e.g.
 ```
 
 Note that these objects should not be directly modified using the console, as it will cause the GUI and `model` to become out of sync with the underlying brian2 model.
-
