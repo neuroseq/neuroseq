@@ -11,7 +11,6 @@
 
 Use experiment manager dialogs to keep runs organized and reproducible.
 
-
 To generate synthetic Cellpose test data (TIFF image + matching `.npy` segmentation):
 
 ```bash

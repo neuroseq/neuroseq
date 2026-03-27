@@ -9,4 +9,4 @@ The NeuroSeq is an open-source project. Everyone can suggest and implement impro
 3. [Install](developer_installation.md) in editable mode.
 4. Modify the code.
 5. Test new functionality.
-5. Run [pytests](\testing.md) before opening a pull request.
+6. Run [pytests](\testing.md) before opening a pull request.

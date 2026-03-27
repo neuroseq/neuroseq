@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from neuroseq.cellpose_test_data import generate_cellpose_test_grid
@@ -44,6 +45,154 @@ def test_generate_cellpose_test_grid_spacing() -> None:
 
     assert np.isclose(center_2[0] - center_1[0], 30.0)
     assert np.isclose(center_3[1] - center_1[1], 30.0)
+
+
+def test_generate_cellpose_test_grid_square_size() -> None:
+    image_array, segmentation_array = generate_cellpose_test_grid(
+        rows=10,
+        cols=10,
+        radius=10,
+        gap=10,
+        square_size=1300,
+    )
+
+    assert image_array.shape == (1300, 1300)
+    assert segmentation_array.shape == (1300, 1300)
+    assert segmentation_array.max() == 100
+    assert np.unique(segmentation_array).shape[0] == 101
+
+
+def test_generate_cellpose_test_grid_square_size_preserves_rows_cols() -> None:
+    rows = 7
+    cols = 13
+    _, segmentation_array = generate_cellpose_test_grid(
+        rows=rows,
+        cols=cols,
+        radius=10,
+        gap=10,
+        square_size=1300,
+    )
+
+    assert segmentation_array.shape == (1300, 1300)
+    assert segmentation_array.max() == rows * cols
+    assert np.unique(segmentation_array).shape[0] == (rows * cols) + 1
+
+
+def test_generate_cellpose_test_grid_square_size_preserve_radius_gap() -> None:
+    radius = 10
+    gap = 10
+    rows = 10
+    cols = 10
+    square_size = 1300
+    _, segmentation_array = generate_cellpose_test_grid(
+        rows=rows,
+        cols=cols,
+        radius=radius,
+        gap=gap,
+        square_size=square_size,
+        preserve_radius_gap=True,
+    )
+
+    y1, x1 = np.where(segmentation_array == 1)
+    y2, x2 = np.where(segmentation_array == 2)
+    y_down, x_down = np.where(segmentation_array == (cols + 1))
+    center_1 = (x1.mean(), y1.mean())
+    center_2 = (x2.mean(), y2.mean())
+    center_down = (x_down.mean(), y_down.mean())
+
+    assert segmentation_array.shape == (square_size, square_size)
+    assert segmentation_array.max() == rows * cols
+    assert np.unique(segmentation_array).shape[0] == (rows * cols) + 1
+    assert np.isclose(center_2[0] - center_1[0], (2 * radius) + gap)
+    assert np.isclose(center_down[1] - center_1[1], (2 * radius) + gap)
+
+    yy, xx = np.ogrid[-radius : radius + 1, -radius : radius + 1]
+    expected_pixels = np.count_nonzero((yy**2) + (xx**2) <= radius**2)
+    assert np.count_nonzero(segmentation_array == 1) == expected_pixels
+
+
+def test_generate_cellpose_test_grid_square_size_preserve_radius_auto_gap() -> None:
+    rows = 8
+    cols = 12
+    radius = 10
+    square_size = 1300
+    expected_gap = min(
+        (square_size - (2 * radius * cols)) // (cols - 1),
+        (square_size - (2 * radius * rows)) // (rows - 1),
+    )
+    _, segmentation_array = generate_cellpose_test_grid(
+        rows=rows,
+        cols=cols,
+        radius=radius,
+        gap=1,
+        square_size=square_size,
+        preserve_radius_auto_gap=True,
+    )
+
+    y1, x1 = np.where(segmentation_array == 1)
+    y2, x2 = np.where(segmentation_array == 2)
+    y_down, x_down = np.where(segmentation_array == (cols + 1))
+    center_1 = (x1.mean(), y1.mean())
+    center_2 = (x2.mean(), y2.mean())
+    center_down = (x_down.mean(), y_down.mean())
+
+    assert segmentation_array.shape == (square_size, square_size)
+    assert segmentation_array.max() == rows * cols
+    assert np.unique(segmentation_array).shape[0] == (rows * cols) + 1
+    assert np.isclose(center_2[0] - center_1[0], (2 * radius) + expected_gap)
+    assert np.isclose(center_down[1] - center_1[1], (2 * radius) + expected_gap)
+
+    yy, xx = np.ogrid[-radius : radius + 1, -radius : radius + 1]
+    expected_pixels = np.count_nonzero((yy**2) + (xx**2) <= radius**2)
+    assert np.count_nonzero(segmentation_array == 1) == expected_pixels
+
+
+def test_generate_cellpose_test_grid_square_size_too_small() -> None:
+    with pytest.raises(ValueError, match="square_size is too small"):
+        generate_cellpose_test_grid(
+            rows=10,
+            cols=10,
+            radius=10,
+            gap=10,
+            square_size=10,
+        )
+
+
+def test_generate_cellpose_test_grid_square_size_too_small_for_fixed_geometry() -> None:
+    with pytest.raises(ValueError, match="fixed geometry"):
+        generate_cellpose_test_grid(
+            rows=10,
+            cols=10,
+            radius=10,
+            gap=10,
+            square_size=100,
+            preserve_radius_gap=True,
+        )
+
+
+def test_generate_cellpose_test_grid_square_size_too_small_for_fixed_radius() -> None:
+    with pytest.raises(ValueError, match="fixed radius geometry"):
+        generate_cellpose_test_grid(
+            rows=10,
+            cols=10,
+            radius=10,
+            gap=10,
+            square_size=100,
+            preserve_radius_auto_gap=True,
+        )
+
+
+def test_generate_cellpose_test_grid_square_size_exclusive_preserve_modes() -> None:
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        generate_cellpose_test_grid(
+            rows=10,
+            cols=10,
+            radius=10,
+            gap=10,
+            square_size=1300,
+            preserve_radius_gap=True,
+            preserve_radius_auto_gap=True,
+        )
 
 
 def test_save_cellpose_test_data_roundtrip(tmp_path: Path) -> None:

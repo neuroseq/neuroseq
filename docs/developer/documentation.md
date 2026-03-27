@@ -27,8 +27,3 @@ mkdocs build
 ```
 
 The generated site is written to the `site/` folder.
-
-
-
-
-

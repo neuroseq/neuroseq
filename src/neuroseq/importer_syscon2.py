@@ -38,6 +38,10 @@ _SAME_NEURON_MAX_CENTER_DISTANCE_UM = 1.0
 _HOLO4D_TTL_OUT_START_PULSE_MIN_US = 9_000
 _SYSCON2_TTL_PULSE_QUANTUM_US = 520.8125
 _SYSCON2_NEURON_OBJECT_QUANTUM_US = 32 * _SYSCON2_TTL_PULSE_QUANTUM_US
+_SYSCON2_WINDOW_TICKS = 32
+_NEUROSEQ_WINDOW_SAMPLES = 17
+_NEUROSEQ_DT_SECONDS = 0.001
+_NEUROSEQ_DT_TOLERANCE_SECONDS = 1e-9
 
 
 @dataclass
@@ -300,6 +304,60 @@ def _ttl_pulse_duration_us(
     _ = tick_resolution_us
     duration_ticks = max(1, obj.repeats + 1)
     return float(duration_ticks) * _SYSCON2_TTL_PULSE_QUANTUM_US
+
+
+def _time_us_to_tick(time_us: float) -> int:
+    return int(np.rint(time_us / _SYSCON2_TTL_PULSE_QUANTUM_US))
+
+
+def _is_fixed_window_import_mode(
+    *,
+    dt_seconds: float,
+    pulses: list[SysconSequenceObject],
+) -> bool:
+    if not np.isclose(
+        float(dt_seconds),
+        _NEUROSEQ_DT_SECONDS,
+        atol=_NEUROSEQ_DT_TOLERANCE_SECONDS,
+        rtol=0.0,
+    ):
+        return False
+    if len(pulses) == 0:
+        return False
+
+    for pulse in pulses:
+        start_tick = _time_us_to_tick(float(pulse.start_time_us))
+        snapped_start_us = start_tick * _SYSCON2_TTL_PULSE_QUANTUM_US
+        if not np.isclose(
+            float(pulse.start_time_us),
+            float(snapped_start_us),
+            atol=1e-3,
+            rtol=0.0,
+        ):
+            return False
+        duration_ticks = max(1, pulse.repeats + 1)
+        if start_tick % _SYSCON2_WINDOW_TICKS != 0:
+            return False
+        if duration_ticks % _SYSCON2_WINDOW_TICKS != 0:
+            return False
+    return True
+
+
+def _ticks_interval_to_neuro_indices(
+    *,
+    start_tick: int,
+    end_tick: int,
+) -> tuple[int, int]:
+    start_window = int(np.rint(start_tick / float(_SYSCON2_WINDOW_TICKS)))
+    end_window = int(np.rint(end_tick / float(_SYSCON2_WINDOW_TICKS)))
+    if end_window <= start_window:
+        end_window = start_window + 1
+
+    start_idx = max(0, start_window * _NEUROSEQ_WINDOW_SAMPLES)
+    end_idx = max(
+        start_idx + _NEUROSEQ_WINDOW_SAMPLES, end_window * _NEUROSEQ_WINDOW_SAMPLES
+    )
+    return start_idx, max(1, end_idx - start_idx)
 
 
 def _shape_object_duration_us(
@@ -613,6 +671,10 @@ def _sequence_to_stim_values_holo4d_layout(
         key=lambda item: (-len(item[1]), item[0]),
     )[0]
     _ = active_timeline_idx
+    use_fixed_window_mapping = _is_fixed_window_import_mode(
+        dt_seconds=dt_seconds,
+        pulses=active_timeline_pulses,
+    )
     # In Holo4D layout, laser TTLPulse objects are the true stimulation events.
     # Entity objects define availability windows (SLM lead-in + placement duration).
     pulse_intervals = _merge_time_intervals_us(
@@ -676,16 +738,24 @@ def _sequence_to_stim_values_holo4d_layout(
                 if effective_end_us <= effective_start_us:
                     continue
 
-                start_idx = int(np.rint((effective_start_us * 1e-6) / dt_seconds))
-                duration_timepoints = max(
-                    1,
-                    int(
-                        np.rint(
-                            ((effective_end_us - effective_start_us) * 1e-6)
-                            / dt_seconds
-                        )
-                    ),
-                )
+                if use_fixed_window_mapping:
+                    effective_start_tick = _time_us_to_tick(effective_start_us)
+                    effective_end_tick = _time_us_to_tick(effective_end_us)
+                    start_idx, duration_timepoints = _ticks_interval_to_neuro_indices(
+                        start_tick=effective_start_tick,
+                        end_tick=effective_end_tick,
+                    )
+                else:
+                    start_idx = int(np.rint((effective_start_us * 1e-6) / dt_seconds))
+                    duration_timepoints = max(
+                        1,
+                        int(
+                            np.rint(
+                                ((effective_end_us - effective_start_us) * 1e-6)
+                                / dt_seconds
+                            )
+                        ),
+                    )
                 end_idx = start_idx + duration_timepoints
                 intervals_by_neuron[neuron_idx].append(
                     (start_idx, end_idx, entity.intensity)

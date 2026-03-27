@@ -68,7 +68,7 @@ It can shown within "analysis widget" or opened in a new window.
 
 ## GUI Console
 
-The GUI console is a text box at the bottom of the GUI that can be used to run a custom Python code. 
+The GUI console is a text box at the bottom of the GUI that can be used to run a custom Python code.
 
 The code is executed in the same Python environment as the GUI, with the following variables/objects made available (run dir() command to see the list):
 
