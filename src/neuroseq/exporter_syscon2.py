@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import csv
 import heapq
+import io
 import pathlib
 import re
 from collections import OrderedDict
 from collections import defaultdict
 from dataclasses import dataclass
+from dataclasses import field
 
 import brian2.numpy_ as np
 
@@ -48,6 +51,56 @@ _SUPPORTED_LASER_WAVELENGTHS_NM = (940, 1030, 1140)
 _LEGACY_LASER_WAVELENGTH_ALIASES_NM = {1040: 1030}
 _DEFAULT_ACTIVE_LASER_WAVELENGTH_NM = 1140
 _LASER_TIMELINE_OFFSETS = {940: 0, 1030: 1, 1140: 2}
+_LIGHTSOURCE_ID_BY_WAVELENGTH_NM = {
+    940: "dummy_0_0",
+    1030: "dummy_1_0",
+    1140: "dummy_2_0",
+}
+
+_NEUROSEQ_SAMPLE_US = 1_000.0
+_NEUROSEQ_WINDOW_MS = 17.0
+_NEUROSEQ_WINDOW_US = _NEUROSEQ_WINDOW_MS * 1e3
+_NEUROSEQ_WINDOW_SAMPLES = 17
+_SYSCON2_WINDOW_TICKS = 32
+_SYSCON2_WINDOW_US = _SYSCON2_WINDOW_TICKS * _SYSCON2_TTL_PULSE_QUANTUM_US
+_NEUROSEQ_DT_TOLERANCE_S = 1e-9
+
+_DEBUG_CSV_COLUMNS: tuple[str, ...] = (
+    "export_id",
+    "row_seq",
+    "row_type",
+    "stage",
+    "object_id",
+    "parent_id",
+    "neuron_id",
+    "hologram_id",
+    "timeline_index",
+    "lane_index",
+    "lightsource_id",
+    "laser_nm",
+    "start_neuro_ms",
+    "end_neuro_ms_excl",
+    "duration_neuro_ms",
+    "neuro_win_start",
+    "neuro_win_count",
+    "start_sys_us",
+    "end_sys_us_excl",
+    "duration_sys_us",
+    "start_sys_tick",
+    "duration_sys_tick",
+    "sys_win_start",
+    "sys_win_count",
+    "intensity_in",
+    "intensity_out",
+    "includes_load_window",
+    "preblank_win_required",
+    "preblank_win_present",
+    "fix_code",
+    "fix_value",
+    "source_ids",
+    "status",
+    "message",
+)
 
 
 @dataclass(frozen=True)
@@ -114,6 +167,8 @@ class SysconExportReport:
     laser_timeline_index: int
     ttl_out1_timeline_index: int
     ttl_out2_timeline_index: int
+    debug_csv_text: str = ""
+    sanity_fix_messages: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -122,6 +177,58 @@ class SysconInputSanityReport:
     errors: list[str]
     warnings: list[str]
     export_report: SysconExportReport | None
+    sanitized_values: np.ndarray | None = None
+    fix_messages: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _RawSegment:
+    segment_id: str
+    neuron_index: int
+    start_idx: int
+    end_idx: int
+    intensity_in: float
+
+
+@dataclass(frozen=True)
+class _WindowSegment:
+    segment_id: str
+    neuron_index: int
+    start_win: int
+    win_count: int
+    intensity_out: float
+    source_ids: tuple[str, ...]
+
+    @property
+    def end_win(self) -> int:
+        return self.start_win + self.win_count
+
+
+@dataclass(frozen=True)
+class _SanityFix:
+    code: str
+    message: str
+    value: str
+    source_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _Hologram:
+    hologram_id: int
+    start_win: int
+    end_win: int
+    neuron_indices: tuple[int, ...]
+    preblank_present: bool
+
+
+@dataclass
+class _SanitizedStimModel:
+    window_values: np.ndarray
+    raw_segments: list[_RawSegment]
+    sanitized_segments: list[_WindowSegment]
+    holograms: list[_Hologram]
+    fixes: list[_SanityFix]
+    truncated_tail_windows: int
 
 
 @dataclass(frozen=True)
@@ -189,22 +296,18 @@ def generate_syscon2_sequence_text(
     force_binary_intensity: bool = True,
     active_laser_wavelength_nm: int = _DEFAULT_ACTIVE_LASER_WAVELENGTH_NM,
 ) -> tuple[str, SysconExportReport]:
-    """Generate SysCon2 `.seq` content from stim-array + Cellpose segmentation.
-
-    Export model:
-    - Binary mode: values > active_threshold are considered ON.
-    - First timelines are neuron lanes (N = max simultaneously stimulated neurons).
-    - Next 3 timelines are fixed laser timelines (940, 1030, 1140 nm).
-    - Next 2 timelines are TTL outputs:
-      TTL Out 1 mirrors laser pulses + initial 10ms pulse, TTL Out 2 empty.
-    - Shape objects include SLM lead-in and 16.666ms-quantized placement constraints.
-    """
+    """Generate SysCon2 `.seq` content with fixed 17ms->16.666ms window mapping."""
     if stim_array.values.ndim != 2:
         raise ValueError("Stim array values must be 2D (timepoints x neurons)")
     if tick_resolution_us <= 0:
         raise ValueError("tick_resolution_us must be positive")
     if force_binary_intensity and (binary_intensity < 0 or binary_intensity > 1):
         raise ValueError("binary_intensity must be within [0, 1]")
+    if cellpose_data is None:
+        raise ValueError("Cellpose data is required to export SysCon2 .seq")
+    if cellpose_data.segmentation_array is None:
+        raise ValueError("Cellpose segmentation is required to export SysCon2 .seq")
+
     active_laser_wavelength_nm = _normalize_active_laser_wavelength_nm(
         active_laser_wavelength_nm
     )
@@ -213,22 +316,33 @@ def generate_syscon2_sequence_text(
             "active_laser_wavelength_nm must be one of "
             f"{_SUPPORTED_LASER_WAVELENGTHS_NM}"
         )
-    if cellpose_data is None:
-        raise ValueError("Cellpose data is required to export SysCon2 .seq")
-    if cellpose_data.segmentation_array is None:
-        raise ValueError("Cellpose segmentation is required to export SysCon2 .seq")
+    _require_1ms_neuroseq_tick(stim_array)
 
     header_lines = _build_header_lines(template_text)
     (
-        lightsource_id,
-        lightsource_port,
+        _template_lightsource_id,
+        template_lightsource_port,
         ttl_out_1_port,
         ttl_out_2_port,
     ) = _detect_port_info(template_text, header_lines)
+    lightsource_id = _LIGHTSOURCE_ID_BY_WAVELENGTH_NM[active_laser_wavelength_nm]
+    lightsource_port = (
+        template_lightsource_port
+        if lightsource_id in template_lightsource_port
+        else f"{lightsource_id} RMI In"
+    )
 
-    segments = _extract_active_segments(stim_array.values, active_threshold)
-    active_neurons = sorted({segment.neuron_index for segment in segments})
-    active_neurons_set = set(active_neurons)
+    sanitized = _sanitize_stim_array_for_export(
+        stim_array,
+        active_threshold=active_threshold,
+        binary_intensity=binary_intensity,
+        force_binary_intensity=force_binary_intensity,
+    )
+
+    if len(sanitized.sanitized_segments) == 0:
+        raise ValueError(
+            "No active stimulation remained after sanity quantization/fixes."
+        )
 
     segmentation = cellpose_data.segmentation_array
     centroids = _compute_cell_centroids(segmentation)
@@ -238,55 +352,44 @@ def generate_syscon2_sequence_text(
         set(centroids.keys()),
     )
 
-    sample_us = float(stim_array.dt * 1e6)
-    _ = tick_resolution_us
-    lead_ticks = int(np.ceil(_SLM_LEAD_IN_US / _SYSCON2_TTL_PULSE_QUANTUM_US))
-    min_entity_duration_ticks = int(
-        np.ceil(_ENTITY_MIN_DURATION_US / _SYSCON2_TTL_PULSE_QUANTUM_US)
-    )
-
     mapped_segments: list[_MappedSegment] = []
     skipped_segments_unmapped = 0
-    mapped_active_neurons: set[int] = set()
     unmapped_active_neurons: set[int] = set()
+    mapped_active_neurons: set[int] = set()
+    active_neurons = sorted(
+        {segment.neuron_index for segment in sanitized.raw_segments}
+    )
 
-    for segment in segments:
+    mapped_window_values = np.zeros_like(sanitized.window_values)
+    for segment in sanitized.sanitized_segments:
         cellpose_id = neuron_to_cellpose.get(segment.neuron_index)
         if cellpose_id is None or cellpose_id not in centroids:
             skipped_segments_unmapped += 1
-            if segment.neuron_index in active_neurons_set:
-                unmapped_active_neurons.add(segment.neuron_index)
+            unmapped_active_neurons.add(segment.neuron_index)
             continue
-
-        mapped_active_neurons.add(segment.neuron_index)
         center_x, center_y = centroids[cellpose_id]
-        # Deround GUI timing (ms grid) back to SysCon2 pulse quantum units.
-        start_tick = int(
-            np.rint((segment.start_idx * sample_us) / _SYSCON2_TTL_PULSE_QUANTUM_US)
-        )
-        duration_us = float(segment.duration_idx) * sample_us
-        duration_ticks = max(
-            1, int(np.rint(duration_us / _SYSCON2_TTL_PULSE_QUANTUM_US))
-        )
-        end_tick = start_tick + duration_ticks
-        if force_binary_intensity:
-            export_intensity = binary_intensity
-        else:
-            segment_values = stim_array.values[
-                segment.start_idx : segment.start_idx + segment.duration_idx,
-                segment.neuron_index,
-            ]
-            export_intensity = float(np.max(segment_values))
-            export_intensity = float(np.clip(export_intensity, 0.0, 1.0))
+        mapped_active_neurons.add(segment.neuron_index)
+        start_tick = segment.start_win * _SYSCON2_WINDOW_TICKS
+        end_tick = segment.end_win * _SYSCON2_WINDOW_TICKS
         mapped_segments.append(
             _MappedSegment(
                 neuron_index=segment.neuron_index,
                 start_tick=start_tick,
                 end_tick=end_tick,
-                intensity=export_intensity,
+                intensity=segment.intensity_out,
                 center_x=center_x,
                 center_y=center_y,
             )
+        )
+        mapped_window_values[
+            segment.start_win : segment.end_win,
+            segment.neuron_index,
+        ] = np.maximum(
+            mapped_window_values[
+                segment.start_win : segment.end_win,
+                segment.neuron_index,
+            ],
+            segment.intensity_out,
         )
 
     if len(mapped_segments) == 0:
@@ -298,61 +401,91 @@ def generate_syscon2_sequence_text(
     pulse_intervals = _merge_tick_intervals(
         [(segment.start_tick, segment.end_tick) for segment in mapped_segments]
     )
+    mapped_holograms = _build_holograms_from_window_values(mapped_window_values)
 
-    max_simultaneous = _max_simultaneous_segments(mapped_segments)
-    entity_windows = _build_entity_windows(
-        mapped_segments,
-        lead_ticks=lead_ticks,
-        min_duration_ticks=min_entity_duration_ticks,
-        pulse_guard_ticks=_TTL_PULSE_BOUNDARY_GUARD_TICKS,
-    )
-    _validate_pulse_bounds_within_entity_windows(
-        entity_windows,
-        lead_ticks=lead_ticks,
-        pulse_guard_ticks=_TTL_PULSE_BOUNDARY_GUARD_TICKS,
-    )
-    _validate_no_off_on_overlap(
-        entity_windows,
-        lead_ticks=lead_ticks,
-        pulse_guard_ticks=_TTL_PULSE_BOUNDARY_GUARD_TICKS,
-    )
-    scheduled_windows = _assign_entity_lanes(entity_windows, max_simultaneous)
+    entity_windows: list[_EntityWindow] = []
+    for hologram in mapped_holograms:
+        if len(hologram.neuron_indices) == 0:
+            continue
+        shape_start_win = max(0, hologram.start_win - 1)
+        for neuron_idx in hologram.neuron_indices:
+            neuron_slice = mapped_window_values[
+                hologram.start_win : hologram.end_win, neuron_idx
+            ]
+            active_offsets = np.flatnonzero(neuron_slice > 0)
+            if active_offsets.size == 0:
+                continue
+            first_active_win = hologram.start_win + int(active_offsets[0])
+            last_active_win_excl = hologram.start_win + int(active_offsets[-1]) + 1
+            shape_end_win = max(last_active_win_excl, shape_start_win + 2)
+            stimulation_start_tick = first_active_win * _SYSCON2_WINDOW_TICKS
+            stimulation_end_tick = last_active_win_excl * _SYSCON2_WINDOW_TICKS
+            start_tick = shape_start_win * _SYSCON2_WINDOW_TICKS
+            end_tick = shape_end_win * _SYSCON2_WINDOW_TICKS
+            matching_segments = [
+                segment
+                for segment in mapped_segments
+                if segment.neuron_index == neuron_idx
+                and not (
+                    segment.end_tick <= stimulation_start_tick
+                    or stimulation_end_tick <= segment.start_tick
+                )
+            ]
+            intensity = max(
+                (segment.intensity for segment in matching_segments), default=1.0
+            )
+            center_x = matching_segments[0].center_x
+            center_y = matching_segments[0].center_y
+            entity_windows.append(
+                _EntityWindow(
+                    neuron_index=neuron_idx,
+                    stimulation_start_tick=stimulation_start_tick,
+                    stimulation_end_tick=stimulation_end_tick,
+                    start_tick=start_tick,
+                    end_tick=end_tick,
+                    intensity=intensity,
+                    center_x=center_x,
+                    center_y=center_y,
+                )
+            )
+
+    if len(entity_windows) == 0:
+        raise ValueError("No shape windows could be generated for mapped stimulation.")
+
+    lane_count = _max_simultaneous_entity_windows(entity_windows)
+    scheduled_windows = _assign_entity_lanes(entity_windows, lane_count)
     scheduled_windows.sort(
         key=lambda window: (window.start_tick, window.lane, window.neuron_index)
     )
     _validate_laser_pulse_end_before_overlapping_shapes(
         pulse_intervals,
         scheduled_windows,
-        pulse_guard_ticks=_TTL_PULSE_BOUNDARY_GUARD_TICKS,
+        pulse_guard_ticks=0,
     )
 
-    n_entity_lanes = max_simultaneous
-    laser_timeline_base = n_entity_lanes
+    n_entity_lanes = lane_count
     laser_timeline_index = (
-        laser_timeline_base + _LASER_TIMELINE_OFFSETS[active_laser_wavelength_nm]
+        n_entity_lanes + _LASER_TIMELINE_OFFSETS[active_laser_wavelength_nm]
     )
-    ttl_out1_timeline_index = laser_timeline_base + 3
-    ttl_out2_timeline_index = laser_timeline_base + 4
-    ttl_out_start_duration_ticks = max(
-        1, int(np.rint(_TTL_OUT_1_START_PULSE_US / _SYSCON2_TTL_PULSE_QUANTUM_US))
-    )
+    ttl_out1_timeline_index = n_entity_lanes + 3
+    ttl_out2_timeline_index = n_entity_lanes + 4
+    _ = ttl_out_2_port
 
     object_blocks: list[list[str]] = []
     next_object_id = 1
+    shape_block_rows: list[tuple[int, _ScheduledEntityWindow]] = []
+    laser_block_rows: list[tuple[int, tuple[int, int]]] = []
+    ttl_out_block_rows: list[tuple[int, tuple[int, int]]] = []
 
     for shape_counter, window in enumerate(scheduled_windows):
-        duration_ticks = max(1, window.end_tick - window.start_tick)
         duration_shape_quanta = max(
             2,
-            int(
-                np.ceil(
-                    duration_ticks / float(_SYSCON2_NEURON_OBJECT_QUANTUM_IN_TTL_UNITS)
-                )
-            ),
+            int(np.rint((window.end_tick - window.start_tick) / _SYSCON2_WINDOW_TICKS)),
         )
+        block_object_id = next_object_id
         object_blocks.append(
             _format_object_block(
-                object_id=next_object_id,
+                object_id=block_object_id,
                 block_index=len(object_blocks),
                 object_type="Shape",
                 properties=[
@@ -390,13 +523,15 @@ def generate_syscon2_sequence_text(
                 ],
             )
         )
+        shape_block_rows.append((block_object_id, window))
         next_object_id += 1
 
     for start_tick, end_tick in pulse_intervals:
         duration_ticks = max(1, end_tick - start_tick)
+        block_object_id = next_object_id
         object_blocks.append(
             _format_ttl_pulse_block(
-                object_id=next_object_id,
+                object_id=block_object_id,
                 block_index=len(object_blocks),
                 timeline_index=laser_timeline_index,
                 start_tick=start_tick,
@@ -406,27 +541,15 @@ def generate_syscon2_sequence_text(
                 include_lightsource=True,
             )
         )
+        laser_block_rows.append((block_object_id, (start_tick, end_tick)))
         next_object_id += 1
 
-    # TTL Out 1: fixed 10ms start pulse + mirrored laser pulses.
-    object_blocks.append(
-        _format_ttl_pulse_block(
-            object_id=next_object_id,
-            block_index=len(object_blocks),
-            timeline_index=ttl_out1_timeline_index,
-            start_tick=0,
-            duration_ticks=ttl_out_start_duration_ticks,
-            port=ttl_out_1_port,
-            lightsource_id="",
-            include_lightsource=False,
-        )
-    )
-    next_object_id += 1
     for start_tick, end_tick in pulse_intervals:
         duration_ticks = max(1, end_tick - start_tick)
+        block_object_id = next_object_id
         object_blocks.append(
             _format_ttl_pulse_block(
-                object_id=next_object_id,
+                object_id=block_object_id,
                 block_index=len(object_blocks),
                 timeline_index=ttl_out1_timeline_index,
                 start_tick=start_tick,
@@ -436,25 +559,36 @@ def generate_syscon2_sequence_text(
                 include_lightsource=False,
             )
         )
+        ttl_out_block_rows.append((block_object_id, (start_tick, end_tick)))
         next_object_id += 1
-
-    # TTL Out 2 intentionally remains empty.
-    _ = ttl_out_2_port
 
     lines = list(header_lines)
     for block in object_blocks:
         lines.extend(block)
     sequence_text = "\n".join(lines).rstrip() + "\n"
-
-    # Ensure generated sequence can be parsed by our SysCon2 parser.
     parse_syscon2_seq_text(sequence_text)
+
+    debug_csv_text = _build_debug_csv_text(
+        sanitized=sanitized,
+        mapped_segments=mapped_segments,
+        mapped_holograms=mapped_holograms,
+        scheduled_windows=scheduled_windows,
+        shape_block_rows=shape_block_rows,
+        laser_block_rows=laser_block_rows,
+        ttl_out_block_rows=ttl_out_block_rows,
+        unmapped_active_neurons=sorted(unmapped_active_neurons),
+        active_laser_wavelength_nm=active_laser_wavelength_nm,
+        lightsource_id=lightsource_id,
+        laser_timeline_index=laser_timeline_index,
+        ttl_out1_timeline_index=ttl_out1_timeline_index,
+    )
 
     report = SysconExportReport(
         total_neurons=stim_array.values.shape[1],
         active_neurons=len(active_neurons),
         mapped_active_neurons=len(mapped_active_neurons),
         unmapped_active_neurons=sorted(unmapped_active_neurons),
-        total_segments=len(segments),
+        total_segments=len(sanitized.raw_segments),
         exported_segments=len(mapped_segments),
         skipped_segments_unmapped=skipped_segments_unmapped,
         entity_lanes=n_entity_lanes,
@@ -463,8 +597,820 @@ def generate_syscon2_sequence_text(
         laser_timeline_index=laser_timeline_index,
         ttl_out1_timeline_index=ttl_out1_timeline_index,
         ttl_out2_timeline_index=ttl_out2_timeline_index,
+        debug_csv_text=debug_csv_text,
+        sanity_fix_messages=[fix.message for fix in sanitized.fixes],
     )
     return sequence_text, report
+
+
+def _require_1ms_neuroseq_tick(stim_array: StimArray) -> None:
+    if not np.isclose(
+        float(stim_array.dt),
+        0.001,
+        atol=_NEUROSEQ_DT_TOLERANCE_S,
+        rtol=0.0,
+    ):
+        raise ValueError(
+            "SysCon2 export expects a NeuroSeq tick of 1ms (stim_array.dt == 0.001s)."
+        )
+
+
+def _extract_raw_segments(
+    values: np.ndarray,
+    *,
+    active_threshold: float,
+) -> list[_RawSegment]:
+    raw_segments: list[_RawSegment] = []
+    for idx, segment in enumerate(_extract_active_segments(values, active_threshold)):
+        end_idx = int(segment.start_idx + segment.duration_idx)
+        segment_values = values[segment.start_idx : end_idx, segment.neuron_index]
+        intensity_in = float(np.max(segment_values)) if segment_values.size > 0 else 0.0
+        raw_segments.append(
+            _RawSegment(
+                segment_id=f"raw_{idx}",
+                neuron_index=int(segment.neuron_index),
+                start_idx=int(segment.start_idx),
+                end_idx=end_idx,
+                intensity_in=intensity_in,
+            )
+        )
+    return raw_segments
+
+
+def _merge_window_segments(segments: list[_WindowSegment]) -> list[_WindowSegment]:
+    merged: dict[tuple[int, int, int], tuple[float, set[str]]] = {}
+    for segment in segments:
+        key = (segment.neuron_index, segment.start_win, segment.win_count)
+        if key not in merged:
+            merged[key] = (float(segment.intensity_out), set(segment.source_ids))
+            continue
+        prev_intensity, source_ids = merged[key]
+        source_ids.update(segment.source_ids)
+        merged[key] = (
+            max(float(prev_intensity), float(segment.intensity_out)),
+            source_ids,
+        )
+
+    result: list[_WindowSegment] = []
+    for idx, (key, payload) in enumerate(
+        sorted(merged.items(), key=lambda item: (item[0][1], item[0][0], item[0][2]))
+    ):
+        neuron_idx, start_win, win_count = key
+        intensity, source_ids_set = payload
+        source_ids_tuple = tuple(sorted(source_ids_set))
+        result.append(
+            _WindowSegment(
+                segment_id=f"seg_{idx}",
+                neuron_index=neuron_idx,
+                start_win=start_win,
+                win_count=win_count,
+                intensity_out=float(intensity),
+                source_ids=source_ids_tuple,
+            )
+        )
+    return result
+
+
+def _raw_to_quantized_window_segments(
+    raw_segments: list[_RawSegment],
+    *,
+    binary_intensity: float,
+    force_binary_intensity: bool,
+) -> tuple[list[_WindowSegment], list[_SanityFix]]:
+    quantized: list[_WindowSegment] = []
+    fixes: list[_SanityFix] = []
+
+    for raw_segment in raw_segments:
+        raw_duration = max(1, raw_segment.end_idx - raw_segment.start_idx)
+        start_win = raw_segment.start_idx // _NEUROSEQ_WINDOW_SAMPLES
+        end_win = int(np.ceil(raw_segment.end_idx / float(_NEUROSEQ_WINDOW_SAMPLES)))
+        win_count = max(1, end_win - start_win)
+
+        snapped_start_idx = start_win * _NEUROSEQ_WINDOW_SAMPLES
+        snapped_duration = win_count * _NEUROSEQ_WINDOW_SAMPLES
+        if snapped_start_idx != raw_segment.start_idx:
+            fixes.append(
+                _SanityFix(
+                    code="align_start_to_17ms_window",
+                    message=(
+                        f"Aligned neuron {raw_segment.neuron_index} start from "
+                        f"{raw_segment.start_idx}ms to {snapped_start_idx}ms."
+                    ),
+                    value=str(snapped_start_idx - raw_segment.start_idx),
+                    source_ids=(raw_segment.segment_id,),
+                )
+            )
+        if raw_duration < _NEUROSEQ_WINDOW_SAMPLES:
+            fixes.append(
+                _SanityFix(
+                    code="expand_short_stimulus_to_17ms",
+                    message=(
+                        f"Expanded neuron {raw_segment.neuron_index} stimulus duration "
+                        f"from {raw_duration}ms to {_NEUROSEQ_WINDOW_SAMPLES}ms."
+                    ),
+                    value=str(_NEUROSEQ_WINDOW_SAMPLES - raw_duration),
+                    source_ids=(raw_segment.segment_id,),
+                )
+            )
+        elif snapped_duration != raw_duration:
+            fixes.append(
+                _SanityFix(
+                    code="quantize_duration_to_17ms_windows",
+                    message=(
+                        f"Quantized neuron {raw_segment.neuron_index} duration from "
+                        f"{raw_duration}ms to {snapped_duration}ms."
+                    ),
+                    value=str(snapped_duration - raw_duration),
+                    source_ids=(raw_segment.segment_id,),
+                )
+            )
+
+        if force_binary_intensity:
+            intensity_out = float(binary_intensity)
+        else:
+            intensity_out = float(np.clip(raw_segment.intensity_in, 0.0, 1.0))
+        quantized.append(
+            _WindowSegment(
+                segment_id=f"quant_{raw_segment.segment_id}",
+                neuron_index=raw_segment.neuron_index,
+                start_win=start_win,
+                win_count=win_count,
+                intensity_out=intensity_out,
+                source_ids=(raw_segment.segment_id,),
+            )
+        )
+
+    return _merge_window_segments(quantized), fixes
+
+
+def _build_overlap_components(segments: list[_WindowSegment]) -> list[list[int]]:
+    if len(segments) <= 1:
+        return [[idx] for idx in range(len(segments))]
+
+    adjacency: list[set[int]] = [set() for _ in segments]
+    for left_idx, left_segment in enumerate(segments):
+        for right_idx in range(left_idx + 1, len(segments)):
+            right_segment = segments[right_idx]
+            overlaps = (
+                left_segment.start_win < right_segment.end_win
+                and right_segment.start_win < left_segment.end_win
+            )
+            if not overlaps:
+                continue
+            adjacency[left_idx].add(right_idx)
+            adjacency[right_idx].add(left_idx)
+
+    components: list[list[int]] = []
+    visited: set[int] = set()
+    for idx in range(len(segments)):
+        if idx in visited:
+            continue
+        stack = [idx]
+        component: list[int] = []
+        while stack:
+            current = stack.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            component.append(current)
+            stack.extend(
+                neighbor for neighbor in adjacency[current] if neighbor not in visited
+            )
+        components.append(sorted(component))
+    return components
+
+
+def _normalize_overlapping_window_segments(
+    segments: list[_WindowSegment],
+) -> tuple[list[_WindowSegment], list[_SanityFix]]:
+    fixes: list[_SanityFix] = []
+    current = _merge_window_segments(segments)
+    if len(current) <= 1:
+        return current, fixes
+
+    max_iterations = max(1, len(current) * 4)
+    for _ in range(max_iterations):
+        components = _build_overlap_components(current)
+        updated: list[_WindowSegment] = []
+        any_change = False
+
+        start_override: dict[int, int] = {}
+        count_override: dict[int, int] = {}
+        for component in components:
+            if len(component) <= 1:
+                continue
+            target_start = min(current[idx].start_win for idx in component)
+            target_count = min(current[idx].win_count for idx in component)
+            for idx in component:
+                start_override[idx] = target_start
+                count_override[idx] = target_count
+
+        for idx, segment in enumerate(current):
+            new_start = start_override.get(idx, segment.start_win)
+            new_count = count_override.get(idx, segment.win_count)
+            if new_start != segment.start_win:
+                any_change = True
+                fixes.append(
+                    _SanityFix(
+                        code="align_overlap_start_left",
+                        message=(
+                            f"Aligned overlapping stimulus for neuron "
+                            f"{segment.neuron_index} to window {new_start}."
+                        ),
+                        value=str(new_start - segment.start_win),
+                        source_ids=segment.source_ids,
+                    )
+                )
+            if new_count != segment.win_count:
+                any_change = True
+                fixes.append(
+                    _SanityFix(
+                        code="trim_overlap_duration_to_shortest",
+                        message=(
+                            f"Trimmed overlapping stimulus for neuron "
+                            f"{segment.neuron_index} to {new_count * _NEUROSEQ_WINDOW_MS:.0f}ms."
+                        ),
+                        value=str(new_count - segment.win_count),
+                        source_ids=segment.source_ids,
+                    )
+                )
+            updated.append(
+                _WindowSegment(
+                    segment_id=segment.segment_id,
+                    neuron_index=segment.neuron_index,
+                    start_win=new_start,
+                    win_count=max(1, new_count),
+                    intensity_out=segment.intensity_out,
+                    source_ids=segment.source_ids,
+                )
+            )
+
+        if not any_change:
+            break
+        current = _merge_window_segments(updated)
+
+    return current, fixes
+
+
+def _window_segments_to_matrix(
+    segments: list[_WindowSegment],
+    *,
+    n_windows: int,
+    n_neurons: int,
+) -> np.ndarray:
+    window_values = np.zeros((n_windows, n_neurons), dtype=np.float32)
+    for segment in segments:
+        if segment.neuron_index < 0 or segment.neuron_index >= n_neurons:
+            continue
+        start_win = max(0, segment.start_win)
+        end_win = min(n_windows, segment.end_win)
+        if end_win <= start_win:
+            continue
+        window_values[start_win:end_win, segment.neuron_index] = np.maximum(
+            window_values[start_win:end_win, segment.neuron_index],
+            segment.intensity_out,
+        )
+    return window_values
+
+
+def _window_matrix_to_segments(
+    window_values: np.ndarray,
+    *,
+    segment_prefix: str,
+) -> list[_WindowSegment]:
+    segments: list[_WindowSegment] = []
+    n_windows, n_neurons = window_values.shape
+    next_idx = 0
+    for neuron_idx in range(n_neurons):
+        active = window_values[:, neuron_idx] > 0.0
+        if not np.any(active):
+            continue
+        padded = np.concatenate(
+            (
+                np.array([False], dtype=bool),
+                active.astype(bool),
+                np.array([False], dtype=bool),
+            )
+        )
+        starts = np.where((~padded[:-1]) & padded[1:])[0]
+        ends = np.where(padded[:-1] & (~padded[1:]))[0]
+        for start_win, end_win in zip(starts, ends, strict=False):
+            if end_win <= start_win:
+                continue
+            intensity = float(np.max(window_values[start_win:end_win, neuron_idx]))
+            segments.append(
+                _WindowSegment(
+                    segment_id=f"{segment_prefix}_{next_idx}",
+                    neuron_index=neuron_idx,
+                    start_win=int(start_win),
+                    win_count=int(end_win - start_win),
+                    intensity_out=float(np.clip(intensity, 0.0, 1.0)),
+                    source_ids=(),
+                )
+            )
+            next_idx += 1
+    return segments
+
+
+def _build_holograms_from_window_values(window_values: np.ndarray) -> list[_Hologram]:
+    active = window_values > 0.0
+    n_windows = active.shape[0]
+    holograms: list[_Hologram] = []
+
+    current_start: int | None = None
+    current_end = 0
+    current_neurons: set[int] = set()
+    previous_non_empty_window: int | None = None
+
+    def flush_current() -> None:
+        nonlocal current_start, current_end, current_neurons
+        if current_start is None:
+            return
+        preblank_present = bool(
+            current_start > 0 and not np.any(active[current_start - 1, :])
+        )
+        holograms.append(
+            _Hologram(
+                hologram_id=len(holograms),
+                start_win=current_start,
+                end_win=current_end,
+                neuron_indices=tuple(sorted(current_neurons)),
+                preblank_present=preblank_present,
+            )
+        )
+        current_start = None
+        current_end = 0
+        current_neurons = set()
+
+    for window_idx in range(n_windows):
+        active_neurons = set(np.flatnonzero(active[window_idx]).tolist())
+        if len(active_neurons) == 0:
+            flush_current()
+            previous_non_empty_window = None
+            continue
+
+        if current_start is None:
+            current_start = window_idx
+            current_end = window_idx + 1
+            current_neurons = set(active_neurons)
+            previous_non_empty_window = window_idx
+            continue
+
+        contiguous = (
+            previous_non_empty_window is not None
+            and window_idx == previous_non_empty_window + 1
+        )
+        introduces_new_neuron = len(active_neurons - current_neurons) > 0
+        if (not contiguous) or introduces_new_neuron:
+            flush_current()
+            current_start = window_idx
+            current_end = window_idx + 1
+            current_neurons = set(active_neurons)
+            previous_non_empty_window = window_idx
+            continue
+
+        current_end = window_idx + 1
+        current_neurons |= active_neurons
+        previous_non_empty_window = window_idx
+
+    flush_current()
+    return holograms
+
+
+def _enforce_preblank_windows(
+    window_values: np.ndarray,
+) -> tuple[np.ndarray, list[_Hologram], list[_SanityFix], int]:
+    adjusted = np.array(window_values, copy=True)
+    fixes: list[_SanityFix] = []
+    truncated_tail_windows = 0
+    n_windows = adjusted.shape[0]
+
+    max_iterations = max(1, n_windows * 3)
+    for _ in range(max_iterations):
+        holograms = _build_holograms_from_window_values(adjusted)
+        violation = next(
+            (hologram for hologram in holograms if not hologram.preblank_present),
+            None,
+        )
+        if violation is None:
+            return adjusted, holograms, fixes, truncated_tail_windows
+
+        shift_start = violation.start_win
+        tail = adjusted[shift_start:, :].copy()
+        adjusted[shift_start:, :] = 0
+        write_start = shift_start + 1
+        if write_start < n_windows:
+            writable = n_windows - write_start
+            adjusted[write_start:, :] = tail[:writable, :]
+            dropped = max(0, tail.shape[0] - writable)
+        else:
+            dropped = tail.shape[0]
+        if dropped > 0:
+            truncated_tail_windows += dropped
+
+        fixes.append(
+            _SanityFix(
+                code="insert_preblank_window",
+                message=(
+                    f"Inserted 17ms blank window before hologram {violation.hologram_id} "
+                    f"(start window {violation.start_win})."
+                ),
+                value="1",
+                source_ids=tuple(
+                    str(neuron_idx) for neuron_idx in violation.neuron_indices
+                ),
+            )
+        )
+
+    final_holograms = _build_holograms_from_window_values(adjusted)
+    return adjusted, final_holograms, fixes, truncated_tail_windows
+
+
+def _sanitize_stim_array_for_export(
+    stim_array: StimArray,
+    *,
+    active_threshold: float,
+    binary_intensity: float,
+    force_binary_intensity: bool,
+) -> _SanitizedStimModel:
+    values = np.asarray(stim_array.values)
+    n_timepoints, n_neurons = values.shape
+    n_windows = int(np.ceil(n_timepoints / float(_NEUROSEQ_WINDOW_SAMPLES)))
+
+    raw_segments = _extract_raw_segments(values, active_threshold=active_threshold)
+    quantized_segments, quantization_fixes = _raw_to_quantized_window_segments(
+        raw_segments,
+        binary_intensity=binary_intensity,
+        force_binary_intensity=force_binary_intensity,
+    )
+    normalized_segments, overlap_fixes = _normalize_overlapping_window_segments(
+        quantized_segments
+    )
+    window_values = _window_segments_to_matrix(
+        normalized_segments,
+        n_windows=n_windows,
+        n_neurons=n_neurons,
+    )
+    adjusted_windows, holograms, preblank_fixes, truncated_tail_windows = (
+        _enforce_preblank_windows(window_values)
+    )
+    sanitized_segments = _window_matrix_to_segments(
+        adjusted_windows,
+        segment_prefix="sanitized",
+    )
+    return _SanitizedStimModel(
+        window_values=adjusted_windows,
+        raw_segments=raw_segments,
+        sanitized_segments=sanitized_segments,
+        holograms=holograms,
+        fixes=[*quantization_fixes, *overlap_fixes, *preblank_fixes],
+        truncated_tail_windows=truncated_tail_windows,
+    )
+
+
+def _window_values_to_sample_values(
+    window_values: np.ndarray,
+    *,
+    n_timepoints: int,
+) -> np.ndarray:
+    n_windows, n_neurons = window_values.shape
+    result = np.zeros((n_timepoints, n_neurons), dtype=np.float32)
+    for window_idx in range(n_windows):
+        start_idx = window_idx * _NEUROSEQ_WINDOW_SAMPLES
+        if start_idx >= n_timepoints:
+            break
+        end_idx = min(n_timepoints, start_idx + _NEUROSEQ_WINDOW_SAMPLES)
+        result[start_idx:end_idx, :] = window_values[window_idx, :]
+    return result
+
+
+def _max_simultaneous_entity_windows(windows: list[_EntityWindow]) -> int:
+    if len(windows) == 0:
+        return 1
+    events: dict[int, int] = defaultdict(int)
+    for window in windows:
+        events[window.start_tick] += 1
+        events[window.end_tick] -= 1
+    concurrent = 0
+    max_concurrent = 0
+    for tick in sorted(events.keys()):
+        concurrent += events[tick]
+        max_concurrent = max(max_concurrent, concurrent)
+    return max(1, max_concurrent)
+
+
+def _debug_row(
+    *,
+    row_type: str,
+    stage: str,
+    **values: object,
+) -> dict[str, str]:
+    row = {column: "" for column in _DEBUG_CSV_COLUMNS}
+    row["row_type"] = row_type
+    row["stage"] = stage
+    for key, value in values.items():
+        if key not in row:
+            continue
+        if isinstance(value, bool):
+            row[key] = "True" if value else "False"
+        elif isinstance(value, float):
+            row[key] = _format_float(value)
+        elif value is None:
+            row[key] = ""
+        else:
+            row[key] = str(value)
+    return row
+
+
+def _find_hologram_id_for_window(
+    holograms: list[_Hologram],
+    window_idx: int,
+) -> str:
+    for hologram in holograms:
+        if hologram.start_win <= window_idx < hologram.end_win:
+            return str(hologram.hologram_id)
+    return ""
+
+
+def _build_debug_csv_text(
+    *,
+    sanitized: _SanitizedStimModel,
+    mapped_segments: list[_MappedSegment],
+    mapped_holograms: list[_Hologram],
+    scheduled_windows: list[_ScheduledEntityWindow],
+    shape_block_rows: list[tuple[int, _ScheduledEntityWindow]],
+    laser_block_rows: list[tuple[int, tuple[int, int]]],
+    ttl_out_block_rows: list[tuple[int, tuple[int, int]]],
+    unmapped_active_neurons: list[int],
+    active_laser_wavelength_nm: int,
+    lightsource_id: str,
+    laser_timeline_index: int,
+    ttl_out1_timeline_index: int,
+) -> str:
+    rows: list[dict[str, str]] = []
+    rows.append(
+        _debug_row(
+            row_type="meta",
+            stage="export",
+            object_id="meta_0",
+            lightsource_id=lightsource_id,
+            laser_nm=active_laser_wavelength_nm,
+            message=(
+                "NeuroSeq windows: 17ms (1ms ticks). SysCon windows: 16.666ms "
+                "(32 ticks x 0.5208125ms)."
+            ),
+        )
+    )
+
+    used_windows: set[int] = set()
+    for sanitized_segment in sanitized.sanitized_segments:
+        used_windows.update(
+            range(sanitized_segment.start_win, sanitized_segment.end_win)
+        )
+    for raw_segment in sanitized.raw_segments:
+        raw_start_win = raw_segment.start_idx // _NEUROSEQ_WINDOW_SAMPLES
+        raw_end_win = int(
+            np.ceil(raw_segment.end_idx / float(_NEUROSEQ_WINDOW_SAMPLES))
+        )
+        used_windows.update(range(raw_start_win, max(raw_start_win + 1, raw_end_win)))
+    for hologram in mapped_holograms:
+        used_windows.update(range(max(0, hologram.start_win - 1), hologram.end_win))
+
+    for window_idx in sorted(used_windows):
+        start_neuro_ms = window_idx * _NEUROSEQ_WINDOW_MS
+        end_neuro_ms = (window_idx + 1) * _NEUROSEQ_WINDOW_MS
+        start_sys_us = window_idx * _SYSCON2_WINDOW_US
+        end_sys_us = (window_idx + 1) * _SYSCON2_WINDOW_US
+        rows.append(
+            _debug_row(
+                row_type="window_map",
+                stage="mapping",
+                object_id=f"win_{window_idx}",
+                neuro_win_start=window_idx,
+                neuro_win_count=1,
+                sys_win_start=window_idx,
+                sys_win_count=1,
+                start_neuro_ms=start_neuro_ms,
+                end_neuro_ms_excl=end_neuro_ms,
+                duration_neuro_ms=_NEUROSEQ_WINDOW_MS,
+                start_sys_us=start_sys_us,
+                end_sys_us_excl=end_sys_us,
+                duration_sys_us=_SYSCON2_WINDOW_US,
+                start_sys_tick=window_idx * _SYSCON2_WINDOW_TICKS,
+                duration_sys_tick=_SYSCON2_WINDOW_TICKS,
+            )
+        )
+
+    for raw_segment in sanitized.raw_segments:
+        raw_duration = raw_segment.end_idx - raw_segment.start_idx
+        start_win = raw_segment.start_idx // _NEUROSEQ_WINDOW_SAMPLES
+        win_count = max(
+            1,
+            int(np.ceil(raw_duration / float(_NEUROSEQ_WINDOW_SAMPLES))),
+        )
+        rows.append(
+            _debug_row(
+                row_type="stim_raw",
+                stage="input",
+                object_id=raw_segment.segment_id,
+                neuron_id=raw_segment.neuron_index,
+                start_neuro_ms=raw_segment.start_idx,
+                end_neuro_ms_excl=raw_segment.end_idx,
+                duration_neuro_ms=raw_duration,
+                neuro_win_start=start_win,
+                neuro_win_count=win_count,
+                intensity_in=raw_segment.intensity_in,
+            )
+        )
+
+    for fix_idx, fix in enumerate(sanitized.fixes):
+        rows.append(
+            _debug_row(
+                row_type="fix",
+                stage="sanity",
+                object_id=f"fix_{fix_idx}",
+                fix_code=fix.code,
+                fix_value=fix.value,
+                source_ids=";".join(fix.source_ids),
+                status="applied",
+                message=fix.message,
+            )
+        )
+
+    for segment in sanitized.sanitized_segments:
+        start_tick = segment.start_win * _SYSCON2_WINDOW_TICKS
+        duration_ticks = segment.win_count * _SYSCON2_WINDOW_TICKS
+        rows.append(
+            _debug_row(
+                row_type="stim_sanitized",
+                stage="sanity",
+                object_id=segment.segment_id,
+                neuron_id=segment.neuron_index,
+                start_neuro_ms=segment.start_win * _NEUROSEQ_WINDOW_MS,
+                end_neuro_ms_excl=segment.end_win * _NEUROSEQ_WINDOW_MS,
+                duration_neuro_ms=segment.win_count * _NEUROSEQ_WINDOW_MS,
+                neuro_win_start=segment.start_win,
+                neuro_win_count=segment.win_count,
+                start_sys_us=segment.start_win * _SYSCON2_WINDOW_US,
+                end_sys_us_excl=segment.end_win * _SYSCON2_WINDOW_US,
+                duration_sys_us=segment.win_count * _SYSCON2_WINDOW_US,
+                start_sys_tick=start_tick,
+                duration_sys_tick=duration_ticks,
+                sys_win_start=segment.start_win,
+                sys_win_count=segment.win_count,
+                intensity_out=segment.intensity_out,
+                source_ids=";".join(segment.source_ids),
+            )
+        )
+
+    for hologram in mapped_holograms:
+        rows.append(
+            _debug_row(
+                row_type="hologram",
+                stage="sanity",
+                object_id=f"hologram_{hologram.hologram_id}",
+                hologram_id=hologram.hologram_id,
+                neuro_win_start=hologram.start_win,
+                neuro_win_count=hologram.end_win - hologram.start_win,
+                start_neuro_ms=hologram.start_win * _NEUROSEQ_WINDOW_MS,
+                end_neuro_ms_excl=hologram.end_win * _NEUROSEQ_WINDOW_MS,
+                duration_neuro_ms=(hologram.end_win - hologram.start_win)
+                * _NEUROSEQ_WINDOW_MS,
+                sys_win_start=hologram.start_win,
+                sys_win_count=hologram.end_win - hologram.start_win,
+                start_sys_tick=hologram.start_win * _SYSCON2_WINDOW_TICKS,
+                duration_sys_tick=(hologram.end_win - hologram.start_win)
+                * _SYSCON2_WINDOW_TICKS,
+                start_sys_us=hologram.start_win * _SYSCON2_WINDOW_US,
+                end_sys_us_excl=hologram.end_win * _SYSCON2_WINDOW_US,
+                duration_sys_us=(hologram.end_win - hologram.start_win)
+                * _SYSCON2_WINDOW_US,
+                preblank_win_required=True,
+                preblank_win_present=hologram.preblank_present,
+            )
+        )
+        for neuron_idx in hologram.neuron_indices:
+            rows.append(
+                _debug_row(
+                    row_type="hologram_member",
+                    stage="sanity",
+                    object_id=f"hologram_{hologram.hologram_id}_n{neuron_idx}",
+                    hologram_id=hologram.hologram_id,
+                    neuron_id=neuron_idx,
+                    parent_id=f"hologram_{hologram.hologram_id}",
+                )
+            )
+
+    for object_id, (start_tick, end_tick) in laser_block_rows:
+        start_win = start_tick // _SYSCON2_WINDOW_TICKS
+        sys_win_count = max(1, (end_tick - start_tick) // _SYSCON2_WINDOW_TICKS)
+        rows.append(
+            _debug_row(
+                row_type="sys_pulse_laser",
+                stage="export",
+                object_id=object_id,
+                hologram_id=_find_hologram_id_for_window(mapped_holograms, start_win),
+                timeline_index=laser_timeline_index,
+                lightsource_id=lightsource_id,
+                laser_nm=active_laser_wavelength_nm,
+                start_sys_tick=start_tick,
+                duration_sys_tick=end_tick - start_tick,
+                start_sys_us=start_tick * _SYSCON2_TTL_PULSE_QUANTUM_US,
+                end_sys_us_excl=end_tick * _SYSCON2_TTL_PULSE_QUANTUM_US,
+                duration_sys_us=(end_tick - start_tick) * _SYSCON2_TTL_PULSE_QUANTUM_US,
+                sys_win_start=start_win,
+                sys_win_count=sys_win_count,
+                start_neuro_ms=start_win * _NEUROSEQ_WINDOW_MS,
+                end_neuro_ms_excl=(start_win + sys_win_count) * _NEUROSEQ_WINDOW_MS,
+                duration_neuro_ms=sys_win_count * _NEUROSEQ_WINDOW_MS,
+            )
+        )
+
+    for object_id, window in shape_block_rows:
+        start_win = window.start_tick // _SYSCON2_WINDOW_TICKS
+        win_count = max(
+            1, (window.end_tick - window.start_tick) // _SYSCON2_WINDOW_TICKS
+        )
+        rows.append(
+            _debug_row(
+                row_type="sys_shape",
+                stage="export",
+                object_id=object_id,
+                neuron_id=window.neuron_index,
+                hologram_id=_find_hologram_id_for_window(
+                    mapped_holograms,
+                    window.stimulation_start_tick // _SYSCON2_WINDOW_TICKS,
+                ),
+                timeline_index=window.lane,
+                lane_index=window.lane,
+                lightsource_id=lightsource_id,
+                laser_nm=active_laser_wavelength_nm,
+                start_sys_tick=window.start_tick,
+                duration_sys_tick=window.end_tick - window.start_tick,
+                start_sys_us=window.start_tick * _SYSCON2_TTL_PULSE_QUANTUM_US,
+                end_sys_us_excl=window.end_tick * _SYSCON2_TTL_PULSE_QUANTUM_US,
+                duration_sys_us=(window.end_tick - window.start_tick)
+                * _SYSCON2_TTL_PULSE_QUANTUM_US,
+                sys_win_start=start_win,
+                sys_win_count=win_count,
+                start_neuro_ms=start_win * _NEUROSEQ_WINDOW_MS,
+                end_neuro_ms_excl=(start_win + win_count) * _NEUROSEQ_WINDOW_MS,
+                duration_neuro_ms=win_count * _NEUROSEQ_WINDOW_MS,
+                includes_load_window=True,
+                intensity_out=window.intensity,
+            )
+        )
+
+    for object_id, (start_tick, end_tick) in ttl_out_block_rows:
+        start_win = start_tick // _SYSCON2_WINDOW_TICKS
+        sys_win_count = max(1, (end_tick - start_tick) // _SYSCON2_WINDOW_TICKS)
+        rows.append(
+            _debug_row(
+                row_type="sys_ttl_out1",
+                stage="export",
+                object_id=object_id,
+                timeline_index=ttl_out1_timeline_index,
+                start_sys_tick=start_tick,
+                duration_sys_tick=end_tick - start_tick,
+                start_sys_us=start_tick * _SYSCON2_TTL_PULSE_QUANTUM_US,
+                end_sys_us_excl=end_tick * _SYSCON2_TTL_PULSE_QUANTUM_US,
+                duration_sys_us=(end_tick - start_tick) * _SYSCON2_TTL_PULSE_QUANTUM_US,
+                sys_win_start=start_win,
+                sys_win_count=sys_win_count,
+            )
+        )
+
+    for warning_idx, neuron_idx in enumerate(unmapped_active_neurons):
+        rows.append(
+            _debug_row(
+                row_type="warning",
+                stage="export",
+                object_id=f"warning_{warning_idx}",
+                neuron_id=neuron_idx,
+                status="warning",
+                message=f"Active neuron {neuron_idx} is unmapped and was skipped.",
+            )
+        )
+
+    return _render_debug_csv(rows, export_id="syscon_export")
+
+
+def _render_debug_csv(rows: list[dict[str, str]], *, export_id: str) -> str:
+    buffer = io.StringIO()
+    writer = csv.DictWriter(
+        buffer,
+        fieldnames=list(_DEBUG_CSV_COLUMNS),
+        extrasaction="ignore",
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    for row_idx, row in enumerate(rows):
+        writable = {column: "" for column in _DEBUG_CSV_COLUMNS}
+        writable.update(row)
+        writable["export_id"] = export_id
+        writable["row_seq"] = str(row_idx)
+        writer.writerow(writable)
+    return buffer.getvalue()
 
 
 def generate_syscon2_timeline_overview_png(
@@ -665,11 +1611,11 @@ def check_syscon2_input_sanity(
     force_binary_intensity: bool = True,
     active_laser_wavelength_nm: int = _DEFAULT_ACTIVE_LASER_WAVELENGTH_NM,
 ) -> SysconInputSanityReport:
-    """Run a dry-run validation for SysCon2 export without writing files."""
+    """Run the new fixed-window sanity model and dry-run export."""
     errors: list[str] = []
     warnings: list[str] = []
 
-    values = stim_array.values
+    values = np.asarray(stim_array.values)
     if values.ndim != 2:
         errors.append("Stim array values must be 2D (timepoints x neurons).")
     elif values.shape[0] == 0 or values.shape[1] == 0:
@@ -677,108 +1623,8 @@ def check_syscon2_input_sanity(
 
     if stim_array.dt <= 0:
         errors.append("Stim array dt must be positive.")
-
     if values.size > 0 and not np.all(np.isfinite(values)):
         errors.append("Stim array contains non-finite values (NaN/Inf).")
-
-    if values.size > 0:
-        active_values = values[values > active_threshold]
-        if active_values.size == 0:
-            errors.append(
-                "No active stimulation samples found above the active threshold."
-            )
-        if active_threshold == 0.0 and np.any(values < 0):
-            warnings.append(
-                "Negative stimulation values are exported as OFF "
-                "(binary ON/OFF uses values > threshold)."
-            )
-        initial_slm_load_violation = find_initial_slm_load_violation(
-            stim_array,
-            active_threshold=active_threshold,
-            min_start_us=_SLM_LEAD_IN_US,
-        )
-        if initial_slm_load_violation is not None:
-            first_start_ms = (
-                initial_slm_load_violation.first_active_idx * stim_array.dt * 1e3
-            )
-            required_start_ms = (
-                initial_slm_load_violation.required_start_idx * stim_array.dt * 1e3
-            )
-            errors.append(
-                "First stimulation starts too early for SLM initialization: "
-                f"{first_start_ms:.2f}ms (minimum {required_start_ms:.2f}ms)."
-            )
-        off_on_overlap_violations = find_slm_off_on_overlap_violations(
-            stim_array,
-            active_threshold=active_threshold,
-            min_gap_us=_SLM_LEAD_IN_US,
-        )
-        if off_on_overlap_violations:
-            first_overlap = off_on_overlap_violations[0]
-            required_shift_ms = (
-                first_overlap.required_shift_samples * stim_array.dt * 1e3
-            )
-            overlap_start_ms = (
-                first_overlap.overlap_start_tick * _SYSCON2_TTL_PULSE_QUANTUM_US / 1e3
-            )
-            overlap_end_ms = (
-                first_overlap.overlap_end_tick * _SYSCON2_TTL_PULSE_QUANTUM_US / 1e3
-            )
-            errors.append(
-                "SLM off/on overlap detected: "
-                f"off-neuron {first_overlap.off_neuron_index} overlaps ON interval of "
-                f"neuron {first_overlap.on_neuron_index} in "
-                f"[{overlap_start_ms:.2f}, {overlap_end_ms:.2f})ms. "
-                f"Space input right by at least {required_shift_ms:.2f}ms."
-            )
-        slm_gap_violations = find_slm_gap_violations(
-            stim_array,
-            active_threshold=active_threshold,
-            min_gap_us=_SLM_LEAD_IN_US,
-        )
-        if slm_gap_violations:
-            first_violation = slm_gap_violations[0]
-            gap_ms = first_violation.gap_samples * stim_array.dt * 1e3
-            required_gap_ms = first_violation.required_gap_samples * stim_array.dt * 1e3
-            errors.append(
-                "SLM new-target gap violation detected: "
-                f"{first_violation.previous_neuron_indices} -> "
-                f"{first_violation.current_neuron_indices}, gap={gap_ms:.2f}ms "
-                f"(required {required_gap_ms:.2f}ms)."
-            )
-        global_window_violations = find_global_slm_window_violations(
-            stim_array,
-            active_threshold=active_threshold,
-        )
-        if global_window_violations:
-            first_global_window_violation = global_window_violations[0]
-            shift_ms = (
-                first_global_window_violation.shift_ticks
-                * _SYSCON2_TTL_PULSE_QUANTUM_US
-                / 1e3
-            )
-            warnings.append(
-                "Global 16.66ms alignment warning: "
-                f"{len(global_window_violations)} stimulation start(s) are off the "
-                "global SLM window grid. "
-                f"Example nearest correction: {shift_ms:+.3f}ms."
-            )
-        if force_binary_intensity:
-            if active_values.size > 0 and not np.all(
-                np.isclose(active_values, binary_intensity)
-            ):
-                warnings.append(
-                    "Binary export mode is enabled: all ON samples are exported "
-                    f"with fixed intensity {binary_intensity:g}."
-                )
-        else:
-            if active_values.size > 0 and (
-                np.any(active_values < 0.0) or np.any(active_values > 1.0)
-            ):
-                warnings.append(
-                    "Non-binary export mode preserves ON amplitudes but clips values "
-                    "outside [0, 1] to match SysCon2 intensity bounds."
-                )
 
     if errors:
         return SysconInputSanityReport(
@@ -786,7 +1632,68 @@ def check_syscon2_input_sanity(
             errors=errors,
             warnings=warnings,
             export_report=None,
+            sanitized_values=None,
+            fix_messages=[],
         )
+
+    try:
+        _require_1ms_neuroseq_tick(stim_array)
+    except ValueError as exc:
+        return SysconInputSanityReport(
+            is_valid=False,
+            errors=[str(exc)],
+            warnings=[],
+            export_report=None,
+            sanitized_values=None,
+            fix_messages=[],
+        )
+
+    sanitized = _sanitize_stim_array_for_export(
+        stim_array,
+        active_threshold=active_threshold,
+        binary_intensity=binary_intensity,
+        force_binary_intensity=force_binary_intensity,
+    )
+    if len(sanitized.raw_segments) == 0:
+        errors.append("No active stimulation samples found above the active threshold.")
+        return SysconInputSanityReport(
+            is_valid=False,
+            errors=errors,
+            warnings=[],
+            export_report=None,
+            sanitized_values=_window_values_to_sample_values(
+                sanitized.window_values,
+                n_timepoints=values.shape[0],
+            ),
+            fix_messages=[fix.message for fix in sanitized.fixes],
+        )
+
+    if force_binary_intensity:
+        active_values = values[values > active_threshold]
+        if active_values.size > 0 and not np.all(
+            np.isclose(active_values, binary_intensity)
+        ):
+            warnings.append(
+                "Binary export mode is enabled: ON samples are exported with fixed intensity "
+                f"{binary_intensity:g}."
+            )
+    else:
+        active_values = values[values > active_threshold]
+        if active_values.size > 0 and (
+            np.any(active_values < 0.0) or np.any(active_values > 1.0)
+        ):
+            warnings.append(
+                "Non-binary export mode clips ON amplitudes to [0, 1] before export."
+            )
+
+    if sanitized.truncated_tail_windows > 0:
+        warnings.append(
+            "Sanity fixes inserted preload blank windows and truncated "
+            f"{sanitized.truncated_tail_windows} trailing 17ms window(s)."
+        )
+
+    for fix in sanitized.fixes:
+        warnings.append(fix.message)
 
     try:
         _, export_report = generate_syscon2_sequence_text(
@@ -806,6 +1713,11 @@ def check_syscon2_input_sanity(
             errors=errors,
             warnings=warnings,
             export_report=None,
+            sanitized_values=_window_values_to_sample_values(
+                sanitized.window_values,
+                n_timepoints=values.shape[0],
+            ),
+            fix_messages=[fix.message for fix in sanitized.fixes],
         )
 
     if export_report.unmapped_active_neurons:
@@ -819,6 +1731,11 @@ def check_syscon2_input_sanity(
         errors=[],
         warnings=warnings,
         export_report=export_report,
+        sanitized_values=_window_values_to_sample_values(
+            sanitized.window_values,
+            n_timepoints=values.shape[0],
+        ),
+        fix_messages=[fix.message for fix in sanitized.fixes],
     )
 
 

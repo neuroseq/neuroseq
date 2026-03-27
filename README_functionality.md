@@ -336,55 +336,94 @@ Color/intensity interpretation:
 Provides export dialog for hardware script generation.
 Current implementation status:
 
-- hardware type list currently only `HOLO4D`,
-- output extension currently always `.seq`,
-- exports are generated from selected stim array + imported Cellpose segmentation using `exporter_syscon2.py`,
-- exporter normalizes/sanitizes template header fields (SysCon2 v3 defaults, connector key cleanup, required timing fields) and auto-detects source/laser/TTL ports from template/header text,
-- export input segmentation pipeline is pulse-first:
-- contiguous ON samples (`stim_value > threshold`) are extracted per neuron as segments,
-- segments are mapped to SysCon2 TTL ticks using `round(time_us / 520.8125us)` for both segment start and duration,
-- active segments without valid stimulus->cellpose mapping are skipped and reported,
-- target coordinates come from Cellpose centroid lookup for mapped IDs,
-- segment intensity is either fixed binary (`1.0`) or preserved from input amplitude (clipped to `[0,1]`) depending on mode,
-- active-laser pulse intervals are the merged union of mapped segment intervals (touching intervals are merged: `start <= current_end`),
-- shape windows are inferred from mapped segment timing per neuron and per phase (phases split when a new target appears relative to the previous active set),
-- SLM lead/guard constants are enforced in TTL tick units:
-- lead-in is `16.66ms` (`32` TTL ticks at `520.8125us`),
-- boundary guard is `1` TTL tick (`0.5208125ms`),
-- for each inferred shape window:
-- `shape_start_tick = first_associated_pulse_start_tick - (lead_ticks + guard_ticks)`,
-- `shape_end_tick` is quantized upward to shape quanta (`32` TTL ticks, i.e. `16.666ms`) with minimum 2 quanta,
-- this guarantees `shape_end_tick - last_associated_pulse_end_tick >= 1` TTL tick,
-- hard exporter validations before writing blocks:
-- first associated pulse starts exactly at `shape_start + lead + guard`,
-- associated pulses end at least one TTL tick before shape end,
-- OFF portion of one shape (`[start, start+lead+guard)`) does not overlap another neuron's ON interval,
-- every merged laser pulse overlaps at least one scheduled shape window and ends before every overlapping shape's guarded end,
-- lane scheduling uses interval coloring (min-heap assignment) with lane count `N = max` simultaneously active mapped segments,
-- timeline layout is fixed:
-- `0..N-1` = shape/neuron lanes,
-- `N+0..N+2` = laser timelines (`940`, `1030`, `1140` nm),
-- `N+3` = `TTL Out 1`, `N+4` = `TTL Out 2`,
-- exactly one laser timeline is active per export (selector in dialog; default `1140nm`),
-- emitted block order is deterministic:
-- all shape blocks first (sorted by `start_tick, lane, neuron_index`),
-- active-laser `TTLPulse` blocks from merged pulse intervals,
-- `TTL Out 1` startup pulse at `t=0` (`~9.895ms`, 19 TTL ticks) plus mirrored laser pulses,
-- `TTL Out 2` intentionally empty,
-- object timing encoding rules:
-- `TTLPulse` duration = `(repeats + 1) * 520.8125us`,
-- `Shape` duration = `(repeats + 2) * 16.666ms`,
-- generated sequence text is parser-validated immediately (`parse_syscon2_seq_text`) and summarized via `SysconExportReport`,
-- exporter writes a timeline overview PNG (`<script_name>_overview.png`) showing rows, object spans, SLM lead-in overlay, and explicit timeline labels (`Neuron lane`, `Laser <wavelength>`, `TTL Out`/port when inferable); the renderer adapts figure width, time units, and minimum visible pulse width for long timelines to remain readable,
-- script generator sanity workflow (`Check Input Sanity`) runs iterative fix/check stages with undo-compatible stim replacement:
-- optional global 16.66ms alignment warning stage (fixed global SLM windows at `32` TTL-tick cadence, lead+guard offset),
-- optional auto-fix `Snap To Allowed Windows` (snap each segment start to nearest global window, keep duration/amplitude, report tail truncation),
-- simultaneous-start duration equalization option (`Equalize to lowest value`),
-- initial SLM load-up enforcement (first stimulation must start after lead-in window),
-- SLM switch-gap enforcement when introducing new targets,
-- SLM OFF/ON overlap enforcement with right-shift fix option,
-- if global-window warning is not fixed, sanity can still pass with warnings (not a hard failure),
-- header/template fields come from HOLO4D config text (lines before first object block); when a SysCon2 file is imported, its header block becomes the default export template for later script generation in the same project/session.
+#### Scope and outputs
+
+- Hardware type list currently only `HOLO4D`.
+- Output extension currently always `.seq`.
+- Exports are generated from selected stim array + imported Cellpose segmentation using `exporter_syscon2.py`.
+- Generator writes three files per run:
+  - `<script_name>.seq`,
+  - `<script_name>_export_debug.csv`,
+  - `<script_name>_overview.png`.
+
+#### Fixed-window export model (current)
+
+- NeuroSeq input is required to use `dt=1ms` (`stim_array.dt == 0.001`).
+- Export quantization is window-based:
+  - NeuroSeq timeline windows: `17ms` (`17` samples at `1ms`),
+  - SysCon timeline windows: `32` TTL ticks (`32 * 0.5208125ms = 16.666ms`).
+- Window index mapping is direct and positional: NeuroSeq window `k` maps to SysCon window `k`.
+- Raw active segments (`stim_value > threshold`) are normalized by sanity logic:
+  - start snaps to the left 17ms window boundary,
+  - duration is expanded/quantized to whole 17ms windows,
+  - duration minimum is `17ms` (1 window),
+  - intensity is either fixed binary (`1.0`) or preserved/clipped to `[0,1]`.
+- Overlapping stimuli are normalized in connected overlap components:
+  - all overlapping starts align left to the earliest start,
+  - all overlapping durations are trimmed to the shortest overlapping duration.
+- Hologram grouping is inferred from normalized window activity:
+  - windows with activity are grouped,
+  - a new hologram is created when a new neuron appears in the active set,
+  - non-contiguous active windows also split holograms.
+- Pre-load blank enforcement:
+  - each hologram must have a blank NeuroSeq window immediately before it,
+  - if missing, sanitizer inserts a blank 17ms window by shifting the tail right,
+  - this also applies to the first hologram,
+  - tail windows may be truncated if shifting exceeds array length.
+
+#### Mapping, holograms, and object emission
+
+- Sanitized segments are mapped to Cellpose centroids; active segments without valid mapping are skipped and reported.
+- Laser stimulation pulses are inferred from the merged union of mapped segment intervals.
+- SysCon shape objects are inferred from hologram windows and include the load-up blank window:
+  - `shape_start_win = hologram.start_win - 1` (clamped at `0`),
+  - shape duration is at least 2 windows (`load + stimulation`).
+- Multiple TTL pulses can occur within one hologram.
+
+#### Timeline layout and emitted object order
+
+- Lane scheduling uses interval coloring with lane count `N = max` simultaneously active shape windows.
+- Fixed timeline layout: `0..N-1` = shape/neuron lanes, `N+0..N+2` = laser timelines (`940`, `1030`, `1140` nm), `N+3` = `TTL Out 1`, `N+4` = `TTL Out 2`.
+- Exactly one laser timeline is active per export (selector in dialog; default `1140nm`).
+- Laser/light-source mapping is fixed:
+  - `TimelineInfo0_LightsourceID_0=dummy_0_0` -> `940nm`,
+  - `TimelineInfo0_LightsourceID_0=dummy_1_0` -> `1030nm`,
+  - `TimelineInfo0_LightsourceID_0=dummy_2_0` -> `1140nm`.
+- Deterministic block order:
+  - all shape blocks first (`start_tick, lane, neuron_index` order),
+  - then active-laser `TTLPulse` blocks from merged pulse intervals,
+  - then `TTL Out 1` mirrored pulse blocks for the same intervals,
+  - `TTL Out 2` is intentionally left empty.
+- Timing encoding rules: `TTLPulse` duration = `(repeats + 1) * 520.8125us`, `Shape` duration = `(repeats + 2) * 16.666ms`.
+- Generated sequence text is parser-validated immediately (`parse_syscon2_seq_text`) and summarized via `SysconExportReport`.
+
+#### Debug CSV (current schema usage)
+
+- Exporter emits a structured debug CSV with fixed columns and row types covering:
+  - mapping windows (`window_map`),
+  - raw/sanitized stim segments (`stim_raw`, `stim_sanitized`),
+  - sanity fixes (`fix`),
+  - inferred holograms and members (`hologram`, `hologram_member`),
+  - emitted SysCon objects (`sys_shape`, `sys_pulse_laser`, `sys_ttl_out1`),
+  - warnings (for example unmapped active neurons).
+- Rows include both NeuroSeq and SysCon timing representations (ms/us, window indices, tick indices), IDs/parent IDs, timeline/lane, and fix metadata.
+
+#### Timeline overview PNG
+
+- Exporter writes `<script_name>_overview.png` with timeline rows, object spans, SLM lead-in overlay, and explicit timeline labels (`Neuron lane`, `Laser <wavelength>`, `TTL Out`/port when inferable).
+- For long timelines, renderer adapts figure width, time units, and minimum visible pulse width to improve readability.
+
+#### Sanity check workflow in generator dialog
+
+- `Check Input Sanity` executes the same fixed-window sanitizer used by export and performs a dry-run export.
+- If sanitizer changed values, the dialog can apply the normalized stim values back into the selected stim array (undo-compatible path when available).
+- Sanity warnings include applied fix descriptions, truncation (if any), binary/clipping warnings, and unmapped active neurons.
+- Current UI flow is single-pass sanity + optional apply; legacy interactive prompt-by-prompt fix stages are not used in the active workflow.
+
+#### Header/template lifecycle
+
+- Header/template fields come from HOLO4D config text (lines before first object block) and are normalized to SysCon2 v3 required defaults.
+- When a SysCon2 file is imported, its header block becomes the default export template for later script generation in the same project/session.
 
 ## 9) Data import pipelines
 
@@ -511,21 +550,27 @@ python -m neuroseq \
 - Each object extracts timing from `TimelineInfo0_*`: `starttime` (us, float), `repeats`, `Stepsize`, and `Intensity_0`; values are clamped/sanitized (`start>=0`, `repeats>=0`, `step>=1`).
 - Eligibility uses timed `Shape`/`Entity` objects only (non-shape timed objects are no longer an import option in the dialog).
 - If `Intensity_0` is missing, default intensity is `1.0` for `Shape`/`Entity` and `0.0` for other object types.
-- Circular-entity grouping is applied for geometry type `2` (`..._Type=2`) so multiple entities can map to one neuron channel.
-- Grouping uses center coordinates only (`CenterX`, `CenterY`); vertex/radius values are ignored for same-neuron detection.
-- Two circular entities are treated as the same neuron target when center distance is `<= 1.0 um`; if center distance is `> 1.0 um`, they map to different neurons.
-- When laser `TTLPulse` entries are present, importer uses pulse-based fixed-lane reconstruction, and timed `Shape`/`Entity` point objects are treated as target lanes.
-- In that Holo4D path, center-distance grouping (`<= 1.0 um`) is applied to `Entity` point objects; `Shape` point objects remain distinct channels.
+- Circular-entity grouping for the generic timed-object path uses geometry type `2` entities and center distance (`<=1.0um`) based on `CenterX/CenterY`.
+- Import path selection is pulse-first:
+  - if any laser `TTLPulse` objects exist (`LightsourceID` present), importer uses Holo4D pulse-based reconstruction,
+  - otherwise importer uses generic timed object expansion from `Shape`/`Entity`.
+- In pulse-based reconstruction:
+  - active laser timeline is selected as the timeline with the most laser pulses (tie -> lowest index),
+  - `TTLPulse` duration uses `duration_us = (repeats + 1) * 520.8125`,
+  - pulses from that active laser timeline are the true stimulation events,
+  - `Shape`/`Entity` objects define placement windows, with unusable lead period `16.666ms` (`usable_start = object_start + 16.666ms`),
+  - shape duration uses SysCon quantum (`(repeats + 2) * 16.666ms`),
+  - if multiple point objects share a lane, a later object clips/replaces earlier placement on that lane,
+  - TTL output pulses (`LightsourceCount=0`) are ignored for reconstruction.
+- Fixed-window reconstruction mode is enabled when:
+  - target stim array `dt` is exactly `1ms`,
+  - active laser pulse starts are tick-aligned and multiples of 32 ticks,
+  - pulse durations are multiples of 32 ticks.
+- In fixed-window reconstruction mode:
+  - pulse intervals are converted by SysCon window index (`32` ticks/window) and mapped to NeuroSeq indices (`17` samples/window),
+  - index conversion is window-based and enforces minimum `17ms` duration per imported interval.
+- In generic timed-object fallback mode (no laser pulses), start indices and durations are converted by `round(t / dt)` using object timing metadata.
 - Mapping order is deterministic: grouped timed objects are assigned to neuron channels in file order.
-- For SysCon2 pulse-based imports, `TTLPulse` duration uses quantum timing `duration_us = (repeats + 1) * 520.8125`.
-- For SysCon2 `Shape` neuron objects, duration uses `duration_us = (repeats + 2) * 16666`.
-- `Stepsize` is preserved from file metadata but is not used for pulse/shape duration calculations in the pulse-based import path.
-- Sample index conversion uses `round(t / dt)` (`np.rint`) and de-duplicates identical indices produced by sub-sample timing.
-- In Holo4D fixed-lane layout, pulses from the active laser timeline are the true stimulation events; they stimulate point objects whose usable windows contain the pulse (`usable_start = object_start + 16.66ms`), and shape-window duration follows SysCon2 shape quantum rules.
-- If multiple point objects are present on the same lane timeline, a later object replaces the earlier one (earlier window is clipped at the next object start).
-- TTL output pulses (`LightsourceCount=0`) are ignored for stimulation reconstruction.
-- Legacy non-Holo4D files keep prior entity handling: nearest laser-TTL matching for onset/duration with fallback to `16.666ms`.
-- Non-entity events fill one timepoint.
 - If repeated/overlapping events hit the same channel/time window, amplitude merge uses `max(existing, incoming)`.
 - Safety cap limits each object to `500000` events during expansion; excess repeats are counted as truncated repeats in the result report.
 - Import target controls: `neuron_offset` chooses starting destination neuron column; channels beyond available target neurons are dropped and reported.
