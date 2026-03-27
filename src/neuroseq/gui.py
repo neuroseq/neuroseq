@@ -28,8 +28,10 @@ from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_project_sections
 from neuroseq.example_projects import example_projects
 from neuroseq.experiments_manager_dialog import ExperimentsManagerDialog
+from neuroseq.exporter_igor2 import export_igor2_patchclamp_csv
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
+from neuroseq.igor2_patchclamp_export_dialog import Igor2PatchClampExportDialog
 from neuroseq.import_dialog import Suite2pImportDialog
 from neuroseq.import_experiment_dialog import ImportExperimentDialog
 from neuroseq.importer_cellpose import CellposeImportResult
@@ -342,6 +344,79 @@ class Gui(QtWidgets.QMainWindow):
                 f"Could not export to file '{filename}': {e}",
             )
             return
+
+    def btn_export_igor2_patchclamp_stim_clicked(self) -> None:
+        if not self.project.stim_arrays:
+            QtWidgets.QMessageBox.information(
+                self,
+                "No stimulation entities",
+                "No stimulation data entities available. Create one before exporting to Igor2 patch clamp CSV.",
+            )
+            return
+
+        stim_name = self.cmb_stim.currentText()
+        if not stim_name or stim_name not in self.project.stim_arrays:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Export error",
+                "No stimulation array is currently selected for export.",
+            )
+            return
+
+        stim_array = self.project.stim_arrays[stim_name]
+        if int(stim_array.values.shape[1]) <= 0:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Export error",
+                "The selected stimulation array has no neurons to export.",
+            )
+            return
+
+        dialog = Igor2PatchClampExportDialog(stim_name, stim_array, parent=self)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+
+        suggested_filename = f"{dialog.experiment_name}.csv"
+        filename, _ = getsavefilename(
+            self,
+            "Export Igor2 Patch Clamp CSV",
+            suggested_filename,
+            "CSV file (*.csv)",
+        )
+        if filename == "":
+            return
+
+        output_path = pathlib.Path(filename)
+        if output_path.suffix.lower() != ".csv":
+            output_path = output_path.with_suffix(".csv")
+
+        try:
+            export_report = export_igor2_patchclamp_csv(
+                output_path,
+                stim_array,
+                experiment_name=dialog.experiment_name,
+                neuron_index=dialog.selected_neuron_index,
+            )
+        except Exception as e:
+            self.logger.warning(
+                "Failed to export Igor2 patch clamp CSV %s: %s",
+                output_path,
+                e,
+            )
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Export error",
+                f"Could not export Igor2 patch clamp CSV to '{output_path}': {e}",
+            )
+            return
+
+        QtWidgets.QMessageBox.information(
+            self,
+            "Export Successful",
+            "Exported Igor2 patch clamp CSV for "
+            f"stimulus '{stim_name}', neuron {export_report.neuron_index}, "
+            f"{export_report.sample_count} samples.",
+        )
 
     def btn_edit_clicked(self) -> None:
         mdiag = ModelEditorDialog(self.project.b2_model, parent=self)
@@ -933,6 +1008,14 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             shortcut="Ctrl+Shift+E",
             icon=qta.icon("mdi6.content-save-move"),
+        )
+        add_action(
+            "Export Stim for Igor2 &Patch Clamp",
+            self.btn_export_igor2_patchclamp_stim_clicked,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon=qta.icon("mdi6.waveform"),
         )
         add_action(
             "&Edit model",

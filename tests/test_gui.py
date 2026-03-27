@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import brian2 as b2
 import pytest
@@ -386,6 +389,80 @@ def test_gui_export_empty_project(
     assert "export error" in qmessagebox_calls[0]["title"].lower()
     assert not filename.exists()
     gui.close()
+
+
+def test_gui_export_igor2_patchclamp_stim(
+    tmp_path: Path, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+) -> None:
+    project = Project()
+    stim_values = np.array(
+        [
+            [0.0, 10.0],
+            [1.0, 20.0],
+            [0.0, 30.0],
+        ],
+        dtype=np.float32,
+    )
+    project.add_stim_array(
+        StimArray("stim", StimType.Excitation, stim_values, "pA", 0.001)
+    )
+
+    class MockIgor2PatchClampExportDialog:
+        def __init__(self, stim_name: str, stim_array: StimArray, parent=None) -> None:
+            assert stim_name == "stim"
+            assert stim_array is project.stim_arrays["stim"]
+            self.experiment_name = "one_neuron_stim_example"
+            self.selected_neuron_index = 1
+
+        def exec(self) -> int:
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    output_path = tmp_path / "igor_export.csv"
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "Igor2PatchClampExportDialog",
+        MockIgor2PatchClampExportDialog,
+    )
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "getsavefilename",
+        lambda *args: (f"{output_path}", "CSV file (*.csv)"),
+    )
+
+    fake_gui: Any = SimpleNamespace(
+        project=project,
+        cmb_stim=SimpleNamespace(currentText=lambda: "stim"),
+        logger=logging.getLogger("test_gui_export_igor2_patchclamp_stim"),
+    )
+
+    Gui.btn_export_igor2_patchclamp_stim_clicked(fake_gui)
+
+    assert output_path.exists()
+    assert (
+        output_path.read_text(encoding="utf-8")
+        == "one_neuron_stim_example\n10.0\n20.0\n30.0\n"
+    )
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "information"
+    assert "export successful" in qmessagebox_calls[0]["title"].lower()
+
+
+def test_gui_export_igor2_patchclamp_stim_requires_stim_data(
+    qmessagebox_calls: list,
+) -> None:
+    fake_gui: Any = SimpleNamespace(
+        project=Project(),
+        cmb_stim=SimpleNamespace(currentText=lambda: ""),
+        logger=logging.getLogger(
+            "test_gui_export_igor2_patchclamp_stim_requires_stim_data"
+        ),
+    )
+
+    Gui.btn_export_igor2_patchclamp_stim_clicked(fake_gui)
+
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "information"
+    assert "no stimulation entities" in qmessagebox_calls[0]["title"].lower()
 
 
 def test_gui_checkpoints(
