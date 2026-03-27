@@ -12,9 +12,11 @@ The operation Sutter amplifiers is controlled via SutterPatch software run in th
 
 The generation of stimuli in Igor Pro environment is controled in "Routine Editor". There, a single routine in the routine pool can be modified to represent a given sequence of stimulations composed from distinct segments. A user will need only a single segment setting in to "Template" as a type of stimuli. The *.csv file created by Neuroseq for SutterPatch can be imported in a form of a Template. 
 
-The environment also has its own file format .ibw to store a stimuli of arbitraty shape. Neuroseq can directly generate the files of this format and facilitates import to SutterPatch. In this case, .ibw file with a sequence can be directly imported into  
+The environment also has its own file format .ibw to store a stimuli of arbitraty shape. Neuroseq can directly generate the files of this format and facilitates import to SutterPatch. In this case, .ibw file with a sequence can be directly imported via Tempate Editor by cliking "Import": 
 
 ![SutterPatch Template Editor](../images/SutterPatch_TemplateEditor.png)
+
+The imported template will become availible in routine editor in the list of availible templates. 
 
 
 
