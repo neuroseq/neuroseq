@@ -8,6 +8,7 @@ import brian2 as b2
 import brian2.numpy_ as np
 import pytest
 from numpy.typing import NDArray
+from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.b2_model import B2Model
@@ -97,6 +98,35 @@ def qmessagebox_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
 @pytest.fixture(autouse=True)
 def reduce_brian2_logging_verbosity() -> None:
     init_brian2_logging()
+
+
+@pytest.fixture(autouse=True)
+def flush_qt_deferred_deletes():
+    yield
+    qapplication_class = QtWidgets.QApplication
+    app_instance = getattr(qapplication_class, "instance", None)
+    if not callable(app_instance):
+        return
+    app = app_instance()
+    if app is None:
+        return
+    top_level_widgets = getattr(qapplication_class, "topLevelWidgets", None)
+    if not callable(top_level_widgets):
+        return
+    for widget in list(top_level_widgets()):
+        try:
+            widget.close()
+        except RuntimeError:
+            continue
+    process_events = getattr(app, "processEvents", None)
+    if not callable(process_events):
+        return
+    process_events()
+    QtCore.QCoreApplication.sendPostedEvents(
+        None,
+        QtCore.QEvent.Type.DeferredDelete,
+    )
+    process_events()
 
 
 # use temporary path for storing user settings

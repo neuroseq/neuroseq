@@ -20,13 +20,13 @@ The project may contrain not only one, but several stimulation arrays. The user 
 
 ![Data selection](../images/data_selection.png).
 
-Similarly, the trace, spike and synapce data may contain a list of different data entries (generated in computational, biologial or neuromorphic experiments) with corresponding drop down menues. "All data" corresponds to a universal widget where any data in a form of traces or spikes can be independently selected. 
+Similarly, the trace, spike and synapce data may contain a list of different data entries (generated in computational, biologial or neuromorphic experiments) with corresponding drop down menues. "All data" corresponds to a universal widget where any data in a form of traces or spikes can be independently selected.
 
 ![Data selection](../images/data_selection.png).
 
- ## Stimulation editor
+## Stimulation editor
 
-The stimulatation pattern can be edited using the toolbar located at the left side of a main window. The editing can be operated in draw and select modes. 
+The stimulatation pattern can be edited using the toolbar located at the left side of a main window. The editing can be operated in draw and select modes.
 
 ![Draw mode](../images/draw_mode.png)
 
@@ -47,9 +47,9 @@ If "select mode" is active, the drawing options are not availible anymore, inste
 
 The toolbar also contains a pad with for creating/deleting new stim arrays, modifying the properties of the existing stimulation array (name, type, number of neurons and physical units) and padding/trimming the duration of an existing array.
 
-The option "show all stim arrays" gives a possibility to show all stim arrays at the same time in one widget. In this case, the selected array remains the same, while other arrays will be shown in background with additional transparency applied.  
+The option "show all stim arrays" gives a possibility to show all stim arrays at the same time in one widget. In this case, the selected array remains the same, while other arrays will be shown in background with additional transparency applied.
 
-## Neuron data and spike data widgets 
+## Neuron data and spike data widgets
 
 Once the simulation is run or trace data is exported, it became availible in drop down menu "Neuron data". Natigation is done as described above. Normalization of traces can be set with buttons next it with a possibility to normalize traces on a median value and clip/upclip them to permit to restrict traces to the provided space for each neuron or provide a possibility to occupy an unlimited space within the widget. Spike data widget is analogous to the neuron data widget but constructed to represent binary spike events.
 
@@ -110,6 +110,7 @@ The objects from the underlying brian2 model can also be accessed. For example, 
 >>> project.b2_model.monitors.keys()
 dict_keys(['Traces_v', 'spikemon', 'synmon'])
 ```
+
 And you can then get the underlying brian2 monitor object with e.g.
 
 ```python
@@ -120,4 +121,3 @@ Note that these objects should not be directly modified using the console, as it
 
 It is also possible to modify other aspects of the model using the console, by interacting with the `project.b2_model` object.
 Try `help(project.b2_model)` to see what methods and attributes are available.
-
