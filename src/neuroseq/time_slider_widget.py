@@ -122,3 +122,11 @@ class TimeSliderWidget(QtWidgets.QWidget):
         self.t_ms = value
         for widget in self.widgets:
             widget.set_time_ms(value)
+
+    def closeEvent(self, event) -> None:
+        # Stop playback before child widgets begin shutting down so queued timer
+        # ticks do not try to update deleted widgets.
+        if self.timer.isActive():
+            self.timer.stop()
+        self.widgets.clear()
+        super().closeEvent(event)

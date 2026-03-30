@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import pathlib
 
 import pytest
@@ -9,25 +8,14 @@ import neuroseq.example_projects as example_projects
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
 
-
-def _is_project_generator(obj) -> bool:
-    return (
-        inspect.isfunction(obj)
-        and obj.__module__ == example_projects.__name__
-        and obj.__name__ != "register_example_project"
-    )
-
-
 project_generators = [
-    f for _, f in inspect.getmembers(example_projects, _is_project_generator)
+    pytest.param(project_generator, id=f"{section}/{name}")
+    for section, section_projects in example_projects.example_projects.items()
+    for name, project_generator in section_projects.items()
 ]
 
 
-@pytest.mark.parametrize(
-    "project_generator",
-    project_generators,
-    ids=lambda f: f.__name__,
-)
+@pytest.mark.parametrize("project_generator", project_generators)
 def test_example_projects(project_generator, tmp_path: pathlib.Path) -> None:
     project = project_generator()
     # do a short simulation

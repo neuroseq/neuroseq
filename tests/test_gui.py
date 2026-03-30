@@ -44,33 +44,14 @@ def test_gui_open_example_project_menu_has_subsections(qtbot: QtBot) -> None:
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
 
-    open_example_project_menu = next(
-        action.menu()
-        for action in gui.menu_file.actions()
-        if action.menu() is not None
-        and action.text().replace("&", "") == "Open example project"
+    assert gui.open_example_project_menu is not None
+    assert list(gui.open_example_project_section_menus) == list(example_projects)
+    assert len(gui.open_example_project_actions) == sum(
+        len(section_projects) for section_projects in example_projects.values()
     )
-
-    section_names = {
-        action.text().replace("&", "")
-        for action in open_example_project_menu.actions()
-        if action.menu() is not None
-    }
-    assert {"Basics", "Single Neuron", "Network", "Optogenetics"}.issubset(
-        section_names
+    assert {"Getting Started Project", "non_linear"}.issubset(
+        example_projects["Basics"]
     )
-
-    basics_menu = next(
-        action.menu()
-        for action in open_example_project_menu.actions()
-        if action.menu() is not None and action.text().replace("&", "") == "Basics"
-    )
-    basics_entries = {
-        action.text().replace("&", "")
-        for action in basics_menu.actions()
-        if action.menu() is None
-    }
-    assert {"Getting Started Project", "non_linear"}.issubset(basics_entries)
 
     gui.close()
 
@@ -162,12 +143,14 @@ def test_gui_new(tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot) -> None
     gui.close()
 
 
-def test_gui_open(monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_path: Path) -> None:
+def test_gui_open(
+    monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_path: Path, test_project: Project
+) -> None:
     gui = Gui()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
-    project = example_projects[list(sorted(example_projects.keys()))[-1]]()
+    project = test_project
     project_path = tmp_path / "model.nseq"
     project.save(
         project_path,
@@ -287,7 +270,11 @@ def test_gui_save(
 
 
 def test_gui_import(
-    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, project_ornstein: Project
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    qtbot: QtBot,
+    project_ornstein: Project,
+    test_project: Project,
 ) -> None:
     gui = Gui()
     gui.show()
@@ -295,7 +282,7 @@ def test_gui_import(
     qtbot.waitUntil(lambda: gui.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)
     # create a nseq file to import from
-    project = example_projects[list(sorted(example_projects.keys()))[-1]]()
+    project = test_project
     model_path = tmp_path / "model.nseq"
     project.save(
         model_path,

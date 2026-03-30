@@ -40,3 +40,8 @@ class ResourceMonitorLabel(QLabel):
             self.setText(text)
         except Exception as e:
             self.logger.exception(e)
+
+    def closeEvent(self, event):
+        if self.timer.isActive():
+            self.timer.stop()
+        super().closeEvent(event)

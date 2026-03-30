@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import brian2.numpy_ as np
+import pytest
 from PIL import Image
 
 from neuroseq.exporter_syscon2 import align_stim_values_left_for_slm
@@ -119,9 +120,9 @@ def _quantized_us(sample_idx: int, dt_seconds: float) -> float:
 
 
 def test_export_seq_uses_fixed_laser_and_ttl_out_timeline_layout() -> None:
-    values = np.zeros((6, 2), dtype=np.float32)
-    values[1:3, 0] = 0.2
-    values[1:3, 1] = 0.9
+    values = np.zeros((40, 2), dtype=np.float32)
+    values[20:22, 0] = 0.2
+    values[20:22, 1] = 0.9
     stim_array = StimArray(
         name="stim",
         stim_type=StimType.Excitation,
@@ -161,12 +162,12 @@ def test_export_seq_uses_fixed_laser_and_ttl_out_timeline_layout() -> None:
     ttl_out_2_pulses = [obj for obj in pulses if _timeline_index(obj) == 6]
 
     assert len(laser_pulses) == 1
-    assert len(ttl_out_1_pulses) == 2  # startup 10ms pulse + mirrored laser pulse
+    assert len(ttl_out_1_pulses) == 1
     assert len(ttl_out_2_pulses) == 0
-    assert ttl_out_1_pulses[0].start_time_us == 0
+    assert ttl_out_1_pulses[0].start_time_us == 16_666.0
 
 
-def test_export_seq_treats_stim_array_segments_as_true_laser_pulse_timing() -> None:
+def test_export_seq_coalesces_nearby_segments_into_one_sanitized_window() -> None:
     values = np.zeros((80, 1), dtype=np.float32)
     values[40:42, 0] = 1.0
     values[45:47, 0] = 1.0
@@ -198,10 +199,7 @@ def test_export_seq_treats_stim_array_segments_as_true_laser_pulse_timing() -> N
     ]
 
     assert len(entities) == 1
-    assert [pulse.start_time_us for pulse in laser_pulses] == [
-        _quantized_us(40, stim_array.dt),
-        _quantized_us(45, stim_array.dt),
-    ]
+    assert [pulse.start_time_us for pulse in laser_pulses] == [33_332.0]
 
     imported_values, _ = sequence_to_stim_values(
         sequence,
@@ -210,14 +208,12 @@ def test_export_seq_treats_stim_array_segments_as_true_laser_pulse_timing() -> N
         tick_resolution_us=500,
         include_non_shape=False,
     )
-    assert np.all(imported_values[40:42, 0] == 1.0)
-    assert np.all(imported_values[45:47, 0] == 1.0)
-    assert np.all(imported_values[42:45, 0] == 0.0)
+    assert np.array_equal(np.flatnonzero(imported_values[:, 0] > 0), np.arange(34, 51))
 
 
 def test_export_seq_routes_ttl_pulses_to_selected_1030_laser_timeline() -> None:
-    values = np.zeros((6, 1), dtype=np.float32)
-    values[1:3, 0] = 1.0
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 1.0
     stim_array = StimArray(
         name="stim",
         stim_type=StimType.Excitation,
@@ -252,10 +248,10 @@ def test_export_seq_routes_ttl_pulses_to_selected_1030_laser_timeline() -> None:
     assert len(upper_laser_timeline) == 0
 
 
-def test_export_seq_ttl_pulse_repeats_use_plus_one_quantum_rule() -> None:
+def test_export_seq_requires_1ms_neuroseq_tick() -> None:
     dt_seconds = _TTL_QUANTUM_US * 1e-6
     values = np.zeros((16, 1), dtype=np.float32)
-    values[4:7, 0] = 1.0  # 3 TTL quanta -> repeats must be 2.
+    values[4:7, 0] = 1.0
     stim_array = StimArray(
         name="stim",
         stim_type=StimType.Excitation,
@@ -264,37 +260,21 @@ def test_export_seq_ttl_pulse_repeats_use_plus_one_quantum_rule() -> None:
         dt=dt_seconds,
     )
 
-    seq_text, report = generate_syscon2_sequence_text(
-        stim_array,
-        _cellpose_result(mapping={0: 0}),
-        template_text=_template_header(),
-        tick_resolution_us=500,
-        active_threshold=0.0,
-        binary_intensity=1.0,
-        active_laser_wavelength_nm=1140,
-    )
-
-    sequence = parse_syscon2_seq_text(seq_text)
-    laser_pulses = [
-        obj
-        for obj in sequence.objects
-        if obj.object_type == "TTLPulse"
-        and _timeline_index(obj) == report.laser_timeline_index
-    ]
-
-    assert len(laser_pulses) == 1
-    assert laser_pulses[0].repeats == 2
-    assert np.isclose(
-        (laser_pulses[0].repeats + 1) * _TTL_QUANTUM_US,
-        3 * _TTL_QUANTUM_US,
-    )
+    with pytest.raises(ValueError, match="1ms"):
+        generate_syscon2_sequence_text(
+            stim_array,
+            _cellpose_result(mapping={0: 0}),
+            template_text=_template_header(),
+            tick_resolution_us=500,
+            active_threshold=0.0,
+            binary_intensity=1.0,
+            active_laser_wavelength_nm=1140,
+        )
 
 
-def test_export_seq_shape_repeats_use_plus_two_quantum_rule() -> None:
+def test_check_syscon2_input_sanity_rejects_non_1ms_neuroseq_tick() -> None:
     dt_seconds = _TTL_QUANTUM_US * 1e-6
     values = np.zeros((96, 1), dtype=np.float32)
-    # Start at one shape quantum and keep the segment long enough to require
-    # exactly 3 shape quanta for the exported window.
     values[32:65, 0] = 1.0
     stim_array = StimArray(
         name="stim",
@@ -304,22 +284,15 @@ def test_export_seq_shape_repeats_use_plus_two_quantum_rule() -> None:
         dt=dt_seconds,
     )
 
-    seq_text, _ = generate_syscon2_sequence_text(
+    sanity = check_syscon2_input_sanity(
         stim_array,
         _cellpose_result(mapping={0: 0}),
         template_text=_template_header(),
-        tick_resolution_us=500,
-        active_threshold=0.0,
-        binary_intensity=1.0,
-        active_laser_wavelength_nm=1140,
     )
 
-    sequence = parse_syscon2_seq_text(seq_text)
-    shapes = [obj for obj in sequence.objects if obj.object_type == "Shape"]
-
-    assert len(shapes) == 1
-    assert shapes[0].repeats == 1
-    assert np.isclose((shapes[0].repeats + 2) * 16_666.0, 49_998.0)
+    assert not sanity.is_valid
+    assert sanity.export_report is None
+    assert any("1ms" in error.lower() or "0.001" in error for error in sanity.errors)
 
 
 def test_generate_syscon2_timeline_overview_png_writes_file(tmp_path: Path) -> None:
@@ -409,8 +382,8 @@ def test_generate_syscon2_timeline_overview_png_scales_width_for_long_duration(
 
 
 def test_export_seq_accepts_legacy_1040_alias_as_1030_timeline() -> None:
-    values = np.zeros((6, 1), dtype=np.float32)
-    values[1:3, 0] = 1.0
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 1.0
     stim_array = StimArray(
         name="stim",
         stim_type=StimType.Excitation,
@@ -438,7 +411,7 @@ def test_export_seq_accepts_legacy_1040_alias_as_1030_timeline() -> None:
     assert len(laser_pulses) == 1
 
 
-def test_export_seq_roundtrip_preserves_pulse_logic_for_two_neuron_groups() -> None:
+def test_export_seq_roundtrip_coalesces_dense_bursts_into_group_windows() -> None:
     values = np.zeros((300, 6), dtype=np.float32)
     first_group_starts = [100, 107, 114, 121, 128, 135, 142, 149]
     second_group_starts = [200, 207, 214, 221]
@@ -453,7 +426,7 @@ def test_export_seq_roundtrip_preserves_pulse_logic_for_two_neuron_groups() -> N
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.0005,
+        dt=0.001,
     )
 
     seq_text, report = generate_syscon2_sequence_text(
@@ -476,11 +449,8 @@ def test_export_seq_roundtrip_preserves_pulse_logic_for_two_neuron_groups() -> N
         and _timeline_index(obj) == report.laser_timeline_index
     ]
 
-    assert len(laser_pulses) == 12
-    assert [pulse.start_time_us for pulse in laser_pulses] == [
-        _quantized_us(start_idx, stim_array.dt)
-        for start_idx in (first_group_starts + second_group_starts)
-    ]
+    assert len(laser_pulses) == 2
+    assert [pulse.start_time_us for pulse in laser_pulses] == [83_330.0, 183_326.0]
 
     imported_values, _ = sequence_to_stim_values(
         sequence,
@@ -492,12 +462,12 @@ def test_export_seq_roundtrip_preserves_pulse_logic_for_two_neuron_groups() -> N
     segment_counts = [
         _count_active_segments(imported_values[:, idx]) for idx in range(6)
     ]
-    assert sorted(segment_counts) == [4, 4, 4, 8, 8, 8]
+    assert segment_counts == [1, 1, 1, 1, 1, 1]
 
 
 def test_export_seq_preserves_non_binary_shape_intensity_when_requested() -> None:
-    values = np.zeros((12, 1), dtype=np.float32)
-    values[2:5, 0] = 0.37
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 0.37
     stim_array = StimArray(
         name="stim",
         stim_type=StimType.Excitation,
@@ -525,9 +495,9 @@ def test_export_seq_preserves_non_binary_shape_intensity_when_requested() -> Non
 
 
 def test_export_seq_skips_unmapped_active_neurons_and_reports_them() -> None:
-    values = np.zeros((6, 3), dtype=np.float32)
-    values[1:3, 0] = 1.0
-    values[2:4, 2] = 1.0
+    values = np.zeros((40, 3), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    values[25:27, 2] = 1.0
     stim_array = StimArray(
         name="stim",
         stim_type=StimType.Excitation,
@@ -553,16 +523,16 @@ def test_export_seq_skips_unmapped_active_neurons_and_reports_them() -> None:
     assert report.exported_segments == 1
     assert report.skipped_segments_unmapped == 1
     assert report.entity_lanes == 1
-    assert report.generated_objects == 4
+    assert report.generated_objects == 3
     assert len(entities) == 1
-    assert len(pulses) == 3  # one laser pulse + 2 TTL Out 1 pulses
+    assert len(pulses) == 2
 
     assert _timeline_index(entities[0]) == 0
 
 
 def test_export_seq_accepts_one_based_mapping_keys() -> None:
-    values = np.zeros((4, 1), dtype=np.float32)
-    values[1:3, 0] = 1.0
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 1.0
     stim_array = StimArray(
         name="stim",
         stim_type=StimType.Excitation,
@@ -633,7 +603,7 @@ def test_check_syscon2_input_sanity_warns_for_unmapped_and_non_binary() -> None:
     assert any("unmapped" in warning.lower() for warning in sanity.warnings)
 
 
-def test_check_syscon2_input_sanity_fails_when_first_stim_too_early() -> None:
+def test_check_syscon2_input_sanity_auto_fixes_when_first_stim_is_too_early() -> None:
     values = np.zeros((30, 1), dtype=np.float32)
     values[1:3, 0] = 1.0
     stim_array = StimArray(
@@ -650,11 +620,14 @@ def test_check_syscon2_input_sanity_fails_when_first_stim_too_early() -> None:
         template_text=_template_header(),
     )
 
-    assert not sanity.is_valid
-    assert sanity.export_report is None
-    assert any(
-        "first stimulation starts too early" in error.lower() for error in sanity.errors
+    assert sanity.is_valid
+    assert sanity.export_report is not None
+    assert sanity.sanitized_values is not None
+    assert sanity.export_report.exported_segments == 1
+    assert np.array_equal(
+        np.flatnonzero(sanity.sanitized_values[:, 0] > 0), np.arange(17, 30)
     )
+    assert any("Inserted 17ms blank window" in warning for warning in sanity.warnings)
 
 
 def test_check_syscon2_input_sanity_fails_without_active_samples() -> None:
@@ -681,7 +654,9 @@ def test_check_syscon2_input_sanity_fails_without_active_samples() -> None:
     )
 
 
-def test_check_syscon2_input_sanity_fails_when_off_state_overlaps_other_on() -> None:
+def test_check_syscon2_input_sanity_auto_fixes_overlap_into_exportable_windows() -> (
+    None
+):
     values = np.zeros((120, 2), dtype=np.float32)
     values[20:22, 0] = 1.0
     values[40:42, 0] = 1.0
@@ -700,9 +675,11 @@ def test_check_syscon2_input_sanity_fails_when_off_state_overlaps_other_on() -> 
         template_text=_template_header(),
     )
 
-    assert not sanity.is_valid
-    assert sanity.export_report is None
-    assert any("off/on overlap" in error.lower() for error in sanity.errors)
+    assert sanity.is_valid
+    assert sanity.export_report is not None
+    assert sanity.export_report.exported_segments == 3
+    assert any("Inserted 17ms blank window" in warning for warning in sanity.warnings)
+    assert sanity.sanitized_values is not None
 
 
 def test_find_slm_gap_violations_detects_short_gap_between_different_neurons() -> None:
