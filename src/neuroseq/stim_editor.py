@@ -21,6 +21,14 @@ from neuroseq.stim import StimType
 from neuroseq.stim_array_modifier import StimArrayModifier
 from neuroseq.stim_dialog import EditStimDialog
 from neuroseq.stim_intensity_dialog import StimIntensityDialog
+from neuroseq.stim_timing import DEFAULT_STIM_DT_SECONDS
+from neuroseq.stim_timing import format_milliseconds
+from neuroseq.stim_timing import milliseconds_to_samples_nearest
+from neuroseq.stim_timing import samples_to_milliseconds
+from neuroseq.stim_timing import samples_to_seconds
+from neuroseq.stim_timing import seconds_to_samples_ceil
+from neuroseq.stim_timing import seconds_to_samples_nearest
+from neuroseq.stim_timing import stim_dt_matches
 from neuroseq.stim_widget import StimWidget
 from neuroseq.utils import InteractMode
 from neuroseq.utils import add_action
@@ -60,7 +68,7 @@ class StimEditor(QtWidgets.QWidget):
         self.draw_mode = DrawMode.DRAW
         self.select_mode = SelectMode.SELECT
         self.draw_stim = DrawStim(DrawStimType.Constant, 1.0, 1.0)
-        self.draw_stim_length = 1  # in milliseconds
+        self.draw_stim_length = 1  # in samples
         self.pad_stim_array_secs = 5.0
         self.trim_stim_array_secs = 5.0
         self.draw_stim_units = ""
@@ -114,6 +122,7 @@ class StimEditor(QtWidgets.QWidget):
         self, project: Project, keep_undo_history=False, stim_to_select=""
     ) -> None:
         self.project = project
+        self.project.update_limits()
         if self.current_stim_modifier is not None and keep_undo_history:
             for k in self.stims_dict:
                 if k in self.project.stim_arrays:
@@ -304,6 +313,14 @@ class StimEditor(QtWidgets.QWidget):
             stim_name in self.stims_dict
             and self.current_stim_modifier != self.stims_dict[stim_name]
         ):
+            old_dt_seconds = self._current_stim_dt_seconds()
+            new_dt_seconds = float(self.stims_dict[stim_name].stim_array.dt)
+            old_draw_duration_seconds = samples_to_seconds(
+                self.draw_stim_length, old_dt_seconds
+            )
+            self.draw_stim_length = max(
+                1, seconds_to_samples_nearest(old_draw_duration_seconds, new_dt_seconds)
+            )
             self.current_stim_modifier = self.stims_dict[stim_name]
             self.stim_type = get_stim_type(stim_name)
             self.draw_stim.draw_stim_type = DrawStimType.Constant
@@ -599,26 +616,40 @@ class StimEditor(QtWidgets.QWidget):
         self._stim_values_updated()
 
     def choose_stim_length(self) -> None:
+        dt_ms = format_milliseconds(self._current_stim_dt_seconds() * 1000.0)
         new_stim_length, ok = QtWidgets.QInputDialog.getText(
             self,
             "Stimulus length",
-            "Length of stimulus in milliseconds",
+            "Length of stimulus in milliseconds "
+            f"(rounded to nearest multiple of selected stim dt = {dt_ms} ms)",
             QtWidgets.QLineEdit.EchoMode.Normal,
-            f"{self.draw_stim_length}",
+            format_milliseconds(self._draw_stim_length_milliseconds()),
         )
         if not ok:
             return
         try:
-            self.draw_stim_length = max(1, int(new_stim_length))
+            duration_ms = float(new_stim_length)
+            if duration_ms <= 0.0:
+                raise ValueError
+            self.draw_stim_length = max(
+                1,
+                milliseconds_to_samples_nearest(
+                    duration_ms, self._current_stim_dt_seconds()
+                ),
+            )
             self.set_mode(self.mode)  # Reset mode to update hover slice
         except ValueError:
             QtWidgets.QMessageBox.critical(
                 self,
                 "Invalid input",
-                f"Could not parse '{new_stim_length}' as a number of milliseconds.",
+                f"Could not parse '{new_stim_length}' as a positive number of milliseconds.",
             )
             return
-        self.logger.debug(f"Setting draw stim length to {self.draw_stim_length}ms")
+        self.logger.debug(
+            "Setting draw stim length to %s samples (%sms)",
+            self.draw_stim_length,
+            format_milliseconds(self._draw_stim_length_milliseconds()),
+        )
 
     def toggle_show_all_stim_arrays(self) -> None:
         self.stim_widget.set_background_data_visible(
@@ -641,22 +672,36 @@ class StimEditor(QtWidgets.QWidget):
             and time_slice.stop <= self.stim_widget.n_timestamps
         )
 
+    def _current_stim_dt_seconds(self) -> float:
+        if self.current_stim_modifier is not None:
+            return float(self.current_stim_modifier.stim_array.dt)
+        return DEFAULT_STIM_DT_SECONDS
+
+    def _draw_stim_length_milliseconds(self) -> float:
+        return samples_to_milliseconds(
+            self.draw_stim_length, self._current_stim_dt_seconds()
+        )
+
     def create_stim_array(self):
+        if self.project is None:
+            return
         stim_type = StimType.Excitation
         n_neurons = 10
         units = "nS"
-        dt = 0.001
+        dt = self._current_stim_dt_seconds()
         if self.current_stim_modifier is not None:
             stim_type = self.current_stim_modifier.stim_array.stim_type
-            n_neurons = self.current_stim_modifier.stim_array.values.shape[1]
+            n_neurons = (
+                self.current_stim_modifier.stim_array.values.shape[1]
+                if self.current_stim_modifier.stim_array.values.ndim > 1
+                else 1
+            )
             units = self.current_stim_modifier.stim_array.units
-            dt = self.current_stim_modifier.stim_array.dt
         dt = float(dt)
-        n_timestamps = int(float(self.project.max_time_secs) / dt)
         stim_array = StimArray(
             "new_stim",
             stim_type,
-            np.zeros((n_timestamps, n_neurons)),
+            np.zeros((0, n_neurons)),
             units,
             dt,
         )
@@ -666,6 +711,9 @@ class StimEditor(QtWidgets.QWidget):
             parent=self,
         )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            n_timestamps = seconds_to_samples_ceil(
+                float(self.project.max_time_secs), float(dialog.dt)
+            )
             self.project.add_stim_array(
                 StimArray(
                     dialog.name,
@@ -687,6 +735,27 @@ class StimEditor(QtWidgets.QWidget):
             parent=self,
         )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            old_draw_duration_seconds = samples_to_seconds(
+                self.draw_stim_length, self._current_stim_dt_seconds()
+            )
+            if not stim_dt_matches(dialog.dt, self.current_stim_modifier.stim_array.dt):
+                continue_with_remap = QtWidgets.QMessageBox.question(
+                    self,
+                    "Change stim array timestep",
+                    "Changing the stimulation timestep will remap stimulus array "
+                    f"'{old_name}' from "
+                    f"{format_milliseconds(self.current_stim_modifier.stim_array.dt * 1000.0)} ms "
+                    f"to {format_milliseconds(dialog.dt * 1000.0)} ms. "
+                    "Stimulus timing may shift by up to one sample. Continue?",
+                    QtWidgets.QMessageBox.StandardButton.Yes
+                    | QtWidgets.QMessageBox.StandardButton.No,
+                )
+                if continue_with_remap != QtWidgets.QMessageBox.StandardButton.Yes:
+                    return
+                self.draw_stim_length = max(
+                    1,
+                    seconds_to_samples_nearest(old_draw_duration_seconds, dialog.dt),
+                )
             if dialog.name != old_name:
                 self.project.rename_stim_array(old_name, dialog.name)
             self.project.update_stim_array_properties(

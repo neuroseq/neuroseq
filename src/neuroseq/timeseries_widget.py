@@ -17,6 +17,7 @@ from neuroseq.data import TraceData
 from neuroseq.fpl_widget import FPLWidget
 from neuroseq.gridlines import GridLines
 from neuroseq.region_of_interest import RegionOfInterest
+from neuroseq.stim_timing import format_milliseconds
 from neuroseq.text import Text
 from neuroseq.timeline import Timeline
 from neuroseq.utils import InteractMode
@@ -155,7 +156,9 @@ class TimeseriesWidget(FPLWidget):
         self.subplot.axes.x.points.visible = False
         self.subplot.axes.x.line.visible = False
         self.subplot.axes.x.min_tick_distance = 100
-        self.subplot.axes.x.tick_format = lambda x, x_min, x_max: f"{x:.0f}ms"
+        self.subplot.axes.x.tick_format = (
+            lambda x, x_min, x_max: f"{format_milliseconds(x)}ms"
+        )
         self.subplot.toolbar = False
         self.subplot.add_graphic(self.roi, center=False)
         self.subplot.add_graphic(self.timeline, center=False)

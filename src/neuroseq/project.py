@@ -23,6 +23,10 @@ from neuroseq.io import load_from_zip
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
+from neuroseq.stim_timing import ensure_2d_stim_values
+from neuroseq.stim_timing import remap_stim_values_to_dt
+from neuroseq.stim_timing import stim_dt_matches
+from neuroseq.stim_timing import validate_stim_dt_seconds
 from neuroseq.utils import append_data
 from neuroseq.utils import find_by_name_and_type
 from neuroseq.utils import save_store_name
@@ -190,6 +194,9 @@ class Project:
         return None
 
     def add_stim_array(self, stim_array: StimArray):
+        stim_dt = validate_stim_dt_seconds(stim_array.dt)
+        stim_array.values = ensure_2d_stim_values(stim_array.values)
+        stim_array.dt = stim_dt
         self.stim_arrays[stim_array.name] = stim_array
         self.update_limits()
 
@@ -201,22 +208,32 @@ class Project:
     def update_stim_array_properties(
         self, name: str, n_neurons: int, stim_type: StimType, units: str, dt: float
     ):
+        dt = validate_stim_dt_seconds(dt)
         stim_array = self.stim_arrays[name]
+        old_dt = validate_stim_dt_seconds(stim_array.dt)
         stim_array.stim_type = stim_type
         stim_array.units = units
+        if not stim_dt_matches(old_dt, dt):
+            stim_array.values = remap_stim_values_to_dt(
+                stim_array.values,
+                old_dt_seconds=old_dt,
+                new_dt_seconds=dt,
+            )
+        stim_array.values = ensure_2d_stim_values(stim_array.values)
         stim_array.dt = dt
-        if n_neurons < stim_array.values.shape[1]:
+        current_n_neurons = int(stim_array.values.shape[1])
+        if n_neurons < current_n_neurons:
             self.logger.info(
-                f"Decreasing neurons in StimArray {name} from {stim_array.values.shape[1]} to {n_neurons}"
+                f"Decreasing neurons in StimArray {name} from {current_n_neurons} to {n_neurons}"
             )
             stim_array.values = stim_array.values[:, :n_neurons]
-        elif n_neurons > stim_array.values.shape[1]:
+        elif n_neurons > current_n_neurons:
             self.logger.info(
-                f"Increasing neurons in StimArray {name} from {stim_array.values.shape[1]} to {n_neurons}"
+                f"Increasing neurons in StimArray {name} from {current_n_neurons} to {n_neurons}"
             )
             stim_array.values = np.pad(
                 stim_array.values,
-                ((0, 0), (0, n_neurons - stim_array.values.shape[1])),
+                ((0, 0), (0, n_neurons - current_n_neurons)),
                 mode="constant",
                 constant_values=0,
             )
@@ -235,11 +252,15 @@ class Project:
                 self.max_time_secs, _to_seconds(experiment.duration)
             )
         for stim_array in self.stim_arrays.values():
+            stim_array.values = ensure_2d_stim_values(stim_array.values)
+            stim_dt = validate_stim_dt_seconds(stim_array.dt)
+            stim_array.dt = stim_dt
             self.max_time_secs = max(
                 self.max_time_secs,
-                _to_seconds(stim_array.dt) * float(stim_array.values.shape[0]),
+                _to_seconds(stim_dt) * float(stim_array.values.shape[0]),
             )
-            self.max_neurons = max(self.max_neurons, int(stim_array.values.shape[1]))
+            n_stim_neurons = int(stim_array.values.shape[1])
+            self.max_neurons = max(self.max_neurons, n_stim_neurons)
 
     def issues_with_appending_experimental_data(
         self,

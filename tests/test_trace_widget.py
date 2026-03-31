@@ -231,7 +231,7 @@ def test_trace_widget_gridlines_use_controller_limits(qtbot: QtBot) -> None:
     trace_widget.set_data(data)
     assert trace_widget.grid_lines is not None
     assert trace_widget.grid_lines.time_ms == pytest.approx(controller.max_width)
-    positions = trace_widget.grid_lines.gridline_10ms.geometry.positions.data
+    positions = trace_widget.grid_lines.gridline_10samples.geometry.positions.data
     assert np.max(positions[:, 0]) == pytest.approx(controller.max_width)
     trace_widget.close()
 
@@ -256,7 +256,7 @@ def test_trace_widget_gridlines_use_controller_neuron_limit(qtbot: QtBot) -> Non
     trace_widget.set_data(data)
     assert trace_widget.grid_lines is not None
     assert trace_widget.grid_lines.n_neurons == 10
-    positions = trace_widget.grid_lines.gridline_10ms.geometry.positions.data
+    positions = trace_widget.grid_lines.gridline_10samples.geometry.positions.data
     assert np.max(positions[:, 1]) == pytest.approx(controller.max_height - 0.5)
     trace_widget.close()
 

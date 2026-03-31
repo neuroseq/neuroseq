@@ -36,6 +36,14 @@ def test_edit_stim_dialog(qtbot: QtBot):
     # Change name to a new name and check validation
     dialog.txt_name.setText("s8")
     assert dialog.btn_save.isEnabled()
+    assert dialog.txt_dt.isEnabled()
+
+    # Change dt to an invalid value and back
+    dialog.txt_dt.setText("0")
+    assert not dialog.btn_save.isEnabled()
+    dialog.txt_dt.setText("0.002")
+    assert dialog.btn_save.isEnabled()
+    assert dialog.dt == 0.002
 
     # Change stim type
     dialog.cmb_type.setCurrentIndex(0)
