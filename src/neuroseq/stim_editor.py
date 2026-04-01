@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from enum import Enum
 from typing import Literal
 from typing import overload
@@ -629,7 +630,7 @@ class StimEditor(QtWidgets.QWidget):
             return
         try:
             duration_ms = float(new_stim_length)
-            if duration_ms <= 0.0:
+            if not math.isfinite(duration_ms) or duration_ms <= 0.0:
                 raise ValueError
             self.draw_stim_length = max(
                 1,
@@ -638,7 +639,7 @@ class StimEditor(QtWidgets.QWidget):
                 ),
             )
             self.set_mode(self.mode)  # Reset mode to update hover slice
-        except ValueError:
+        except (OverflowError, ValueError):
             QtWidgets.QMessageBox.critical(
                 self,
                 "Invalid input",

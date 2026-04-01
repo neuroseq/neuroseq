@@ -270,6 +270,39 @@ def test_choose_stim_length_snaps_to_selected_stim_dt(
     stim_editor.close()
 
 
+def test_choose_stim_length_rejects_non_finite_input(
+    monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list[dict[str, str]]
+) -> None:
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "a",
+            neuroseq.stim.StimType.Excitation,
+            np.zeros((10, 2), dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.show()
+    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    stim_editor.set_project(project)
+    stim_editor.draw_stim_length = 3
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("inf", True))
+
+    stim_editor.choose_stim_length()
+
+    assert stim_editor.draw_stim_length == 3
+    assert qmessagebox_calls[-1]["name"] == "critical"
+    assert qmessagebox_calls[-1]["title"] == "Invalid input"
+    assert "positive number of milliseconds" in qmessagebox_calls[-1]["text"]
+    stim_editor.close()
+
+
 def test_selecting_stim_preserves_physical_draw_duration(qtbot: QtBot) -> None:
     project = Project()
     project.add_stim_array(
