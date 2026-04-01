@@ -93,9 +93,7 @@ def remap_stim_values_to_dt(
     if n_new_samples == 0:
         return np.zeros((0, *values.shape[1:]), dtype=values.dtype)
 
-    # Use zero-order-hold remapping from the start of each new sample bin so that
-    # coarse re-quantization preserves onset timing instead of dropping short pulses
-    # that begin exactly on the original grid.
+    # Use the start of each new sample when remapping to preserve pulse onset timing.
     sample_start_seconds = np.arange(n_new_samples, dtype=np.float64) * new_dt
     source_indices = np.floor(sample_start_seconds / old_dt).astype(np.int64)
     np.clip(source_indices, 0, n_old_samples - 1, out=source_indices)

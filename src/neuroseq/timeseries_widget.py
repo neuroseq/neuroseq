@@ -167,7 +167,7 @@ class TimeseriesWidget(FPLWidget):
         if self.controller is not None:
             max_time_ms = max(max_time_ms, float(self.controller.max_width))
             max_neurons = max(max_neurons, int(self.controller.max_height))
-        self.grid_lines = GridLines(max_neurons, max_time_ms)
+        self.grid_lines = GridLines(max_neurons, max_time_ms, dt_ms=self.dt_ms)
         self.subplot.add_graphic(self.grid_lines, center=False)
         self.grid_lines.visible = self.show_grid
         self.controller.add_grid_lines(self.grid_lines)
