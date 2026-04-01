@@ -166,6 +166,9 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
 
     def add_grid_lines(self, gridlines: GridLines):
         self.grid_lines.append(gridlines)
+        current_state = self._get_camera_state()
+        if "width" in current_state:
+            gridlines.set_current_time_extent(current_state["width"])
 
     def remove_grid_lines(self, gridlines: GridLines):
         if not self.grid_lines:

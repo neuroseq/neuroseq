@@ -25,7 +25,6 @@ from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.data_widget import DataWidget
 from neuroseq.example_projects import default_project
-from neuroseq.example_projects import example_project_sections
 from neuroseq.example_projects import example_projects
 from neuroseq.experiments_manager_dialog import ExperimentsManagerDialog
 from neuroseq.exporter_igor2 import export_igor2_patchclamp_csv
@@ -967,24 +966,19 @@ class Gui(QtWidgets.QMainWindow):
         self.open_example_project_menu = menu.addMenu("&Open example project")
         self.open_example_project_section_menus = {}
         self.open_example_project_actions = []
-        for name, generator in example_projects.items():
-            target_menu = self.open_example_project_menu
-            section = example_project_sections.get(name)
-            if section is not None:
-                if section not in self.open_example_project_section_menus:
-                    self.open_example_project_section_menus[section] = (
-                        self.open_example_project_menu.addMenu(section)
-                    )
-                target_menu = self.open_example_project_section_menus[section]
-            action = add_action(
-                name,
-                lambda checked=False, _generator=generator: self.load_project(
-                    _generator()
-                ),
-                target_menu,
-                None,
-            )
-            self.open_example_project_actions.append(action)
+        for section, section_projects in example_projects.items():
+            section_menu = self.open_example_project_menu.addMenu(section)
+            self.open_example_project_section_menus[section] = section_menu
+            for name, generator in section_projects.items():
+                action = add_action(
+                    name,
+                    lambda checked=False, _generator=generator: self.load_project(
+                        _generator()
+                    ),
+                    section_menu,
+                    None,
+                )
+                self.open_example_project_actions.append(action)
         add_action(
             "&Open project",
             self.btn_open_clicked,
@@ -1310,7 +1304,18 @@ class Gui(QtWidgets.QMainWindow):
         )
 
     def closeEvent(self, event):
+        # Stop timers and queued widget updates before tearing down owned widgets.
+        self.time_slider.close()
         # explicitly close all fastplotlib figures to avoid renderer trying to access them after they have been destroyed
         for widget in self.plot_widgets:
             widget.close()
+        # Close any detached analysis windows that are parented to this GUI.
+        for analysis_window in self.findChildren(CustomAnalysisWindow):
+            analysis_window.close()
+        # Drop strong menu refs so closed GUI instances do not keep dangling
+        # QMenu/QAction wrappers alive across tests and CI runs.
+        self.menuBar().clear()
+        self.open_example_project_menu = None
+        self.open_example_project_section_menus.clear()
+        self.open_example_project_actions.clear()
         super().closeEvent(event)

@@ -8,6 +8,7 @@ import brian2 as b2
 import brian2.numpy_ as np
 import pytest
 from numpy.typing import NDArray
+from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.b2_model import B2Model
@@ -99,6 +100,35 @@ def reduce_brian2_logging_verbosity() -> None:
     init_brian2_logging()
 
 
+@pytest.fixture(autouse=True)
+def flush_qt_deferred_deletes():
+    yield
+    qapplication_class = QtWidgets.QApplication
+    app_instance = getattr(qapplication_class, "instance", None)
+    if not callable(app_instance):
+        return
+    app = app_instance()
+    if app is None:
+        return
+    top_level_widgets = getattr(qapplication_class, "topLevelWidgets", None)
+    if not callable(top_level_widgets):
+        return
+    for widget in list(top_level_widgets()):
+        try:
+            widget.close()
+        except RuntimeError:
+            continue
+    process_events = getattr(app, "processEvents", None)
+    if not callable(process_events):
+        return
+    process_events()
+    QtCore.QCoreApplication.sendPostedEvents(
+        None,
+        QtCore.QEvent.Type.DeferredDelete,
+    )
+    process_events()
+
+
 # use temporary path for storing user settings
 @pytest.fixture()
 def tmp_config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path):
@@ -172,9 +202,8 @@ def test_stim_arrays() -> dict[str, StimArray]:
     stim[:, :] = 0
     stim_constant = 300
     stimulus = StimArray("stimulus", StimType.Excitation, stim, "siemens", 0.001)
-    stim_inh = np.zeros(int(tfinal / b2.ms), dtype="float")
-    stim_inh[0:500] = 0
-    stim_inh[500:-1] = 0
+    stim_inh = np.zeros((int(tfinal / b2.ms), 30), dtype="float")
+    stim_inh[:, :] = 0
     stimulus_inh = StimArray(
         "stimulus_inh", StimType.Inhibition, stim_inh, "siemens", 0.001
     )
@@ -235,7 +264,7 @@ def reference_parameters() -> dict[str, Any]:
     dh/dt = alpha_h*(1-h)-beta_h*h : 1
     dge/dt = -ge*(1./taue) : siemens
     dgi/dt = -gi*(1./taui) : siemens
-    giopto = stimulus_inh(t): siemens
+    giopto = stimulus_inh(t, i): siemens
     geopto = stimulus(t, i): siemens
     alpha_m = 0.32*(mV**-1)*4*mV/exprel((13*mV-v+VT)/(4*mV))/ms : Hz
     beta_m = 0.28*(mV**-1)*5*mV/exprel((v-VT-40*mV)/(5*mV))/ms : Hz

@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import brian2 as b2
 import brian2.numpy_ as np
 
@@ -5,23 +7,22 @@ from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
-example_projects = {}
-example_project_sections = {}
+ExampleProjectGenerator = Callable[[], Project]
+
+example_projects: dict[str, dict[str, ExampleProjectGenerator]] = {}
 
 
-def register_example_project(name: str, section: str | None = None):
+def register_example_project(name: str, section: str):
     """
     Decorator used to register example project generator functions so that they will be displayed in the GUI
 
     Args:
         name: The name shown in the GUI (e.g., "Non-linear").
-        section: Optional submenu section in "Open example project".
+        section: Submenu section in "Open example project".
     """
 
-    def decorator(func):
-        example_projects[name] = func
-        if section is not None:
-            example_project_sections[name] = section
+    def decorator(func: ExampleProjectGenerator) -> ExampleProjectGenerator:
+        example_projects.setdefault(section, {})[name] = func
         return func
 
     return decorator

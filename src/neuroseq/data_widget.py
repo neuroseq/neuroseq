@@ -56,6 +56,9 @@ class DataWidget(QtWidgets.QWidget):
             self.heatmap_widget.set_data(data)
 
     def closeEvent(self, event):
-        self.trace_widget.closeEvent(event)
-        self.spike_widget.closeEvent(event)
-        self.heatmap_widget.closeEvent(event)
+        # Close child plot widgets explicitly so their renderers shut down before
+        # Qt destroys this container.
+        self.trace_widget.close()
+        self.spike_widget.close()
+        self.heatmap_widget.close()
+        super().closeEvent(event)

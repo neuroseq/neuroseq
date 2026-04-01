@@ -32,9 +32,57 @@ class StimWidget(TimeseriesWidget):
         self.context_menu = menu
         self.subplot.title = "Stimuli"
         self.hover_slice_graphic: fpl.Graphic | None = None
+        self._hover_pos_cache: tuple[int, float, float] | None = None
         self.vmin = 0.0
         self.vmax = 1.0
         self.stim_type = StimType.Excitation
+
+    def _configure_time_scaled_image(
+        self,
+        image_graphic: fpl.ImageGraphic,
+        *,
+        dt_ms: float | None = None,
+        time_index: int = 0,
+        y_offset: float = 0.0,
+        z_offset: float = 0.0,
+    ) -> None:
+        if dt_ms is None:
+            dt_ms = self.dt_ms
+        image_graphic.offset = (
+            time_index * dt_ms + 0.5 * dt_ms,
+            y_offset,
+            z_offset,
+        )
+        image_graphic.world_object.world.scale = (dt_ms, 1.0, 1.0)
+
+    def _hover_slice_position(self) -> tuple[int, float, float]:
+        if self.mouse_pos is None:
+            return 0, 0.0, 100.0
+        time_index = 0
+        if self.n_timestamps > 0 and self.dt_ms > 0.0:
+            time_index = int(
+                np.clip(
+                    np.floor(self.mouse_pos[0] / self.dt_ms),
+                    0,
+                    self.n_timestamps - 1,
+                )
+            )
+        return time_index, float(np.rint(self.mouse_pos[1])), 100.0
+
+    def _update_hover_slice_position(self) -> None:
+        if self.hover_slice_graphic is None:
+            return
+        pos = self._hover_slice_position()
+        if pos == self._hover_pos_cache:
+            return
+        self._hover_pos_cache = pos
+        time_index, y_offset, z_offset = pos
+        self._configure_time_scaled_image(
+            self.hover_slice_graphic,
+            time_index=time_index,
+            y_offset=y_offset,
+            z_offset=z_offset,
+        )
 
     def set_data(self, stim_array: StimArray | None = None) -> None:
         self.clear_data()
@@ -49,18 +97,22 @@ class StimWidget(TimeseriesWidget):
         if self.stim_type == StimType.External:
             self.vmin = -self.vmax
         self.units = "" if stim_array.units == "1" else stim_array.units
+        self.dt_ms = float(stim_array.dt) * 1000.0  # convert to milliseconds
         self.graphic = self.subplot.add_image(
             stim_array.values.T,
             vmin=self.vmin,
             vmax=self.vmax,
             cmap=get_cmap(self.stim_type),
-            offset=(0.5, 0, 0),
         )
-        # todo: properly support dt_ms != 1 (currently we share the camera with other widgets, but add_image has fixed integer x-axis spacing, so the bounds of the shared camera is only correct if dt_ms=1)
-        self.dt_ms = float(stim_array.dt) * 1000.0  # convert to milliseconds
+        self._configure_time_scaled_image(self.graphic)
         self.n_neurons = stim_array.values.shape[1]
         self.n_timestamps = stim_array.values.shape[0]
         self.post_set_data()
+
+    def post_set_data(self):
+        super().post_set_data()
+        if self.grid_lines is not None:
+            self.grid_lines.update_dt_ms(self.dt_ms)
 
     def set_background_data(self, stim_array: StimArray | None = None) -> None:
         if stim_array is None:
@@ -71,7 +123,12 @@ class StimWidget(TimeseriesWidget):
         vmin = -vmax if stim_array.stim_type == StimType.External else 0
         cmap = get_cmap(stim_array.stim_type, alpha=0.25)
         image_graphic = self.subplot.add_image(
-            stim_array.values.T, vmin=vmin, vmax=vmax, cmap=cmap, offset=(0.5, 0, 0)
+            stim_array.values.T, vmin=vmin, vmax=vmax, cmap=cmap
+        )
+        self._configure_time_scaled_image(
+            image_graphic,
+            dt_ms=float(stim_array.dt) * 1000.0,
+            z_offset=1.0,
         )
         # set the graphic material texture colormap values directly, as add_image ignores any alpha values
         image_graphic._material.map.texture.data[:] = cmap(
@@ -121,8 +178,11 @@ class StimWidget(TimeseriesWidget):
             self.subplot.canvas.unsetCursor()
             return
         self.subplot.canvas.setCursor(QtCore.Qt.CursorShape.CrossCursor)
-        if self.mouse_pos is not None:
-            offset = (np.rint(self.mouse_pos[0]), np.rint(self.mouse_pos[1]), 100)
-        else:
-            offset = (0, 0, 100)
-        self.hover_slice_graphic = self.subplot.add_image(data.T, offset=offset)
+        self.hover_slice_graphic = self.subplot.add_image(data.T, offset=(0, 0, 100))
+        self._hover_pos_cache = None
+        self._update_hover_slice_position()
+
+    def pointer_move(self, ev: pygfx.PointerEvent) -> None:
+        super().pointer_move(ev)
+        if self.hover_slice_graphic is not None and self.mouse_pos is not None:
+            self._update_hover_slice_position()
