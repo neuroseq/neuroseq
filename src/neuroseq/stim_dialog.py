@@ -97,10 +97,8 @@ class EditStimDialog(QDialog):
     def _update_validation_state(self) -> None:
         error = self._name_error or self._dt_error
         self.btn_save.setEnabled(error == "")
-        self.txt_name.setStyleSheet(
-            "color: red" if self._name_error else "color: default"
-        )
-        self.txt_dt.setStyleSheet("color: red" if self._dt_error else "color: default")
+        self.txt_name.setStyleSheet("color: red" if self._name_error else "")
+        self.txt_dt.setStyleSheet("color: red" if self._dt_error else "")
         self.lbl_error.setText(error)
 
     def txt_name_text_changed(self, text: str) -> None:
