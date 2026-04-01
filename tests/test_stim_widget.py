@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import numpy as np
 import pytest
 from pytestqt.qtbot import QtBot
@@ -208,7 +206,8 @@ def test_stim_widget_hover_preview_snaps_to_sample_on_pointer_move(
         lambda ev: np.array([1.3, 2.2, 0.0]),
     )
 
-    stim_widget.pointer_move(SimpleNamespace())
+    # The event argument is ignored because map_screen_to_world is monkeypatched above.
+    stim_widget.pointer_move(None)
 
     assert stim_widget.hover_slice_graphic is not None
     assert stim_widget.hover_slice_graphic.offset[0] == pytest.approx(1.25)
