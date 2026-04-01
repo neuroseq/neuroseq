@@ -128,6 +128,7 @@ class StimWidget(TimeseriesWidget):
         self._configure_time_scaled_image(
             image_graphic,
             dt_ms=float(stim_array.dt) * 1000.0,
+            z_offset=1.0,
         )
         # set the graphic material texture colormap values directly, as add_image ignores any alpha values
         image_graphic._material.map.texture.data[:] = cmap(
