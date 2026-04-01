@@ -512,17 +512,15 @@ def test_stim_array_trimming(project_ornstein: Project) -> None:
 
 def test_stim_array_properties() -> None:
     arr = np.random.rand(1000, 30)
-    project = default_project()
-    project.stim_arrays["stim"] = StimArray(
-        "stim", StimType.Excitation, arr, "mS", dt=0.001
-    )
+    project = Project()
+    project.add_stim_array(StimArray("stim", StimType.Excitation, arr, "mS", dt=0.001))
     assert project.stim_arrays["stim"].values.shape == (1000, 30)
     project.update_stim_array_properties(
-        "stim", units="nS", dt=0.01, n_neurons=25, stim_type=StimType.Inhibition
+        "stim", units="nS", dt=0.001, n_neurons=25, stim_type=StimType.Inhibition
     )
     updated_stim_array = project.stim_arrays["stim"]
     assert updated_stim_array.units == "nS"
-    assert updated_stim_array.dt == pytest.approx(0.01)
+    assert updated_stim_array.dt == pytest.approx(0.001)
     assert updated_stim_array.values.shape == (1000, 25)
     assert updated_stim_array.stim_type == StimType.Inhibition
     project.update_stim_array_properties(
@@ -533,6 +531,94 @@ def test_stim_array_properties() -> None:
     assert updated_stim_array.dt == pytest.approx(0.001)
     assert updated_stim_array.values.shape == (1000, 44)
     assert updated_stim_array.stim_type == StimType.External
+
+
+def test_update_stim_array_properties_remaps_existing_stim_array() -> None:
+    project = Project()
+    values = np.array([[1.0], [0.0], [0.0], [0.0], [0.0]], dtype=np.float32)
+    project.add_stim_array(
+        StimArray("stim", StimType.Excitation, values, "nS", dt=0.001)
+    )
+
+    project.update_stim_array_properties(
+        "stim", n_neurons=1, stim_type=StimType.Excitation, units="nS", dt=0.002
+    )
+
+    updated_stim_array = project.stim_arrays["stim"]
+    assert updated_stim_array.dt == pytest.approx(0.002)
+    assert updated_stim_array.values.shape == (3, 1)
+    assert np.array_equal(updated_stim_array.values[:, 0], np.array([1.0, 0.0, 0.0]))
+    assert project.max_time_secs == pytest.approx(0.006)
+
+
+def test_add_stim_array_coerces_1d_values_to_2d() -> None:
+    project = Project()
+    values = np.array([1.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
+    project.add_stim_array(
+        StimArray("stim", StimType.Inhibition, values, "nS", dt=0.001)
+    )
+
+    updated_stim_array = project.stim_arrays["stim"]
+    assert updated_stim_array.dt == pytest.approx(0.001)
+    assert updated_stim_array.values.shape == (5, 1)
+    assert np.array_equal(updated_stim_array.values[:, 0], values)
+    assert project.max_time_secs == pytest.approx(0.005)
+    assert project.max_neurons == 1
+
+
+def test_save_load_project_preserves_mixed_stim_dt(tmp_path: Path) -> None:
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "stim_a",
+            StimType.Excitation,
+            np.zeros((10, 2), dtype=np.float32),
+            "nS",
+            0.001,
+        )
+    )
+    project.add_stim_array(
+        StimArray(
+            "stim_b",
+            StimType.Inhibition,
+            np.zeros((12, 3), dtype=np.float32),
+            "nS",
+            0.0005208125,
+        )
+    )
+    tmp_file = tmp_path / "project_with_mixed_stim_dt.nseq"
+
+    project.save(tmp_file, SaveLoadOptions(True, True, False, False))
+
+    reconstructed_project = Project(tmp_file)
+    assert reconstructed_project.stim_arrays["stim_a"].dt == pytest.approx(0.001)
+    assert reconstructed_project.stim_arrays["stim_b"].dt == pytest.approx(0.0005208125)
+    assert reconstructed_project.max_time_secs == pytest.approx(0.01)
+
+
+def test_update_limits_with_mixed_stim_dt() -> None:
+    project = Project()
+    project.stim_arrays = {
+        "stim_a": StimArray(
+            "stim_a",
+            StimType.Excitation,
+            np.zeros((10, 2), dtype=np.float32),
+            "nS",
+            0.001,
+        ),
+        "stim_b": StimArray(
+            "stim_b",
+            StimType.Excitation,
+            np.zeros((10, 2), dtype=np.float32),
+            "nS",
+            0.002,
+        ),
+    }
+
+    project.update_limits()
+
+    assert project.max_time_secs == pytest.approx(0.02)
+    assert project.max_neurons == 2
 
 
 def test_stim_array_rename() -> None:

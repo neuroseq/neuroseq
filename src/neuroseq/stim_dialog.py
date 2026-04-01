@@ -9,6 +9,7 @@ from qtpy.QtWidgets import QPushButton
 
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
+from neuroseq.stim_timing import validate_stim_dt_seconds
 
 
 class EditStimDialog(QDialog):
@@ -28,6 +29,8 @@ class EditStimDialog(QDialog):
         self.n_neurons = stim_array.values.shape[1]
         self.units = stim_array.units
         self.dt = stim_array.dt
+        self._name_error = ""
+        self._dt_error = ""
 
         self.setWindowTitle("Edit StimArray")
         self.setModal(True)
@@ -72,7 +75,6 @@ class EditStimDialog(QDialog):
         self.txt_dt = QtWidgets.QLineEdit(self)
         self.txt_dt.setText(f"{self.dt}")
         self.txt_dt.textChanged.connect(self.txt_dt_text_changed)
-        self.txt_dt.setEnabled(False)
         self.layout.addWidget(self.txt_dt, 4, 1)
 
         self.lbl_error = QLabel("")
@@ -90,19 +92,22 @@ class EditStimDialog(QDialog):
         self.btn_cancel.clicked.connect(self.reject)
 
         self.txt_name_text_changed(self.name)
+        self.txt_dt_text_changed(self.txt_dt.text())
+
+    def _update_validation_state(self) -> None:
+        error = self._name_error or self._dt_error
+        self.btn_save.setEnabled(error == "")
+        self.txt_name.setStyleSheet("color: red" if self._name_error else "")
+        self.txt_dt.setStyleSheet("color: red" if self._dt_error else "")
+        self.lbl_error.setText(error)
 
     def txt_name_text_changed(self, text: str) -> None:
-        if text in self.existing_names:
-            self.btn_save.setEnabled(False)
-            self.txt_name.setStyleSheet("color: red")
-            self.lbl_error.setText(
-                f"A stimulus array with name '{text}' already exists."
-            )
-        else:
-            self.btn_save.setEnabled(True)
-            self.txt_name.setStyleSheet("color: default")
-            self.lbl_error.setText("")
         self.name = text
+        if text in self.existing_names:
+            self._name_error = f"A stimulus array with name '{text}' already exists."
+        else:
+            self._name_error = ""
+        self._update_validation_state()
 
     def cmb_type_index_changed(self, index: int) -> None:
         self.stim_type = {
@@ -118,4 +123,9 @@ class EditStimDialog(QDialog):
         self.units = text
 
     def txt_dt_text_changed(self, text: str) -> None:
-        self.dt = float(text)
+        try:
+            self.dt = validate_stim_dt_seconds(float(text))
+            self._dt_error = ""
+        except (TypeError, ValueError):
+            self._dt_error = "Stimulus timestep must be a positive finite number."
+        self._update_validation_state()

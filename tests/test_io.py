@@ -111,6 +111,23 @@ def test_stim_array_json_normalizes_quantity_dt_to_float(tmp_path: Path) -> None
     assert read["s"].dt == pytest.approx(0.01)
 
 
+def test_stim_array_json_coerces_1d_values_to_2d_on_load(tmp_path: Path) -> None:
+    d = {
+        "s": StimArray(
+            "name",
+            StimType.External,
+            np.array([1.0, 2.0, 3.0], dtype=np.float32),
+            "mV",
+            0.01,
+        )
+    }
+
+    read = _save_and_reload_json(d, tmp_path)
+
+    assert read["s"].values.shape == (3, 1)
+    assert np.allclose(read["s"].values[:, 0], d["s"].values)
+
+
 def test_trace_data_json(tmp_path: Path) -> None:
     d = {
         "s": TraceData(

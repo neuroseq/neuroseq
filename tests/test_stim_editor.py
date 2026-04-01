@@ -176,6 +176,248 @@ def test_stim_editor_pad_and_trim(
     stim_editor.close()
 
 
+def test_edit_stim_array_dt_change_requires_confirmation(
+    monkeypatch: MonkeyPatch, qtbot: QtBot
+) -> None:
+    class MockEditStimDialog:
+        def __init__(self, stim_array, existing_names, parent=None):
+            self.name = stim_array.name
+            self.stim_type = stim_array.stim_type
+            self.n_neurons = stim_array.values.shape[1]
+            self.units = stim_array.units
+            self.dt = 0.002
+
+        def exec(self):
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "a",
+            neuroseq.stim.StimType.Excitation,
+            np.array([[1.0], [0.0], [0.0], [0.0], [0.0]], dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.show()
+    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    stim_editor.set_project(project)
+    stim_editor.draw_stim_length = 4
+    monkeypatch.setattr(neuroseq.stim_editor, "EditStimDialog", MockEditStimDialog)
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args: QtWidgets.QMessageBox.StandardButton.No,
+    )
+
+    stim_editor.edit_stim_array()
+
+    assert stim_editor.current_stim_modifier is not None
+    assert stim_editor.current_stim_modifier.stim_array.dt == approx(0.001)
+    assert stim_editor.current_stim_modifier.stim_array.values.shape == (5, 1)
+    assert stim_editor.draw_stim_length == 4
+
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args: QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+    stim_editor.edit_stim_array()
+
+    assert stim_editor.current_stim_modifier is not None
+    assert stim_editor.current_stim_modifier.stim_array.dt == approx(0.002)
+    assert stim_editor.current_stim_modifier.stim_array.values.shape == (3, 1)
+    assert stim_editor.current_stim_modifier.stim_array.values[0, 0] == approx(1.0)
+    assert stim_editor.current_stim_modifier.stim_array.values[1, 0] == approx(0.0)
+    assert stim_editor.current_stim_modifier.stim_array.values[2, 0] == approx(0.0)
+    assert stim_editor.draw_stim_length == 2
+    stim_editor.close()
+
+
+def test_choose_stim_length_snaps_to_selected_stim_dt(
+    monkeypatch: MonkeyPatch, qtbot: QtBot
+) -> None:
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "a",
+            neuroseq.stim.StimType.Excitation,
+            np.zeros((10, 2), dtype=np.float32),
+            "mV",
+            0.0005208125,
+        )
+    )
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.show()
+    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    stim_editor.set_project(project)
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("1.0", True))
+
+    stim_editor.choose_stim_length()
+
+    assert stim_editor.draw_stim_length == 2
+    assert stim_editor._draw_stim_length_milliseconds() == approx(1.041625)
+    stim_editor.close()
+
+
+def test_choose_stim_length_rejects_non_finite_input(
+    monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list[dict[str, str]]
+) -> None:
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "a",
+            neuroseq.stim.StimType.Excitation,
+            np.zeros((10, 2), dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.show()
+    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    stim_editor.set_project(project)
+    stim_editor.draw_stim_length = 3
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("inf", True))
+
+    stim_editor.choose_stim_length()
+
+    assert stim_editor.draw_stim_length == 3
+    assert qmessagebox_calls[-1]["name"] == "critical"
+    assert qmessagebox_calls[-1]["title"] == "Invalid input"
+    assert "positive number of milliseconds" in qmessagebox_calls[-1]["text"]
+    stim_editor.close()
+
+
+def test_selecting_stim_preserves_physical_draw_duration(qtbot: QtBot) -> None:
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "a",
+            neuroseq.stim.StimType.Excitation,
+            np.zeros((10, 2), dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+    project.add_stim_array(
+        StimArray(
+            "b",
+            neuroseq.stim.StimType.Excitation,
+            np.zeros((10, 2), dtype=np.float32),
+            "mV",
+            0.002,
+        )
+    )
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.show()
+    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    stim_editor.set_project(project, stim_to_select="a")
+    stim_editor.draw_stim_length = 4
+    stim_editor.select_stim("b")
+
+    assert stim_editor.current_stim_modifier is not None
+    assert stim_editor.current_stim_modifier.stim_array.name == "b"
+    assert stim_editor.draw_stim_length == 2
+    assert stim_editor._draw_stim_length_milliseconds() == approx(4.0)
+    stim_editor.close()
+
+
+def test_create_stim_array_defaults_to_selected_stim_dt(
+    monkeypatch: MonkeyPatch, qtbot: QtBot
+) -> None:
+    captured = {}
+
+    class MockEditStimDialog:
+        def __init__(self, stim_array, existing_names, parent=None):
+            captured["dt"] = stim_array.dt
+            self.name = stim_array.name
+            self.stim_type = stim_array.stim_type
+            self.n_neurons = stim_array.values.shape[1]
+            self.units = stim_array.units
+            self.dt = stim_array.dt
+
+        def exec(self):
+            return QtWidgets.QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(neuroseq.stim_editor, "EditStimDialog", MockEditStimDialog)
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "a",
+            neuroseq.stim.StimType.Excitation,
+            np.zeros((10, 2), dtype=np.float32),
+            "mV",
+            0.002,
+        )
+    )
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.show()
+    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    stim_editor.set_project(project, stim_to_select="a")
+
+    stim_editor.create_stim_array()
+
+    assert captured["dt"] == approx(0.002)
+    stim_editor.close()
+
+
+def test_create_stim_array_defaults_to_one_millisecond_without_selection(
+    monkeypatch: MonkeyPatch, qtbot: QtBot
+) -> None:
+    captured = {}
+
+    class MockEditStimDialog:
+        def __init__(self, stim_array, existing_names, parent=None):
+            captured["dt"] = stim_array.dt
+            self.name = stim_array.name
+            self.stim_type = stim_array.stim_type
+            self.n_neurons = stim_array.values.shape[1]
+            self.units = stim_array.units
+            self.dt = stim_array.dt
+
+        def exec(self):
+            return QtWidgets.QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(neuroseq.stim_editor, "EditStimDialog", MockEditStimDialog)
+    project = Project()
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.show()
+    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    stim_editor.set_project(project)
+
+    stim_editor.create_stim_array()
+
+    assert captured["dt"] == approx(0.001)
+    stim_editor.close()
+
+
 def test_stim_editor_actions(
     qtbot: QtBot, monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:

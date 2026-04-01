@@ -132,6 +132,90 @@ def test_stim_widget_background_stims(qtbot: QtBot) -> None:
     qtbot.waitUntil(lambda: not stim_widget.isVisible())
 
 
+def test_stim_widget_background_stims_use_their_own_dt(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    stim_widget.show()
+    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    selected_stim = StimArray(
+        "selected", StimType.Excitation, np.random.random((10, 8)), "mV", dt=0.001
+    )
+    background_stim = StimArray(
+        "background", StimType.Inhibition, np.random.random((10, 8)), "mV", dt=0.0005
+    )
+
+    stim_widget.set_data(selected_stim)
+    stim_widget.set_background_data(background_stim)
+
+    assert stim_widget.graphic is not None
+    assert len(stim_widget.background_graphics) == 1
+    background_graphic = stim_widget.background_graphics[0]
+    assert stim_widget.graphic.world_object.world.scale[0] == pytest.approx(1.0)
+    assert background_graphic.world_object.world.scale[0] == pytest.approx(0.5)
+    assert background_graphic.offset[0] == pytest.approx(0.25)
+    stim_widget.close()
+    qtbot.waitUntil(lambda: not stim_widget.isVisible())
+
+
+def test_stim_widget_gridlines_follow_stim_dt(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    stim_widget.show()
+    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    stim_array = StimArray(
+        "stim",
+        StimType.Excitation,
+        np.random.random((10, 8)),
+        "mV",
+        dt=0.0005208125,
+    )
+
+    stim_widget.set_data(stim_array)
+
+    assert stim_widget.grid_lines is not None
+    assert stim_widget.grid_lines.dt_ms == pytest.approx(0.5208125)
+    positions = stim_widget.grid_lines.gridline_1sample.geometry.positions.data[0::2, 0]
+    assert positions[1] - positions[0] == pytest.approx(0.5208125)
+    stim_widget.close()
+    qtbot.waitUntil(lambda: not stim_widget.isVisible())
+
+
+def test_stim_widget_hover_preview_snaps_to_sample_on_pointer_move(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    stim_widget.show()
+    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    stim_array = StimArray(
+        "stim",
+        StimType.Excitation,
+        np.random.random((10, 8)),
+        "mV",
+        dt=0.0005,
+    )
+    stim_widget.set_data(stim_array)
+    stim_widget.mouse_pos = np.array([0.0, 2.2, 0.0])
+    stim_widget.set_hover_slice(np.ones((2, 1)))
+    monkeypatch.setattr(
+        stim_widget.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([1.3, 2.2, 0.0]),
+    )
+
+    # The event argument is ignored because map_screen_to_world is monkeypatched above.
+    stim_widget.pointer_move(None)
+
+    assert stim_widget.hover_slice_graphic is not None
+    assert stim_widget.hover_slice_graphic.offset[0] == pytest.approx(1.25)
+    assert stim_widget.hover_slice_graphic.offset[1] == pytest.approx(2.0)
+    stim_widget.close()
+    qtbot.waitUntil(lambda: not stim_widget.isVisible())
+
+
 def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
     controller = ConstrainedPanZoomController()
     stim_widget = StimWidget(controller)

@@ -4,6 +4,8 @@ import pygfx
 from fastplotlib import Graphic
 from fastplotlib.utils import mesh_masks
 
+from neuroseq.stim_timing import format_milliseconds
+
 
 class RegionOfInterest(Graphic):
     def __init__(self, fill_color: Sequence[float]):
@@ -43,7 +45,9 @@ class RegionOfInterest(Graphic):
             else f"Neuron {neuron_index_slice.start}"
         )
         self.text.set_text(
-            f"{neuron_text}\n{time_index_slice.start * dt_ms:0.1f}ms-{time_index_slice.stop * dt_ms:0.1f}ms"
+            f"{neuron_text}\n"
+            f"{format_milliseconds(time_index_slice.start * dt_ms)}ms-"
+            f"{format_milliseconds(time_index_slice.stop * dt_ms)}ms"
         )
         self.text.world.position = (
             dt_ms * (time_index_slice.stop + time_index_slice.start) / 2,

@@ -14,6 +14,7 @@ from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.stim import StimArray
+from neuroseq.stim_timing import ensure_2d_stim_values
 
 
 def _to_seconds(value: float | int) -> float:
@@ -158,7 +159,7 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                 "dt": dt,
             }:
                 with _zf.open(values) as fp:
-                    loaded_values = np.load(fp)
+                    loaded_values = ensure_2d_stim_values(np.load(fp))
                 return StimArray(
                     name,
                     stim_type,
