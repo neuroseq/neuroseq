@@ -691,11 +691,7 @@ class StimEditor(QtWidgets.QWidget):
         dt = self._current_stim_dt_seconds()
         if self.current_stim_modifier is not None:
             stim_type = self.current_stim_modifier.stim_array.stim_type
-            n_neurons = (
-                self.current_stim_modifier.stim_array.values.shape[1]
-                if self.current_stim_modifier.stim_array.values.ndim > 1
-                else 1
-            )
+            n_neurons = self.current_stim_modifier.stim_array.values.shape[1]
             units = self.current_stim_modifier.stim_array.units
         dt = float(dt)
         stim_array = StimArray(

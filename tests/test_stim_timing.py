@@ -107,18 +107,6 @@ def test_remap_stim_values_to_dt_remaps_2d_to_finer_grid() -> None:
     assert np.array_equal(remapped, expected)
 
 
-def test_remap_stim_values_to_dt_remaps_1d_arrays() -> None:
-    values = np.array([1.0, 2.0, 3.0], dtype=np.float32)
-
-    remapped = remap_stim_values_to_dt(
-        values, old_dt_seconds=0.002, new_dt_seconds=0.001
-    )
-
-    expected = np.array([1.0, 1.0, 2.0, 2.0, 3.0, 3.0], dtype=np.float32)
-    assert np.array_equal(remapped, expected)
-    assert remapped.shape == (6,)
-
-
 def test_remap_stim_values_to_dt_preserves_empty_array_shape() -> None:
     values = np.zeros((0, 3), dtype=np.float32)
 
@@ -130,8 +118,13 @@ def test_remap_stim_values_to_dt_preserves_empty_array_shape() -> None:
     assert remapped.dtype == values.dtype
 
 
-def test_remap_stim_values_to_dt_rejects_ndim_greater_than_two() -> None:
-    values = np.zeros((2, 3, 4), dtype=np.float32)
-
-    with pytest.raises(ValueError, match="1-dimensional or 2-dimensional"):
+@pytest.mark.parametrize(
+    "values",
+    [
+        np.zeros((3,), dtype=np.float32),
+        np.zeros((2, 3, 4), dtype=np.float32),
+    ],
+)
+def test_remap_stim_values_to_dt_rejects_non_2d_values(values: np.ndarray) -> None:
+    with pytest.raises(ValueError, match="2-dimensional"):
         remap_stim_values_to_dt(values, old_dt_seconds=0.001, new_dt_seconds=0.002)

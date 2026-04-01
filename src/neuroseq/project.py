@@ -476,18 +476,17 @@ class Project:
         Pad all StimArrays in the project to a length of total_time_seconds
         """
         for name, stim_array in self.stim_arrays.items():
-            if stim_array.values.ndim > 1:
-                n_timestamps = stim_array.values.shape[0]
-                array_time_secs = stim_array.dt * n_timestamps
-                padding_required_secs = total_time_seconds - array_time_secs
-                if padding_required_secs > 0:
-                    n_pad = math.ceil(padding_required_secs / stim_array.dt)
-                    self.logger.info(
-                        f"Adding {padding_required_secs}s / {n_pad} timestamps of padding to {name}: {stim_array.values.shape}"
-                    )
-                    self.stim_arrays[name].values = np.pad(
-                        stim_array.values, pad_width=((0, n_pad), (0, 0))
-                    )
+            n_timestamps = stim_array.values.shape[0]
+            array_time_secs = stim_array.dt * n_timestamps
+            padding_required_secs = total_time_seconds - array_time_secs
+            if padding_required_secs > 0:
+                n_pad = math.ceil(padding_required_secs / stim_array.dt)
+                self.logger.info(
+                    f"Adding {padding_required_secs}s / {n_pad} timestamps of padding to {name}: {stim_array.values.shape}"
+                )
+                self.stim_arrays[name].values = np.pad(
+                    stim_array.values, pad_width=((0, n_pad), (0, 0))
+                )
         self.update_limits()
 
     def trim_stim_arrays(self, total_time_seconds: float):
@@ -495,16 +494,13 @@ class Project:
         Trim all StimArrays in the project to a length of total_time_seconds
         """
         for name, stim_array in self.stim_arrays.items():
-            if stim_array.values.ndim > 1:
-                n_timestamps = stim_array.values.shape[0]
-                new_n_timestamps = int(total_time_seconds / stim_array.dt)
-                if new_n_timestamps < n_timestamps:
-                    self.logger.info(
-                        f"Reducing {name} number of timestamps: {n_timestamps} -> {new_n_timestamps}"
-                    )
-                    self.stim_arrays[name].values = stim_array.values[
-                        :new_n_timestamps, :
-                    ]
+            n_timestamps = stim_array.values.shape[0]
+            new_n_timestamps = int(total_time_seconds / stim_array.dt)
+            if new_n_timestamps < n_timestamps:
+                self.logger.info(
+                    f"Reducing {name} number of timestamps: {n_timestamps} -> {new_n_timestamps}"
+                )
+                self.stim_arrays[name].values = stim_array.values[:new_n_timestamps, :]
         self.update_limits()
 
     def trim_stim_array_would_delete_data(self, total_time_seconds: float) -> bool:
@@ -512,13 +508,12 @@ class Project:
         Check whether trimming all StimArrays in the project to a length of total_time_seconds would delete data
         """
         for stim_array in self.stim_arrays.values():
-            if stim_array.values.ndim > 1:
-                new_n_timestamps = int(total_time_seconds / stim_array.dt)
-                if (
-                    new_n_timestamps < stim_array.values.shape[0]
-                    and np.sum(stim_array.values[new_n_timestamps:, :]) > 0
-                ):
-                    return True
+            new_n_timestamps = int(total_time_seconds / stim_array.dt)
+            if (
+                new_n_timestamps < stim_array.values.shape[0]
+                and np.sum(stim_array.values[new_n_timestamps:, :]) > 0
+            ):
+                return True
         return False
 
     def run_simulation(

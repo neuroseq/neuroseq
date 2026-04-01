@@ -76,14 +76,13 @@ def remap_stim_values_to_dt(
     old_dt_seconds: float | int,
     new_dt_seconds: float | int,
 ) -> np.ndarray:
+    values = np.asarray(values)
     old_dt = validate_stim_dt_seconds(old_dt_seconds)
     new_dt = validate_stim_dt_seconds(new_dt_seconds)
     if stim_dt_matches(old_dt, new_dt):
         return np.array(values, copy=True)
-    if values.ndim not in (1, 2):
-        raise ValueError(
-            "Stimulus arrays must be 1-dimensional or 2-dimensional to be remapped."
-        )
+    if values.ndim != 2:
+        raise ValueError("Stimulus arrays must be 2-dimensional to be remapped.")
 
     n_old_samples = int(values.shape[0])
     if n_old_samples == 0:
@@ -100,6 +99,4 @@ def remap_stim_values_to_dt(
     sample_start_seconds = np.arange(n_new_samples, dtype=np.float64) * new_dt
     source_indices = np.floor(sample_start_seconds / old_dt).astype(np.int64)
     np.clip(source_indices, 0, n_old_samples - 1, out=source_indices)
-    if values.ndim == 1:
-        return np.array(values[source_indices], copy=True)
     return np.array(values[source_indices, :], copy=True)

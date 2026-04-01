@@ -26,7 +26,7 @@ class EditStimDialog(QDialog):
 
         self.name = stim_array.name
         self.stim_type = stim_array.stim_type
-        self.n_neurons = stim_array.values.shape[1] if stim_array.values.ndim > 1 else 1
+        self.n_neurons = stim_array.values.shape[1]
         self.units = stim_array.units
         self.dt = stim_array.dt
         self._name_error = ""
