@@ -579,6 +579,129 @@ python -m neuroseq \
 - Preview panel reports parsed header fields, object counts, timed-object counts, estimated grouped channels, and center-distance merged counts before import.
 - Completion dialog reports eligible objects, grouped channels, mapped/unmapped channels, generated timepoints, merged circular entities, and any truncation counters.
 
+### 9.6 Igor2 `.ibw` / Igor-style `.csv` import (stimulation data)
+
+`igor_import_dialog.py` + `importer_igor2.py`:
+
+- GUI entrypoint is `File -> Import Igor2 Wave (.ibw/.csv)`.
+- Import is available regardless of whether the project already has stim arrays:
+  - if no stim arrays exist, only `Create new stim array` is available,
+  - if stim arrays already exist, user can either create a new stim array or import into an existing one.
+- Supported file types are:
+  - Igor Binary Wave `.ibw`,
+  - simple Igor-style `.csv`.
+- Current scope is single-wave import only:
+  - packed Igor/Sutter experiments such as `.pxp` are not imported yet,
+  - multidimensional Igor waves are rejected,
+  - the importer currently expects one 1D command/stimulation trace per file.
+
+#### Supported file semantics
+
+- Igor-style `.csv` import expects:
+  - first non-empty row = wave name,
+  - every following non-empty row = exactly one numeric sample value.
+- Multi-column sample rows in `.csv` are rejected as invalid input.
+- `.ibw` loading uses the optional Python dependency `igor2`.
+- For `.ibw`, importer extracts when available:
+  - wave name,
+  - raw sample values,
+  - source sample interval (`dt`) from Igor header scaling fields,
+  - data units,
+  - x-axis / dimension units,
+  - optional wave note text for preview display.
+
+#### Preview and source sampling metadata
+
+- After file selection, the dialog shows a preview containing:
+  - wave name,
+  - source format,
+  - source sample count,
+  - detected source `dt` if present in file metadata,
+  - the source `dt` currently selected for import,
+  - estimated imported sample count on the NeuroSeq 1 ms grid,
+  - wave units,
+  - axis units,
+  - value range (`min..max`),
+  - optional Igor note text.
+- Source sample interval is always user-editable in the dialog.
+- If the file contains no source `dt` metadata:
+  - the dialog defaults to `0.001 s`,
+  - preview explicitly warns that the file did not store the sample interval,
+  - import still proceeds using the currently selected source `dt`.
+
+#### Timeline conversion model
+
+- NeuroSeq’s current stim editor/timeline assumes a 1 ms grid for correct editing/viewing behavior.
+- Therefore Igor import always targets:
+  - `target_dt = 0.001 s`.
+- If source `dt` already equals `0.001 s`, sample values are copied directly.
+- If source `dt` differs from `0.001 s`, importer resamples to the NeuroSeq grid using zero-order hold:
+  - target timestamps are generated on the 1 ms grid,
+  - each target sample takes the most recent source sample value,
+  - this is intended for step-like command waveforms,
+  - fine sub-ms structure is intentionally collapsed to the 1 ms NeuroSeq representation.
+- Estimated imported sample count is computed from total source duration:
+  - `ceil(source_samples * source_dt / 0.001)`.
+
+#### Import target modes
+
+The dialog offers two mutually exclusive modes.
+
+##### A) Create new stim array
+
+- A new `StimArray` is created from the imported wave.
+- Suggested stim name defaults to the Igor wave name.
+- Suggested units default to the imported wave units when available.
+- Default stim type is `External`.
+- Imported values are stored as a single-neuron stim matrix:
+  - shape = `(timepoints, 1)`.
+- Stored stim metadata:
+  - `name` = dialog name field,
+  - `stim_type` = dialog type selection,
+  - `units` = dialog units field,
+  - `dt = 0.001`.
+- Duplicate stim names are rejected before import.
+
+##### B) Import into existing stim array
+
+- User selects:
+  - target stim array,
+  - target neuron column,
+  - whether to extend target duration,
+  - whether to replace or add to existing values.
+- Existing-target import is only enabled when the selected target stim array also uses:
+  - `dt = 0.001 s`.
+- Import writes the 1D Igor wave into exactly one neuron column of the chosen target stim array.
+- Time-axis behavior:
+  - if `extend_to_fit=True`, target stim array grows to fit the imported duration,
+  - otherwise overflow samples are truncated.
+- Value-write behavior:
+  - if `replace_existing=True`, destination neuron column is cleared first and then overwritten with imported values,
+  - if `replace_existing=False`, imported values are added to existing destination values sample-by-sample.
+- Other neuron columns are preserved.
+
+#### Resulting project/GUI updates
+
+- New-stim mode calls `Project.add_stim_array(...)`.
+- Existing-stim mode mutates the selected `StimArray.values` in place.
+- After successful import, GUI refreshes project state and sets the stim combobox to the imported/updated stim array.
+- Completion dialog reports:
+  - source sample count,
+  - imported sample count,
+  - target stim name,
+  - target neuron index for existing-stim mode,
+  - whether resampling occurred,
+  - source and target `dt`,
+  - any truncation when target extension was disabled.
+
+#### Current limitations
+
+- No `.pxp` / Sutter packed-experiment import yet.
+- No multi-wave batch import yet.
+- No automatic reconstruction of stimulation patterns from Sutter routine/paradigm metadata yet.
+- Import-to-existing currently requires the target stim array to already be on the 1 ms grid.
+- Because zero-order hold is used, the importer is best aligned with command/stimulation waveforms that are piecewise constant or approximately step-like.
+
 ## 10) Synthetic data generation (`synthetic_data_dialog.py`)
 
 Two synthetic workflows:

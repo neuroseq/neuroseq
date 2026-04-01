@@ -465,6 +465,48 @@ def test_gui_export_igor2_patchclamp_stim_requires_stim_data(
     assert "no stimulation entities" in qmessagebox_calls[0]["title"].lower()
 
 
+def test_gui_import_igor2_wave_updates_selected_stim(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    project = Project()
+
+    class MockIgorImportDialog:
+        def __init__(self, dialog_project: Project, parent=None) -> None:
+            assert dialog_project is project
+            self.project = dialog_project
+            self.selected_stim_name = "igor_wave"
+
+        def exec(self) -> int:
+            self.project.add_stim_array(
+                StimArray(
+                    "igor_wave",
+                    StimType.External,
+                    np.array([[1.0], [2.0]], dtype=np.float32),
+                    "pA",
+                    0.001,
+                )
+            )
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    stim_combo = QtWidgets.QComboBox()
+
+    def _update_project(updated_project: Project) -> None:
+        stim_combo.clear()
+        stim_combo.addItems(list(updated_project.stim_arrays.keys()))
+
+    fake_gui: Any = SimpleNamespace(
+        project=project,
+        cmb_stim=stim_combo,
+        update_project=_update_project,
+    )
+
+    monkeypatch.setattr(neuroseq.gui, "IgorImportDialog", MockIgorImportDialog)
+    Gui.btn_import_igor2_wave_clicked(fake_gui)
+
+    assert fake_gui.cmb_stim.currentText() == "igor_wave"
+    assert "igor_wave" in project.stim_arrays
+
+
 def test_gui_checkpoints(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

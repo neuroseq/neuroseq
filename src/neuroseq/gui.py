@@ -32,6 +32,7 @@ from neuroseq.exporter_igor2 import export_igor2_patchclamp_csv
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.igor2_patchclamp_export_dialog import Igor2PatchClampExportDialog
+from neuroseq.igor_import_dialog import IgorImportDialog
 from neuroseq.import_dialog import Suite2pImportDialog
 from neuroseq.import_experiment_dialog import ImportExperimentDialog
 from neuroseq.importer_cellpose import CellposeImportResult
@@ -777,6 +778,13 @@ class Gui(QtWidgets.QMainWindow):
             if dialog.selected_stim_name:
                 self.cmb_stim.setCurrentText(dialog.selected_stim_name)
 
+    def btn_import_igor2_wave_clicked(self) -> None:
+        dialog = IgorImportDialog(self.project, parent=self)
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            self.update_project(self.project)
+            if dialog.selected_stim_name:
+                self.cmb_stim.setCurrentText(dialog.selected_stim_name)
+
     def _delete_cellpose_data(self) -> None:
         """Remove stored cellpose data from both GUI and project."""
         self.last_cellpose_import = None
@@ -1068,6 +1076,14 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             shortcut=None,
             icon=qta.icon("mdi6.file-import-outline"),
+        )
+        add_action(
+            "Import Igor2 &Wave (.ibw/.csv)",
+            self.btn_import_igor2_wave_clicked,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon=qta.icon("mdi6.waveform"),
         )
         menu.addSeparator()
         add_action(

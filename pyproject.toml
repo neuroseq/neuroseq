@@ -19,6 +19,7 @@ dependencies = [
     "pyside6!=6.9.1",
     "pyqtgraph!=0.14.0",
     "h5py",
+    "igor2",
     "qtawesome",
     "click",
     "fastplotlib",
