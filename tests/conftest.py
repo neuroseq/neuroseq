@@ -19,6 +19,7 @@ from neuroseq.data import TraceData
 from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
+from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.utils import init_brian2_logging
 
 b2.prefs.codegen.target = "numpy"
@@ -91,6 +92,30 @@ def qmessagebox_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
         monkeypatch.setattr(
             QtWidgets.QMessageBox, method_name, _make_callback(method_name)
         )
+
+    # Also intercept _show_scrollable_message, which the sanity-check dialog uses
+    # instead of the static QMessageBox methods.  Map the QMessageBox.Icon to a
+    # string name so tests can assert on it the same way.
+    _icon_to_name = {
+        QtWidgets.QMessageBox.Icon.Information: "information",
+        QtWidgets.QMessageBox.Icon.Warning: "warning",
+        QtWidgets.QMessageBox.Icon.Critical: "critical",
+    }
+
+    def _mock_scrollable(
+        self: Any,
+        title: str,
+        text: str,
+        icon: QtWidgets.QMessageBox.Icon = QtWidgets.QMessageBox.Icon.Information,
+        extra_button_text: str | None = None,
+    ) -> bool:
+        name = _icon_to_name.get(icon, "information")
+        calls.append({"name": name, "title": title, "text": text})
+        return False  # extra button not clicked
+
+    monkeypatch.setattr(
+        StimulationGeneratorDialog, "_show_scrollable_message", _mock_scrollable
+    )
 
     return calls
 

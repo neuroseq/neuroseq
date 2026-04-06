@@ -10,6 +10,7 @@ import qtawesome as qta
 from qtpy import QtWidgets
 from qtpy.compat import getexistingdirectory
 
+from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 from neuroseq.exporter_syscon2 import GlobalSlmWindowViolation
 from neuroseq.exporter_syscon2 import InitialSlmLoadViolation
 from neuroseq.exporter_syscon2 import SimultaneousDurationViolation
@@ -419,8 +420,8 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             apply_choice = QtWidgets.QMessageBox.question(
                 self,
                 "Apply Sanity Fixes",
-                "Sanity check produced normalized 17ms-window fixes.\n"
-                "Apply them to the selected stimulation array now?",
+                "Sanity check inserted blank load window(s) by shifting the timeline.\n"
+                "Apply the shift to the selected stimulation array now?",
                 QtWidgets.QMessageBox.StandardButton.Yes
                 | QtWidgets.QMessageBox.StandardButton.No,
                 QtWidgets.QMessageBox.StandardButton.Yes,
@@ -446,11 +447,43 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 error_lines.extend(["", "Errors:", *sanity_report.errors])
             if sanity_report.warnings:
                 error_lines.extend(["", "Warnings:", *sanity_report.warnings])
-            QtWidgets.QMessageBox.critical(
-                self,
+            is_dt_violation = any(
+                str(_SYSCON2_TTL_PULSE_QUANTUM_S) in e
+                for e in (sanity_report.errors or [])
+            )
+            fix_clicked = self._show_scrollable_message(
                 "Sanity Check Failed",
                 "\n".join(error_lines),
+                QtWidgets.QMessageBox.Icon.Critical,
+                extra_button_text="Fix dt" if is_dt_violation else None,
             )
+            if fix_clicked and is_dt_violation:
+                stim_array = self.project.stim_arrays[stim_name]
+                stim_array.dt = _SYSCON2_TTL_PULSE_QUANTUM_S
+                blank_values = np.zeros_like(stim_array.values)
+                self._replace_stim_values_preserving_undo(stim_name, blank_values)
+                # Re-select so the stim widget re-reads the updated dt for its time axis.
+                parent_widget = self.parentWidget()
+                stim_editor = (
+                    getattr(parent_widget, "stim_editor", None)
+                    if parent_widget is not None
+                    else None
+                )
+                if stim_editor is not None and hasattr(stim_editor, "select_stim"):
+                    stim_editor.select_stim(stim_name)
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "dt Updated — Array Cleared",
+                    f"dt has been set to {_SYSCON2_TTL_PULSE_QUANTUM_S} s "
+                    f"({_SYSCON2_TTL_PULSE_QUANTUM_S * 1e6:.4f} µs per tick).\n\n"
+                    "The stimulation array has been cleared.\n"
+                    "Please redraw your stimuli.",
+                )
+                self._log_status(
+                    "Set dt of '%s' to %s s and cleared all stimuli — please redraw.",
+                    stim_name,
+                    _SYSCON2_TTL_PULSE_QUANTUM_S,
+                )
             return
 
         assert sanity_report.export_report is not None
@@ -467,17 +500,59 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         ]
         if sanity_report.warnings:
             success_lines.extend(["", "Warnings:", *sanity_report.warnings])
-            QtWidgets.QMessageBox.warning(
-                self,
+            self._show_scrollable_message(
                 "Sanity Check Passed With Warnings",
                 "\n".join(success_lines),
+                QtWidgets.QMessageBox.Icon.Warning,
             )
             return
-        QtWidgets.QMessageBox.information(
-            self,
+        self._show_scrollable_message(
             "Sanity Check Passed",
             "\n".join(success_lines),
+            QtWidgets.QMessageBox.Icon.Information,
         )
+
+    def _show_scrollable_message(
+        self,
+        title: str,
+        text: str,
+        icon: QtWidgets.QMessageBox.Icon = QtWidgets.QMessageBox.Icon.Information,
+        extra_button_text: str | None = None,
+    ) -> bool:
+        """Show a message dialog with a scrollable text area.
+
+        Returns True if the extra button (if any) was clicked, False otherwise.
+        """
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.resize(600, 400)
+
+        text_edit = QtWidgets.QPlainTextEdit(dlg)
+        text_edit.setPlainText(text)
+        text_edit.setReadOnly(True)
+
+        button_box = QtWidgets.QDialogButtonBox(dlg)
+        ok_button = button_box.addButton(QtWidgets.QDialogButtonBox.StandardButton.Ok)
+        ok_button.clicked.connect(dlg.accept)
+
+        extra_clicked = [False]
+        if extra_button_text is not None:
+            extra_btn = button_box.addButton(
+                extra_button_text,
+                QtWidgets.QDialogButtonBox.ButtonRole.ActionRole,
+            )
+
+            def _on_extra() -> None:
+                extra_clicked[0] = True
+                dlg.accept()
+
+            extra_btn.clicked.connect(_on_extra)
+
+        layout = QtWidgets.QVBoxLayout(dlg)
+        layout.addWidget(text_edit)
+        layout.addWidget(button_box)
+        dlg.exec()
+        return extra_clicked[0]
 
     def _prompt_global_slm_window_fix_choice(
         self,

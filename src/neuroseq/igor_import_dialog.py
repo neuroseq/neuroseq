@@ -1,0 +1,412 @@
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
+
+import brian2.numpy_ as np
+from qtpy import QtWidgets
+from qtpy.compat import getopenfilename
+
+from neuroseq.importer_igor2 import NEUROSEQ_IGOR_TARGET_DT_SECONDS
+from neuroseq.importer_igor2 import IgorWave
+from neuroseq.importer_igor2 import create_stim_array_from_igor_wave
+from neuroseq.importer_igor2 import estimate_resampled_sample_count
+from neuroseq.importer_igor2 import import_igor_wave_into_stim_array
+from neuroseq.importer_igor2 import load_igor_wave_file
+from neuroseq.importer_igor2 import prepare_igor_wave_for_neuroseq
+from neuroseq.stim import StimType
+
+if TYPE_CHECKING:
+    from neuroseq.project import Project
+    from neuroseq.stim import StimArray
+
+
+class IgorImportDialog(QtWidgets.QDialog):
+    """Dialog for importing single-wave Igor stim traces into NeuroSeq."""
+
+    def __init__(
+        self,
+        project: Project,
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.logger = logging.getLogger(__name__)
+        self.project = project
+        self.loaded_wave: IgorWave | None = None
+        self.file_path: str = ""
+        self.selected_stim_name: str = ""
+        self._auto_stim_name = ""
+        self._auto_units = ""
+        self._setup_ui()
+
+    def _setup_ui(self) -> None:
+        self.setWindowTitle("Import Igor2 Wave")
+        self.setModal(True)
+        self.resize(860, 700)
+
+        layout = QtWidgets.QVBoxLayout(self)
+
+        intro = QtWidgets.QLabel(
+            "Import a single Igor2/Sutter stimulation wave from .ibw or the simple "
+            "NeuroSeq-compatible .csv format. Imported waves are placed on NeuroSeq's "
+            "1 ms timeline using zero-order-hold resampling when needed."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        file_group = QtWidgets.QGroupBox("File Selection")
+        file_layout = QtWidgets.QHBoxLayout(file_group)
+        self.file_label = QtWidgets.QLabel("No Igor wave selected")
+        self.file_label.setStyleSheet("QLabel { color: gray; }")
+        browse_button = QtWidgets.QPushButton("Browse…")
+        browse_button.clicked.connect(self._browse_file)
+        file_layout.addWidget(self.file_label, stretch=1)
+        file_layout.addWidget(browse_button)
+        layout.addWidget(file_group)
+
+        preview_group = QtWidgets.QGroupBox("Wave Preview")
+        preview_layout = QtWidgets.QVBoxLayout(preview_group)
+        self.preview_text = QtWidgets.QPlainTextEdit()
+        self.preview_text.setReadOnly(True)
+        self.preview_text.setPlaceholderText(
+            "Preview appears here after selecting an Igor wave."
+        )
+        preview_layout.addWidget(self.preview_text)
+        layout.addWidget(preview_group)
+
+        source_group = QtWidgets.QGroupBox("Source Wave Settings")
+        source_layout = QtWidgets.QFormLayout(source_group)
+        self.source_dt_spin = QtWidgets.QDoubleSpinBox()
+        self.source_dt_spin.setDecimals(9)
+        self.source_dt_spin.setRange(0.000001, 3600.0)
+        self.source_dt_spin.setSingleStep(0.0001)
+        self.source_dt_spin.setValue(NEUROSEQ_IGOR_TARGET_DT_SECONDS)
+        self.source_dt_spin.setSuffix(" s")
+        self.source_dt_spin.valueChanged.connect(self._update_preview)
+        source_layout.addRow("Source sample interval:", self.source_dt_spin)
+        self.target_dt_label = QtWidgets.QLabel(
+            f"{NEUROSEQ_IGOR_TARGET_DT_SECONDS:.3f} s (fixed NeuroSeq grid)"
+        )
+        source_layout.addRow("Imported sample interval:", self.target_dt_label)
+        layout.addWidget(source_group)
+
+        target_group = QtWidgets.QGroupBox("Import Target")
+        target_layout = QtWidgets.QVBoxLayout(target_group)
+
+        self.create_new_radio = QtWidgets.QRadioButton("Create new stim array")
+        self.import_existing_radio = QtWidgets.QRadioButton(
+            "Import into existing stim array"
+        )
+        self.create_new_radio.setChecked(True)
+        self.create_new_radio.toggled.connect(self._update_mode_state)
+        self.import_existing_radio.toggled.connect(self._update_mode_state)
+        target_layout.addWidget(self.create_new_radio)
+        target_layout.addWidget(self.import_existing_radio)
+
+        self.new_target_group = QtWidgets.QGroupBox("New Stim Array")
+        new_target_layout = QtWidgets.QFormLayout(self.new_target_group)
+        self.new_name_edit = QtWidgets.QLineEdit()
+        self.new_name_edit.textChanged.connect(self._update_import_button_state)
+        new_target_layout.addRow("Stim name:", self.new_name_edit)
+        self.new_type_combo = QtWidgets.QComboBox()
+        self.new_type_combo.addItem("Excitatory", StimType.Excitation)
+        self.new_type_combo.addItem("Inhibitory", StimType.Inhibition)
+        self.new_type_combo.addItem("External", StimType.External)
+        self.new_type_combo.setCurrentIndex(2)
+        new_target_layout.addRow("Stim type:", self.new_type_combo)
+        self.new_units_edit = QtWidgets.QLineEdit()
+        new_target_layout.addRow("Units:", self.new_units_edit)
+        target_layout.addWidget(self.new_target_group)
+
+        self.existing_target_group = QtWidgets.QGroupBox("Existing Stim Array")
+        existing_target_layout = QtWidgets.QFormLayout(self.existing_target_group)
+        self.target_combo = QtWidgets.QComboBox()
+        self.target_combo.currentTextChanged.connect(self._on_target_changed)
+        existing_target_layout.addRow("Target stim array:", self.target_combo)
+        self.neuron_index_spin = QtWidgets.QSpinBox()
+        self.neuron_index_spin.setRange(0, 0)
+        existing_target_layout.addRow("Target neuron index:", self.neuron_index_spin)
+        self.extend_checkbox = QtWidgets.QCheckBox(
+            "Extend target stim array to fit imported duration"
+        )
+        self.extend_checkbox.setChecked(True)
+        existing_target_layout.addRow(self.extend_checkbox)
+        self.replace_checkbox = QtWidgets.QCheckBox(
+            "Replace target neuron values instead of adding to them"
+        )
+        self.replace_checkbox.setChecked(True)
+        existing_target_layout.addRow(self.replace_checkbox)
+        target_layout.addWidget(self.existing_target_group)
+        layout.addWidget(target_group)
+
+        self.info_label = QtWidgets.QLabel("")
+        self.info_label.setWordWrap(True)
+        self.info_label.setStyleSheet("QLabel { color: gray; }")
+        layout.addWidget(self.info_label)
+
+        button_layout = QtWidgets.QHBoxLayout()
+        button_layout.addStretch()
+        self.import_button = QtWidgets.QPushButton("Import")
+        self.import_button.setEnabled(False)
+        self.import_button.clicked.connect(self._import_file)
+        cancel_button = QtWidgets.QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(self.import_button)
+        button_layout.addWidget(cancel_button)
+        layout.addLayout(button_layout)
+
+        self._populate_target_stims()
+        self._update_mode_state()
+        self._update_preview()
+
+    def _populate_target_stims(self) -> None:
+        self.target_combo.clear()
+        stim_names = list(self.project.stim_arrays.keys())
+        if not stim_names:
+            self.target_combo.addItem("(No stim arrays available)")
+            self.target_combo.setEnabled(False)
+            self.import_existing_radio.setEnabled(False)
+            self.create_new_radio.setChecked(True)
+            self.neuron_index_spin.setRange(0, 0)
+            self.neuron_index_spin.setValue(0)
+            return
+
+        self.target_combo.addItems(stim_names)
+        self.target_combo.setEnabled(True)
+        self.import_existing_radio.setEnabled(True)
+        self._on_target_changed(self.target_combo.currentText())
+
+    def _selected_stim_array(self) -> StimArray | None:
+        target_name = self.target_combo.currentText()
+        if not target_name or target_name.startswith("("):
+            return None
+        return self.project.stim_arrays.get(target_name)
+
+    def _on_target_changed(self, target_name: str) -> None:
+        stim_array = self.project.stim_arrays.get(target_name)
+        if stim_array is None:
+            self.neuron_index_spin.setRange(0, 0)
+            self.neuron_index_spin.setValue(0)
+            self._update_import_button_state()
+            return
+        max_neuron_index = max(0, int(stim_array.values.shape[1]) - 1)
+        self.neuron_index_spin.setRange(0, max_neuron_index)
+        if self.neuron_index_spin.value() > max_neuron_index:
+            self.neuron_index_spin.setValue(max_neuron_index)
+        self._update_preview()
+        self._update_import_button_state()
+
+    def _browse_file(self) -> None:
+        filename, _ = getopenfilename(
+            self,
+            "Select Igor wave",
+            "",
+            "Igor waves (*.ibw *.csv);;Igor Binary Wave (*.ibw);;CSV file (*.csv);;All files (*)",
+        )
+        if filename:
+            self._load_file(filename)
+
+    def _load_file(self, filename: str) -> None:
+        try:
+            wave = load_igor_wave_file(filename)
+        except Exception as exc:
+            self.logger.exception("Failed to load Igor wave %s", filename)
+            self.loaded_wave = None
+            self.file_path = ""
+            self.file_label.setText("No Igor wave selected")
+            self.file_label.setStyleSheet("QLabel { color: gray; }")
+            self.preview_text.clear()
+            self.info_label.setText("")
+            self._update_import_button_state()
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Import Error",
+                f"Could not load Igor wave:\n{exc}",
+            )
+            return
+
+        previous_auto_name = self._auto_stim_name
+        self._auto_stim_name = wave.name
+        current_name = self.new_name_edit.text().strip()
+        if not current_name or current_name == previous_auto_name:
+            self.new_name_edit.setText(self._auto_stim_name)
+
+        previous_auto_units = self._auto_units
+        self._auto_units = wave.units or ""
+        current_units = self.new_units_edit.text().strip()
+        if not current_units or current_units == previous_auto_units:
+            self.new_units_edit.setText(self._auto_units)
+
+        self.loaded_wave = wave
+        self.file_path = filename
+        self.file_label.setText(filename)
+        self.file_label.setStyleSheet("QLabel { color: black; }")
+        if wave.source_dt is not None:
+            self.source_dt_spin.setValue(float(wave.source_dt))
+        else:
+            self.source_dt_spin.setValue(NEUROSEQ_IGOR_TARGET_DT_SECONDS)
+        self._update_preview()
+        self._update_import_button_state()
+
+    def _build_preview_text(self, wave: IgorWave) -> str:
+        source_dt = float(self.source_dt_spin.value())
+        imported_samples = estimate_resampled_sample_count(
+            int(wave.values.size),
+            source_dt,
+            target_dt=NEUROSEQ_IGOR_TARGET_DT_SECONDS,
+        )
+        lines = [
+            f"Wave name={wave.name}",
+            f"Source format={wave.source_format}",
+            f"Source samples={int(wave.values.size)}",
+            (
+                f"Detected source dt={wave.source_dt:.9f} s"
+                if wave.source_dt is not None
+                else "Detected source dt=(not stored in file)"
+            ),
+            f"Import source dt={source_dt:.9f} s",
+            f"Imported samples on 1 ms grid={imported_samples}",
+            f"Wave units={wave.units or '(none)'}",
+            f"Axis units={wave.axis_units or '(none)'}",
+            f"Value range={float(np.min(wave.values)):.6g} .. {float(np.max(wave.values)):.6g}",
+        ]
+        if wave.note:
+            lines.extend(["", f"Wave note={wave.note}"])
+        return "\n".join(lines)
+
+    def _update_mode_state(self) -> None:
+        create_new = self.create_new_radio.isChecked()
+        self.new_target_group.setEnabled(create_new)
+        self.existing_target_group.setEnabled(not create_new)
+        self._update_preview()
+        self._update_import_button_state()
+
+    def _update_preview(self) -> None:
+        if self.loaded_wave is None:
+            self.preview_text.setPlainText("")
+            if not self.project.stim_arrays:
+                self.info_label.setText(
+                    "Select an Igor wave to preview it. Only the new-stim import mode is "
+                    "currently available because the project has no stim arrays yet."
+                )
+            else:
+                self.info_label.setText("Select an Igor wave to preview it.")
+            return
+
+        self.preview_text.setPlainText(self._build_preview_text(self.loaded_wave))
+        source_dt = float(self.source_dt_spin.value())
+        info_lines: list[str] = []
+        if abs(source_dt - NEUROSEQ_IGOR_TARGET_DT_SECONDS) > 1e-9:
+            info_lines.append(
+                "This wave will be resampled to NeuroSeq's 1 ms timeline using zero-order hold. "
+                "Fast sub-ms changes may be lost."
+            )
+        else:
+            info_lines.append("This wave already matches NeuroSeq's 1 ms timeline.")
+        if self.loaded_wave.source_dt is None:
+            info_lines.append(
+                "The source file does not store the sample interval. Review the source sample interval before importing."
+            )
+        selected_stim = self._selected_stim_array()
+        if (
+            self.import_existing_radio.isChecked()
+            and selected_stim is not None
+            and abs(float(selected_stim.dt) - NEUROSEQ_IGOR_TARGET_DT_SECONDS) > 1e-9
+        ):
+            info_lines.append(
+                "The selected target stim array does not use a 1 ms dt and cannot be imported into by this first Igor importer."
+            )
+        self.info_label.setText("\n".join(info_lines))
+
+    def _update_import_button_state(self) -> None:
+        enabled = self.loaded_wave is not None
+        if enabled and self.create_new_radio.isChecked():
+            enabled = self.new_name_edit.text().strip() != ""
+        if enabled and self.import_existing_radio.isChecked():
+            target = self._selected_stim_array()
+            enabled = target is not None and (
+                abs(float(target.dt) - NEUROSEQ_IGOR_TARGET_DT_SECONDS) <= 1e-9
+            )
+        self.import_button.setEnabled(enabled)
+
+    def _current_new_stim_type(self) -> StimType:
+        current_data = self.new_type_combo.currentData()
+        if isinstance(current_data, StimType):
+            return current_data
+        return StimType.External
+
+    def _import_file(self) -> None:
+        if self.loaded_wave is None:
+            return
+
+        try:
+            prepared_wave = prepare_igor_wave_for_neuroseq(
+                self.loaded_wave,
+                source_dt_override=float(self.source_dt_spin.value()),
+                target_dt=NEUROSEQ_IGOR_TARGET_DT_SECONDS,
+            )
+            if self.create_new_radio.isChecked():
+                stim_name = self.new_name_edit.text().strip()
+                if not stim_name:
+                    raise ValueError("Stim name cannot be empty")
+                if stim_name in self.project.stim_arrays:
+                    raise ValueError(
+                        f"A stimulation data entity named '{stim_name}' already exists"
+                    )
+                stim_array = create_stim_array_from_igor_wave(
+                    prepared_wave,
+                    stim_name=stim_name,
+                    stim_type=self._current_new_stim_type(),
+                    units=self.new_units_edit.text().strip(),
+                )
+                self.project.add_stim_array(stim_array)
+                self.selected_stim_name = stim_name
+                info_lines = [
+                    f"Imported '{prepared_wave.name}' into new stim array '{stim_name}'.",
+                    f"Source samples: {prepared_wave.original_sample_count}",
+                    f"Imported samples: {prepared_wave.values.shape[0]}",
+                    "Target neuron count: 1",
+                ]
+                if prepared_wave.resampled:
+                    info_lines.append(
+                        f"Resampled from {prepared_wave.source_dt:.9f} s to {prepared_wave.target_dt:.3f} s using zero-order hold."
+                    )
+            else:
+                target_stim = self._selected_stim_array()
+                if target_stim is None:
+                    raise ValueError("No target stimulation data entity selected")
+                report = import_igor_wave_into_stim_array(
+                    target_stim,
+                    prepared_wave,
+                    neuron_index=self.neuron_index_spin.value(),
+                    replace_existing=self.replace_checkbox.isChecked(),
+                    extend_to_fit=self.extend_checkbox.isChecked(),
+                )
+                self.selected_stim_name = target_stim.name
+                info_lines = [
+                    f"Imported '{prepared_wave.name}' into '{target_stim.name}' neuron {report.target_neuron_index}.",
+                    f"Source samples: {report.source_samples}",
+                    f"Imported samples: {report.imported_samples}",
+                ]
+                if report.truncated_samples > 0:
+                    info_lines.append(
+                        f"Truncated imported samples: {report.truncated_samples}"
+                    )
+                if report.resampled:
+                    info_lines.append(
+                        f"Resampled from {report.source_dt:.9f} s to {report.target_dt:.3f} s using zero-order hold."
+                    )
+
+            QtWidgets.QMessageBox.information(
+                self,
+                "Import Complete",
+                "\n".join(info_lines),
+            )
+            self.accept()
+        except Exception as exc:
+            self.logger.exception("Failed to import Igor wave")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Import Error",
+                f"Failed to import Igor wave:\n{exc}",
+            )

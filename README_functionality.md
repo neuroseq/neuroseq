@@ -346,39 +346,43 @@ Current implementation status:
   - `<script_name>_export_debug.csv`,
   - `<script_name>_overview.png`.
 
-#### Fixed-window export model (current)
+#### Direct-tick export model (current)
 
-- NeuroSeq input is required to use `dt=1ms` (`stim_array.dt == 0.001`).
-- Export quantization is window-based:
-  - NeuroSeq timeline windows: `17ms` (`17` samples at `1ms`),
-  - SysCon timeline windows: `32` TTL ticks (`32 * 0.5208125ms = 16.666ms`).
-- Window index mapping is direct and positional: NeuroSeq window `k` maps to SysCon window `k`.
-- Raw active segments (`stim_value > threshold`) are normalized by sanity logic:
-  - start snaps to the left 17ms window boundary,
-  - duration is expanded/quantized to whole 17ms windows,
-  - duration minimum is `17ms` (1 window),
-  - intensity is either fixed binary (`1.0`) or preserved/clipped to `[0,1]`.
-- Overlapping stimuli are normalized in connected overlap components:
-  - all overlapping starts align left to the earliest start,
-  - all overlapping durations are trimmed to the shortest overlapping duration.
-- Hologram grouping is inferred from normalized window activity:
-  - windows with activity are grouped,
-  - a new hologram is created when a new neuron appears in the active set,
-  - non-contiguous active windows also split holograms.
+The stim array represents laser **TTL pulses** directly. Each sample is one SysCon2 tick (`dt = 0.0005208125 s = 520.8125 µs`), so `sample_idx == tick_idx` exactly. SLM shape objects are _inferred_ from the pulse activity and are not drawn by the user.
+
+- Required `stim_array.dt == 0.0005208125` (exact constant `_SYSCON2_TTL_PULSE_QUANTUM_S`); export and sanity check both enforce this.
+- Raw active segments (`stim_value > threshold`) represent the desired TTL pulses. No minimum duration is imposed.
+- Intensity is either fixed binary (`1.0`, default) or preserved/clipped to `[0,1]`.
+
+**Shape object inference (SLM hardware requirement)**
+
+- For shape derivation, raw segments are quantized to 32-tick (16.666 ms) window boundaries:
+  - start snaps to the left window boundary,
+  - duration is rounded up to whole windows.
+- Overlapping window-level segments are normalized in connected overlap components (all starts align left, durations trimmed to shortest).
+- Hologram grouping is inferred from the normalized window-level activity:
+  - a new hologram is started only when a neuron appears that has **never** been part of the current hologram's neuron set (`current_neurons` is monotonically growing),
+  - gaps (empty windows) between pulse groups of the same neuron set do **not** break the hologram — the SLM shape object spans across the gap.
 - Pre-load blank enforcement:
-  - each hologram must have a blank NeuroSeq window immediately before it,
-  - if missing, sanitizer inserts a blank 17ms window by shifting the tail right,
-  - this also applies to the first hologram,
-  - tail windows may be truncated if shifting exceeds array length.
+  - each hologram must have a blank 16.666 ms window immediately before its first active window (SLM load-in requirement),
+  - if missing, sanitizer inserts a blank window by shifting all subsequent content right by 32 ticks,
+  - raw segment tick positions are adjusted by the same shift so TTL pulses remain inside the shape's usable window after insertion,
+  - this also applies to the first hologram; tail windows may be truncated if shifting exceeds the array length.
 
-#### Mapping, holograms, and object emission
+**TTL pulse emission**
+
+- Laser TTL pulse intervals are derived from the **adjusted raw segment positions** (raw positions after accounting for any preblank insertions), not from window boundaries.
+- This preserves sub-window timing: a pulse drawn at tick 100 is emitted at exactly tick 100 (or tick 100 + shift if a preblank window was inserted before it).
+- Multiple TTL pulses from different raw segments can occur within the same hologram.
+
+**Shape object emission**
 
 - Sanitized segments are mapped to Cellpose centroids; active segments without valid mapping are skipped and reported.
-- Laser stimulation pulses are inferred from the merged union of mapped segment intervals.
-- SysCon shape objects are inferred from hologram windows and include the load-up blank window:
-  - `shape_start_win = hologram.start_win - 1` (clamped at `0`),
-  - shape duration is at least 2 windows (`load + stimulation`).
-- Multiple TTL pulses can occur within one hologram.
+- For each neuron within a hologram:
+  - `shape_start_win = hologram.start_win - 1` (clamped at `0`) — the blank load window,
+  - `shape_end_win` covers the last active window for that neuron (minimum `shape_start_win + 2`),
+  - shape tick range: `[shape_start_win * 32, shape_end_win * 32)`.
+- Multiple TTL pulses can occur within one hologram's shape span.
 
 #### Timeline layout and emitted object order
 
@@ -415,10 +419,11 @@ Current implementation status:
 
 #### Sanity check workflow in generator dialog
 
-- `Check Input Sanity` executes the same fixed-window sanitizer used by export and performs a dry-run export.
-- If sanitizer changed values, the dialog can apply the normalized stim values back into the selected stim array (undo-compatible path when available).
-- Sanity warnings include applied fix descriptions, truncation (if any), binary/clipping warnings, and unmapped active neurons.
-- Current UI flow is single-pass sanity + optional apply; legacy interactive prompt-by-prompt fix stages are not used in the active workflow.
+- `Check Input Sanity` runs `check_syscon2_input_sanity`, which validates `dt`, checks for SLM gap/overlap/preblank violations, and performs a dry-run export.
+- Feedback is displayed in a scrollable dialog so long fix lists do not overflow the screen.
+- If the stim array has the wrong `dt`, a **Fix dt** button sets `stim_array.dt = 0.0005208125` and re-runs the check automatically.
+- If sanitizer changed values (preblank insertions, overlap normalization), the dialog offers to apply the corrected values back into the selected stim array.
+- Sanity warnings include applied fix descriptions, truncation count, binary/clipping warnings, and unmapped active neurons.
 
 #### Header/template lifecycle
 
@@ -562,13 +567,9 @@ python -m neuroseq \
   - shape duration uses SysCon quantum (`(repeats + 2) * 16.666ms`),
   - if multiple point objects share a lane, a later object clips/replaces earlier placement on that lane,
   - TTL output pulses (`LightsourceCount=0`) are ignored for reconstruction.
-- Fixed-window reconstruction mode is enabled when:
-  - target stim array `dt` is exactly `1ms`,
-  - active laser pulse starts are tick-aligned and multiples of 32 ticks,
-  - pulse durations are multiples of 32 ticks.
-- In fixed-window reconstruction mode:
-  - pulse intervals are converted by SysCon window index (`32` ticks/window) and mapped to NeuroSeq indices (`17` samples/window),
-  - index conversion is window-based and enforces minimum `17ms` duration per imported interval.
+- In pulse-based reconstruction (`dt = 0.0005208125 s`):
+  - pulse start/duration are converted by `round(t_us / dt_us)` giving `sample_idx == tick_idx` exactly,
+  - sub-window pulse timing is preserved end-to-end: a pulse at tick 100 imports at sample 100.
 - In generic timed-object fallback mode (no laser pulses), start indices and durations are converted by `round(t / dt)` using object timing metadata.
 - Mapping order is deterministic: grouped timed objects are assigned to neuron channels in file order.
 - If repeated/overlapping events hit the same channel/time window, amplitude merge uses `max(existing, incoming)`.
@@ -578,6 +579,129 @@ python -m neuroseq \
 - Value-write mode: `replace_existing=True` replaces destination values; otherwise imported values are merged with existing data by pointwise `max`.
 - Preview panel reports parsed header fields, object counts, timed-object counts, estimated grouped channels, and center-distance merged counts before import.
 - Completion dialog reports eligible objects, grouped channels, mapped/unmapped channels, generated timepoints, merged circular entities, and any truncation counters.
+
+### 9.6 Igor2 `.ibw` / Igor-style `.csv` import (stimulation data)
+
+`igor_import_dialog.py` + `importer_igor2.py`:
+
+- GUI entrypoint is `File -> Import Igor2 Wave (.ibw/.csv)`.
+- Import is available regardless of whether the project already has stim arrays:
+  - if no stim arrays exist, only `Create new stim array` is available,
+  - if stim arrays already exist, user can either create a new stim array or import into an existing one.
+- Supported file types are:
+  - Igor Binary Wave `.ibw`,
+  - simple Igor-style `.csv`.
+- Current scope is single-wave import only:
+  - packed Igor/Sutter experiments such as `.pxp` are not imported yet,
+  - multidimensional Igor waves are rejected,
+  - the importer currently expects one 1D command/stimulation trace per file.
+
+#### Supported file semantics
+
+- Igor-style `.csv` import expects:
+  - first non-empty row = wave name,
+  - every following non-empty row = exactly one numeric sample value.
+- Multi-column sample rows in `.csv` are rejected as invalid input.
+- `.ibw` loading uses the optional Python dependency `igor2`.
+- For `.ibw`, importer extracts when available:
+  - wave name,
+  - raw sample values,
+  - source sample interval (`dt`) from Igor header scaling fields,
+  - data units,
+  - x-axis / dimension units,
+  - optional wave note text for preview display.
+
+#### Preview and source sampling metadata
+
+- After file selection, the dialog shows a preview containing:
+  - wave name,
+  - source format,
+  - source sample count,
+  - detected source `dt` if present in file metadata,
+  - the source `dt` currently selected for import,
+  - estimated imported sample count on the NeuroSeq 1 ms grid,
+  - wave units,
+  - axis units,
+  - value range (`min..max`),
+  - optional Igor note text.
+- Source sample interval is always user-editable in the dialog.
+- If the file contains no source `dt` metadata:
+  - the dialog defaults to `0.001 s`,
+  - preview explicitly warns that the file did not store the sample interval,
+  - import still proceeds using the currently selected source `dt`.
+
+#### Timeline conversion model
+
+- NeuroSeq’s current stim editor/timeline assumes a 1 ms grid for correct editing/viewing behavior.
+- Therefore Igor import always targets:
+  - `target_dt = 0.001 s`.
+- If source `dt` already equals `0.001 s`, sample values are copied directly.
+- If source `dt` differs from `0.001 s`, importer resamples to the NeuroSeq grid using zero-order hold:
+  - target timestamps are generated on the 1 ms grid,
+  - each target sample takes the most recent source sample value,
+  - this is intended for step-like command waveforms,
+  - fine sub-ms structure is intentionally collapsed to the 1 ms NeuroSeq representation.
+- Estimated imported sample count is computed from total source duration:
+  - `ceil(source_samples * source_dt / 0.001)`.
+
+#### Import target modes
+
+The dialog offers two mutually exclusive modes.
+
+##### A) Create new stim array
+
+- A new `StimArray` is created from the imported wave.
+- Suggested stim name defaults to the Igor wave name.
+- Suggested units default to the imported wave units when available.
+- Default stim type is `External`.
+- Imported values are stored as a single-neuron stim matrix:
+  - shape = `(timepoints, 1)`.
+- Stored stim metadata:
+  - `name` = dialog name field,
+  - `stim_type` = dialog type selection,
+  - `units` = dialog units field,
+  - `dt = 0.001`.
+- Duplicate stim names are rejected before import.
+
+##### B) Import into existing stim array
+
+- User selects:
+  - target stim array,
+  - target neuron column,
+  - whether to extend target duration,
+  - whether to replace or add to existing values.
+- Existing-target import is only enabled when the selected target stim array also uses:
+  - `dt = 0.001 s`.
+- Import writes the 1D Igor wave into exactly one neuron column of the chosen target stim array.
+- Time-axis behavior:
+  - if `extend_to_fit=True`, target stim array grows to fit the imported duration,
+  - otherwise overflow samples are truncated.
+- Value-write behavior:
+  - if `replace_existing=True`, destination neuron column is cleared first and then overwritten with imported values,
+  - if `replace_existing=False`, imported values are added to existing destination values sample-by-sample.
+- Other neuron columns are preserved.
+
+#### Resulting project/GUI updates
+
+- New-stim mode calls `Project.add_stim_array(...)`.
+- Existing-stim mode mutates the selected `StimArray.values` in place.
+- After successful import, GUI refreshes project state and sets the stim combobox to the imported/updated stim array.
+- Completion dialog reports:
+  - source sample count,
+  - imported sample count,
+  - target stim name,
+  - target neuron index for existing-stim mode,
+  - whether resampling occurred,
+  - source and target `dt`,
+  - any truncation when target extension was disabled.
+
+#### Current limitations
+
+- No `.pxp` / Sutter packed-experiment import yet.
+- No multi-wave batch import yet.
+- No automatic reconstruction of stimulation patterns from Sutter routine/paradigm metadata yet.
+- Import-to-existing currently requires the target stim array to already be on the 1 ms grid.
+- Because zero-order hold is used, the importer is best aligned with command/stimulation waveforms that are piecewise constant or approximately step-like.
 
 ## 10) Synthetic data generation (`synthetic_data_dialog.py`)
 
