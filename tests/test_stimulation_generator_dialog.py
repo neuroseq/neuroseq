@@ -237,10 +237,17 @@ def test_stimulation_generator_dialog_sanity_check_fails_for_inactive_input(
     qtbot: QtBot,
     qmessagebox_calls: list[dict[str, str]],
 ) -> None:
-    values = np.zeros((6, 2), dtype=np.float32)
-    dialog = StimulationGeneratorDialog(
-        _build_project(values, mapping={0: 0, 1: 1}),
+    # dt must match the SysCon2 tick quantum so the dt check passes and we reach
+    # the "no active stimulation" error.
+    _DT_S = 0.0005208125
+    values = np.zeros((64, 2), dtype=np.float32)
+    project = Project()
+    stim = StimArray(
+        name="stim", stim_type=StimType.Excitation, values=values, units="1", dt=_DT_S
     )
+    project.add_stim_array(stim)
+    project.cellpose_data = _cellpose_result(mapping={0: 0, 1: 1})
+    dialog = StimulationGeneratorDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.waitUntil(lambda: dialog.isVisible())
@@ -391,11 +398,20 @@ def test_stimulation_generator_dialog_generate_writes_seq_and_overview_png(
     tmp_path: Path,
     qmessagebox_calls: list[dict[str, str]],
 ) -> None:
-    values = np.zeros((40, 1), dtype=np.float32)
-    values[20:22, 0] = 1.0
-    dialog = StimulationGeneratorDialog(
-        _build_project(values, mapping={0: 0}),
+    _DT_S = 0.0005208125  # SysCon2 tick quantum required for export
+    values = np.zeros((64, 1), dtype=np.float32)
+    values[33:36, 0] = 1.0  # active pulse inside a valid SLM window
+    project = Project()
+    stim = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
     )
+    project.add_stim_array(stim)
+    project.cellpose_data = _cellpose_result(mapping={0: 0})
+    dialog = StimulationGeneratorDialog(project)
     qtbot.addWidget(dialog)
     dialog.output_folder = tmp_path
     dialog.folder_edit.setText(str(tmp_path))
