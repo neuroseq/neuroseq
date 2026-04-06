@@ -346,39 +346,43 @@ Current implementation status:
   - `<script_name>_export_debug.csv`,
   - `<script_name>_overview.png`.
 
-#### Fixed-window export model (current)
+#### Direct-tick export model (current)
 
-- NeuroSeq input is required to use `dt=1ms` (`stim_array.dt == 0.001`).
-- Export quantization is window-based:
-  - NeuroSeq timeline windows: `17ms` (`17` samples at `1ms`),
-  - SysCon timeline windows: `32` TTL ticks (`32 * 0.5208125ms = 16.666ms`).
-- Window index mapping is direct and positional: NeuroSeq window `k` maps to SysCon window `k`.
-- Raw active segments (`stim_value > threshold`) are normalized by sanity logic:
-  - start snaps to the left 17ms window boundary,
-  - duration is expanded/quantized to whole 17ms windows,
-  - duration minimum is `17ms` (1 window),
-  - intensity is either fixed binary (`1.0`) or preserved/clipped to `[0,1]`.
-- Overlapping stimuli are normalized in connected overlap components:
-  - all overlapping starts align left to the earliest start,
-  - all overlapping durations are trimmed to the shortest overlapping duration.
-- Hologram grouping is inferred from normalized window activity:
-  - windows with activity are grouped,
-  - a new hologram is created when a new neuron appears in the active set,
-  - non-contiguous active windows also split holograms.
+The stim array represents laser **TTL pulses** directly. Each sample is one SysCon2 tick (`dt = 0.0005208125 s = 520.8125 µs`), so `sample_idx == tick_idx` exactly. SLM shape objects are _inferred_ from the pulse activity and are not drawn by the user.
+
+- Required `stim_array.dt == 0.0005208125` (exact constant `_SYSCON2_TTL_PULSE_QUANTUM_S`); export and sanity check both enforce this.
+- Raw active segments (`stim_value > threshold`) represent the desired TTL pulses. No minimum duration is imposed.
+- Intensity is either fixed binary (`1.0`, default) or preserved/clipped to `[0,1]`.
+
+**Shape object inference (SLM hardware requirement)**
+
+- For shape derivation, raw segments are quantized to 32-tick (16.666 ms) window boundaries:
+  - start snaps to the left window boundary,
+  - duration is rounded up to whole windows.
+- Overlapping window-level segments are normalized in connected overlap components (all starts align left, durations trimmed to shortest).
+- Hologram grouping is inferred from the normalized window-level activity:
+  - a new hologram is started only when a neuron appears that has **never** been part of the current hologram's neuron set (`current_neurons` is monotonically growing),
+  - gaps (empty windows) between pulse groups of the same neuron set do **not** break the hologram — the SLM shape object spans across the gap.
 - Pre-load blank enforcement:
-  - each hologram must have a blank NeuroSeq window immediately before it,
-  - if missing, sanitizer inserts a blank 17ms window by shifting the tail right,
-  - this also applies to the first hologram,
-  - tail windows may be truncated if shifting exceeds array length.
+  - each hologram must have a blank 16.666 ms window immediately before its first active window (SLM load-in requirement),
+  - if missing, sanitizer inserts a blank window by shifting all subsequent content right by 32 ticks,
+  - raw segment tick positions are adjusted by the same shift so TTL pulses remain inside the shape's usable window after insertion,
+  - this also applies to the first hologram; tail windows may be truncated if shifting exceeds the array length.
 
-#### Mapping, holograms, and object emission
+**TTL pulse emission**
+
+- Laser TTL pulse intervals are derived from the **adjusted raw segment positions** (raw positions after accounting for any preblank insertions), not from window boundaries.
+- This preserves sub-window timing: a pulse drawn at tick 100 is emitted at exactly tick 100 (or tick 100 + shift if a preblank window was inserted before it).
+- Multiple TTL pulses from different raw segments can occur within the same hologram.
+
+**Shape object emission**
 
 - Sanitized segments are mapped to Cellpose centroids; active segments without valid mapping are skipped and reported.
-- Laser stimulation pulses are inferred from the merged union of mapped segment intervals.
-- SysCon shape objects are inferred from hologram windows and include the load-up blank window:
-  - `shape_start_win = hologram.start_win - 1` (clamped at `0`),
-  - shape duration is at least 2 windows (`load + stimulation`).
-- Multiple TTL pulses can occur within one hologram.
+- For each neuron within a hologram:
+  - `shape_start_win = hologram.start_win - 1` (clamped at `0`) — the blank load window,
+  - `shape_end_win` covers the last active window for that neuron (minimum `shape_start_win + 2`),
+  - shape tick range: `[shape_start_win * 32, shape_end_win * 32)`.
+- Multiple TTL pulses can occur within one hologram's shape span.
 
 #### Timeline layout and emitted object order
 
@@ -415,10 +419,11 @@ Current implementation status:
 
 #### Sanity check workflow in generator dialog
 
-- `Check Input Sanity` executes the same fixed-window sanitizer used by export and performs a dry-run export.
-- If sanitizer changed values, the dialog can apply the normalized stim values back into the selected stim array (undo-compatible path when available).
-- Sanity warnings include applied fix descriptions, truncation (if any), binary/clipping warnings, and unmapped active neurons.
-- Current UI flow is single-pass sanity + optional apply; legacy interactive prompt-by-prompt fix stages are not used in the active workflow.
+- `Check Input Sanity` runs `check_syscon2_input_sanity`, which validates `dt`, checks for SLM gap/overlap/preblank violations, and performs a dry-run export.
+- Feedback is displayed in a scrollable dialog so long fix lists do not overflow the screen.
+- If the stim array has the wrong `dt`, a **Fix dt** button sets `stim_array.dt = 0.0005208125` and re-runs the check automatically.
+- If sanitizer changed values (preblank insertions, overlap normalization), the dialog offers to apply the corrected values back into the selected stim array.
+- Sanity warnings include applied fix descriptions, truncation count, binary/clipping warnings, and unmapped active neurons.
 
 #### Header/template lifecycle
 
@@ -562,13 +567,9 @@ python -m neuroseq \
   - shape duration uses SysCon quantum (`(repeats + 2) * 16.666ms`),
   - if multiple point objects share a lane, a later object clips/replaces earlier placement on that lane,
   - TTL output pulses (`LightsourceCount=0`) are ignored for reconstruction.
-- Fixed-window reconstruction mode is enabled when:
-  - target stim array `dt` is exactly `1ms`,
-  - active laser pulse starts are tick-aligned and multiples of 32 ticks,
-  - pulse durations are multiples of 32 ticks.
-- In fixed-window reconstruction mode:
-  - pulse intervals are converted by SysCon window index (`32` ticks/window) and mapped to NeuroSeq indices (`17` samples/window),
-  - index conversion is window-based and enforces minimum `17ms` duration per imported interval.
+- In pulse-based reconstruction (`dt = 0.0005208125 s`):
+  - pulse start/duration are converted by `round(t_us / dt_us)` giving `sample_idx == tick_idx` exactly,
+  - sub-window pulse timing is preserved end-to-end: a pulse at tick 100 imports at sample 100.
 - In generic timed-object fallback mode (no laser pulses), start indices and durations are converted by `round(t / dt)` using object timing metadata.
 - Mapping order is deterministic: grouped timed objects are assigned to neuron channels in file order.
 - If repeated/overlapping events hit the same channel/time window, amplitude merge uses `max(existing, incoming)`.

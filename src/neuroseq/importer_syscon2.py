@@ -33,14 +33,14 @@ _HEADER_COMPAT_DEFAULTS: dict[str, str] = {
 }
 
 _MAPPABLE_SHAPE_TYPES = {"shape", "entity"}
+# Fallback duration for legacy Entity objects that lack an associated TTL pulse.
+# Equals one SLM window (32 ticks × 520.8125 µs = 16 666 µs); rounded to 16.666 ms.
 _ENTITY_DEFAULT_DURATION_SECONDS = 16.666e-3
 _SAME_NEURON_MAX_CENTER_DISTANCE_UM = 1.0
 _HOLO4D_TTL_OUT_START_PULSE_MIN_US = 9_000
 _SYSCON2_TTL_PULSE_QUANTUM_US = 520.8125
 _SYSCON2_NEURON_OBJECT_QUANTUM_US = 32 * _SYSCON2_TTL_PULSE_QUANTUM_US
 _SYSCON2_WINDOW_TICKS = 32
-_NEUROSEQ_WINDOW_SAMPLES = 17
-_NEUROSEQ_DT_SECONDS = 0.001
 _NEUROSEQ_DT_TOLERANCE_SECONDS = 1e-9
 
 
@@ -301,63 +301,13 @@ def _ttl_pulse_duration_us(
     if len(_extract_lightsource_ids(obj)) == 0:
         # Not a laser timeline pulse (e.g., main-controller TTL outputs).
         return None
-    _ = tick_resolution_us
+    _ = tick_resolution_us  # TTLPulse duration is always in 520.8125 µs quanta
     duration_ticks = max(1, obj.repeats + 1)
     return float(duration_ticks) * _SYSCON2_TTL_PULSE_QUANTUM_US
 
 
 def _time_us_to_tick(time_us: float) -> int:
     return int(np.rint(time_us / _SYSCON2_TTL_PULSE_QUANTUM_US))
-
-
-def _is_fixed_window_import_mode(
-    *,
-    dt_seconds: float,
-    pulses: list[SysconSequenceObject],
-) -> bool:
-    if not np.isclose(
-        float(dt_seconds),
-        _NEUROSEQ_DT_SECONDS,
-        atol=_NEUROSEQ_DT_TOLERANCE_SECONDS,
-        rtol=0.0,
-    ):
-        return False
-    if len(pulses) == 0:
-        return False
-
-    for pulse in pulses:
-        start_tick = _time_us_to_tick(float(pulse.start_time_us))
-        snapped_start_us = start_tick * _SYSCON2_TTL_PULSE_QUANTUM_US
-        if not np.isclose(
-            float(pulse.start_time_us),
-            float(snapped_start_us),
-            atol=1e-3,
-            rtol=0.0,
-        ):
-            return False
-        duration_ticks = max(1, pulse.repeats + 1)
-        if start_tick % _SYSCON2_WINDOW_TICKS != 0:
-            return False
-        if duration_ticks % _SYSCON2_WINDOW_TICKS != 0:
-            return False
-    return True
-
-
-def _ticks_interval_to_neuro_indices(
-    *,
-    start_tick: int,
-    end_tick: int,
-) -> tuple[int, int]:
-    start_window = int(np.rint(start_tick / float(_SYSCON2_WINDOW_TICKS)))
-    end_window = int(np.rint(end_tick / float(_SYSCON2_WINDOW_TICKS)))
-    if end_window <= start_window:
-        end_window = start_window + 1
-
-    start_idx = max(0, start_window * _NEUROSEQ_WINDOW_SAMPLES)
-    end_idx = max(
-        start_idx + _NEUROSEQ_WINDOW_SAMPLES, end_window * _NEUROSEQ_WINDOW_SAMPLES
-    )
-    return start_idx, max(1, end_idx - start_idx)
 
 
 def _shape_object_duration_us(
@@ -671,10 +621,6 @@ def _sequence_to_stim_values_holo4d_layout(
         key=lambda item: (-len(item[1]), item[0]),
     )[0]
     _ = active_timeline_idx
-    use_fixed_window_mapping = _is_fixed_window_import_mode(
-        dt_seconds=dt_seconds,
-        pulses=active_timeline_pulses,
-    )
     # In Holo4D layout, laser TTLPulse objects are the true stimulation events.
     # Entity objects define availability windows (SLM lead-in + placement duration).
     pulse_intervals = _merge_time_intervals_us(
@@ -691,7 +637,9 @@ def _sequence_to_stim_values_holo4d_layout(
         ]
     )
 
-    entity_unusable_lead_us = int(np.ceil(_ENTITY_DEFAULT_DURATION_SECONDS * 1e6))
+    # One SLM window (32 ticks × 520.8125 µs = 16 666 µs) is the hologram load-up
+    # time during which no laser pulse may fire.
+    entity_unusable_lead_us = int(_SYSCON2_NEURON_OBJECT_QUANTUM_US)
     intervals_by_neuron: list[list[tuple[int, int, float]]] = [
         [] for _ in range(mapped_objects)
     ]
@@ -738,24 +686,16 @@ def _sequence_to_stim_values_holo4d_layout(
                 if effective_end_us <= effective_start_us:
                     continue
 
-                if use_fixed_window_mapping:
-                    effective_start_tick = _time_us_to_tick(effective_start_us)
-                    effective_end_tick = _time_us_to_tick(effective_end_us)
-                    start_idx, duration_timepoints = _ticks_interval_to_neuro_indices(
-                        start_tick=effective_start_tick,
-                        end_tick=effective_end_tick,
-                    )
-                else:
-                    start_idx = int(np.rint((effective_start_us * 1e-6) / dt_seconds))
-                    duration_timepoints = max(
-                        1,
-                        int(
-                            np.rint(
-                                ((effective_end_us - effective_start_us) * 1e-6)
-                                / dt_seconds
-                            )
-                        ),
-                    )
+                start_idx = int(np.rint((effective_start_us * 1e-6) / dt_seconds))
+                duration_timepoints = max(
+                    1,
+                    int(
+                        np.rint(
+                            ((effective_end_us - effective_start_us) * 1e-6)
+                            / dt_seconds
+                        )
+                    ),
+                )
                 end_idx = start_idx + duration_timepoints
                 intervals_by_neuron[neuron_idx].append(
                     (start_idx, end_idx, entity.intensity)
@@ -860,6 +800,19 @@ def sequence_to_stim_values(
     include_non_shape: bool = False,
     max_events_per_object: int = 500_000,
 ) -> tuple[np.ndarray, SysconImportResult]:
+    """Convert a parsed SysCon2 sequence to a (timepoints × neurons) stim array.
+
+    Two reconstruction paths are used depending on the file format:
+
+    - **Holo4D layout** (preferred): when laser ``TTLPulse`` objects are present,
+      pulse intervals define the stimulation events and Shape/Entity objects define
+      SLM availability windows.  This gives tick-accurate reconstruction.
+    - **Legacy layout**: when no laser ``TTLPulse`` objects are present, timing is
+      inferred from the Entity/Shape start times and durations.
+
+    ``tick_resolution_us`` is used only for legacy ``Entity`` duration calculation
+    and has no effect when the Holo4D path is active.
+    """
     if dt_seconds <= 0:
         raise ValueError("dt_seconds must be positive")
     if n_neurons <= 0:
@@ -974,6 +927,13 @@ def import_sequence_into_stim_array(
     extend_to_fit: bool = True,
     neuron_offset: int = 0,
 ) -> SysconImportResult:
+    """Import a parsed SysCon2 sequence into an existing ``StimArray`` in place.
+
+    ``dt_seconds`` is taken from ``stim_array.dt``; neurons are written starting
+    at column ``neuron_offset``.  If ``extend_to_fit`` is ``True`` and the
+    imported data is longer than the existing array, the array is extended.
+    Excess timepoints are silently truncated when ``extend_to_fit`` is ``False``.
+    """
     if stim_array.values.ndim != 2:
         raise ValueError("Target StimArray must be 2-dimensional")
 

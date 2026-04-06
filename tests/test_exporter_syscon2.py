@@ -6,10 +6,12 @@ import brian2.numpy_ as np
 import pytest
 from PIL import Image
 
+from neuroseq.exporter_syscon2 import align_overlapping_pulses_to_shortest
 from neuroseq.exporter_syscon2 import align_stim_values_left_for_slm
 from neuroseq.exporter_syscon2 import check_syscon2_input_sanity
 from neuroseq.exporter_syscon2 import equalize_simultaneous_durations_to_min
 from neuroseq.exporter_syscon2 import find_initial_slm_load_violation
+from neuroseq.exporter_syscon2 import find_overlapping_pulse_group_violations
 from neuroseq.exporter_syscon2 import find_simultaneous_duration_violations
 from neuroseq.exporter_syscon2 import find_slm_gap_violations
 from neuroseq.exporter_syscon2 import find_slm_off_on_overlap_violations
@@ -25,6 +27,7 @@ from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
 _TTL_QUANTUM_US = 520.8125
+_DT_S = 0.0005208125  # exact literal; avoids float rounding from _TTL_QUANTUM_US * 1e-6
 
 
 def _template_header() -> str:
@@ -128,7 +131,7 @@ def test_export_seq_uses_fixed_laser_and_ttl_out_timeline_layout() -> None:
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     seq_text, report = generate_syscon2_sequence_text(
@@ -164,7 +167,9 @@ def test_export_seq_uses_fixed_laser_and_ttl_out_timeline_layout() -> None:
     assert len(laser_pulses) == 1
     assert len(ttl_out_1_pulses) == 1
     assert len(ttl_out_2_pulses) == 0
-    assert ttl_out_1_pulses[0].start_time_us == 16_666.0
+    # TTL pulse comes from the adjusted raw segment position (tick 20 shifted by
+    # one preblank window to tick 52 → 52 × 520.8125µs = 27082.25µs).
+    assert ttl_out_1_pulses[0].start_time_us == pytest.approx(27082.25)
 
 
 def test_export_seq_coalesces_nearby_segments_into_one_sanitized_window() -> None:
@@ -176,7 +181,7 @@ def test_export_seq_coalesces_nearby_segments_into_one_sanitized_window() -> Non
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     seq_text, report = generate_syscon2_sequence_text(
@@ -198,8 +203,13 @@ def test_export_seq_coalesces_nearby_segments_into_one_sanitized_window() -> Non
         and _timeline_index(obj) == report.laser_timeline_index
     ]
 
+    # Shape object still coalesces both segments into one window (window 1) with
+    # a blank load window before it.  TTL pulses, however, now come from the
+    # exact drawn tick positions (no window-quantisation): ticks 40-42 and 45-47.
     assert len(entities) == 1
-    assert [pulse.start_time_us for pulse in laser_pulses] == [33_332.0]
+    assert [pulse.start_time_us for pulse in laser_pulses] == pytest.approx(
+        [40 * _TTL_QUANTUM_US, 45 * _TTL_QUANTUM_US]
+    )
 
     imported_values, _ = sequence_to_stim_values(
         sequence,
@@ -208,7 +218,9 @@ def test_export_seq_coalesces_nearby_segments_into_one_sanitized_window() -> Non
         tick_resolution_us=500,
         include_non_shape=False,
     )
-    assert np.array_equal(np.flatnonzero(imported_values[:, 0] > 0), np.arange(34, 51))
+    # Roundtrip preserves sub-window accuracy: each drawn segment is reconstructed
+    # at its original tick position (40-41 and 45-46).
+    assert np.array_equal(np.flatnonzero(imported_values[:, 0] > 0), [40, 41, 45, 46])
 
 
 def test_export_seq_routes_ttl_pulses_to_selected_1030_laser_timeline() -> None:
@@ -219,7 +231,7 @@ def test_export_seq_routes_ttl_pulses_to_selected_1030_laser_timeline() -> None:
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     seq_text, report = generate_syscon2_sequence_text(
@@ -248,8 +260,7 @@ def test_export_seq_routes_ttl_pulses_to_selected_1030_laser_timeline() -> None:
     assert len(upper_laser_timeline) == 0
 
 
-def test_export_seq_requires_1ms_neuroseq_tick() -> None:
-    dt_seconds = _TTL_QUANTUM_US * 1e-6
+def test_export_seq_requires_syscon2_tick_rate() -> None:
     values = np.zeros((16, 1), dtype=np.float32)
     values[4:7, 0] = 1.0
     stim_array = StimArray(
@@ -257,10 +268,10 @@ def test_export_seq_requires_1ms_neuroseq_tick() -> None:
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=dt_seconds,
+        dt=0.001,  # 1ms — no longer valid
     )
 
-    with pytest.raises(ValueError, match="1ms"):
+    with pytest.raises(ValueError, match="0.0005208125"):
         generate_syscon2_sequence_text(
             stim_array,
             _cellpose_result(mapping={0: 0}),
@@ -272,8 +283,7 @@ def test_export_seq_requires_1ms_neuroseq_tick() -> None:
         )
 
 
-def test_check_syscon2_input_sanity_rejects_non_1ms_neuroseq_tick() -> None:
-    dt_seconds = _TTL_QUANTUM_US * 1e-6
+def test_check_syscon2_input_sanity_rejects_wrong_dt() -> None:
     values = np.zeros((96, 1), dtype=np.float32)
     values[32:65, 0] = 1.0
     stim_array = StimArray(
@@ -281,7 +291,7 @@ def test_check_syscon2_input_sanity_rejects_non_1ms_neuroseq_tick() -> None:
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=dt_seconds,
+        dt=0.001,  # 1ms — no longer valid
     )
 
     sanity = check_syscon2_input_sanity(
@@ -292,7 +302,7 @@ def test_check_syscon2_input_sanity_rejects_non_1ms_neuroseq_tick() -> None:
 
     assert not sanity.is_valid
     assert sanity.export_report is None
-    assert any("1ms" in error.lower() or "0.001" in error for error in sanity.errors)
+    assert any("0.0005208125" in error for error in sanity.errors)
 
 
 def test_generate_syscon2_timeline_overview_png_writes_file(tmp_path: Path) -> None:
@@ -303,7 +313,7 @@ def test_generate_syscon2_timeline_overview_png_writes_file(tmp_path: Path) -> N
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     seq_text, _ = generate_syscon2_sequence_text(
@@ -334,7 +344,7 @@ def test_generate_syscon2_timeline_overview_png_scales_width_for_long_duration(
         stim_type=StimType.Excitation,
         values=short_values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
     short_seq_text, _ = generate_syscon2_sequence_text(
         short_stim,
@@ -346,14 +356,14 @@ def test_generate_syscon2_timeline_overview_png_scales_width_for_long_duration(
         active_laser_wavelength_nm=1140,
     )
 
-    long_values = np.zeros((120_000, 1), dtype=np.float32)
-    long_values[110_000:110_002, 0] = 1.0
+    long_values = np.zeros((200_000, 1), dtype=np.float32)
+    long_values[180_000:180_002, 0] = 1.0
     long_stim = StimArray(
         name="long",
         stim_type=StimType.Excitation,
         values=long_values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
     long_seq_text, _ = generate_syscon2_sequence_text(
         long_stim,
@@ -389,7 +399,7 @@ def test_export_seq_accepts_legacy_1040_alias_as_1030_timeline() -> None:
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     seq_text, report = generate_syscon2_sequence_text(
@@ -411,7 +421,13 @@ def test_export_seq_accepts_legacy_1040_alias_as_1030_timeline() -> None:
     assert len(laser_pulses) == 1
 
 
-def test_export_seq_roundtrip_coalesces_dense_bursts_into_group_windows() -> None:
+def test_export_seq_roundtrip_preserves_burst_timing_at_exact_tick_positions() -> None:
+    """Each drawn burst becomes a separate TTL pulse at its exact tick position.
+
+    Shape objects still cover the full burst range (window-level coalescing for
+    SLM hardware), but laser TTL pulses are no longer window-quantised.  The
+    roundtrip (export → import) reconstructs each burst at the original tick.
+    """
     values = np.zeros((300, 6), dtype=np.float32)
     first_group_starts = [100, 107, 114, 121, 128, 135, 142, 149]
     second_group_starts = [200, 207, 214, 221]
@@ -426,7 +442,7 @@ def test_export_seq_roundtrip_coalesces_dense_bursts_into_group_windows() -> Non
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     seq_text, report = generate_syscon2_sequence_text(
@@ -449,8 +465,14 @@ def test_export_seq_roundtrip_coalesces_dense_bursts_into_group_windows() -> Non
         and _timeline_index(obj) == report.laser_timeline_index
     ]
 
-    assert len(laser_pulses) == 2
-    assert [pulse.start_time_us for pulse in laser_pulses] == [83_330.0, 183_326.0]
+    # 8 bursts in group 1 + 4 bursts in group 2 = 12 separate laser pulses
+    assert len(laser_pulses) == 12
+    expected_starts = [
+        s * _TTL_QUANTUM_US for s in first_group_starts + second_group_starts
+    ]
+    assert [pulse.start_time_us for pulse in laser_pulses] == pytest.approx(
+        expected_starts
+    )
 
     imported_values, _ = sequence_to_stim_values(
         sequence,
@@ -459,10 +481,12 @@ def test_export_seq_roundtrip_coalesces_dense_bursts_into_group_windows() -> Non
         tick_resolution_us=500,
         include_non_shape=False,
     )
+    # Each neuron's bursts are reconstructed at the original tick positions:
+    # 8 separate 2-tick segments for neurons 0-2, 4 for neurons 3-5.
     segment_counts = [
         _count_active_segments(imported_values[:, idx]) for idx in range(6)
     ]
-    assert segment_counts == [1, 1, 1, 1, 1, 1]
+    assert segment_counts == [8, 8, 8, 4, 4, 4]
 
 
 def test_export_seq_preserves_non_binary_shape_intensity_when_requested() -> None:
@@ -473,7 +497,7 @@ def test_export_seq_preserves_non_binary_shape_intensity_when_requested() -> Non
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     seq_text, _ = generate_syscon2_sequence_text(
@@ -503,7 +527,7 @@ def test_export_seq_skips_unmapped_active_neurons_and_reports_them() -> None:
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     seq_text, report = generate_syscon2_sequence_text(
@@ -538,7 +562,7 @@ def test_export_seq_accepts_one_based_mapping_keys() -> None:
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     seq_text, report = generate_syscon2_sequence_text(
@@ -555,14 +579,14 @@ def test_export_seq_accepts_one_based_mapping_keys() -> None:
 
 
 def test_check_syscon2_input_sanity_passes_for_valid_inputs() -> None:
-    values = np.zeros((30, 1), dtype=np.float32)
-    values[20:22, 0] = 1.0
+    values = np.zeros((64, 1), dtype=np.float32)
+    values[40:42, 0] = 1.0
     stim_array = StimArray(
         name="stim",
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     sanity = check_syscon2_input_sanity(
@@ -578,15 +602,15 @@ def test_check_syscon2_input_sanity_passes_for_valid_inputs() -> None:
 
 
 def test_check_syscon2_input_sanity_warns_for_unmapped_and_non_binary() -> None:
-    values = np.zeros((30, 2), dtype=np.float32)
-    values[20:22, 0] = 0.2
-    values[20:22, 1] = 0.8
+    values = np.zeros((64, 2), dtype=np.float32)
+    values[40:42, 0] = 0.2
+    values[40:42, 1] = 0.8
     stim_array = StimArray(
         name="stim",
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     sanity = check_syscon2_input_sanity(
@@ -604,14 +628,14 @@ def test_check_syscon2_input_sanity_warns_for_unmapped_and_non_binary() -> None:
 
 
 def test_check_syscon2_input_sanity_auto_fixes_when_first_stim_is_too_early() -> None:
-    values = np.zeros((30, 1), dtype=np.float32)
+    values = np.zeros((64, 1), dtype=np.float32)
     values[1:3, 0] = 1.0
     stim_array = StimArray(
         name="stim",
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     sanity = check_syscon2_input_sanity(
@@ -624,10 +648,10 @@ def test_check_syscon2_input_sanity_auto_fixes_when_first_stim_is_too_early() ->
     assert sanity.export_report is not None
     assert sanity.sanitized_values is not None
     assert sanity.export_report.exported_segments == 1
-    assert np.array_equal(
-        np.flatnonzero(sanity.sanitized_values[:, 0] > 0), np.arange(17, 30)
-    )
-    assert any("Inserted 17ms blank window" in warning for warning in sanity.warnings)
+    # sanitized_values reflects the preblank shift only: the original 2-tick pulse
+    # at [1:3] is shifted by one window (32 ticks) to [33:35], duration preserved.
+    assert np.array_equal(np.flatnonzero(sanity.sanitized_values[:, 0] > 0), [33, 34])
+    assert any("Inserted blank window" in warning for warning in sanity.warnings)
 
 
 def test_check_syscon2_input_sanity_fails_without_active_samples() -> None:
@@ -637,7 +661,7 @@ def test_check_syscon2_input_sanity_fails_without_active_samples() -> None:
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     sanity = check_syscon2_input_sanity(
@@ -666,7 +690,7 @@ def test_check_syscon2_input_sanity_auto_fixes_overlap_into_exportable_windows()
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     sanity = check_syscon2_input_sanity(
@@ -678,7 +702,7 @@ def test_check_syscon2_input_sanity_auto_fixes_overlap_into_exportable_windows()
     assert sanity.is_valid
     assert sanity.export_report is not None
     assert sanity.export_report.exported_segments == 3
-    assert any("Inserted 17ms blank window" in warning for warning in sanity.warnings)
+    assert any("Inserted blank window" in warning for warning in sanity.warnings)
     assert sanity.sanitized_values is not None
 
 
@@ -686,20 +710,20 @@ def test_find_slm_gap_violations_detects_short_gap_between_different_neurons() -
     values = np.zeros((80, 2), dtype=np.float32)
     values[0:3, 0] = 1.0
     values[8:11, 1] = 1.0
-    values[35:38, 0] = 1.0
+    values[48:51, 0] = 1.0  # gap of 37 samples from end of run 2 (> 32 required)
     stim_array = StimArray(
         name="stim",
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     violations = find_slm_gap_violations(stim_array, active_threshold=0.0)
 
     assert len(violations) == 1
     assert violations[0].gap_samples == 5
-    assert violations[0].required_gap_samples == 17
+    assert violations[0].required_gap_samples == 32
 
 
 def test_find_slm_gap_violations_ignores_transitions_without_new_neurons() -> None:
@@ -712,7 +736,7 @@ def test_find_slm_gap_violations_ignores_transitions_without_new_neurons() -> No
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     violations = find_slm_gap_violations(stim_array, active_threshold=0.0)
@@ -730,7 +754,7 @@ def test_find_slm_off_on_overlap_violations_detects_overlap() -> None:
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     violations = find_slm_off_on_overlap_violations(
@@ -750,18 +774,18 @@ def test_find_initial_slm_load_violation_detects_too_early_first_stimulus() -> N
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     violation = find_initial_slm_load_violation(stim_array, active_threshold=0.0)
 
     assert violation is not None
     assert violation.first_active_idx == 0
-    assert violation.required_start_idx == 17
+    assert violation.required_start_idx == 32
 
 
 def test_shift_stim_values_right_for_initial_slm_load_moves_all_inputs() -> None:
-    values = np.zeros((40, 2), dtype=np.float32)
+    values = np.zeros((72, 2), dtype=np.float32)
     values[0:3, 0] = 1.0
     values[10:12, 1] = 1.0
     stim_array = StimArray(
@@ -769,7 +793,7 @@ def test_shift_stim_values_right_for_initial_slm_load_moves_all_inputs() -> None
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     new_values, truncated_tail_samples = shift_stim_values_right_for_initial_slm_load(
@@ -783,10 +807,10 @@ def test_shift_stim_values_right_for_initial_slm_load_moves_all_inputs() -> None
         dt=stim_array.dt,
     )
 
-    assert truncated_tail_samples == 17
-    assert np.all(new_values[0:17, :] == 0.0)
-    assert np.all(new_values[17:20, 0] == 1.0)
-    assert np.all(new_values[27:29, 1] == 1.0)
+    assert truncated_tail_samples == 32
+    assert np.all(new_values[0:32, :] == 0.0)
+    assert np.all(new_values[32:35, 0] == 1.0)
+    assert np.all(new_values[42:44, 1] == 1.0)
     assert find_initial_slm_load_violation(shifted, active_threshold=0.0) is None
 
 
@@ -799,7 +823,7 @@ def test_space_out_stim_values_for_slm_resolves_violations() -> None:
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     new_values, truncated_tail_samples = space_out_stim_values_for_slm(
@@ -811,7 +835,7 @@ def test_space_out_stim_values_for_slm_resolves_violations() -> None:
         stim_type=StimType.Excitation,
         values=new_values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     assert len(find_slm_gap_violations(resolved, active_threshold=0.0)) == 0
@@ -827,7 +851,7 @@ def test_align_stim_values_left_for_slm_resolves_violations() -> None:
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     new_values, moved_runs = align_stim_values_left_for_slm(
@@ -839,7 +863,7 @@ def test_align_stim_values_left_for_slm_resolves_violations() -> None:
         stim_type=StimType.Excitation,
         values=new_values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     assert moved_runs > 0
@@ -856,7 +880,7 @@ def test_space_out_stim_values_for_slm_off_on_overlap_resolves_violations() -> N
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     new_values, truncated_tail_samples = space_out_stim_values_for_slm_off_on_overlap(
@@ -868,7 +892,7 @@ def test_space_out_stim_values_for_slm_off_on_overlap_resolves_violations() -> N
         stim_type=StimType.Excitation,
         values=new_values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     assert truncated_tail_samples > 0
@@ -885,7 +909,7 @@ def test_export_seq_restarts_and_aligns_objects_when_new_target_appears() -> Non
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     seq_text, _ = generate_syscon2_sequence_text(
@@ -916,7 +940,7 @@ def test_find_simultaneous_duration_violations_detects_unequal_durations() -> No
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     violations = find_simultaneous_duration_violations(
@@ -942,7 +966,7 @@ def test_equalize_simultaneous_durations_to_min_trims_longer_segments() -> None:
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     new_values, trimmed_timepoints = equalize_simultaneous_durations_to_min(
@@ -954,7 +978,7 @@ def test_equalize_simultaneous_durations_to_min_trims_longer_segments() -> None:
         stim_type=StimType.Excitation,
         values=new_values,
         units="1",
-        dt=0.001,
+        dt=_DT_S,
     )
 
     assert trimmed_timepoints == 8
@@ -965,3 +989,202 @@ def test_equalize_simultaneous_durations_to_min_trims_longer_segments() -> None:
     assert (
         len(find_simultaneous_duration_violations(resolved, active_threshold=0.0)) == 0
     )
+
+
+def test_find_overlapping_pulse_group_violations_detects_staggered_overlap() -> None:
+    # Neuron 0: [40:48], neuron 1: [44:52] — overlap at [44:48], different starts and durations
+    values = np.zeros((80, 2), dtype=np.float32)
+    values[40:48, 0] = 1.0
+    values[44:52, 1] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+
+    violations = find_overlapping_pulse_group_violations(
+        stim_array, active_threshold=0.0
+    )
+
+    assert len(violations) == 1
+    v = violations[0]
+    assert set(v.segment_neuron_indices) == {0, 1}
+    assert v.aligned_start_idx == 40  # leftmost start
+    assert (
+        v.aligned_duration_idx == 8
+    )  # both have duration 8 — different starts trigger violation
+
+
+def test_find_overlapping_pulse_group_violations_no_violation_for_non_overlapping() -> (
+    None
+):
+    values = np.zeros((80, 2), dtype=np.float32)
+    values[10:20, 0] = 1.0
+    values[30:40, 1] = 1.0  # gap between them — no overlap
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+
+    violations = find_overlapping_pulse_group_violations(
+        stim_array, active_threshold=0.0
+    )
+    assert violations == []
+
+
+def test_find_overlapping_pulse_group_violations_no_violation_when_already_aligned() -> (
+    None
+):
+    # Both neurons exactly the same start and duration — no violation
+    values = np.zeros((80, 2), dtype=np.float32)
+    values[40:46, 0] = 1.0
+    values[40:46, 1] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+
+    violations = find_overlapping_pulse_group_violations(
+        stim_array, active_threshold=0.0
+    )
+    assert violations == []
+
+
+def test_align_overlapping_pulses_to_shortest_fixes_staggered_overlap() -> None:
+    # Neuron 0: [40:45] (dur 5), neuron 1: [43:51] (dur 8) — overlap, different starts
+    values = np.zeros((80, 2), dtype=np.float32)
+    values[40:45, 0] = 1.0
+    values[43:51, 1] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+
+    new_values, modified = align_overlapping_pulses_to_shortest(
+        stim_array, active_threshold=0.0
+    )
+
+    # Both should be at aligned_start=40, aligned_duration=5 → [40:45]
+    assert modified > 0
+    assert np.all(new_values[40:45, 0] == 1.0)
+    assert np.all(new_values[45:, 0] == 0.0)
+    assert np.all(new_values[40:45, 1] == 1.0)
+    assert np.all(new_values[45:, 1] == 0.0)
+    assert np.all(new_values[:40, :] == 0.0)
+    # No more violations after fix
+    fixed = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=new_values,
+        units="1",
+        dt=_DT_S,
+    )
+    assert find_overlapping_pulse_group_violations(fixed, active_threshold=0.0) == []
+
+
+def test_align_overlapping_pulses_to_shortest_transitive_grouping() -> None:
+    # Neuron 0: [100:110], neuron 1: [105:120], neuron 2: [115:125]
+    # 0 overlaps 1, 1 overlaps 2 → all three in one group
+    values = np.zeros((200, 3), dtype=np.float32)
+    values[100:110, 0] = 1.0
+    values[105:120, 1] = 1.0
+    values[115:125, 2] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+
+    violations = find_overlapping_pulse_group_violations(
+        stim_array, active_threshold=0.0
+    )
+    assert len(violations) == 1
+    assert set(violations[0].segment_neuron_indices) == {0, 1, 2}
+    assert violations[0].aligned_start_idx == 100
+    assert violations[0].aligned_duration_idx == 10  # neuron 0 has shortest (10)
+
+    new_values, _ = align_overlapping_pulses_to_shortest(
+        stim_array, active_threshold=0.0
+    )
+    assert np.all(new_values[100:110, 0] == 1.0)
+    assert np.all(new_values[100:110, 1] == 1.0)
+    assert np.all(new_values[100:110, 2] == 1.0)
+    assert np.all(new_values[110:, :] == 0.0)
+
+
+def test_check_syscon2_input_sanity_auto_fixes_overlapping_pulses() -> None:
+    # Neuron 0: [64:70] (dur 6), neuron 1: [67:75] (dur 8) — staggered overlap
+    values = np.zeros((128, 2), dtype=np.float32)
+    values[64:70, 0] = 1.0
+    values[67:75, 1] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+
+    sanity = check_syscon2_input_sanity(
+        stim_array,
+        _cellpose_result(mapping={0: 0, 1: 1}),
+        template_text=_template_header(),
+    )
+
+    assert sanity.is_valid
+    assert sanity.sanitized_values is not None
+    assert len(sanity.fix_messages) >= 1
+    assert any(
+        "overlapping" in m.lower() or "aligned" in m.lower()
+        for m in sanity.fix_messages
+    )
+    # After fix: both neurons at [64:70]
+    assert np.all(sanity.sanitized_values[64:70, 0] == 1.0)
+    assert np.all(sanity.sanitized_values[64:70, 1] == 1.0)
+    assert np.all(sanity.sanitized_values[70:, :] == 0.0)
+
+
+def test_export_clips_pulse_to_sanitized_window_extent_when_tail_is_truncated() -> None:
+    # Regression test for: "laser pulse end exceeds the allowed end for an overlapping
+    # shape object (pulse_ticks=[125, 131), shape_ticks=[64, 128))".
+    #
+    # Geometry (32-tick windows, 4 windows = 128 ticks):
+    #   Neuron 0: ticks [35:38] → window 1 → hologram A (window 0 is blank preload ✓)
+    #   Neuron 1: ticks [93:99] → straddles window 2 (64–95) and window 3 (96–127)
+    #             → new hologram B (neuron 1 never seen); first active window = 2,
+    #               but window 1 is occupied → sanitizer inserts preblank at window 2,
+    #               shifting all hologram-B content right by 32 ticks.
+    #   After insertion: neuron-1 segment → [125:131].
+    #   Shape for hologram B covers windows 2–3 → shape end = 4 * 32 = 128.
+    #   Without the clip fix: pulse [125:131] overruns shape end 128 → validation error.
+    #   With the clip fix: pulse clipped to [125:128] → export succeeds.
+    values = np.zeros((128, 2), dtype=np.float32)
+    values[35:38, 0] = 1.0  # neuron 0: window 1
+    values[93:99, 1] = 1.0  # neuron 1: straddles windows 2 and 3
+    stim = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+    # Must succeed without raising a pulse-overrun validation error.
+    seq_text, _ = generate_syscon2_sequence_text(
+        stim,
+        _cellpose_result(mapping={0: 0, 1: 1}),
+        template_text=_template_header(),
+    )
+    assert "TTLPulse" in seq_text
