@@ -8,6 +8,7 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
 import neuroseq.stimulation_generator_dialog as stimulation_generator_dialog_module
+from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 from neuroseq.exporter_syscon2 import SysconExportReport
 from neuroseq.exporter_syscon2 import SysconInputSanityReport
 from neuroseq.importer_cellpose import CellposeImportResult
@@ -54,11 +55,49 @@ def _build_project(values: np.ndarray, mapping: dict[int, int] | None) -> Projec
         stim_type=StimType.Excitation,
         values=values,
         units="1",
-        dt=0.001,
+        dt=_SYSCON2_TTL_PULSE_QUANTUM_S,
     )
     project.add_stim_array(stim)
     project.cellpose_data = _cellpose_result(mapping=mapping)
     return project
+
+
+def _patch_no_slm_violations(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch all pre-sanity SLM violation finders to return no violations.
+
+    Use this in tests that mock check_syscon2_input_sanity directly and
+    don't care about the pre-sanity steps.
+    """
+    monkeypatch.setattr(
+        stimulation_generator_dialog_module,
+        "find_initial_slm_load_violation",
+        lambda *a, **kw: None,
+    )
+    monkeypatch.setattr(
+        stimulation_generator_dialog_module,
+        "find_slm_gap_violations",
+        lambda *a, **kw: [],
+    )
+    monkeypatch.setattr(
+        stimulation_generator_dialog_module,
+        "find_slm_off_on_overlap_violations",
+        lambda *a, **kw: [],
+    )
+    monkeypatch.setattr(
+        stimulation_generator_dialog_module,
+        "find_simultaneous_duration_violations",
+        lambda *a, **kw: [],
+    )
+    monkeypatch.setattr(
+        stimulation_generator_dialog_module,
+        "find_overlapping_pulse_group_violations",
+        lambda *a, **kw: [],
+    )
+    monkeypatch.setattr(
+        stimulation_generator_dialog_module,
+        "find_global_slm_window_violations",
+        lambda *a, **kw: [],
+    )
 
 
 def _build_export_report(
@@ -115,6 +154,7 @@ def test_stimulation_generator_dialog_sanity_check_passes(
     values = np.zeros((40, 1), dtype=np.float32)
     values[20:22, 0] = 1.0
     project = _build_project(values, mapping={0: 0})
+    _patch_no_slm_violations(monkeypatch)
 
     monkeypatch.setattr(
         stimulation_generator_dialog_module,
@@ -161,6 +201,7 @@ def test_stimulation_generator_dialog_sanity_check_uses_selected_laser_wavelengt
 ) -> None:
     values = np.zeros((40, 1), dtype=np.float32)
     values[20:22, 0] = 1.0
+    _patch_no_slm_violations(monkeypatch)
     dialog = StimulationGeneratorDialog(
         _build_project(values, mapping={0: 0}),
     )
@@ -200,6 +241,7 @@ def test_stimulation_generator_dialog_sanity_check_warns_when_report_contains_wa
     values[20:22, 0] = 1.0
     values[20:22, 1] = 1.0
     project = _build_project(values, mapping={0: 0})
+    _patch_no_slm_violations(monkeypatch)
 
     monkeypatch.setattr(
         stimulation_generator_dialog_module,
@@ -268,6 +310,7 @@ def test_stimulation_generator_dialog_applies_sanitized_values_after_confirmatio
     values = np.zeros((40, 1), dtype=np.float32)
     values[20:22, 0] = 1.0
     project = _build_project(values, mapping={0: 0})
+    _patch_no_slm_violations(monkeypatch)
     sanitized_values = np.array(values, copy=True)
     sanitized_values[20:22, 0] = 0.0
     sanitized_values[17:34, 0] = 1.0
@@ -305,6 +348,7 @@ def test_stimulation_generator_dialog_declines_sanitized_values_when_confirmatio
     values = np.zeros((40, 1), dtype=np.float32)
     values[20:22, 0] = 1.0
     project = _build_project(values, mapping={0: 0})
+    _patch_no_slm_violations(monkeypatch)
     before = np.array(project.stim_arrays["stim"].values, copy=True)
     sanitized_values = np.array(values, copy=True)
     sanitized_values[20:22, 0] = 0.0
@@ -359,6 +403,7 @@ def test_stimulation_generator_dialog_uses_stim_editor_undo_path_for_applied_san
     values = np.zeros((40, 1), dtype=np.float32)
     values[20:22, 0] = 1.0
     project = _build_project(values, mapping={0: 0})
+    _patch_no_slm_violations(monkeypatch)
     sanitized_values = np.array(values, copy=True)
     sanitized_values[20:22, 0] = 0.0
     sanitized_values[17:34, 0] = 1.0
