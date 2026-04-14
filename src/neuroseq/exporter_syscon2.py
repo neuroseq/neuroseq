@@ -173,6 +173,7 @@ class SysconInputSanityReport:
     export_report: SysconExportReport | None
     sanitized_values: np.ndarray | None = None
     fix_messages: list[str] = field(default_factory=list)
+    pulse_overrun_fix_values: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -297,9 +298,185 @@ class GlobalSlmWindowViolation:
     shift_samples: int
 
 
+@dataclass(frozen=True)
+class PulseOverrunViolation:
+    """A laser pulse interval that extends past an overlapping shape object's end.
+
+    Fields
+    ------
+    pulse_start_tick, pulse_end_tick : int
+        The merged laser TTL pulse interval [start, end).
+    shape_start_tick, shape_end_tick : int
+        The SLM shape object window [start, end) that the pulse overlaps.
+    max_pulse_end_tick : int
+        The latest tick at which the pulse would be allowed to end
+        (= shape_end_tick - pulse_guard_ticks).
+    shape_lane : int
+        The entity-lane index of the shape object.
+    neuron_index : int
+        The neuron index of the shape object.
+    """
+
+    pulse_start_tick: int
+    pulse_end_tick: int
+    shape_start_tick: int
+    shape_end_tick: int
+    max_pulse_end_tick: int
+    shape_lane: int
+    neuron_index: int
+
+
 def _normalize_active_laser_wavelength_nm(wavelength_nm: int) -> int:
     normalized = int(wavelength_nm)
     return _LEGACY_LASER_WAVELENGTH_ALIASES_NM.get(normalized, normalized)
+
+
+@dataclass
+class _PulseWindowState:
+    mapped_segments: list[_MappedSegment]
+    mapped_active_neurons: set[int]
+    unmapped_active_neurons: set[int]
+    skipped_segments_unmapped: int
+    pulse_intervals: list[tuple[int, int]]
+    scheduled_windows: list[_ScheduledEntityWindow]
+    n_entity_lanes: int
+    mapped_holograms: list[_Hologram]
+
+
+def _build_pulse_window_state(
+    sanitized: _SanitizedStimModel,
+    neuron_to_cellpose: dict[int, int],
+    centroids: dict[int, tuple[float, float]],
+) -> _PulseWindowState:
+    """Map sanitized segments to Cellpose cells and build pulse/window state.
+
+    This is the common pipeline shared between export and sanity-check
+    violation detection:
+      1. Map sanitized window-segments to Cellpose centroids.
+      2. Build merged laser TTL pulse intervals from adjusted raw segments.
+      3. Build hologram entity windows and assign them to lanes.
+
+    Raises ValueError if no mapped segments or no entity windows can be built.
+    """
+    mapped_segments: list[_MappedSegment] = []
+    skipped_segments_unmapped = 0
+    unmapped_active_neurons: set[int] = set()
+    mapped_active_neurons: set[int] = set()
+
+    mapped_window_values = np.zeros_like(sanitized.window_values)
+    for segment in sanitized.sanitized_segments:
+        cellpose_id = neuron_to_cellpose.get(segment.neuron_index)
+        if cellpose_id is None or cellpose_id not in centroids:
+            skipped_segments_unmapped += 1
+            unmapped_active_neurons.add(segment.neuron_index)
+            continue
+        center_x, center_y = centroids[cellpose_id]
+        mapped_active_neurons.add(segment.neuron_index)
+        start_tick = segment.start_win * _SYSCON2_WINDOW_TICKS
+        end_tick = segment.end_win * _SYSCON2_WINDOW_TICKS
+        mapped_segments.append(
+            _MappedSegment(
+                neuron_index=segment.neuron_index,
+                start_tick=start_tick,
+                end_tick=end_tick,
+                intensity=segment.intensity_out,
+                center_x=center_x,
+                center_y=center_y,
+            )
+        )
+        mapped_window_values[
+            segment.start_win : segment.end_win,
+            segment.neuron_index,
+        ] = np.maximum(
+            mapped_window_values[
+                segment.start_win : segment.end_win,
+                segment.neuron_index,
+            ],
+            segment.intensity_out,
+        )
+
+    if len(mapped_segments) == 0:
+        raise ValueError(
+            "No mapped active stimulation segments to export. "
+            "Check Cellpose mapping and stim activity."
+        )
+
+    max_pulse_tick = sanitized.window_values.shape[0] * _SYSCON2_WINDOW_TICKS
+    pulse_intervals = _merge_tick_intervals(
+        [
+            (segment.start_idx, min(segment.end_idx, max_pulse_tick))
+            for segment in sanitized.adjusted_raw_segments
+            if segment.neuron_index in mapped_active_neurons
+            and segment.start_idx < max_pulse_tick
+        ]
+    )
+    mapped_holograms = _build_holograms_from_window_values(mapped_window_values)
+
+    entity_windows: list[_EntityWindow] = []
+    for hologram in mapped_holograms:
+        if len(hologram.neuron_indices) == 0:
+            continue
+        shape_start_win = max(0, hologram.start_win - 1)
+        for neuron_idx in hologram.neuron_indices:
+            neuron_slice = mapped_window_values[
+                hologram.start_win : hologram.end_win, neuron_idx
+            ]
+            active_offsets = np.flatnonzero(neuron_slice > 0)
+            if active_offsets.size == 0:
+                continue
+            first_active_win = hologram.start_win + int(active_offsets[0])
+            last_active_win_excl = hologram.start_win + int(active_offsets[-1]) + 1
+            shape_end_win = max(last_active_win_excl, shape_start_win + 2)
+            stimulation_start_tick = first_active_win * _SYSCON2_WINDOW_TICKS
+            stimulation_end_tick = last_active_win_excl * _SYSCON2_WINDOW_TICKS
+            start_tick = shape_start_win * _SYSCON2_WINDOW_TICKS
+            end_tick = shape_end_win * _SYSCON2_WINDOW_TICKS
+            matching_segments = [
+                segment
+                for segment in mapped_segments
+                if segment.neuron_index == neuron_idx
+                and not (
+                    segment.end_tick <= stimulation_start_tick
+                    or stimulation_end_tick <= segment.start_tick
+                )
+            ]
+            intensity = max(
+                (segment.intensity for segment in matching_segments), default=1.0
+            )
+            center_x = matching_segments[0].center_x
+            center_y = matching_segments[0].center_y
+            entity_windows.append(
+                _EntityWindow(
+                    neuron_index=neuron_idx,
+                    stimulation_start_tick=stimulation_start_tick,
+                    stimulation_end_tick=stimulation_end_tick,
+                    start_tick=start_tick,
+                    end_tick=end_tick,
+                    intensity=intensity,
+                    center_x=center_x,
+                    center_y=center_y,
+                )
+            )
+
+    if len(entity_windows) == 0:
+        raise ValueError("No shape windows could be generated for mapped stimulation.")
+
+    lane_count = _max_simultaneous_entity_windows(entity_windows)
+    scheduled_windows = _assign_entity_lanes(entity_windows, lane_count)
+    scheduled_windows.sort(
+        key=lambda window: (window.start_tick, window.lane, window.neuron_index)
+    )
+
+    return _PulseWindowState(
+        mapped_segments=mapped_segments,
+        mapped_active_neurons=mapped_active_neurons,
+        unmapped_active_neurons=unmapped_active_neurons,
+        skipped_segments_unmapped=skipped_segments_unmapped,
+        pulse_intervals=pulse_intervals,
+        scheduled_windows=scheduled_windows,
+        n_entity_lanes=lane_count,
+        mapped_holograms=mapped_holograms,
+    )
 
 
 def generate_syscon2_sequence_text(
@@ -377,133 +554,26 @@ def generate_syscon2_sequence_text(
         set(centroids.keys()),
     )
 
-    mapped_segments: list[_MappedSegment] = []
-    skipped_segments_unmapped = 0
-    unmapped_active_neurons: set[int] = set()
-    mapped_active_neurons: set[int] = set()
     active_neurons = sorted(
         {segment.neuron_index for segment in sanitized.raw_segments}
     )
 
-    mapped_window_values = np.zeros_like(sanitized.window_values)
-    for segment in sanitized.sanitized_segments:
-        cellpose_id = neuron_to_cellpose.get(segment.neuron_index)
-        if cellpose_id is None or cellpose_id not in centroids:
-            skipped_segments_unmapped += 1
-            unmapped_active_neurons.add(segment.neuron_index)
-            continue
-        center_x, center_y = centroids[cellpose_id]
-        mapped_active_neurons.add(segment.neuron_index)
-        start_tick = segment.start_win * _SYSCON2_WINDOW_TICKS
-        end_tick = segment.end_win * _SYSCON2_WINDOW_TICKS
-        mapped_segments.append(
-            _MappedSegment(
-                neuron_index=segment.neuron_index,
-                start_tick=start_tick,
-                end_tick=end_tick,
-                intensity=segment.intensity_out,
-                center_x=center_x,
-                center_y=center_y,
-            )
-        )
-        mapped_window_values[
-            segment.start_win : segment.end_win,
-            segment.neuron_index,
-        ] = np.maximum(
-            mapped_window_values[
-                segment.start_win : segment.end_win,
-                segment.neuron_index,
-            ],
-            segment.intensity_out,
-        )
+    state = _build_pulse_window_state(sanitized, neuron_to_cellpose, centroids)
 
-    if len(mapped_segments) == 0:
-        raise ValueError(
-            "No mapped active stimulation segments to export. "
-            "Check Cellpose mapping and stim activity."
-        )
-
-    # TTL pulse intervals come from the adjusted raw segment positions (raw tick
-    # positions shifted to account for any preblank window insertions performed
-    # during sanitization).  In direct-tick mode dt == 520.8125µs, so
-    # sample_idx == tick_idx exactly, giving sub-window-accurate pulse timing.
-    # Clip pulses to the sanitized window extent: if tail truncation removed
-    # windows, an adjusted raw segment may extend into the truncated zone where
-    # no shape object exists.  Clipping ensures pulses stay within valid shape
-    # bounds and prevents pulse-overrun validation errors.
-    max_pulse_tick = sanitized.window_values.shape[0] * _SYSCON2_WINDOW_TICKS
-    pulse_intervals = _merge_tick_intervals(
-        [
-            (segment.start_idx, min(segment.end_idx, max_pulse_tick))
-            for segment in sanitized.adjusted_raw_segments
-            if segment.neuron_index in mapped_active_neurons
-            and segment.start_idx < max_pulse_tick
-        ]
-    )
-    mapped_holograms = _build_holograms_from_window_values(mapped_window_values)
-
-    entity_windows: list[_EntityWindow] = []
-    for hologram in mapped_holograms:
-        if len(hologram.neuron_indices) == 0:
-            continue
-        shape_start_win = max(0, hologram.start_win - 1)
-        for neuron_idx in hologram.neuron_indices:
-            neuron_slice = mapped_window_values[
-                hologram.start_win : hologram.end_win, neuron_idx
-            ]
-            active_offsets = np.flatnonzero(neuron_slice > 0)
-            if active_offsets.size == 0:
-                continue
-            first_active_win = hologram.start_win + int(active_offsets[0])
-            last_active_win_excl = hologram.start_win + int(active_offsets[-1]) + 1
-            shape_end_win = max(last_active_win_excl, shape_start_win + 2)
-            stimulation_start_tick = first_active_win * _SYSCON2_WINDOW_TICKS
-            stimulation_end_tick = last_active_win_excl * _SYSCON2_WINDOW_TICKS
-            start_tick = shape_start_win * _SYSCON2_WINDOW_TICKS
-            end_tick = shape_end_win * _SYSCON2_WINDOW_TICKS
-            matching_segments = [
-                segment
-                for segment in mapped_segments
-                if segment.neuron_index == neuron_idx
-                and not (
-                    segment.end_tick <= stimulation_start_tick
-                    or stimulation_end_tick <= segment.start_tick
-                )
-            ]
-            intensity = max(
-                (segment.intensity for segment in matching_segments), default=1.0
-            )
-            # All segments for the same neuron share the same cellpose centroid.
-            center_x = matching_segments[0].center_x
-            center_y = matching_segments[0].center_y
-            entity_windows.append(
-                _EntityWindow(
-                    neuron_index=neuron_idx,
-                    stimulation_start_tick=stimulation_start_tick,
-                    stimulation_end_tick=stimulation_end_tick,
-                    start_tick=start_tick,
-                    end_tick=end_tick,
-                    intensity=intensity,
-                    center_x=center_x,
-                    center_y=center_y,
-                )
-            )
-
-    if len(entity_windows) == 0:
-        raise ValueError("No shape windows could be generated for mapped stimulation.")
-
-    lane_count = _max_simultaneous_entity_windows(entity_windows)
-    scheduled_windows = _assign_entity_lanes(entity_windows, lane_count)
-    scheduled_windows.sort(
-        key=lambda window: (window.start_tick, window.lane, window.neuron_index)
-    )
     _validate_laser_pulse_end_before_overlapping_shapes(
-        pulse_intervals,
-        scheduled_windows,
+        state.pulse_intervals,
+        state.scheduled_windows,
         pulse_guard_ticks=0,
     )
 
-    n_entity_lanes = lane_count
+    mapped_segments = state.mapped_segments
+    mapped_active_neurons = state.mapped_active_neurons
+    unmapped_active_neurons = state.unmapped_active_neurons
+    skipped_segments_unmapped = state.skipped_segments_unmapped
+    pulse_intervals = state.pulse_intervals
+    scheduled_windows = state.scheduled_windows
+    n_entity_lanes = state.n_entity_lanes
+    mapped_holograms = state.mapped_holograms
     laser_timeline_index = (
         n_entity_lanes + _LASER_TIMELINE_OFFSETS[active_laser_wavelength_nm]
     )
@@ -1891,6 +1961,44 @@ def check_syscon2_input_sanity(
         n_neurons=values.shape[1],
     )
 
+    # Pre-compute all pulse overrun violations so we can return a complete fix
+    # even though generate_syscon2_sequence_text raises on the first one.
+    pulse_overrun_fix_values: np.ndarray | None = None
+    if (
+        cellpose_data is not None
+        and cellpose_data.segmentation_array is not None
+        and len(sanitized.sanitized_segments) > 0
+    ):
+        try:
+            _cp_segmentation = cellpose_data.segmentation_array
+            _cp_centroids = _compute_cell_centroids(_cp_segmentation)
+            _cp_neuron_to_cellpose = _resolve_neuron_to_cellpose_mapping(
+                cellpose_data,
+                work_stim.values.shape[1],
+                set(_cp_centroids.keys()),
+            )
+            _pw_state = _build_pulse_window_state(
+                sanitized, _cp_neuron_to_cellpose, _cp_centroids
+            )
+            _overrun_violations = _find_pulse_overrun_violations(
+                _pw_state.pulse_intervals,
+                _pw_state.scheduled_windows,
+                pulse_guard_ticks=0,
+            )
+            if _overrun_violations:
+                _fix_values = np.copy(sanitized_values_out)
+                for _v in _overrun_violations:
+                    # Zero out all samples in [max_pulse_end_tick, pulse_end_tick)
+                    # for all neurons. This clips the merged pulse to not overshoot
+                    # the shape boundary while removing the minimal number of samples.
+                    _start = _v.max_pulse_end_tick
+                    _end = min(_v.pulse_end_tick, _fix_values.shape[0])
+                    if _start < _end:
+                        _fix_values[_start:_end, :] = 0.0
+                pulse_overrun_fix_values = _fix_values
+        except (ValueError, TypeError, IndexError):
+            pass  # If pipeline fails for other reasons, skip the fix
+
     try:
         _, export_report = generate_syscon2_sequence_text(
             work_stim,
@@ -1911,6 +2019,7 @@ def check_syscon2_input_sanity(
             export_report=None,
             sanitized_values=sanitized_values_out,
             fix_messages=all_fix_messages,
+            pulse_overrun_fix_values=pulse_overrun_fix_values,
         )
 
     if export_report.unmapped_active_neurons:
@@ -3088,6 +3197,48 @@ def _validate_pulse_bounds_within_entity_windows(
                 f"stimulation_end_tick={window.stimulation_end_tick}, "
                 f"maximum_allowed_tick={max_stimulation_end})."
             )
+
+
+def _find_pulse_overrun_violations(
+    pulse_intervals: list[tuple[int, int]],
+    scheduled_windows: list[_ScheduledEntityWindow],
+    *,
+    pulse_guard_ticks: int = 0,
+) -> list[PulseOverrunViolation]:
+    """Return all pulse-overrun violations without raising.
+
+    A violation occurs when a merged laser pulse interval ends after the
+    allowed end of an overlapping SLM shape object
+    (``pulse_end > shape_end - pulse_guard_ticks``).
+
+    Non-positive pulse intervals and pulses without any overlapping window
+    are skipped here; those are caught separately by
+    :func:`_validate_laser_pulse_end_before_overlapping_shapes`.
+    """
+    violations: list[PulseOverrunViolation] = []
+    for pulse_start_tick, pulse_end_tick in pulse_intervals:
+        if pulse_end_tick <= pulse_start_tick:
+            continue
+        for window in scheduled_windows:
+            if (
+                pulse_end_tick <= window.start_tick
+                or window.end_tick <= pulse_start_tick
+            ):
+                continue
+            latest_allowed_end_tick = window.end_tick - pulse_guard_ticks
+            if pulse_end_tick > latest_allowed_end_tick:
+                violations.append(
+                    PulseOverrunViolation(
+                        pulse_start_tick=pulse_start_tick,
+                        pulse_end_tick=pulse_end_tick,
+                        shape_start_tick=window.start_tick,
+                        shape_end_tick=window.end_tick,
+                        max_pulse_end_tick=latest_allowed_end_tick,
+                        shape_lane=window.lane,
+                        neuron_index=window.neuron_index,
+                    )
+                )
+    return violations
 
 
 def _validate_laser_pulse_end_before_overlapping_shapes(

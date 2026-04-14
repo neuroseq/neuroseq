@@ -17,9 +17,21 @@ from neuroseq.exporter_syscon2 import SimultaneousDurationViolation
 from neuroseq.exporter_syscon2 import SlmGapViolation
 from neuroseq.exporter_syscon2 import SlmOffOnOverlapViolation
 from neuroseq.exporter_syscon2 import SysconExportReport
+from neuroseq.exporter_syscon2 import align_overlapping_pulses_to_shortest
 from neuroseq.exporter_syscon2 import check_syscon2_input_sanity
+from neuroseq.exporter_syscon2 import equalize_simultaneous_durations_to_min
+from neuroseq.exporter_syscon2 import find_global_slm_window_violations
+from neuroseq.exporter_syscon2 import find_initial_slm_load_violation
+from neuroseq.exporter_syscon2 import find_overlapping_pulse_group_violations
+from neuroseq.exporter_syscon2 import find_simultaneous_duration_violations
+from neuroseq.exporter_syscon2 import find_slm_gap_violations
+from neuroseq.exporter_syscon2 import find_slm_off_on_overlap_violations
 from neuroseq.exporter_syscon2 import generate_syscon2_sequence_text
 from neuroseq.exporter_syscon2 import generate_syscon2_timeline_overview_png
+from neuroseq.exporter_syscon2 import shift_stim_values_right_for_initial_slm_load
+from neuroseq.exporter_syscon2 import snap_stim_values_to_global_slm_windows
+from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm
+from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm_off_on_overlap
 
 if TYPE_CHECKING:
     from neuroseq.importer_cellpose import CellposeImportResult
@@ -214,7 +226,6 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
 
     class _SlmFixChoice(Enum):
         SPACE_OUT = "space_out"
-        ALIGN_LEFT = "align_left"
         CANCEL = "cancel"
 
     class _SlmOffOnFixChoice(Enum):
@@ -398,6 +409,141 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             return
 
         stim_array = self.project.stim_arrays[stim_name]
+
+        # 0. dt check — always first; wrong dt makes all other fixes meaningless.
+        if abs(stim_array.dt - _SYSCON2_TTL_PULSE_QUANTUM_S) > 1e-9:
+            error_msg = (
+                "Input sanity check failed.\n\nErrors:\n"
+                f"SysCon2 export requires stim_array.dt == {_SYSCON2_TTL_PULSE_QUANTUM_S} s. "
+                f"Got {stim_array.dt} s ({stim_array.dt * 1e6:.4f} µs)."
+            )
+            fix_clicked = self._show_scrollable_message(
+                "Sanity Check Failed",
+                error_msg,
+                QtWidgets.QMessageBox.Icon.Critical,
+                extra_button_text="Fix dt",
+            )
+            if fix_clicked:
+                stim_array.dt = _SYSCON2_TTL_PULSE_QUANTUM_S
+                blank_values = np.zeros_like(stim_array.values)
+                self._replace_stim_values_preserving_undo(stim_name, blank_values)
+                parent_widget = self.parentWidget()
+                stim_editor = (
+                    getattr(parent_widget, "stim_editor", None)
+                    if parent_widget is not None
+                    else None
+                )
+                if stim_editor is not None and hasattr(stim_editor, "select_stim"):
+                    stim_editor.select_stim(stim_name)
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "dt Updated — Array Cleared",
+                    f"dt has been set to {_SYSCON2_TTL_PULSE_QUANTUM_S} s "
+                    f"({_SYSCON2_TTL_PULSE_QUANTUM_S * 1e6:.4f} µs per tick).\n\n"
+                    "The stimulation array has been cleared.\n"
+                    "Please redraw your stimuli.",
+                )
+                self._log_status(
+                    "Set dt of '%s' to %s s and cleared all stimuli — please redraw.",
+                    stim_name,
+                    _SYSCON2_TTL_PULSE_QUANTUM_S,
+                )
+            return
+
+        # --- Pre-sanity SLM violation checks ---
+        # 1. Initial SLM load: stim starts before SLM has had time to load.
+        slm_load_violation = find_initial_slm_load_violation(stim_array)
+        if slm_load_violation is not None:
+            load_choice = self._prompt_initial_slm_start_fix_choice(
+                slm_load_violation, dt_seconds=stim_array.dt
+            )
+            if load_choice == self._InitialSlmFixChoice.CANCEL:
+                return
+            fixed_values, _ = shift_stim_values_right_for_initial_slm_load(stim_array)
+            if not self._replace_stim_values_preserving_undo(stim_name, fixed_values):
+                return
+            stim_array = self.project.stim_arrays[stim_name]
+            self._log_status(
+                "Shifted stim '%s' right for initial SLM load-up.", stim_name
+            )
+
+        # 2. SLM gap: new neuron appears without enough gap for hologram reload.
+        slm_gap_violations = find_slm_gap_violations(stim_array)
+        if slm_gap_violations:
+            gap_choice = self._prompt_slm_gap_fix_choice(
+                slm_gap_violations, dt_seconds=stim_array.dt
+            )
+            if gap_choice == self._SlmFixChoice.CANCEL:
+                return
+            fixed_values, _ = space_out_stim_values_for_slm(stim_array)
+            if not self._replace_stim_values_preserving_undo(stim_name, fixed_values):
+                return
+            stim_array = self.project.stim_arrays[stim_name]
+            self._log_status(
+                "Spaced out stim '%s' to resolve SLM gap violations.", stim_name
+            )
+
+        # 3. SLM off/on overlap: new-phase OFF window overlaps another neuron's ON.
+        slm_offon_violations = find_slm_off_on_overlap_violations(stim_array)
+        if slm_offon_violations:
+            offon_choice = self._prompt_slm_off_on_overlap_fix_choice(
+                slm_offon_violations, dt_seconds=stim_array.dt
+            )
+            if offon_choice == self._SlmOffOnFixChoice.CANCEL:
+                return
+            fixed_values, _ = space_out_stim_values_for_slm_off_on_overlap(stim_array)
+            if not self._replace_stim_values_preserving_undo(stim_name, fixed_values):
+                return
+            stim_array = self.project.stim_arrays[stim_name]
+            self._log_status(
+                "Spaced out stim '%s' to resolve SLM off/on overlap.", stim_name
+            )
+
+        # 4. Simultaneous duration mismatch: neurons fired together with unequal durations.
+        duration_violations = find_simultaneous_duration_violations(stim_array)
+        if duration_violations:
+            dur_choice = self._prompt_duration_fix_choice(
+                duration_violations, dt_seconds=stim_array.dt
+            )
+            if dur_choice == self._DurationFixChoice.CANCEL:
+                return
+            fixed_values, _ = equalize_simultaneous_durations_to_min(stim_array)
+            if not self._replace_stim_values_preserving_undo(stim_name, fixed_values):
+                return
+            stim_array = self.project.stim_arrays[stim_name]
+            self._log_status(
+                "Equalized simultaneous durations in stim '%s'.", stim_name
+            )
+
+        # 4b. Overlap alignment — applied automatically before the full sanity check so
+        #     that check_syscon2_input_sanity's internal overlap fix never diverges from
+        #     what the previous pre-sanity steps already produced.
+        overlap_violations = find_overlapping_pulse_group_violations(stim_array)
+        if overlap_violations:
+            fixed_values, _ = align_overlapping_pulses_to_shortest(stim_array)
+            if not self._replace_stim_values_preserving_undo(stim_name, fixed_values):
+                return
+            stim_array = self.project.stim_arrays[stim_name]
+            self._log_status(
+                "Aligned overlapping pulse groups in stim '%s'.", stim_name
+            )
+
+        # 5. Global SLM window misalignment: pulse starts not on allowed 16.66ms grid.
+        global_violations = find_global_slm_window_violations(stim_array)
+        if global_violations:
+            global_choice = self._prompt_global_slm_window_fix_choice(global_violations)
+            if global_choice == self._GlobalWindowFixChoice.CANCEL:
+                return
+            if global_choice == self._GlobalWindowFixChoice.SNAP:
+                fixed_values, _, _ = snap_stim_values_to_global_slm_windows(stim_array)
+                if not self._replace_stim_values_preserving_undo(
+                    stim_name, fixed_values
+                ):
+                    return
+                stim_array = self.project.stim_arrays[stim_name]
+                self._log_status("Snapped stim '%s' to global SLM windows.", stim_name)
+            # CONTINUE falls through to the full sanity check.
+
         force_binary_intensity = self.binary_mode_checkbox.isChecked()
         sanity_report = check_syscon2_input_sanity(
             stim_array,
@@ -447,42 +593,19 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 error_lines.extend(["", "Errors:", *sanity_report.errors])
             if sanity_report.warnings:
                 error_lines.extend(["", "Warnings:", *sanity_report.warnings])
-            is_dt_violation = any(
-                str(_SYSCON2_TTL_PULSE_QUANTUM_S) in e
-                for e in (sanity_report.errors or [])
-            )
+            is_pulse_overrun = sanity_report.pulse_overrun_fix_values is not None
             fix_clicked = self._show_scrollable_message(
                 "Sanity Check Failed",
                 "\n".join(error_lines),
                 QtWidgets.QMessageBox.Icon.Critical,
-                extra_button_text="Fix dt" if is_dt_violation else None,
+                extra_button_text="Fix pulse overrun" if is_pulse_overrun else None,
             )
-            if fix_clicked and is_dt_violation:
-                stim_array = self.project.stim_arrays[stim_name]
-                stim_array.dt = _SYSCON2_TTL_PULSE_QUANTUM_S
-                blank_values = np.zeros_like(stim_array.values)
-                self._replace_stim_values_preserving_undo(stim_name, blank_values)
-                # Re-select so the stim widget re-reads the updated dt for its time axis.
-                parent_widget = self.parentWidget()
-                stim_editor = (
-                    getattr(parent_widget, "stim_editor", None)
-                    if parent_widget is not None
-                    else None
-                )
-                if stim_editor is not None and hasattr(stim_editor, "select_stim"):
-                    stim_editor.select_stim(stim_name)
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "dt Updated — Array Cleared",
-                    f"dt has been set to {_SYSCON2_TTL_PULSE_QUANTUM_S} s "
-                    f"({_SYSCON2_TTL_PULSE_QUANTUM_S * 1e6:.4f} µs per tick).\n\n"
-                    "The stimulation array has been cleared.\n"
-                    "Please redraw your stimuli.",
-                )
+            if fix_clicked and is_pulse_overrun:
+                fix_values = sanity_report.pulse_overrun_fix_values
+                self._replace_stim_values_preserving_undo(stim_name, fix_values)
                 self._log_status(
-                    "Set dt of '%s' to %s s and cleared all stimuli — please redraw.",
+                    "Applied pulse overrun fix to '%s'. Re-run sanity check to verify.",
                     stim_name,
-                    _SYSCON2_TTL_PULSE_QUANTUM_S,
                 )
             return
 
@@ -659,6 +782,11 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         first_violation = violations[0]
         gap_ms = first_violation.gap_samples * dt_seconds * 1e3
         required_gap_ms = first_violation.required_gap_samples * dt_seconds * 1e3
+        shift_ms = (
+            (first_violation.required_gap_samples - first_violation.gap_samples)
+            * dt_seconds
+            * 1e3
+        )
         text_lines = [
             (
                 "Detected stimulation transitions that violate the SLM load-time rule "
@@ -672,11 +800,11 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 f"{first_violation.current_neuron_indices}, "
                 f"gap={gap_ms:.2f}ms (required {required_gap_ms:.2f}ms)"
             ),
+            f"Proposed fix: translate inputs right by {shift_ms:.2f} ms from the violation point.",
             "",
             "Choose how to resolve:",
-            "1) Space input out (by 16.66 ms)",
-            "2) Align troublesome stimuli (to the left)",
-            "3) Cancel",
+            f"1) Translate inputs right by {shift_ms:.2f} ms",
+            "2) Cancel",
         ]
         msg_box = QtWidgets.QMessageBox(self)
         msg_box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
@@ -684,11 +812,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         msg_box.setText("\n".join(text_lines))
 
         space_button = msg_box.addButton(
-            "Space Input Out",
-            QtWidgets.QMessageBox.ButtonRole.ActionRole,
-        )
-        align_button = msg_box.addButton(
-            "Align Troublesome Stimuli (Left)",
+            "Translate Inputs Right",
             QtWidgets.QMessageBox.ButtonRole.ActionRole,
         )
         cancel_button = msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
@@ -697,8 +821,6 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         clicked = msg_box.clickedButton()
         if clicked == space_button:
             return self._SlmFixChoice.SPACE_OUT
-        if clicked == align_button:
-            return self._SlmFixChoice.ALIGN_LEFT
         return self._SlmFixChoice.CANCEL
 
     def _prompt_duration_fix_choice(
