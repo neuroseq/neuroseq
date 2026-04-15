@@ -17,6 +17,8 @@ from neuroseq.importer_igor2 import load_igor_pxp_file
 from neuroseq.importer_igor2 import load_igor_wave_file
 from neuroseq.importer_igor2 import prepare_igor_wave_for_neuroseq
 from neuroseq.stim import StimType
+from neuroseq.stim_timing import format_milliseconds
+from neuroseq.stim_timing import stim_dt_matches
 
 if TYPE_CHECKING:
     from neuroseq.project import Project
@@ -97,8 +99,15 @@ class IgorImportDialog(QtWidgets.QDialog):
         self.source_dt_spin.setSingleStep(0.0001)
         self.source_dt_spin.setValue(NEUROSEQ_IGOR_TARGET_DT_SECONDS)
         self.source_dt_spin.setSuffix(" s")
-        self.source_dt_spin.valueChanged.connect(self._update_preview)
+        self.source_dt_spin.valueChanged.connect(self._on_timing_settings_changed)
         source_layout.addRow("Source sample interval:", self.source_dt_spin)
+        self.match_source_grid_checkbox = QtWidgets.QCheckBox(
+            "Adjust NeuroSeq stim grid to source/file grid"
+        )
+        self.match_source_grid_checkbox.toggled.connect(
+            self._on_timing_settings_changed
+        )
+        source_layout.addRow(self.match_source_grid_checkbox)
         self.target_dt_label = QtWidgets.QLabel(
             f"{NEUROSEQ_IGOR_TARGET_DT_SECONDS:.3f} s (fixed NeuroSeq grid)"
         )
@@ -173,6 +182,23 @@ class IgorImportDialog(QtWidgets.QDialog):
         self._populate_target_stims()
         self._update_mode_state()
         self._update_preview()
+
+    def _target_dt_seconds(self) -> float:
+        if self.match_source_grid_checkbox.isChecked():
+            return float(self.source_dt_spin.value())
+        return NEUROSEQ_IGOR_TARGET_DT_SECONDS
+
+    def _update_target_dt_label(self) -> None:
+        target_dt = self._target_dt_seconds()
+        if self.match_source_grid_checkbox.isChecked():
+            self.target_dt_label.setText(f"{target_dt:.9f} s (match source/file grid)")
+        else:
+            self.target_dt_label.setText(f"{target_dt:.3f} s (fixed NeuroSeq grid)")
+
+    def _on_timing_settings_changed(self) -> None:
+        self._update_target_dt_label()
+        self._update_preview()
+        self._update_import_button_state()
 
     def _populate_target_stims(self) -> None:
         self.target_combo.clear()
@@ -339,10 +365,11 @@ class IgorImportDialog(QtWidgets.QDialog):
 
     def _build_preview_text(self, wave: IgorWave) -> str:
         source_dt = float(self.source_dt_spin.value())
+        target_dt = self._target_dt_seconds()
         imported_samples = estimate_resampled_sample_count(
             int(wave.values.size),
             source_dt,
-            target_dt=NEUROSEQ_IGOR_TARGET_DT_SECONDS,
+            target_dt=target_dt,
         )
         lines = [
             f"Wave name={wave.name}",
@@ -354,7 +381,8 @@ class IgorImportDialog(QtWidgets.QDialog):
                 else "Detected source dt=(not stored in file)"
             ),
             f"Import source dt={source_dt:.9f} s",
-            f"Imported samples on 1 ms grid={imported_samples}",
+            f"Imported sample interval={target_dt:.9f} s",
+            f"Imported samples on target grid={imported_samples}",
             f"Wave units={wave.units or '(none)'}",
             f"Axis units={wave.axis_units or '(none)'}",
             f"Value range={float(np.min(wave.values)):.6g} .. {float(np.max(wave.values)):.6g}",
@@ -371,6 +399,7 @@ class IgorImportDialog(QtWidgets.QDialog):
         self._update_import_button_state()
 
     def _update_preview(self) -> None:
+        self._update_target_dt_label()
         if self.loaded_wave is None:
             self.preview_text.setPlainText("")
             if not self.project.stim_arrays:
@@ -384,11 +413,16 @@ class IgorImportDialog(QtWidgets.QDialog):
 
         self.preview_text.setPlainText(self._build_preview_text(self.loaded_wave))
         source_dt = float(self.source_dt_spin.value())
+        target_dt = self._target_dt_seconds()
         info_lines: list[str] = []
-        if abs(source_dt - NEUROSEQ_IGOR_TARGET_DT_SECONDS) > 1e-9:
+        if abs(source_dt - target_dt) > 1e-9:
             info_lines.append(
-                "This wave will be resampled to NeuroSeq's 1 ms timeline using zero-order hold. "
+                "This wave will be resampled to the selected NeuroSeq stim grid using zero-order hold. "
                 "Fast sub-ms changes may be lost."
+            )
+        elif self.match_source_grid_checkbox.isChecked():
+            info_lines.append(
+                "This import will preserve the source/file timestep by adjusting the NeuroSeq stim grid."
             )
         else:
             info_lines.append("This wave already matches NeuroSeq's 1 ms timeline.")
@@ -400,10 +434,12 @@ class IgorImportDialog(QtWidgets.QDialog):
         if (
             self.import_existing_radio.isChecked()
             and selected_stim is not None
-            and abs(float(selected_stim.dt) - NEUROSEQ_IGOR_TARGET_DT_SECONDS) > 1e-9
+            and not stim_dt_matches(float(selected_stim.dt), target_dt)
         ):
             info_lines.append(
-                "The selected target stim array does not use a 1 ms dt and cannot be imported into by this first Igor importer."
+                "The selected target stim array will be remapped from "
+                f"{format_milliseconds(float(selected_stim.dt) * 1000.0)} ms to "
+                f"{format_milliseconds(target_dt * 1000.0)} ms before import."
             )
         self.info_label.setText("\n".join(info_lines))
 
@@ -413,9 +449,7 @@ class IgorImportDialog(QtWidgets.QDialog):
             enabled = self.new_name_edit.text().strip() != ""
         if enabled and self.import_existing_radio.isChecked():
             target = self._selected_stim_array()
-            enabled = target is not None and (
-                abs(float(target.dt) - NEUROSEQ_IGOR_TARGET_DT_SECONDS) <= 1e-9
-            )
+            enabled = target is not None
         self.import_button.setEnabled(enabled)
 
     def _current_new_stim_type(self) -> StimType:
@@ -429,10 +463,11 @@ class IgorImportDialog(QtWidgets.QDialog):
             return
 
         try:
+            target_dt = self._target_dt_seconds()
             prepared_wave = prepare_igor_wave_for_neuroseq(
                 self.loaded_wave,
                 source_dt_override=float(self.source_dt_spin.value()),
-                target_dt=NEUROSEQ_IGOR_TARGET_DT_SECONDS,
+                target_dt=target_dt,
             )
             if self.create_new_radio.isChecked():
                 stim_name = self.new_name_edit.text().strip()
@@ -464,6 +499,30 @@ class IgorImportDialog(QtWidgets.QDialog):
                 target_stim = self._selected_stim_array()
                 if target_stim is None:
                     raise ValueError("No target stimulation data entity selected")
+                remapped_target_dt = False
+                if not stim_dt_matches(float(target_stim.dt), prepared_wave.target_dt):
+                    continue_with_remap = QtWidgets.QMessageBox.question(
+                        self,
+                        "Change stim array timestep",
+                        "Changing the stimulation timestep will remap stimulus array "
+                        f"'{target_stim.name}' from "
+                        f"{format_milliseconds(float(target_stim.dt) * 1000.0)} ms "
+                        f"to {format_milliseconds(prepared_wave.target_dt * 1000.0)} ms. "
+                        "Stimulus timing may shift by up to one sample. Continue?",
+                        QtWidgets.QMessageBox.StandardButton.Yes
+                        | QtWidgets.QMessageBox.StandardButton.No,
+                    )
+                    if continue_with_remap != QtWidgets.QMessageBox.StandardButton.Yes:
+                        return
+                    self.project.update_stim_array_properties(
+                        target_stim.name,
+                        n_neurons=int(target_stim.values.shape[1]),
+                        stim_type=target_stim.stim_type,
+                        units=target_stim.units,
+                        dt=prepared_wave.target_dt,
+                    )
+                    target_stim = self.project.stim_arrays[target_stim.name]
+                    remapped_target_dt = True
                 report = import_igor_wave_into_stim_array(
                     target_stim,
                     prepared_wave,
@@ -480,6 +539,10 @@ class IgorImportDialog(QtWidgets.QDialog):
                 if report.truncated_samples > 0:
                     info_lines.append(
                         f"Truncated imported samples: {report.truncated_samples}"
+                    )
+                if remapped_target_dt:
+                    info_lines.append(
+                        f"Adjusted target stim grid to {report.target_dt:.9f} s before import."
                     )
                 if report.resampled:
                     info_lines.append(

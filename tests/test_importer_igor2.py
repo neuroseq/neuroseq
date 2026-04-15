@@ -102,6 +102,38 @@ def test_import_igor_wave_into_stim_array_replaces_target_column_and_extends() -
     np.testing.assert_allclose(target_stim.values[:, 1], np.array([5.0, 6.0, 7.0]))
 
 
+def test_import_igor_wave_into_stim_array_allows_matching_nondefault_dt() -> None:
+    target_stim = StimArray(
+        name="stimulus",
+        stim_type=StimType.External,
+        values=np.zeros((2, 1), dtype=np.float32),
+        units="pA",
+        dt=0.0005,
+    )
+    wave = IgorWave(
+        name="test_wave",
+        values=np.array([5.0, 6.0, 7.0], dtype=np.float32),
+        source_dt=0.0005,
+        units="pA",
+        axis_units="s",
+        source_format="csv",
+    )
+    prepared = prepare_igor_wave_for_neuroseq(wave, target_dt=0.0005)
+
+    report = import_igor_wave_into_stim_array(
+        target_stim,
+        prepared,
+        neuron_index=0,
+        replace_existing=True,
+        extend_to_fit=True,
+    )
+
+    assert report.target_dt == pytest.approx(0.0005)
+    assert target_stim.dt == pytest.approx(0.0005)
+    assert target_stim.values.shape == (3, 1)
+    np.testing.assert_allclose(target_stim.values[:, 0], np.array([5.0, 6.0, 7.0]))
+
+
 def test_load_igor_ibw_file_extracts_name_dt_and_units(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -5,6 +5,7 @@ from pathlib import Path
 import brian2.numpy_ as np
 import pytest
 from pytestqt.qtbot import QtBot
+from qtpy import QtWidgets
 
 from neuroseq.igor_import_dialog import IgorImportDialog
 from neuroseq.project import Project
@@ -73,6 +74,80 @@ def test_igor_import_dialog_imports_into_existing_stim_array(
     assert dialog.selected_stim_name == "stimulus"
     assert qmessagebox_calls[-1]["name"] == "information"
     assert "import complete" in qmessagebox_calls[-1]["title"].lower()
+
+
+def test_igor_import_dialog_creates_new_stim_array_on_source_grid(
+    tmp_path: Path,
+    qtbot: QtBot,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    csv_path = tmp_path / "wave.csv"
+    csv_path.write_text("igor_wave\n1.0\n2.0\n3.0\n4.0\n", encoding="utf-8")
+
+    project = Project()
+    dialog = IgorImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(csv_path))
+    dialog.source_dt_spin.setValue(0.0005)
+    dialog.match_source_grid_checkbox.setChecked(True)
+    dialog._import_file()
+
+    assert "igor_wave" in project.stim_arrays
+    stim_array = project.stim_arrays["igor_wave"]
+    assert stim_array.dt == pytest.approx(0.0005)
+    assert stim_array.values.shape == (4, 1)
+    np.testing.assert_allclose(stim_array.values[:, 0], np.array([1.0, 2.0, 3.0, 4.0]))
+    assert "match source/file grid" in dialog.target_dt_label.text().lower()
+    assert qmessagebox_calls[-1]["name"] == "information"
+
+
+def test_igor_import_dialog_imports_into_existing_stim_array_on_source_grid(
+    tmp_path: Path,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    csv_path = tmp_path / "wave.csv"
+    csv_path.write_text("igor_wave\n10.0\n20.0\n30.0\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            name="stimulus",
+            stim_type=StimType.External,
+            values=np.zeros((2, 2), dtype=np.float32),
+            units="pA",
+            dt=0.001,
+        )
+    )
+
+    dialog = IgorImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(csv_path))
+    dialog.source_dt_spin.setValue(0.0005)
+    dialog.match_source_grid_checkbox.setChecked(True)
+    dialog.import_existing_radio.setChecked(True)
+    dialog.target_combo.setCurrentText("stimulus")
+    dialog.neuron_index_spin.setValue(1)
+    dialog.replace_checkbox.setChecked(True)
+    dialog.extend_checkbox.setChecked(True)
+    dialog._import_file()
+
+    stim_array = project.stim_arrays["stimulus"]
+    assert stim_array.dt == pytest.approx(0.0005)
+    assert stim_array.values.shape == (4, 2)
+    np.testing.assert_allclose(
+        stim_array.values[:, 1], np.array([10.0, 20.0, 30.0, 0.0])
+    )
+    assert dialog.selected_stim_name == "stimulus"
+    assert qmessagebox_calls[-1]["name"] == "information"
+    assert "adjusted target stim grid" in qmessagebox_calls[-1]["text"].lower()
 
 
 def test_igor_import_dialog_loads_pxp_and_shows_wave_picker(

@@ -30,12 +30,20 @@ After selecting a wave, the preview shows:
 - source format
 - source sample count
 - detected source sample interval (`dt`) when present
-- imported sample count on NeuroSeq's fixed 1 ms grid
+- imported sample count on the currently selected NeuroSeq import grid
 - units and axis units
 - value range
 - optional Igor note text
 
-The source sample interval can always be edited before import. NeuroSeq imports stimulation data onto its 1 ms timeline and uses zero-order-hold resampling when the source `dt` differs from `0.001 s`.
+The source sample interval can always be edited before import.
+
+By default, NeuroSeq imports stimulation data onto its 1 ms timeline and uses zero-order-hold resampling when the source `dt` differs from `0.001 s`.
+
+If you enable `Adjust NeuroSeq stim grid to source/file grid`, NeuroSeq instead uses the selected source sample interval as the imported stimulation grid:
+
+- new stimulation arrays are created with that `dt`
+- existing stimulation arrays are remapped to that `dt` before import, after confirmation
+- when source and target `dt` match, the Igor wave is copied without timeline resampling
 
 ## Import targets
 
@@ -49,5 +57,4 @@ For packed experiments, the suggested stim name and units update automatically w
 ## Current limitations
 
 - Import is still one wave at a time, even for `.pxp` files.
-- Import into an existing stim array requires the target stimulation array to already use a 1 ms `dt`.
 - Packed-experiment metadata is not reconstructed into higher-level Sutter routine structures; NeuroSeq only imports the contained waves.

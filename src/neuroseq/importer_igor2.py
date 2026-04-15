@@ -401,7 +401,8 @@ def import_igor_wave_into_stim_array(
         > _DT_TOLERANCE_SECONDS
     ):
         raise ValueError(
-            "Igor import into an existing stim array currently requires a 1 ms target dt"
+            "Target StimArray dt must match the imported wave target dt "
+            f"({float(stim_array.dt):.9f}s != {float(prepared_wave.target_dt):.9f}s)"
         )
 
     n_existing_timepoints, n_existing_neurons = stim_array.values.shape

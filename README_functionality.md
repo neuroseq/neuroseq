@@ -652,16 +652,19 @@ python -m neuroseq \
 #### Timeline conversion model
 
 - NeuroSeq’s current stim editor/timeline assumes a 1 ms grid for correct editing/viewing behavior.
-- Therefore Igor import always targets:
+- By default Igor import targets:
   - `target_dt = 0.001 s`.
-- If source `dt` already equals `0.001 s`, sample values are copied directly.
-- If source `dt` differs from `0.001 s`, importer resamples to the NeuroSeq grid using zero-order hold:
-  - target timestamps are generated on the 1 ms grid,
+- The dialog now also offers `Adjust NeuroSeq stim grid to source/file grid`:
+  - if enabled, `target_dt` becomes the currently selected source/file `dt`,
+  - new stim arrays are created on that grid,
+  - existing stim arrays are remapped to that grid before import after user confirmation.
+- If source `dt` already equals the selected target `dt`, sample values are copied directly.
+- If source `dt` differs from the selected target `dt`, importer resamples using zero-order hold:
+  - target timestamps are generated on the selected target grid,
   - each target sample takes the most recent source sample value,
   - this is intended for step-like command waveforms,
-  - fine sub-ms structure is intentionally collapsed to the 1 ms NeuroSeq representation.
-- Estimated imported sample count is computed from total source duration:
-  - `ceil(source_samples * source_dt / 0.001)`.
+  - fine structure below the chosen target `dt` is intentionally collapsed in the NeuroSeq representation.
+- Estimated imported sample count is computed from total source duration and the selected target `dt`.
 
 #### Import target modes
 
@@ -690,8 +693,10 @@ The dialog offers two mutually exclusive modes.
   - whether to extend target duration,
   - whether to replace or add to existing values.
 - Existing-target import is only enabled when the selected target stim array also uses:
-  - `dt = 0.001 s`.
 - Import writes the 1D Igor wave into exactly one neuron column of the chosen target stim array.
+- If the selected target stim array uses a different `dt` than the chosen import target `dt`:
+  - the dialog asks for confirmation,
+  - the target stim array is remapped to the selected import grid before writing the Igor wave.
 - Time-axis behavior:
   - if `extend_to_fit=True`, target stim array grows to fit the imported duration,
   - otherwise overflow samples are truncated.
@@ -718,7 +723,6 @@ The dialog offers two mutually exclusive modes.
 
 - No multi-wave batch import yet.
 - No automatic reconstruction of stimulation patterns from Sutter routine/paradigm metadata yet.
-- Import-to-existing currently requires the target stim array to already be on the 1 ms grid.
 - Because zero-order hold is used, the importer is best aligned with command/stimulation waveforms that are piecewise constant or approximately step-like.
 
 ## 10) Synthetic data generation (`synthetic_data_dialog.py`)
