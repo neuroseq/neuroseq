@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # NeuroSeq — Claude Code Guide
 
 ## Project Overview
@@ -22,7 +26,7 @@ uv run pytest tests/test_gui.py
 uv run mkdocs serve   # → http://127.0.0.1:8000/neuroseq
 ```
 
-Pre-commit hooks use **ruff** (lint + format), **mypy**, **prettier**, and **nbstripout**. Run `prek install` to set them up.
+Pre-commit hooks use **ruff** (lint + format), **mypy**, **prettier**, and **nbstripout**. Run `pre-commit install` to set them up.
 
 ## Architecture
 
@@ -88,6 +92,27 @@ Tests are in `tests/`. The `conftest.py` provides fixtures for:
 - Synthetic trace/spike/synapse data
 
 Run with `uv run pytest`. Coverage reports use `pytest-cov`; memory profiling available via `pytest-memray` (Linux/macOS only).
+
+### Screenshot tests
+
+Screenshot tests are skipped by default. To update reference screenshots instead of running all other tests:
+
+```bash
+uv run pytest --update-screenshot
+```
+
+### Qt testing patterns
+
+Two `autouse` fixtures apply to every test automatically:
+
+- **`suppress_message_boxes`** — patches `QMessageBox.information/warning/critical` to return `Ok` silently.
+- **`patch_b2w_exec_show`** — replaces `.exec()` with `.show()` on `QDialog` and `QMessageBox` to prevent event-loop blocking.
+
+Use the opt-in **`qmessagebox_calls`** fixture to capture dialog calls and assert on them (supports both static `QMessageBox` methods and `StimulationGeneratorDialog._show_scrollable_message`).
+
+### Brian2 in tests
+
+`conftest.py` sets `b2.prefs.codegen.target = "numpy"` globally for all tests, disabling C++ code generation for speed and reproducibility.
 
 ## File Format
 

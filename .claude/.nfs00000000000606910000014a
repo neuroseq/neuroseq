@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uvx prek *)",
+      "Bash(QT_API=pyside6 PYTEST_QT_API=pyside6 uv run *)",
+      "Bash(export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.cache/prek/tools/uv:$HOME/conda-ws/envs/neuroseq/bin:$PATH\")",
+      "Bash(export PATH=\"$HOME/.cache/prek/tools/uv:$HOME/conda-ws/envs/neuroseq/bin:$PATH\")"
+    ]
+  }
+}
