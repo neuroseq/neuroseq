@@ -61,6 +61,7 @@ class StimEditor(QtWidgets.QWidget):
     ) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
+        self.controller = controller
         self.toolbar = toolbar
         self.project: Project | None = None
         self.cmb_stim = cmb_stim
@@ -145,6 +146,10 @@ class StimEditor(QtWidgets.QWidget):
         self.stim_widget.clear_data()
         self.stim_widget.setEnabled(have_stims)
         self.cmb_stim.setEnabled(have_stims)
+        self.controller.set_limits(
+            float(self.project.max_time_secs),
+            max(1, int(self.project.max_neurons)),
+        )
         if not have_stims:
             self.current_stim_modifier = None
             return
@@ -330,6 +335,10 @@ class StimEditor(QtWidgets.QWidget):
                 self.draw_stim.value1 = 1.0
             self.draw_stim.value2 = self.draw_stim.value1
             self.stim_widget.set_data(self.current_stim_modifier.stim_array)
+            self.controller.focus_neuron_range(
+                0,
+                int(self.current_stim_modifier.stim_array.values.shape[1]),
+            )
             for modifier in self.stims_dict.values():
                 if modifier is not self.current_stim_modifier:
                     self.stim_widget.set_background_data(modifier.stim_array)

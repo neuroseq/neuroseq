@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import brian2.numpy_ as np
 import pytest
@@ -339,6 +340,53 @@ def test_selecting_stim_preserves_physical_draw_duration(qtbot: QtBot) -> None:
     assert stim_editor.draw_stim_length == 2
     assert stim_editor._draw_stim_length_milliseconds() == approx(4.0)
     stim_editor.close()
+
+
+def test_selecting_smaller_stim_refocuses_y_view() -> None:
+    wide_modifier = SimpleNamespace(
+        stim_array=StimArray(
+            "wide",
+            neuroseq.stim.StimType.Excitation,
+            np.zeros((10, 50), dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+    single_modifier = SimpleNamespace(
+        stim_array=StimArray(
+            "single",
+            neuroseq.stim.StimType.Excitation,
+            np.zeros((10, 1), dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+    focused_ranges: list[tuple[int, int]] = []
+    fake_stim_widget = SimpleNamespace(
+        set_data=lambda stim_array: None,
+        set_background_data=lambda stim_array: None,
+    )
+    fake_editor = SimpleNamespace(
+        logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        stims_dict={"wide": wide_modifier, "single": single_modifier},
+        current_stim_modifier=wide_modifier,
+        draw_stim_length=4,
+        draw_stim=DrawStim(DrawStimType.Constant, 1.0, 1.0),
+        stim_type=neuroseq.stim.StimType.Excitation,
+        stim_widget=fake_stim_widget,
+        controller=SimpleNamespace(
+            focus_neuron_range=lambda start, stop: focused_ranges.append((start, stop))
+        ),
+        set_mode=lambda mode: None,
+        set_draw_mode=lambda mode: None,
+        _stim_values_updated=lambda: None,
+        _current_stim_dt_seconds=lambda: 0.001,
+    )
+
+    StimEditor.select_stim(fake_editor, "single")  # type: ignore[arg-type]
+
+    assert fake_editor.current_stim_modifier is single_modifier
+    assert focused_ranges == [(0, 1)]
 
 
 def test_create_stim_array_defaults_to_selected_stim_dt(

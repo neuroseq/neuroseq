@@ -70,6 +70,28 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         self._set_camera_state(state)
         self._update_cameras()
 
+    def focus_neuron_range(self, start_index: int, stop_index: int) -> None:
+        start_index = int(start_index)
+        stop_index = int(stop_index)
+        if stop_index <= start_index:
+            return
+        state = self._get_camera_state()
+        visible_neurons = float(
+            np.clip(
+                stop_index - start_index,
+                float(self.min_height),
+                float(self.max_height),
+            )
+        )
+        state["height"] = visible_neurons
+        state["position"] = (
+            float(state["position"][0]),
+            float(start_index) + 0.5 * visible_neurons - 0.5,
+            float(state["position"][2]),
+        )
+        self._set_camera_state(state)
+        self._update_cameras()
+
     def _set_camera_state(self, new_state):
         """Override the _set_camera_state method
         - limit the width, height and position to prevent scrolling or zooming beyond the data
