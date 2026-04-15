@@ -136,3 +136,7 @@ dmypy.json
 # ide
 .vscode
 .idea
+
+# AI tool internal files
+.claude/
+.codex

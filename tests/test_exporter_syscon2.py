@@ -6,6 +6,9 @@ import brian2.numpy_ as np
 import pytest
 from PIL import Image
 
+from neuroseq.exporter_syscon2 import PulseOverrunViolation
+from neuroseq.exporter_syscon2 import _find_pulse_overrun_violations
+from neuroseq.exporter_syscon2 import _ScheduledEntityWindow
 from neuroseq.exporter_syscon2 import align_overlapping_pulses_to_shortest
 from neuroseq.exporter_syscon2 import align_stim_values_left_for_slm
 from neuroseq.exporter_syscon2 import check_syscon2_input_sanity
@@ -1188,3 +1191,229 @@ def test_export_clips_pulse_to_sanitized_window_extent_when_tail_is_truncated() 
         template_text=_template_header(),
     )
     assert "TTLPulse" in seq_text
+
+
+# ---------------------------------------------------------------------------
+# generate_syscon2_sequence_text — input-validation error branches
+# ---------------------------------------------------------------------------
+
+
+def _stim_1d() -> StimArray:
+    return StimArray(
+        name="s",
+        stim_type=StimType.Excitation,
+        values=np.zeros(10, dtype=np.float32),
+        units="1",
+        dt=_DT_S,
+    )
+
+
+def _stim_active() -> StimArray:
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    return StimArray(
+        name="s",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+
+
+def test_generate_syscon2_sequence_text_raises_for_1d_values() -> None:
+    with pytest.raises(ValueError, match="2D"):
+        generate_syscon2_sequence_text(
+            _stim_1d(),
+            _cellpose_result(mapping={0: 0}),
+            template_text=_template_header(),
+        )
+
+
+def test_generate_syscon2_sequence_text_raises_for_non_positive_tick_resolution() -> (
+    None
+):
+    with pytest.raises(ValueError, match="tick_resolution_us"):
+        generate_syscon2_sequence_text(
+            _stim_active(),
+            _cellpose_result(mapping={0: 0}),
+            template_text=_template_header(),
+            tick_resolution_us=-1,
+        )
+
+
+def test_generate_syscon2_sequence_text_raises_for_out_of_range_binary_intensity() -> (
+    None
+):
+    with pytest.raises(ValueError, match="binary_intensity"):
+        generate_syscon2_sequence_text(
+            _stim_active(),
+            _cellpose_result(mapping={0: 0}),
+            template_text=_template_header(),
+            binary_intensity=1.5,
+        )
+
+
+def test_generate_syscon2_sequence_text_raises_when_cellpose_data_is_none() -> None:
+    with pytest.raises(ValueError, match="Cellpose data is required"):
+        generate_syscon2_sequence_text(
+            _stim_active(),
+            None,
+            template_text=_template_header(),
+        )
+
+
+def test_generate_syscon2_sequence_text_raises_when_segmentation_array_is_none() -> (
+    None
+):
+    import numpy as _np
+
+    from neuroseq.importer_cellpose import CellposeImportResult as _CellposeImportResult
+
+    no_seg = _CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=None,
+        overlay_image=_np.zeros((2, 4, 3), dtype=_np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=_np.array([0, 1], dtype=_np.int32),
+        stimulus_to_cellpose_mapping=None,
+    )
+    with pytest.raises(ValueError, match="Cellpose segmentation is required"):
+        generate_syscon2_sequence_text(
+            _stim_active(),
+            no_seg,
+            template_text=_template_header(),
+        )
+
+
+def test_generate_syscon2_sequence_text_raises_for_unsupported_wavelength() -> None:
+    with pytest.raises(ValueError, match="active_laser_wavelength_nm"):
+        generate_syscon2_sequence_text(
+            _stim_active(),
+            _cellpose_result(mapping={0: 0}),
+            template_text=_template_header(),
+            active_laser_wavelength_nm=999,
+        )
+
+
+def test_generate_syscon2_sequence_text_raises_when_no_active_stimulation() -> None:
+    values = np.zeros((40, 1), dtype=np.float32)  # no active samples
+    stim = StimArray(
+        name="s",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+    with pytest.raises(ValueError, match="No active stimulation"):
+        generate_syscon2_sequence_text(
+            stim,
+            _cellpose_result(mapping={0: 0}),
+            template_text=_template_header(),
+        )
+
+
+# ---------------------------------------------------------------------------
+# _find_pulse_overrun_violations
+# ---------------------------------------------------------------------------
+
+
+def _make_scheduled_window(
+    start_tick: int,
+    end_tick: int,
+    *,
+    neuron_index: int = 0,
+    lane: int = 0,
+) -> _ScheduledEntityWindow:
+    return _ScheduledEntityWindow(
+        neuron_index=neuron_index,
+        stimulation_start_tick=start_tick,
+        stimulation_end_tick=end_tick,
+        start_tick=start_tick,
+        end_tick=end_tick,
+        intensity=1.0,
+        center_x=0.0,
+        center_y=0.0,
+        lane=lane,
+    )
+
+
+def test_find_pulse_overrun_violations_empty_when_pulse_within_window() -> None:
+    windows = [_make_scheduled_window(0, 64)]
+    violations = _find_pulse_overrun_violations([(0, 32)], windows)
+    assert violations == []
+
+
+def test_find_pulse_overrun_violations_skips_degenerate_intervals() -> None:
+    windows = [_make_scheduled_window(0, 64)]
+    # pulse_end <= pulse_start → degenerate, must be skipped
+    violations = _find_pulse_overrun_violations([(10, 5)], windows)
+    assert violations == []
+
+
+def test_find_pulse_overrun_violations_detects_overrun() -> None:
+    windows = [_make_scheduled_window(0, 32)]
+    # pulse ends at 40, past window end 32
+    violations = _find_pulse_overrun_violations([(0, 40)], windows)
+    assert len(violations) == 1
+    v = violations[0]
+    assert v.pulse_start_tick == 0
+    assert v.pulse_end_tick == 40
+    assert v.shape_start_tick == 0
+    assert v.shape_end_tick == 32
+    assert v.max_pulse_end_tick == 32
+    assert v.neuron_index == 0
+    assert v.shape_lane == 0
+
+
+# ---------------------------------------------------------------------------
+# check_syscon2_input_sanity — pulse overrun fix values
+# ---------------------------------------------------------------------------
+
+
+def test_check_syscon2_input_sanity_computes_pulse_overrun_fix_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # pulse_overrun_fix_values is only propagated on the is_valid=False path (when
+    # generate_syscon2_sequence_text raises).  Patch both:
+    #   1. _find_pulse_overrun_violations → return a fake violation so the fix is computed
+    #   2. generate_syscon2_sequence_text → raise so the is_valid=False return is taken
+    values = np.zeros((64, 1), dtype=np.float32)
+    values[32:36, 0] = 1.0
+    stim = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+    fake_violation = PulseOverrunViolation(
+        pulse_start_tick=32,
+        pulse_end_tick=40,
+        shape_start_tick=32,
+        shape_end_tick=36,
+        max_pulse_end_tick=36,
+        shape_lane=0,
+        neuron_index=0,
+    )
+    monkeypatch.setattr(
+        "neuroseq.exporter_syscon2._find_pulse_overrun_violations",
+        lambda *a, **kw: [fake_violation],
+    )
+    monkeypatch.setattr(
+        "neuroseq.exporter_syscon2.generate_syscon2_sequence_text",
+        lambda *a, **kw: (_ for _ in ()).throw(
+            ValueError("laser pulse end exceeds shape boundary")
+        ),
+    )
+
+    report = check_syscon2_input_sanity(
+        stim,
+        _cellpose_result(mapping={0: 0}),
+        template_text=_template_header(),
+    )
+
+    assert not report.is_valid
+    assert report.pulse_overrun_fix_values is not None
+    # Fix zeros [max_pulse_end_tick, pulse_end_tick) = [36, 40)
+    assert np.all(report.pulse_overrun_fix_values[36:40, :] == 0.0)
