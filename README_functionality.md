@@ -590,11 +590,13 @@ python -m neuroseq \
   - if stim arrays already exist, user can either create a new stim array or import into an existing one.
 - Supported file types are:
   - Igor Binary Wave `.ibw`,
+  - Igor Packed Experiment `.pxp`,
   - simple Igor-style `.csv`.
-- Current scope is single-wave import only:
-  - packed Igor/Sutter experiments such as `.pxp` are not imported yet,
-  - multidimensional Igor waves are rejected,
-  - the importer currently expects one 1D command/stimulation trace per file.
+- Current scope is one selected 1D wave per import action:
+  - `.ibw` and `.csv` provide a single wave directly,
+  - `.pxp` files may contain many waves, but the dialog imports one selected wave at a time,
+  - multidimensional Igor waves are rejected or skipped,
+  - the importer currently expects one 1D command/stimulation trace per import operation.
 
 #### Supported file semantics
 
@@ -603,6 +605,7 @@ python -m neuroseq \
   - every following non-empty row = exactly one numeric sample value.
 - Multi-column sample rows in `.csv` are rejected as invalid input.
 - `.ibw` loading uses the optional Python dependency `igor2`.
+- `.pxp` loading also uses the optional Python dependency `igor2`.
 - For `.ibw`, importer extracts when available:
   - wave name,
   - raw sample values,
@@ -610,6 +613,22 @@ python -m neuroseq \
   - data units,
   - x-axis / dimension units,
   - optional wave note text for preview display.
+- For `.pxp`, importer walks the packed experiment, extracts all importable 1D waves, and presents them in a wave-picker list using slash-joined folder paths such as `root/stims/HodgkinHuxley`.
+
+#### Packed experiment selection flow
+
+- When a `.pxp` file is selected:
+  - the dialog scans the packed experiment for importable 1D waves,
+  - a `Wave Selection` panel becomes visible,
+  - the list contains the wave path keys derived from the packed-experiment folder hierarchy.
+- If exactly one wave is found:
+  - it is auto-selected immediately,
+  - preview, suggested stim name, and suggested units populate automatically.
+- If multiple waves are found:
+  - no wave is selected initially,
+  - preview stays empty,
+  - import remains disabled until the user chooses one wave from the list.
+- Loading a non-`.pxp` file hides the wave picker again and returns to the original single-wave flow.
 
 #### Preview and source sampling metadata
 
@@ -697,7 +716,6 @@ The dialog offers two mutually exclusive modes.
 
 #### Current limitations
 
-- No `.pxp` / Sutter packed-experiment import yet.
 - No multi-wave batch import yet.
 - No automatic reconstruction of stimulation patterns from Sutter routine/paradigm metadata yet.
 - Import-to-existing currently requires the target stim array to already be on the 1 ms grid.
