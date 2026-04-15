@@ -188,6 +188,66 @@ def load_igor_ibw_file(path: str | Path) -> IgorWave:
     return parse_igor_binary_wave_data(wave_data, fallback_name=path.stem)
 
 
+def is_pxp_file(path: str | Path) -> bool:
+    """Return True if *path* has a .pxp extension (case-insensitive)."""
+    return Path(path).suffix.lower() == ".pxp"
+
+
+def load_igor_pxp_file(path: str | Path) -> dict[str, IgorWave]:
+    """Load all 1-D waves from an Igor Packed Experiment (.pxp) file."""
+    path = Path(path)
+    try:
+        packed = importlib.import_module("igor2.packed")
+        wave_record_module = importlib.import_module("igor2.record.wave")
+    except ImportError as exc:
+        raise ImportError(
+            "Reading Igor Packed Experiment files requires the optional 'igor2' dependency."
+        ) from exc
+
+    WaveRecord = wave_record_module.WaveRecord
+
+    _records, filesystem = packed.load(path)
+
+    waves: dict[str, IgorWave] = {}
+
+    def _collect(dirpath: list[object], key: object, value: object) -> None:
+        if not isinstance(value, WaveRecord):
+            return
+        parts = [
+            seg.decode("utf-8", errors="ignore")
+            if isinstance(seg, (bytes, bytearray))
+            else str(seg)
+            for seg in dirpath
+        ]
+        wave_name_str = (
+            key.decode("utf-8", errors="ignore")
+            if isinstance(key, (bytes, bytearray))
+            else str(key)
+        )
+        parts.append(wave_name_str)
+        path_key = "/".join(parts)
+
+        try:
+            igor_wave = parse_igor_binary_wave_data(
+                value.wave,
+                fallback_name=wave_name_str,
+            )
+        except ValueError as exc:
+            logger.debug("Skipping wave %s: %s", path_key, exc)
+            return
+
+        waves[path_key] = igor_wave
+
+    packed.walk(filesystem, _collect)
+
+    if not waves:
+        raise ValueError(
+            f"No importable 1-D waves found in packed experiment file '{path.name}'"
+        )
+
+    return waves
+
+
 def load_igor_csv_file(path: str | Path) -> IgorWave:
     path = Path(path)
     with path.open("r", encoding="utf-8-sig", newline="") as fp:
@@ -234,6 +294,11 @@ def load_igor_wave_file(path: str | Path) -> IgorWave:
         return load_igor_csv_file(path)
     if suffix == ".ibw":
         return load_igor_ibw_file(path)
+    if suffix == ".pxp":
+        raise ValueError(
+            "Igor Packed Experiment files (.pxp) contain multiple waves — "
+            "use load_igor_pxp_file() instead."
+        )
     raise ValueError(f"Unsupported Igor wave file format '{path.suffix}'")
 
 

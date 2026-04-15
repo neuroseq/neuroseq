@@ -12,6 +12,8 @@ from neuroseq.importer_igor2 import IgorWave
 from neuroseq.importer_igor2 import create_stim_array_from_igor_wave
 from neuroseq.importer_igor2 import estimate_resampled_sample_count
 from neuroseq.importer_igor2 import import_igor_wave_into_stim_array
+from neuroseq.importer_igor2 import is_pxp_file
+from neuroseq.importer_igor2 import load_igor_pxp_file
 from neuroseq.importer_igor2 import load_igor_wave_file
 from neuroseq.importer_igor2 import prepare_igor_wave_for_neuroseq
 from neuroseq.stim import StimType
@@ -37,6 +39,7 @@ class IgorImportDialog(QtWidgets.QDialog):
         self.selected_stim_name: str = ""
         self._auto_stim_name = ""
         self._auto_units = ""
+        self.loaded_pxp_waves: dict[str, IgorWave] = {}
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -47,9 +50,10 @@ class IgorImportDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
 
         intro = QtWidgets.QLabel(
-            "Import a single Igor2/Sutter stimulation wave from .ibw or the simple "
-            "NeuroSeq-compatible .csv format. Imported waves are placed on NeuroSeq's "
-            "1 ms timeline using zero-order-hold resampling when needed."
+            "Import a single Igor2/Sutter stimulation wave from .ibw, .pxp, or the "
+            "simple NeuroSeq-compatible .csv format. Packed experiments allow you to "
+            "pick one contained wave at a time. Imported waves are placed on "
+            "NeuroSeq's 1 ms timeline using zero-order-hold resampling when needed."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -63,6 +67,17 @@ class IgorImportDialog(QtWidgets.QDialog):
         file_layout.addWidget(self.file_label, stretch=1)
         file_layout.addWidget(browse_button)
         layout.addWidget(file_group)
+
+        self.wave_picker_group = QtWidgets.QGroupBox("Wave Selection")
+        wave_picker_layout = QtWidgets.QVBoxLayout(self.wave_picker_group)
+        self.pxp_wave_list = QtWidgets.QListWidget()
+        self.pxp_wave_list.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.SingleSelection
+        )
+        self.pxp_wave_list.currentItemChanged.connect(self._on_pxp_wave_selected)
+        wave_picker_layout.addWidget(self.pxp_wave_list)
+        self.wave_picker_group.setVisible(False)
+        layout.addWidget(self.wave_picker_group)
 
         preview_group = QtWidgets.QGroupBox("Wave Preview")
         preview_layout = QtWidgets.QVBoxLayout(preview_group)
@@ -176,6 +191,35 @@ class IgorImportDialog(QtWidgets.QDialog):
         self.import_existing_radio.setEnabled(True)
         self._on_target_changed(self.target_combo.currentText())
 
+    def _on_pxp_wave_selected(
+        self,
+        current: QtWidgets.QListWidgetItem | None,
+        _previous: QtWidgets.QListWidgetItem | None,
+    ) -> None:
+        if current is None:
+            self.loaded_wave = None
+        else:
+            path_key = current.text()
+            self.loaded_wave = self.loaded_pxp_waves.get(path_key)
+            if self.loaded_wave is not None and self.loaded_wave.source_dt is not None:
+                self.source_dt_spin.setValue(float(self.loaded_wave.source_dt))
+            else:
+                self.source_dt_spin.setValue(NEUROSEQ_IGOR_TARGET_DT_SECONDS)
+            previous_auto_name = self._auto_stim_name
+            self._auto_stim_name = self.loaded_wave.name if self.loaded_wave else ""
+            current_name = self.new_name_edit.text().strip()
+            if not current_name or current_name == previous_auto_name:
+                self.new_name_edit.setText(self._auto_stim_name)
+            previous_auto_units = self._auto_units
+            self._auto_units = (
+                (self.loaded_wave.units or "") if self.loaded_wave else ""
+            )
+            current_units = self.new_units_edit.text().strip()
+            if not current_units or current_units == previous_auto_units:
+                self.new_units_edit.setText(self._auto_units)
+        self._update_preview()
+        self._update_import_button_state()
+
     def _selected_stim_array(self) -> StimArray | None:
         target_name = self.target_combo.currentText()
         if not target_name or target_name.startswith("("):
@@ -201,12 +245,18 @@ class IgorImportDialog(QtWidgets.QDialog):
             self,
             "Select Igor wave",
             "",
-            "Igor waves (*.ibw *.csv);;Igor Binary Wave (*.ibw);;CSV file (*.csv);;All files (*)",
+            "Igor files (*.ibw *.pxp *.csv);;Igor Binary Wave (*.ibw);;Igor Packed Experiment (*.pxp);;CSV file (*.csv);;All files (*)",
         )
         if filename:
             self._load_file(filename)
 
     def _load_file(self, filename: str) -> None:
+        self.loaded_pxp_waves = {}
+        self.pxp_wave_list.clear()
+        self.wave_picker_group.setVisible(False)
+        if is_pxp_file(filename):
+            self._load_pxp_file(filename)
+            return
         try:
             wave = load_igor_wave_file(filename)
         except Exception as exc:
@@ -247,6 +297,45 @@ class IgorImportDialog(QtWidgets.QDialog):
             self.source_dt_spin.setValue(NEUROSEQ_IGOR_TARGET_DT_SECONDS)
         self._update_preview()
         self._update_import_button_state()
+
+    def _load_pxp_file(self, filename: str) -> None:
+        try:
+            waves = load_igor_pxp_file(filename)
+        except Exception as exc:
+            self.logger.exception("Failed to load Igor packed experiment %s", filename)
+            self.loaded_wave = None
+            self.loaded_pxp_waves = {}
+            self.file_path = ""
+            self.file_label.setText("No Igor wave selected")
+            self.file_label.setStyleSheet("QLabel { color: gray; }")
+            self.pxp_wave_list.clear()
+            self.wave_picker_group.setVisible(False)
+            self.preview_text.clear()
+            self.info_label.setText("")
+            self._update_import_button_state()
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Import Error",
+                f"Could not load Igor packed experiment:\n{exc}",
+            )
+            return
+
+        self.loaded_pxp_waves = waves
+        self.file_path = filename
+        self.file_label.setText(filename)
+        self.file_label.setStyleSheet("QLabel { color: black; }")
+
+        self.pxp_wave_list.clear()
+        for path_key in sorted(waves.keys()):
+            self.pxp_wave_list.addItem(path_key)
+        self.wave_picker_group.setVisible(True)
+
+        if len(waves) == 1:
+            self.pxp_wave_list.setCurrentRow(0)
+        else:
+            self.loaded_wave = None
+            self._update_preview()
+            self._update_import_button_state()
 
     def _build_preview_text(self, wave: IgorWave) -> str:
         source_dt = float(self.source_dt_spin.value())

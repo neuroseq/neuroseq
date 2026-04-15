@@ -9,8 +9,10 @@ import pytest
 from neuroseq.importer_igor2 import IgorWave
 from neuroseq.importer_igor2 import create_stim_array_from_igor_wave
 from neuroseq.importer_igor2 import import_igor_wave_into_stim_array
+from neuroseq.importer_igor2 import is_pxp_file
 from neuroseq.importer_igor2 import load_igor_csv_file
 from neuroseq.importer_igor2 import load_igor_ibw_file
+from neuroseq.importer_igor2 import load_igor_pxp_file
 from neuroseq.importer_igor2 import prepare_igor_wave_for_neuroseq
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
@@ -143,3 +145,201 @@ def test_load_igor_ibw_file_extracts_name_dt_and_units(
     assert wave.units == "pA"
     assert wave.axis_units == "s"
     assert wave.note == "example note"
+
+
+class _FakeWaveRecord:
+    def __init__(self, wave: dict[str, object]) -> None:
+        self.wave = wave
+
+
+class _FakePackedModule:
+    def __init__(self, filesystem: dict[object, object]) -> None:
+        self._filesystem = filesystem
+
+    def load(self, path: Path) -> tuple[list[object], dict[object, object]]:
+        return [], self._filesystem
+
+    def walk(
+        self,
+        fs: dict[object, object],
+        callback,
+        dirpath: list[object] | None = None,
+    ) -> None:
+        if dirpath is None:
+            dirpath = []
+        for key, value in sorted(fs.items(), key=lambda item: str(item[0])):
+            callback(dirpath, key, value)
+            if isinstance(value, dict):
+                self.walk(value, callback, dirpath + [key])
+
+
+def _make_fake_packed_module(filesystem: dict[object, object]) -> _FakePackedModule:
+    return _FakePackedModule(filesystem)
+
+
+def _make_fake_wave_record(wave_dict: dict[str, object]) -> _FakeWaveRecord:
+    return _FakeWaveRecord(wave_dict)
+
+
+def test_load_igor_pxp_file_returns_all_1d_waves(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    pxp_path = tmp_path / "test.pxp"
+    pxp_path.write_bytes(b"fake pxp")
+
+    wave_dict = {
+        "version": 5,
+        "wave": {
+            "wave_header": {
+                "bname": b"MyWave\x00",
+                "sfA": [0.001, 0.0, 0.0, 0.0],
+                "dataUnits": b"pA\x00",
+                "dimUnits": [b"s\x00", b"", b"", b""],
+            },
+            "wData": np.array([1.0, 2.0, 3.0], dtype=np.float32),
+            "note": b"",
+        },
+    }
+
+    fake_packed = _make_fake_packed_module(
+        {b"root": {b"MyWave": _make_fake_wave_record(wave_dict)}}
+    )
+
+    class FakeWaveRecordModule:
+        WaveRecord = _FakeWaveRecord
+
+    original_import = importlib.import_module
+
+    def fake_import(name: str, package: str | None = None):
+        if name == "igor2.packed":
+            return fake_packed
+        if name == "igor2.record.wave":
+            return FakeWaveRecordModule()
+        return original_import(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", fake_import)
+
+    waves = load_igor_pxp_file(pxp_path)
+
+    assert waves.keys() == {"root/MyWave"}
+    wave = waves["root/MyWave"]
+    assert wave.name == "MyWave"
+    assert wave.source_dt == pytest.approx(0.001)
+    assert wave.units == "pA"
+    np.testing.assert_allclose(wave.values, np.array([1.0, 2.0, 3.0]))
+
+
+def test_load_igor_pxp_file_skips_multidimensional_waves(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    pxp_path = tmp_path / "test.pxp"
+    pxp_path.write_bytes(b"fake")
+
+    wave_2d_dict = {
+        "version": 5,
+        "wave": {
+            "wave_header": {
+                "bname": b"TwoDWave\x00",
+                "sfA": [0.001, 0.0, 0.0, 0.0],
+                "dataUnits": b"\x00",
+                "dimUnits": [b"s\x00", b"", b"", b""],
+            },
+            "wData": np.ones((3, 4), dtype=np.float32),
+            "note": b"",
+        },
+    }
+    wave_1d_dict = {
+        "version": 5,
+        "wave": {
+            "wave_header": {
+                "bname": b"OneDWave\x00",
+                "sfA": [0.001, 0.0, 0.0, 0.0],
+                "dataUnits": b"mV\x00",
+                "dimUnits": [b"s\x00", b"", b"", b""],
+            },
+            "wData": np.array([0.5, 1.5], dtype=np.float32),
+            "note": b"",
+        },
+    }
+
+    fake_packed = _make_fake_packed_module(
+        {
+            b"TwoDWave": _make_fake_wave_record(wave_2d_dict),
+            b"OneDWave": _make_fake_wave_record(wave_1d_dict),
+        }
+    )
+
+    class FakeWaveRecordModule:
+        WaveRecord = _FakeWaveRecord
+
+    original_import = importlib.import_module
+
+    def fake_import(name: str, package: str | None = None):
+        if name == "igor2.packed":
+            return fake_packed
+        if name == "igor2.record.wave":
+            return FakeWaveRecordModule()
+        return original_import(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", fake_import)
+
+    waves = load_igor_pxp_file(pxp_path)
+
+    assert waves.keys() == {"OneDWave"}
+    np.testing.assert_allclose(waves["OneDWave"].values, np.array([0.5, 1.5]))
+
+
+def test_load_igor_pxp_file_raises_if_no_waves(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    pxp_path = tmp_path / "empty.pxp"
+    pxp_path.write_bytes(b"fake")
+
+    fake_packed = _make_fake_packed_module({})
+
+    class FakeWaveRecordModule:
+        WaveRecord = _FakeWaveRecord
+
+    original_import = importlib.import_module
+
+    def fake_import(name: str, package: str | None = None):
+        if name == "igor2.packed":
+            return fake_packed
+        if name == "igor2.record.wave":
+            return FakeWaveRecordModule()
+        return original_import(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", fake_import)
+
+    with pytest.raises(ValueError, match="No importable"):
+        load_igor_pxp_file(pxp_path)
+
+
+def test_load_igor_pxp_file_raises_if_igor2_not_installed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    pxp_path = tmp_path / "test.pxp"
+    pxp_path.write_bytes(b"fake")
+
+    original_import = importlib.import_module
+
+    def fake_import(name: str, package: str | None = None):
+        if name in ("igor2.packed", "igor2.record.wave"):
+            raise ImportError("no module named igor2")
+        return original_import(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", fake_import)
+
+    with pytest.raises(ImportError, match="igor2"):
+        load_igor_pxp_file(pxp_path)
+
+
+def test_is_pxp_file_detects_extension() -> None:
+    assert is_pxp_file("foo.pxp") is True
+    assert is_pxp_file("foo.PXP") is True
+    assert is_pxp_file("foo.ibw") is False
+    assert is_pxp_file("foo.csv") is False

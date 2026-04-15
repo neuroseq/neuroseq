@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import brian2.numpy_ as np
+import pytest
 from pytestqt.qtbot import QtBot
 
 from neuroseq.igor_import_dialog import IgorImportDialog
@@ -72,3 +73,155 @@ def test_igor_import_dialog_imports_into_existing_stim_array(
     assert dialog.selected_stim_name == "stimulus"
     assert qmessagebox_calls[-1]["name"] == "information"
     assert "import complete" in qmessagebox_calls[-1]["title"].lower()
+
+
+def test_igor_import_dialog_loads_pxp_and_shows_wave_picker(
+    tmp_path: Path,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from neuroseq.importer_igor2 import IgorWave
+
+    pxp_path = tmp_path / "test.pxp"
+    pxp_path.write_bytes(b"fake")
+
+    wave_a = IgorWave(
+        name="WaveA",
+        values=np.array([1.0, 2.0], dtype=np.float32),
+        source_dt=0.001,
+        units="pA",
+        axis_units="s",
+        source_format="ibw",
+    )
+    wave_b = IgorWave(
+        name="WaveB",
+        values=np.array([3.0, 4.0], dtype=np.float32),
+        source_dt=0.001,
+        units="mV",
+        axis_units="s",
+        source_format="ibw",
+    )
+    fake_waves = {"root/WaveA": wave_a, "root/WaveB": wave_b}
+
+    monkeypatch.setattr("neuroseq.igor_import_dialog.is_pxp_file", lambda _: True)
+    monkeypatch.setattr(
+        "neuroseq.igor_import_dialog.load_igor_pxp_file",
+        lambda _: fake_waves,
+    )
+
+    project = Project()
+    dialog = IgorImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitUntil(lambda: dialog.isVisible())
+    dialog._load_file(str(pxp_path))
+
+    assert dialog.wave_picker_group.isVisible()
+    assert dialog.pxp_wave_list.count() == 2
+    items = []
+    for i in range(dialog.pxp_wave_list.count()):
+        item = dialog.pxp_wave_list.item(i)
+        assert item is not None
+        items.append(item.text())
+    assert "root/WaveA" in items
+    assert "root/WaveB" in items
+    assert dialog.loaded_wave is None
+    assert not dialog.import_button.isEnabled()
+
+
+def test_igor_import_dialog_pxp_wave_selection_sets_loaded_wave(
+    tmp_path: Path,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from neuroseq.importer_igor2 import IgorWave
+
+    pxp_path = tmp_path / "test.pxp"
+    pxp_path.write_bytes(b"fake")
+
+    wave_a = IgorWave(
+        name="WaveA",
+        values=np.array([1.0, 2.0], dtype=np.float32),
+        source_dt=0.001,
+        units="pA",
+        axis_units="s",
+        source_format="ibw",
+    )
+    fake_waves = {"root/WaveA": wave_a}
+
+    monkeypatch.setattr("neuroseq.igor_import_dialog.is_pxp_file", lambda _: True)
+    monkeypatch.setattr(
+        "neuroseq.igor_import_dialog.load_igor_pxp_file",
+        lambda _: fake_waves,
+    )
+
+    project = Project()
+    dialog = IgorImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitUntil(lambda: dialog.isVisible())
+    dialog._load_file(str(pxp_path))
+
+    assert dialog.loaded_wave is wave_a
+    assert dialog.new_name_edit.text() == "WaveA"
+    assert dialog.new_units_edit.text() == "pA"
+    assert "Wave name=WaveA" in dialog.preview_text.toPlainText()
+    assert dialog.import_button.isEnabled()
+
+
+def test_igor_import_dialog_pxp_multi_wave_requires_selection(
+    tmp_path: Path,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from neuroseq.importer_igor2 import IgorWave
+
+    pxp_path = tmp_path / "test.pxp"
+    pxp_path.write_bytes(b"fake")
+
+    wave_a = IgorWave(
+        name="WaveA",
+        values=np.array([1.0], dtype=np.float32),
+        source_dt=0.001,
+        units="pA",
+        axis_units="s",
+        source_format="ibw",
+    )
+    wave_b = IgorWave(
+        name="WaveB",
+        values=np.array([2.0], dtype=np.float32),
+        source_dt=0.001,
+        units="mV",
+        axis_units="s",
+        source_format="ibw",
+    )
+    fake_waves = {"root/WaveA": wave_a, "root/WaveB": wave_b}
+
+    monkeypatch.setattr("neuroseq.igor_import_dialog.is_pxp_file", lambda _: True)
+    monkeypatch.setattr(
+        "neuroseq.igor_import_dialog.load_igor_pxp_file",
+        lambda _: fake_waves,
+    )
+
+    project = Project()
+    dialog = IgorImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitUntil(lambda: dialog.isVisible())
+    dialog._load_file(str(pxp_path))
+
+    assert dialog.loaded_wave is None
+    assert not dialog.import_button.isEnabled()
+
+    items = []
+    for i in range(dialog.pxp_wave_list.count()):
+        item = dialog.pxp_wave_list.item(i)
+        assert item is not None
+        items.append(item.text())
+    dialog.pxp_wave_list.setCurrentRow(items.index("root/WaveB"))
+
+    assert dialog.loaded_wave is wave_b
+    assert dialog.new_name_edit.text() == "WaveB"
+    assert dialog.new_units_edit.text() == "mV"
+    assert "Wave name=WaveB" in dialog.preview_text.toPlainText()
+    assert dialog.import_button.isEnabled()
