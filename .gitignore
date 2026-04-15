@@ -136,3 +136,6 @@ dmypy.json
 # ide
 .vscode
 .idea
+
+# Claude Code internal files
+.claude/
