@@ -6,6 +6,7 @@ import runpy
 from collections.abc import Callable
 
 import brian2 as b2
+import brian2.numpy_ as np
 import qtawesome as qta
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -483,10 +484,91 @@ class Gui(QtWidgets.QMainWindow):
         self.console_widget.set_project(self.project)
         self._update_combo_boxes()
 
-    @with_wait_cursor
-    def set_neuron(self, cmb_name: str) -> None:
+    def _cellpose_neuron_count(self, imported: CellposeImportResult | None) -> int:
+        if imported is None:
+            return 0
+        if imported.original_cellpose_ids is not None:
+            return int(len(imported.original_cellpose_ids))
+        if imported.segmentation_array is None:
+            return 0
+        unique_ids = np.unique(imported.segmentation_array)
+        return int(np.sum(unique_ids >= 0))
+
+    def _expand_stim_arrays_to_neuron_count(
+        self, target_neuron_count: int
+    ) -> list[str]:
+        if self.project is None:
+            return []
+        resized_names: list[str] = []
+        for name, stim_array in self.project.stim_arrays.items():
+            if int(stim_array.values.shape[1]) >= target_neuron_count:
+                continue
+            self.project.update_stim_array_properties(
+                name,
+                n_neurons=target_neuron_count,
+                stim_type=stim_array.stim_type,
+                units=stim_array.units,
+                dt=stim_array.dt,
+            )
+            resized_names.append(name)
+        return resized_names
+
+    def _apply_cellpose_import_result(
+        self,
+        imported: CellposeImportResult,
+    ) -> list[str]:
+        imported_copy = clone_cellpose_result(imported)
+        if imported_copy is None:
+            return []
+        self.last_cellpose_import = imported_copy
+        if self.project is None:
+            return []
+
+        self.project.cellpose_data = imported_copy
+        detected_neurons = self._cellpose_neuron_count(imported_copy)
+        resized_names: list[str] = []
+        if detected_neurons > 0 and self.project.stim_arrays:
+            current_max_neurons = max(
+                int(stim_array.values.shape[1])
+                for stim_array in self.project.stim_arrays.values()
+            )
+            if detected_neurons > current_max_neurons:
+                resize_reply = QtWidgets.QMessageBox.question(
+                    self,
+                    "Resize Stim Arrays",
+                    "The imported Cellpose segmentation contains "
+                    f"{detected_neurons} cells, but the largest existing stimulation "
+                    f"array has {current_max_neurons} neurons.\n\n"
+                    "Expand all existing stimulation arrays to match the Cellpose "
+                    "cell count?",
+                    QtWidgets.QMessageBox.StandardButton.Yes
+                    | QtWidgets.QMessageBox.StandardButton.No,
+                    QtWidgets.QMessageBox.StandardButton.Yes,
+                )
+                if resize_reply == QtWidgets.QMessageBox.StandardButton.Yes:
+                    resized_names = self._expand_stim_arrays_to_neuron_count(
+                        detected_neurons
+                    )
+                    self.update_project(self.project)
+                    return resized_names
+
+        self.project.update_limits()
+        self.update_limits()
+        return resized_names
+
+    def _focus_neuron_range(self, n_neurons: int) -> None:
+        if int(n_neurons) <= 0:
+            return
+        self.controller.focus_neuron_range(0, int(n_neurons))
+
+    def _apply_trace_selection(self, cmb_name: str) -> None:
         data = self.project.get_data(cmb_name, TraceData)
         self.trace_widget.set_data(data)
+        self._focus_neuron_range(self.trace_widget.n_neurons)
+
+    @with_wait_cursor
+    def set_neuron(self, cmb_name: str) -> None:
+        self._apply_trace_selection(cmb_name)
 
     @with_wait_cursor
     def set_synapse(self, cmb_name: str) -> None:
@@ -496,13 +578,16 @@ class Gui(QtWidgets.QMainWindow):
         data = self.project.get_data(cmb_name, SynapseData)
         self.heatmap_widget.set_data(data)
 
-    @with_wait_cursor
-    def set_spike(self, cmb_name: str) -> None:
+    def _apply_spike_selection(self, cmb_name: str) -> None:
         data = self.project.get_data(cmb_name, SpikeData)
         self.spike_widget.set_data(data)
+        self._focus_neuron_range(self.spike_widget.n_neurons)
 
     @with_wait_cursor
-    def set_data(self, cmb_name: str) -> None:
+    def set_spike(self, cmb_name: str) -> None:
+        self._apply_spike_selection(cmb_name)
+
+    def _apply_data_selection(self, cmb_name: str) -> None:
         data: TraceData | SpikeData | SynapseData | None = None
         if cmb_name.endswith(" [trace]") and not self.data_widget.isVisible():
             return
@@ -513,6 +598,14 @@ class Gui(QtWidgets.QMainWindow):
         elif cmb_name.endswith(" [synapse]"):
             data = self.project.get_data(cmb_name[:-10], SynapseData)
         self.data_widget.set_data(data)
+        if isinstance(data, TraceData):
+            self._focus_neuron_range(self.data_widget.trace_widget.n_neurons)
+        elif isinstance(data, SpikeData):
+            self._focus_neuron_range(self.data_widget.spike_widget.n_neurons)
+
+    @with_wait_cursor
+    def set_data(self, cmb_name: str) -> None:
+        self._apply_data_selection(cmb_name)
 
     def btn_exit_clicked(self) -> None:
         self.close()
@@ -752,14 +845,23 @@ class Gui(QtWidgets.QMainWindow):
             delete_handler=self._delete_cellpose_data,
         )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
-            imported = clone_cellpose_result(dialog.get_imported_data())
-            self.last_cellpose_import = imported
-            if self.project is not None:
-                self.project.cellpose_data = imported
+            imported = dialog.get_imported_data()
+            if imported is None:
+                return
+            resized_names = self._apply_cellpose_import_result(imported)
+            message = "Cellpose segmentation loaded."
+            if resized_names:
+                detected_neurons = self._cellpose_neuron_count(
+                    self.last_cellpose_import
+                )
+                message += (
+                    "\n\nExpanded "
+                    f"{len(resized_names)} stimulation array(s) to {detected_neurons} neurons."
+                )
             QtWidgets.QMessageBox.information(
                 self,
                 "Cellpose import",
-                "Cellpose segmentation loaded.",
+                message,
             )
 
     def btn_import_syscon2_seq_clicked(self) -> None:
@@ -1072,7 +1174,7 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.file-import-outline"),
         )
         add_action(
-            "Import Igor2 &Wave (.ibw/.csv)",
+            "Import Igor2 &Wave (.ibw/.pxp/.csv)",
             self.btn_import_igor2_wave_clicked,
             menu,
             toolbar,

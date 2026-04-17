@@ -13,6 +13,7 @@ from neuroseq.importer_igor2 import is_pxp_file
 from neuroseq.importer_igor2 import load_igor_csv_file
 from neuroseq.importer_igor2 import load_igor_ibw_file
 from neuroseq.importer_igor2 import load_igor_pxp_file
+from neuroseq.importer_igor2 import load_igor_wave_file
 from neuroseq.importer_igor2 import prepare_igor_wave_for_neuroseq
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
@@ -375,3 +376,8 @@ def test_is_pxp_file_detects_extension() -> None:
     assert is_pxp_file("foo.PXP") is True
     assert is_pxp_file("foo.ibw") is False
     assert is_pxp_file("foo.csv") is False
+
+
+def test_load_igor_wave_file_rejects_pxp_dispatch() -> None:
+    with pytest.raises(ValueError, match="load_igor_pxp_file"):
+        load_igor_wave_file("packed_experiment.pxp")

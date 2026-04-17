@@ -36,6 +36,47 @@ def _to_seconds(value: float | int) -> float:
     return float(value)
 
 
+def _trace_data_neuron_count(data: TraceData) -> int:
+    if data.indices.size > 0:
+        return int(np.max(data.indices)) + 1
+    if data.traces.ndim >= 1:
+        return int(data.traces.shape[0])
+    return 0
+
+
+def _spike_data_neuron_count(data: SpikeData) -> int:
+    if data.spike_indices.size == 0:
+        return 0
+    return int(np.max(data.spike_indices)) + 1
+
+
+def _synapse_data_neuron_count(data: SynapseData) -> int:
+    if data.values.ndim < 2:
+        return 0
+    return int(max(data.values.shape[0], data.values.shape[1]))
+
+
+def _experiment_data_neuron_count(
+    data: TraceData | SpikeData | SynapseData,
+) -> int:
+    if isinstance(data, TraceData):
+        return _trace_data_neuron_count(data)
+    if isinstance(data, SpikeData):
+        return _spike_data_neuron_count(data)
+    return _synapse_data_neuron_count(data)
+
+
+def _cellpose_neuron_count(cellpose_data: CellposeImportResult | None) -> int:
+    if cellpose_data is None:
+        return 0
+    if cellpose_data.original_cellpose_ids is not None:
+        return int(np.asarray(cellpose_data.original_cellpose_ids).size)
+    if cellpose_data.segmentation_array is None:
+        return 0
+    unique_ids = np.unique(cellpose_data.segmentation_array)
+    return int(np.sum(unique_ids >= 0))
+
+
 class Project:
     def __init__(
         self,
@@ -251,6 +292,11 @@ class Project:
             self.max_time_secs = max(
                 self.max_time_secs, _to_seconds(experiment.duration)
             )
+            for datum in experiment.data:
+                self.max_neurons = max(
+                    self.max_neurons,
+                    _experiment_data_neuron_count(datum),
+                )
         for stim_array in self.stim_arrays.values():
             stim_array.values = ensure_2d_stim_values(stim_array.values)
             stim_dt = validate_stim_dt_seconds(stim_array.dt)
@@ -261,6 +307,10 @@ class Project:
             )
             n_stim_neurons = int(stim_array.values.shape[1])
             self.max_neurons = max(self.max_neurons, n_stim_neurons)
+        self.max_neurons = max(
+            self.max_neurons,
+            _cellpose_neuron_count(self.cellpose_data),
+        )
 
     def issues_with_appending_experimental_data(
         self,

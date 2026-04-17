@@ -16,15 +16,21 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 import neuroseq
+from neuroseq.data import SpikeData
+from neuroseq.data import TraceData
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
 from neuroseq.gui import Gui
+from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.model_editor import EditableSynapseTree
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
+from neuroseq.stim_editor import DrawMode
+from neuroseq.stim_editor import StimEditor
+from neuroseq.utils import InteractMode
 
 # no obvious signal to wait for after the model is updated to know when the GUI is ready,
 # so for now we just wait for a fixed time
@@ -475,7 +481,25 @@ def test_gui_import_igor2_wave_updates_selected_stim(
             )
             return QtWidgets.QDialog.DialogCode.Accepted
 
-    stim_combo = QtWidgets.QComboBox()
+    class FakeComboBox:
+        def __init__(self) -> None:
+            self._items: list[str] = []
+            self._current_text = ""
+
+        def clear(self) -> None:
+            self._items = []
+            self._current_text = ""
+
+        def addItems(self, items: list[str]) -> None:
+            self._items.extend(items)
+
+        def setCurrentText(self, text: str) -> None:
+            self._current_text = text
+
+        def currentText(self) -> str:
+            return self._current_text
+
+    stim_combo = FakeComboBox()
 
     def _update_project(updated_project: Project) -> None:
         stim_combo.clear()
@@ -492,6 +516,275 @@ def test_gui_import_igor2_wave_updates_selected_stim(
 
     assert fake_gui.cmb_stim.currentText() == "igor_wave"
     assert "igor_wave" in project.stim_arrays
+
+
+def test_gui_imported_igor_stim_can_be_edited_by_click(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    class MockIgorImportDialog:
+        def __init__(self, dialog_project: Project, parent=None) -> None:
+            self.project = dialog_project
+            self.selected_stim_name = "igor_wave"
+
+        def exec(self) -> int:
+            self.project.add_stim_array(
+                StimArray(
+                    "igor_wave",
+                    StimType.External,
+                    np.zeros((4, 1), dtype=np.float32),
+                    "pA",
+                    0.001,
+                )
+            )
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    project = Project()
+    draw_value = 3.0
+
+    fake_editor: Any = SimpleNamespace(
+        logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        current_stim_modifier=SimpleNamespace(
+            stim_array=StimArray(
+                "igor_wave",
+                StimType.External,
+                np.zeros((4, 1), dtype=np.float32),
+                "pA",
+                0.001,
+            )
+        ),
+        mode=InteractMode.DRAW,
+        draw_mode=DrawMode.DRAW,
+        draw_stim_length=1,
+        draw_stim=SimpleNamespace(draw_stim_type=neuroseq.stim.DrawStimType.Constant),
+        _is_valid_slice=lambda neuron_slice, time_slice: True,
+        draw_stim_region=lambda neuron_slice,
+        time_slice,
+        erase=False: project.stim_arrays["igor_wave"].values.__setitem__(
+            (time_slice, neuron_slice), 0.0 if erase else draw_value
+        ),
+    )
+
+    class FakeComboBox:
+        def __init__(self) -> None:
+            self._items: list[str] = []
+            self._current_text = ""
+
+        def clear(self) -> None:
+            self._items = []
+            self._current_text = ""
+
+        def addItems(self, items: list[str]) -> None:
+            self._items.extend(items)
+
+        def setCurrentText(self, text: str) -> None:
+            self._current_text = text
+            if text in project.stim_arrays:
+                fake_editor.current_stim_modifier = SimpleNamespace(
+                    stim_array=project.stim_arrays[text]
+                )
+
+        def currentText(self) -> str:
+            return self._current_text
+
+    stim_combo = FakeComboBox()
+
+    def _update_project(updated_project: Project) -> None:
+        stim_combo.clear()
+        stim_combo.addItems(list(updated_project.stim_arrays.keys()))
+
+    fake_gui: Any = SimpleNamespace(
+        project=project,
+        cmb_stim=stim_combo,
+        update_project=_update_project,
+    )
+    monkeypatch.setattr(neuroseq.gui, "IgorImportDialog", MockIgorImportDialog)
+
+    Gui.btn_import_igor2_wave_clicked(fake_gui)
+
+    assert fake_editor.current_stim_modifier is not None
+    assert fake_editor.current_stim_modifier.stim_array.name == "igor_wave"
+    assert fake_gui.cmb_stim.currentText() == "igor_wave"
+
+    StimEditor.stim_widget_mouse_clicked(fake_editor, 0, 0, 1)  # type: ignore[arg-type]
+
+    assert project.stim_arrays["igor_wave"].values[0, 0] == approx(draw_value)
+
+
+def test_gui_set_neuron_refocuses_to_selected_trace_range() -> None:
+    trace_data = TraceData(
+        name="cellpose traces",
+        traces=np.array([[1.0, 2.0]], dtype=np.float32),
+        indices=np.array([0], dtype=np.uint32),
+        units="mV",
+        dt=0.1,
+    )
+    focus_calls: list[int] = []
+    captured_data: list[TraceData | None] = []
+    trace_widget = SimpleNamespace(n_neurons=0)
+
+    def _set_trace_data(data: TraceData | None) -> None:
+        captured_data.append(data)
+        trace_widget.n_neurons = 0 if data is None else int(np.max(data.indices)) + 1
+
+    trace_widget.set_data = _set_trace_data
+    fake_gui: Any = SimpleNamespace(
+        project=SimpleNamespace(
+            get_data=lambda name, data_type: trace_data
+            if data_type is TraceData
+            else None
+        ),
+        trace_widget=trace_widget,
+        _focus_neuron_range=lambda n_neurons: focus_calls.append(n_neurons),
+    )
+
+    Gui._apply_trace_selection(fake_gui, "Cellpose :: traces")
+
+    assert captured_data == [trace_data]
+    assert focus_calls == [1]
+
+
+def test_gui_set_spike_refocuses_to_selected_spike_range() -> None:
+    spike_data = SpikeData(
+        name="cellpose spikes",
+        spike_indices=np.array([0, 0, 0], dtype=np.int32),
+        spike_times=np.array([0.1, 0.2, 0.3], dtype=np.float32),
+    )
+    focus_calls: list[int] = []
+    captured_data: list[SpikeData | None] = []
+    spike_widget = SimpleNamespace(n_neurons=0)
+
+    def _set_spike_data(data: SpikeData | None) -> None:
+        captured_data.append(data)
+        spike_widget.n_neurons = (
+            0 if data is None else int(np.max(data.spike_indices)) + 1
+        )
+
+    spike_widget.set_data = _set_spike_data
+    fake_gui: Any = SimpleNamespace(
+        project=SimpleNamespace(
+            get_data=lambda name, data_type: spike_data
+            if data_type is SpikeData
+            else None
+        ),
+        spike_widget=spike_widget,
+        _focus_neuron_range=lambda n_neurons: focus_calls.append(n_neurons),
+    )
+
+    Gui._apply_spike_selection(fake_gui, "Cellpose :: spikes")
+
+    assert captured_data == [spike_data]
+    assert focus_calls == [1]
+
+
+def test_gui_set_data_refocuses_combined_trace_view() -> None:
+    trace_data = TraceData(
+        name="cellpose traces",
+        traces=np.array([[1.0, 2.0]], dtype=np.float32),
+        indices=np.array([0], dtype=np.uint32),
+        units="mV",
+        dt=0.1,
+    )
+    focus_calls: list[int] = []
+    captured_data: list[TraceData | SpikeData | None] = []
+    trace_widget = SimpleNamespace(n_neurons=0)
+    spike_widget = SimpleNamespace(n_neurons=0)
+    data_widget = SimpleNamespace(
+        isVisible=lambda: True,
+        trace_widget=trace_widget,
+        spike_widget=spike_widget,
+    )
+
+    def _set_combined_data(data: TraceData | SpikeData | None) -> None:
+        captured_data.append(data)
+        trace_widget.n_neurons = 0
+        spike_widget.n_neurons = 0
+        if isinstance(data, TraceData):
+            trace_widget.n_neurons = int(np.max(data.indices)) + 1
+        elif isinstance(data, SpikeData):
+            spike_widget.n_neurons = int(np.max(data.spike_indices)) + 1
+
+    data_widget.set_data = _set_combined_data
+    fake_gui: Any = SimpleNamespace(
+        project=SimpleNamespace(
+            get_data=lambda name, data_type: trace_data
+            if data_type is TraceData
+            else None
+        ),
+        data_widget=data_widget,
+        _focus_neuron_range=lambda n_neurons: focus_calls.append(n_neurons),
+    )
+
+    Gui._apply_data_selection(fake_gui, "Cellpose :: traces [trace]")
+
+    assert captured_data == [trace_data]
+    assert focus_calls == [1]
+
+
+def test_gui_apply_cellpose_import_result_expands_stim_arrays(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "stim",
+            StimType.Excitation,
+            np.zeros((10, 40), dtype=np.float32),
+            "nS",
+            0.001,
+        )
+    )
+
+    class _FakeGui:
+        def __init__(self, project: Project) -> None:
+            self.project = project
+            self.last_cellpose_import: CellposeImportResult | None = None
+            self.updated_projects: list[Project] = []
+            self.update_limits_calls = 0
+
+        def update_project(self, project: Project) -> None:
+            self.updated_projects.append(project)
+
+        def update_limits(self) -> None:
+            self.update_limits_calls += 1
+
+        def _cellpose_neuron_count(
+            self,
+            imported: CellposeImportResult | None,
+        ) -> int:
+            return Gui._cellpose_neuron_count(self, imported)  # type: ignore[arg-type]
+
+        def _expand_stim_arrays_to_neuron_count(
+            self,
+            target_neuron_count: int,
+        ) -> list[str]:
+            return Gui._expand_stim_arrays_to_neuron_count(
+                self,  # type: ignore[arg-type]
+                target_neuron_count,
+            )
+
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+    fake_gui = _FakeGui(project)
+    imported = CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=np.zeros((2, 2), dtype=np.int32),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.arange(100, dtype=np.int32),
+        stimulus_to_cellpose_mapping=None,
+    )
+
+    resized_names = Gui._apply_cellpose_import_result(fake_gui, imported)  # type: ignore[arg-type]
+
+    assert resized_names == ["stim"]
+    assert fake_gui.last_cellpose_import is not None
+    assert project.stim_arrays["stim"].values.shape[1] == 100
+    assert fake_gui.updated_projects == [project]
+    assert fake_gui.update_limits_calls == 0
 
 
 def test_gui_checkpoints(

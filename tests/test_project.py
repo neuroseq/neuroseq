@@ -11,6 +11,7 @@ from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.example_projects import default_project
+from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stim import StimArray
@@ -47,6 +48,7 @@ def test_add_experimental_data_overwrite_raises_error() -> None:
     assert project.experiments["test_experiment"].data[1].spike_indices.shape == (3,)
     assert project.experiments["test_experiment"].data[1].spike_times.shape == (3,)
     assert project.max_time_secs == pytest.approx(3.7, abs=0.01)
+    assert project.max_neurons == 12
 
     with pytest.raises(ValueError):
         project.add_experiment(_make_experiment())
@@ -619,6 +621,32 @@ def test_update_limits_with_mixed_stim_dt() -> None:
 
     assert project.max_time_secs == pytest.approx(0.02)
     assert project.max_neurons == 2
+
+
+def test_update_limits_include_cellpose_neuron_count() -> None:
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "stim",
+            StimType.Excitation,
+            np.zeros((10, 40), dtype=np.float32),
+            "nS",
+            0.001,
+        )
+    )
+    project.cellpose_data = CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=np.zeros((2, 2), dtype=np.int32),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.arange(100, dtype=np.int32),
+        stimulus_to_cellpose_mapping=None,
+    )
+
+    project.update_limits()
+
+    assert project.max_neurons == 100
 
 
 def test_stim_array_rename() -> None:
