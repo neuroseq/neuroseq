@@ -37,6 +37,173 @@ from neuroseq.utils import InteractMode
 delay_after_update_model_call_in_ms = 50
 
 
+class _MockAxes:
+    def __init__(self) -> None:
+        self.plot_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        self.scatter_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def plot(self, *args: Any, **kwargs: Any) -> None:
+        self.plot_calls.append((args, kwargs))
+
+    def scatter(self, *args: Any, **kwargs: Any) -> None:
+        self.scatter_calls.append((args, kwargs))
+
+    def set_xlabel(self, *args: Any, **kwargs: Any) -> None:
+        return
+
+    def set_ylabel(self, *args: Any, **kwargs: Any) -> None:
+        return
+
+    def set_title(self, *args: Any, **kwargs: Any) -> None:
+        return
+
+    def tick_params(self, *args: Any, **kwargs: Any) -> None:
+        return
+
+
+class _MockFigure:
+    def __init__(self, save_error: Exception | None = None) -> None:
+        self.save_error = save_error
+        self.saved: list[tuple[str, dict[str, Any]]] = []
+        self.tight_layout_called = False
+
+    def tight_layout(self) -> None:
+        self.tight_layout_called = True
+
+    def savefig(self, path: str, **kwargs: Any) -> None:
+        if self.save_error is not None:
+            raise self.save_error
+        self.saved.append((path, kwargs))
+
+
+def _make_trace_export_gui(
+    trace_name: str,
+    trace_data: TraceData | None,
+) -> Any:
+    return SimpleNamespace(
+        cmb_trace=SimpleNamespace(currentText=lambda: trace_name),
+        project=SimpleNamespace(
+            get_data=lambda name, data_type: trace_data
+            if data_type is TraceData
+            else None
+        ),
+        logger=logging.getLogger("test_trace_export"),
+    )
+
+
+def _make_spike_export_gui(
+    spike_name: str,
+    spike_data: SpikeData | None,
+) -> Any:
+    return SimpleNamespace(
+        cmb_spike=SimpleNamespace(currentText=lambda: spike_name),
+        project=SimpleNamespace(
+            get_data=lambda name, data_type: spike_data
+            if data_type is SpikeData
+            else None
+        ),
+        logger=logging.getLogger("test_spike_export"),
+    )
+
+
+@pytest.mark.parametrize(
+    ("method_name", "software", "inner_name"),
+    [
+        (
+            "btn_import_stimulus_light_clicked",
+            "SysCon2",
+            "btn_import_syscon2_seq_clicked",
+        ),
+        (
+            "btn_import_stimulus_patchclamp_clicked",
+            "Igor2",
+            "btn_import_igor2_wave_clicked",
+        ),
+        (
+            "btn_import_trace_patchclamp_clicked",
+            "Igor2",
+            "btn_import_patchclamp_data_clicked",
+        ),
+        (
+            "btn_export_patch_clamp_stim_clicked",
+            "Igor2",
+            "btn_export_igor2_patchclamp_stim_clicked",
+        ),
+        (
+            "btn_export_light_stimulus_clicked",
+            "SysCon2",
+            "open_stimulation_generator_dialog",
+        ),
+    ],
+)
+def test_gui_pre_dialog_wrapper_calls_inner_handler_on_accept(
+    monkeypatch: MonkeyPatch,
+    method_name: str,
+    software: str,
+    inner_name: str,
+) -> None:
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog,
+        "getItem",
+        lambda *args, **kwargs: (software, True),
+    )
+    called: list[bool] = []
+    fake_gui: Any = SimpleNamespace(**{inner_name: lambda: called.append(True)})
+
+    getattr(Gui, method_name)(fake_gui)
+
+    assert called == [True]
+
+
+@pytest.mark.parametrize(
+    ("method_name", "software", "inner_name"),
+    [
+        (
+            "btn_import_stimulus_light_clicked",
+            "SysCon2",
+            "btn_import_syscon2_seq_clicked",
+        ),
+        (
+            "btn_import_stimulus_patchclamp_clicked",
+            "Igor2",
+            "btn_import_igor2_wave_clicked",
+        ),
+        (
+            "btn_import_trace_patchclamp_clicked",
+            "Igor2",
+            "btn_import_patchclamp_data_clicked",
+        ),
+        (
+            "btn_export_patch_clamp_stim_clicked",
+            "Igor2",
+            "btn_export_igor2_patchclamp_stim_clicked",
+        ),
+        (
+            "btn_export_light_stimulus_clicked",
+            "SysCon2",
+            "open_stimulation_generator_dialog",
+        ),
+    ],
+)
+def test_gui_pre_dialog_wrapper_does_nothing_on_cancel(
+    monkeypatch: MonkeyPatch,
+    method_name: str,
+    software: str,
+    inner_name: str,
+) -> None:
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog,
+        "getItem",
+        lambda *args, **kwargs: (software, False),
+    )
+    called: list[bool] = []
+    fake_gui: Any = SimpleNamespace(**{inner_name: lambda: called.append(True)})
+
+    getattr(Gui, method_name)(fake_gui)
+
+    assert called == []
+
+
 def test_gui_click_exit(qtbot: QtBot) -> None:
     gui = Gui()
     gui.show()
@@ -356,7 +523,7 @@ def test_gui_export_with_simulation_data(
     monkeypatch.setattr(
         QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (f"{filename}", True)
     )
-    gui.btn_export_clicked()
+    gui.btn_export_simulation_results_clicked()
     assert filename.exists()
     gui.close()
 
@@ -376,7 +543,7 @@ def test_gui_export_empty_project(
     monkeypatch.setattr(
         QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (f"{filename}", True)
     )
-    gui.btn_export_clicked()
+    gui.btn_export_simulation_results_clicked()
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "critical"
     assert "export error" in qmessagebox_calls[0]["title"].lower()
@@ -456,6 +623,218 @@ def test_gui_export_igor2_patchclamp_stim_requires_stim_data(
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "information"
     assert "no stimulation entities" in qmessagebox_calls[0]["title"].lower()
+
+
+def test_gui_export_traces_no_selection(qmessagebox_calls: list) -> None:
+    fake_gui = _make_trace_export_gui("", None)
+
+    Gui.btn_export_traces_clicked(fake_gui)
+
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "information"
+    assert "no trace data" in qmessagebox_calls[0]["title"].lower()
+
+
+def test_gui_export_traces_returns_when_file_dialog_cancelled(
+    monkeypatch: MonkeyPatch,
+    qmessagebox_calls: list,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    trace_data = TraceData(
+        name="voltage",
+        traces=np.zeros((3, 100), dtype=np.float32),
+        indices=np.array([0, 1, 2], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    fake_gui = _make_trace_export_gui("exp :: voltage", trace_data)
+
+    def _unexpected_subplots(*args: Any, **kwargs: Any) -> tuple[Any, Any]:
+        raise AssertionError("subplots should not be called when no file is selected")
+
+    monkeypatch.setattr(neuroseq.gui, "getsavefilename", lambda *args: ("", ""))
+    monkeypatch.setattr(plt, "subplots", _unexpected_subplots)
+
+    Gui.btn_export_traces_clicked(fake_gui)
+
+    assert qmessagebox_calls == []
+
+
+def test_gui_export_traces_saves_figure(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    qmessagebox_calls: list,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    trace_data = TraceData(
+        name="voltage",
+        traces=np.zeros((3, 100), dtype=np.float32),
+        indices=np.array([0, 1, 2], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    output_path = tmp_path / "traces.png"
+    fig = _MockFigure()
+    ax = _MockAxes()
+    closed_figs: list[_MockFigure] = []
+    fake_gui = _make_trace_export_gui("exp :: voltage", trace_data)
+
+    monkeypatch.setattr(plt, "subplots", lambda *args, **kwargs: (fig, ax))
+    monkeypatch.setattr(plt, "close", lambda figure: closed_figs.append(figure))
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "getsavefilename",
+        lambda *args: (str(output_path), "PNG image (*.png)"),
+    )
+
+    Gui.btn_export_traces_clicked(fake_gui)
+
+    assert fig.saved == [
+        (str(output_path), {"dpi": 300, "bbox_inches": "tight"}),
+    ]
+    assert fig.tight_layout_called is True
+    assert len(ax.plot_calls) == 3
+    assert closed_figs == [fig]
+    assert any(call["name"] == "information" for call in qmessagebox_calls)
+
+
+def test_gui_export_traces_closes_figure_on_save_error(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    qmessagebox_calls: list,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    trace_data = TraceData(
+        name="voltage",
+        traces=np.zeros((2, 50), dtype=np.float32),
+        indices=np.array([0, 1], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    output_path = tmp_path / "traces.png"
+    fig = _MockFigure(save_error=OSError("disk full"))
+    ax = _MockAxes()
+    closed_figs: list[_MockFigure] = []
+    fake_gui = _make_trace_export_gui("exp :: voltage", trace_data)
+
+    monkeypatch.setattr(plt, "subplots", lambda *args, **kwargs: (fig, ax))
+    monkeypatch.setattr(plt, "close", lambda figure: closed_figs.append(figure))
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "getsavefilename",
+        lambda *args: (str(output_path), "PNG image (*.png)"),
+    )
+
+    Gui.btn_export_traces_clicked(fake_gui)
+
+    assert closed_figs == [fig]
+    assert any(call["name"] == "critical" for call in qmessagebox_calls)
+
+
+def test_gui_export_spikes_no_selection(qmessagebox_calls: list) -> None:
+    fake_gui = _make_spike_export_gui("", None)
+
+    Gui.btn_export_spikes_clicked(fake_gui)
+
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "information"
+    assert "no spike data" in qmessagebox_calls[0]["title"].lower()
+
+
+def test_gui_export_spikes_returns_when_file_dialog_cancelled(
+    monkeypatch: MonkeyPatch,
+    qmessagebox_calls: list,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    spike_data = SpikeData(
+        name="spikes",
+        spike_indices=np.array([0, 1], dtype=np.int32),
+        spike_times=np.array([0.1, 0.2], dtype=np.float32),
+    )
+    fake_gui = _make_spike_export_gui("exp :: spikes", spike_data)
+
+    def _unexpected_subplots(*args: Any, **kwargs: Any) -> tuple[Any, Any]:
+        raise AssertionError("subplots should not be called when no file is selected")
+
+    monkeypatch.setattr(neuroseq.gui, "getsavefilename", lambda *args: ("", ""))
+    monkeypatch.setattr(plt, "subplots", _unexpected_subplots)
+
+    Gui.btn_export_spikes_clicked(fake_gui)
+
+    assert qmessagebox_calls == []
+
+
+def test_gui_export_spikes_saves_figure(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    qmessagebox_calls: list,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    spike_data = SpikeData(
+        name="spikes",
+        spike_indices=np.array([0, 1, 0], dtype=np.int32),
+        spike_times=np.array([0.1, 0.2, 0.3], dtype=np.float32),
+    )
+    output_path = tmp_path / "spikes.png"
+    fig = _MockFigure()
+    ax = _MockAxes()
+    closed_figs: list[_MockFigure] = []
+    fake_gui = _make_spike_export_gui("exp :: spikes", spike_data)
+
+    monkeypatch.setattr(plt, "subplots", lambda *args, **kwargs: (fig, ax))
+    monkeypatch.setattr(plt, "close", lambda figure: closed_figs.append(figure))
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "getsavefilename",
+        lambda *args: (str(output_path), "PNG image (*.png)"),
+    )
+
+    Gui.btn_export_spikes_clicked(fake_gui)
+
+    assert fig.saved == [
+        (str(output_path), {"dpi": 300, "bbox_inches": "tight"}),
+    ]
+    assert fig.tight_layout_called is True
+    assert len(ax.scatter_calls) == 1
+    assert closed_figs == [fig]
+    assert any(call["name"] == "information" for call in qmessagebox_calls)
+
+
+def test_gui_export_spikes_closes_figure_on_save_error(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    qmessagebox_calls: list,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    spike_data = SpikeData(
+        name="spikes",
+        spike_indices=np.array([0, 1], dtype=np.int32),
+        spike_times=np.array([0.1, 0.2], dtype=np.float32),
+    )
+    output_path = tmp_path / "spikes.png"
+    fig = _MockFigure(save_error=OSError("disk full"))
+    ax = _MockAxes()
+    closed_figs: list[_MockFigure] = []
+    fake_gui = _make_spike_export_gui("exp :: spikes", spike_data)
+
+    monkeypatch.setattr(plt, "subplots", lambda *args, **kwargs: (fig, ax))
+    monkeypatch.setattr(plt, "close", lambda figure: closed_figs.append(figure))
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "getsavefilename",
+        lambda *args: (str(output_path), "PNG image (*.png)"),
+    )
+
+    Gui.btn_export_spikes_clicked(fake_gui)
+
+    assert closed_figs == [fig]
+    assert any(call["name"] == "critical" for call in qmessagebox_calls)
 
 
 def test_gui_import_igor2_wave_updates_selected_stim(

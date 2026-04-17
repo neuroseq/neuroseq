@@ -102,9 +102,9 @@ class Gui(QtWidgets.QMainWindow):
         split_left_right.addWidget(self.console_widget)
         split_left_right.setSizes([1000, 1000, 1000])
         # main vertical splitter layout
-        split_vertical = QtWidgets.QSplitter(
-            QtCore.Qt.Orientation.Vertical, handleWidth=0, childrenCollapsible=False
-        )
+        split_vertical = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        split_vertical.setHandleWidth(0)
+        split_vertical.setChildrenCollapsible(False)
         self.stim_editor = StimEditor(
             controller=self.controller,
             cmb_stim=self.cmb_stim,
@@ -118,7 +118,7 @@ class Gui(QtWidgets.QMainWindow):
         self.data_widget = DataWidget(self.controller, parent=self)
         split_vertical.addWidget(self.data_widget)
         self.time_slider = TimeSliderWidget(self)
-        self.plot_widgets: list[TimeseriesWidget | HeatmapWidget] = [
+        self.plot_widgets: list[TimeseriesWidget | HeatmapWidget | DataWidget] = [
             self.stim_editor.stim_widget,
             self.trace_widget,
             self.spike_widget,
@@ -326,7 +326,7 @@ class Gui(QtWidgets.QMainWindow):
             return
         self._update_window_title()
 
-    def btn_export_clicked(self) -> None:
+    def btn_export_simulation_results_clicked(self) -> None:
         filename, _ = getsavefilename(
             self,
             "Export results",
@@ -898,33 +898,37 @@ class Gui(QtWidgets.QMainWindow):
             project=self.project,
             parent=self,
         )
-        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
-            if not dialog.imported_data:
-                return
-            try:
-                if dialog.cellpose_import is not None:
-                    # keep GUI/project copies in sync with any updated stimulus mapping
-                    self.last_cellpose_import = clone_cellpose_result(
-                        dialog.cellpose_import
+        try:
+            if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+                if not dialog.imported_data:
+                    return
+                try:
+                    if dialog.cellpose_import is not None:
+                        # keep GUI/project copies in sync with any updated stimulus mapping
+                        self.last_cellpose_import = clone_cellpose_result(
+                            dialog.cellpose_import
+                        )
+                        if self.project is not None:
+                            self.project.cellpose_data = self.last_cellpose_import
+                    self._append_experimental_data(
+                        Experiment(
+                            dialog.experiment_name,
+                            dialog.experiment_duration,
+                            [],
+                            dialog.imported_data,
+                        )
                     )
-                    if self.project is not None:
-                        self.project.cellpose_data = self.last_cellpose_import
-                self._append_experimental_data(
-                    Experiment(
-                        dialog.experiment_name,
-                        dialog.experiment_duration,
-                        [],
-                        dialog.imported_data,
+                except Exception as exc:
+                    QtWidgets.QMessageBox.critical(
+                        self,
+                        "Patch clamp import error",
+                        f"Could not import patch clamp data: {exc}",
                     )
-                )
-            except Exception as exc:
-                QtWidgets.QMessageBox.critical(
-                    self,
-                    "Patch clamp import error",
-                    f"Could not import patch clamp data: {exc}",
-                )
-                self.logger.exception(exc)
-                return
+                    self.logger.exception(exc)
+                    return
+        finally:
+            dialog.close()
+            dialog.deleteLater()
 
     def connect_external_simulation_function_with_brian2(self) -> None:
         self._load_external_simulation_function(
@@ -955,6 +959,222 @@ class Gui(QtWidgets.QMainWindow):
         """Open the stimulation script generator dialog."""
         dialog = StimulationGeneratorDialog(self.project, parent=self)
         dialog.exec()
+
+    # Import stimulus wrappers
+
+    def btn_import_stimulus_light_clicked(self) -> None:
+        """Pre-dialog: choose software, then import a light stimulus waveform."""
+        software, ok = QtWidgets.QInputDialog.getItem(
+            self,
+            "Import light stimulus",
+            "Import from:",
+            ["SysCon2"],
+            0,
+            False,
+        )
+        if not ok:
+            return
+        if software == "SysCon2":
+            self.btn_import_syscon2_seq_clicked()
+
+    def btn_import_stimulus_patchclamp_clicked(self) -> None:
+        """Pre-dialog: choose software, then import a patch-clamp stimulus waveform."""
+        software, ok = QtWidgets.QInputDialog.getItem(
+            self,
+            "Import patch clamp stimulus",
+            "Import from:",
+            ["Igor2"],
+            0,
+            False,
+        )
+        if not ok:
+            return
+        if software == "Igor2":
+            self.btn_import_igor2_wave_clicked()
+
+    def btn_import_trace_patchclamp_clicked(self) -> None:
+        """Pre-dialog: choose software, then import recorded patch-clamp traces.
+
+        Convention:
+          Current Clamp (CC) -> recorded signal is voltage (mV)
+          Voltage Clamp (VC) -> recorded signal is current (pA)
+        The underlying PatchClampImportDialog handles the data; the mode is
+        determined by the units stored in the imported TraceData.
+        """
+        software, ok = QtWidgets.QInputDialog.getItem(
+            self,
+            "Import patch clamp traces",
+            "Import from:",
+            ["Igor2"],
+            0,
+            False,
+        )
+        if not ok:
+            return
+        if software == "Igor2":
+            self.btn_import_patchclamp_data_clicked()
+
+    # Export wrappers
+
+    def btn_export_patch_clamp_stim_clicked(self) -> None:
+        """Pre-dialog: choose software, then export patch-clamp stimulus CSV."""
+        software, ok = QtWidgets.QInputDialog.getItem(
+            self,
+            "Export patch clamp stimulus",
+            "Export for:",
+            ["Igor2"],
+            0,
+            False,
+        )
+        if not ok:
+            return
+        if software == "Igor2":
+            self.btn_export_igor2_patchclamp_stim_clicked()
+
+    def btn_export_light_stimulus_clicked(self) -> None:
+        """Pre-dialog: choose software, then open the stimulation script generator."""
+        software, ok = QtWidgets.QInputDialog.getItem(
+            self,
+            "Export light stimulus",
+            "Export for:",
+            ["SysCon2"],
+            0,
+            False,
+        )
+        if not ok:
+            return
+        if software == "SysCon2":
+            self.open_stimulation_generator_dialog()
+
+    def btn_export_traces_clicked(self) -> None:
+        """Export the currently displayed trace data as a publication-quality figure.
+
+        Exports all neuron traces for the selected TraceData as a single matplotlib
+        figure. The Y-axis label uses the units stored in the TraceData (e.g. 'mV'
+        for current-clamp recordings, 'pA' for voltage-clamp recordings). DPI is 300.
+        """
+        import matplotlib.pyplot as plt
+
+        trace_name = self.cmb_trace.currentText()
+        if not trace_name:
+            QtWidgets.QMessageBox.information(
+                self,
+                "No trace data",
+                "No trace data is currently selected in the Traces panel.",
+            )
+            return
+        trace_data = self.project.get_data(trace_name, TraceData)
+        if trace_data is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "No trace data",
+                f"Could not retrieve trace data '{trace_name}'.",
+            )
+            return
+
+        filename, _ = getsavefilename(
+            self,
+            "Export traces",
+            f"{trace_name.replace(' :: ', '_')}_traces.png",
+            "PNG image (*.png);;SVG vector (*.svg);;PDF document (*.pdf)",
+        )
+        if not filename:
+            return
+
+        fig = None
+        try:
+            n_neurons, n_timepoints = trace_data.traces.shape
+            times = np.arange(n_timepoints) * trace_data.dt
+            fig, ax = plt.subplots(figsize=(12, max(4, n_neurons * 0.5 + 2)))
+            for i in range(n_neurons):
+                ax.plot(times, trace_data.traces[i], linewidth=0.8, alpha=0.85)
+            ax.set_xlabel("Time (s)", fontsize=12)
+            ax.set_ylabel(trace_data.units or "Amplitude", fontsize=12)
+            ax.set_title(trace_name, fontsize=13)
+            ax.tick_params(labelsize=10)
+            fig.tight_layout()
+            fig.savefig(filename, dpi=300, bbox_inches="tight")
+            QtWidgets.QMessageBox.information(
+                self,
+                "Export successful",
+                f"Traces exported to '{filename}'.",
+            )
+        except Exception as exc:
+            self.logger.exception("Failed to export traces")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Export error",
+                f"Could not export traces: {exc}",
+            )
+        finally:
+            if fig is not None:
+                plt.close(fig)
+
+    def btn_export_spikes_clicked(self) -> None:
+        """Export the currently displayed spike data as a publication-quality raster.
+
+        Produces a scatter-plot raster (spike time vs neuron index) saved at 300 DPI.
+        """
+        import matplotlib.pyplot as plt
+
+        spike_name = self.cmb_spike.currentText()
+        if not spike_name:
+            QtWidgets.QMessageBox.information(
+                self,
+                "No spike data",
+                "No spike data is currently selected in the Spikes panel.",
+            )
+            return
+        spike_data = self.project.get_data(spike_name, SpikeData)
+        if spike_data is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "No spike data",
+                f"Could not retrieve spike data '{spike_name}'.",
+            )
+            return
+
+        filename, _ = getsavefilename(
+            self,
+            "Export spikes",
+            f"{spike_name.replace(' :: ', '_')}_spikes.png",
+            "PNG image (*.png);;SVG vector (*.svg);;PDF document (*.pdf)",
+        )
+        if not filename:
+            return
+
+        fig = None
+        try:
+            fig, ax = plt.subplots(figsize=(12, 5))
+            ax.scatter(
+                spike_data.spike_times,
+                spike_data.spike_indices,
+                s=1,
+                c="black",
+                alpha=0.7,
+                linewidths=0,
+            )
+            ax.set_xlabel("Time (s)", fontsize=12)
+            ax.set_ylabel("Neuron index", fontsize=12)
+            ax.set_title(spike_name, fontsize=13)
+            ax.tick_params(labelsize=10)
+            fig.tight_layout()
+            fig.savefig(filename, dpi=300, bbox_inches="tight")
+            QtWidgets.QMessageBox.information(
+                self,
+                "Export successful",
+                f"Spikes exported to '{filename}'.",
+            )
+        except Exception as exc:
+            self.logger.exception("Failed to export spikes")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Export error",
+                f"Could not export spikes: {exc}",
+            )
+        finally:
+            if fig is not None:
+                plt.close(fig)
 
     def choose_brian2_backend(self) -> None:
         backends = ["cython", "numpy"]
@@ -1019,32 +1239,47 @@ class Gui(QtWidgets.QMainWindow):
 
     def _create_menus_and_toolbars(self) -> None:
         menu = self.menuBar()
+        assert menu is not None
         self.menu_file = menu.addMenu("&File")
+        assert self.menu_file is not None
         self.toolbar_file = QtWidgets.QToolBar("File")
         self.addToolBar(self.toolbar_file)
         self.menu_simulate = menu.addMenu("&Simulate")
+        assert self.menu_simulate is not None
         self.toolbar_simulate = QtWidgets.QToolBar("Simulate")
         self.addToolBar(self.toolbar_simulate)
 
         self.menu_playback = menu.addMenu("&Playback")
+        assert self.menu_playback is not None
         self.toolbar_playback = QtWidgets.QToolBar("Playback")
         self.addToolBar(self.toolbar_playback)
         self.menu_view = menu.addMenu("&View")
+        assert self.menu_view is not None
         self.toolbar_view = QtWidgets.QToolBar("View")
         self.toolbar_data = QtWidgets.QToolBar("Data")
         self.addToolBar(self.toolbar_data)
 
         self.menu_experiment = menu.addMenu("&Experiment")
+        assert self.menu_experiment is not None
         self.toolbar_experiment = QtWidgets.QToolBar("Experiment")
         self.addToolBar(self.toolbar_experiment)
         self.addToolBarBreak()
         self.addToolBar(self.toolbar_view)
 
         self.menu_settings = menu.addMenu("&Settings")
+        assert self.menu_settings is not None
         self.menu_help = menu.addMenu("&Help")
+        assert self.menu_help is not None
         self._create_actions_data(toolbar=self.toolbar_data, menu=None)
 
     def _create_actions(self) -> None:
+        assert self.menu_file is not None
+        assert self.menu_simulate is not None
+        assert self.menu_playback is not None
+        assert self.menu_view is not None
+        assert self.menu_settings is not None
+        assert self.menu_help is not None
+        assert self.menu_experiment is not None
         self._create_actions_file(self.menu_file, self.toolbar_file)
         self._create_actions_simulate(self.menu_simulate, self.toolbar_simulate)
         self._create_actions_playback(self.menu_playback, self.toolbar_playback)
@@ -1066,10 +1301,12 @@ class Gui(QtWidgets.QMainWindow):
         )
         # add "open example project" item to the file menu which opens a sub-menu containing the example projects from src/neuroseq/example_projects
         self.open_example_project_menu = menu.addMenu("&Open example project")
+        assert self.open_example_project_menu is not None
         self.open_example_project_section_menus = {}
         self.open_example_project_actions = []
         for section, section_projects in example_projects.items():
             section_menu = self.open_example_project_menu.addMenu(section)
+            assert section_menu is not None
             self.open_example_project_section_menus[section] = section_menu
             for name, generator in section_projects.items():
                 action = add_action(
@@ -1105,22 +1342,92 @@ class Gui(QtWidgets.QMainWindow):
             shortcut="Ctrl+S",
             icon=qta.icon("mdi6.content-save"),
         )
+
+        import_data_menu = menu.addMenu("&Import data")
+        assert import_data_menu is not None
+
+        import_stimulus_menu = import_data_menu.addMenu("Import &stimulus")
+        assert import_stimulus_menu is not None
         add_action(
-            "&Export data",
-            self.btn_export_clicked,
-            menu,
-            toolbar,
+            "Import &light stimulus",
+            self.btn_import_stimulus_light_clicked,
+            import_stimulus_menu,
+            None,
+            icon=qta.icon("mdi6.file-import-outline"),
+        )
+        add_action(
+            "Import &patch clamp",
+            self.btn_import_stimulus_patchclamp_clicked,
+            import_stimulus_menu,
+            None,
+            icon=qta.icon("mdi6.waveform"),
+        )
+
+        import_trace_menu = import_data_menu.addMenu("Import &trace")
+        assert import_trace_menu is not None
+        add_action(
+            "Import &calcium imaging",
+            self.btn_import_suite2p_data_clicked,
+            import_trace_menu,
+            None,
+            icon=qta.icon("mdi6.import"),
+        )
+        add_action(
+            "Import &patch clamp",
+            self.btn_import_trace_patchclamp_clicked,
+            import_trace_menu,
+            None,
+            icon=qta.icon("mdi6.import"),
+        )
+
+        add_action(
+            "Import cell &segmentation",
+            self.btn_import_cellpose_data_clicked,
+            import_data_menu,
+            None,
+            icon=qta.icon("mdi6.image-edit-outline"),
+        )
+
+        export_data_menu = menu.addMenu("&Export data")
+        assert export_data_menu is not None
+
+        add_action(
+            "Export &patch clamp stimulus",
+            self.btn_export_patch_clamp_stim_clicked,
+            export_data_menu,
+            None,
+            icon=qta.icon("mdi6.waveform"),
+        )
+        add_action(
+            "Export &light stimulus",
+            self.btn_export_light_stimulus_clicked,
+            export_data_menu,
+            None,
+            icon=qta.icon("mdi6.file-code"),
+        )
+        add_action(
+            "Export &traces",
+            self.btn_export_traces_clicked,
+            export_data_menu,
+            None,
+            icon=qta.icon("mdi.waves"),
+        )
+        add_action(
+            "Export &spikes",
+            self.btn_export_spikes_clicked,
+            export_data_menu,
+            None,
+            icon=qta.icon("ph.barcode-light"),
+        )
+        add_action(
+            "Export &simulation results",
+            self.btn_export_simulation_results_clicked,
+            export_data_menu,
+            None,
             shortcut="Ctrl+Shift+E",
             icon=qta.icon("mdi6.content-save-move"),
         )
-        add_action(
-            "Export Stim for Igor2 &Patch Clamp",
-            self.btn_export_igor2_patchclamp_stim_clicked,
-            menu,
-            toolbar,
-            shortcut=None,
-            icon=qta.icon("mdi6.waveform"),
-        )
+
         add_action(
             "&Edit model",
             self.btn_edit_clicked,
@@ -1139,47 +1446,6 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.microsoft-xbox-controller-view")
             if hasattr(qta, "icon")
             else None,
-        )
-        menu.addSeparator()
-        add_action(
-            "Import Suite2p &Data",
-            self.btn_import_suite2p_data_clicked,
-            menu,
-            toolbar,
-            shortcut="Ctrl+Shift+I",
-            icon=qta.icon("mdi6.import"),
-        )
-        add_action(
-            "Import Cellpose &Segmentation",
-            self.btn_import_cellpose_data_clicked,
-            menu,
-            toolbar,
-            shortcut=None,
-            icon=qta.icon("mdi6.image-edit-outline"),
-        )
-        add_action(
-            "Import &Patch Clamp Data",
-            self.btn_import_patchclamp_data_clicked,
-            menu,
-            toolbar,
-            shortcut=None,
-            icon=qta.icon("mdi6.import"),
-        )
-        add_action(
-            "Import SysCon2 .seq &File",
-            self.btn_import_syscon2_seq_clicked,
-            menu,
-            toolbar,
-            shortcut=None,
-            icon=qta.icon("mdi6.file-import-outline"),
-        )
-        add_action(
-            "Import Igor2 &Wave (.ibw/.pxp/.csv)",
-            self.btn_import_igor2_wave_clicked,
-            menu,
-            toolbar,
-            shortcut=None,
-            icon=qta.icon("mdi6.waveform"),
         )
         menu.addSeparator()
         add_action(
@@ -1364,14 +1630,6 @@ class Gui(QtWidgets.QMainWindow):
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
     ) -> None:
         add_action(
-            "&Generate stimulation scripts",
-            self.open_stimulation_generator_dialog,
-            menu,
-            toolbar,
-            shortcut=None,
-            icon=qta.icon("mdi6.file-code"),
-        )
-        add_action(
             "&Manage Experiments",
             self.btn_manage_experiments_clicked,
             menu,
@@ -1393,7 +1651,7 @@ class Gui(QtWidgets.QMainWindow):
             self.connect_external_simulation_function_with_brian2,
             menu,
             toolbar,
-            shortcut="Ctrl+Shift+E",
+            shortcut=None,
             icon=qta.icon("mdi6.function"),
         )
         add_action(

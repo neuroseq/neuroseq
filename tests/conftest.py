@@ -1,8 +1,24 @@
 from __future__ import annotations
 
+import os
 import pathlib
+import sys
 from collections.abc import Callable
 from typing import Any
+
+if sys.platform.startswith("linux"):
+    os.environ.setdefault("NEUROSEQ_HEADLESS_TEST", "1")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    pathlib.Path("/tmp/mpl").mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl")
+
+if os.environ.get("NEUROSEQ_HEADLESS_TEST", "").lower() in {"1", "true", "yes"}:
+    from fastplotlib.layouts._figure import Figure
+
+    def _disable_fastplotlib_auto_render(self) -> None:
+        return None
+
+    Figure._start_render = _disable_fastplotlib_auto_render
 
 import brian2 as b2
 import brian2.numpy_ as np

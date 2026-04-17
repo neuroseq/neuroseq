@@ -1,0 +1,314 @@
+REVIEW: Menu reorganisation + Igor2 PXP import — post-Codex audit
+=================================================================
+Branch: import_igor2
+Date:   2026-04-17
+Files reviewed:
+  src/neuroseq/gui.py
+  src/neuroseq/importer_igor2.py
+  src/neuroseq/igor_import_dialog.py
+  tests/test_gui.py
+  tests/test_importer_igor2.py
+  tests/test_igor_import_dialog.py
+
+OVERALL VERDICT
+---------------
+PXP import: fully correct, no issues.
+Menu reorganisation: two bugs found, one test-coverage gap found.
+All three need to be fixed.
+
+
+=============================================================
+BUG 1 (RUNTIME ERROR): Duplicate Ctrl+Shift+E shortcut
+=============================================================
+
+SEVERITY: High — Qt logs "QAction: Ambiguous shortcut" at runtime; the shortcut
+stops working predictably for both actions.
+
+LOCATION: src/neuroseq/gui.py
+
+LINE 1421:  Export simulation results (File → Export data submenu)
+            shortcut="Ctrl+Shift+E"    ← newly added here
+
+LINE 1648:  Connect brian2 external stimulation function (Experiment menu)
+            shortcut="Ctrl+Shift+E"    ← was already here, NOT removed during refactor
+
+The handoff explicitly called out this conflict and said to remove the shortcut from
+the Experiment action. Codex did not do this.
+
+FIX — in _create_action_experiment(), change line 1648:
+  Before:   shortcut="Ctrl+Shift+E",
+  After:    shortcut=None,
+
+No other changes needed. The Ctrl+Shift+E shortcut should only live on
+"Export simulation results" in the File menu.
+
+
+=============================================================
+BUG 2 (MEMORY LEAK): matplotlib figure not closed on error
+=============================================================
+
+SEVERITY: Medium — leaked figure objects accumulate in memory each time
+a save fails; in long sessions with large trace arrays this is significant.
+
+LOCATION: src/neuroseq/gui.py
+
+AFFECTED METHODS:
+  btn_export_traces_clicked()  lines 1084–1108
+  btn_export_spikes_clicked()  lines 1143–1171
+
+PROBLEM: In both methods the try block creates `fig` via `plt.subplots()`,
+then calls `fig.savefig()`. `plt.close(fig)` is called only on the success
+path (before the information message box). If `savefig()` or any preceding
+line raises, the except branch runs without closing the figure.
+
+CURRENT STRUCTURE (both methods follow this pattern):
+    try:
+        fig, ax = plt.subplots(...)      # fig created
+        ...
+        fig.savefig(filename, ...)       # can raise (e.g. disk full, bad path)
+        plt.close(fig)                   # NOT reached if savefig raised
+        QtWidgets.QMessageBox.information(...)
+    except Exception as exc:
+        self.logger.exception(...)       # fig is still open → leak
+        QtWidgets.QMessageBox.critical(...)
+
+FIX — restructure both methods to use a finally guard.
+Replace the try/except block in EACH of the two methods with this pattern:
+
+    fig = None
+    try:
+        fig, ax = plt.subplots(...)
+        ...
+        fig.savefig(filename, dpi=300, bbox_inches="tight")
+        QtWidgets.QMessageBox.information(
+            self,
+            "Export successful",
+            f"... exported to '{filename}'.",
+        )
+    except Exception as exc:
+        self.logger.exception("Failed to export ...")
+        QtWidgets.QMessageBox.critical(
+            self,
+            "Export error",
+            f"Could not export ...: {exc}",
+        )
+    finally:
+        if fig is not None:
+            plt.close(fig)
+
+Apply this to both btn_export_traces_clicked and btn_export_spikes_clicked.
+The only change from current code is:
+  1. Add `fig = None` before the try block.
+  2. Remove `plt.close(fig)` from inside the try block (success path).
+  3. Add a `finally:` clause after the except with `if fig is not None: plt.close(fig)`.
+
+
+=============================================================
+ISSUE 3 (TEST COVERAGE): No tests for 7 new handler methods
+=============================================================
+
+SEVERITY: Low-Medium — the pre-dialog wrappers and matplotlib export methods are
+completely untested. This likely drops coverage on gui.py below the 75% threshold.
+
+UNTESTED METHODS (all in src/neuroseq/gui.py):
+  btn_import_stimulus_light_clicked()        — pre-dialog → SysCon2
+  btn_import_stimulus_patchclamp_clicked()   — pre-dialog → Igor2 (stimulus)
+  btn_import_trace_patchclamp_clicked()      — pre-dialog → Igor2 (trace)
+  btn_export_patch_clamp_stim_clicked()      — pre-dialog → Igor2
+  btn_export_light_stimulus_clicked()        — pre-dialog → SysCon2
+  btn_export_traces_clicked()                — matplotlib trace export
+  btn_export_spikes_clicked()                — matplotlib spike raster export
+
+Add the following tests to tests/test_gui.py. Use the SimpleNamespace fake_gui
+pattern already established in the file. Add required imports at the top if not
+already present: `import matplotlib` is not needed since we monkeypatch plt.subplots.
+
+--- TESTS FOR PRE-DIALOG WRAPPERS ---
+
+Each pre-dialog wrapper follows the same pattern: getItem returns (software, True),
+then the corresponding inner handler is called. Test two cases per method:
+  (a) user accepts → inner handler is called
+  (b) user cancels (ok=False) → inner handler is NOT called
+
+Use monkeypatch on QtWidgets.QInputDialog.getItem to control the dialog.
+Check whether the inner handler was called by monkeypatching it on the fake_gui.
+
+Example for btn_import_stimulus_light_clicked (write analogous tests for the
+remaining 4 pre-dialog wrappers):
+
+    def test_btn_import_stimulus_light_calls_syscon2_on_accept(
+        monkeypatch: MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            QtWidgets.QInputDialog,
+            "getItem",
+            lambda *args, **kwargs: ("SysCon2", True),
+        )
+        called = []
+        fake_gui: Any = SimpleNamespace(
+            btn_import_syscon2_seq_clicked=lambda: called.append(True),
+        )
+        Gui.btn_import_stimulus_light_clicked(fake_gui)
+        assert called == [True]
+
+    def test_btn_import_stimulus_light_does_nothing_on_cancel(
+        monkeypatch: MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            QtWidgets.QInputDialog,
+            "getItem",
+            lambda *args, **kwargs: ("SysCon2", False),
+        )
+        called = []
+        fake_gui: Any = SimpleNamespace(
+            btn_import_syscon2_seq_clicked=lambda: called.append(True),
+        )
+        Gui.btn_import_stimulus_light_clicked(fake_gui)
+        assert called == []
+
+Write equivalent pairs for:
+  btn_import_stimulus_patchclamp_clicked → btn_import_igor2_wave_clicked
+  btn_import_trace_patchclamp_clicked    → btn_import_patchclamp_data_clicked
+  btn_export_patch_clamp_stim_clicked    → btn_export_igor2_patchclamp_stim_clicked
+  btn_export_light_stimulus_clicked      → open_stimulation_generator_dialog
+
+--- TESTS FOR MATPLOTLIB EXPORT METHODS ---
+
+For btn_export_traces_clicked and btn_export_spikes_clicked, monkeypatch:
+  - getsavefilename (in neuroseq.gui) to return a path
+  - matplotlib.pyplot.subplots to return mock fig/ax objects
+  - fig.savefig to do nothing (or to raise, to test the error path)
+
+Do NOT write real matplotlib drawing tests — just verify the control flow:
+  (a) valid data + valid path → savefig called, information dialog shown, fig closed
+  (b) no trace/spike selected → information dialog, no savefig
+  (c) savefig raises → error dialog shown, figure still closed (tests Bug 2 fix)
+
+Example skeleton for (a):
+
+    def test_btn_export_traces_saves_figure(
+        monkeypatch: MonkeyPatch, tmp_path: Path, qmessagebox_calls: list
+    ) -> None:
+        import matplotlib.pyplot as plt
+
+        trace_data = TraceData(
+            name="voltage",
+            traces=np.zeros((3, 100), dtype=np.float32),
+            indices=np.array([0, 1, 2], dtype=np.uint32),
+            units="mV",
+            dt=0.001,
+        )
+        output_path = tmp_path / "traces.png"
+        saved_paths = []
+
+        # monkeypatch savefig to record the call rather than write a real PNG
+        original_subplots = plt.subplots
+        def fake_subplots(*args, **kwargs):
+            fig, ax = original_subplots(*args, **kwargs)
+            original_savefig = fig.savefig
+            fig.savefig = lambda path, **kw: saved_paths.append(path)
+            return fig, ax
+
+        monkeypatch.setattr(plt, "subplots", fake_subplots)
+        monkeypatch.setattr(
+            neuroseq.gui, "getsavefilename",
+            lambda *args, **kwargs: (str(output_path), "PNG image (*.png)"),
+        )
+
+        fake_gui: Any = SimpleNamespace(
+            cmb_trace=SimpleNamespace(currentText=lambda: "exp :: voltage"),
+            project=SimpleNamespace(
+                get_data=lambda name, dtype: trace_data,
+            ),
+            logger=logging.getLogger("test"),
+        )
+        Gui.btn_export_traces_clicked(fake_gui)
+
+        assert len(saved_paths) == 1
+        assert str(output_path) in saved_paths[0]
+        assert any(c["name"] == "information" for c in qmessagebox_calls)
+
+    def test_btn_export_traces_closes_figure_on_savefig_error(
+        monkeypatch: MonkeyPatch, tmp_path: Path, qmessagebox_calls: list
+    ) -> None:
+        """Verifies the Bug 2 fix: figure is closed even when savefig raises."""
+        import matplotlib.pyplot as plt
+
+        trace_data = TraceData(
+            name="voltage",
+            traces=np.zeros((2, 50), dtype=np.float32),
+            indices=np.array([0, 1], dtype=np.uint32),
+            units="mV",
+            dt=0.001,
+        )
+        output_path = tmp_path / "traces.png"
+        closed_figs = []
+
+        original_subplots = plt.subplots
+        original_close = plt.close
+        def fake_subplots(*args, **kwargs):
+            fig, ax = original_subplots(*args, **kwargs)
+            fig.savefig = lambda *a, **kw: (_ for _ in ()).throw(OSError("disk full"))
+            return fig, ax
+        def fake_close(fig):
+            closed_figs.append(fig)
+            original_close(fig)
+
+        monkeypatch.setattr(plt, "subplots", fake_subplots)
+        monkeypatch.setattr(plt, "close", fake_close)
+        monkeypatch.setattr(
+            neuroseq.gui, "getsavefilename",
+            lambda *args, **kwargs: (str(output_path), "PNG image (*.png)"),
+        )
+
+        fake_gui: Any = SimpleNamespace(
+            cmb_trace=SimpleNamespace(currentText=lambda: "exp :: voltage"),
+            project=SimpleNamespace(get_data=lambda name, dtype: trace_data),
+            logger=logging.getLogger("test"),
+        )
+        Gui.btn_export_traces_clicked(fake_gui)
+
+        assert len(closed_figs) == 1, "figure must be closed even when savefig raises"
+        assert any(c["name"] == "critical" for c in qmessagebox_calls)
+
+Write equivalent tests for btn_export_spikes_clicked.
+
+NOTE on fake_subplots lambda trick for raising: the `(_ for _ in ()).throw(...)` idiom
+works in Python 3.10+ for raising inside a lambda. Alternatively use a named function:
+    def raise_error(*a, **kw): raise OSError("disk full")
+    fig.savefig = raise_error
+
+
+=============================================================
+ITEMS VERIFIED CORRECT (no action needed)
+=============================================================
+- PXP loader (load_igor_pxp_file, is_pxp_file) — correct
+- load_igor_wave_file raises ValueError for .pxp — correct
+- IgorImportDialog: wave picker, _load_pxp_file, _on_pxp_wave_selected — correct
+- Reset of wave picker state when switching file types — correct
+- All 8 new PXP tests in test_importer_igor2.py — correct
+- All 3 new PXP dialog tests in test_igor_import_dialog.py — correct
+- _create_actions_file() submenu structure — correct
+- "Generate stimulation scripts" removed from Experiment menu — correct
+- btn_export_simulation_results_clicked rename + test update — correct
+- All toolbar=None assignments for submenu items — correct
+- All 7 new handler method signatures and docstrings — correct
+- pre-dialog QInputDialog.getItem calls — correct
+- matplotlib lazy import inside function body — correct
+
+
+=============================================================
+SUMMARY OF REQUIRED CHANGES
+=============================================================
+
+File: src/neuroseq/gui.py
+  1. gui.py line 1648: change shortcut="Ctrl+Shift+E" → shortcut=None
+  2. gui.py btn_export_traces_clicked: add `fig = None` before try, move
+     plt.close(fig) to finally block with `if fig is not None:` guard
+  3. gui.py btn_export_spikes_clicked: same finally-block fix as above
+
+File: tests/test_gui.py
+  4. Add 10–12 new tests:
+       - 2 tests × 5 pre-dialog wrappers = 10 tests
+       - ~4 tests for btn_export_traces_clicked (no data, valid save, save error, no file)
+       - ~4 tests for btn_export_spikes_clicked (same)

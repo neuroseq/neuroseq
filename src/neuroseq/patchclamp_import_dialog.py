@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 import brian2.numpy_ as np
@@ -165,17 +166,24 @@ class PatchClampImportDialog(QtWidgets.QDialog):
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Expanding,
         )
-        self.overlay_widget = CellOverlayWidget("Cellpose Preview")
-        self.overlay_widget.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Expanding,
-            QtWidgets.QSizePolicy.Policy.Expanding,
-        )
+        headless_test_mode = os.environ.get("NEUROSEQ_HEADLESS_TEST", "").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        if not headless_test_mode:
+            self.overlay_widget = CellOverlayWidget("Cellpose Preview")
+            self.overlay_widget.setSizePolicy(
+                QtWidgets.QSizePolicy.Policy.Expanding,
+                QtWidgets.QSizePolicy.Policy.Expanding,
+            )
         self.overlay_placeholder = QtWidgets.QLabel("No cellpose data yet")
         self.overlay_placeholder.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.overlay_placeholder.setStyleSheet("QLabel { color: gray; }")
         self.overlay_placeholder.setWordWrap(True)
         self.overlay_stack.addWidget(self.overlay_placeholder)
-        self.overlay_stack.addWidget(self.overlay_widget)
+        if self.overlay_widget is not None:
+            self.overlay_stack.addWidget(self.overlay_widget)
         self.left_layout.addWidget(self.overlay_stack, stretch=1)
         self.left_layout.addStretch()
 
@@ -448,6 +456,10 @@ class PatchClampImportDialog(QtWidgets.QDialog):
     def _populate_cellpose_preview(self) -> None:
         """Fill the left-hand preview with Cellpose data if available."""
         if self.overlay_widget is None or self.overlay_stack is None:
+            if self.overlay_stack is not None:
+                self._show_overlay_placeholder(
+                    "Cellpose preview disabled in headless tests"
+                )
             return
 
         if (
@@ -909,5 +921,6 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
     def closeEvent(self, event):
         # explicitly close all fastplotlib figures to avoid renderer trying to access them after they have been destroyed
-        self.overlay_widget.close()
+        if self.overlay_widget is not None:
+            self.overlay_widget.close()
         super().closeEvent(event)
