@@ -1,0 +1,333 @@
+REVIEW: Igor2 trace import dialog
+==================================================================
+Branch: import_igor2
+Repo:   /mnt/live3/svintila/neuroseq
+Date:   2026-04-20
+Reviewed against handoff: .ai_dev/handoffs/igor2_trace_import_dialog.txt
+
+
+STATUS
+------
+Functionally complete — all 81 targeted tests pass, ruff clean, mypy clean.
+
+    tests/test_igor_trace_import_dialog.py  10 PASSED
+    tests/test_importer_igor2.py            (new trace helper tests included)
+    tests/test_gui.py                       (routing + CC/VC tests included)
+
+New files:
+  src/neuroseq/igor_trace_import_dialog.py
+  tests/test_igor_trace_import_dialog.py
+
+Changed files verified:
+  src/neuroseq/importer_igor2.py       — IgorTraceImportReport, create_trace_data_from_igor_wave,
+                                          import_igor_wave_into_trace_data
+  src/neuroseq/project.py              — add_data_to_experiment
+  src/neuroseq/gui.py                  — btn_import_trace_patchclamp_clicked routing,
+                                          btn_import_igor2_trace_clicked, CC/VC labels
+
+
+WHAT WORKS
+----------
+
+1. New experiment / new trace data (mode A)
+   - `create_trace_data_from_igor_wave` builds a (1, N) float32 array with a
+     single-element uint32 indices array.
+   - `_commit_new_trace_data` routes to `project.add_experiment` for new
+     experiments and `project.add_data_to_experiment` for existing ones.
+   - Duration and timepoints updated correctly by both paths.
+
+2. Existing trace data (mode B)
+   - `import_igor_wave_into_trace_data` appends a new row (or replaces an
+     existing row) with extend/replace flags honoured.
+   - `_refresh_experiment_timing` adjusts experiment duration after extending.
+   - dt mismatch guard present; `_confirm_and_remap_trace_dt` ZOH-remaps all
+     rows in-place before import.
+
+3. .pxp multi-wave session
+   - Dialog stays open after each import; ✓ prefix applied; ItemIsSelectable
+     cleared; Cancel→Close promotion fires via `_promote_cancel_to_close`.
+   - Re-import of an already-imported wave correctly disables Import button.
+   - After first import from a new experiment, the new-experiment combo
+     switches to the created experiment for subsequent imports.
+
+4. Spike detection
+   - `_SPIKE_DETECTION_DEFAULTS` field names (`peak_height`, `peak_prominence`,
+     `min_interval`, `peak_distance`, `peak_width`) match `PeakDetectionParams`
+     exactly. Parameter forwarding to `detect_spikes_voltage_trace` is correct.
+   - Detected count appended to status text: "Detected N spike(s)."
+   - SpikeData stored under "Igor Patch Clamp Spikes" via
+     `project.add_data_to_experiment`.
+
+5. gui.py routing
+   - `btn_import_trace_patchclamp_clicked` options list is `["Igor2", "NumPy (.npy)"]`.
+   - Igor2 → `btn_import_igor2_trace_clicked` (new).
+   - NumPy (.npy) → `btn_import_patchclamp_data_clicked` (existing, backward compat).
+   - After dialog accepts, `cmb_trace` is set to `"ExperimentName :: TraceName"`,
+     matching the format produced by `project.get_data_names(TraceData)`.
+   - `_apply_trace_selection` called explicitly to refresh the widget even when
+     the combo text string doesn't change.
+
+6. CC/VC guidance labels
+   - Both `btn_import_stimulus_patchclamp_clicked` and
+     `btn_import_trace_patchclamp_clicked` carry the multi-line convention note.
+   - `test_patchclamp_pre_dialogs_include_cc_vc_convention` locks the strings in.
+
+
+SHOULD-FIX (non-blocking)
+--------------------------
+
+1. tests/test_igor_trace_import_dialog.py — no assertion on `last_import_label`
+   text content.
+
+   The stimulus dialog review (`igor2_pxp_multi_wave_import.txt`, item 1)
+   already required fixing the "Imported: Imported…" stutter, and the resulting
+   `test_igor_import_dialog_single_wave_pxp_import_stays_open_until_close`
+   asserts on the exact label text. The trace dialog has no equivalent check.
+
+   The current label text for a "create new" pxp import is:
+       "Imported '<wave>' into new trace data '<name>' in experiment '<exp>'."
+
+   Add an assertion in `test_trace_dialog_stays_open_for_multiple_pxp_imports`
+   (after the first `_import_file()` call):
+
+       assert dialog.last_import_label.text() == (
+           "Imported 'WaveA' into new trace data 'WaveA' in experiment 'Experiment A'."
+       )
+
+   This prevents the label from silently regressing to an empty string or a
+   stutter prefix if someone refactors `_import_file` later.
+
+
+2. src/neuroseq/igor_trace_import_dialog.py:697 —
+   `QMessageBox.question` is not patched by the autouse `suppress_message_boxes`
+   fixture (which only patches information/warning/critical).
+
+   If a future test hits the dt-mismatch path in `_confirm_and_remap_trace_dt`,
+   it will block on a real modal dialog. Either:
+
+   a) Add `QMessageBox.question` to the autouse fixture in `tests/conftest.py`
+      to return `QMessageBox.StandardButton.Yes` by default, OR
+   b) Patch it per-test in any test that exercises the dt-remap path.
+
+   No test currently exercises this path, so this is latent risk, not a
+   current failure.
+
+
+3. src/neuroseq/igor_trace_import_dialog.py:707 — deferred import inside a
+   method body:
+
+       from neuroseq.importer_igor2 import resample_wave_zero_order_hold
+
+   `resample_wave_zero_order_hold` is already imported at module level in
+   `importer_igor2.py`; the deferred import here avoids a circular-import risk
+   that doesn't actually exist (the module is not imported at module level).
+   Move it to the top-of-file imports alongside the other `importer_igor2`
+   imports. Minor.
+
+
+=================================================================
+ADDITIONAL TASK — Project-wide canonical dt: keep stim and trace
+                  timeline ticks in sync
+=================================================================
+
+PROBLEM
+-------
+Stimuli (`StimArray.dt`) and traces (`TraceData.dt`) currently carry
+independent sample intervals.  Both are plotted on the same absolute
+time axis (0 … `project.max_time_secs`), but their tick grids are
+generated separately in `gridlines.py` using each object's own `dt`.
+
+If a stimulus lives at 1 ms and a trace is imported at 0.5 ms, the
+two widgets render ticks at different densities — a vertical line on
+the trace widget lands between two ticks on the stim widget.  More
+importantly, the stim editor's draw grid is 1 ms wide while the trace
+data has twice the resolution; a user drawing a stimulus at 1 ms
+resolution cannot match sub-ms trace events.
+
+This disconnect surfaces in three import paths:
+  • `IgorImportDialog` — "Adjust NeuroSeq stim grid to source/file grid"
+    changes the selected stim array's dt but leaves all traces at their
+    existing dt.
+  • `IgorTraceImportDialog` — "Adjust NeuroSeq trace grid to source/file
+    grid" changes the imported trace's dt but leaves all stim arrays at
+    their existing dt.
+  • `PatchClampImportDialog` — same issue; traces can land at any dt the
+    experimenter recorded at.
+
+
+DESIGN
+------
+Introduce a single **project-level canonical dt** (`Project.dt: float`,
+default `NEUROSEQ_IGOR_TARGET_DT_SECONDS = 0.001`).
+
+Invariant: every `StimArray.dt` and every `TraceData.dt` in the project
+must equal `project.dt`.  Nothing else enforces alignment; the invariant
+is maintained at the two mutation points:
+
+  1. Adding a new StimArray or TraceData whose dt differs → remap it to
+     `project.dt` before storing, OR change `project.dt` and remap
+     everything else.
+  2. Calling `update_stim_array_properties` with a new dt (the stim
+     editor's "change dt" path) → treat the new dt as the new canonical
+     dt and remap all stims and all traces.
+
+The user must be asked before any global remap that touches existing
+data — one QMessageBox.question listing what will be remapped and
+confirming the new dt.
+
+
+FILES TO CHANGE
+---------------
+
+src/neuroseq/project.py
+
+  Add field:
+      dt: float = NEUROSEQ_IGOR_TARGET_DT_SECONDS  # canonical project dt
+
+  Add helper:
+      def remap_all_data_to_dt(self, new_dt: float) -> None:
+          """ZOH-remap every StimArray and every TraceData to new_dt."""
+          from neuroseq.importer_igor2 import resample_wave_zero_order_hold
+          from neuroseq.stim_timing import remap_stim_values_to_dt
+
+          for stim_array in self.stim_arrays.values():
+              if not stim_dt_matches(float(stim_array.dt), new_dt):
+                  stim_array.values = remap_stim_values_to_dt(
+                      stim_array.values, float(stim_array.dt), new_dt
+                  )
+                  stim_array.dt = new_dt
+
+          for experiment in self.experiments.values():
+              for data in experiment.data:
+                  if isinstance(data, TraceData):
+                      if not stim_dt_matches(float(data.dt), new_dt):
+                          new_rows = [
+                              resample_wave_zero_order_hold(
+                                  data.traces[i],
+                                  source_dt=float(data.dt),
+                                  target_dt=new_dt,
+                              )
+                              for i in range(data.traces.shape[0])
+                          ]
+                          data.traces = (
+                              np.stack(new_rows, axis=0).astype(np.float32, copy=False)
+                              if new_rows
+                              else np.zeros((0, 0), dtype=np.float32)
+                          )
+                          data.dt = new_dt
+
+          self.dt = new_dt
+          self.update_limits()
+
+  Update `add_stim_array` and `add_data_to_experiment` / `add_experiment`
+  to assert `stim_dt_matches(incoming_dt, self.dt)` and raise ValueError
+  if not (callers are responsible for resampling before calling these).
+
+src/neuroseq/igor_import_dialog.py
+src/neuroseq/igor_trace_import_dialog.py
+
+  In `_import_file`, after computing `target_dt`, check whether it
+  differs from `project.dt`:
+
+      if not stim_dt_matches(target_dt, self.project.dt):
+          affected = _describe_affected_data(self.project, target_dt)
+          # e.g. "2 stim array(s) and 3 trace dataset(s)"
+          answer = QMessageBox.question(
+              self,
+              "Change project sample interval",
+              f"Importing at {target_dt*1000:.3f} ms will change the "
+              f"project sample interval from "
+              f"{self.project.dt*1000:.3f} ms to {target_dt*1000:.3f} ms "
+              f"and remap {affected} using zero-order hold. Continue?",
+              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+          )
+          if answer != QMessageBox.StandardButton.Yes:
+              return
+          self.project.remap_all_data_to_dt(target_dt)
+
+  After the remap the import proceeds normally; the new data is already
+  at `project.dt`.
+
+src/neuroseq/patchclamp_import_dialog.py  (if it sets TraceData.dt directly)
+
+  Same guard: before committing, check `stim_dt_matches(data.dt, project.dt)`.
+  If not, offer the same remap dialog.
+
+src/neuroseq/stim_editor.py  (the "change dt" path via update_stim_array_properties)
+
+  When the user edits the dt of a stim array in the properties panel, the
+  new dt should also become the new canonical `project.dt`.  Trigger
+  `project.remap_all_data_to_dt(new_dt)` there too (with the same
+  confirmation dialog before remapping other data).
+
+
+TESTS
+-----
+Add to tests/test_project.py:
+
+    def test_remap_all_data_to_dt_remaps_stims_and_traces():
+        project = Project()
+        # add a stim at 1 ms and a trace at 1 ms
+        # call remap_all_data_to_dt(0.0005)
+        # assert stim.dt == 0.0005, trace.dt == 0.0005, project.dt == 0.0005
+        # assert sample counts doubled (within ±1 for rounding)
+
+    def test_add_stim_array_raises_on_dt_mismatch():
+        project = Project()
+        project.dt = 0.001
+        stim = StimArray(..., dt=0.0005)
+        with pytest.raises(ValueError, match="dt"):
+            project.add_stim_array(stim)
+
+    def test_add_data_to_experiment_raises_on_dt_mismatch():
+        ...same pattern for TraceData...
+
+Add to tests/test_igor_import_dialog.py and
+         tests/test_igor_trace_import_dialog.py:
+
+    def test_import_at_different_dt_offers_remap_and_remaps_on_yes():
+        # project has existing stim at 1 ms
+        # load a .ibw at 0.5 ms, check source grid checkbox
+        # monkeypatch QMessageBox.question → Yes
+        # import → assert project.dt == 0.0005
+        #           assert all stim arrays at 0.0005
+        #           assert imported trace at 0.0005
+
+    def test_import_at_different_dt_aborts_on_no():
+        # same setup, monkeypatch question → No
+        # _import_file() returns without modifying project
+        # assert project.dt unchanged
+
+
+IO / SERIALISATION (src/neuroseq/io.py)
+---------------------------------------
+`project.dt` must survive save/load.  Add it to the JSON metadata block
+written in `io.py` and read it back on load.  Default to
+`NEUROSEQ_IGOR_TARGET_DT_SECONDS` if the field is absent (backward compat
+with existing .nseq files).
+
+
+HOW TO VERIFY
+-------------
+    cd /mnt/live3/svintila/neuroseq
+    .venv/bin/python -m pytest tests/test_igor_trace_import_dialog.py \
+        tests/test_importer_igor2.py tests/test_gui.py -v
+    .venv/bin/python -m pytest          # full suite
+    .venv/bin/python -m ruff check src/neuroseq/igor_trace_import_dialog.py \
+        src/neuroseq/importer_igor2.py src/neuroseq/gui.py \
+        tests/test_igor_trace_import_dialog.py tests/test_gui.py
+    .venv/bin/python -m mypy --ignore-missing-imports \
+        src/neuroseq/igor_trace_import_dialog.py src/neuroseq/importer_igor2.py \
+        src/neuroseq/gui.py
+
+Manual smoke test:
+    .venv/bin/python -m neuroseq
+    → File → Import data → Import trace → Import patch clamp
+      * Pre-dialog must show CC/VC convention note above "Import from:" combobox.
+      * Selecting "Igor2" must open IgorTraceImportDialog (not PatchClampImportDialog).
+    → Load a .pxp file; import two waves; verify dialog stays open between imports,
+      ✓ markers appear, Cancel button relabels to Close, Close produces Accepted.
+    → Check that imported traces appear in the Neuron data dropdown as
+      "ExperimentName :: TraceName".
+    → Verify spike detection checkbox adds SpikeData visible in the Spike data
+      dropdown.

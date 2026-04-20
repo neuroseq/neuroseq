@@ -4,6 +4,7 @@ import os
 import pathlib
 import sys
 from collections.abc import Callable
+from collections.abc import Generator
 from typing import Any
 
 if sys.platform.startswith("linux"):
@@ -39,6 +40,7 @@ from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.utils import init_brian2_logging
 
 b2.prefs.codegen.target = "numpy"
+b2.prefs.codegen.runtime.cython.cache_dir = "/tmp/neuroseq-brian2-cython-cache"
 
 
 def pytest_addoption(parser):
@@ -139,6 +141,24 @@ def qmessagebox_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
 @pytest.fixture(autouse=True)
 def reduce_brian2_logging_verbosity() -> None:
     init_brian2_logging()
+
+
+@pytest.fixture(scope="session")
+def brian2_cython_cache_dir(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> pathlib.Path:
+    return tmp_path_factory.mktemp("brian2_cython_cache")
+
+
+@pytest.fixture(autouse=True)
+def isolate_brian2_codegen_state(
+    brian2_cython_cache_dir: pathlib.Path,
+) -> Generator[None, None, None]:
+    b2.prefs.codegen.target = "numpy"
+    b2.prefs.codegen.runtime.cython.cache_dir = str(brian2_cython_cache_dir)
+    yield
+    b2.prefs.codegen.target = "numpy"
+    b2.prefs.codegen.runtime.cython.cache_dir = str(brian2_cython_cache_dir)
 
 
 @pytest.fixture(autouse=True)

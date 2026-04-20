@@ -16,6 +16,7 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 import neuroseq
+from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.example_projects import default_project
@@ -122,6 +123,11 @@ def _make_spike_export_gui(
         (
             "btn_import_trace_patchclamp_clicked",
             "Igor2",
+            "btn_import_igor2_trace_clicked",
+        ),
+        (
+            "btn_import_trace_patchclamp_clicked",
+            "NumPy (.npy)",
             "btn_import_patchclamp_data_clicked",
         ),
         (
@@ -171,6 +177,11 @@ def test_gui_pre_dialog_wrapper_calls_inner_handler_on_accept(
         (
             "btn_import_trace_patchclamp_clicked",
             "Igor2",
+            "btn_import_igor2_trace_clicked",
+        ),
+        (
+            "btn_import_trace_patchclamp_clicked",
+            "NumPy (.npy)",
             "btn_import_patchclamp_data_clicked",
         ),
         (
@@ -218,6 +229,7 @@ def test_patchclamp_pre_dialogs_include_cc_vc_convention(
 
     fake_gui: Any = SimpleNamespace(
         btn_import_igor2_wave_clicked=lambda: None,
+        btn_import_igor2_trace_clicked=lambda: None,
         btn_import_patchclamp_data_clicked=lambda: None,
     )
 
@@ -927,6 +939,197 @@ def test_gui_import_igor2_wave_updates_selected_stim(
 
     assert fake_gui.cmb_stim.currentText() == "igor_wave"
     assert "igor_wave" in project.stim_arrays
+
+
+def test_gui_import_igor2_trace_updates_selected_trace(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    import neuroseq.igor_trace_import_dialog
+
+    project = Project()
+    captured_data: list[TraceData | None] = []
+    trace_widget = SimpleNamespace(n_neurons=0)
+
+    def _set_trace_data(data: TraceData | None) -> None:
+        captured_data.append(data)
+        trace_widget.n_neurons = 0 if data is None else int(np.max(data.indices)) + 1
+
+    trace_widget.set_data = _set_trace_data
+
+    class MockIgorTraceImportDialog:
+        def __init__(self, dialog_project: Project, parent=None) -> None:
+            assert dialog_project is project
+            self.project = dialog_project
+            self.selected_experiment_name = "Experiment A"
+            self.selected_trace_name = "Igor Trace"
+
+        def exec(self) -> int:
+            self.project.add_experiment(
+                Experiment(
+                    name="Experiment A",
+                    duration=0.002,
+                    timepoints=[],
+                    data=[
+                        TraceData(
+                            name="Igor Trace",
+                            traces=np.array([[1.0, 2.0]], dtype=np.float32),
+                            indices=np.array([0], dtype=np.uint32),
+                            units="mV",
+                            dt=0.001,
+                        )
+                    ],
+                )
+            )
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    class FakeComboBox:
+        def __init__(self) -> None:
+            self._items: list[str] = []
+            self._current_text = ""
+
+        def clear(self) -> None:
+            self._items = []
+            self._current_text = ""
+
+        def addItems(self, items: list[str]) -> None:
+            self._items.extend(items)
+
+        def setCurrentText(self, text: str) -> None:
+            self._current_text = text
+
+        def currentText(self) -> str:
+            return self._current_text
+
+    trace_combo = FakeComboBox()
+
+    def _update_project(updated_project: Project) -> None:
+        trace_combo.clear()
+        trace_combo.addItems(updated_project.get_data_names(TraceData))
+
+    fake_gui: Any = SimpleNamespace(
+        project=project,
+        cmb_trace=trace_combo,
+        trace_widget=trace_widget,
+        update_project=_update_project,
+        _focus_neuron_range=lambda n_neurons: None,
+    )
+    fake_gui._apply_trace_selection = lambda cmb_name: Gui._apply_trace_selection(  # type: ignore[attr-defined]
+        fake_gui, cmb_name
+    )
+
+    monkeypatch.setattr(
+        neuroseq.igor_trace_import_dialog,
+        "IgorTraceImportDialog",
+        MockIgorTraceImportDialog,
+    )
+    Gui.btn_import_igor2_trace_clicked(fake_gui)
+
+    assert fake_gui.cmb_trace.currentText() == "Experiment A :: Igor Trace"
+    assert "Experiment A" in project.experiments
+    assert project.stim_arrays == {}
+    assert captured_data[-1] is not None
+    assert captured_data[-1].name == "Igor Trace"
+
+
+def test_gui_import_igor2_trace_refreshes_existing_selected_trace_plot(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    import neuroseq.igor_trace_import_dialog
+
+    project = Project()
+    project.add_experiment(
+        Experiment(
+            name="Experiment A",
+            duration=0.002,
+            timepoints=[],
+            data=[
+                TraceData(
+                    name="Igor Trace",
+                    traces=np.array([[1.0, 2.0]], dtype=np.float32),
+                    indices=np.array([0], dtype=np.uint32),
+                    units="mV",
+                    dt=0.001,
+                )
+            ],
+        )
+    )
+
+    class MockIgorTraceImportDialog:
+        def __init__(self, dialog_project: Project, parent=None) -> None:
+            assert dialog_project is project
+            self.project = dialog_project
+            self.selected_experiment_name = "Experiment A"
+            self.selected_trace_name = "Igor Trace"
+
+        def exec(self) -> int:
+            trace_data = self.project.get_data("Experiment A :: Igor Trace", TraceData)
+            assert trace_data is not None
+            trace_data.traces = np.array(
+                [[1.0, 2.0], [3.0, 4.0]],
+                dtype=np.float32,
+            )
+            trace_data.indices = np.array([0, 5], dtype=np.uint32)
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    class FakeComboBox:
+        def __init__(self, initial_text: str) -> None:
+            self._items: list[str] = []
+            self._current_text = initial_text
+
+        def clear(self) -> None:
+            self._items = []
+
+        def addItems(self, items: list[str]) -> None:
+            self._items.extend(items)
+
+        def setCurrentText(self, text: str) -> None:
+            self._current_text = text
+
+        def currentText(self) -> str:
+            return self._current_text
+
+    captured_data: list[TraceData | None] = []
+    focus_calls: list[int] = []
+    trace_combo = FakeComboBox("Experiment A :: Igor Trace")
+    trace_widget = SimpleNamespace(n_neurons=0)
+
+    def _set_trace_data_2(data: TraceData | None) -> None:
+        captured_data.append(data)
+        trace_widget.n_neurons = 0 if data is None else int(np.max(data.indices)) + 1
+
+    trace_widget.set_data = _set_trace_data_2
+
+    def _update_project(updated_project: Project) -> None:
+        trace_combo.clear()
+        trace_combo.addItems(updated_project.get_data_names(TraceData))
+
+    fake_gui: Any = SimpleNamespace(
+        project=project,
+        cmb_trace=trace_combo,
+        trace_widget=trace_widget,
+        update_project=_update_project,
+        _focus_neuron_range=lambda n_neurons: focus_calls.append(n_neurons),
+    )
+    fake_gui._apply_trace_selection = lambda cmb_name: Gui._apply_trace_selection(  # type: ignore[attr-defined]
+        fake_gui, cmb_name
+    )
+
+    monkeypatch.setattr(
+        neuroseq.igor_trace_import_dialog,
+        "IgorTraceImportDialog",
+        MockIgorTraceImportDialog,
+    )
+
+    Gui.btn_import_igor2_trace_clicked(fake_gui)
+
+    assert fake_gui.cmb_trace.currentText() == "Experiment A :: Igor Trace"
+    assert captured_data[-1] is not None
+    assert captured_data[-1].traces.shape == (2, 2)
+    np.testing.assert_array_equal(
+        captured_data[-1].indices,
+        np.array([0, 5], dtype=np.uint32),
+    )
+    assert focus_calls[-1] == 6
 
 
 def test_gui_imported_igor_stim_can_be_edited_by_click(

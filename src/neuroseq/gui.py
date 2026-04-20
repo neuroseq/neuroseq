@@ -886,6 +886,22 @@ class Gui(QtWidgets.QMainWindow):
             if dialog.selected_stim_name:
                 self.cmb_stim.setCurrentText(dialog.selected_stim_name)
 
+    def btn_import_igor2_trace_clicked(self) -> None:
+        from neuroseq.igor_trace_import_dialog import IgorTraceImportDialog
+
+        dialog = IgorTraceImportDialog(self.project, parent=self)
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            self.update_project(self.project)
+            if dialog.selected_trace_name:
+                combo_label = (
+                    f"{dialog.selected_experiment_name} :: {dialog.selected_trace_name}"
+                )
+                self.cmb_trace.setCurrentText(combo_label)
+                # update_project() clears the trace widget; if the combo label did
+                # not change (for example importing into the currently selected
+                # TraceData), currentTextChanged will not fire, so refresh explicitly.
+                self._apply_trace_selection(combo_label)
+
     def _delete_cellpose_data(self) -> None:
         """Remove stored cellpose data from both GUI and project."""
         self.last_cellpose_import = None
@@ -1004,8 +1020,8 @@ class Gui(QtWidgets.QMainWindow):
         Convention:
           Current Clamp (CC) -> recorded signal is voltage (mV)
           Voltage Clamp (VC) -> recorded signal is current (pA)
-        The underlying PatchClampImportDialog handles the data; the mode is
-        determined by the units stored in the imported TraceData.
+        Igor2 routes to the Igor trace importer; NumPy routes to the existing
+        PatchClampImportDialog.
         """
         software, ok = QtWidgets.QInputDialog.getItem(
             self,
@@ -1017,13 +1033,15 @@ class Gui(QtWidgets.QMainWindow):
                 "\n"
                 "Import from:"
             ),
-            ["Igor2"],
+            ["Igor2", "NumPy (.npy)"],
             0,
             False,
         )
         if not ok:
             return
         if software == "Igor2":
+            self.btn_import_igor2_trace_clicked()
+        elif software == "NumPy (.npy)":
             self.btn_import_patchclamp_data_clicked()
 
     # Export wrappers

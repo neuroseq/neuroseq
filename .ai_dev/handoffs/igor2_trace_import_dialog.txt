@@ -1,0 +1,813 @@
+HANDOFF: Igor2-aware trace import dialog
+=========================================
+Branch: import_igor2
+Repo:   /mnt/live3/svintila/neuroseq
+Date:   2026-04-20
+
+
+PROBLEM
+-------
+Today `File → Import data → Import trace → Import patch clamp` asks the
+user to choose "Igor2" but then opens `PatchClampImportDialog`, which
+only reads `.npy` files. The CC/VC convention note we just added to the
+pre-dialog reinforces the expectation that Igor .ibw/.pxp/.csv should
+work here the same way they do for stimuli — and they don't.
+
+The stimulus side (`File → Import data → Import stimulus → Import patch
+clamp`) already has a fully-featured Igor2 dialog — `IgorImportDialog` —
+with `.ibw`/`.pxp`/`.csv` loading, tolerant packed-experiment scanning,
+per-wave picker, dt adjustment, and multi-wave "stay open until Close"
+behaviour. We want the trace side to behave the same way, routed to
+`TraceData` / `Experiment` instead of `StimArray`.
+
+
+TASK OVERVIEW
+-------------
+1. Add a new dialog `IgorTraceImportDialog` in
+   `src/neuroseq/igor_trace_import_dialog.py` that mirrors
+   `IgorImportDialog`'s UX and flow, but imports each wave as a
+   `TraceData` inside an `Experiment`.
+2. Extend `importer_igor2.py` with two helpers parallel to the stim
+   helpers:
+       create_trace_data_from_igor_wave(...) -> TraceData
+       import_igor_wave_into_trace_data(...) -> IgorTraceImportReport
+3. Add a small helper on `Project` to append a `TraceData` / `SpikeData`
+   to an existing experiment while keeping `duration` and `timepoints`
+   coherent.
+4. Extend the `btn_import_trace_patchclamp_clicked` pre-dialog with a
+   second option "NumPy (.npy)" so the existing `PatchClampImportDialog`
+   stays reachable. "Igor2" routes to a new handler that opens the new
+   dialog.
+5. Add optional spike detection on import, off by default, driven by
+   the existing `PeakDetectionParams` defaults. No parameter spinners
+   in the UI — one checkbox only.
+
+
+SCOPE (explicit cuts)
+---------------------
+- Do NOT modify `IgorImportDialog`. The new dialog duplicates widget
+  layout code by design; refactoring a shared base class is a follow-up.
+- Do NOT modify `PatchClampImportDialog`. It remains the `.npy` path.
+- No exposed spike-detection parameters — the new dialog has exactly
+  one "Detect spikes (CC voltage traces only)" checkbox; defaults are
+  re-used from the existing `PatchClampImportDialog` values.
+- No Cellpose overlay integration in the new dialog.
+- No multi-neuron TraceData in a single import; each imported wave is a
+  single-neuron trace. Multiple waves can still land in the SAME
+  `TraceData` via Mode B (one wave per row, keyed by neuron ID).
+
+
+HOW TO RUN TESTS
+----------------
+    cd /mnt/live3/svintila/neuroseq
+    .venv/bin/python -m pytest tests/test_importer_igor2.py \
+        tests/test_igor_trace_import_dialog.py tests/test_gui.py -v
+    .venv/bin/python -m pytest        # full suite must stay green
+    .venv/bin/python -m ruff check src/neuroseq tests
+    .venv/bin/python -m mypy --ignore-missing-imports \
+        src/neuroseq/importer_igor2.py \
+        src/neuroseq/igor_trace_import_dialog.py \
+        src/neuroseq/project.py src/neuroseq/gui.py
+
+
+FILES TO CHANGE
+---------------
+  src/neuroseq/importer_igor2.py              — add trace helpers
+  src/neuroseq/igor_trace_import_dialog.py    — NEW dialog module
+  src/neuroseq/project.py                     — add_data_to_experiment helper
+  src/neuroseq/gui.py                         — pre-dialog + new inner handler
+  tests/test_importer_igor2.py                — unit tests for new helpers
+  tests/test_igor_trace_import_dialog.py      — NEW dialog tests
+  tests/test_gui.py                           — pre-dialog routing test cases
+
+DO NOT TOUCH:
+  src/neuroseq/igor_import_dialog.py
+  src/neuroseq/patchclamp_import_dialog.py
+  src/neuroseq/importer_patchclamp.py
+  Any file not explicitly listed above.
+
+
+=============================================================
+CHANGE 1 — src/neuroseq/importer_igor2.py
+=============================================================
+
+Add to the existing dataclasses block, next to `IgorImportReport`:
+
+    @dataclass
+    class IgorTraceImportReport:
+        target_experiment_name: str
+        target_trace_data_name: str
+        target_neuron_id: int
+        source_samples: int
+        imported_samples: int
+        source_dt: float
+        target_dt: float
+        resampled: bool
+        truncated_samples: int
+        spikes_detected: int | None = None  # None if detection was not run
+
+Add two new functions (place them AFTER the existing
+`import_igor_wave_into_stim_array` so the file's flow reads
+stim-helpers → trace-helpers).
+
+    def create_trace_data_from_igor_wave(
+        prepared_wave: PreparedIgorWave,
+        *,
+        trace_name: str,
+        neuron_id: int = 0,
+        units: str | None = None,
+    ) -> TraceData:
+        """Build a single-neuron TraceData from a prepared Igor wave."""
+        from neuroseq.data import TraceData  # local import to avoid cycles
+        trace_values = prepared_wave.values.reshape(1, -1).astype(np.float32, copy=False)
+        return TraceData(
+            name=trace_name,
+            traces=trace_values,
+            indices=np.array([int(neuron_id)], dtype=np.uint32),
+            units=(prepared_wave.units or "") if units is None else units,
+            dt=float(prepared_wave.target_dt),
+        )
+
+
+    def import_igor_wave_into_trace_data(
+        trace_data: TraceData,
+        prepared_wave: PreparedIgorWave,
+        *,
+        neuron_id: int,
+        replace_existing: bool = True,
+        extend_to_fit: bool = True,
+    ) -> IgorTraceImportReport:
+        """Append or replace a single neuron row in an existing TraceData.
+
+        - If ``neuron_id`` is already in ``trace_data.indices`` and
+          ``replace_existing`` is True, that row is overwritten with the
+          imported wave (with length handling per ``extend_to_fit``).
+        - If ``neuron_id`` is already present and ``replace_existing`` is
+          False, raises ValueError.
+        - If ``neuron_id`` is new, appends a new row. Existing rows and
+          the new row are padded to a common length (either the existing
+          length or the imported length, depending on ``extend_to_fit``).
+
+        Raises ValueError if the imported target_dt does not match
+        ``trace_data.dt`` (caller is expected to remap first — mirror the
+        stim behaviour where `update_stim_array_properties` is used
+        before calling `import_igor_wave_into_stim_array`).
+        """
+        if abs(float(trace_data.dt) - float(prepared_wave.target_dt)) > _DT_TOLERANCE_SECONDS:
+            raise ValueError(
+                "Target TraceData dt must match the imported wave target dt "
+                f"({float(trace_data.dt):.9f}s != {float(prepared_wave.target_dt):.9f}s)"
+            )
+
+        imported_values = prepared_wave.values.astype(np.float32, copy=False)
+        n_rows_existing, n_time_existing = trace_data.traces.shape
+        n_time_imported = int(imported_values.size)
+
+        indices_list = [int(x) for x in trace_data.indices.tolist()]
+        row_index = indices_list.index(int(neuron_id)) if int(neuron_id) in indices_list else -1
+
+        if row_index >= 0 and not replace_existing:
+            raise ValueError(
+                f"Neuron ID {neuron_id} already exists in trace data '{trace_data.name}'; "
+                "enable 'Replace existing' to overwrite it."
+            )
+
+        if extend_to_fit:
+            n_time_target = max(n_time_existing, n_time_imported)
+        else:
+            n_time_target = n_time_existing
+
+        if n_time_target != n_time_existing:
+            padded = np.zeros((n_rows_existing, n_time_target), dtype=trace_data.traces.dtype)
+            padded[:, :n_time_existing] = trace_data.traces
+            trace_data.traces = padded
+
+        truncated = max(0, n_time_imported - n_time_target)
+        written_len = min(n_time_imported, n_time_target)
+
+        new_row = np.zeros((1, n_time_target), dtype=trace_data.traces.dtype)
+        new_row[0, :written_len] = imported_values[:written_len]
+
+        if row_index >= 0:
+            trace_data.traces[row_index] = new_row[0]
+        else:
+            trace_data.traces = np.concatenate([trace_data.traces, new_row], axis=0)
+            trace_data.indices = np.concatenate(
+                [trace_data.indices, np.array([int(neuron_id)], dtype=np.uint32)]
+            )
+
+        logger.info(
+            "Imported Igor wave '%s' into TraceData '%s' neuron %d: %d -> %d samples",
+            prepared_wave.name,
+            trace_data.name,
+            int(neuron_id),
+            prepared_wave.original_sample_count,
+            written_len,
+        )
+        return IgorTraceImportReport(
+            target_experiment_name="",  # filled in by caller which knows the experiment
+            target_trace_data_name=trace_data.name,
+            target_neuron_id=int(neuron_id),
+            source_samples=prepared_wave.original_sample_count,
+            imported_samples=written_len,
+            source_dt=float(prepared_wave.source_dt),
+            target_dt=float(prepared_wave.target_dt),
+            resampled=prepared_wave.resampled,
+            truncated_samples=truncated,
+        )
+
+
+=============================================================
+CHANGE 2 — src/neuroseq/project.py
+=============================================================
+
+Add a new method alongside `add_experimental_data`:
+
+    def add_data_to_experiment(
+        self,
+        experiment_name: str,
+        data: TraceData | SpikeData | SynapseData,
+    ) -> None:
+        """Append a data entry to an existing experiment and keep
+        duration/timepoints coherent. If the experiment does not exist,
+        raises KeyError. If a TraceData extends beyond the current
+        experiment duration, bump duration and append the new timepoint.
+        """
+        experiment = self.experiments.get(experiment_name)
+        if experiment is None:
+            raise KeyError(f"Experiment '{experiment_name}' does not exist")
+        experiment.data.append(data)
+        if isinstance(data, TraceData):
+            new_duration = float(data.traces.shape[1] * data.dt)
+            if new_duration > experiment.duration:
+                experiment.duration = new_duration
+                if new_duration not in experiment.timepoints:
+                    experiment.timepoints.append(new_duration)
+        self.update_limits()
+
+Only add this helper — do NOT change `add_experiment` or
+`add_experimental_data`.
+
+
+=============================================================
+CHANGE 3 — src/neuroseq/igor_trace_import_dialog.py (NEW)
+=============================================================
+
+Create the file. Model its structure on `igor_import_dialog.py`. The
+overview below is a skeleton; fill in boilerplate by cross-referencing
+the stim dialog. Keep line-for-line similarity where behaviour is
+shared (file-picker, wave picker, `✓ ` bookkeeping, Cancel→Close
+promotion, last-import status line, skipped-record warning, multi-wave
+"stay open" flow in `_import_file`) so a future refactor can extract
+the common code cleanly.
+
+3a) Imports
+
+    from __future__ import annotations
+
+    import logging
+    from contextlib import suppress
+    from pathlib import Path
+    from typing import TYPE_CHECKING
+
+    import brian2.numpy_ as np
+    from qtpy import QtCore
+    from qtpy import QtWidgets
+    from qtpy.compat import getopenfilename
+
+    from neuroseq.data import SpikeData
+    from neuroseq.data import TraceData
+    from neuroseq.importer_igor2 import NEUROSEQ_IGOR_TARGET_DT_SECONDS
+    from neuroseq.importer_igor2 import IgorWave
+    from neuroseq.importer_igor2 import create_trace_data_from_igor_wave
+    from neuroseq.importer_igor2 import estimate_resampled_sample_count
+    from neuroseq.importer_igor2 import import_igor_wave_into_trace_data
+    from neuroseq.importer_igor2 import is_pxp_file
+    from neuroseq.importer_igor2 import load_igor_pxp_file
+    from neuroseq.importer_igor2 import load_igor_wave_file
+    from neuroseq.importer_igor2 import prepare_igor_wave_for_neuroseq
+    from neuroseq.importer_patchclamp import PeakDetectionParams
+    from neuroseq.spike_detection import detect_spikes_voltage_trace
+    from neuroseq.stim_timing import format_milliseconds
+    from neuroseq.stim_timing import stim_dt_matches
+
+    if TYPE_CHECKING:
+        from neuroseq.project import Project
+
+    _SPIKE_DETECTION_DEFAULTS = PeakDetectionParams(
+        peak_height=3.0,
+        peak_prominence=0.5,
+        min_interval=0.001,
+        peak_distance=10,
+        peak_width=1,
+    )
+
+3b) Class signature and state
+
+    class IgorTraceImportDialog(QtWidgets.QDialog):
+        """Import Igor2/Sutter patch-clamp TRACE waves into project experiments."""
+
+        def __init__(self, project: Project, parent: QtWidgets.QWidget | None = None) -> None:
+            super().__init__(parent)
+            self.logger = logging.getLogger(__name__)
+            self.project = project
+            self.loaded_wave: IgorWave | None = None
+            self.file_path: str = ""
+            self.selected_experiment_name: str = ""
+            self.selected_trace_name: str = ""
+            self._auto_trace_name = ""
+            self._auto_units = ""
+            self.loaded_pxp_waves: dict[str, IgorWave] = {}
+            self._imported_pxp_keys: set[str] = set()
+            self._had_successful_import: bool = False
+            self._setup_ui()
+
+3c) UI structure (top-to-bottom)
+
+    Title: "Import Igor2 Patch-Clamp Trace"
+    setModal(True), resize(860, 780).
+
+    Intro QLabel:
+        "Import Igor2/Sutter patch-clamp trace waves from .ibw, .pxp, or
+         the simple NeuroSeq-compatible .csv format. Each wave is stored
+         as a single-neuron TraceData inside an Experiment. Packed
+         experiments can contain many waves; import as many as you need
+         from the same file, then click Close when done."
+
+    Groups, in order (same widget names as the stim dialog where the
+    behaviour is identical — makes the similarity obvious):
+      1. self.file_group           — Browse button + file_label
+      2. self.wave_picker_group    — QListWidget self.pxp_wave_list
+                                     (hidden until a .pxp is loaded)
+      3. preview_group             — self.preview_text (QPlainTextEdit)
+      4. self.source_group         — self.source_dt_spin,
+                                     self.match_source_grid_checkbox,
+                                     self.target_dt_label
+      5. self.target_group         — radios + two inner groups (see 3d)
+      6. self.spike_group          — single checkbox (see 3e)
+      7. self.last_import_label    — green inline status line
+      8. self.info_label           — grey hint line
+      9. Button row — self.import_button + self.cancel_button
+
+    Keep the `#2a7a2a` green stylesheet and the grey style for
+    `info_label`, matching the stim dialog.
+
+3d) Target-mode widgets
+
+    self.create_new_radio = QRadioButton("Create new trace data")
+    self.import_existing_radio = QRadioButton("Import into existing trace data")
+
+    self.new_target_group = QGroupBox("New Trace Data")
+      form rows:
+        "Experiment:" → self.new_experiment_combo (QComboBox) with items
+            "(New experiment)" plus each existing experiment name; on
+            change toggles visibility of self.new_experiment_name_edit.
+        "New experiment name:" → self.new_experiment_name_edit
+            (visible only when "(New experiment)" is selected)
+        "Trace data name:" → self.new_trace_name_edit
+        "Neuron ID:" → self.new_neuron_id_spin (int 0..10_000, default 0)
+        "Units:" → self.new_units_edit
+
+    self.existing_target_group = QGroupBox("Existing Trace Data")
+      form rows:
+        "Experiment:" → self.existing_experiment_combo
+        "Trace data:"  → self.existing_trace_combo
+                         (populated when the experiment combo changes;
+                          only TraceData entries within the selected
+                          experiment are listed)
+        "Target neuron ID:" → self.existing_neuron_id_spin
+        "Extend target trace data to fit imported duration" checkbox
+        "Replace existing row with the same neuron ID" checkbox
+          (default checked; when unchecked and the ID already exists,
+           import fails cleanly via `import_igor_wave_into_trace_data`'s
+           ValueError)
+
+    Gating:
+    - At __init__, if the project has no experiments containing at
+      least one TraceData, disable `import_existing_radio` and force
+      `create_new_radio`.
+    - Re-run this gating from `_populate_target_experiments()` after
+      every successful import, since a freshly-created trace data may
+      unlock the existing-target mode for the NEXT wave.
+
+3e) Spike-detection widgets
+
+    self.spike_group = QGroupBox("Spike detection")
+    self.spike_detect_checkbox = QCheckBox(
+        "Detect spikes (CC voltage traces only — leave unchecked for VC current)"
+    )
+    self.spike_detect_checkbox.setChecked(False)
+    self.spike_detect_checkbox.setToolTip(
+        "If enabled, detected spikes are stored as SpikeData in the same experiment. "
+        "Uses the same default parameters as the NumPy (.npy) patch-clamp importer."
+    )
+    spike_layout = QVBoxLayout(self.spike_group)
+    spike_layout.addWidget(self.spike_detect_checkbox)
+
+3f) File loading
+
+    Reuse exactly the same file-picker filter string and branching as
+    `IgorImportDialog._load_file` / `_load_pxp_file`, including:
+    - IgorPxpLoadReport handling with the skipped-records warning
+    - single-wave auto-select when the .pxp contains one wave
+    - clearing `_imported_pxp_keys` and `last_import_label` on each new
+      file load
+    - `current_item.text().removeprefix("✓ ")` when reading the selected
+      wave path key
+
+3g) Import flow (`_import_file`)
+
+    Structure the method as:
+
+        if self.loaded_wave is None:
+            return
+
+        try:
+            target_dt = self._target_dt_seconds()
+            prepared_wave = prepare_igor_wave_for_neuroseq(
+                self.loaded_wave,
+                source_dt_override=float(self.source_dt_spin.value()),
+                target_dt=target_dt,
+            )
+
+            if self.create_new_radio.isChecked():
+                # Mode A — create new TraceData, either in a new or
+                # existing experiment.
+                experiment_name = self._resolve_new_target_experiment_name()
+                trace_name = self.new_trace_name_edit.text().strip()
+                if not trace_name:
+                    raise ValueError("Trace data name cannot be empty")
+                neuron_id = int(self.new_neuron_id_spin.value())
+                units = self.new_units_edit.text().strip()
+
+                trace_data = create_trace_data_from_igor_wave(
+                    prepared_wave,
+                    trace_name=trace_name,
+                    neuron_id=neuron_id,
+                    units=units,
+                )
+                self._commit_new_trace_data(experiment_name, trace_data)
+                self.selected_experiment_name = experiment_name
+                self.selected_trace_name = trace_name
+                report_headline = (
+                    f"Imported '{prepared_wave.name}' into new trace data "
+                    f"'{trace_name}' in experiment '{experiment_name}'."
+                )
+
+            else:
+                # Mode B — append/replace a row in an existing TraceData.
+                experiment_name = self.existing_experiment_combo.currentText()
+                trace_name = self.existing_trace_combo.currentText()
+                target_trace = self._resolve_existing_trace_data(
+                    experiment_name, trace_name
+                )
+                if target_trace is None:
+                    raise ValueError("No target trace data selected")
+
+                if not stim_dt_matches(float(target_trace.dt), prepared_wave.target_dt):
+                    # Mirror the stim dialog's remap-confirm flow.
+                    if not self._confirm_and_remap_trace_dt(
+                        target_trace, experiment_name, prepared_wave.target_dt
+                    ):
+                        return
+                    target_trace = self._resolve_existing_trace_data(
+                        experiment_name, trace_name
+                    )
+
+                report = import_igor_wave_into_trace_data(
+                    target_trace,
+                    prepared_wave,
+                    neuron_id=int(self.existing_neuron_id_spin.value()),
+                    replace_existing=self.existing_replace_checkbox.isChecked(),
+                    extend_to_fit=self.existing_extend_checkbox.isChecked(),
+                )
+                report.target_experiment_name = experiment_name
+                self.selected_experiment_name = experiment_name
+                self.selected_trace_name = trace_name
+                report_headline = (
+                    f"Imported '{prepared_wave.name}' into '{trace_name}' "
+                    f"in experiment '{experiment_name}' at neuron {report.target_neuron_id}."
+                )
+
+            # Optional spike detection — same for both modes.
+            spikes_detected: int | None = None
+            if self.spike_detect_checkbox.isChecked():
+                spikes_detected = self._run_spike_detection(
+                    prepared_wave,
+                    experiment_name=self.selected_experiment_name,
+                    neuron_id=(
+                        int(self.new_neuron_id_spin.value())
+                        if self.create_new_radio.isChecked()
+                        else int(self.existing_neuron_id_spin.value())
+                    ),
+                )
+
+            # Multi-wave branching — exactly like the stim dialog.
+            is_pxp_session = bool(self.loaded_pxp_waves)
+            status_text = report_headline
+            if spikes_detected is not None:
+                status_text += f" Detected {spikes_detected} spike(s)."
+
+            if is_pxp_session:
+                current_item = self.pxp_wave_list.currentItem()
+                if current_item is not None:
+                    path_key = current_item.text().removeprefix("✓ ")
+                    self._imported_pxp_keys.add(path_key)
+                    current_item.setText(f"✓ {path_key}")
+                    current_item.setFlags(
+                        current_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable
+                    )
+                self.last_import_label.setText(status_text)
+                self.pxp_wave_list.clearSelection()
+                self.pxp_wave_list.setCurrentItem(None)
+                self.loaded_wave = None
+                self.new_trace_name_edit.clear()
+                self.new_units_edit.clear()
+                self._auto_trace_name = ""
+                self._auto_units = ""
+                self._populate_target_experiments()  # refresh combos
+                self._had_successful_import = True
+                self._promote_cancel_to_close()
+                self._update_preview()
+                self._update_import_button_state()
+            else:
+                QtWidgets.QMessageBox.information(
+                    self, "Import Complete", status_text,
+                )
+                self.accept()
+
+        except Exception as exc:
+            self.logger.exception("Failed to import Igor trace wave")
+            QtWidgets.QMessageBox.critical(
+                self, "Import Error",
+                f"Failed to import Igor trace wave:\n{exc}",
+            )
+
+3h) Helper methods to implement on the class
+
+    def _resolve_new_target_experiment_name(self) -> str:
+        current = self.new_experiment_combo.currentText()
+        if current == "(New experiment)":
+            name = self.new_experiment_name_edit.text().strip()
+            if not name:
+                raise ValueError("Experiment name cannot be empty")
+            if name in self.project.experiments:
+                raise ValueError(f"Experiment '{name}' already exists")
+            return name
+        return current
+
+    def _commit_new_trace_data(
+        self, experiment_name: str, trace_data: TraceData
+    ) -> None:
+        if experiment_name in self.project.experiments:
+            # Disallow duplicate TraceData name within the experiment.
+            existing_names = [
+                getattr(d, "name", "")
+                for d in self.project.experiments[experiment_name].data
+            ]
+            if trace_data.name in existing_names:
+                raise ValueError(
+                    f"Trace data '{trace_data.name}' already exists "
+                    f"in experiment '{experiment_name}'"
+                )
+            self.project.add_data_to_experiment(experiment_name, trace_data)
+        else:
+            self.project.add_experimental_data(experiment_name, [trace_data])
+
+    def _resolve_existing_trace_data(
+        self, experiment_name: str, trace_name: str
+    ) -> TraceData | None:
+        experiment = self.project.experiments.get(experiment_name)
+        if experiment is None:
+            return None
+        for data in experiment.data:
+            if isinstance(data, TraceData) and data.name == trace_name:
+                return data
+        return None
+
+    def _confirm_and_remap_trace_dt(
+        self, target_trace: TraceData, experiment_name: str, new_dt: float
+    ) -> bool:
+        """Mirror the stim dialog's dt-remap confirm. Because TraceData
+        has no project-level `update_*_properties` helper, do the remap
+        in place: resample existing rows with zero-order hold to the new
+        dt. Users who dislike the change can click No to abort."""
+        msg = (
+            "Changing the stimulation timestep will remap trace data "
+            f"'{target_trace.name}' from "
+            f"{format_milliseconds(float(target_trace.dt) * 1000.0)} ms "
+            f"to {format_milliseconds(new_dt * 1000.0)} ms. "
+            "Trace timing may shift by up to one sample. Continue?"
+        )
+        answer = QtWidgets.QMessageBox.question(
+            self, "Change trace data timestep", msg,
+            QtWidgets.QMessageBox.StandardButton.Yes
+            | QtWidgets.QMessageBox.StandardButton.No,
+        )
+        if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+            return False
+        # Zero-order-hold remap of every existing row.
+        from neuroseq.importer_igor2 import resample_wave_zero_order_hold
+        new_rows = [
+            resample_wave_zero_order_hold(
+                target_trace.traces[i],
+                source_dt=float(target_trace.dt),
+                target_dt=float(new_dt),
+            )
+            for i in range(target_trace.traces.shape[0])
+        ]
+        target_trace.traces = np.stack(new_rows, axis=0).astype(np.float32, copy=False)
+        target_trace.dt = float(new_dt)
+        return True
+
+    def _run_spike_detection(
+        self,
+        prepared_wave: PreparedIgorWave,
+        *,
+        experiment_name: str,
+        neuron_id: int,
+    ) -> int:
+        """Run detect_spikes_voltage_trace with defaults; append a
+        SpikeData to the same experiment; return detected count."""
+        spike_data = detect_spikes_voltage_trace(
+            prepared_wave.values,
+            neuron_id=neuron_id,
+            dt=float(prepared_wave.target_dt),
+            detection_method="peak",
+            peak_height_threshold=_SPIKE_DETECTION_DEFAULTS.peak_height,
+            peak_prominence=_SPIKE_DETECTION_DEFAULTS.peak_prominence,
+            min_spike_interval=_SPIKE_DETECTION_DEFAULTS.min_interval,
+            peak_distance=_SPIKE_DETECTION_DEFAULTS.peak_distance,
+            peak_width=_SPIKE_DETECTION_DEFAULTS.peak_width,
+        )
+        spike_data.name = "Igor Patch Clamp Spikes"
+        self.project.add_data_to_experiment(experiment_name, spike_data)
+        return int(len(spike_data.spike_times))
+
+3i) Miscellaneous
+
+    - Copy `_promote_cancel_to_close`, `_on_pxp_wave_selected`,
+      `_update_import_button_state`, and the dt/preview helpers from
+      `IgorImportDialog` verbatim (rename `self.new_name_edit` to
+      `self.new_trace_name_edit`, `self.target_combo` to
+      `self.existing_trace_combo`, etc.).
+    - `_populate_target_experiments()` must repopulate both combos AND
+      the existing-mode gate. Call it on dialog open and after every
+      successful import.
+    - The preview-text builder mirrors the stim dialog. Replace
+      "target stim array" mentions with "target trace data".
+
+
+=============================================================
+CHANGE 4 — src/neuroseq/gui.py
+=============================================================
+
+4a) Add a new inner handler directly above or below
+    `btn_import_igor2_wave_clicked`:
+
+        def btn_import_igor2_trace_clicked(self) -> None:
+            from neuroseq.igor_trace_import_dialog import IgorTraceImportDialog
+            dialog = IgorTraceImportDialog(self.project, parent=self)
+            if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+                self.update_project(self.project)
+                if dialog.selected_trace_name:
+                    # cmb_trace entries use "ExperimentName :: TraceDataName"
+                    # — look at how _update_combo_box populates it and
+                    # match the format when setting currentText.
+                    combo_label = (
+                        f"{dialog.selected_experiment_name} :: "
+                        f"{dialog.selected_trace_name}"
+                    )
+                    self.cmb_trace.setCurrentText(combo_label)
+
+    The `::` separator is the convention in this codebase — confirm by
+    reading `gui.py:_update_combo_box` and `gui.py:820-830` where
+    `cmb_trace` is iterated.
+
+4b) Extend the pre-dialog in `btn_import_trace_patchclamp_clicked`:
+
+        software, ok = QtWidgets.QInputDialog.getItem(
+            self,
+            "Import patch clamp traces",
+            (
+                "Patch-clamp convention:\n"
+                "  • Current Clamp (CC): the recorded VOLTAGE is the trace\n"
+                "  • Voltage Clamp (VC): the recorded CURRENT is the trace\n"
+                "\n"
+                "Import from:"
+            ),
+            ["Igor2", "NumPy (.npy)"],
+            0,
+            False,
+        )
+        if not ok:
+            return
+        if software == "Igor2":
+            self.btn_import_igor2_trace_clicked()
+        elif software == "NumPy (.npy)":
+            self.btn_import_patchclamp_data_clicked()
+
+
+=============================================================
+CHANGE 5 — tests
+=============================================================
+
+5a) tests/test_importer_igor2.py — add unit tests for the two new
+    helpers. Follow the style of the existing stim-side unit tests.
+
+    - test_create_trace_data_from_igor_wave_produces_single_neuron_row
+    - test_import_igor_wave_into_trace_data_appends_new_neuron
+    - test_import_igor_wave_into_trace_data_replaces_existing_neuron_when_allowed
+    - test_import_igor_wave_into_trace_data_rejects_duplicate_neuron_without_replace
+    - test_import_igor_wave_into_trace_data_extends_time_axis
+    - test_import_igor_wave_into_trace_data_rejects_mismatched_dt
+
+5b) tests/test_igor_trace_import_dialog.py — NEW. Mirror
+    tests/test_igor_import_dialog.py. Essential cases:
+
+    - test_trace_dialog_creates_new_trace_in_new_experiment
+    - test_trace_dialog_creates_new_trace_in_existing_experiment
+    - test_trace_dialog_imports_into_existing_trace_data
+    - test_trace_dialog_loads_pxp_and_shows_wave_picker
+    - test_trace_dialog_stays_open_for_multiple_pxp_imports
+    - test_trace_dialog_reimport_same_pxp_wave_is_blocked
+    - test_trace_dialog_warns_when_pxp_records_are_skipped
+    - test_trace_dialog_optional_spike_detection_adds_spikedata
+      (checkbox on; after import, project.experiments[expname].data
+       contains a SpikeData alongside the TraceData)
+    - test_trace_dialog_spike_detection_off_adds_no_spikedata
+
+    Reuse the monkey-patching pattern from the stim dialog tests
+    (`monkeypatch.setattr("neuroseq.igor_trace_import_dialog.load_igor_pxp_file",
+    lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]))`).
+
+5c) tests/test_gui.py — extend the parametrised pre-dialog routing
+    tests to cover the new options. Add two entries to both
+    `test_gui_pre_dialog_wrapper_calls_inner_handler_on_accept` and
+    `test_gui_pre_dialog_wrapper_does_nothing_on_cancel`:
+
+        ("btn_import_trace_patchclamp_clicked", "Igor2",
+         "btn_import_igor2_trace_clicked"),
+        ("btn_import_trace_patchclamp_clicked", "NumPy (.npy)",
+         "btn_import_patchclamp_data_clicked"),
+
+    The existing ("Igor2", "btn_import_patchclamp_data_clicked") entry
+    must be removed or updated — it is now incorrect.
+
+
+HOW TO VERIFY LOCALLY
+---------------------
+1. Manual smoke against the real Cristina .pxp:
+
+       .venv/bin/python -m neuroseq
+       File → Import data → Import trace → Import patch clamp → Igor2 →
+         /mnt/live3/svintila/code_scraps/igor2_files/test_files/pxp_cristina/
+         drive-download-20260416T122331Z-3-001/251118_0.pxp
+
+   Expect:
+     - Same wave picker behaviour as the stim flow
+     - Importing a wave creates a new Experiment + TraceData
+     - ✓ marker + Cancel→Close behaviour identical to stim dialog
+     - Toggling "Detect spikes" produces a SpikeData alongside the trace
+       (visible in the spike panel after Close)
+
+2. Regression — NumPy (.npy) route still works:
+
+       File → Import data → Import trace → Import patch clamp → NumPy (.npy)
+     → opens the existing PatchClampImportDialog unchanged.
+
+3. Regression — stim flow unchanged. Spot check that
+   `IgorImportDialog`'s tests still pass (they should, no modifications).
+
+
+NOTES / GOTCHAS
+---------------
+- `project.add_data_to_experiment` mutates the experiment in place. Do
+  NOT add guard rails like "create experiment if missing" — that blurs
+  the intent. Raise KeyError on missing experiment and let the dialog
+  handle the New-vs-Existing branching itself.
+
+- The new dialog must NOT call `self.project.update_stim_array_properties`
+  — that's stim-only. Trace dt remap happens in
+  `_confirm_and_remap_trace_dt`, which mutates the TraceData in place
+  via zero-order hold. Do not try to add a
+  `Project.update_trace_data_properties` helper in this handoff.
+
+- `detect_spikes_voltage_trace` already exists in
+  `src/neuroseq/spike_detection.py`; use it directly — do not import
+  `import_patchclamp_data` (which wraps both trace construction and
+  spike detection).
+
+- Keep the dialog MODAL (`setModal(True)`) — same as the stim dialog.
+
+- Do not reintroduce the `"Import from: Igor2"` single-item combo once
+  you've added the second option. The pre-dialog's existing "Igor2"
+  branch routes to the new handler; the "NumPy (.npy)" branch preserves
+  the current path.
+
+- Pre-commit (ruff + mypy + prettier + nbstripout) must pass. Coverage
+  must remain ≥ 75% across the changed modules.
+
+- Docs update is out of scope for this handoff — we'll do a separate
+  docs pass after the implementation lands, so we can describe the
+  final UI accurately.

@@ -5,11 +5,15 @@ import importlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import brian2.numpy_ as np
 
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
+
+if TYPE_CHECKING:
+    from neuroseq.data import TraceData
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +54,20 @@ class IgorImportReport:
     target_dt: float
     resampled: bool
     truncated_samples: int
+
+
+@dataclass
+class IgorTraceImportReport:
+    target_experiment_name: str
+    target_trace_data_name: str
+    target_neuron_id: int
+    source_samples: int
+    imported_samples: int
+    source_dt: float
+    target_dt: float
+    resampled: bool
+    truncated_samples: int
+    spikes_detected: int | None = None
 
 
 @dataclass
@@ -574,4 +592,106 @@ def import_igor_wave_into_stim_array(
         target_dt=prepared_wave.target_dt,
         resampled=prepared_wave.resampled,
         truncated_samples=max(0, prepared_wave.values.shape[0] - target_timepoints),
+    )
+
+
+def create_trace_data_from_igor_wave(
+    prepared_wave: PreparedIgorWave,
+    *,
+    trace_name: str,
+    neuron_id: int = 0,
+    units: str | None = None,
+) -> TraceData:
+    """Build a single-neuron TraceData from a prepared Igor wave."""
+    from neuroseq.data import TraceData
+
+    trace_values = prepared_wave.values.reshape(1, -1).astype(np.float32, copy=False)
+    return TraceData(
+        name=trace_name,
+        traces=trace_values,
+        indices=np.array([int(neuron_id)], dtype=np.uint32),
+        units=(prepared_wave.units or "") if units is None else units,
+        dt=float(prepared_wave.target_dt),
+    )
+
+
+def import_igor_wave_into_trace_data(
+    trace_data: TraceData,
+    prepared_wave: PreparedIgorWave,
+    *,
+    neuron_id: int,
+    replace_existing: bool = True,
+    extend_to_fit: bool = True,
+) -> IgorTraceImportReport:
+    """Append or replace a single neuron row in an existing TraceData."""
+    if trace_data.traces.ndim != 2:
+        raise ValueError("Target TraceData must be 2-dimensional")
+    if (
+        abs(float(trace_data.dt) - float(prepared_wave.target_dt))
+        > _DT_TOLERANCE_SECONDS
+    ):
+        raise ValueError(
+            "Target TraceData dt must match the imported wave target dt "
+            f"({float(trace_data.dt):.9f}s != {float(prepared_wave.target_dt):.9f}s)"
+        )
+
+    imported_values = prepared_wave.values.astype(np.float32, copy=False)
+    n_rows_existing, n_time_existing = trace_data.traces.shape
+    n_time_imported = int(imported_values.size)
+
+    indices_list = [int(x) for x in trace_data.indices.tolist()]
+    row_index = (
+        indices_list.index(int(neuron_id)) if int(neuron_id) in indices_list else -1
+    )
+
+    if row_index >= 0 and not replace_existing:
+        raise ValueError(
+            f"Neuron ID {neuron_id} already exists in trace data '{trace_data.name}'; "
+            "enable 'Replace existing' to overwrite it."
+        )
+
+    if extend_to_fit:
+        n_time_target = max(n_time_existing, n_time_imported)
+    else:
+        n_time_target = n_time_existing
+
+    if n_time_target != n_time_existing:
+        padded = np.zeros(
+            (n_rows_existing, n_time_target), dtype=trace_data.traces.dtype
+        )
+        padded[:, :n_time_existing] = trace_data.traces
+        trace_data.traces = padded
+
+    truncated = max(0, n_time_imported - n_time_target)
+    written_len = min(n_time_imported, n_time_target)
+
+    new_row = np.zeros((1, n_time_target), dtype=trace_data.traces.dtype)
+    new_row[0, :written_len] = imported_values[:written_len]
+
+    if row_index >= 0:
+        trace_data.traces[row_index] = new_row[0]
+    else:
+        trace_data.traces = np.concatenate([trace_data.traces, new_row], axis=0)
+        trace_data.indices = np.concatenate(
+            [trace_data.indices, np.array([int(neuron_id)], dtype=np.uint32)]
+        )
+
+    logger.info(
+        "Imported Igor wave '%s' into TraceData '%s' neuron %d: %d -> %d samples",
+        prepared_wave.name,
+        trace_data.name,
+        int(neuron_id),
+        prepared_wave.original_sample_count,
+        written_len,
+    )
+    return IgorTraceImportReport(
+        target_experiment_name="",
+        target_trace_data_name=trace_data.name,
+        target_neuron_id=int(neuron_id),
+        source_samples=prepared_wave.original_sample_count,
+        imported_samples=written_len,
+        source_dt=float(prepared_wave.source_dt),
+        target_dt=float(prepared_wave.target_dt),
+        resampled=prepared_wave.resampled,
+        truncated_samples=truncated,
     )

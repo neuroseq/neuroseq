@@ -42,6 +42,15 @@ def test_igor_import_dialog_creates_new_stim_array(
     assert "import complete" in qmessagebox_calls[-1]["title"].lower()
 
 
+def test_igor_import_dialog_wraps_content_in_scroll_area(qtbot: QtBot) -> None:
+    dialog = IgorImportDialog(Project())
+    qtbot.addWidget(dialog)
+
+    assert isinstance(dialog.scroll_area, QtWidgets.QScrollArea)
+    assert dialog.scroll_area.widget() is not None
+    assert dialog.scroll_area.widgetResizable() is True
+
+
 def test_igor_import_dialog_imports_into_existing_stim_array(
     tmp_path: Path,
     qtbot: QtBot,
@@ -611,3 +620,109 @@ def test_igor_import_dialog_reimport_same_pxp_wave_is_blocked(
 
     assert dialog.pxp_wave_list.currentItem() is imported_wave_a_item
     assert dialog.import_button.isEnabled() is False
+
+
+def test_igor_import_dialog_offers_remap_on_dt_change_and_remaps_on_yes(
+    tmp_path: Path,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    """When a non-default dt is selected and the project has existing data,
+    a confirmation dialog must be shown and all data must be remapped on Yes."""
+    csv_path = tmp_path / "wave.csv"
+    csv_path.write_text("new_wave\n1.0\n2.0\n", encoding="utf-8")
+
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "existing",
+            StimType.External,
+            np.zeros((10, 1), dtype=np.float32),
+            "pA",
+            0.001,
+        )
+    )
+
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+
+    dialog = IgorImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(csv_path))
+    dialog.match_source_grid_checkbox.setChecked(True)
+    dialog.source_dt_spin.setValue(0.0005)
+    dialog._import_file()
+
+    assert project.dt == pytest.approx(0.0005)
+    # existing stim remapped: 10 samples at 1 ms → 20 samples at 0.5 ms
+    assert project.stim_arrays["existing"].dt == pytest.approx(0.0005)
+    assert project.stim_arrays["existing"].values.shape[0] == 20
+    assert "new_wave" in project.stim_arrays
+    assert project.stim_arrays["new_wave"].dt == pytest.approx(0.0005)
+
+
+def test_igor_import_dialog_aborts_import_on_remap_decline(
+    tmp_path: Path,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Declining the remap confirmation must leave the project untouched."""
+    csv_path = tmp_path / "wave.csv"
+    csv_path.write_text("new_wave\n1.0\n2.0\n", encoding="utf-8")
+
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "existing",
+            StimType.External,
+            np.zeros((10, 1), dtype=np.float32),
+            "pA",
+            0.001,
+        )
+    )
+
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.No,
+    )
+
+    dialog = IgorImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(csv_path))
+    dialog.match_source_grid_checkbox.setChecked(True)
+    dialog.source_dt_spin.setValue(0.0005)
+    dialog._import_file()
+
+    assert project.dt == pytest.approx(0.001)
+    assert "new_wave" not in project.stim_arrays
+    assert project.stim_arrays["existing"].dt == pytest.approx(0.001)
+    assert project.stim_arrays["existing"].values.shape[0] == 10
+
+
+def test_igor_import_dialog_no_remap_dialog_when_project_is_empty(
+    tmp_path: Path,
+    qtbot: QtBot,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    """Creating the first stim at a non-default dt must NOT show a remap dialog."""
+    csv_path = tmp_path / "wave.csv"
+    csv_path.write_text("wave\n1.0\n2.0\n3.0\n4.0\n", encoding="utf-8")
+
+    project = Project()
+
+    dialog = IgorImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(csv_path))
+    dialog.match_source_grid_checkbox.setChecked(True)
+    dialog.source_dt_spin.setValue(0.0005)
+    dialog._import_file()
+
+    assert project.dt == pytest.approx(0.0005)
+    assert "wave" in project.stim_arrays
+    question_calls = [c for c in qmessagebox_calls if c["name"] == "question"]
+    assert not question_calls

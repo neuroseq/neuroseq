@@ -54,7 +54,17 @@ class IgorImportDialog(QtWidgets.QDialog):
         self.setModal(True)
         self.resize(860, 700)
 
-        layout = QtWidgets.QVBoxLayout(self)
+        root_layout = QtWidgets.QVBoxLayout(self)
+        self.scroll_area = QtWidgets.QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        content_widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(content_widget)
+        self.scroll_area.setWidget(content_widget)
+        root_layout.addWidget(self.scroll_area)
 
         intro = QtWidgets.QLabel(
             "Import Igor2/Sutter stimulation waves from .ibw, .pxp, or the simple "
@@ -188,7 +198,7 @@ class IgorImportDialog(QtWidgets.QDialog):
         self.cancel_button.clicked.connect(self.reject)
         button_layout.addWidget(self.import_button)
         button_layout.addWidget(self.cancel_button)
-        layout.addLayout(button_layout)
+        root_layout.addLayout(button_layout)
 
         self._populate_target_stims()
         self._update_mode_state()
@@ -512,6 +522,26 @@ class IgorImportDialog(QtWidgets.QDialog):
                 source_dt_override=float(self.source_dt_spin.value()),
                 target_dt=target_dt,
             )
+
+            _dt_changed = not stim_dt_matches(target_dt, self.project.dt)
+            if _dt_changed:
+                affected = self.project.remappable_data_description(target_dt)
+                if affected:
+                    answer = QtWidgets.QMessageBox.question(
+                        self,
+                        "Change project sample interval",
+                        f"Importing at {format_milliseconds(target_dt * 1000.0)} ms "
+                        "will change the project sample interval from "
+                        f"{format_milliseconds(self.project.dt * 1000.0)} ms to "
+                        f"{format_milliseconds(target_dt * 1000.0)} ms and remap "
+                        f"{affected} using zero-order hold. Continue?",
+                        QtWidgets.QMessageBox.StandardButton.Yes
+                        | QtWidgets.QMessageBox.StandardButton.No,
+                    )
+                    if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                        return
+                self.project.remap_all_data_to_dt(target_dt)
+
             if self.create_new_radio.isChecked():
                 stim_name = self.new_name_edit.text().strip()
                 if not stim_name:
@@ -542,7 +572,7 @@ class IgorImportDialog(QtWidgets.QDialog):
                 target_stim = self._selected_stim_array()
                 if target_stim is None:
                     raise ValueError("No target stimulation data entity selected")
-                remapped_target_dt = False
+                remapped_target_dt = _dt_changed
                 if not stim_dt_matches(float(target_stim.dt), prepared_wave.target_dt):
                     continue_with_remap = QtWidgets.QMessageBox.question(
                         self,

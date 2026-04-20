@@ -11,10 +11,13 @@ from typing import cast
 import brian2.numpy_ as np
 import pytest
 
+from neuroseq.data import TraceData
 from neuroseq.importer_igor2 import IgorPxpLoadReport
 from neuroseq.importer_igor2 import IgorWave
 from neuroseq.importer_igor2 import create_stim_array_from_igor_wave
+from neuroseq.importer_igor2 import create_trace_data_from_igor_wave
 from neuroseq.importer_igor2 import import_igor_wave_into_stim_array
+from neuroseq.importer_igor2 import import_igor_wave_into_trace_data
 from neuroseq.importer_igor2 import is_pxp_file
 from neuroseq.importer_igor2 import load_igor_csv_file
 from neuroseq.importer_igor2 import load_igor_ibw_file
@@ -85,6 +88,32 @@ def test_create_stim_array_from_igor_wave_uses_single_neuron_column() -> None:
     assert stim_array.dt == pytest.approx(0.001)
 
 
+def test_create_trace_data_from_igor_wave_produces_single_neuron_row() -> None:
+    wave = IgorWave(
+        name="test_wave",
+        values=np.array([0.5, 1.5, 2.5], dtype=np.float32),
+        source_dt=0.001,
+        units="mV",
+        axis_units="s",
+        source_format="csv",
+    )
+
+    prepared = prepare_igor_wave_for_neuroseq(wave)
+    trace_data = create_trace_data_from_igor_wave(
+        prepared,
+        trace_name="imported_trace",
+        neuron_id=7,
+    )
+
+    assert isinstance(trace_data, TraceData)
+    assert trace_data.name == "imported_trace"
+    assert trace_data.traces.shape == (1, 3)
+    np.testing.assert_allclose(trace_data.traces[0], np.array([0.5, 1.5, 2.5]))
+    np.testing.assert_array_equal(trace_data.indices, np.array([7], dtype=np.uint32))
+    assert trace_data.units == "mV"
+    assert trace_data.dt == pytest.approx(0.001)
+
+
 def test_import_igor_wave_into_stim_array_replaces_target_column_and_extends() -> None:
     target_stim = StimArray(
         name="stimulus",
@@ -147,6 +176,163 @@ def test_import_igor_wave_into_stim_array_allows_matching_nondefault_dt() -> Non
     assert target_stim.dt == pytest.approx(0.0005)
     assert target_stim.values.shape == (3, 1)
     np.testing.assert_allclose(target_stim.values[:, 0], np.array([5.0, 6.0, 7.0]))
+
+
+def test_import_igor_wave_into_trace_data_appends_new_neuron() -> None:
+    trace_data = TraceData(
+        name="trace_data",
+        traces=np.array([[1.0, 2.0]], dtype=np.float32),
+        indices=np.array([0], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    wave = IgorWave(
+        name="test_wave",
+        values=np.array([5.0, 6.0], dtype=np.float32),
+        source_dt=0.001,
+        units="mV",
+        axis_units="s",
+        source_format="csv",
+    )
+    prepared = prepare_igor_wave_for_neuroseq(wave)
+
+    report = import_igor_wave_into_trace_data(
+        trace_data,
+        prepared,
+        neuron_id=5,
+        replace_existing=True,
+        extend_to_fit=True,
+    )
+
+    assert report.target_trace_data_name == "trace_data"
+    assert report.target_neuron_id == 5
+    assert report.imported_samples == 2
+    assert trace_data.traces.shape == (2, 2)
+    np.testing.assert_array_equal(trace_data.indices, np.array([0, 5], dtype=np.uint32))
+    np.testing.assert_allclose(trace_data.traces[1], np.array([5.0, 6.0]))
+
+
+def test_import_igor_wave_into_trace_data_replaces_existing_neuron_when_allowed() -> (
+    None
+):
+    trace_data = TraceData(
+        name="trace_data",
+        traces=np.array([[1.0, 2.0], [9.0, 9.0]], dtype=np.float32),
+        indices=np.array([0, 5], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    wave = IgorWave(
+        name="test_wave",
+        values=np.array([7.0, 8.0], dtype=np.float32),
+        source_dt=0.001,
+        units="mV",
+        axis_units="s",
+        source_format="csv",
+    )
+    prepared = prepare_igor_wave_for_neuroseq(wave)
+
+    report = import_igor_wave_into_trace_data(
+        trace_data,
+        prepared,
+        neuron_id=5,
+        replace_existing=True,
+        extend_to_fit=True,
+    )
+
+    assert report.imported_samples == 2
+    assert trace_data.traces.shape == (2, 2)
+    np.testing.assert_allclose(trace_data.traces[1], np.array([7.0, 8.0]))
+
+
+def test_import_igor_wave_into_trace_data_rejects_duplicate_neuron_without_replace() -> (
+    None
+):
+    trace_data = TraceData(
+        name="trace_data",
+        traces=np.array([[1.0, 2.0]], dtype=np.float32),
+        indices=np.array([5], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    wave = IgorWave(
+        name="test_wave",
+        values=np.array([7.0, 8.0], dtype=np.float32),
+        source_dt=0.001,
+        units="mV",
+        axis_units="s",
+        source_format="csv",
+    )
+    prepared = prepare_igor_wave_for_neuroseq(wave)
+
+    with pytest.raises(ValueError, match="already exists"):
+        import_igor_wave_into_trace_data(
+            trace_data,
+            prepared,
+            neuron_id=5,
+            replace_existing=False,
+            extend_to_fit=True,
+        )
+
+
+def test_import_igor_wave_into_trace_data_extends_time_axis() -> None:
+    trace_data = TraceData(
+        name="trace_data",
+        traces=np.array([[1.0, 2.0]], dtype=np.float32),
+        indices=np.array([0], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    wave = IgorWave(
+        name="test_wave",
+        values=np.array([5.0, 6.0, 7.0, 8.0], dtype=np.float32),
+        source_dt=0.001,
+        units="mV",
+        axis_units="s",
+        source_format="csv",
+    )
+    prepared = prepare_igor_wave_for_neuroseq(wave)
+
+    report = import_igor_wave_into_trace_data(
+        trace_data,
+        prepared,
+        neuron_id=3,
+        replace_existing=True,
+        extend_to_fit=True,
+    )
+
+    assert report.imported_samples == 4
+    assert trace_data.traces.shape == (2, 4)
+    np.testing.assert_allclose(trace_data.traces[0], np.array([1.0, 2.0, 0.0, 0.0]))
+    np.testing.assert_allclose(trace_data.traces[1], np.array([5.0, 6.0, 7.0, 8.0]))
+
+
+def test_import_igor_wave_into_trace_data_rejects_mismatched_dt() -> None:
+    trace_data = TraceData(
+        name="trace_data",
+        traces=np.array([[1.0, 2.0]], dtype=np.float32),
+        indices=np.array([0], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    wave = IgorWave(
+        name="test_wave",
+        values=np.array([5.0, 6.0], dtype=np.float32),
+        source_dt=0.0005,
+        units="mV",
+        axis_units="s",
+        source_format="csv",
+    )
+    prepared = prepare_igor_wave_for_neuroseq(wave, target_dt=0.0005)
+
+    with pytest.raises(ValueError, match="Target TraceData dt must match"):
+        import_igor_wave_into_trace_data(
+            trace_data,
+            prepared,
+            neuron_id=2,
+            replace_existing=True,
+            extend_to_fit=True,
+        )
 
 
 def test_load_igor_ibw_file_extracts_name_dt_and_units(

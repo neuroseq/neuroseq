@@ -784,14 +784,22 @@ class StimEditor(QtWidgets.QWidget):
                 self.draw_stim_length, self._current_stim_dt_seconds()
             )
             if not stim_dt_matches(dialog.dt, self.current_stim_modifier.stim_array.dt):
+                _other = self.project.remappable_data_description(dialog.dt)
+                _extra = (
+                    f" All other project data ({_other}) will also be remapped"
+                    " using zero-order hold."
+                    if _other
+                    else ""
+                )
                 continue_with_remap = QtWidgets.QMessageBox.question(
                     self,
-                    "Change stim array timestep",
-                    "Changing the stimulation timestep will remap stimulus array "
+                    "Change project sample interval",
+                    f"Changing the stimulation timestep will remap stimulus array "
                     f"'{old_name}' from "
                     f"{format_milliseconds(self.current_stim_modifier.stim_array.dt * 1000.0)} ms "
-                    f"to {format_milliseconds(dialog.dt * 1000.0)} ms. "
-                    "Stimulus timing may shift by up to one sample. Continue?",
+                    f"to {format_milliseconds(dialog.dt * 1000.0)} ms."
+                    f"{_extra} "
+                    "Timing may shift by up to one sample. Continue?",
                     QtWidgets.QMessageBox.StandardButton.Yes
                     | QtWidgets.QMessageBox.StandardButton.No,
                 )
@@ -801,6 +809,7 @@ class StimEditor(QtWidgets.QWidget):
                     1,
                     seconds_to_samples_nearest(old_draw_duration_seconds, dialog.dt),
                 )
+                self.project.remap_all_data_to_dt(dialog.dt)
             if dialog.name != old_name:
                 self.project.rename_stim_array(old_name, dialog.name)
             self.project.update_stim_array_properties(
