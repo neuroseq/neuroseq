@@ -1,4 +1,5 @@
 import logging
+import re
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -6,6 +7,37 @@ import brian2.numpy_ as np
 # these import * statements are needed so that we can do eval("<brian2 Quantity expression as python code>"):
 from brian2 import *  # noqa: F403
 from brian2.units.allunits import *  # noqa: F403
+
+_UNIT_SYMBOL_ALIASES = {
+    "A": "amp",
+    "C": "coulomb",
+    "F": "farad",
+    "H": "henry",
+    "J": "joule",
+    "N": "newton",
+    "Pa": "pascal",
+    "S": "siemens",
+    "T": "tesla",
+    "V": "volt",
+    "W": "watt",
+    "s": "second",
+}
+_UNIT_ALIAS_PATTERNS = [
+    (
+        re.compile(rf"(?<![A-Za-z_]){re.escape(alias)}(?![A-Za-z_])"),
+        replacement,
+    )
+    for alias, replacement in sorted(
+        _UNIT_SYMBOL_ALIASES.items(), key=lambda item: len(item[0]), reverse=True
+    )
+]
+
+
+def _normalize_unit_str(unit_str: str) -> str:
+    normalized_unit_str = unit_str.strip()
+    for pattern, replacement in _UNIT_ALIAS_PATTERNS:
+        normalized_unit_str = pattern.sub(replacement, normalized_unit_str)
+    return normalized_unit_str
 
 
 def quantity_to_value_unit_str(
@@ -29,7 +61,7 @@ def quantity_to_value_unit_str(
 def value_unit_str_to_quantity(
     value: int | float | np.ndarray, unit_str: str
 ) -> b2.Quantity:
-    return eval(unit_str) * value
+    return eval(_normalize_unit_str(unit_str)) * value
 
 
 def str_to_quantity(string: str) -> b2.Quantity | str:

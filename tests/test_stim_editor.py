@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import brian2.numpy_ as np
 import pytest
@@ -341,6 +343,53 @@ def test_selecting_stim_preserves_physical_draw_duration(qtbot: QtBot) -> None:
     stim_editor.close()
 
 
+def test_selecting_smaller_stim_refocuses_y_view() -> None:
+    wide_modifier = SimpleNamespace(
+        stim_array=StimArray(
+            "wide",
+            neuroseq.stim.StimType.Excitation,
+            np.zeros((10, 50), dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+    single_modifier = SimpleNamespace(
+        stim_array=StimArray(
+            "single",
+            neuroseq.stim.StimType.Excitation,
+            np.zeros((10, 1), dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+    focused_ranges: list[tuple[int, int]] = []
+    fake_stim_widget = SimpleNamespace(
+        set_data=lambda stim_array: None,
+        set_background_data=lambda stim_array: None,
+    )
+    fake_editor = SimpleNamespace(
+        logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        stims_dict={"wide": wide_modifier, "single": single_modifier},
+        current_stim_modifier=wide_modifier,
+        draw_stim_length=4,
+        draw_stim=DrawStim(DrawStimType.Constant, 1.0, 1.0),
+        stim_type=neuroseq.stim.StimType.Excitation,
+        stim_widget=fake_stim_widget,
+        controller=SimpleNamespace(
+            focus_neuron_range=lambda start, stop: focused_ranges.append((start, stop))
+        ),
+        set_mode=lambda mode: None,
+        set_draw_mode=lambda mode: None,
+        _stim_values_updated=lambda: None,
+        _current_stim_dt_seconds=lambda: 0.001,
+    )
+
+    StimEditor.select_stim(fake_editor, "single")  # type: ignore[arg-type]
+
+    assert fake_editor.current_stim_modifier is single_modifier
+    assert focused_ranges == [(0, 1)]
+
+
 def test_create_stim_array_defaults_to_selected_stim_dt(
     monkeypatch: MonkeyPatch, qtbot: QtBot
 ) -> None:
@@ -382,6 +431,114 @@ def test_create_stim_array_defaults_to_selected_stim_dt(
 
     assert captured["dt"] == approx(0.002)
     stim_editor.close()
+
+
+def test_stim_editor_mouse_click_draws_and_erases() -> None:
+    stim_array = StimArray(
+        "igor_wave",
+        neuroseq.stim.StimType.External,
+        np.zeros((6, 1), dtype=np.float32),
+        "pA",
+        0.001,
+    )
+    draw_calls: list[tuple[slice, slice, bool]] = []
+
+    def _draw_stim_region(
+        neuron_slice: slice,
+        time_slice: slice,
+        erase: bool = False,
+    ) -> None:
+        draw_calls.append((neuron_slice, time_slice, erase))
+        stim_array.values[time_slice, neuron_slice] = 0.0 if erase else 2.5
+
+    fake_editor: Any = SimpleNamespace(
+        logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        current_stim_modifier=SimpleNamespace(stim_array=stim_array),
+        mode=InteractMode.DRAW,
+        draw_mode=DrawMode.DRAW,
+        draw_stim_length=2,
+        draw_stim=DrawStim(DrawStimType.Constant, 2.5, 2.5),
+        _is_valid_slice=lambda neuron_slice, time_slice: True,
+        draw_stim_region=_draw_stim_region,
+    )
+
+    StimEditor.stim_widget_mouse_clicked(fake_editor, 0, 2, 1)
+
+    assert draw_calls == [(slice(0, 1), slice(2, 4), False)]
+    assert stim_array.values[2, 0] == approx(2.5)
+    assert stim_array.values[3, 0] == approx(2.5)
+
+    StimEditor.stim_widget_mouse_clicked(fake_editor, 0, 2, 2)
+
+    assert draw_calls[-1] == (slice(0, 1), slice(2, 4), True)
+    assert stim_array.values[2, 0] == approx(0.0)
+    assert stim_array.values[3, 0] == approx(0.0)
+
+
+def test_stim_editor_draw_region_extends_short_stim_for_follow_up_input() -> None:
+    stim_array = StimArray(
+        "igor_wave",
+        neuroseq.stim.StimType.External,
+        np.zeros((1, 1), dtype=np.float32),
+        "pA",
+        0.001,
+    )
+    project = Project()
+    project.add_stim_array(stim_array)
+    draw_calls: list[tuple[slice, slice, float]] = []
+    stim_widget = SimpleNamespace(n_neurons=1, n_timestamps=1)
+
+    class _FakeModifier:
+        def __init__(self, stim_array: StimArray) -> None:
+            self.stim_array = stim_array
+
+        def do(
+            self,
+            neuron_slice: slice,
+            time_slice: slice,
+            values: float,
+        ) -> None:
+            draw_calls.append((neuron_slice, time_slice, values))
+            self.stim_array.values[time_slice, neuron_slice] = values
+
+    modifier = _FakeModifier(stim_array)
+
+    def _set_project(
+        project: Project,
+        keep_undo_history: bool = False,
+        stim_to_select: str = "",
+    ) -> None:
+        stim_widget.n_timestamps = project.stim_arrays["igor_wave"].values.shape[0]
+        modifier.stim_array = project.stim_arrays["igor_wave"]
+
+    fake_editor: Any = SimpleNamespace(
+        current_stim_modifier=modifier,
+        project=project,
+        draw_stim=DrawStim(DrawStimType.Constant, 2.5, 2.5),
+        draw_stim_length=1,
+        stim_widget=stim_widget,
+        set_project=_set_project,
+        _is_valid_slice=lambda neuron_slice, time_slice: (
+            neuron_slice.start >= 0
+            and neuron_slice.stop <= stim_widget.n_neurons
+            and time_slice.start >= 0
+            and time_slice.stop <= stim_widget.n_timestamps
+        ),
+        _current_draw_stim_values=lambda erase=False: 0.0 if erase else 2.5,
+        _stim_values_updated=lambda: None,
+    )
+    fake_editor._ensure_time_capacity_for_slice = (
+        lambda time_slice: StimEditor._ensure_time_capacity_for_slice(
+            fake_editor,
+            time_slice,
+        )
+    )
+
+    StimEditor.draw_stim_region(fake_editor, slice(0, 1), slice(1, 2))
+
+    assert project.stim_arrays["igor_wave"].values.shape == (2, 1)
+    assert project.stim_arrays["igor_wave"].values[1, 0] == approx(2.5)
+    assert draw_calls == [(slice(0, 1), slice(1, 2), 2.5)]
 
 
 def test_create_stim_array_defaults_to_one_millisecond_without_selection(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 import fastplotlib as fpl
 import pygfx
@@ -20,8 +21,16 @@ class FPLWidget(QtWidgets.QWidget):
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.controller = controller
+        canvas_kwargs: dict[str, object] = {"parent": self}
+        if os.environ.get("NEUROSEQ_HEADLESS_TEST", "").lower() in {
+            "1",
+            "true",
+            "yes",
+        }:
+            # Use rendercanvas bitmap presentation for headless Qt test runs.
+            canvas_kwargs["present_method"] = "bitmap"
         self.figure: fpl.Figure = fpl.Figure(
-            controllers=controller, canvas_kwargs={"parent": self}
+            controllers=controller, canvas_kwargs=canvas_kwargs
         )
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

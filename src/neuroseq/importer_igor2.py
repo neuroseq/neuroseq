@@ -5,11 +5,15 @@ import importlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import brian2.numpy_ as np
 
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
+
+if TYPE_CHECKING:
+    from neuroseq.data import TraceData
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +54,37 @@ class IgorImportReport:
     target_dt: float
     resampled: bool
     truncated_samples: int
+
+
+@dataclass
+class IgorTraceImportReport:
+    target_experiment_name: str
+    target_trace_data_name: str
+    target_neuron_id: int
+    source_samples: int
+    imported_samples: int
+    source_dt: float
+    target_dt: float
+    resampled: bool
+    truncated_samples: int
+    spikes_detected: int | None = None
+
+
+@dataclass
+class SkippedPxpRecord:
+    """A record that could not be parsed while loading a .pxp file."""
+
+    record_index: int
+    record_type: str
+    reason: str
+
+
+@dataclass
+class IgorPxpLoadReport:
+    """Result of loading an Igor Packed Experiment file."""
+
+    waves: dict[str, IgorWave]
+    skipped: list[SkippedPxpRecord]
 
 
 def _as_bytes(value: object) -> bytes | None:
@@ -188,6 +223,172 @@ def load_igor_ibw_file(path: str | Path) -> IgorWave:
     return parse_igor_binary_wave_data(wave_data, fallback_name=path.stem)
 
 
+def is_pxp_file(path: str | Path) -> bool:
+    """Return True if *path* has a .pxp extension (case-insensitive)."""
+    return Path(path).suffix.lower() == ".pxp"
+
+
+def load_igor_pxp_file(path: str | Path) -> IgorPxpLoadReport:
+    """Load all 1-D waves from an Igor Packed Experiment (.pxp) file.
+
+    Uses a tolerant record-by-record loader: a single malformed wave
+    record is logged and skipped rather than aborting the whole load.
+
+    Returns an :class:`IgorPxpLoadReport` whose ``waves`` dict maps
+    slash-joined folder paths to :class:`IgorWave` objects, and whose
+    ``skipped`` list enumerates records that could not be parsed.
+
+    Raises ``ImportError`` if igor2 is not installed. Raises
+    ``ValueError`` only if no importable 1-D waves survive.
+    """
+    path = Path(path)
+    try:
+        packed = importlib.import_module("igor2.packed")
+        wave_record_module = importlib.import_module("igor2.record.wave")
+        record_module = importlib.import_module("igor2.record")
+        record_base = importlib.import_module("igor2.record.base")
+        struct_module = importlib.import_module("igor2.struct")
+        util_module = importlib.import_module("igor2.util")
+    except ImportError as exc:
+        raise ImportError(
+            "Reading Igor Packed Experiment files requires the optional 'igor2' dependency."
+        ) from exc
+
+    WaveRecord = wave_record_module.WaveRecord
+    RECORD_TYPE = record_module.RECORD_TYPE
+    UnknownRecord = record_base.UnknownRecord
+    Structure = struct_module.Structure
+    Field = struct_module.Field
+    byte_order = util_module.byte_order
+    need_to_reorder_bytes = util_module.need_to_reorder_bytes
+
+    def _make_header_struct(bo: str):
+        header_struct = Structure(
+            name="PackedFileRecordHeader",
+            fields=[
+                Field("H", "recordType"),
+                Field("h", "version"),
+                Field("l", "numDataBytes"),
+            ],
+            byte_order=bo,
+        )
+        header_struct.setup()
+        return header_struct
+
+    packed_record_type_mask = 0x7FFF
+
+    records: list[object] = []
+    skipped: list[SkippedPxpRecord] = []
+    bo: str | None = None
+    initial_bo = "="
+
+    with path.open("rb") as fp:
+        record_index = 0
+        while True:
+            header_struct = _make_header_struct(bo or initial_bo)
+            header_bytes = fp.read(header_struct.size)
+            if not header_bytes:
+                break
+            if len(header_bytes) < header_struct.size:
+                logger.warning(
+                    "Truncated record header in %s at byte offset %d; "
+                    "stopping after %d records.",
+                    path.name,
+                    fp.tell() - len(header_bytes),
+                    record_index,
+                )
+                break
+
+            header = header_struct.unpack_from(header_bytes)
+            if header["version"] and bo is None:
+                reorder = need_to_reorder_bytes(header["version"])
+                bo = initial_bo = byte_order(reorder)
+                if reorder:
+                    header_struct = _make_header_struct(bo)
+                    header = header_struct.unpack_from(header_bytes)
+
+            data = fp.read(header["numDataBytes"])
+            if len(data) < header["numDataBytes"]:
+                logger.warning(
+                    "Truncated record #%d in %s (wanted %d bytes, got %d); "
+                    "stopping the packed-record scan.",
+                    record_index + 1,
+                    path.name,
+                    header["numDataBytes"],
+                    len(data),
+                )
+                break
+
+            record_index += 1
+            record_type = RECORD_TYPE.get(
+                header["recordType"] & packed_record_type_mask,
+                UnknownRecord,
+            )
+            try:
+                record_obj = record_type(header, data, byte_order=bo)
+            except Exception as exc:
+                logger.warning(
+                    "Skipping malformed Igor packed record #%d (%s) in %s: %s",
+                    record_index,
+                    record_type.__name__,
+                    path.name,
+                    exc,
+                )
+                skipped.append(
+                    SkippedPxpRecord(
+                        record_index=record_index,
+                        record_type=record_type.__name__,
+                        reason=f"{type(exc).__name__}: {exc}",
+                    )
+                )
+                continue
+
+            records.append(record_obj)
+
+    # Reuse igor2's filesystem builder; reimplementing its folder/name handling here
+    # would duplicate library behavior and make upgrades more brittle.
+    filesystem = packed._build_filesystem(records)
+
+    waves: dict[str, IgorWave] = {}
+
+    def _collect(dirpath: list[object], key: object, value: object) -> None:
+        if not isinstance(value, WaveRecord):
+            return
+        parts = [
+            seg.decode("utf-8", errors="ignore")
+            if isinstance(seg, (bytes, bytearray))
+            else str(seg)
+            for seg in dirpath
+        ]
+        wave_name_str = (
+            key.decode("utf-8", errors="ignore")
+            if isinstance(key, (bytes, bytearray))
+            else str(key)
+        )
+        parts.append(wave_name_str)
+        path_key = "/".join(parts)
+
+        try:
+            igor_wave = parse_igor_binary_wave_data(
+                value.wave,
+                fallback_name=wave_name_str,
+            )
+        except ValueError as exc:
+            logger.debug("Skipping wave %s: %s", path_key, exc)
+            return
+
+        waves[path_key] = igor_wave
+
+    packed.walk(filesystem, _collect)
+
+    if not waves:
+        raise ValueError(
+            f"No importable 1-D waves found in packed experiment file '{path.name}'"
+        )
+
+    return IgorPxpLoadReport(waves=waves, skipped=skipped)
+
+
 def load_igor_csv_file(path: str | Path) -> IgorWave:
     path = Path(path)
     with path.open("r", encoding="utf-8-sig", newline="") as fp:
@@ -234,6 +435,11 @@ def load_igor_wave_file(path: str | Path) -> IgorWave:
         return load_igor_csv_file(path)
     if suffix == ".ibw":
         return load_igor_ibw_file(path)
+    if suffix == ".pxp":
+        raise ValueError(
+            "Igor Packed Experiment files (.pxp) contain multiple waves — "
+            "use load_igor_pxp_file() instead."
+        )
     raise ValueError(f"Unsupported Igor wave file format '{path.suffix}'")
 
 
@@ -336,7 +542,8 @@ def import_igor_wave_into_stim_array(
         > _DT_TOLERANCE_SECONDS
     ):
         raise ValueError(
-            "Igor import into an existing stim array currently requires a 1 ms target dt"
+            "Target StimArray dt must match the imported wave target dt "
+            f"({float(stim_array.dt):.9f}s != {float(prepared_wave.target_dt):.9f}s)"
         )
 
     n_existing_timepoints, n_existing_neurons = stim_array.values.shape
@@ -385,4 +592,106 @@ def import_igor_wave_into_stim_array(
         target_dt=prepared_wave.target_dt,
         resampled=prepared_wave.resampled,
         truncated_samples=max(0, prepared_wave.values.shape[0] - target_timepoints),
+    )
+
+
+def create_trace_data_from_igor_wave(
+    prepared_wave: PreparedIgorWave,
+    *,
+    trace_name: str,
+    neuron_id: int = 0,
+    units: str | None = None,
+) -> TraceData:
+    """Build a single-neuron TraceData from a prepared Igor wave."""
+    from neuroseq.data import TraceData
+
+    trace_values = prepared_wave.values.reshape(1, -1).astype(np.float32, copy=False)
+    return TraceData(
+        name=trace_name,
+        traces=trace_values,
+        indices=np.array([int(neuron_id)], dtype=np.uint32),
+        units=(prepared_wave.units or "") if units is None else units,
+        dt=float(prepared_wave.target_dt),
+    )
+
+
+def import_igor_wave_into_trace_data(
+    trace_data: TraceData,
+    prepared_wave: PreparedIgorWave,
+    *,
+    neuron_id: int,
+    replace_existing: bool = True,
+    extend_to_fit: bool = True,
+) -> IgorTraceImportReport:
+    """Append or replace a single neuron row in an existing TraceData."""
+    if trace_data.traces.ndim != 2:
+        raise ValueError("Target TraceData must be 2-dimensional")
+    if (
+        abs(float(trace_data.dt) - float(prepared_wave.target_dt))
+        > _DT_TOLERANCE_SECONDS
+    ):
+        raise ValueError(
+            "Target TraceData dt must match the imported wave target dt "
+            f"({float(trace_data.dt):.9f}s != {float(prepared_wave.target_dt):.9f}s)"
+        )
+
+    imported_values = prepared_wave.values.astype(np.float32, copy=False)
+    n_rows_existing, n_time_existing = trace_data.traces.shape
+    n_time_imported = int(imported_values.size)
+
+    indices_list = [int(x) for x in trace_data.indices.tolist()]
+    row_index = (
+        indices_list.index(int(neuron_id)) if int(neuron_id) in indices_list else -1
+    )
+
+    if row_index >= 0 and not replace_existing:
+        raise ValueError(
+            f"Neuron ID {neuron_id} already exists in trace data '{trace_data.name}'; "
+            "enable 'Replace existing' to overwrite it."
+        )
+
+    if extend_to_fit:
+        n_time_target = max(n_time_existing, n_time_imported)
+    else:
+        n_time_target = n_time_existing
+
+    if n_time_target != n_time_existing:
+        padded = np.zeros(
+            (n_rows_existing, n_time_target), dtype=trace_data.traces.dtype
+        )
+        padded[:, :n_time_existing] = trace_data.traces
+        trace_data.traces = padded
+
+    truncated = max(0, n_time_imported - n_time_target)
+    written_len = min(n_time_imported, n_time_target)
+
+    new_row = np.zeros((1, n_time_target), dtype=trace_data.traces.dtype)
+    new_row[0, :written_len] = imported_values[:written_len]
+
+    if row_index >= 0:
+        trace_data.traces[row_index] = new_row[0]
+    else:
+        trace_data.traces = np.concatenate([trace_data.traces, new_row], axis=0)
+        trace_data.indices = np.concatenate(
+            [trace_data.indices, np.array([int(neuron_id)], dtype=np.uint32)]
+        )
+
+    logger.info(
+        "Imported Igor wave '%s' into TraceData '%s' neuron %d: %d -> %d samples",
+        prepared_wave.name,
+        trace_data.name,
+        int(neuron_id),
+        prepared_wave.original_sample_count,
+        written_len,
+    )
+    return IgorTraceImportReport(
+        target_experiment_name="",
+        target_trace_data_name=trace_data.name,
+        target_neuron_id=int(neuron_id),
+        source_samples=prepared_wave.original_sample_count,
+        imported_samples=written_len,
+        source_dt=float(prepared_wave.source_dt),
+        target_dt=float(prepared_wave.target_dt),
+        resampled=prepared_wave.resampled,
+        truncated_samples=truncated,
     )

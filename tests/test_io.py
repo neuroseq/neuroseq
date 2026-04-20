@@ -1,6 +1,7 @@
 import zipfile
 from pathlib import Path
 
+import brian2 as b2
 import brian2.numpy_ as np
 import pytest
 from brian2 import get_dimensions
@@ -109,6 +110,23 @@ def test_stim_array_json_normalizes_quantity_dt_to_float(tmp_path: Path) -> None
 
     assert isinstance(read["s"].dt, float)
     assert read["s"].dt == pytest.approx(0.01)
+
+
+def test_as_timed_array_accepts_symbol_unit_aliases() -> None:
+    stim_array = StimArray(
+        "stim",
+        StimType.External,
+        np.array([[1.0], [2.0]], dtype=np.float32),
+        "V",
+        0.001,
+    )
+
+    timed_array = io.as_timed_array(stim_array)
+
+    assert timed_array.values.shape == (2, 1)
+    assert np.allclose(timed_array.values, np.array([[1.0], [2.0]], dtype=np.float32))
+    assert timed_array(0 * second, 0) == 1 * b2.volt
+    assert timed_array(1 * b2.ms, 0) == 2 * b2.volt
 
 
 def test_stim_array_json_coerces_1d_values_to_2d_on_load(tmp_path: Path) -> None:

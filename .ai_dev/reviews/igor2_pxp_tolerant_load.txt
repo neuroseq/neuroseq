@@ -1,0 +1,191 @@
+REVIEW: Tolerant Igor2 Packed Experiment (.pxp) loading
+========================================================
+Branch: import_igor2
+Repo: /mnt/live3/svintila/neuroseq
+Date: 2026-04-20
+Reviewed against handoff: .ai_dev/handoffs/igor2_pxp_tolerant_load.txt
+
+
+STATUS
+------
+Functionally complete — all 486 tests in the full suite pass, including the
+two skip-guarded integration tests against the real .pxp fixtures:
+
+    tests/test_importer_igor2.py::test_load_igor_pxp_file_recovers_from_real_world_broken_record  PASSED
+    tests/test_importer_igor2.py::test_load_igor_pxp_file_keeps_working_file_strictly_clean      PASSED
+    tests/test_importer_igor2.py::test_load_igor_pxp_file_skips_malformed_records                PASSED
+    tests/test_igor_import_dialog.py::test_igor_import_dialog_warns_when_pxp_records_are_skipped PASSED
+
+Coverage of `src/neuroseq/importer_igor2.py` is 77.51% (≥75% threshold).
+`mypy --ignore-missing-imports` is clean on both modified source files.
+
+HOWEVER, pre-commit is currently red: `ruff check` flags two errors
+(reproduced under "MUST-FIX" below). Those must be resolved before this
+branch can land, since the repo's pre-commit hook runs ruff.
+
+The runtime log line:
+
+    ERROR  igor2.binarywave:binarywave.py:424 could not reshape data from [np.int64(5)] to b''
+
+observed during the real-world integration test originates inside
+igor2 itself — it is the upstream warning we are intentionally catching.
+The fix correctly logs a higher-level "Skipping malformed Igor packed
+record" warning on top of it. Not an issue.
+
+
+MUST-FIX (pre-commit blockers)
+------------------------------
+
+1. src/neuroseq/importer_igor2.py:335 — ruff B009
+
+   Current:
+       build_filesystem = getattr(packed, "_build_filesystem")
+       filesystem = build_filesystem(records)
+
+   Ruff error:
+       B009 Do not call `getattr` with a constant attribute value.
+
+   Replace both lines with direct attribute access. The leading underscore
+   already signals "private usage"; we don't need the `getattr` indirection
+   to communicate it:
+
+       filesystem = packed._build_filesystem(records)  # noqa: SLF001
+
+   The `# noqa: SLF001` silences the "private member access" lint (if
+   ruff's SLF001 rule is active on this repo — check pyproject.toml; if
+   SLF001 is not enabled, drop the noqa). The comment in the previous
+   handoff explaining *why* we touch this private symbol is still valid
+   and should remain nearby, so future readers understand the upgrade
+   risk.
+
+2. tests/test_importer_igor2.py:14 — ruff F401
+
+       from neuroseq.importer_igor2 import SkippedPxpRecord
+
+   SkippedPxpRecord is never referenced in this test module (the skipped-
+   record assertions only read .record_type/.reason strings off the
+   returned instances). Remove this import.
+
+   `SkippedPxpRecord` remains used in tests/test_igor_import_dialog.py —
+   leave that import alone.
+
+
+SHOULD-FIX (non-blocking cleanups)
+----------------------------------
+
+3. src/neuroseq/importer_igor2.py — remove the dead "reference" line and
+   the unused local aliases it props up.
+
+   Current (around line 234):
+       FolderStartRecord = folder_module.FolderStartRecord
+       FolderEndRecord = folder_module.FolderEndRecord
+       ...
+       _ = (FolderStartRecord, FolderEndRecord, UnusedRecord)
+
+   These three classes are never referenced by name at runtime; they're
+   reached only via the `RECORD_TYPE` dict's values, which we already
+   capture into the local `RECORD_TYPE` variable. The `_ = (...)` line
+   exists solely to prevent F841 warnings for assignments we made
+   pre-emptively. That's noise.
+
+   Delete all four lines:
+       - `FolderStartRecord = folder_module.FolderStartRecord`
+       - `FolderEndRecord = folder_module.FolderEndRecord`
+       - `UnusedRecord = record_base.UnusedRecord`
+       - `_ = (FolderStartRecord, FolderEndRecord, UnusedRecord)`
+
+   Also drop the corresponding `folder_module = importlib.import_module(
+   "igor2.record.folder")` import — nothing else in the function uses it.
+
+   Keep `UnknownRecord = record_base.UnknownRecord` (used as the
+   `.get(..., UnknownRecord)` default).
+
+   NB: this contradicts part of the original handoff text, which pre-
+   emptively pulled these symbols out. Codex followed the handoff
+   correctly; we're now tightening on review.
+
+4. tests/test_importer_igor2.py:527 (
+   test_load_igor_pxp_file_recovers_from_real_world_broken_record) —
+   strengthen the numeric expectation.
+
+   Current:
+       assert len(report.waves) > 50, ...
+
+   The reference file 251118_0.pxp yielded 100+ parseable 1-D waves in
+   manual exploration; a drop below ~150 would be a silent regression.
+   Tighten to:
+       assert len(report.waves) > 150, ...
+
+   If Codex has a different local measurement, pick a number ~20% below
+   the observed count — the goal is to catch future regressions that
+   silently discard lots of waves, not to be tolerant to small numerical
+   noise (there is none, the count is deterministic).
+
+5. tests/test_importer_igor2.py — shape of the "skips multidimensional
+   waves" fake filesystem.
+
+   The updated test expects a key of `"root/OneDWave"` now, which matches
+   real igor2 behaviour (everything lives under the implicit `root`
+   folder). Good. But the test no longer exercises a wave placed inside
+   a sub-folder. Add one extra wave in a nested folder in that same test
+   so the slash-joined path key exercises folder nesting:
+
+       pxp_path.write_bytes(
+           _pack_fake_pxp_record(3, b"wave-2d")
+           + _pack_fake_pxp_record(3, b"wave-1d")
+           + _pack_fake_pxp_record(1, b"subfolder\x00")
+           + _pack_fake_pxp_record(3, b"wave-nested")
+           + _pack_fake_pxp_record(2, b"")
+       )
+
+   and extend the assertion to expect `"root/subfolder/NestedWave"` as
+   well. This protects the folder-walk behaviour — which is the whole
+   reason we never skip FolderStart/FolderEnd records — against future
+   refactors.
+
+
+NICE-TO-HAVE (optional, not required for merge)
+-----------------------------------------------
+
+6. src/neuroseq/igor_import_dialog.py — the warning dialog is raised
+   AFTER the wave picker becomes visible. The user momentarily sees the
+   list populate before the modal warning appears. Consider moving the
+   `QtWidgets.QMessageBox.warning(...)` call to BEFORE
+   `self.wave_picker_group.setVisible(True)`. Cosmetic only; current
+   order is not a bug.
+
+7. src/neuroseq/importer_igor2.py — the `packed_record_type_mask` local
+   variable is used once. Inline it as `0x7FFF` at the call site, or
+   promote it to a module-level constant `_PACKED_RECORD_TYPE_MASK = 0x7FFF`
+   alongside `_DT_TOLERANCE_SECONDS`. Codex's current local-variable
+   placement is fine too; feel free to skip.
+
+
+HOW TO VERIFY THE FIXES
+-----------------------
+    cd /mnt/live3/svintila/neuroseq
+    .venv/bin/python -m ruff check src/neuroseq/importer_igor2.py \
+        src/neuroseq/igor_import_dialog.py \
+        tests/test_importer_igor2.py \
+        tests/test_igor_import_dialog.py
+    .venv/bin/python -m mypy --ignore-missing-imports \
+        src/neuroseq/importer_igor2.py src/neuroseq/igor_import_dialog.py
+    .venv/bin/python -m pytest tests/test_importer_igor2.py \
+        tests/test_igor_import_dialog.py -v
+    .venv/bin/python -m pytest     # full suite must stay green
+
+Expected final state: ruff clean, mypy clean, 24 tests in the two
+targeted modules pass, 486 tests in the full suite pass, pre-commit
+(ruff + mypy + prettier + nbstripout) passes with no changes to
+pyproject.toml.
+
+
+SUMMARY FOR REVIEWER-OF-REVIEWER
+--------------------------------
+The tolerant loader *works*: on the real-world Cristina file that
+previously raised `TypeError: buffer is too small for requested array`
+mid-load, it now skips that one WaveRecord, logs it at WARNING, and
+returns the rest of the file. The dialog now surfaces the skip count
+via a `QMessageBox.warning`. The only blockers to landing are two
+style-level ruff errors; the optional cleanups tighten test strictness
+and drop a handful of lines of dead code.

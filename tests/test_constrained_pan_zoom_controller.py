@@ -44,3 +44,28 @@ def test_set_camera_state_accepts_quantity_bounds(monkeypatch) -> None:
     )
 
     controller._set_camera_state(dummy_state.copy())
+
+
+def test_focus_neuron_range_updates_height_and_y_position(monkeypatch) -> None:
+    controller = ConstrainedPanZoomController()
+    controller.min_height = 1.0
+    controller.max_height = 50.0
+    dummy_state = {
+        "width": 1000.0,
+        "height": 50.0,
+        "position": (500.0, 24.5, 1.0),
+    }
+    captured_state = {}
+
+    monkeypatch.setattr(controller, "_get_camera_state", lambda: dummy_state.copy())
+    monkeypatch.setattr(
+        controller,
+        "_set_camera_state",
+        lambda state: captured_state.update(state),
+    )
+    monkeypatch.setattr(controller, "_update_cameras", lambda: None)
+
+    controller.focus_neuron_range(0, 1)
+
+    assert captured_state["height"] == 1.0
+    assert captured_state["position"] == (500.0, 0.0, 1.0)

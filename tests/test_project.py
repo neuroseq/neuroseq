@@ -11,6 +11,7 @@ from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.example_projects import default_project
+from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stim import StimArray
@@ -47,6 +48,7 @@ def test_add_experimental_data_overwrite_raises_error() -> None:
     assert project.experiments["test_experiment"].data[1].spike_indices.shape == (3,)
     assert project.experiments["test_experiment"].data[1].spike_times.shape == (3,)
     assert project.max_time_secs == pytest.approx(3.7, abs=0.01)
+    assert project.max_neurons == 12
 
     with pytest.raises(ValueError):
         project.add_experiment(_make_experiment())
@@ -621,6 +623,32 @@ def test_update_limits_with_mixed_stim_dt() -> None:
     assert project.max_neurons == 2
 
 
+def test_update_limits_include_cellpose_neuron_count() -> None:
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "stim",
+            StimType.Excitation,
+            np.zeros((10, 40), dtype=np.float32),
+            "nS",
+            0.001,
+        )
+    )
+    project.cellpose_data = CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=np.zeros((2, 2), dtype=np.int32),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.arange(100, dtype=np.int32),
+        stimulus_to_cellpose_mapping=None,
+    )
+
+    project.update_limits()
+
+    assert project.max_neurons == 100
+
+
 def test_stim_array_rename() -> None:
     arr = np.random.rand(1000, 30)
     project = Project()
@@ -714,3 +742,115 @@ def test_issues_with_appending_experimental_data_invalid(
             make_spike_data(n_neurons=5, max_time_secs=0.10),
         ],
     )
+
+
+def test_project_dt_defaults_to_1ms() -> None:
+    project = Project()
+    assert project.dt == pytest.approx(0.001)
+
+
+def test_remap_all_data_to_dt_remaps_stims_and_traces() -> None:
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "stim1", StimType.External, np.ones((10, 2), dtype=np.float32), "pA", 0.001
+        )
+    )
+    trace = TraceData(
+        "trace1",
+        np.ones((2, 10), dtype=np.float32),
+        np.array([0, 1], dtype=np.uint32),
+        "mV",
+        0.001,
+    )
+    project.add_experiment(Experiment("exp1", 0.01, [], [trace]))
+
+    project.remap_all_data_to_dt(0.0005)
+
+    assert project.dt == pytest.approx(0.0005)
+    assert project.stim_arrays["stim1"].dt == pytest.approx(0.0005)
+    # 10 samples at 1 ms = 0.01 s → at 0.5 ms = 20 samples
+    assert project.stim_arrays["stim1"].values.shape == (20, 2)
+    td = project.experiments["exp1"].data[0]
+    assert isinstance(td, TraceData)
+    assert td.dt == pytest.approx(0.0005)
+    assert td.traces.shape == (2, 20)
+
+
+def test_remap_all_data_to_dt_noop_when_dt_already_matches() -> None:
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "stim1", StimType.External, np.ones((10, 1), dtype=np.float32), "pA", 0.001
+        )
+    )
+    original = project.stim_arrays["stim1"].values.copy()
+
+    project.remap_all_data_to_dt(0.001)
+
+    assert project.dt == pytest.approx(0.001)
+    np.testing.assert_array_equal(project.stim_arrays["stim1"].values, original)
+
+
+def test_project_dt_persists_through_save_load(tmp_path: Path) -> None:
+    project = Project()
+    project.dt = 0.0005
+    filepath = tmp_path / "test.nseq"
+    project.save(filepath, SaveLoadOptions(True, True, True, True))
+
+    loaded = Project(filepath)
+    assert loaded.dt == pytest.approx(0.0005)
+
+
+def test_project_dt_falls_back_to_stim_dt_for_old_files(tmp_path: Path) -> None:
+    """Loading an .nseq without project_metadata.json derives dt from stim arrays."""
+    import zipfile as _zf
+
+    project = Project()
+    project.dt = 0.0005
+    project.add_stim_array(
+        StimArray(
+            "s", StimType.External, np.zeros((4, 1), dtype=np.float32), "pA", 0.0005
+        )
+    )
+    filepath = tmp_path / "old.nseq"
+    project.save(filepath, SaveLoadOptions(True, True, True, True))
+
+    # strip the project_metadata.json from the archive to simulate an old file
+
+    stripped = tmp_path / "old_stripped.nseq"
+    with _zf.ZipFile(filepath, "r") as src, _zf.ZipFile(stripped, "w") as dst:
+        for item in src.infolist():
+            if item.filename != "project_metadata.json":
+                dst.writestr(item, src.read(item.filename))
+
+    loaded = Project(stripped)
+    assert loaded.dt == pytest.approx(0.0005)
+
+
+def test_remappable_data_description_counts_correctly() -> None:
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "s1", StimType.External, np.zeros((4, 1), dtype=np.float32), "pA", 0.001
+        )
+    )
+    project.add_stim_array(
+        StimArray(
+            "s2", StimType.External, np.zeros((4, 1), dtype=np.float32), "pA", 0.001
+        )
+    )
+    trace = TraceData(
+        "t1",
+        np.zeros((1, 4), dtype=np.float32),
+        np.array([0], dtype=np.uint32),
+        "mV",
+        0.001,
+    )
+    project.add_experiment(Experiment("exp1", 0.004, [], [trace]))
+
+    desc = project.remappable_data_description(0.0005)
+    assert "2 stim array(s)" in desc
+    assert "1 trace dataset(s)" in desc
+
+    assert project.remappable_data_description(0.001) == ""

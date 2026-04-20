@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import math
 import pathlib
@@ -36,6 +37,47 @@ def _to_seconds(value: float | int) -> float:
     return float(value)
 
 
+def _trace_data_neuron_count(data: TraceData) -> int:
+    if data.indices.size > 0:
+        return int(np.max(data.indices)) + 1
+    if data.traces.ndim >= 1:
+        return int(data.traces.shape[0])
+    return 0
+
+
+def _spike_data_neuron_count(data: SpikeData) -> int:
+    if data.spike_indices.size == 0:
+        return 0
+    return int(np.max(data.spike_indices)) + 1
+
+
+def _synapse_data_neuron_count(data: SynapseData) -> int:
+    if data.values.ndim < 2:
+        return 0
+    return int(max(data.values.shape[0], data.values.shape[1]))
+
+
+def _experiment_data_neuron_count(
+    data: TraceData | SpikeData | SynapseData,
+) -> int:
+    if isinstance(data, TraceData):
+        return _trace_data_neuron_count(data)
+    if isinstance(data, SpikeData):
+        return _spike_data_neuron_count(data)
+    return _synapse_data_neuron_count(data)
+
+
+def _cellpose_neuron_count(cellpose_data: CellposeImportResult | None) -> int:
+    if cellpose_data is None:
+        return 0
+    if cellpose_data.original_cellpose_ids is not None:
+        return int(np.asarray(cellpose_data.original_cellpose_ids).size)
+    if cellpose_data.segmentation_array is None:
+        return 0
+    unique_ids = np.unique(cellpose_data.segmentation_array)
+    return int(np.sum(unique_ids >= 0))
+
+
 class Project:
     def __init__(
         self,
@@ -52,11 +94,13 @@ class Project:
         self.max_ram_synapse_plot_matrix = 256
         self.max_time_secs = 0.0
         self.max_neurons = 0
+        self.dt: float = 0.001
 
         self.logger = logging.getLogger(__name__)
         if filepath:
             self.filepath = pathlib.Path(filepath)
             self.logger.info(f"Loading project from '{filepath}'")
+            _dt_from_metadata = False
             with zipfile.ZipFile(filepath, "r", zipfile.ZIP_DEFLATED) as zf:
                 b2_model_data = load_from_zip("b2_model", zf)
                 if "b2_stored_state.pkl" in zf.namelist():
@@ -71,6 +115,12 @@ class Project:
                 self.cellpose_data = load_from_zip("cellpose_data", zf).get(
                     "cellpose_import"
                 )
+                if "project_metadata.json" in zf.namelist():
+                    _meta = json.loads(zf.read("project_metadata.json"))
+                    self.dt = float(_meta.get("dt", 0.001))
+                    _dt_from_metadata = True
+            if not _dt_from_metadata:
+                self.dt = self._derive_dt_from_data()
             for experiment in self.experiments.values():
                 self.max_time_secs = max(self.max_time_secs, experiment.duration)
             for stim_array in self.stim_arrays.values():
@@ -251,6 +301,11 @@ class Project:
             self.max_time_secs = max(
                 self.max_time_secs, _to_seconds(experiment.duration)
             )
+            for datum in experiment.data:
+                self.max_neurons = max(
+                    self.max_neurons,
+                    _experiment_data_neuron_count(datum),
+                )
         for stim_array in self.stim_arrays.values():
             stim_array.values = ensure_2d_stim_values(stim_array.values)
             stim_dt = validate_stim_dt_seconds(stim_array.dt)
@@ -261,6 +316,92 @@ class Project:
             )
             n_stim_neurons = int(stim_array.values.shape[1])
             self.max_neurons = max(self.max_neurons, n_stim_neurons)
+        self.max_neurons = max(
+            self.max_neurons,
+            _cellpose_neuron_count(self.cellpose_data),
+        )
+
+    def _derive_dt_from_data(self) -> float:
+        """Infer canonical dt from loaded stim/trace data; fall back to 1 ms."""
+        for stim_array in self.stim_arrays.values():
+            return float(stim_array.dt)
+        for experiment in self.experiments.values():
+            for data in experiment.data:
+                if isinstance(data, TraceData):
+                    return float(data.dt)
+        return 0.001
+
+    def remap_all_data_to_dt(self, new_dt: float) -> None:
+        """ZOH-remap every StimArray and every TraceData in the project to new_dt."""
+        from neuroseq.importer_igor2 import (  # noqa: PLC0415
+            estimate_resampled_sample_count,
+        )
+        from neuroseq.importer_igor2 import (  # noqa: PLC0415
+            resample_wave_zero_order_hold,
+        )
+
+        new_dt = float(new_dt)
+        for stim_array in self.stim_arrays.values():
+            if not stim_dt_matches(float(stim_array.dt), new_dt):
+                stim_array.values = remap_stim_values_to_dt(
+                    stim_array.values,
+                    old_dt_seconds=float(stim_array.dt),
+                    new_dt_seconds=new_dt,
+                )
+                stim_array.dt = new_dt
+
+        for experiment in self.experiments.values():
+            for data in experiment.data:
+                if not isinstance(data, TraceData):
+                    continue
+                if stim_dt_matches(float(data.dt), new_dt):
+                    continue
+                n_rows, n_cols = data.traces.shape
+                if n_cols == 0:
+                    data.dt = new_dt
+                    continue
+                if n_rows == 0:
+                    new_cols = estimate_resampled_sample_count(
+                        n_cols, float(data.dt), target_dt=new_dt
+                    )
+                    data.traces = np.zeros((0, new_cols), dtype=np.float32)
+                else:
+                    new_rows = [
+                        resample_wave_zero_order_hold(
+                            data.traces[i],
+                            source_dt=float(data.dt),
+                            target_dt=new_dt,
+                        )
+                        for i in range(n_rows)
+                    ]
+                    data.traces = np.stack(new_rows, axis=0).astype(
+                        np.float32, copy=False
+                    )
+                data.dt = new_dt
+
+        self.dt = new_dt
+        self.update_limits()
+
+    def remappable_data_description(self, new_dt: float) -> str:
+        """Human-readable summary of stims/traces that would be remapped to new_dt."""
+        stim_count = sum(
+            1
+            for sa in self.stim_arrays.values()
+            if not stim_dt_matches(float(sa.dt), new_dt)
+        )
+        trace_count = sum(
+            1
+            for exp in self.experiments.values()
+            for data in exp.data
+            if isinstance(data, TraceData)
+            and not stim_dt_matches(float(data.dt), new_dt)
+        )
+        parts: list[str] = []
+        if stim_count:
+            parts.append(f"{stim_count} stim array(s)")
+        if trace_count:
+            parts.append(f"{trace_count} trace dataset(s)")
+        return " and ".join(parts)
 
     def issues_with_appending_experimental_data(
         self,
@@ -471,6 +612,26 @@ class Project:
         )
         self.add_experiment(experiment)
 
+    def add_data_to_experiment(
+        self,
+        experiment_name: str,
+        data: TraceData | SpikeData | SynapseData,
+    ) -> None:
+        """Append data to an existing experiment and keep timing metadata coherent."""
+        experiment = self.experiments.get(experiment_name)
+        if experiment is None:
+            raise KeyError(f"Experiment '{experiment_name}' does not exist")
+
+        experiment.data.append(data)
+        if isinstance(data, TraceData):
+            new_duration = float(data.traces.shape[1] * data.dt)
+            if new_duration > experiment.duration:
+                experiment.duration = new_duration
+                if new_duration not in experiment.timepoints:
+                    experiment.timepoints.append(new_duration)
+                experiment.timepoints.sort()
+        self.update_limits()
+
     def pad_stim_arrays(self, total_time_seconds: float):
         """
         Pad all StimArrays in the project to a length of total_time_seconds
@@ -552,6 +713,7 @@ class Project:
         """
 
         with zipfile.ZipFile(filepath, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("project_metadata.json", json.dumps({"dt": self.dt}))
             if options.include_stim_arrays:
                 append_to_zip(self.stim_arrays, "stim_arrays", zf)
             if options.include_model:

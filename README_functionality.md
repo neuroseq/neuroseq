@@ -584,17 +584,19 @@ python -m neuroseq \
 
 `igor_import_dialog.py` + `importer_igor2.py`:
 
-- GUI entrypoint is `File -> Import Igor2 Wave (.ibw/.csv)`.
+- GUI entrypoint is `File → Import data → Import stimulus → Import patch clamp` (pre-dialog selects `Igor2`).
 - Import is available regardless of whether the project already has stim arrays:
   - if no stim arrays exist, only `Create new stim array` is available,
   - if stim arrays already exist, user can either create a new stim array or import into an existing one.
 - Supported file types are:
   - Igor Binary Wave `.ibw`,
+  - Igor Packed Experiment `.pxp`,
   - simple Igor-style `.csv`.
-- Current scope is single-wave import only:
-  - packed Igor/Sutter experiments such as `.pxp` are not imported yet,
-  - multidimensional Igor waves are rejected,
-  - the importer currently expects one 1D command/stimulation trace per file.
+- Current scope is one selected 1D wave per import action:
+  - `.ibw` and `.csv` provide a single wave directly,
+  - `.pxp` files may contain many waves, but the dialog imports one selected wave at a time,
+  - multidimensional Igor waves are rejected or skipped,
+  - the importer currently expects one 1D command/stimulation trace per import operation.
 
 #### Supported file semantics
 
@@ -603,6 +605,7 @@ python -m neuroseq \
   - every following non-empty row = exactly one numeric sample value.
 - Multi-column sample rows in `.csv` are rejected as invalid input.
 - `.ibw` loading uses the optional Python dependency `igor2`.
+- `.pxp` loading also uses the optional Python dependency `igor2`.
 - For `.ibw`, importer extracts when available:
   - wave name,
   - raw sample values,
@@ -610,6 +613,27 @@ python -m neuroseq \
   - data units,
   - x-axis / dimension units,
   - optional wave note text for preview display.
+- For `.pxp`, importer walks the packed experiment, extracts all importable 1D waves, and presents them in a wave-picker list using slash-joined folder paths such as `root/stims/HodgkinHuxley`.
+- `.pxp` loading is tolerant to per-record unpack failures (e.g. upstream igor2 0.5.x raises `TypeError: buffer is too small for requested array` on some dependency-formula / multidimensional waves). The loader iterates the packed record stream itself and wraps each `record_type(header, data, ...)` call in try/except:
+  - records that fail to unpack are logged at WARNING and recorded as `SkippedPxpRecord(record_index, record_type, reason)`,
+  - the remaining records are still passed through `igor2.packed._build_filesystem(...)` and parsed as usual,
+  - `load_igor_pxp_file()` returns an `IgorPxpLoadReport(waves, skipped)` dataclass,
+  - when `skipped` is non-empty the dialog shows a `QMessageBox.warning` ("Some waves were skipped") after populating the wave picker, and writes the full per-record breakdown to the application log.
+
+#### Packed experiment selection flow
+
+- When a `.pxp` file is selected:
+  - the dialog scans the packed experiment for importable 1D waves,
+  - a `Wave Selection` panel becomes visible,
+  - the list contains the wave path keys derived from the packed-experiment folder hierarchy.
+- If exactly one wave is found:
+  - it is auto-selected immediately,
+  - preview, suggested stim name, and suggested units populate automatically.
+- If multiple waves are found:
+  - no wave is selected initially,
+  - preview stays empty,
+  - import remains disabled until the user chooses one wave from the list.
+- Loading a non-`.pxp` file hides the wave picker again and returns to the original single-wave flow.
 
 #### Preview and source sampling metadata
 
@@ -633,16 +657,19 @@ python -m neuroseq \
 #### Timeline conversion model
 
 - NeuroSeq’s current stim editor/timeline assumes a 1 ms grid for correct editing/viewing behavior.
-- Therefore Igor import always targets:
+- By default Igor import targets:
   - `target_dt = 0.001 s`.
-- If source `dt` already equals `0.001 s`, sample values are copied directly.
-- If source `dt` differs from `0.001 s`, importer resamples to the NeuroSeq grid using zero-order hold:
-  - target timestamps are generated on the 1 ms grid,
+- The dialog now also offers `Adjust NeuroSeq stim grid to source/file grid`:
+  - if enabled, `target_dt` becomes the currently selected source/file `dt`,
+  - new stim arrays are created on that grid,
+  - existing stim arrays are remapped to that grid before import after user confirmation.
+- If source `dt` already equals the selected target `dt`, sample values are copied directly.
+- If source `dt` differs from the selected target `dt`, importer resamples using zero-order hold:
+  - target timestamps are generated on the selected target grid,
   - each target sample takes the most recent source sample value,
   - this is intended for step-like command waveforms,
-  - fine sub-ms structure is intentionally collapsed to the 1 ms NeuroSeq representation.
-- Estimated imported sample count is computed from total source duration:
-  - `ceil(source_samples * source_dt / 0.001)`.
+  - fine structure below the chosen target `dt` is intentionally collapsed in the NeuroSeq representation.
+- Estimated imported sample count is computed from total source duration and the selected target `dt`.
 
 #### Import target modes
 
@@ -671,8 +698,10 @@ The dialog offers two mutually exclusive modes.
   - whether to extend target duration,
   - whether to replace or add to existing values.
 - Existing-target import is only enabled when the selected target stim array also uses:
-  - `dt = 0.001 s`.
 - Import writes the 1D Igor wave into exactly one neuron column of the chosen target stim array.
+- If the selected target stim array uses a different `dt` than the chosen import target `dt`:
+  - the dialog asks for confirmation,
+  - the target stim array is remapped to the selected import grid before writing the Igor wave.
 - Time-axis behavior:
   - if `extend_to_fit=True`, target stim array grows to fit the imported duration,
   - otherwise overflow samples are truncated.
@@ -697,10 +726,8 @@ The dialog offers two mutually exclusive modes.
 
 #### Current limitations
 
-- No `.pxp` / Sutter packed-experiment import yet.
 - No multi-wave batch import yet.
 - No automatic reconstruction of stimulation patterns from Sutter routine/paradigm metadata yet.
-- Import-to-existing currently requires the target stim array to already be on the 1 ms grid.
 - Because zero-order hold is used, the importer is best aligned with command/stimulation waveforms that are piecewise constant or approximately step-like.
 
 ## 10) Synthetic data generation (`synthetic_data_dialog.py`)

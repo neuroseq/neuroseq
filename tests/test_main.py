@@ -21,17 +21,56 @@ class FakeGui:
 
 class FakeQApplication:
     def __init__(self, *args: Any) -> None:
-        pass
+        self.quit_called = False
 
     def exec(self) -> None:
         pass
+
+    def quit(self) -> None:
+        self.quit_called = True
 
 
 @pytest.fixture()
 def cli_runner_fake_gui(monkeypatch: pytest.MonkeyPatch) -> CliRunner:
     monkeypatch.setattr("neuroseq.gui.Gui", FakeGui)
     monkeypatch.setattr("qtpy.QtWidgets.QApplication", FakeQApplication)
+    monkeypatch.setattr(
+        "neuroseq.__main__._install_interrupt_handlers", lambda app: None
+    )
     return CliRunner()
+
+
+class FakeTimerSignal:
+    def __init__(self) -> None:
+        self.callback: Any | None = None
+
+    def connect(self, callback: Any) -> None:
+        self.callback = callback
+
+
+class FakeTimer:
+    def __init__(self, parent: Any) -> None:
+        self.parent = parent
+        self.interval: int | None = None
+        self.started = False
+        self.timeout = FakeTimerSignal()
+
+    def setInterval(self, interval: int) -> None:
+        self.interval = interval
+
+    def start(self) -> None:
+        self.started = True
+
+
+class FakeSignalModule:
+    SIGINT = 2
+    SIGTERM = 15
+
+    def __init__(self) -> None:
+        self.handlers: dict[int, Any] = {}
+
+    def signal(self, signum: int, handler: Any) -> None:
+        self.handlers[signum] = handler
 
 
 @pytest.mark.parametrize("log_level", ["DEBUG", "inFo", "warning", "ERROR", "Critical"])
@@ -54,6 +93,50 @@ def test_main_logging_invalid(
     result = cli_runner_fake_gui.invoke(main, ["--log-level", log_level])
     assert "Error" in result.output
     assert result.exit_code != 0
+
+
+def test_install_interrupt_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
+    from neuroseq.__main__ import _install_interrupt_handlers
+
+    app = FakeQApplication()
+    fake_signals = FakeSignalModule()
+
+    monkeypatch.setattr("neuroseq.__main__.sys.platform", "linux")
+    timer = _install_interrupt_handlers(
+        app,
+        timer_factory=FakeTimer,
+        signal_module=fake_signals,
+    )
+
+    assert isinstance(timer, FakeTimer)
+    assert timer.parent is app
+    assert timer.interval == 200
+    assert timer.started is True
+    assert callable(timer.timeout.callback)
+    assert fake_signals.SIGINT in fake_signals.handlers
+    assert fake_signals.SIGTERM in fake_signals.handlers
+
+    fake_signals.handlers[fake_signals.SIGINT](fake_signals.SIGINT, None)
+    assert app.quit_called is True
+
+
+def test_install_interrupt_handlers_skips_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from neuroseq.__main__ import _install_interrupt_handlers
+
+    app = FakeQApplication()
+    fake_signals = FakeSignalModule()
+
+    monkeypatch.setattr("neuroseq.__main__.sys.platform", "win32")
+    timer = _install_interrupt_handlers(
+        app,
+        timer_factory=FakeTimer,
+        signal_module=fake_signals,
+    )
+
+    assert timer is None
+    assert fake_signals.handlers == {}
 
 
 def test_generate_cellpose_test_data_cli(

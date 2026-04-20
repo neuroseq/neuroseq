@@ -1,0 +1,730 @@
+HANDOFF: Igor2 Packed Experiment (.pxp) import support
+=======================================================
+Branch: import_igor2
+Repo: /mnt/live3/svintila/neuroseq
+Date: 2026-04-15
+
+TASK OVERVIEW
+-------------
+Add .pxp (Igor Pro Packed Experiment) file loading to the existing Igor2 import pipeline
+in NeuroSeq. The igor2 Python library is already installed in the project venv. The single-
+wave .ibw/.csv import pipeline must remain completely untouched. You are only ADDING new
+code paths; do not refactor existing ones.
+
+Full spec: .ai_dev/specs/igor2_pxp_import.md
+
+Test data files (read-only, do NOT copy them into the repo):
+  /mnt/live3/svintila/code_scraps/igor2_files/test_files/260316_0.pxp  (13 MB, real PXP)
+  /mnt/live3/svintila/code_scraps/igor2_files/test_files/HodgkinHuxley.ibw
+  /mnt/live3/svintila/code_scraps/igor2_files/test_files/Single_actionPotential.ibw
+  /mnt/live3/svintila/code_scraps/igor2_files/test_files/Noise.ibw
+
+
+HOW TO RUN TESTS
+----------------
+  cd /mnt/live3/svintila/neuroseq
+  uv run pytest tests/test_importer_igor2.py tests/test_igor_import_dialog.py -v
+
+Run the full suite before and after your changes:
+  uv run pytest
+
+
+FILES TO CHANGE
+---------------
+1. src/neuroseq/importer_igor2.py      — add new functions (details below)
+2. src/neuroseq/igor_import_dialog.py  — extend dialog to handle .pxp (details below)
+3. tests/test_importer_igor2.py        — add new unit tests
+4. tests/test_igor_import_dialog.py    — add new dialog tests
+
+DO NOT TOUCH:
+  src/neuroseq/exporter_igor2.py
+  src/neuroseq/igor2_patchclamp_export_dialog.py
+  src/neuroseq/gui.py
+  Any other file not listed above.
+
+
+=============================================================
+CHANGE 1: src/neuroseq/importer_igor2.py
+=============================================================
+
+Add these two functions AFTER the existing load_igor_ibw_file() function.
+
+---
+
+def is_pxp_file(path: str | Path) -> bool:
+    """Return True if *path* has a .pxp extension (case-insensitive)."""
+    return Path(path).suffix.lower() == ".pxp"
+
+
+def load_igor_pxp_file(path: str | Path) -> dict[str, IgorWave]:
+    """Load all 1-D waves from an Igor Packed Experiment (.pxp) file.
+
+    Returns a dict mapping slash-joined folder paths to IgorWave objects.
+    Example key: "root/stims/HodgkinHuxley" or just "HodgkinHuxley" if at root.
+
+    Only 1-D waves are included; multi-dimensional waves are skipped with a
+    debug log message. Raises ImportError if igor2 is not installed. Raises
+    ValueError if the file contains no importable 1-D waves.
+    """
+    path = Path(path)
+    try:
+        packed = importlib.import_module("igor2.packed")
+        wave_record_module = importlib.import_module("igor2.record.wave")
+    except ImportError as exc:
+        raise ImportError(
+            "Reading Igor Packed Experiment files requires the optional 'igor2' dependency."
+        ) from exc
+
+    WaveRecord = wave_record_module.WaveRecord
+
+    _records, filesystem = packed.load(path)
+
+    waves: dict[str, IgorWave] = {}
+
+    def _collect(dirpath: list[object], key: object, value: object) -> None:
+        if not isinstance(value, WaveRecord):
+            return
+        # Build a human-readable path key
+        parts = [
+            seg.decode("utf-8", errors="ignore") if isinstance(seg, (bytes, bytearray)) else str(seg)
+            for seg in dirpath
+        ]
+        wave_name_str = (
+            key.decode("utf-8", errors="ignore") if isinstance(key, (bytes, bytearray)) else str(key)
+        )
+        parts.append(wave_name_str)
+        path_key = "/".join(parts)
+
+        try:
+            igor_wave = parse_igor_binary_wave_data(
+                value.wave,
+                fallback_name=wave_name_str,
+            )
+        except ValueError as exc:
+            logger.debug("Skipping wave %s: %s", path_key, exc)
+            return
+
+        waves[path_key] = igor_wave
+
+    packed.walk(filesystem, _collect)
+
+    if not waves:
+        raise ValueError(
+            f"No importable 1-D waves found in packed experiment file '{path.name}'"
+        )
+
+    return waves
+
+---
+
+Also update load_igor_wave_file() to raise a clear error for .pxp (since it returns a single
+IgorWave, not a dict — .pxp must be loaded via load_igor_pxp_file):
+
+    def load_igor_wave_file(path: str | Path) -> IgorWave:
+        path = Path(path)
+        suffix = path.suffix.lower()
+        if suffix == ".csv":
+            return load_igor_csv_file(path)
+        if suffix == ".ibw":
+            return load_igor_ibw_file(path)
+        if suffix == ".pxp":
+            raise ValueError(
+                "Igor Packed Experiment files (.pxp) contain multiple waves — "
+                "use load_igor_pxp_file() instead."
+            )
+        raise ValueError(f"Unsupported Igor wave file format '{path.suffix}'")
+
+Style rules:
+  - Keep "from __future__ import annotations" at top.
+  - All imports stay at module level (importlib.import_module calls inside function bodies are fine).
+  - No type: ignore comments; use proper type annotations.
+  - Ruff E501 is ignored so long lines are fine.
+
+
+=============================================================
+CHANGE 2: src/neuroseq/igor_import_dialog.py
+=============================================================
+
+Add these imports at the top (after existing imports from neuroseq.importer_igor2):
+
+    from neuroseq.importer_igor2 import is_pxp_file
+    from neuroseq.importer_igor2 import load_igor_pxp_file
+
+---
+
+ADD new instance variables in __init__ (after self._auto_units = ""):
+
+    self.loaded_pxp_waves: dict[str, IgorWave] = {}
+
+---
+
+In _setup_ui(), INSERT a new QGroupBox BETWEEN the file-selection group and the preview
+group. Use this exact structure:
+
+    self.wave_picker_group = QtWidgets.QGroupBox("Wave Selection")
+    wave_picker_layout = QtWidgets.QVBoxLayout(self.wave_picker_group)
+    self.pxp_wave_list = QtWidgets.QListWidget()
+    self.pxp_wave_list.setSelectionMode(
+        QtWidgets.QAbstractItemView.SelectionMode.SingleSelection
+    )
+    self.pxp_wave_list.currentItemChanged.connect(self._on_pxp_wave_selected)
+    wave_picker_layout.addWidget(self.pxp_wave_list)
+    self.wave_picker_group.setVisible(False)   # hidden until a .pxp is loaded
+    layout.addWidget(self.wave_picker_group)
+
+Then add layout.addWidget(preview_group) AFTER the wave_picker_group.
+
+(The existing preview group comes after wave picker in the vertical layout.)
+
+---
+
+ADD this new method to the class:
+
+    def _on_pxp_wave_selected(
+        self,
+        current: QtWidgets.QListWidgetItem | None,
+        _previous: QtWidgets.QListWidgetItem | None,
+    ) -> None:
+        if current is None:
+            self.loaded_wave = None
+        else:
+            path_key = current.text()
+            self.loaded_wave = self.loaded_pxp_waves.get(path_key)
+            if self.loaded_wave is not None and self.loaded_wave.source_dt is not None:
+                self.source_dt_spin.setValue(float(self.loaded_wave.source_dt))
+            else:
+                self.source_dt_spin.setValue(NEUROSEQ_IGOR_TARGET_DT_SECONDS)
+            # Auto-populate stim name from wave name
+            previous_auto_name = self._auto_stim_name
+            self._auto_stim_name = self.loaded_wave.name if self.loaded_wave else ""
+            current_name = self.new_name_edit.text().strip()
+            if not current_name or current_name == previous_auto_name:
+                self.new_name_edit.setText(self._auto_stim_name)
+            # Auto-populate units
+            previous_auto_units = self._auto_units
+            self._auto_units = (self.loaded_wave.units or "") if self.loaded_wave else ""
+            current_units = self.new_units_edit.text().strip()
+            if not current_units or current_units == previous_auto_units:
+                self.new_units_edit.setText(self._auto_units)
+        self._update_preview()
+        self._update_import_button_state()
+
+---
+
+MODIFY _browse_file() — update the file filter string to include .pxp:
+
+    filename, _ = getopenfilename(
+        self,
+        "Select Igor wave",
+        "",
+        "Igor files (*.ibw *.pxp *.csv);;Igor Binary Wave (*.ibw);;Igor Packed Experiment (*.pxp);;CSV file (*.csv);;All files (*)",
+    )
+
+---
+
+MODIFY _load_file() — add PXP branch BEFORE the existing try block:
+
+    def _load_file(self, filename: str) -> None:
+        if is_pxp_file(filename):
+            self._load_pxp_file(filename)
+            return
+        # ... existing code unchanged below ...
+
+ADD new method _load_pxp_file():
+
+    def _load_pxp_file(self, filename: str) -> None:
+        try:
+            waves = load_igor_pxp_file(filename)
+        except Exception as exc:
+            self.logger.exception("Failed to load Igor packed experiment %s", filename)
+            self.loaded_wave = None
+            self.loaded_pxp_waves = {}
+            self.file_path = ""
+            self.file_label.setText("No Igor wave selected")
+            self.file_label.setStyleSheet("QLabel { color: gray; }")
+            self.pxp_wave_list.clear()
+            self.wave_picker_group.setVisible(False)
+            self._update_import_button_state()
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Import Error",
+                f"Could not load Igor packed experiment:\n{exc}",
+            )
+            return
+
+        self.loaded_pxp_waves = waves
+        self.file_path = filename
+        self.file_label.setText(filename)
+        self.file_label.setStyleSheet("QLabel { color: black; }")
+
+        # Populate wave picker
+        self.pxp_wave_list.clear()
+        for path_key in sorted(waves.keys()):
+            self.pxp_wave_list.addItem(path_key)
+        self.wave_picker_group.setVisible(True)
+
+        # Auto-select if only one wave
+        if len(waves) == 1:
+            self.pxp_wave_list.setCurrentRow(0)
+        else:
+            self.loaded_wave = None
+            self._update_preview()
+            self._update_import_button_state()
+
+
+=============================================================
+CHANGE 3: tests/test_importer_igor2.py
+=============================================================
+
+Add these four tests at the bottom of the file. Use monkeypatching — do NOT reference the
+real .pxp test file. Keep all existing tests untouched.
+
+---
+
+import types  # add to existing imports at top of file (only if not already present)
+
+from neuroseq.importer_igor2 import is_pxp_file
+from neuroseq.importer_igor2 import load_igor_pxp_file
+
+---
+
+def _make_fake_packed_module(filesystem: dict) -> types.ModuleType:
+    """Build a fake igor2.packed module for monkeypatching."""
+    import types as _types
+
+    mod = _types.ModuleType("igor2.packed")
+
+    def load(path):
+        return [], filesystem
+
+    def walk(fs, callback, dirpath=None):
+        if dirpath is None:
+            dirpath = []
+        for key, value in sorted(fs.items()):
+            callback(dirpath, key, value)
+            if isinstance(value, dict):
+                walk(fs=value, callback=callback, dirpath=dirpath + [key])
+
+    mod.load = load
+    mod.walk = walk
+    return mod
+
+
+def _make_fake_wave_record(wave_dict: dict) -> object:
+    """Build a fake WaveRecord for testing."""
+    class FakeWaveRecord:
+        wave = wave_dict
+    return FakeWaveRecord()
+
+
+def test_load_igor_pxp_file_returns_all_1d_waves(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    pxp_path = tmp_path / "test.pxp"
+    pxp_path.write_bytes(b"fake pxp")
+
+    wave_dict = {
+        "version": 5,
+        "wave": {
+            "wave_header": {
+                "bname": b"MyWave\x00",
+                "sfA": [0.001, 0.0, 0.0, 0.0],
+                "dataUnits": b"pA\x00",
+                "dimUnits": [b"s\x00", b"", b"", b""],
+            },
+            "wData": np.array([1.0, 2.0, 3.0], dtype=np.float32),
+            "note": b"",
+        },
+    }
+
+    fake_packed = _make_fake_packed_module(
+        {b"root": {b"MyWave": _make_fake_wave_record(wave_dict)}}
+    )
+
+    class FakeWaveRecordModule:
+        WaveRecord = type(_make_fake_wave_record(wave_dict))
+
+    original_import = importlib.import_module
+
+    def fake_import(name, package=None):
+        if name == "igor2.packed":
+            return fake_packed
+        if name == "igor2.record.wave":
+            return FakeWaveRecordModule()
+        return original_import(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", fake_import)
+
+    waves = load_igor_pxp_file(pxp_path)
+
+    assert len(waves) == 1
+    key = next(iter(waves))
+    assert "MyWave" in key
+    wave = waves[key]
+    assert wave.name == "MyWave"
+    assert wave.source_dt == pytest.approx(0.001)
+    assert wave.units == "pA"
+    np.testing.assert_allclose(wave.values, np.array([1.0, 2.0, 3.0]))
+
+
+def test_load_igor_pxp_file_skips_multidimensional_waves(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """2-D waves produce a ValueError in parse_igor_binary_wave_data and are skipped."""
+    pxp_path = tmp_path / "test.pxp"
+    pxp_path.write_bytes(b"fake")
+
+    wave_2d_dict = {
+        "version": 5,
+        "wave": {
+            "wave_header": {
+                "bname": b"TwoDWave\x00",
+                "sfA": [0.001, 0.0, 0.0, 0.0],
+                "dataUnits": b"\x00",
+                "dimUnits": [b"s\x00", b"", b"", b""],
+            },
+            # 2-D array: after squeeze still 2-D
+            "wData": np.ones((3, 4), dtype=np.float32),
+            "note": b"",
+        },
+    }
+    wave_1d_dict = {
+        "version": 5,
+        "wave": {
+            "wave_header": {
+                "bname": b"OneDWave\x00",
+                "sfA": [0.001, 0.0, 0.0, 0.0],
+                "dataUnits": b"mV\x00",
+                "dimUnits": [b"s\x00", b"", b"", b""],
+            },
+            "wData": np.array([0.5, 1.5], dtype=np.float32),
+            "note": b"",
+        },
+    }
+
+    fake_packed = _make_fake_packed_module(
+        {
+            b"TwoDWave": _make_fake_wave_record(wave_2d_dict),
+            b"OneDWave": _make_fake_wave_record(wave_1d_dict),
+        }
+    )
+
+    class FakeWaveRecordModule:
+        WaveRecord = type(_make_fake_wave_record(wave_1d_dict))
+
+    original_import = importlib.import_module
+
+    def fake_import(name, package=None):
+        if name == "igor2.packed":
+            return fake_packed
+        if name == "igor2.record.wave":
+            return FakeWaveRecordModule()
+        return original_import(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", fake_import)
+
+    waves = load_igor_pxp_file(pxp_path)
+
+    assert len(waves) == 1
+    assert any("OneDWave" in k for k in waves)
+    assert not any("TwoDWave" in k for k in waves)
+
+
+def test_load_igor_pxp_file_raises_if_no_waves(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    pxp_path = tmp_path / "empty.pxp"
+    pxp_path.write_bytes(b"fake")
+
+    fake_packed = _make_fake_packed_module({})
+
+    class FakeWaveRecordModule:
+        class WaveRecord:
+            pass
+
+    original_import = importlib.import_module
+
+    def fake_import(name, package=None):
+        if name == "igor2.packed":
+            return fake_packed
+        if name == "igor2.record.wave":
+            return FakeWaveRecordModule()
+        return original_import(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", fake_import)
+
+    with pytest.raises(ValueError, match="No importable"):
+        load_igor_pxp_file(pxp_path)
+
+
+def test_load_igor_pxp_file_raises_if_igor2_not_installed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    pxp_path = tmp_path / "test.pxp"
+    pxp_path.write_bytes(b"fake")
+
+    original_import = importlib.import_module
+
+    def fake_import(name, package=None):
+        if name in ("igor2.packed", "igor2.record.wave"):
+            raise ImportError("no module named igor2")
+        return original_import(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", fake_import)
+
+    with pytest.raises(ImportError, match="igor2"):
+        load_igor_pxp_file(pxp_path)
+
+
+def test_is_pxp_file_detects_extension() -> None:
+    assert is_pxp_file("foo.pxp") is True
+    assert is_pxp_file("foo.PXP") is True
+    assert is_pxp_file("foo.ibw") is False
+    assert is_pxp_file("foo.csv") is False
+
+
+=============================================================
+CHANGE 4: tests/test_igor_import_dialog.py
+=============================================================
+
+Add these imports at the top:
+
+    import importlib
+    import types
+
+Add these three tests at the bottom. Do NOT modify existing tests.
+
+The fake_import helper below must be defined inside each test (or as a local closure) to
+keep the monkeypatching clean.
+
+---
+
+def _build_dialog_with_pxp(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch: pytest.MonkeyPatch,
+    waves_filesystem: dict,
+) -> tuple["IgorImportDialog", "Project"]:
+    """Helper: create a dialog and load a fake PXP into it."""
+    from neuroseq.importer_igor2 import load_igor_pxp_file  # noqa: F401 (used via monkeypatch)
+
+    pxp_path = tmp_path / "test.pxp"
+    pxp_path.write_bytes(b"fake pxp")
+
+    project = Project()
+    dialog = IgorImportDialog(project)
+    qtbot.addWidget(dialog)
+
+    import importlib as _importlib
+
+    def _make_fake_packed(fs):
+        mod = types.ModuleType("igor2.packed")
+        def load(p): return [], fs
+        def walk(f, cb, dirpath=None):
+            if dirpath is None: dirpath = []
+            for k, v in sorted(f.items()):
+                cb(dirpath, k, v)
+                if isinstance(v, dict):
+                    walk(f=v, cb=cb, dirpath=dirpath + [k])
+        mod.load = load
+        mod.walk = walk
+        return mod
+
+    class FakeWR:
+        pass
+
+    class FakeWRModule:
+        WaveRecord = FakeWR
+
+    for key, val in waves_filesystem.items():
+        if not isinstance(val, dict):
+            val.__class__ = FakeWR
+
+    original_import = _importlib.import_module
+    def fake_import(name, package=None):
+        if name == "igor2.packed":
+            return _make_fake_packed(waves_filesystem)
+        if name == "igor2.record.wave":
+            return FakeWRModule()
+        return original_import(name, package)
+
+    monkeypatch.setattr(_importlib, "import_module", fake_import)
+
+    dialog._load_file(str(pxp_path))
+    return dialog, project
+
+
+NOTE: The above helper approach is complex because of how isinstance(value, WaveRecord) works
+inside load_igor_pxp_file. A simpler approach for the test is to monkeypatch
+load_igor_pxp_file directly on the dialog's module:
+
+    monkeypatch.setattr(
+        "neuroseq.igor_import_dialog.load_igor_pxp_file",
+        lambda path: {"root/WaveA": wave_a, "root/WaveB": wave_b},
+    )
+    monkeypatch.setattr(
+        "neuroseq.igor_import_dialog.is_pxp_file",
+        lambda path: True,
+    )
+
+Use this simpler approach for all three dialog tests:
+
+---
+
+def test_igor_import_dialog_loads_pxp_and_shows_wave_picker(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from neuroseq.importer_igor2 import IgorWave
+
+    pxp_path = tmp_path / "test.pxp"
+    pxp_path.write_bytes(b"fake")
+
+    wave_a = IgorWave(
+        name="WaveA",
+        values=np.array([1.0, 2.0], dtype=np.float32),
+        source_dt=0.001,
+        units="pA",
+        axis_units="s",
+        source_format="pxp",
+    )
+    wave_b = IgorWave(
+        name="WaveB",
+        values=np.array([3.0, 4.0], dtype=np.float32),
+        source_dt=0.001,
+        units="mV",
+        axis_units="s",
+        source_format="pxp",
+    )
+    fake_waves = {"root/WaveA": wave_a, "root/WaveB": wave_b}
+
+    monkeypatch.setattr("neuroseq.igor_import_dialog.is_pxp_file", lambda _: True)
+    monkeypatch.setattr("neuroseq.igor_import_dialog.load_igor_pxp_file", lambda _: fake_waves)
+
+    project = Project()
+    dialog = IgorImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(pxp_path))
+
+    assert dialog.wave_picker_group.isVisible()
+    assert dialog.pxp_wave_list.count() == 2
+    items = [dialog.pxp_wave_list.item(i).text() for i in range(dialog.pxp_wave_list.count())]
+    assert "root/WaveA" in items
+    assert "root/WaveB" in items
+    # No wave selected yet → import button disabled
+    assert not dialog.import_button.isEnabled()
+
+
+def test_igor_import_dialog_pxp_wave_selection_sets_loaded_wave(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from neuroseq.importer_igor2 import IgorWave
+
+    pxp_path = tmp_path / "test.pxp"
+    pxp_path.write_bytes(b"fake")
+
+    wave_a = IgorWave(
+        name="WaveA",
+        values=np.array([1.0, 2.0], dtype=np.float32),
+        source_dt=0.001,
+        units="pA",
+        axis_units="s",
+        source_format="pxp",
+    )
+    fake_waves = {"root/WaveA": wave_a}
+
+    monkeypatch.setattr("neuroseq.igor_import_dialog.is_pxp_file", lambda _: True)
+    monkeypatch.setattr("neuroseq.igor_import_dialog.load_igor_pxp_file", lambda _: fake_waves)
+
+    project = Project()
+    dialog = IgorImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(pxp_path))
+
+    # Auto-selected because only one wave
+    assert dialog.loaded_wave is wave_a
+    assert dialog.new_name_edit.text() == "WaveA"
+    assert dialog.new_units_edit.text() == "pA"
+    assert dialog.import_button.isEnabled()
+
+
+def test_igor_import_dialog_pxp_multi_wave_requires_selection(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from neuroseq.importer_igor2 import IgorWave
+
+    pxp_path = tmp_path / "test.pxp"
+    pxp_path.write_bytes(b"fake")
+
+    wave_a = IgorWave(name="WaveA", values=np.array([1.0], dtype=np.float32),
+                      source_dt=0.001, units="pA", axis_units="s", source_format="pxp")
+    wave_b = IgorWave(name="WaveB", values=np.array([2.0], dtype=np.float32),
+                      source_dt=0.001, units="mV", axis_units="s", source_format="pxp")
+    fake_waves = {"root/WaveA": wave_a, "root/WaveB": wave_b}
+
+    monkeypatch.setattr("neuroseq.igor_import_dialog.is_pxp_file", lambda _: True)
+    monkeypatch.setattr("neuroseq.igor_import_dialog.load_igor_pxp_file", lambda _: fake_waves)
+
+    project = Project()
+    dialog = IgorImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(pxp_path))
+
+    # Two waves → nothing auto-selected, import disabled
+    assert dialog.loaded_wave is None
+    assert not dialog.import_button.isEnabled()
+
+    # Select WaveB manually
+    items = [dialog.pxp_wave_list.item(i).text() for i in range(dialog.pxp_wave_list.count())]
+    wave_b_row = items.index("root/WaveB")
+    dialog.pxp_wave_list.setCurrentRow(wave_b_row)
+
+    assert dialog.loaded_wave is wave_b
+    assert dialog.new_name_edit.text() == "WaveB"
+    assert dialog.import_button.isEnabled()
+
+
+=============================================================
+IMPLEMENTATION NOTES
+=============================================================
+
+1. source_format for waves loaded from PXP should be "pxp" (set this in _on_pxp_wave_selected
+   if needed, but parse_igor_binary_wave_data sets source_format="ibw" since PXP waves are
+   IBW-encoded internally — leave it as "ibw", it's accurate and the dialog preview shows it).
+
+2. When _load_pxp_file() calls _update_preview() with no wave selected yet, the existing
+   _update_preview() logic already handles self.loaded_wave is None gracefully.
+
+3. The wave_picker_group must be hidden (setVisible(False)) whenever a non-PXP file is loaded
+   or the dialog is cleared. Add this to the except branch of _load_file() for .ibw/.csv too,
+   or just always reset it in _load_file before the PXP branch check.
+
+4. When the user loads a .pxp, then loads a .ibw, the wave picker must hide and loaded_pxp_waves
+   must be cleared. Handle this in _load_file() at the top:
+       self.loaded_pxp_waves = {}
+       self.pxp_wave_list.clear()
+       self.wave_picker_group.setVisible(False)
+   before the is_pxp_file() branch.
+
+5. Do not add .pxp to the load_igor_wave_file() dispatcher — it stays as a ValueError there.
+   Only the dialog calls load_igor_pxp_file() directly.
+
+6. Mypy: dict[str, IgorWave] return type on load_igor_pxp_file(), bool on is_pxp_file().
+   IgorWave is already imported at the top of igor_import_dialog.py.
+
+7. Ruff: isort requires force-single-line = true, so each import on its own line.
+
+DONE WHEN:
+- uv run pytest tests/test_importer_igor2.py tests/test_igor_import_dialog.py  → all pass
+- uv run pytest  → no regressions
+- uv run mypy src/neuroseq/importer_igor2.py src/neuroseq/igor_import_dialog.py  → clean
+- uv run ruff check src/neuroseq/importer_igor2.py src/neuroseq/igor_import_dialog.py  → clean

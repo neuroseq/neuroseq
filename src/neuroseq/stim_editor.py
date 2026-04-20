@@ -61,6 +61,7 @@ class StimEditor(QtWidgets.QWidget):
     ) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
+        self.controller = controller
         self.toolbar = toolbar
         self.project: Project | None = None
         self.cmb_stim = cmb_stim
@@ -145,6 +146,10 @@ class StimEditor(QtWidgets.QWidget):
         self.stim_widget.clear_data()
         self.stim_widget.setEnabled(have_stims)
         self.cmb_stim.setEnabled(have_stims)
+        self.controller.set_limits(
+            float(self.project.max_time_secs),
+            max(1, int(self.project.max_neurons)),
+        )
         if not have_stims:
             self.current_stim_modifier = None
             return
@@ -330,6 +335,10 @@ class StimEditor(QtWidgets.QWidget):
                 self.draw_stim.value1 = 1.0
             self.draw_stim.value2 = self.draw_stim.value1
             self.stim_widget.set_data(self.current_stim_modifier.stim_array)
+            self.controller.focus_neuron_range(
+                0,
+                int(self.current_stim_modifier.stim_array.values.shape[1]),
+            )
             for modifier in self.stims_dict.values():
                 if modifier is not self.current_stim_modifier:
                     self.stim_widget.set_background_data(modifier.stim_array)
@@ -395,6 +404,27 @@ class StimEditor(QtWidgets.QWidget):
     def set_draw_mode(self, draw_mode: DrawMode) -> None:
         self.draw_mode = draw_mode
 
+    def _ensure_time_capacity_for_slice(self, time_slice: slice) -> bool:
+        if self.current_stim_modifier is None:
+            return False
+        if time_slice.stop is None:
+            return False
+        if time_slice.stop <= self.stim_widget.n_timestamps:
+            return True
+        if self.project is None:
+            return False
+        stim_name = self.current_stim_modifier.stim_array.name
+        required_total_time_seconds = (
+            float(self.current_stim_modifier.stim_array.dt) * time_slice.stop
+        )
+        self.project.pad_stim_arrays(required_total_time_seconds)
+        self.set_project(
+            self.project,
+            keep_undo_history=False,
+            stim_to_select=stim_name,
+        )
+        return time_slice.stop <= self.stim_widget.n_timestamps
+
     def draw_stim_region(
         self, neuron_slice: slice, time_slice: slice, erase=False
     ) -> None:
@@ -406,6 +436,10 @@ class StimEditor(QtWidgets.QWidget):
             time_slice = slice(
                 time_slice.start, time_slice.start + self.draw_stim_length
             )
+        if not self._is_valid_slice(neuron_slice, time_slice) and (
+            erase or not self._ensure_time_capacity_for_slice(time_slice)
+        ):
+            return
         if not self._is_valid_slice(neuron_slice, time_slice):
             return
         values = self._current_draw_stim_values(erase=erase)
@@ -431,6 +465,20 @@ class StimEditor(QtWidgets.QWidget):
                 self.paste_selected_stim(neuron_index, time_index)
             else:
                 self.stim_widget.unselect_neurons()
+            return
+        if self.mode == InteractMode.DRAW and button_index <= 2:
+            erase = (self.draw_mode == DrawMode.DRAW and button_index == 2) or (
+                self.draw_mode == DrawMode.ERASE and button_index == 1
+            )
+            neuron_slice = slice(neuron_index, neuron_index + 1)
+            time_slice = slice(time_index, time_index + self.draw_stim_length)
+            if not self._is_valid_slice(neuron_slice, time_slice):
+                return
+            self.draw_stim_region(
+                neuron_slice,
+                time_slice,
+                erase=erase,
+            )
             return
 
     def stim_widget_mouse_dragged(
@@ -736,14 +784,22 @@ class StimEditor(QtWidgets.QWidget):
                 self.draw_stim_length, self._current_stim_dt_seconds()
             )
             if not stim_dt_matches(dialog.dt, self.current_stim_modifier.stim_array.dt):
+                _other = self.project.remappable_data_description(dialog.dt)
+                _extra = (
+                    f" All other project data ({_other}) will also be remapped"
+                    " using zero-order hold."
+                    if _other
+                    else ""
+                )
                 continue_with_remap = QtWidgets.QMessageBox.question(
                     self,
-                    "Change stim array timestep",
-                    "Changing the stimulation timestep will remap stimulus array "
+                    "Change project sample interval",
+                    f"Changing the stimulation timestep will remap stimulus array "
                     f"'{old_name}' from "
                     f"{format_milliseconds(self.current_stim_modifier.stim_array.dt * 1000.0)} ms "
-                    f"to {format_milliseconds(dialog.dt * 1000.0)} ms. "
-                    "Stimulus timing may shift by up to one sample. Continue?",
+                    f"to {format_milliseconds(dialog.dt * 1000.0)} ms."
+                    f"{_extra} "
+                    "Timing may shift by up to one sample. Continue?",
                     QtWidgets.QMessageBox.StandardButton.Yes
                     | QtWidgets.QMessageBox.StandardButton.No,
                 )
@@ -753,6 +809,7 @@ class StimEditor(QtWidgets.QWidget):
                     1,
                     seconds_to_samples_nearest(old_draw_duration_seconds, dialog.dt),
                 )
+                self.project.remap_all_data_to_dt(dialog.dt)
             if dialog.name != old_name:
                 self.project.rename_stim_array(old_name, dialog.name)
             self.project.update_stim_array_properties(

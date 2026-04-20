@@ -4,7 +4,24 @@
 
 `src/neuroseq/` contains the installable package and most application code. The layout is intentionally flat: GUI entry lives in `__main__.py`, widgets and dialogs use names like `*_widget.py` and `*_dialog.py`, and import/export code uses `importer_*.py` and `exporter_*.py`. `tests/` mirrors that surface area with `test_*.py` files, shared fixtures in `tests/conftest.py`, and sample inputs in `tests/sampledata/`. `docs/` holds MkDocs content, with developer notes under `docs/developer/`, user docs under `docs/user_guide/`, and images in `docs/images/`. `external_simulation_example/`, `examplary_data/`, and `notebooks/` are supporting material, not core package code.
 
+## NeuroSeq Functionality Overview
+
+NeuroSeq is a Qt desktop application for designing neuronal stimulation sequences, running Brian2-based network simulations, importing experimental data, and comparing simulated and recorded activity in one workspace. The main window is assembled in `src/neuroseq/gui.py`; shared project state lives in `src/neuroseq/project.py`; the simulation/model layer lives in `src/neuroseq/b2_model.py`; canonical data structures live in `src/neuroseq/data.py`; and project serialization lives in `src/neuroseq/io.py`.
+
+Key user-visible workflows:
+
+- Stimulation editing: users work primarily in the stimulation editor (`stim_editor.py`, `stim_widget.py`, `stim.py`). NeuroSeq supports multiple stim arrays per project, draw/erase/select interactions, amplitude and duration controls, padding/trimming, array metadata editing, and showing multiple arrays together.
+- Simulations and model editing: NeuroSeq can run and continue Brian2 simulations from the GUI, keep checkpoints, and load a default Hodgkin-Huxley-style example project. Model definitions include neuron groups, synapses, monitors, parameters, and initial values; editing paths are centered around `b2_model.py`, `model_editor.py`, and `example_projects.py`.
+- Data visualization and playback: trace, spike-raster, and synapse-heatmap views are first-class widgets (`trace_widget.py`, `spike_widget.py`, `heatmap_widget.py`) synchronized by the time slider (`time_slider_widget.py`) and shared pan/zoom controls. `data_widget.py` provides an extra generic viewer for comparing datasets.
+- Analysis and scripting: selected regions can be sent to the custom analysis pane/window (`custom_analysis_widget.py`). The embedded Python console (`console_widget.py`) exposes project/model/stim objects for inspection and scripted stimulus manipulation, but direct low-level Brian2 object mutation can desynchronize GUI state.
+- Experimental data import/export: supported flows include Suite2p, Cellpose, patch-clamp, Igor2, and SysCon2 import paths (`importer_*.py`, `*_import_dialog.py`) plus exporter flows such as Igor2 patch-clamp CSV and SysCon2 sequence export (`exporter_*.py`). There is also Cellpose synthetic test-data generation exposed from `__main__.py`.
+- Experiments and persistence: `.nseq` project archives save/load model definitions, stimulus arrays, experiments, imported data, and stored simulation state. NeuroSeq can also import selected content from another project and manage experiment sets via dialogs such as `experiments_manager_dialog.py` and `import_experiment_dialog.py`.
+
+When working on a feature or bug, identify which of these surfaces is affected first: stimulation editing, simulation/model assembly, import/export, visualization, analysis, or project persistence. Tests usually mirror those surfaces directly, for example `tests/test_stim_editor.py`, `tests/test_b2model.py`, `tests/test_importer_*.py`, `tests/test_exporter_*.py`, `tests/test_io.py`, and `tests/test_gui.py`.
+
 ## Build, Test, and Development Commands
+
+Use the Conda environment named `neuroseq` for all commands in this repository so the expected toolchain is available, including `rg`. Prefer `conda run -n neuroseq <command>` for one-off commands if shell activation is not already in place.
 
 Use `uv` for the fastest local workflow:
 

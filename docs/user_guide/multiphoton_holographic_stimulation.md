@@ -117,7 +117,7 @@ the corrected values back to the stim array via _Apply fixes_.
 
 ## Exporting
 
-1. Open **File → Generate Hardware Script** (or the toolbar button).
+1. Open **File → Export data → Export light stimulus** (or the toolbar button) and choose `SysCon2` in the pre-dialog.
 2. Select the stim array and Cellpose segmentation.
 3. Choose laser wavelength (default 1140 nm).
 4. Click **Check Input Sanity** and resolve any errors.

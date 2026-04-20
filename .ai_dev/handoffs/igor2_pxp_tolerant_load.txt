@@ -1,0 +1,560 @@
+HANDOFF: Tolerant Igor2 Packed Experiment (.pxp) loading
+=========================================================
+Branch: import_igor2
+Repo: /mnt/live3/svintila/neuroseq
+Date: 2026-04-20
+
+
+PROBLEM
+-------
+Importing a real-world experimental .pxp through File → Import → Igor2 Wave
+currently aborts with:
+
+    TypeError: buffer is too small for requested array
+
+before any waves are returned. The error originates *inside* igor2's own
+`packed.load()` loop — specifically in
+`igor2/binarywave.py:417` (`DynamicWaveDataField1.unpack`) — when a single
+malformed wave record declares a shape/dtype whose byte size exceeds the bytes
+igor2 actually read for that record. Because this happens record-by-record
+inside the loader and propagates unchecked, **one bad record blocks the entire
+file**.
+
+Diagnostic on the reference failing file (see TEST DATA below):
+
+    total records: 284
+    parse-ok:      283
+    parse-fail:      1   (record #55, WaveRecord, numDataBytes=1038,
+                          header shape=[5], buffer=b'')
+
+Root cause is upstream in igor2 0.5.13, so we cannot rely on a library fix in
+the short term. Our importer must degrade gracefully: **skip the offending
+record, log it, and import every wave we can still parse.** That single file
+has ~200 usable experimental waves behind the one broken record — users lose
+everything until we fix this.
+
+
+TASK OVERVIEW
+-------------
+Replace our current `load_igor_pxp_file()` implementation so that it does NOT
+call `igor2.packed.load()` directly. Instead, iterate the packed-experiment's
+record stream ourselves (reusing igor2's lower-level primitives), catch
+per-record unpack failures, and build the filesystem from only the records
+that loaded successfully. Surface the number of skipped records to the user
+in the import dialog.
+
+Do NOT change the existing `.ibw`/`.csv` code paths. Do NOT touch unrelated
+modules. This is a localised fix to the .pxp loader + a small UX addition in
+the dialog.
+
+Full spec context: .ai_dev/specs/igor2_pxp_import.md (still valid; this
+handoff extends/corrects CHANGE 1).
+
+
+HOW TO RUN TESTS
+----------------
+    cd /mnt/live3/svintila/neuroseq
+    uv run pytest tests/test_importer_igor2.py tests/test_igor_import_dialog.py -v
+
+Full suite before AND after:
+    uv run pytest
+
+
+TEST DATA
+---------
+Read-only reference files — do NOT copy them into the repo. Tests that use them
+must `pytest.skip(...)` when the path does not exist on the local machine.
+
+Primary failing file (must-load after fix):
+    /mnt/live3/svintila/code_scraps/igor2_files/test_files/pxp_cristina/drive-download-20260416T122331Z-3-001/251118_0.pxp
+    (~391 MB, 1 broken wave record, ~200 recoverable 1-D waves)
+
+Sibling files from the same dataset (all should at least load without raising):
+    /mnt/live3/svintila/code_scraps/igor2_files/test_files/pxp_cristina/drive-download-20260416T122331Z-3-001/251203_0.pxp
+    /mnt/live3/svintila/code_scraps/igor2_files/test_files/pxp_cristina/drive-download-20260416T122331Z-3-001/251209_0.pxp
+    /mnt/live3/svintila/code_scraps/igor2_files/test_files/pxp_cristina/drive-download-20260416T122331Z-3-001/251210_0.pxp
+    /mnt/live3/svintila/code_scraps/igor2_files/test_files/pxp_cristina/drive-download-20260416T122331Z-3-001/251212_0.pxp
+    /mnt/live3/svintila/code_scraps/igor2_files/test_files/pxp_cristina/drive-download-20260416T122331Z-3-001/251215_0.pxp
+
+Previously-working .pxp (must keep working; should yield zero skipped records):
+    /mnt/live3/svintila/code_scraps/igor2_files/test_files/260316_0.pxp
+
+Previously-working .ibw (must keep working):
+    /mnt/live3/svintila/code_scraps/igor2_files/test_files/HodgkinHuxley.ibw
+    /mnt/live3/svintila/code_scraps/igor2_files/test_files/Single_actionPotential.ibw
+    /mnt/live3/svintila/code_scraps/igor2_files/test_files/Noise.ibw
+
+
+FILES TO CHANGE
+---------------
+1. src/neuroseq/importer_igor2.py
+2. src/neuroseq/igor_import_dialog.py
+3. tests/test_importer_igor2.py
+4. tests/test_igor_import_dialog.py
+
+DO NOT TOUCH:
+    src/neuroseq/exporter_igor2.py
+    src/neuroseq/igor2_patchclamp_export_dialog.py
+    src/neuroseq/gui.py
+    Any other file not listed above.
+
+
+=============================================================
+CHANGE 1: src/neuroseq/importer_igor2.py
+=============================================================
+
+Goal: rewrite `load_igor_pxp_file()` so it tolerates per-record unpack
+failures. Add a small dataclass so callers can see what was skipped.
+
+1a) Add one new dataclass alongside the existing ones (place it next to
+    `IgorImportReport`, before any functions):
+
+    @dataclass
+    class SkippedPxpRecord:
+        """A record that could not be parsed while loading a .pxp file."""
+        record_index: int     # 1-based index in the packed record stream
+        record_type: str      # e.g. "WaveRecord", "VariablesRecord", "UnknownRecord"
+        reason: str           # short human-readable reason (exception message)
+
+
+    @dataclass
+    class IgorPxpLoadReport:
+        """Result of loading an Igor Packed Experiment file.
+
+        Contains every wave we were able to parse (``waves``) plus a list of
+        records that raised during unpack and were skipped (``skipped``).
+        """
+        waves: dict[str, IgorWave]
+        skipped: list[SkippedPxpRecord]
+
+
+1b) Replace the existing `load_igor_pxp_file()` entirely. New signature and
+    body:
+
+    def load_igor_pxp_file(path: str | Path) -> IgorPxpLoadReport:
+        """Load all 1-D waves from an Igor Packed Experiment (.pxp) file.
+
+        Uses a tolerant record-by-record loader: a single malformed wave
+        record (e.g. igor2 0.5.x can raise ``TypeError: buffer is too small
+        for requested array`` on some multidimensional / dependency-formula
+        waves) is logged and skipped rather than aborting the whole load.
+
+        Returns an :class:`IgorPxpLoadReport` whose ``waves`` dict maps
+        slash-joined folder paths to :class:`IgorWave` objects, and whose
+        ``skipped`` list enumerates records that could not be parsed.
+
+        Raises ``ImportError`` if igor2 is not installed. Raises
+        ``ValueError`` only if no importable 1-D waves survive.
+        """
+        path = Path(path)
+        try:
+            packed = importlib.import_module("igor2.packed")
+            wave_record_module = importlib.import_module("igor2.record.wave")
+            record_module = importlib.import_module("igor2.record")
+            record_base = importlib.import_module("igor2.record.base")
+            folder_module = importlib.import_module("igor2.record.folder")
+            struct_module = importlib.import_module("igor2.struct")
+            util_module = importlib.import_module("igor2.util")
+        except ImportError as exc:
+            raise ImportError(
+                "Reading Igor Packed Experiment files requires the optional 'igor2' dependency."
+            ) from exc
+
+        WaveRecord = wave_record_module.WaveRecord
+        RECORD_TYPE = record_module.RECORD_TYPE
+        UnknownRecord = record_base.UnknownRecord
+        UnusedRecord = record_base.UnusedRecord
+        FolderStartRecord = folder_module.FolderStartRecord
+        FolderEndRecord = folder_module.FolderEndRecord
+        Structure = struct_module.Structure
+        Field = struct_module.Field
+        byte_order = util_module.byte_order
+        need_to_reorder_bytes = util_module.need_to_reorder_bytes
+
+        # Mirror the header struct used by igor2.packed.setup_packed_file_record_header.
+        # Declared here so we stay independent of any private helpers in igor2.packed.
+        def _make_header_struct(bo: str):
+            hs = Structure(
+                name="PackedFileRecordHeader",
+                fields=[
+                    Field("H", "recordType"),
+                    Field("h", "version"),
+                    Field("l", "numDataBytes"),
+                ],
+                byte_order=bo,
+            )
+            hs.setup()
+            return hs
+
+        PACKEDRECTYPE_MASK = 0x7FFF  # same mask igor2.packed uses
+
+        records: list[object] = []
+        skipped: list[SkippedPxpRecord] = []
+        bo: str | None = None
+        initial_bo = "="
+
+        with path.open("rb") as fp:
+            record_index = 0
+            while True:
+                header_struct = _make_header_struct(bo or initial_bo)
+                header_bytes = fp.read(header_struct.size)
+                if not header_bytes:
+                    break
+                if len(header_bytes) < header_struct.size:
+                    # Malformed trailing bytes — stop parsing but keep what we have.
+                    logger.warning(
+                        "Truncated record header in %s at byte offset %d; "
+                        "stopping after %d records.",
+                        path.name, fp.tell() - len(header_bytes), record_index,
+                    )
+                    break
+
+                header = header_struct.unpack_from(header_bytes)
+                if header["version"] and bo is None:
+                    reorder = need_to_reorder_bytes(header["version"])
+                    bo = initial_bo = byte_order(reorder)
+                    if reorder:
+                        header_struct = _make_header_struct(bo)
+                        header = header_struct.unpack_from(header_bytes)
+
+                data = fp.read(header["numDataBytes"])
+                if len(data) < header["numDataBytes"]:
+                    logger.warning(
+                        "Truncated record #%d in %s (wanted %d bytes, got %d); "
+                        "stopping the packed-record scan.",
+                        record_index + 1, path.name,
+                        header["numDataBytes"], len(data),
+                    )
+                    break
+
+                record_index += 1
+                record_type = RECORD_TYPE.get(
+                    header["recordType"] & PACKEDRECTYPE_MASK, UnknownRecord
+                )
+                try:
+                    record_obj = record_type(header, data, byte_order=bo)
+                except Exception as exc:  # pragma: no cover — exercised by integration test
+                    logger.warning(
+                        "Skipping malformed Igor packed record #%d (%s) in %s: %s",
+                        record_index, record_type.__name__, path.name, exc,
+                    )
+                    skipped.append(SkippedPxpRecord(
+                        record_index=record_index,
+                        record_type=record_type.__name__,
+                        reason=f"{type(exc).__name__}: {exc}",
+                    ))
+                    continue
+
+                # Folder delimiters MUST NOT be dropped — the walk below relies on
+                # balanced start/end pairs. If they ever fail to unpack (they are
+                # tiny and simple, so this is extremely unlikely), we'd have to
+                # stop here or risk misaligning the folder tree. We treat them as
+                # fatal.
+                records.append(record_obj)
+
+                _ = (FolderStartRecord, FolderEndRecord, UnusedRecord)  # referenced for clarity / future use
+
+        # Reuse igor2's own filesystem builder — it is module-private but stable
+        # across the 0.5.x series, and reimplementing the name-collision/sysvar
+        # handling here is error-prone.
+        build_filesystem = getattr(packed, "_build_filesystem")
+        filesystem = build_filesystem(records)
+
+        waves: dict[str, IgorWave] = {}
+
+        def _collect(dirpath: list[object], key: object, value: object) -> None:
+            if not isinstance(value, WaveRecord):
+                return
+            parts = [
+                seg.decode("utf-8", errors="ignore")
+                if isinstance(seg, (bytes, bytearray))
+                else str(seg)
+                for seg in dirpath
+            ]
+            wave_name_str = (
+                key.decode("utf-8", errors="ignore")
+                if isinstance(key, (bytes, bytearray))
+                else str(key)
+            )
+            parts.append(wave_name_str)
+            path_key = "/".join(parts)
+            try:
+                igor_wave = parse_igor_binary_wave_data(
+                    value.wave,
+                    fallback_name=wave_name_str,
+                )
+            except ValueError as exc:
+                # E.g. multi-dimensional waves: not an error, just not importable.
+                logger.debug("Skipping wave %s: %s", path_key, exc)
+                return
+            waves[path_key] = igor_wave
+
+        packed.walk(filesystem, _collect)
+
+        if not waves:
+            raise ValueError(
+                f"No importable 1-D waves found in packed experiment file '{path.name}'"
+            )
+
+        return IgorPxpLoadReport(waves=waves, skipped=skipped)
+
+
+1c) The `load_igor_wave_file()` branch that rejects .pxp is unchanged.
+
+Style rules (unchanged from prior handoff):
+  - Keep "from __future__ import annotations" at the top of the module.
+  - All third-party imports at module level; `importlib.import_module` calls
+    inside the function body are fine and follow the existing pattern.
+  - No `type: ignore` comments; use proper type annotations.
+  - Ruff E501 is ignored, long lines are fine. But keep it readable.
+  - `from __future__ import annotations` means the `| None` / `dict[...]`
+    annotations evaluate lazily; no stubs needed.
+
+
+=============================================================
+CHANGE 2: src/neuroseq/igor_import_dialog.py
+=============================================================
+
+Goal: update the one call site of `load_igor_pxp_file()` for the new return
+type, and surface the skipped-record count to the user.
+
+2a) Inside `_load_pxp_file(self, filename: str)`, change:
+
+        try:
+            waves = load_igor_pxp_file(filename)
+        except Exception as exc:
+            ... (existing error branch, leave untouched)
+            return
+
+    to:
+
+        try:
+            report = load_igor_pxp_file(filename)
+        except Exception as exc:
+            ... (existing error branch, leave untouched)
+            return
+
+        waves = report.waves
+
+    Everything after the assignment (populating `self.loaded_pxp_waves`,
+    `self.pxp_wave_list`, visibility toggles, single-wave auto-select) stays
+    the same.
+
+2b) After the list-population loop (after `self.wave_picker_group.setVisible(True)`
+    and before the `if len(waves) == 1:` check), add:
+
+        if report.skipped:
+            summary = (
+                f"{len(report.skipped)} record(s) in '{Path(filename).name}' could not "
+                "be parsed and were skipped. The other waves loaded normally. "
+                "Open the application log for details."
+            )
+            QtWidgets.QMessageBox.warning(self, "Some waves were skipped", summary)
+            for skipped in report.skipped:
+                self.logger.warning(
+                    "Skipped record #%d (%s): %s",
+                    skipped.record_index, skipped.record_type, skipped.reason,
+                )
+
+    Add `from pathlib import Path` at the top of the module if not already
+    present (it is NOT currently imported there — check and add only if needed).
+
+2c) No other methods change. Type hints on `self.loaded_pxp_waves` stay as
+    `dict[str, IgorWave]`.
+
+
+=============================================================
+CHANGE 3: tests/test_importer_igor2.py
+=============================================================
+
+Update all existing `load_igor_pxp_file(...)` callers to read
+`.waves` off the new report object, and add two new tests.
+
+3a) The three existing tests that assign the return value of
+    `load_igor_pxp_file(...)` (search for `waves = load_igor_pxp_file(pxp_path)`)
+    must be updated to:
+
+        report = load_igor_pxp_file(pxp_path)
+        waves = report.waves
+        assert report.skipped == []    # new assertion: no tolerant fallbacks
+                                       # triggered by the synthetic fixture
+
+    (The existing `test_load_igor_pxp_file_raises_if_no_waves` still expects a
+    `ValueError` to be raised — behaviour unchanged. Adjust the test only if
+    its setup calls `.waves`; otherwise leave it alone.)
+
+3b) Import the new names at the top of the test module:
+
+        from neuroseq.importer_igor2 import IgorPxpLoadReport
+        from neuroseq.importer_igor2 import SkippedPxpRecord
+
+3c) Add a new unit test that exercises the tolerant path end-to-end by
+    monkeypatching just the three igor2 structs we call directly. Keep it
+    self-contained — do NOT require the real Cristina .pxp for the unit
+    suite.
+
+        def test_load_igor_pxp_file_skips_malformed_records(
+            monkeypatch: pytest.MonkeyPatch,
+            tmp_path: Path,
+        ) -> None:
+            """A single malformed record must not abort the whole load."""
+            pxp_path = tmp_path / "partially_broken.pxp"
+            pxp_path.write_bytes(b"igor-pxp-stub")  # body is irrelevant; we monkeypatch the reader
+
+            # Build a fake file stream that yields three records:
+            #   1. a FolderStartRecord "root"           -> parses fine
+            #   2. a WaveRecord whose unpack raises     -> must be skipped
+            #   3. a WaveRecord whose unpack succeeds   -> must appear in report.waves
+            #
+            # Rather than hand-crafting a real binary pxp, monkeypatch igor2's
+            # record-type constructors on a copy of the module dict. See the
+            # existing _FakePackedModule pattern further down in this file for
+            # a similar approach.
+            ...
+
+    Model the monkeypatch precisely on the existing
+    `test_load_igor_pxp_file_returns_all_1d_waves` test (the `_FakePackedModule`
+    + `monkeypatch.setattr(importlib, "import_module", ...)` setup). You will
+    also need to fake `igor2.record`, `igor2.record.base`, `igor2.record.folder`,
+    `igor2.struct`, and `igor2.util` — stub classes are fine; only the method
+    surface used by the loader must exist.
+
+    Asserts:
+        assert isinstance(report, IgorPxpLoadReport)
+        assert len(report.waves) == 1
+        assert len(report.skipped) == 1
+        assert report.skipped[0].record_type == "WaveRecord"
+        assert "buffer" in report.skipped[0].reason.lower()
+
+3d) Add an opt-in integration test using the real file. Mark it with a skip
+    guard so it's a no-op on machines without the test fixture:
+
+        REAL_FAILING_PXP = Path(
+            "/mnt/live3/svintila/code_scraps/igor2_files/test_files/"
+            "pxp_cristina/drive-download-20260416T122331Z-3-001/251118_0.pxp"
+        )
+
+        @pytest.mark.skipif(
+            not REAL_FAILING_PXP.exists(),
+            reason="Real-world Cristina .pxp test file not available on this host.",
+        )
+        def test_load_igor_pxp_file_recovers_from_real_world_broken_record() -> None:
+            report = load_igor_pxp_file(REAL_FAILING_PXP)
+            assert len(report.waves) > 100, (
+                "Expected >100 usable waves after skipping the broken record; "
+                f"got {len(report.waves)}. Skipped list: {report.skipped!r}"
+            )
+            assert any(s.record_type == "WaveRecord" for s in report.skipped), (
+                "Expected at least one skipped WaveRecord. "
+                f"skipped={report.skipped!r}"
+            )
+
+    Also add a complementary skip-guarded test that the previously-working
+    260316_0.pxp still yields zero skipped records (regression guard against
+    accidentally making the tolerant loader too eager).
+
+
+=============================================================
+CHANGE 4: tests/test_igor_import_dialog.py
+=============================================================
+
+Four existing tests monkeypatch `neuroseq.igor_import_dialog.load_igor_pxp_file`
+to return a `dict[str, IgorWave]`. They must now return
+`IgorPxpLoadReport(waves=<the dict>, skipped=[])`.
+
+4a) At the top of the test module:
+
+        from neuroseq.importer_igor2 import IgorPxpLoadReport
+
+4b) For each `monkeypatch.setattr("neuroseq.igor_import_dialog.load_igor_pxp_file", ...)`
+    call, wrap the returned dict in an `IgorPxpLoadReport`:
+
+        # before
+        monkeypatch.setattr(
+            "neuroseq.igor_import_dialog.load_igor_pxp_file",
+            lambda _path: fake_waves,
+        )
+
+        # after
+        monkeypatch.setattr(
+            "neuroseq.igor_import_dialog.load_igor_pxp_file",
+            lambda _path: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
+        )
+
+4c) Add one new dialog test that exercises the "some waves were skipped"
+    warning branch. Use the `qmessagebox_calls` fixture (documented in
+    CLAUDE.md → Qt testing patterns) to assert that a
+    `QMessageBox.warning` with title "Some waves were skipped" is shown when
+    the patched loader returns a non-empty `skipped` list. The rest of the
+    dialog state (list populated, picker visible, etc.) must remain correct.
+
+
+HOW TO VERIFY LOCALLY
+---------------------
+1. Unit + dialog tests:
+
+       uv run pytest tests/test_importer_igor2.py tests/test_igor_import_dialog.py -v
+
+   All new and updated tests must pass. Coverage on the new branches in
+   `importer_igor2.py` must remain ≥ 75% (diff coverage is enforced).
+
+2. Full suite:
+
+       uv run pytest
+
+3. Manual smoke test with the real failing file (only if you have it):
+
+       uv run neuroseq
+       → File → Import → Igor2 Wave → Browse →
+         /mnt/live3/svintila/code_scraps/igor2_files/test_files/pxp_cristina/
+         drive-download-20260416T122331Z-3-001/251118_0.pxp
+
+   Expected behaviour:
+     - No "TypeError: buffer is too small for requested array" dialog.
+     - A QMessageBox.warning appears: "Some waves were skipped" (1 record).
+     - Wave picker is populated with >100 entries.
+     - Selecting any wave previews fine and imports fine.
+
+4. Regression:
+
+       File → Import → Igor2 Wave → Browse →
+       /mnt/live3/svintila/code_scraps/igor2_files/test_files/260316_0.pxp
+
+   Expected: loads exactly as before, no "skipped waves" warning.
+
+
+NOTES / GOTCHAS
+---------------
+- `igor2.packed._build_filesystem` is module-private in igor2. We call it by
+  attribute lookup (`getattr(packed, "_build_filesystem")`) rather than
+  importing a private name with `from ... import _build_filesystem`. This is
+  intentional: it keeps the attribute access explicit at the one call site and
+  avoids polluting module-level imports with a private name that could break
+  on a future igor2 upgrade. If it ever disappears upstream, the clearest
+  alternative is to inline a copy of the 25-line `_build_filesystem`
+  implementation — do NOT paper over it by calling `packed.load()` again.
+
+- `packed.walk()` is a public symbol and is safe to keep using.
+
+- Folder start/end records are treated as structurally load-bearing: if one
+  ever fails to unpack, our loop currently still skips it (which would
+  misalign the folder tree downstream). In practice these records are a few
+  bytes long and have not been observed to fail in any of our fixture files.
+  The logger.warning on a skipped FolderStartRecord/FolderEndRecord is a
+  useful breadcrumb if this ever happens; no further handling is required
+  until it does.
+
+- Do NOT change the public `IgorWave` / `PreparedIgorWave` / `IgorImportReport`
+  dataclasses — they are serialised-by-value through stim-array pipelines and
+  are checked in downstream tests.
+
+- Do NOT add retries, partial-bytes heuristics, or zero-padding fallbacks
+  inside `parse_igor_binary_wave_data()`. Silent data fabrication in a
+  scientific pipeline is unsafe; the tolerant loader above is strictly a
+  per-record "skip on failure" mechanism, not a "repair on failure" one.
+
+- Keep the new dataclasses and functions alphabetically-ish ordered within the
+  existing file layout; don't reshuffle unrelated sections.
+
+- Pre-commit hooks (ruff, mypy, prettier, nbstripout) must pass. Run
+  `pre-commit run --all-files` before calling the task done.

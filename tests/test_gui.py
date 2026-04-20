@@ -16,19 +16,236 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 import neuroseq
+from neuroseq.data import Experiment
+from neuroseq.data import SpikeData
+from neuroseq.data import TraceData
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
 from neuroseq.gui import Gui
+from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.model_editor import EditableSynapseTree
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
+from neuroseq.stim_editor import DrawMode
+from neuroseq.stim_editor import StimEditor
+from neuroseq.utils import InteractMode
 
 # no obvious signal to wait for after the model is updated to know when the GUI is ready,
 # so for now we just wait for a fixed time
 delay_after_update_model_call_in_ms = 50
+
+
+class _MockAxes:
+    def __init__(self) -> None:
+        self.plot_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        self.scatter_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def plot(self, *args: Any, **kwargs: Any) -> None:
+        self.plot_calls.append((args, kwargs))
+
+    def scatter(self, *args: Any, **kwargs: Any) -> None:
+        self.scatter_calls.append((args, kwargs))
+
+    def set_xlabel(self, *args: Any, **kwargs: Any) -> None:
+        return
+
+    def set_ylabel(self, *args: Any, **kwargs: Any) -> None:
+        return
+
+    def set_title(self, *args: Any, **kwargs: Any) -> None:
+        return
+
+    def tick_params(self, *args: Any, **kwargs: Any) -> None:
+        return
+
+
+class _MockFigure:
+    def __init__(self, save_error: Exception | None = None) -> None:
+        self.save_error = save_error
+        self.saved: list[tuple[str, dict[str, Any]]] = []
+        self.tight_layout_called = False
+
+    def tight_layout(self) -> None:
+        self.tight_layout_called = True
+
+    def savefig(self, path: str, **kwargs: Any) -> None:
+        if self.save_error is not None:
+            raise self.save_error
+        self.saved.append((path, kwargs))
+
+
+def _make_trace_export_gui(
+    trace_name: str,
+    trace_data: TraceData | None,
+) -> Any:
+    return SimpleNamespace(
+        cmb_trace=SimpleNamespace(currentText=lambda: trace_name),
+        project=SimpleNamespace(
+            get_data=lambda name, data_type: trace_data
+            if data_type is TraceData
+            else None
+        ),
+        logger=logging.getLogger("test_trace_export"),
+    )
+
+
+def _make_spike_export_gui(
+    spike_name: str,
+    spike_data: SpikeData | None,
+) -> Any:
+    return SimpleNamespace(
+        cmb_spike=SimpleNamespace(currentText=lambda: spike_name),
+        project=SimpleNamespace(
+            get_data=lambda name, data_type: spike_data
+            if data_type is SpikeData
+            else None
+        ),
+        logger=logging.getLogger("test_spike_export"),
+    )
+
+
+@pytest.mark.parametrize(
+    ("method_name", "software", "inner_name"),
+    [
+        (
+            "btn_import_stimulus_light_clicked",
+            "SysCon2",
+            "btn_import_syscon2_seq_clicked",
+        ),
+        (
+            "btn_import_stimulus_patchclamp_clicked",
+            "Igor2",
+            "btn_import_igor2_wave_clicked",
+        ),
+        (
+            "btn_import_trace_patchclamp_clicked",
+            "Igor2",
+            "btn_import_igor2_trace_clicked",
+        ),
+        (
+            "btn_import_trace_patchclamp_clicked",
+            "NumPy (.npy)",
+            "btn_import_patchclamp_data_clicked",
+        ),
+        (
+            "btn_export_patch_clamp_stim_clicked",
+            "Igor2",
+            "btn_export_igor2_patchclamp_stim_clicked",
+        ),
+        (
+            "btn_export_light_stimulus_clicked",
+            "SysCon2",
+            "open_stimulation_generator_dialog",
+        ),
+    ],
+)
+def test_gui_pre_dialog_wrapper_calls_inner_handler_on_accept(
+    monkeypatch: MonkeyPatch,
+    method_name: str,
+    software: str,
+    inner_name: str,
+) -> None:
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog,
+        "getItem",
+        lambda *args, **kwargs: (software, True),
+    )
+    called: list[bool] = []
+    fake_gui: Any = SimpleNamespace(**{inner_name: lambda: called.append(True)})
+
+    getattr(Gui, method_name)(fake_gui)
+
+    assert called == [True]
+
+
+@pytest.mark.parametrize(
+    ("method_name", "software", "inner_name"),
+    [
+        (
+            "btn_import_stimulus_light_clicked",
+            "SysCon2",
+            "btn_import_syscon2_seq_clicked",
+        ),
+        (
+            "btn_import_stimulus_patchclamp_clicked",
+            "Igor2",
+            "btn_import_igor2_wave_clicked",
+        ),
+        (
+            "btn_import_trace_patchclamp_clicked",
+            "Igor2",
+            "btn_import_igor2_trace_clicked",
+        ),
+        (
+            "btn_import_trace_patchclamp_clicked",
+            "NumPy (.npy)",
+            "btn_import_patchclamp_data_clicked",
+        ),
+        (
+            "btn_export_patch_clamp_stim_clicked",
+            "Igor2",
+            "btn_export_igor2_patchclamp_stim_clicked",
+        ),
+        (
+            "btn_export_light_stimulus_clicked",
+            "SysCon2",
+            "open_stimulation_generator_dialog",
+        ),
+    ],
+)
+def test_gui_pre_dialog_wrapper_does_nothing_on_cancel(
+    monkeypatch: MonkeyPatch,
+    method_name: str,
+    software: str,
+    inner_name: str,
+) -> None:
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog,
+        "getItem",
+        lambda *args, **kwargs: (software, False),
+    )
+    called: list[bool] = []
+    fake_gui: Any = SimpleNamespace(**{inner_name: lambda: called.append(True)})
+
+    getattr(Gui, method_name)(fake_gui)
+
+    assert called == []
+
+
+def test_patchclamp_pre_dialogs_include_cc_vc_convention(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    captured_labels: list[str] = []
+
+    def fake_get_item(*args: Any, **kwargs: Any) -> tuple[str, bool]:
+        del kwargs
+        captured_labels.append(args[2])
+        return ("Igor2", False)
+
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getItem", fake_get_item)
+
+    fake_gui: Any = SimpleNamespace(
+        btn_import_igor2_wave_clicked=lambda: None,
+        btn_import_igor2_trace_clicked=lambda: None,
+        btn_import_patchclamp_data_clicked=lambda: None,
+    )
+
+    Gui.btn_import_stimulus_patchclamp_clicked(fake_gui)
+    Gui.btn_import_trace_patchclamp_clicked(fake_gui)
+
+    assert len(captured_labels) == 2
+    stim_label, trace_label = captured_labels
+    assert "Current Clamp (CC)" in stim_label
+    assert "Voltage Clamp (VC)" in stim_label
+    assert "CURRENT is the stimulus" in stim_label
+    assert "VOLTAGE is the stimulus" in stim_label
+    assert "Current Clamp (CC)" in trace_label
+    assert "Voltage Clamp (VC)" in trace_label
+    assert "VOLTAGE is the trace" in trace_label
+    assert "CURRENT is the trace" in trace_label
 
 
 def test_gui_click_exit(qtbot: QtBot) -> None:
@@ -350,7 +567,7 @@ def test_gui_export_with_simulation_data(
     monkeypatch.setattr(
         QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (f"{filename}", True)
     )
-    gui.btn_export_clicked()
+    gui.btn_export_simulation_results_clicked()
     assert filename.exists()
     gui.close()
 
@@ -370,7 +587,7 @@ def test_gui_export_empty_project(
     monkeypatch.setattr(
         QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (f"{filename}", True)
     )
-    gui.btn_export_clicked()
+    gui.btn_export_simulation_results_clicked()
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "critical"
     assert "export error" in qmessagebox_calls[0]["title"].lower()
@@ -452,6 +669,218 @@ def test_gui_export_igor2_patchclamp_stim_requires_stim_data(
     assert "no stimulation entities" in qmessagebox_calls[0]["title"].lower()
 
 
+def test_gui_export_traces_no_selection(qmessagebox_calls: list) -> None:
+    fake_gui = _make_trace_export_gui("", None)
+
+    Gui.btn_export_traces_clicked(fake_gui)
+
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "information"
+    assert "no trace data" in qmessagebox_calls[0]["title"].lower()
+
+
+def test_gui_export_traces_returns_when_file_dialog_cancelled(
+    monkeypatch: MonkeyPatch,
+    qmessagebox_calls: list,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    trace_data = TraceData(
+        name="voltage",
+        traces=np.zeros((3, 100), dtype=np.float32),
+        indices=np.array([0, 1, 2], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    fake_gui = _make_trace_export_gui("exp :: voltage", trace_data)
+
+    def _unexpected_subplots(*args: Any, **kwargs: Any) -> tuple[Any, Any]:
+        raise AssertionError("subplots should not be called when no file is selected")
+
+    monkeypatch.setattr(neuroseq.gui, "getsavefilename", lambda *args: ("", ""))
+    monkeypatch.setattr(plt, "subplots", _unexpected_subplots)
+
+    Gui.btn_export_traces_clicked(fake_gui)
+
+    assert qmessagebox_calls == []
+
+
+def test_gui_export_traces_saves_figure(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    qmessagebox_calls: list,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    trace_data = TraceData(
+        name="voltage",
+        traces=np.zeros((3, 100), dtype=np.float32),
+        indices=np.array([0, 1, 2], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    output_path = tmp_path / "traces.png"
+    fig = _MockFigure()
+    ax = _MockAxes()
+    closed_figs: list[_MockFigure] = []
+    fake_gui = _make_trace_export_gui("exp :: voltage", trace_data)
+
+    monkeypatch.setattr(plt, "subplots", lambda *args, **kwargs: (fig, ax))
+    monkeypatch.setattr(plt, "close", lambda figure: closed_figs.append(figure))
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "getsavefilename",
+        lambda *args: (str(output_path), "PNG image (*.png)"),
+    )
+
+    Gui.btn_export_traces_clicked(fake_gui)
+
+    assert fig.saved == [
+        (str(output_path), {"dpi": 300, "bbox_inches": "tight"}),
+    ]
+    assert fig.tight_layout_called is True
+    assert len(ax.plot_calls) == 3
+    assert closed_figs == [fig]
+    assert any(call["name"] == "information" for call in qmessagebox_calls)
+
+
+def test_gui_export_traces_closes_figure_on_save_error(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    qmessagebox_calls: list,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    trace_data = TraceData(
+        name="voltage",
+        traces=np.zeros((2, 50), dtype=np.float32),
+        indices=np.array([0, 1], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    output_path = tmp_path / "traces.png"
+    fig = _MockFigure(save_error=OSError("disk full"))
+    ax = _MockAxes()
+    closed_figs: list[_MockFigure] = []
+    fake_gui = _make_trace_export_gui("exp :: voltage", trace_data)
+
+    monkeypatch.setattr(plt, "subplots", lambda *args, **kwargs: (fig, ax))
+    monkeypatch.setattr(plt, "close", lambda figure: closed_figs.append(figure))
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "getsavefilename",
+        lambda *args: (str(output_path), "PNG image (*.png)"),
+    )
+
+    Gui.btn_export_traces_clicked(fake_gui)
+
+    assert closed_figs == [fig]
+    assert any(call["name"] == "critical" for call in qmessagebox_calls)
+
+
+def test_gui_export_spikes_no_selection(qmessagebox_calls: list) -> None:
+    fake_gui = _make_spike_export_gui("", None)
+
+    Gui.btn_export_spikes_clicked(fake_gui)
+
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "information"
+    assert "no spike data" in qmessagebox_calls[0]["title"].lower()
+
+
+def test_gui_export_spikes_returns_when_file_dialog_cancelled(
+    monkeypatch: MonkeyPatch,
+    qmessagebox_calls: list,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    spike_data = SpikeData(
+        name="spikes",
+        spike_indices=np.array([0, 1], dtype=np.int32),
+        spike_times=np.array([0.1, 0.2], dtype=np.float32),
+    )
+    fake_gui = _make_spike_export_gui("exp :: spikes", spike_data)
+
+    def _unexpected_subplots(*args: Any, **kwargs: Any) -> tuple[Any, Any]:
+        raise AssertionError("subplots should not be called when no file is selected")
+
+    monkeypatch.setattr(neuroseq.gui, "getsavefilename", lambda *args: ("", ""))
+    monkeypatch.setattr(plt, "subplots", _unexpected_subplots)
+
+    Gui.btn_export_spikes_clicked(fake_gui)
+
+    assert qmessagebox_calls == []
+
+
+def test_gui_export_spikes_saves_figure(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    qmessagebox_calls: list,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    spike_data = SpikeData(
+        name="spikes",
+        spike_indices=np.array([0, 1, 0], dtype=np.int32),
+        spike_times=np.array([0.1, 0.2, 0.3], dtype=np.float32),
+    )
+    output_path = tmp_path / "spikes.png"
+    fig = _MockFigure()
+    ax = _MockAxes()
+    closed_figs: list[_MockFigure] = []
+    fake_gui = _make_spike_export_gui("exp :: spikes", spike_data)
+
+    monkeypatch.setattr(plt, "subplots", lambda *args, **kwargs: (fig, ax))
+    monkeypatch.setattr(plt, "close", lambda figure: closed_figs.append(figure))
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "getsavefilename",
+        lambda *args: (str(output_path), "PNG image (*.png)"),
+    )
+
+    Gui.btn_export_spikes_clicked(fake_gui)
+
+    assert fig.saved == [
+        (str(output_path), {"dpi": 300, "bbox_inches": "tight"}),
+    ]
+    assert fig.tight_layout_called is True
+    assert len(ax.scatter_calls) == 1
+    assert closed_figs == [fig]
+    assert any(call["name"] == "information" for call in qmessagebox_calls)
+
+
+def test_gui_export_spikes_closes_figure_on_save_error(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    qmessagebox_calls: list,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    spike_data = SpikeData(
+        name="spikes",
+        spike_indices=np.array([0, 1], dtype=np.int32),
+        spike_times=np.array([0.1, 0.2], dtype=np.float32),
+    )
+    output_path = tmp_path / "spikes.png"
+    fig = _MockFigure(save_error=OSError("disk full"))
+    ax = _MockAxes()
+    closed_figs: list[_MockFigure] = []
+    fake_gui = _make_spike_export_gui("exp :: spikes", spike_data)
+
+    monkeypatch.setattr(plt, "subplots", lambda *args, **kwargs: (fig, ax))
+    monkeypatch.setattr(plt, "close", lambda figure: closed_figs.append(figure))
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "getsavefilename",
+        lambda *args: (str(output_path), "PNG image (*.png)"),
+    )
+
+    Gui.btn_export_spikes_clicked(fake_gui)
+
+    assert closed_figs == [fig]
+    assert any(call["name"] == "critical" for call in qmessagebox_calls)
+
+
 def test_gui_import_igor2_wave_updates_selected_stim(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -475,7 +904,25 @@ def test_gui_import_igor2_wave_updates_selected_stim(
             )
             return QtWidgets.QDialog.DialogCode.Accepted
 
-    stim_combo = QtWidgets.QComboBox()
+    class FakeComboBox:
+        def __init__(self) -> None:
+            self._items: list[str] = []
+            self._current_text = ""
+
+        def clear(self) -> None:
+            self._items = []
+            self._current_text = ""
+
+        def addItems(self, items: list[str]) -> None:
+            self._items.extend(items)
+
+        def setCurrentText(self, text: str) -> None:
+            self._current_text = text
+
+        def currentText(self) -> str:
+            return self._current_text
+
+    stim_combo = FakeComboBox()
 
     def _update_project(updated_project: Project) -> None:
         stim_combo.clear()
@@ -492,6 +939,466 @@ def test_gui_import_igor2_wave_updates_selected_stim(
 
     assert fake_gui.cmb_stim.currentText() == "igor_wave"
     assert "igor_wave" in project.stim_arrays
+
+
+def test_gui_import_igor2_trace_updates_selected_trace(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    import neuroseq.igor_trace_import_dialog
+
+    project = Project()
+    captured_data: list[TraceData | None] = []
+    trace_widget = SimpleNamespace(n_neurons=0)
+
+    def _set_trace_data(data: TraceData | None) -> None:
+        captured_data.append(data)
+        trace_widget.n_neurons = 0 if data is None else int(np.max(data.indices)) + 1
+
+    trace_widget.set_data = _set_trace_data
+
+    class MockIgorTraceImportDialog:
+        def __init__(self, dialog_project: Project, parent=None) -> None:
+            assert dialog_project is project
+            self.project = dialog_project
+            self.selected_experiment_name = "Experiment A"
+            self.selected_trace_name = "Igor Trace"
+
+        def exec(self) -> int:
+            self.project.add_experiment(
+                Experiment(
+                    name="Experiment A",
+                    duration=0.002,
+                    timepoints=[],
+                    data=[
+                        TraceData(
+                            name="Igor Trace",
+                            traces=np.array([[1.0, 2.0]], dtype=np.float32),
+                            indices=np.array([0], dtype=np.uint32),
+                            units="mV",
+                            dt=0.001,
+                        )
+                    ],
+                )
+            )
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    class FakeComboBox:
+        def __init__(self) -> None:
+            self._items: list[str] = []
+            self._current_text = ""
+
+        def clear(self) -> None:
+            self._items = []
+            self._current_text = ""
+
+        def addItems(self, items: list[str]) -> None:
+            self._items.extend(items)
+
+        def setCurrentText(self, text: str) -> None:
+            self._current_text = text
+
+        def currentText(self) -> str:
+            return self._current_text
+
+    trace_combo = FakeComboBox()
+
+    def _update_project(updated_project: Project) -> None:
+        trace_combo.clear()
+        trace_combo.addItems(updated_project.get_data_names(TraceData))
+
+    fake_gui: Any = SimpleNamespace(
+        project=project,
+        cmb_trace=trace_combo,
+        trace_widget=trace_widget,
+        update_project=_update_project,
+        _focus_neuron_range=lambda n_neurons: None,
+    )
+    fake_gui._apply_trace_selection = lambda cmb_name: Gui._apply_trace_selection(  # type: ignore[attr-defined]
+        fake_gui, cmb_name
+    )
+
+    monkeypatch.setattr(
+        neuroseq.igor_trace_import_dialog,
+        "IgorTraceImportDialog",
+        MockIgorTraceImportDialog,
+    )
+    Gui.btn_import_igor2_trace_clicked(fake_gui)
+
+    assert fake_gui.cmb_trace.currentText() == "Experiment A :: Igor Trace"
+    assert "Experiment A" in project.experiments
+    assert project.stim_arrays == {}
+    assert captured_data[-1] is not None
+    assert captured_data[-1].name == "Igor Trace"
+
+
+def test_gui_import_igor2_trace_refreshes_existing_selected_trace_plot(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    import neuroseq.igor_trace_import_dialog
+
+    project = Project()
+    project.add_experiment(
+        Experiment(
+            name="Experiment A",
+            duration=0.002,
+            timepoints=[],
+            data=[
+                TraceData(
+                    name="Igor Trace",
+                    traces=np.array([[1.0, 2.0]], dtype=np.float32),
+                    indices=np.array([0], dtype=np.uint32),
+                    units="mV",
+                    dt=0.001,
+                )
+            ],
+        )
+    )
+
+    class MockIgorTraceImportDialog:
+        def __init__(self, dialog_project: Project, parent=None) -> None:
+            assert dialog_project is project
+            self.project = dialog_project
+            self.selected_experiment_name = "Experiment A"
+            self.selected_trace_name = "Igor Trace"
+
+        def exec(self) -> int:
+            trace_data = self.project.get_data("Experiment A :: Igor Trace", TraceData)
+            assert trace_data is not None
+            trace_data.traces = np.array(
+                [[1.0, 2.0], [3.0, 4.0]],
+                dtype=np.float32,
+            )
+            trace_data.indices = np.array([0, 5], dtype=np.uint32)
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    class FakeComboBox:
+        def __init__(self, initial_text: str) -> None:
+            self._items: list[str] = []
+            self._current_text = initial_text
+
+        def clear(self) -> None:
+            self._items = []
+
+        def addItems(self, items: list[str]) -> None:
+            self._items.extend(items)
+
+        def setCurrentText(self, text: str) -> None:
+            self._current_text = text
+
+        def currentText(self) -> str:
+            return self._current_text
+
+    captured_data: list[TraceData | None] = []
+    focus_calls: list[int] = []
+    trace_combo = FakeComboBox("Experiment A :: Igor Trace")
+    trace_widget = SimpleNamespace(n_neurons=0)
+
+    def _set_trace_data_2(data: TraceData | None) -> None:
+        captured_data.append(data)
+        trace_widget.n_neurons = 0 if data is None else int(np.max(data.indices)) + 1
+
+    trace_widget.set_data = _set_trace_data_2
+
+    def _update_project(updated_project: Project) -> None:
+        trace_combo.clear()
+        trace_combo.addItems(updated_project.get_data_names(TraceData))
+
+    fake_gui: Any = SimpleNamespace(
+        project=project,
+        cmb_trace=trace_combo,
+        trace_widget=trace_widget,
+        update_project=_update_project,
+        _focus_neuron_range=lambda n_neurons: focus_calls.append(n_neurons),
+    )
+    fake_gui._apply_trace_selection = lambda cmb_name: Gui._apply_trace_selection(  # type: ignore[attr-defined]
+        fake_gui, cmb_name
+    )
+
+    monkeypatch.setattr(
+        neuroseq.igor_trace_import_dialog,
+        "IgorTraceImportDialog",
+        MockIgorTraceImportDialog,
+    )
+
+    Gui.btn_import_igor2_trace_clicked(fake_gui)
+
+    assert fake_gui.cmb_trace.currentText() == "Experiment A :: Igor Trace"
+    assert captured_data[-1] is not None
+    assert captured_data[-1].traces.shape == (2, 2)
+    np.testing.assert_array_equal(
+        captured_data[-1].indices,
+        np.array([0, 5], dtype=np.uint32),
+    )
+    assert focus_calls[-1] == 6
+
+
+def test_gui_imported_igor_stim_can_be_edited_by_click(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    class MockIgorImportDialog:
+        def __init__(self, dialog_project: Project, parent=None) -> None:
+            self.project = dialog_project
+            self.selected_stim_name = "igor_wave"
+
+        def exec(self) -> int:
+            self.project.add_stim_array(
+                StimArray(
+                    "igor_wave",
+                    StimType.External,
+                    np.zeros((4, 1), dtype=np.float32),
+                    "pA",
+                    0.001,
+                )
+            )
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    project = Project()
+    draw_value = 3.0
+
+    fake_editor: Any = SimpleNamespace(
+        logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        current_stim_modifier=SimpleNamespace(
+            stim_array=StimArray(
+                "igor_wave",
+                StimType.External,
+                np.zeros((4, 1), dtype=np.float32),
+                "pA",
+                0.001,
+            )
+        ),
+        mode=InteractMode.DRAW,
+        draw_mode=DrawMode.DRAW,
+        draw_stim_length=1,
+        draw_stim=SimpleNamespace(draw_stim_type=neuroseq.stim.DrawStimType.Constant),
+        _is_valid_slice=lambda neuron_slice, time_slice: True,
+        draw_stim_region=lambda neuron_slice,
+        time_slice,
+        erase=False: project.stim_arrays["igor_wave"].values.__setitem__(
+            (time_slice, neuron_slice), 0.0 if erase else draw_value
+        ),
+    )
+
+    class FakeComboBox:
+        def __init__(self) -> None:
+            self._items: list[str] = []
+            self._current_text = ""
+
+        def clear(self) -> None:
+            self._items = []
+            self._current_text = ""
+
+        def addItems(self, items: list[str]) -> None:
+            self._items.extend(items)
+
+        def setCurrentText(self, text: str) -> None:
+            self._current_text = text
+            if text in project.stim_arrays:
+                fake_editor.current_stim_modifier = SimpleNamespace(
+                    stim_array=project.stim_arrays[text]
+                )
+
+        def currentText(self) -> str:
+            return self._current_text
+
+    stim_combo = FakeComboBox()
+
+    def _update_project(updated_project: Project) -> None:
+        stim_combo.clear()
+        stim_combo.addItems(list(updated_project.stim_arrays.keys()))
+
+    fake_gui: Any = SimpleNamespace(
+        project=project,
+        cmb_stim=stim_combo,
+        update_project=_update_project,
+    )
+    monkeypatch.setattr(neuroseq.gui, "IgorImportDialog", MockIgorImportDialog)
+
+    Gui.btn_import_igor2_wave_clicked(fake_gui)
+
+    assert fake_editor.current_stim_modifier is not None
+    assert fake_editor.current_stim_modifier.stim_array.name == "igor_wave"
+    assert fake_gui.cmb_stim.currentText() == "igor_wave"
+
+    StimEditor.stim_widget_mouse_clicked(fake_editor, 0, 0, 1)  # type: ignore[arg-type]
+
+    assert project.stim_arrays["igor_wave"].values[0, 0] == approx(draw_value)
+
+
+def test_gui_set_neuron_refocuses_to_selected_trace_range() -> None:
+    trace_data = TraceData(
+        name="cellpose traces",
+        traces=np.array([[1.0, 2.0]], dtype=np.float32),
+        indices=np.array([0], dtype=np.uint32),
+        units="mV",
+        dt=0.1,
+    )
+    focus_calls: list[int] = []
+    captured_data: list[TraceData | None] = []
+    trace_widget = SimpleNamespace(n_neurons=0)
+
+    def _set_trace_data(data: TraceData | None) -> None:
+        captured_data.append(data)
+        trace_widget.n_neurons = 0 if data is None else int(np.max(data.indices)) + 1
+
+    trace_widget.set_data = _set_trace_data
+    fake_gui: Any = SimpleNamespace(
+        project=SimpleNamespace(
+            get_data=lambda name, data_type: trace_data
+            if data_type is TraceData
+            else None
+        ),
+        trace_widget=trace_widget,
+        _focus_neuron_range=lambda n_neurons: focus_calls.append(n_neurons),
+    )
+
+    Gui._apply_trace_selection(fake_gui, "Cellpose :: traces")
+
+    assert captured_data == [trace_data]
+    assert focus_calls == [1]
+
+
+def test_gui_set_spike_refocuses_to_selected_spike_range() -> None:
+    spike_data = SpikeData(
+        name="cellpose spikes",
+        spike_indices=np.array([0, 0, 0], dtype=np.int32),
+        spike_times=np.array([0.1, 0.2, 0.3], dtype=np.float32),
+    )
+    focus_calls: list[int] = []
+    captured_data: list[SpikeData | None] = []
+    spike_widget = SimpleNamespace(n_neurons=0)
+
+    def _set_spike_data(data: SpikeData | None) -> None:
+        captured_data.append(data)
+        spike_widget.n_neurons = (
+            0 if data is None else int(np.max(data.spike_indices)) + 1
+        )
+
+    spike_widget.set_data = _set_spike_data
+    fake_gui: Any = SimpleNamespace(
+        project=SimpleNamespace(
+            get_data=lambda name, data_type: spike_data
+            if data_type is SpikeData
+            else None
+        ),
+        spike_widget=spike_widget,
+        _focus_neuron_range=lambda n_neurons: focus_calls.append(n_neurons),
+    )
+
+    Gui._apply_spike_selection(fake_gui, "Cellpose :: spikes")
+
+    assert captured_data == [spike_data]
+    assert focus_calls == [1]
+
+
+def test_gui_set_data_refocuses_combined_trace_view() -> None:
+    trace_data = TraceData(
+        name="cellpose traces",
+        traces=np.array([[1.0, 2.0]], dtype=np.float32),
+        indices=np.array([0], dtype=np.uint32),
+        units="mV",
+        dt=0.1,
+    )
+    focus_calls: list[int] = []
+    captured_data: list[TraceData | SpikeData | None] = []
+    trace_widget = SimpleNamespace(n_neurons=0)
+    spike_widget = SimpleNamespace(n_neurons=0)
+    data_widget = SimpleNamespace(
+        isVisible=lambda: True,
+        trace_widget=trace_widget,
+        spike_widget=spike_widget,
+    )
+
+    def _set_combined_data(data: TraceData | SpikeData | None) -> None:
+        captured_data.append(data)
+        trace_widget.n_neurons = 0
+        spike_widget.n_neurons = 0
+        if isinstance(data, TraceData):
+            trace_widget.n_neurons = int(np.max(data.indices)) + 1
+        elif isinstance(data, SpikeData):
+            spike_widget.n_neurons = int(np.max(data.spike_indices)) + 1
+
+    data_widget.set_data = _set_combined_data
+    fake_gui: Any = SimpleNamespace(
+        project=SimpleNamespace(
+            get_data=lambda name, data_type: trace_data
+            if data_type is TraceData
+            else None
+        ),
+        data_widget=data_widget,
+        _focus_neuron_range=lambda n_neurons: focus_calls.append(n_neurons),
+    )
+
+    Gui._apply_data_selection(fake_gui, "Cellpose :: traces [trace]")
+
+    assert captured_data == [trace_data]
+    assert focus_calls == [1]
+
+
+def test_gui_apply_cellpose_import_result_expands_stim_arrays(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "stim",
+            StimType.Excitation,
+            np.zeros((10, 40), dtype=np.float32),
+            "nS",
+            0.001,
+        )
+    )
+
+    class _FakeGui:
+        def __init__(self, project: Project) -> None:
+            self.project = project
+            self.last_cellpose_import: CellposeImportResult | None = None
+            self.updated_projects: list[Project] = []
+            self.update_limits_calls = 0
+
+        def update_project(self, project: Project) -> None:
+            self.updated_projects.append(project)
+
+        def update_limits(self) -> None:
+            self.update_limits_calls += 1
+
+        def _cellpose_neuron_count(
+            self,
+            imported: CellposeImportResult | None,
+        ) -> int:
+            return Gui._cellpose_neuron_count(self, imported)  # type: ignore[arg-type]
+
+        def _expand_stim_arrays_to_neuron_count(
+            self,
+            target_neuron_count: int,
+        ) -> list[str]:
+            return Gui._expand_stim_arrays_to_neuron_count(
+                self,  # type: ignore[arg-type]
+                target_neuron_count,
+            )
+
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+    fake_gui = _FakeGui(project)
+    imported = CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=np.zeros((2, 2), dtype=np.int32),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.arange(100, dtype=np.int32),
+        stimulus_to_cellpose_mapping=None,
+    )
+
+    resized_names = Gui._apply_cellpose_import_result(fake_gui, imported)  # type: ignore[arg-type]
+
+    assert resized_names == ["stim"]
+    assert fake_gui.last_cellpose_import is not None
+    assert project.stim_arrays["stim"].values.shape[1] == 100
+    assert fake_gui.updated_projects == [project]
+    assert fake_gui.update_limits_calls == 0
 
 
 def test_gui_checkpoints(

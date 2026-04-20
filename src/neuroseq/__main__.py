@@ -2,11 +2,46 @@ from __future__ import annotations
 
 import logging
 import pathlib
+import signal
 import sys
+from collections.abc import Callable
+from types import FrameType
+from typing import Any
 
 import click
 
 from neuroseq.cellpose_test_data import save_cellpose_test_data
+
+
+def _install_interrupt_handlers(
+    app: Any,
+    *,
+    timer_factory: Callable[[Any], Any] | None = None,
+    signal_module: Any = signal,
+) -> Any | None:
+    """Keep Ctrl-C responsive while the Qt event loop is running."""
+    if sys.platform == "win32":
+        return None
+
+    if timer_factory is None:
+        from qtpy import QtCore
+
+        timer = QtCore.QTimer(app)
+    else:
+        timer = timer_factory(app)
+
+    def _quit_on_signal(signum: int, _frame: FrameType | None) -> None:
+        logging.getLogger(__name__).info(
+            "Received signal %s, quitting GUI event loop", signum
+        )
+        app.quit()
+
+    signal_module.signal(signal_module.SIGINT, _quit_on_signal)
+    signal_module.signal(signal_module.SIGTERM, _quit_on_signal)
+    timer.setInterval(200)
+    timer.timeout.connect(lambda: None)
+    timer.start()
+    return timer
 
 
 @click.command()
@@ -173,8 +208,10 @@ def main(
     click.echo(msg)
     logging.getLogger(__name__).info(msg)
     app = QtWidgets.QApplication(sys.argv)
+    app._interrupt_timer = _install_interrupt_handlers(app)
     gui = Gui(filename=filename)
     gui.show()
+    logging.getLogger(__name__).info("GUI initialized, entering Qt event loop")
     app.exec()
 
 

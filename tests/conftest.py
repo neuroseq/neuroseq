@@ -1,8 +1,25 @@
 from __future__ import annotations
 
+import os
 import pathlib
+import sys
 from collections.abc import Callable
+from collections.abc import Generator
 from typing import Any
+
+if sys.platform.startswith("linux"):
+    os.environ.setdefault("NEUROSEQ_HEADLESS_TEST", "1")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    pathlib.Path("/tmp/mpl").mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl")
+
+if os.environ.get("NEUROSEQ_HEADLESS_TEST", "").lower() in {"1", "true", "yes"}:
+    from fastplotlib.layouts._figure import Figure
+
+    def _disable_fastplotlib_auto_render(self) -> None:
+        return None
+
+    Figure._start_render = _disable_fastplotlib_auto_render
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -23,6 +40,7 @@ from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.utils import init_brian2_logging
 
 b2.prefs.codegen.target = "numpy"
+b2.prefs.codegen.runtime.cython.cache_dir = "/tmp/neuroseq-brian2-cython-cache"
 
 
 def pytest_addoption(parser):
@@ -123,6 +141,24 @@ def qmessagebox_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
 @pytest.fixture(autouse=True)
 def reduce_brian2_logging_verbosity() -> None:
     init_brian2_logging()
+
+
+@pytest.fixture(scope="session")
+def brian2_cython_cache_dir(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> pathlib.Path:
+    return tmp_path_factory.mktemp("brian2_cython_cache")
+
+
+@pytest.fixture(autouse=True)
+def isolate_brian2_codegen_state(
+    brian2_cython_cache_dir: pathlib.Path,
+) -> Generator[None, None, None]:
+    b2.prefs.codegen.target = "numpy"
+    b2.prefs.codegen.runtime.cython.cache_dir = str(brian2_cython_cache_dir)
+    yield
+    b2.prefs.codegen.target = "numpy"
+    b2.prefs.codegen.runtime.cython.cache_dir = str(brian2_cython_cache_dir)
 
 
 @pytest.fixture(autouse=True)

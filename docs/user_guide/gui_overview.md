@@ -1,5 +1,24 @@
 # GUI Overview
 
+## File menu
+
+All data import and export actions are grouped under two sub-menus:
+
+- `File → Import data`
+  - `Import stimulus → Import light stimulus` — SysCon2 `.seq` import
+  - `Import stimulus → Import patch clamp` — Igor2 `.ibw` / `.pxp` / `.csv` import (see [Importing Igor2 Waves](importing_igor2_waves.md))
+  - `Import trace → Import calcium imaging` — Suite2p fluorescence import
+  - `Import trace → Import patch clamp` — Igor2 patch-clamp trace import
+  - `Import cell segmentation` — Cellpose segmentation import
+- `File → Export data`
+  - `Export patch clamp stimulus` — Igor2 stimulus CSV/`.ibw` export for SutterPatch (see [Export stimuli for patch clamp recordings](export_patch_clamp_stimuli.md))
+  - `Export light stimulus` — SysCon2 `.seq` export for holographic hardware (see [Multiphoton Holographic Stimulation](multiphoton_holographic_stimulation.md))
+  - `Export traces` — publication-quality matplotlib figure (PNG/SVG/PDF, 300 DPI) of the currently selected `TraceData`
+  - `Export spikes` — publication-quality matplotlib raster (PNG/SVG/PDF, 300 DPI) of the currently selected `SpikeData`
+  - `Export simulation results` — HDF5 snapshot of the full simulation
+
+Each import or export action that supports multiple third-party software packages opens a small pre-dialog first so you can choose the source/target software (e.g. Igor2, SysCon2).
+
 ## General Layout
 
 ![GUI layout](../images/layout.png)
