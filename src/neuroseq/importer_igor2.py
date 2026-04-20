@@ -52,6 +52,23 @@ class IgorImportReport:
     truncated_samples: int
 
 
+@dataclass
+class SkippedPxpRecord:
+    """A record that could not be parsed while loading a .pxp file."""
+
+    record_index: int
+    record_type: str
+    reason: str
+
+
+@dataclass
+class IgorPxpLoadReport:
+    """Result of loading an Igor Packed Experiment file."""
+
+    waves: dict[str, IgorWave]
+    skipped: list[SkippedPxpRecord]
+
+
 def _as_bytes(value: object) -> bytes | None:
     if value is None:
         return None
@@ -193,20 +210,126 @@ def is_pxp_file(path: str | Path) -> bool:
     return Path(path).suffix.lower() == ".pxp"
 
 
-def load_igor_pxp_file(path: str | Path) -> dict[str, IgorWave]:
-    """Load all 1-D waves from an Igor Packed Experiment (.pxp) file."""
+def load_igor_pxp_file(path: str | Path) -> IgorPxpLoadReport:
+    """Load all 1-D waves from an Igor Packed Experiment (.pxp) file.
+
+    Uses a tolerant record-by-record loader: a single malformed wave
+    record is logged and skipped rather than aborting the whole load.
+
+    Returns an :class:`IgorPxpLoadReport` whose ``waves`` dict maps
+    slash-joined folder paths to :class:`IgorWave` objects, and whose
+    ``skipped`` list enumerates records that could not be parsed.
+
+    Raises ``ImportError`` if igor2 is not installed. Raises
+    ``ValueError`` only if no importable 1-D waves survive.
+    """
     path = Path(path)
     try:
         packed = importlib.import_module("igor2.packed")
         wave_record_module = importlib.import_module("igor2.record.wave")
+        record_module = importlib.import_module("igor2.record")
+        record_base = importlib.import_module("igor2.record.base")
+        struct_module = importlib.import_module("igor2.struct")
+        util_module = importlib.import_module("igor2.util")
     except ImportError as exc:
         raise ImportError(
             "Reading Igor Packed Experiment files requires the optional 'igor2' dependency."
         ) from exc
 
     WaveRecord = wave_record_module.WaveRecord
+    RECORD_TYPE = record_module.RECORD_TYPE
+    UnknownRecord = record_base.UnknownRecord
+    Structure = struct_module.Structure
+    Field = struct_module.Field
+    byte_order = util_module.byte_order
+    need_to_reorder_bytes = util_module.need_to_reorder_bytes
 
-    _records, filesystem = packed.load(path)
+    def _make_header_struct(bo: str):
+        header_struct = Structure(
+            name="PackedFileRecordHeader",
+            fields=[
+                Field("H", "recordType"),
+                Field("h", "version"),
+                Field("l", "numDataBytes"),
+            ],
+            byte_order=bo,
+        )
+        header_struct.setup()
+        return header_struct
+
+    packed_record_type_mask = 0x7FFF
+
+    records: list[object] = []
+    skipped: list[SkippedPxpRecord] = []
+    bo: str | None = None
+    initial_bo = "="
+
+    with path.open("rb") as fp:
+        record_index = 0
+        while True:
+            header_struct = _make_header_struct(bo or initial_bo)
+            header_bytes = fp.read(header_struct.size)
+            if not header_bytes:
+                break
+            if len(header_bytes) < header_struct.size:
+                logger.warning(
+                    "Truncated record header in %s at byte offset %d; "
+                    "stopping after %d records.",
+                    path.name,
+                    fp.tell() - len(header_bytes),
+                    record_index,
+                )
+                break
+
+            header = header_struct.unpack_from(header_bytes)
+            if header["version"] and bo is None:
+                reorder = need_to_reorder_bytes(header["version"])
+                bo = initial_bo = byte_order(reorder)
+                if reorder:
+                    header_struct = _make_header_struct(bo)
+                    header = header_struct.unpack_from(header_bytes)
+
+            data = fp.read(header["numDataBytes"])
+            if len(data) < header["numDataBytes"]:
+                logger.warning(
+                    "Truncated record #%d in %s (wanted %d bytes, got %d); "
+                    "stopping the packed-record scan.",
+                    record_index + 1,
+                    path.name,
+                    header["numDataBytes"],
+                    len(data),
+                )
+                break
+
+            record_index += 1
+            record_type = RECORD_TYPE.get(
+                header["recordType"] & packed_record_type_mask,
+                UnknownRecord,
+            )
+            try:
+                record_obj = record_type(header, data, byte_order=bo)
+            except Exception as exc:
+                logger.warning(
+                    "Skipping malformed Igor packed record #%d (%s) in %s: %s",
+                    record_index,
+                    record_type.__name__,
+                    path.name,
+                    exc,
+                )
+                skipped.append(
+                    SkippedPxpRecord(
+                        record_index=record_index,
+                        record_type=record_type.__name__,
+                        reason=f"{type(exc).__name__}: {exc}",
+                    )
+                )
+                continue
+
+            records.append(record_obj)
+
+    # Reuse igor2's filesystem builder; reimplementing its folder/name handling here
+    # would duplicate library behavior and make upgrades more brittle.
+    filesystem = packed._build_filesystem(records)
 
     waves: dict[str, IgorWave] = {}
 
@@ -245,7 +368,7 @@ def load_igor_pxp_file(path: str | Path) -> dict[str, IgorWave]:
             f"No importable 1-D waves found in packed experiment file '{path.name}'"
         )
 
-    return waves
+    return IgorPxpLoadReport(waves=waves, skipped=skipped)
 
 
 def load_igor_csv_file(path: str | Path) -> IgorWave:

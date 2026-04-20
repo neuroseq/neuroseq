@@ -982,7 +982,13 @@ class Gui(QtWidgets.QMainWindow):
         software, ok = QtWidgets.QInputDialog.getItem(
             self,
             "Import patch clamp stimulus",
-            "Import from:",
+            (
+                "Patch-clamp convention:\n"
+                "  • Current Clamp (CC): the injected CURRENT is the stimulus\n"
+                "  • Voltage Clamp (VC): the commanded VOLTAGE is the stimulus\n"
+                "\n"
+                "Import from:"
+            ),
             ["Igor2"],
             0,
             False,
@@ -1004,7 +1010,13 @@ class Gui(QtWidgets.QMainWindow):
         software, ok = QtWidgets.QInputDialog.getItem(
             self,
             "Import patch clamp traces",
-            "Import from:",
+            (
+                "Patch-clamp convention:\n"
+                "  • Current Clamp (CC): the recorded VOLTAGE is the trace\n"
+                "  • Voltage Clamp (VC): the recorded CURRENT is the trace\n"
+                "\n"
+                "Import from:"
+            ),
             ["Igor2"],
             0,
             False,

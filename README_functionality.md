@@ -584,7 +584,7 @@ python -m neuroseq \
 
 `igor_import_dialog.py` + `importer_igor2.py`:
 
-- GUI entrypoint is `File -> Import Igor2 Wave (.ibw/.csv)`.
+- GUI entrypoint is `File → Import data → Import stimulus → Import patch clamp` (pre-dialog selects `Igor2`).
 - Import is available regardless of whether the project already has stim arrays:
   - if no stim arrays exist, only `Create new stim array` is available,
   - if stim arrays already exist, user can either create a new stim array or import into an existing one.
@@ -614,6 +614,11 @@ python -m neuroseq \
   - x-axis / dimension units,
   - optional wave note text for preview display.
 - For `.pxp`, importer walks the packed experiment, extracts all importable 1D waves, and presents them in a wave-picker list using slash-joined folder paths such as `root/stims/HodgkinHuxley`.
+- `.pxp` loading is tolerant to per-record unpack failures (e.g. upstream igor2 0.5.x raises `TypeError: buffer is too small for requested array` on some dependency-formula / multidimensional waves). The loader iterates the packed record stream itself and wraps each `record_type(header, data, ...)` call in try/except:
+  - records that fail to unpack are logged at WARNING and recorded as `SkippedPxpRecord(record_index, record_type, reason)`,
+  - the remaining records are still passed through `igor2.packed._build_filesystem(...)` and parsed as usual,
+  - `load_igor_pxp_file()` returns an `IgorPxpLoadReport(waves, skipped)` dataclass,
+  - when `skipped` is non-empty the dialog shows a `QMessageBox.warning` ("Some waves were skipped") after populating the wave picker, and writes the full per-record breakdown to the application log.
 
 #### Packed experiment selection flow
 

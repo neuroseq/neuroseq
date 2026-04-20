@@ -204,6 +204,38 @@ def test_gui_pre_dialog_wrapper_does_nothing_on_cancel(
     assert called == []
 
 
+def test_patchclamp_pre_dialogs_include_cc_vc_convention(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    captured_labels: list[str] = []
+
+    def fake_get_item(*args: Any, **kwargs: Any) -> tuple[str, bool]:
+        del kwargs
+        captured_labels.append(args[2])
+        return ("Igor2", False)
+
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getItem", fake_get_item)
+
+    fake_gui: Any = SimpleNamespace(
+        btn_import_igor2_wave_clicked=lambda: None,
+        btn_import_patchclamp_data_clicked=lambda: None,
+    )
+
+    Gui.btn_import_stimulus_patchclamp_clicked(fake_gui)
+    Gui.btn_import_trace_patchclamp_clicked(fake_gui)
+
+    assert len(captured_labels) == 2
+    stim_label, trace_label = captured_labels
+    assert "Current Clamp (CC)" in stim_label
+    assert "Voltage Clamp (VC)" in stim_label
+    assert "CURRENT is the stimulus" in stim_label
+    assert "VOLTAGE is the stimulus" in stim_label
+    assert "Current Clamp (CC)" in trace_label
+    assert "Voltage Clamp (VC)" in trace_label
+    assert "VOLTAGE is the trace" in trace_label
+    assert "CURRENT is the trace" in trace_label
+
+
 def test_gui_click_exit(qtbot: QtBot) -> None:
     gui = Gui()
     gui.show()

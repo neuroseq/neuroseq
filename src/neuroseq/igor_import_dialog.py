@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import logging
+from contextlib import suppress
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import brian2.numpy_ as np
+from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
@@ -42,6 +45,8 @@ class IgorImportDialog(QtWidgets.QDialog):
         self._auto_stim_name = ""
         self._auto_units = ""
         self.loaded_pxp_waves: dict[str, IgorWave] = {}
+        self._imported_pxp_keys: set[str] = set()
+        self._had_successful_import: bool = False
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -52,10 +57,11 @@ class IgorImportDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
 
         intro = QtWidgets.QLabel(
-            "Import a single Igor2/Sutter stimulation wave from .ibw, .pxp, or the "
-            "simple NeuroSeq-compatible .csv format. Packed experiments allow you to "
-            "pick one contained wave at a time. Imported waves are placed on "
-            "NeuroSeq's 1 ms timeline using zero-order-hold resampling when needed."
+            "Import Igor2/Sutter stimulation waves from .ibw, .pxp, or the simple "
+            "NeuroSeq-compatible .csv format. Packed experiments can contain many "
+            "waves; import as many as you need from the same file, then click Close "
+            "when done. Imported waves are placed on NeuroSeq's 1 ms timeline using "
+            "zero-order-hold resampling when needed."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -163,6 +169,11 @@ class IgorImportDialog(QtWidgets.QDialog):
         target_layout.addWidget(self.existing_target_group)
         layout.addWidget(target_group)
 
+        self.last_import_label = QtWidgets.QLabel("")
+        self.last_import_label.setWordWrap(True)
+        self.last_import_label.setStyleSheet("QLabel { color: #2a7a2a; }")
+        layout.addWidget(self.last_import_label)
+
         self.info_label = QtWidgets.QLabel("")
         self.info_label.setWordWrap(True)
         self.info_label.setStyleSheet("QLabel { color: gray; }")
@@ -173,10 +184,10 @@ class IgorImportDialog(QtWidgets.QDialog):
         self.import_button = QtWidgets.QPushButton("Import")
         self.import_button.setEnabled(False)
         self.import_button.clicked.connect(self._import_file)
-        cancel_button = QtWidgets.QPushButton("Cancel")
-        cancel_button.clicked.connect(self.reject)
+        self.cancel_button = QtWidgets.QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.reject)
         button_layout.addWidget(self.import_button)
-        button_layout.addWidget(cancel_button)
+        button_layout.addWidget(self.cancel_button)
         layout.addLayout(button_layout)
 
         self._populate_target_stims()
@@ -225,7 +236,7 @@ class IgorImportDialog(QtWidgets.QDialog):
         if current is None:
             self.loaded_wave = None
         else:
-            path_key = current.text()
+            path_key = current.text().removeprefix("✓ ")
             self.loaded_wave = self.loaded_pxp_waves.get(path_key)
             if self.loaded_wave is not None and self.loaded_wave.source_dt is not None:
                 self.source_dt_spin.setValue(float(self.loaded_wave.source_dt))
@@ -326,7 +337,7 @@ class IgorImportDialog(QtWidgets.QDialog):
 
     def _load_pxp_file(self, filename: str) -> None:
         try:
-            waves = load_igor_pxp_file(filename)
+            report = load_igor_pxp_file(filename)
         except Exception as exc:
             self.logger.exception("Failed to load Igor packed experiment %s", filename)
             self.loaded_wave = None
@@ -346,7 +357,10 @@ class IgorImportDialog(QtWidgets.QDialog):
             )
             return
 
+        waves = report.waves
         self.loaded_pxp_waves = waves
+        self._imported_pxp_keys = set()
+        self.last_import_label.setText("")
         self.file_path = filename
         self.file_label.setText(filename)
         self.file_label.setStyleSheet("QLabel { color: black; }")
@@ -355,6 +369,20 @@ class IgorImportDialog(QtWidgets.QDialog):
         for path_key in sorted(waves.keys()):
             self.pxp_wave_list.addItem(path_key)
         self.wave_picker_group.setVisible(True)
+        if report.skipped:
+            summary = (
+                f"{len(report.skipped)} record(s) in '{Path(filename).name}' could not "
+                "be parsed and were skipped. The other waves loaded normally. "
+                "Open the application log for details."
+            )
+            QtWidgets.QMessageBox.warning(self, "Some waves were skipped", summary)
+            for skipped in report.skipped:
+                self.logger.warning(
+                    "Skipped record #%d (%s): %s",
+                    skipped.record_index,
+                    skipped.record_type,
+                    skipped.reason,
+                )
 
         if len(waves) == 1:
             self.pxp_wave_list.setCurrentRow(0)
@@ -445,6 +473,12 @@ class IgorImportDialog(QtWidgets.QDialog):
 
     def _update_import_button_state(self) -> None:
         enabled = self.loaded_wave is not None
+        if enabled and self.loaded_pxp_waves:
+            current_item = self.pxp_wave_list.currentItem()
+            if current_item is not None:
+                raw_key = current_item.text().removeprefix("✓ ")
+                if raw_key in self._imported_pxp_keys:
+                    enabled = False
         if enabled and self.create_new_radio.isChecked():
             enabled = self.new_name_edit.text().strip() != ""
         if enabled and self.import_existing_radio.isChecked():
@@ -457,6 +491,15 @@ class IgorImportDialog(QtWidgets.QDialog):
         if isinstance(current_data, StimType):
             return current_data
         return StimType.External
+
+    def _promote_cancel_to_close(self) -> None:
+        """Promote Cancel to Close once the dialog has modified the project."""
+        if self.cancel_button.text() == "Close":
+            return
+        self.cancel_button.setText("Close")
+        with suppress(TypeError, RuntimeError):
+            self.cancel_button.clicked.disconnect(self.reject)
+        self.cancel_button.clicked.connect(self.accept)
 
     def _import_file(self) -> None:
         if self.loaded_wave is None:
@@ -549,12 +592,39 @@ class IgorImportDialog(QtWidgets.QDialog):
                         f"Resampled from {report.source_dt:.9f} s to {report.target_dt:.3f} s using zero-order hold."
                     )
 
-            QtWidgets.QMessageBox.information(
-                self,
-                "Import Complete",
-                "\n".join(info_lines),
-            )
-            self.accept()
+            is_pxp_session = bool(self.loaded_pxp_waves)
+
+            if is_pxp_session:
+                current_item = self.pxp_wave_list.currentItem()
+                if current_item is not None:
+                    path_key = current_item.text().removeprefix("✓ ")
+                    self._imported_pxp_keys.add(path_key)
+                    current_item.setText(f"✓ {path_key}")
+                    current_item.setFlags(
+                        current_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable
+                    )
+
+                self.last_import_label.setText(info_lines[0])
+                self.pxp_wave_list.clearSelection()
+                self.pxp_wave_list.setCurrentItem(None)
+                self.loaded_wave = None
+                self.new_name_edit.clear()
+                self.new_units_edit.clear()
+                self._auto_stim_name = ""
+                self._auto_units = ""
+                self._populate_target_stims()
+
+                self._had_successful_import = True
+                self._promote_cancel_to_close()
+                self._update_preview()
+                self._update_import_button_state()
+            else:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Import Complete",
+                    "\n".join(info_lines),
+                )
+                self.accept()
         except Exception as exc:
             self.logger.exception("Failed to import Igor wave")
             QtWidgets.QMessageBox.critical(

@@ -1,0 +1,478 @@
+HANDOFF: Keep Igor2 import dialog open for multi-wave .pxp imports
+===================================================================
+Branch: import_igor2
+Repo:   /mnt/live3/svintila/neuroseq
+Date:   2026-04-20
+
+
+PROBLEM
+-------
+When a user opens an Igor Packed Experiment (.pxp) via the Igor2 import
+dialog, the file typically contains many 1-D waves (60+ in our reference
+file `251118_0.pxp`). Today, as soon as the user clicks *Import* for one
+wave, the dialog calls `self.accept()` and closes. To import a second
+wave from the same file the user must reopen the dialog, reselect the
+file, and wait for the full packed-experiment scan again.
+
+For .pxp files this is clearly the wrong UX — the file is already scanned,
+the wave picker is already populated, and the user will typically want to
+import several waves from the same experiment back-to-back.
+
+For .ibw and .csv there is only ever one wave per file, so accept-and-close
+after a successful import remains correct.
+
+
+TASK OVERVIEW
+-------------
+Change `igor_import_dialog.py` so that:
+
+- For .pxp files: after a successful import, the dialog STAYS OPEN. The
+  user can select and import additional waves from the same packed
+  experiment without reloading the file. A "Close" button replaces the
+  "Cancel" button once at least one wave has been imported, so closing
+  the dialog still triggers the caller's post-accept hooks (project
+  update + stim combobox switch).
+- For .ibw and .csv files: unchanged — dialog still calls `self.accept()`
+  on a successful import.
+
+Scope is intentionally narrow: behaviour, buttons, and per-wave bookkeeping
+inside `IgorImportDialog`. No changes to `importer_igor2.py`, no changes to
+`gui.py`. Dialog tests must be updated to match the new flow; importer
+tests are unaffected.
+
+
+HOW TO RUN TESTS
+----------------
+    cd /mnt/live3/svintila/neuroseq
+    .venv/bin/python -m pytest tests/test_igor_import_dialog.py -v
+    .venv/bin/python -m pytest                       # full suite, no regressions
+    .venv/bin/python -m ruff check src/neuroseq/igor_import_dialog.py tests/test_igor_import_dialog.py
+    .venv/bin/python -m mypy --ignore-missing-imports src/neuroseq/igor_import_dialog.py
+
+
+FILES TO CHANGE
+---------------
+1. src/neuroseq/igor_import_dialog.py  — dialog behaviour + buttons
+2. tests/test_igor_import_dialog.py    — update existing tests, add new ones
+
+DO NOT TOUCH:
+    src/neuroseq/importer_igor2.py
+    src/neuroseq/gui.py
+    Any other file.
+
+
+=============================================================
+CHANGE 1: src/neuroseq/igor_import_dialog.py
+=============================================================
+
+1a) __init__ — add two new instance variables next to the existing
+    `self.loaded_pxp_waves` line:
+
+        self.loaded_pxp_waves: dict[str, IgorWave] = {}
+        self._imported_pxp_keys: set[str] = set()
+        self._had_successful_import: bool = False
+
+    `_imported_pxp_keys` tracks which path-keys in the current .pxp have
+    already been imported in this session so we can visually flag them.
+    `_had_successful_import` gates the Cancel→Close button swap (see 1c).
+
+1b) _setup_ui — the button-row block at the bottom of the layout currently
+    reads:
+
+        button_layout = QtWidgets.QHBoxLayout()
+        button_layout.addStretch()
+        self.import_button = QtWidgets.QPushButton("Import")
+        self.import_button.setEnabled(False)
+        self.import_button.clicked.connect(self._import_file)
+        cancel_button = QtWidgets.QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(self.import_button)
+        button_layout.addWidget(cancel_button)
+        layout.addLayout(button_layout)
+
+    Replace the `cancel_button` local with an instance attribute so we
+    can re-label it later:
+
+        button_layout = QtWidgets.QHBoxLayout()
+        button_layout.addStretch()
+        self.import_button = QtWidgets.QPushButton("Import")
+        self.import_button.setEnabled(False)
+        self.import_button.clicked.connect(self._import_file)
+        self.cancel_button = QtWidgets.QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(self.import_button)
+        button_layout.addWidget(self.cancel_button)
+        layout.addLayout(button_layout)
+
+    Also add a new QLabel ABOVE the existing `self.info_label` (so the
+    user has a persistent place to read the last-import status without
+    a modal dialog). Pattern:
+
+        self.last_import_label = QtWidgets.QLabel("")
+        self.last_import_label.setWordWrap(True)
+        self.last_import_label.setStyleSheet("QLabel { color: #2a7a2a; }")
+        layout.addWidget(self.last_import_label)
+
+    Place it immediately before the `self.info_label = QtWidgets.QLabel("")`
+    widget (so order from top to bottom is: target group → last-import
+    status → info hints → button row).
+
+1c) _load_pxp_file — when a new .pxp is loaded, reset the per-file session
+    state. After the existing line `self.loaded_pxp_waves = waves`, add:
+
+        self._imported_pxp_keys = set()
+        self.last_import_label.setText("")
+
+    (Do NOT reset `self._had_successful_import` on file reload. Rationale:
+    if the user imports two waves from file A, then loads file B, we still
+    want the dialog's Close button — the project has already been modified
+    and closing the dialog should still route through `accept()`.)
+
+1d) _import_file — this is the core behaviour change. Locate the success
+    tail near the end of the `try` block:
+
+        QtWidgets.QMessageBox.information(
+            self,
+            "Import Complete",
+            "\n".join(info_lines),
+        )
+        self.accept()
+
+    Replace it with a branch on whether the dialog is currently operating
+    on a .pxp file. Use the presence of a non-empty
+    `self.loaded_pxp_waves` as the canonical signal:
+
+        is_pxp_session = bool(self.loaded_pxp_waves)
+
+        if is_pxp_session:
+            # Record the wave we just imported and mark it in the list.
+            current_item = self.pxp_wave_list.currentItem()
+            if current_item is not None:
+                path_key = current_item.text()
+                self._imported_pxp_keys.add(path_key)
+                current_item.setText(f"✓ {path_key}")
+                current_item.setFlags(current_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
+
+            # Inline status instead of a modal "Import Complete" dialog,
+            # so bulk imports don't require clicking through a dialog per wave.
+            self.last_import_label.setText("Imported: " + info_lines[0])
+
+            # Reset selection-driven state so the user can pick the next wave.
+            self.pxp_wave_list.clearSelection()
+            self.pxp_wave_list.setCurrentItem(None)
+            self.loaded_wave = None
+            self.new_name_edit.clear()
+            self.new_units_edit.clear()
+            self._auto_stim_name = ""
+            self._auto_units = ""
+
+            # A freshly created stim array may now be a valid target for
+            # the next wave — refresh the "Import into existing" combo.
+            self._populate_target_stims()
+
+            self._had_successful_import = True
+            self._promote_cancel_to_close()
+            self._update_preview()
+            self._update_import_button_state()
+        else:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Import Complete",
+                "\n".join(info_lines),
+            )
+            self.accept()
+
+    Note the rebinding of the current list item's selectable flag: it
+    prevents the user from re-selecting an already-imported wave (which
+    would succeed but require typing a fresh stim name to avoid the
+    "already exists" error).
+
+    Add a top-level import for `QtCore` alongside the existing `QtWidgets`
+    import — the `Qt.ItemFlag.ItemIsSelectable` enum lives there:
+
+        from qtpy import QtCore
+        from qtpy import QtWidgets
+
+1e) Add a small helper method on the class:
+
+        def _promote_cancel_to_close(self) -> None:
+            """After the first successful .pxp import, rename Cancel to Close
+            and route its signal to ``accept()`` so the caller's
+            post-accept hooks (project refresh, combobox switch) still run.
+
+            Called multiple times is safe: the reconnect is idempotent
+            because disconnect()'s missing-signal case is caught silently."""
+            if self.cancel_button.text() == "Close":
+                return
+            self.cancel_button.setText("Close")
+            try:
+                self.cancel_button.clicked.disconnect(self.reject)
+            except (TypeError, RuntimeError):
+                # Already disconnected (e.g. after unit-test monkeypatching)
+                # — the connect below is the only thing that matters.
+                pass
+            self.cancel_button.clicked.connect(self.accept)
+
+1f) _update_import_button_state — add one extra gate so the Import button
+    is disabled when the currently selected wave has already been
+    imported in this .pxp session. Insert this between the existing
+    `enabled = self.loaded_wave is not None` line and the final
+    `self.import_button.setEnabled(enabled)`:
+
+        if enabled and self.loaded_pxp_waves:
+            current_item = self.pxp_wave_list.currentItem()
+            if current_item is not None:
+                raw_key = current_item.text().removeprefix("✓ ")
+                if raw_key in self._imported_pxp_keys:
+                    enabled = False
+
+    (`str.removeprefix` is Python 3.9+; the repo requires 3.10, so this
+    is fine.)
+
+    Because `_imported_pxp_keys` stores the ORIGINAL path key (without
+    the "✓ " prefix we added on the item), we strip the prefix before
+    looking it up. Keep this consistent with 1d.
+
+1g) _on_pxp_wave_selected — the currently selected list item may now
+    carry a "✓ " prefix if the user clicks an already-imported wave
+    (even though we made it non-selectable, clicking it still fires
+    `currentItemChanged`). Update the path-key lookup:
+
+    Find:
+        path_key = current.text()
+        self.loaded_wave = self.loaded_pxp_waves.get(path_key)
+
+    Replace with:
+        path_key = current.text().removeprefix("✓ ")
+        self.loaded_wave = self.loaded_pxp_waves.get(path_key)
+
+    (The rest of the method is unchanged.)
+
+
+=============================================================
+CHANGE 2: tests/test_igor_import_dialog.py
+=============================================================
+
+2a) The four existing dialog tests that monkeypatch `load_igor_pxp_file`
+    (test names contain "pxp") currently either:
+      - construct a single-wave .pxp fake and therefore hit the
+        auto-select path and then click Import, previously expecting
+        `dialog.result() == Accepted`, OR
+      - load a multi-wave .pxp and stop before calling `_import_file()`.
+
+    Their outcomes now differ on the single-wave path because the
+    dialog no longer accepts itself after a .pxp import. Audit the four
+    tests. For each that calls `dialog._import_file()` on a .pxp file
+    and asserts the dialog accepted:
+      - Replace that assertion with an assertion that the dialog is
+        STILL visible after the import
+      - Assert `dialog.cancel_button.text() == "Close"`
+      - Assert the expected stim array was created in the project
+      - Then explicitly call `dialog.cancel_button.click()` or
+        `dialog.accept()` and confirm the dialog closes via
+        `qtbot.waitUntil(lambda: not dialog.isVisible())`.
+
+    Tests that already target .ibw / .csv file paths are unchanged.
+
+2b) Add a new test that exercises the full multi-wave flow end-to-end.
+    Place it immediately after the existing
+    `test_igor_import_dialog_warns_when_pxp_records_are_skipped`:
+
+        def test_igor_import_dialog_stays_open_for_multiple_pxp_imports(
+            tmp_path: Path,
+            qtbot: QtBot,
+            monkeypatch: pytest.MonkeyPatch,
+        ) -> None:
+            """Two waves from the same .pxp must be importable without
+            reopening the dialog."""
+            from neuroseq.importer_igor2 import IgorWave
+
+            pxp_path = tmp_path / "multi.pxp"
+            pxp_path.write_bytes(b"fake")
+
+            wave_a = IgorWave(
+                name="WaveA",
+                values=np.array([1.0, 2.0, 3.0], dtype=np.float32),
+                source_dt=0.001,
+                units="pA",
+                axis_units="s",
+                source_format="ibw",
+            )
+            wave_b = IgorWave(
+                name="WaveB",
+                values=np.array([4.0, 5.0, 6.0], dtype=np.float32),
+                source_dt=0.001,
+                units="pA",
+                axis_units="s",
+                source_format="ibw",
+            )
+            fake_waves = {"root/WaveA": wave_a, "root/WaveB": wave_b}
+
+            monkeypatch.setattr("neuroseq.igor_import_dialog.is_pxp_file", lambda _: True)
+            monkeypatch.setattr(
+                "neuroseq.igor_import_dialog.load_igor_pxp_file",
+                lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
+            )
+
+            project = Project()
+            dialog = IgorImportDialog(project)
+            qtbot.addWidget(dialog)
+            dialog.show()
+            qtbot.waitUntil(lambda: dialog.isVisible())
+            dialog._load_file(str(pxp_path))
+
+            # Select and import the first wave.
+            items = [
+                dialog.pxp_wave_list.item(i)
+                for i in range(dialog.pxp_wave_list.count())
+            ]
+            assert {it.text() for it in items} == {"root/WaveA", "root/WaveB"}
+            dialog.pxp_wave_list.setCurrentItem(
+                next(it for it in items if it.text() == "root/WaveA")
+            )
+            assert dialog.loaded_wave is wave_a
+            assert dialog.import_button.isEnabled()
+            dialog._import_file()
+
+            # Dialog stayed open; WaveA marked imported; WaveB still selectable.
+            assert dialog.isVisible()
+            assert dialog.cancel_button.text() == "Close"
+            wave_a_item = next(
+                it for it in (
+                    dialog.pxp_wave_list.item(i)
+                    for i in range(dialog.pxp_wave_list.count())
+                )
+                if "WaveA" in it.text()
+            )
+            assert wave_a_item.text().startswith("✓ ")
+            assert not (wave_a_item.flags() & QtCore.Qt.ItemFlag.ItemIsSelectable)
+            assert "WaveA" in project.stim_arrays
+
+            # Select and import the second wave.
+            wave_b_item = next(
+                it for it in (
+                    dialog.pxp_wave_list.item(i)
+                    for i in range(dialog.pxp_wave_list.count())
+                )
+                if "WaveB" in it.text()
+            )
+            dialog.pxp_wave_list.setCurrentItem(wave_b_item)
+            assert dialog.loaded_wave is wave_b
+            # Name field was cleared after the first import, so auto-populate
+            # should have re-filled from WaveB.
+            assert dialog.new_name_edit.text() == "WaveB"
+            dialog._import_file()
+
+            assert dialog.isVisible()
+            assert "WaveB" in project.stim_arrays
+            assert dialog.selected_stim_name == "WaveB"
+
+            # Close via the renamed button — caller sees Accepted.
+            with qtbot.waitSignal(dialog.finished, timeout=1000):
+                dialog.cancel_button.click()
+            assert dialog.result() == QtWidgets.QDialog.DialogCode.Accepted
+
+    Add `from qtpy import QtCore` at the top of the test module if not
+    already imported (it isn't currently — check and add only if needed).
+
+2c) Add a focused unit test that guards the "already-imported" Import-
+    button gate:
+
+        def test_igor_import_dialog_reimport_same_pxp_wave_is_blocked(
+            tmp_path: Path,
+            qtbot: QtBot,
+            monkeypatch: pytest.MonkeyPatch,
+        ) -> None:
+            """A wave that was already imported in this .pxp session must
+            not be importable a second time (Import button stays disabled
+            when an already-imported wave is re-selected)."""
+            from neuroseq.importer_igor2 import IgorWave
+            ...
+
+    This test can share most of its setup with 2b. Select WaveA, import,
+    then try to re-select WaveA (by clicking the row via its current
+    text including the "✓ " prefix — or via setCurrentRow). Assert
+    `dialog.import_button.isEnabled() is False`.
+
+    NB: because `_import_file()` disables the ItemIsSelectable flag on
+    imported items, `setCurrentItem(...)` on that item is still the
+    right way to simulate a click — programmatic selection respects
+    the flag but does not reject the assignment. Confirm locally that
+    this assertion holds; if it doesn't (e.g. Qt skips the
+    currentItemChanged signal for non-selectable items), use
+    `dialog._on_pxp_wave_selected(wave_a_item, None)` directly.
+
+
+HOW TO VERIFY LOCALLY
+---------------------
+1. Manual smoke test against the real Cristina file:
+
+       .venv/bin/python -m neuroseq
+       → File → Import data → Import stimulus → Import patch clamp
+       → Igor2 → browse to
+         /mnt/live3/svintila/code_scraps/igor2_files/test_files/pxp_cristina/
+         drive-download-20260416T122331Z-3-001/251118_0.pxp
+       → pick a wave, click Import:
+           * Dialog must stay open
+           * Imported wave row must show a "✓ " prefix and be non-selectable
+           * "Import Complete" modal must NOT appear (look for inline green
+             status line above the button row instead)
+           * Cancel button must now read "Close"
+       → pick a second wave, click Import:
+           * Same as above; both stim arrays appear in the project
+       → click Close:
+           * Dialog closes; stim combobox in main window switches to the
+             LAST imported wave
+
+2. Regression — single-file .ibw flow must NOT stay open:
+
+       .venv/bin/python -m neuroseq
+       → File → Import data → Import stimulus → Import patch clamp
+       → Igor2 → browse to any .ibw in /mnt/live3/svintila/code_scraps/
+         igor2_files/test_files/
+       → click Import:
+           * "Import Complete" modal appears (as before)
+           * Dialog closes on OK (as before)
+
+3. Automated checks:
+
+       .venv/bin/python -m pytest tests/test_igor_import_dialog.py -v
+       .venv/bin/python -m pytest              # full suite
+       .venv/bin/python -m ruff check src/neuroseq/igor_import_dialog.py \
+           tests/test_igor_import_dialog.py
+       .venv/bin/python -m mypy --ignore-missing-imports \
+           src/neuroseq/igor_import_dialog.py
+
+   All green, coverage ≥ 75%.
+
+
+NOTES / GOTCHAS
+---------------
+- The dt-remap confirmation inside the "Import into existing stim array"
+  branch calls `self.project.update_stim_array_properties(...)` which
+  permanently changes the target stim's dt. This is current behaviour
+  and unchanged by this handoff; do not alter it.
+
+- The `selected_stim_name` field is overwritten on each successful
+  import, so after multiple imports the caller (`gui.py:882`) will
+  switch the main-window combobox to the LAST imported wave. This is
+  the desired behaviour — the user's focus naturally follows what they
+  just worked on.
+
+- The `suppress_message_boxes` and `patch_b2w_exec_show` autouse
+  fixtures described in CLAUDE.md already replace modal dialogs with
+  non-blocking stubs, so the inline `last_import_label` is not needed
+  to make tests pass — it is needed for the actual user-facing UX.
+
+- `str.removeprefix` requires Python 3.9+; the project targets 3.10 so
+  this is safe.
+
+- Do not reset `self._had_successful_import` or `self._imported_pxp_keys`
+  on Cancel→Close promotion: once the project has been modified, closing
+  the dialog should always route through accept() so the caller's post-
+  accept hooks run.
+
+- Do not add a "Reset" or "Clear imported marks" button. If the user
+  wants a clean slate they can simply close the dialog and reopen it.
+
+- Pre-commit hooks (ruff + mypy + prettier + nbstripout) must pass.
