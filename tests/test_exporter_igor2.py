@@ -11,6 +11,7 @@ from neuroseq.exporter_igor2 import _sanitize_igor_wave_name
 from neuroseq.exporter_igor2 import _write_ibw_v5
 from neuroseq.exporter_igor2 import export_igor2_patchclamp_csv
 from neuroseq.exporter_igor2 import export_igor2_patchclamp_ibw
+from neuroseq.exporter_igor2 import export_igor2_pxp
 from neuroseq.exporter_igor2 import generate_igor2_patchclamp_csv_text
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
@@ -212,3 +213,129 @@ def test_generate_igor2_patchclamp_csv_text_rejects_invalid_neuron() -> None:
             experiment_name="example_export",
             neuron_index=3,
         )
+
+
+def test_export_igor2_pxp_roundtrip_single_array(tmp_path: Path) -> None:
+    packed = importlib.import_module("igor2.packed")
+    stim = StimArray(
+        name="Exc",
+        stim_type=StimType.Excitation,
+        values=np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
+        units="pA",
+        dt=0.001,
+    )
+    output_path = tmp_path / "test.pxp"
+
+    report = export_igor2_pxp(output_path, {"Exc": stim})
+
+    assert output_path.exists()
+    assert report.wave_names == ["Exc_n0", "Exc_n1"]
+    records, _ = packed.load(output_path)
+    assert len(records) == 2
+    names = [
+        record.wave["wave"]["wave_header"]["bname"].rstrip(b"\x00").decode("ascii")
+        for record in records
+        if hasattr(record, "wave")
+    ]
+    assert names == ["Exc_n0", "Exc_n1"]
+
+
+def test_export_igor2_pxp_inhibitory_arrays_are_negated(tmp_path: Path) -> None:
+    packed = importlib.import_module("igor2.packed")
+    stim = StimArray(
+        name="Inh",
+        stim_type=StimType.Inhibition,
+        values=np.array([[1.0], [2.0], [3.0]], dtype=np.float32),
+        units="1",
+        dt=0.001,
+    )
+    output_path = tmp_path / "inh.pxp"
+
+    export_igor2_pxp(output_path, {"Inh": stim})
+
+    records, _ = packed.load(output_path)
+    wave_data = records[0].wave["wave"]["wData"].astype(np.float32)
+    np.testing.assert_array_almost_equal(
+        wave_data,
+        np.array([-1.0, -2.0, -3.0], dtype=np.float32),
+        decimal=5,
+    )
+
+
+def test_export_igor2_pxp_writes_one_wave_per_neuron_per_array(tmp_path: Path) -> None:
+    packed = importlib.import_module("igor2.packed")
+    exc = StimArray(
+        name="Exc",
+        stim_type=StimType.Excitation,
+        values=np.ones((10, 3), dtype=np.float32),
+        units="pA",
+        dt=0.001,
+    )
+    inh = StimArray(
+        name="Inh",
+        stim_type=StimType.Inhibition,
+        values=np.ones((10, 2), dtype=np.float32),
+        units="1",
+        dt=0.001,
+    )
+    output_path = tmp_path / "multi.pxp"
+
+    report = export_igor2_pxp(output_path, {"Exc": exc, "Inh": inh})
+
+    records, _ = packed.load(output_path)
+    assert len(records) == 5
+    assert len(report.wave_names) == 5
+
+
+def test_export_igor2_pxp_external_arrays_are_not_negated(tmp_path: Path) -> None:
+    packed = importlib.import_module("igor2.packed")
+    stim = StimArray(
+        name="Ext",
+        stim_type=StimType.External,
+        values=np.array([[-1.0], [2.0]], dtype=np.float32),
+        units="pA",
+        dt=0.001,
+    )
+    output_path = tmp_path / "ext.pxp"
+
+    export_igor2_pxp(output_path, {"Ext": stim})
+
+    records, _ = packed.load(output_path)
+    wave_data = records[0].wave["wave"]["wData"].astype(np.float32)
+    np.testing.assert_array_almost_equal(
+        wave_data,
+        np.array([-1.0, 2.0], dtype=np.float32),
+        decimal=5,
+    )
+
+
+def test_export_igor2_pxp_deduplicates_long_wave_names(tmp_path: Path) -> None:
+    packed = importlib.import_module("igor2.packed")
+    base = "A" * 31
+    first = StimArray(
+        name=base,
+        stim_type=StimType.Excitation,
+        values=np.ones((2, 1), dtype=np.float32),
+        units="pA",
+        dt=0.001,
+    )
+    second = StimArray(
+        name=f"{base}!",
+        stim_type=StimType.Excitation,
+        values=np.ones((2, 1), dtype=np.float32),
+        units="pA",
+        dt=0.001,
+    )
+    output_path = tmp_path / "dedup.pxp"
+
+    report = export_igor2_pxp(output_path, {first.name: first, second.name: second})
+
+    records, _ = packed.load(output_path)
+    names = [
+        record.wave["wave"]["wave_header"]["bname"].rstrip(b"\x00").decode("ascii")
+        for record in records
+        if hasattr(record, "wave")
+    ]
+    assert len(names) == 2
+    assert len(set(names)) == 2
+    assert len(report.wave_names) == 2

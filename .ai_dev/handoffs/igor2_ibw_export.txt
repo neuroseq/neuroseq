@@ -1,4 +1,4 @@
-HANDOFF: Igor2 binary wave (.ibw) export for patch-clamp stimuli
+HANDOFF: Igor2 binary wave (.ibw) export for patch-clamp stimuli [IMPLEMENTED]
 =================================================================
 Branch: import_igor2
 Repo:   /mnt/live3/svintila/neuroseq

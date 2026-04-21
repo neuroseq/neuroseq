@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import brian2.numpy_ as np
 
 from neuroseq.stim import StimArray
+from neuroseq.stim import StimType
 
 
 @dataclass(frozen=True)
@@ -19,9 +20,17 @@ class Igor2PatchClampExport:
     sample_count: int
 
 
+@dataclass(frozen=True)
+class Igor2PxpExport:
+    path: pathlib.Path
+    wave_names: list[str]
+
+
 _NT_FP32: int = 2
+_PXP_WAVE_RECORD_TYPE: int = 3
 
 _BIN_HEADER5_FMT: str = "<hllll4l4llll"
+_PXP_RECORD_HEADER_FMT: str = "<HhI"
 
 _WAVE_HEADER5_FMT: str = "<LLLlhh6sh32slL4l4d4d4s16shhddL4L4LL16lhhhBBLlhhLL"
 
@@ -35,6 +44,23 @@ def _sanitize_igor_wave_name(name: str) -> str:
     if not sanitized or not sanitized[0].isalpha():
         sanitized = f"w{sanitized}"
     return sanitized[:31]
+
+
+def _deduplicate_igor_wave_name(base_name: str, used_names: set[str]) -> str:
+    """Return a unique Igor wave name that respects the 31-character limit."""
+    candidate = _sanitize_igor_wave_name(base_name)
+    if candidate not in used_names:
+        used_names.add(candidate)
+        return candidate
+
+    suffix = 2
+    while True:
+        suffix_text = f"_{suffix}"
+        candidate = f"{_sanitize_igor_wave_name(base_name)[: 31 - len(suffix_text)]}{suffix_text}"
+        if candidate not in used_names:
+            used_names.add(candidate)
+            return candidate
+        suffix += 1
 
 
 def _write_ibw_v5(
@@ -155,6 +181,17 @@ def _write_ibw_v5(
     return version_bytes + bin_header + wave_header + data_bytes
 
 
+def _write_pxp_wave_record(ibw_bytes: bytes) -> bytes:
+    """Wrap full IBW bytes (including version prefix) in a PXP WaveRecord."""
+    header = struct.pack(
+        _PXP_RECORD_HEADER_FMT,
+        _PXP_WAVE_RECORD_TYPE,
+        0,
+        len(ibw_bytes),
+    )
+    return header + ibw_bytes
+
+
 def generate_igor2_patchclamp_csv_text(
     stim_array: StimArray,
     *,
@@ -246,3 +283,50 @@ def export_igor2_patchclamp_ibw(
         neuron_index=neuron_index,
         sample_count=int(stim_array.values.shape[0]),
     )
+
+
+def export_igor2_pxp(
+    output_path: str | pathlib.Path,
+    stim_arrays: dict[str, StimArray],
+    *,
+    array_names: list[str] | None = None,
+) -> Igor2PxpExport:
+    """Export selected stim arrays to an Igor2 Packed Experiment (.pxp) file."""
+    if array_names is None:
+        array_names = list(stim_arrays.keys())
+
+    used_names: set[str] = set()
+    exported_wave_names: list[str] = []
+    pxp_data = bytearray()
+
+    for name in array_names:
+        stim_array = stim_arrays[name]
+        if stim_array.values.ndim != 2:
+            raise ValueError(
+                "Stimulus export expects a 2D stim array with shape (time, neuron)."
+            )
+
+        values = stim_array.values
+        if stim_array.stim_type == StimType.Inhibition:
+            values = -values
+
+        base_wave_name = _sanitize_igor_wave_name(name)
+        n_neurons = int(values.shape[1])
+        for neuron_idx in range(n_neurons):
+            neuron_wave_name = _deduplicate_igor_wave_name(
+                f"{base_wave_name}_n{neuron_idx}",
+                used_names,
+            )
+            exported_wave_names.append(neuron_wave_name)
+            ibw_bytes = _write_ibw_v5(
+                np.asarray(values[:, neuron_idx], dtype=np.float32),
+                wave_name=neuron_wave_name,
+                dt=float(stim_array.dt),
+                data_units=str(stim_array.units),
+                x_units="s",
+            )
+            pxp_data += _write_pxp_wave_record(ibw_bytes)
+
+    path = pathlib.Path(output_path)
+    path.write_bytes(bytes(pxp_data))
+    return Igor2PxpExport(path=path, wave_names=exported_wave_names)

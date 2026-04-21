@@ -115,6 +115,10 @@ class IgorImportDialog(QtWidgets.QDialog):
         self.source_dt_spin.setSingleStep(0.0001)
         self.source_dt_spin.setValue(NEUROSEQ_IGOR_TARGET_DT_SECONDS)
         self.source_dt_spin.setSuffix(" s")
+        self.source_dt_spin.setReadOnly(True)
+        self.source_dt_spin.setButtonSymbols(
+            QtWidgets.QAbstractSpinBox.ButtonSymbols.NoButtons
+        )
         self.source_dt_spin.valueChanged.connect(self._on_timing_settings_changed)
         source_layout.addRow("Source sample interval:", self.source_dt_spin)
         self.match_source_grid_checkbox = QtWidgets.QCheckBox(

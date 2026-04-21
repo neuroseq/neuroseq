@@ -30,9 +30,11 @@ from neuroseq.example_projects import example_projects
 from neuroseq.experiments_manager_dialog import ExperimentsManagerDialog
 from neuroseq.exporter_igor2 import export_igor2_patchclamp_csv
 from neuroseq.exporter_igor2 import export_igor2_patchclamp_ibw
+from neuroseq.exporter_igor2 import export_igor2_pxp
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.igor2_patchclamp_export_dialog import Igor2PatchClampExportDialog
+from neuroseq.igor2_pxp_stim_export_dialog import Igor2PxpStimExportDialog
 from neuroseq.igor_import_dialog import IgorImportDialog
 from neuroseq.import_dialog import Suite2pImportDialog
 from neuroseq.import_experiment_dialog import ImportExperimentDialog
@@ -434,6 +436,61 @@ class Gui(QtWidgets.QMainWindow):
             f"Exported {fmt_label} for "
             f"stimulus '{stim_name}', neuron {export_report.neuron_index}, "
             f"{export_report.sample_count} samples.",
+        )
+
+    def btn_export_igor2_pxp_stim_clicked(self) -> None:
+        if not self.project.stim_arrays:
+            QtWidgets.QMessageBox.information(
+                self,
+                "No stimulation entities",
+                "No stimulation data entities available. Create one before exporting.",
+            )
+            return
+
+        dialog = Igor2PxpStimExportDialog(self.project, parent=self)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+
+        selected = dialog.selected_array_names
+        if not selected:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Nothing selected",
+                "No stim arrays were selected for export.",
+            )
+            return
+
+        filename, _ = getsavefilename(
+            self,
+            "Export Igor2 Packed Experiment",
+            "stim_arrays.pxp",
+            "Igor Packed Experiment (*.pxp)",
+        )
+        if filename == "":
+            return
+
+        output_path = pathlib.Path(filename)
+        if output_path.suffix.lower() != ".pxp":
+            output_path = output_path.with_suffix(".pxp")
+
+        try:
+            export_report = export_igor2_pxp(
+                output_path,
+                self.project.stim_arrays,
+                array_names=selected,
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Export error",
+                f"PXP export failed:\n{e}",
+            )
+            return
+
+        QtWidgets.QMessageBox.information(
+            self,
+            "Export complete",
+            f"Exported {len(export_report.wave_names)} wave(s) to:\n{export_report.path}",
         )
 
     def btn_edit_clicked(self) -> None:
@@ -1075,14 +1132,16 @@ class Gui(QtWidgets.QMainWindow):
             self,
             "Export patch clamp stimulus",
             "Export for:",
-            ["Igor2"],
+            ["Igor2 - single array (.ibw / .csv)", "Igor2 - all arrays (.pxp)"],
             0,
             False,
         )
         if not ok:
             return
-        if software == "Igor2":
+        if software.startswith("Igor2 - single"):
             self.btn_export_igor2_patchclamp_stim_clicked()
+        elif software.startswith("Igor2 - all"):
+            self.btn_export_igor2_pxp_stim_clicked()
 
     def btn_export_light_stimulus_clicked(self) -> None:
         """Pre-dialog: choose software, then open the stimulation script generator."""
