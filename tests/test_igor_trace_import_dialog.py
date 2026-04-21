@@ -11,6 +11,7 @@ from qtpy import QtWidgets
 from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
+from neuroseq.exporter_igor2 import _write_ibw_v5
 from neuroseq.igor_trace_import_dialog import IgorTraceImportDialog
 from neuroseq.importer_igor2 import IgorPxpLoadReport
 from neuroseq.importer_igor2 import IgorWave
@@ -67,6 +68,36 @@ def test_trace_dialog_wraps_content_in_scroll_area(qtbot: QtBot) -> None:
     assert isinstance(dialog.scroll_area, QtWidgets.QScrollArea)
     assert dialog.scroll_area.widget() is not None
     assert dialog.scroll_area.widgetResizable() is True
+
+
+def test_trace_dialog_wave_plot_hidden_initially(qtbot: QtBot) -> None:
+    dialog = IgorTraceImportDialog(Project())
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitUntil(lambda: dialog.isVisible())
+
+    assert not dialog.wave_plot.isVisible()
+
+
+def test_trace_dialog_wave_plot_shown_after_wave_load(
+    tmp_path: Path,
+    qtbot: QtBot,
+) -> None:
+    ibw = _write_ibw_v5(
+        np.array([0.0, 1.0, 0.0], dtype="<f4"),
+        wave_name="test",
+        dt=0.001,
+    )
+    path = tmp_path / "test.ibw"
+    path.write_bytes(ibw)
+    dialog = IgorTraceImportDialog(Project())
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitUntil(lambda: dialog.isVisible())
+
+    dialog._load_file(str(path))
+
+    qtbot.waitUntil(lambda: dialog.wave_plot.isVisible())
 
 
 def test_trace_dialog_creates_new_trace_in_existing_experiment(

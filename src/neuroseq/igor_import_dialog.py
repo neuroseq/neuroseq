@@ -3,10 +3,13 @@ from __future__ import annotations
 import logging
 from contextlib import suppress
 from pathlib import Path
+from types import MethodType
 from typing import TYPE_CHECKING
 
 import brian2.numpy_ as np
+from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
@@ -101,10 +104,29 @@ class IgorImportDialog(QtWidgets.QDialog):
         preview_layout = QtWidgets.QVBoxLayout(preview_group)
         self.preview_text = QtWidgets.QPlainTextEdit()
         self.preview_text.setReadOnly(True)
+        self.preview_text.setMaximumHeight(120)
         self.preview_text.setPlaceholderText(
             "Preview appears here after selecting an Igor wave."
         )
         preview_layout.addWidget(self.preview_text)
+        self.wave_plot = MatplotlibWidget()
+        self.wave_plot.setMinimumHeight(200)
+        self.wave_plot.setMaximumHeight(260)
+        self.wave_plot.setVisible(False)
+        original_draw_idle = self.wave_plot.canvas._draw_idle
+
+        def _safe_draw_idle(canvas) -> None:
+            try:
+                original_draw_idle()
+            except RuntimeError as exc:
+                if "deleted" not in str(exc).lower():
+                    raise
+
+        self.wave_plot.canvas._draw_idle = MethodType(
+            _safe_draw_idle,
+            self.wave_plot.canvas,
+        )
+        preview_layout.addWidget(self.wave_plot)
         layout.addWidget(preview_group)
 
         source_group = QtWidgets.QGroupBox("Source Wave Settings")
@@ -316,8 +338,7 @@ class IgorImportDialog(QtWidgets.QDialog):
             self.file_path = ""
             self.file_label.setText("No Igor wave selected")
             self.file_label.setStyleSheet("QLabel { color: gray; }")
-            self.preview_text.clear()
-            self.info_label.setText("")
+            self._update_preview()
             self._update_import_button_state()
             QtWidgets.QMessageBox.critical(
                 self,
@@ -361,8 +382,7 @@ class IgorImportDialog(QtWidgets.QDialog):
             self.file_label.setStyleSheet("QLabel { color: gray; }")
             self.pxp_wave_list.clear()
             self.wave_picker_group.setVisible(False)
-            self.preview_text.clear()
-            self.info_label.setText("")
+            self._update_preview()
             self._update_import_button_state()
             QtWidgets.QMessageBox.critical(
                 self,
@@ -440,8 +460,39 @@ class IgorImportDialog(QtWidgets.QDialog):
         self._update_preview()
         self._update_import_button_state()
 
+    def _update_wave_plot(self, wave: IgorWave | None) -> None:
+        fig = self.wave_plot.getFigure()
+        fig.clf()
+        if wave is None:
+            self.wave_plot.setVisible(False)
+            self.wave_plot.draw()
+            return
+
+        source_dt = float(self.source_dt_spin.value())
+        values = np.asarray(wave.values, dtype=float).ravel()
+        max_display_pts = 4000
+        step = max(1, len(values) // max_display_pts)
+        t = np.arange(0, len(values), step) * source_dt
+        y = values[::step]
+
+        ax = fig.add_subplot(111)
+        ax.plot(t, y, linewidth=0.8, color="#1f77b4")
+        ax.set_xlabel("Time (s)", fontsize=8)
+        ax.set_ylabel(wave.units or "a.u.", fontsize=8)
+        ax.set_title(wave.name, fontsize=9)
+        ax.tick_params(labelsize=7)
+        fig.tight_layout(pad=0.5)
+        self.wave_plot.setVisible(True)
+        self.wave_plot.draw()
+
+    def _cleanup_wave_plot(self) -> None:
+        canvas = self.wave_plot.canvas
+        canvas._draw_pending = False
+        canvas._is_drawing = False
+
     def _update_preview(self) -> None:
         self._update_target_dt_label()
+        self._update_wave_plot(self.loaded_wave)
         if self.loaded_wave is None:
             self.preview_text.setPlainText("")
             if not self.project.stim_arrays:
@@ -666,3 +717,11 @@ class IgorImportDialog(QtWidgets.QDialog):
                 "Import Error",
                 f"Failed to import Igor wave:\n{exc}",
             )
+
+    def done(self, result: int) -> None:
+        self._cleanup_wave_plot()
+        super().done(result)
+
+    def closeEvent(self, event: QtGui.QCloseEvent | None) -> None:
+        self._cleanup_wave_plot()
+        super().closeEvent(event)

@@ -70,6 +70,26 @@ sa.values[:, 1] = np.sin(           \\
     np.linspace(0, 2*np.pi, sa.values.shape[0])\\
 ) * 200                              # sinusoidal pattern on neuron 1
 
+# ── Ramp stimulus patterns ────────────────────────────────────
+# Single ramp: linearly increase from 0 to 500 pA over 200 samples on neuron 0
+sa.values[100:300, 0] = np.linspace(0, 500, 200)
+
+# Ramp up then back down (triangle) on neuron 0
+n = 200
+sa.values[100:100+n, 0] = np.linspace(0, 500, n)
+sa.values[100+n:100+2*n, 0] = np.linspace(500, 0, n)
+
+# Staircase: 5 steps, each 100 samples wide, amplitude 0→500 pA on neuron 0
+n_steps, step_len, amp = 5, 100, 500
+for i in range(n_steps):
+ sa.values[i*step_len:(i+1)*step_len, 0] = i * amp / (n_steps - 1)
+
+# Sequential ramp across all neurons (each neuron gets a later ramp)
+n_neurons = sa.values.shape[1]
+for i in range(n_neurons):
+ start = i * 50
+ sa.values[start:start+100, i] = np.linspace(0, 300, 100)
+
 # ── Experiment / trace data ───────────────────────────────────
 exp = project.experiments['MyExp']
 exp.data                             # list of TraceData / SpikeData objects
