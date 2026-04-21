@@ -1,0 +1,630 @@
+HANDOFF: Igor2 binary wave (.ibw) export for patch-clamp stimuli
+=================================================================
+Branch: import_igor2
+Repo:   /mnt/live3/svintila/neuroseq
+Date:   2026-04-21
+
+
+PROBLEM
+-------
+`File → Export → Export patch clamp stimulus → Igor2` currently writes a
+plain CSV file.  The CSV contains only the raw sample values; the sample
+interval (dt), units, and wave name are lost.  Users who round-trip
+stimulus data through Igor Pro have to restore the x-scaling manually.
+
+The Igor Binary Wave (.ibw) format stores dt in the WaveHeader5 `sfA[0]`
+field (x-axis scaling delta) and encodes units in `dataUnits` /
+`dimUnits[0]`.  Igor Pro reads these automatically on open, so a round-trip
+preserves the full signal context.
+
+`igor2.binarywave.save` is a `NotImplementedError` stub — the library only
+reads .ibw, it does not write it.  We must implement the writer ourselves.
+
+
+TASK OVERVIEW
+-------------
+1. Add `export_igor2_patchclamp_ibw` (and a private `_write_ibw_v5` helper)
+   to `src/neuroseq/exporter_igor2.py`.
+2. Extend `btn_export_igor2_patchclamp_stim_clicked` in `src/neuroseq/gui.py`
+   so the file-save dialog offers both `.csv` and `.ibw`, and dispatches to
+   the correct exporter based on the chosen extension.
+3. Add unit tests in `tests/test_exporter_igor2.py` including a real
+   round-trip (write → load via `binarywave.load`, no monkeypatching).
+4. Add one integration test to `tests/test_gui.py` for the .ibw path.
+
+No new files.  No dialog changes.  No changes to the CSV path.
+
+
+SCOPE (explicit cuts)
+---------------------
+- Do NOT touch `igor2_patchclamp_export_dialog.py` — the dialog is unchanged.
+- Do NOT touch the CSV exporter functions — they keep working exactly as they
+  do today.
+- Do NOT implement .pxp export.
+- Do NOT add multi-neuron batch export.
+- The IBW writer only writes version-5 little-endian single-precision float
+  (NT_FP32 = 2) 1-D waves.  No other types.
+
+
+HOW TO RUN TESTS
+----------------
+    cd /mnt/live3/svintila/neuroseq
+    .venv/bin/python -m pytest tests/test_exporter_igor2.py tests/test_gui.py -v
+    .venv/bin/python -m pytest          # full suite must stay green
+    .venv/bin/python -m ruff check src/neuroseq tests
+    .venv/bin/python -m mypy --ignore-missing-imports \
+        src/neuroseq/exporter_igor2.py src/neuroseq/gui.py
+
+
+FILES TO CHANGE
+---------------
+  src/neuroseq/exporter_igor2.py   — add IBW writer
+  src/neuroseq/gui.py              — extend file-save dialog + dispatch
+  tests/test_exporter_igor2.py     — new tests
+  tests/test_gui.py                — one new integration test
+
+DO NOT TOUCH:
+  src/neuroseq/igor2_patchclamp_export_dialog.py
+  Any file not listed above.
+
+
+=============================================================
+CHANGE 1 — src/neuroseq/exporter_igor2.py
+=============================================================
+
+Add at the top of the file:
+
+    import re
+    import struct
+
+Add after the existing `Igor2PatchClampExport` dataclass (no new dataclass
+needed — reuse it):
+
+    # NT_FP32 type code used by Igor Pro for single-precision float waves.
+    _NT_FP32: int = 2
+
+    # igor2.binarywave.save is NotImplementedError, so we hand-roll the writer.
+    # Byte layout is documented in WaveMetrics TN003.  All multi-byte fields are
+    # little-endian (native on x86; igor2.binarywave reads with byte_order='=').
+
+    _BIN_HEADER5_FMT: str = (
+        "<"
+        "h"    # checksum        int16  (filled last)
+        "l"    # wfmSize         int32
+        "l"    # formulaSize     int32  = 0
+        "l"    # noteSize        int32  = 0
+        "l"    # dataEUnitsSize  int32  = 0
+        "4l"   # dimEUnitsSize[4]       = 0 each
+        "4l"   # dimLabelsSize[4]       = 0 each
+        "l"    # sIndicesSize    int32  = 0
+        "l"    # optionsSize1    int32  = 0
+        "l"    # optionsSize2    int32  = 0
+    )
+    # struct.calcsize(_BIN_HEADER5_FMT) must equal 62
+
+    _WAVE_HEADER5_FMT: str = (
+        "<"
+        "LLL"   # next, creationDate, modDate    uint32 × 3   = 0
+        "l"     # npnts                          int32
+        "hh"    # type, dLock                    int16 × 2
+        "6s"    # whpad1                         char[6]      = b'\x00'*6
+        "h"     # whVersion                      int16        = 1
+        "32s"   # bname                          char[32]
+        "l"     # whpad2                         int32        = 0
+        "L"     # dFolder                        uint32       = 0
+        "4l"    # nDim[4]                        int32 × 4
+        "4d"    # sfA[4]                         double × 4
+        "4d"    # sfB[4]                         double × 4   = 0 each
+        "4s"    # dataUnits                      char[4]
+        "16s"   # dimUnits[4][4]                 char[16]
+        "hh"    # fsValid, whpad3                int16 × 2    = 0
+        "dd"    # topFullScale, botFullScale      double × 2   = 0
+        "L"     # dataEUnits                     uint32       = 0
+        "4L"    # dimEUnits[4]                   uint32 × 4   = 0
+        "4L"    # dimLabels[4]                   uint32 × 4   = 0
+        "L"     # waveNoteH                      uint32       = 0
+        "16l"   # whUnused[16]                   int32 × 16   = 0
+        "hhh"   # aModified, wModified, swModified int16 × 3  = 0
+        "BB"    # useBits, kindBits              uint8 × 2    = 0
+        "L"     # formula                        uint32       = 0
+        "l"     # depID                          int32        = 0
+        "hh"    # whpad4, srcFldr                int16 × 2    = 0
+        "LL"    # fileName, sIndices             uint32 × 2   = 0
+    )
+    # struct.calcsize(_WAVE_HEADER5_FMT) must equal 320
+
+Both sizes must be verified with assert statements at module level (below the
+constants) so a silent layout regression fails loudly on import:
+
+    assert struct.calcsize(_BIN_HEADER5_FMT) == 62, "BinHeader5 layout wrong"
+    assert struct.calcsize(_WAVE_HEADER5_FMT) == 320, "WaveHeader5 layout wrong"
+
+
+Add a private helper `_sanitize_igor_wave_name`:
+
+    def _sanitize_igor_wave_name(name: str) -> str:
+        """Return a valid Igor wave name derived from *name*.
+
+        Igor Pro rules: ≤31 chars, letters/digits/underscores only, must start
+        with a letter.
+        """
+        sanitized = re.sub(r"[^A-Za-z0-9_]", "_", name.strip())
+        if not sanitized or not sanitized[0].isalpha():
+            sanitized = "w" + sanitized
+        return sanitized[:31]
+
+
+Add the private IBW writer `_write_ibw_v5`:
+
+    def _write_ibw_v5(
+        values: np.ndarray,
+        *,
+        wave_name: str,
+        dt: float,
+        data_units: str = "",
+        x_units: str = "s",
+    ) -> bytes:
+        """Serialise a 1-D float32 array to Igor Binary Wave v5 bytes.
+
+        Parameters
+        ----------
+        values:
+            1-D float32 array of sample values.
+        wave_name:
+            Must already be a valid Igor name (call _sanitize_igor_wave_name
+            before passing here).  Max 31 chars.
+        dt:
+            Sample interval in seconds, stored in sfA[0].
+        data_units:
+            Y-axis units string (≤3 printable chars, stored null-padded to 4).
+        x_units:
+            X-axis units string (stored in dimUnits[0], default "s").
+        """
+        data = np.asarray(values, dtype=np.float32)
+        n = int(data.size)
+        data_bytes = data.tobytes()          # little-endian float32 samples
+
+        wfm_size = struct.calcsize(_WAVE_HEADER5_FMT) + len(data_bytes)
+        # wfmSize does not include BinHeader5 itself
+
+        def _encode_units(s: str, width: int) -> bytes:
+            b = s.encode("ascii", errors="replace")[:width - 1]
+            return b.ljust(width, b"\x00")
+
+        bname_bytes = wave_name.encode("ascii", errors="replace")[:31].ljust(32, b"\x00")
+        data_units_bytes = _encode_units(data_units, 4)
+        dim_units_bytes = _encode_units(x_units, 4).ljust(16, b"\x00")
+
+        wave_header = struct.pack(
+            _WAVE_HEADER5_FMT,
+            0, 0, 0,            # next, creationDate, modDate
+            n,                  # npnts
+            _NT_FP32, 0,        # type, dLock
+            b"\x00" * 6,        # whpad1
+            1,                  # whVersion
+            bname_bytes,        # bname
+            0,                  # whpad2
+            0,                  # dFolder
+            n, 0, 0, 0,         # nDim[4]
+            dt, 0.0, 0.0, 0.0,  # sfA[4]  — sfA[0] is the x-axis delta (dt)
+            0.0, 0.0, 0.0, 0.0, # sfB[4]
+            data_units_bytes,   # dataUnits
+            dim_units_bytes,    # dimUnits[4][4]
+            0, 0,               # fsValid, whpad3
+            0.0, 0.0,           # topFullScale, botFullScale
+            0,                  # dataEUnits
+            0, 0, 0, 0,         # dimEUnits[4]
+            0, 0, 0, 0,         # dimLabels[4]
+            0,                  # waveNoteH
+            *([0] * 16),        # whUnused[16]
+            0, 0, 0,            # aModified, wModified, swModified
+            0, 0,               # useBits, kindBits
+            0,                  # formula
+            0,                  # depID
+            0, 0,               # whpad4, srcFldr
+            0, 0,               # fileName, sIndices
+        )
+
+        # Build BinHeader5 with checksum = 0 first, then compute the real checksum.
+        bin_header = struct.pack(
+            _BIN_HEADER5_FMT,
+            0,           # checksum placeholder
+            wfm_size,
+            0, 0, 0,     # formulaSize, noteSize, dataEUnitsSize
+            0, 0, 0, 0,  # dimEUnitsSize[4]
+            0, 0, 0, 0,  # dimLabelsSize[4]
+            0, 0, 0,     # sIndicesSize, optionsSize1, optionsSize2
+        )
+
+        # Checksum covers all int16 words from byte 2 of BinHeader5 (after the
+        # checksum field) through the end of WaveHeader5 (TN003 §3).
+        combined = bin_header[2:] + wave_header
+        n_words = len(combined) // 2
+        word_sum = sum(struct.unpack_from(f"<{n_words}h", combined))
+        checksum = struct.unpack("<h", struct.pack("<H", (-word_sum) % 65536))[0]
+
+        # Repack BinHeader5 with the real checksum.
+        bin_header = struct.pack(
+            _BIN_HEADER5_FMT,
+            checksum,
+            wfm_size,
+            0, 0, 0,
+            0, 0, 0, 0,
+            0, 0, 0, 0,
+            0, 0, 0,
+        )
+
+        return bin_header + wave_header + data_bytes
+
+
+Add the public function `export_igor2_patchclamp_ibw`:
+
+    def export_igor2_patchclamp_ibw(
+        output_path: str | pathlib.Path,
+        stim_array: StimArray,
+        *,
+        wave_name: str,
+        neuron_index: int,
+    ) -> Igor2PatchClampExport:
+        """Export one neuron column from *stim_array* as an Igor Binary Wave.
+
+        *wave_name* is sanitised to a valid Igor identifier; the sanitised
+        name is returned in the report and is what Igor Pro will see.
+        """
+        if stim_array.values.ndim != 2:
+            raise ValueError(
+                "Stimulus export expects a 2D stim array with shape (time, neuron)."
+            )
+        n_neurons = int(stim_array.values.shape[1])
+        if n_neurons <= 0:
+            raise ValueError("Stimulus export requires at least one neuron.")
+        if neuron_index < 0 or neuron_index >= n_neurons:
+            raise ValueError(
+                f"Neuron index {neuron_index} is out of range for {n_neurons} neurons."
+            )
+
+        sanitized_name = _sanitize_igor_wave_name(wave_name)
+        values = np.asarray(stim_array.values[:, neuron_index], dtype=np.float32)
+
+        ibw_bytes = _write_ibw_v5(
+            values,
+            wave_name=sanitized_name,
+            dt=float(stim_array.dt),
+            data_units=str(stim_array.units),
+            x_units="s",
+        )
+
+        path = pathlib.Path(output_path)
+        path.write_bytes(ibw_bytes)
+
+        return Igor2PatchClampExport(
+            experiment_name=sanitized_name,
+            neuron_index=neuron_index,
+            sample_count=int(stim_array.values.shape[0]),
+        )
+
+Note: `Igor2PatchClampExport.experiment_name` is repurposed as the wave name
+when the format is IBW.  The field semantics are the same for callers.
+
+
+=============================================================
+CHANGE 2 — src/neuroseq/gui.py
+=============================================================
+
+Add to the existing imports block (alongside the existing CSV import):
+
+    from neuroseq.exporter_igor2 import export_igor2_patchclamp_ibw
+
+Modify `btn_export_igor2_patchclamp_stim_clicked`.  The only changes are:
+(a) the `getsavefilename` filter now offers both .csv and .ibw,
+(b) the suffix-normalisation block handles .ibw as well, and
+(c) a branch selects the right exporter and adjusts the success message.
+
+Replace the three blocks that start at `suggested_filename = ...` through the
+end of the `except` / `information` calls with:
+
+        suggested_filename = f"{dialog.experiment_name}.ibw"
+        filename, _ = getsavefilename(
+            self,
+            "Export Igor2 Patch Clamp Stimulus",
+            suggested_filename,
+            "Igor Binary Wave (*.ibw);;CSV file (*.csv)",
+        )
+        if filename == "":
+            return
+
+        output_path = pathlib.Path(filename)
+        suffix = output_path.suffix.lower()
+        if suffix not in {".ibw", ".csv"}:
+            output_path = output_path.with_suffix(".ibw")
+            suffix = ".ibw"
+
+        try:
+            if suffix == ".ibw":
+                export_report = export_igor2_patchclamp_ibw(
+                    output_path,
+                    stim_array,
+                    wave_name=dialog.experiment_name,
+                    neuron_index=dialog.selected_neuron_index,
+                )
+                fmt_label = f"Igor Binary Wave '{export_report.experiment_name}'"
+            else:
+                export_report = export_igor2_patchclamp_csv(
+                    output_path,
+                    stim_array,
+                    experiment_name=dialog.experiment_name,
+                    neuron_index=dialog.selected_neuron_index,
+                )
+                fmt_label = f"CSV experiment '{export_report.experiment_name}'"
+        except Exception as e:
+            self.logger.warning(
+                "Failed to export Igor2 patch clamp stimulus %s: %s",
+                output_path,
+                e,
+            )
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Export error",
+                f"Could not export Igor2 patch clamp stimulus to '{output_path}': {e}",
+            )
+            return
+
+        QtWidgets.QMessageBox.information(
+            self,
+            "Export Successful",
+            f"Exported {fmt_label} for "
+            f"stimulus '{stim_name}', neuron {export_report.neuron_index}, "
+            f"{export_report.sample_count} samples.",
+        )
+
+The `suggested_filename` default is now `.ibw` (first filter entry) to
+steer users towards the richer format.  The CSV path is preserved unchanged.
+
+
+=============================================================
+CHANGE 3 — tests/test_exporter_igor2.py
+=============================================================
+
+Add the following imports at the top of the test file:
+
+    import importlib
+    import struct
+
+    from neuroseq.exporter_igor2 import _sanitize_igor_wave_name
+    from neuroseq.exporter_igor2 import _write_ibw_v5
+    from neuroseq.exporter_igor2 import export_igor2_patchclamp_ibw
+
+Add these tests:
+
+--- test: sanitize_igor_wave_name ---
+
+    def test_sanitize_igor_wave_name_replaces_invalid_chars() -> None:
+        assert _sanitize_igor_wave_name("my stim-array!") == "my_stim_array_"
+
+    def test_sanitize_igor_wave_name_prepends_w_for_leading_digit() -> None:
+        assert _sanitize_igor_wave_name("1_stim") == "w1_stim"
+
+    def test_sanitize_igor_wave_name_truncates_to_31_chars() -> None:
+        long_name = "A" * 50
+        result = _sanitize_igor_wave_name(long_name)
+        assert len(result) == 31
+
+    def test_sanitize_igor_wave_name_preserves_valid_name() -> None:
+        assert _sanitize_igor_wave_name("stim_neuron_0") == "stim_neuron_0"
+
+
+--- test: _write_ibw_v5 struct layout ---
+
+    def test_write_ibw_v5_produces_correct_byte_structure() -> None:
+        data = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        result = _write_ibw_v5(data, wave_name="myWave", dt=0.001, data_units="pA")
+
+        # Version must be 5 — stored as int16 at byte 0 of the file.
+        # BinHeader5 has checksum(2) + wfmSize(4) + ... but version lives in
+        # WaveHeader5.whVersion at offset 62+28 = 90.
+        (version,) = struct.unpack_from("<h", result, offset=62 + 28)
+        assert version == 1  # whVersion field (always 1 within IBW v5)
+
+        # BinHeader5: version byte used by igor2 to determine format is the
+        # high byte of the first int16 word after the file starts.  igor2 reads
+        # the BinHeader version from a separate field.  Instead, verify file
+        # starts with the expected byte pattern: checksum(2) then wfmSize(4).
+        expected_wfm_size = 320 + 3 * 4  # WaveHeader5 + 3 float32 samples
+        (wfm_size,) = struct.unpack_from("<l", result, offset=2)
+        assert wfm_size == expected_wfm_size
+
+        # Verify total byte length.
+        assert len(result) == 62 + expected_wfm_size
+
+
+--- test: round-trip (the most important test) ---
+
+    def test_write_ibw_v5_round_trips_via_binarywave_load(
+        tmp_path: Path,
+    ) -> None:
+        """Write an .ibw file and reload it with the real igor2 library.
+
+        This test does NOT monkeypatch binarywave.load — it writes a real
+        binary file and reads it back, verifying the format is valid.
+        """
+        binarywave = importlib.import_module("igor2.binarywave")
+
+        data = np.array([0.0, 1.5, 3.0, 0.0], dtype=np.float32)
+        ibw_path = tmp_path / "roundtrip.ibw"
+        ibw_path.write_bytes(
+            _write_ibw_v5(
+                data,
+                wave_name="RoundTrip",
+                dt=0.0005,
+                data_units="pA",
+                x_units="s",
+            )
+        )
+
+        loaded = binarywave.load(ibw_path)
+        wave = loaded["wave"]
+        header = wave["wave_header"]
+
+        np.testing.assert_array_almost_equal(
+            wave["wData"].astype(np.float32), data, decimal=5
+        )
+        assert abs(header["sfA"][0] - 0.0005) < 1e-10
+        assert header["bname"].rstrip(b"\x00").decode("ascii") == "RoundTrip"
+        # dataUnits is a 4-byte field; strip nulls.
+        assert header["dataUnits"].rstrip(b"\x00").decode("ascii") == "pA"
+
+
+--- test: export_igor2_patchclamp_ibw writes file with correct content ---
+
+    def test_export_igor2_patchclamp_ibw_writes_file(tmp_path: Path) -> None:
+        binarywave = importlib.import_module("igor2.binarywave")
+
+        stim_array = StimArray(
+            name="stim",
+            stim_type=StimType.Excitation,
+            values=np.array([[0.0, 10.0], [1.5, 20.0], [0.0, 30.0]], dtype=np.float32),
+            units="pA",
+            dt=0.001,
+        )
+        output_path = tmp_path / "stim_neuron_1.ibw"
+
+        report = export_igor2_patchclamp_ibw(
+            output_path,
+            stim_array,
+            wave_name="stim_neuron_1",
+            neuron_index=1,
+        )
+
+        assert output_path.exists()
+        assert report.neuron_index == 1
+        assert report.sample_count == 3
+        assert report.experiment_name == "stim_neuron_1"
+
+        loaded = binarywave.load(output_path)
+        wave_data = loaded["wave"]["wData"].astype(np.float32)
+        np.testing.assert_array_almost_equal(
+            wave_data, np.array([10.0, 20.0, 30.0], dtype=np.float32), decimal=5
+        )
+        sfA = loaded["wave"]["wave_header"]["sfA"]
+        assert abs(sfA[0] - 0.001) < 1e-10
+
+
+--- test: invalid inputs ---
+
+    def test_export_igor2_patchclamp_ibw_rejects_invalid_neuron() -> None:
+        stim_array = StimArray(
+            name="stim",
+            stim_type=StimType.Excitation,
+            values=np.zeros((4, 1), dtype=np.float32),
+            units="pA",
+            dt=0.001,
+        )
+        with pytest.raises(ValueError, match="out of range"):
+            export_igor2_patchclamp_ibw(
+                "/dev/null", stim_array, wave_name="w", neuron_index=5
+            )
+
+    def test_sanitize_igor_wave_name_is_applied_on_export(tmp_path: Path) -> None:
+        """Wave name with spaces is sanitised; the report reflects the actual name used."""
+        stim_array = StimArray(
+            name="stim",
+            stim_type=StimType.Excitation,
+            values=np.ones((3, 1), dtype=np.float32),
+            units="pA",
+            dt=0.001,
+        )
+        report = export_igor2_patchclamp_ibw(
+            tmp_path / "out.ibw",
+            stim_array,
+            wave_name="my wave name!",
+            neuron_index=0,
+        )
+        assert " " not in report.experiment_name
+        assert "!" not in report.experiment_name
+
+
+=============================================================
+CHANGE 4 — tests/test_gui.py
+=============================================================
+
+Add one new test after `test_gui_export_igor2_patchclamp_stim`:
+
+    def test_gui_export_igor2_patchclamp_stim_ibw_format(
+        tmp_path: Path, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+    ) -> None:
+        import importlib
+
+        binarywave = importlib.import_module("igor2.binarywave")
+        project = Project()
+        stim_values = np.array([[0.0, 10.0], [1.0, 20.0], [0.0, 30.0]], dtype=np.float32)
+        project.add_stim_array(
+            StimArray("stim", StimType.Excitation, stim_values, "pA", 0.001)
+        )
+
+        class MockDialog:
+            def __init__(self, stim_name: str, stim_array: StimArray, parent=None) -> None:
+                self.experiment_name = "stim_neuron_1"
+                self.selected_neuron_index = 1
+
+            def exec(self) -> int:
+                return QtWidgets.QDialog.DialogCode.Accepted
+
+        output_path = tmp_path / "stim_neuron_1.ibw"
+        monkeypatch.setattr(neuroseq.gui, "Igor2PatchClampExportDialog", MockDialog)
+        monkeypatch.setattr(
+            neuroseq.gui,
+            "getsavefilename",
+            lambda *args: (str(output_path), "Igor Binary Wave (*.ibw)"),
+        )
+
+        fake_gui: Any = SimpleNamespace(
+            project=project,
+            cmb_stim=SimpleNamespace(currentText=lambda: "stim"),
+            logger=logging.getLogger("test_gui_export_ibw"),
+        )
+
+        Gui.btn_export_igor2_patchclamp_stim_clicked(fake_gui)
+
+        assert output_path.exists()
+        loaded = binarywave.load(output_path)
+        wave_data = loaded["wave"]["wData"].astype(np.float32)
+        np.testing.assert_array_almost_equal(
+            wave_data, np.array([10.0, 20.0, 30.0], dtype=np.float32), decimal=5
+        )
+        assert len(qmessagebox_calls) == 1
+        assert qmessagebox_calls[0]["name"] == "information"
+        assert "export successful" in qmessagebox_calls[0]["title"].lower()
+
+The existing `test_gui_export_igor2_patchclamp_stim` test (which mocks
+`getsavefilename` to return a `.csv` path) must continue to pass unchanged
+— verify this after your changes.
+
+
+=============================================================
+VERIFICATION CHECKLIST
+=============================================================
+
+After implementation, run:
+
+    .venv/bin/python -c "
+    from neuroseq.exporter_igor2 import _BIN_HEADER5_FMT, _WAVE_HEADER5_FMT
+    import struct
+    assert struct.calcsize(_BIN_HEADER5_FMT) == 62,  f'BinHeader5: {struct.calcsize(_BIN_HEADER5_FMT)}'
+    assert struct.calcsize(_WAVE_HEADER5_FMT) == 320, f'WaveHeader5: {struct.calcsize(_WAVE_HEADER5_FMT)}'
+    print('Layout sizes OK')
+    "
+
+    .venv/bin/python -m pytest tests/test_exporter_igor2.py tests/test_gui.py -v
+    .venv/bin/python -m pytest
+    .venv/bin/python -m ruff check src/neuroseq tests
+    .venv/bin/python -m mypy --ignore-missing-imports \
+        src/neuroseq/exporter_igor2.py src/neuroseq/gui.py
+
+Manual smoke test:
+    .venv/bin/python -m neuroseq
+    → select a stim array, File → Export patch clamp stimulus → Igor2
+    → save as .ibw and as .csv; verify both files are created
+    → load the .ibw in Igor Pro (or verify with binarywave.load in a REPL):
+        import igor2.binarywave as bw; w = bw.load("path/to/out.ibw")
+        w["wave"]["wave_header"]["sfA"][0]   # should equal stim dt
+        w["wave"]["wave_header"]["dataUnits"] # should equal stim units

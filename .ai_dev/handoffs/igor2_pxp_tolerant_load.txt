@@ -1,4 +1,4 @@
-HANDOFF: Tolerant Igor2 Packed Experiment (.pxp) loading
+HANDOFF: Tolerant Igor2 Packed Experiment (.pxp) loading  [IMPLEMENTED]
 =========================================================
 Branch: import_igor2
 Repo: /mnt/live3/svintila/neuroseq

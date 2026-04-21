@@ -1,4 +1,4 @@
-HANDOFF: File/Experiment menu reorganisation
+HANDOFF: File/Experiment menu reorganisation  [IMPLEMENTED]
 =============================================
 Branch: import_igor2
 Repo:   /mnt/live3/svintila/neuroseq

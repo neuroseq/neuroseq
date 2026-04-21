@@ -1,4 +1,4 @@
-HANDOFF: Igor2-aware trace import dialog
+HANDOFF: Igor2-aware trace import dialog  [IMPLEMENTED]
 =========================================
 Branch: import_igor2
 Repo:   /mnt/live3/svintila/neuroseq

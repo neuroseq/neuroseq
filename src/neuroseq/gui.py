@@ -29,6 +29,7 @@ from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
 from neuroseq.experiments_manager_dialog import ExperimentsManagerDialog
 from neuroseq.exporter_igor2 import export_igor2_patchclamp_csv
+from neuroseq.exporter_igor2 import export_igor2_patchclamp_ibw
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.igor2_patchclamp_export_dialog import Igor2PatchClampExportDialog
@@ -351,7 +352,7 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(
                 self,
                 "No stimulation entities",
-                "No stimulation data entities available. Create one before exporting to Igor2 patch clamp CSV.",
+                "No stimulation data entities available. Create one before exporting.",
             )
             return
 
@@ -377,44 +378,56 @@ class Gui(QtWidgets.QMainWindow):
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
 
-        suggested_filename = f"{dialog.experiment_name}.csv"
+        suggested_filename = f"{dialog.experiment_name}.ibw"
         filename, _ = getsavefilename(
             self,
-            "Export Igor2 Patch Clamp CSV",
+            "Export Igor2 Patch Clamp Stimulus",
             suggested_filename,
-            "CSV file (*.csv)",
+            "Igor Binary Wave (*.ibw);;CSV file (*.csv)",
         )
         if filename == "":
             return
 
         output_path = pathlib.Path(filename)
-        if output_path.suffix.lower() != ".csv":
-            output_path = output_path.with_suffix(".csv")
+        suffix = output_path.suffix.lower()
+        if suffix not in {".ibw", ".csv"}:
+            output_path = output_path.with_suffix(".ibw")
+            suffix = ".ibw"
 
         try:
-            export_report = export_igor2_patchclamp_csv(
-                output_path,
-                stim_array,
-                experiment_name=dialog.experiment_name,
-                neuron_index=dialog.selected_neuron_index,
-            )
+            if suffix == ".ibw":
+                export_report = export_igor2_patchclamp_ibw(
+                    output_path,
+                    stim_array,
+                    wave_name=dialog.experiment_name,
+                    neuron_index=dialog.selected_neuron_index,
+                )
+                fmt_label = f"Igor Binary Wave '{export_report.experiment_name}'"
+            else:
+                export_report = export_igor2_patchclamp_csv(
+                    output_path,
+                    stim_array,
+                    experiment_name=dialog.experiment_name,
+                    neuron_index=dialog.selected_neuron_index,
+                )
+                fmt_label = f"CSV experiment '{export_report.experiment_name}'"
         except Exception as e:
             self.logger.warning(
-                "Failed to export Igor2 patch clamp CSV %s: %s",
+                "Failed to export Igor2 patch clamp stimulus %s: %s",
                 output_path,
                 e,
             )
             QtWidgets.QMessageBox.critical(
                 self,
                 "Export error",
-                f"Could not export Igor2 patch clamp CSV to '{output_path}': {e}",
+                f"Could not export Igor2 patch clamp stimulus to '{output_path}': {e}",
             )
             return
 
         QtWidgets.QMessageBox.information(
             self,
             "Export Successful",
-            "Exported Igor2 patch clamp CSV for "
+            f"Exported {fmt_label} for "
             f"stimulus '{stim_name}', neuron {export_report.neuron_index}, "
             f"{export_report.sample_count} samples.",
         )

@@ -1,4 +1,4 @@
-HANDOFF: Igor2 Packed Experiment (.pxp) import support
+HANDOFF: Igor2 Packed Experiment (.pxp) import support  [IMPLEMENTED]
 =======================================================
 Branch: import_igor2
 Repo: /mnt/live3/svintila/neuroseq
