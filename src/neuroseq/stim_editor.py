@@ -837,6 +837,24 @@ class StimEditor(QtWidgets.QWidget):
             self.project.delete_stim_array(self.current_stim_modifier.stim_array.name)
             self.set_project(self.project)
 
+    def clear_stim_array(self) -> None:
+        if self.current_stim_modifier is None:
+            return
+        name = self.current_stim_modifier.stim_array.name
+        if (
+            QtWidgets.QMessageBox.question(
+                self,
+                "Clear stim array",
+                f"Set all values in '{name}' to zero?",
+                QtWidgets.QMessageBox.StandardButton.Yes
+                | QtWidgets.QMessageBox.StandardButton.No,
+            )
+            != QtWidgets.QMessageBox.StandardButton.Yes
+        ):
+            return
+        new_values = np.zeros_like(self.current_stim_modifier.stim_array.values)
+        self.replace_stim_values_with_undo(name, new_values)
+
     def _add_actions(self, toolbar: QtWidgets.QToolBar, menu: QtWidgets.QMenu) -> None:
         self.action_draw_mode = add_action(
             "Draw mode (1)",
@@ -884,6 +902,14 @@ class StimEditor(QtWidgets.QWidget):
             toolbar,
             self,
             icon=qta.icon("mdi6.text-box-remove"),
+        )
+        add_action(
+            "Clear stim array",
+            self.clear_stim_array,
+            menu,
+            toolbar,
+            self,
+            icon=qta.icon("mdi6.text-box-minus"),
         )
         add_action(
             "Pad stim array (Ctrl+Shift+Plus)",

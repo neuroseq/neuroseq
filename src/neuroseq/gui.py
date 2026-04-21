@@ -130,6 +130,10 @@ class Gui(QtWidgets.QMainWindow):
             self.time_slider.connect_widget(widget)
         split_vertical.addWidget(self.time_slider)
         self.data_widget.setVisible(False)
+        self.trace_widget.setVisible(False)
+        self.spike_widget.setVisible(False)
+        self.heatmap_widget.setVisible(False)
+        self.custom_analysis_widget.setVisible(False)
         # heatmap / custom analysis widget / console
         split_vertical.addWidget(split_left_right)
         main_horizontal_layout.addWidget(split_vertical)
@@ -577,6 +581,8 @@ class Gui(QtWidgets.QMainWindow):
     def _apply_trace_selection(self, cmb_name: str) -> None:
         data = self.project.get_data(cmb_name, TraceData)
         self.trace_widget.set_data(data)
+        if data is not None and hasattr(self, "_auto_show_widget"):
+            self._auto_show_widget(self.trace_widget)
         self._focus_neuron_range(self.trace_widget.n_neurons)
 
     @with_wait_cursor
@@ -590,10 +596,14 @@ class Gui(QtWidgets.QMainWindow):
         )
         data = self.project.get_data(cmb_name, SynapseData)
         self.heatmap_widget.set_data(data)
+        if data is not None and hasattr(self, "_auto_show_widget"):
+            self._auto_show_widget(self.heatmap_widget)
 
     def _apply_spike_selection(self, cmb_name: str) -> None:
         data = self.project.get_data(cmb_name, SpikeData)
         self.spike_widget.set_data(data)
+        if data is not None and hasattr(self, "_auto_show_widget"):
+            self._auto_show_widget(self.spike_widget)
         self._focus_neuron_range(self.spike_widget.n_neurons)
 
     @with_wait_cursor
@@ -1575,23 +1585,25 @@ class Gui(QtWidgets.QMainWindow):
     def _create_actions_view(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
     ) -> None:
+        self._view_actions: dict[QtWidgets.QWidget, QtWidgets.QAction] = {}
         for name, widget, icon, is_checked in [
             ("&Stimuli", self.stim_editor, "mdi6.chart-timeline", True),
-            ("&Traces", self.trace_widget, "mdi.waves", True),
-            ("&Spikes", self.spike_widget, "ph.barcode-light", True),
+            ("&Traces", self.trace_widget, "mdi.waves", False),
+            ("&Spikes", self.spike_widget, "ph.barcode-light", False),
             ("&Data", self.data_widget, "mdi6.chart-donut", False),
-            ("&Heatmap", self.heatmap_widget, "mdi6.data-matrix", True),
+            ("&Heatmap", self.heatmap_widget, "mdi6.data-matrix", False),
             (
                 "&Custom analysis",
                 self.custom_analysis_widget,
                 "mdi6.chart-histogram",
-                True,
+                False,
             ),
             ("&Console", self.console_widget, "mdi6.console", True),
         ]:
-            add_action(
+            w: QtWidgets.QWidget = widget  # type: ignore[assignment]
+            self._view_actions[w] = add_action(
                 f"Show {name}",
-                lambda toggled, w=widget: self._set_widget_visible(w, toggled),
+                lambda toggled, w=w: self._set_widget_visible(w, toggled),
                 menu,
                 toolbar,
                 icon=qta.icon(f"{icon}"),
@@ -1621,6 +1633,11 @@ class Gui(QtWidgets.QMainWindow):
         widget.setVisible(toggled)
         if toggled and widget is self.data_widget:
             self.set_data(self.cmb_data.currentText())
+
+    def _auto_show_widget(self, widget: QtWidgets.QWidget) -> None:
+        action = getattr(self, "_view_actions", {}).get(widget)
+        if action is not None and not action.isChecked():
+            action.trigger()
 
     def _create_actions_settings(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None

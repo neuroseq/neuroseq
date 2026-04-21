@@ -89,6 +89,10 @@ It can shown within "analysis widget" or opened in a new window.
 
 The GUI console is a text box at the bottom of the GUI that can be used to run a custom Python code.
 
+A **"Sample python code"** button sits directly below the console input box.
+Clicking it opens a reference dialog with ready-to-use code snippets covering the most common tasks: listing and accessing stimulus arrays, editing values (zeroing, range assignment, generating waveforms), and accessing experiment and trace data.
+All snippets can be selected and copied directly into the console input box.
+
 The code is executed in the same Python environment as the GUI, with the following variables/objects made available (run dir() command to see the list):
 
 - `np`: numpy
