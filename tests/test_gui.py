@@ -132,8 +132,13 @@ def _make_spike_export_gui(
         ),
         (
             "btn_export_patch_clamp_stim_clicked",
-            "Igor2",
+            "Igor2 - single array (.ibw / .csv)",
             "btn_export_igor2_patchclamp_stim_clicked",
+        ),
+        (
+            "btn_export_patch_clamp_stim_clicked",
+            "Igor2 - all arrays (.pxp)",
+            "btn_export_igor2_pxp_stim_clicked",
         ),
         (
             "btn_export_light_stimulus_clicked",
@@ -186,8 +191,13 @@ def test_gui_pre_dialog_wrapper_calls_inner_handler_on_accept(
         ),
         (
             "btn_export_patch_clamp_stim_clicked",
-            "Igor2",
+            "Igor2 - single array (.ibw / .csv)",
             "btn_export_igor2_patchclamp_stim_clicked",
+        ),
+        (
+            "btn_export_patch_clamp_stim_clicked",
+            "Igor2 - all arrays (.pxp)",
+            "btn_export_igor2_pxp_stim_clicked",
         ),
         (
             "btn_export_light_stimulus_clicked",
@@ -651,6 +661,64 @@ def test_gui_export_igor2_patchclamp_stim(
     assert "export successful" in qmessagebox_calls[0]["title"].lower()
 
 
+def test_gui_export_igor2_patchclamp_stim_ibw_format(
+    tmp_path: Path, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+) -> None:
+    import importlib
+
+    binarywave = importlib.import_module("igor2.binarywave")
+    project = Project()
+    stim_values = np.array(
+        [
+            [0.0, 10.0],
+            [1.0, 20.0],
+            [0.0, 30.0],
+        ],
+        dtype=np.float32,
+    )
+    project.add_stim_array(
+        StimArray("stim", StimType.Excitation, stim_values, "pA", 0.001)
+    )
+
+    class MockDialog:
+        def __init__(self, stim_name: str, stim_array: StimArray, parent=None) -> None:
+            assert stim_name == "stim"
+            assert stim_array is project.stim_arrays["stim"]
+            self.experiment_name = "stim_neuron_1"
+            self.selected_neuron_index = 1
+
+        def exec(self) -> int:
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    output_path = tmp_path / "stim_neuron_1.ibw"
+    monkeypatch.setattr(neuroseq.gui, "Igor2PatchClampExportDialog", MockDialog)
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "getsavefilename",
+        lambda *args: (str(output_path), "Igor Binary Wave (*.ibw)"),
+    )
+
+    fake_gui: Any = SimpleNamespace(
+        project=project,
+        cmb_stim=SimpleNamespace(currentText=lambda: "stim"),
+        logger=logging.getLogger("test_gui_export_ibw"),
+    )
+
+    Gui.btn_export_igor2_patchclamp_stim_clicked(fake_gui)
+
+    assert output_path.exists()
+    loaded = binarywave.load(output_path)
+    wave_data = loaded["wave"]["wData"].astype(np.float32)
+    np.testing.assert_array_almost_equal(
+        wave_data,
+        np.array([10.0, 20.0, 30.0], dtype=np.float32),
+        decimal=5,
+    )
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "information"
+    assert "export successful" in qmessagebox_calls[0]["title"].lower()
+
+
 def test_gui_export_igor2_patchclamp_stim_requires_stim_data(
     qmessagebox_calls: list,
 ) -> None:
@@ -667,6 +735,87 @@ def test_gui_export_igor2_patchclamp_stim_requires_stim_data(
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "information"
     assert "no stimulation entities" in qmessagebox_calls[0]["title"].lower()
+
+
+def test_gui_export_igor2_pxp_stim(
+    tmp_path: Path, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+) -> None:
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "exc",
+            StimType.Excitation,
+            np.ones((3, 2), dtype=np.float32),
+            "pA",
+            0.001,
+        )
+    )
+    project.add_stim_array(
+        StimArray(
+            "inh",
+            StimType.Inhibition,
+            np.ones((3, 1), dtype=np.float32),
+            "pA",
+            0.001,
+        )
+    )
+
+    class MockPxpDialog:
+        def __init__(self, current_project: Project, parent=None) -> None:
+            assert current_project is project
+            self.selected_array_names = ["exc", "inh"]
+
+        def exec(self) -> int:
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    output_path = tmp_path / "stim_arrays.pxp"
+    monkeypatch.setattr(neuroseq.gui, "Igor2PxpStimExportDialog", MockPxpDialog)
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "getsavefilename",
+        lambda *args: (str(output_path), "Igor Packed Experiment (*.pxp)"),
+    )
+
+    fake_gui: Any = SimpleNamespace(project=project)
+
+    Gui.btn_export_igor2_pxp_stim_clicked(fake_gui)
+
+    assert output_path.exists()
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "information"
+    assert "export complete" in qmessagebox_calls[0]["title"].lower()
+
+
+def test_gui_export_igor2_pxp_stim_requires_selection(
+    monkeypatch: MonkeyPatch, qmessagebox_calls: list
+) -> None:
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "stim",
+            StimType.Excitation,
+            np.ones((3, 1), dtype=np.float32),
+            "pA",
+            0.001,
+        )
+    )
+
+    class MockPxpDialog:
+        def __init__(self, current_project: Project, parent=None) -> None:
+            assert current_project is project
+            self.selected_array_names: list[str] = []
+
+        def exec(self) -> int:
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(neuroseq.gui, "Igor2PxpStimExportDialog", MockPxpDialog)
+    fake_gui: Any = SimpleNamespace(project=project)
+
+    Gui.btn_export_igor2_pxp_stim_clicked(fake_gui)
+
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "warning"
+    assert "nothing selected" in qmessagebox_calls[0]["title"].lower()
 
 
 def test_gui_export_traces_no_selection(qmessagebox_calls: list) -> None:

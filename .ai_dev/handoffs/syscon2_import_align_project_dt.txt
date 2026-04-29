@@ -1,0 +1,215 @@
+syscon2_import_align_project_dt — Auto-align project dt to SysCon2 tick resolution on import [IMPLEMENTED]
+==========================================================================================================
+
+When the user imports a SysCon2 .seq file via "Import Data > Light Stimulus > SysCon2", the
+NeuroSeq project sample interval (`project.dt`) should be automatically set to match the
+SysCon2 tick resolution (`tick_resolution_us`) chosen in the dialog. All existing stim arrays
+and trace datasets must be ZOH-remapped to the new dt before the SysCon2 sequence is imported.
+
+This is the same pattern already used by the Igor2 import dialogs — see
+`src/neuroseq/igor_import_dialog.py:569-598` and
+`src/neuroseq/igor_trace_import_dialog.py:825-847` for the canonical implementation.
+
+Single file to change:
+    src/neuroseq/syscon2_import_dialog.py
+
+────────────────────────────────────────────────────────────────────────────────────────────
+BACKGROUND — what the two "ticks" are
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- "NeuroSeq timeline ticks" = `project.dt` (seconds). Default 0.001 s (1 ms). This is the
+  canonical sample interval shared by every StimArray and every TraceData in the project.
+  Changing it triggers a ZOH remap of all stims/traces via `Project.remap_all_data_to_dt`.
+
+- "SysCon ticks" = `tick_resolution_us` (microseconds). Configured in the dialog by
+  `self.tick_resolution_spin`. Typical values: 500 µs (Holo4D) or 50 µs (UGA-42).
+  Conversion: `new_dt_seconds = tick_resolution_us / 1e6`.
+
+Currently `_import_file` calls `import_sequence_into_stim_array(...)` directly. The target
+StimArray's existing dt is used to bin imported timepoints — if the user picks a 500 µs
+SysCon resolution but the project is at 1 ms, half the timing precision is silently lost.
+
+The fix: before importing, prompt to remap the project dt to the SysCon tick resolution
+(when they differ), then call `import_sequence_into_stim_array` as today.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+APPROACH
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Mirror the Igor2 dialog flow inside `Syscon2ImportDialog._import_file`:
+
+1.  Compute `target_dt = self.tick_resolution_spin.value() / 1e6` (seconds).
+2.  If `target_dt` differs from `self.project.dt` (use `stim_dt_matches`):
+     a.  Build a description of affected data via `self.project.remappable_data_description(target_dt)`.
+     b.  If the description is non-empty, ask the user to confirm via `QMessageBox.question`.
+         On No, return without importing.
+     c.  Call `self.project.remap_all_data_to_dt(target_dt)`.
+3.  Continue with the existing `import_sequence_into_stim_array(...)` call.
+
+After step 2c the target StimArray has been remapped, so its `.values` and `.dt` are now
+aligned to the SysCon ticks before the sequence import begins.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/syscon2_import_dialog.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1.  ADD IMPORTS (top of file, after the existing `from neuroseq.importer_syscon2 ...`
+    block):
+
+        from neuroseq.stim_timing import format_milliseconds
+        from neuroseq.stim_timing import stim_dt_matches
+
+2.  MODIFY `_import_file` (currently at lines 255–303). Insert the dt-alignment block
+    immediately after the early-return guards and before the `try:` that wraps
+    `import_sequence_into_stim_array`. The new code looks like:
+
+        def _import_file(self) -> None:
+            if self.sequence is None:
+                return
+            stim_array = self._selected_stim_array()
+            if stim_array is None:
+                return
+
+            target_dt = float(self.tick_resolution_spin.value()) / 1e6
+            if not stim_dt_matches(target_dt, self.project.dt):
+                affected = self.project.remappable_data_description(target_dt)
+                if affected:
+                    answer = QtWidgets.QMessageBox.question(
+                        self,
+                        "Change project sample interval",
+                        f"Importing at {format_milliseconds(target_dt * 1000.0)} ms "
+                        "will change the project sample interval from "
+                        f"{format_milliseconds(self.project.dt * 1000.0)} ms to "
+                        f"{format_milliseconds(target_dt * 1000.0)} ms and remap "
+                        f"{affected} using zero-order hold. Continue?",
+                        QtWidgets.QMessageBox.StandardButton.Yes
+                        | QtWidgets.QMessageBox.StandardButton.No,
+                    )
+                    if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                        return
+                self.project.remap_all_data_to_dt(target_dt)
+
+            try:
+                result = import_sequence_into_stim_array(
+                    stim_array,
+                    self.sequence,
+                    tick_resolution_us=self.tick_resolution_spin.value(),
+                    replace_existing=self.replace_checkbox.isChecked(),
+                    extend_to_fit=self.extend_checkbox.isChecked(),
+                    neuron_offset=self.neuron_offset_spin.value(),
+                )
+                # ... existing info_lines + QMessageBox.information + self.accept() unchanged
+            except Exception as exc:
+                # ... unchanged
+
+    Do NOT change the existing `try`/`except` body — only insert the alignment block above
+    it. Keep the rest of `_import_file` exactly as it is today.
+
+3.  IMPORTANT EDGE CASE — `stim_array` is captured by `_selected_stim_array()` BEFORE the
+    remap. After `remap_all_data_to_dt`, the same `StimArray` object is mutated in place
+    (its `.values` is reshaped and its `.dt` is updated), so the local `stim_array`
+    reference is still valid and points at the remapped array. Do NOT re-fetch it. (Verify
+    by skimming `Project.remap_all_data_to_dt` in `src/neuroseq/project.py:334-382` —
+    `stim_array.values = ...; stim_array.dt = ...` are in-place assignments.)
+
+4.  No changes are needed in `gui.py`. After `dialog.exec()` returns Accepted,
+    `self.update_project(self.project)` already refreshes the GUI to reflect the new
+    project dt and remapped stim arrays.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Add to `tests/test_gui.py` or create `tests/test_syscon2_import_dialog.py`. Follow the
+existing fixtures in `tests/conftest.py` (use `qtbot` and a project fixture that has at
+least one StimArray; use a small fabricated `.seq` file or skip with `pytest.importorskip`
+if a fixture file already exists for SysCon2 import tests).
+
+    def test_syscon2_import_aligns_project_dt(qtbot, project_with_stim, tmp_path, monkeypatch):
+        """Importing a SysCon2 .seq with tick_resolution_us=500 sets project.dt to 0.0005 s."""
+        # 1. write a minimal valid .seq file (or use an existing fixture if available)
+        seq_path = tmp_path / "test.seq"
+        seq_path.write_text(_MINIMAL_SEQ_CONTENT)  # see tests/test_importer_syscon2.py
+
+        dlg = Syscon2ImportDialog(project_with_stim)
+        qtbot.addWidget(dlg)
+        dlg._load_file(str(seq_path))
+        dlg.tick_resolution_spin.setValue(500)  # 500 µs
+
+        # auto-confirm the QMessageBox.question dialog
+        monkeypatch.setattr(
+            QtWidgets.QMessageBox,
+            "question",
+            lambda *a, **kw: QtWidgets.QMessageBox.StandardButton.Yes,
+        )
+
+        dlg._import_file()
+        assert math.isclose(project_with_stim.dt, 0.0005, abs_tol=1e-12)
+        for stim in project_with_stim.stim_arrays.values():
+            assert math.isclose(stim.dt, 0.0005, abs_tol=1e-12)
+
+    def test_syscon2_import_no_remap_when_dt_matches(qtbot, project_with_stim, tmp_path, monkeypatch):
+        """If tick_resolution matches project.dt, no confirmation dialog and no remap."""
+        project_with_stim.remap_all_data_to_dt(0.0005)
+        seq_path = tmp_path / "test.seq"
+        seq_path.write_text(_MINIMAL_SEQ_CONTENT)
+
+        dlg = Syscon2ImportDialog(project_with_stim)
+        qtbot.addWidget(dlg)
+        dlg._load_file(str(seq_path))
+        dlg.tick_resolution_spin.setValue(500)
+
+        called = {"n": 0}
+        def _spy(*a, **kw):
+            called["n"] += 1
+            return QtWidgets.QMessageBox.StandardButton.Yes
+        monkeypatch.setattr(QtWidgets.QMessageBox, "question", _spy)
+
+        dlg._import_file()
+        assert called["n"] == 0  # no confirmation prompted because dt already matches
+
+    def test_syscon2_import_aborts_when_user_declines_remap(qtbot, project_with_stim, tmp_path, monkeypatch):
+        seq_path = tmp_path / "test.seq"
+        seq_path.write_text(_MINIMAL_SEQ_CONTENT)
+        original_dt = project_with_stim.dt
+
+        dlg = Syscon2ImportDialog(project_with_stim)
+        qtbot.addWidget(dlg)
+        dlg._load_file(str(seq_path))
+        dlg.tick_resolution_spin.setValue(50)  # 50 µs — definitely different from default 1 ms
+
+        monkeypatch.setattr(
+            QtWidgets.QMessageBox,
+            "question",
+            lambda *a, **kw: QtWidgets.QMessageBox.StandardButton.No,
+        )
+
+        dlg._import_file()
+        assert math.isclose(project_with_stim.dt, original_dt, abs_tol=1e-12)
+        # dialog should NOT have called accept()
+        assert dlg.result() != QtWidgets.QDialog.DialogCode.Accepted
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NOTES
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- `Project.remap_all_data_to_dt` already calls `update_limits()` and updates `self.dt`, so
+  no extra bookkeeping is needed in the dialog.
+- The QMessageBox.question call is suppressed automatically by the autouse
+  `suppress_message_boxes` fixture in tests; tests that need to assert a specific user
+  choice should monkeypatch `QtWidgets.QMessageBox.question` explicitly (as shown above).
+- Empty-project safety: if there are no stim arrays at all, the dialog already blocks at
+  `gui.btn_import_syscon2_seq_clicked` with a "No stimulation entities" message, so we
+  don't need to handle that case here. `remappable_data_description` will return "" if
+  there is exactly one freshly created StimArray that already matches the new dt — in
+  that case we silently call `remap_all_data_to_dt` (which still updates `project.dt` even
+  though no values change) without prompting. This matches the Igor2 dialog's behaviour.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    ruff check src/neuroseq/syscon2_import_dialog.py
+    mypy --ignore-missing-imports src/neuroseq/syscon2_import_dialog.py
+    PYTHONPATH=src .venv/bin/python -m pytest tests/ -v -k "syscon2_import"
+    PYTHONPATH=src .venv/bin/python -m pytest

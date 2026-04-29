@@ -29,9 +29,12 @@ from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
 from neuroseq.experiments_manager_dialog import ExperimentsManagerDialog
 from neuroseq.exporter_igor2 import export_igor2_patchclamp_csv
+from neuroseq.exporter_igor2 import export_igor2_patchclamp_ibw
+from neuroseq.exporter_igor2 import export_igor2_pxp
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.igor2_patchclamp_export_dialog import Igor2PatchClampExportDialog
+from neuroseq.igor2_pxp_stim_export_dialog import Igor2PxpStimExportDialog
 from neuroseq.igor_import_dialog import IgorImportDialog
 from neuroseq.import_dialog import Suite2pImportDialog
 from neuroseq.import_experiment_dialog import ImportExperimentDialog
@@ -129,6 +132,10 @@ class Gui(QtWidgets.QMainWindow):
             self.time_slider.connect_widget(widget)
         split_vertical.addWidget(self.time_slider)
         self.data_widget.setVisible(False)
+        self.trace_widget.setVisible(False)
+        self.spike_widget.setVisible(False)
+        self.heatmap_widget.setVisible(False)
+        self.custom_analysis_widget.setVisible(False)
         # heatmap / custom analysis widget / console
         split_vertical.addWidget(split_left_right)
         main_horizontal_layout.addWidget(split_vertical)
@@ -351,7 +358,7 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(
                 self,
                 "No stimulation entities",
-                "No stimulation data entities available. Create one before exporting to Igor2 patch clamp CSV.",
+                "No stimulation data entities available. Create one before exporting.",
             )
             return
 
@@ -377,46 +384,113 @@ class Gui(QtWidgets.QMainWindow):
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
 
-        suggested_filename = f"{dialog.experiment_name}.csv"
+        suggested_filename = f"{dialog.experiment_name}.ibw"
         filename, _ = getsavefilename(
             self,
-            "Export Igor2 Patch Clamp CSV",
+            "Export Igor2 Patch Clamp Stimulus",
             suggested_filename,
-            "CSV file (*.csv)",
+            "Igor Binary Wave (*.ibw);;CSV file (*.csv)",
         )
         if filename == "":
             return
 
         output_path = pathlib.Path(filename)
-        if output_path.suffix.lower() != ".csv":
-            output_path = output_path.with_suffix(".csv")
+        suffix = output_path.suffix.lower()
+        if suffix not in {".ibw", ".csv"}:
+            output_path = output_path.with_suffix(".ibw")
+            suffix = ".ibw"
 
         try:
-            export_report = export_igor2_patchclamp_csv(
-                output_path,
-                stim_array,
-                experiment_name=dialog.experiment_name,
-                neuron_index=dialog.selected_neuron_index,
-            )
+            if suffix == ".ibw":
+                export_report = export_igor2_patchclamp_ibw(
+                    output_path,
+                    stim_array,
+                    wave_name=dialog.experiment_name,
+                    neuron_index=dialog.selected_neuron_index,
+                )
+                fmt_label = f"Igor Binary Wave '{export_report.experiment_name}'"
+            else:
+                export_report = export_igor2_patchclamp_csv(
+                    output_path,
+                    stim_array,
+                    experiment_name=dialog.experiment_name,
+                    neuron_index=dialog.selected_neuron_index,
+                )
+                fmt_label = f"CSV experiment '{export_report.experiment_name}'"
         except Exception as e:
             self.logger.warning(
-                "Failed to export Igor2 patch clamp CSV %s: %s",
+                "Failed to export Igor2 patch clamp stimulus %s: %s",
                 output_path,
                 e,
             )
             QtWidgets.QMessageBox.critical(
                 self,
                 "Export error",
-                f"Could not export Igor2 patch clamp CSV to '{output_path}': {e}",
+                f"Could not export Igor2 patch clamp stimulus to '{output_path}': {e}",
             )
             return
 
         QtWidgets.QMessageBox.information(
             self,
             "Export Successful",
-            "Exported Igor2 patch clamp CSV for "
+            f"Exported {fmt_label} for "
             f"stimulus '{stim_name}', neuron {export_report.neuron_index}, "
             f"{export_report.sample_count} samples.",
+        )
+
+    def btn_export_igor2_pxp_stim_clicked(self) -> None:
+        if not self.project.stim_arrays:
+            QtWidgets.QMessageBox.information(
+                self,
+                "No stimulation entities",
+                "No stimulation data entities available. Create one before exporting.",
+            )
+            return
+
+        dialog = Igor2PxpStimExportDialog(self.project, parent=self)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+
+        selected = dialog.selected_array_names
+        if not selected:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Nothing selected",
+                "No stim arrays were selected for export.",
+            )
+            return
+
+        filename, _ = getsavefilename(
+            self,
+            "Export Igor2 Packed Experiment",
+            "stim_arrays.pxp",
+            "Igor Packed Experiment (*.pxp)",
+        )
+        if filename == "":
+            return
+
+        output_path = pathlib.Path(filename)
+        if output_path.suffix.lower() != ".pxp":
+            output_path = output_path.with_suffix(".pxp")
+
+        try:
+            export_report = export_igor2_pxp(
+                output_path,
+                self.project.stim_arrays,
+                array_names=selected,
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Export error",
+                f"PXP export failed:\n{e}",
+            )
+            return
+
+        QtWidgets.QMessageBox.information(
+            self,
+            "Export complete",
+            f"Exported {len(export_report.wave_names)} wave(s) to:\n{export_report.path}",
         )
 
     def btn_edit_clicked(self) -> None:
@@ -564,6 +638,8 @@ class Gui(QtWidgets.QMainWindow):
     def _apply_trace_selection(self, cmb_name: str) -> None:
         data = self.project.get_data(cmb_name, TraceData)
         self.trace_widget.set_data(data)
+        if data is not None and hasattr(self, "_auto_show_widget"):
+            self._auto_show_widget(self.trace_widget)
         self._focus_neuron_range(self.trace_widget.n_neurons)
 
     @with_wait_cursor
@@ -577,10 +653,14 @@ class Gui(QtWidgets.QMainWindow):
         )
         data = self.project.get_data(cmb_name, SynapseData)
         self.heatmap_widget.set_data(data)
+        if data is not None and hasattr(self, "_auto_show_widget"):
+            self._auto_show_widget(self.heatmap_widget)
 
     def _apply_spike_selection(self, cmb_name: str) -> None:
         data = self.project.get_data(cmb_name, SpikeData)
         self.spike_widget.set_data(data)
+        if data is not None and hasattr(self, "_auto_show_widget"):
+            self._auto_show_widget(self.spike_widget)
         self._focus_neuron_range(self.spike_widget.n_neurons)
 
     @with_wait_cursor
@@ -1052,14 +1132,16 @@ class Gui(QtWidgets.QMainWindow):
             self,
             "Export patch clamp stimulus",
             "Export for:",
-            ["Igor2"],
+            ["Igor2 - single array (.ibw / .csv)", "Igor2 - all arrays (.pxp)"],
             0,
             False,
         )
         if not ok:
             return
-        if software == "Igor2":
+        if software.startswith("Igor2 - single"):
             self.btn_export_igor2_patchclamp_stim_clicked()
+        elif software.startswith("Igor2 - all"):
+            self.btn_export_igor2_pxp_stim_clicked()
 
     def btn_export_light_stimulus_clicked(self) -> None:
         """Pre-dialog: choose software, then open the stimulation script generator."""
@@ -1562,23 +1644,25 @@ class Gui(QtWidgets.QMainWindow):
     def _create_actions_view(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
     ) -> None:
+        self._view_actions: dict[QtWidgets.QWidget, QtWidgets.QAction] = {}
         for name, widget, icon, is_checked in [
             ("&Stimuli", self.stim_editor, "mdi6.chart-timeline", True),
-            ("&Traces", self.trace_widget, "mdi.waves", True),
-            ("&Spikes", self.spike_widget, "ph.barcode-light", True),
+            ("&Traces", self.trace_widget, "mdi.waves", False),
+            ("&Spikes", self.spike_widget, "ph.barcode-light", False),
             ("&Data", self.data_widget, "mdi6.chart-donut", False),
-            ("&Heatmap", self.heatmap_widget, "mdi6.data-matrix", True),
+            ("&Heatmap", self.heatmap_widget, "mdi6.data-matrix", False),
             (
                 "&Custom analysis",
                 self.custom_analysis_widget,
                 "mdi6.chart-histogram",
-                True,
+                False,
             ),
             ("&Console", self.console_widget, "mdi6.console", True),
         ]:
-            add_action(
+            w: QtWidgets.QWidget = widget  # type: ignore[assignment]
+            self._view_actions[w] = add_action(
                 f"Show {name}",
-                lambda toggled, w=widget: self._set_widget_visible(w, toggled),
+                lambda toggled, w=w: self._set_widget_visible(w, toggled),
                 menu,
                 toolbar,
                 icon=qta.icon(f"{icon}"),
@@ -1608,6 +1692,11 @@ class Gui(QtWidgets.QMainWindow):
         widget.setVisible(toggled)
         if toggled and widget is self.data_widget:
             self.set_data(self.cmb_data.currentText())
+
+    def _auto_show_widget(self, widget: QtWidgets.QWidget) -> None:
+        action = getattr(self, "_view_actions", {}).get(widget)
+        if action is not None and not action.isChecked():
+            action.trigger()
 
     def _create_actions_settings(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None

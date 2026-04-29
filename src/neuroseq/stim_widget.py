@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import fastplotlib as fpl
 import numpy as np
 import pygfx
@@ -29,13 +31,14 @@ class StimWidget(TimeseriesWidget):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(controller, parent)
-        self.context_menu = menu
+        self.context_menu = menu if menu is not None else QtWidgets.QMenu(self)
         self.subplot.title = "Stimuli"
         self.hover_slice_graphic: fpl.Graphic | None = None
         self._hover_pos_cache: tuple[int, float, float] | None = None
         self.vmin = 0.0
         self.vmax = 1.0
         self.stim_type = StimType.Excitation
+        self._background_stim_arrays: list[tuple[np.ndarray, str, float, StimType]] = []
 
     def _configure_time_scaled_image(
         self,
@@ -114,6 +117,10 @@ class StimWidget(TimeseriesWidget):
         if self.grid_lines is not None:
             self.grid_lines.update_dt_ms(self.dt_ms)
 
+    def clear_data(self) -> None:
+        self._background_stim_arrays = []
+        super().clear_data()
+
     def set_background_data(self, stim_array: StimArray | None = None) -> None:
         if stim_array is None:
             return
@@ -137,6 +144,15 @@ class StimWidget(TimeseriesWidget):
         image_graphic._material.map.texture.update_range((0, 0, 0), size=(256, 1, 1))
         image_graphic.visible = self.show_background_graphics
         self.background_graphics.append(image_graphic)
+        units_str = "" if stim_array.units == "1" else str(stim_array.units)
+        self._background_stim_arrays.append(
+            (
+                stim_array.values,
+                units_str,
+                float(stim_array.dt) * 1000.0,
+                stim_array.stim_type,
+            )
+        )
 
     def set_background_data_visible(self, visible: bool) -> None:
         self.show_background_graphics = visible
@@ -186,3 +202,42 @@ class StimWidget(TimeseriesWidget):
         super().pointer_move(ev)
         if self.hover_slice_graphic is not None and self.mouse_pos is not None:
             self._update_hover_slice_position()
+        if (
+            self.mouse_pos is None
+            or self.data_values is None
+            or (
+                not self._background_stim_arrays
+                and self.stim_type != StimType.Inhibition
+            )
+        ):
+            return
+        t_idx_fg = np.clip(
+            math.floor(self.mouse_pos[0] / self.dt_ms),
+            0,
+            self.data_values.shape[0] - 1,
+        )
+        n_idx = np.clip(
+            math.floor(self.mouse_pos[1] + 0.5),
+            0,
+            self.data_values.shape[1] - 1,
+        )
+        raw_fg = float(self.data_values[t_idx_fg, n_idx])
+        best_val = -raw_fg if self.stim_type == StimType.Inhibition else raw_fg
+        best_units = self.units
+        for arr, units, dt_ms, stim_type in self._background_stim_arrays:
+            t_idx = np.clip(
+                math.floor(self.mouse_pos[0] / dt_ms),
+                0,
+                arr.shape[0] - 1,
+            )
+            n_idx_bg = np.clip(
+                math.floor(self.mouse_pos[1] + 0.5),
+                0,
+                arr.shape[1] - 1,
+            )
+            raw_val = float(arr[t_idx, n_idx_bg])
+            val = -raw_val if stim_type == StimType.Inhibition else raw_val
+            if abs(val) > abs(best_val):
+                best_val = val
+                best_units = units
+        self.text.set_pos(self.mouse_pos, f"{best_val:.3g} {best_units}")

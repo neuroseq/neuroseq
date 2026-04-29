@@ -1,0 +1,425 @@
+igor2_pxp_stim_export — Fix "show all" hover values + PXP multi-array export [IMPLEMENTED]
+==========================================================================
+
+Two independent tasks.  Implement both in one PR.
+
+────────────────────────────────────────────────────────────────────────────
+TASK 1 — Fix hover value in StimWidget "show all" mode
+────────────────────────────────────────────────────────────────────────────
+
+PROBLEM
+When multiple stim arrays are displayed via "show all", background arrays are
+rendered as fpl.ImageGraphic objects stored in `self.background_graphics`.
+`timeseries_widget.pointer_move()` reads only `self.data_values`, which is the
+foreground array.  Hovering over a region that belongs exclusively to a
+background array shows no value (or the foreground value, which may be zero).
+
+RELEVANT CODE
+  src/neuroseq/stim_widget.py
+    __init__             — no _background_stim_arrays slot yet
+    set_background_data() lines 117–139 — has the StimArray object but only
+                           stores the fpl graphic, not the raw numpy values
+    pointer_move()       lines 185–188 — calls super() then updates hover slice
+    (no clear_data override — TimeseriesWidget.clear_data() resets
+     background_graphics but knows nothing about raw value arrays)
+
+  src/neuroseq/timeseries_widget.py
+    pointer_move()       lines 217–237 — sets hover text from self.data_values
+    clear_data()         lines 178–188 — resets background_graphics = []
+
+FIX — three changes to src/neuroseq/stim_widget.py
+
+1. Add import at top of file:
+     import math
+
+2. In StimWidget.__init__(), add after existing attribute assignments:
+     self._background_stim_arrays: list[tuple[np.ndarray, str, float]] = []
+   (tuple layout: values array, units string, dt_ms float)
+
+3. In set_background_data(), after `self.background_graphics.append(image_graphic)`,
+   add:
+     units_str = "" if stim_array.units == "1" else str(stim_array.units)
+     self._background_stim_arrays.append(
+         (stim_array.values, units_str, float(stim_array.dt) * 1000.0)
+     )
+
+4. Add a clear_data() override (insert before set_background_data()):
+     def clear_data(self) -> None:
+         self._background_stim_arrays = []
+         super().clear_data()
+
+5. Replace pointer_move() with:
+
+     def pointer_move(self, ev: pygfx.PointerEvent) -> None:
+         super().pointer_move(ev)
+         if self.hover_slice_graphic is not None and self.mouse_pos is not None:
+             self._update_hover_slice_position()
+         if (
+             self._background_stim_arrays
+             and self.mouse_pos is not None
+             and self.data_values is not None
+         ):
+             t_idx_fg = np.clip(
+                 math.floor(self.mouse_pos[0] / self.dt_ms),
+                 0,
+                 self.data_values.shape[0] - 1,
+             )
+             n_idx = np.clip(
+                 math.floor(self.mouse_pos[1] + 0.5),
+                 0,
+                 self.data_values.shape[1] - 1,
+             )
+             best_val = float(self.data_values[t_idx_fg, n_idx])
+             best_units = self.units
+             for arr, units, dt_ms in self._background_stim_arrays:
+                 t_idx = np.clip(
+                     math.floor(self.mouse_pos[0] / dt_ms),
+                     0,
+                     arr.shape[0] - 1,
+                 )
+                 n_idx_bg = np.clip(
+                     math.floor(self.mouse_pos[1] + 0.5),
+                     0,
+                     arr.shape[1] - 1,
+                 )
+                 val = float(arr[t_idx, n_idx_bg])
+                 if abs(val) > abs(best_val):
+                     best_val = val
+                     best_units = units
+             if abs(best_val) > abs(float(self.data_values[t_idx_fg, n_idx])):
+                 self.text.set_pos(self.mouse_pos, f"{best_val:.3g} {best_units}")
+
+   This shows the value from whichever loaded array has the highest absolute
+   amplitude at the cursor position.
+
+TESTS
+  Extend tests/test_stim_widget.py (or test_gui.py if no dedicated file):
+  - Create a StimWidget, call set_data(exc_stim), then set_background_data(inh_stim)
+    where inh_stim has a non-zero value at a position where exc_stim is zero.
+    Simulate a pointer_move event at that position and assert that the
+    _background_stim_arrays list has length 1.
+  - Call clear_data() and assert _background_stim_arrays == [].
+
+
+────────────────────────────────────────────────────────────────────────────
+TASK 2 — PXP multi-array export
+────────────────────────────────────────────────────────────────────────────
+
+BACKGROUND
+IgorPro .pxp ("Packed Experiment") is a container of typed records.
+Each record = 8-byte header + payload.
+
+    struct PackedFileRecordHeader {   // little-endian
+        uint16  recordType;           // 3 = WaveRecord
+        int16   version;              // 0
+        int32   numDataBytes;         // length of payload in bytes
+    };
+
+Payload for a WaveRecord = full IBW bytes (including the 2-byte version
+prefix).  This was verified with an igor2 round-trip: igor2.packed.load()
+calls igor2.binarywave.load() on the raw payload bytes.
+
+    RECORD_TYPE from igor2.record: {0: Unused, 1: Variables, 2: History,
+    3: Wave, 4: Recreation, 5: Procedure, 6: Unused, 7: GetHistory,
+    8: PackedFile, 9: FolderStart, 10: FolderEnd}
+
+WAVE NAMING CONVENTION
+Use _sanitize_igor_wave_name() (already in exporter_igor2.py) to derive the
+wave name from each StimArray.name.  For inhibitory arrays, negate the values
+before writing (see below).  Append a deduplication suffix ("_2", "_3", …) if
+two arrays produce the same sanitized name.
+
+INHIBITORY ARRAYS
+StimType.Inhibition arrays store values as positive 0→N.  For patch clamp they
+represent inhibitory current magnitude.  Export them with negated values so the
+electrophysiology software sees them as negative (inhibitory) currents.
+StimType.Excitation and StimType.External arrays are exported as-is.
+
+STEP-BY-STEP IMPLEMENTATION
+
+── A. exporter_igor2.py ──────────────────────────────────────────────────
+
+Add new dataclass after Igor2PatchClampExport:
+
+    @dataclass(frozen=True)
+    class Igor2PxpExport:
+        path: pathlib.Path
+        wave_names: list[str]          # one per exported array, in order
+
+Add helper after _write_ibw_v5():
+
+    _PXP_WAVE_RECORD_TYPE: int = 3
+    _PXP_RECORD_HEADER_FMT: str = "<HhI"   # uint16, int16, uint32 — 8 bytes
+
+    def _write_pxp_wave_record(ibw_bytes: bytes) -> bytes:
+        """Wrap full IBW bytes (including version prefix) in a PXP WaveRecord."""
+        header = struct.pack(
+            _PXP_RECORD_HEADER_FMT,
+            _PXP_WAVE_RECORD_TYPE,
+            0,
+            len(ibw_bytes),
+        )
+        return header + ibw_bytes
+
+Add export function:
+
+    def export_igor2_pxp(
+        output_path: str | pathlib.Path,
+        stim_arrays: dict[str, "StimArray"],
+        *,
+        array_names: list[str] | None = None,
+    ) -> Igor2PxpExport:
+        """Export selected stim arrays to an Igor2 Packed Experiment (.pxp) file.
+
+        array_names: ordered list of StimArray names to export; defaults to all.
+        Inhibitory arrays (StimType.Inhibition) are negated before export.
+        """
+        from neuroseq.stim import StimType  # avoid circular at module level
+
+        if array_names is None:
+            array_names = list(stim_arrays.keys())
+
+        # deduplicate wave names
+        used_names: set[str] = set()
+        final_wave_names: list[str] = []
+        pxp_data = bytearray()
+
+        for name in array_names:
+            stim_array = stim_arrays[name]
+            base = _sanitize_igor_wave_name(name)
+            wave_name = base
+            suffix = 2
+            while wave_name in used_names:
+                wave_name = f"{base}_{suffix}"[:31]
+                suffix += 1
+            used_names.add(wave_name)
+            final_wave_names.append(wave_name)
+
+            values = stim_array.values
+            # Export mean across neurons (1-D) as the wave — one column per neuron
+            # is not the IBW convention; instead we export each neuron as its own
+            # wave.  See NOTE below for the chosen convention.
+
+            # Negate inhibitory arrays
+            if stim_array.stim_type == StimType.Inhibition:
+                values = -values
+
+            # Write one wave per neuron
+            n_neurons = int(values.shape[1])
+            for neuron_idx in range(n_neurons):
+                col_values = np.asarray(values[:, neuron_idx], dtype=np.float32)
+                neuron_wave_name = f"{wave_name}_n{neuron_idx}"[:31]
+                # re-deduplicate neuron-suffixed names
+                actual_neuron_name = neuron_wave_name
+                nsfx = 2
+                while actual_neuron_name in used_names:
+                    actual_neuron_name = f"{wave_name}_n{neuron_idx}_{nsfx}"[:31]
+                    nsfx += 1
+                used_names.add(actual_neuron_name)
+
+                ibw_bytes = _write_ibw_v5(
+                    col_values,
+                    wave_name=actual_neuron_name,
+                    dt=float(stim_array.dt),
+                    data_units=str(stim_array.units),
+                    x_units="s",
+                )
+                pxp_data += _write_pxp_wave_record(ibw_bytes)
+
+        path = pathlib.Path(output_path)
+        path.write_bytes(bytes(pxp_data))
+        return Igor2PxpExport(path=path, wave_names=final_wave_names)
+
+NOTE ON WAVE LAYOUT:
+Each stim array column (neuron) is stored as a separate 1-D wave named
+<array_name>_n0, <array_name>_n1, etc.  This is the most natural mapping for
+IgorPro where electrophysiology sweeps are individual 1-D waves.
+
+── B. Igor2PxpStimExportDialog (new file: src/neuroseq/igor2_pxp_stim_export_dialog.py) ──
+
+A minimal dialog that:
+  - Shows a QListWidget with checkboxes for each stim array in the project
+  - Pre-checks all arrays
+  - Shows the StimType next to each name so the user knows which will be negated
+  - Has OK / Cancel buttons
+
+    from __future__ import annotations
+    from qtpy import QtWidgets
+    from neuroseq.project import Project
+    from neuroseq.stim import StimType
+
+    class Igor2PxpStimExportDialog(QtWidgets.QDialog):
+        def __init__(self, project: Project, parent: QtWidgets.QWidget | None = None):
+            super().__init__(parent)
+            self.setWindowTitle("Export stim arrays to Igor2 PXP")
+            self._project = project
+            layout = QtWidgets.QVBoxLayout(self)
+
+            layout.addWidget(QtWidgets.QLabel(
+                "Select stim arrays to export.\n"
+                "Inhibitory arrays will be negated (values × −1)."
+            ))
+
+            self._list = QtWidgets.QListWidget()
+            for name, sa in project.stim_arrays.items():
+                negate_note = " [negated]" if sa.stim_type == StimType.Inhibition else ""
+                item = QtWidgets.QListWidgetItem(f"{name}{negate_note}")
+                item.setData(QtCore.Qt.ItemDataRole.UserRole, name)
+                item.setCheckState(QtCore.Qt.CheckState.Checked)
+                self._list.addItem(item)
+            layout.addWidget(self._list)
+
+            btns = QtWidgets.QDialogButtonBox(
+                QtWidgets.QDialogButtonBox.StandardButton.Ok
+                | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+            )
+            btns.accepted.connect(self.accept)
+            btns.rejected.connect(self.reject)
+            layout.addWidget(btns)
+
+        @property
+        def selected_array_names(self) -> list[str]:
+            result = []
+            for i in range(self._list.count()):
+                item = self._list.item(i)
+                if item.checkState() == QtCore.Qt.CheckState.Checked:
+                    result.append(item.data(QtCore.Qt.ItemDataRole.UserRole))
+            return result
+
+    Remember to add `from qtpy import QtCore` to imports.
+
+── C. gui.py — add handler and wire up pre-dialog ──────────────────────
+
+1. Add imports near existing igor2 imports (lines 31–35):
+     from neuroseq.exporter_igor2 import export_igor2_pxp
+     from neuroseq.igor2_pxp_stim_export_dialog import Igor2PxpStimExportDialog
+
+2. Add new handler (insert after btn_export_igor2_patchclamp_stim_clicked, ~line 425):
+
+     def btn_export_igor2_pxp_stim_clicked(self) -> None:
+         if not self.project.stim_arrays:
+             QtWidgets.QMessageBox.information(
+                 self,
+                 "No stimulation entities",
+                 "No stimulation data entities available. Create one before exporting.",
+             )
+             return
+
+         dialog = Igor2PxpStimExportDialog(self.project, parent=self)
+         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+             return
+
+         selected = dialog.selected_array_names
+         if not selected:
+             QtWidgets.QMessageBox.warning(
+                 self, "Nothing selected", "No stim arrays were selected for export."
+             )
+             return
+
+         filename, _ = getsavefilename(
+             self,
+             "Export Igor2 Packed Experiment",
+             "stim_arrays.pxp",
+             "Igor Packed Experiment (*.pxp)",
+         )
+         if filename == "":
+             return
+
+         output_path = pathlib.Path(filename)
+         if output_path.suffix.lower() != ".pxp":
+             output_path = output_path.with_suffix(".pxp")
+
+         try:
+             export_report = export_igor2_pxp(
+                 output_path,
+                 self.project.stim_arrays,
+                 array_names=selected,
+             )
+         except Exception as e:
+             QtWidgets.QMessageBox.critical(
+                 self, "Export error", f"PXP export failed:\n{e}"
+             )
+             return
+
+         QtWidgets.QMessageBox.information(
+             self,
+             "Export complete",
+             f"Exported {len(export_report.wave_names)} wave(s) to:\n{export_report.path}",
+         )
+
+3. In btn_export_patch_clamp_stim_clicked (~line 1072), add "PXP (all arrays)" to
+   the software list and dispatch:
+
+     software, ok = QtWidgets.QInputDialog.getItem(
+         self,
+         "Export patch clamp stimulus",
+         "Export for:",
+         ["Igor2 — single array (.ibw / .csv)", "Igor2 — all arrays (.pxp)"],
+         0,
+         False,
+     )
+     if not ok:
+         return
+     if software.startswith("Igor2 — single"):
+         self.btn_export_igor2_patchclamp_stim_clicked()
+     elif software.startswith("Igor2 — all"):
+         self.btn_export_igor2_pxp_stim_clicked()
+
+TESTS (tests/test_exporter_igor2.py)
+
+Add a test class TestExportIgor2Pxp:
+
+    def test_pxp_roundtrip_single_array(tmp_path):
+        """PXP with one excitatory array round-trips correctly."""
+        import igor2.packed as pkg
+        stim = StimArray(values=np.array([[1.0, 2.0], [3.0, 4.0]]), dt=0.001,
+                         units="pA", stim_type=StimType.Excitation, name="Exc")
+        out = tmp_path / "test.pxp"
+        report = export_igor2_pxp(out, {"Exc": stim})
+        assert out.exists()
+        records, _ = pkg.load(out)
+        wave_names = [list(r.wave['wave']['wave_header']['bname']) for r in records
+                      if hasattr(r, 'wave')]
+        # two waves: Exc_n0, Exc_n1
+        assert len(records) == 2
+
+    def test_pxp_inhibitory_negated(tmp_path):
+        """Inhibitory stim array values are negated in the exported waves."""
+        import igor2.packed as pkg
+        vals = np.array([[1.0], [2.0], [3.0]])
+        stim = StimArray(values=vals, dt=0.001, units="1",
+                         stim_type=StimType.Inhibition, name="Inh")
+        out = tmp_path / "inh.pxp"
+        export_igor2_pxp(out, {"Inh": stim})
+        records, _ = pkg.load(out)
+        wave_data = records[0].wave['wave']['wData']
+        assert np.allclose(wave_data, [-1.0, -2.0, -3.0])
+
+    def test_pxp_multi_array(tmp_path):
+        """PXP with multiple arrays writes one wave per neuron per array."""
+        import igor2.packed as pkg
+        exc = StimArray(values=np.ones((10, 3)), dt=0.001, units="pA",
+                        stim_type=StimType.Excitation, name="Exc")
+        inh = StimArray(values=np.ones((10, 2)), dt=0.001, units="1",
+                        stim_type=StimType.Inhibition, name="Inh")
+        out = tmp_path / "multi.pxp"
+        export_igor2_pxp(out, {"Exc": exc, "Inh": inh})
+        records, _ = pkg.load(out)
+        assert len(records) == 5  # 3 + 2
+
+    def test_pxp_external_not_negated(tmp_path):
+        """External stim arrays are exported as-is (not negated)."""
+        import igor2.packed as pkg
+        vals = np.array([[-1.0], [2.0]])
+        stim = StimArray(values=vals, dt=0.001, units="pA",
+                         stim_type=StimType.External, name="Ext")
+        out = tmp_path / "ext.pxp"
+        export_igor2_pxp(out, {"Ext": stim})
+        records, _ = pkg.load(out)
+        wave_data = records[0].wave['wave']['wData']
+        assert np.allclose(wave_data, [-1.0, 2.0])
+
+VERIFICATION
+  ruff check src/neuroseq/exporter_igor2.py src/neuroseq/igor2_pxp_stim_export_dialog.py src/neuroseq/gui.py src/neuroseq/stim_widget.py
+  mypy --ignore-missing-imports src/neuroseq/exporter_igor2.py src/neuroseq/igor2_pxp_stim_export_dialog.py src/neuroseq/gui.py src/neuroseq/stim_widget.py
+  PYTHONPATH=src .venv/bin/pytest tests/test_exporter_igor2.py tests/test_stim_widget.py tests/test_gui.py -v

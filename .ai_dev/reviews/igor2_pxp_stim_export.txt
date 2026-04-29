@@ -1,0 +1,45 @@
+REVIEW: igor2_pxp_stim_export
+==============================
+Result: APPROVED
+
+Both tasks from the handoff are correctly implemented.  543 tests pass.
+
+── Task 1 — Hover fix ──────────────────────────────────────────────────────
+
+Correct.  `_background_stim_arrays` is initialised in `__init__`, populated in
+`set_background_data()`, reset in the new `clear_data()` override (before
+`super().clear_data()`), and scanned in `pointer_move()`.  The "highest abs"
+selection logic matches the spec exactly.  dt_ms is stored per background array
+so different-dt arrays are handled correctly.
+
+Test `test_stim_widget_hover_uses_background_values_in_show_all_mode` exercises
+the whole path with a monkeypatched `set_pos` — asserts "-4.5 pA" is displayed
+when the background array has a non-zero value and the foreground is zero.
+`test_stim_widget_clear_data_resets_background_stim_arrays` confirms cleanup.
+
+One minor note: `set_background_data()` stores a direct reference to
+`stim_array.values` (not a copy).  In practice this is safe because
+`StimArray.values` is replaced on update, never mutated in place.
+
+── Task 2 — PXP export ─────────────────────────────────────────────────────
+
+Correct.  Codex added a dedicated `_deduplicate_igor_wave_name()` helper (not
+in the handoff spec) that correctly handles the 31-char limit when appending
+suffix digits — an improvement over the inline approach from the handoff.
+
+`export_igor2_pxp()` negates Inhibition arrays, writes one wave per neuron
+column, uses the deduplication helper, and wraps each IBW payload in a
+`_write_pxp_wave_record()` record (type=3, version=0, numDataBytes=len(ibw)).
+The `Igor2PxpExport` dataclass and `_PXP_WAVE_RECORD_TYPE / _PXP_RECORD_HEADER_FMT`
+constants are clean additions.
+
+`Igor2PxpStimExportDialog` is minimal and correct: checkboxes pre-checked,
+UserRole stores the raw array name, `selected_array_names` guards against
+`item is None`.
+
+GUI wiring is correct: pre-dialog now lists "Igor2 - single array (.ibw / .csv)"
+and "Igor2 - all arrays (.pxp)"; dispatch uses `startswith` matching.
+
+Five tests cover round-trip, inhibitory negation, multi-array wave count,
+external-not-negated, and long-name deduplication — all with real igor2.packed
+round-trips.

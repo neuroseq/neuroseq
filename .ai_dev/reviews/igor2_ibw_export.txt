@@ -1,0 +1,84 @@
+REVIEW: Igor2 .ibw export
+========================
+Branch: import_igor2
+Repo:   /mnt/live3/svintila/neuroseq
+Date:   2026-04-21
+Reviewed against handoff: .ai_dev/handoffs/igor2_ibw_export.txt
+
+
+STATUS
+------
+Functionally complete — all 532 tests pass, ruff clean, mypy clean.
+
+    tests/test_exporter_igor2.py   10 tests (7 pre-existing + 3 new IBW tests)
+    tests/test_gui.py              1 new integration test
+
+Changed files verified:
+  src/neuroseq/exporter_igor2.py   — _write_ibw_v5, _sanitize_igor_wave_name,
+                                     export_igor2_patchclamp_ibw, format constants
+  src/neuroseq/gui.py              — btn_export_igor2_patchclamp_stim_clicked
+  tests/test_exporter_igor2.py
+  tests/test_gui.py
+
+
+WHAT WORKS
+----------
+
+1. Binary format
+   - `_write_ibw_v5` correctly prepends the 2-byte IBW version field (int16 = 5)
+     before BinHeader5.  The igor2 library's DynamicVersionField reads this first
+     int16 at offset 0 to select the v5 parser — without it the file would be
+     rejected as an unknown format.  The handoff omitted this prefix; Codex
+     correctly inferred it from the igor2 struct definitions.
+   - BinHeader5 (62 bytes) and WaveHeader5 (320 bytes) sizes are asserted at
+     module level (lines 68–69) so a layout regression fails loudly on import.
+   - `sfA[0]` = dt, `sfB[0]` = 0.0, `nDim[0]` = n_samples, `type` = NT_FP32 (2).
+   - `dataUnits` and `dimUnits[0]` correctly carry the Y-axis and X-axis unit
+     strings, null-padded to their respective field widths.
+   - `data = np.asarray(values, dtype="<f4")` — explicitly little-endian float32,
+     correct for IBW.
+
+2. Checksum
+   - The checksum is computed over `version_bytes + bin_header + wave_header`,
+     i.e. including the 2-byte version prefix in the sum.  The round-trip test
+     (write → `binarywave.load`) passes, confirming igor2 accepts this.
+
+3. Wave name sanitisation
+   - `_sanitize_igor_wave_name` handles spaces, special chars, leading digits,
+     and long names.  Four targeted unit tests cover these cases.
+
+4. GUI wiring
+   - File-save filter is now `"Igor Binary Wave (*.ibw);;CSV file (*.csv)"` with
+     `.ibw` as the default suggestion.
+   - Dispatch on extension is correct; CSV path is preserved unchanged.
+   - The existing `test_gui_export_igor2_patchclamp_stim` (CSV path) continues
+     to pass.
+
+5. Round-trip test
+   - `test_write_ibw_v5_round_trips_via_binarywave_load` writes a real .ibw file
+     and loads it back with the unpatched `binarywave.load`.  Checks wData,
+     sfA[0], bname, and dataUnits.  This is the definitive correctness test.
+
+
+SHOULD-FIX (non-blocking)
+--------------------------
+
+1. src/neuroseq/gui.py:356 — error message still mentions "CSV":
+
+       "No stimulation data entities available. Create one before exporting to
+        Igor2 patch clamp CSV."
+
+   Now that .ibw is the primary format the word "CSV" is misleading.  Change to:
+
+       "No stimulation data entities available. Create one before exporting."
+
+
+2. src/neuroseq/exporter_igor2.py:103 — `version_bytes` has no comment.
+
+   The version prefix is not part of BinHeader5; it is the top-level IBW frame
+   field that the igor2 parser reads at offset 0 to select the v5 decoder.
+   A reader of `_write_ibw_v5` won't understand why it is there.  Add:
+
+       # IBW files begin with a top-level int16 version selector (here: 5).
+       # igor2's DynamicVersionField reads this before dispatching to Wave5.
+       version_bytes = struct.pack("<h", 5)

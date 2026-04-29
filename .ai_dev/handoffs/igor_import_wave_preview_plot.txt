@@ -1,0 +1,144 @@
+igor_import_wave_preview_plot — Matplotlib waveform preview in Igor2 import dialogs [IMPLEMENTED]
+=====================================================================================
+
+Add a matplotlib line plot of the selected wave's values to the "Wave Preview" section
+of both Igor2 import dialogs.  The plot updates whenever a wave is selected (from a
+.pxp list or from a direct .ibw/.csv load) and is cleared when no wave is loaded.
+
+Applies to TWO files that are near-identical in structure:
+  src/neuroseq/igor_import_dialog.py      (stim import — IgorImportDialog)
+  src/neuroseq/igor_trace_import_dialog.py (trace import — IgorTraceImportDialog)
+
+Make the same changes to both files.
+
+────────────────────────────────────────────────────────────────────────────────────
+APPROACH
+────────────────────────────────────────────────────────────────────────────────────
+
+Use `pyqtgraph.widgets.MatplotlibWidget.MatplotlibWidget` — already used in
+`src/neuroseq/custom_analysis_widget.py` (see line 7 and 38–47 there for usage
+pattern):
+
+    from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
+    widget = MatplotlibWidget()
+    fig = widget.getFigure()
+    ax = fig.add_subplot(111)
+    ax.plot(t, values)
+    widget.draw()
+
+────────────────────────────────────────────────────────────────────────────────────
+CHANGES — same in both dialogs
+────────────────────────────────────────────────────────────────────────────────────
+
+1.  ADD IMPORT at the top of each file:
+
+        from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
+
+2.  IN _setup_ui() — modify the "Wave Preview" QGroupBox block.
+    Currently:
+        preview_group = QtWidgets.QGroupBox("Wave Preview")
+        preview_layout = QtWidgets.QVBoxLayout(preview_group)
+        self.preview_text = QtWidgets.QPlainTextEdit()
+        self.preview_text.setReadOnly(True)
+        self.preview_text.setPlaceholderText("Preview appears here after selecting an Igor wave.")
+        preview_layout.addWidget(self.preview_text)
+        layout.addWidget(preview_group)
+
+    Change to:
+        preview_group = QtWidgets.QGroupBox("Wave Preview")
+        preview_layout = QtWidgets.QVBoxLayout(preview_group)
+        self.preview_text = QtWidgets.QPlainTextEdit()
+        self.preview_text.setReadOnly(True)
+        self.preview_text.setMaximumHeight(120)
+        self.preview_text.setPlaceholderText("Preview appears here after selecting an Igor wave.")
+        preview_layout.addWidget(self.preview_text)
+        self.wave_plot = MatplotlibWidget()
+        self.wave_plot.setMinimumHeight(200)
+        self.wave_plot.setMaximumHeight(260)
+        self.wave_plot.setVisible(False)
+        preview_layout.addWidget(self.wave_plot)
+        layout.addWidget(preview_group)
+
+3.  ADD METHOD _update_wave_plot() to each dialog class:
+
+        def _update_wave_plot(self, wave: IgorWave | None) -> None:
+            if wave is None:
+                self.wave_plot.setVisible(False)
+                return
+            source_dt = float(self.source_dt_spin.value())
+            values = np.asarray(wave.values, dtype=float).ravel()
+            # Downsample for display only — don't modify the wave
+            max_display_pts = 4000
+            step = max(1, len(values) // max_display_pts)
+            t = np.arange(0, len(values), step) * source_dt
+            y = values[::step]
+            fig = self.wave_plot.getFigure()
+            fig.clf()
+            ax = fig.add_subplot(111)
+            ax.plot(t, y, linewidth=0.8, color="#1f77b4")
+            ax.set_xlabel("Time (s)", fontsize=8)
+            units_label = wave.units or "a.u."
+            ax.set_ylabel(units_label, fontsize=8)
+            ax.set_title(wave.name, fontsize=9)
+            ax.tick_params(labelsize=7)
+            fig.tight_layout(pad=0.5)
+            self.wave_plot.setVisible(True)
+            self.wave_plot.draw()
+
+4.  IN _update_preview() — add call to _update_wave_plot at the top:
+    In each dialog's `_update_preview` method, at the very start (before the early
+    return for `loaded_wave is None`), add:
+
+        self._update_wave_plot(self.loaded_wave)
+
+    This ensures the plot is always consistent with the loaded wave, including the
+    "no wave" state.
+
+────────────────────────────────────────────────────────────────────────────────────
+DETAILS
+────────────────────────────────────────────────────────────────────────────────────
+
+- `wave.values` is a 1-D numpy array (already guaranteed by IgorWave).
+- Downsampling is display-only (pure numpy slice — wave data is never modified).
+- `max_display_pts = 4000` keeps rendering fast even for 100k-sample traces.
+- `fig.clf()` clears the previous plot on each wave selection.
+- `self.wave_plot.setVisible(False)` when no wave is loaded keeps the dialog compact.
+- Use `setMaximumHeight(120)` on `preview_text` to prevent the text block from
+  growing too tall now that it shares space with the plot.
+- The `MatplotlibWidget` is hidden by default (`setVisible(False)`) and shown only
+  when `_update_wave_plot` is called with a valid wave.  This keeps the dialog height
+  the same as before until a wave is loaded.
+
+────────────────────────────────────────────────────────────────────────────────────
+TESTS
+────────────────────────────────────────────────────────────────────────────────────
+
+Extend tests/test_gui.py or create tests/test_igor_import_dialog.py:
+
+    def test_igor_import_dialog_wave_plot_hidden_initially(qtbot, project):
+        dlg = IgorImportDialog(project)
+        qtbot.addWidget(dlg)
+        assert not dlg.wave_plot.isVisible()
+
+    def test_igor_import_dialog_wave_plot_shown_after_wave_load(qtbot, project, tmp_path):
+        # write a minimal .ibw file and load it
+        from neuroseq.exporter_igor2 import _write_ibw_v5
+        ibw = _write_ibw_v5(np.array([0.0, 1.0, 0.0], dtype="<f4"),
+                             wave_name="test", dt=0.001)
+        path = tmp_path / "test.ibw"
+        path.write_bytes(ibw)
+        dlg = IgorImportDialog(project)
+        qtbot.addWidget(dlg)
+        dlg._load_file(str(path))
+        assert dlg.wave_plot.isVisible()
+
+Apply the same two tests to IgorTraceImportDialog.
+
+────────────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────────────
+
+    ruff check src/neuroseq/igor_import_dialog.py src/neuroseq/igor_trace_import_dialog.py
+    mypy --ignore-missing-imports src/neuroseq/igor_import_dialog.py src/neuroseq/igor_trace_import_dialog.py
+    PYTHONPATH=src .venv/bin/python -m pytest tests/ -v -k "igor_import"
+    PYTHONPATH=src .venv/bin/python -m pytest

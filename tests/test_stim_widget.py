@@ -158,6 +158,83 @@ def test_stim_widget_background_stims_use_their_own_dt(qtbot: QtBot) -> None:
     qtbot.waitUntil(lambda: not stim_widget.isVisible())
 
 
+def test_stim_widget_hover_uses_background_values_in_show_all_mode(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    stim_widget.show()
+    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    foreground = StimArray(
+        "foreground",
+        StimType.Excitation,
+        np.zeros((5, 3), dtype=float),
+        "pA",
+        dt=0.001,
+    )
+    background_values = np.zeros((5, 3), dtype=float)
+    background_values[2, 1] = 4.5  # inhibitory arrays store positive magnitudes
+    background = StimArray(
+        "background",
+        StimType.Inhibition,
+        background_values,
+        "pA",
+        dt=0.001,
+    )
+
+    stim_widget.set_data(foreground)
+    stim_widget.set_background_data(background)
+    captured: dict[str, str] = {}
+
+    def capture_text(pos: np.ndarray, additional_text: str) -> None:
+        captured["additional_text"] = additional_text
+
+    monkeypatch.setattr(stim_widget.text, "set_pos", capture_text)
+    monkeypatch.setattr(
+        stim_widget.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([2.0, 1.0, 0.0]),
+    )
+
+    stim_widget.pointer_move(None)
+
+    assert len(stim_widget._background_stim_arrays) == 1
+    assert captured["additional_text"] == "-4.5 pA"
+    stim_widget.close()
+    qtbot.waitUntil(lambda: not stim_widget.isVisible())
+
+
+def test_stim_widget_clear_data_resets_background_stim_arrays(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    stim_widget.show()
+    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    foreground = StimArray(
+        "foreground",
+        StimType.Excitation,
+        np.zeros((5, 3), dtype=float),
+        "pA",
+        dt=0.001,
+    )
+    background = StimArray(
+        "background",
+        StimType.Inhibition,
+        np.ones((5, 3), dtype=float),
+        "pA",
+        dt=0.001,
+    )
+
+    stim_widget.set_data(foreground)
+    stim_widget.set_background_data(background)
+    stim_widget.clear_data()
+
+    assert stim_widget._background_stim_arrays == []
+    stim_widget.close()
+    qtbot.waitUntil(lambda: not stim_widget.isVisible())
+
+
 def test_stim_widget_gridlines_follow_stim_dt(qtbot: QtBot) -> None:
     controller = ConstrainedPanZoomController()
     stim_widget = StimWidget(controller)

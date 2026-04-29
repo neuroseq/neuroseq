@@ -3,11 +3,14 @@ from __future__ import annotations
 import csv
 import io
 import pathlib
+import re
+import struct
 from dataclasses import dataclass
 
 import brian2.numpy_ as np
 
 from neuroseq.stim import StimArray
+from neuroseq.stim import StimType
 
 
 @dataclass(frozen=True)
@@ -15,6 +18,178 @@ class Igor2PatchClampExport:
     experiment_name: str
     neuron_index: int
     sample_count: int
+
+
+@dataclass(frozen=True)
+class Igor2PxpExport:
+    path: pathlib.Path
+    wave_names: list[str]
+
+
+_NT_FP32: int = 2
+_PXP_WAVE_RECORD_TYPE: int = 3
+
+_BIN_HEADER5_FMT: str = "<hllll4l4llll"
+_PXP_RECORD_HEADER_FMT: str = "<HhI"
+
+_WAVE_HEADER5_FMT: str = "<LLLlhh6sh32slL4l4d4d4s16shhddL4L4LL16lhhhBBLlhhLL"
+
+assert struct.calcsize(_BIN_HEADER5_FMT) == 62, "BinHeader5 layout wrong"
+assert struct.calcsize(_WAVE_HEADER5_FMT) == 320, "WaveHeader5 layout wrong"
+
+
+def _sanitize_igor_wave_name(name: str) -> str:
+    """Return a valid Igor wave name derived from *name*."""
+    sanitized = re.sub(r"[^A-Za-z0-9_]", "_", name.strip())
+    if not sanitized or not sanitized[0].isalpha():
+        sanitized = f"w{sanitized}"
+    return sanitized[:31]
+
+
+def _deduplicate_igor_wave_name(base_name: str, used_names: set[str]) -> str:
+    """Return a unique Igor wave name that respects the 31-character limit."""
+    candidate = _sanitize_igor_wave_name(base_name)
+    if candidate not in used_names:
+        used_names.add(candidate)
+        return candidate
+
+    suffix = 2
+    while True:
+        suffix_text = f"_{suffix}"
+        candidate = f"{_sanitize_igor_wave_name(base_name)[: 31 - len(suffix_text)]}{suffix_text}"
+        if candidate not in used_names:
+            used_names.add(candidate)
+            return candidate
+        suffix += 1
+
+
+def _write_ibw_v5(
+    values: np.ndarray,
+    *,
+    wave_name: str,
+    dt: float,
+    data_units: str = "",
+    x_units: str = "s",
+) -> bytes:
+    """Serialise a 1-D float32 array to Igor Binary Wave v5 bytes."""
+    data = np.asarray(values, dtype="<f4")
+    if data.ndim != 1:
+        raise ValueError("IBW export expects a 1-dimensional array")
+    if dt <= 0:
+        raise ValueError("Sample interval must be positive")
+
+    n = int(data.size)
+    data_bytes = data.tobytes()
+    wfm_size = struct.calcsize(_WAVE_HEADER5_FMT) + len(data_bytes)
+
+    def _encode_units(text: str, width: int) -> bytes:
+        encoded = text.encode("ascii", errors="replace")[: width - 1]
+        return encoded.ljust(width, b"\x00")
+
+    # IBW files begin with a top-level int16 version selector (here: 5).
+    # igor2's DynamicVersionField reads this before dispatching to Wave5.
+    version_bytes = struct.pack("<h", 5)
+    bname_bytes = wave_name.encode("ascii", errors="replace")[:31].ljust(32, b"\x00")
+    data_units_bytes = _encode_units(data_units, 4)
+    dim_units_bytes = _encode_units(x_units, 4).ljust(16, b"\x00")
+
+    wave_header_values = (
+        0,
+        0,
+        0,
+        n,
+        _NT_FP32,
+        0,
+        b"\x00" * 6,
+        1,
+        bname_bytes,
+        0,
+        0,
+        n,
+        0,
+        0,
+        0,
+        float(dt),
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        data_units_bytes,
+        dim_units_bytes,
+        0,
+        0,
+        0.0,
+        0.0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        *([0] * 16),
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    )
+    wave_header = struct.pack(_WAVE_HEADER5_FMT, *wave_header_values)
+
+    bin_header_values = (
+        0,
+        wfm_size,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    )
+    bin_header = struct.pack(_BIN_HEADER5_FMT, *bin_header_values)
+
+    checksum_buffer = version_bytes + bin_header + wave_header
+    short_count = len(checksum_buffer) // 2
+    short_sum = sum(struct.unpack(f"<{short_count}h", checksum_buffer))
+    checksum = struct.unpack("<h", struct.pack("<H", (-short_sum) % 65536))[0]
+
+    bin_header = struct.pack(
+        _BIN_HEADER5_FMT,
+        checksum,
+        *bin_header_values[1:],
+    )
+    return version_bytes + bin_header + wave_header + data_bytes
+
+
+def _write_pxp_wave_record(ibw_bytes: bytes) -> bytes:
+    """Wrap full IBW bytes (including version prefix) in a PXP WaveRecord."""
+    header = struct.pack(
+        _PXP_RECORD_HEADER_FMT,
+        _PXP_WAVE_RECORD_TYPE,
+        0,
+        len(ibw_bytes),
+    )
+    return header + ibw_bytes
 
 
 def generate_igor2_patchclamp_csv_text(
@@ -69,3 +244,89 @@ def export_igor2_patchclamp_csv(
         neuron_index=neuron_index,
         sample_count=int(stim_array.values.shape[0]),
     )
+
+
+def export_igor2_patchclamp_ibw(
+    output_path: str | pathlib.Path,
+    stim_array: StimArray,
+    *,
+    wave_name: str,
+    neuron_index: int,
+) -> Igor2PatchClampExport:
+    """Export one neuron column from *stim_array* as an Igor Binary Wave."""
+    if stim_array.values.ndim != 2:
+        raise ValueError(
+            "Stimulus export expects a 2D stim array with shape (time, neuron)."
+        )
+    n_neurons = int(stim_array.values.shape[1])
+    if n_neurons <= 0:
+        raise ValueError("Stimulus export requires at least one neuron.")
+    if neuron_index < 0 or neuron_index >= n_neurons:
+        raise ValueError(
+            f"Neuron index {neuron_index} is out of range for {n_neurons} neurons."
+        )
+
+    sanitized_name = _sanitize_igor_wave_name(wave_name)
+    values = np.asarray(stim_array.values[:, neuron_index], dtype=np.float32)
+    ibw_bytes = _write_ibw_v5(
+        values,
+        wave_name=sanitized_name,
+        dt=float(stim_array.dt),
+        data_units=str(stim_array.units),
+        x_units="s",
+    )
+
+    path = pathlib.Path(output_path)
+    path.write_bytes(ibw_bytes)
+    return Igor2PatchClampExport(
+        experiment_name=sanitized_name,
+        neuron_index=neuron_index,
+        sample_count=int(stim_array.values.shape[0]),
+    )
+
+
+def export_igor2_pxp(
+    output_path: str | pathlib.Path,
+    stim_arrays: dict[str, StimArray],
+    *,
+    array_names: list[str] | None = None,
+) -> Igor2PxpExport:
+    """Export selected stim arrays to an Igor2 Packed Experiment (.pxp) file."""
+    if array_names is None:
+        array_names = list(stim_arrays.keys())
+
+    used_names: set[str] = set()
+    exported_wave_names: list[str] = []
+    pxp_data = bytearray()
+
+    for name in array_names:
+        stim_array = stim_arrays[name]
+        if stim_array.values.ndim != 2:
+            raise ValueError(
+                "Stimulus export expects a 2D stim array with shape (time, neuron)."
+            )
+
+        values = stim_array.values
+        if stim_array.stim_type == StimType.Inhibition:
+            values = -values
+
+        base_wave_name = _sanitize_igor_wave_name(name)
+        n_neurons = int(values.shape[1])
+        for neuron_idx in range(n_neurons):
+            neuron_wave_name = _deduplicate_igor_wave_name(
+                f"{base_wave_name}_n{neuron_idx}",
+                used_names,
+            )
+            exported_wave_names.append(neuron_wave_name)
+            ibw_bytes = _write_ibw_v5(
+                np.asarray(values[:, neuron_idx], dtype=np.float32),
+                wave_name=neuron_wave_name,
+                dt=float(stim_array.dt),
+                data_units=str(stim_array.units),
+                x_units="s",
+            )
+            pxp_data += _write_pxp_wave_record(ibw_bytes)
+
+    path = pathlib.Path(output_path)
+    path.write_bytes(bytes(pxp_data))
+    return Igor2PxpExport(path=path, wave_names=exported_wave_names)

@@ -8,11 +8,14 @@ from typing import TYPE_CHECKING
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
+from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 from neuroseq.importer_syscon2 import SysconSequence
 from neuroseq.importer_syscon2 import get_timed_objects
 from neuroseq.importer_syscon2 import group_timed_objects_by_neuron_target
 from neuroseq.importer_syscon2 import import_sequence_into_stim_array
 from neuroseq.importer_syscon2 import parse_syscon2_seq_file
+from neuroseq.stim_timing import format_milliseconds
+from neuroseq.stim_timing import stim_dt_matches
 
 if TYPE_CHECKING:
     from neuroseq.project import Project
@@ -258,6 +261,25 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
         stim_array = self._selected_stim_array()
         if stim_array is None:
             return
+
+        target_dt = _SYSCON2_TTL_PULSE_QUANTUM_S
+        if not stim_dt_matches(target_dt, self.project.dt):
+            affected = self.project.remappable_data_description(target_dt)
+            if affected:
+                answer = QtWidgets.QMessageBox.question(
+                    self,
+                    "Change project sample interval",
+                    f"Importing at {format_milliseconds(target_dt * 1000.0)} ms "
+                    "will change the project sample interval from "
+                    f"{format_milliseconds(self.project.dt * 1000.0)} ms to "
+                    f"{format_milliseconds(target_dt * 1000.0)} ms and remap "
+                    f"{affected} using zero-order hold. Continue?",
+                    QtWidgets.QMessageBox.StandardButton.Yes
+                    | QtWidgets.QMessageBox.StandardButton.No,
+                )
+                if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                    return
+            self.project.remap_all_data_to_dt(target_dt)
 
         try:
             result = import_sequence_into_stim_array(

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import brian2.numpy_ as np
+from qtpy import QtWidgets
 
+from neuroseq.data import Experiment
+from neuroseq.data import TraceData
+from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 from neuroseq.importer_syscon2 import import_sequence_into_stim_array
 from neuroseq.importer_syscon2 import parse_syscon2_seq_file
 from neuroseq.importer_syscon2 import sequence_to_stim_values
@@ -1342,7 +1347,9 @@ def test_import_sequence_into_stim_array_extends_and_offsets(tmp_path: Path) -> 
     assert np.all(stim_array.values[:, 0] == 0)
 
 
-def test_syscon2_import_dialog_imports_into_project(tmp_path: Path, qtbot) -> None:
+def test_syscon2_import_dialog_imports_into_project(
+    tmp_path: Path, qtbot, monkeypatch
+) -> None:
     seq_path = tmp_path / "sample.seq"
     seq_path.write_text(_sample_seq_text(), encoding="utf-8")
 
@@ -1363,14 +1370,154 @@ def test_syscon2_import_dialog_imports_into_project(tmp_path: Path, qtbot) -> No
     dialog.replace_checkbox.setChecked(True)
     dialog.extend_checkbox.setChecked(True)
     dialog.tick_resolution_spin.setValue(500)
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Yes,
+    )
     dialog._import_file()
 
     stim_values = project.stim_arrays["stimulus"].values
-    assert stim_values.shape[0] >= 8
+    assert math.isclose(project.dt, _SYSCON2_TTL_PULSE_QUANTUM_S, abs_tol=1e-12)
+    assert math.isclose(
+        project.stim_arrays["stimulus"].dt,
+        _SYSCON2_TTL_PULSE_QUANTUM_S,
+        abs_tol=1e-12,
+    )
+    assert stim_values.shape[0] >= 14
     assert stim_values[0, 0] == 0.3
     assert stim_values[1, 0] == 0.3
-    assert stim_values[6, 1] == 0.8
-    assert stim_values[7, 1] == 0.8
+    assert stim_values[12, 1] == 0.8
+    assert stim_values[13, 1] == 0.8
+
+
+def test_syscon2_import_dialog_remaps_existing_trace_data(
+    tmp_path: Path, qtbot, monkeypatch
+) -> None:
+    seq_path = tmp_path / "sample.seq"
+    seq_path.write_text(_sample_seq_text(), encoding="utf-8")
+
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            name="stimulus",
+            stim_type=StimType.Excitation,
+            values=np.zeros((5, 3), dtype=np.float32),
+            units="1",
+            dt=0.001,
+        )
+    )
+    trace_data = TraceData(
+        name="trace",
+        traces=np.array([[1.0, 2.0, 3.0]], dtype=np.float32),
+        indices=np.array([0], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    project.experiments["exp"] = Experiment(
+        name="exp",
+        duration=0.003,
+        timepoints=[0.003],
+        data=[trace_data],
+    )
+    project.update_limits()
+
+    question_calls = {"count": 0}
+
+    def _question(*args, **kwargs):
+        question_calls["count"] += 1
+        return QtWidgets.QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "question", _question)
+
+    dialog = Syscon2ImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(seq_path))
+    dialog.tick_resolution_spin.setValue(500)
+    dialog._import_file()
+
+    assert question_calls["count"] == 1
+    assert math.isclose(project.dt, _SYSCON2_TTL_PULSE_QUANTUM_S, abs_tol=1e-12)
+    assert math.isclose(trace_data.dt, _SYSCON2_TTL_PULSE_QUANTUM_S, abs_tol=1e-12)
+    assert trace_data.traces.shape == (1, 6)
+    np.testing.assert_allclose(
+        trace_data.traces[0],
+        np.array([1.0, 1.0, 2.0, 2.0, 3.0, 3.0], dtype=np.float32),
+    )
+
+
+def test_syscon2_import_dialog_skips_remap_prompt_when_dt_matches(
+    tmp_path: Path, qtbot, monkeypatch
+) -> None:
+    seq_path = tmp_path / "sample.seq"
+    seq_path.write_text(_sample_seq_text(), encoding="utf-8")
+
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            name="stimulus",
+            stim_type=StimType.Excitation,
+            values=np.zeros((5, 3), dtype=np.float32),
+            units="1",
+            dt=_SYSCON2_TTL_PULSE_QUANTUM_S,
+        )
+    )
+    project.dt = _SYSCON2_TTL_PULSE_QUANTUM_S
+
+    question_calls = {"count": 0}
+
+    def _question(*args, **kwargs):
+        question_calls["count"] += 1
+        return QtWidgets.QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "question", _question)
+
+    dialog = Syscon2ImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(seq_path))
+    dialog.tick_resolution_spin.setValue(500)
+    dialog._import_file()
+
+    assert question_calls["count"] == 0
+    assert math.isclose(project.dt, _SYSCON2_TTL_PULSE_QUANTUM_S, abs_tol=1e-12)
+
+
+def test_syscon2_import_dialog_aborts_when_user_declines_remap(
+    tmp_path: Path, qtbot, monkeypatch
+) -> None:
+    seq_path = tmp_path / "sample.seq"
+    seq_path.write_text(_sample_seq_text(), encoding="utf-8")
+
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            name="stimulus",
+            stim_type=StimType.Excitation,
+            values=np.zeros((5, 3), dtype=np.float32),
+            units="1",
+            dt=0.001,
+        )
+    )
+    original_values = project.stim_arrays["stimulus"].values.copy()
+
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.No,
+    )
+
+    dialog = Syscon2ImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(seq_path))
+    dialog.tick_resolution_spin.setValue(500)
+    dialog._import_file()
+
+    assert math.isclose(project.dt, 0.001, abs_tol=1e-12)
+    np.testing.assert_array_equal(
+        project.stim_arrays["stimulus"].values,
+        original_values,
+    )
+    assert dialog.result() != QtWidgets.QDialog.DialogCode.Accepted
 
 
 def test_syscon2_import_dialog_updates_generator_template_from_loaded_file(
