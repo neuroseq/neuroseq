@@ -533,10 +533,19 @@ class Gui(QtWidgets.QMainWindow):
         self.update_project(project, reset_controller=True)
 
     def _update_window_title(self) -> None:
+        title_context: str | None = None
+        if self.project is not None:
+            if self.project.project_section and self.project.project_name:
+                title_context = (
+                    f"{self.project.project_section} / {self.project.project_name}"
+                )
+            else:
+                title_context = self.project.b2_model.name
+        model_suffix = f" [{title_context}]" if title_context else ""
         if self.project.filepath is not None:
-            self.setWindowTitle(f"{self.project.filepath} - Neuroseq")
+            self.setWindowTitle(f"{self.project.filepath}{model_suffix} - Neuroseq")
         else:
-            self.setWindowTitle("Neuroseq")
+            self.setWindowTitle(f"Neuroseq{model_suffix}")
 
     @with_wait_cursor
     def update_project(self, project: Project, reset_controller=False) -> None:

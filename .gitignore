@@ -140,3 +140,4 @@ dmypy.json
 # AI tool internal files
 .claude/
 .codex
+uv.lock

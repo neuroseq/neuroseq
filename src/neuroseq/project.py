@@ -86,6 +86,8 @@ class Project:
     ) -> None:
         self.filepath = None
         self.b2_model: B2Model = B2Model()
+        self.project_name: str | None = None
+        self.project_section: str | None = None
         self.experiments: dict[str, Experiment] = {}
         self.stim_arrays: dict[str, StimArray] = {}
         self.cellpose_data: CellposeImportResult | None = None
