@@ -31,7 +31,7 @@ class TraceNormDialog(QtWidgets.QDialog):
         )
         self.layout.addWidget(self.label_norm)
         self.slider_norm = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal, self)
-        self.slider_norm.setRange(100, 10000)
+        self.slider_norm.setRange(50, 1000)
         self.slider_norm.setValue(self.trace_norm_percent)
         self.slider_norm.valueChanged.connect(self.update_norm_input)
         self.layout.addWidget(self.slider_norm)
