@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import logging
 import pathlib
 import runpy
@@ -253,7 +254,12 @@ class Gui(QtWidgets.QMainWindow):
         self.progress_dialog.setValue(completed_percent)
 
     def btn_new_clicked(self) -> None:
+        gc.collect()
         self.load_project(default_project())
+
+    def _load_example_project(self, generator: Callable[[], Project]) -> None:
+        gc.collect()
+        self.load_project(generator())
 
     def btn_open_clicked(self) -> None:
         filename, _ = getopenfilename(
@@ -545,7 +551,7 @@ class Gui(QtWidgets.QMainWindow):
         if self.project.filepath is not None:
             self.setWindowTitle(f"{self.project.filepath}{model_suffix} - Neuroseq")
         else:
-            self.setWindowTitle(f"Neuroseq{model_suffix}")
+            self.setWindowTitle(f"{model_suffix} - Neuroseq")
 
     @with_wait_cursor
     def update_project(self, project: Project, reset_controller=False) -> None:
@@ -1432,9 +1438,8 @@ class Gui(QtWidgets.QMainWindow):
             for name, generator in section_projects.items():
                 action = add_action(
                     name,
-                    lambda checked=False, _generator=generator: self.load_project(
-                        _generator()
-                    ),
+                    lambda checked=False,
+                    _generator=generator: self._load_example_project(_generator),
                     section_menu,
                     None,
                 )
