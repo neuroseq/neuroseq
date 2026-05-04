@@ -13,3 +13,7 @@ pytest
 ```bash
 pytest tests/test_gui.py
 ```
+
+## Pre-commit
+
+pre-commit run --all-files
