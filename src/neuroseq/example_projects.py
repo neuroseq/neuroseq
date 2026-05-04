@@ -676,7 +676,9 @@ def hh_neuron_with_synapses() -> Project:
     return project
 
 
-@register_example_project("Network of Hodgkin-Huxley Neurons with Predefined Synapses")
+@register_example_project(
+    "Network of Hodgkin-Huxley Neurons with Predefined Synapses", section="Network"
+)
 def hh_neuron_with_synthetic_synapses() -> Project:
     project = Project()
 
