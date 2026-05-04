@@ -373,6 +373,51 @@ def test_gui_new(tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot) -> None
     gui.close()
 
 
+def test_btn_new_clicked_calls_gc_collect(monkeypatch: MonkeyPatch) -> None:
+    collect_calls = [0]
+    sentinel_project = Project()
+    loaded_project: list[Project] = []
+
+    monkeypatch.setattr(
+        "neuroseq.gui.gc.collect",
+        lambda: collect_calls.__setitem__(0, collect_calls[0] + 1),
+    )
+    monkeypatch.setattr("neuroseq.gui.default_project", lambda: sentinel_project)
+
+    fake_gui: Any = SimpleNamespace(
+        load_project=lambda project: loaded_project.append(project)
+    )
+    Gui.btn_new_clicked(fake_gui)
+
+    assert collect_calls[0] == 1
+    assert loaded_project == [sentinel_project]
+
+
+def test_load_example_project_calls_gc_collect(monkeypatch: MonkeyPatch) -> None:
+    collect_calls = [0]
+    generator_calls = [0]
+    sentinel_project = Project()
+    loaded_project: list[Project] = []
+
+    monkeypatch.setattr(
+        "neuroseq.gui.gc.collect",
+        lambda: collect_calls.__setitem__(0, collect_calls[0] + 1),
+    )
+
+    def generator() -> Project:
+        generator_calls[0] += 1
+        return sentinel_project
+
+    fake_gui: Any = SimpleNamespace(
+        load_project=lambda project: loaded_project.append(project)
+    )
+    Gui._load_example_project(fake_gui, generator)
+
+    assert collect_calls[0] == 1
+    assert generator_calls[0] == 1
+    assert loaded_project == [sentinel_project]
+
+
 def test_gui_open(
     monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_path: Path, test_project: Project
 ) -> None:
