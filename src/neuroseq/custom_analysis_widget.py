@@ -17,6 +17,7 @@ from neuroseq.pretty_print_enum import PrettyPrintEnum
 class CustomAnalysisType(PrettyPrintEnum):
     Histogram = "mdi6.chart-histogram"
     Histogram2d = "mdi6.data-matrix"
+    SpikeCountPerNeuron = "mdi6.chart-bar"
 
 
 class CustomAnalysisWindow(QtWidgets.QWidget):
@@ -139,6 +140,37 @@ class CustomAnalysisWidget(MatplotlibWidget):
                 self.subplot.set_ylabel("Neurons")
             self.subplot.hist2d(x, y, bins=30, density=True)
             self.subplot.set_xlabel("Time")
+        elif analysis_type == CustomAnalysisType.SpikeCountPerNeuron:
+            if isinstance(data, SpikeData):
+                # Count spikes per neuron with custom binning
+                spike_indices = self.spike_indices
+                if spike_indices is not None and len(spike_indices) > 0:
+                    max_neuron_idx = int(np.max(spike_indices))
+                    # Create bin edges: one bin per neuron index
+                    bins = np.arange(0, max_neuron_idx + 1.5) - 0.5
+                    counts, bin_edges, _ = self.subplot.hist(
+                        spike_indices, bins=bins, edgecolor="black"
+                    )
+                    # Set x-tick labels at neuron centers
+                    self.subplot.set_xticks(bin_edges[:-1] + 0.5)
+                    self.subplot.set_xticklabels(
+                        [str(int(i)) for i in range(len(counts))],
+                        rotation=45 if len(counts) > 10 else 0,
+                    )
+                    self.subplot.set_xlim([-0.5, max_neuron_idx + 0.5])
+                    self.subplot.set_xlabel("Neuron Index")
+                    self.subplot.set_ylabel("Spike Count")
+                else:
+                    self.subplot.text(
+                        0.5,
+                        0.5,
+                        "No spikes in selected region",
+                        ha="center",
+                        va="center",
+                        transform=self.subplot.transAxes,
+                    )
+            else:
+                return
         else:
             return
         self.draw()
