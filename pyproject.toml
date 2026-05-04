@@ -47,7 +47,6 @@ dev = [
     "pytest-memray ; platform_system != 'Windows'",
     "diff-cover",
     "mkdocs-material",
-    "memray>=1.17.2",
     "ruff",
 ]
 

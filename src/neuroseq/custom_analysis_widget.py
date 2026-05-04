@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from types import MethodType
 
 import brian2.numpy_ as np
 import numpy.typing as npt
@@ -17,6 +18,18 @@ from neuroseq.pretty_print_enum import PrettyPrintEnum
 class CustomAnalysisType(PrettyPrintEnum):
     Histogram = "mdi6.chart-histogram"
     Histogram2d = "mdi6.data-matrix"
+    SpikeCountPerNeuron = "mdi6.chart-bar"
+
+    @property
+    def label(self) -> str:
+        return {
+            CustomAnalysisType.Histogram: "Histogram",
+            CustomAnalysisType.Histogram2d: "Histogram 2D",
+            CustomAnalysisType.SpikeCountPerNeuron: "Spike count per neuron",
+        }[self]
+
+    def __str__(self) -> str:
+        return self.label
 
 
 class CustomAnalysisWindow(QtWidgets.QWidget):
@@ -45,10 +58,35 @@ class CustomAnalysisWidget(MatplotlibWidget):
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.subplot = self.getFigure().add_subplot(111)
+        original_draw_idle = self.canvas._draw_idle
+
+        def _safe_draw_idle(canvas) -> None:
+            try:
+                original_draw_idle()
+            except RuntimeError as exc:
+                if "deleted" not in str(exc).lower():
+                    raise
+            except AttributeError as exc:
+                if "screenchanged" not in str(exc).lower():
+                    raise
+
+        self.canvas._draw_idle = MethodType(_safe_draw_idle, self.canvas)
         self.traces: npt.NDArray | None = None
         self.spike_times_ms: npt.NDArray | None = None
         self.spike_indices: npt.NDArray | None = None
+        self.spike_neuron_indices: npt.NDArray | None = None
         self.dt_ms: float = 1.0
+
+    def _redraw(self) -> None:
+        if self.isVisible() and self.windowHandle() is not None:
+            try:
+                self.draw()
+                return
+            except AttributeError as exc:
+                if "screenchanged" not in str(exc).lower():
+                    raise
+
+        self.canvas.draw_idle()
 
     def _preprocess_data(
         self,
@@ -60,6 +98,7 @@ class CustomAnalysisWidget(MatplotlibWidget):
         self.traces = None
         self.spike_times_ms = None
         self.spike_indices = None
+        self.spike_neuron_indices = None
         if isinstance(data, TraceData):
             self.dt_ms = data.dt * 1000.0
         else:
@@ -78,14 +117,25 @@ class CustomAnalysisWidget(MatplotlibWidget):
         else:
             time_str = f"time {time_slice.start * self.dt_ms:.0f}ms-{time_slice.stop * self.dt_ms:.0f}ms"
         self.time_slice = time_slice
-        self.subplot.set_title(f"{data.name} {analysis_type}: {neuron_str}, {time_str}")
+        self.subplot.set_title(
+            f"{data.name} {analysis_type.label}: {neuron_str}, {time_str}"
+        )
         if isinstance(data, TraceData):
             self.traces = np.asarray(data.traces)[neuron_slice, time_slice]
         elif isinstance(data, SpikeData):
+            all_spike_indices = np.asarray(data.spike_indices)
+            if neuron_slice.start is not None and neuron_slice.stop is not None:
+                self.spike_neuron_indices = np.arange(
+                    neuron_slice.start, neuron_slice.stop
+                )
+            elif all_spike_indices.size:
+                self.spike_neuron_indices = np.arange(int(all_spike_indices.max()) + 1)
+            else:
+                self.spike_neuron_indices = np.asarray([], dtype=np.int64)
             spike_times_ms = (
                 np.asarray(data.spike_times) * 1000.0
             )  # convert to milliseconds
-            spike_indices = np.asarray(data.spike_indices)
+            spike_indices = all_spike_indices
             if time_slice.start is not None and time_slice.stop is not None:
                 times_mask = (spike_times_ms >= time_slice.start * self.dt_ms) & (
                     spike_times_ms < time_slice.stop * self.dt_ms
@@ -139,6 +189,35 @@ class CustomAnalysisWidget(MatplotlibWidget):
                 self.subplot.set_ylabel("Neurons")
             self.subplot.hist2d(x, y, bins=30, density=True)
             self.subplot.set_xlabel("Time")
+        elif analysis_type == CustomAnalysisType.SpikeCountPerNeuron:
+            if not isinstance(data, SpikeData):
+                return
+            assert self.spike_neuron_indices is not None
+            self.subplot.set_xlabel("Neuron Index")
+            self.subplot.set_ylabel("Spike Count")
+            if self.spike_indices is None or self.spike_indices.size == 0:
+                self.subplot.text(
+                    0.5,
+                    0.5,
+                    "No spikes in selected region",
+                    ha="center",
+                    va="center",
+                    transform=self.subplot.transAxes,
+                )
+            else:
+                max_neuron_index = (
+                    int(np.max(self.spike_neuron_indices))
+                    if self.spike_neuron_indices.size
+                    else int(np.max(self.spike_indices))
+                )
+                spike_counts = np.bincount(
+                    self.spike_indices.astype(np.int64),
+                    minlength=max_neuron_index + 1,
+                )
+                self.subplot.bar(
+                    self.spike_neuron_indices,
+                    spike_counts[self.spike_neuron_indices],
+                )
         else:
             return
-        self.draw()
+        self._redraw()

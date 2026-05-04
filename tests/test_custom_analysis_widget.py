@@ -266,3 +266,144 @@ def test_custom_analysis_widget_spike_histogram2d(
     assert "neurons 5-9" in custom_analysis_widget.subplot.get_title().lower()
     assert "time 150" in custom_analysis_widget.subplot.get_title().lower()
     assert "1050" in custom_analysis_widget.subplot.get_title().lower()
+
+
+@pytest.mark.parametrize("new_window", [False, True])
+def test_custom_analysis_widget_spike_count_per_neuron(
+    qtbot: QtBot, new_window: bool, make_spike_data
+) -> None:
+    """Test the SpikeCountPerNeuron analysis with all data and no slices."""
+    custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    data = make_spike_data(n_neurons=24)
+    # with no slices provided, all data is used
+    custom_analysis_widget.set_data(
+        data,
+        CustomAnalysisType.SpikeCountPerNeuron,
+        None,
+        None,
+    )
+    qtbot.wait(gui_delay_in_ms)
+    assert (
+        "spike count per neuron" in custom_analysis_widget.subplot.get_title().lower()
+    )
+    assert "all neurons" in custom_analysis_widget.subplot.get_title().lower()
+    assert "all time" in custom_analysis_widget.subplot.get_title().lower()
+    # Verify histogram was created with correct axes
+    assert custom_analysis_widget.subplot.get_xlabel() == "Neuron Index"
+    assert custom_analysis_widget.subplot.get_ylabel() == "Spike Count"
+
+
+@pytest.mark.parametrize("new_window", [False, True])
+def test_custom_analysis_widget_spike_count_per_neuron_single_neuron(
+    qtbot: QtBot, new_window: bool, make_spike_data
+) -> None:
+    """Test SpikeCountPerNeuron with single neuron slice."""
+    custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    data = make_spike_data(n_neurons=24)
+    # set single neuron
+    custom_analysis_widget.set_data(
+        data,
+        CustomAnalysisType.SpikeCountPerNeuron,
+        slice(7, 8),
+        None,
+    )
+    qtbot.wait(gui_delay_in_ms)
+    assert "neuron 7" in custom_analysis_widget.subplot.get_title().lower()
+    assert "all time" in custom_analysis_widget.subplot.get_title().lower()
+    assert custom_analysis_widget.subplot.get_xlabel() == "Neuron Index"
+    assert custom_analysis_widget.subplot.get_ylabel() == "Spike Count"
+
+
+@pytest.mark.parametrize("new_window", [False, True])
+def test_custom_analysis_widget_spike_count_per_neuron_neuron_range(
+    qtbot: QtBot, new_window: bool, make_spike_data
+) -> None:
+    """Test SpikeCountPerNeuron with neuron range slice."""
+    custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    data = make_spike_data(n_neurons=24)
+    # set slice of neurons
+    custom_analysis_widget.set_data(
+        data,
+        CustomAnalysisType.SpikeCountPerNeuron,
+        slice(8, 18),
+        None,
+    )
+    qtbot.wait(gui_delay_in_ms)
+    assert "neurons 8-17" in custom_analysis_widget.subplot.get_title().lower()
+    assert "all time" in custom_analysis_widget.subplot.get_title().lower()
+    assert custom_analysis_widget.subplot.get_xlabel() == "Neuron Index"
+    assert custom_analysis_widget.subplot.get_ylabel() == "Spike Count"
+
+
+@pytest.mark.parametrize("new_window", [False, True])
+def test_custom_analysis_widget_spike_count_per_neuron_time_slice(
+    qtbot: QtBot, new_window: bool, make_spike_data
+) -> None:
+    """Test SpikeCountPerNeuron with time slice filtering."""
+    custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    data = make_spike_data(n_neurons=24)
+    # set time slice (0.15-1.05s)
+    custom_analysis_widget.set_data(
+        data,
+        CustomAnalysisType.SpikeCountPerNeuron,
+        None,
+        slice(150, 1050),
+    )
+    qtbot.wait(gui_delay_in_ms)
+    assert "all neurons" in custom_analysis_widget.subplot.get_title().lower()
+    assert "time 150" in custom_analysis_widget.subplot.get_title().lower()
+    assert "1050" in custom_analysis_widget.subplot.get_title().lower()
+    assert custom_analysis_widget.subplot.get_xlabel() == "Neuron Index"
+    assert custom_analysis_widget.subplot.get_ylabel() == "Spike Count"
+
+
+@pytest.mark.parametrize("new_window", [False, True])
+def test_custom_analysis_widget_spike_count_per_neuron_both_slices(
+    qtbot: QtBot, new_window: bool, make_spike_data
+) -> None:
+    """Test SpikeCountPerNeuron with both neuron and time slices."""
+    custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    data = make_spike_data(n_neurons=24)
+    # set neuronslice and timeslice
+    custom_analysis_widget.set_data(
+        data,
+        CustomAnalysisType.SpikeCountPerNeuron,
+        slice(5, 10),
+        slice(150, 1050),
+    )
+    qtbot.wait(gui_delay_in_ms)
+    assert "neurons 5-9" in custom_analysis_widget.subplot.get_title().lower()
+    assert "time 150" in custom_analysis_widget.subplot.get_title().lower()
+    assert "1050" in custom_analysis_widget.subplot.get_title().lower()
+    assert custom_analysis_widget.subplot.get_xlabel() == "Neuron Index"
+    assert custom_analysis_widget.subplot.get_ylabel() == "Spike Count"
+
+
+@pytest.mark.parametrize("new_window", [False, True])
+def test_custom_analysis_widget_spike_count_no_spikes_in_selection(
+    qtbot: QtBot, new_window: bool, make_spike_data
+) -> None:
+    """Test SpikeCountPerNeuron when no spikes exist in the selected region."""
+    custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    data = make_spike_data(n_neurons=24)
+    # set a time slice far beyond existing data (should result in no spikes)
+    custom_analysis_widget.set_data(
+        data,
+        CustomAnalysisType.SpikeCountPerNeuron,
+        None,
+        slice(50000, 100000),
+    )
+    qtbot.wait(gui_delay_in_ms)
+    # Should show "No spikes in selected region" message
+    text_children = [
+        child
+        for child in custom_analysis_widget.subplot.get_children()
+        if hasattr(child, "get_text") and "no spikes" in child.get_text().lower()
+    ]
+    assert len(text_children) > 0
