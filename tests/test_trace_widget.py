@@ -11,6 +11,16 @@ from neuroseq.trace_widget import TraceWidget
 from neuroseq.utils import neuron_indices_to_colors
 
 
+def test_trace_norm_dialog_minimum_is_50_percent(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    trace_norm_dialog = TraceNormDialog(trace_widget)
+    qtbot.addWidget(trace_widget)
+    qtbot.addWidget(trace_norm_dialog)
+
+    assert trace_norm_dialog.slider_norm.minimum() == 50
+
+
 def test_trace_widget_zero_traces(qtbot: QtBot) -> None:
     controller = ConstrainedPanZoomController()
     trace_widget = TraceWidget(controller)
