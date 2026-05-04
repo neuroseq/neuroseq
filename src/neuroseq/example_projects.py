@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from functools import wraps
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -22,8 +23,15 @@ def register_example_project(name: str, section: str):
     """
 
     def decorator(func: ExampleProjectGenerator) -> ExampleProjectGenerator:
-        example_projects.setdefault(section, {})[name] = func
-        return func
+        @wraps(func)
+        def wrapped() -> Project:
+            project = func()
+            project.project_name = name
+            project.project_section = section
+            return project
+
+        example_projects.setdefault(section, {})[name] = wrapped
+        return wrapped
 
     return decorator
 
