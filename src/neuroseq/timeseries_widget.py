@@ -10,6 +10,8 @@ import qtawesome as qta
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+from neuroseq.analysis_plugins import AnalysisPlugin
+from neuroseq.analysis_plugins import discover_analysis_plugins
 from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
@@ -41,7 +43,7 @@ class TimeseriesWidget(FPLWidget):
         int, int, int, int, int
     )  # initial neuron index, current neuron index, initial time index, current time index, mouse button (0 for no button, 1 for left, 2 for right, 3 for middle)
     custom_analysis_requested = QtCore.Signal(
-        object, CustomAnalysisType, bool, slice, slice
+        object, object, bool, slice, slice
     )  # data, analysis type, new window, neuron slice, time slice
     escape_pressed = QtCore.Signal()
 
@@ -64,24 +66,6 @@ class TimeseriesWidget(FPLWidget):
         self.show_grid = True
 
         self.context_menu = QtWidgets.QMenu("Custom analysis", self)
-        for custom_analysis_type in CustomAnalysisType:
-            for new_window in [False, True]:
-                add_action(
-                    f"{custom_analysis_type} {'(new window)' if new_window else ''}",
-                    lambda *args,
-                    _custom_analysis_type=custom_analysis_type,
-                    _new_window=new_window: self.custom_analysis_requested.emit(
-                        self.data,
-                        _custom_analysis_type,
-                        _new_window,
-                        self.selected_neuron_slice,
-                        self.selected_time_slice,
-                    ),
-                    self.context_menu,
-                    None,
-                    self,
-                    icon=qta.icon(custom_analysis_type.value),
-                )
 
         self.logger = logging.getLogger(__name__)
         self.data: TraceData | SpikeData | SynapseData | None = None
@@ -141,9 +125,57 @@ class TimeseriesWidget(FPLWidget):
             self.mode == InteractMode.SELECT
             and event.modifiers() != QtCore.Qt.KeyboardModifier.ControlModifier
         ):
+            self._rebuild_custom_analysis_menu()
             self.context_menu.exec(event.globalPos())
         else:
             super().contextMenuEvent(event)
+
+    def _add_analysis_action(
+        self,
+        analysis_type: CustomAnalysisType | AnalysisPlugin,
+        icon_name: str,
+        new_window: bool,
+    ) -> None:
+        action_label = str(analysis_type)
+        if new_window:
+            action_label = f"{action_label} (new window)"
+        add_action(
+            action_label,
+            lambda *args,
+            _analysis_type=analysis_type,
+            _new_window=new_window: self.custom_analysis_requested.emit(
+                self.data,
+                _analysis_type,
+                _new_window,
+                self.selected_neuron_slice,
+                self.selected_time_slice,
+            ),
+            self.context_menu,
+            None,
+            self,
+            icon=qta.icon(icon_name),
+        )
+
+    def _rebuild_custom_analysis_menu(self) -> None:
+        self.context_menu.clear()
+        for custom_analysis_type in CustomAnalysisType:
+            for new_window in [False, True]:
+                self._add_analysis_action(
+                    custom_analysis_type,
+                    custom_analysis_type.value,
+                    new_window,
+                )
+
+        plugin_analyses = discover_analysis_plugins()
+        if plugin_analyses:
+            self.context_menu.addSeparator()
+            for plugin_analysis in plugin_analyses:
+                for new_window in [False, True]:
+                    self._add_analysis_action(
+                        plugin_analysis,
+                        plugin_analysis.icon,
+                        new_window,
+                    )
 
     def post_set_data(self):
         self.subplot.grids = False

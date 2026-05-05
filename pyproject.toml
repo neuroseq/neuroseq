@@ -92,6 +92,7 @@ namespace_packages = false
 [tool.coverage.run]
 branch = true
 source = ["./src/neuroseq"]
+omit = ["src/neuroseq/resources/analysis_plugins/*"]
 
 [tool.coverage.report]
 # Regexes for lines to exclude from consideration
