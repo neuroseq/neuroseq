@@ -12,6 +12,7 @@
 - [GUI overview](user_guide/gui_overview.md)
 - [Simulations](user_guide/simulations.md)
 - [Experiments](user_guide/experiments.md)
+- [Analysis tools and custom plugins](user_guide/analysis_and_plugins.md)
 - [Connecting simulations and experiments](user_guide/simulations_and_experiments.md)
 - [Importing Igor2 Waves](user_guide/importing_igor2_waves.md)
 - [Importing Imaging Data](user_guide/importing_imaging_data.md)
@@ -26,6 +27,7 @@
 
 - [Installation and use](developer/developer_installation.md)
 - [Documentation](developer/documentation.md)
+- [Analysis plugins](developer/analysis_plugins.md)
 - [Miscellaneous](developer/miscellaneous.md)
 - [Testing](developer/testing.md)
 - [Contributing](developer/contributing.md)
