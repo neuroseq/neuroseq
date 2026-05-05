@@ -54,7 +54,11 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
             if grid_line is not None:
                 grid_line.update_time_extent(self.max_width)
                 grid_line.update_neuron_extent(int(self.max_height))
-        state = self._get_camera_state()
+        try:
+            state = self._get_camera_state()
+        except ValueError:
+            # Limits can be configured before any camera is attached.
+            return
         if not self.initialized:
             # first use of controller: set initial camera state to show all data
             state["width"] = self.max_width

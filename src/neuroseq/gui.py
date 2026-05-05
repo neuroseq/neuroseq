@@ -120,6 +120,10 @@ class Gui(QtWidgets.QMainWindow):
         self.spike_widget = SpikeWidget(self.controller, parent=self)
         split_vertical.addWidget(self.spike_widget)
         self.data_widget = DataWidget(self.controller, parent=self)
+        self.data_widget.set_default_scroll_bars(
+            self.stim_editor.x_scrollbar,
+            self.stim_editor.y_scrollbar,
+        )
         split_vertical.addWidget(self.data_widget)
         self.time_slider = TimeSliderWidget(self)
         self.plot_widgets: list[TimeseriesWidget | HeatmapWidget | DataWidget] = [
@@ -169,6 +173,7 @@ class Gui(QtWidgets.QMainWindow):
         max_time_secs = float(self.project.max_time_secs)
         max_neurons = int(self.project.max_neurons)
         self.controller.set_limits(max_time_secs, max_neurons)
+        self.data_widget.set_limits(max_time_secs, max_neurons)
         self.time_slider.set_max_time_secs(max_time_secs)
 
     def _custom_analysis(
