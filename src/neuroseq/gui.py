@@ -15,6 +15,7 @@ from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
 from neuroseq import __version__
+from neuroseq.analysis_plugins import AnalysisPlugin
 from neuroseq.cellpose_import_dialog import CellposeImportDialog
 from neuroseq.console_widget import ConsoleWidget
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
@@ -179,7 +180,7 @@ class Gui(QtWidgets.QMainWindow):
     def _custom_analysis(
         self,
         data: TraceData | SpikeData | SynapseData,
-        analysis_type: CustomAnalysisType | None,
+        analysis_type: CustomAnalysisType | AnalysisPlugin | None,
         new_window: bool,
         neuron_slice: slice | None,
         time_slice: slice | None,

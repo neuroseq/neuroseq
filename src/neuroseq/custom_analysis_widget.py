@@ -9,6 +9,7 @@ from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 
+from neuroseq.analysis_plugins import AnalysisPlugin
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
@@ -91,7 +92,7 @@ class CustomAnalysisWidget(MatplotlibWidget):
     def _preprocess_data(
         self,
         data: TraceData | SpikeData | SynapseData,
-        analysis_type: CustomAnalysisType,
+        analysis_label: str,
         neuron_slice: slice | None,
         time_slice: slice | None,
     ) -> None:
@@ -118,7 +119,7 @@ class CustomAnalysisWidget(MatplotlibWidget):
             time_str = f"time {time_slice.start * self.dt_ms:.0f}ms-{time_slice.stop * self.dt_ms:.0f}ms"
         self.time_slice = time_slice
         self.subplot.set_title(
-            f"{data.name} {analysis_type.label}: {neuron_str}, {time_str}"
+            f"{data.name} {analysis_label}: {neuron_str}, {time_str}"
         )
         if isinstance(data, TraceData):
             self.traces = np.asarray(data.traces)[neuron_slice, time_slice]
@@ -154,7 +155,7 @@ class CustomAnalysisWidget(MatplotlibWidget):
     def set_data(
         self,
         data: TraceData | SpikeData | SynapseData | None,
-        analysis_type: CustomAnalysisType | None,
+        analysis_type: CustomAnalysisType | AnalysisPlugin | None,
         neuron_slice: slice | None,
         time_slice: slice | None,
     ) -> None:
@@ -164,7 +165,31 @@ class CustomAnalysisWidget(MatplotlibWidget):
         self.logger.info(
             f"Plotting {analysis_type} of {type(data)} data for neuron slice {neuron_slice} and time slice {time_slice}"
         )
-        self._preprocess_data(data, analysis_type, neuron_slice, time_slice)
+        analysis_label = (
+            analysis_type.label
+            if isinstance(analysis_type, CustomAnalysisType)
+            else analysis_type.label
+        )
+        self._preprocess_data(data, analysis_label, neuron_slice, time_slice)
+
+        if isinstance(analysis_type, AnalysisPlugin):
+            try:
+                analysis_type.render(self, data, neuron_slice, time_slice)
+            except Exception as exc:
+                self.logger.exception(
+                    f"Analysis plugin {analysis_type.id} failed while plotting: {exc}"
+                )
+                self.subplot.text(
+                    0.5,
+                    0.5,
+                    "Plugin execution failed. See logs for details.",
+                    ha="center",
+                    va="center",
+                    transform=self.subplot.transAxes,
+                )
+            self._redraw()
+            return
+
         if analysis_type == CustomAnalysisType.Histogram:
             if isinstance(data, TraceData):
                 x = np.asarray(self.traces).flatten()
