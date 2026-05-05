@@ -46,6 +46,7 @@ class DataWidget(QtWidgets.QWidget):
         # y-axis controls for the all-data widget
         self.y_scrollbar = QtWidgets.QScrollBar(QtCore.Qt.Orientation.Vertical)
         self.controller.connect_y_scroll_bar(self.y_scrollbar)
+        self.y_scrollbar.setFixedWidth(12)
         layout.addWidget(self.y_scrollbar, 0, 1)
 
         self.y_btn_zoom_in = QtWidgets.QPushButton("+", self)
@@ -69,12 +70,14 @@ class DataWidget(QtWidgets.QWidget):
 
         # x-axis controls for the all-data widget
         self.x_controls_widget = QtWidgets.QWidget(self)
+        self.x_controls_widget.setFixedHeight(14)
         self.x_controls_layout = QtWidgets.QHBoxLayout(self.x_controls_widget)
         self.x_controls_layout.setContentsMargins(0, 0, 0, 0)
         self.x_controls_layout.setSpacing(0)
 
         self.x_scrollbar = QtWidgets.QScrollBar(QtCore.Qt.Orientation.Horizontal)
         self.controller.connect_x_scroll_bar(self.x_scrollbar)
+        self.x_scrollbar.setFixedHeight(12)
         self.x_controls_layout.addWidget(self.x_scrollbar, 1)
 
         self.x_btn_zoom_out = QtWidgets.QPushButton("-", self)
