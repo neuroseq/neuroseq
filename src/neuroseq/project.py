@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 import math
 import pathlib
 import pickle
+import runpy
 import zipfile
 from collections.abc import Callable
+from collections.abc import Mapping
 from collections.abc import Sequence
+from typing import Protocol
 from typing import overload
 
 import numpy as np
@@ -31,6 +35,15 @@ from neuroseq.stim_timing import validate_stim_dt_seconds
 from neuroseq.utils import append_data
 from neuroseq.utils import find_by_name_and_type
 from neuroseq.utils import save_store_name
+
+
+class ExternalSimulateFn(Protocol):
+    def __call__(
+        self,
+        stims_dict: dict,
+        simulation_time: float,
+        params: Mapping[str, object] | None = None,
+    ) -> Experiment: ...
 
 
 def _to_seconds(value: float | int) -> float:
@@ -98,6 +111,15 @@ class Project:
         self.max_neurons = 0
         self.dt: float = 0.001
 
+        # External-simulation function state. `external_simulate_path` is either
+        # a filesystem path to a `.py` file or a `neuroseq:<module_name>`
+        # sentinel resolving to `neuroseq.example_models.<module_name>.simulate`.
+        # `external_simulate_function` is transient and re-resolved from the
+        # path on load (see `load_external_simulate`).
+        self.external_simulate_path: str | None = None
+        self.external_simulate_params: dict[str, dict] = {}
+        self.external_simulate_function: ExternalSimulateFn | None = None
+
         self.logger = logging.getLogger(__name__)
         if filepath:
             self.filepath = pathlib.Path(filepath)
@@ -121,8 +143,21 @@ class Project:
                     _meta = json.loads(zf.read("project_metadata.json"))
                     self.dt = float(_meta.get("dt", 0.001))
                     _dt_from_metadata = True
+                    self.external_simulate_path = _meta.get("external_simulate_path")
+                    self.external_simulate_params = _meta.get(
+                        "external_simulate_params", {}
+                    )
             if not _dt_from_metadata:
                 self.dt = self._derive_dt_from_data()
+            if self.external_simulate_path is not None:
+                try:
+                    self.load_external_simulate()
+                except Exception as e:
+                    self.logger.warning(
+                        f"Failed to resolve external_simulate_path "
+                        f"{self.external_simulate_path!r}: {e}"
+                    )
+                    self.external_simulate_function = None
             for experiment in self.experiments.values():
                 self.max_time_secs = max(self.max_time_secs, experiment.duration)
             for stim_array in self.stim_arrays.values():
@@ -679,6 +714,28 @@ class Project:
                 return True
         return False
 
+    def load_external_simulate(self) -> None:
+        """Resolve `external_simulate_path` into `external_simulate_function`.
+
+        `external_simulate_path` is either a filesystem path to a `.py` file
+        (loaded via `runpy.run_path`) or a `neuroseq:<module_name>` sentinel
+        resolving to `neuroseq.example_models.<module_name>.simulate`.
+        """
+        path = self.external_simulate_path
+        if path is None:
+            self.external_simulate_function = None
+            return
+        if path.startswith("neuroseq:"):
+            module_name = path[len("neuroseq:") :]
+            module = importlib.import_module(f"neuroseq.example_models.{module_name}")
+            self.external_simulate_function = module.simulate
+        else:
+            self.external_simulate_function = runpy.run_path(path)["simulate"]
+
+    def external_simulate_params_flat(self) -> dict[str, object]:
+        """Flatten `external_simulate_params` to `{name: value}` for the call site."""
+        return {k: v["value"] for k, v in self.external_simulate_params.items()}
+
     def run_simulation(
         self,
         time_seconds: float,
@@ -715,7 +772,12 @@ class Project:
         """
 
         with zipfile.ZipFile(filepath, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr("project_metadata.json", json.dumps({"dt": self.dt}))
+            metadata: dict = {"dt": self.dt}
+            if self.external_simulate_path is not None:
+                metadata["external_simulate_path"] = self.external_simulate_path
+            if self.external_simulate_params:
+                metadata["external_simulate_params"] = self.external_simulate_params
+            zf.writestr("project_metadata.json", json.dumps(metadata))
             if options.include_stim_arrays:
                 append_to_zip(self.stim_arrays, "stim_arrays", zf)
             if options.include_model:

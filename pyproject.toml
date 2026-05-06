@@ -28,8 +28,12 @@ dependencies = [
     "psutil",
     "nvidia-ml-py",
     "cellpose[gui]",
+    "elise",
 ]
 dynamic = ["version"]
+
+[tool.uv.sources]
+elise = { path = "/mnt/live1/svintila/sequence-learning", editable = true }
 
 [project.scripts]
 neuroseq = "neuroseq.__main__:main"
