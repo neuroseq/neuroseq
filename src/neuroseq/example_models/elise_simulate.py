@@ -1,11 +1,12 @@
 """ELISE network model exposed as a neuroseq external simulate function.
 
-Wraps the rate-coded ELISE network from the ``elise`` package (sequence-learning
-by Kriener et al., 2024) behind neuroseq's ``simulate(stims_dict, simulation_time,
-params=None) -> Experiment`` contract.
+Wraps the rate-coded ELISE network from the vendored ``_elise`` subpackage
+(Kriener et al., 2024 — see ``_elise/__init__.py`` for upstream attribution)
+behind neuroseq's ``simulate(stims_dict, simulation_time, params=None) -> Experiment``
+contract.
 
 ELISE only ships ``SimpleUpdater`` as an optimizer; that is what we use here
-(matches ``sequence-learning/scripts/train.py``).
+(matches the upstream ``scripts/train.py``).
 """
 
 from __future__ import annotations
@@ -328,17 +329,18 @@ def simulate(
         An ``Experiment`` containing somatic potential, dendritic potential,
         firing rate traces, and dendritic weight snapshots.
     """
-    # Imported here so DEFAULT_PARAMS can be inspected without elise installed.
-    # `elise.model` calls ``np.seterr(all="raise")`` at module load, which would
-    # leak into the rest of the process and break unrelated numpy code that
-    # tolerates over/underflow. Save and restore the global errstate around the
-    # import so the change is scoped to ELISE-internal computation.
+    # Imported here so DEFAULT_PARAMS can be inspected without numba installed.
+    # The vendored ``_elise.model`` calls ``np.seterr(all="raise")`` at module
+    # load, which would leak into the rest of the process and break unrelated
+    # numpy code that tolerates over/underflow. Save and restore the global
+    # errstate around the import so the change is scoped to ELISE-internal
+    # computation.
     _prev_seterr = np.seterr()
-    from elise.model import Network
-    from elise.optimizer import SimpleUpdater
-    from elise.rate_buffer import Buffer
-    from elise.weights import DendriticWeights
-    from elise.weights import SomaticWeights
+    from neuroseq.example_models._elise import Buffer
+    from neuroseq.example_models._elise import DendriticWeights
+    from neuroseq.example_models._elise import Network
+    from neuroseq.example_models._elise import SimpleUpdater
+    from neuroseq.example_models._elise import SomaticWeights
 
     np.seterr(**_prev_seterr)
 

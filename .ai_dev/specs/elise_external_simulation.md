@@ -10,9 +10,19 @@ backbone (`gui.py:_load_external_simulation_function`,
 
 ELISE is numpy/numba — not Brian2. Porting its full N×N matrix-vector dendritic
 currents and per-neuron delays to Brian2 equations would lose Numba JIT and
-duplicate the upstream model. Instead we wrap ELISE behind the
-`simulate(stims_dict, simulation_time, params=None) -> Experiment` contract that
-neuroseq already supports for external functions.
+duplicate the upstream model. Instead we **vendor** the minimal subset of
+upstream `elise` (model, optimizer, weights, rate_buffer) into
+`neuroseq.example_models._elise` and wrap it behind the
+`simulate(stims_dict, simulation_time, params=None) -> Experiment` contract
+that neuroseq already supports for external functions.
+
+The model is faithful to the published equations (Kriener et al., 2024,
+_ELiSe: Efficient Learning of Sequences in Structured Recurrent Networks_):
+`Network._compute_update` implements eqs. 1-2 (compartment ODEs),
+`eq_i_som`/`eq_syn_cond` implements eqs. 9-11 (somato-somatic scaffold with
+delays), `eq_cond_*_inp`/`eq_i_inp` implements eqs. 17-18 (teacher synapses
+to output neurons), and `eq_dwdt`/`eq_drbar_dt`/`eq_rescale_v` implements
+eqs. 19-21 (Urbanczik-Senn dendritic plasticity).
 
 To make ELISE feel like a first-class example project (opens from
 **Open → Example Project**, has editable parameters, runs from the main **Run**
@@ -22,6 +32,7 @@ GUI-window attribute onto the `Project` itself, so it can be persisted in
 
 Applies to:
 
+- New: `src/neuroseq/example_models/_elise/{__init__.py,LICENSE,model.py,optimizer.py,rate_buffer.py,weights.py}`
 - New: `src/neuroseq/example_models/elise_simulate.py`
 - New: `src/neuroseq/example_models/__init__.py`
 - `src/neuroseq/project.py` — new external-simulate fields, loader, save/load
@@ -29,7 +40,7 @@ Applies to:
 - `src/neuroseq/gui.py` — read function from project; Run dispatch; param editor
 - `src/neuroseq/model_editor.py` — `EditableExternalSimParamsTree`
 - `src/neuroseq/example_projects.py` — `@register_example_project("ELISE …")`
-- `pyproject.toml` — `elise` path dependency
+- `pyproject.toml` — adds `numba` (direct runtime dep of vendored elise)
 - `external_simulation_example/{simulate.py,run_brian2_externally.py}` —
   add `params=None` kwarg
 - `tests/` — new unit + smoke tests
@@ -310,21 +321,37 @@ at GUI startup. `example_projects.py` is loaded eagerly by `gui.py`.
 
 ---
 
-## Dependency
+## Dependency: vendored `_elise` subpackage
 
-`pyproject.toml` adds:
+ELISE is **vendored** into neuroseq at
+`src/neuroseq/example_models/_elise/`. The four modules used by
+`elise_simulate.py` are byte-identical copies of the upstream:
 
-```toml
-dependencies = [..., "elise"]
+| File             | Upstream                                                  |
+| ---------------- | --------------------------------------------------------- |
+| `model.py`       | `elise/model.py` (Network class + plasticity ODEs)        |
+| `optimizer.py`   | `elise/optimizer.py` (`SimpleUpdater`)                    |
+| `rate_buffer.py` | `elise/rate_buffer.py` (`Buffer` for delayed-rate lookup) |
+| `weights.py`     | `elise/weights.py` (`DendriticWeights`, `SomaticWeights`) |
 
-[tool.uv.sources]
-elise = { path = "/mnt/live1/svintila/sequence-learning", editable = true }
-```
+Source: <https://github.com/unibe-cns/temporal_sequence_learning>, MIT
+license, commit `cf790867` (version 0.3.0). Attribution and a copy of the
+upstream LICENSE live in `_elise/__init__.py` and `_elise/LICENSE`.
 
-ELISE upstream pinned `requires-python = ">=3.11"`; relaxed to `>=3.10` in
-the path-deployed `pyproject.toml` (the conda env this runs against is 3.10
-and the imported modules — `model`, `optimizer`, `weights`, `rate_buffer` —
-don't use 3.11-only syntax).
+The `__init__.py` re-exports the five public symbols
+(`Network`, `SimpleUpdater`, `Buffer`, `DendriticWeights`, `SomaticWeights`)
+so consumers can `from neuroseq.example_models._elise import …`.
+
+The relative imports inside `model.py` (`from .rate_buffer import Buffer`,
+etc.) keep working because the package layout is preserved.
+
+`pyproject.toml` lists `numba` directly (the only runtime dep of the four
+vendored modules); `elise` is no longer in the dependency tree and the
+former `[tool.uv.sources]` entry is removed.
+
+To resync from upstream: copy the four files plus `LICENSE` from a clean
+upstream checkout, refresh the commit hash in `_elise/__init__.py`, and
+run the test sweep below.
 
 ---
 
