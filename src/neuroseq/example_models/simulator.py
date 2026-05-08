@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-from abc import ABC
-from abc import abstractmethod
 from collections.abc import Mapping
 from copy import deepcopy
-from typing import Generic
-from typing import TypeVar
 
 from neuroseq.data import Experiment
 
@@ -14,10 +10,7 @@ FlatParams = dict[str, ParamValue]
 SchemaValue = ParamValue | str
 Schema = dict[str, dict[str, SchemaValue]]
 
-TParams = TypeVar("TParams", bound=ParamValue)
-
-
-class Simulator(ABC):
+class Simulator:
     """Standard interface for neuroseq external simulation backends.
 
     Backends are expected to expose editable parameter metadata, allow
@@ -51,11 +44,10 @@ class Simulator(ABC):
     def _flat_defaults(self) -> FlatParams:
         return {k: v["default"] for k, v in self._default_params_schema.items()}
 
-    @abstractmethod
     def reset(self) -> None:
         """Reset backend-specific simulation state."""
+        raise NotImplementedError("Simulator.reset must be implemented by subclasses")
 
-    @abstractmethod
     def simulate(
         self,
         stims_dict: dict,
@@ -63,3 +55,6 @@ class Simulator(ABC):
         params: Mapping[str, ParamValue] | None = None,
     ) -> Experiment:
         """Run simulation and return one experiment chunk."""
+        raise NotImplementedError(
+            "Simulator.simulate must be implemented by subclasses"
+        )
