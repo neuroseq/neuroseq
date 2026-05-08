@@ -31,6 +31,7 @@ nav:
   - User Guide:
       - GUI Overview: user_guide/gui_overview.md
       - Simulations: user_guide/simulations.md
+      - Run External Simulators: user_guide/run_external_simulators.md
       - Experiments: user_guide/experiments.md
       - Analysis tools and plugins: user_guide/analysis_and_plugins.md
       - Connecting simulations and experiments: user_guide/simulations_and_experiments.md
@@ -42,6 +43,7 @@ nav:
   - Developer Guide:
       - Installation and use: developer/developer_installation.md
       - Documentation: developer/documentation.md
+      - Implementation of Custom Simulators: developer/custom_simulators.md
       - Analysis plugins: developer/analysis_plugins.md
       - Miscellaneous: developer/miscellaneous.md
       - Testing: developer/testing.md
