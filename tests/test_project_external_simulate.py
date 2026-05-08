@@ -21,12 +21,11 @@ def test_default_state_is_empty():
 
 def test_load_neuroseq_sentinel_resolves_to_callable():
     project = Project()
-    project.external_simulate_path = "neuroseq:elise_simulate"
-    project.load_external_simulate()
+    project.external_simulate_path = "neuroseq:elise"
+    project.load_external_simulator()
     assert callable(project.external_simulate_function)
     assert (
-        project.external_simulate_function.__module__
-        == "neuroseq.example_models.elise_simulate"
+        project.external_simulate_function.__module__ == "neuroseq.example_models.elise"
     )
 
 
@@ -42,7 +41,7 @@ def test_load_filesystem_path(tmp_path):
     )
     project = Project()
     project.external_simulate_path = str(sim_path)
-    project.load_external_simulate()
+    project.load_external_simulator()
     assert project.external_simulate_function is not None
     result = project.external_simulate_function({}, 1.0, params={"x": 5})
     assert result == ("called", 1.0, {"x": 5})
@@ -50,12 +49,12 @@ def test_load_filesystem_path(tmp_path):
 
 def test_load_clears_function_when_path_is_none():
     project = Project()
-    project.external_simulate_path = "neuroseq:elise_simulate"
-    project.load_external_simulate()
+    project.external_simulate_path = "neuroseq:elise"
+    project.load_external_simulator()
     assert project.external_simulate_function is not None
 
     project.external_simulate_path = None
-    project.load_external_simulate()
+    project.load_external_simulator()
     assert project.external_simulate_function is None
 
 
@@ -83,7 +82,7 @@ def test_params_flat_strips_metadata():
 
 def test_metadata_roundtrip_preserves_external_simulate_state(tmp_path):
     project = Project()
-    project.external_simulate_path = "neuroseq:elise_simulate"
+    project.external_simulate_path = "neuroseq:elise"
     project.external_simulate_params = {
         "num_lat": {
             "value": 12,
@@ -98,7 +97,7 @@ def test_metadata_roundtrip_preserves_external_simulate_state(tmp_path):
     project.save(out, _full_options())
 
     reloaded = Project(out)
-    assert reloaded.external_simulate_path == "neuroseq:elise_simulate"
+    assert reloaded.external_simulate_path == "neuroseq:elise"
     assert reloaded.external_simulate_params == project.external_simulate_params
     # function is reconstructed transparently from the path
     assert callable(reloaded.external_simulate_function)

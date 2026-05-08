@@ -115,7 +115,7 @@ class Project:
         # a filesystem path to a `.py` file or a `neuroseq:<module_name>`
         # sentinel resolving to `neuroseq.example_models.<module_name>.simulate`.
         # `external_simulate_function` is transient and re-resolved from the
-        # path on load (see `load_external_simulate`).
+        # path on load (see `load_external_simulator`).
         self.external_simulate_path: str | None = None
         self.external_simulate_params: dict[str, dict] = {}
         self.external_simulate_function: ExternalSimulateFn | None = None
@@ -151,7 +151,7 @@ class Project:
                 self.dt = self._derive_dt_from_data()
             if self.external_simulate_path is not None:
                 try:
-                    self.load_external_simulate()
+                    self.load_external_simulator()
                 except Exception as e:
                     self.logger.warning(
                         f"Failed to resolve external_simulate_path "
@@ -714,7 +714,7 @@ class Project:
                 return True
         return False
 
-    def load_external_simulate(self) -> None:
+    def load_external_simulator(self) -> None:
         """Resolve `external_simulate_path` into `external_simulate_function`.
 
         `external_simulate_path` is either a filesystem path to a `.py` file
@@ -727,6 +727,8 @@ class Project:
             return
         if path.startswith("neuroseq:"):
             module_name = path[len("neuroseq:") :]
+            if module_name == "elise_simulate":
+                module_name = "elise"
             module = importlib.import_module(f"neuroseq.example_models.{module_name}")
             self.external_simulate_function = module.simulate
         else:

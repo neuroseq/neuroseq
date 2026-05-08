@@ -1517,15 +1517,15 @@ def elise_project() -> Project:
     learns the sequence via the Urbanczik-Senn dendritic plasticity rule.
 
     Parameters are editable from the model editor; the underlying simulate
-    function lives at ``neuroseq.example_models.elise_simulate.simulate``.
+    function lives at ``neuroseq.example_models.elise.simulate``.
     """
     # Deferred so opening unrelated example projects doesn't pull in elise/numba.
-    from neuroseq.example_models.elise_simulate import DEFAULT_PARAMS
+    from neuroseq.example_models.elise import DEFAULT_PARAMS
 
     project = Project()
-    project.external_simulate_path = "neuroseq:elise_simulate"
+    project.external_simulate_path = "neuroseq:elise"
     project.external_simulate_params = copy.deepcopy(DEFAULT_PARAMS)
-    project.load_external_simulate()
+    project.load_external_simulator()
 
     n_vis = 4
     tfinal_ms = 5000

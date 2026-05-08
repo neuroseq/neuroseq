@@ -1065,7 +1065,7 @@ class Gui(QtWidgets.QMainWindow):
         path = pathlib.Path(filename).resolve()
         try:
             self.project.external_simulate_path = str(path)
-            self.project.load_external_simulate()
+            self.project.load_external_simulator()
             self.logger.info(f"Loaded custom simulate function from {path}")
             QtWidgets.QMessageBox.information(
                 self,

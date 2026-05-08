@@ -848,7 +848,7 @@ class EditableExternalSimParamsTree(EditableParameterTree):
     """Tree for editing the flat ``Project.external_simulate_params`` schema.
 
     The schema is ``{name: {value, default, type, group, description}}`` —
-    see ``neuroseq.example_models.elise_simulate.DEFAULT_PARAMS`` for the
+    see ``neuroseq.example_models.elise.DEFAULT_PARAMS`` for the
     canonical shape. Top-level rows are the unique ``group`` values; leaf
     parameters are typed (int/float/bool/str) and edits write through to
     ``params_dict[name]["value"]``.

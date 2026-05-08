@@ -80,7 +80,7 @@ def test_tree_edit_writes_back_to_dict(qtbot: QtBot, sample_params):
 
 def test_dialog_external_mode_when_path_set(qtbot: QtBot, sample_params):
     project = Project()
-    project.external_simulate_path = "neuroseq:elise_simulate"
+    project.external_simulate_path = "neuroseq:elise"
     project.external_simulate_params = sample_params
 
     dialog = ModelEditorDialog(project.b2_model, parent=None, project=project)
@@ -125,7 +125,7 @@ def test_dialog_accept_in_external_mode_does_not_touch_b2(
     qtbot: QtBot, sample_params, monkeypatch
 ):
     project = Project()
-    project.external_simulate_path = "neuroseq:elise_simulate"
+    project.external_simulate_path = "neuroseq:elise"
     project.external_simulate_params = sample_params
 
     dialog = ModelEditorDialog(project.b2_model, parent=None, project=project)

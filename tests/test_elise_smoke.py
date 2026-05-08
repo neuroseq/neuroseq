@@ -1,15 +1,15 @@
 """Standalone smoke test for the ELISE external simulate wrapper.
 
-Run with: uv run pytest tests/test_elise_simulate_smoke.py -s
-Or: uv run python tests/test_elise_simulate_smoke.py
+Run with: uv run pytest tests/test_elise_smoke.py -s
+Or: uv run python tests/test_elise_smoke.py
 """
 
 import numpy as np
 
 
-def test_elise_simulate_runs():
-    from neuroseq.example_models.elise_simulate import DEFAULT_PARAMS
-    from neuroseq.example_models.elise_simulate import simulate
+def test_elise_runs():
+    from neuroseq.example_models.elise import DEFAULT_PARAMS
+    from neuroseq.example_models.elise import simulate
 
     num_vis = 5
     duration_s = 0.2
@@ -54,4 +54,4 @@ def test_elise_simulate_runs():
 
 
 if __name__ == "__main__":
-    test_elise_simulate_runs()
+    test_elise_runs()

@@ -54,7 +54,7 @@ def test_run_dispatches_to_external_when_path_set(
         / "simulate.py"
     )
     project.external_simulate_path = str(sim_path)
-    project.load_external_simulate()
+    project.load_external_simulator()
     assert project.external_simulate_function is not None
 
     calls: dict[str, list] = {"external": [], "b2": []}
@@ -124,7 +124,7 @@ def test_external_simulation_passes_params_kwarg(
     qtbot.addWidget(gui)
     project = gui.project
     project.external_simulate_path = str(sim_path)
-    project.load_external_simulate()
+    project.load_external_simulator()
     project.external_simulate_params = {
         "k1": {
             "value": 42,

@@ -19,7 +19,7 @@ def test_elise_example_project_builds():
 
     assert project.project_name == "ELISE Sequence Learning Network"
     assert project.project_section == "Network"
-    assert project.external_simulate_path == "neuroseq:elise_simulate"
+    assert project.external_simulate_path == "neuroseq:elise"
     assert callable(project.external_simulate_function)
     assert "u_inp" in project.stim_arrays
 
