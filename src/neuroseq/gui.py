@@ -1074,6 +1074,7 @@ class Gui(QtWidgets.QMainWindow):
             )
         except Exception as e:
             self.project.external_simulate_path = None
+            self.project.external_simulator = None
             self.project.external_simulate_function = None
             QtWidgets.QMessageBox.critical(
                 self,

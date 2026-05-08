@@ -1,11 +1,12 @@
-"""ELISE network model exposed as a neuroseq external simulate function.
+"""ELISE network model exposed through a stateful simulator class.
 
 Wraps the rate-coded ELISE network from the ``elise`` package (sequence-learning
-by Kriener et al., 2024) behind neuroseq's ``simulate(stims_dict, simulation_time,
-params=None) -> Experiment`` contract.
+by Kriener et al., 2024) behind neuroseq's
+``simulate(stims_dict, simulation_time, params=None) -> Experiment`` contract.
 
-ELISE only ships ``SimpleUpdater`` as an optimizer; that is what we use here
-(matches ``sequence-learning/scripts/train.py``).
+The module-level ``simulate`` function delegates to a singleton ``Simulator``
+instance so existing project and GUI integration remains unchanged while
+preserving simulation state across repeated runs.
 """
 
 from __future__ import annotations
@@ -19,8 +20,9 @@ from neuroseq.data import Data
 from neuroseq.data import Experiment
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
+from neuroseq.example_models.simulator import ParamValue
+from neuroseq.example_models.simulator import Simulator
 
-ParamValue = int | float | bool | str
 FlatParams = dict[str, ParamValue]
 
 # Editable parameter schema. The neuroseq GUI consumes this via
@@ -312,145 +314,197 @@ def _build_namespaces(
     return network_params, neuron_params, weight_params
 
 
+class Elise(Simulator):
+    """Stateful ELISE simulator backend.
+
+    Responsibilities:
+    1) expose editable parameter metadata for the GUI,
+    2) initialize from default parameters,
+    3) retain network state and cumulative simulated time,
+    4) continue simulation across repeated runs,
+    5) return each run as an ``Experiment``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(DEFAULT_PARAMS)
+        self._network = None
+        self._signature: tuple[int, tuple[tuple[str, ParamValue], ...]] | None = None
+        self._elise_types: tuple[type, type, type, type, type] | None = None
+
+    def reset(self) -> None:
+        self._network = None
+        self._simulated_time_s = 0.0
+        self._signature = None
+
+    def _import_elise_types(self) -> tuple[type, type, type, type, type]:
+        if self._elise_types is not None:
+            return self._elise_types
+        # Imported here so DEFAULT_PARAMS can be inspected without elise installed.
+        # `elise.model` calls ``np.seterr(all="raise")`` at module load, which would
+        # leak into the rest of the process and break unrelated numpy code that
+        # tolerates over/underflow. Save and restore the global errstate around the
+        # import so the change is scoped to ELISE-internal computation.
+        _prev_seterr = np.seterr()
+        from elise.model import Network
+        from elise.optimizer import SimpleUpdater
+        from elise.rate_buffer import Buffer
+        from elise.weights import DendriticWeights
+        from elise.weights import SomaticWeights
+
+        np.seterr(**_prev_seterr)
+        self._elise_types = (Network, SimpleUpdater, Buffer, DendriticWeights, SomaticWeights)
+        return self._elise_types
+
+    def _initialize_network(self, num_vis: int) -> None:
+        (
+            Network,
+            SimpleUpdater,
+            Buffer,
+            DendriticWeights,
+            SomaticWeights,
+        ) = self._import_elise_types()
+        network_params, neuron_params, weight_params = _build_namespaces(self._params, num_vis)
+
+        # Spawn child RNGs (mirrors sequence-learning/scripts/train.py:setup_network).
+        child_seeds = np.random.SeedSequence(_int_param(self._params, "seed")).spawn(4)
+        rng_d_den, rng_d_som, rng_w_den, rng_w_som = (
+            np.random.default_rng(s) for s in child_seeds
+        )
+
+        dendritic_weights = DendriticWeights(
+            weight_params, rng_w=rng_w_den, rng_d=rng_d_den
+        )
+        somatic_weights = SomaticWeights(weight_params, rng_w=rng_w_som, rng_d=rng_d_som)
+
+        network = Network(
+            network_params, neuron_params, dendritic_weights, somatic_weights, Buffer
+        )
+
+        dt_ms = _float_param(self._params, "dt_ms")
+        # ELISE scales eta by 1/dt internally — see scripts/simulator.py:33-34.
+        network.prepare_for_simulation(
+            dt_ms,
+            SimpleUpdater(_float_param(self._params, "eta_vis") / dt_ms),
+            SimpleUpdater(_float_param(self._params, "eta_lat") / dt_ms),
+        )
+        self._network = network
+
+    def simulate(
+        self,
+        stims_dict: dict,
+        simulation_time: float,
+        params: Mapping[str, ParamValue] | None = None,
+    ) -> Experiment:
+        if "u_inp" not in stims_dict:
+            raise ValueError(
+                "stims_dict must contain a 'u_inp' entry (visible-neuron drive). "
+                f"Got: {list(stims_dict)}"
+            )
+        u_inp_full = np.asarray(stims_dict["u_inp"]["array"], dtype=np.float64)
+        if u_inp_full.ndim != 2 or u_inp_full.shape[0] == 0:
+            raise ValueError(
+                f"'u_inp' array must be 2D with shape [T, num_vis]; got {u_inp_full.shape}"
+            )
+        stim_dt_s = float(stims_dict["u_inp"]["dt"])
+        num_vis = int(u_inp_full.shape[1])
+
+        self.update_params(params)
+        signature = (num_vis, tuple(sorted(self._params.items())))
+        if self._network is None or signature != self._signature:
+            self._initialize_network(num_vis)
+            self._signature = signature
+            self._simulated_time_s = 0.0
+
+        if self._network is None:
+            raise RuntimeError("ELISE network failed to initialize")
+
+        dt_ms = _float_param(self._params, "dt_ms")
+        n_steps = int(np.round(simulation_time * 1000.0 / dt_ms))
+        n_total = self._network.num_all
+        learn = _bool_param(self._params, "learn")
+
+        u_trace = np.empty((n_total, n_steps), dtype=np.float32)
+        v_trace = np.empty((n_total, n_steps), dtype=np.float32)
+        r_trace = np.empty((n_total, n_steps), dtype=np.float32)
+
+        snap_interval_ms = _float_param(self._params, "weight_snapshot_interval_ms")
+        snap_every_n_steps = max(1, int(np.round(snap_interval_ms / dt_ms)))
+        snap_indices = list(range(0, n_steps, snap_every_n_steps))
+        weight_snaps = np.empty((n_total, n_total, len(snap_indices)), dtype=np.float32)
+        snap_timestamps = np.empty(len(snap_indices), dtype=np.float32)
+        snap_cursor = 0
+
+        stim_T = u_inp_full.shape[0]
+        t0_s = self._simulated_time_s
+
+        for step in range(n_steps):
+            t_s = step * dt_ms / 1000.0
+            t_abs_s = t0_s + t_s
+            stim_idx = min(int(t_abs_s / stim_dt_s), stim_T - 1)
+            u_inp_step = u_inp_full[stim_idx]
+
+            self._network(u_inp=u_inp_step, learn=learn)
+
+            u_trace[:, step] = self._network.u
+            v_trace[:, step] = self._network.v
+            r_trace[:, step] = self._network.r
+
+            if snap_cursor < len(snap_indices) and step == snap_indices[snap_cursor]:
+                weight_snaps[:, :, snap_cursor] = self._network.dendritic_weights
+                # Keep timestamps local to this run so appending can offset cleanly.
+                snap_timestamps[snap_cursor] = t_s
+                snap_cursor += 1
+
+        self._simulated_time_s += simulation_time
+
+        indices = np.arange(n_total, dtype=np.uint32)
+        dt_s = dt_ms / 1000.0
+
+        data: list[Data] = [
+            TraceData(
+                name="somatic_potential_u",
+                traces=u_trace,
+                indices=indices,
+                units="mV",
+                dt=dt_s,
+            ),
+            TraceData(
+                name="dendritic_potential_v",
+                traces=v_trace,
+                indices=indices,
+                units="mV",
+                dt=dt_s,
+            ),
+            TraceData(
+                name="firing_rate_r",
+                traces=r_trace,
+                indices=indices,
+                units="1",
+                dt=dt_s,
+            ),
+            SynapseData(
+                name="dendritic_weights",
+                values=weight_snaps,
+                timestamps=snap_timestamps,
+            ),
+        ]
+        return Experiment(
+            name="ELISE simulation",
+            duration=simulation_time,
+            timepoints=[],
+            data=data,
+        )
+
+
 def simulate(
     stims_dict: dict, simulation_time: float, params: Mapping[str, ParamValue] | None = None
 ) -> Experiment:
-    """Run ELISE for ``simulation_time`` seconds, driven by ``stims_dict["u_inp"]``.
+    """Compatibility wrapper using the singleton ``Elise`` instance."""
+    return _SIMULATOR.simulate(stims_dict, simulation_time, params=params)
 
-    Args:
-        stims_dict: ``{stim_name: {"array": ndarray[T_stim, num_vis], "dt": seconds}}``.
-            Must contain an entry named ``"u_inp"`` providing the visible-layer
-            membrane-potential drive (mV) over time.
-        simulation_time: Total simulation duration in seconds.
-        params: Optional flat parameter overrides (see ``DEFAULT_PARAMS`` for keys).
 
-    Returns:
-        An ``Experiment`` containing somatic potential, dendritic potential,
-        firing rate traces, and dendritic weight snapshots.
-    """
-    # Imported here so DEFAULT_PARAMS can be inspected without elise installed.
-    # `elise.model` calls ``np.seterr(all="raise")`` at module load, which would
-    # leak into the rest of the process and break unrelated numpy code that
-    # tolerates over/underflow. Save and restore the global errstate around the
-    # import so the change is scoped to ELISE-internal computation.
-    _prev_seterr = np.seterr()
-    from elise.model import Network
-    from elise.optimizer import SimpleUpdater
-    from elise.rate_buffer import Buffer
-    from elise.weights import DendriticWeights
-    from elise.weights import SomaticWeights
+def get_simulator() -> Elise:
+    return _SIMULATOR
 
-    np.seterr(**_prev_seterr)
 
-    p = _flat_defaults()
-    if params:
-        p.update(params)
-
-    if "u_inp" not in stims_dict:
-        raise ValueError(
-            "stims_dict must contain a 'u_inp' entry (visible-neuron drive). "
-            f"Got: {list(stims_dict)}"
-        )
-    u_inp_full = np.asarray(stims_dict["u_inp"]["array"], dtype=np.float64)
-    if u_inp_full.ndim != 2 or u_inp_full.shape[0] == 0:
-        raise ValueError(
-            f"'u_inp' array must be 2D with shape [T, num_vis]; got {u_inp_full.shape}"
-        )
-    stim_dt_s = float(stims_dict["u_inp"]["dt"])
-    num_vis = int(u_inp_full.shape[1])
-
-    network_params, neuron_params, weight_params = _build_namespaces(p, num_vis)
-
-    # Spawn child RNGs (mirrors sequence-learning/scripts/train.py:setup_network).
-    child_seeds = np.random.SeedSequence(_int_param(p, "seed")).spawn(4)
-    rng_d_den, rng_d_som, rng_w_den, rng_w_som = (
-        np.random.default_rng(s) for s in child_seeds
-    )
-
-    dendritic_weights = DendriticWeights(
-        weight_params, rng_w=rng_w_den, rng_d=rng_d_den
-    )
-    somatic_weights = SomaticWeights(weight_params, rng_w=rng_w_som, rng_d=rng_d_som)
-
-    network = Network(
-        network_params, neuron_params, dendritic_weights, somatic_weights, Buffer
-    )
-
-    dt_ms = _float_param(p, "dt_ms")
-    # ELISE scales eta by 1/dt internally — see scripts/simulator.py:33-34.
-    network.prepare_for_simulation(
-        dt_ms,
-        SimpleUpdater(_float_param(p, "eta_vis") / dt_ms),
-        SimpleUpdater(_float_param(p, "eta_lat") / dt_ms),
-    )
-
-    n_steps = int(np.round(simulation_time * 1000.0 / dt_ms))
-    n_total = network.num_all
-    learn = _bool_param(p, "learn")
-
-    u_trace = np.empty((n_total, n_steps), dtype=np.float32)
-    v_trace = np.empty((n_total, n_steps), dtype=np.float32)
-    r_trace = np.empty((n_total, n_steps), dtype=np.float32)
-
-    snap_interval_ms = _float_param(p, "weight_snapshot_interval_ms")
-    snap_every_n_steps = max(1, int(np.round(snap_interval_ms / dt_ms)))
-    snap_indices = list(range(0, n_steps, snap_every_n_steps))
-    weight_snaps = np.empty((n_total, n_total, len(snap_indices)), dtype=np.float32)
-    snap_timestamps = np.empty(len(snap_indices), dtype=np.float32)
-    snap_cursor = 0
-
-    stim_T = u_inp_full.shape[0]
-
-    for step in range(n_steps):
-        t_s = step * dt_ms / 1000.0
-        stim_idx = min(int(t_s / stim_dt_s), stim_T - 1)
-        u_inp_step = u_inp_full[stim_idx]
-
-        network(u_inp=u_inp_step, learn=learn)
-
-        u_trace[:, step] = network.u
-        v_trace[:, step] = network.v
-        r_trace[:, step] = network.r
-
-        if snap_cursor < len(snap_indices) and step == snap_indices[snap_cursor]:
-            weight_snaps[:, :, snap_cursor] = network.dendritic_weights
-            snap_timestamps[snap_cursor] = t_s
-            snap_cursor += 1
-
-    indices = np.arange(n_total, dtype=np.uint32)
-    dt_s = dt_ms / 1000.0
-
-    data: list[Data] = [
-        TraceData(
-            name="somatic_potential_u",
-            traces=u_trace,
-            indices=indices,
-            units="mV",
-            dt=dt_s,
-        ),
-        TraceData(
-            name="dendritic_potential_v",
-            traces=v_trace,
-            indices=indices,
-            units="mV",
-            dt=dt_s,
-        ),
-        TraceData(
-            name="firing_rate_r",
-            traces=r_trace,
-            indices=indices,
-            units="1",
-            dt=dt_s,
-        ),
-        SynapseData(
-            name="dendritic_weights",
-            values=weight_snaps,
-            timestamps=snap_timestamps,
-        ),
-    ]
-    return Experiment(
-        name="ELISE simulation",
-        duration=simulation_time,
-        timepoints=[],
-        data=data,
-    )
+_SIMULATOR = Elise()

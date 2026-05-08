@@ -23,9 +23,11 @@ def test_load_neuroseq_sentinel_resolves_to_callable():
     project = Project()
     project.external_simulate_path = "neuroseq:elise"
     project.load_external_simulator()
+    assert project.external_simulator is not None
     assert callable(project.external_simulate_function)
     assert (
-        project.external_simulate_function.__module__ == "neuroseq.example_models.elise"
+        project.external_simulator.__class__.__module__
+        == "neuroseq.example_models.elise"
     )
 
 

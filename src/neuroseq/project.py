@@ -118,6 +118,7 @@ class Project:
         # path on load (see `load_external_simulator`).
         self.external_simulate_path: str | None = None
         self.external_simulate_params: dict[str, dict] = {}
+        self.external_simulator: object | None = None
         self.external_simulate_function: ExternalSimulateFn | None = None
 
         self.logger = logging.getLogger(__name__)
@@ -723,6 +724,7 @@ class Project:
         """
         path = self.external_simulate_path
         if path is None:
+            self.external_simulator = None
             self.external_simulate_function = None
             return
         if path.startswith("neuroseq:"):
@@ -730,8 +732,24 @@ class Project:
             if module_name == "elise_simulate":
                 module_name = "elise"
             module = importlib.import_module(f"neuroseq.example_models.{module_name}")
-            self.external_simulate_function = module.simulate
+
+            simulator = None
+            if hasattr(module, "get_simulator"):
+                simulator = module.get_simulator()
+            elif hasattr(module, "Simulator"):
+                simulator = module.Simulator()
+            self.external_simulator = simulator
+
+            if simulator is not None and hasattr(simulator, "simulate"):
+                self.external_simulate_function = simulator.simulate
+            elif hasattr(module, "simulate"):
+                self.external_simulate_function = module.simulate
+            else:
+                raise AttributeError(
+                    f"Module neuroseq.example_models.{module_name} has no simulator entry point"
+                )
         else:
+            self.external_simulator = None
             self.external_simulate_function = runpy.run_path(path)["simulate"]
 
     def external_simulate_params_flat(self) -> dict[str, object]:

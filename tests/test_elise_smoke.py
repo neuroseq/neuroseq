@@ -53,5 +53,40 @@ def test_elise_runs():
     )
 
 
+def test_elise_simulator_continues_state_across_runs():
+    from neuroseq.example_models.elise import Simulator
+
+    num_vis = 4
+    duration_s = 0.01
+    stim_dt_s = 0.001
+    n_stim = int(duration_s / stim_dt_s)
+
+    stim = np.full((n_stim, num_vis), -60.0, dtype=np.float32)
+    stims_dict = {"u_inp": {"array": stim, "dt": stim_dt_s}}
+    params = {
+        "num_lat": 6,
+        "learn": False,
+        "weight_snapshot_interval_ms": 5.0,
+    }
+
+    sim = Simulator()
+    first = sim.simulate(stims_dict, simulation_time=duration_s, params=params)
+    second = sim.simulate(stims_dict, simulation_time=duration_s, params=params)
+
+    assert np.isclose(sim.simulated_time_seconds, 2 * duration_s)
+
+    first_u = next(d for d in first.data if d.name == "somatic_potential_u")
+    second_u = next(d for d in second.data if d.name == "somatic_potential_u")
+
+    # Compare against a fresh simulator's first run to confirm continuation.
+    fresh = Simulator()
+    fresh_first = fresh.simulate(stims_dict, simulation_time=duration_s, params=params)
+    fresh_u = next(d for d in fresh_first.data if d.name == "somatic_potential_u")
+
+    assert not np.allclose(second_u.traces[:, 0], fresh_u.traces[:, 0])
+    # Sanity check: both runs still produce the same output shape.
+    assert first_u.traces.shape == second_u.traces.shape == fresh_u.traces.shape
+
+
 if __name__ == "__main__":
     test_elise_runs()
