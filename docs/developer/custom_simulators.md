@@ -63,7 +63,9 @@ For integration with the current project and GUI code, the module should expose 
    Compatibility wrapper used by the existing call sites.
 2. `get_simulator()`
    Returns the singleton backend instance.
-3. A singleton instance such as `_SIMULATOR = Elise()`.
+3. `NN`
+   Constructor used by `Project.load_external_simulator()` when a module exposes a class-based backend entry point.
+4. A singleton instance such as `_SIMULATOR = Elise()`.
 
 This keeps the current GUI and project logic simple while still allowing a class-based implementation internally.
 
