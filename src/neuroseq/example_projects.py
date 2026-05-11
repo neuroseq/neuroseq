@@ -1538,7 +1538,7 @@ def elise_project() -> Project:
     learns the sequence via the Urbanczik-Senn dendritic plasticity rule.
 
     Parameters are editable from the model editor; the underlying simulate
-    function lives at ``neuroseq.example_models.elise.simulate``.
+    function lives at ``neuroseq.example_models.elise``.
     """
     # Deferred so opening unrelated example projects doesn't pull in elise/numba.
     from neuroseq.example_models.elise import DEFAULT_PARAMS
@@ -1546,7 +1546,7 @@ def elise_project() -> Project:
     project = Project()
     project.external_simulate_path = "neuroseq:elise"
     project.external_simulate_params = copy.deepcopy(DEFAULT_PARAMS)
-    project.load_external_simulator()
+    project.load_NN()
 
     n_vis = 4
     tfinal_ms = 5000
@@ -1575,7 +1575,7 @@ def sinus_offset_project() -> Project:
     project = Project()
     project.external_simulate_path = "neuroseq:sinus_offset"
     project.external_simulate_params = copy.deepcopy(DEFAULT_PARAMS)
-    project.load_external_simulator()
+    project.load_NN()
 
     tfinal_ms = 4000
     stim = _build_sinus_offset_pattern(tfinal_ms=tfinal_ms, n_units=5)

@@ -54,7 +54,7 @@ def test_elise_runs():
 
 
 def test_elise_simulator_continues_state_across_runs():
-    from neuroseq.example_models.elise import Simulator
+    from neuroseq.example_models.elise import NN
 
     num_vis = 4
     duration_s = 0.01
@@ -69,7 +69,7 @@ def test_elise_simulator_continues_state_across_runs():
         "weight_snapshot_interval_ms": 5.0,
     }
 
-    sim = Simulator()
+    sim = NN()
     first = sim.simulate(stims_dict, simulation_time=duration_s, params=params)
     second = sim.simulate(stims_dict, simulation_time=duration_s, params=params)
 
@@ -79,7 +79,7 @@ def test_elise_simulator_continues_state_across_runs():
     second_u = next(d for d in second.data if d.name == "somatic_potential_u")
 
     # Compare against a fresh simulator's first run to confirm continuation.
-    fresh = Simulator()
+    fresh = NN()
     fresh_first = fresh.simulate(stims_dict, simulation_time=duration_s, params=params)
     fresh_u = next(d for d in fresh_first.data if d.name == "somatic_potential_u")
 

@@ -10,7 +10,7 @@ FlatParams = dict[str, ParamValue]
 SchemaValue = ParamValue | str
 Schema = dict[str, dict[str, SchemaValue]]
 
-class Simulator:
+class NN:
     """Standard interface for neuroseq external simulation backends.
 
     Backends are expected to expose editable parameter metadata, allow
@@ -46,7 +46,7 @@ class Simulator:
 
     def reset(self) -> None:
         """Reset backend-specific simulation state."""
-        raise NotImplementedError("Simulator.reset must be implemented by subclasses")
+        raise NotImplementedError("NN.reset must be implemented by subclasses")
 
     def simulate(
         self,
@@ -56,5 +56,5 @@ class Simulator:
     ) -> Experiment:
         """Run simulation and return one experiment chunk."""
         raise NotImplementedError(
-            "Simulator.simulate must be implemented by subclasses"
+            "NN.simulate must be implemented by subclasses"
         )

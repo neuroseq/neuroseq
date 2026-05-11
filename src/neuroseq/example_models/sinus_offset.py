@@ -7,8 +7,8 @@ import numpy as np
 from neuroseq.data import Data
 from neuroseq.data import Experiment
 from neuroseq.data import TraceData
-from neuroseq.example_models.simulator import ParamValue
-from neuroseq.example_models.simulator import Simulator
+from neuroseq.example_models.NN import ParamValue
+from neuroseq.example_models.NN import NN
 
 FlatParams = dict[str, ParamValue]
 N_UNITS = 5
@@ -98,7 +98,7 @@ def _stim_as_unit_time_series(
     return padded
 
 
-class SinusOffset(Simulator):
+class SinusOffset(NN):
     """Five-unit sinusoidal simulator with additive stimulus offsets.
 
     The simulator keeps cumulative simulation time so repeated calls continue

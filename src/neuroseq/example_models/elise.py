@@ -4,7 +4,7 @@ Wraps the rate-coded ELISE network from the ``elise`` package (sequence-learning
 by Kriener et al., 2024) behind neuroseq's
 ``simulate(stims_dict, simulation_time, params=None) -> Experiment`` contract.
 
-The module-level ``simulate`` function delegates to a singleton ``Simulator``
+The module-level ``simulate`` function delegates to a singleton ``NN``
 instance so existing project and GUI integration remains unchanged while
 preserving simulation state across repeated runs.
 """
@@ -20,8 +20,9 @@ from neuroseq.data import Data
 from neuroseq.data import Experiment
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
-from neuroseq.example_models.simulator import ParamValue
-from neuroseq.example_models.simulator import Simulator
+from neuroseq.example_models.NN import NN
+from neuroseq.example_models.NN import ParamValue
+
 
 FlatParams = dict[str, ParamValue]
 
@@ -314,7 +315,7 @@ def _build_namespaces(
     return network_params, neuron_params, weight_params
 
 
-class Elise(Simulator):
+class Elise(NN):
     """Stateful ELISE simulator backend.
 
     Responsibilities:
@@ -505,6 +506,7 @@ def simulate(
 
 def get_simulator() -> Elise:
     return _SIMULATOR
+
 
 
 _SIMULATOR = Elise()

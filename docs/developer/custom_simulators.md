@@ -13,9 +13,9 @@ There are now two layers:
 
 The base class is intentionally lightweight. It does not use `abc`; instead, subclass methods are expected to override the base methods and the defaults raise `NotImplementedError`.
 
-## Structure of the Base Simulator Class
+## Structure of the Base NN Class
 
-The shared `Simulator` class in [src/neuroseq/example_models/simulator.py](../../src/neuroseq/example_models/simulator.py) provides common state and parameter handling.
+The shared `NN` class in [src/neuroseq/example_models/simulator.py](../../src/neuroseq/example_models/simulator.py) provides common state and parameter handling.
 
 It currently contains:
 
@@ -40,7 +40,7 @@ The important design point is that the base class owns parameter bookkeeping and
 
 ## Structure of a Backend Implementation
 
-An implementation module should define a backend class derived from `Simulator`. The ELISE backend in [src/neuroseq/example_models/elise.py](../../src/neuroseq/example_models/elise.py) is the current reference implementation.
+An implementation module should define a backend class derived from `NN`. The ELISE backend in [src/neuroseq/example_models/elise.py](../../src/neuroseq/example_models/elise.py) is the current reference implementation.
 
 The backend class should typically provide:
 
@@ -85,7 +85,7 @@ from collections.abc import Mapping
 
 from neuroseq.data import Experiment
 from neuroseq.example_models.simulator import ParamValue
-from neuroseq.example_models.simulator import Simulator
+from neuroseq.example_models.simulator import NN
 
 DEFAULT_PARAMS = {
     "example_param": {
@@ -98,7 +98,7 @@ DEFAULT_PARAMS = {
 }
 
 
-class MyBackend(Simulator):
+class MyBackend(NN):
     def __init__(self) -> None:
         super().__init__(DEFAULT_PARAMS)
         self._runtime = None
