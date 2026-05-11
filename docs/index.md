@@ -11,6 +11,7 @@
 
 - [GUI overview](user_guide/gui_overview.md)
 - [Simulations](user_guide/simulations.md)
+- [Run external simulators](user_guide/run_external_simulators.md)
 - [Experiments](user_guide/experiments.md)
 - [Analysis tools and custom plugins](user_guide/analysis_and_plugins.md)
 - [Connecting simulations and experiments](user_guide/simulations_and_experiments.md)
@@ -27,6 +28,7 @@
 
 - [Installation and use](developer/developer_installation.md)
 - [Documentation](developer/documentation.md)
+- [Implementation of custom simulators](developer/custom_simulators.md)
 - [Analysis plugins](developer/analysis_plugins.md)
 - [Miscellaneous](developer/miscellaneous.md)
 - [Testing](developer/testing.md)
