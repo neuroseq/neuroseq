@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from copy import deepcopy
 from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import Any
 
 import brian2 as b2
@@ -11,7 +12,9 @@ import h5py
 import pytest
 from brian2.tests.utils import assert_allclose
 from pytest import MonkeyPatch
-from pytest_mock import MockerFixture
+
+if TYPE_CHECKING:
+    from pytest_mock import MockerFixture
 
 from neuroseq.b2_model import B2Model
 from neuroseq.project import Project

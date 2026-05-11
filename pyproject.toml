@@ -59,6 +59,7 @@ path = "src/neuroseq/__init__.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 markers = ["screenshot"]
 log_cli = "true"
 log_cli_level = "ERROR"

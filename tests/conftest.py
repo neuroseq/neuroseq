@@ -5,7 +5,10 @@ import pathlib
 import sys
 from collections.abc import Callable
 from collections.abc import Generator
+from types import SimpleNamespace
+from typing import TYPE_CHECKING
 from typing import Any
+from unittest.mock import patch
 
 if sys.platform.startswith("linux"):
     os.environ.setdefault("NEUROSEQ_HEADLESS_TEST", "1")
@@ -28,6 +31,9 @@ from numpy.typing import NDArray
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+if TYPE_CHECKING:
+    pass
+
 from neuroseq.b2_model import B2Model
 from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
@@ -41,6 +47,25 @@ from neuroseq.utils import init_brian2_logging
 
 b2.prefs.codegen.target = "numpy"
 b2.prefs.codegen.runtime.cython.cache_dir = "/tmp/neuroseq-brian2-cython-cache"
+
+
+try:
+    import pytest_mock as _pytest_mock  # noqa: F401
+except ModuleNotFoundError:
+
+    @pytest.fixture()
+    def mocker() -> Generator[SimpleNamespace, None, None]:
+        active_patchers: list[Any] = []
+
+        def _patch(*args: Any, **kwargs: Any) -> Any:
+            patcher = patch(*args, **kwargs)
+            active_patchers.append(patcher)
+            return patcher.start()
+
+        yield SimpleNamespace(patch=_patch)
+
+        while active_patchers:
+            active_patchers.pop().stop()
 
 
 def pytest_addoption(parser):
