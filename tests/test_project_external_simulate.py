@@ -153,8 +153,8 @@ def test_load_alias_elise_simulate_maps_to_elise(monkeypatch: pytest.MonkeyPatch
     assert calls == ["neuroseq.example_models.elise"]
     assert project.external_simulator is simulator
     assert project.external_simulate_function is not None
-    assert project.external_simulate_function.__self__ is simulator
-    assert project.external_simulate_function.__func__ is _Sim.simulate
+    result = project.external_simulate_function({}, 1.0, params={"x": 5})
+    assert result == ("ok", ({}, 1.0), {"params": {"x": 5}})
 
 
 def test_load_neuroseq_module_with_NN_class(monkeypatch: pytest.MonkeyPatch):
@@ -173,8 +173,8 @@ def test_load_neuroseq_module_with_NN_class(monkeypatch: pytest.MonkeyPatch):
 
     assert isinstance(project.external_simulator, _Backend)
     assert project.external_simulate_function is not None
-    assert project.external_simulate_function.__self__ is project.external_simulator
-    assert project.external_simulate_function.__func__ is _Backend.simulate
+    result = project.external_simulate_function({}, 1.0, params={"x": 5})
+    assert result == ("class-backend", ({}, 1.0), {"params": {"x": 5}})
 
 
 def test_load_neuroseq_module_with_simulate_fallback(monkeypatch: pytest.MonkeyPatch):

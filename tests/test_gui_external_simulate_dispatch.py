@@ -15,6 +15,7 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
 import neuroseq
+from neuroseq.data import Experiment
 from neuroseq.gui import Gui
 
 
@@ -213,11 +214,18 @@ def test_btn_edit_clicked_writes_b2model_back(
 def test_load_external_simulation_function_failure_clears_state(
     qtbot: QtBot, monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
+    def _previous_external_sim(
+        stims_dict: dict,
+        simulation_time: float,
+        params=None,
+    ) -> Experiment:
+        return Experiment("previous", simulation_time, [], [])
+
     gui = Gui()
     qtbot.addWidget(gui)
     gui.project.external_simulate_path = "previous"
     gui.project.external_simulator = object()
-    gui.project.external_simulate_function = lambda *args, **kwargs: None
+    gui.project.external_simulate_function = _previous_external_sim
 
     monkeypatch.setattr(
         gui.project,
