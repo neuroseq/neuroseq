@@ -1,3 +1,4 @@
+import copy
 from collections.abc import Callable
 from functools import wraps
 
@@ -1481,4 +1482,110 @@ def pyrho_6state_chr2_project() -> Project:
     )
     project.add_stim_array(stim_array)
 
+    return project
+
+
+def _build_elise_sequence_pattern(
+    tfinal_ms: int,
+    n_vis: int,
+    slot_ms: int = 50,
+    rest_mv: float = -70.0,
+    active_mv: float = -55.0,
+) -> np.ndarray:
+    """One-hot rolling depolarization pulses across `n_vis` visible neurons.
+
+    Each visible neuron is held at `active_mv` for `slot_ms` in turn; between
+    pulses the neuron rests at `rest_mv` (matches the default `E_l`). The
+    cycle period is `n_vis * slot_ms`.
+    """
+    stim = np.full((tfinal_ms, n_vis), rest_mv, dtype=np.float32)
+    period_ms = n_vis * slot_ms
+    for cycle_start in range(0, tfinal_ms, period_ms):
+        for k in range(n_vis):
+            i_start = cycle_start + k * slot_ms
+            i_end = min(i_start + slot_ms, tfinal_ms)
+            stim[i_start:i_end, k] = active_mv
+    return stim
+
+
+def _build_sinus_offset_pattern(
+    tfinal_ms: int,
+    n_units: int = 5,
+    slot_ms: int = 100,
+    active_offset_mv: float = 3.0,
+) -> np.ndarray:
+    """Piecewise offset pattern used by the sinus-offset external simulator.
+
+    The pattern is zero most of the time, with rolling per-unit positive
+    offsets so the additive stimulus contribution is easy to inspect.
+    """
+    stim = np.zeros((tfinal_ms, n_units), dtype=np.float32)
+    period_ms = n_units * slot_ms
+    for cycle_start in range(0, tfinal_ms, period_ms):
+        for unit in range(n_units):
+            i_start = cycle_start + unit * slot_ms
+            i_end = min(i_start + slot_ms, tfinal_ms)
+            stim[i_start:i_end, unit] = active_offset_mv
+    return stim
+
+
+@register_example_project("ELISE Sequence Learning Network", section="Network")
+def elise_project() -> Project:
+    """ELISE rate-coded sequence-learning network (Kriener et al., 2024).
+
+    NumPy/Numba model wrapped behind neuroseq's external-simulation interface.
+    Visible neurons receive a repeating one-hot pulse train; the network
+    learns the sequence via the Urbanczik-Senn dendritic plasticity rule.
+
+    Parameters are editable from the model editor; the underlying simulate
+    function lives at ``neuroseq.example_models.elise``.
+    """
+    # Deferred so opening unrelated example projects doesn't pull in elise/numba.
+    from neuroseq.example_models.elise import DEFAULT_PARAMS
+
+    project = Project()
+    project.external_simulate_path = "neuroseq:elise"
+    project.external_simulate_params = copy.deepcopy(DEFAULT_PARAMS)
+    project.load_NN()
+
+    n_vis = 4
+    tfinal_ms = 5000
+    stim = _build_elise_sequence_pattern(tfinal_ms, n_vis)
+    project.add_stim_array(
+        StimArray(
+            name="u_inp",
+            stim_type=StimType.External,
+            values=stim,
+            units="mV",
+            dt=0.001,
+        )
+    )
+    return project
+
+
+@register_example_project("Sinus Offset External Simulator", section="Network")
+def sinus_offset_project() -> Project:
+    """Five-unit sinus-wave simulator with additive stimulation offsets.
+
+    Uses ``neuroseq.example_models.sinus_offset`` through the external
+    simulation interface so model parameters can be edited from the GUI.
+    """
+    from neuroseq.example_models.sinus_offset import DEFAULT_PARAMS
+
+    project = Project()
+    project.external_simulate_path = "neuroseq:sinus_offset"
+    project.external_simulate_params = copy.deepcopy(DEFAULT_PARAMS)
+    project.load_NN()
+
+    tfinal_ms = 4000
+    stim = _build_sinus_offset_pattern(tfinal_ms=tfinal_ms, n_units=5)
+    project.add_stim_array(
+        StimArray(
+            name="offset",
+            stim_type=StimType.External,
+            values=stim,
+            units="mV",
+            dt=0.001,
+        )
+    )
     return project

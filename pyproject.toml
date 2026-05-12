@@ -8,12 +8,12 @@ description = "Protoype GUI to edit and run neuron models"
 readme = "README.md"
 license = { text = "NONE" }
 authors = [{ name = "SSC", email = "ssc@uni-heidelberg.de" }]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "brian2",
     "matplotlib",
     "pillow",
-    "numpy",
+    "numpy <= 2.0",
     "scipy",
     "qtpy",
     "pyside6!=6.9.1",
@@ -55,6 +55,7 @@ path = "src/neuroseq/__init__.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 markers = ["screenshot"]
 log_cli = "true"
 log_cli_level = "ERROR"

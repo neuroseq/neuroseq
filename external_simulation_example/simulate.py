@@ -4,7 +4,11 @@ import numpy as np
 from neuroseq.data import TraceData, SpikeData, SynapseData, Experiment
 
 
-def simulate(stims_dict: dict[str, np.ndarray], simulation_time: float) -> Experiment:
+def simulate(
+    stims_dict: dict[str, np.ndarray],
+    simulation_time: float,
+    params: dict | None = None,
+) -> Experiment:
     # This function is provided by neuroseq with a dict of stimuli, and the desired simulation time.
     # stims_dict is a dict of key:data pairs, where data contains
     #   - "array": 2d numpy array of timestamps x neurons

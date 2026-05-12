@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import copy
 import logging
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 from typing import Any
+from typing import cast
 
 import brian2 as b2  # noqa: F401
 from brian2 import TimedArray
@@ -23,6 +26,9 @@ from qtpy.QtWidgets import QComboBox
 
 from neuroseq.b2_model import B2Model
 from neuroseq.b2_units import str_to_quantity
+
+if TYPE_CHECKING:
+    from neuroseq.project import Project
 
 
 # derive a new combobox which has a 'clicked' signal
@@ -838,6 +844,118 @@ class EditableNeurongroupTree(EditableParameterTree):
             pass
 
 
+class EditableExternalSimParamsTree(EditableParameterTree):
+    """Tree for editing the flat ``Project.external_simulate_params`` schema.
+
+    The schema is ``{name: {value, default, type, group, description}}`` —
+    see ``neuroseq.example_models.elise.DEFAULT_PARAMS`` for the
+    canonical shape. Top-level rows are the unique ``group`` values; leaf
+    parameters are typed (int/float/bool/str) and edits write through to
+    ``params_dict[name]["value"]``.
+
+    Bypasses the b2_model-coupled parts of ``EditableParameterTree.__init__``;
+    inherits for IS-A and to reuse the context menu.
+    """
+
+    def __init__(
+        self,
+        params_dict: dict[str, dict],
+        parent: QtWidgets.QWidget | None = None,
+        showHeader: bool = False,
+    ) -> None:
+        ParameterTree.__init__(self, parent=parent, showHeader=showHeader)
+        self.params_dict = params_dict
+        self.logger = logging.getLogger(__name__)
+        # Parent-class fields kept as no-ops so inherited helpers don't break.
+        self.b2model = cast(Any, None)
+        self.name = "external_simulate_params"
+        self.states = {}
+        self.functions = {}
+        self.list_items = {}
+        self.default_creator = lambda: None
+        self.add_to_groups = False
+        self.add_to_groups_text = ""
+        self.add_item_action = QtWidgets.QAction("")
+        self._build_tree()
+
+    @staticmethod
+    def _param_type(entry_type: str) -> str:
+        return {
+            "int": "int",
+            "float": "float",
+            "bool": "bool",
+            "str": "str",
+        }.get(entry_type, "str")
+
+    def _build_tree(self, expanded: bool = True) -> None:  # type: ignore[override]
+        """Group params by `group`, build typed leaves, wire change signals."""
+        # Preserve insertion order of params_dict for stable group ordering.
+        groups: dict[str, list[dict]] = {}
+        for name, entry in self.params_dict.items():
+            group = entry.get("group", "Other")
+            groups.setdefault(group, []).append(
+                {
+                    "name": name,
+                    "type": self._param_type(entry.get("type", "str")),
+                    "value": entry["value"],
+                    "default": entry.get("default", entry["value"]),
+                    "tip": entry.get("description", ""),
+                    "removable": False,
+                    "renamable": False,
+                }
+            )
+
+        children = [
+            {
+                "name": group_name,
+                "type": "group",
+                "children": child_params,
+                "expanded": expanded,
+                "removable": False,
+                "renamable": False,
+            }
+            for group_name, child_params in groups.items()
+        ]
+        self.root = Parameter.create(
+            name=self.name,
+            type="group",
+            children=children,
+        )
+        self.setParameters(self.root, showTop=False)
+        self._connect_external_sim_params(self.root)
+
+    def _connect_external_sim_params(self, root: Parameter) -> None:
+        """Wire each leaf's `sigValueChanged` back into ``params_dict``.
+
+        ``sigValueChanged`` emits ``(parameter, new_value)`` — two positional
+        args. We bind the parameter name in a closure rather than a default
+        kwarg so the second positional arg can't overwrite it.
+        """
+        for group in root.children():
+            if group.type() != "group":
+                continue
+            for leaf in group.children():
+                self._connect_leaf(leaf)
+
+    def _connect_leaf(self, leaf: Parameter) -> None:
+        name = leaf.name()
+
+        def _handler(_param, value, _name=name):
+            self._on_value_changed(_name, value)
+
+        leaf.sigValueChanged.connect(_handler)
+
+    def _on_value_changed(self, name: str, value: Any) -> None:
+        if name in self.params_dict:
+            self.params_dict[name]["value"] = value
+            self.logger.debug(f"external sim param '{name}' set to {value!r}")
+
+    def contextMenuEvent(self, ev: QtCore.QEvent) -> None:
+        """Schema is fixed: no add/delete; pass clicks on items through."""
+        if self.itemAt(ev.pos()):
+            ParameterTree.contextMenuEvent(self, ev)
+
+
 class ModelEditorDialog(QtWidgets.QDialog):
     """
     Editor dialog for editing the properties of a model using multiple pyqtgraph ParameterTrees.
@@ -848,7 +966,12 @@ class ModelEditorDialog(QtWidgets.QDialog):
         Basic Qt Dialog class
     """
 
-    def __init__(self, b2model: B2Model, parent: QtWidgets.QWidget | None = None):
+    def __init__(
+        self,
+        b2model: B2Model,
+        parent: QtWidgets.QWidget | None = None,
+        project: Project | None = None,
+    ):
         """
         Create a new modeleditor instance and tie it to a B2Model instance.
 
@@ -858,10 +981,27 @@ class ModelEditorDialog(QtWidgets.QDialog):
             Model to edit through the gui
         parent : QtWidgets.QWidget | None, optional
             parent widget, by default None
+        project : Project | None, optional
+            If provided and `project.external_simulate_path` is set, the dialog
+            switches to "external simulation" mode and edits
+            `external_simulate_params` instead of the Brian2 model.
         """
         super().__init__(parent=parent)
 
         self.setWindowTitle("Model Editor")
+
+        self.project = project
+        self.external_simulate_params: dict[str, dict] | None = None
+        self.logger = logging.getLogger(__name__)
+
+        external_mode = (
+            project is not None and project.external_simulate_path is not None
+        )
+
+        if external_mode:
+            assert project is not None  # narrow for type checker
+            self._init_external_simulate(project, b2model)
+            return
 
         self.b2model = B2Model.from_dict(
             b2model.to_dict(), b2model.network._stored_state
@@ -891,8 +1031,6 @@ class ModelEditorDialog(QtWidgets.QDialog):
                 add_to_groups=True,
             ),
         }
-
-        self.logger = logging.getLogger(__name__)
 
         layout = QtWidgets.QGridLayout()
 
@@ -969,10 +1107,53 @@ class ModelEditorDialog(QtWidgets.QDialog):
         self.setLayout(layout)
         self.showMaximized()
 
+    def _init_external_simulate(self, project: Project, b2model: B2Model) -> None:
+        """Build a single-tree layout for editing external-simulation params."""
+        # `b2model` is kept on the instance so the calling pattern in
+        # `gui.btn_edit_clicked` continues to work; we don't edit it here.
+        self.b2model = b2model
+        self.external_simulate_params = copy.deepcopy(project.external_simulate_params)
+
+        layout = QtWidgets.QVBoxLayout()
+
+        nameplate = QtWidgets.QLabel("External Simulation Parameters", parent=self)
+        bold_font = QtGui.QFont()
+        bold_font.setBold(True)
+        nameplate.setFont(bold_font)
+        layout.addWidget(nameplate)
+
+        path_label = QtWidgets.QLabel(
+            f"Simulate function: {project.external_simulate_path}", parent=self
+        )
+        path_label.setStyleSheet("color: #888;")
+        layout.addWidget(path_label)
+
+        self.external_sim_tree = EditableExternalSimParamsTree(
+            self.external_simulate_params, parent=self
+        )
+        layout.addWidget(self.external_sim_tree)
+
+        btns = (
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        self.button_box = QtWidgets.QDialogButtonBox(btns)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
+
+        self.setLayout(layout)
+        self.resize(700, 600)
+
     def accept(self):
         """
         Accept the current state of the model and rebuilt it if anything has been edited.
         """
+        # External-sim mode: edits already mutated `external_simulate_params`
+        # in place via the tree; the caller will copy it back to the project.
+        if self.external_simulate_params is not None:
+            QtWidgets.QDialog.accept(self)
+            return
         self.logger.info(f"accept model editions {self.b2model.must_be_rebuilt}")
         try:
             # apply any changed seed value to the brian2 RNG and the model

@@ -3,7 +3,6 @@ from __future__ import annotations
 import gc
 import logging
 import pathlib
-import runpy
 from collections.abc import Callable
 
 import brian2 as b2
@@ -71,7 +70,6 @@ class Gui(QtWidgets.QMainWindow):
         self.setStatusBar(self.status_bar)
         self.status_bar.addPermanentWidget(ResourceMonitorLabel())
         self.project = Project()
-        self.external_simulation_function: Callable | None = None
         self.setWindowTitle("NeuroSeq")
         self.cmb_trace = QtWidgets.QComboBox()
         self.cmb_trace.setMinimumWidth(120)
@@ -506,9 +504,14 @@ class Gui(QtWidgets.QMainWindow):
         )
 
     def btn_edit_clicked(self) -> None:
-        mdiag = ModelEditorDialog(self.project.b2_model, parent=self)
+        mdiag = ModelEditorDialog(
+            self.project.b2_model, parent=self, project=self.project
+        )
         if mdiag.exec():
-            self.project.b2_model = mdiag.b2model
+            if mdiag.external_simulate_params is not None:
+                self.project.external_simulate_params = mdiag.external_simulate_params
+            else:
+                self.project.b2_model = mdiag.b2model
             self.project.update_limits()
             self.update_project(self.project)
 
@@ -754,6 +757,9 @@ class Gui(QtWidgets.QMainWindow):
         simulation_time = getSimulationTime(self)
         if simulation_time is None:
             return
+        if self.project.external_simulate_path is not None:
+            self._do_external_simulation(simulation_time)
+            return
         try:
             self.progress_dialog.setLabelText("Compiling...")
             self.progress_dialog.setValue(0)
@@ -801,7 +807,7 @@ class Gui(QtWidgets.QMainWindow):
 
     @with_wait_cursor
     def _do_external_simulation(self, simulation_time: float):
-        if self.external_simulation_function is None:
+        if self.project.external_simulate_function is None:
             return
         try:
             # pre-emptively pad timed arrays before simulating
@@ -814,9 +820,10 @@ class Gui(QtWidgets.QMainWindow):
             self.logger.info(
                 f"Running external simulation function for {simulation_time} seconds"
             )
-            experiment = self.external_simulation_function(
+            experiment = self.project.external_simulate_function(
                 stims_dict,
                 simulation_time,
+                params=self.project.external_simulate_params_flat(),
             )
             self.logger.info(
                 f"External simulation complete, returned {experiment.duration}s experiment '{experiment.name}' with {len(experiment.data)} data objects"
@@ -833,7 +840,7 @@ class Gui(QtWidgets.QMainWindow):
         self._append_experimental_data(experiment)
 
     def btn_do_external_simulation_clicked(self) -> None:
-        if self.external_simulation_function is None:
+        if self.project.external_simulate_function is None:
             QtWidgets.QMessageBox.information(
                 self,
                 "No external simulation function",
@@ -1057,7 +1064,8 @@ class Gui(QtWidgets.QMainWindow):
             return
         path = pathlib.Path(filename).resolve()
         try:
-            self.external_simulation_function = runpy.run_path(filename)["simulate"]
+            self.project.external_simulate_path = str(path)
+            self.project.load_NN()
             self.logger.info(f"Loaded custom simulate function from {path}")
             QtWidgets.QMessageBox.information(
                 self,
@@ -1065,6 +1073,9 @@ class Gui(QtWidgets.QMainWindow):
                 f"Custom simulate function loaded from {path}. You can run this simulation using the Experiment -> Run external simulation function menu option.",
             )
         except Exception as e:
+            self.project.external_simulate_path = None
+            self.project.external_simulator = None
+            self.project.external_simulate_function = None
             QtWidgets.QMessageBox.critical(
                 self,
                 "Error loading simulate function",
