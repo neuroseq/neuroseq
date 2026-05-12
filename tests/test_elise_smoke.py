@@ -4,7 +4,15 @@ Run with: uv run pytest tests/test_elise_smoke.py -s
 Or: uv run python tests/test_elise_smoke.py
 """
 
+import importlib.util
+
 import numpy as np
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    importlib.util.find_spec("elise") is None,
+    reason="ELISE smoke tests require the private 'elise' package.",
+)
 
 
 def test_elise_runs():

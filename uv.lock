@@ -1028,37 +1028,6 @@ wheels = [
 ]
 
 [[package]]
-name = "elise"
-version = "0.3.0"
-source = { editable = "../sequence-learning" }
-dependencies = [
-    { name = "coolname" },
-    { name = "matplotlib" },
-    { name = "mlflow" },
-    { name = "networkx" },
-    { name = "numba" },
-    { name = "numpy" },
-    { name = "scikit-learn" },
-    { name = "scipy" },
-    { name = "tomli-w" },
-    { name = "tqdm" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "coolname" },
-    { name = "matplotlib", specifier = ">=3.7" },
-    { name = "mlflow" },
-    { name = "networkx" },
-    { name = "numba" },
-    { name = "numpy", specifier = ">=1.24" },
-    { name = "scikit-learn" },
-    { name = "scipy" },
-    { name = "tomli-w" },
-    { name = "tqdm" },
-]
-
-[[package]]
 name = "fastapi"
 version = "0.136.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2551,7 +2520,6 @@ dependencies = [
     { name = "brian2", version = "2.10.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "cellpose", extra = ["gui"] },
     { name = "click" },
-    { name = "elise" },
     { name = "fastplotlib" },
     { name = "h5py" },
     { name = "igor2" },
@@ -2590,7 +2558,6 @@ requires-dist = [
     { name = "brian2" },
     { name = "cellpose", extras = ["gui"] },
     { name = "click" },
-    { name = "elise", editable = "../sequence-learning" },
     { name = "fastplotlib" },
     { name = "h5py" },
     { name = "igor2" },

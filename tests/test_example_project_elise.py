@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import importlib.util
+
 import numpy as np
+import pytest
 
 from neuroseq.example_projects import _build_elise_sequence_pattern
 from neuroseq.example_projects import example_projects
@@ -33,6 +36,10 @@ def test_elise_example_project_builds():
     assert np.allclose(first_pulse[:, 1:], -70.0)
 
 
+@pytest.mark.skipif(
+    importlib.util.find_spec("elise") is None,
+    reason="ELISE simulation test requires the private 'elise' package.",
+)
 def test_elise_example_simulate_runs():
     """End-to-end: build the example, then call simulate via the project."""
     factory = example_projects["Network"]["ELISE Sequence Learning Network"]

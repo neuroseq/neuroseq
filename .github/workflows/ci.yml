@@ -26,17 +26,10 @@ jobs:
         shell: bash -leo pipefail {0}
     steps:
       - uses: actions/checkout@v6
-      - name: Clone sequence-learning (ELISE) as sibling
-        run: |
-          git clone https://github.com/unibe-cns/sequence-learning.git ../sequence-learning
-          git -C ../sequence-learning checkout cf790867
-          # upstream pins requires-python >= 3.11; relax to match neuroseq's >= 3.10
-          sed -i.bak 's/requires-python = ">=3.11"/requires-python = ">=3.10"/' ../sequence-learning/pyproject.toml
       - uses: mamba-org/setup-micromamba@v3
         with:
           environment-file: environment.yml
       - run: pip install . --no-deps
-      - run: pip install ../sequence-learning
       - run: pytest -sv || pytest -sv || pytest -sv
   pypi:
     runs-on: ${{ matrix.os }}
@@ -51,12 +44,6 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Clone sequence-learning (ELISE) as sibling
-        run: |
-          git clone https://github.com/unibe-cns/sequence-learning.git ../sequence-learning
-          git -C ../sequence-learning checkout cf790867
-          # upstream pins requires-python >= 3.11; relax to match neuroseq's >= 3.10
-          sed -i.bak 's/requires-python = ">=3.11"/requires-python = ">=3.10"/' ../sequence-learning/pyproject.toml
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
