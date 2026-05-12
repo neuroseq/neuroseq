@@ -152,3 +152,82 @@ def test_external_simulation_passes_params_kwarg(
     assert captured["simulation_time"] == 2.0
     assert captured["params"] == {"k1": 42, "k2": 1.5}
     gui.close()
+
+
+def test_btn_edit_clicked_writes_external_params_back(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    class _Dialog:
+        def __init__(self, *args, **kwargs):
+            self.external_simulate_params = {
+                "alpha": {
+                    "value": 12,
+                    "default": 1,
+                    "type": "int",
+                    "group": "G",
+                    "description": ".",
+                }
+            }
+            self.b2model = object()
+
+        def exec(self) -> bool:
+            return True
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+    monkeypatch.setattr(neuroseq.gui, "ModelEditorDialog", _Dialog)
+    monkeypatch.setattr(gui.project, "update_limits", lambda: None)
+    monkeypatch.setattr(gui, "update_project", lambda project: None)
+
+    gui.btn_edit_clicked()
+
+    assert gui.project.external_simulate_params["alpha"]["value"] == 12
+    gui.close()
+
+
+def test_btn_edit_clicked_writes_b2model_back(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    replacement = object()
+
+    class _Dialog:
+        def __init__(self, *args, **kwargs):
+            self.external_simulate_params = None
+            self.b2model = replacement
+
+        def exec(self) -> bool:
+            return True
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+    monkeypatch.setattr(neuroseq.gui, "ModelEditorDialog", _Dialog)
+    monkeypatch.setattr(gui.project, "update_limits", lambda: None)
+    monkeypatch.setattr(gui, "update_project", lambda project: None)
+
+    gui.btn_edit_clicked()
+
+    assert gui.project.b2_model is replacement
+    gui.close()
+
+
+def test_load_external_simulation_function_failure_clears_state(
+    qtbot: QtBot, monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    gui.project.external_simulate_path = "previous"
+    gui.project.external_simulator = object()
+    gui.project.external_simulate_function = lambda *args, **kwargs: None
+
+    monkeypatch.setattr(
+        gui.project,
+        "load_NN",
+        lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    gui._load_external_simulation_function(str(tmp_path / "missing.py"))
+
+    assert gui.project.external_simulate_path is None
+    assert gui.project.external_simulator is None
+    assert gui.project.external_simulate_function is None
+    gui.close()

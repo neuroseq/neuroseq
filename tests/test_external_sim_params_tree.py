@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
+from pyqtgraph.parametertree import Parameter
 from pytestqt.qtbot import QtBot
+from qtpy import QtCore
+from qtpy import QtGui
 
 from neuroseq.model_editor import EditableExternalSimParamsTree
 from neuroseq.model_editor import ModelEditorDialog
@@ -142,3 +147,49 @@ def test_dialog_accept_in_external_mode_does_not_touch_b2(
 
     dialog.accept()
     assert dialog.result() == dialog.DialogCode.Accepted
+
+
+def test_connect_external_sim_params_skips_non_group_children(sample_params) -> None:
+    tree = EditableExternalSimParamsTree(sample_params)
+    connected: list[str] = []
+    tree._connect_leaf = lambda leaf: connected.append(leaf.name())  # type: ignore[method-assign]
+
+    fake_root = SimpleNamespace(
+        children=lambda: [
+            SimpleNamespace(type=lambda: "str", children=lambda: []),
+            SimpleNamespace(
+                type=lambda: "group",
+                children=lambda: [SimpleNamespace(name=lambda: "leaf_a")],
+            ),
+        ]
+    )
+
+    tree._connect_external_sim_params(fake_root)
+    assert connected == ["leaf_a"]
+
+
+def test_context_menu_event_passes_through_on_item_hit(
+    qtbot: QtBot, sample_params, monkeypatch
+) -> None:
+    tree = EditableExternalSimParamsTree(sample_params)
+    qtbot.addWidget(tree)
+
+    calls: list[object] = []
+    monkeypatch.setattr(tree, "itemAt", lambda pos: object())
+    monkeypatch.setattr(
+        Parameter,
+        "contextMenuEvent",
+        lambda self, ev: calls.append(ev),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "pyqtgraph.parametertree.ParameterTree.contextMenuEvent",
+        lambda self, ev: calls.append(ev),
+    )
+
+    event = QtGui.QContextMenuEvent(
+        QtGui.QContextMenuEvent.Reason.Mouse,
+        QtCore.QPoint(1, 1),
+    )
+    tree.contextMenuEvent(event)
+    assert calls == [event]

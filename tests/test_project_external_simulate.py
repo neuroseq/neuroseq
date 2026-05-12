@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import textwrap
+from types import SimpleNamespace
+
+import pytest
 
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
@@ -126,3 +129,91 @@ def test_metadata_load_failure_does_not_break_load(tmp_path, monkeypatch):
     reloaded = Project(out)
     assert reloaded.external_simulate_path == "neuroseq:not_a_real_module"
     assert reloaded.external_simulate_function is None
+
+
+def test_load_alias_elise_simulate_maps_to_elise(monkeypatch: pytest.MonkeyPatch):
+    calls: list[str] = []
+
+    class _Sim:
+        def simulate(self, *args, **kwargs):
+            return ("ok", args, kwargs)
+
+    simulator = _Sim()
+
+    def _fake_import(name: str):
+        calls.append(name)
+        return SimpleNamespace(get_simulator=lambda: simulator)
+
+    monkeypatch.setattr("neuroseq.project.importlib.import_module", _fake_import)
+
+    project = Project()
+    project.external_simulate_path = "neuroseq:elise_simulate"
+    project.load_NN()
+
+    assert calls == ["neuroseq.example_models.elise"]
+    assert project.external_simulator is simulator
+    assert project.external_simulate_function is not None
+    assert project.external_simulate_function.__self__ is simulator
+    assert project.external_simulate_function.__func__ is _Sim.simulate
+
+
+def test_load_neuroseq_module_with_NN_class(monkeypatch: pytest.MonkeyPatch):
+    class _Backend:
+        def simulate(self, *args, **kwargs):
+            return ("class-backend", args, kwargs)
+
+    monkeypatch.setattr(
+        "neuroseq.project.importlib.import_module",
+        lambda name: SimpleNamespace(NN=_Backend),
+    )
+
+    project = Project()
+    project.external_simulate_path = "neuroseq:dummy"
+    project.load_NN()
+
+    assert isinstance(project.external_simulator, _Backend)
+    assert project.external_simulate_function is not None
+    assert project.external_simulate_function.__self__ is project.external_simulator
+    assert project.external_simulate_function.__func__ is _Backend.simulate
+
+
+def test_load_neuroseq_module_with_simulate_fallback(monkeypatch: pytest.MonkeyPatch):
+    def _simulate(*args, **kwargs):
+        return ("module-sim", args, kwargs)
+
+    monkeypatch.setattr(
+        "neuroseq.project.importlib.import_module",
+        lambda name: SimpleNamespace(simulate=_simulate),
+    )
+
+    project = Project()
+    project.external_simulate_path = "neuroseq:dummy"
+    project.load_NN()
+
+    assert project.external_simulator is None
+    assert project.external_simulate_function is _simulate
+
+
+def test_load_neuroseq_module_without_entrypoint_raises(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        "neuroseq.project.importlib.import_module",
+        lambda name: SimpleNamespace(),
+    )
+
+    project = Project()
+    project.external_simulate_path = "neuroseq:dummy"
+    with pytest.raises(AttributeError, match="has no simulator entry point"):
+        project.load_NN()
+
+
+def test_load_external_simulator_wrapper_calls_load_nn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = Project()
+    called: list[str] = []
+    monkeypatch.setattr(project, "load_NN", lambda: called.append("load_NN"))
+
+    project.load_external_simulator()
+    assert called == ["load_NN"]
