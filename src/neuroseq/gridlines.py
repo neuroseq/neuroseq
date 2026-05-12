@@ -33,7 +33,7 @@ def generate_gridlines(
     """Generate vertical gridlines for a timeseries plot."""
     coords = _gridline_coords(n_neurons, time_ms, dt_ms)
 
-    color = pygfx.Color((0.6, 0.6, 0.6, 0.3))
+    color = pygfx.Color((0.3, 0.3, 0.3, 0.4))
     geometry = pygfx.Geometry(positions=coords)
     material = pygfx.LineSegmentMaterial(thickness=thickness, aa=True, color=color)
     return pygfx.Line(geometry, material)

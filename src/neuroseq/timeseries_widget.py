@@ -182,7 +182,7 @@ class TimeseriesWidget(FPLWidget):
         self.subplot.axes.y.ticks = None
         self.subplot.axes.y.points.visible = False
         self.subplot.axes.y.line.visible = False
-        self.subplot.axes.y.min_tick_distance = 20
+        self.subplot.axes.y.min_tick_distance = 35
         self.subplot.axes.y.tick_format = self._create_y_tick_formatter()
         self.subplot.axes.x.ticks = None
         self.subplot.axes.x.points.visible = False
@@ -191,6 +191,8 @@ class TimeseriesWidget(FPLWidget):
         self.subplot.axes.x.tick_format = (
             lambda x, x_min, x_max: f"{format_milliseconds(x)}ms"
         )
+        # Push axes (incl. tick labels) above gridline z=199 so labels render on top.
+        self.subplot.axes.world_object.world.z = 300
         self.subplot.toolbar = False
         self.subplot.add_graphic(self.roi, center=False)
         self.subplot.add_graphic(self.timeline, center=False)
