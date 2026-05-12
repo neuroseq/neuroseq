@@ -22,7 +22,7 @@ def test_default_state_is_empty():
 def test_load_neuroseq_sentinel_resolves_to_callable():
     project = Project()
     project.external_simulate_path = "neuroseq:elise"
-    project.load_external_simulator()
+    project.load_NN()
     assert project.external_simulator is not None
     assert callable(project.external_simulate_function)
     assert (
@@ -43,7 +43,7 @@ def test_load_filesystem_path(tmp_path):
     )
     project = Project()
     project.external_simulate_path = str(sim_path)
-    project.load_external_simulator()
+    project.load_NN()
     assert project.external_simulate_function is not None
     result = project.external_simulate_function({}, 1.0, params={"x": 5})
     assert result == ("called", 1.0, {"x": 5})
@@ -52,11 +52,11 @@ def test_load_filesystem_path(tmp_path):
 def test_load_clears_function_when_path_is_none():
     project = Project()
     project.external_simulate_path = "neuroseq:elise"
-    project.load_external_simulator()
+    project.load_NN()
     assert project.external_simulate_function is not None
 
     project.external_simulate_path = None
-    project.load_external_simulator()
+    project.load_NN()
     assert project.external_simulate_function is None
 
 

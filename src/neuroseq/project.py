@@ -752,6 +752,13 @@ class Project:
             self.external_simulator = None
             self.external_simulate_function = runpy.run_path(path)["simulate"]
 
+    def load_external_simulator(self) -> None:
+        """Compatibility wrapper for loading external simulation entry points.
+
+        This delegates to `load_NN`, which remains the canonical implementation.
+        """
+        self.load_NN()
+
     def external_simulate_params_flat(self) -> dict[str, object]:
         """Flatten `external_simulate_params` to `{name: value}` for the call site."""
         return {k: v["value"] for k, v in self.external_simulate_params.items()}
