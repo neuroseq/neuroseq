@@ -365,9 +365,9 @@ def append_data(
         )
         existing_data.values = safe_concat(
             [
-                existing_data.values[0:idx0],
+                existing_data.values[:, :, 0:idx0],
                 new_data.values,
-                existing_data.values[idx1:],
+                existing_data.values[:, :, idx1:],
             ],
             axis=2,
         )
