@@ -23,7 +23,6 @@ from neuroseq.data import TraceData
 from neuroseq.example_models.NN import NN
 from neuroseq.example_models.NN import ParamValue
 
-
 FlatParams = dict[str, ParamValue]
 
 # Editable parameter schema. The neuroseq GUI consumes this via
