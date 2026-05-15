@@ -22,6 +22,7 @@ from neuroseq.stim import StimType
 from neuroseq.stim_array_modifier import StimArrayModifier
 from neuroseq.stim_dialog import EditStimDialog
 from neuroseq.stim_intensity_dialog import StimIntensityDialog
+from neuroseq.stim_loop_dialog import StimLoopDialog
 from neuroseq.stim_timing import DEFAULT_STIM_DT_SECONDS
 from neuroseq.stim_timing import format_milliseconds
 from neuroseq.stim_timing import milliseconds_to_samples_nearest
@@ -303,6 +304,25 @@ class StimEditor(QtWidgets.QWidget):
                 return
         self.trim_stim_array_secs = trim_seconds_as_float
         self.project.trim_stim_arrays(new_length_secs)
+        self.set_project(self.project, keep_undo_history=False)
+
+    def loop_stim_array(self) -> None:
+        if self.current_stim_modifier is None or self.project is None:
+            return
+        dialog = StimLoopDialog(self.project, parent=self)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            self.set_project(self.project, keep_undo_history=False)
+            return
+        if dialog.loop_count > 1:
+            try:
+                self.project.loop_stim_arrays(dialog.loop_count)
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Error",
+                    f"Error looping stim arrays: '{e}'",
+                )
+                return
         self.set_project(self.project, keep_undo_history=False)
 
     def _stim_values_updated(self) -> None:
@@ -928,6 +948,14 @@ class StimEditor(QtWidgets.QWidget):
             self,
             shortcut="Ctrl+Shift+-",
             icon=qta.icon("mdi6.timeline-minus"),
+        )
+        add_action(
+            "Loop stim array",
+            self.loop_stim_array,
+            menu,
+            toolbar,
+            self,
+            icon=qta.icon("mdi6.repeat-variant"),
         )
         add_action(
             "Show all stim arrays",

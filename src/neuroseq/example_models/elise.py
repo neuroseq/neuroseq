@@ -223,6 +223,18 @@ DEFAULT_PARAMS: dict[str, dict[str, ParamValue | str]] = {
         "group": "Simulation",
         "description": "Enable plasticity during the simulation.",
     },
+    "clamp_visible": {
+        "value": True,
+        "default": True,
+        "type": "bool",
+        "group": "Simulation",
+        "description": (
+            "If True (training), drive visible neurons every step with "
+            "the stim array. If False (replay), release the teaching "
+            "nudging - let the network ring out from its current state. "
+            "Toggling this between Runs does NOT reset the network."
+        ),
+    },
     "weight_snapshot_interval_ms": {
         "value": 50.0,
         "default": 50.0,
@@ -323,8 +335,14 @@ class Elise(NN):
     2) initialize from default parameters,
     3) retain network state and cumulative simulated time,
     4) continue simulation across repeated runs,
-    5) return each run as an ``Experiment``.
+    5) return each run as an ``Experiment``,
+    6) support a ``clamp_visible`` phase toggle so train/replay can
+       alternate between Runs without losing weights or voltages.
     """
+
+    # Parameters whose toggling between runs should NOT discard the
+    # network state - phase controls rather than trajectory controls.
+    _PHASE_PARAMS: frozenset[str] = frozenset({"clamp_visible", "learn"})
 
     def __init__(self) -> None:
         super().__init__(DEFAULT_PARAMS)
@@ -336,6 +354,20 @@ class Elise(NN):
         self._network = None
         self._simulated_time_s = 0.0
         self._signature = None
+
+    def update_params(self, params: Mapping[str, ParamValue] | None) -> None:
+        merged = self._flat_defaults()
+        if params:
+            merged.update(params)
+        old_traj = {k: v for k, v in self._params.items() if k not in self._PHASE_PARAMS}
+        new_traj = {k: v for k, v in merged.items() if k not in self._PHASE_PARAMS}
+        if old_traj != new_traj:
+            self._params = merged
+            self.reset()
+        else:
+            # Trajectory-affecting params unchanged: update phase params in place,
+            # keep `_network`, `_simulated_time_s`, `_signature`.
+            self._params = merged
 
     def _import_elise_types(self) -> tuple[type, type, type, type, type]:
         if self._elise_types is not None:
@@ -410,7 +442,14 @@ class Elise(NN):
         num_vis = int(u_inp_full.shape[1])
 
         self.update_params(params)
-        signature = (num_vis, tuple(sorted(self._params.items())))
+        signature = (
+            num_vis,
+            tuple(
+                sorted(
+                    (k, v) for k, v in self._params.items() if k not in self._PHASE_PARAMS
+                )
+            ),
+        )
         if self._network is None or signature != self._signature:
             self._initialize_network(num_vis)
             self._signature = signature
@@ -423,6 +462,7 @@ class Elise(NN):
         n_steps = int(np.round(simulation_time * 1000.0 / dt_ms))
         n_total = self._network.num_all
         learn = _bool_param(self._params, "learn")
+        clamp_visible = _bool_param(self._params, "clamp_visible")
 
         u_trace = np.empty((n_total, n_steps), dtype=np.float32)
         v_trace = np.empty((n_total, n_steps), dtype=np.float32)
@@ -441,8 +481,11 @@ class Elise(NN):
         for step in range(n_steps):
             t_s = step * dt_ms / 1000.0
             t_abs_s = t0_s + t_s
-            stim_idx = min(int(t_abs_s / stim_dt_s), stim_T - 1)
-            u_inp_step = u_inp_full[stim_idx]
+            if clamp_visible:
+                stim_idx = min(int(t_abs_s / stim_dt_s), stim_T - 1)
+                u_inp_step = u_inp_full[stim_idx]
+            else:
+                u_inp_step = None
 
             self._network(u_inp=u_inp_step, learn=learn)
 

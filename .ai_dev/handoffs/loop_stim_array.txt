@@ -1,0 +1,400 @@
+loop_stim_array — Tile every stim array N times along the time axis, with optional periodicity-detect trim
+============================================================================================================
+
+Add a new toolbar action "Loop stim array" next to the existing
+"Pad / Trim / Clear stim array" family in the stim editor. The action opens
+a small dialog where the user enters an integer loop count N and optionally
+clicks a "Detect period & trim" button before looping. On OK the dialog
+multiplies every project stim array's time axis by N (literal np.tile-style
+repetition), keeping all stim arrays time-aligned the same way Pad and Trim
+already do.
+
+Loop is a RESHAPE operation (it changes the time-axis length of the values
+array), not a slice edit. The existing per-cell `StimArrayModifier` undo
+machinery cannot represent reshapes — its `ReversibleAction` requires a
+fixed shape (see `src/neuroseq/stim_array_modifier.py:14-42`). Loop must
+therefore follow the same pattern as Pad/Trim: mutate the stim array values
+in place via a new `Project.loop_stim_arrays(n_loops)` method, then call
+`self.set_project(self.project, keep_undo_history=False)` to refresh the
+view. Loop is consequently NOT Ctrl-Z-undoable — same as Pad/Trim today.
+
+Files to change:
+    src/neuroseq/project.py             (new method `loop_stim_arrays`)
+    src/neuroseq/stim_editor.py         (new method `loop_stim_array`, new toolbar action)
+
+Files to create:
+    src/neuroseq/stim_loop_dialog.py    (`StimLoopDialog`, `_detect_period`)
+    tests/test_stim_loop.py             (unit + qtbot tests)
+
+────────────────────────────────────────────────────────────────────────────────────────────
+BACKGROUND — how Pad and Trim work today
+────────────────────────────────────────────────────────────────────────────────────────────
+
+The toolbar actions for Pad (`stim_editor.py:214`) and Trim
+(`stim_editor.py:256`) follow a fixed shape:
+
+    1.  Open a `QInputDialog` for a duration in seconds.
+    2.  Validate the input (positive float, doesn't exceed current length).
+    3.  Call `self.project.pad_stim_arrays(total_time_seconds=...)` or
+        `self.project.trim_stim_arrays(total_time_seconds=...)`.
+    4.  Call `self.set_project(self.project, keep_undo_history=False)` to
+        refresh the GUI and clear undo history.
+
+Both project methods (`project.py:673` for pad, `project.py:691` for trim)
+loop over every entry in `self.stim_arrays.values()` and resize that
+StimArray's `.values` array, then call `self.update_limits()`. Time
+alignment across stims is preserved because the operation is uniform.
+
+Loop slots into the same pattern with `np.tile` as the per-stim primitive.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+APPROACH
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1.  Add `Project.loop_stim_arrays(n_loops: int) -> None` in `project.py`.
+2.  Add `StimLoopDialog` in a new module `stim_loop_dialog.py`. Also expose a
+    free function `_detect_period(values) -> int | None` from that module.
+3.  Add `StimEditor.loop_stim_array` method in `stim_editor.py`, modeled on
+    `pad_stim_array` (line 214). Wire it as a toolbar action right after the
+    "Trim stim array" `add_action` block (around line 920).
+4.  Add unit tests for `loop_stim_arrays` and `_detect_period`, and qtbot
+    integration tests for the dialog.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/project.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Add the method as a sibling of `pad_stim_arrays` (line 673) and
+`trim_stim_arrays` (line 691). Place it directly after `trim_stim_arrays`:
+
+    def loop_stim_arrays(self, n_loops: int) -> None:
+        """Tile every stim array's values along the time axis (axis 0).
+
+        Each stim's `.values` array becomes ``np.tile(values, (n_loops, 1))``,
+        keeping every stim array time-aligned the way pad/trim do.
+
+        Raises
+        ------
+        ValueError
+            If `n_loops` is less than 1.
+        """
+        if n_loops < 1:
+            raise ValueError(
+                f"n_loops must be >= 1, got {n_loops}"
+            )
+        if n_loops == 1:
+            return
+        for stim_array in self.stim_arrays.values():
+            stim_array.values = np.tile(stim_array.values, (n_loops, 1))
+        self.update_limits()
+
+`np` is already imported at the top of `project.py`. No other imports needed.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/stim_loop_dialog.py (new file)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+The dialog has three rows:
+
+    1.  STATUS LABEL (read-only). Shows current length and the looped length:
+
+            "Current stim length: 2000 ms (2000 samples) → after × 5 = 10000 ms"
+
+        Updates live when the spinbox value changes and after the Detect-period
+        button has trimmed the stim.
+
+    2.  DETECT-PERIOD ROW. A `QPushButton` labelled "Detect period and trim"
+        with a status caption to its right (initially empty).
+
+        Tooltip on the button:
+            "Find the smallest repeating block in the current stim and trim
+            the array to one period. Loop then composes that with the
+            multiplier."
+
+        On click:
+          - Pick the first stim array in `project.stim_arrays.values()` as
+            the reference (all stims share the same time axis).
+          - Run `_detect_period(reference.values)`.
+          - If a period `p` is returned and `0 < p < T`:
+              * Call `project.trim_stim_arrays(total_time_seconds=p * dt)`
+                where `dt = reference.dt`.
+              * Update the status caption to:
+                    f"Trimmed to {p * dt * 1000:.1f} ms ({p} samples) — 1 period"
+              * Refresh the dialog's main status label (current length).
+          - If `_detect_period` returns `None`:
+              * Status caption: "No periodic block detected; array unchanged."
+              * Array left alone, no exception.
+
+    3.  SPINBOX ROW. `QSpinBox` labelled "Number of repetitions". Range 1..1000,
+        default 2, single-step 1. `QDialogButtonBox.StandardButton.Ok |
+        Cancel` standard button row.
+
+`exec()` returns `Accepted` when the user clicks OK. The dialog exposes a
+read-only `loop_count` property the caller reads after `exec()`.
+
+Skeleton:
+
+    from __future__ import annotations
+
+    import logging
+
+    import numpy as np
+    from qtpy import QtWidgets
+
+    from neuroseq.project import Project
+
+
+    def _detect_period(values: np.ndarray) -> int | None:
+        """Return the smallest integer p in [1, T//2] such that the values
+        array is exactly periodic with period p, or None if no such p exists.
+
+        "Exactly periodic with period p" means
+            values[i, :] == values[i + p, :]   for all 0 <= i < T - p
+        and the array length T is a multiple of p.
+
+        For float arrays the comparison uses `np.allclose` with rtol=0,
+        atol=1e-6 (stim values are stored in float32, voltage scale is mV,
+        so 1e-6 mV tolerance is well below any meaningful numerical drift).
+        """
+        T = values.shape[0]
+        if T < 2:
+            return None
+        for p in range(1, T // 2 + 1):
+            if T % p != 0:
+                continue
+            if np.allclose(values[: T - p], values[p:], rtol=0.0, atol=1e-6):
+                return p
+        return None
+
+
+    class StimLoopDialog(QtWidgets.QDialog):
+        def __init__(self, project: Project, parent=None):
+            super().__init__(parent)
+            self.setWindowTitle("Loop stim array")
+            self.project = project
+            self.logger = logging.getLogger(__name__)
+
+            self.status_label = QtWidgets.QLabel(self)
+            self.detect_button = QtWidgets.QPushButton(
+                "Detect period and trim", self
+            )
+            self.detect_button.setToolTip(
+                "Find the smallest repeating block in the current stim and "
+                "trim the array to one period. Loop then composes that with "
+                "the multiplier."
+            )
+            self.detect_caption = QtWidgets.QLabel("", self)
+            self.spinbox = QtWidgets.QSpinBox(self)
+            self.spinbox.setRange(1, 1000)
+            self.spinbox.setValue(2)
+            self.spinbox.setSingleStep(1)
+            self.button_box = QtWidgets.QDialogButtonBox(
+                QtWidgets.QDialogButtonBox.StandardButton.Ok
+                | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+                parent=self,
+            )
+
+            layout = QtWidgets.QVBoxLayout(self)
+            layout.addWidget(self.status_label)
+            detect_row = QtWidgets.QHBoxLayout()
+            detect_row.addWidget(self.detect_button)
+            detect_row.addWidget(self.detect_caption)
+            detect_row.addStretch(1)
+            layout.addLayout(detect_row)
+            spin_row = QtWidgets.QHBoxLayout()
+            spin_row.addWidget(QtWidgets.QLabel("Number of repetitions:", self))
+            spin_row.addWidget(self.spinbox)
+            spin_row.addStretch(1)
+            layout.addLayout(spin_row)
+            layout.addWidget(self.button_box)
+
+            self.detect_button.clicked.connect(self._on_detect_clicked)
+            self.spinbox.valueChanged.connect(self._refresh_status_label)
+            self.button_box.accepted.connect(self.accept)
+            self.button_box.rejected.connect(self.reject)
+
+            self._refresh_status_label()
+
+        @property
+        def loop_count(self) -> int:
+            return int(self.spinbox.value())
+
+        def _reference_stim(self):
+            if not self.project.stim_arrays:
+                return None
+            return next(iter(self.project.stim_arrays.values()))
+
+        def _refresh_status_label(self) -> None:
+            ref = self._reference_stim()
+            if ref is None:
+                self.status_label.setText("(no stim arrays)")
+                return
+            T = ref.values.shape[0]
+            dt_ms = ref.dt * 1000.0
+            current_ms = T * dt_ms
+            n = self.loop_count
+            looped_ms = current_ms * n
+            self.status_label.setText(
+                f"Current stim length: {current_ms:.1f} ms ({T} samples) "
+                f"→ after × {n} = {looped_ms:.1f} ms"
+            )
+
+        def _on_detect_clicked(self) -> None:
+            ref = self._reference_stim()
+            if ref is None:
+                self.detect_caption.setText("(no stim arrays)")
+                return
+            period = _detect_period(ref.values)
+            if period is None or period <= 0 or period >= ref.values.shape[0]:
+                self.detect_caption.setText(
+                    "No periodic block detected; array unchanged."
+                )
+                return
+            new_length_secs = period * ref.dt
+            self.project.trim_stim_arrays(total_time_seconds=new_length_secs)
+            self.detect_caption.setText(
+                f"Trimmed to {new_length_secs * 1000.0:.1f} ms "
+                f"({period} samples) — 1 period"
+            )
+            self._refresh_status_label()
+
+The `T % p != 0` filter means a (2000, 13) Für Elise stim with 8 internal
+240-sample cycles is NOT detected as period 240 (since 2000 % 240 ≠ 0).
+That is INTENTIONAL — we only declare periodicity when it tiles cleanly. If
+the user wants to detect cycles that don't divide T, they should Trim first
+and then run Detect.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/stim_editor.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1.  ADD IMPORT near the existing stim-related imports at the top of the file:
+
+        from neuroseq.stim_loop_dialog import StimLoopDialog
+
+2.  ADD `loop_stim_array` method on `StimEditor`. Place it directly after
+    `trim_stim_array` (currently ends around line 320):
+
+        def loop_stim_array(self) -> None:
+            if self.current_stim_modifier is None or self.project is None:
+                return
+            dialog = StimLoopDialog(self.project, parent=self)
+            if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+                # Still refresh: Detect-period may have trimmed the stim.
+                self.set_project(self.project, keep_undo_history=False)
+                return
+            n_loops = dialog.loop_count
+            if n_loops > 1:
+                try:
+                    self.project.loop_stim_arrays(n_loops)
+                except Exception as e:
+                    QtWidgets.QMessageBox.critical(
+                        self, "Error", f"Error looping stim arrays: '{e}'"
+                    )
+                    return
+            # `set_project(..., keep_undo_history=False)` always runs so that
+            # both the loop and any preceding Detect-period trim are reflected.
+            self.set_project(self.project, keep_undo_history=False)
+
+3.  WIRE TOOLBAR ACTION. Search for the existing "Trim stim array
+    (Ctrl+Shift+Minus)" `add_action` call (around line 925-935) and add the
+    Loop action immediately after it:
+
+        add_action(
+            "Loop stim array",
+            self.loop_stim_array,
+            menu,
+            toolbar,
+            self,
+            icon=qta.icon("mdi6.repeat-variant"),
+        )
+
+    No keyboard shortcut.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_stim_loop.py (new)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Unit tests for the project method and the detector:
+
+    test_loop_stim_arrays_tiles_values
+        Build a project with one StimArray of shape (100, 4). Call
+        `project.loop_stim_arrays(3)`. Assert the result has shape (300, 4)
+        and equals `np.tile(original_values, (3, 1))`.
+
+    test_loop_stim_arrays_loops_all_stims_simultaneously
+        Project with two stim arrays of length 100 → after loop_stim_arrays(2),
+        both have length 200.
+
+    test_loop_stim_arrays_n_equals_one_is_noop
+        Shapes and values unchanged.
+
+    test_loop_stim_arrays_rejects_zero_and_negative
+        `loop_stim_arrays(0)` and `loop_stim_arrays(-3)` raise ValueError.
+
+    test_detect_period_finds_minimum
+        Array built by tiling a (7, 3) random block 5 times → returns 7.
+        Same array with one mid-position sample mutated → returns None.
+
+    test_detect_period_rejects_non_dividing
+        2000-sample × 13-channel "Für Elise" stim (8 internal 240-sample
+        cycles plus 80 padding) → returns None. Trimmed to 1920 samples (8
+        clean cycles, T % 240 == 0) → returns 240.
+
+    test_detect_period_handles_short_arrays
+        Empty or 1-sample arrays return None.
+
+qtbot integration tests (follow `tests/test_stim_dialog.py` for fixture
+patterns; `qtbot` and `project_with_stim` fixtures already exist in
+`tests/conftest.py`):
+
+    test_stim_loop_dialog_accept_returns_loop_count
+        Construct `StimLoopDialog(project)`, set `dialog.spinbox` to 4 via
+        `dialog.spinbox.setValue(4)`, call `dialog.accept()`, assert
+        `dialog.loop_count == 4` and `dialog.result() ==
+        QtWidgets.QDialog.DialogCode.Accepted`.
+
+    test_stim_loop_dialog_detect_period_trims_when_periodic
+        Project with a stim trimmed to 1920 samples of clean Für Elise →
+        click `dialog.detect_button.click()` → assert the project's stim
+        length drops to 240 and the caption text mentions "1 period".
+
+    test_stim_loop_dialog_detect_period_no_op_when_aperiodic
+        Project with a random non-periodic stim → click detect → project
+        stim unchanged, caption mentions "No periodic block detected".
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NON-GOALS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- PER-STIM LOOPING. All stim arrays loop together (same N), matching the
+  uniform behaviour of Pad/Trim. Per-stim loop counts would require
+  rethinking how the simulator handles unequal-length stims and is a
+  separate spec.
+
+- FUZZY PERIOD DETECTION. Current detector requires `T % p == 0` and uses
+  `np.allclose(rtol=0, atol=1e-6)`. Approximate / autocorrelation-based
+  detection is a separate feature.
+
+- UNDO OF LOOP. Loop is a reshape; same as Pad/Trim, it is not undoable and
+  the undo history is cleared via `keep_undo_history=False`. If
+  undo-of-reshape becomes desirable, the right fix is to redesign
+  `StimArrayModifier` to support shape-changing actions across the whole
+  Pad/Trim/Loop family, not to retrofit Loop alone.
+
+- LOOPING A SELECTED TIME RANGE. Out of scope; Loop tiles the entire values
+  array. Users who want to loop a slice should Trim first.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    ruff check src/neuroseq/project.py src/neuroseq/stim_editor.py src/neuroseq/stim_loop_dialog.py tests/test_stim_loop.py
+    mypy --ignore-missing-imports src/neuroseq/stim_loop_dialog.py src/neuroseq/project.py src/neuroseq/stim_editor.py
+    PYTHONPATH=src .venv/bin/python -m pytest tests/test_stim_loop.py -v
+    PYTHONPATH=src .venv/bin/python -m pytest
+
+The full pytest run is required because the new `Project.loop_stim_arrays`
+method and the `StimEditor.loop_stim_array` toolbar action can affect
+existing stim-editor and project tests via the shared fixtures in
+`tests/conftest.py`.

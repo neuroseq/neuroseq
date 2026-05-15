@@ -1519,7 +1519,7 @@ _FUER_ELISE_N_PITCHES = 13
 
 
 def _build_fuer_elise_pattern(
-    tfinal_ms: int = 2000,
+    tfinal_ms: int = 1920,
     event_ms: int = 10,
     rest_mv: float = -70.0,
     active_mv: float = -50.0,
@@ -1528,8 +1528,9 @@ def _build_fuer_elise_pattern(
 
     Matches Kriener et al., 2024 Fig. 2: 13 visible neurons (one per pitch),
     24 events per cycle, each event activates one or two pitches. Default
-    event duration of 10 ms gives a 240-ms cycle; ``tfinal_ms=2000`` fits 8
-    full cycles plus 80 ms of trailing rest.
+    event duration of 10 ms gives a 240-ms cycle; the default
+    ``tfinal_ms=1920`` fits exactly 8 full cycles, making the array exactly
+    periodic so the loop dialog's "Detect period and trim" recognises it.
 
     Voltage mapping matches the upstream ``to_biounits`` transform:
     inactive → ``E_l = -70 mV`` (rest), active → ``E_l + biounits_scale = -50 mV``.
@@ -1589,7 +1590,7 @@ def elise_project() -> Project:
     project.external_simulate_params = copy.deepcopy(DEFAULT_PARAMS)
     project.load_NN()
 
-    tfinal_ms = 2000
+    tfinal_ms = 1920  # 8 × 240 ms cycles, exactly periodic
     stim = _build_fuer_elise_pattern(tfinal_ms=tfinal_ms)
     project.add_stim_array(
         StimArray(

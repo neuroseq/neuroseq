@@ -702,6 +702,16 @@ class Project:
                 self.stim_arrays[name].values = stim_array.values[:new_n_timestamps, :]
         self.update_limits()
 
+    def loop_stim_arrays(self, n_loops: int) -> None:
+        """Tile every stim array's values along the time axis."""
+        if n_loops < 1:
+            raise ValueError(f"n_loops must be >= 1, got {n_loops}")
+        if n_loops == 1:
+            return
+        for stim_array in self.stim_arrays.values():
+            stim_array.values = np.tile(stim_array.values, (n_loops, 1))
+        self.update_limits()
+
     def trim_stim_array_would_delete_data(self, total_time_seconds: float) -> bool:
         """
         Check whether trimming all StimArrays in the project to a length of total_time_seconds would delete data

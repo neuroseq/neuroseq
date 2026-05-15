@@ -27,8 +27,8 @@ def test_elise_example_project_builds():
     assert "u_inp" in project.stim_arrays
 
     stim = project.stim_arrays["u_inp"]
-    # 2 s pattern with 13 pitch neurons (Kriener et al., 2024 Fig. 2)
-    assert stim.values.shape == (2000, 13)
+    # 8 full 240-ms cycles, exactly periodic so Detect-period works.
+    assert stim.values.shape == (1920, 13)
     assert stim.dt == 0.001
 
     # First event (0..10 ms) activates pitch 0 (the opening E5 of Für Elise).
@@ -105,10 +105,18 @@ def test_fuer_elise_pattern_first_events():
             )
 
 
-def test_fuer_elise_pattern_default_is_two_seconds():
-    """Calling with no args returns a 2-second, 13-pitch stim."""
+def test_fuer_elise_pattern_default_is_eight_full_cycles():
+    """Default (no args) is 8 × 240 ms cycles, no trailing rest."""
     pattern = _build_fuer_elise_pattern()
-    assert pattern.shape == (2000, 13)
-    # 8 full 240-ms cycles + 80 ms of trailing rest at the end.
-    trailing = pattern[1920:2000, :]
-    assert np.allclose(trailing, -70.0)
+    assert pattern.shape == (1920, 13)
+    cycle = pattern[:240]
+    for c in range(1, 8):
+        np.testing.assert_array_equal(pattern[c * 240 : (c + 1) * 240], cycle)
+
+
+def test_fuer_elise_pattern_default_is_detected_as_periodic():
+    """The default stim must be detectable as period 240 by the loop dialog."""
+    from neuroseq.stim_loop_dialog import _detect_period
+
+    pattern = _build_fuer_elise_pattern()
+    assert _detect_period(pattern) == 240
