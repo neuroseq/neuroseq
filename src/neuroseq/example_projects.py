@@ -1485,26 +1485,67 @@ def pyrho_6state_chr2_project() -> Project:
     return project
 
 
-def _build_elise_sequence_pattern(
-    tfinal_ms: int,
-    n_vis: int,
-    slot_ms: int = 50,
-    rest_mv: float = -70.0,
-    active_mv: float = -55.0,
-) -> np.ndarray:
-    """One-hot rolling depolarization pulses across `n_vis` visible neurons.
+# Beethoven "Für Elise" opening phrase as used in Kriener et al., 2024 (Fig. 2).
+# Each entry is a pitch index (int) or a tuple of two simultaneous pitch indices
+# (chord). Max pitch index is 12, so 13 visible neurons cover all pitches.
+# Source: sequence-learning/scripts/patterns/fuer_elise_original.txt
+_FUER_ELISE_INTRO: list[int | tuple[int, ...]] = [
+    0,
+    1,
+    0,
+    1,
+    0,
+    4,
+    2,
+    3,
+    (5, 11),
+    (5, 10),
+    8,
+    7,
+    6,
+    5,
+    (4, 12),
+    (4, 10),
+    (4, 9),
+    7,
+    3,
+    4,
+    (5, 11),
+    (5, 10),
+    (5, 8),
+    5,
+]
+_FUER_ELISE_N_PITCHES = 13
 
-    Each visible neuron is held at `active_mv` for `slot_ms` in turn; between
-    pulses the neuron rests at `rest_mv` (matches the default `E_l`). The
-    cycle period is `n_vis * slot_ms`.
+
+def _build_fuer_elise_pattern(
+    tfinal_ms: int = 2000,
+    event_ms: int = 10,
+    rest_mv: float = -70.0,
+    active_mv: float = -50.0,
+) -> np.ndarray:
+    """Multi-hot membrane-potential stim for the Für Elise intro.
+
+    Matches Kriener et al., 2024 Fig. 2: 13 visible neurons (one per pitch),
+    24 events per cycle, each event activates one or two pitches. Default
+    event duration of 10 ms gives a 240-ms cycle; ``tfinal_ms=2000`` fits 8
+    full cycles plus 80 ms of trailing rest.
+
+    Voltage mapping matches the upstream ``to_biounits`` transform:
+    inactive → ``E_l = -70 mV`` (rest), active → ``E_l + biounits_scale = -50 mV``.
     """
-    stim = np.full((tfinal_ms, n_vis), rest_mv, dtype=np.float32)
-    period_ms = n_vis * slot_ms
-    for cycle_start in range(0, tfinal_ms, period_ms):
-        for k in range(n_vis):
-            i_start = cycle_start + k * slot_ms
-            i_end = min(i_start + slot_ms, tfinal_ms)
-            stim[i_start:i_end, k] = active_mv
+    stim = np.full((tfinal_ms, _FUER_ELISE_N_PITCHES), rest_mv, dtype=np.float32)
+    cycle_ms = len(_FUER_ELISE_INTRO) * event_ms
+
+    # Only emit complete cycles; any remainder is left at rest_mv so the
+    # trailing tail isn't a half-phrase.
+    for cycle_start in range(0, tfinal_ms - cycle_ms + 1, cycle_ms):
+        for event_idx, event in enumerate(_FUER_ELISE_INTRO):
+            t_start = cycle_start + event_idx * event_ms
+            t_end = t_start + event_ms
+            pitches = event if isinstance(event, tuple) else (event,)
+            for pitch in pitches:
+                stim[t_start:t_end, pitch] = active_mv
     return stim
 
 
@@ -1548,9 +1589,8 @@ def elise_project() -> Project:
     project.external_simulate_params = copy.deepcopy(DEFAULT_PARAMS)
     project.load_NN()
 
-    n_vis = 4
-    tfinal_ms = 5000
-    stim = _build_elise_sequence_pattern(tfinal_ms, n_vis)
+    tfinal_ms = 2000
+    stim = _build_fuer_elise_pattern(tfinal_ms=tfinal_ms)
     project.add_stim_array(
         StimArray(
             name="u_inp",
