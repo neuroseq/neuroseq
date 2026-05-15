@@ -754,7 +754,10 @@ class Gui(QtWidgets.QMainWindow):
             return
 
     def btn_continue_simulation_clicked(self) -> None:
-        simulation_time = getSimulationTime(self)
+        simulation_time = getSimulationTime(
+            self,
+            default_seconds=self.project.suggested_simulation_time_seconds(),
+        )
         if simulation_time is None:
             return
         if self.project.external_simulate_path is not None:
@@ -810,8 +813,12 @@ class Gui(QtWidgets.QMainWindow):
         if self.project.external_simulate_function is None:
             return
         try:
-            # pre-emptively pad timed arrays before simulating
-            self.project.pad_stim_arrays(total_time_seconds=simulation_time)
+            cumulative_so_far = 0.0
+            sim = getattr(self.project, "external_simulator", None)
+            if sim is not None and hasattr(sim, "simulated_time_seconds"):
+                cumulative_so_far = float(sim.simulated_time_seconds)
+            target_seconds = cumulative_so_far + simulation_time
+            self.project.tile_stim_arrays_to_length(target_seconds)
             self.stim_editor.set_project(self.project)
             stims_dict = {
                 k: {"array": v.stim_array.values, "dt": v.stim_array.dt}
@@ -847,7 +854,10 @@ class Gui(QtWidgets.QMainWindow):
                 "No external simulation function loaded - please load one first.",
             )
             return
-        simulation_time = getSimulationTime(self)
+        simulation_time = getSimulationTime(
+            self,
+            default_seconds=self.project.suggested_simulation_time_seconds(),
+        )
         if simulation_time is None:
             return
         self._do_external_simulation(simulation_time)

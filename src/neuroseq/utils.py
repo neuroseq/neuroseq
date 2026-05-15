@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import math
 from collections.abc import Callable
 from collections.abc import Iterable
 from enum import Enum
@@ -171,7 +172,9 @@ def add_items_to_combobox(combobox: QtWidgets.QComboBox, items: list[str]) -> No
     longest_item = max(items, key=len)
     font_metrics = QtGui.QFontMetrics(combobox.font())
     max_width = font_metrics.boundingRect(longest_item).width()
-    combobox.view().setMinimumWidth(max_width + 20)
+    combobox_view = combobox.view()
+    if combobox_view is not None:
+        combobox_view.setMinimumWidth(max_width + 20)
 
 
 def update_nested_dict(original: dict[Any, Any], updates: Any) -> None:
@@ -426,13 +429,25 @@ def remove_neurons_from_data(
             data.spike_times = np.array([], dtype=data.spike_times.dtype)
 
 
-def getSimulationTime(parent: QtWidgets.QWidget | None = None) -> float | None:
+def getSimulationTime(
+    parent: QtWidgets.QWidget | None = None,
+    default_seconds: float | None = None,
+) -> float | None:
+    """Prompt the user for a simulation time in seconds."""
+    if (
+        default_seconds is None
+        or default_seconds <= 0
+        or not math.isfinite(default_seconds)
+    ):
+        default_text = "1.0"
+    else:
+        default_text = f"{default_seconds:g}"
     simulation_time_str, ok = QtWidgets.QInputDialog.getText(
         parent,
         "Simulate",
         "Simulation time (s)",
         QtWidgets.QLineEdit.EchoMode.Normal,
-        "1.0",
+        default_text,
     )
     if not ok:
         return None

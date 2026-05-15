@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import FunctionType
 
+import numpy as np
 from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
@@ -152,6 +153,82 @@ def test_external_simulation_passes_params_kwarg(
     captured = fn.__globals__["captured"]
     assert captured["simulation_time"] == 2.0
     assert captured["params"] == {"k1": 42, "k2": 1.5}
+    gui.close()
+
+
+def test_run_dialog_default_is_suggested_simulation_time(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    def _external_sim(
+        stims_dict: dict,
+        simulation_time: float,
+        params=None,
+    ) -> Experiment:
+        return Experiment("unused", simulation_time, [], [])
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+    gui.project.external_simulate_path = "neuroseq:elise"
+    gui.project.external_simulate_function = _external_sim
+
+    seen_default: dict[str, str] = {}
+
+    def _get_text(*args, **kwargs):
+        seen_default["text"] = args[4]
+        return ("1.92", True)
+
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", _get_text)
+    monkeypatch.setattr(gui.project, "suggested_simulation_time_seconds", lambda: 1.92)
+    monkeypatch.setattr(gui, "_do_external_simulation", lambda simulation_time: None)
+
+    gui.btn_continue_simulation_clicked()
+
+    assert seen_default["text"] == "1.92"
+    gui.close()
+
+
+def test_run_with_overshoot_tiles_stim_before_dispatch(
+    qtbot: QtBot, monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    sim_path = tmp_path / "shape_capture_sim.py"
+    sim_path.write_text(
+        "from neuroseq.data import Experiment\n"
+        "captured = {}\n"
+        "def simulate(stims_dict, simulation_time, params=None):\n"
+        "    captured['shape'] = stims_dict['u_inp']['array'].shape\n"
+        "    return Experiment('mock', simulation_time, [], [])\n"
+    )
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project = gui.project
+    project.external_simulate_path = str(sim_path)
+    project.load_NN()
+    monkeypatch.setattr(neuroseq.gui, "ImportExperimentDialog", _MockImportDialog)
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog,
+        "getText",
+        lambda *args, **kwargs: ("0.25", True),
+    )
+
+    stim = np.arange(200, dtype=np.float32).reshape(100, 2)
+    project.add_stim_array(
+        neuroseq.stim.StimArray(
+            "u_inp",
+            neuroseq.stim.StimType.Excitation,
+            stim,
+            "mV",
+            0.001,
+        )
+    )
+    gui.stim_editor.set_project(project)
+
+    gui.btn_continue_simulation_clicked()
+
+    fn = project.external_simulate_function
+    assert isinstance(fn, FunctionType)
+    captured = fn.__globals__["captured"]
+    assert captured["shape"] == (250, 2)
     gui.close()
 
 

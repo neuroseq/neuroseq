@@ -50,6 +50,34 @@ def _to_seconds(value: float | int) -> float:
     return float(value)
 
 
+def _meaningful_row_count(values: np.ndarray) -> int:
+    """Return n such that values[n:] is a uniform-and-constant tail.
+
+    A "tail" must satisfy both:
+    * the tail row is uniform across channels (all elements equal), so it
+      represents "every neuron at the same rest value", and
+    * the row is repeated identically from some index onward.
+
+    Multi-channel patterns whose last event has only one channel active are
+    not uniform and are left intact.
+    """
+    n_rows = int(values.shape[0])
+    if n_rows == 0:
+        return 0
+    tail = values[-1]
+    if tail.size > 0 and not np.all(tail == tail.flat[0]):
+        return n_rows
+    tail_len = 0
+    for i in range(n_rows - 1, -1, -1):
+        if np.array_equal(values[i], tail):
+            tail_len += 1
+            continue
+        break
+    if tail_len == n_rows:
+        return 0
+    return n_rows - tail_len
+
+
 def _trace_data_neuron_count(data: TraceData) -> int:
     if data.indices.size > 0:
         return int(np.max(data.indices)) + 1
@@ -710,6 +738,40 @@ class Project:
             return
         for stim_array in self.stim_arrays.values():
             stim_array.values = np.tile(stim_array.values, (n_loops, 1))
+        self.update_limits()
+
+    def suggested_simulation_time_seconds(self) -> float:
+        """Return the longest meaningfully-filled duration across stim arrays."""
+        if not self.stim_arrays:
+            return float(self.max_time_secs) if self.max_time_secs > 0 else 1.0
+        candidates: list[float] = []
+        for stim_array in self.stim_arrays.values():
+            values = stim_array.values
+            n_rows = int(values.shape[0])
+            if n_rows == 0:
+                continue
+            meaningful_n = _meaningful_row_count(values)
+            if meaningful_n == 0:
+                meaningful_n = n_rows
+            candidates.append(meaningful_n * stim_array.dt)
+        if not candidates:
+            return 1.0
+        return max(candidates)
+
+    def tile_stim_arrays_to_length(self, target_seconds: float) -> None:
+        """Extend every stim array via tiling so each covers `target_seconds`."""
+        if target_seconds < 0:
+            raise ValueError(f"target_seconds must be >= 0, got {target_seconds}")
+        for stim_array in self.stim_arrays.values():
+            current_n = int(stim_array.values.shape[0])
+            if current_n == 0:
+                continue
+            n_target = int(math.ceil(target_seconds / stim_array.dt))
+            if n_target <= current_n:
+                continue
+            full_tiles = (n_target + current_n - 1) // current_n
+            tiled = np.tile(stim_array.values, (full_tiles, 1))
+            stim_array.values = tiled[:n_target]
         self.update_limits()
 
     def trim_stim_array_would_delete_data(self, total_time_seconds: float) -> bool:
