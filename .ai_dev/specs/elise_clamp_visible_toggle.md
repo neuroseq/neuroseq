@@ -1,3 +1,7 @@
+> **Superseded by** `.ai_dev/specs/elise_opsin_migration.md`.
+> The `clamp_visible` parameter no longer exists; "release" is expressed
+> by zeroing both opsin stim arrays.
+
 # ELISE — `clamp_visible` train/replay phase toggle
 
 ## Overview

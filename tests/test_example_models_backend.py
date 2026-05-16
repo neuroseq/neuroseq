@@ -155,7 +155,7 @@ def _install_fake_elise(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             self.dendritic_weights = np.zeros(
                 (self.num_all, self.num_all), dtype=np.float32
             )
-            self.calls: list[tuple[np.ndarray, bool]] = []
+            self.calls: list[tuple[np.ndarray | None, bool]] = []
             self.prepared: tuple[float, FakeSimpleUpdater, FakeSimpleUpdater] | None = (
                 None
             )
@@ -170,9 +170,14 @@ def _install_fake_elise(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             self.prepared = (dt_ms, opt_vis, opt_lat)
 
         def __call__(self, u_inp, learn: bool = True) -> None:
-            self.calls.append((np.array(u_inp, copy=True), learn))
-            self.u[: len(u_inp)] = u_inp
-            self.u[len(u_inp) :] = 100.0 + len(self.calls)
+            if u_inp is None:
+                self.calls.append((None, learn))
+                self.u[:] = 100.0 + len(self.calls)
+            else:
+                arr = np.array(u_inp, copy=True)
+                self.calls.append((arr, learn))
+                self.u[: len(arr)] = arr
+                self.u[len(arr) :] = 100.0 + len(self.calls)
             self.v[:] = self.u + 1.0
             self.r[:] = np.clip(self.u / 100.0, 0.0, 1.0)
             if learn:
@@ -227,10 +232,26 @@ def test_elise_simulate_with_fake_backend_and_wrapper(
     _install_fake_elise(monkeypatch)
     sim = Elise()
 
-    with pytest.raises(ValueError, match="must contain a 'u_inp'"):
+    with pytest.raises(
+        ValueError, match="must contain both 'opsin_exc' and 'opsin_inh'"
+    ):
         sim.simulate({}, 0.1)
+    with pytest.raises(ValueError, match="must have the same shape"):
+        sim.simulate(
+            {
+                "opsin_exc": {"array": np.zeros((1, 1), dtype=np.float32), "dt": 0.1},
+                "opsin_inh": {"array": np.zeros((1, 2), dtype=np.float32), "dt": 0.1},
+            },
+            0.1,
+        )
     with pytest.raises(ValueError, match="must be 2D"):
-        sim.simulate({"u_inp": {"array": np.zeros(0), "dt": 0.1}}, 0.1)
+        sim.simulate(
+            {
+                "opsin_exc": {"array": np.zeros(0), "dt": 0.1},
+                "opsin_inh": {"array": np.zeros(0), "dt": 0.1},
+            },
+            0.1,
+        )
 
     params = {
         "num_lat": 2,
@@ -238,8 +259,16 @@ def test_elise_simulate_with_fake_backend_and_wrapper(
         "weight_snapshot_interval_ms": 100.0,
         "learn": True,
     }
-    stim = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]], dtype=np.float32)
-    stims_dict = {"u_inp": {"array": stim, "dt": 0.1}}
+    u_tgt = np.array(
+        [[-10.0, -20.0], [-30.0, -40.0], [-50.0, -60.0], [-25.0, -35.0]],
+        dtype=np.float32,
+    )
+    g_exc = ((-75.0 - u_tgt) / -75.0).astype(np.float32)
+    g_inh = ((u_tgt - 0.0) / -75.0).astype(np.float32)
+    stims_dict = {
+        "opsin_exc": {"array": g_exc, "dt": 0.1},
+        "opsin_inh": {"array": g_inh, "dt": 0.1},
+    }
 
     first = sim.simulate(stims_dict, 0.2, params=params)
     second = sim.simulate(stims_dict, 0.2, params=params)
@@ -258,8 +287,8 @@ def test_elise_simulate_with_fake_backend_and_wrapper(
     )
     assert first_u.traces.shape == (4, 2)
     assert first_w.timestamps.tolist() == pytest.approx([0.0, 0.1])
-    assert np.allclose(first_u.traces[:2, 0], [1.0, 2.0])
-    assert np.allclose(second_u.traces[:2, 0], [5.0, 6.0])
+    assert np.allclose(first_u.traces[:2, 0], [-10.0, -20.0])
+    assert np.allclose(second_u.traces[:2, 0], [-50.0, -60.0])
     assert sim.simulated_time_seconds == pytest.approx(0.4)
 
     sim.reset()
@@ -281,7 +310,10 @@ def test_elise_simulate_raises_if_initialization_did_not_set_network(
 ) -> None:
     sim = Elise()
     monkeypatch.setattr(sim, "_initialize_network", lambda num_vis: None)
-    stims_dict = {"u_inp": {"array": np.ones((2, 1), dtype=np.float32), "dt": 0.1}}
+    stims_dict = {
+        "opsin_exc": {"array": np.ones((2, 1), dtype=np.float32), "dt": 0.1},
+        "opsin_inh": {"array": np.ones((2, 1), dtype=np.float32), "dt": 0.1},
+    }
     with pytest.raises(RuntimeError, match="failed to initialize"):
         sim.simulate(stims_dict, 0.1, params={"dt_ms": 100.0})
 

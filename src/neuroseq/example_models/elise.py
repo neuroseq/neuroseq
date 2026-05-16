@@ -4,6 +4,11 @@ Wraps the rate-coded ELISE network from the ``elise`` package (sequence-learning
 by Kriener et al., 2024) behind neuroseq's
 ``simulate(stims_dict, simulation_time, params=None) -> Experiment`` contract.
 
+The user-facing stim API uses two virtual opsins, ``opsin_exc`` and
+``opsin_inh``. Their per-pitch ratio determines the matching potential;
+their absolute magnitudes do not. Overall teaching strength remains
+controlled by ``lam``.
+
 The module-level ``simulate`` function delegates to a singleton ``NN``
 instance so existing project and GUI integration remains unchanged while
 preserving simulation state across repeated runs.
@@ -222,18 +227,6 @@ DEFAULT_PARAMS: dict[str, dict[str, ParamValue | str]] = {
         "group": "Simulation",
         "description": "Enable plasticity during the simulation.",
     },
-    "clamp_visible": {
-        "value": True,
-        "default": True,
-        "type": "bool",
-        "group": "Simulation",
-        "description": (
-            "If True (training), drive visible neurons every step with "
-            "the stim array. If False (replay), release the teaching "
-            "nudging - let the network ring out from its current state. "
-            "Toggling this between Runs does NOT reset the network."
-        ),
-    },
     "weight_snapshot_interval_ms": {
         "value": 50.0,
         "default": 50.0,
@@ -335,13 +328,15 @@ class Elise(NN):
     3) retain network state and cumulative simulated time,
     4) continue simulation across repeated runs,
     5) return each run as an ``Experiment``,
-    6) support a ``clamp_visible`` phase toggle so train/replay can
-       alternate between Runs without losing weights or voltages.
+    6) consume two opsin-activation stim arrays (``opsin_exc``,
+       ``opsin_inh``) and derive the upstream ``u_inp`` from their
+       ratio per pitch per step. Release is "both opsins at zero
+       everywhere" - no separate parameter required.
     """
 
     # Parameters whose toggling between runs should NOT discard the
     # network state - phase controls rather than trajectory controls.
-    _PHASE_PARAMS: frozenset[str] = frozenset({"clamp_visible", "learn"})
+    _PHASE_PARAMS: frozenset[str] = frozenset({"learn"})
 
     def __init__(self) -> None:
         super().__init__(DEFAULT_PARAMS)
@@ -357,15 +352,18 @@ class Elise(NN):
     def update_params(self, params: Mapping[str, ParamValue] | None) -> None:
         merged = self._flat_defaults()
         if params:
-            merged.update(params)
-        old_traj = {k: v for k, v in self._params.items() if k not in self._PHASE_PARAMS}
+            # Drop unknown keys (legacy archives may still carry
+            # ``clamp_visible``); they're no longer meaningful.
+            known = set(self._default_params_schema.keys())
+            merged.update({k: v for k, v in params.items() if k in known})
+        old_traj = {
+            k: v for k, v in self._params.items() if k not in self._PHASE_PARAMS
+        }
         new_traj = {k: v for k, v in merged.items() if k not in self._PHASE_PARAMS}
         if old_traj != new_traj:
             self._params = merged
             self.reset()
         else:
-            # Trajectory-affecting params unchanged: update phase params in place,
-            # keep `_network`, `_simulated_time_s`, `_signature`.
             self._params = merged
 
     def _import_elise_types(self) -> tuple[type, type, type, type, type]:
@@ -427,18 +425,26 @@ class Elise(NN):
         simulation_time: float,
         params: Mapping[str, ParamValue] | None = None,
     ) -> Experiment:
-        if "u_inp" not in stims_dict:
+        if "opsin_exc" not in stims_dict or "opsin_inh" not in stims_dict:
             raise ValueError(
-                "stims_dict must contain a 'u_inp' entry (visible-neuron drive). "
-                f"Got: {list(stims_dict)}"
+                "stims_dict must contain both 'opsin_exc' and 'opsin_inh' "
+                "entries (excitatory and inhibitory virtual opsin "
+                f"activations). Got: {list(stims_dict)}"
             )
-        u_inp_full = np.asarray(stims_dict["u_inp"]["array"], dtype=np.float64)
-        if u_inp_full.ndim != 2 or u_inp_full.shape[0] == 0:
+        g_exc_full = np.asarray(stims_dict["opsin_exc"]["array"], dtype=np.float64)
+        g_inh_full = np.asarray(stims_dict["opsin_inh"]["array"], dtype=np.float64)
+        if g_exc_full.shape != g_inh_full.shape:
             raise ValueError(
-                f"'u_inp' array must be 2D with shape [T, num_vis]; got {u_inp_full.shape}"
+                f"'opsin_exc' and 'opsin_inh' must have the same shape; "
+                f"got {g_exc_full.shape} vs {g_inh_full.shape}"
             )
-        stim_dt_s = float(stims_dict["u_inp"]["dt"])
-        num_vis = int(u_inp_full.shape[1])
+        if g_exc_full.ndim != 2 or g_exc_full.shape[0] == 0:
+            raise ValueError(
+                f"opsin stim arrays must be 2D with shape [T, num_vis]; "
+                f"got {g_exc_full.shape}"
+            )
+        stim_dt_s = float(stims_dict["opsin_exc"]["dt"])
+        num_vis = int(g_exc_full.shape[1])
 
         self.update_params(params)
         signature = (
@@ -461,7 +467,9 @@ class Elise(NN):
         n_steps = int(np.round(simulation_time * 1000.0 / dt_ms))
         n_total = self._network.num_all
         learn = _bool_param(self._params, "learn")
-        clamp_visible = _bool_param(self._params, "clamp_visible")
+        E_exc = _float_param(self._params, "E_exc")
+        E_inh = _float_param(self._params, "E_inh")
+        E_l = _float_param(self._params, "E_l")
 
         u_trace = np.empty((n_total, n_steps), dtype=np.float32)
         v_trace = np.empty((n_total, n_steps), dtype=np.float32)
@@ -474,17 +482,23 @@ class Elise(NN):
         snap_timestamps = np.empty(len(snap_indices), dtype=np.float32)
         snap_cursor = 0
 
-        stim_T = u_inp_full.shape[0]
+        stim_T = g_exc_full.shape[0]
         t0_s = self._simulated_time_s
 
         for step in range(n_steps):
             t_s = step * dt_ms / 1000.0
             t_abs_s = t0_s + t_s
-            if clamp_visible:
-                stim_idx = min(int(t_abs_s / stim_dt_s), stim_T - 1)
-                u_inp_step = u_inp_full[stim_idx]
-            else:
+            stim_idx = min(int(t_abs_s / stim_dt_s), stim_T - 1)
+            g_exc_k = g_exc_full[stim_idx]
+            g_inh_k = g_inh_full[stim_idx]
+            sum_k = g_exc_k + g_inh_k
+            if not np.any(sum_k > 0):
                 u_inp_step = None
+            else:
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    u_tgt = (g_exc_k * E_exc + g_inh_k * E_inh) / sum_k
+                u_tgt = np.where(sum_k > 0, u_tgt, E_l)
+                u_inp_step = u_tgt.astype(np.float64)
 
             self._network(u_inp=u_inp_step, learn=learn)
 
