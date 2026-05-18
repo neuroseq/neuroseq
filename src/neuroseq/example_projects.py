@@ -1485,27 +1485,79 @@ def pyrho_6state_chr2_project() -> Project:
     return project
 
 
-def _build_elise_sequence_pattern(
-    tfinal_ms: int,
-    n_vis: int,
-    slot_ms: int = 50,
-    rest_mv: float = -70.0,
-    active_mv: float = -55.0,
-) -> np.ndarray:
-    """One-hot rolling depolarization pulses across `n_vis` visible neurons.
+# Beethoven "Für Elise" opening phrase as used in Kriener et al., 2024 (Fig. 2).
+# Each entry is a pitch index (int) or a tuple of two simultaneous pitch indices
+# (chord). Max pitch index is 12, so 13 visible neurons cover all pitches.
+# Source: sequence-learning/scripts/patterns/fuer_elise_original.txt
+_FUER_ELISE_INTRO: list[int | tuple[int, ...]] = [
+    0,
+    1,
+    0,
+    1,
+    0,
+    4,
+    2,
+    3,
+    (5, 11),
+    (5, 10),
+    8,
+    7,
+    6,
+    5,
+    (4, 12),
+    (4, 10),
+    (4, 9),
+    7,
+    3,
+    4,
+    (5, 11),
+    (5, 10),
+    (5, 8),
+    5,
+]
+_FUER_ELISE_N_PITCHES = 13
+# Normalized so g_exc + g_inh = 1 in each state while preserving the
+# ratios that reproduce u_tgt = -50 mV (active) and -70 mV (rest).
+_FUER_ELISE_OPSIN_EXC_REST: float = 1.0 / 15.0
+_FUER_ELISE_OPSIN_INH_REST: float = 14.0 / 15.0
+_FUER_ELISE_OPSIN_EXC_ACTIVE: float = 1.0 / 3.0
+_FUER_ELISE_OPSIN_INH_ACTIVE: float = 2.0 / 3.0
 
-    Each visible neuron is held at `active_mv` for `slot_ms` in turn; between
-    pulses the neuron rests at `rest_mv` (matches the default `E_l`). The
-    cycle period is `n_vis * slot_ms`.
+
+def _build_fuer_elise_opsin_stims(
+    tfinal_ms: int = 1920,
+    event_ms: int = 10,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Two opsin-activation arrays encoding the Für Elise intro.
+
+    Returns ``(stim_exc, stim_inh)`` of shape ``(tfinal_ms, 13)``. The
+    wrapper's matching-potential math turns these into ``u_tgt = -50 mV`` for
+    active pitches and ``u_tgt = -70 mV`` for inactive pitches, reproducing
+    the same teaching as the previous single-stim pattern.
+
+    Background voltages match the upstream ``to_biounits`` transform:
+    rest = ``E_l = -70 mV``, active = ``E_l + biounits_scale = -50 mV``.
     """
-    stim = np.full((tfinal_ms, n_vis), rest_mv, dtype=np.float32)
-    period_ms = n_vis * slot_ms
-    for cycle_start in range(0, tfinal_ms, period_ms):
-        for k in range(n_vis):
-            i_start = cycle_start + k * slot_ms
-            i_end = min(i_start + slot_ms, tfinal_ms)
-            stim[i_start:i_end, k] = active_mv
-    return stim
+    n_pitches = _FUER_ELISE_N_PITCHES
+    stim_exc = np.full(
+        (tfinal_ms, n_pitches), _FUER_ELISE_OPSIN_EXC_REST, dtype=np.float32
+    )
+    stim_inh = np.full(
+        (tfinal_ms, n_pitches), _FUER_ELISE_OPSIN_INH_REST, dtype=np.float32
+    )
+    cycle_ms = len(_FUER_ELISE_INTRO) * event_ms
+
+    # Only emit complete cycles; any remainder is left at the rest ratio so the
+    # trailing tail isn't a half-phrase.
+    for cycle_start in range(0, tfinal_ms - cycle_ms + 1, cycle_ms):
+        for event_idx, event in enumerate(_FUER_ELISE_INTRO):
+            t_start = cycle_start + event_idx * event_ms
+            t_end = t_start + event_ms
+            pitches = event if isinstance(event, tuple) else (event,)
+            for pitch in pitches:
+                stim_exc[t_start:t_end, pitch] = _FUER_ELISE_OPSIN_EXC_ACTIVE
+                stim_inh[t_start:t_end, pitch] = _FUER_ELISE_OPSIN_INH_ACTIVE
+    return stim_exc, stim_inh
 
 
 def _build_sinus_offset_pattern(
@@ -1533,12 +1585,11 @@ def _build_sinus_offset_pattern(
 def elise_project() -> Project:
     """ELISE rate-coded sequence-learning network (Kriener et al., 2024).
 
-    NumPy/Numba model wrapped behind neuroseq's external-simulation interface.
-    Visible neurons receive a repeating one-hot pulse train; the network
-    learns the sequence via the Urbanczik-Senn dendritic plasticity rule.
-
-    Parameters are editable from the model editor; the underlying simulate
-    function lives at ``neuroseq.example_models.elise``.
+    Visible neurons are driven by two virtual opsins (``opsin_exc`` and
+    ``opsin_inh``); the wrapper computes the per-pitch matching potential
+    from their ratio each step. Release (no teaching) is expressed by
+    zeroing both stim arrays in the time range where you want the network
+    to ring out.
     """
     # Deferred so opening unrelated example projects doesn't pull in elise/numba.
     from neuroseq.example_models.elise import DEFAULT_PARAMS
@@ -1548,15 +1599,23 @@ def elise_project() -> Project:
     project.external_simulate_params = copy.deepcopy(DEFAULT_PARAMS)
     project.load_NN()
 
-    n_vis = 4
-    tfinal_ms = 5000
-    stim = _build_elise_sequence_pattern(tfinal_ms, n_vis)
+    tfinal_ms = 1920  # 8 × 240 ms cycles, exactly periodic
+    stim_exc, stim_inh = _build_fuer_elise_opsin_stims(tfinal_ms=tfinal_ms)
     project.add_stim_array(
         StimArray(
-            name="u_inp",
-            stim_type=StimType.External,
-            values=stim,
-            units="mV",
+            name="opsin_exc",
+            stim_type=StimType.Excitation,
+            values=stim_exc,
+            units="1",
+            dt=0.001,
+        )
+    )
+    project.add_stim_array(
+        StimArray(
+            name="opsin_inh",
+            stim_type=StimType.Inhibition,
+            values=stim_inh,
+            units="1",
             dt=0.001,
         )
     )

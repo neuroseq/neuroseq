@@ -1,0 +1,620 @@
+elise_opsin_migration — Two virtual-opsin stim arrays replace `u_inp` + `clamp_visible`
+========================================================================================
+
+Replace the ELISE wrapper's single `u_inp` stim (a per-step target voltage)
+with **two stim arrays** — one for an excitatory virtual opsin, one for an
+inhibitory virtual opsin — and **delete `clamp_visible`**, which becomes
+mathematically obsolete and was always a source of view/state desync.
+
+The current ELISE wrapper has two problems that this migration solves at the
+same time:
+
+  (a) `u_inp` cannot express "no teaching" — no value of `u_inp` produces zero
+      teaching conductance under upstream's eq. 17/18 (paper §5.3.3). The
+      only escape is the upstream `if u_inp is not None:` gate, which the
+      wrapper hits via the `clamp_visible` boolean param. That parameter is
+      orthogonal to the stim contents, so the stim widget and the simulator
+      can disagree about what is being delivered ("clamp off but heatmap
+      shows pattern playing").
+
+  (b) Teaching synapses with reversals `E_exc = 0 mV` / `E_inh = -75 mV` are
+      structurally identical to two parallel opsins. Exposing the user-facing
+      stim API as "two opsin activations" instead of "one voltage" aligns the
+      ELISE plugin with the rest of neuroseq's optogenetic conventions, and
+      makes the stim widget the canonical source of truth for what the
+      network is being driven with.
+
+The migration is bounded: the upstream `elise` package is untouched. The
+wrapper still calls `Network(...)` and still passes `u_inp` to it; the
+wrapper just derives `u_inp` from two new stim arrays instead of reading a
+single one.
+
+Files to change:
+    src/neuroseq/example_models/elise.py
+        * DEFAULT_PARAMS: remove `clamp_visible`
+        * Elise._PHASE_PARAMS: remove `clamp_visible` (keep `learn`)
+        * Elise.simulate: read `opsin_exc`/`opsin_inh` stim arrays, compute
+          per-pitch u_tgt, pass to upstream
+        * Elise.update_params: filter out unknown legacy keys silently
+        * Class docstring: update item (6) about clamp_visible
+    src/neuroseq/example_projects.py
+        * Replace `u_inp` stim with two `opsin_exc`/`opsin_inh` stims for
+          the Für Elise factory
+        * Replace `_build_fuer_elise_pattern` with
+          `_build_fuer_elise_opsin_stims` returning a `(stim_exc, stim_inh)`
+          tuple
+    src/neuroseq/project.py
+        * `load_NN()` post-processing: if a loaded project has
+          `external_simulate_path == "neuroseq:elise"` and a single legacy
+          `u_inp` stim array, auto-migrate to two `opsin_exc`/`opsin_inh`
+          stims (see MIGRATION below)
+
+Files to update (tests):
+    tests/test_elise_clamp_visible.py
+        * Most tests reference `clamp_visible` directly. Delete the whole
+          file. Re-create as `tests/test_elise_opsin_release.py` with the
+          equivalent semantics expressed via the two-stim API (see TESTS).
+    tests/test_elise_smoke.py
+        * `test_elise_runs` uses `stims_dict["u_inp"]`. Rewrite to provide
+          two stims.
+        * `test_elise_simulator_continues_state_across_runs` similarly.
+    tests/test_example_project_elise.py
+        * Update assertions on stim names + shape: now `opsin_exc` and
+          `opsin_inh` with shape `(1920, 13)`.
+        * Replace `test_fuer_elise_pattern_default_is_eight_full_cycles` and
+          `test_fuer_elise_pattern_first_events` so they exercise the new
+          `_build_fuer_elise_opsin_stims` helper.
+        * `test_fuer_elise_pattern_default_is_detected_as_periodic` stays
+          valid against each individual opsin stim (each cycle is still 240
+          samples).
+
+Files to update (specs/docs):
+    .ai_dev/specs/elise_clamp_visible_toggle.md
+        Mark superseded by this migration (add a header note pointing here);
+        do NOT delete — it documents the historical reason for the
+        intermediate design.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+DESIGN — the two-stim, ratio-only parameterisation
+────────────────────────────────────────────────────────────────────────────────────────────
+
+The user authors two stim arrays of equal shape `(T, num_vis)`:
+
+    stims_dict["opsin_exc"]["array"]   # excitatory virtual opsin activation, float32
+    stims_dict["opsin_inh"]["array"]   # inhibitory virtual opsin activation, float32
+
+Values are interpreted as **fractional activations** in [0, ∞); only their
+RATIO matters per-pitch per-timestep (see "magnitudes" below). For each
+visible neuron k at each timestep, the wrapper computes:
+
+    sum_k = g_exc_k + g_inh_k
+    if sum_k > 0:
+        u_tgt_k = (g_exc_k * E_exc + g_inh_k * E_inh) / sum_k
+    else:
+        u_tgt_k = sentinel for "no teaching for this pitch"
+
+A pitch with both opsins at zero is held at neuroseq's `E_l` (= the
+"rest" reference for ELISE) by setting `u_tgt_k = E_l`. This is NOT the
+same as "no teaching anywhere" — that requires every pitch to be zero.
+
+If EVERY pitch has `sum_k == 0` at this step, the wrapper passes
+`u_inp = None` to `Network.__call__`, taking the upstream's
+`if u_inp is not None:` gate and producing literally no teaching current
+(this is the replacement for `clamp_visible=False`). The stim widget
+naturally shows the all-zero state — view and state agree.
+
+WHY RATIO-ONLY: the upstream constraint (paper §5.3.3 eq. 16) fixes
+`g_exc(u) + g_inh(u) = λ/(1−λ) · (g_l + g_den)`. The wrapper doesn't
+loosen this — it would require forking upstream. So when the user
+provides arbitrary `(g_exc_k, g_inh_k)`, only their ratio is honoured.
+The magnitudes are normalised away by the division. The user-facing
+docs and tooltip on the opsin stims must say so:
+
+    "Both opsin stim values represent fractional activation; only the
+    ratio between excitatory and inhibitory determines the teaching
+    target voltage. The overall teaching strength is controlled by the
+    `lam` simulation parameter."
+
+WHY DELETE clamp_visible (rather than keep as convenience): with the new
+parameterisation, "no teaching anywhere" is just "both stims all zero"
+which the user can author with one click of the new Loop dialog
+(create a zero-stim and loop it to the right length) or a `Pad`
+operation. Keeping `clamp_visible` would re-introduce the same view/state
+desync this migration is designed to fix. The user explicitly endorsed
+removal in the discussion that prompted this handoff.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/example_models/elise.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1.  REMOVE the `clamp_visible` entry from `DEFAULT_PARAMS` (currently lines
+    225-238). Keep the `learn` entry above it unchanged. The `lam` entry
+    keeps its current meaning — it controls upstream's eq. 16
+    teaching-conductance budget.
+
+2.  UPDATE `Elise._PHASE_PARAMS` (line 344) from:
+
+        _PHASE_PARAMS: frozenset[str] = frozenset({"clamp_visible", "learn"})
+
+    to:
+
+        _PHASE_PARAMS: frozenset[str] = frozenset({"learn"})
+
+3.  UPDATE the class docstring at lines 329-340. Replace item (6):
+
+        6) support a ``clamp_visible`` phase toggle so train/replay can
+           alternate between Runs without losing weights or voltages.
+
+    with:
+
+        6) consume two opsin-activation stim arrays (``opsin_exc``,
+           ``opsin_inh``) and derive the upstream ``u_inp`` from their
+           ratio per pitch per step. Release is "both opsins at zero
+           everywhere" — no separate parameter required.
+
+4.  UPDATE `Elise.update_params` (lines 357-369) to drop unknown keys
+    silently, so legacy archives carrying ``clamp_visible=True/False``
+    don't poison `self._params` after the key is removed from
+    DEFAULT_PARAMS:
+
+        def update_params(self, params: Mapping[str, ParamValue] | None) -> None:
+            merged = self._flat_defaults()
+            if params:
+                # Drop unknown keys (legacy archives may still carry e.g.
+                # ``clamp_visible``); they're no longer meaningful.
+                known = set(self._default_params_schema.keys())
+                merged.update({k: v for k, v in params.items() if k in known})
+            old_traj = {k: v for k, v in self._params.items()
+                        if k not in self._PHASE_PARAMS}
+            new_traj = {k: v for k, v in merged.items()
+                        if k not in self._PHASE_PARAMS}
+            if old_traj != new_traj:
+                self._params = merged
+                self.reset()
+            else:
+                self._params = merged
+
+5.  REWRITE the stim-reading block of `Elise.simulate` (lines 432-487).
+    The current block:
+
+        u_inp_full = np.asarray(stims_dict["u_inp"]["array"], dtype=np.float64)
+        if u_inp_full.ndim != 2 or u_inp_full.shape[0] == 0:
+            raise ValueError(
+                f"'u_inp' array must be 2D with shape [T, num_vis]; got {u_inp_full.shape}"
+            )
+        stim_dt_s = float(stims_dict["u_inp"]["dt"])
+        num_vis = int(u_inp_full.shape[1])
+
+        ...
+
+        clamp_visible = _bool_param(self._params, "clamp_visible")
+        ...
+        stim_T = u_inp_full.shape[0]
+        t0_s = self._simulated_time_s
+
+        for step in range(n_steps):
+            t_s = step * dt_ms / 1000.0
+            t_abs_s = t0_s + t_s
+            if clamp_visible:
+                stim_idx = min(int(t_abs_s / stim_dt_s), stim_T - 1)
+                u_inp_step = u_inp_full[stim_idx]
+            else:
+                u_inp_step = None
+            self._network(u_inp=u_inp_step, learn=learn)
+            ...
+
+    becomes:
+
+        if "opsin_exc" not in stims_dict or "opsin_inh" not in stims_dict:
+            raise ValueError(
+                "stims_dict must contain both 'opsin_exc' and 'opsin_inh' "
+                "entries (excitatory and inhibitory virtual opsin "
+                "activations). Got: {list(stims_dict)}"
+            )
+        g_exc_full = np.asarray(
+            stims_dict["opsin_exc"]["array"], dtype=np.float64
+        )
+        g_inh_full = np.asarray(
+            stims_dict["opsin_inh"]["array"], dtype=np.float64
+        )
+        if g_exc_full.shape != g_inh_full.shape:
+            raise ValueError(
+                f"'opsin_exc' and 'opsin_inh' must have the same shape; "
+                f"got {g_exc_full.shape} vs {g_inh_full.shape}"
+            )
+        if g_exc_full.ndim != 2 or g_exc_full.shape[0] == 0:
+            raise ValueError(
+                f"opsin stim arrays must be 2D with shape [T, num_vis]; "
+                f"got {g_exc_full.shape}"
+            )
+        # Both stims share the same dt (they're authored on the same
+        # neuroseq time axis). Trust the excitatory one.
+        stim_dt_s = float(stims_dict["opsin_exc"]["dt"])
+        num_vis = int(g_exc_full.shape[1])
+
+        ...
+
+        E_exc = _float_param(self._params, "E_exc")
+        E_inh = _float_param(self._params, "E_inh")
+        E_l = _float_param(self._params, "E_l")
+        stim_T = g_exc_full.shape[0]
+        t0_s = self._simulated_time_s
+
+        for step in range(n_steps):
+            t_s = step * dt_ms / 1000.0
+            t_abs_s = t0_s + t_s
+            stim_idx = min(int(t_abs_s / stim_dt_s), stim_T - 1)
+            g_exc_k = g_exc_full[stim_idx]
+            g_inh_k = g_inh_full[stim_idx]
+            sum_k = g_exc_k + g_inh_k
+            if not np.any(sum_k > 0):
+                # No opsin active anywhere this step → upstream "release".
+                u_inp_step = None
+            else:
+                # Per-pitch matching potential; pitches with both opsins at
+                # zero are held at rest (E_l) so they don't get nudged by
+                # neighbouring pitches' teaching.
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    u_tgt = (g_exc_k * E_exc + g_inh_k * E_inh) / sum_k
+                u_tgt = np.where(sum_k > 0, u_tgt, E_l)
+                u_inp_step = u_tgt.astype(np.float64)
+            self._network(u_inp=u_inp_step, learn=learn)
+            ...
+
+    The `clamp_visible` local variable disappears. The `_bool_param` call
+    that read it can be removed.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/example_projects.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Replace the existing `_build_fuer_elise_pattern` helper with one that
+produces two stim arrays. The two arrays should encode the Für Elise
+intro such that, when the wrapper computes `u_tgt`, it reproduces the
+old per-pitch values: -50 mV for an active pitch, -70 mV for a rest pitch
+(the old default pattern's "active" vs "rest").
+
+Ratios derived from the matching-potential formula with `E_exc = 0`,
+`E_inh = -75`:
+
+    active pitch  (u_tgt = -50 mV):  g_exc : g_inh = 25/75 : 50/75 = 1 : 2
+    rest pitch    (u_tgt = -70 mV):  g_exc : g_inh =  5/75 : 70/75 = 1 : 14
+
+Pick any positive scale; the wrapper only uses the ratio. Use scale 1
+for clarity. The new helper:
+
+    _FUER_ELISE_OPSIN_EXC_REST: float = 1.0
+    _FUER_ELISE_OPSIN_INH_REST: float = 14.0
+    _FUER_ELISE_OPSIN_EXC_ACTIVE: float = 1.0
+    _FUER_ELISE_OPSIN_INH_ACTIVE: float = 2.0
+
+
+    def _build_fuer_elise_opsin_stims(
+        tfinal_ms: int = 1920,
+        event_ms: int = 10,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Two opsin-activation arrays encoding the Für Elise intro.
+
+        Returns `(stim_exc, stim_inh)` of shape `(tfinal_ms, 13)`. The
+        wrapper's matching-potential math turns these into u_tgt = -50 mV
+        for active pitches and u_tgt = -70 mV for inactive pitches, which
+        reproduces the same teaching as the previous single-stim pattern.
+
+        Background voltages match the upstream `to_biounits` transform:
+        rest = E_l = -70 mV, active = E_l + biounits_scale = -50 mV.
+        """
+        n_p = _FUER_ELISE_N_PITCHES
+        stim_exc = np.full(
+            (tfinal_ms, n_p), _FUER_ELISE_OPSIN_EXC_REST, dtype=np.float32
+        )
+        stim_inh = np.full(
+            (tfinal_ms, n_p), _FUER_ELISE_OPSIN_INH_REST, dtype=np.float32
+        )
+        cycle_ms = len(_FUER_ELISE_INTRO) * event_ms
+        for cycle_start in range(0, tfinal_ms - cycle_ms + 1, cycle_ms):
+            for event_idx, event in enumerate(_FUER_ELISE_INTRO):
+                t_start = cycle_start + event_idx * event_ms
+                t_end = t_start + event_ms
+                pitches = event if isinstance(event, tuple) else (event,)
+                for pitch in pitches:
+                    stim_exc[t_start:t_end, pitch] = _FUER_ELISE_OPSIN_EXC_ACTIVE
+                    stim_inh[t_start:t_end, pitch] = _FUER_ELISE_OPSIN_INH_ACTIVE
+        return stim_exc, stim_inh
+
+UPDATE the `elise_project()` factory accordingly:
+
+    @register_example_project("ELISE Sequence Learning Network", section="Network")
+    def elise_project() -> Project:
+        """ELISE rate-coded sequence-learning network (Kriener et al., 2024).
+
+        Visible neurons are driven by two virtual opsins ('opsin_exc'
+        and 'opsin_inh'); the wrapper computes the per-pitch matching
+        potential from their ratio each step. 'Release' (no teaching) is
+        expressed by zeroing both stim arrays in the time range where
+        you want the network to ring out.
+        """
+        from neuroseq.example_models.elise import DEFAULT_PARAMS
+
+        project = Project()
+        project.external_simulate_path = "neuroseq:elise"
+        project.external_simulate_params = copy.deepcopy(DEFAULT_PARAMS)
+        project.load_NN()
+
+        tfinal_ms = 1920  # 8 × 240 ms cycles, exactly periodic
+        stim_exc, stim_inh = _build_fuer_elise_opsin_stims(tfinal_ms=tfinal_ms)
+        project.add_stim_array(
+            StimArray(
+                name="opsin_exc",
+                stim_type=StimType.Excitation,
+                values=stim_exc,
+                units="1",
+                dt=0.001,
+            )
+        )
+        project.add_stim_array(
+            StimArray(
+                name="opsin_inh",
+                stim_type=StimType.Inhibition,
+                values=stim_inh,
+                units="1",
+                dt=0.001,
+            )
+        )
+        return project
+
+Note the `stim_type` choice: `StimType.Excitation` / `StimType.Inhibition`
+(both already in the enum) so the GUI can colour the heatmaps differently
+if it wants to in the future. `units="1"` is the convention for
+dimensionless activations.
+
+`_build_fuer_elise_pattern` (the old single-stim helper) can be removed.
+If any tests import it directly, switch them to the new helper.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/project.py (auto-migrate legacy archives)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Add a hook after `load_NN()` populates `external_simulate_function`, in
+`Project.load_NN` (around `project.py:744-756`). When the loaded project
+has `external_simulate_path == "neuroseq:elise"` AND `self.stim_arrays`
+contains a `u_inp` entry but does NOT contain `opsin_exc`/`opsin_inh`,
+auto-migrate by computing the two equivalent stims and replacing
+`u_inp`:
+
+    def _migrate_legacy_elise_stim(self) -> None:
+        """Convert a single `u_inp` stim into `(opsin_exc, opsin_inh)`.
+
+        Old ELISE archives (pre-opsin-migration) carried one stim named
+        `u_inp` with per-pitch target voltages. The new wrapper expects
+        two opsin-activation arrays. The migration produces stims whose
+        ratio reproduces the old u_inp via the matching-potential
+        formula.
+        """
+        if self.external_simulate_path != "neuroseq:elise":
+            return
+        if "u_inp" not in self.stim_arrays:
+            return
+        if "opsin_exc" in self.stim_arrays or "opsin_inh" in self.stim_arrays:
+            return
+        params = self.external_simulate_params or {}
+        E_exc = float(params.get("E_exc", {}).get("value", 0.0))
+        E_inh = float(params.get("E_inh", {}).get("value", -75.0))
+        old = self.stim_arrays["u_inp"]
+        u_inp = np.asarray(old.values, dtype=np.float64)
+        denom = E_inh - E_exc
+        if denom == 0:
+            # pathological config; bail without migrating
+            self.logger.warning(
+                "Cannot migrate legacy u_inp stim: E_inh == E_exc"
+            )
+            return
+        g_exc_vals = ((E_inh - u_inp) / denom).astype(np.float32)
+        g_inh_vals = ((u_inp - E_exc) / denom).astype(np.float32)
+        # Clip negatives that arise if u_inp wandered outside [E_exc, E_inh];
+        # the upstream model already prefers physically meaningful values.
+        np.clip(g_exc_vals, 0.0, None, out=g_exc_vals)
+        np.clip(g_inh_vals, 0.0, None, out=g_inh_vals)
+        del self.stim_arrays["u_inp"]
+        self.stim_arrays["opsin_exc"] = StimArray(
+            name="opsin_exc",
+            stim_type=StimType.Excitation,
+            values=g_exc_vals,
+            units="1",
+            dt=float(old.dt),
+        )
+        self.stim_arrays["opsin_inh"] = StimArray(
+            name="opsin_inh",
+            stim_type=StimType.Inhibition,
+            values=g_inh_vals,
+            units="1",
+            dt=float(old.dt),
+        )
+        self.logger.info(
+            "Migrated legacy ELISE 'u_inp' stim to "
+            "'opsin_exc'/'opsin_inh' opsin-activation pair."
+        )
+
+Call `self._migrate_legacy_elise_stim()` immediately after `load_NN()`
+is invoked from `Project.__init__` for a loaded archive. Don't call it
+on the fresh-project path (`Project()` with no `filepath`).
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+DELETE: `tests/test_elise_clamp_visible.py` (every test references
+`clamp_visible` directly).
+
+CREATE: `tests/test_elise_opsin_release.py`. Replaces the old file with
+semantically-equivalent tests expressed via the two-stim API:
+
+    test_opsin_exc_inh_not_in_default_params_under_simulation_group
+        After migration, neither name appears in `DEFAULT_PARAMS`. Make
+        sure `clamp_visible` does NOT appear either.
+
+    test_phase_params_no_longer_contains_clamp_visible
+        `"clamp_visible" not in Elise._PHASE_PARAMS`; `"learn"` is still in.
+
+    test_simulate_both_stims_zero_passes_none_to_network (mocked)
+        Build a fake Network class (same shape as the existing
+        `test_simulate_clamp_visible_false_passes_none_and_preserves_network`).
+        Run simulate with `opsin_exc` and `opsin_inh` both all-zero;
+        assert every recorded call's `u_inp is None`.
+
+    test_simulate_mixed_stim_drives_per_pitch_u_tgt (mocked)
+        Provide non-zero stims with a known ratio for one pitch and
+        all-zero for the others. Assert the fake Network was called with
+        a `u_inp` vector whose value at that pitch matches the expected
+        `(g_exc·E_exc + g_inh·E_inh) / (g_exc + g_inh)`, and is `E_l` at
+        the rest pitches.
+
+    test_simulate_preserves_network_across_releases (mocked)
+        Run once with non-zero stims, then once with all-zero stims;
+        assert `id(network)` is preserved and `_simulated_time_s`
+        accumulates.
+
+    test_clamp_visible_in_legacy_archive_is_dropped (mocked)
+        Construct a project, set `external_simulate_path =
+        "neuroseq:elise"` and `external_simulate_params` containing a
+        `"clamp_visible"` entry. Call `update_params` with that loaded
+        params dict. Assert `self._params` does not contain
+        `clamp_visible` afterwards (silently dropped).
+
+UPDATE: `tests/test_elise_smoke.py`. Both tests build a stims_dict
+indexed by `"u_inp"`; switch to `"opsin_exc"` + `"opsin_inh"`. For the
+shape-only smoke test, any reasonable non-zero stim is fine (e.g., both
+arrays = ones).
+
+UPDATE: `tests/test_example_project_elise.py`:
+
+    test_elise_example_project_builds:
+        * stim names assertion: `assert "opsin_exc" in project.stim_arrays`
+          AND `"opsin_inh" in project.stim_arrays`
+        * shape assertion: both `.values.shape == (1920, 13)`
+        * remove the "first event activates pitch 0 at -50 mV" check;
+          replace with "first event has g_exc_active and g_inh_active
+          values at pitch 0 and rest values elsewhere"
+
+    test_fuer_elise_pattern_default_is_eight_full_cycles → rename to
+    `test_fuer_elise_opsin_stims_default_are_eight_full_cycles` and assert
+    each of the two arrays is periodic with period 240 samples.
+
+    test_fuer_elise_pattern_first_events → rename to
+    `test_fuer_elise_opsin_stims_first_events`; check the first ~9 events
+    against the expected `_FUER_ELISE_OPSIN_EXC_ACTIVE/REST` and
+    `_FUER_ELISE_OPSIN_INH_ACTIVE/REST` values per pitch.
+
+    test_fuer_elise_pattern_default_is_detected_as_periodic → assert period
+    240 on both arrays.
+
+ADD to `tests/test_project_external_simulate.py`:
+
+    test_legacy_u_inp_stim_migrated_to_opsin_pair_on_load
+        Build a project, set its `external_simulate_path` to
+        `"neuroseq:elise"` and add a single `u_inp` stim. Call
+        `_migrate_legacy_elise_stim` directly (the post-load hook).
+        Assert: `u_inp` is gone; `opsin_exc` and `opsin_inh` exist with
+        the same shape and dt; their per-step ratio reproduces the
+        original `u_inp` via the matching-potential formula.
+
+    test_migration_is_idempotent
+        Running the migration twice doesn't double-convert. After the
+        first call, `u_inp` is gone, so the second call is a no-op.
+
+    test_migration_only_for_elise_external_path
+        For `external_simulate_path == "neuroseq:sinus_offset"`, a `u_inp`
+        stim is NOT migrated. (Guards against accidentally migrating
+        unrelated projects.)
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NOTES
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- The "ratio-only" semantics is a deliberate restriction inherited from
+  upstream eq. 16. Document it in `Elise`'s class docstring and in the
+  user-facing description of the `opsin_exc`/`opsin_inh` stim arrays so
+  it doesn't surprise anyone.
+
+- The spec at `.ai_dev/specs/elise_clamp_visible_toggle.md` describes a
+  parameter this migration deletes. Don't delete that spec — it's the
+  historical record of why the intermediate design existed. Add a
+  one-line note at the top:
+
+      > **Superseded by** `.ai_dev/specs/elise_opsin_migration.md`
+      > (when written). The `clamp_visible` parameter no longer exists;
+      > "release" is expressed by zeroing both opsin stim arrays.
+
+  (The successor spec will be written after this handoff lands and is
+  reviewed; that's the "review codex work" → spec promotion step.)
+
+- `Project._migrate_legacy_elise_stim` is the only place that knows about
+  the legacy single-stim shape. Keep that knowledge localised — don't
+  scatter it into the wrapper or the stim editor. The wrapper itself
+  should refuse a `stims_dict` without both `opsin_exc` and `opsin_inh`
+  (clear error message). Migration is a load-time concern only.
+
+- `update_params` filtering: the new "drop unknown keys" rule is the
+  minimum needed for the `clamp_visible` deletion to be backward-
+  compatible. It also future-proofs the schema against further
+  param renames/removals, so keep it general (filter against
+  `self._default_params_schema.keys()`, not a hard-coded set).
+
+- After migration, the existing "smart simulation time default" tile
+  semantics (see `.ai_dev/specs/run_smart_simulation_time.md`) keeps
+  working: tiling now extends BOTH opsin stims by the same amount,
+  preserving their per-pitch ratio across the new tail. No changes
+  required to `Project.tile_stim_arrays_to_length` — it already
+  operates uniformly across all stim arrays.
+
+- The Für Elise example's "rest pitches" are now actively driven toward
+  -70 mV (the `g_exc=1, g_inh=14` ratio) rather than left at upstream's
+  E_l by some other mechanism. This means the network is being told
+  "this pitch should be at rest" during training — same as the upstream
+  ELISE behaviour but now explicit in the stim. Verify the network
+  still trains as expected on the new stim by running the integration
+  test branch of `tests/test_elise_smoke.py`.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NON-GOALS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- INDEPENDENT TEACHING STRENGTH PER PITCH. The eq. 16 constraint stays
+  global — `lam` controls the overall budget. Adding per-pitch teaching
+  strength would require bypassing upstream's teaching pipeline (writing
+  our own per-step current injection), which means forking
+  `elise.model`. Out of scope.
+
+- REAL OPSIN MODELS (ChR2, halorhodopsin) WITH KINETICS. The "virtual"
+  opsins here are instantaneous activation → conductance mappings. Real
+  opsins have rise/decay time constants and saturation. A follow-up
+  spec would extend the wrapper to optionally consume kinetic-model
+  stims; not in this handoff.
+
+- CHANGING `lam` SEMANTICS, OR ADDING `phi(u)` PARAMETERS TO THE GUI.
+  This handoff doesn't touch the φ(u) discussion that prompted the
+  opsin proposal. The supervisor's separate suggestion to broaden φ
+  and shift b → 0 is its own modelling experiment; it changes default
+  parameter values but not the wrapper architecture.
+
+- GUI VISUALISATION OF "TEACHING IS ACTIVE" STATE. With the migration,
+  the stim widget IS the visualisation — no separate badge or banner
+  needed. If a user wants to see "is teaching currently active for any
+  pitch?", they look at the stim heatmaps; non-zero = active. Don't
+  add a separate indicator.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    ruff check src/neuroseq/example_models/elise.py src/neuroseq/example_projects.py src/neuroseq/project.py tests/test_elise_opsin_release.py tests/test_elise_smoke.py tests/test_example_project_elise.py tests/test_project_external_simulate.py
+    ruff format --check src/neuroseq/example_models/elise.py src/neuroseq/example_projects.py src/neuroseq/project.py tests/test_elise_opsin_release.py tests/test_elise_smoke.py tests/test_example_project_elise.py tests/test_project_external_simulate.py
+    mypy --ignore-missing-imports src/neuroseq/example_models/elise.py src/neuroseq/example_projects.py src/neuroseq/project.py
+    PYTHONPATH=src .venv/bin/python -m pytest tests/test_elise_opsin_release.py tests/test_elise_smoke.py tests/test_example_project_elise.py tests/test_project_external_simulate.py -v
+    PYTHONPATH=src .venv/bin/python -m pytest
+
+The full pytest run is required because the wrapper signature change
+(stim names u_inp → opsin_exc/opsin_inh) touches multiple existing
+test files, and the legacy-migration hook on project load can affect
+any test that loads a saved project archive. The existing
+`test_gui_simulate_external_model` in `tests/test_gui.py` is the
+canonical regression check for the end-to-end Run path.

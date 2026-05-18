@@ -5,10 +5,14 @@ from __future__ import annotations
 import textwrap
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from neuroseq.project import Project
+from neuroseq.project import _matching_potential_to_opsins
 from neuroseq.save_load_options import SaveLoadOptions
+from neuroseq.stim import StimArray
+from neuroseq.stim import StimType
 
 
 def _full_options() -> SaveLoadOptions:
@@ -217,3 +221,101 @@ def test_load_external_simulator_wrapper_calls_load_nn(
 
     project.load_external_simulator()
     assert called == ["load_NN"]
+
+
+def test_legacy_u_inp_stim_migrated_to_opsin_pair_on_load() -> None:
+    project = Project()
+    project.external_simulate_path = "neuroseq:elise"
+    u_inp = np.array([[-70.0, -50.0], [-60.0, -65.0]], dtype=np.float32)
+    project.add_stim_array(
+        StimArray(
+            "u_inp",
+            StimType.External,
+            u_inp,
+            "mV",
+            0.001,
+        )
+    )
+
+    project._migrate_legacy_elise_stim()
+
+    assert "u_inp" not in project.stim_arrays
+    assert "opsin_exc" in project.stim_arrays
+    assert "opsin_inh" in project.stim_arrays
+    stim_exc = project.stim_arrays["opsin_exc"]
+    stim_inh = project.stim_arrays["opsin_inh"]
+    assert stim_exc.values.shape == u_inp.shape
+    assert stim_inh.values.shape == u_inp.shape
+    assert stim_exc.dt == pytest.approx(0.001)
+    assert stim_inh.dt == pytest.approx(0.001)
+
+    expected = _matching_potential_to_opsins(u_inp.astype(np.float64), 0.0, -75.0)
+    assert expected is not None
+    expected_exc, expected_inh = expected
+    np.testing.assert_allclose(stim_exc.values, expected_exc)
+    np.testing.assert_allclose(stim_inh.values, expected_inh)
+
+
+def test_legacy_u_inp_archive_migrated_on_reload(tmp_path) -> None:
+    project = Project()
+    project.external_simulate_path = "neuroseq:elise"
+    project.add_stim_array(
+        StimArray(
+            "u_inp",
+            StimType.External,
+            np.array([[-70.0], [-50.0]], dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+
+    out = tmp_path / "legacy_elise.nseq"
+    project.save(out, _full_options())
+
+    reloaded = Project(out)
+    assert "u_inp" not in reloaded.stim_arrays
+    assert "opsin_exc" in reloaded.stim_arrays
+    assert "opsin_inh" in reloaded.stim_arrays
+
+
+def test_migration_is_idempotent() -> None:
+    project = Project()
+    project.external_simulate_path = "neuroseq:elise"
+    project.add_stim_array(
+        StimArray(
+            "u_inp",
+            StimType.External,
+            np.array([[-70.0], [-50.0]], dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+
+    project._migrate_legacy_elise_stim()
+    first_exc = np.array(project.stim_arrays["opsin_exc"].values, copy=True)
+    first_inh = np.array(project.stim_arrays["opsin_inh"].values, copy=True)
+
+    project._migrate_legacy_elise_stim()
+
+    np.testing.assert_array_equal(project.stim_arrays["opsin_exc"].values, first_exc)
+    np.testing.assert_array_equal(project.stim_arrays["opsin_inh"].values, first_inh)
+
+
+def test_migration_only_for_elise_external_path() -> None:
+    project = Project()
+    project.external_simulate_path = "neuroseq:sinus_offset"
+    project.add_stim_array(
+        StimArray(
+            "u_inp",
+            StimType.External,
+            np.array([[-70.0], [-50.0]], dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+
+    project._migrate_legacy_elise_stim()
+
+    assert "u_inp" in project.stim_arrays
+    assert "opsin_exc" not in project.stim_arrays
+    assert "opsin_inh" not in project.stim_arrays

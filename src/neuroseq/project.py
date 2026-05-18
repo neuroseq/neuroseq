@@ -50,6 +50,21 @@ def _to_seconds(value: float | int) -> float:
     return float(value)
 
 
+def _matching_potential_to_opsins(
+    u_inp: np.ndarray,
+    E_exc: float,
+    E_inh: float,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    denom = E_inh - E_exc
+    if denom == 0:
+        return None
+    g_exc_vals = ((E_inh - u_inp) / denom).astype(np.float32)
+    g_inh_vals = ((u_inp - E_exc) / denom).astype(np.float32)
+    np.clip(g_exc_vals, 0.0, None, out=g_exc_vals)
+    np.clip(g_inh_vals, 0.0, None, out=g_inh_vals)
+    return g_exc_vals, g_inh_vals
+
+
 def _trace_data_neuron_count(data: TraceData) -> int:
     if data.indices.size > 0:
         return int(np.max(data.indices)) + 1
@@ -153,6 +168,7 @@ class Project:
             if self.external_simulate_path is not None:
                 try:
                     self.load_NN()
+                    self._migrate_legacy_elise_stim()
                 except Exception as e:
                     self.logger.warning(
                         f"Failed to resolve external_simulate_path "
@@ -702,6 +718,55 @@ class Project:
                 self.stim_arrays[name].values = stim_array.values[:new_n_timestamps, :]
         self.update_limits()
 
+    def loop_stim_arrays(self, n_loops: int) -> None:
+        """Tile every stim array's values along the time axis."""
+        if n_loops < 1:
+            raise ValueError(f"n_loops must be >= 1, got {n_loops}")
+        if n_loops == 1:
+            return
+        for stim_array in self.stim_arrays.values():
+            stim_array.values = np.tile(stim_array.values, (n_loops, 1))
+        self.update_limits()
+
+    def suggested_simulation_time_seconds(self) -> float:
+        """Return the longest stim-array duration across the project.
+
+        The full stim length is used as the suggested simulation time so
+        that any pre-Run modification (Pad, Loop, Trim, manual editing)
+        is faithfully reflected in the Run dialog's default. In particular,
+        padding a stim with trailing zeros to create a "ring-out" period
+        produces the same end state as the dialog would: the simulator
+        reads the entire stim, including the trailing zeros, and produces
+        no teaching current during that interval.
+        """
+        if not self.stim_arrays:
+            return float(self.max_time_secs) if self.max_time_secs > 0 else 1.0
+        candidates: list[float] = []
+        for stim_array in self.stim_arrays.values():
+            n_rows = int(stim_array.values.shape[0])
+            if n_rows == 0:
+                continue
+            candidates.append(n_rows * stim_array.dt)
+        if not candidates:
+            return 1.0
+        return max(candidates)
+
+    def tile_stim_arrays_to_length(self, target_seconds: float) -> None:
+        """Extend every stim array via tiling so each covers `target_seconds`."""
+        if target_seconds < 0:
+            raise ValueError(f"target_seconds must be >= 0, got {target_seconds}")
+        for stim_array in self.stim_arrays.values():
+            current_n = int(stim_array.values.shape[0])
+            if current_n == 0:
+                continue
+            n_target = int(math.ceil(target_seconds / stim_array.dt))
+            if n_target <= current_n:
+                continue
+            full_tiles = (n_target + current_n - 1) // current_n
+            tiled = np.tile(stim_array.values, (full_tiles, 1))
+            stim_array.values = tiled[:n_target]
+        self.update_limits()
+
     def trim_stim_array_would_delete_data(self, total_time_seconds: float) -> bool:
         """
         Check whether trimming all StimArrays in the project to a length of total_time_seconds would delete data
@@ -751,6 +816,45 @@ class Project:
         else:
             self.external_simulator = None
             self.external_simulate_function = runpy.run_path(path)["simulate"]
+
+    def _migrate_legacy_elise_stim(self) -> None:
+        """Convert a single `u_inp` ELISE stim into an opsin-activation pair."""
+        if self.external_simulate_path != "neuroseq:elise":
+            return
+        if "u_inp" not in self.stim_arrays:
+            return
+        if "opsin_exc" in self.stim_arrays or "opsin_inh" in self.stim_arrays:
+            return
+
+        params = self.external_simulate_params or {}
+        E_exc = float(params.get("E_exc", {}).get("value", 0.0))
+        E_inh = float(params.get("E_inh", {}).get("value", -75.0))
+        old = self.stim_arrays["u_inp"]
+        u_inp = np.asarray(old.values, dtype=np.float64)
+        converted = _matching_potential_to_opsins(u_inp, E_exc, E_inh)
+        if converted is None:
+            self.logger.warning("Cannot migrate legacy u_inp stim: E_inh == E_exc")
+            return
+        g_exc_vals, g_inh_vals = converted
+        del self.stim_arrays["u_inp"]
+        self.stim_arrays["opsin_exc"] = StimArray(
+            name="opsin_exc",
+            stim_type=StimType.Excitation,
+            values=g_exc_vals,
+            units="1",
+            dt=float(old.dt),
+        )
+        self.stim_arrays["opsin_inh"] = StimArray(
+            name="opsin_inh",
+            stim_type=StimType.Inhibition,
+            values=g_inh_vals,
+            units="1",
+            dt=float(old.dt),
+        )
+        self.logger.info(
+            "Migrated legacy ELISE 'u_inp' stim to "
+            "'opsin_exc'/'opsin_inh' opsin-activation pair."
+        )
 
     def load_external_simulator(self) -> None:
         """Compatibility wrapper for loading external simulation entry points.

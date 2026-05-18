@@ -25,9 +25,16 @@ def test_elise_runs():
     n_stim = int(duration_s / stim_dt_s)
 
     t = np.arange(n_stim) * stim_dt_s
-    base = -70.0 + 10.0 * np.sin(2 * np.pi * 5.0 * t)
-    stim = np.repeat(base[:, None], num_vis, axis=1).astype(np.float32)
-    stims_dict = {"u_inp": {"array": stim, "dt": stim_dt_s}}
+    g_exc = np.repeat(
+        (1.0 + 0.25 * np.sin(2 * np.pi * 5.0 * t))[:, None], num_vis, axis=1
+    )
+    g_inh = np.repeat(
+        (2.0 + 0.25 * np.cos(2 * np.pi * 5.0 * t))[:, None], num_vis, axis=1
+    )
+    stims_dict = {
+        "opsin_exc": {"array": g_exc.astype(np.float32), "dt": stim_dt_s},
+        "opsin_inh": {"array": g_inh.astype(np.float32), "dt": stim_dt_s},
+    }
 
     params = {"num_lat": 8, "weight_snapshot_interval_ms": 20.0}
     exp = simulate(stims_dict, simulation_time=duration_s, params=params)
@@ -69,8 +76,12 @@ def test_elise_simulator_continues_state_across_runs():
     stim_dt_s = 0.001
     n_stim = int(duration_s / stim_dt_s)
 
-    stim = np.full((n_stim, num_vis), -60.0, dtype=np.float32)
-    stims_dict = {"u_inp": {"array": stim, "dt": stim_dt_s}}
+    g_exc = np.full((n_stim, num_vis), 1.0, dtype=np.float32)
+    g_inh = np.full((n_stim, num_vis), 2.0, dtype=np.float32)
+    stims_dict = {
+        "opsin_exc": {"array": g_exc, "dt": stim_dt_s},
+        "opsin_inh": {"array": g_inh, "dt": stim_dt_s},
+    }
     params = {
         "num_lat": 6,
         "learn": False,

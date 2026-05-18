@@ -1,0 +1,197 @@
+REVIEW: ELISE opsin migration (two stim arrays, delete clamp_visible)
+=======================================================================
+Branch: state_elise
+Repo: /mnt/live3/svintila/neuroseq
+Date: 2026-05-15
+Reviewed against handoff: .ai_dev/handoffs/elise_opsin_migration.txt
+
+
+STATUS
+------
+Mostly very good. Every prescribed edit in the handoff is in place, with
+small improvements: `_matching_potential_to_opsins` was factored out as a
+top-level helper (cleaner than the inline implementation the handoff
+sketched), and the migration tests exercise it directly. The fake-network
+test scaffolding in `tests/test_example_models_backend.py` was extended
+to handle the new `u_inp=None` path — a thoughtful catch beyond what the
+handoff called out.
+
+One MUST-FIX: the Für Elise default constants make `stim_exc` a uniform
+block (1.0 everywhere), which violates the user's stated principle that
+"the stim array should always be a correct visual guide to what is
+actually happening." The fix is a one-line edit to the constants — the
+math (ratio-only semantics) is preserved.
+
+Two minor NICE-TO-HAVE items below.
+
+The handoff's NOTES called out the asymmetry between "all pitches zero
+→ u_inp=None" vs. "some pitches zero → u_inp[k] = E_l at those pitches".
+Codex implemented that asymmetry exactly, including the `np.where`
+masking + `np.errstate` to suppress the 0/0 warning in the mixed-zero
+case. Good.
+
+VERIFICATION block from the handoff was not re-run here per the
+review-workflow rule; the only file Codex needs to retouch is
+`src/neuroseq/example_projects.py` (constants), and the test that
+codifies the uniform behaviour (`test_fuer_elise_opsin_stims_default_are_detected_as_periodic`)
+needs updating to reflect the new constants. Re-running
+`pytest tests/test_example_project_elise.py` after applying the fix
+suffices.
+
+
+MUST-FIX
+--------
+
+1.  src/neuroseq/example_projects.py:1519-1522 — `_FUER_ELISE_OPSIN_*`
+    constants make `stim_exc` visually uninformative.
+
+    Current:
+
+        _FUER_ELISE_OPSIN_EXC_REST: float = 1.0
+        _FUER_ELISE_OPSIN_INH_REST: float = 14.0
+        _FUER_ELISE_OPSIN_EXC_ACTIVE: float = 1.0
+        _FUER_ELISE_OPSIN_INH_ACTIVE: float = 2.0
+
+    Empirically (just verified):
+
+        stim_exc unique values: [1.0]   ← entire heatmap is one colour
+        stim_inh unique values: [2.0, 14.0]
+
+    The wrapper's ratio-only semantics means the magnitudes are
+    arbitrary, so the ratios that produce u_tgt = -50 mV (active) and
+    u_tgt = -70 mV (rest) can be expressed with magnitudes that vary
+    in BOTH arrays. The handoff specified the suboptimal pair — that's
+    on me, not on Codex — but the empirical result violates the
+    user's stim-as-visual-truth principle that motivated this whole
+    migration. Worse, the legacy-archive migration in
+    `Project._migrate_legacy_elise_stim` produces normalised values in
+    [0, 1] that DO vary visibly, so freshly built projects and
+    migrated old ones look inconsistent.
+
+    Replace with normalised values that preserve the ratios and stay
+    in the [0, 1] range that the migration also uses:
+
+        # Normalised so g_exc + g_inh = 1 in each state; ratios match
+        # paper §5.3.3:
+        #   active (u_tgt = -50 mV): exc/inh = 1/2  → 0.333 : 0.667
+        #   rest   (u_tgt = -70 mV): exc/inh = 1/14 → 0.067 : 0.933
+        _FUER_ELISE_OPSIN_EXC_ACTIVE: float = 1.0 / 3.0
+        _FUER_ELISE_OPSIN_INH_ACTIVE: float = 2.0 / 3.0
+        _FUER_ELISE_OPSIN_EXC_REST:   float = 1.0 / 15.0
+        _FUER_ELISE_OPSIN_INH_REST:   float = 14.0 / 15.0
+
+    After this:
+
+        stim_exc varies between ~0.067 (rest) and ~0.333 (active) — 5×
+            contrast, easy to spot the pattern in the heatmap.
+        stim_inh varies between ~0.667 (active) and ~0.933 (rest) —
+            ~1.4× contrast; visible but subtler. Both arrays now show
+            the pattern; neither is a flat block.
+
+    Either order is fine (whichever the project's style prefers); the
+    important thing is `_EXC_ACTIVE != _EXC_REST` and
+    `_INH_ACTIVE != _INH_REST`.
+
+2.  tests/test_example_project_elise.py:149-154 —
+    `test_fuer_elise_opsin_stims_default_are_detected_as_periodic` codifies
+    the uniform-stim_exc bug.
+
+    Current:
+
+        def test_fuer_elise_opsin_stims_default_are_detected_as_periodic():
+            """The default opsin stims remain loop-detectable."""
+            from neuroseq.stim_loop_dialog import _detect_period
+
+            stim_exc, stim_inh = _build_fuer_elise_opsin_stims()
+            assert _detect_period(stim_exc) == 1
+            assert _detect_period(stim_inh) == 240
+
+    `_detect_period(stim_exc) == 1` is the smoking gun: period 1 means
+    every row is identical = uniform stim. After applying MUST-FIX 1,
+    `stim_exc` is no longer uniform and `_detect_period(stim_exc) == 240`
+    (one cycle of the Für Elise intro, same as `stim_inh`).
+
+    Replace the assertion:
+
+        def test_fuer_elise_opsin_stims_default_are_detected_as_periodic():
+            """Both default opsin stims encode the 240-ms cycle."""
+            from neuroseq.stim_loop_dialog import _detect_period
+
+            stim_exc, stim_inh = _build_fuer_elise_opsin_stims()
+            assert _detect_period(stim_exc) == 240
+            assert _detect_period(stim_inh) == 240
+
+
+NICE-TO-HAVE (non-blocking)
+---------------------------
+
+A.  tests/test_project_external_simulate.py — add a test that exercises
+    the `Project.__init__` → `_migrate_legacy_elise_stim` integration
+    end-to-end (via `Project.save` + reload), not just the helper in
+    isolation. The three new tests all call `_migrate_legacy_elise_stim`
+    directly, which is enough to verify the helper logic but doesn't
+    cover the post-load hook wiring at `project.py:198`. Something
+    like:
+
+        def test_legacy_u_inp_archive_migrated_on_reload(tmp_path):
+            project = Project()
+            project.external_simulate_path = "neuroseq:elise"
+            project.add_stim_array(
+                StimArray(
+                    "u_inp", StimType.External,
+                    np.array([[-70.0], [-50.0]], dtype=np.float32),
+                    "mV", 0.001,
+                )
+            )
+            out = tmp_path / "legacy.nseq"
+            project.save(out, _full_options())
+
+            reloaded = Project(out)
+            assert "u_inp" not in reloaded.stim_arrays
+            assert "opsin_exc" in reloaded.stim_arrays
+            assert "opsin_inh" in reloaded.stim_arrays
+
+    Uses the existing `_full_options()` helper at line 12. Catches a
+    future regression of the hook being removed from `Project.__init__`.
+
+B.  tests/test_elise_opsin_release.py — the four mocked fake-network
+    tests (lines 37, 110, 187, plus the smaller ones) each redefine a
+    near-identical `FakeNetwork`/`FakeBuffer`/`FakeWeights`/`FakeSimpleUpdater`
+    quartet. The existing helper `_install_fake_elise` in
+    `tests/test_example_models_backend.py:155` could be lifted into a
+    shared fixture / module so the four new tests just call it. Drops
+    ~200 lines from the test file. Doesn't change correctness.
+
+
+NOTES
+-----
+
+- `_matching_potential_to_opsins` as a top-level helper (rather than
+  inline in `_migrate_legacy_elise_stim`) is a clean improvement over
+  the handoff. The migration tests import it and use it as the
+  expected-value oracle, which is the right design — the test doesn't
+  re-derive the formula independently.
+
+- The handoff also asked for the `tests/test_elise_clamp_visible.py`
+  file to be deleted and recreated as `tests/test_elise_opsin_release.py`.
+  Done verbatim, plus replacement tests cover every semantic the old
+  file did (default-params check, phase-params check, mocked
+  bidirectional state preservation, elise-gated integration). No
+  regression in coverage.
+
+- `.ai_dev/specs/elise_clamp_visible_toggle.md` got the "Superseded
+  by" header note as requested. Don't touch.
+
+- The deletion of `clamp_visible` from `DEFAULT_PARAMS` paired with
+  the `Elise.update_params` "drop unknown keys" filter means
+  legacy archives carrying `clamp_visible=True` or `False` silently
+  ignore that param after load. `tests/test_elise_opsin_release.py::test_clamp_visible_in_legacy_archive_is_dropped`
+  confirms it.
+
+- After applying MUST-FIX 1, the spec promotion (next step) should
+  document the chosen normalisation explicitly in the
+  "## Für Elise example constants" section so future readers know why
+  the magnitudes are 1/3, 2/3, 1/15, 14/15 instead of arbitrary
+  integers — i.e., "chosen so both arrays show clear active/rest
+  contrast in the heatmap, while preserving the ratios that produce
+  u_tgt = -50 / -70 mV."

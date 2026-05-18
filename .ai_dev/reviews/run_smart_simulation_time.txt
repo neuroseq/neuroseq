@@ -1,0 +1,205 @@
+REVIEW: Smart simulation-time default + tile-on-overshoot
+==========================================================
+Branch: state_elise
+Repo: /mnt/live3/svintila/neuroseq
+Date: 2026-05-15
+Reviewed against handoff: .ai_dev/handoffs/run_smart_simulation_time.txt
+
+
+STATUS
+------
+Almost there. `Project.tile_stim_arrays_to_length`, the
+`getSimulationTime` default-kwarg extension, and the GUI dispatch swap
+(pad → tile, with cumulative offset) all match the handoff exactly and
+work correctly. The new dispatch tests are good.
+
+One MUST-FIX: the `_meaningful_row_count` algorithm trims the trailing
+event of the default Für Elise stim because all 10 samples of the final
+pitch-5 event are identical rows. The user's stated expectation in the
+handoff conversation was "in the elise case, 1.92s", but the current
+implementation suggests 1.91 s. The handoff specced the simpler
+"trim-any-constant-tail" algorithm, which I now see was wrong for this
+use case — the spec is the source of the bug.
+
+The fix is to require the trailing-tail row to be UNIFORM across
+channels (all elements equal) before treating it as rest. That keeps
+the "trim trailing rest" behaviour for genuine all-rest tails (`np.pad`
+zeros, or all-channels-at-E_l) while preserving the last event of any
+multi-channel signal pattern where one channel is active and the
+others are not.
+
+Verified locally:
+
+    from neuroseq.example_projects import _build_fuer_elise_pattern
+    from neuroseq.project import _meaningful_row_count
+    _meaningful_row_count(_build_fuer_elise_pattern())  # → 1910, want 1920
+
+
+MUST-FIX
+--------
+
+1.  src/neuroseq/project.py:53-69 — `_meaningful_row_count` over-trims
+    multi-channel patterns whose last event spans multiple identical rows.
+
+    Current:
+
+        def _meaningful_row_count(values: np.ndarray) -> int:
+            """Return n such that values[n:] is a constant tail."""
+            n_rows = int(values.shape[0])
+            if n_rows == 0:
+                return 0
+            tail = values[-1]
+            tail_len = 0
+            for i in range(n_rows - 1, -1, -1):
+                if np.array_equal(values[i], tail):
+                    tail_len += 1
+                    continue
+                break
+            if tail_len == n_rows:
+                return 0
+            if tail_len == 1:
+                return n_rows
+            return n_rows - tail_len
+
+    Trace for Für Elise default (`(1920, 13)`): row 1919 ≡ rows 1910-1918
+    (the 10 ms of pitch 5 active that closes each cycle). Tail_len = 10.
+    Result: 1920 − 10 = 1910 → suggested 1.91 s.
+
+    Replace with a uniform-tail guard before the trimming loop. A multi-
+    channel row whose elements are NOT all equal is signal, not rest, and
+    should never be treated as a tail:
+
+        def _meaningful_row_count(values: np.ndarray) -> int:
+            """Return n such that values[n:] is a uniform-and-constant tail.
+
+            A "tail" must satisfy BOTH:
+              * the tail row is uniform across channels (all elements equal),
+                so it represents "every neuron at the same rest value", and
+              * the row is repeated identically from some index onward.
+
+            Multi-channel patterns whose last event has only one channel
+            active are NOT uniform and are left intact.
+            """
+            n_rows = int(values.shape[0])
+            if n_rows == 0:
+                return 0
+            tail = values[-1]
+            # Non-uniform last row = signal, not rest. Don't trim.
+            if tail.size > 0 and not np.all(tail == tail.flat[0]):
+                return n_rows
+            tail_len = 0
+            for i in range(n_rows - 1, -1, -1):
+                if np.array_equal(values[i], tail):
+                    tail_len += 1
+                    continue
+                break
+            if tail_len == n_rows:
+                return 0
+            return n_rows - tail_len
+
+    The `if tail_len == 1: return n_rows` special case Codex added is no
+    longer needed — the uniform check covers the same class of cases
+    more cleanly. Remove it.
+
+2.  tests/test_project_suggested_sim_time.py:29-35 — the existing
+    `test_suggested_time_trims_constant_trailing_tail` builds the tail
+    from `values[-1]` of an `arange(...)`, which is NOT a uniform row.
+    Under the corrected algorithm, that tail would no longer be trimmed
+    and the test would (correctly) fail.
+
+    Current (lines 29-35):
+
+        def test_suggested_time_trims_constant_trailing_tail() -> None:
+            project = Project()
+            values = np.arange(300, dtype=np.float32).reshape(100, 3)
+            values[50:] = values[-1]
+            project.add_stim_array(_make_stim("stim", values))
+
+            assert project.suggested_simulation_time_seconds() == pytest.approx(0.05)
+
+    Make the trailing block uniform (e.g., all zeros) so the assertion
+    survives:
+
+        def test_suggested_time_trims_constant_trailing_tail() -> None:
+            project = Project()
+            values = np.arange(300, dtype=np.float32).reshape(100, 3)
+            values[50:] = 0.0  # uniform rest tail
+            project.add_stim_array(_make_stim("stim", values))
+
+            assert project.suggested_simulation_time_seconds() == pytest.approx(0.05)
+
+    Same fix at lines 47-55 in `test_suggested_time_takes_max_across_arrays`:
+    both `short_values[60:] = short_values[-1]` and
+    `long_values[100:] = long_values[-1]` need to become
+    `... = 0.0` for the constant tail to be uniform.
+
+3.  tests/test_project_suggested_sim_time.py — add a regression test
+    that pins the user's stated expectation directly:
+
+        def test_suggested_time_for_fuer_elise_default_is_one_point_nine_two_seconds() -> None:
+            """The user's stated expectation: the default Für Elise example
+            project's stim must produce 1.92 s as the suggested simulation
+            time. The last 10-ms event spans 10 identical rows but is signal
+            (pitch 5 active), not rest, so it must not be trimmed.
+            """
+            from neuroseq.example_projects import _build_fuer_elise_pattern
+            from neuroseq.stim_timing import DEFAULT_STIM_DT_SECONDS
+
+            project = Project()
+            project.add_stim_array(
+                _make_stim(
+                    "u_inp",
+                    _build_fuer_elise_pattern(),
+                    dt=DEFAULT_STIM_DT_SECONDS,
+                )
+            )
+
+            assert project.suggested_simulation_time_seconds() == pytest.approx(1.92)
+
+    If `DEFAULT_STIM_DT_SECONDS` isn't a clean import target on your
+    branch, just pass `dt=0.001` directly.
+
+
+NICE-TO-HAVE (non-blocking)
+---------------------------
+
+A.  tests/test_project_suggested_sim_time.py — add a positive-case test
+    that a single-channel stim with a real uniform trailing tail still
+    gets trimmed. This catches a future regression of the uniform-tail
+    rule going too far:
+
+        def test_suggested_time_trims_single_channel_uniform_tail() -> None:
+            project = Project()
+            values = np.zeros((100, 1), dtype=np.float32)
+            values[:30] = 1.0  # active for first 30 ms, rest after
+            project.add_stim_array(_make_stim("stim", values))
+
+            assert project.suggested_simulation_time_seconds() == pytest.approx(0.03)
+
+B.  Docstring in `_meaningful_row_count` is currently one terse line.
+    The corrected version's docstring (see MUST-FIX 1) is clearer about
+    the two-condition trim rule; please keep that prose.
+
+
+NOTES — not bugs, just acknowledgements
+---------------------------------------
+
+- The `if tail_len == 1: return n_rows` special case Codex added on
+  top of the handoff spec was a good instinct — it caught one shape of
+  signal that the simpler spec would over-trim ([A, B, A] pattern). The
+  uniform-tail rule above generalises that instinct cleanly, so the
+  special case becomes redundant rather than wrong.
+
+- The `tile_stim_arrays_to_length` semantics and its tests are
+  correct. The cumulative-offset logic in `_do_external_simulation`
+  is correct for multi-run continuation. No changes needed to those.
+
+- The `getSimulationTime(default_seconds=...)` kwarg, the `g`-format
+  trimming, and the `math.isfinite` guard all match the handoff. No
+  changes needed.
+
+- VERIFICATION block in the handoff doesn't need to be re-run after
+  the fixes — the changes are localised to one function and a few
+  test lines; running `pytest tests/test_project_suggested_sim_time.py`
+  is sufficient to validate the corrections. The full suite is worth
+  one more pass after applying everything, as the handoff suggested.

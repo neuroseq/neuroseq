@@ -1,0 +1,387 @@
+elise_clamp_visible_toggle — Let the ELISE wrapper toggle teaching nudging on/off between Runs (train ↔ replay)
+==================================================================================================================
+
+The upstream ELISE network distinguishes two phases by the value passed for
+the visible-layer drive `u_inp`:
+
+- `network(u_inp=<vector>, ...)`  → TRAINING. Teaching synapses nudge the
+  somatic potential of visible neurons toward each entry of the vector.
+- `network(u_inp=None, ...)`     → REPLAY. No teaching current. Visible
+  neurons evolve freely from the somato-somatic recurrent inputs alone.
+
+See `total_diff_eq` in the path-deployed elise at
+`../sequence-learning/src/elise/model.py` — the entire teaching-current
+block is gated on `if u_inp is not None:` (the upstream `scripts/train.py`
+uses the two modes in `run_training` vs `run_replay`).
+
+The current neuroseq wrapper (`src/neuroseq/example_models/elise.py`)
+always slices the stim and passes a vector:
+
+        u_inp_step = u_inp_full[stim_idx]
+        self._network(u_inp=u_inp_step, learn=learn)
+
+So there is no way today, through the GUI, to do a "replay" / "ring out"
+phase: a flat-E_l (-70 mV) stim is NOT equivalent to `u_inp=None` — it
+actively drives the soma toward -70 mV via conductance-based input.
+
+Add a `clamp_visible` boolean parameter so the user can toggle between
+training and replay BETWEEN runs without losing the trained network state.
+The singleton-state design already preserves `_network`, `_simulated_time_s`,
+and `dendritic_weights` across runs (`Elise.simulate` at line 414 checks
+`signature` against `_signature` and only re-initialises on mismatch).
+This handoff extends that to make toggling `clamp_visible` (and `learn`)
+a state-preserving operation.
+
+Files to change:
+    src/neuroseq/example_models/elise.py    (3 edits: param, signature, loop)
+    src/neuroseq/example_models/NN.py       (no change — handled via override)
+
+Files to create:
+    tests/test_elise_clamp_visible.py       (new test file; existing
+                                             test_elise_smoke.py stays as-is)
+
+────────────────────────────────────────────────────────────────────────────────────────────
+BACKGROUND — the singleton-state design that this builds on
+────────────────────────────────────────────────────────────────────────────────────────────
+
+`Elise` is a stateful subclass of `NN`. The module-level
+`_SIMULATOR = Elise()` is created once at import; `Project.load_NN()`
+returns the same singleton via `module.get_simulator()`. Each call to
+`Elise.simulate(...)` continues from the previous run's network state
+unless invalidated by:
+
+1.  An `Elise.reset()` call (clears `_network`, `_signature`,
+    `_simulated_time_s`).
+2.  A change to `self._params` detected by `NN.update_params`
+    (`example_models/NN.py:36-42`) — that triggers `self.reset()` on
+    ANY param diff.
+3.  A signature mismatch in `Elise.simulate` (line 413) — the signature
+    includes every param, so the same effect.
+
+If we add `clamp_visible` as a regular param, toggling it from True →
+False between training and replay would wipe the trained weights via
+mechanisms (2) and (3). That defeats the entire purpose of the feature.
+
+The fix is to declare a small `_PHASE_PARAMS` set inside `Elise` —
+parameters whose changes do NOT count as a trajectory change — and skip
+them in both the override of `update_params` and the signature
+computation. Initial members:
+
+    _PHASE_PARAMS = frozenset({"clamp_visible", "learn"})
+
+`learn` belongs in the set because the user might also want to toggle
+plasticity on/off between runs without losing the network state.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+APPROACH
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1.  Add `clamp_visible` (bool, default True) to `DEFAULT_PARAMS` in
+    `Simulation` group.
+
+2.  Declare `_PHASE_PARAMS` on the `Elise` class with the two members
+    above.
+
+3.  Override `Elise.update_params` so changes restricted to phase params
+    update `self._params` without calling `self.reset()`. Any change to a
+    non-phase param still triggers reset (delegate to base class behavior).
+
+4.  Change the signature computation in `Elise.simulate` (line 413) to
+    exclude phase params from the cache key. Trajectory-affecting params
+    still force re-initialisation; phase toggles do not.
+
+5.  In the simulation loop (line 445-447), pass `None` for `u_inp` when
+    `clamp_visible` is False.
+
+6.  Write `tests/test_elise_clamp_visible.py` with both wrapper-logic
+    tests (no real elise required) and integration tests gated on
+    `importlib.util.find_spec("elise")`.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/example_models/elise.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1.  ADD to `DEFAULT_PARAMS` in the `Simulation` group. Insert the new
+    entry directly after the existing `"learn"` entry (search for the
+    `"learn":` key in the schema dictionary):
+
+        "clamp_visible": {
+            "value": True,
+            "default": True,
+            "type": "bool",
+            "group": "Simulation",
+            "description": (
+                "If True (training), drive visible neurons every step with "
+                "the stim array. If False (replay), release the teaching "
+                "nudging — let the network ring out from its current state. "
+                "Toggling this between Runs does NOT reset the network."
+            ),
+        },
+
+2.  ADD class-level constant `_PHASE_PARAMS` inside `Elise` (between the
+    class docstring at line 319-327 and the `__init__` method at line 329):
+
+        # Parameters whose toggling between runs should NOT discard the
+        # network state — phase controls rather than trajectory controls.
+        _PHASE_PARAMS: frozenset[str] = frozenset({"clamp_visible", "learn"})
+
+3.  ADD `update_params` override on the `Elise` class. Place it directly
+    after `reset` (currently at lines 335-338):
+
+        def update_params(self, params):
+            merged = self._flat_defaults()
+            if params:
+                merged.update(params)
+            old_traj = {
+                k: v for k, v in self._params.items()
+                if k not in self._PHASE_PARAMS
+            }
+            new_traj = {
+                k: v for k, v in merged.items()
+                if k not in self._PHASE_PARAMS
+            }
+            if old_traj != new_traj:
+                self._params = merged
+                self.reset()
+            else:
+                # Trajectory-affecting params unchanged: update phase
+                # params in place, keep `_network`, `_simulated_time_s`,
+                # `_signature`.
+                self._params = merged
+
+    The signature matches `NN.update_params` (`example_models/NN.py:36`).
+    Import `Mapping` and `ParamValue` if needed (they are already imported
+    at the top of `elise.py`).
+
+4.  MODIFY signature computation in `Elise.simulate` (line 413). Replace
+    the single line:
+
+        signature = (num_vis, tuple(sorted(self._params.items())))
+
+    with:
+
+        signature = (
+            num_vis,
+            tuple(
+                sorted(
+                    (k, v) for k, v in self._params.items()
+                    if k not in self._PHASE_PARAMS
+                )
+            ),
+        )
+
+5.  MODIFY the simulation loop body in `Elise.simulate`. The current
+    body (line 441-451) reads:
+
+        for step in range(n_steps):
+            t_s = step * dt_ms / 1000.0
+            t_abs_s = t0_s + t_s
+            stim_idx = min(int(t_abs_s / stim_dt_s), stim_T - 1)
+            u_inp_step = u_inp_full[stim_idx]
+
+            self._network(u_inp=u_inp_step, learn=learn)
+
+            u_trace[:, step] = self._network.u
+            v_trace[:, step] = self._network.v
+            r_trace[:, step] = self._network.r
+
+    Hoist the `clamp_visible` lookup ABOVE the loop (so it isn't a per-step
+    dict access — the loop runs at dt_ms=0.1 over ~2 s, i.e., 20,000
+    iterations per Run), and pass None when False:
+
+        clamp_visible = _bool_param(self._params, "clamp_visible")
+        ...
+        for step in range(n_steps):
+            t_s = step * dt_ms / 1000.0
+            t_abs_s = t0_s + t_s
+            if clamp_visible:
+                stim_idx = min(int(t_abs_s / stim_dt_s), stim_T - 1)
+                u_inp_step = u_inp_full[stim_idx]
+            else:
+                u_inp_step = None
+
+            self._network(u_inp=u_inp_step, learn=learn)
+
+            u_trace[:, step] = self._network.u
+            v_trace[:, step] = self._network.v
+            r_trace[:, step] = self._network.r
+
+    `_bool_param` is already defined at line 267 of the same file.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_elise_clamp_visible.py (new)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Two layers of tests. The first three need no real elise installed and run
+fast — exercise the wrapper logic directly. The last two are
+integration tests gated on `importlib.util.find_spec("elise") is not None`
+(same pattern as `tests/test_elise_smoke.py`).
+
+WRAPPER-LOGIC TESTS (always run)
+
+    test_clamp_visible_in_default_params
+        from neuroseq.example_models.elise import DEFAULT_PARAMS
+        assert "clamp_visible" in DEFAULT_PARAMS
+        entry = DEFAULT_PARAMS["clamp_visible"]
+        assert entry["value"] is True
+        assert entry["default"] is True
+        assert entry["type"] == "bool"
+        assert entry["group"] == "Simulation"
+
+    test_phase_params_includes_clamp_visible_and_learn
+        from neuroseq.example_models.elise import Elise
+        assert "clamp_visible" in Elise._PHASE_PARAMS
+        assert "learn" in Elise._PHASE_PARAMS
+
+    test_update_params_toggling_phase_does_not_reset
+        """A pure-phase-param change must keep _network, _signature,
+        _simulated_time_s intact."""
+        from neuroseq.example_models.elise import Elise
+        sim = Elise()
+        # Plant sentinel state that reset() would clear.
+        sim._network = object()
+        sim._signature = ("sentinel",)
+        sim._simulated_time_s = 1.234
+
+        sim.update_params({"clamp_visible": False})
+
+        assert sim._network is not None
+        assert sim._signature == ("sentinel",)
+        assert sim._simulated_time_s == 1.234
+        assert sim._params["clamp_visible"] is False
+
+    test_update_params_non_phase_change_resets
+        """Changing a trajectory param must call reset()."""
+        from neuroseq.example_models.elise import Elise
+        sim = Elise()
+        sim._network = object()
+        sim._signature = ("sentinel",)
+        sim._simulated_time_s = 1.234
+
+        sim.update_params({"num_lat": 4})
+
+        assert sim._network is None
+        assert sim._signature is None
+        assert sim._simulated_time_s == 0.0
+        assert sim._params["num_lat"] == 4
+
+    test_update_params_mixed_change_resets
+        """A mix of phase + trajectory changes resets (the trajectory
+        diff wins)."""
+        from neuroseq.example_models.elise import Elise
+        sim = Elise()
+        sim._network = object()
+        sim._signature = ("sentinel",)
+
+        sim.update_params({"clamp_visible": False, "num_lat": 4})
+
+        assert sim._network is None
+        assert sim._params["num_lat"] == 4
+        assert sim._params["clamp_visible"] is False
+
+INTEGRATION TESTS (gated on `importlib.util.find_spec("elise") is not None`)
+
+    test_clamp_visible_true_passes_stim_vector_to_network
+        """End-to-end: a 0.1 s sim with clamp_visible=True. After the call,
+        the stim should have driven the visible neurons toward the active
+        voltage. We just check the somatic potential of visible neurons
+        moved AWAY from E_l."""
+        Build a 5-neuron stim of shape (100, 5) at dt=1 ms, all -50 mV
+        (active). Call simulate with simulation_time=0.1, params={"num_lat": 4,
+        "clamp_visible": True}. Assert at least one visible neuron's u
+        deviates from -70 mV by > 1 mV by the end of the run.
+
+    test_clamp_visible_false_keeps_visible_near_rest
+        """With clamp_visible=False and the network freshly reset, the
+        visible neurons should NOT be driven by the stim (no teaching
+        synapses fire). Their somatic potentials should stay close to
+        E_l — recurrent drive from the random somatic scaffold is the
+        only contribution."""
+        Build same stim. Call simulate with clamp_visible=False. After
+        the run, assert all visible u_k values are within a few mV of
+        E_l = -70 mV. (Tight tolerance: |u_k - E_l| < 5 mV. The somatic
+        scaffold IS still active but its drive is small for a fresh
+        network.)
+
+    test_clamp_visible_toggle_preserves_network_across_runs
+        """Train one Run with clamp_visible=True, then release on the
+        second Run. The cumulative simulated time must accumulate, AND
+        the network instance object must be the same."""
+        Build stim, call simulate(..., simulation_time=0.05,
+        params={"num_lat": 4, "clamp_visible": True}). Record
+        `id(sim._network)`. Call simulate(..., simulation_time=0.05,
+        params={"num_lat": 4, "clamp_visible": False}). Assert
+        `id(sim._network) == recorded_id` and
+        `sim.simulated_time_seconds == 0.1`.
+
+For the integration tests, use `neuroseq.example_models.elise.get_simulator()`
+to get the singleton (so the test surfaces a stable instance), and call
+`sim.reset()` at the start of each test to put the singleton into a known
+state. Build stims using small `num_lat` (e.g. 4) for test speed.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NOTES
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- Hoist `clamp_visible` ABOVE the loop. The loop runs at typical
+  ~20,000 iterations per Run; a per-step `self._params["clamp_visible"]`
+  dict lookup is negligible compared to the numba-jitted network step,
+  but the hoist makes the intent visible: the phase is fixed for the
+  duration of a single `simulate()` call. If the user wants mid-run
+  switching, that's a separate spec.
+
+- `_bool_param` already handles the str → bool coercion path
+  (`"true"/"1"/"yes"/"on"` → True). Don't add new sanitisation.
+
+- The change to the simulate loop is the only place where `u_inp_full`,
+  `stim_idx`, and `stim_dt_s` are consumed. When `clamp_visible=False`,
+  none of those are read inside the loop — the `if clamp_visible:`
+  branch skips them. The stim array is still validated up front
+  (lines 404-410) so an obviously-malformed stim is still caught.
+
+- The `Elise` class docstring at lines 319-327 currently lists five
+  responsibilities ending with "5) return each run as an Experiment".
+  Update it to add:
+
+        6) support a `clamp_visible` phase toggle so train/replay can
+           alternate between Runs without losing weights or voltages.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NON-GOALS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- MID-RUN PHASE SWITCHING. `clamp_visible` is read once per `simulate()`
+  call; you can't release nudging halfway through one Run. If that
+  becomes desirable, the right shape is a "release_after_seconds"
+  scalar param OR a per-step mask channel — both are bigger and out of
+  scope.
+
+- A "replay" BUTTON IN THE GUI. The user toggles the param via the
+  existing model editor. No new toolbar action.
+
+- SAVING/RESTORING THE NETWORK STATE TO DISK. The singleton lives in
+  the running process only; closing the GUI loses the trained weights.
+  Same constraint as today.
+
+- BACKWARDS COMPAT WITH `.nseq` ARCHIVES THAT LACK `clamp_visible`. The
+  schema is loaded via `external_simulate_params` and merged against
+  `_flat_defaults()` inside `NN.update_params`, so old archives lacking
+  the key naturally pick up `default=True`. No migration needed.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    ruff check src/neuroseq/example_models/elise.py tests/test_elise_clamp_visible.py
+    ruff format --check src/neuroseq/example_models/elise.py tests/test_elise_clamp_visible.py
+    mypy --ignore-missing-imports src/neuroseq/example_models/elise.py
+    PYTHONPATH=src .venv/bin/python -m pytest tests/test_elise_clamp_visible.py -v
+    PYTHONPATH=src .venv/bin/python -m pytest
+
+The full pytest run is required because the override of `update_params`
+on `Elise` could affect existing ELISE example-project tests
+(`tests/test_example_project_elise.py`) and the smoke tests
+(`tests/test_elise_smoke.py`) — both already exercise the singleton via
+`get_simulator()` / module-level `simulate`. None of those tests vary
+phase params today, so they should be unaffected, but the full sweep is
+the cheapest way to confirm.

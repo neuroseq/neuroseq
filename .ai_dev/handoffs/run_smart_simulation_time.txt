@@ -1,0 +1,458 @@
+run_smart_simulation_time — Pre-fill the Run dialog with the meaningfully-filled stim length, and tile (not zero-pad) the stim when the user requests more
+================================================================================================================================================================
+
+When the user clicks **Run simulation**, the simulation-time prompt
+should pre-fill with the length of the **meaningfully-filled** portion
+of the project's stim arrays, not the current hardcoded "1.0" string. If
+the user overrides it with a longer value, the stim arrays should be
+**tiled** (looped) to cover the requested simulation duration — not
+zero-padded, which is what `Project.pad_stim_arrays` currently does and
+which causes the simulator to perceive an unintended teaching signal
+past the end of the stim (visible neurons get nudged toward 0 mV after
+the prepared pattern ends — see context below).
+
+This applies to **external simulations only** (the
+`Project.external_simulate_path is not None` dispatch path). The
+Brian2-backed b2_model path keeps its existing
+`Project.pad_stim_arrays` behaviour.
+
+Files to change:
+    src/neuroseq/project.py     (two new methods: `suggested_simulation_time_seconds`,
+                                 `tile_stim_arrays_to_length`)
+    src/neuroseq/utils.py       (extend `getSimulationTime` with a default kwarg)
+    src/neuroseq/gui.py         (call the new pieces from
+                                 `btn_continue_simulation_clicked`,
+                                 `btn_do_external_simulation_clicked`,
+                                 `_do_external_simulation`)
+
+Tests to create:
+    tests/test_project_suggested_sim_time.py
+    tests/test_project_tile_to_length.py
+
+Tests to extend:
+    tests/test_gui_external_simulate_dispatch.py
+        (add coverage that the dialog default is the suggested time
+         and that overshoot triggers tiling)
+
+────────────────────────────────────────────────────────────────────────────────────────────
+BACKGROUND — why this is needed
+────────────────────────────────────────────────────────────────────────────────────────────
+
+`Elise.simulate` samples the stim by ABSOLUTE simulated time:
+
+        t_abs_s = self._simulated_time_s + step * dt_ms / 1000.0
+        if clamp_visible:
+            stim_idx = min(int(t_abs_s / stim_dt_s), stim_T - 1)
+            u_inp_step = u_inp_full[stim_idx]
+
+(See `src/neuroseq/example_models/elise.py:480-487`.) Two issues compound
+with the current dispatch flow:
+
+1.  `_do_external_simulation` already calls
+    `self.project.pad_stim_arrays(total_time_seconds=simulation_time)`
+    before launching the simulation. `pad_stim_arrays`
+    (`project.py:673-689`) uses `np.pad(...)` with default mode
+    `"constant"`, which fills the padded region with ZEROS. For ELISE
+    that means u_inp = 0 mV past the prepared pattern — a strong nudge
+    toward zero. Not what the user wants.
+
+2.  The simulator continues across Runs via the singleton
+    `_simulated_time_s`. So even if the first Run uses sim_time =
+    1.92 s and the prepared stim is also 1.92 s, the SECOND Run reads
+    `t_abs_s ∈ [1.92, 3.84]` from a stim that's still 1.92 s long. The
+    `min(..., stim_T - 1)` clamp pins every sample of the second Run to
+    `u_inp_full[1919]`, which for the Für Elise default is "pitch 5
+    nudged" — not silence.
+
+Both issues are fixed by:
+
+1.  PRE-FILLING the Run dialog with the meaningful stim length so the
+    default behaviour is to simulate exactly the prepared pattern.
+2.  When the user OVERRIDES the suggestion with a longer time, TILING
+    the stim (`np.tile` + remainder slice) to cover the new absolute-
+    time window. The simulator then reads sequentially through real
+    pattern data instead of clamped tail / zero padding.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+APPROACH
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1.  Add `Project.suggested_simulation_time_seconds() -> float`.
+2.  Add `Project.tile_stim_arrays_to_length(target_seconds: float) -> None`.
+3.  Extend `getSimulationTime` in `utils.py` to accept a `default_seconds`
+    kwarg.
+4.  In `gui.py`, pass `project.suggested_simulation_time_seconds()` as the
+    default to `getSimulationTime` from both Run-button paths
+    (`btn_continue_simulation_clicked` and
+    `btn_do_external_simulation_clicked`).
+5.  In `gui.py:_do_external_simulation`, REPLACE the
+    `self.project.pad_stim_arrays(total_time_seconds=simulation_time)`
+    call with a call to the new tile method, computing the target as
+    `cumulative_simulated_seconds + simulation_time` so multi-run
+    continuation extends the stim correctly. Tile is a no-op when the
+    stim already covers the absolute-time window.
+
+The Brian2 path stays unchanged: `btn_continue_simulation_clicked` only
+gets the new default-prefill behaviour; the existing
+`self.project.run_simulation(...)` call still pads with zeros, which is
+the historical Brian2 semantic.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/project.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Add the two methods together near the existing `pad_stim_arrays`
+(line 673) / `trim_stim_arrays` (line 691) / `loop_stim_arrays`
+(line 705) sibling group.
+
+1.  `suggested_simulation_time_seconds`:
+
+        def suggested_simulation_time_seconds(self) -> float:
+            """Return the longest meaningfully-filled duration across stim arrays.
+
+            A stim array is "meaningfully filled" up to (and including) the
+            last row that differs from its trailing-constant tail. A trailing
+            run of identical rows is interpreted as the user's "this part is
+            rest" tail and excluded from the suggestion.
+
+            Edge cases:
+              * Empty project (no stim arrays) → return ``self.max_time_secs``
+                if positive, else ``1.0`` so the dialog still shows a sensible
+                default.
+              * Stim array of length 0 → contributes 0 (ignored).
+              * Stim array whose rows are all identical → degenerate "no
+                signal"; contributes the full array duration so the user can
+                still run something for that length.
+            """
+            if not self.stim_arrays:
+                return float(self.max_time_secs) if self.max_time_secs > 0 else 1.0
+            candidates: list[float] = []
+            for stim_array in self.stim_arrays.values():
+                values = stim_array.values
+                n = values.shape[0]
+                if n == 0:
+                    continue
+                meaningful_n = _meaningful_row_count(values)
+                if meaningful_n == 0:
+                    # All rows identical: fall back to the full length so we
+                    # still suggest something positive.
+                    meaningful_n = n
+                candidates.append(meaningful_n * stim_array.dt)
+            if not candidates:
+                return 1.0
+            return max(candidates)
+
+    Add the helper directly above the `Project` class (or in
+    `src/neuroseq/utils.py` if you prefer keeping array helpers there;
+    if you do that, import it in `project.py`):
+
+        def _meaningful_row_count(values: np.ndarray) -> int:
+            """Return n such that values[n:] is a constant tail.
+
+            Returns 0 when every row equals the last row (no signal). Otherwise
+            returns the index of the last differing row, plus 1.
+            """
+            n = int(values.shape[0])
+            if n == 0:
+                return 0
+            tail = values[-1]
+            for i in range(n - 1, -1, -1):
+                if not np.array_equal(values[i], tail):
+                    return i + 1
+            return 0
+
+2.  `tile_stim_arrays_to_length`:
+
+        def tile_stim_arrays_to_length(self, target_seconds: float) -> None:
+            """Extend every stim array via `np.tile` so each covers `target_seconds`.
+
+            For each stim array `s`:
+              * If `s` already covers ``target_seconds`` (i.e.
+                ``s.values.shape[0] * s.dt >= target_seconds``), it is left
+                alone.
+              * Otherwise the values are tiled along axis 0 to the smallest
+                integer number of full repetitions that covers the target,
+                then truncated to exactly `n_target = ceil(target_seconds / dt)`
+                samples (so the last tile is partial when the target isn't a
+                multiple of the original length).
+
+            Calls `update_limits()` at the end.
+
+            Raises:
+                ValueError: if `target_seconds < 0`.
+            """
+            if target_seconds < 0:
+                raise ValueError(
+                    f"target_seconds must be >= 0, got {target_seconds}"
+                )
+            for stim_array in self.stim_arrays.values():
+                current_n = int(stim_array.values.shape[0])
+                if current_n == 0:
+                    continue
+                n_target = int(math.ceil(target_seconds / stim_array.dt))
+                if n_target <= current_n:
+                    continue
+                full_tiles = (n_target + current_n - 1) // current_n
+                tiled = np.tile(stim_array.values, (full_tiles, 1))
+                stim_array.values = tiled[:n_target]
+            self.update_limits()
+
+    `math` and `np` are already imported at the top of `project.py`.
+    The behaviour mirrors `loop_stim_arrays` (which takes integer
+    repetitions) but is duration-driven and handles partial trailing
+    tiles cleanly.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/utils.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Replace the `getSimulationTime` definition at lines 429-448 with:
+
+    def getSimulationTime(
+        parent: QtWidgets.QWidget | None = None,
+        default_seconds: float | None = None,
+    ) -> float | None:
+        """Prompt the user for a simulation time in seconds.
+
+        Args:
+            parent: parent widget for the QInputDialog (Qt-style).
+            default_seconds: if given, pre-fill the input field with this
+                value. Negative or non-finite values fall back to the
+                historical "1.0" default.
+
+        Returns the parsed float, or None on cancel / parse error.
+        """
+        if default_seconds is None or default_seconds <= 0 or not math.isfinite(default_seconds):
+            default_text = "1.0"
+        else:
+            # Trim trailing zeros so 1.92 doesn't show as "1.920000000".
+            default_text = f"{default_seconds:g}"
+        simulation_time_str, ok = QtWidgets.QInputDialog.getText(
+            parent,
+            "Simulate",
+            "Simulation time (s)",
+            QtWidgets.QLineEdit.EchoMode.Normal,
+            default_text,
+        )
+        if not ok:
+            return None
+        try:
+            simulation_time = float(simulation_time_str)
+        except ValueError:
+            QtWidgets.QMessageBox.critical(
+                parent,
+                "Invalid input",
+                f"Could not parse simulation time '{simulation_time_str}' as a number",
+            )
+            return None
+        return simulation_time
+
+Add `import math` near the top of `utils.py` if it isn't already
+imported (search for `^import math`).
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/gui.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1.  `btn_continue_simulation_clicked` (line 756). Currently:
+
+        simulation_time = getSimulationTime(self)
+
+    Replace with:
+
+        simulation_time = getSimulationTime(
+            self,
+            default_seconds=self.project.suggested_simulation_time_seconds(),
+        )
+
+2.  `btn_do_external_simulation_clicked` (around line 850). Same change:
+
+        simulation_time = getSimulationTime(
+            self,
+            default_seconds=self.project.suggested_simulation_time_seconds(),
+        )
+
+3.  `_do_external_simulation` (line 809). The relevant block currently:
+
+        @with_wait_cursor
+        def _do_external_simulation(self, simulation_time: float):
+            if self.project.external_simulate_function is None:
+                return
+            try:
+                # pre-emptively pad timed arrays before simulating
+                self.project.pad_stim_arrays(total_time_seconds=simulation_time)
+                self.stim_editor.set_project(self.project)
+
+    The `pad_stim_arrays(total_time_seconds=simulation_time)` line is
+    what produces the zero-padded tail. Replace the pad call with the
+    new tile call, scoped to the absolute time window:
+
+        cumulative_so_far = 0.0
+        sim = getattr(self.project, "external_simulator", None)
+        if sim is not None and hasattr(sim, "simulated_time_seconds"):
+            cumulative_so_far = float(sim.simulated_time_seconds)
+        target_seconds = cumulative_so_far + simulation_time
+        self.project.tile_stim_arrays_to_length(target_seconds)
+        self.stim_editor.set_project(self.project)
+
+    `getattr` + `hasattr` is defensive in case the external simulator
+    hasn't been resolved (`external_simulate_function` set by a raw
+    filesystem path that yielded only a function, not an `NN`
+    instance) — in that case fall back to `cumulative_so_far = 0.0` and
+    just tile to `simulation_time`.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_project_suggested_sim_time.py (new)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Pure-function tests of `suggested_simulation_time_seconds`. Build small
+in-memory `Project` objects with hand-rolled `StimArray`s. Don't import
+elise.
+
+    test_suggested_time_for_fully_filled_stim
+        Stim of shape (100, 3) with all rows distinct (e.g. arange) at
+        dt=0.001 → suggested = 0.1 s.
+
+    test_suggested_time_trims_constant_trailing_tail
+        Stim of shape (100, 3): rows 0-49 distinct, rows 50-99 all equal
+        to row 99 (constant tail). dt=0.001 → suggested = 0.050 s
+        (the index of the last differing row, +1, times dt).
+
+    test_suggested_time_full_length_when_all_rows_identical
+        Stim of shape (100, 3) entirely zeros → suggested = 0.1 s
+        (degenerate fallback, not 0).
+
+    test_suggested_time_takes_max_across_arrays
+        Two stims: one with meaningful 80 ms, one with 120 ms → suggested = 0.12 s.
+
+    test_suggested_time_no_stim_arrays
+        Empty project → suggested = 1.0 (or `max_time_secs` if positive).
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_project_tile_to_length.py (new)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    test_tile_to_length_extends_short_stim
+        Stim (100, 3) at dt=0.001 → target 0.25 s → values shape (250, 3),
+        values[:100] == original, values[100:200] == original,
+        values[200:250] == original[:50].
+
+    test_tile_to_length_is_noop_when_already_long_enough
+        Stim (200, 3) at dt=0.001 → target 0.1 s → unchanged shape and values.
+
+    test_tile_to_length_handles_exact_multiple
+        Stim (100, 3) at dt=0.001 → target 0.2 s → shape (200, 3),
+        tiled cleanly (no partial tile slice).
+
+    test_tile_to_length_applies_to_all_stims
+        Two stims of length 100 → target 0.25 s → both shape (250, ...).
+
+    test_tile_to_length_rejects_negative_target
+        `tile_stim_arrays_to_length(-1.0)` raises ValueError.
+
+    test_tile_to_length_skips_empty_arrays
+        A 0-row stim array remains 0-row (skipped via early continue).
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_gui_external_simulate_dispatch.py (extend)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Two new qtbot tests in the existing file. Look at the pattern used by
+the existing tests for monkey-patching `QInputDialog.getText` and the
+external simulate function.
+
+    test_run_dialog_default_is_suggested_simulation_time
+        Build a project where `suggested_simulation_time_seconds()`
+        returns 1.92 (a Für-Elise-shaped stim, or just a hand-rolled
+        stim with the right shape). Monkey-patch
+        `QtWidgets.QInputDialog.getText` to capture the `text` (default)
+        argument it was called with, return ("1.92", True). Click the
+        Run path. Assert the default arg seen by getText is the string
+        "1.92".
+
+    test_run_with_overshoot_tiles_stim_before_dispatch
+        Project with a (100, 2) stim at dt=0.001 (i.e., 0.1 s).
+        Monkey-patch `QInputDialog.getText` to return ("0.25", True).
+        Stub the external simulate function with a callable that
+        captures its `stims_dict["…"]["array"].shape`. Trigger the
+        external Run path. After the call, assert the captured array
+        shape is (250, 2). Confirms tile happened before dispatch.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NOTES
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- The new tile semantics REPLACE the existing zero-pad call inside
+  `_do_external_simulation` only. The Brian2 path
+  (`project.run_simulation` → `pad_stim_arrays`) is unchanged: that
+  path's historical zero-padding is appropriate for Brian2 simulations
+  that don't have looping semantics. If you ever want to unify the
+  two, that's a separate spec.
+
+- `suggested_simulation_time_seconds` deliberately does NOT subtract
+  `cumulative_simulated_seconds`. The user's mental model is "Run for
+  N seconds"; the default is "the prepared pattern length". If a user
+  has already simulated 1 s of a 1.92-s pattern and clicks Run again,
+  the dialog still suggests 1.92 (not 0.92). They can edit to whatever
+  they want; the auto-tile in `_do_external_simulation` handles the
+  rest.
+
+- The tile target inside `_do_external_simulation` IS based on
+  cumulative time: `cumulative_so_far + simulation_time`. That guarantees
+  the stim covers the absolute-time window the simulator will read from,
+  whether the user accepted the default or typed a larger number.
+
+- Stim widget refresh: the `tile_stim_arrays_to_length` call replaces
+  the existing `pad_stim_arrays` call site, and the existing
+  `self.stim_editor.set_project(self.project)` immediately afterwards
+  already triggers the GUI refresh. No additional refresh wiring.
+
+- "Meaningful length" definition: the algorithm trims trailing rows
+  that are CONSTANT-equal to the last row. It doesn't interpret a
+  per-stim "rest value"; it just looks at structural equality. That
+  means a stim like `[A, B, A]` returns meaningful=2 (trims the single
+  trailing A as if it were rest). This is a known-acceptable
+  approximation — the user always sees the suggestion and can override.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NON-GOALS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- IN-WRAPPER MODULO. The clamp-to-last behaviour in `Elise.simulate`
+  stays as-is; tiling the stim before dispatch makes it irrelevant in
+  practice (the simulator never reads past `stim_T - 1`). A modulo
+  fallback inside the wrapper is redundant once tiling is in place and
+  out of scope for this handoff.
+
+- CHANGING `pad_stim_arrays`. The signature, callers in the Brian2
+  path, and behaviour stay unchanged. Only `_do_external_simulation`
+  swaps from pad to tile.
+
+- SUPPORTING A "loop forever" / cyclic stim semantics in the GUI. The
+  tile call materialises the looped stim into the values array. If a
+  user wants the stim to *visually* show one cycle while the simulator
+  internally loops, that's a different feature (would require the
+  metadata-based Option B from earlier loop-stim-array discussions).
+
+- TRIMMING THE STIM AFTER A SHORTER-THAN-PREPARED RUN. If the user
+  enters sim_time < current stim length, the stim is left alone. The
+  simulator just reads the prefix; the user's authored pattern is
+  preserved for the next Run.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    ruff check src/neuroseq/project.py src/neuroseq/utils.py src/neuroseq/gui.py tests/test_project_suggested_sim_time.py tests/test_project_tile_to_length.py tests/test_gui_external_simulate_dispatch.py
+    ruff format --check src/neuroseq/project.py src/neuroseq/utils.py src/neuroseq/gui.py tests/test_project_suggested_sim_time.py tests/test_project_tile_to_length.py tests/test_gui_external_simulate_dispatch.py
+    mypy --ignore-missing-imports src/neuroseq/project.py src/neuroseq/utils.py src/neuroseq/gui.py
+    PYTHONPATH=src .venv/bin/python -m pytest tests/test_project_suggested_sim_time.py tests/test_project_tile_to_length.py tests/test_gui_external_simulate_dispatch.py -v
+    PYTHONPATH=src .venv/bin/python -m pytest
+
+The full pytest run is required because the change to `getSimulationTime`
+adds a new kwarg used by GUI test paths; any caller that monkey-patches
+`QInputDialog.getText` should keep working but should be re-verified.
+The change to `_do_external_simulation` (swap pad → tile) also affects
+existing dispatch tests; the existing `test_gui_simulate_external_model`
+in `tests/test_gui.py` is the canonical regression check for the path
+swap.
