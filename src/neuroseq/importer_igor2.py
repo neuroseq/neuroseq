@@ -30,6 +30,8 @@ class IgorWave:
     axis_units: str | None
     source_format: str
     note: str | None = None
+    n_sweeps: int = 1
+    samples_per_sweep: int | None = None
 
 
 @dataclass
@@ -42,6 +44,8 @@ class PreparedIgorWave:
     source_format: str
     resampled: bool
     original_sample_count: int
+    n_sweeps: int = 1
+    samples_per_sweep: int | None = None
 
 
 @dataclass
@@ -54,6 +58,8 @@ class IgorImportReport:
     target_dt: float
     resampled: bool
     truncated_samples: int
+    n_sweeps: int = 1
+    samples_per_sweep: int | None = None
 
 
 @dataclass
@@ -67,6 +73,8 @@ class IgorTraceImportReport:
     target_dt: float
     resampled: bool
     truncated_samples: int
+    n_sweeps: int = 1
+    samples_per_sweep: int | None = None
     spikes_detected: int | None = None
 
 
@@ -190,10 +198,26 @@ def parse_igor_binary_wave_data(
         raise ValueError("Invalid Igor Binary Wave data: missing wave header")
 
     raw_values = np.asarray(wave.get("wData"), dtype=np.float32)
-    values = np.squeeze(raw_values)
-    if values.ndim != 1:
+    squeezed = np.squeeze(raw_values)
+    if squeezed.ndim == 1:
+        values = squeezed.astype(np.float32, copy=False)
+        n_sweeps = 1
+        samples_per_sweep = int(values.size)
+    elif squeezed.ndim == 2:
+        # Igor stores multi-D waves column-major. Sweeps are along axis 1.
+        # Concatenate sweep-by-sweep into a 1-D wave (sweep 0 all samples
+        # first, then sweep 1, ...). The inter-sweep recording gaps from
+        # the original SutterPatch protocol (see `note`'s SweepStartTimes
+        # field) are NOT reconstructed - sweeps abut.
+        # TODO: Parse the SutterPatch note text (ScaleFactor / ScaleOffset /
+        # SweepStartTimes) and apply or surface it on import.
+        samples_per_sweep = int(squeezed.shape[0])
+        n_sweeps = int(squeezed.shape[1])
+        values = squeezed.ravel(order="F").astype(np.float32, copy=False)
+    else:
         raise ValueError(
-            "Only 1-dimensional Igor Binary Waves can be imported into NeuroSeq"
+            f"Igor wave has {squeezed.ndim} dimensions after squeezing; "
+            "only 1-D and 2-D (samples × sweeps) waves can be imported."
         )
 
     units, axis_units = _extract_units(header, wave)
@@ -205,6 +229,8 @@ def parse_igor_binary_wave_data(
         axis_units=axis_units,
         source_format="ibw",
         note=_decode_igor_text(wave.get("note")),
+        n_sweeps=n_sweeps,
+        samples_per_sweep=samples_per_sweep,
     )
 
 
@@ -508,6 +534,8 @@ def prepare_igor_wave_for_neuroseq(
         source_format=wave.source_format,
         resampled=abs(float(source_dt) - float(target_dt)) > _DT_TOLERANCE_SECONDS,
         original_sample_count=int(np.asarray(wave.values).size),
+        n_sweeps=wave.n_sweeps,
+        samples_per_sweep=wave.samples_per_sweep,
     )
 
 
@@ -592,6 +620,8 @@ def import_igor_wave_into_stim_array(
         target_dt=prepared_wave.target_dt,
         resampled=prepared_wave.resampled,
         truncated_samples=max(0, prepared_wave.values.shape[0] - target_timepoints),
+        n_sweeps=prepared_wave.n_sweeps,
+        samples_per_sweep=prepared_wave.samples_per_sweep,
     )
 
 
@@ -694,4 +724,6 @@ def import_igor_wave_into_trace_data(
         target_dt=float(prepared_wave.target_dt),
         resampled=prepared_wave.resampled,
         truncated_samples=truncated,
+        n_sweeps=prepared_wave.n_sweeps,
+        samples_per_sweep=prepared_wave.samples_per_sweep,
     )

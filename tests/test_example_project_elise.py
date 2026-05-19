@@ -13,6 +13,7 @@ from neuroseq.example_projects import _FUER_ELISE_OPSIN_INH_ACTIVE
 from neuroseq.example_projects import _FUER_ELISE_OPSIN_INH_REST
 from neuroseq.example_projects import _build_fuer_elise_opsin_stims
 from neuroseq.example_projects import example_projects
+from neuroseq.utils import detect_period
 
 
 def test_elise_example_project_registered():
@@ -144,8 +145,6 @@ def test_fuer_elise_opsin_stims_default_are_eight_full_cycles():
 
 def test_fuer_elise_opsin_stims_default_are_detected_as_periodic():
     """Both default opsin stims encode the 240-ms cycle."""
-    from neuroseq.stim_loop_dialog import _detect_period
-
     stim_exc, stim_inh = _build_fuer_elise_opsin_stims()
-    assert _detect_period(stim_exc) == 240
-    assert _detect_period(stim_inh) == 240
+    assert detect_period(stim_exc) == 240
+    assert detect_period(stim_inh) == 240

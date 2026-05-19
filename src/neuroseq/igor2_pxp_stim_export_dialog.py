@@ -5,6 +5,7 @@ from qtpy import QtWidgets
 
 from neuroseq.project import Project
 from neuroseq.stim import StimType
+from neuroseq.utils import parse_number
 
 
 class Igor2PxpStimExportDialog(QtWidgets.QDialog):
@@ -44,7 +45,9 @@ class Igor2PxpStimExportDialog(QtWidgets.QDialog):
         form.addRow("Unit of measurement (optional):", self._unit_edit)
 
         self._scale_edit = QtWidgets.QLineEdit()
-        self._scale_edit.setPlaceholderText("(leave blank for 1.0)")
+        self._scale_edit.setPlaceholderText(
+            "(blank = 1.0; accepts e.g. 1e-12, 10^-12, 2.5*10^(-12))"
+        )
         form.addRow("Scaling factor (optional):", self._scale_edit)
         layout.addLayout(form)
 
@@ -77,18 +80,18 @@ class Igor2PxpStimExportDialog(QtWidgets.QDialog):
         text = self._scale_edit.text().strip()
         if not text:
             return 1.0
-        return float(text)
+        return parse_number(text)
 
     def accept(self) -> None:
         text = self._scale_edit.text().strip()
         if text:
             try:
-                value = float(text)
-            except ValueError:
+                value = parse_number(text)
+            except ValueError as exc:
                 QtWidgets.QMessageBox.critical(
                     self,
                     "Invalid scaling factor",
-                    f"Could not parse '{text}' as a number.",
+                    str(exc),
                 )
                 return
             import math

@@ -127,6 +127,44 @@ def test_write_ibw_v5_round_trips_via_binarywave_load(tmp_path: Path) -> None:
     )
 
 
+def test_write_ibw_v5_two_d_emits_nDim_correctly(tmp_path: Path) -> None:
+    binarywave = importlib.import_module("igor2.binarywave")
+    data = np.arange(15, dtype=np.float32).reshape(5, 3)
+    ibw_path = tmp_path / "two_d.ibw"
+    ibw_path.write_bytes(_write_ibw_v5(data, wave_name="TwoD", dt=0.001))
+
+    loaded = binarywave.load(ibw_path)
+    header = loaded["wave"]["wave_header"]
+    assert tuple(int(v) for v in header["nDim"][:4]) == (5, 3, 0, 0)
+    assert int(header["npnts"]) == 15
+
+
+def test_write_ibw_v5_two_d_data_is_column_major() -> None:
+    data = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=np.float32)
+    result = _write_ibw_v5(data, wave_name="TwoD", dt=0.001)
+    data_offset = 2 + 62 + 320
+    raw = np.frombuffer(result[data_offset:], dtype="<f4", count=6)
+    np.testing.assert_array_equal(raw, np.array([1.0, 3.0, 5.0, 2.0, 4.0, 6.0]))
+
+
+def test_write_ibw_v5_round_trips_two_d(tmp_path: Path) -> None:
+    binarywave = importlib.import_module("igor2.binarywave")
+    data = np.arange(15, dtype=np.float32).reshape(5, 3)
+    ibw_path = tmp_path / "roundtrip_two_d.ibw"
+    ibw_path.write_bytes(_write_ibw_v5(data, wave_name="TwoD", dt=0.001))
+
+    loaded = binarywave.load(ibw_path)
+    wave_data = loaded["wave"]["wData"].astype(np.float32)
+    assert wave_data.shape == (5, 3)
+    np.testing.assert_array_equal(wave_data, data)
+
+
+def test_write_ibw_v5_rejects_three_d() -> None:
+    data = np.zeros((2, 2, 2), dtype=np.float32)
+    with pytest.raises(ValueError, match="1-D or 2-D"):
+        _write_ibw_v5(data, wave_name="bad", dt=0.001)
+
+
 def test_export_igor2_ibw_writes_file(tmp_path: Path) -> None:
     binarywave = importlib.import_module("igor2.binarywave")
     stim_array = StimArray(
@@ -149,6 +187,7 @@ def test_export_igor2_ibw_writes_file(tmp_path: Path) -> None:
     assert report.neuron_index == 1
     assert report.sample_count == 3
     assert report.experiment_name == "stim_neuron_1"
+    assert report.n_sweeps == 1
 
     loaded = binarywave.load(output_path)
     wave_data = loaded["wave"]["wData"].astype(np.float32)
@@ -196,6 +235,112 @@ def test_sanitize_igor_wave_name_is_applied_on_export(tmp_path: Path) -> None:
 
     assert " " not in report.experiment_name
     assert "!" not in report.experiment_name
+
+
+def test_export_ibw_as_sweeps_writes_2d_when_period_detected(tmp_path: Path) -> None:
+    binarywave = importlib.import_module("igor2.binarywave")
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=np.tile(np.array([[1.0], [2.0], [3.0]], dtype=np.float32), (5, 1)),
+        units="pA",
+        dt=0.001,
+    )
+    output_path = tmp_path / "sweeps.ibw"
+
+    report = export_igor2_ibw(
+        output_path,
+        stim_array,
+        wave_name="sweeps",
+        neuron_index=0,
+        as_sweeps=True,
+    )
+
+    loaded = binarywave.load(output_path)
+    wave_data = loaded["wave"]["wData"].astype(np.float32)
+    assert wave_data.shape == (3, 5)
+    assert report.n_sweeps == 5
+
+
+def test_export_ibw_as_sweeps_falls_back_to_1d_when_no_period(tmp_path: Path) -> None:
+    binarywave = importlib.import_module("igor2.binarywave")
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=np.arange(7, dtype=np.float32).reshape(7, 1),
+        units="pA",
+        dt=0.001,
+    )
+    output_path = tmp_path / "aperiodic.ibw"
+
+    report = export_igor2_ibw(
+        output_path,
+        stim_array,
+        wave_name="aperiodic",
+        neuron_index=0,
+        as_sweeps=True,
+    )
+
+    loaded = binarywave.load(output_path)
+    wave_data = loaded["wave"]["wData"].astype(np.float32)
+    assert wave_data.ndim == 1
+    assert report.n_sweeps == 1
+
+
+def test_export_ibw_as_sweeps_falls_back_when_single_sweep(tmp_path: Path) -> None:
+    binarywave = importlib.import_module("igor2.binarywave")
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=np.array([[1.0], [2.0], [3.0], [4.0]], dtype=np.float32),
+        units="pA",
+        dt=0.001,
+    )
+    output_path = tmp_path / "single.ibw"
+
+    report = export_igor2_ibw(
+        output_path,
+        stim_array,
+        wave_name="single",
+        neuron_index=0,
+        as_sweeps=True,
+    )
+
+    loaded = binarywave.load(output_path)
+    wave_data = loaded["wave"]["wData"].astype(np.float32)
+    assert wave_data.ndim == 1
+    assert report.n_sweeps == 1
+
+
+def test_export_ibw_as_sweeps_applies_scaling_before_detection(tmp_path: Path) -> None:
+    binarywave = importlib.import_module("igor2.binarywave")
+    base = np.tile(np.array([[1.0], [2.0], [3.0]], dtype=np.float32), (4, 1))
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=(base * 0.5).astype(np.float32),
+        units="pA",
+        dt=0.001,
+    )
+    output_path = tmp_path / "scaled_sweeps.ibw"
+
+    report = export_igor2_ibw(
+        output_path,
+        stim_array,
+        wave_name="scaled",
+        neuron_index=0,
+        scaling_factor=2.0,
+        as_sweeps=True,
+    )
+
+    loaded = binarywave.load(output_path)
+    wave_data = loaded["wave"]["wData"].astype(np.float32)
+    assert wave_data.shape == (3, 4)
+    np.testing.assert_array_equal(
+        wave_data[:, 0],
+        np.array([1.0, 2.0, 3.0], dtype=np.float32),
+    )
+    assert report.n_sweeps == 4
 
 
 def test_generate_igor2_csv_text_rejects_invalid_neuron() -> None:

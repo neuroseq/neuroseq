@@ -674,6 +674,7 @@ def test_gui_export_igor2_single_wave_csv(
             self.selected_neuron_index = 1
             self.unit_override: str | None = None
             self.scaling_factor: float = 1.0
+            self.as_sweeps: bool = False
 
         def exec(self) -> int:
             return QtWidgets.QDialog.DialogCode.Accepted
@@ -735,6 +736,7 @@ def test_gui_export_igor2_single_wave_ibw(
             self.selected_neuron_index = 1
             self.unit_override: str | None = None
             self.scaling_factor: float = 1.0
+            self.as_sweeps: bool = False
 
         def exec(self) -> int:
             return QtWidgets.QDialog.DialogCode.Accepted
@@ -766,6 +768,102 @@ def test_gui_export_igor2_single_wave_ibw(
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "information"
     assert "export successful" in qmessagebox_calls[0]["title"].lower()
+
+
+def test_gui_export_igor2_single_wave_ibw_with_as_sweeps_succeeds(
+    tmp_path: Path, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+) -> None:
+    import importlib
+
+    binarywave = importlib.import_module("igor2.binarywave")
+    project = Project()
+    stim_values = np.tile(
+        np.array([[1.0], [2.0], [3.0]], dtype=np.float32),
+        (4, 1),
+    )
+    project.add_stim_array(
+        StimArray("stim", StimType.Excitation, stim_values, "pA", 0.001)
+    )
+
+    class MockDialog:
+        def __init__(self, stim_name: str, stim_array: StimArray, parent=None) -> None:
+            self.experiment_name = "stim_sweeps"
+            self.selected_neuron_index = 0
+            self.unit_override: str | None = None
+            self.scaling_factor: float = 1.0
+            self.as_sweeps = True
+
+        def exec(self) -> int:
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    output_path = tmp_path / "stim_sweeps.ibw"
+    monkeypatch.setattr(neuroseq.gui, "Igor2SingleWaveExportDialog", MockDialog)
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "getsavefilename",
+        lambda *args: (str(output_path), "Igor Binary Wave (*.ibw)"),
+    )
+
+    fake_gui: Any = SimpleNamespace(
+        project=project,
+        cmb_stim=SimpleNamespace(currentText=lambda: "stim"),
+        logger=logging.getLogger("test_gui_export_ibw_sweeps"),
+    )
+
+    Gui.btn_export_igor2_single_wave_clicked(fake_gui)
+
+    loaded = binarywave.load(output_path)
+    wave_data = loaded["wave"]["wData"].astype(np.float32)
+    assert wave_data.shape == (3, 4)
+    assert "Split into 4 sweeps × 3 samples." in qmessagebox_calls[0]["text"]
+
+
+def test_gui_export_igor2_single_wave_ibw_as_sweeps_falls_back_for_non_periodic(
+    tmp_path: Path, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+) -> None:
+    import importlib
+
+    binarywave = importlib.import_module("igor2.binarywave")
+    project = Project()
+    stim_values = np.arange(7, dtype=np.float32).reshape(7, 1)
+    project.add_stim_array(
+        StimArray("stim", StimType.Excitation, stim_values, "pA", 0.001)
+    )
+
+    class MockDialog:
+        def __init__(self, stim_name: str, stim_array: StimArray, parent=None) -> None:
+            self.experiment_name = "stim_aperiodic"
+            self.selected_neuron_index = 0
+            self.unit_override: str | None = None
+            self.scaling_factor: float = 1.0
+            self.as_sweeps = True
+
+        def exec(self) -> int:
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    output_path = tmp_path / "stim_aperiodic.ibw"
+    monkeypatch.setattr(neuroseq.gui, "Igor2SingleWaveExportDialog", MockDialog)
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "getsavefilename",
+        lambda *args: (str(output_path), "Igor Binary Wave (*.ibw)"),
+    )
+
+    info_messages: list[str] = []
+    fake_gui: Any = SimpleNamespace(
+        project=project,
+        cmb_stim=SimpleNamespace(currentText=lambda: "stim"),
+        logger=SimpleNamespace(
+            info=lambda message, *args: info_messages.append(message % args)
+        ),
+    )
+
+    Gui.btn_export_igor2_single_wave_clicked(fake_gui)
+
+    loaded = binarywave.load(output_path)
+    wave_data = loaded["wave"]["wData"].astype(np.float32)
+    assert wave_data.ndim == 1
+    assert any("no period was detected" in message for message in info_messages)
 
 
 def test_gui_export_igor2_single_wave_requires_stim_data(
@@ -982,6 +1080,7 @@ def test_gui_export_igor2_single_wave_ibw_passes_unit_and_scaling(
             self.selected_neuron_index = 0
             self.unit_override = "mW/mm^2"
             self.scaling_factor = 10.0
+            self.as_sweeps = False
 
         def exec(self) -> int:
             return QtWidgets.QDialog.DialogCode.Accepted

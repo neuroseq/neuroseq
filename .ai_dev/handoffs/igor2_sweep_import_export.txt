@@ -1,0 +1,697 @@
+HANDOFF: Igor2 multi-sweep import (concatenate) + IBW sweep export
+==================================================================
+Branch: <pick one off main>
+Repo:   /mnt/live3/svintila/neuroseq
+Date:   2026-05-19
+
+
+PROBLEM
+-------
+Two missing features on the Igor2 import/export side, both centred on
+the same concept: an Igor wave can be 2-D `(samples, sweeps)`, where
+each column is one trial of the same protocol.
+
+1. IMPORT side. `parse_igor_binary_wave_data` (src/neuroseq/importer_igor2.py)
+   rejects any wave whose data isn't 1-D after `np.squeeze`. A real
+   SutterPatch IVstep recording has shape `(30000, 7)` — 30 000 samples
+   × 7 sweeps — which the squeeze can't reduce and the importer raises
+   "Only 1-dimensional Igor Binary Waves can be imported into NeuroSeq".
+   Test file proven to trigger this:
+   `/mnt/live3/svintila/random/igor2_files/test_files/R5_S1_IVstep.ibw`
+   (wData shape (30000, 7), sfA[0]=5e-5, dataUnits='A', dimUnits[0]='s').
+
+   The desired behaviour is to **concatenate sweeps end-to-end into a
+   single 1-D wave** (sweep 0 then sweep 1 … then sweep N−1) and import
+   that. This keeps the rest of the importer (resampler, single-column
+   StimArray builder, single-row TraceData builder) unchanged. The cost
+   is that inter-sweep gaps from the original recording (Igor's
+   `SweepStartTimes` note) are not reconstructed — the sweeps abut. For
+   the patch-clamp use case where sweeps are well-spaced enough that the
+   cell returns to rest, this loses nothing observable. The dialog must
+   show an info label so this isn't a silent surprise.
+
+2. EXPORT side. The single-wave IBW exporter (`Igor2SingleWaveExportDialog`
+   + `export_igor2_ibw`) writes only 1-D waves today. Neuroseq has a
+   loop-detection helper (`_detect_period` in stim_loop_dialog.py) that
+   finds the smallest exact-repeating block in a stim. We want a
+   checkbox in the export dialog — "Export as sweeps (auto-detect period)"
+   — that, when enabled, runs the detector on the column being exported.
+   If a period is found and the column splits evenly into ≥2 sweeps,
+   the exporter writes a 2-D IBW (shape `(period, n_sweeps)`) with Igor
+   column-major byte order. Igor Pro then opens the file as a multi-sweep
+   wave the user can plot stacked, overlaid, or averaged. If no period
+   is detected (or the result would be a single sweep), the exporter
+   falls back to 1-D and the dialog surfaces a small inline status
+   note. CSV path is unchanged — sweeps are an IBW-only concept here.
+
+
+TASK OVERVIEW
+-------------
+A. Promote `_detect_period` from `stim_loop_dialog.py` to `utils.py` as a
+   public `detect_period` so both the loop dialog and the new export
+   checkbox call the same function. The existing loop dialog switches
+   to importing it from there.
+
+B. Multi-sweep IBW import:
+   - `parse_igor_binary_wave_data` accepts shape `(N,)` and `(N, S)`,
+     rejects 3-D+.
+   - When the input is 2-D, concatenate column-major into 1-D
+     (`wData.ravel(order='F').astype(float32)`).
+   - `IgorWave` records `n_sweeps` and `samples_per_sweep` (default 1 / N
+     for 1-D inputs). Used only by the dialog info label and reports.
+   - `IgorImportReport` and `IgorTraceImportReport` gain `n_sweeps` and
+     `samples_per_sweep` fields for the post-import message.
+   - `igor_import_dialog.py` and `igor_trace_import_dialog.py` show an
+     info label when `wave.n_sweeps > 1`. No new controls.
+
+C. Multi-sweep IBW export:
+   - `_write_ibw_v5` accepts either a 1-D `ndarray` (current behaviour)
+     or a 2-D `(samples, sweeps)` ndarray. For 2-D it writes
+     `nDim = [samples, sweeps, 0, 0]`, `npnts = samples * sweeps`, and
+     serialises the data block in **column-major** order (Igor's wire
+     format for multi-D waves).
+   - `export_igor2_ibw` gains a new keyword `as_sweeps: bool = False`.
+     When `True`, the exporter calls `detect_period` on the selected
+     column AFTER scaling; if a usable period is found, reshape to
+     `(period, n_sweeps)` and write 2-D. If not, write 1-D and report
+     that fallback to the caller via a new `Igor2SingleWaveExport.n_sweeps`
+     field (set to 1 in the fallback case, `>1` on success).
+   - `Igor2SingleWaveExportDialog` adds a checkbox "Export as sweeps
+     (auto-detect period)" plus an inline status label. The checkbox is
+     enabled only when the chosen format is `.ibw` (greyed out the
+     moment the user picks `.csv` from the file-save dialog — but
+     because file format is picked AFTER the dialog closes, see
+     "design note" below for the actual UX).
+   - `gui.py`'s `btn_export_igor2_single_wave_clicked` forwards the
+     checkbox through to `export_igor2_ibw` (CSV path silently ignores
+     it).
+
+
+DESIGN NOTE — checkbox timing
+-----------------------------
+The current export flow is: dialog (pick name/neuron/unit/scaling) →
+file-save dialog (pick .ibw or .csv). The "Export as sweeps" checkbox
+must therefore live in the **first** dialog. The simplest UX:
+
+- Checkbox is always enabled in the first dialog.
+- Below it, a non-editable status label shows the detection result for
+  the **currently selected neuron**, updating when the neuron combo
+  changes:
+    - "Period detected: 300 samples × 6 sweeps (1800 total)" — sweep
+      export will work.
+    - "No periodic block detected — will fall back to single-sweep
+      export." — informs the user but does not block.
+- When the user picks `.csv` at the file-save dialog, the checkbox is
+  silently ignored (CSV is 1-D by nature). A one-line warning is
+  emitted via `logger.info` so the silence isn't total.
+
+Detection runs in the dialog (so the user sees the status) AND in the
+exporter (so it does the actual reshape with the post-scaling values).
+The status preview is computed on the raw `stim_array[:, idx]`; the
+authoritative reshape uses `scaled_values`. The two agree because
+`detect_period` is scale-invariant for non-zero scaling factors (the
+exact-equality check on `values[:n-period]` vs `values[period:]`
+survives uniform scaling). The dialog status is a UX hint; the
+exporter does the real work.
+
+
+SCOPE (explicit cuts)
+---------------------
+- Do NOT add `.pxp` sweep export. PXP already has natural per-array
+  waves; the loop-detect-and-split semantics don't translate cleanly.
+- Do NOT add a "use only first sweep" import mode. Default and only
+  mode on import: concatenate all sweeps. Selective-sweep import is
+  out of scope.
+- Do NOT parse the SutterPatch `note` text (ScaleFactor, ScaleOffset,
+  SweepStartTimes). The file from the user has ScaleFactor=1 /
+  ScaleOffset=0 so this is a no-op for the test file, and a general
+  parser of that text blob is a separate concern. Add a TODO comment
+  in `parse_igor_binary_wave_data` flagging the note metadata as a
+  future improvement.
+- Do NOT add inter-sweep gap reconstruction from `SweepStartTimes`.
+  Sweeps abut. Document this in the dialog info label.
+- Do NOT touch the PXP loader, the trace importer's spike detection,
+  or any export path that isn't the single-wave IBW.
+
+
+HOW TO RUN TESTS
+----------------
+    cd /mnt/live3/svintila/neuroseq
+    uv run pytest tests/test_importer_igor2.py \
+                  tests/test_igor_import_dialog.py \
+                  tests/test_igor_trace_import_dialog.py \
+                  tests/test_exporter_igor2.py \
+                  tests/test_igor2_single_wave_export_dialog.py \
+                  tests/test_gui.py \
+                  tests/test_utils.py -v
+    uv run pytest                       # full suite must stay green
+    uv run pre-commit run --files \
+        src/neuroseq/importer_igor2.py \
+        src/neuroseq/exporter_igor2.py \
+        src/neuroseq/igor_import_dialog.py \
+        src/neuroseq/igor_trace_import_dialog.py \
+        src/neuroseq/igor2_single_wave_export_dialog.py \
+        src/neuroseq/stim_loop_dialog.py \
+        src/neuroseq/utils.py \
+        src/neuroseq/gui.py \
+        tests/test_importer_igor2.py \
+        tests/test_igor_import_dialog.py \
+        tests/test_igor_trace_import_dialog.py \
+        tests/test_exporter_igor2.py \
+        tests/test_igor2_single_wave_export_dialog.py \
+        tests/test_gui.py \
+        tests/test_utils.py
+
+
+FILES TO CHANGE
+---------------
+  src/neuroseq/utils.py                       — new public `detect_period`
+  src/neuroseq/stim_loop_dialog.py            — import `detect_period` from utils
+  src/neuroseq/importer_igor2.py              — multi-sweep concat on load
+  src/neuroseq/igor_import_dialog.py          — info label for n_sweeps > 1
+  src/neuroseq/igor_trace_import_dialog.py    — info label for n_sweeps > 1
+  src/neuroseq/exporter_igor2.py              — 2-D _write_ibw_v5 + as_sweeps
+  src/neuroseq/igor2_single_wave_export_dialog.py — checkbox + status
+  src/neuroseq/gui.py                         — forward checkbox state
+  tests/test_utils.py                         — detect_period tests
+  tests/test_importer_igor2.py                — multi-sweep concat tests
+  tests/test_igor_import_dialog.py            — info label test
+  tests/test_igor_trace_import_dialog.py      — info label test
+  tests/test_exporter_igor2.py                — 2-D writer + as_sweeps tests
+  tests/test_igor2_single_wave_export_dialog.py — checkbox + status tests
+  tests/test_gui.py                           — end-to-end as_sweeps flow
+
+DO NOT TOUCH:
+  src/neuroseq/exporter_igor2.py's CSV / PXP paths' behaviour (signatures
+    may grow optional kwargs but defaults must preserve today's output).
+  src/neuroseq/igor2_pxp_stim_export_dialog.py
+  Any file not listed above.
+
+
+==================================================================
+CHANGE A — promote `detect_period` to utils.py
+==================================================================
+
+Move the body of `_detect_period` from src/neuroseq/stim_loop_dialog.py
+to src/neuroseq/utils.py. Rename to public `detect_period`. Signature
+unchanged:
+
+    def detect_period(values: np.ndarray) -> int | None:
+        """Return the smallest exact period of ``values``, or ``None``.
+
+        The period is measured in samples along axis 0. Returns ``None``
+        when no proper divisor of len(values) produces an exact repeat.
+        """
+
+Update stim_loop_dialog.py:
+    -from neuroseq.project import Project
+    +from neuroseq.project import Project
+    +from neuroseq.utils import detect_period
+    ...
+    -        period = _detect_period(reference_stim.values)
+    +        period = detect_period(reference_stim.values)
+
+Delete the local `_detect_period` definition in stim_loop_dialog.py.
+
+NEW TESTS in tests/test_utils.py (4):
+
+| Test                                            | Asserts                                       |
+| ----------------------------------------------- | --------------------------------------------- |
+| test_detect_period_returns_period_for_repeat    | `[1,2,3]*4` → period 3                        |
+| test_detect_period_returns_none_for_non_repeat  | `[1,2,3,4,5,6,7]` → None                      |
+| test_detect_period_returns_none_for_short_array | `[1]` → None                                  |
+| test_detect_period_handles_2d_arrays            | `[[1,2],[3,4]]*3` → period 2 (axis-0 repeat)  |
+
+
+==================================================================
+CHANGE B — multi-sweep IBW import (concatenate)
+==================================================================
+
+src/neuroseq/importer_igor2.py:
+
+(1) Extend the IgorWave dataclass:
+
+    @dataclass
+    class IgorWave:
+        name: str
+        values: np.ndarray
+        source_dt: float | None
+        units: str | None
+        axis_units: str | None
+        source_format: str
+        note: str | None = None
+        n_sweeps: int = 1
+        samples_per_sweep: int | None = None  # equals values.size when 1-D
+
+(2) Replace the 1-D check in `parse_igor_binary_wave_data`:
+
+    raw_values = np.asarray(wave.get("wData"), dtype=np.float32)
+    squeezed = np.squeeze(raw_values)
+
+    if squeezed.ndim == 1:
+        values = squeezed
+        n_sweeps = 1
+        samples_per_sweep = int(values.size)
+    elif squeezed.ndim == 2:
+        # Igor stores multi-D waves column-major. Sweeps are along axis 1.
+        # Concatenate sweep-by-sweep into a 1-D wave (sweep 0 all samples
+        # first, then sweep 1, ...). The inter-sweep recording gaps from
+        # the original SutterPatch protocol (see `note`'s SweepStartTimes
+        # field) are NOT reconstructed — sweeps abut.
+        # TODO: a future change could parse the SutterPatch note text
+        # (ScaleFactor / ScaleOffset / SweepStartTimes) and apply or
+        # surface them on import.
+        samples_per_sweep = int(squeezed.shape[0])
+        n_sweeps = int(squeezed.shape[1])
+        values = squeezed.ravel(order="F").astype(np.float32, copy=False)
+    else:
+        raise ValueError(
+            f"Igor wave has {squeezed.ndim} dimensions after squeezing; "
+            "only 1-D and 2-D (samples × sweeps) waves can be imported."
+        )
+
+(3) Update the IgorWave constructor call at the bottom of
+    `parse_igor_binary_wave_data`:
+
+    return IgorWave(
+        name=...,
+        values=values,
+        source_dt=...,
+        units=units,
+        axis_units=axis_units,
+        source_format="ibw",
+        note=...,
+        n_sweeps=n_sweeps,
+        samples_per_sweep=samples_per_sweep,
+    )
+
+(4) The `load_igor_csv_file`, `load_igor_pxp_file`, `_collect`, and
+    `load_igor_wave_file` paths that don't go through
+    `parse_igor_binary_wave_data` need to default the two new fields
+    safely. Easiest: leave `n_sweeps=1` and `samples_per_sweep=None` as
+    dataclass defaults; only the IBW path sets them.
+
+(5) Add `n_sweeps` and `samples_per_sweep` to both report dataclasses:
+
+    @dataclass
+    class IgorImportReport:
+        ...existing fields...
+        n_sweeps: int = 1
+        samples_per_sweep: int | None = None
+
+    @dataclass
+    class IgorTraceImportReport:
+        ...existing fields...
+        n_sweeps: int = 1
+        samples_per_sweep: int | None = None
+
+    In the two `import_igor_wave_into_*` functions, populate the new
+    fields from the IgorWave (passed via PreparedIgorWave — see (6)).
+
+(6) PreparedIgorWave gains the same two fields, forwarded from the
+    source IgorWave:
+
+    @dataclass
+    class PreparedIgorWave:
+        ...existing fields...
+        n_sweeps: int = 1
+        samples_per_sweep: int | None = None
+
+    `prepare_igor_wave_for_neuroseq` copies them from `wave`.
+
+(7) `resample_wave_zero_order_hold` — unchanged. It already accepts
+    arbitrary 1-D inputs via `.reshape(-1)`; the concatenation already
+    happened upstream, so resampling continues to work over the full
+    concatenated wave.
+
+NEW TESTS in tests/test_importer_igor2.py (5):
+
+| Test                                                  | Asserts                                                                                          |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| test_parse_binary_wave_accepts_two_d_and_concatenates | Synthetic wData `(4, 3)` → values length 12, sweep-by-sweep order; n_sweeps=3, samples_per_sweep=4 |
+| test_parse_binary_wave_rejects_three_d                | wData shape `(4, 3, 2)` → ValueError matching "3 dimensions"                                     |
+| test_parse_binary_wave_keeps_one_d_unchanged          | 1-D input → n_sweeps=1, samples_per_sweep=N, values unchanged                                    |
+| test_real_sutterpatch_file_imports                    | Load `/mnt/live3/.../R5_S1_IVstep.ibw`; assert n_sweeps=7, samples_per_sweep=30000, dt=5e-5      |
+| test_prepared_wave_carries_sweep_metadata             | After `prepare_igor_wave_for_neuroseq`, the n_sweeps/samples_per_sweep fields are populated      |
+
+For the SutterPatch real-file test, use `pytest.importorskip("igor2")`
+and skip with a clear message if the test file path does not exist
+(some CI checkouts may not have it):
+
+    TEST_FILE = Path(
+        "/mnt/live3/svintila/random/igor2_files/test_files/R5_S1_IVstep.ibw"
+    )
+
+    @pytest.mark.skipif(not TEST_FILE.exists(), reason="real IBW not present")
+    def test_real_sutterpatch_file_imports():
+        ...
+
+
+==================================================================
+CHANGE C — dialog info label for multi-sweep imports
+==================================================================
+
+src/neuroseq/igor_import_dialog.py and src/neuroseq/igor_trace_import_dialog.py:
+
+After the wave is loaded but before the dialog returns to the user,
+detect `wave.n_sweeps > 1` and add a QLabel above the existing controls:
+
+    if wave.n_sweeps > 1:
+        info = (
+            f"Multi-sweep IBW: {wave.n_sweeps} sweeps × "
+            f"{wave.samples_per_sweep} samples → concatenated to "
+            f"{wave.values.size} samples. "
+            f"Inter-sweep recording gaps are not preserved."
+        )
+        # Add as a QLabel near the top of the existing form layout.
+        # Wrap text and set object name "multi_sweep_info" for testing.
+
+The label is shown only when `n_sweeps > 1`; for 1-D imports it
+doesn't appear at all.
+
+NEW TESTS:
+  tests/test_igor_import_dialog.py — one test: load a synthetic
+    multi-sweep IgorWave (constructed in-memory, not from a file), open
+    the dialog, assert findChild for the QLabel with objectName
+    "multi_sweep_info" is non-None and its text contains "3 sweeps".
+  tests/test_igor_trace_import_dialog.py — same shape, for the trace
+    dialog.
+
+
+==================================================================
+CHANGE D — _write_ibw_v5 accepts 2-D
+==================================================================
+
+src/neuroseq/exporter_igor2.py. Extend `_write_ibw_v5` to accept either
+a 1-D or 2-D `(samples, sweeps)` ndarray:
+
+    def _write_ibw_v5(
+        values: np.ndarray,
+        *,
+        wave_name: str,
+        dt: float,
+        data_units: str = "",
+        x_units: str = "s",
+    ) -> bytes:
+        data = np.asarray(values, dtype="<f4")
+        if data.ndim not in (1, 2):
+            raise ValueError(
+                "IBW export expects a 1-D or 2-D (samples × sweeps) array"
+            )
+        if dt <= 0:
+            raise ValueError("Sample interval must be positive")
+
+        if data.ndim == 1:
+            n_samples = int(data.size)
+            n_sweeps = 0  # 0 marks "axis not present" in Igor's nDim
+            npnts = n_samples
+            data_bytes = data.tobytes()
+        else:
+            n_samples = int(data.shape[0])
+            n_sweeps = int(data.shape[1])
+            npnts = n_samples * n_sweeps
+            # Igor stores multi-D waves column-major.
+            data_bytes = np.asarray(data, order="F").tobytes()
+
+In the existing `wave_header_values` tuple, the `n` field (currently
+shown at position 3) is `npnts` — change to `npnts`. The four-element
+`nDim` array follows. Today it's implicit (zeros) — make it explicit:
+
+    # 4-element nDim (axis sizes; trailing zeros mean "axis not present").
+    n_dim_values = (n_samples, n_sweeps, 0, 0)
+
+Substitute `n_dim_values` into the `*([0] * 16)` slot if that's where
+`nDim` lives — refer to the WaveHeader5 layout in igor2/binarywave.py
+(lines 256-340). The 4 nDim longs replace the first 4 of the 16 zeros.
+
+`sfA[0]` keeps `dt`; `sfA[1]` stays at default (1.0 — Igor's "no scale"
+for the sweep axis is fine). dimUnits[1] stays empty (sweep axis is
+unitless).
+
+NEW TESTS in tests/test_exporter_igor2.py (4):
+
+| Test                                            | Asserts                                                                                |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------- |
+| test_write_ibw_v5_two_d_emits_nDim_correctly    | 2-D `(5, 3)` input → `wave_header.nDim` reads `[5, 3, 0, 0]`, `npnts == 15`            |
+| test_write_ibw_v5_two_d_data_is_column_major    | 2-D `[[1,2],[3,4],[5,6]]` → wData bytes are `[1,3,5,2,4,6]`                            |
+| test_write_ibw_v5_round_trips_two_d             | Write 2-D `(5, 3)`, load via `binarywave.load`, assert shape and per-cell equality     |
+| test_write_ibw_v5_rejects_three_d               | 3-D input → ValueError                                                                 |
+
+
+==================================================================
+CHANGE E — `export_igor2_ibw(as_sweeps=...)`
+==================================================================
+
+src/neuroseq/exporter_igor2.py. Extend the existing `Igor2SingleWaveExport`
+dataclass:
+
+    @dataclass(frozen=True)
+    class Igor2SingleWaveExport:
+        experiment_name: str
+        neuron_index: int
+        sample_count: int
+        n_sweeps: int = 1            # NEW
+
+Extend `export_igor2_ibw`:
+
+    def export_igor2_ibw(
+        output_path: str | pathlib.Path,
+        stim_array: StimArray,
+        *,
+        wave_name: str,
+        neuron_index: int,
+        unit_override: str | None = None,
+        scaling_factor: float = 1.0,
+        as_sweeps: bool = False,
+    ) -> Igor2SingleWaveExport:
+        # ...existing validation, scaling, sanitisation...
+        values = scaled_values  # 1-D, shape (n_samples,)
+
+        n_sweeps_out = 1
+        write_values: np.ndarray = values
+        if as_sweeps:
+            from neuroseq.utils import detect_period
+            period = detect_period(values)
+            if period is not None and period > 0 and values.size % period == 0:
+                sweep_count = values.size // period
+                if sweep_count > 1:
+                    write_values = values.reshape(sweep_count, period).T
+                    write_values = np.ascontiguousarray(write_values)
+                    n_sweeps_out = sweep_count
+            # else: fall through and emit 1-D
+
+        ibw_bytes = _write_ibw_v5(
+            write_values,
+            wave_name=sanitized_name,
+            dt=float(stim_array.dt),
+            data_units=wave_units,
+            x_units="s",
+        )
+        path = pathlib.Path(output_path)
+        path.write_bytes(ibw_bytes)
+        return Igor2SingleWaveExport(
+            experiment_name=sanitized_name,
+            neuron_index=neuron_index,
+            sample_count=int(stim_array.values.shape[0]),
+            n_sweeps=n_sweeps_out,
+        )
+
+The `.values.reshape(sweep_count, period).T` produces the
+`(period, sweep_count)` layout `_write_ibw_v5` expects. Order: if the
+original 1-D wave was `[s0_sweep0, s1_sweep0, ..., s0_sweep1, ...]`
+(the natural concatenation our import side now produces) then
+`reshape(sweep_count, period)` groups by sweep first (each row = one
+sweep), and `.T` puts samples on axis 0 / sweeps on axis 1 — which
+matches Igor's column-major layout when serialised.
+
+If the 1-D wave was authored in some other order (e.g. interleaved),
+`detect_period` will not find a period of `period_length` and the
+2-D path will not engage. So no silent misreshape.
+
+NEW TESTS in tests/test_exporter_igor2.py (4):
+
+| Test                                                          | Asserts                                                                                                            |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| test_export_ibw_as_sweeps_writes_2d_when_period_detected      | 1-D `[1,2,3]*5` exported with as_sweeps=True → loaded wData has shape (3, 5); n_sweeps==5 in return value          |
+| test_export_ibw_as_sweeps_falls_back_to_1d_when_no_period     | Non-periodic input + as_sweeps=True → 1-D output; return value has n_sweeps==1                                     |
+| test_export_ibw_as_sweeps_falls_back_when_single_sweep        | Period == full length (would yield 1 sweep) → 1-D output                                                           |
+| test_export_ibw_as_sweeps_applies_scaling_before_detection    | `[1,2,3]*4 * 0.5` written with scaling_factor=2.0 → still detects period 3 and emits 2-D                           |
+
+
+==================================================================
+CHANGE F — Igor2SingleWaveExportDialog gets the checkbox
+==================================================================
+
+src/neuroseq/igor2_single_wave_export_dialog.py. Add to `_setup_ui` after
+the scaling-factor row:
+
+    self._as_sweeps_check = QtWidgets.QCheckBox(
+        "Export as sweeps (auto-detect period)", self
+    )
+    self._as_sweeps_check.setToolTip(
+        "If the selected column is a repetition of a smaller block, "
+        "export it as a multi-sweep .ibw (one column per repeat). "
+        "Ignored when saving as .csv."
+    )
+    form.addRow("", self._as_sweeps_check)
+
+    self._sweep_status = QtWidgets.QLabel("", self)
+    self._sweep_status.setWordWrap(True)
+    self._sweep_status.setObjectName("sweep_detection_status")
+    form.addRow("", self._sweep_status)
+
+Wire the status label to update whenever:
+- the user toggles the checkbox; OR
+- the user changes the neuron picker.
+
+The update reads `stim_array.values[:, selected_neuron_index]`,
+calls `detect_period`, and sets the label:
+
+    def _update_sweep_status(self) -> None:
+        if not self._as_sweeps_check.isChecked():
+            self._sweep_status.setText("")
+            return
+        column = self.stim_array.values[:, self.selected_neuron_index]
+        period = detect_period(column)
+        if period is None or period <= 0 or column.size % period != 0:
+            self._sweep_status.setText(
+                "No periodic block detected — will export as a single sweep."
+            )
+            return
+        n = column.size // period
+        if n < 2:
+            self._sweep_status.setText(
+                "Only one repetition — will export as a single sweep."
+            )
+            return
+        self._sweep_status.setText(
+            f"Period detected: {period} samples × {n} sweeps "
+            f"({column.size} total)."
+        )
+
+    self._as_sweeps_check.toggled.connect(self._update_sweep_status)
+    self.neuron_combo.currentIndexChanged.connect(
+        lambda _idx: self._update_sweep_status()
+    )
+
+Expose:
+    @property
+    def as_sweeps(self) -> bool:
+        return self._as_sweeps_check.isChecked()
+
+NEW TESTS in tests/test_igor2_single_wave_export_dialog.py (4):
+
+| Test                                                       | Asserts                                                                                          |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| test_dialog_default_as_sweeps_is_false                     | `dialog.as_sweeps is False` on construction                                                      |
+| test_dialog_status_empty_when_checkbox_off                 | Checking detection status text is empty until checkbox toggled                                   |
+| test_dialog_status_reports_detected_period                 | Set values to `[1,2,3]*4`, toggle checkbox, status reads "Period detected: 3 samples × 4 sweeps" |
+| test_dialog_status_reports_no_period_for_non_periodic_data | Non-periodic column → "No periodic block detected"                                               |
+
+
+==================================================================
+CHANGE G — gui.py threads the checkbox through
+==================================================================
+
+src/neuroseq/gui.py. In `btn_export_igor2_single_wave_clicked`, the
+`.ibw` branch becomes:
+
+    if suffix == ".ibw":
+        export_report = export_igor2_ibw(
+            output_path,
+            stim_array,
+            wave_name=dialog.experiment_name,
+            neuron_index=dialog.selected_neuron_index,
+            unit_override=dialog.unit_override,
+            scaling_factor=dialog.scaling_factor,
+            as_sweeps=dialog.as_sweeps,
+        )
+        if dialog.as_sweeps and export_report.n_sweeps == 1:
+            self.logger.info(
+                "Sweep export requested for '%s' but no period was detected; "
+                "exported as single sweep.",
+                stim_array.name,
+            )
+        ...
+
+The `.csv` branch is unchanged (CSV has no notion of sweeps; the
+checkbox is silently ignored — already documented in the dialog
+tooltip).
+
+The post-export success message gets one extra line when n_sweeps > 1:
+
+    if export_report.n_sweeps > 1:
+        sweep_note = (
+            f" Split into {export_report.n_sweeps} sweeps × "
+            f"{export_report.sample_count // export_report.n_sweeps} samples."
+        )
+    else:
+        sweep_note = ""
+
+    QtWidgets.QMessageBox.information(
+        self,
+        "Export Successful",
+        f"Exported {fmt_label} for stimulus '{stim_name}', "
+        f"neuron {export_report.neuron_index}, "
+        f"{export_report.sample_count} samples.{sweep_note}",
+    )
+
+NEW TESTS in tests/test_gui.py (2):
+
+| Test                                                                  | Asserts                                                                                                              |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| test_gui_export_igor2_single_wave_ibw_with_as_sweeps_succeeds         | StimArray with `[1,2,3]*4` (1 neuron), dialog mock `as_sweeps=True`; loaded IBW has shape (3, 4)                     |
+| test_gui_export_igor2_single_wave_ibw_as_sweeps_falls_back_for_non_periodic | StimArray with monotonic ramp + as_sweeps=True; output is 1-D; logger.info called with "no period was detected" message |
+
+The existing MockDialog stubs for the single-wave export tests must
+gain `self.as_sweeps = False` to keep them passing.
+
+
+==================================================================
+COMPATIBILITY / MIGRATION
+==================================================================
+
+- Old .nseq archives are unaffected — IgorWave / PreparedIgorWave /
+  IgorImportReport are runtime-only, not serialised.
+- Existing tests that build `IgorWave(...)` directly will keep
+  working: the new fields have defaults.
+- The `Igor2SingleWaveExport.n_sweeps` new field defaults to 1, so
+  callers that ignore it see today's behaviour.
+
+
+==================================================================
+VERIFICATION (post-implementation, before marking done)
+==================================================================
+
+A. Real-file round trip (manual):
+   1. Open neuroseq.
+   2. File → Import → Import light stimulus → Igor2 → pick
+      `/mnt/live3/svintila/random/igor2_files/test_files/R5_S1_IVstep.ibw`.
+   3. Confirm the dialog shows "Multi-sweep IBW: 7 sweeps × 30000
+      samples …".
+   4. Accept the import. The resulting stim array should have ~210 000
+      samples after resampling.
+   5. Export Single Wave to .ibw, neuron 0, "Export as sweeps" on.
+   6. Confirm post-export message says "Split into N sweeps × M samples"
+      where N · M equals the post-resample sample count.
+   7. Re-import the exported .ibw. n_sweeps should match.
+
+B. Programmatic:
+   uv run pytest                       # all green
+   uv run pre-commit run --files <list above>
+
+
+==================================================================
+QUESTIONS / NOTES FOR ME (Stefan)
+==================================================================
+
+- I want a brief verification block in this handoff filled in after
+  you've run the tests, so I can skip re-running them during review
+  (per project workflow).
+- If the real-file test is failing because the file isn't present in
+  your sandbox, skip cleanly (don't xfail). The synthetic-2-D tests
+  cover the same code path.
+- If you find that the detection status label updates introduce a
+  visible flicker (e.g. because the neuron combo emits many signals
+  when populated at __init__), debounce by guarding with a
+  `_signals_connected` flag. Not critical.

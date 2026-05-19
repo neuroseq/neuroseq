@@ -11,6 +11,7 @@ import brian2.numpy_ as np
 
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
+from neuroseq.utils import detect_period
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,7 @@ class Igor2SingleWaveExport:
     experiment_name: str
     neuron_index: int
     sample_count: int
+    n_sweeps: int = 1
 
 
 @dataclass(frozen=True)
@@ -71,15 +73,23 @@ def _write_ibw_v5(
     data_units: str = "",
     x_units: str = "s",
 ) -> bytes:
-    """Serialise a 1-D float32 array to Igor Binary Wave v5 bytes."""
+    """Serialise a 1-D or 2-D float32 array to Igor Binary Wave v5 bytes."""
     data = np.asarray(values, dtype="<f4")
-    if data.ndim != 1:
-        raise ValueError("IBW export expects a 1-dimensional array")
+    if data.ndim not in (1, 2):
+        raise ValueError("IBW export expects a 1-D or 2-D (samples × sweeps) array")
     if dt <= 0:
         raise ValueError("Sample interval must be positive")
 
-    n = int(data.size)
-    data_bytes = data.tobytes()
+    if data.ndim == 1:
+        n_samples = int(data.size)
+        n_sweeps = 0
+        npnts = n_samples
+        data_bytes = data.tobytes()
+    else:
+        n_samples = int(data.shape[0])
+        n_sweeps = int(data.shape[1])
+        npnts = n_samples * n_sweeps
+        data_bytes = np.asarray(data, order="F").tobytes(order="F")
     wfm_size = struct.calcsize(_WAVE_HEADER5_FMT) + len(data_bytes)
 
     def _encode_units(text: str, width: int) -> bytes:
@@ -100,13 +110,16 @@ def _write_ibw_v5(
     version_bytes = struct.pack("<h", 5)
     bname_bytes = wave_name.encode("ascii", errors="replace")[:31].ljust(32, b"\x00")
     data_units_bytes = _encode_units(data_units, 4)
-    dim_units_bytes = _encode_units(x_units, 4).ljust(16, b"\x00")
+    dim_units_bytes = _encode_units(x_units, 4) + (b"\x00" * 12)
+    n_dim_values = (n_samples, n_sweeps, 0, 0)
+    sfA_values = (float(dt), 1.0, 1.0, 1.0)
+    sfB_values = (0.0, 0.0, 0.0, 0.0)
 
     wave_header_values = (
         0,
         0,
         0,
-        n,
+        npnts,
         _NT_FP32,
         0,
         b"\x00" * 6,
@@ -114,18 +127,9 @@ def _write_ibw_v5(
         bname_bytes,
         0,
         0,
-        n,
-        0,
-        0,
-        0,
-        float(dt),
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
+        *n_dim_values,
+        *sfA_values,
+        *sfB_values,
         data_units_bytes,
         dim_units_bytes,
         0,
@@ -285,6 +289,7 @@ def export_igor2_ibw(
     neuron_index: int,
     unit_override: str | None = None,
     scaling_factor: float = 1.0,
+    as_sweeps: bool = False,
 ) -> Igor2SingleWaveExport:
     """Export one neuron column from *stim_array* as an Igor Binary Wave.
 
@@ -311,9 +316,19 @@ def export_igor2_ibw(
     values = np.asarray(stim_array.values[:, neuron_index], dtype=np.float32)
     if scaling_factor != 1.0:
         values = (values * scaling_factor).astype(np.float32)
+    write_values: np.ndarray = values
+    n_sweeps_out = 1
+    if as_sweeps:
+        period = detect_period(values)
+        if period is not None and period > 0 and values.size % period == 0:
+            sweep_count = values.size // period
+            if sweep_count > 1:
+                write_values = values.reshape(sweep_count, period).T
+                write_values = np.ascontiguousarray(write_values)
+                n_sweeps_out = sweep_count
     wave_units = unit_override if unit_override else str(stim_array.units)
     ibw_bytes = _write_ibw_v5(
-        values,
+        write_values,
         wave_name=sanitized_name,
         dt=float(stim_array.dt),
         data_units=wave_units,
@@ -326,6 +341,7 @@ def export_igor2_ibw(
         experiment_name=sanitized_name,
         neuron_index=neuron_index,
         sample_count=int(stim_array.values.shape[0]),
+        n_sweeps=n_sweeps_out,
     )
 
 

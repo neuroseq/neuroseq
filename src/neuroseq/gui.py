@@ -419,9 +419,22 @@ class Gui(QtWidgets.QMainWindow):
                     neuron_index=dialog.selected_neuron_index,
                     unit_override=dialog.unit_override,
                     scaling_factor=dialog.scaling_factor,
+                    as_sweeps=dialog.as_sweeps,
                 )
+                if dialog.as_sweeps and export_report.n_sweeps == 1:
+                    self.logger.info(
+                        "Sweep export requested for '%s' but no period was detected; "
+                        "exported as single sweep.",
+                        stim_array.name,
+                    )
                 fmt_label = f"Igor Binary Wave '{export_report.experiment_name}'"
             else:
+                if dialog.as_sweeps:
+                    self.logger.info(
+                        "Sweep export requested for '%s' but CSV was selected; "
+                        "exported as single sweep.",
+                        stim_array.name,
+                    )
                 export_report = export_igor2_csv(
                     output_path,
                     stim_array,
@@ -443,12 +456,19 @@ class Gui(QtWidgets.QMainWindow):
             )
             return
 
+        if export_report.n_sweeps > 1:
+            sweep_note = (
+                f" Split into {export_report.n_sweeps} sweeps × "
+                f"{export_report.sample_count // export_report.n_sweeps} samples."
+            )
+        else:
+            sweep_note = ""
         QtWidgets.QMessageBox.information(
             self,
             "Export Successful",
             f"Exported {fmt_label} for "
             f"stimulus '{stim_name}', neuron {export_report.neuron_index}, "
-            f"{export_report.sample_count} samples.",
+            f"{export_report.sample_count} samples.{sweep_note}",
         )
 
     def btn_export_igor2_pxp_stim_clicked(self) -> None:
