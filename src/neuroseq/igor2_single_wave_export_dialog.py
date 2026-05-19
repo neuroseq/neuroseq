@@ -6,7 +6,7 @@ from qtpy import QtWidgets
 from neuroseq.stim import StimArray
 
 
-class Igor2PatchClampExportDialog(QtWidgets.QDialog):
+class Igor2SingleWaveExportDialog(QtWidgets.QDialog):
     def __init__(
         self,
         stim_name: str,
@@ -20,7 +20,7 @@ class Igor2PatchClampExportDialog(QtWidgets.QDialog):
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        self.setWindowTitle("Export Stimulus for Igor2 Patch Clamp")
+        self.setWindowTitle("Export single wave to Igor2")
         self.setModal(True)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -42,6 +42,16 @@ class Igor2PatchClampExportDialog(QtWidgets.QDialog):
 
         self.experiment_name_edit = QtWidgets.QLineEdit(self._auto_name)
         form.addRow("Experiment name:", self.experiment_name_edit)
+
+        self._unit_edit = QtWidgets.QLineEdit()
+        self._unit_edit.setPlaceholderText(
+            f"(leave blank to keep '{self.stim_array.units}')"
+        )
+        form.addRow("Unit of measurement (optional):", self._unit_edit)
+
+        self._scale_edit = QtWidgets.QLineEdit()
+        self._scale_edit.setPlaceholderText("(leave blank for 1.0)")
+        form.addRow("Scaling factor (optional):", self._scale_edit)
 
         layout.addLayout(form)
 
@@ -74,6 +84,18 @@ class Igor2PatchClampExportDialog(QtWidgets.QDialog):
     def experiment_name(self) -> str:
         return self.experiment_name_edit.text().strip()
 
+    @property
+    def unit_override(self) -> str | None:
+        text = self._unit_edit.text().strip()
+        return text if text else None
+
+    @property
+    def scaling_factor(self) -> float:
+        text = self._scale_edit.text().strip()
+        if not text:
+            return 1.0
+        return float(text)
+
     def accept(self) -> None:
         if not self.experiment_name:
             QtWidgets.QMessageBox.critical(
@@ -82,4 +104,24 @@ class Igor2PatchClampExportDialog(QtWidgets.QDialog):
                 "Experiment name cannot be empty.",
             )
             return
+        scale_text = self._scale_edit.text().strip()
+        if scale_text:
+            try:
+                value = float(scale_text)
+            except ValueError:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Invalid scaling factor",
+                    f"Could not parse '{scale_text}' as a number.",
+                )
+                return
+            import math
+
+            if not math.isfinite(value):
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Invalid scaling factor",
+                    "Scaling factor must be a finite number.",
+                )
+                return
         super().accept()

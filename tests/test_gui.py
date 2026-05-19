@@ -84,9 +84,9 @@ def _make_trace_export_gui(
     return SimpleNamespace(
         cmb_trace=SimpleNamespace(currentText=lambda: trace_name),
         project=SimpleNamespace(
-            get_data=lambda name, data_type: trace_data
-            if data_type is TraceData
-            else None
+            get_data=lambda name, data_type: (
+                trace_data if data_type is TraceData else None
+            )
         ),
         logger=logging.getLogger("test_trace_export"),
     )
@@ -99,9 +99,9 @@ def _make_spike_export_gui(
     return SimpleNamespace(
         cmb_spike=SimpleNamespace(currentText=lambda: spike_name),
         project=SimpleNamespace(
-            get_data=lambda name, data_type: spike_data
-            if data_type is SpikeData
-            else None
+            get_data=lambda name, data_type: (
+                spike_data if data_type is SpikeData else None
+            )
         ),
         logger=logging.getLogger("test_spike_export"),
     )
@@ -133,7 +133,7 @@ def _make_spike_export_gui(
         (
             "btn_export_patch_clamp_stim_clicked",
             "Igor2 - single array (.ibw / .csv)",
-            "btn_export_igor2_patchclamp_stim_clicked",
+            "btn_export_igor2_single_wave_clicked",
         ),
         (
             "btn_export_patch_clamp_stim_clicked",
@@ -192,7 +192,7 @@ def test_gui_pre_dialog_wrapper_calls_inner_handler_on_accept(
         (
             "btn_export_patch_clamp_stim_clicked",
             "Igor2 - single array (.ibw / .csv)",
-            "btn_export_igor2_patchclamp_stim_clicked",
+            "btn_export_igor2_single_wave_clicked",
         ),
         (
             "btn_export_patch_clamp_stim_clicked",
@@ -650,7 +650,7 @@ def test_gui_export_empty_project(
     gui.close()
 
 
-def test_gui_export_igor2_patchclamp_stim(
+def test_gui_export_igor2_single_wave_csv(
     tmp_path: Path, monkeypatch: MonkeyPatch, qmessagebox_calls: list
 ) -> None:
     project = Project()
@@ -666,12 +666,14 @@ def test_gui_export_igor2_patchclamp_stim(
         StimArray("stim", StimType.Excitation, stim_values, "pA", 0.001)
     )
 
-    class MockIgor2PatchClampExportDialog:
+    class MockIgor2SingleWaveExportDialog:
         def __init__(self, stim_name: str, stim_array: StimArray, parent=None) -> None:
             assert stim_name == "stim"
             assert stim_array is project.stim_arrays["stim"]
             self.experiment_name = "one_neuron_stim_example"
             self.selected_neuron_index = 1
+            self.unit_override: str | None = None
+            self.scaling_factor: float = 1.0
 
         def exec(self) -> int:
             return QtWidgets.QDialog.DialogCode.Accepted
@@ -679,8 +681,8 @@ def test_gui_export_igor2_patchclamp_stim(
     output_path = tmp_path / "igor_export.csv"
     monkeypatch.setattr(
         neuroseq.gui,
-        "Igor2PatchClampExportDialog",
-        MockIgor2PatchClampExportDialog,
+        "Igor2SingleWaveExportDialog",
+        MockIgor2SingleWaveExportDialog,
     )
     monkeypatch.setattr(
         neuroseq.gui,
@@ -691,10 +693,10 @@ def test_gui_export_igor2_patchclamp_stim(
     fake_gui: Any = SimpleNamespace(
         project=project,
         cmb_stim=SimpleNamespace(currentText=lambda: "stim"),
-        logger=logging.getLogger("test_gui_export_igor2_patchclamp_stim"),
+        logger=logging.getLogger("test_gui_export_igor2_single_wave_csv"),
     )
 
-    Gui.btn_export_igor2_patchclamp_stim_clicked(fake_gui)
+    Gui.btn_export_igor2_single_wave_clicked(fake_gui)
 
     assert output_path.exists()
     assert (
@@ -706,7 +708,7 @@ def test_gui_export_igor2_patchclamp_stim(
     assert "export successful" in qmessagebox_calls[0]["title"].lower()
 
 
-def test_gui_export_igor2_patchclamp_stim_ibw_format(
+def test_gui_export_igor2_single_wave_ibw(
     tmp_path: Path, monkeypatch: MonkeyPatch, qmessagebox_calls: list
 ) -> None:
     import importlib
@@ -731,12 +733,14 @@ def test_gui_export_igor2_patchclamp_stim_ibw_format(
             assert stim_array is project.stim_arrays["stim"]
             self.experiment_name = "stim_neuron_1"
             self.selected_neuron_index = 1
+            self.unit_override: str | None = None
+            self.scaling_factor: float = 1.0
 
         def exec(self) -> int:
             return QtWidgets.QDialog.DialogCode.Accepted
 
     output_path = tmp_path / "stim_neuron_1.ibw"
-    monkeypatch.setattr(neuroseq.gui, "Igor2PatchClampExportDialog", MockDialog)
+    monkeypatch.setattr(neuroseq.gui, "Igor2SingleWaveExportDialog", MockDialog)
     monkeypatch.setattr(
         neuroseq.gui,
         "getsavefilename",
@@ -749,7 +753,7 @@ def test_gui_export_igor2_patchclamp_stim_ibw_format(
         logger=logging.getLogger("test_gui_export_ibw"),
     )
 
-    Gui.btn_export_igor2_patchclamp_stim_clicked(fake_gui)
+    Gui.btn_export_igor2_single_wave_clicked(fake_gui)
 
     assert output_path.exists()
     loaded = binarywave.load(output_path)
@@ -764,18 +768,18 @@ def test_gui_export_igor2_patchclamp_stim_ibw_format(
     assert "export successful" in qmessagebox_calls[0]["title"].lower()
 
 
-def test_gui_export_igor2_patchclamp_stim_requires_stim_data(
+def test_gui_export_igor2_single_wave_requires_stim_data(
     qmessagebox_calls: list,
 ) -> None:
     fake_gui: Any = SimpleNamespace(
         project=Project(),
         cmb_stim=SimpleNamespace(currentText=lambda: ""),
         logger=logging.getLogger(
-            "test_gui_export_igor2_patchclamp_stim_requires_stim_data"
+            "test_gui_export_igor2_single_wave_requires_stim_data"
         ),
     )
 
-    Gui.btn_export_igor2_patchclamp_stim_clicked(fake_gui)
+    Gui.btn_export_igor2_single_wave_clicked(fake_gui)
 
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "information"
@@ -809,6 +813,8 @@ def test_gui_export_igor2_pxp_stim(
         def __init__(self, current_project: Project, parent=None) -> None:
             assert current_project is project
             self.selected_array_names = ["exc", "inh"]
+            self.unit_override: str | None = None
+            self.scaling_factor: float = 1.0
 
         def exec(self) -> int:
             return QtWidgets.QDialog.DialogCode.Accepted
@@ -849,6 +855,8 @@ def test_gui_export_igor2_pxp_stim_requires_selection(
         def __init__(self, current_project: Project, parent=None) -> None:
             assert current_project is project
             self.selected_array_names: list[str] = []
+            self.unit_override: str | None = None
+            self.scaling_factor: float = 1.0
 
         def exec(self) -> int:
             return QtWidgets.QDialog.DialogCode.Accepted
@@ -861,6 +869,203 @@ def test_gui_export_igor2_pxp_stim_requires_selection(
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "warning"
     assert "nothing selected" in qmessagebox_calls[0]["title"].lower()
+
+
+def test_gui_export_light_stimulus_igor2_pxp_routes_to_pxp_export(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Selecting 'Igor2 - all arrays (.pxp)' must dispatch to the pxp handler."""
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog,
+        "getItem",
+        lambda *args, **kwargs: ("Igor2 - all arrays (.pxp)", True),
+    )
+
+    called: dict[str, int] = {"pxp": 0, "ibw": 0, "syscon": 0}
+
+    fake_gui: Any = SimpleNamespace(
+        btn_export_igor2_pxp_stim_clicked=lambda: called.__setitem__(
+            "pxp", called["pxp"] + 1
+        ),
+        btn_export_igor2_single_wave_clicked=lambda: called.__setitem__(
+            "ibw", called["ibw"] + 1
+        ),
+        open_stimulation_generator_dialog=lambda: called.__setitem__(
+            "syscon", called["syscon"] + 1
+        ),
+    )
+
+    Gui.btn_export_light_stimulus_clicked(fake_gui)
+
+    assert called == {"pxp": 1, "ibw": 0, "syscon": 0}
+
+
+def test_gui_export_light_stimulus_syscon2_routes_to_generator(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Selecting SysCon2 still opens the stimulation generator dialog."""
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog,
+        "getItem",
+        lambda *args, **kwargs: ("SysCon2", True),
+    )
+
+    called: dict[str, int] = {"pxp": 0, "ibw": 0, "syscon": 0}
+
+    fake_gui: Any = SimpleNamespace(
+        btn_export_igor2_pxp_stim_clicked=lambda: called.__setitem__(
+            "pxp", called["pxp"] + 1
+        ),
+        btn_export_igor2_single_wave_clicked=lambda: called.__setitem__(
+            "ibw", called["ibw"] + 1
+        ),
+        open_stimulation_generator_dialog=lambda: called.__setitem__(
+            "syscon", called["syscon"] + 1
+        ),
+    )
+
+    Gui.btn_export_light_stimulus_clicked(fake_gui)
+
+    assert called == {"pxp": 0, "ibw": 0, "syscon": 1}
+
+
+def test_gui_export_light_stimulus_igor2_ibw_routes_to_single_wave_export(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Selecting 'Igor2 - single neuron' routes to the single-wave export flow."""
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog,
+        "getItem",
+        lambda *args, **kwargs: ("Igor2 - single neuron (.ibw / .csv)", True),
+    )
+
+    called: dict[str, int] = {"pxp": 0, "ibw": 0, "syscon": 0}
+
+    fake_gui: Any = SimpleNamespace(
+        btn_export_igor2_pxp_stim_clicked=lambda: called.__setitem__(
+            "pxp", called["pxp"] + 1
+        ),
+        btn_export_igor2_single_wave_clicked=lambda: called.__setitem__(
+            "ibw", called["ibw"] + 1
+        ),
+        open_stimulation_generator_dialog=lambda: called.__setitem__(
+            "syscon", called["syscon"] + 1
+        ),
+    )
+
+    Gui.btn_export_light_stimulus_clicked(fake_gui)
+
+    assert called == {"pxp": 0, "ibw": 1, "syscon": 0}
+
+
+def test_gui_export_igor2_single_wave_ibw_passes_unit_and_scaling(
+    tmp_path: Path, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+) -> None:
+    """Single-wave dialog's unit_override and scaling_factor reach the .ibw exporter."""
+    import importlib
+
+    binarywave = importlib.import_module("igor2.binarywave")
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "stim",
+            StimType.Excitation,
+            np.array([[1.0], [2.0], [3.0]], dtype=np.float32),
+            "pA",
+            0.001,
+        )
+    )
+
+    class MockDialog:
+        def __init__(self, stim_name: str, stim_array: StimArray, parent=None) -> None:
+            self.experiment_name = "scaled_wave"
+            self.selected_neuron_index = 0
+            self.unit_override = "mW/mm^2"
+            self.scaling_factor = 10.0
+
+        def exec(self) -> int:
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    output_path = tmp_path / "scaled_wave.ibw"
+    monkeypatch.setattr(neuroseq.gui, "Igor2SingleWaveExportDialog", MockDialog)
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "getsavefilename",
+        lambda *args: (str(output_path), "Igor Binary Wave (*.ibw)"),
+    )
+
+    fake_gui: Any = SimpleNamespace(
+        project=project,
+        cmb_stim=SimpleNamespace(currentText=lambda: "stim"),
+        logger=logging.getLogger("test_gui_export_ibw_extras"),
+    )
+
+    Gui.btn_export_igor2_single_wave_clicked(fake_gui)
+
+    loaded = binarywave.load(output_path)
+    wave_data = loaded["wave"]["wData"].astype(np.float32)
+    np.testing.assert_array_almost_equal(
+        wave_data,
+        np.array([10.0, 20.0, 30.0], dtype=np.float32),
+        decimal=5,
+    )
+    extended = bytes(loaded["wave"]["data_units"]).decode("ascii")
+    assert extended == "mW/mm^2"
+
+
+def test_gui_export_igor2_pxp_stim_passes_unit_and_scaling(
+    tmp_path: Path, monkeypatch: MonkeyPatch, qmessagebox_calls: list
+) -> None:
+    """Dialog's unit_override and scaling_factor must flow into export_igor2_pxp."""
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "exc",
+            StimType.Excitation,
+            np.ones((3, 1), dtype=np.float32),
+            "pA",
+            0.001,
+        )
+    )
+
+    class MockPxpDialog:
+        def __init__(self, current_project: Project, parent=None) -> None:
+            assert current_project is project
+            self.selected_array_names = ["exc"]
+            self.unit_override = "mW/mm^2"
+            self.scaling_factor = 3.0
+
+        def exec(self) -> int:
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    output_path = tmp_path / "scaled.pxp"
+    monkeypatch.setattr(neuroseq.gui, "Igor2PxpStimExportDialog", MockPxpDialog)
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "getsavefilename",
+        lambda *args: (str(output_path), "Igor Packed Experiment (*.pxp)"),
+    )
+
+    captured: dict[str, Any] = {}
+
+    def _fake_export(out, stims, **kwargs):
+        captured["out"] = out
+        captured["array_names"] = kwargs.get("array_names")
+        captured["unit_override"] = kwargs.get("unit_override")
+        captured["scaling_factor"] = kwargs.get("scaling_factor")
+        out.write_bytes(b"")
+        from neuroseq.exporter_igor2 import Igor2PxpExport
+
+        return Igor2PxpExport(path=out, wave_names=["exc_n0"])
+
+    monkeypatch.setattr(neuroseq.gui, "export_igor2_pxp", _fake_export)
+
+    fake_gui: Any = SimpleNamespace(project=project)
+    Gui.btn_export_igor2_pxp_stim_clicked(fake_gui)
+
+    assert captured["array_names"] == ["exc"]
+    assert captured["unit_override"] == "mW/mm^2"
+    assert captured["scaling_factor"] == 3.0
 
 
 def test_gui_export_traces_no_selection(qmessagebox_calls: list) -> None:
@@ -1365,10 +1570,10 @@ def test_gui_imported_igor_stim_can_be_edited_by_click(
         draw_stim_length=1,
         draw_stim=SimpleNamespace(draw_stim_type=neuroseq.stim.DrawStimType.Constant),
         _is_valid_slice=lambda neuron_slice, time_slice: True,
-        draw_stim_region=lambda neuron_slice,
-        time_slice,
-        erase=False: project.stim_arrays["igor_wave"].values.__setitem__(
-            (time_slice, neuron_slice), 0.0 if erase else draw_value
+        draw_stim_region=lambda neuron_slice, time_slice, erase=False: (
+            project.stim_arrays["igor_wave"].values.__setitem__(
+                (time_slice, neuron_slice), 0.0 if erase else draw_value
+            )
         ),
     )
 
@@ -1437,9 +1642,9 @@ def test_gui_set_neuron_refocuses_to_selected_trace_range() -> None:
     trace_widget.set_data = _set_trace_data
     fake_gui: Any = SimpleNamespace(
         project=SimpleNamespace(
-            get_data=lambda name, data_type: trace_data
-            if data_type is TraceData
-            else None
+            get_data=lambda name, data_type: (
+                trace_data if data_type is TraceData else None
+            )
         ),
         trace_widget=trace_widget,
         _focus_neuron_range=lambda n_neurons: focus_calls.append(n_neurons),
@@ -1470,9 +1675,9 @@ def test_gui_set_spike_refocuses_to_selected_spike_range() -> None:
     spike_widget.set_data = _set_spike_data
     fake_gui: Any = SimpleNamespace(
         project=SimpleNamespace(
-            get_data=lambda name, data_type: spike_data
-            if data_type is SpikeData
-            else None
+            get_data=lambda name, data_type: (
+                spike_data if data_type is SpikeData else None
+            )
         ),
         spike_widget=spike_widget,
         _focus_neuron_range=lambda n_neurons: focus_calls.append(n_neurons),
@@ -1514,9 +1719,9 @@ def test_gui_set_data_refocuses_combined_trace_view() -> None:
     data_widget.set_data = _set_combined_data
     fake_gui: Any = SimpleNamespace(
         project=SimpleNamespace(
-            get_data=lambda name, data_type: trace_data
-            if data_type is TraceData
-            else None
+            get_data=lambda name, data_type: (
+                trace_data if data_type is TraceData else None
+            )
         ),
         data_widget=data_widget,
         _focus_neuron_range=lambda n_neurons: focus_calls.append(n_neurons),

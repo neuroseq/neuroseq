@@ -9,15 +9,15 @@ import pytest
 
 from neuroseq.exporter_igor2 import _sanitize_igor_wave_name
 from neuroseq.exporter_igor2 import _write_ibw_v5
-from neuroseq.exporter_igor2 import export_igor2_patchclamp_csv
-from neuroseq.exporter_igor2 import export_igor2_patchclamp_ibw
+from neuroseq.exporter_igor2 import export_igor2_csv
+from neuroseq.exporter_igor2 import export_igor2_ibw
 from neuroseq.exporter_igor2 import export_igor2_pxp
-from neuroseq.exporter_igor2 import generate_igor2_patchclamp_csv_text
+from neuroseq.exporter_igor2 import generate_igor2_csv_text
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
 
-def test_generate_igor2_patchclamp_csv_text_exports_single_neuron_column() -> None:
+def test_generate_igor2_csv_text_exports_single_neuron_column() -> None:
     stim_array = StimArray(
         name="stim",
         stim_type=StimType.Excitation,
@@ -33,7 +33,7 @@ def test_generate_igor2_patchclamp_csv_text_exports_single_neuron_column() -> No
         dt=0.001,
     )
 
-    csv_text = generate_igor2_patchclamp_csv_text(
+    csv_text = generate_igor2_csv_text(
         stim_array,
         experiment_name="one_neuron_stim_example",
         neuron_index=1,
@@ -42,7 +42,7 @@ def test_generate_igor2_patchclamp_csv_text_exports_single_neuron_column() -> No
     assert csv_text == "one_neuron_stim_example\n10.0\n20.0\n30.0\n"
 
 
-def test_export_igor2_patchclamp_csv_writes_file(tmp_path: Path) -> None:
+def test_export_igor2_csv_writes_file(tmp_path: Path) -> None:
     stim_array = StimArray(
         name="stim",
         stim_type=StimType.Excitation,
@@ -52,7 +52,7 @@ def test_export_igor2_patchclamp_csv_writes_file(tmp_path: Path) -> None:
     )
     output_path = tmp_path / "export.csv"
 
-    report = export_igor2_patchclamp_csv(
+    report = export_igor2_csv(
         output_path,
         stim_array,
         experiment_name="example_export",
@@ -127,7 +127,7 @@ def test_write_ibw_v5_round_trips_via_binarywave_load(tmp_path: Path) -> None:
     )
 
 
-def test_export_igor2_patchclamp_ibw_writes_file(tmp_path: Path) -> None:
+def test_export_igor2_ibw_writes_file(tmp_path: Path) -> None:
     binarywave = importlib.import_module("igor2.binarywave")
     stim_array = StimArray(
         name="stim",
@@ -138,7 +138,7 @@ def test_export_igor2_patchclamp_ibw_writes_file(tmp_path: Path) -> None:
     )
     output_path = tmp_path / "stim_neuron_1.ibw"
 
-    report = export_igor2_patchclamp_ibw(
+    report = export_igor2_ibw(
         output_path,
         stim_array,
         wave_name="stim_neuron_1",
@@ -160,7 +160,7 @@ def test_export_igor2_patchclamp_ibw_writes_file(tmp_path: Path) -> None:
     assert abs(loaded["wave"]["wave_header"]["sfA"][0] - 0.001) < 1e-10
 
 
-def test_export_igor2_patchclamp_ibw_rejects_invalid_neuron() -> None:
+def test_export_igor2_ibw_rejects_invalid_neuron() -> None:
     stim_array = StimArray(
         name="stim",
         stim_type=StimType.Excitation,
@@ -170,7 +170,7 @@ def test_export_igor2_patchclamp_ibw_rejects_invalid_neuron() -> None:
     )
 
     with pytest.raises(ValueError, match="out of range"):
-        export_igor2_patchclamp_ibw(
+        export_igor2_ibw(
             "/dev/null",
             stim_array,
             wave_name="w",
@@ -187,7 +187,7 @@ def test_sanitize_igor_wave_name_is_applied_on_export(tmp_path: Path) -> None:
         dt=0.001,
     )
 
-    report = export_igor2_patchclamp_ibw(
+    report = export_igor2_ibw(
         tmp_path / "out.ibw",
         stim_array,
         wave_name="my wave name!",
@@ -198,7 +198,7 @@ def test_sanitize_igor_wave_name_is_applied_on_export(tmp_path: Path) -> None:
     assert "!" not in report.experiment_name
 
 
-def test_generate_igor2_patchclamp_csv_text_rejects_invalid_neuron() -> None:
+def test_generate_igor2_csv_text_rejects_invalid_neuron() -> None:
     stim_array = StimArray(
         name="stim",
         stim_type=StimType.Excitation,
@@ -208,7 +208,7 @@ def test_generate_igor2_patchclamp_csv_text_rejects_invalid_neuron() -> None:
     )
 
     with pytest.raises(ValueError, match="out of range"):
-        generate_igor2_patchclamp_csv_text(
+        generate_igor2_csv_text(
             stim_array,
             experiment_name="example_export",
             neuron_index=3,
@@ -339,3 +339,246 @@ def test_export_igor2_pxp_deduplicates_long_wave_names(tmp_path: Path) -> None:
     assert len(names) == 2
     assert len(set(names)) == 2
     assert len(report.wave_names) == 2
+
+
+def test_export_igor2_pxp_unit_override_replaces_per_array_units(
+    tmp_path: Path,
+) -> None:
+    packed = importlib.import_module("igor2.packed")
+    stim = StimArray(
+        name="Light",
+        stim_type=StimType.Excitation,
+        values=np.ones((4, 1), dtype=np.float32),
+        units="pA",
+        dt=0.001,
+    )
+    output_path = tmp_path / "unit.pxp"
+
+    export_igor2_pxp(
+        output_path,
+        {"Light": stim},
+        unit_override="nA",
+    )
+
+    records, _ = packed.load(output_path)
+    data_units = (
+        bytes(records[0].wave["wave"]["wave_header"]["dataUnits"])
+        .rstrip(b"\x00")
+        .decode("ascii")
+    )
+    assert data_units == "nA"  # overridden, not the stim's original "pA"
+
+
+def test_export_igor2_pxp_empty_unit_override_keeps_array_units(
+    tmp_path: Path,
+) -> None:
+    packed = importlib.import_module("igor2.packed")
+    stim = StimArray(
+        name="Light",
+        stim_type=StimType.Excitation,
+        values=np.ones((4, 1), dtype=np.float32),
+        units="pA",
+        dt=0.001,
+    )
+    output_path = tmp_path / "keep_unit.pxp"
+
+    export_igor2_pxp(output_path, {"Light": stim}, unit_override=None)
+
+    records, _ = packed.load(output_path)
+    data_units = (
+        bytes(records[0].wave["wave"]["wave_header"]["dataUnits"])
+        .rstrip(b"\x00")
+        .decode("ascii")
+    )
+    assert data_units == "pA"
+
+
+def test_export_igor2_pxp_scaling_factor_scales_values(tmp_path: Path) -> None:
+    packed = importlib.import_module("igor2.packed")
+    stim = StimArray(
+        name="Light",
+        stim_type=StimType.Excitation,
+        values=np.array([[1.0], [2.0], [3.0]], dtype=np.float32),
+        units="pA",
+        dt=0.001,
+    )
+    output_path = tmp_path / "scale.pxp"
+
+    export_igor2_pxp(output_path, {"Light": stim}, scaling_factor=2.5)
+
+    records, _ = packed.load(output_path)
+    wave_data = records[0].wave["wave"]["wData"].astype(np.float32)
+    np.testing.assert_array_almost_equal(
+        wave_data,
+        np.array([2.5, 5.0, 7.5], dtype=np.float32),
+        decimal=5,
+    )
+
+
+def test_export_igor2_pxp_scaling_factor_applies_after_inhibition_negate(
+    tmp_path: Path,
+) -> None:
+    packed = importlib.import_module("igor2.packed")
+    stim = StimArray(
+        name="Inh",
+        stim_type=StimType.Inhibition,
+        values=np.array([[1.0], [2.0]], dtype=np.float32),
+        units="1",
+        dt=0.001,
+    )
+    output_path = tmp_path / "neg_scale.pxp"
+
+    export_igor2_pxp(output_path, {"Inh": stim}, scaling_factor=2.0)
+
+    records, _ = packed.load(output_path)
+    wave_data = records[0].wave["wave"]["wData"].astype(np.float32)
+    np.testing.assert_array_almost_equal(
+        wave_data,
+        np.array([-2.0, -4.0], dtype=np.float32),
+        decimal=5,
+    )
+
+
+def test_export_igor2_pxp_rejects_non_finite_scaling(tmp_path: Path) -> None:
+    stim = StimArray(
+        name="Light",
+        stim_type=StimType.Excitation,
+        values=np.ones((2, 1), dtype=np.float32),
+        units="pA",
+        dt=0.001,
+    )
+    with pytest.raises(ValueError, match="scaling_factor"):
+        export_igor2_pxp(
+            output_path=tmp_path / "bad.pxp",
+            stim_arrays={"Light": stim},
+            scaling_factor=float("inf"),
+        )
+
+
+def test_write_ibw_v5_emits_extended_units_for_long_strings(tmp_path: Path) -> None:
+    """Units > 3 ASCII chars must round-trip through the IBW v5 extended block."""
+    binarywave = importlib.import_module("igor2.binarywave")
+    data = np.array([0.0, 1.0], dtype=np.float32)
+    ibw_path = tmp_path / "long_units.ibw"
+    ibw_path.write_bytes(
+        _write_ibw_v5(
+            data,
+            wave_name="LongUnits",
+            dt=0.001,
+            data_units="mW/mm^2",
+        )
+    )
+    loaded = binarywave.load(ibw_path)
+    extended = bytes(loaded["wave"]["data_units"]).decode("ascii")
+    assert extended == "mW/mm^2"
+
+
+def test_write_ibw_v5_short_units_have_empty_extended_block(tmp_path: Path) -> None:
+    """3-char-or-shorter units stay in the short field; no extended block written."""
+    binarywave = importlib.import_module("igor2.binarywave")
+    data = np.array([0.0, 1.0], dtype=np.float32)
+    ibw_path = tmp_path / "short_units.ibw"
+    ibw_path.write_bytes(
+        _write_ibw_v5(data, wave_name="ShortU", dt=0.001, data_units="pA")
+    )
+    loaded = binarywave.load(ibw_path)
+    short = (
+        b"".join(loaded["wave"]["wave_header"]["dataUnits"].tolist())
+        .rstrip(b"\x00")
+        .decode("ascii")
+    )
+    assert short == "pA"
+    assert bytes(loaded["wave"]["data_units"]) == b""
+
+
+def test_export_igor2_pxp_long_units_round_trip(tmp_path: Path) -> None:
+    """Multi-array PXP export with long unit override writes extended units."""
+    packed = importlib.import_module("igor2.packed")
+    stim = StimArray(
+        name="Light",
+        stim_type=StimType.Excitation,
+        values=np.ones((3, 1), dtype=np.float32),
+        units="pA",
+        dt=0.001,
+    )
+    output_path = tmp_path / "long.pxp"
+
+    export_igor2_pxp(output_path, {"Light": stim}, unit_override="mW/mm^2")
+
+    records, _ = packed.load(output_path)
+    extended = bytes(records[0].wave["wave"]["data_units"]).decode("ascii")
+    assert extended == "mW/mm^2"
+
+
+def test_export_igor2_ibw_applies_unit_override_and_scaling(
+    tmp_path: Path,
+) -> None:
+    binarywave = importlib.import_module("igor2.binarywave")
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=np.array([[1.0], [2.0], [3.0]], dtype=np.float32),
+        units="pA",
+        dt=0.001,
+    )
+    output_path = tmp_path / "ibw_override.ibw"
+
+    export_igor2_ibw(
+        output_path,
+        stim_array,
+        wave_name="ibw_override",
+        neuron_index=0,
+        unit_override="mW/mm^2",
+        scaling_factor=4.0,
+    )
+
+    loaded = binarywave.load(output_path)
+    wave_data = loaded["wave"]["wData"].astype(np.float32)
+    np.testing.assert_array_almost_equal(
+        wave_data,
+        np.array([4.0, 8.0, 12.0], dtype=np.float32),
+        decimal=5,
+    )
+    extended = bytes(loaded["wave"]["data_units"]).decode("ascii")
+    assert extended == "mW/mm^2"
+
+
+def test_export_igor2_ibw_rejects_non_finite_scaling(
+    tmp_path: Path,
+) -> None:
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=np.ones((2, 1), dtype=np.float32),
+        units="pA",
+        dt=0.001,
+    )
+    with pytest.raises(ValueError, match="scaling_factor"):
+        export_igor2_ibw(
+            tmp_path / "bad.ibw",
+            stim_array,
+            wave_name="bad",
+            neuron_index=0,
+            scaling_factor=float("nan"),
+        )
+
+
+def test_export_igor2_csv_applies_scaling(tmp_path: Path) -> None:
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=np.array([[1.0], [2.0], [3.0]], dtype=np.float32),
+        units="pA",
+        dt=0.001,
+    )
+    output_path = tmp_path / "scaled.csv"
+
+    export_igor2_csv(
+        output_path,
+        stim_array,
+        experiment_name="scaled_example",
+        neuron_index=0,
+        scaling_factor=2.5,
+    )
+
+    assert output_path.read_text(encoding="utf-8") == "scaled_example\n2.5\n5.0\n7.5\n"
