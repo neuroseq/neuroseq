@@ -10,46 +10,7 @@ from qtpy import QtWidgets
 
 from neuroseq.project import Project
 
-
-class ConsoleWidget(ReplWidget):
-    console_command_entered = QtCore.Signal()
-
-    def __init__(
-        self,
-        parent: QtWidgets.QWidget | None = None,
-    ):
-        super().__init__(globals=self.namespace, locals=self.namespace, parent=parent)
-        self.namespace_dict: dict[str, Any] = {
-            "np": np,
-            "b2": b2,
-            "project": None,
-        }
-        self._print_intro()
-        sample_btn = QtWidgets.QPushButton("Sample python code")
-        sample_btn.clicked.connect(self._show_sample_code)
-        self.layout.addWidget(sample_btn)
-
-    def _print_intro(self) -> None:
-        self.output.insertPlainText(
-            "This is a Python console where you can interact directly with the Model using the 'project' variable.\n"
-        )
-        self.output.insertPlainText(
-            "Here are some examples you can try entering below:\n\n"
-        )
-        self.write(
-            ">>> project.stim_arrays['stimulus'].values[::10,::2] = 1", style="command"
-        )
-        self.output.insertPlainText("\n")
-        self.write(
-            ">>> project.stim_arrays['stimulus'].values = np.random.randint(3,size=(1000, 80))",
-            style="command",
-        )
-        self.output.insertPlainText(
-            "\n\nNumpy is available as np, brian2 as b2, and indentation can be done with a single space.\n\n\n"
-        )
-
-    def _show_sample_code(self) -> None:
-        samples = """\
+SAMPLE_CODE = """\
 # ── Project ──────────────────────────────────────────────────
 project                              # the active Project object
 project.stim_arrays                  # dict of StimArray objects
@@ -90,6 +51,18 @@ for i in range(n_neurons):
  start = i * 50
  sa.values[start:start+100, i] = np.linspace(0, 300, 100)
 
+# Sequential 100 ms pulses on all neurons with 18 ms inter-pulse gap
+pulse_n = int(round(0.100 / sa.dt))
+gap_n = int(round(0.018 / sa.dt))
+n_neurons = sa.values.shape[1]
+total_n = n_neurons * (pulse_n + gap_n)
+amp = 1.0
+new_len = max(sa.values.shape[0], total_n)
+sa.values = np.zeros((new_len, n_neurons), dtype=sa.values.dtype)
+for i in range(n_neurons):
+ t0 = i * (pulse_n + gap_n)
+ sa.values[t0:t0+pulse_n, i] = amp
+
 # ── Experiment / trace data ───────────────────────────────────
 exp = project.experiments['MyExp']
 exp.data                             # list of TraceData / SpikeData objects
@@ -98,11 +71,51 @@ exp.data                             # list of TraceData / SpikeData objects
 np                                   # numpy (already imported)
 b2                                   # brian2 (already imported)
 """
+
+
+class ConsoleWidget(ReplWidget):
+    console_command_entered = QtCore.Signal()
+
+    def __init__(
+        self,
+        parent: QtWidgets.QWidget | None = None,
+    ):
+        super().__init__(globals=self.namespace, locals=self.namespace, parent=parent)
+        self.namespace_dict: dict[str, Any] = {
+            "np": np,
+            "b2": b2,
+            "project": None,
+        }
+        self._print_intro()
+        sample_btn = QtWidgets.QPushButton("Sample python code")
+        sample_btn.clicked.connect(self._show_sample_code)
+        self.layout.addWidget(sample_btn)
+
+    def _print_intro(self) -> None:
+        self.output.insertPlainText(
+            "This is a Python console where you can interact directly with the Model using the 'project' variable.\n"
+        )
+        self.output.insertPlainText(
+            "Here are some examples you can try entering below:\n\n"
+        )
+        self.write(
+            ">>> project.stim_arrays['stimulus'].values[::10,::2] = 1", style="command"
+        )
+        self.output.insertPlainText("\n")
+        self.write(
+            ">>> project.stim_arrays['stimulus'].values = np.random.randint(3,size=(1000, 80))",
+            style="command",
+        )
+        self.output.insertPlainText(
+            "\n\nNumpy is available as np, brian2 as b2, and indentation can be done with a single space.\n\n\n"
+        )
+
+    def _show_sample_code(self) -> None:
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle("Console — sample python code")
         dlg.resize(620, 480)
         layout = QtWidgets.QVBoxLayout(dlg)
-        text_edit = QtWidgets.QPlainTextEdit(samples)
+        text_edit = QtWidgets.QPlainTextEdit(SAMPLE_CODE)
         text_edit.setReadOnly(True)
         text_edit.setVerticalScrollBarPolicy(
             QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn
