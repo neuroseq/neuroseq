@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import inspect
 import logging
 import pathlib
 from collections.abc import Callable
@@ -58,6 +59,21 @@ from neuroseq.utils import add_action
 from neuroseq.utils import add_items_to_combobox
 from neuroseq.utils import getSimulationTime
 from neuroseq.utils import with_wait_cursor
+
+
+def _external_simulator_accepts_progress(simulate_fn: Callable) -> bool:
+    """True if ``simulate_fn`` advertises a ``progress`` keyword argument.
+
+    Used so old-style third-party simulators (``simulate(stims_dict,
+    simulation_time, params=None)``) keep working unchanged, while the
+    bundled :class:`NN`-based backends receive the progress callback the
+    main window's progress dialog needs.
+    """
+    try:
+        sig = inspect.signature(simulate_fn)
+    except (TypeError, ValueError):
+        return False
+    return "progress" in sig.parameters
 
 
 class Gui(QtWidgets.QMainWindow):
@@ -852,11 +868,25 @@ class Gui(QtWidgets.QMainWindow):
             self.logger.info(
                 f"Running external simulation function for {simulation_time} seconds"
             )
-            experiment = self.project.external_simulate_function(
-                stims_dict,
-                simulation_time,
-                params=self.project.external_simulate_params_flat(),
-            )
+            params = self.project.external_simulate_params_flat()
+            if _external_simulator_accepts_progress(
+                self.project.external_simulate_function
+            ):
+                self.progress_dialog.setLabelText("Simulating...")
+                self.progress_dialog.setValue(0)
+                experiment = self.project.external_simulate_function(
+                    stims_dict,
+                    simulation_time,
+                    params=params,
+                    progress=self._update_external_simulation_progress,  # type: ignore[call-arg]
+                )
+            else:
+                experiment = self.project.external_simulate_function(
+                    stims_dict,
+                    simulation_time,
+                    params=params,
+                )
+            self.progress_dialog.setValue(100)
             self.logger.info(
                 f"External simulation complete, returned {experiment.duration}s experiment '{experiment.name}' with {len(experiment.data)} data objects"
             )
@@ -870,6 +900,11 @@ class Gui(QtWidgets.QMainWindow):
             return
         QtWidgets.QApplication.restoreOverrideCursor()
         self._append_experimental_data(experiment)
+
+    def _update_external_simulation_progress(self, fraction: float) -> None:
+        """Translate a [0, 1] completion fraction into the shared progress dialog."""
+        clamped = max(0.0, min(1.0, float(fraction)))
+        self.progress_dialog.setValue(int(round(clamped * 100)))
 
     def btn_do_external_simulation_clicked(self) -> None:
         if self.project.external_simulate_function is None:

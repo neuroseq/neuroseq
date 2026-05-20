@@ -9,6 +9,7 @@ from neuroseq.data import Experiment
 from neuroseq.data import TraceData
 from neuroseq.example_models.NN import ParamValue
 from neuroseq.example_models.NN import NN
+from neuroseq.example_models.NN import ProgressCallback
 
 FlatParams = dict[str, ParamValue]
 N_UNITS = 5
@@ -116,7 +117,12 @@ class SinusOffset(NN):
         stims_dict: dict,
         simulation_time: float,
         params: Mapping[str, ParamValue] | None = None,
+        progress: ProgressCallback | None = None,
     ) -> Experiment:
+        # This model is fully vectorised so there is no per-step Python loop
+        # to update progress against; we surface only start/end ticks.
+        if progress is not None:
+            progress(0.0)
         self.update_params(params)
 
         dt_s = _float_param(self._params, "dt_ms") / 1000.0
@@ -174,20 +180,26 @@ class SinusOffset(NN):
                 dt=dt_s,
             ),
         ]
-        return Experiment(
+        experiment = Experiment(
             name="5-unit sinusoid with stimulation offset",
             duration=simulation_time,
             timepoints=[],
             data=data,
         )
+        if progress is not None:
+            progress(1.0)
+        return experiment
 
 
 def simulate(
     stims_dict: dict,
     simulation_time: float,
     params: Mapping[str, ParamValue] | None = None,
+    progress: ProgressCallback | None = None,
 ) -> Experiment:
-    return _SIMULATOR.simulate(stims_dict, simulation_time, params=params)
+    return _SIMULATOR.simulate(
+        stims_dict, simulation_time, params=params, progress=progress
+    )
 
 
 def get_simulator() -> SinusOffset:

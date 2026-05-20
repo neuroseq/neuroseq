@@ -107,5 +107,56 @@ def test_elise_simulator_continues_state_across_runs():
     assert first_u.traces.shape == second_u.traces.shape == fresh_u.traces.shape
 
 
+def test_elise_simulate_emits_progress_callback() -> None:
+    from neuroseq.example_models.elise import simulate
+
+    num_vis = 3
+    duration_s = 0.1
+    stim_dt_s = 0.001
+    n_stim = int(duration_s / stim_dt_s)
+    g_exc = np.full((n_stim, num_vis), 1.0 / 3.0, dtype=np.float32)
+    g_inh = np.full((n_stim, num_vis), 2.0 / 3.0, dtype=np.float32)
+    stims_dict = {
+        "opsin_exc": {"array": g_exc, "dt": stim_dt_s},
+        "opsin_inh": {"array": g_inh, "dt": stim_dt_s},
+    }
+
+    fractions: list[float] = []
+    simulate(
+        stims_dict,
+        simulation_time=duration_s,
+        params={"num_lat": 4, "learn": False},
+        progress=fractions.append,
+    )
+
+    # Must bracket the run with 0.0 and 1.0, with strictly increasing
+    # intermediate updates so the progress dialog has something to show.
+    assert fractions[0] == 0.0
+    assert fractions[-1] == 1.0
+    assert len(fractions) >= 3
+    assert all(b >= a for a, b in zip(fractions, fractions[1:], strict=False))
+
+
+def test_elise_simulate_progress_is_optional() -> None:
+    """Omitting progress must not raise (back-compat for old callers)."""
+    from neuroseq.example_models.elise import simulate
+
+    num_vis = 3
+    duration_s = 0.05
+    stim_dt_s = 0.001
+    n_stim = int(duration_s / stim_dt_s)
+    stims_dict = {
+        "opsin_exc": {
+            "array": np.full((n_stim, num_vis), 1.0 / 3.0, dtype=np.float32),
+            "dt": stim_dt_s,
+        },
+        "opsin_inh": {
+            "array": np.full((n_stim, num_vis), 2.0 / 3.0, dtype=np.float32),
+            "dt": stim_dt_s,
+        },
+    }
+    simulate(stims_dict, simulation_time=duration_s, params={"learn": False})
+
+
 if __name__ == "__main__":
     test_elise_runs()

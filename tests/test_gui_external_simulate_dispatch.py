@@ -316,3 +316,101 @@ def test_load_external_simulation_function_failure_clears_state(
     assert gui.project.external_simulator is None
     assert gui.project.external_simulate_function is None
     gui.close()
+
+
+def test_external_simulator_accepts_progress_detection() -> None:
+    """The signature-introspection helper opts in only when ``progress`` is named."""
+    from neuroseq.gui import _external_simulator_accepts_progress
+
+    def old_sim(stims_dict, simulation_time, params=None):
+        pass
+
+    def new_sim(stims_dict, simulation_time, params=None, progress=None):
+        pass
+
+    def kwargs_sim(stims_dict, simulation_time, **kwargs):
+        # Despite **kwargs swallowing progress=, the callback wouldn't run,
+        # so the helper must NOT report this as progress-capable.
+        pass
+
+    assert not _external_simulator_accepts_progress(old_sim)
+    assert _external_simulator_accepts_progress(new_sim)
+    assert not _external_simulator_accepts_progress(kwargs_sim)
+
+
+def test_external_simulation_passes_progress_when_accepted(
+    qtbot: QtBot, monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """When the simulator advertises a ``progress`` kwarg, _do_external_simulation
+    must wire it to the main window's progress dialog."""
+    sim_path = tmp_path / "progress_aware_sim.py"
+    sim_path.write_text(
+        "from neuroseq.data import Experiment\n"
+        "captured = {'fractions': []}\n"
+        "def simulate(stims_dict, simulation_time, params=None, progress=None):\n"
+        "    if progress is not None:\n"
+        "        progress(0.0)\n"
+        "        progress(0.5)\n"
+        "        progress(1.0)\n"
+        "    captured['progress_was_passed'] = progress is not None\n"
+        "    return Experiment('mock', simulation_time, [], [])\n"
+    )
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project = gui.project
+    project.external_simulate_path = str(sim_path)
+    project.load_NN()
+    monkeypatch.setattr(neuroseq.gui, "ImportExperimentDialog", _MockImportDialog)
+
+    # Spy on setValue to observe the progress percentages routed into the
+    # dialog. The dialog itself auto-resets to -1 once value reaches 100.
+    set_value_calls: list[int] = []
+    original_set_value = gui.progress_dialog.setValue
+
+    def _spy_set_value(v: int) -> None:
+        set_value_calls.append(int(v))
+        original_set_value(int(v))
+
+    monkeypatch.setattr(gui.progress_dialog, "setValue", _spy_set_value)
+
+    gui._do_external_simulation(1.0)
+
+    fn = project.external_simulate_function
+    assert isinstance(fn, FunctionType)
+    captured = fn.__globals__["captured"]
+    assert captured["progress_was_passed"] is True
+    # The simulator emitted 0.0, 0.5, 1.0 plus the final 100 set by the GUI.
+    assert 50 in set_value_calls
+    assert 100 in set_value_calls
+    gui.close()
+
+
+def test_external_simulation_skips_progress_for_old_simulators(
+    qtbot: QtBot, monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """An old-contract simulator without ``progress`` must still run successfully
+    and not be passed an unexpected kwarg."""
+    sim_path = tmp_path / "old_sim.py"
+    sim_path.write_text(
+        "from neuroseq.data import Experiment\n"
+        "captured = {}\n"
+        "def simulate(stims_dict, simulation_time, params=None):\n"
+        "    captured['ran'] = True\n"
+        "    return Experiment('mock', simulation_time, [], [])\n"
+    )
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project = gui.project
+    project.external_simulate_path = str(sim_path)
+    project.load_NN()
+    monkeypatch.setattr(neuroseq.gui, "ImportExperimentDialog", _MockImportDialog)
+
+    gui._do_external_simulation(1.0)
+
+    fn = project.external_simulate_function
+    assert isinstance(fn, FunctionType)
+    captured = fn.__globals__["captured"]
+    assert captured["ran"] is True
+    gui.close()
