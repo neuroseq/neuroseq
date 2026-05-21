@@ -11,6 +11,7 @@ from qtpy import QtWidgets
 from neuroseq.exporter_igor2 import _write_ibw_v5
 from neuroseq.igor_import_dialog import IgorImportDialog
 from neuroseq.importer_igor2 import IgorPxpLoadReport
+from neuroseq.importer_igor2 import IgorWave
 from neuroseq.importer_igor2 import SkippedPxpRecord
 from neuroseq.project import Project
 from neuroseq.stim import StimArray
@@ -80,6 +81,34 @@ def test_igor_import_dialog_wave_plot_shown_after_wave_load(
     dialog._load_file(str(path))
 
     qtbot.waitUntil(lambda: dialog.wave_plot.isVisible())
+
+
+def test_igor_import_dialog_shows_multi_sweep_info(qtbot: QtBot) -> None:
+    project = Project()
+    dialog = IgorImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.loaded_wave = IgorWave(
+        name="multi",
+        values=np.arange(12, dtype=np.float32),
+        source_dt=0.001,
+        units="pA",
+        axis_units="s",
+        source_format="ibw",
+        n_sweeps=3,
+        samples_per_sweep=4,
+    )
+    dialog._update_preview()
+
+    label = dialog.findChild(QtWidgets.QLabel, "multi_sweep_info")
+    assert label is not None
+    text = label.text()
+    assert "3 sweeps" in text
+    assert "4 source samples" in text
+    assert "12 total source samples" in text
+    # Lives inside the Wave Preview group, not floating at the top of the dialog.
+    parent_group = label.parent()
+    assert isinstance(parent_group, QtWidgets.QGroupBox)
+    assert parent_group.title() == "Wave Preview"
 
 
 def test_igor_import_dialog_imports_into_existing_stim_array(
@@ -631,21 +660,25 @@ def test_igor_import_dialog_reimport_same_pxp_wave_is_blocked(
     qtbot.waitUntil(lambda: dialog.isVisible())
     dialog._load_file(str(pxp_path))
 
-    wave_a_item = next(
-        dialog.pxp_wave_list.item(i)
-        for i in range(dialog.pxp_wave_list.count())
-        if dialog.pxp_wave_list.item(i) is not None
-        and dialog.pxp_wave_list.item(i).text() == "root/WaveA"
-    )
+    wave_a_item = None
+    for i in range(dialog.pxp_wave_list.count()):
+        item = dialog.pxp_wave_list.item(i)
+        assert item is not None
+        if item.text() == "root/WaveA":
+            wave_a_item = item
+            break
+    assert wave_a_item is not None
     dialog.pxp_wave_list.setCurrentItem(wave_a_item)
     dialog._import_file()
 
-    imported_wave_a_item = next(
-        dialog.pxp_wave_list.item(i)
-        for i in range(dialog.pxp_wave_list.count())
-        if dialog.pxp_wave_list.item(i) is not None
-        and "WaveA" in dialog.pxp_wave_list.item(i).text()
-    )
+    imported_wave_a_item = None
+    for i in range(dialog.pxp_wave_list.count()):
+        item = dialog.pxp_wave_list.item(i)
+        assert item is not None
+        if "WaveA" in item.text():
+            imported_wave_a_item = item
+            break
+    assert imported_wave_a_item is not None
     dialog.pxp_wave_list.setCurrentItem(imported_wave_a_item)
     dialog._update_import_button_state()
 

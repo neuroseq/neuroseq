@@ -11,7 +11,7 @@ from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.stim_editor import StimEditor
 from neuroseq.stim_loop_dialog import StimLoopDialog
-from neuroseq.stim_loop_dialog import _detect_period
+from neuroseq.utils import detect_period
 
 
 def _make_project(*stim_arrays: StimArray) -> Project:
@@ -84,10 +84,10 @@ def test_detect_period_finds_minimum() -> None:
     block = rng.normal(size=(7, 3)).astype(np.float32)
     values = np.tile(block, (5, 1))
 
-    assert _detect_period(values) == 7
+    assert detect_period(values) == 7
 
     values[10, 1] += 0.25
-    assert _detect_period(values) is None
+    assert detect_period(values) is None
 
 
 def test_detect_period_rejects_non_dividing() -> None:
@@ -102,13 +102,13 @@ def test_detect_period_rejects_non_dividing() -> None:
     )
 
     assert padded_values.shape == (2000, 13)
-    assert _detect_period(padded_values) is None
-    assert _detect_period(periodic_values) == 240
+    assert detect_period(padded_values) is None
+    assert detect_period(periodic_values) == 240
 
 
 def test_detect_period_handles_short_arrays() -> None:
-    assert _detect_period(np.zeros((0, 3), dtype=np.float32)) is None
-    assert _detect_period(np.ones((1, 3), dtype=np.float32)) is None
+    assert detect_period(np.zeros((0, 3), dtype=np.float32)) is None
+    assert detect_period(np.ones((1, 3), dtype=np.float32)) is None
 
 
 def test_stim_loop_dialog_accept_returns_loop_count(qtbot: QtBot) -> None:

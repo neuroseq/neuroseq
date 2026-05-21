@@ -2903,9 +2903,22 @@ def _build_mapped_segments_for_timing(
 
 
 def _compute_cell_centroids(segmentation: np.ndarray) -> dict[int, tuple[float, float]]:
+    """Return per-cell centroids in **SysCon coordinates** (top-left origin).
+
+    The Cellpose importer applies ``np.flipud`` to the segmentation on load
+    so the in-app overlay matches Fiji's bottom-left display convention
+    (``importer_cellpose.py::_align_orientation_segmentation``). SysCon's
+    `.seq` format uses image-array / top-left convention (``CenterY``
+    measured from the top of the field), so we undo that vertical flip
+    here: the exported ``center_y`` for a cell is its row index in the
+    *original* (pre-``flipud``) image. Without this inversion the cells
+    appear vertically mirrored when the generated ``.seq`` is loaded into
+    SysCon.
+    """
     if segmentation.ndim != 2:
         raise ValueError("Cellpose segmentation must be a 2D array")
 
+    height = int(segmentation.shape[0])
     centroids: dict[int, tuple[float, float]] = {}
     unique_ids = np.unique(segmentation)
     for cell_id in unique_ids:
@@ -2915,7 +2928,8 @@ def _compute_cell_centroids(segmentation: np.ndarray) -> dict[int, tuple[float, 
         y_coords, x_coords = np.where(segmentation == cell_int)
         if x_coords.size == 0:
             continue
-        centroids[cell_int] = (float(np.mean(x_coords)), float(np.mean(y_coords)))
+        flipped_y = float(height - 1) - float(np.mean(y_coords))
+        centroids[cell_int] = (float(np.mean(x_coords)), flipped_y)
     return centroids
 
 

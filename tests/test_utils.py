@@ -7,8 +7,10 @@ from brian2 import numpy_ as np
 
 from neuroseq.data import SynapseData
 from neuroseq.utils import append_data
+from neuroseq.utils import detect_period
 from neuroseq.utils import get_downsample_factor
 from neuroseq.utils import neuron_indices_to_colors
+from neuroseq.utils import parse_number
 from neuroseq.utils import update_nested_dict
 
 
@@ -180,3 +182,57 @@ def test_append_data_synapse_overwrites_overlap() -> None:
     # After overlap (originally indices 8..9 at t=0.8, 0.9): kept, all zeros.
     assert np.all(existing.values[:, :, 8:] == 0.0)
     assert existing.values.shape[2] == existing.timestamps.shape[0]
+
+
+def test_detect_period_returns_period_for_repeat() -> None:
+    values = np.tile(np.array([1.0, 2.0, 3.0], dtype=np.float32), 4)
+    assert detect_period(values) == 3
+
+
+def test_detect_period_returns_none_for_non_repeat() -> None:
+    values = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0], dtype=np.float32)
+    assert detect_period(values) is None
+
+
+def test_detect_period_returns_none_for_short_array() -> None:
+    values = np.array([1.0], dtype=np.float32)
+    assert detect_period(values) is None
+
+
+def test_detect_period_handles_2d_arrays() -> None:
+    block = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
+    values = np.tile(block, (3, 1))
+    assert detect_period(values) == 2
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("1", 1.0),
+        ("1.5", 1.5),
+        ("-3", -3.0),
+        ("  2.0  ", 2.0),
+        ("1e-12", 1e-12),
+        ("2.5e3", 2500.0),
+        ("10^-12", 1e-12),
+        ("10^(-12)", 1e-12),
+        ("10^12", 1e12),
+        ("10^(12)", 1e12),
+        ("2*10^-12", 2e-12),
+        ("2.5*10^(-12)", 2.5e-12),
+        ("3 x 10^6", 3e6),
+        ("4×10^-3", 4e-3),
+        ("1.5*10^3", 1500.0),
+    ],
+)
+def test_parse_number_accepts_common_formats(text: str, expected: float) -> None:
+    assert parse_number(text) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["abc", "10^", "^-12", "10^^2", "10*-12", "", "10^(-12"],
+)
+def test_parse_number_rejects_garbage(text: str) -> None:
+    with pytest.raises(ValueError, match="Could not parse"):
+        parse_number(text)

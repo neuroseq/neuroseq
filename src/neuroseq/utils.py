@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 import logging
 import math
+import re
 from collections.abc import Callable
 from collections.abc import Iterable
 from enum import Enum
@@ -47,6 +48,28 @@ def get_downsample_factor(
     mbits_per_float = float(bits_per_float) / mb_in_bits
     ram_mb = n_floats * mbits_per_float
     return 1 + int(ram_mb // max_ram_mb)
+
+
+def detect_period(values: np.ndarray) -> int | None:
+    """Return the smallest exact period of ``values``, or ``None``.
+
+    The period is measured in samples along axis 0. Returns ``None`` when
+    no proper divisor of ``len(values)`` produces an exact repeat.
+    """
+    n_timestamps = int(values.shape[0])
+    if n_timestamps < 2:
+        return None
+    for period in range(1, n_timestamps // 2 + 1):
+        if n_timestamps % period != 0:
+            continue
+        if np.allclose(
+            values[: n_timestamps - period],
+            values[period:],
+            rtol=0.0,
+            atol=1e-6,
+        ):
+            return period
+    return None
 
 
 def construct_synapse_matrix(
@@ -427,6 +450,40 @@ def remove_neurons_from_data(
             # All spikes removed - create empty arrays
             data.spike_indices = np.array([], dtype=data.spike_indices.dtype)
             data.spike_times = np.array([], dtype=data.spike_times.dtype)
+
+
+_POWER_OF_TEN_RE = re.compile(
+    r"\A\s*(?:(?P<mantissa>-?\d+(?:\.\d+)?)\s*[*x×]\s*)?"
+    r"10\s*\^\s*"
+    r"(?:"
+    r"\(\s*(?P<exp_paren>[+-]?\d+(?:\.\d+)?)\s*\)"
+    r"|"
+    r"(?P<exp_bare>[+-]?\d+(?:\.\d+)?)"
+    r")"
+    r"\s*\Z",
+    re.IGNORECASE,
+)
+
+
+def parse_number(text: str) -> float:
+    """Parse a user-entered number, accepting common scientific shorthands.
+
+    Accepts standard Python float literals (``1.5``, ``1e-12``, ``-3``) plus
+    ``10^N`` / ``10^(N)`` / ``a*10^N`` shorthand (where ``*`` may be ``x`` or
+    ``×``). Parentheses around the exponent must be balanced. Raises
+    ``ValueError`` if the input matches nothing.
+    """
+    stripped = text.strip()
+    try:
+        return float(stripped)
+    except ValueError:
+        pass
+    match = _POWER_OF_TEN_RE.match(stripped)
+    if match is None:
+        raise ValueError(f"Could not parse '{text}' as a number.")
+    mantissa = float(match.group("mantissa")) if match.group("mantissa") else 1.0
+    exponent_str = match.group("exp_paren") or match.group("exp_bare")
+    return mantissa * (10.0 ** float(exponent_str))
 
 
 def getSimulationTime(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import inspect
 import logging
 import pathlib
 from collections.abc import Callable
@@ -29,13 +30,13 @@ from neuroseq.data_widget import DataWidget
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
 from neuroseq.experiments_manager_dialog import ExperimentsManagerDialog
-from neuroseq.exporter_igor2 import export_igor2_patchclamp_csv
-from neuroseq.exporter_igor2 import export_igor2_patchclamp_ibw
+from neuroseq.exporter_igor2 import export_igor2_csv
+from neuroseq.exporter_igor2 import export_igor2_ibw
 from neuroseq.exporter_igor2 import export_igor2_pxp
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
-from neuroseq.igor2_patchclamp_export_dialog import Igor2PatchClampExportDialog
 from neuroseq.igor2_pxp_stim_export_dialog import Igor2PxpStimExportDialog
+from neuroseq.igor2_single_wave_export_dialog import Igor2SingleWaveExportDialog
 from neuroseq.igor_import_dialog import IgorImportDialog
 from neuroseq.import_dialog import Suite2pImportDialog
 from neuroseq.import_experiment_dialog import ImportExperimentDialog
@@ -58,6 +59,21 @@ from neuroseq.utils import add_action
 from neuroseq.utils import add_items_to_combobox
 from neuroseq.utils import getSimulationTime
 from neuroseq.utils import with_wait_cursor
+
+
+def _external_simulator_accepts_progress(simulate_fn: Callable) -> bool:
+    """True if ``simulate_fn`` advertises a ``progress`` keyword argument.
+
+    Used so old-style third-party simulators (``simulate(stims_dict,
+    simulation_time, params=None)``) keep working unchanged, while the
+    bundled :class:`NN`-based backends receive the progress callback the
+    main window's progress dialog needs.
+    """
+    try:
+        sig = inspect.signature(simulate_fn)
+    except (TypeError, ValueError):
+        return False
+    return "progress" in sig.parameters
 
 
 class Gui(QtWidgets.QMainWindow):
@@ -363,7 +379,7 @@ class Gui(QtWidgets.QMainWindow):
             )
             return
 
-    def btn_export_igor2_patchclamp_stim_clicked(self) -> None:
+    def btn_export_igor2_single_wave_clicked(self) -> None:
         if not self.project.stim_arrays:
             QtWidgets.QMessageBox.information(
                 self,
@@ -390,14 +406,14 @@ class Gui(QtWidgets.QMainWindow):
             )
             return
 
-        dialog = Igor2PatchClampExportDialog(stim_name, stim_array, parent=self)
+        dialog = Igor2SingleWaveExportDialog(stim_name, stim_array, parent=self)
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
 
         suggested_filename = f"{dialog.experiment_name}.ibw"
         filename, _ = getsavefilename(
             self,
-            "Export Igor2 Patch Clamp Stimulus",
+            "Export single wave to Igor2",
             suggested_filename,
             "Igor Binary Wave (*.ibw);;CSV file (*.csv)",
         )
@@ -412,40 +428,63 @@ class Gui(QtWidgets.QMainWindow):
 
         try:
             if suffix == ".ibw":
-                export_report = export_igor2_patchclamp_ibw(
+                export_report = export_igor2_ibw(
                     output_path,
                     stim_array,
                     wave_name=dialog.experiment_name,
                     neuron_index=dialog.selected_neuron_index,
+                    unit_override=dialog.unit_override,
+                    scaling_factor=dialog.scaling_factor,
+                    as_sweeps=dialog.as_sweeps,
                 )
+                if dialog.as_sweeps and export_report.n_sweeps == 1:
+                    self.logger.info(
+                        "Sweep export requested for '%s' but no period was detected; "
+                        "exported as single sweep.",
+                        stim_array.name,
+                    )
                 fmt_label = f"Igor Binary Wave '{export_report.experiment_name}'"
             else:
-                export_report = export_igor2_patchclamp_csv(
+                if dialog.as_sweeps:
+                    self.logger.info(
+                        "Sweep export requested for '%s' but CSV was selected; "
+                        "exported as single sweep.",
+                        stim_array.name,
+                    )
+                export_report = export_igor2_csv(
                     output_path,
                     stim_array,
                     experiment_name=dialog.experiment_name,
                     neuron_index=dialog.selected_neuron_index,
+                    scaling_factor=dialog.scaling_factor,
                 )
                 fmt_label = f"CSV experiment '{export_report.experiment_name}'"
         except Exception as e:
             self.logger.warning(
-                "Failed to export Igor2 patch clamp stimulus %s: %s",
+                "Failed to export Igor2 single wave %s: %s",
                 output_path,
                 e,
             )
             QtWidgets.QMessageBox.critical(
                 self,
                 "Export error",
-                f"Could not export Igor2 patch clamp stimulus to '{output_path}': {e}",
+                f"Could not export Igor2 single wave to '{output_path}': {e}",
             )
             return
 
+        if export_report.n_sweeps > 1:
+            sweep_note = (
+                f" Split into {export_report.n_sweeps} sweeps × "
+                f"{export_report.sample_count // export_report.n_sweeps} samples."
+            )
+        else:
+            sweep_note = ""
         QtWidgets.QMessageBox.information(
             self,
             "Export Successful",
             f"Exported {fmt_label} for "
             f"stimulus '{stim_name}', neuron {export_report.neuron_index}, "
-            f"{export_report.sample_count} samples.",
+            f"{export_report.sample_count} samples.{sweep_note}",
         )
 
     def btn_export_igor2_pxp_stim_clicked(self) -> None:
@@ -488,6 +527,8 @@ class Gui(QtWidgets.QMainWindow):
                 output_path,
                 self.project.stim_arrays,
                 array_names=selected,
+                unit_override=dialog.unit_override,
+                scaling_factor=dialog.scaling_factor,
             )
         except Exception as e:
             QtWidgets.QMessageBox.critical(
@@ -827,11 +868,25 @@ class Gui(QtWidgets.QMainWindow):
             self.logger.info(
                 f"Running external simulation function for {simulation_time} seconds"
             )
-            experiment = self.project.external_simulate_function(
-                stims_dict,
-                simulation_time,
-                params=self.project.external_simulate_params_flat(),
-            )
+            params = self.project.external_simulate_params_flat()
+            if _external_simulator_accepts_progress(
+                self.project.external_simulate_function
+            ):
+                self.progress_dialog.setLabelText("Simulating...")
+                self.progress_dialog.setValue(0)
+                experiment = self.project.external_simulate_function(
+                    stims_dict,
+                    simulation_time,
+                    params=params,
+                    progress=self._update_external_simulation_progress,  # type: ignore[call-arg]
+                )
+            else:
+                experiment = self.project.external_simulate_function(
+                    stims_dict,
+                    simulation_time,
+                    params=params,
+                )
+            self.progress_dialog.setValue(100)
             self.logger.info(
                 f"External simulation complete, returned {experiment.duration}s experiment '{experiment.name}' with {len(experiment.data)} data objects"
             )
@@ -845,6 +900,11 @@ class Gui(QtWidgets.QMainWindow):
             return
         QtWidgets.QApplication.restoreOverrideCursor()
         self._append_experimental_data(experiment)
+
+    def _update_external_simulation_progress(self, fraction: float) -> None:
+        """Translate a [0, 1] completion fraction into the shared progress dialog."""
+        clamped = max(0.0, min(1.0, float(fraction)))
+        self.progress_dialog.setValue(int(round(clamped * 100)))
 
     def btn_do_external_simulation_clicked(self) -> None:
         if self.project.external_simulate_function is None:
@@ -1181,17 +1241,21 @@ class Gui(QtWidgets.QMainWindow):
         if not ok:
             return
         if software.startswith("Igor2 - single"):
-            self.btn_export_igor2_patchclamp_stim_clicked()
+            self.btn_export_igor2_single_wave_clicked()
         elif software.startswith("Igor2 - all"):
             self.btn_export_igor2_pxp_stim_clicked()
 
     def btn_export_light_stimulus_clicked(self) -> None:
-        """Pre-dialog: choose software, then open the stimulation script generator."""
+        """Pre-dialog: choose software, then open the corresponding export flow."""
         software, ok = QtWidgets.QInputDialog.getItem(
             self,
             "Export light stimulus",
             "Export for:",
-            ["SysCon2"],
+            [
+                "SysCon2",
+                "Igor2 - all arrays (.pxp)",
+                "Igor2 - single neuron (.ibw / .csv)",
+            ],
             0,
             False,
         )
@@ -1199,6 +1263,10 @@ class Gui(QtWidgets.QMainWindow):
             return
         if software == "SysCon2":
             self.open_stimulation_generator_dialog()
+        elif software.startswith("Igor2 - all"):
+            self.btn_export_igor2_pxp_stim_clicked()
+        elif software.startswith("Igor2 - single"):
+            self.btn_export_igor2_single_wave_clicked()
 
     def btn_export_traces_clicked(self) -> None:
         """Export the currently displayed trace data as a publication-quality figure.
@@ -1465,8 +1533,9 @@ class Gui(QtWidgets.QMainWindow):
             for name, generator in section_projects.items():
                 action = add_action(
                     name,
-                    lambda checked=False,
-                    _generator=generator: self._load_example_project(_generator),
+                    lambda checked=False, _generator=generator: (
+                        self._load_example_project(_generator)
+                    ),
                     section_menu,
                     None,
                 )

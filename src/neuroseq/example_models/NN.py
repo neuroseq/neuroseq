@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from collections.abc import Mapping
 from copy import deepcopy
 
@@ -9,6 +10,8 @@ ParamValue = int | float | bool | str
 FlatParams = dict[str, ParamValue]
 SchemaValue = ParamValue | str
 Schema = dict[str, dict[str, SchemaValue]]
+ProgressCallback = Callable[[float], None]
+"""Called periodically by `simulate` with the completion fraction in [0, 1]."""
 
 class NN:
     """Standard interface for neuroseq external simulation backends.
@@ -53,8 +56,16 @@ class NN:
         stims_dict: dict,
         simulation_time: float,
         params: Mapping[str, ParamValue] | None = None,
+        progress: ProgressCallback | None = None,
     ) -> Experiment:
-        """Run simulation and return one experiment chunk."""
+        """Run simulation and return one experiment chunk.
+
+        ``progress``, when supplied, is invoked periodically by the
+        implementation with a completion fraction in ``[0, 1]``. It is
+        intentionally optional — subclasses must accept the keyword for
+        forwards compatibility, but are free to ignore it when running
+        without a progress consumer.
+        """
         raise NotImplementedError(
             "NN.simulate must be implemented by subclasses"
         )

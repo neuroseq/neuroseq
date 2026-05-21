@@ -49,8 +49,11 @@ class _DummyBackend(NN):
         stims_dict: dict,
         simulation_time: float,
         params=None,
+        progress=None,
     ) -> Experiment:
         self._simulated_time_s += simulation_time
+        if progress is not None:
+            progress(1.0)
         return Experiment("dummy", simulation_time, [], [])
 
 

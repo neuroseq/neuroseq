@@ -73,3 +73,26 @@ def test_sinus_offset_continues_phase_between_runs() -> None:
     assert np.allclose(second_mem.traces[:, 0], expected_second_start, atol=1e-5)
     assert np.allclose(first_mem.traces[:, 0], 0.0, atol=1e-7)
     assert np.isclose(sim.simulated_time_seconds, 2.0 * duration_s)
+
+
+def test_sinus_offset_simulate_emits_progress_callback() -> None:
+    from neuroseq.example_models.sinus_offset import simulate
+
+    duration_s = 0.05
+    stim_dt_s = 0.001
+    n_stim = int(duration_s / stim_dt_s)
+    stims_dict = {
+        "u_inp": {
+            "array": np.zeros((n_stim, 5), dtype=np.float32),
+            "dt": stim_dt_s,
+        },
+    }
+    fractions: list[float] = []
+    simulate(
+        stims_dict,
+        simulation_time=duration_s,
+        params={"dt_ms": 1.0},
+        progress=fractions.append,
+    )
+    # Vectorised model: surfaces only start and end ticks.
+    assert fractions == [0.0, 1.0]

@@ -23,6 +23,7 @@ from neuroseq.importer_igor2 import load_igor_csv_file
 from neuroseq.importer_igor2 import load_igor_ibw_file
 from neuroseq.importer_igor2 import load_igor_pxp_file
 from neuroseq.importer_igor2 import load_igor_wave_file
+from neuroseq.importer_igor2 import parse_igor_binary_wave_data
 from neuroseq.importer_igor2 import prepare_igor_wave_for_neuroseq
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
@@ -34,6 +35,31 @@ REAL_BROKEN_PXP = Path(
 REAL_WORKING_PXP = Path(
     "/mnt/live3/svintila/code_scraps/igor2_files/test_files/260316_0.pxp"
 )
+REAL_SUTTERPATCH_IBW = Path(
+    "/mnt/live3/svintila/random/igor2_files/test_files/R5_S1_IVstep.ibw"
+)
+
+
+def _fake_ibw_payload(
+    wdata: np.ndarray,
+    *,
+    name: str = "wave",
+    dt: float = 0.001,
+    units: str = "pA",
+    axis_units: str = "s",
+) -> dict[str, object]:
+    return {
+        "wave": {
+            "wData": wdata,
+            "note": b"",
+            "wave_header": {
+                "bname": name.encode("ascii") + b"\x00",
+                "sfA": np.array([dt], dtype=np.float64),
+                "dataUnits": units.encode("ascii") + b"\x00",
+                "dimUnits": [axis_units.encode("ascii") + b"\x00"],
+            },
+        }
+    }
 
 
 def test_load_igor_csv_file_parses_simple_wave(tmp_path: Path) -> None:
@@ -46,6 +72,64 @@ def test_load_igor_csv_file_parses_simple_wave(tmp_path: Path) -> None:
     assert wave.source_dt is None
     assert wave.units is None
     np.testing.assert_allclose(wave.values, np.array([1.0, 2.5, -3.0]))
+
+
+def test_parse_binary_wave_accepts_two_d_and_concatenates() -> None:
+    raw = np.array(
+        [[1.0, 5.0, 9.0], [2.0, 6.0, 10.0], [3.0, 7.0, 11.0], [4.0, 8.0, 12.0]],
+        dtype=np.float32,
+    )
+    wave = parse_igor_binary_wave_data(_fake_ibw_payload(raw))
+
+    np.testing.assert_allclose(
+        wave.values,
+        np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0]),
+    )
+    assert wave.n_sweeps == 3
+    assert wave.samples_per_sweep == 4
+
+
+def test_parse_binary_wave_rejects_three_d() -> None:
+    raw = np.zeros((4, 3, 2), dtype=np.float32)
+    with pytest.raises(ValueError, match="3 dimensions"):
+        parse_igor_binary_wave_data(_fake_ibw_payload(raw))
+
+
+def test_parse_binary_wave_keeps_one_d_unchanged() -> None:
+    raw = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+    wave = parse_igor_binary_wave_data(_fake_ibw_payload(raw))
+
+    np.testing.assert_allclose(wave.values, raw)
+    assert wave.n_sweeps == 1
+    assert wave.samples_per_sweep == 4
+
+
+@pytest.mark.skipif(not REAL_SUTTERPATCH_IBW.exists(), reason="real IBW not present")
+def test_real_sutterpatch_file_imports() -> None:
+    pytest.importorskip("igor2")
+    wave = load_igor_ibw_file(REAL_SUTTERPATCH_IBW)
+
+    assert wave.n_sweeps == 7
+    assert wave.samples_per_sweep == 30000
+    assert wave.source_dt == pytest.approx(5e-5)
+
+
+def test_prepared_wave_carries_sweep_metadata() -> None:
+    wave = IgorWave(
+        name="test_wave",
+        values=np.arange(12, dtype=np.float32),
+        source_dt=0.001,
+        units="pA",
+        axis_units="s",
+        source_format="ibw",
+        n_sweeps=3,
+        samples_per_sweep=4,
+    )
+
+    prepared = prepare_igor_wave_for_neuroseq(wave)
+
+    assert prepared.n_sweeps == 3
+    assert prepared.samples_per_sweep == 4
 
 
 def test_prepare_igor_wave_for_neuroseq_resamples_to_1ms() -> None:
@@ -614,7 +698,7 @@ def test_load_igor_pxp_file_returns_all_1d_waves(
     np.testing.assert_allclose(wave.values, np.array([1.0, 2.0, 3.0]))
 
 
-def test_load_igor_pxp_file_skips_multidimensional_waves(
+def test_load_igor_pxp_file_imports_two_d_waves(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -681,8 +765,16 @@ def test_load_igor_pxp_file_skips_multidimensional_waves(
     waves = report.waves
 
     assert report.skipped == []
-    assert waves.keys() == {"root/OneDWave", "root/subfolder/NestedWave"}
+    assert waves.keys() == {
+        "root/OneDWave",
+        "root/TwoDWave",
+        "root/subfolder/NestedWave",
+    }
     np.testing.assert_allclose(waves["root/OneDWave"].values, np.array([0.5, 1.5]))
+    two_d_wave = waves["root/TwoDWave"]
+    assert two_d_wave.n_sweeps == 4
+    assert two_d_wave.samples_per_sweep == 3
+    np.testing.assert_allclose(two_d_wave.values, np.ones(12, dtype=np.float32))
     np.testing.assert_allclose(
         waves["root/subfolder/NestedWave"].values,
         np.array([2.5, 3.5, 4.5]),

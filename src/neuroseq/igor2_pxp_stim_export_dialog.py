@@ -5,6 +5,7 @@ from qtpy import QtWidgets
 
 from neuroseq.project import Project
 from neuroseq.stim import StimType
+from neuroseq.utils import parse_number
 
 
 class Igor2PxpStimExportDialog(QtWidgets.QDialog):
@@ -38,6 +39,18 @@ class Igor2PxpStimExportDialog(QtWidgets.QDialog):
             self._list.addItem(item)
         layout.addWidget(self._list)
 
+        form = QtWidgets.QFormLayout()
+        self._unit_edit = QtWidgets.QLineEdit()
+        self._unit_edit.setPlaceholderText("(leave blank to keep per-array units)")
+        form.addRow("Unit of measurement (optional):", self._unit_edit)
+
+        self._scale_edit = QtWidgets.QLineEdit()
+        self._scale_edit.setPlaceholderText(
+            "(blank = 1.0; accepts e.g. 1e-12, 10^-12, 2.5*10^(-12))"
+        )
+        form.addRow("Scaling factor (optional):", self._scale_edit)
+        layout.addLayout(form)
+
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok
             | QtWidgets.QDialogButtonBox.StandardButton.Cancel
@@ -56,3 +69,38 @@ class Igor2PxpStimExportDialog(QtWidgets.QDialog):
             if item.checkState() == QtCore.Qt.CheckState.Checked:
                 result.append(str(item.data(QtCore.Qt.ItemDataRole.UserRole)))
         return result
+
+    @property
+    def unit_override(self) -> str | None:
+        text = self._unit_edit.text().strip()
+        return text if text else None
+
+    @property
+    def scaling_factor(self) -> float:
+        text = self._scale_edit.text().strip()
+        if not text:
+            return 1.0
+        return parse_number(text)
+
+    def accept(self) -> None:
+        text = self._scale_edit.text().strip()
+        if text:
+            try:
+                value = parse_number(text)
+            except ValueError as exc:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Invalid scaling factor",
+                    str(exc),
+                )
+                return
+            import math
+
+            if not math.isfinite(value):
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Invalid scaling factor",
+                    "Scaling factor must be a finite number.",
+                )
+                return
+        super().accept()

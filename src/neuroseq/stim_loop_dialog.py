@@ -1,27 +1,9 @@
 from __future__ import annotations
 
-import numpy as np
 from qtpy import QtWidgets
 
 from neuroseq.project import Project
-
-
-def _detect_period(values: np.ndarray) -> int | None:
-    """Return the smallest exact period of `values`, if one exists."""
-    n_timestamps = int(values.shape[0])
-    if n_timestamps < 2:
-        return None
-    for period in range(1, n_timestamps // 2 + 1):
-        if n_timestamps % period != 0:
-            continue
-        if np.allclose(
-            values[: n_timestamps - period],
-            values[period:],
-            rtol=0.0,
-            atol=1e-6,
-        ):
-            return period
-    return None
+from neuroseq.utils import detect_period
 
 
 class StimLoopDialog(QtWidgets.QDialog):
@@ -104,7 +86,7 @@ class StimLoopDialog(QtWidgets.QDialog):
             self.detect_caption.setText("(no stim arrays)")
             return
 
-        period = _detect_period(reference_stim.values)
+        period = detect_period(reference_stim.values)
         if period is None or period <= 0 or period >= reference_stim.values.shape[0]:
             self.detect_caption.setText("No periodic block detected; array unchanged.")
             return

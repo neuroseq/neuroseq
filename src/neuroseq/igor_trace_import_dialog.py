@@ -114,6 +114,14 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
 
         preview_group = QtWidgets.QGroupBox("Wave Preview")
         preview_layout = QtWidgets.QVBoxLayout(preview_group)
+        self.multi_sweep_info = QtWidgets.QLabel("")
+        self.multi_sweep_info.setWordWrap(True)
+        self.multi_sweep_info.setObjectName("multi_sweep_info")
+        self.multi_sweep_info.setStyleSheet(
+            "QLabel { color: #555; font-weight: bold; }"
+        )
+        self.multi_sweep_info.setVisible(False)
+        preview_layout.addWidget(self.multi_sweep_info)
         self.preview_text = QtWidgets.QPlainTextEdit()
         self.preview_text.setReadOnly(True)
         self.preview_text.setMaximumHeight(120)
@@ -558,6 +566,28 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
             lines.extend(["", f"Wave note={wave.note}"])
         return "\n".join(lines)
 
+    def _update_multi_sweep_info(self) -> None:
+        wave = self.loaded_wave
+        if wave is None or wave.n_sweeps <= 1 or wave.samples_per_sweep is None:
+            self.multi_sweep_info.setVisible(False)
+            self.multi_sweep_info.setText("")
+            return
+        source_dt = float(self.source_dt_spin.value())
+        target_dt = self._target_dt_seconds()
+        target_samples = estimate_resampled_sample_count(
+            int(wave.values.size), source_dt, target_dt=target_dt
+        )
+        total_duration_s = float(wave.values.size) * source_dt
+        self.multi_sweep_info.setText(
+            f"Multi-sweep IBW: {wave.n_sweeps} sweeps × "
+            f"{wave.samples_per_sweep} source samples concatenated "
+            f"({wave.values.size} total source samples → "
+            f"{target_samples} samples at the {target_dt * 1000.0:g} ms "
+            f"import grid = {total_duration_s:g} s). "
+            "Inter-sweep recording gaps are not preserved."
+        )
+        self.multi_sweep_info.setVisible(True)
+
     def _update_mode_state(self) -> None:
         create_new = self.create_new_radio.isChecked()
         self.new_target_group.setEnabled(create_new)
@@ -598,6 +628,7 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
     def _update_preview(self) -> None:
         self._update_target_dt_label()
         self._update_wave_plot(self.loaded_wave)
+        self._update_multi_sweep_info()
         if self.loaded_wave is None:
             self.preview_text.setPlainText("")
             if not self._experiments_with_trace_data():
@@ -869,6 +900,14 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
                     f"Imported '{prepared_wave.name}' into new trace data "
                     f"'{trace_name}' in experiment '{experiment_name}'."
                 )
+                if (
+                    prepared_wave.n_sweeps > 1
+                    and prepared_wave.samples_per_sweep is not None
+                ):
+                    report_headline += (
+                        f" Source wave contained {prepared_wave.n_sweeps} sweeps × "
+                        f"{prepared_wave.samples_per_sweep} samples, concatenated on import."
+                    )
                 spike_neuron_id = neuron_id
             else:
                 experiment_name = self.existing_experiment_combo.currentText()
@@ -910,6 +949,11 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
                     f"experiment '{experiment_name}' at neuron "
                     f"{report.target_neuron_id}."
                 )
+                if report.n_sweeps > 1 and report.samples_per_sweep is not None:
+                    report_headline += (
+                        f" Source wave contained {report.n_sweeps} sweeps × "
+                        f"{report.samples_per_sweep} samples, concatenated on import."
+                    )
                 spike_neuron_id = int(self.existing_neuron_id_spin.value())
 
             spikes_detected: int | None = None

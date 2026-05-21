@@ -27,6 +27,7 @@ from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.example_models.NN import NN
 from neuroseq.example_models.NN import ParamValue
+from neuroseq.example_models.NN import ProgressCallback
 
 FlatParams = dict[str, ParamValue]
 
@@ -424,6 +425,7 @@ class Elise(NN):
         stims_dict: dict,
         simulation_time: float,
         params: Mapping[str, ParamValue] | None = None,
+        progress: ProgressCallback | None = None,
     ) -> Experiment:
         if "opsin_exc" not in stims_dict or "opsin_inh" not in stims_dict:
             raise ValueError(
@@ -485,6 +487,12 @@ class Elise(NN):
         stim_T = g_exc_full.shape[0]
         t0_s = self._simulated_time_s
 
+        # Throttle progress callbacks so they refresh roughly every 5 % of
+        # the simulation without dominating the loop's runtime.
+        progress_stride = max(1, n_steps // 20) if progress is not None else 0
+        if progress is not None and n_steps > 0:
+            progress(0.0)
+
         for step in range(n_steps):
             t_s = step * dt_ms / 1000.0
             t_abs_s = t0_s + t_s
@@ -511,6 +519,12 @@ class Elise(NN):
                 # Keep timestamps local to this run so appending can offset cleanly.
                 snap_timestamps[snap_cursor] = t_s
                 snap_cursor += 1
+
+            if progress_stride and (step + 1) % progress_stride == 0:
+                progress((step + 1) / n_steps)
+
+        if progress is not None and n_steps > 0:
+            progress(1.0)
 
         self._simulated_time_s += simulation_time
 
@@ -554,10 +568,15 @@ class Elise(NN):
 
 
 def simulate(
-    stims_dict: dict, simulation_time: float, params: Mapping[str, ParamValue] | None = None
+    stims_dict: dict,
+    simulation_time: float,
+    params: Mapping[str, ParamValue] | None = None,
+    progress: ProgressCallback | None = None,
 ) -> Experiment:
     """Compatibility wrapper using the singleton ``Elise`` instance."""
-    return _SIMULATOR.simulate(stims_dict, simulation_time, params=params)
+    return _SIMULATOR.simulate(
+        stims_dict, simulation_time, params=params, progress=progress
+    )
 
 
 def get_simulator() -> Elise:
