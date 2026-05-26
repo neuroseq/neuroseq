@@ -4,6 +4,7 @@ import logging
 
 import numpy as np
 
+from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim_widget import StimWidget
 
@@ -38,8 +39,81 @@ class ReversibleAction:
         values: np.ndarray | float,
     ) -> None:
         """Assign the new values to the StimArray and update the StimWidget accordingly."""
+        if (
+            self.time_slice.stop is not None
+            and self.time_slice.stop > stim_array.values.shape[0]
+        ) or (
+            self.neuron_slice.stop is not None
+            and self.neuron_slice.stop > stim_array.values.shape[1]
+        ):
+            return
         stim_array.values[self.time_slice, self.neuron_slice] = values
         stim_widget.update_data_slice(self.neuron_slice, self.time_slice, values)
+
+
+class ResizableReversibleAction:
+    """One-step undo for pad + overwrite operations on a project stim array."""
+
+    def __init__(
+        self,
+        project: Project,
+        target_stim_name: str,
+        neuron_slice: slice,
+        time_slice: slice,
+        new_values: np.ndarray,
+        stim_widget: StimWidget,
+    ) -> None:
+        self.project = project
+        self.target_stim_name = target_stim_name
+        self.neuron_slice = neuron_slice
+        self.time_slice = time_slice
+        self.new_values = np.array(new_values, copy=True)
+        self.stim_widget = stim_widget
+        self.before_lengths: dict[str, int] = {
+            name: arr.values.shape[0] for name, arr in project.stim_arrays.items()
+        }
+        self.before_target_values: np.ndarray | None = None
+        self.new_length = time_slice.stop
+        if self.new_length is None:
+            raise ValueError("ResizableReversibleAction requires bounded time_slice")
+
+    def __call__(self, stim_array: StimArray, stim_widget: StimWidget) -> None:
+        del stim_array, stim_widget
+        self._ensure_padded()
+        target = self.project.stim_arrays[self.target_stim_name]
+        self.before_target_values = target.values[
+            self.time_slice, self.neuron_slice
+        ].copy()
+        target.values[self.time_slice, self.neuron_slice] = self.new_values
+        self._refresh_stim_widget()
+        self.project.update_limits()
+
+    def undo(self, stim_array: StimArray, stim_widget: StimWidget) -> None:
+        del stim_array, stim_widget
+        target = self.project.stim_arrays[self.target_stim_name]
+        if self.before_target_values is not None:
+            target.values[self.time_slice, self.neuron_slice] = (
+                self.before_target_values
+            )
+        for name, old_length in self.before_lengths.items():
+            if name not in self.project.stim_arrays:
+                continue
+            arr = self.project.stim_arrays[name]
+            if arr.values.shape[0] > old_length:
+                arr.values = arr.values[:old_length, :]
+        self._refresh_stim_widget()
+        self.project.update_limits()
+
+    def _ensure_padded(self) -> None:
+        target_dt = float(self.project.stim_arrays[self.target_stim_name].dt)
+        self.project.pad_stim_arrays(self.new_length * target_dt)
+
+    def _refresh_stim_widget(self) -> None:
+        target = self.project.stim_arrays[self.target_stim_name]
+        self.stim_widget.set_data(target)
+        for name, arr in self.project.stim_arrays.items():
+            if name != self.target_stim_name:
+                self.stim_widget.set_background_data(arr)
 
 
 class StimArrayModifier:
@@ -49,7 +123,7 @@ class StimArrayModifier:
         self.logger = logging.getLogger(__name__)
         self.stim_array = stim_array
         self.stim_widget = stim_widget
-        self.action_stack: list[ReversibleAction] = []
+        self.action_stack: list[ReversibleAction | ResizableReversibleAction] = []
         self.current_index = -1
 
     def __len__(self) -> int:

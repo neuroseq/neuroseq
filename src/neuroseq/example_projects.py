@@ -44,8 +44,8 @@ def default_project() -> Project:
     # define Brian2 model
     b2_model = project.b2_model
 
-    nneurons = 40
-    nneurons_exc = 32
+    nneurons = 10
+    nneurons_exc = 8
 
     b2_model.define_parameter("area", 20000 * b2.umetre**2)
     b2_model.define_parameter(
@@ -166,19 +166,23 @@ we= clip(we + Apre, -gmax, gmax)
 
     tfinal = 1000 * b2.ms
 
+    stim_dt = 0.001
     stim = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
-    stim[120, :nneurons_exc:2] = 1
-    stim[121, 1:nneurons_exc:2] = 1
-    stim[320, :nneurons_exc:2] = 1
-    stim[321, 1:nneurons_exc:2] = 1
-    stim[520, :nneurons_exc:2] = 1
-    stim[521, 1:nneurons_exc:2] = 1
+    pulse_n = int(round(0.100 / stim_dt))
+    gap_n = int(round(0.018 / stim_dt))
+    total_n = nneurons * (pulse_n + gap_n)
+    amp = 1.0
+    new_len = max(stim.shape[0], total_n)
+    stim = np.zeros((new_len, nneurons), dtype=stim.dtype)
+    for i in range(nneurons):
+        t0 = i * (pulse_n + gap_n)
+        stim[t0 : t0 + pulse_n, i] = amp
     stim_array = StimArray(
         name="stimulus",
         stim_type=StimType.Excitation,
         values=stim,
         units="siemens",
-        dt=0.001,
+        dt=stim_dt,
     )
     project.add_stim_array(stim_array)
 

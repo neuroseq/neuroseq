@@ -19,10 +19,13 @@ from neuroseq.stim import DrawStim
 from neuroseq.stim import DrawStimType
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
+from neuroseq.stim_array_modifier import ResizableReversibleAction
 from neuroseq.stim_array_modifier import StimArrayModifier
 from neuroseq.stim_dialog import EditStimDialog
 from neuroseq.stim_intensity_dialog import StimIntensityDialog
 from neuroseq.stim_loop_dialog import StimLoopDialog
+from neuroseq.stim_pattern_dialog import StimPatternContext
+from neuroseq.stim_pattern_dialog import StimPatternDialog
 from neuroseq.stim_timing import DEFAULT_STIM_DT_SECONDS
 from neuroseq.stim_timing import format_milliseconds
 from neuroseq.stim_timing import milliseconds_to_samples_nearest
@@ -78,6 +81,12 @@ class StimEditor(QtWidgets.QWidget):
         self.stim_type = StimType.Excitation
         self.stims_dict: dict[str, StimArrayModifier] = {}
         self.copy_values = np.zeros((0, 0))
+        self._pattern_dialog: StimPatternDialog | None = None
+        # Captures the time index the user clicked at, so a Ramp drag can
+        # use it as the ramp's left edge for every subsequent mouse_dragged
+        # emit (the signal's `initial_time_index` is the *previous* position
+        # during a drag, not the original click).
+        self._draw_drag_origin_time_index: int | None = None
         layout = QtWidgets.QGridLayout(self)
         layout.setSpacing(0)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -365,43 +374,56 @@ class StimEditor(QtWidgets.QWidget):
             self.set_mode(InteractMode.DRAW)
             self.set_draw_mode(DrawMode.DRAW)
             self._stim_values_updated()
+        pattern_dialog = getattr(self, "_pattern_dialog", None)
+        if pattern_dialog is not None and self.current_stim_modifier is not None:
+            pattern_dialog.set_context(self._current_pattern_context())
 
     @overload
     def _current_draw_stim_values(
-        self, force_array: Literal[True], erase: bool = ...
+        self,
+        force_array: Literal[True],
+        erase: bool = ...,
+        length: int | None = ...,
+        reverse: bool = ...,
     ) -> np.ndarray: ...
     @overload
     def _current_draw_stim_values(
-        self, force_array: bool = ..., erase: bool = ...
+        self,
+        force_array: bool = ...,
+        erase: bool = ...,
+        length: int | None = ...,
+        reverse: bool = ...,
     ) -> np.ndarray | float: ...
     def _current_draw_stim_values(
-        self, force_array: bool = False, erase: bool = False
+        self,
+        force_array: bool = False,
+        erase: bool = False,
+        length: int | None = None,
+        reverse: bool = False,
     ) -> np.ndarray | float:
+        n_samples = self.draw_stim_length if length is None else max(1, length)
         if erase:
             if force_array:
-                return np.zeros((self.draw_stim_length, 1))
+                return np.zeros((n_samples, 1))
             else:
                 return 0.0
         match self.draw_stim.draw_stim_type:
             case DrawStimType.Constant:
                 if force_array:
-                    return np.full((self.draw_stim_length, 1), self.draw_stim.value1)
+                    return np.full((n_samples, 1), self.draw_stim.value1)
                 else:
                     return self.draw_stim.value1
             case DrawStimType.Linear:
-                return np.linspace(
-                    self.draw_stim.value1, self.draw_stim.value2, self.draw_stim_length
-                )[:, np.newaxis]
-            case DrawStimType.Logarithmic:
-                return np.geomspace(
-                    self.draw_stim.value1, self.draw_stim.value2, self.draw_stim_length
-                )[:, np.newaxis]
-            case DrawStimType.Random:
-                return np.random.uniform(
-                    min(self.draw_stim.value1, self.draw_stim.value2),
-                    max(self.draw_stim.value1, self.draw_stim.value2),
-                    (self.draw_stim_length, 1),
-                )
+                start = self.draw_stim.value2 if reverse else self.draw_stim.value1
+                stop = self.draw_stim.value1 if reverse else self.draw_stim.value2
+                return np.linspace(start, stop, n_samples)[:, np.newaxis]
+            case _:
+                # Legacy types (Logarithmic / Random) are no longer surfaced
+                # via the designer dialog; coerce to a Constant fallback so
+                # restored designs that still carry them don't crash.
+                if force_array:
+                    return np.full((n_samples, 1), self.draw_stim.value1)
+                return self.draw_stim.value1
 
     def set_mode(self, mode: InteractMode) -> None:
         self.mode = mode
@@ -446,23 +468,25 @@ class StimEditor(QtWidgets.QWidget):
         return time_slice.stop <= self.stim_widget.n_timestamps
 
     def draw_stim_region(
-        self, neuron_slice: slice, time_slice: slice, erase=False
+        self,
+        neuron_slice: slice,
+        time_slice: slice,
+        erase: bool = False,
+        reverse: bool = False,
     ) -> None:
         if self.current_stim_modifier is None:
             return
         time_slice = slice(time_slice.start, time_slice.stop)
-        if not erase and self.draw_stim.draw_stim_type != DrawStimType.Constant:
-            # for non-constant stim, don't allow draw region to be larger than draw_stim_length
-            time_slice = slice(
-                time_slice.start, time_slice.start + self.draw_stim_length
-            )
         if not self._is_valid_slice(neuron_slice, time_slice) and (
             erase or not self._ensure_time_capacity_for_slice(time_slice)
         ):
             return
         if not self._is_valid_slice(neuron_slice, time_slice):
             return
-        values = self._current_draw_stim_values(erase=erase)
+        slice_length = max(1, time_slice.stop - time_slice.start)
+        values = self._current_draw_stim_values(
+            erase=erase, length=slice_length, reverse=reverse
+        )
         self.current_stim_modifier.do(neuron_slice, time_slice, values)
         self._stim_values_updated()
 
@@ -490,6 +514,18 @@ class StimEditor(QtWidgets.QWidget):
             erase = (self.draw_mode == DrawMode.DRAW and button_index == 2) or (
                 self.draw_mode == DrawMode.ERASE and button_index == 1
             )
+            # A Ramp drag has already committed the final shape from origin
+            # → current via the trailing mouse_dragged emit, so the click
+            # handler must not stamp a fresh draw_stim_length-wide ramp on
+            # top of its right end. Clear the origin marker either way.
+            ramp_drag_in_progress = (
+                self._draw_drag_origin_time_index is not None
+                and not erase
+                and self.draw_stim.draw_stim_type == DrawStimType.Linear
+            )
+            self._draw_drag_origin_time_index = None
+            if ramp_drag_in_progress:
+                return
             neuron_slice = slice(neuron_index, neuron_index + 1)
             time_slice = slice(time_index, time_index + self.draw_stim_length)
             if not self._is_valid_slice(neuron_slice, time_slice):
@@ -534,18 +570,45 @@ class StimEditor(QtWidgets.QWidget):
         else:
             # when drawing keep the neuron index fixed to the initial neuron index
             neuron_slice = slice(initial_neuron_index, initial_neuron_index + 1)
+            # For a Ramp draw, anchor the left edge of the slice to the
+            # ORIGINAL click position so successive emits during a drag
+            # overwrite one coherent ramp rather than stamping a short
+            # ramp between each pair of consecutive sampled positions.
+            # The signal's `initial_time_index` is the previous emit's
+            # position once a drag is underway, so we capture the origin
+            # from the very first emit (where initial == current ==
+            # pointer-down position) and reuse it until release.
+            if self.draw_stim.draw_stim_type == DrawStimType.Linear:
+                if (
+                    self._draw_drag_origin_time_index is None
+                    or initial_time_index == current_time_index
+                ):
+                    self._draw_drag_origin_time_index = initial_time_index
+                left_anchor = self._draw_drag_origin_time_index
+            else:
+                left_anchor = initial_time_index
             # and draw between the two time indices
             time_slice = slice(
-                min(initial_time_index, current_time_index),
-                max(initial_time_index, current_time_index) + self.draw_stim_length,
+                min(left_anchor, current_time_index),
+                max(left_anchor, current_time_index) + self.draw_stim_length,
             )
         if not self._is_valid_slice(neuron_slice, time_slice):
             return
+        # When a Ramp drag goes backward (current < origin), flip the linspace
+        # so value1 stays at the user's click position and value2 lands at the
+        # release position.
+        reverse_ramp = (
+            not erase
+            and self.draw_stim.draw_stim_type == DrawStimType.Linear
+            and self._draw_drag_origin_time_index is not None
+            and current_time_index < self._draw_drag_origin_time_index
+        )
         if self.mode == InteractMode.DRAW:
             self.draw_stim_region(
                 neuron_slice,
                 time_slice,
                 erase=erase,
+                reverse=reverse_ramp,
             )
 
     def copy_selected_stim(self) -> None:
@@ -605,12 +668,24 @@ class StimEditor(QtWidgets.QWidget):
         if self.current_stim_modifier is None:
             return
         self.current_stim_modifier.undo()
+        if self.project is not None:
+            self.controller.set_limits(
+                float(self.project.max_time_secs),
+                max(1, int(self.project.max_neurons)),
+            )
+            self.limits_modified.emit()
         self._stim_values_updated()
 
     def redo(self) -> None:
         if self.current_stim_modifier is None:
             return
         self.current_stim_modifier.redo()
+        if self.project is not None:
+            self.controller.set_limits(
+                float(self.project.max_time_secs),
+                max(1, int(self.project.max_neurons)),
+            )
+            self.limits_modified.emit()
         self._stim_values_updated()
 
     def save_selected_stim(self) -> None:
@@ -874,6 +949,75 @@ class StimEditor(QtWidgets.QWidget):
             return
         new_values = np.zeros_like(self.current_stim_modifier.stim_array.values)
         self.replace_stim_values_with_undo(name, new_values)
+        pattern_dialog = getattr(self, "_pattern_dialog", None)
+        if pattern_dialog is not None:
+            pattern_dialog.reset_start_time()
+
+    def _current_pattern_context(self) -> StimPatternContext:
+        if self.current_stim_modifier is None:
+            raise ValueError("No current stim array selected.")
+        stim_array = self.current_stim_modifier.stim_array
+        return StimPatternContext(
+            stim_name=stim_array.name,
+            units=stim_array.units,
+            dt_seconds=float(stim_array.dt),
+            n_neurons=int(stim_array.values.shape[1]),
+        )
+
+    def open_pattern_designer(self) -> None:
+        if self.current_stim_modifier is None or self.project is None:
+            return
+        if self._pattern_dialog is None:
+            self._pattern_dialog = StimPatternDialog(self, self)
+        self._pattern_dialog.set_context(self._current_pattern_context())
+        self._pattern_dialog.show()
+        self._pattern_dialog.raise_()
+        self._pattern_dialog.activateWindow()
+
+    def apply_pattern(
+        self,
+        neuron_slice: slice,
+        time_slice: slice,
+        new_values: np.ndarray,
+    ) -> None:
+        if self.current_stim_modifier is None or self.project is None:
+            return
+        modifier = self.current_stim_modifier
+        target_name = modifier.stim_array.name
+        action = ResizableReversibleAction(
+            self.project,
+            target_name,
+            neuron_slice,
+            time_slice,
+            new_values,
+            self.stim_widget,
+        )
+        modifier.action_stack = modifier.action_stack[: modifier.current_index + 1]
+        modifier.action_stack.append(action)
+        action(modifier.stim_array, self.stim_widget)
+        modifier.current_index = len(modifier.action_stack) - 1
+        for other in self.stims_dict.values():
+            if other is not modifier:
+                other.action_stack = []
+                other.current_index = -1
+        self.controller.set_limits(
+            float(self.project.max_time_secs),
+            max(1, int(self.project.max_neurons)),
+        )
+        self.limits_modified.emit()
+        self._stim_values_updated()
+
+    def _pattern_designer_icon(self):
+        for icon_name in [
+            "mdi6.creation",
+            "mdi6.auto-fix",
+            "mdi6.gesture-tap-button",
+        ]:
+            try:
+                return qta.icon(icon_name)
+            except Exception:
+                continue
+        return qta.icon("mdi6.pencil")
 
     def _add_actions(self, toolbar: QtWidgets.QToolBar, menu: QtWidgets.QMenu) -> None:
         self.action_draw_mode = add_action(
@@ -958,6 +1102,14 @@ class StimEditor(QtWidgets.QWidget):
             icon=qta.icon("mdi6.repeat-variant"),
         )
         add_action(
+            "Design stimulation pattern",
+            self.open_pattern_designer,
+            menu,
+            toolbar,
+            self,
+            icon=self._pattern_designer_icon(),
+        )
+        add_action(
             "Show all stim arrays",
             self.toggle_show_all_stim_arrays,
             menu,
@@ -1016,7 +1168,7 @@ class StimEditor(QtWidgets.QWidget):
         )
         self.actions_draw.append(
             add_action(
-                "Modify stimulus intensity",
+                "Draw designer stimuli",
                 self.choose_stim_intensity,
                 menu,
                 toolbar,

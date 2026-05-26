@@ -1701,6 +1701,7 @@ def test_gui_imported_igor_stim_can_be_edited_by_click(
                 (time_slice, neuron_slice), 0.0 if erase else draw_value
             )
         ),
+        _draw_drag_origin_time_index=None,
     )
 
     class FakeComboBox:
