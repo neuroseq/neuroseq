@@ -12,7 +12,11 @@ from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
+from neuroseq.importer_cellpose import AOIRole
+from neuroseq.importer_cellpose import AreasOfInterestConfig
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importer_cellpose import CircleAOI
+from neuroseq.importer_cellpose import SquareAOI
 from neuroseq.stim import StimArray
 from neuroseq.stim_timing import ensure_2d_stim_values
 
@@ -33,6 +37,52 @@ def _save_array(zf: zipfile.ZipFile, name: str, array: np.ndarray) -> str:
         suffix_counter += 1
     zf.writestr(name, npy_buffer.getvalue())
     return name
+
+
+def _aoi_to_json(config: AreasOfInterestConfig | None) -> dict | None:
+    if config is None:
+        return None
+    return {
+        "square": {
+            "enabled": bool(config.square.enabled),
+            "role": config.square.role.value,
+            "x": float(config.square.x),
+            "y": float(config.square.y),
+            "side": float(config.square.side),
+        },
+        "circle": {
+            "enabled": bool(config.circle.enabled),
+            "role": config.circle.role.value,
+            "cx": float(config.circle.cx),
+            "cy": float(config.circle.cy),
+            "diameter": float(config.circle.diameter),
+        },
+        "show_shapes": bool(config.show_shapes),
+    }
+
+
+def _aoi_from_json(config: dict | None) -> AreasOfInterestConfig | None:
+    if config is None:
+        return None
+    square = config["square"]
+    circle = config["circle"]
+    return AreasOfInterestConfig(
+        square=SquareAOI(
+            enabled=bool(square["enabled"]),
+            role=AOIRole(square["role"]),
+            x=float(square["x"]),
+            y=float(square["y"]),
+            side=float(square["side"]),
+        ),
+        circle=CircleAOI(
+            enabled=bool(circle["enabled"]),
+            role=AOIRole(circle["role"]),
+            cx=float(circle["cx"]),
+            cy=float(circle["cy"]),
+            diameter=float(circle["diameter"]),
+        ),
+        show_shapes=bool(config.get("show_shapes", True)),
+    )
 
 
 def _json_encoder_factory(zf: zipfile.ZipFile):
@@ -114,6 +164,7 @@ def _json_encoder_factory(zf: zipfile.ZipFile):
                         "stimulus_to_cellpose_mapping": obj.stimulus_to_cellpose_mapping,
                         "mapping_strategy": obj.mapping_strategy,
                         "linear_offset": obj.linear_offset,
+                        "aoi_config": _aoi_to_json(obj.aoi_config),
                     }
                 case b2.Quantity():
                     value, unit = quantity_to_value_unit_str(obj)
@@ -219,6 +270,7 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                 "stimulus_to_cellpose_mapping": stimulus_to_cellpose_mapping,
                 "mapping_strategy": mapping_strategy,
                 "linear_offset": linear_offset,
+                "aoi_config": aoi_config,
             }:
                 with _zf.open(segmentation_array) as fp:
                     loaded_segmentation = np.load(fp)
@@ -245,7 +297,51 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                         }
                     ),
                     mapping_strategy=mapping_strategy,
-                    linear_offset=int(linear_offset),
+                    linear_offset=(
+                        None if linear_offset is None else int(linear_offset)
+                    ),
+                    aoi_config=_aoi_from_json(aoi_config),
+                )
+            case {
+                "!CellposeImportResult": True,
+                "image_path": image_path,
+                "segmentation_array": segmentation_array,
+                "overlay_image": overlay_image,
+                "trace_data": trace_data,
+                "spike_data": spike_data,
+                "original_cellpose_ids": original_cellpose_ids,
+                "stimulus_to_cellpose_mapping": stimulus_to_cellpose_mapping,
+                "mapping_strategy": mapping_strategy,
+                "linear_offset": linear_offset,
+            }:
+                with _zf.open(segmentation_array) as fp:
+                    loaded_segmentation = np.load(fp)
+                with _zf.open(overlay_image) as fp:
+                    loaded_overlay = np.load(fp)
+                loaded_original_ids = None
+                if original_cellpose_ids is not None:
+                    with _zf.open(original_cellpose_ids) as fp:
+                        loaded_original_ids = np.load(fp)
+
+                return CellposeImportResult(
+                    image_path=Path(image_path),
+                    segmentation_array=loaded_segmentation,
+                    overlay_image=loaded_overlay,
+                    trace_data=trace_data,
+                    spike_data=spike_data,
+                    original_cellpose_ids=loaded_original_ids,
+                    stimulus_to_cellpose_mapping=(
+                        None
+                        if stimulus_to_cellpose_mapping is None
+                        else {
+                            int(k): int(v)
+                            for k, v in stimulus_to_cellpose_mapping.items()
+                        }
+                    ),
+                    mapping_strategy=mapping_strategy,
+                    linear_offset=(
+                        None if linear_offset is None else int(linear_offset)
+                    ),
                 )
             case {
                 "!CellposeImportResult": True,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -9,9 +10,40 @@ import brian2.numpy_ as np
 from PIL import Image
 from PIL import ImageSequence
 
+from neuroseq.aoi_shapes import world_to_user_point
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.utils import neuron_indices_to_colors
+
+
+class AOIRole(str, Enum):  # noqa: UP042
+    PREFERENTIAL = "preferential"
+    EXCLUSION = "exclusion"
+
+
+@dataclass
+class SquareAOI:
+    enabled: bool
+    role: AOIRole
+    x: float
+    y: float
+    side: float
+
+
+@dataclass
+class CircleAOI:
+    enabled: bool
+    role: AOIRole
+    cx: float
+    cy: float
+    diameter: float
+
+
+@dataclass
+class AreasOfInterestConfig:
+    square: SquareAOI
+    circle: CircleAOI
+    show_shapes: bool = True
 
 
 @dataclass
@@ -25,6 +57,135 @@ class CellposeImportResult:
     stimulus_to_cellpose_mapping: dict[int, int] | None = None
     mapping_strategy: str | None = None
     linear_offset: int | None = None
+    aoi_config: AreasOfInterestConfig | None = None
+
+
+def clone_aoi_config(
+    config: AreasOfInterestConfig | None,
+) -> AreasOfInterestConfig | None:
+    """Return a defensive copy of an AOI configuration."""
+    if config is None:
+        return None
+
+    return AreasOfInterestConfig(
+        square=SquareAOI(
+            enabled=bool(config.square.enabled),
+            role=AOIRole(config.square.role),
+            x=float(config.square.x),
+            y=float(config.square.y),
+            side=float(config.square.side),
+        ),
+        circle=CircleAOI(
+            enabled=bool(config.circle.enabled),
+            role=AOIRole(config.circle.role),
+            cx=float(config.circle.cx),
+            cy=float(config.circle.cy),
+            diameter=float(config.circle.diameter),
+        ),
+        show_shapes=bool(config.show_shapes),
+    )
+
+
+def default_aoi_config(image_shape: tuple[int, int]) -> AreasOfInterestConfig:
+    """Return the default AOI config centred within the field of view."""
+    h, w = image_shape[:2]
+    short = min(h, w)
+    circle_d = short / 8.0
+    square_s = 3.0 * circle_d
+    return AreasOfInterestConfig(
+        square=SquareAOI(
+            enabled=True,
+            role=AOIRole.PREFERENTIAL,
+            x=(w - square_s) / 2.0,
+            y=(h - square_s) / 2.0,
+            side=square_s,
+        ),
+        circle=CircleAOI(
+            enabled=True,
+            role=AOIRole.EXCLUSION,
+            cx=w / 2.0,
+            cy=h / 2.0,
+            diameter=circle_d,
+        ),
+        show_shapes=True,
+    )
+
+
+def point_in_square(ux: float, uy: float, sq: SquareAOI) -> bool:
+    """Return whether a user-space point lies inside the square."""
+    return sq.x <= ux <= sq.x + sq.side and sq.y <= uy <= sq.y + sq.side
+
+
+def point_in_circle(ux: float, uy: float, c: CircleAOI) -> bool:
+    """Return whether a user-space point lies inside the circle."""
+    radius = c.diameter / 2.0
+    return (ux - c.cx) ** 2 + (uy - c.cy) ** 2 <= radius * radius
+
+
+def generate_aoi_stimulus_mapping(
+    original_ids: np.ndarray | None,
+    label_centers: dict[int, tuple[float, float]],
+    config: AreasOfInterestConfig,
+    image_height: int,
+) -> dict[int, int]:
+    """Map cellpose IDs to stimulus IDs using AOI role tiers."""
+    if original_ids is None:
+        return {}
+
+    cells: list[tuple[int, float, float]] = []
+    for cellpose_id in original_ids:
+        center = label_centers.get(int(cellpose_id))
+        if center is None:
+            continue
+        cells.append((int(cellpose_id), float(center[0]), float(center[1])))
+
+    preferential: list[int] = []
+    neutral: list[int] = []
+    exclusion: list[int] = []
+
+    for cellpose_id, world_x, world_y in cells:
+        user_x, user_y = world_to_user_point(world_x, world_y, image_height)
+        in_square = config.square.enabled and point_in_square(
+            user_x, user_y, config.square
+        )
+        in_circle = config.circle.enabled and point_in_circle(
+            user_x, user_y, config.circle
+        )
+
+        is_exclusion = (
+            config.square.enabled
+            and config.square.role == AOIRole.EXCLUSION
+            and in_square
+        ) or (
+            config.circle.enabled
+            and config.circle.role == AOIRole.EXCLUSION
+            and in_circle
+        )
+        is_preferential = not is_exclusion and (
+            (
+                config.square.enabled
+                and config.square.role == AOIRole.PREFERENTIAL
+                and in_square
+            )
+            or (
+                config.circle.enabled
+                and config.circle.role == AOIRole.PREFERENTIAL
+                and in_circle
+            )
+        )
+
+        if is_exclusion:
+            exclusion.append(cellpose_id)
+        elif is_preferential:
+            preferential.append(cellpose_id)
+        else:
+            neutral.append(cellpose_id)
+
+    preferential.sort()
+    neutral.sort()
+    exclusion.sort()
+    ordered_ids = preferential + neutral + exclusion
+    return {stim_id: cellpose_id for stim_id, cellpose_id in enumerate(ordered_ids)}
 
 
 def clone_cellpose_result(
@@ -60,6 +221,7 @@ def clone_cellpose_result(
         ),
         mapping_strategy=result.mapping_strategy,
         linear_offset=result.linear_offset,
+        aoi_config=clone_aoi_config(result.aoi_config),
     )
 
 
@@ -397,6 +559,7 @@ class CellPoseImporter:
         *,
         mapping_strategy: str = "Linear",
         linear_offset: int = 0,
+        aoi_config: AreasOfInterestConfig | None = None,
     ) -> CellposeImportResult:
         """Create import result after successful processing."""
         if self.segmentation_data is None or self.overlay_image is None:
@@ -412,6 +575,7 @@ class CellPoseImporter:
             stimulus_to_cellpose_mapping=stimulus_to_cellpose_mapping,
             mapping_strategy=mapping_strategy,
             linear_offset=linear_offset,
+            aoi_config=clone_aoi_config(aoi_config),
         )
 
     def restore_from_result(self, result: CellposeImportResult) -> None:

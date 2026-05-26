@@ -1,0 +1,581 @@
+cellpose_aoi_mapping — "Custom with areas of interest" mapping strategy in the Cellpose import dialog [IMPLEMENTED]
+==================================================================================================================
+
+Add a third Mapping Strategy to the Cellpose import dialog: "Custom with areas of
+interest". When active, the user defines two shapes on the FOV — a square (the
+region where the laser power distribution is well-behaved) and a circle (the
+region where power cannot be generated properly). Each shape can be marked
+preferential or exclusion. Cells whose centroid falls inside a preferential
+shape get the lowest stim IDs (starting at 0). Cells inside an exclusion shape
+get the highest stim IDs. Exclusion takes priority where shapes overlap.
+
+The result is fed into the existing custom-mapping line edit (autofilled),
+which is what already drives `_parse_custom_mapping` and `_update_preview_mapping`.
+
+Files to change:
+    src/neuroseq/importer_cellpose.py           (add AOI dataclasses, mapping helper, persist)
+    src/neuroseq/cellpose_import_dialog.py      (radio button, sub-group UI, wire-up)
+    src/neuroseq/cell_overlay_widget.py         (draw + drag/resize shapes, emit changes)
+    src/neuroseq/io.py                          (serialise/deserialise AOI config)
+
+Files to create:
+    tests/test_cellpose_aoi_mapping.py          (logic + UI tests)
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+COORDINATE SYSTEMS — read before touching the overlay
+────────────────────────────────────────────────────────────────────────────────────────────
+
+The cellpose importer calls `np.flipud()` on both the image and the segmentation
+(`importer_cellpose.py:162` and `:278`) so that pygfx's default y-up camera
+displays the original image right-way-up (Fiji-style). Consequences:
+
+- In pygfx WORLD coords (what `OverlayView` operates in): origin is at the
+  bottom-left of the displayed image. world_x ∈ [0, W], world_y ∈ [0, H].
+  `_label_centers` and `pointer_move` already use world coords directly
+  (see `cell_overlay_widget.py:269-273` and `:486-506`).
+
+- In USER-facing coords (what goes into the text fields and is exposed to the
+  reviewer): origin is at the top-left of the displayed image, y grows
+  downward. For a point: `world_x = user_x`, `world_y = H - user_y`.
+  For a square defined by its top-left corner (user_x, user_y) and side s:
+  the world-coords AABB is `x ∈ [user_x, user_x + s]`,
+  `y ∈ [H - user_y - s, H - user_y]`.
+
+Centralise this conversion in `aoi_shapes.py` (see below) so the dialog, the
+overlay, and the mapping helper all agree.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/importer_cellpose.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1.  ADD enums + dataclasses at module top (after the existing `CellposeImportResult`):
+
+        from enum import Enum
+
+        class AOIRole(str, Enum):
+            PREFERENTIAL = "preferential"
+            EXCLUSION = "exclusion"
+
+        @dataclass
+        class SquareAOI:
+            enabled: bool
+            role: AOIRole
+            x: float           # user-coord top-left X (px)
+            y: float           # user-coord top-left Y (px)
+            side: float        # px
+
+        @dataclass
+        class CircleAOI:
+            enabled: bool
+            role: AOIRole
+            cx: float          # user-coord centre X (px)
+            cy: float          # user-coord centre Y (px)
+            diameter: float    # px
+
+        @dataclass
+        class AreasOfInterestConfig:
+            square: SquareAOI
+            circle: CircleAOI
+            show_shapes: bool = True
+
+    Use string-backed enum so JSON round-tripping in `io.py` stays trivial.
+
+2.  ADD a factory `default_aoi_config(image_shape: tuple[int, int]) -> AreasOfInterestConfig`:
+
+        h, w = image_shape[:2]
+        short = min(h, w)
+        circle_d = short / 8.0
+        square_s = 3.0 * circle_d
+        # Centre both on the FOV.
+        return AreasOfInterestConfig(
+            square=SquareAOI(
+                enabled=True, role=AOIRole.PREFERENTIAL,
+                x=(w - square_s) / 2.0, y=(h - square_s) / 2.0, side=square_s,
+            ),
+            circle=CircleAOI(
+                enabled=True, role=AOIRole.EXCLUSION,
+                cx=w / 2.0, cy=h / 2.0, diameter=circle_d,
+            ),
+            show_shapes=True,
+        )
+
+    Square default = preferential, circle default = exclusion — matches the
+    physical setup (well-behaved square, bad circle).
+
+3.  ADD `generate_aoi_stimulus_mapping`:
+
+        def generate_aoi_stimulus_mapping(
+            original_ids: np.ndarray | None,
+            label_centers: dict[int, tuple[float, float]],
+            config: AreasOfInterestConfig,
+            image_height: int,
+        ) -> dict[int, int]:
+            """Map cellpose IDs to stim IDs using AOI roles.
+
+            `label_centers` is the {cellpose_id: (world_x, world_y)} map produced
+            by OverlayView._compute_label_centers (i.e. world coords). The
+            shapes in `config` are in user coords; convert before testing.
+            """
+
+    Logic, in order:
+        a. If `original_ids` is None → return {}.
+        b. Build a list of (cellpose_id, world_x, world_y) for every id in
+           `original_ids` that has a centroid in `label_centers`. Cells
+           without a centroid (degenerate masks) are dropped silently.
+        c. For each cell, evaluate membership:
+              in_square = config.square.enabled and point_in_square(world_x, H - world_y, square)
+              in_circle = config.circle.enabled and point_in_circle(world_x, H - world_y, circle)
+           Note: convert world_y → user_y via `H - world_y` so the shape's user
+           coords are directly comparable.
+        d. Compute the role for each cell:
+              - exclusion if (square is exclusion AND in_square) OR
+                              (circle is exclusion AND in_circle)
+              - preferential if NOT exclusion AND
+                              ((square is preferential AND in_square) OR
+                               (circle is preferential AND in_circle))
+              - neutral otherwise
+           Exclusion always wins over preferential — required by spec.
+        e. Sort each tier by cellpose_id ascending.
+        f. Concatenate: [preferential…, neutral…, exclusion…].
+        g. Assign stim_id = position in that concatenated list (0..T-1).
+        h. Return `{stim_id: cellpose_id}` — same shape as
+           `generate_linear_stimulus_mapping` and the same shape consumed by
+           the rest of the dialog.
+
+    Helpers — implement as plain free functions in the same module:
+
+        def point_in_square(ux: float, uy: float, sq: SquareAOI) -> bool:
+            return sq.x <= ux <= sq.x + sq.side and sq.y <= uy <= sq.y + sq.side
+
+        def point_in_circle(ux: float, uy: float, c: CircleAOI) -> bool:
+            r = c.diameter / 2.0
+            return (ux - c.cx) ** 2 + (uy - c.cy) ** 2 <= r * r
+
+4.  ADD `aoi_config: AreasOfInterestConfig | None = None` to `CellposeImportResult`.
+    Update `clone_cellpose_result` to deep-copy it (the dataclass fields are
+    immutable primitives + enum, so `copy.deepcopy` or a manual rebuild both
+    work — match the existing style: manual rebuild).
+
+5.  Update `CellPoseImporter.create_result` to accept `aoi_config` and pass it
+    through.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/cellpose_import_dialog.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1.  EXTEND the strategy radio set (around line 184-194):
+
+        for option in ("Linear", "Custom", "Custom with areas of interest"):
+
+    Use a constant `CUSTOM_AOI_STRATEGY = "Custom with areas of interest"`
+    at module top so string comparisons stay in one place.
+
+2.  ADD an `Areas of Interest` QGroupBox below the existing mapping_layout
+    rows. It contains, vertically:
+
+        Row 1 — Square:
+            [x] Square        (•) preferential  ( ) exclusion
+                  x: [____]  y: [____]  side: [____]
+        Row 2 — Circle:
+            [x] Circle        ( ) preferential  (•) exclusion
+                  cx: [____]  cy: [____]  diameter: [____]
+
+    Names: `self.aoi_group`, `self.square_enabled_cb`,
+    `self.square_role_buttons` (QButtonGroup, exclusive, holds
+    `square_pref_radio` / `square_excl_radio`), `self.square_x_spin`,
+    `self.square_y_spin`, `self.square_side_spin`, then the same for circle.
+
+    Use `QDoubleSpinBox` with range [0, 1e6], decimals=1, step=1 — pixel-fractional
+    moves are fine. Set their values from `default_aoi_config(image.shape)` on
+    first load.
+
+    The whole `aoi_group` is hidden by default (`setVisible(False)`); reveal
+    it only when the radio is on "Custom with areas of interest". The role
+    radios are children of each shape's checkbox — disable them and the coord
+    spins when the shape's checkbox is unticked (greyed out, not removed —
+    keeps layout stable).
+
+3.  ADD a "Show shapes" QCheckBox to the `checkbox_container` under the
+    overlay (around line 252-253), named `self.show_shapes_checkbox`. Default
+    checked. Visible only in AOI mode — toggle visibility in `_on_mapping_changed`.
+
+4.  Update `_on_mapping_changed`:
+
+        is_aoi = mapping_strategy == CUSTOM_AOI_STRATEGY
+        is_any_custom = mapping_strategy in ("Custom", CUSTOM_AOI_STRATEGY)
+        self.custom_mapping_line.setVisible(is_any_custom)
+        self.custom_mapping_label.setVisible(is_any_custom)
+        self.linear_offset_spin.setVisible(not is_any_custom)
+        self.linear_offset_label.setVisible(not is_any_custom)
+        self.aoi_group.setVisible(is_aoi)
+        self.show_shapes_checkbox.setVisible(is_aoi)
+        if hasattr(self, "guidance_label"):
+            self.guidance_label.setVisible(is_any_custom)
+        if is_aoi:
+            self._regenerate_aoi_mapping()
+        # ... existing preview refresh
+
+    The existing `Custom` mode keeps its current behaviour (user types in
+    the line edit by hand).
+
+5.  ADD `_current_aoi_config(self) -> AreasOfInterestConfig | None`:
+
+    Read the spins / checkboxes / radio buttons and return a populated
+    `AreasOfInterestConfig`. Returns None if the importer has no image yet.
+
+6.  ADD `_regenerate_aoi_mapping(self) -> None`:
+
+    Called whenever any AOI input changes OR when the user drags/resizes a
+    shape on the overlay. It:
+
+        a. Computes the new mapping via `generate_aoi_stimulus_mapping(
+              self.importer._original_cellpose_ids,
+              self.overlay_widget.overlay_view._label_centers,
+              self._current_aoi_config(),
+              self.importer.image_data.shape[0],
+           )`.
+        b. Serialises it to the same "stim:cellpose,…" string format that
+           `_parse_custom_mapping` accepts. Skip identity pairs (consistent
+           with `_apply_existing_mapping` at line 501-503).
+        c. Blocks signals on `self.custom_mapping_line` while calling
+           `setText` — otherwise `_on_custom_mapping_text_changed` re-fires
+           `_update_preview_mapping`, which we want, but we also want a single
+           refresh, not two. Cleanest: set the text, then call
+           `_update_preview_mapping` once, and gate the AOI sub-widgets so
+           they don't recurse.
+        d. Pushes the shape config to the overlay
+           (`self.overlay_widget.set_aoi_overlay(config, show=self.show_shapes_checkbox.isChecked())`).
+
+    Wire the spins, checkboxes, and radios to `_regenerate_aoi_mapping` via
+    `valueChanged` / `toggled`. Also wire `show_shapes_checkbox` toggle to
+    `set_aoi_overlay(... show=…)` (no mapping recompute needed when only
+    visibility changes).
+
+7.  Update `_generate_stimulus_mapping(strategy)` to handle the new strategy
+    by delegating to `_regenerate_aoi_mapping`'s underlying computation
+    (factor the pure-compute part out so both can share). Returning the
+    in-memory mapping is enough — the line edit is the source of truth for
+    "Custom" but for AOI mode we'd rather be deterministic from the config
+    than parse what we just wrote. So: in AOI mode, call the helper directly;
+    in Custom mode, parse the line edit as today.
+
+8.  Update `_import_data` to pass the AOI config through to
+    `create_result(...)` when in AOI mode, and to record
+    `mapping_strategy=CUSTOM_AOI_STRATEGY`.
+
+9.  Update `_apply_existing_mapping` and `_load_existing_data_if_available`:
+    after restoring strategy/mapping, also restore the AOI config from
+    `existing_data.aoi_config` (if present) into the UI controls. If absent
+    but strategy is `CUSTOM_AOI_STRATEGY` (an inconsistent archive), fall
+    back to `default_aoi_config(image.shape)`.
+
+10. Connect a slot to the overlay's shape-change signal (see next section)
+    that writes the new geometry into the spins and re-runs
+    `_regenerate_aoi_mapping`. Guard against reentrancy with a
+    `self._suppress_aoi_signals = False` flag set around programmatic spin
+    updates — pattern already used elsewhere via `_is_adjusting_position`.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/cell_overlay_widget.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+The shapes live on the same pygfx subplot as the image and labels.
+
+1.  ADD a Qt signal on `CellOverlayWidget`:
+
+        aoi_geometry_changed = QtCore.Signal(object)  # emits AreasOfInterestConfig
+
+    Plumb it: `OverlayView` emits via `self._owner = parent` callback, or
+    let `CellOverlayWidget` install its own pointer handlers and forward.
+    Cleanest: keep the interactive logic on `OverlayView`, give it an
+    `on_geometry_changed: Callable[[AreasOfInterestConfig], None] | None`
+    attribute, and have `CellOverlayWidget._setup_ui` set it to a lambda that
+    emits the signal.
+
+2.  ADD `set_aoi_overlay(config: AreasOfInterestConfig | None, show: bool)` on
+    `CellOverlayWidget`. Stores config; forwards to `OverlayView.set_aoi_shapes`.
+    `config=None` clears the shapes.
+
+3.  In `OverlayView`, ADD:
+
+        self._aoi_config: AreasOfInterestConfig | None = None
+        self._aoi_visible: bool = True
+        self._square_line: LineGraphic | None = None
+        self._square_handles: list[ScatterGraphic] = []   # 4 corners
+        self._square_face: ImageGraphic | None = None     # optional shaded fill (skip for v1; line ring is enough)
+        self._circle_line: LineGraphic | None = None
+        self._circle_handles: list[ScatterGraphic] = []   # 4 cardinal points
+        self._drag_state: _AOIDragState | None = None
+
+    `_AOIDragState` is a small dataclass with: which shape ("square"/"circle"),
+    which part ("body" / "corner_<idx>" / "edge_<dir>"), the world-coord
+    anchor, and the original geometry. Use it to compute drag deltas.
+
+4.  IMPLEMENT `set_aoi_shapes(config, visible)`:
+    - If `config` is None or `not visible`, hide all shape graphics.
+    - Otherwise build/update the two shape graphics from the config in WORLD
+      coords. For the square: a 5-point closed polyline. For the circle: a
+      72-point polyline. Colour by role: preferential = green (0.3, 0.85, 0.3),
+      exclusion = red (0.95, 0.3, 0.3). Line thickness ~2.0, alpha ~0.9.
+    - The four corner handles for the square go at the corners.
+    - The four cardinal handles for the circle go at (cx±r, cy), (cx, cy±r).
+    - Use `screen_space=False` for the lines (so they zoom with the image)
+      and `screen_space=True` for the handles (so they stay clickable at any
+      zoom). Sizes: handles ~8 px radius (screen space).
+
+5.  WIRE pointer events. The renderer already has a `pointer_move` handler
+    bound at line 74. Add `pointer_down` and `pointer_up`:
+
+        self.figure.renderer.add_event_handler(self._aoi_pointer_down, "pointer_down")
+        self.figure.renderer.add_event_handler(self._aoi_pointer_up, "pointer_up")
+
+    On pointer_down:
+        - Convert event to world coords via `self.subplot.map_screen_to_world(ev)`.
+        - If a handle is within a small tolerance (say 6 world units AT the
+          current zoom; compute via the camera state width / widget width),
+          start a resize drag on that handle.
+        - Else if inside a shape body, start a body drag.
+        - Else do nothing — let the camera handle pan.
+        - Store the drag state.
+
+    On pointer_move (extend the existing handler at line 486):
+        - If `self._drag_state is None`, run the existing hover-label logic
+          (unchanged).
+        - Otherwise compute the new geometry from the world delta, update
+          `self._aoi_config` in place (still in USER coords — convert from
+          world deltas, remembering `delta_user_y = -delta_world_y`), rebuild
+          the pygfx graphics, and fire `self.on_geometry_changed(config)`.
+
+    On pointer_up:
+        - Clear `self._drag_state`. Issue a final `on_geometry_changed` so
+          the dialog spins reflect the final values.
+
+    Resize semantics:
+        - Square corner drag: keep the OPPOSITE corner fixed; new side =
+          max(|dx|, |dy|) (keep it a square), sign of dx/dy determines the
+          quadrant. Clamp side >= 4 px so it doesn't collapse.
+        - Circle cardinal drag: new radius = distance from centre to the new
+          handle position; clamp diameter >= 4 px.
+
+    Lock the existing pygfx pan/zoom interaction during a drag so the camera
+    doesn't move. The cleanest path: when drag starts, set
+    `self.subplot.controller.enabled = False` (or whatever the fastplotlib
+    equivalent is — check `FullScreenFPLWidget`); restore on pointer_up. If
+    that knob doesn't exist, call `ev.stop_propagation()` in the down/move
+    handlers while dragging.
+
+6.  In `add_overlay_data` (line 86) and `_reset_graphics`: also clear /
+    re-create the AOI graphics when the image shape changes, so they don't
+    survive a different segmentation. Keep `self._aoi_config` (the
+    dialog will push it back).
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/io.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+The `CellposeImportResult` encoder branch (line 94-117) currently emits 9
+keys. Add `aoi_config`:
+
+    return {
+        "!CellposeImportResult": True,
+        ...
+        "linear_offset": obj.linear_offset,
+        "aoi_config": _aoi_to_json(obj.aoi_config),  # None or a plain dict
+    }
+
+`_aoi_to_json(config)` serialises to:
+
+    {
+        "square": {"enabled": bool, "role": "preferential"|"exclusion",
+                   "x": float, "y": float, "side": float},
+        "circle": {"enabled": bool, "role": "preferential"|"exclusion",
+                   "cx": float, "cy": float, "diameter": float},
+        "show_shapes": bool,
+    }
+
+ADD a new match branch in `neuroseq_object_hook` for the schema with
+`aoi_config`. Keep the existing two branches verbatim so older archives still
+load. The new branch builds `AreasOfInterestConfig` via `_aoi_from_json`.
+
+Important: place the new branch BEFORE the existing two branches in the
+match statement, because Python's match-case picks the first match — newer,
+more-specific schemas need to come first.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_cellpose_aoi_mapping.py (new)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+PURE-LOGIC TESTS (no Qt)
+
+    test_default_aoi_config_centred_and_3x
+        cfg = default_aoi_config((400, 600))   # H=400, W=600
+        # short = 400, circle.d = 50, square.side = 150
+        assert cfg.circle.diameter == 50
+        assert cfg.square.side == 150
+        # centred
+        assert cfg.circle.cx == 300 and cfg.circle.cy == 200
+        assert cfg.square.x == (600 - 150) / 2 == 225
+        assert cfg.square.y == (400 - 150) / 2 == 125
+        assert cfg.square.role == AOIRole.PREFERENTIAL
+        assert cfg.circle.role == AOIRole.EXCLUSION
+
+    test_point_in_square_inclusive_edges
+        sq = SquareAOI(True, AOIRole.PREFERENTIAL, x=10, y=10, side=20)
+        assert point_in_square(10, 10, sq)
+        assert point_in_square(30, 30, sq)
+        assert not point_in_square(31, 20, sq)
+
+    test_point_in_circle
+        c = CircleAOI(True, AOIRole.EXCLUSION, cx=50, cy=50, diameter=20)
+        assert point_in_circle(50, 50, c)
+        assert point_in_circle(60, 50, c)         # on the rim
+        assert not point_in_circle(61, 50, c)
+
+    test_aoi_mapping_preferential_only
+        # 4 cells; cells 1,3 inside a preferential square; 2,4 outside.
+        # Expected: pref tier [1, 3] → stim 0, 1; neutral [2, 4] → stim 2, 3.
+        # i.e. {0: 1, 1: 3, 2: 2, 3: 4}
+        ...
+
+    test_aoi_mapping_exclusion_only
+        # Cells 1,2 in exclusion circle; 3,4 outside.
+        # neutral [3, 4] → 0, 1; exclusion [1, 2] → 2, 3.
+        # i.e. {0: 3, 1: 4, 2: 1, 3: 2}
+        ...
+
+    test_aoi_mapping_overlap_exclusion_wins
+        # Square (preferential) and circle (exclusion) overlap, cell sits in
+        # both. The cell must end up in the exclusion tier (highest stim ID),
+        # not the preferential tier.
+        ...
+
+    test_aoi_mapping_disabled_shape_ignored
+        # Square enabled+preferential covers cell 1. Circle disabled but its
+        # exclusion role covers cell 2 — should be ignored. Cell 1 → 0,
+        # Cell 2 → 1.
+        ...
+
+    test_aoi_mapping_sorted_by_cellpose_id_within_tier
+        # Cells 5, 2, 8 all preferential. Order in mapping must be
+        # {0: 2, 1: 5, 2: 8}.
+        ...
+
+    test_aoi_config_round_trips_through_io
+        # Build a CellposeImportResult with an AOI config, save to a temp
+        # .nseq, load it back, assert the config is identical (use
+        # io.save_project / io.load_project — match the existing
+        # test_io patterns).
+
+UI TESTS (qtbot, mirror existing test_cellpose_import_dialog.py)
+
+    test_dialog_selects_aoi_strategy_shows_subgroup
+        dialog = _make_cellpose_dialog(tmp_path, qtbot)
+        # Find and click the AOI radio button.
+        for btn in dialog.mapping_buttons.buttons():
+            if btn.text() == "Custom with areas of interest":
+                btn.setChecked(True)
+                break
+        assert dialog.aoi_group.isVisible()
+        assert dialog.show_shapes_checkbox.isVisible()
+        # Default config is populated.
+        assert dialog.square_side_spin.value() > 0
+
+    test_dialog_aoi_autofills_custom_mapping_line
+        # After selecting AOI mode with the default config, the custom
+        # mapping line edit must contain a parseable mapping.
+        ...
+        text = dialog.custom_mapping_line.text()
+        assert text != ""
+        # round-trips through the parser
+        parsed = dialog._parse_custom_mapping(text)
+        assert parsed   # non-empty
+
+    test_dialog_aoi_changes_remap_on_spinbox_edit
+        # Move the square so cell A goes from inside to outside; assert the
+        # mapping changes accordingly.
+        ...
+
+    test_dialog_aoi_persists_through_reopen
+        # Create with AOI strategy, run create_result, build a fresh dialog
+        # with existing_data=result, assert _get_mapping_strategy() returns
+        # the AOI strategy and that the spins are repopulated.
+        ...
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NOTES
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- The dialog's _generate_stimulus_mapping("Custom with areas of interest")
+  must return the same mapping that's been autofilled into the line edit;
+  the cleanest way is to call the AOI helper directly rather than parsing
+  the line edit a second time, so we never rely on round-tripping our own
+  serialisation.
+
+- The custom mapping line edit stays editable in AOI mode (the user can hand-
+  tweak after auto-fill). But any subsequent change to a shape input will
+  OVERWRITE manual edits — confirmed in planning. No need to detect "user
+  has hand-edited" state.
+
+- The existing `_apply_existing_mapping` code path (line 496) sorts and
+  filters identity pairs out of the custom mapping. Keep the AOI autofill
+  doing the same — call into a shared helper so the two paths produce
+  identical strings for the same mapping.
+
+- pygfx LineGraphic + screen-space ScatterGraphic handles are already used
+  elsewhere in this codebase via fastplotlib (see `stim_widget.py` and
+  `gridlines.py` if you need precedent). Don't introduce QPainter overlays
+  — the user explicitly chose the pygfx route.
+
+- Pan/zoom lock during drag: `FullScreenFPLWidget` extends the fastplotlib
+  figure widget, whose subplot controller exposes `enabled` (bool). If
+  that's not present on this version, stop event propagation on the down
+  handler and the controller won't get the event.
+
+- Persist the show_shapes flag too: the user may turn off shapes visually
+  for screenshots, and that should survive save/load.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NON-GOALS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- ROTATING shapes. Square is axis-aligned. Circle is a circle, not an
+  ellipse.
+- MORE THAN ONE square or circle. Exactly one of each.
+- SHAPE TYPES BEYOND SQUARE/CIRCLE. No polygon, no rectangle, no annulus.
+- AUTO-DETECTING the AOIs from the image. The user places them by hand or
+  via the text fields.
+- APPLYING THE AOIs OUTSIDE THE CELLPOSE IMPORT DIALOG. The downstream
+  consumers (hardware export, etc.) only see the resulting stim-to-cellpose
+  mapping. The AOI config travels with the import result for round-tripping
+  but isn't consulted elsewhere.
+- CHANGING the existing "Custom" mapping behaviour. It's untouched —
+  hand-typed mappings still work as before.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    ruff check src/neuroseq/importer_cellpose.py src/neuroseq/cellpose_import_dialog.py \
+               src/neuroseq/cell_overlay_widget.py src/neuroseq/io.py \
+               tests/test_cellpose_aoi_mapping.py
+    ruff format --check src/neuroseq/importer_cellpose.py src/neuroseq/cellpose_import_dialog.py \
+               src/neuroseq/cell_overlay_widget.py src/neuroseq/io.py \
+               tests/test_cellpose_aoi_mapping.py
+    mypy --ignore-missing-imports src/neuroseq/importer_cellpose.py \
+               src/neuroseq/cellpose_import_dialog.py src/neuroseq/cell_overlay_widget.py \
+               src/neuroseq/io.py
+    PYTHONPATH=src .venv/bin/python -m pytest tests/test_cellpose_aoi_mapping.py -v
+    PYTHONPATH=src .venv/bin/python -m pytest tests/test_cellpose_import_dialog.py tests/test_cellpose_importer.py -v
+    PYTHONPATH=src .venv/bin/python -m pytest
+
+The full suite is required: io.py changes affect all .nseq save/load and the
+overlay changes affect every cellpose-dialog test.
