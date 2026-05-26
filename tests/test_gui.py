@@ -286,6 +286,33 @@ def test_gui_open_example_project_menu_has_subsections(qtbot: QtBot) -> None:
     gui.close()
 
 
+def test_gui_cellpose_import_action_moved_to_file_menu(qtbot: QtBot) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+
+    file_action_texts = [action.text() for action in gui.menu_file.actions()]
+    assert "Import cell spatial &footprints" in file_action_texts
+
+    import_data_action = next(
+        (
+            action
+            for action in gui.menu_file.actions()
+            if action.menu() is not None and action.text() == "&Import data"
+        ),
+        None,
+    )
+    assert import_data_action is not None
+    import_data_menu = import_data_action.menu()
+    assert import_data_menu is not None
+    import_data_action_texts = [action.text() for action in import_data_menu.actions()]
+    assert "Import cell &segmentation" not in import_data_action_texts
+    assert "Import cell spatial &footprints" not in import_data_action_texts
+
+    gui.close()
+
+
 def test_gui_simulate_and_playback(
     monkeypatch: MonkeyPatch, qtbot: QtBot, test_project: Project
 ) -> None:

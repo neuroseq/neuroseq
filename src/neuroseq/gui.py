@@ -1027,7 +1027,7 @@ class Gui(QtWidgets.QMainWindow):
             if imported is None:
                 return
             resized_names = self._apply_cellpose_import_result(imported)
-            message = "Cellpose segmentation loaded."
+            message = "Cell spatial footprints loaded."
             if resized_names:
                 detected_neurons = self._cellpose_neuron_count(
                     self.last_cellpose_import
@@ -1038,7 +1038,7 @@ class Gui(QtWidgets.QMainWindow):
                 )
             QtWidgets.QMessageBox.information(
                 self,
-                "Cellpose import",
+                "Cell spatial footprint import",
                 message,
             )
 
@@ -1557,6 +1557,13 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.file-import"),
         )
         add_action(
+            "Import cell spatial &footprints",
+            self.btn_import_cellpose_data_clicked,
+            menu,
+            None,
+            icon=qta.icon("mdi6.image-edit-outline"),
+        )
+        add_action(
             "&Save project",
             self.btn_save_clicked,
             menu,
@@ -1600,14 +1607,6 @@ class Gui(QtWidgets.QMainWindow):
             import_trace_menu,
             None,
             icon=qta.icon("mdi6.import"),
-        )
-
-        add_action(
-            "Import cell &segmentation",
-            self.btn_import_cellpose_data_clicked,
-            import_data_menu,
-            None,
-            icon=qta.icon("mdi6.image-edit-outline"),
         )
 
         export_data_menu = menu.addMenu("&Export data")

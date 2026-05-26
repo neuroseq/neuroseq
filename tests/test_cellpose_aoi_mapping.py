@@ -232,6 +232,20 @@ def test_dialog_aoi_autofills_custom_mapping_line(tmp_path: Path, qtbot: QtBot) 
     dialog.close()
 
 
+def test_dialog_aoi_shows_region_summary(tmp_path: Path, qtbot: QtBot) -> None:
+    dialog = _make_dialog(tmp_path, qtbot)
+    _select_aoi_strategy(dialog)
+
+    summary = dialog.aoi_summary_browser.toPlainText()
+    assert not dialog.aoi_summary_browser.isHidden()
+    assert "Areas of interest summary" in summary
+    assert "Square" in summary
+    assert "Circle" in summary
+    assert "preferential" in summary
+    assert "exclusion" in summary
+    dialog.close()
+
+
 def test_dialog_aoi_changes_remap_on_spinbox_edit(tmp_path: Path, qtbot: QtBot) -> None:
     dialog = _make_dialog(tmp_path, qtbot)
     _select_aoi_strategy(dialog)
@@ -243,6 +257,24 @@ def test_dialog_aoi_changes_remap_on_spinbox_edit(tmp_path: Path, qtbot: QtBot) 
 
     assert before != after
     assert dialog.custom_mapping_line.text() == ""
+    dialog.close()
+
+
+def test_dialog_aoi_import_updates_region_summary(
+    tmp_path: Path,
+    qtbot: QtBot,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    dialog = _make_dialog(tmp_path, qtbot)
+    _select_aoi_strategy(dialog)
+
+    dialog._import_data()
+
+    assert dialog.get_imported_data() is not None
+    summary = dialog.aoi_summary_browser.toPlainText()
+    assert "Stim IDs:" in summary
+    assert "Cellpose IDs:" in summary
+    assert any(call["name"] == "information" for call in qmessagebox_calls)
     dialog.close()
 
 
