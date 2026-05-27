@@ -14,6 +14,10 @@ class GuiSettings:
     max_ram_synapse_plot_matrix: int = 256
     brian2_backend: str = "numpy"
     stim_padding_secs: int = 0
+    llm_provider: str = "ollama"
+    llm_model: str = "qwen2.5:7b"
+    llm_ollama_base_url: str = "http://localhost:11434"
+    llm_openai_base_url: str = ""
 
     def __init__(self) -> None:
         self.logger: logging.Logger
@@ -38,6 +42,10 @@ class GuiSettings:
                         "brian2_backend": self.brian2_backend,
                         "max_ram_synapse_plot_matrix": self.max_ram_synapse_plot_matrix,
                         "stim_padding_secs": self.stim_padding_secs,
+                        "llm_provider": self.llm_provider,
+                        "llm_model": self.llm_model,
+                        "llm_ollama_base_url": self.llm_ollama_base_url,
+                        "llm_openai_base_url": self.llm_openai_base_url,
                     },
                     f,
                 )
@@ -69,6 +77,14 @@ class GuiSettings:
                 "max_ram_synapse_plot_matrix", self.max_ram_synapse_plot_matrix
             )
             stim_padding_secs = config.get("stim_padding_secs", self.stim_padding_secs)
+            llm_provider = config.get("llm_provider", self.llm_provider)
+            llm_model = config.get("llm_model", self.llm_model)
+            llm_ollama_base_url = config.get(
+                "llm_ollama_base_url", self.llm_ollama_base_url
+            )
+            llm_openai_base_url = config.get(
+                "llm_openai_base_url", self.llm_openai_base_url
+            )
 
             # setting values
             if brian2_backend in ["cython", "numpy"]:
@@ -103,6 +119,23 @@ class GuiSettings:
                     f"Invalid stimulus padding in config file {config_file}: {stim_padding_secs}. Restoring default of 5s"
                 )
                 self.__dict__["stim_padding_secs"] = 0
+            valid_providers = {"ollama", "openai", "anthropic"}
+            if llm_provider in valid_providers:
+                self.__dict__["llm_provider"] = llm_provider
+            else:
+                self.logger.warning(
+                    "Invalid LLM provider in config file %s: %s. Restoring "
+                    "default of ollama",
+                    config_file,
+                    llm_provider,
+                )
+                self.__dict__["llm_provider"] = "ollama"
+            llm_model = str(llm_model).strip()
+            self.__dict__["llm_model"] = llm_model or "qwen2.5:7b"
+            self.__dict__["llm_ollama_base_url"] = (
+                str(llm_ollama_base_url).rstrip("/") or "http://localhost:11434"
+            )
+            self.__dict__["llm_openai_base_url"] = str(llm_openai_base_url).rstrip("/")
         except Exception as e:
             self.logger.warning(f"Could not load config file: {e}")
             self.logger.exception(e)

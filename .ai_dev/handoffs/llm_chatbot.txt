@@ -1,0 +1,1227 @@
+llm_chatbot — Local-and-cloud LLM chat assistant for NeuroSeq
+==============================================================
+
+A dockable chat panel inside NeuroSeq that lets the user ask questions
+about how to use the program ("how do I import Suite2p data?", "what
+does the trace normalization dialog do?", "how do I export a SysCon2
+sequence?") and receive streamed answers from an LLM. The panel
+supports three pluggable backends behind a single interface:
+
+    1. Ollama       — local server at http://localhost:11434, no key, free
+    2. OpenAI       — user-supplied API key, OpenAI-compatible endpoint
+    3. Anthropic    — user-supplied API key, Claude models
+
+The user picks a backend in a settings dialog. API keys are stored in
+the OS keychain via `keyring`; everything else lives in the existing
+`gui_settings.py` JSON config. The chat is grounded with a system
+prompt assembled at startup from the `docs/` markdown tree plus a
+short live snapshot of the current `Project` state, so the assistant
+answers from real docs and knows what the user is currently looking
+at.
+
+Files to create:
+    src/neuroseq/llm/__init__.py            (package init, public exports)
+    src/neuroseq/llm/backend.py             (abstract `LLMBackend`, `Message` dataclass, registry)
+    src/neuroseq/llm/ollama.py              (`OllamaBackend` — httpx, no SDK)
+    src/neuroseq/llm/openai_backend.py      (`OpenAIBackend` — optional `openai` SDK import)
+    src/neuroseq/llm/anthropic_backend.py   (`AnthropicBackend` — optional `anthropic` SDK import)
+    src/neuroseq/llm/system_prompt.py       (assembles the grounding prompt from docs/ + project state)
+    src/neuroseq/llm/secrets.py             (keyring + env-var fallback for API keys)
+    src/neuroseq/chat_widget.py             (Qt dock-style widget: chat history + input + stream)
+    src/neuroseq/llm_settings_dialog.py     (provider/model/key picker)
+    tests/test_llm_backend.py               (pure backend tests with httpx mocks)
+    tests/test_llm_system_prompt.py         (docs-assembly tests, no Qt)
+    tests/test_chat_widget.py               (qtbot integration: send message, receive stream, error path)
+    tests/test_llm_settings_dialog.py       (qtbot: switch provider, save key, reload)
+
+Files to change:
+    src/neuroseq/gui_settings.py            (add llm_* fields + load/save)
+    src/neuroseq/gui.py                     (instantiate ChatWidget, add View toggle, add Settings entry, refresh project context)
+    pyproject.toml                          (add optional `chat` extra: httpx, openai, anthropic, keyring)
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+GOALS / NON-GOALS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+GOALS
+
+- A panel users can show/hide via the View menu (same pattern as the
+  other widgets — see `_create_actions_view` in `gui.py:1753`).
+- Streamed token-by-token responses so the user sees output as it
+  generates. No event-loop blocking.
+- Three backends, swappable at runtime. Switching providers does NOT
+  lose the chat history.
+- Robust offline behaviour: if Ollama isn't installed/running, the
+  panel shows a clear message and a link to install instructions; it
+  does not crash. Same for missing SDK packages or missing API keys.
+- The full chat history is sent on every request (multi-turn context).
+- API keys live in the OS keychain via `keyring`. Plaintext fallback
+  is environment variables only — never the JSON config file.
+- Settings dialog is non-modal and can be left open while chatting.
+
+NON-GOALS
+
+- Tool/function calling that mutates the project (no "load this
+  example project for me"). Text-only Q&A in v1. Tool use is a
+  separate, larger handoff.
+- RAG / vector store. We use the whole docs corpus stuffed into the
+  system prompt — the `docs/` tree is small (~10 files, ~3000 lines
+  total) and fits comfortably in any modern model's context window.
+- Image/screenshot upload to multimodal models.
+- Persistent conversation history across NeuroSeq sessions. The
+  history is in-memory only and clears when the panel is closed via
+  an explicit "Clear chat" button. Closing the app drops it. (A
+  "save chat to file" affordance is also non-goal for v1.)
+- Telemetry, usage tracking, cost estimation. Out of scope.
+- Bundled / vendored model weights. We never ship a model.
+- Streaming cancellation mid-token-stream. The "Stop" button aborts
+  the next-token wait; tokens already buffered are kept.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+DEPENDENCIES — pyproject.toml
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Add a new optional extra group. The base install must NOT pull in
+`openai`, `anthropic`, or `keyring` so users who only want Ollama
+(or no chat at all) stay lean.
+
+    [project.optional-dependencies]
+    chat = [
+        "httpx>=0.27",
+        "openai>=1.40",
+        "anthropic>=0.40",
+        "keyring>=24",
+    ]
+
+`httpx` is the one hard dependency for the Ollama backend, but since
+the extra is opt-in, users on the slim install simply won't see the
+chat panel work (it shows the install hint). If httpx is missing the
+panel is greyed out at startup; install instructions in the panel say
+`uv pip install 'neuroseq[chat]'`.
+
+Document the extra in `README.md` and `docs/getting_started/installation.md`.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+BACKEND ABSTRACTION — src/neuroseq/llm/backend.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    from __future__ import annotations
+
+    import abc
+    from collections.abc import AsyncIterator, Iterable
+    from dataclasses import dataclass
+    from enum import Enum
+
+
+    class Role(str, Enum):
+        SYSTEM = "system"
+        USER = "user"
+        ASSISTANT = "assistant"
+
+
+    @dataclass(frozen=True)
+    class Message:
+        role: Role
+        content: str
+
+
+    class LLMBackendError(Exception):
+        """Raised by backends for any caller-visible failure (network,
+        auth, missing dep, malformed response). Carries a single human-
+        readable message; never includes raw API responses or stack
+        frames the user shouldn't see."""
+
+
+    class LLMBackend(abc.ABC):
+        """One method, one contract: yield tokens (strings) as they
+        arrive. Implementations MUST raise LLMBackendError on any
+        failure rather than letting provider-specific exceptions
+        escape."""
+
+        #: Stable identifier used in settings, e.g. "ollama", "openai", "anthropic"
+        name: str = ""
+
+        #: Human-readable label for the settings dropdown
+        label: str = ""
+
+        @abc.abstractmethod
+        def stream_chat(
+            self,
+            messages: Iterable[Message],
+            *,
+            model: str,
+            temperature: float = 0.7,
+            max_tokens: int | None = None,
+        ) -> Iterable[str]:
+            """SYNCHRONOUS generator of token strings. Runs in a
+            worker thread (see `chat_widget.py`), so a blocking
+            generator is fine. Must propagate LLMBackendError only."""
+            ...
+
+        @abc.abstractmethod
+        def is_available(self) -> tuple[bool, str]:
+            """Returns (ok, reason). Called when the panel is opened to
+            decide whether to show the input or an install hint."""
+            ...
+
+        @abc.abstractmethod
+        def list_models(self) -> list[str]:
+            """Best-effort list of available models. May raise
+            LLMBackendError. Used to populate the model dropdown in
+            the settings dialog."""
+            ...
+
+
+    # Registry — simple module-level dict so settings dialog and chat
+    # widget look up backends by name. Filled by each backend module
+    # on import.
+    _REGISTRY: dict[str, type[LLMBackend]] = {}
+
+
+    def register(cls: type[LLMBackend]) -> type[LLMBackend]:
+        _REGISTRY[cls.name] = cls
+        return cls
+
+
+    def get_backend(name: str) -> LLMBackend:
+        if name not in _REGISTRY:
+            raise LLMBackendError(
+                f"Unknown backend '{name}'. Available: {sorted(_REGISTRY)}"
+            )
+        return _REGISTRY[name]()
+
+
+    def available_backends() -> list[tuple[str, str]]:
+        """Returns list of (name, label) tuples for UI population."""
+        return [(c.name, c.label) for c in _REGISTRY.values()]
+
+The decision to make `stream_chat` synchronous (not async) is
+deliberate: it's run inside a `QThread`, and a sync generator is
+trivial to consume from one. Adding asyncio + a Qt event-loop bridge
+buys nothing here and adds debugging surface.
+
+`__init__.py` re-exports `LLMBackend`, `Message`, `Role`,
+`LLMBackendError`, `get_backend`, `available_backends`, and imports
+the three backend modules so registration happens on package import.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+OLLAMA BACKEND — src/neuroseq/llm/ollama.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Talks to the Ollama HTTP API directly via `httpx`. Endpoint and model
+are read from settings; default `http://localhost:11434` and
+`qwen2.5:7b`.
+
+    @register
+    class OllamaBackend(LLMBackend):
+        name = "ollama"
+        label = "Ollama (local)"
+
+        def __init__(self, base_url: str = "http://localhost:11434") -> None:
+            self.base_url = base_url.rstrip("/")
+            try:
+                import httpx
+                self._httpx = httpx
+            except ImportError as e:
+                raise LLMBackendError(
+                    "httpx is required for the Ollama backend. "
+                    "Install with: uv pip install 'neuroseq[chat]'"
+                ) from e
+
+        def is_available(self) -> tuple[bool, str]:
+            try:
+                r = self._httpx.get(f"{self.base_url}/api/tags", timeout=2.0)
+                if r.status_code == 200:
+                    return True, ""
+                return False, f"Ollama responded with HTTP {r.status_code}"
+            except Exception as e:
+                return False, (
+                    f"Could not reach Ollama at {self.base_url}. "
+                    f"Install from https://ollama.com and run "
+                    f"`ollama serve`. ({e.__class__.__name__})"
+                )
+
+        def list_models(self) -> list[str]:
+            try:
+                r = self._httpx.get(f"{self.base_url}/api/tags", timeout=5.0)
+                r.raise_for_status()
+                data = r.json()
+                return sorted(m["name"] for m in data.get("models", []))
+            except Exception as e:
+                raise LLMBackendError(f"Failed to list Ollama models: {e}") from e
+
+        def stream_chat(self, messages, *, model, temperature=0.7, max_tokens=None):
+            payload = {
+                "model": model,
+                "messages": [{"role": m.role.value, "content": m.content} for m in messages],
+                "stream": True,
+                "options": {"temperature": temperature},
+            }
+            if max_tokens is not None:
+                payload["options"]["num_predict"] = max_tokens
+            try:
+                with self._httpx.stream(
+                    "POST",
+                    f"{self.base_url}/api/chat",
+                    json=payload,
+                    timeout=self._httpx.Timeout(connect=5.0, read=120.0, write=10.0, pool=5.0),
+                ) as r:
+                    if r.status_code != 200:
+                        raise LLMBackendError(
+                            f"Ollama returned HTTP {r.status_code}: {r.text[:200]}"
+                        )
+                    for line in r.iter_lines():
+                        if not line:
+                            continue
+                        try:
+                            chunk = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if "error" in chunk:
+                            raise LLMBackendError(f"Ollama error: {chunk['error']}")
+                        token = chunk.get("message", {}).get("content", "")
+                        if token:
+                            yield token
+                        if chunk.get("done"):
+                            return
+            except self._httpx.HTTPError as e:
+                raise LLMBackendError(f"Ollama network error: {e}") from e
+
+Notes:
+- `httpx.stream` with `iter_lines()` matches Ollama's NDJSON wire
+  format exactly. Each line is one JSON object with `message.content`
+  carrying the new token and `done: true` on the final chunk.
+- Read timeout is 120 s. CPU inference on a 7B model can pause a few
+  seconds between tokens, so anything shorter risks spurious
+  cancellation. The connect timeout stays short so unavailable
+  servers fail fast.
+- No retries. If a stream dies mid-message we surface the error and
+  let the user retry; silent retries muddy the UX.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+OPENAI BACKEND — src/neuroseq/llm/openai_backend.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    @register
+    class OpenAIBackend(LLMBackend):
+        name = "openai"
+        label = "OpenAI"
+
+        def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
+            try:
+                from openai import OpenAI
+            except ImportError as e:
+                raise LLMBackendError(
+                    "The 'openai' package is required for this backend. "
+                    "Install with: uv pip install 'neuroseq[chat]'"
+                ) from e
+            from neuroseq.llm.secrets import get_api_key
+            key = api_key or get_api_key("openai") or os.environ.get("OPENAI_API_KEY")
+            if not key:
+                raise LLMBackendError(
+                    "No OpenAI API key found. Set one in Settings → LLM, "
+                    "or export OPENAI_API_KEY."
+                )
+            self._client = OpenAI(api_key=key, base_url=base_url)
+
+        def is_available(self) -> tuple[bool, str]:
+            # The constructor already validates the key's presence; we
+            # don't ping the API here because that costs a request.
+            return True, ""
+
+        def list_models(self) -> list[str]:
+            try:
+                models = self._client.models.list()
+                return sorted(
+                    m.id for m in models.data
+                    if m.id.startswith(("gpt-", "o1", "o3", "o4"))
+                )
+            except Exception as e:
+                raise LLMBackendError(f"Failed to list OpenAI models: {e}") from e
+
+        def stream_chat(self, messages, *, model, temperature=0.7, max_tokens=None):
+            try:
+                stream = self._client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": m.role.value, "content": m.content}
+                        for m in messages
+                    ],
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stream=True,
+                )
+                for chunk in stream:
+                    delta = chunk.choices[0].delta.content if chunk.choices else None
+                    if delta:
+                        yield delta
+            except Exception as e:
+                raise LLMBackendError(f"OpenAI error: {e}") from e
+
+Notes:
+- The `base_url` parameter lets advanced users point at an
+  OpenAI-compatible local server (vLLM, LM Studio, etc.). It defaults
+  to the OpenAI cloud endpoint.
+- The model filter on `list_models` is a heuristic; it keeps the
+  dropdown free of embedding/tts models. If it misses a new family,
+  the user can type the model name directly into the settings field
+  (the dropdown is editable — see settings dialog section).
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+ANTHROPIC BACKEND — src/neuroseq/llm/anthropic_backend.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Anthropic's API takes the system prompt as a separate top-level field,
+NOT as a message with role "system". The backend handles this
+conversion internally — callers always pass the system prompt as the
+first `Message(role=Role.SYSTEM, ...)`.
+
+    @register
+    class AnthropicBackend(LLMBackend):
+        name = "anthropic"
+        label = "Anthropic"
+
+        def __init__(self, api_key: str | None = None) -> None:
+            try:
+                from anthropic import Anthropic
+            except ImportError as e:
+                raise LLMBackendError(
+                    "The 'anthropic' package is required for this backend. "
+                    "Install with: uv pip install 'neuroseq[chat]'"
+                ) from e
+            from neuroseq.llm.secrets import get_api_key
+            key = api_key or get_api_key("anthropic") or os.environ.get("ANTHROPIC_API_KEY")
+            if not key:
+                raise LLMBackendError(
+                    "No Anthropic API key found. Set one in Settings → LLM, "
+                    "or export ANTHROPIC_API_KEY."
+                )
+            self._client = Anthropic(api_key=key)
+
+        def is_available(self) -> tuple[bool, str]:
+            return True, ""
+
+        def list_models(self) -> list[str]:
+            # Anthropic exposes a /models endpoint as of SDK v0.40+.
+            try:
+                resp = self._client.models.list()
+                return sorted(m.id for m in resp.data)
+            except Exception as e:
+                raise LLMBackendError(f"Failed to list Anthropic models: {e}") from e
+
+        def stream_chat(self, messages, *, model, temperature=0.7, max_tokens=None):
+            msgs = list(messages)
+            system_msgs = [m for m in msgs if m.role == Role.SYSTEM]
+            non_system = [m for m in msgs if m.role != Role.SYSTEM]
+            system_prompt = "\n\n".join(m.content for m in system_msgs) or None
+            try:
+                with self._client.messages.stream(
+                    model=model,
+                    system=system_prompt,
+                    messages=[
+                        {"role": m.role.value, "content": m.content}
+                        for m in non_system
+                    ],
+                    temperature=temperature,
+                    max_tokens=max_tokens or 4096,
+                ) as stream:
+                    for text in stream.text_stream:
+                        yield text
+            except Exception as e:
+                raise LLMBackendError(f"Anthropic error: {e}") from e
+
+Notes:
+- `max_tokens` is REQUIRED by the Anthropic API. Default to 4096 if
+  the caller didn't supply one — this also matches the SDK's behavior
+  for the streaming helper.
+- The `messages.stream()` context manager yields fully-decoded text
+  chunks via `text_stream`; we don't need to handle individual
+  `content_block_delta` events.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+SECRETS — src/neuroseq/llm/secrets.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Wraps `keyring` with a graceful fallback so the rest of the code
+doesn't care whether keyring is installed.
+
+    SERVICE = "neuroseq-llm"
+
+
+    def _keyring():
+        try:
+            import keyring
+            return keyring
+        except ImportError:
+            return None
+
+
+    def get_api_key(provider: str) -> str | None:
+        kr = _keyring()
+        if kr is None:
+            return None
+        try:
+            return kr.get_password(SERVICE, provider)
+        except Exception:
+            return None
+
+
+    def set_api_key(provider: str, key: str) -> bool:
+        """Returns True if stored successfully, False if keyring is
+        unavailable (caller should show a warning telling the user to
+        set the env var instead)."""
+        kr = _keyring()
+        if kr is None:
+            return False
+        try:
+            kr.set_password(SERVICE, provider, key)
+            return True
+        except Exception:
+            return False
+
+
+    def delete_api_key(provider: str) -> None:
+        kr = _keyring()
+        if kr is None:
+            return
+        try:
+            kr.delete_password(SERVICE, provider)
+        except Exception:
+            pass
+
+`provider` is the backend `name` ("openai", "anthropic"). Ollama does
+not use this module — it has no auth.
+
+NEVER write keys into `gui_settings.py` JSON. The JSON config is
+plaintext on disk; keys belong in keyring or env vars only.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+SYSTEM PROMPT — src/neuroseq/llm/system_prompt.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Two functions: `build_static_prompt()` reads the docs tree once at
+startup; `build_context_snapshot(project)` describes what the user is
+currently looking at. The chat widget concatenates both for every
+request.
+
+    DOCS_DIR = pathlib.Path(__file__).resolve().parents[3] / "docs"
+
+    # Headers prepended so the model knows the structure.
+    _PREAMBLE = """\
+    You are NeuroSeq's in-app help assistant. NeuroSeq is a desktop GUI for
+    computational neuroscience: it combines Brian2 spiking neural network
+    simulation, interactive stimulus design, multi-source experimental data
+    import (Suite2p calcium imaging, Cellpose segmentation, patch-clamp, Igor2
+    binaries, SysCon2 holographic sequences), and hardware export for HOLO4D
+    holographic stimulation.
+
+    Answer the user's question by referencing the documentation excerpts below
+    and the live project snapshot. Prefer concrete menu paths ("File → Import
+    data → Import calcium imaging") over vague descriptions. If the docs don't
+    cover the user's question, say so plainly rather than inventing menu items
+    or feature names. Keep replies under ~6 sentences unless the user asks for
+    more detail.
+    """
+
+    def build_static_prompt(docs_dir: pathlib.Path = DOCS_DIR) -> str:
+        """Walks DOCS_DIR for .md files and concatenates them with file
+        markers. Skips images and any file > 200 KB (defensive)."""
+        parts = [_PREAMBLE, "\n## Documentation\n"]
+        for md_path in sorted(docs_dir.rglob("*.md")):
+            try:
+                if md_path.stat().st_size > 200_000:
+                    continue
+                rel = md_path.relative_to(docs_dir).as_posix()
+                parts.append(f"\n### docs/{rel}\n")
+                parts.append(md_path.read_text(encoding="utf-8"))
+            except OSError:
+                continue
+        return "".join(parts)
+
+
+    def build_context_snapshot(project: "Project | None") -> str:
+        """One short paragraph: number of neurons, simulation duration,
+        loaded experiments, current stim array name, visible widgets.
+        Called fresh on every request — cheap and keeps the model in
+        sync with what the user is looking at."""
+        if project is None:
+            return "## Current project\n(no project loaded)\n"
+        lines = ["## Current project", ""]
+        try:
+            lines.append(f"- Neurons: {int(project.max_neurons)}")
+            lines.append(f"- Simulation duration: {float(project.max_time_secs):.3f} s")
+            lines.append(f"- Stim arrays: {sorted(project.stim_arrays.keys())}")
+            exp_names = sorted(project.experiments.keys()) if hasattr(project, "experiments") else []
+            lines.append(f"- Experiments loaded: {exp_names or 'none'}")
+        except Exception:
+            lines.append("- (project state unavailable)")
+        return "\n".join(lines) + "\n"
+
+The static prompt is built once and cached in the `ChatWidget`. The
+context snapshot is rebuilt on every send (it's cheap — string
+formatting on a handful of fields).
+
+If the docs corpus grows past ~50 KB it will still fit fine in modern
+context windows (Claude/GPT/Qwen all support 32k+). When/if it grows
+past ~200 KB total, the right move is a tiny per-file retrieval step
+keyed on the user's query — but that's out of scope here.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+SETTINGS PERSISTENCE — src/neuroseq/gui_settings.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Extend the `GuiSettings` dataclass with four new fields:
+
+    llm_provider: str = "ollama"            # one of "ollama", "openai", "anthropic"
+    llm_model: str = "qwen2.5:7b"           # provider-specific model id
+    llm_ollama_base_url: str = "http://localhost:11434"
+    llm_openai_base_url: str = ""           # empty → SDK default
+
+Update both `save_config_settings` and `load_config_settings`
+identically to the existing fields. Validation on load:
+
+    - llm_provider: must be one of the known backend names; otherwise
+      fall back to "ollama" with a logged warning.
+    - llm_model: non-empty string; fall back to "qwen2.5:7b".
+    - urls: trim trailing slashes; empty is allowed for the OpenAI url
+      (means SDK default).
+
+No env-var or keychain logic lives here. The new file
+`src/neuroseq/llm/secrets.py` owns keys.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+SETTINGS DIALOG — src/neuroseq/llm_settings_dialog.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+`LLMSettingsDialog(QtWidgets.QDialog)`, non-modal. Layout:
+
+    Provider:       [ Ollama ▾ ]
+    Model:          [ qwen2.5:7b ▾ ]   [ Refresh ]
+    Endpoint:       [ http://localhost:11434 ]    (provider-dependent: shown for Ollama and OpenAI; hidden for Anthropic)
+    API key:        [ •••••••••••••• ]            (hidden for Ollama; echoMode=Password elsewhere)
+                    [ Save key in OS keychain ]   [ Clear stored key ]
+    Status:         <green check + "Connected" | red x + reason>
+    [ Test connection ]   [ Close ]
+
+Behaviour:
+
+- `Provider` is a non-editable combo populated from
+  `available_backends()`.
+- `Model` is **editable** — `QComboBox.setEditable(True)`. The Refresh
+  button calls the backend's `list_models()` and repopulates the
+  dropdown. If `list_models()` raises, show the error in the Status
+  line, leave the dropdown alone. Editable lets users type a model
+  name that isn't yet in the official list (newly released models).
+- When the user switches provider, repopulate Endpoint, API key, and
+  Status fields. Do NOT auto-call list_models on switch — wait for the
+  user to hit Refresh. Avoids surprising network calls when the user
+  is just browsing.
+- "Save key in OS keychain": calls `secrets.set_api_key(provider, key)`.
+  If it returns False (keyring missing) show a QMessageBox.warning
+  telling the user to install with `[chat]` extras or set the env var.
+- "Clear stored key": confirm via QMessageBox.question, then
+  `secrets.delete_api_key(provider)`.
+- "Test connection": instantiates a backend with the current settings
+  and calls `is_available()`. Show result in Status line.
+- "Close": `self.hide()`. The dialog instance is held by `gui.py`
+  (one per main window) and reused — same pattern as
+  `_pattern_dialog`.
+
+Signals emitted from this dialog:
+
+    settings_changed: QtCore.Signal()
+
+    Emitted whenever the user changes provider, model, endpoint, or
+    saves/clears a key. The main window connects this to
+    `ChatWidget.reload_backend()`.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHAT WIDGET — src/neuroseq/chat_widget.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+The user-facing panel. Lives in the existing left/right vertical
+splitter (`gui.py:124`) alongside the other widgets — NOT a
+`QDockWidget`, because the rest of the app uses splitters and view
+toggles. Pattern matches `console_widget.py` exactly.
+
+Layout (top to bottom):
+
+    [ Provider/model badge ]   [ Clear chat ]   [ Settings... ]
+
+    [ QTextBrowser — chat history, scrollable, supports inline HTML ]
+
+    [ QPlainTextEdit — multi-line input ]   [ Send ]   [ Stop ]
+
+    [ Status line: "Streaming...", "Idle", "Error: ..." ]
+
+Class skeleton:
+
+    class ChatWidget(QtWidgets.QWidget):
+        """In-app LLM chat assistant. Holds the conversation history,
+        spawns a worker thread per request, streams tokens to the UI.
+        Owns one backend instance at a time, rebuilt when settings
+        change."""
+
+        # signal raised when the user clicks the Settings... button
+        request_settings_dialog = QtCore.Signal()
+
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.logger = logging.getLogger(__name__)
+            self._project: Project | None = None
+            self._history: list[Message] = []   # USER and ASSISTANT only — system is rebuilt per request
+            self._worker: _ChatWorker | None = None
+            self._static_prompt = build_static_prompt()
+            self._backend: LLMBackend | None = None
+            self._backend_name: str = ""
+            self._backend_model: str = ""
+            self._build_ui()
+            self.reload_backend()
+
+        def set_project(self, project: Project | None) -> None:
+            """Called by gui.py whenever the project changes. Stored
+            for context-snapshot use."""
+            self._project = project
+
+        def reload_backend(self) -> None:
+            """Recreate the backend from current settings. Called on
+            init and whenever LLMSettingsDialog emits settings_changed."""
+            from neuroseq.gui_settings import GuiSettings
+            settings = GuiSettings()  # singleton-ish — reads disk
+            try:
+                self._backend = self._make_backend(settings)
+                self._backend_name = settings.llm_provider
+                self._backend_model = settings.llm_model
+                ok, reason = self._backend.is_available()
+                self._set_status("Idle" if ok else f"Backend unavailable: {reason}")
+            except LLMBackendError as e:
+                self._backend = None
+                self._set_status(f"Backend init failed: {e}")
+            self._update_badge()
+
+        def _make_backend(self, settings) -> LLMBackend:
+            name = settings.llm_provider
+            if name == "ollama":
+                return OllamaBackend(base_url=settings.llm_ollama_base_url)
+            if name == "openai":
+                return OpenAIBackend(
+                    base_url=settings.llm_openai_base_url or None,
+                )
+            if name == "anthropic":
+                return AnthropicBackend()
+            raise LLMBackendError(f"Unknown provider '{name}'")
+
+        def _on_send_clicked(self) -> None:
+            text = self.input_edit.toPlainText().strip()
+            if not text or self._worker is not None or self._backend is None:
+                return
+            self.input_edit.clear()
+            self._history.append(Message(Role.USER, text))
+            self._append_history_html(role="user", content=text)
+            # Begin assistant turn: append an empty bubble that we'll
+            # progressively fill in.
+            self._begin_assistant_bubble()
+            self._spawn_worker()
+
+        def _spawn_worker(self) -> None:
+            system_content = self._static_prompt + "\n" + build_context_snapshot(self._project)
+            full = [Message(Role.SYSTEM, system_content), *self._history]
+            self._worker = _ChatWorker(
+                backend=self._backend,
+                messages=full,
+                model=self._backend_model,
+            )
+            self._worker.token.connect(self._on_token)
+            self._worker.finished.connect(self._on_worker_finished)
+            self._worker.error.connect(self._on_worker_error)
+            self._worker.start()
+            self._set_status("Streaming...")
+            self.send_button.setEnabled(False)
+            self.stop_button.setEnabled(True)
+
+        def _on_token(self, t: str) -> None:
+            self._current_assistant_buffer += t
+            self._update_assistant_bubble(self._current_assistant_buffer)
+
+        def _on_worker_finished(self) -> None:
+            self._history.append(Message(Role.ASSISTANT, self._current_assistant_buffer))
+            self._worker = None
+            self._current_assistant_buffer = ""
+            self.send_button.setEnabled(True)
+            self.stop_button.setEnabled(False)
+            self._set_status("Idle")
+
+        def _on_worker_error(self, msg: str) -> None:
+            # Replace the streaming bubble with the error text styled
+            # in red. Do NOT append to history — the message did not
+            # complete.
+            self._update_assistant_bubble(f"<span style='color:#c33'>Error: {msg}</span>")
+            self._worker = None
+            self._current_assistant_buffer = ""
+            self.send_button.setEnabled(True)
+            self.stop_button.setEnabled(False)
+            self._set_status(f"Error: {msg}")
+
+        def _on_stop_clicked(self) -> None:
+            if self._worker is not None:
+                self._worker.request_stop()
+
+        def _on_clear_clicked(self) -> None:
+            self._history.clear()
+            self.history_view.clear()
+            self._set_status("Idle")
+
+The worker:
+
+    class _ChatWorker(QtCore.QThread):
+        token = QtCore.Signal(str)
+        finished = QtCore.Signal()
+        error = QtCore.Signal(str)
+
+        def __init__(self, backend, messages, model):
+            super().__init__()
+            self._backend = backend
+            self._messages = messages
+            self._model = model
+            self._stop = False
+
+        def request_stop(self) -> None:
+            self._stop = True
+
+        def run(self) -> None:
+            try:
+                for tok in self._backend.stream_chat(
+                    self._messages, model=self._model
+                ):
+                    if self._stop:
+                        break
+                    self.token.emit(tok)
+                self.finished.emit()
+            except LLMBackendError as e:
+                self.error.emit(str(e))
+            except Exception as e:
+                # Backend bug — should have been wrapped already.
+                self.error.emit(f"Internal error: {e!r}")
+
+Notes:
+- The worker calls the backend's blocking generator on a `QThread`.
+  `token.emit(tok)` is thread-safe because Qt queues cross-thread
+  signal emissions automatically (default `Qt.AutoConnection` →
+  `Qt.QueuedConnection` across threads). The UI thread receives each
+  token via the slot and updates the QTextBrowser. This means the UI
+  remains responsive throughout streaming.
+- `request_stop()` only sets a flag; the worker reads it between
+  tokens. It does NOT close the HTTP connection forcibly. That's
+  intentional: cleanly closing the stream costs nothing (Ollama
+  honors the dropped reader), and slamming the connection shut on
+  the cloud providers can produce confusing partial-billing.
+- `_begin_assistant_bubble` / `_update_assistant_bubble` write into
+  the QTextBrowser using `setHtml` on the document's tail. The
+  simplest robust path is to maintain a list of "rendered messages"
+  internally, re-render the entire HTML on every token update, and
+  call `history_view.setHtml(joined)` followed by
+  `history_view.verticalScrollBar().setValue(max)`. The doc is small
+  (one conversation) so full re-rendering each token costs nothing.
+- The badge in the top-left of the widget reads e.g.
+  `Ollama · qwen2.5:7b` and updates on `reload_backend`. The
+  Settings... button on the right emits `request_settings_dialog`,
+  which the main window catches and shows the dialog.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+MAIN WINDOW WIRING — src/neuroseq/gui.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1.  Imports at the top:
+
+        from neuroseq.chat_widget import ChatWidget
+        from neuroseq.llm_settings_dialog import LLMSettingsDialog
+
+2.  In `__init__`, after the existing widget construction (around
+    line 120, alongside `self.console_widget = ConsoleWidget(...)`):
+
+        self.chat_widget = ChatWidget(parent=self)
+        self.chat_widget.setVisible(False)
+        self.chat_widget.request_settings_dialog.connect(self.open_llm_settings)
+        split_left_right.addWidget(self.chat_widget)
+        split_left_right.setSizes([1000, 1000, 1000, 1000])  # update from [1000]*3
+
+3.  Add to `plot_widgets`-equivalent list? No — chat is not a
+    timeseries widget. Leave `plot_widgets` alone.
+
+4.  In `_update_data` (line ~219), add:
+
+        self.chat_widget.set_project(self.project)
+
+    so the context snapshot reflects the current project on every
+    reload.
+
+5.  In `_create_actions_view` (line 1753), add `chat_widget` to the
+    iteration list so it gets a "Show &Chat" toggle:
+
+        ("&Chat", self.chat_widget, "mdi6.robot-happy-outline", False),
+
+6.  In `_create_actions_settings` (line 1810), add:
+
+        add_action("&LLM assistant", self.open_llm_settings, menu)
+
+7.  Add the method:
+
+        def open_llm_settings(self) -> None:
+            if not hasattr(self, "_llm_settings_dialog") or self._llm_settings_dialog is None:
+                self._llm_settings_dialog = LLMSettingsDialog(self)
+                self._llm_settings_dialog.settings_changed.connect(
+                    self.chat_widget.reload_backend
+                )
+            self._llm_settings_dialog.show()
+            self._llm_settings_dialog.raise_()
+            self._llm_settings_dialog.activateWindow()
+
+8.  Initialize `self._llm_settings_dialog: LLMSettingsDialog | None = None`
+    near the other dialog-holders in `__init__`.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_llm_backend.py (no Qt; httpx mocks)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Use `respx` if already in the dev group, otherwise monkeypatch
+`httpx.stream`/`httpx.get` directly. If `respx` is not in
+`[dependency-groups].dev`, add it.
+
+    test_ollama_is_available_true_on_200
+        # Mock GET /api/tags → 200 with empty model list.
+        # Assert is_available() returns (True, "").
+
+    test_ollama_is_available_false_on_connection_error
+        # Mock GET /api/tags → httpx.ConnectError.
+        # Assert is_available() returns (False, msg containing "http://localhost:11434").
+
+    test_ollama_list_models_returns_sorted_names
+        # Mock /api/tags → {"models": [{"name": "qwen:7b"}, {"name": "llama3:8b"}]}
+        # Assert list_models() == ["llama3:8b", "qwen:7b"].
+
+    test_ollama_stream_chat_yields_tokens_in_order
+        # Mock POST /api/chat as a stream of NDJSON chunks:
+        #   {"message": {"content": "Hel"}, "done": false}
+        #   {"message": {"content": "lo"}, "done": false}
+        #   {"message": {"content": ""}, "done": true}
+        # Assert "".join(backend.stream_chat(...)) == "Hello".
+
+    test_ollama_stream_chat_raises_on_http_error
+        # Mock POST /api/chat → 500 with body "model not found"
+        # Assert LLMBackendError raised, message includes "500".
+
+    test_ollama_stream_chat_raises_on_error_chunk
+        # Mock stream with one chunk: {"error": "out of memory"}
+        # Assert LLMBackendError raised, message contains "out of memory".
+
+    test_openai_requires_key_or_env_var
+        # No keyring entry, no OPENAI_API_KEY env var.
+        # Assert OpenAIBackend() raises LLMBackendError mentioning the key.
+
+    test_openai_uses_env_var_when_no_keyring_entry
+        # monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        # OpenAIBackend() should not raise. Construct with a fake
+        # OpenAI client (monkeypatch openai.OpenAI to a stub).
+
+    test_anthropic_strips_system_messages_into_top_level_field
+        # Construct an AnthropicBackend with a stubbed client whose
+        # messages.stream records the arguments it was called with.
+        # Call stream_chat([Message(SYSTEM, "be helpful"),
+        #                   Message(USER, "hi")], model="claude-3-5-sonnet")
+        # Assert the stubbed client received system="be helpful" and
+        # messages=[{"role": "user", "content": "hi"}] (no system in messages).
+
+    test_registry_exposes_three_backends
+        from neuroseq.llm.backend import available_backends
+        names = {n for n, _label in available_backends()}
+        assert names == {"ollama", "openai", "anthropic"}
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_llm_system_prompt.py (no Qt)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    test_build_static_prompt_includes_each_doc_with_header
+        # Pass a tmp_path with two .md files; assert the prompt
+        # contains both filenames as headers and both bodies.
+
+    test_build_static_prompt_skips_large_files
+        # Write a 300 KB .md file; assert it's not in the output.
+
+    test_build_static_prompt_skips_images
+        # Write a .png; assert no binary garbage in the output (i.e.
+        # the function only scans rglob("*.md")).
+
+    test_build_context_snapshot_lists_project_state
+        # Construct a minimal Project with 5 neurons, 1.0 s duration,
+        # one stim array named "foo".
+        # Assert the snapshot contains "Neurons: 5", "1.000 s", and "foo".
+
+    test_build_context_snapshot_no_project
+        assert "no project loaded" in build_context_snapshot(None)
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_chat_widget.py (qtbot)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Use the existing fixtures from `conftest.py`. A `FakeBackend` test
+double replaces the real backend.
+
+    class FakeBackend(LLMBackend):
+        name = "fake"
+        label = "Fake"
+        def __init__(self, tokens=None, error=None):
+            self._tokens = tokens or ["Hello", " ", "world"]
+            self._error = error
+        def is_available(self): return (True, "")
+        def list_models(self): return ["fake-model"]
+        def stream_chat(self, messages, *, model, **kw):
+            if self._error:
+                raise LLMBackendError(self._error)
+            for t in self._tokens:
+                yield t
+
+    test_send_appends_user_and_assistant_to_history(qtbot, monkeypatch):
+        # Monkeypatch ChatWidget._make_backend to return FakeBackend(["Hi!"])
+        # Type "hello", click Send, wait for finished signal.
+        # Assert: widget._history == [USER("hello"), ASSISTANT("Hi!")]
+        # Assert: history_view text contains both "hello" and "Hi!"
+
+    test_send_disabled_while_streaming(qtbot, monkeypatch):
+        # FakeBackend that yields one token, then sleeps for 0.5s
+        # before yielding another. After click, assert send_button is
+        # disabled and stop_button is enabled. After completion,
+        # they swap.
+
+    test_error_surfaces_in_status_line_and_does_not_append_to_history(qtbot, monkeypatch):
+        # FakeBackend(error="boom"). Send.
+        # Assert: history has only the USER message (no ASSISTANT).
+        # Assert: status line shows "Error: boom".
+
+    test_clear_chat_resets_history_and_view(qtbot, monkeypatch):
+        # Send once, then click Clear. Assert empty history + view.
+
+    test_set_project_updates_snapshot_used_in_next_request(qtbot, monkeypatch):
+        # Record the messages passed to FakeBackend.stream_chat.
+        # Send a request with project=None, then call set_project(p),
+        # then send another. Assert second request's system message
+        # contains "Neurons: <n>" while the first contained "no project loaded".
+
+    test_reload_backend_after_settings_change(qtbot, monkeypatch):
+        # Start with FakeBackend (provider="fake"). Monkeypatch the
+        # _make_backend selector. Change settings to a different fake
+        # backend. Call reload_backend(). Assert badge updated and
+        # next send goes to the new backend.
+
+    test_stop_button_interrupts_stream(qtbot, monkeypatch):
+        # FakeBackend that yields 100 tokens slowly. Send, then click
+        # Stop after the first few arrive. Assert: history's assistant
+        # message contains only the tokens received before stop; the
+        # status returns to "Idle"; send is re-enabled.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_llm_settings_dialog.py (qtbot)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    test_dialog_lists_three_providers(qtbot):
+        d = LLMSettingsDialog()
+        items = [d.provider_combo.itemText(i) for i in range(d.provider_combo.count())]
+        assert "Ollama (local)" in items
+        assert "OpenAI" in items
+        assert "Anthropic" in items
+
+    test_switching_provider_shows_correct_fields(qtbot):
+        # Select Ollama → endpoint visible, api-key field hidden.
+        # Select OpenAI → endpoint visible, api-key visible.
+        # Select Anthropic → endpoint hidden, api-key visible.
+
+    test_save_key_writes_to_secrets_module(qtbot, monkeypatch):
+        recorded = {}
+        monkeypatch.setattr(
+            "neuroseq.llm.secrets.set_api_key",
+            lambda provider, key: recorded.setdefault((provider, key), True) and True,
+        )
+        # Select OpenAI, type a key, click "Save key in OS keychain".
+        # Assert recorded == {("openai", "sk-..."): True}
+
+    test_save_key_warns_when_keyring_missing(qtbot, monkeypatch, qmessagebox_calls):
+        monkeypatch.setattr(
+            "neuroseq.llm.secrets.set_api_key", lambda p, k: False
+        )
+        # Try to save → expect a warning QMessageBox.
+        # Assert qmessagebox_calls has one entry with name=="warning".
+
+    test_settings_changed_signal_fires_on_provider_switch(qtbot):
+        d = LLMSettingsDialog()
+        with qtbot.waitSignal(d.settings_changed):
+            d.provider_combo.setCurrentText("OpenAI")
+
+    test_test_connection_button_calls_is_available(qtbot, monkeypatch):
+        # Monkeypatch the backend factory to return a FakeBackend that
+        # reports (False, "no server").
+        # Click Test connection → status label shows "no server".
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NOTES
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- All three backends use `register` (decorator from `backend.py`)
+  on import. The `__init__.py` import order is:
+
+      from neuroseq.llm.backend import *
+      from neuroseq.llm import ollama, openai_backend, anthropic_backend  # registration side-effects
+
+  This means importing `neuroseq.llm` is enough to populate the
+  registry. The chat widget and settings dialog rely on this.
+
+- Defer the heavy imports (`openai`, `anthropic`) inside the backend
+  `__init__` methods, NOT at module top. That way the base install
+  (no `[chat]` extra) can still import `neuroseq.llm` without
+  ImportError — the user only hits an error when they try to USE a
+  backend whose SDK isn't installed.
+
+- Same goes for `httpx` in the Ollama backend. The package is in the
+  `[chat]` extra; importing it inside `__init__` means the registry
+  population doesn't fail at startup on a slim install. The chat
+  widget catches `LLMBackendError` from `reload_backend()` and shows
+  the install hint in the status line.
+
+- `gui_settings.py` is loaded multiple times in the existing code
+  (each `choose_*` method constructs a fresh `GuiSettings`). The chat
+  code follows the same pattern — construct on-demand, no shared
+  instance. The JSON file is the source of truth.
+
+- The model badge ("Ollama · qwen2.5:7b") shown in the chat widget
+  header is a `QLabel` styled with a slightly muted color. Click on
+  it does nothing — it's not a button. The Settings... button next
+  to it opens the dialog.
+
+- For the QTextBrowser rendering: use a tiny inline-CSS template
+  with two CSS classes `.user` and `.assistant`, so the chat looks
+  like two-tone bubbles. Don't pull in a markdown library — render
+  the assistant's content as plain text inside a `<pre>` block to
+  preserve formatting and avoid HTML-injection footguns. If we want
+  markdown rendering later, that's a follow-up. (The user's
+  documentation IS markdown, but the model is told to be concise and
+  cite menu paths, so heavy markdown in replies is rare.)
+
+- The `chat` extra installs `openai>=1.40` and `anthropic>=0.40`,
+  both of which have a `models.list()` method. If the project must
+  support older SDK versions, the `list_models` calls should wrap a
+  try/except AttributeError → return a hardcoded fallback list.
+
+- DO NOT add a screenshot test for the chat panel. Streaming, model
+  badges, and dialog states are noisy. Cover everything with the qtbot
+  tests above instead.
+
+- The `mdi6.robot-happy-outline` icon ships with qtawesome's MDI6
+  pack used elsewhere in the codebase; if it doesn't render fall back
+  to `mdi6.message-text` or `mdi6.chat-question-outline`.
+
+- The chat widget is included in the existing `suppress_message_boxes`
+  / `patch_b2w_exec_show` autouse fixtures by virtue of using
+  QMessageBox and QDialog. Nothing special needed.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+RISKS / GOTCHAS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1. CROSS-THREAD QT SIGNALS WITH QStringS THAT CONTAIN UNICODE:
+   token strings may contain emoji, CJK, RTL marks. Qt's QueuedConnection
+   handles this fine, but the test code that monkeypatches a generator
+   should yield strings, not bytes.
+
+2. STREAM TIMEOUT vs. SLOW CPU INFERENCE:
+   On a CPU with a 7B model, the first token can take 10–20 s while
+   the model is loaded into memory. The 120 s read timeout covers this
+   but a much smaller value will produce confusing failures. Don't
+   shorten it without testing on a cold Ollama.
+
+3. KEYRING ON HEADLESS LINUX:
+   On servers without a Secret Service daemon, `keyring.set_password`
+   raises. The `secrets` module catches and returns False; the dialog
+   surfaces this. Users on such machines fall back to env vars — which
+   is fine for CI, dev containers, etc.
+
+4. STREAMING AND QTextBrowser ANCHORS:
+   Calling `setHtml` on every token kills any user text selection.
+   This is acceptable for v1 — the response is short and the user
+   typically waits for completion before copying. If users complain,
+   the fix is to append nodes via QTextCursor instead of rewriting.
+
+5. THE SYSTEM PROMPT IS LARGE:
+   With ~3000 lines of docs (~80 KB), the prompt costs noticeable
+   tokens per request on the cloud providers. Acceptable for v1.
+   If/when it grows, switch to retrieval. Don't pre-optimize.
+
+6. ANTHROPIC max_tokens REQUIRED:
+   Forgetting to pass a default breaks every Anthropic request with
+   a TypeError. The default of 4096 in `AnthropicBackend.stream_chat`
+   covers this. The test `test_anthropic_strips_system_messages_into_top_level_field`
+   should also assert the SDK received a `max_tokens` arg.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    # Lint & format the new/changed files.
+    .venv/bin/ruff check src/neuroseq/llm src/neuroseq/chat_widget.py \
+        src/neuroseq/llm_settings_dialog.py src/neuroseq/gui.py \
+        src/neuroseq/gui_settings.py \
+        tests/test_llm_backend.py tests/test_llm_system_prompt.py \
+        tests/test_chat_widget.py tests/test_llm_settings_dialog.py
+    .venv/bin/ruff format --check src/neuroseq/llm src/neuroseq/chat_widget.py \
+        src/neuroseq/llm_settings_dialog.py src/neuroseq/gui.py \
+        src/neuroseq/gui_settings.py \
+        tests/test_llm_backend.py tests/test_llm_system_prompt.py \
+        tests/test_chat_widget.py tests/test_llm_settings_dialog.py
+
+    # Type check.
+    .venv/bin/mypy src/neuroseq/llm src/neuroseq/chat_widget.py \
+        src/neuroseq/llm_settings_dialog.py src/neuroseq/gui_settings.py
+
+    # New tests, then the full suite.
+    PYTHONPATH=src .venv/bin/python -m pytest \
+        tests/test_llm_backend.py tests/test_llm_system_prompt.py \
+        tests/test_chat_widget.py tests/test_llm_settings_dialog.py -v
+    PYTHONPATH=src .venv/bin/python -m pytest
+
+The full suite is required because gui.py is modified (View menu,
+settings menu, splitter sizes). Existing GUI tests may need
+adjustment if they assert on the splitter widget count or the View
+menu's action count.
+
+Smoke test by hand:
+
+    1. `uv pip install -e '.[chat]'`
+    2. `ollama pull qwen2.5:7b` (or `qwen2.5:3b` for slower machines)
+    3. `ollama serve` in another terminal
+    4. `uv run neuroseq`
+    5. View → Show Chat. Type "How do I import calcium imaging data?".
+       Expect a streamed answer that mentions "File → Import data →
+       Import calcium imaging" (the exact menu path lives in
+       `gui.py:1597-1602`).
+    6. Settings → LLM assistant. Switch to OpenAI, paste a test key,
+       click Test connection. Switch model. Send a message.
+    7. Stop mid-stream → assert UI returns to Idle.
+    8. Clear chat → history blank, status Idle.
+    9. Close NeuroSeq, reopen → settings persisted (provider/model
+       remembered), key still in keychain, chat history empty.

@@ -31,6 +31,14 @@ dependencies = [
 ]
 dynamic = ["version"]
 
+[project.optional-dependencies]
+chat = [
+    "httpx>=0.27",
+    "openai>=1.40",
+    "anthropic>=0.40",
+    "keyring>=24",
+]
+
 [project.scripts]
 neuroseq = "neuroseq.__main__:main"
 

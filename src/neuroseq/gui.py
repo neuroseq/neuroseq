@@ -17,6 +17,7 @@ from qtpy.compat import getsavefilename
 from neuroseq import __version__
 from neuroseq.analysis_plugins import AnalysisPlugin
 from neuroseq.cellpose_import_dialog import CellposeImportDialog
+from neuroseq.chat_widget import ChatWidget
 from neuroseq.console_widget import ConsoleWidget
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.custom_analysis_widget import CustomAnalysisType
@@ -42,6 +43,7 @@ from neuroseq.import_dialog import Suite2pImportDialog
 from neuroseq.import_experiment_dialog import ImportExperimentDialog
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
+from neuroseq.llm_settings_dialog import LLMSettingsDialog
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
 from neuroseq.project import Project
@@ -119,7 +121,11 @@ class Gui(QtWidgets.QMainWindow):
         split_left_right.addWidget(self.custom_analysis_widget)
         self.console_widget = ConsoleWidget(parent=self)
         split_left_right.addWidget(self.console_widget)
-        split_left_right.setSizes([1000, 1000, 1000])
+        self.chat_widget = ChatWidget(parent=self)
+        self.chat_widget.setVisible(False)
+        self.chat_widget.request_settings_dialog.connect(self.open_llm_settings)
+        split_left_right.addWidget(self.chat_widget)
+        split_left_right.setSizes([1000, 1000, 1000, 1000])
         # main vertical splitter layout
         split_vertical = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         split_vertical.setHandleWidth(0)
@@ -179,6 +185,7 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_data.currentTextChanged.connect(self.set_data)
         self.stim_editor.limits_modified.connect(self.update_limits)
         self.last_cellpose_import: CellposeImportResult | None = None
+        self._llm_settings_dialog: LLMSettingsDialog | None = None
         if filename is not None:
             self.load_project(filename)
         else:
@@ -610,6 +617,7 @@ class Gui(QtWidgets.QMainWindow):
         if reset_controller:
             self.controller.reset()
         self.console_widget.set_project(self.project)
+        self.chat_widget.set_project(self.project)
         self.continue_simulation_action.setText("&Run simulation")
         for widget in self.plot_widgets:
             widget.clear_data()
@@ -621,6 +629,7 @@ class Gui(QtWidgets.QMainWindow):
 
         self.stim_editor.set_project(self.project)
         self.console_widget.set_project(self.project)
+        self.chat_widget.set_project(self.project)
         self._update_combo_boxes()
 
     def _cellpose_neuron_count(self, imported: CellposeImportResult | None) -> int:
@@ -1441,6 +1450,16 @@ class Gui(QtWidgets.QMainWindow):
             f"Setting stimulus padding to {self.settings.stim_padding_secs}s"
         )
 
+    def open_llm_settings(self) -> None:
+        if self._llm_settings_dialog is None:
+            self._llm_settings_dialog = LLMSettingsDialog(self)
+            self._llm_settings_dialog.settings_changed.connect(
+                self.chat_widget.reload_backend
+            )
+        self._llm_settings_dialog.show()
+        self._llm_settings_dialog.raise_()
+        self._llm_settings_dialog.activateWindow()
+
     def about(self) -> None:
         QtWidgets.QMessageBox.about(
             self,
@@ -1767,6 +1786,7 @@ class Gui(QtWidgets.QMainWindow):
                 False,
             ),
             ("&Console", self.console_widget, "mdi6.console", True),
+            ("&Chat", self.chat_widget, "mdi6.robot-happy-outline", False),
         ]:
             w: QtWidgets.QWidget = widget  # type: ignore[assignment]
             self._view_actions[w] = add_action(
@@ -1812,6 +1832,7 @@ class Gui(QtWidgets.QMainWindow):
     ) -> None:
         add_action("&Brian2 simulation backend", self.choose_brian2_backend, menu)
         add_action("&Stimulus automatic padding", self.choose_stim_padding_secs, menu)
+        add_action("&LLM assistant", self.open_llm_settings, menu)
         add_action(
             "&Synapse matrix RAM limit", self.choose_max_ram_synapse_plot_matrix, menu
         )
