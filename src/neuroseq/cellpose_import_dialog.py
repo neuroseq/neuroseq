@@ -14,13 +14,24 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
 from neuroseq.cell_overlay_widget import CellOverlayWidget
+from neuroseq.importer_cellpose import AOIRole
+from neuroseq.importer_cellpose import AreasOfInterestConfig
 from neuroseq.importer_cellpose import CellPoseImporter
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importer_cellpose import CircleAOI
+from neuroseq.importer_cellpose import SquareAOI
+from neuroseq.importer_cellpose import clone_aoi_config
 from neuroseq.importer_cellpose import clone_cellpose_result
+from neuroseq.importer_cellpose import default_aoi_config
+from neuroseq.importer_cellpose import generate_aoi_stimulus_mapping
 from neuroseq.importer_cellpose import generate_linear_stimulus_mapping
+from neuroseq.importer_cellpose import point_in_circle
+from neuroseq.importer_cellpose import point_in_square
 from neuroseq.mapping_validation import ensure_unique_ids
 from neuroseq.utils import get_primary_available_geometry
 from neuroseq.utils import is_vertical_screen
+
+CUSTOM_AOI_STRATEGY = "Custom with areas of interest"
 
 
 class CellposeImportDialog(QtWidgets.QDialog):
@@ -54,10 +65,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.left_layout: QtWidgets.QVBoxLayout | None = None
         self.checkbox_container: QtWidgets.QWidget | None = None
         self.mapping_group: QtWidgets.QGroupBox | None = None
-        self.main_content_layout: QtWidgets.QHBoxLayout | None = None
+        self.main_content_layout: QtWidgets.QBoxLayout | None = None
         self._vertical_layout = False
         self._is_adjusting_position = False
         self._current_screen: QtGui.QScreen | None = None
+        self._suppress_aoi_signals = False
+        self._aoi_initialized_shape: tuple[int, int] | None = None
         self._setup_ui()
         self._load_existing_data_if_available()
 
@@ -91,7 +104,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         return is_vertical_screen(self._get_available_geometry(screen))
 
     def _setup_ui(self) -> None:
-        self.setWindowTitle("Import Cellpose Data")
+        self.setWindowTitle("Import cell spatial footprints")
         self.setModal(True)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -182,7 +195,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         # Strategy selection
         strategy_layout = QtWidgets.QHBoxLayout()
         self.mapping_buttons = QtWidgets.QButtonGroup(self)
-        for option in ("Linear", "Custom"):
+        for option in ("Linear", "Custom", CUSTOM_AOI_STRATEGY):
             button = QtWidgets.QRadioButton(option)
             self.mapping_buttons.addButton(button)
             strategy_layout.addWidget(button)
@@ -222,6 +235,63 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.custom_mapping_label.setVisible(False)
         mapping_layout.addRow(self.custom_mapping_label, self.custom_mapping_line)
 
+        self.aoi_group = QtWidgets.QGroupBox("Areas of Interest")
+        aoi_layout = QtWidgets.QVBoxLayout(self.aoi_group)
+
+        self.square_enabled_cb = QtWidgets.QCheckBox("Square")
+        self.square_enabled_cb.setChecked(True)
+        self.square_role_buttons = QtWidgets.QButtonGroup(self)
+        square_pref_radio = QtWidgets.QRadioButton("preferential")
+        square_excl_radio = QtWidgets.QRadioButton("exclusion")
+        self.square_role_buttons.addButton(square_pref_radio)
+        self.square_role_buttons.addButton(square_excl_radio)
+        square_pref_radio.setChecked(True)
+        square_header = QtWidgets.QHBoxLayout()
+        square_header.addWidget(self.square_enabled_cb)
+        square_header.addWidget(square_pref_radio)
+        square_header.addWidget(square_excl_radio)
+        square_header.addStretch(1)
+        aoi_layout.addLayout(square_header)
+        square_values = QtWidgets.QHBoxLayout()
+        self.square_x_spin = self._make_aoi_spinbox()
+        self.square_y_spin = self._make_aoi_spinbox()
+        self.square_side_spin = self._make_aoi_spinbox()
+        square_values.addWidget(QtWidgets.QLabel("x:"))
+        square_values.addWidget(self.square_x_spin)
+        square_values.addWidget(QtWidgets.QLabel("y:"))
+        square_values.addWidget(self.square_y_spin)
+        square_values.addWidget(QtWidgets.QLabel("side:"))
+        square_values.addWidget(self.square_side_spin)
+        aoi_layout.addLayout(square_values)
+
+        self.circle_enabled_cb = QtWidgets.QCheckBox("Circle")
+        self.circle_enabled_cb.setChecked(True)
+        self.circle_role_buttons = QtWidgets.QButtonGroup(self)
+        circle_pref_radio = QtWidgets.QRadioButton("preferential")
+        circle_excl_radio = QtWidgets.QRadioButton("exclusion")
+        self.circle_role_buttons.addButton(circle_pref_radio)
+        self.circle_role_buttons.addButton(circle_excl_radio)
+        circle_excl_radio.setChecked(True)
+        circle_header = QtWidgets.QHBoxLayout()
+        circle_header.addWidget(self.circle_enabled_cb)
+        circle_header.addWidget(circle_pref_radio)
+        circle_header.addWidget(circle_excl_radio)
+        circle_header.addStretch(1)
+        aoi_layout.addLayout(circle_header)
+        circle_values = QtWidgets.QHBoxLayout()
+        self.circle_cx_spin = self._make_aoi_spinbox()
+        self.circle_cy_spin = self._make_aoi_spinbox()
+        self.circle_diameter_spin = self._make_aoi_spinbox()
+        circle_values.addWidget(QtWidgets.QLabel("cx:"))
+        circle_values.addWidget(self.circle_cx_spin)
+        circle_values.addWidget(QtWidgets.QLabel("cy:"))
+        circle_values.addWidget(self.circle_cy_spin)
+        circle_values.addWidget(QtWidgets.QLabel("diameter:"))
+        circle_values.addWidget(self.circle_diameter_spin)
+        aoi_layout.addLayout(circle_values)
+        self.aoi_group.setVisible(False)
+        mapping_layout.addRow(self.aoi_group)
+
         # Connect radio buttons to show/hide custom mapping input
         for abstract_button in self.mapping_buttons.buttons():
             if hasattr(abstract_button, "toggled"):
@@ -250,8 +320,16 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.show_segmentation_checkbox.setEnabled(True)
         self.show_segmentation_checkbox.toggled.connect(self._on_display_toggle_changed)
         checkbox_layout.addWidget(self.show_segmentation_checkbox)
+        self.show_shapes_checkbox = QtWidgets.QCheckBox("Show shapes")
+        self.show_shapes_checkbox.setChecked(True)
+        self.show_shapes_checkbox.setVisible(False)
+        self.show_shapes_checkbox.toggled.connect(self._update_aoi_overlay_visibility)
+        checkbox_layout.addWidget(self.show_shapes_checkbox)
         checkbox_layout.addStretch(1)
         self.left_layout.addWidget(self.checkbox_container)
+        self.overlay_widget.aoi_geometry_changed.connect(
+            self._on_overlay_aoi_geometry_changed
+        )
 
         self.main_content_layout.addWidget(self.left_container, stretch=3)
         self.right_container = QtWidgets.QWidget()
@@ -272,7 +350,15 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.guidance_label.setVisible(False)
         right_layout.addWidget(self.guidance_label)
         self.guidance_label.setVisible(self._get_mapping_strategy() == "Custom")
-        right_layout.addStretch(1)
+        self.aoi_summary_browser = QtWidgets.QTextBrowser()
+        self.aoi_summary_browser.setReadOnly(True)
+        self.aoi_summary_browser.setOpenExternalLinks(False)
+        self.aoi_summary_browser.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.Expanding,
+        )
+        self.aoi_summary_browser.setVisible(False)
+        right_layout.addWidget(self.aoi_summary_browser, stretch=1)
 
         button_layout = QtWidgets.QHBoxLayout()
 
@@ -296,6 +382,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.main_content_layout.addWidget(self.right_container, stretch=2)
         layout.addWidget(self.main_content_container)
         self.main_content_container.setVisible(False)
+        self._connect_aoi_controls()
+        self._set_square_controls_enabled(self.square_enabled_cb.isChecked())
+        self._set_circle_controls_enabled(self.circle_enabled_cb.isChecked())
         self._set_ui_loaded_state(False)
         self._on_display_toggle_changed()
 
@@ -318,6 +407,54 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 )
         if not loaded and hasattr(self, "import_button"):
             self.import_button.setEnabled(False)
+
+    def _make_aoi_spinbox(self) -> QtWidgets.QDoubleSpinBox:
+        spin = QtWidgets.QDoubleSpinBox()
+        spin.setRange(0.0, 1_000_000.0)
+        spin.setDecimals(1)
+        spin.setSingleStep(1.0)
+        return spin
+
+    def _connect_aoi_controls(self) -> None:
+        for spin in (
+            self.square_x_spin,
+            self.square_y_spin,
+            self.square_side_spin,
+            self.circle_cx_spin,
+            self.circle_cy_spin,
+            self.circle_diameter_spin,
+        ):
+            spin.valueChanged.connect(self._regenerate_aoi_mapping)
+
+        self.square_enabled_cb.toggled.connect(self._set_square_controls_enabled)
+        self.square_enabled_cb.toggled.connect(self._regenerate_aoi_mapping)
+        self.circle_enabled_cb.toggled.connect(self._set_circle_controls_enabled)
+        self.circle_enabled_cb.toggled.connect(self._regenerate_aoi_mapping)
+
+        for button in self.square_role_buttons.buttons():
+            button.toggled.connect(self._regenerate_aoi_mapping)
+        for button in self.circle_role_buttons.buttons():
+            button.toggled.connect(self._regenerate_aoi_mapping)
+
+    def _set_square_controls_enabled(self, enabled: bool) -> None:
+        for button in self.square_role_buttons.buttons():
+            button.setEnabled(enabled)
+        for spin in (
+            self.square_x_spin,
+            self.square_y_spin,
+            self.square_side_spin,
+        ):
+            spin.setEnabled(enabled)
+
+    def _set_circle_controls_enabled(self, enabled: bool) -> None:
+        for button in self.circle_role_buttons.buttons():
+            button.setEnabled(enabled)
+        for spin in (
+            self.circle_cx_spin,
+            self.circle_cy_spin,
+            self.circle_diameter_spin,
+        ):
+            spin.setEnabled(enabled)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -475,6 +612,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.image_path = None
         self.segmentation_path = None
         self._base_segmentation_data = None
+        self._aoi_initialized_shape = None
 
         self.image_path_label.setText("No image selected")
         self.image_path_label.setStyleSheet("QLabel { color: gray; }")
@@ -482,10 +620,13 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.segmentation_path_label.setStyleSheet("QLabel { color: gray; }")
         # self.custom_mapping_line.clear()
         self.linear_offset_spin.setValue(0)
+        self.aoi_summary_browser.clear()
+        self.aoi_summary_browser.setVisible(False)
         for button in self.mapping_buttons.buttons():
             if button.text() == "Linear":
                 button.setChecked(True)
                 break
+        self.overlay_widget.set_aoi_overlay(None, show=False)
 
         self._on_display_toggle_changed()
 
@@ -497,17 +638,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self, mapping: dict[int, int], mapping_strategy: str, linear_offset: int
     ) -> None:
         target_mode = mapping_strategy or "Linear"
-        if target_mode == "Custom" and mapping:
-            filtered_pairs = [
-                (stim_id, cellpose_id)
-                for stim_id, cellpose_id in mapping.items()
-                if stim_id != cellpose_id
-            ]
-            filtered_pairs.sort(key=lambda pair: pair[0])
-            mapping_str = ",".join(
-                [f"{stim_id}:{cellpose_id}" for stim_id, cellpose_id in filtered_pairs]
-            )
-            self.custom_mapping_line.setText(mapping_str)
+        if target_mode in ("Custom", CUSTOM_AOI_STRATEGY):
+            self.custom_mapping_line.setText(self._mapping_to_text(mapping))
         if target_mode == "Linear":
             self.linear_offset_spin.setValue(int(linear_offset or 0))
         for button in self.mapping_buttons.buttons():
@@ -518,13 +650,23 @@ class CellposeImportDialog(QtWidgets.QDialog):
     def _on_mapping_changed(self) -> None:
         """Handle toggle between mapping strategies"""
         mapping_strategy = self._get_mapping_strategy()
-        is_custom = mapping_strategy == "Custom"
-        self.custom_mapping_line.setVisible(is_custom)
-        self.custom_mapping_label.setVisible(is_custom)
-        self.linear_offset_spin.setVisible(not is_custom)
-        self.linear_offset_label.setVisible(not is_custom)
+        is_aoi = mapping_strategy == CUSTOM_AOI_STRATEGY
+        is_any_custom = mapping_strategy in ("Custom", CUSTOM_AOI_STRATEGY)
+        self.custom_mapping_line.setVisible(is_any_custom)
+        self.custom_mapping_label.setVisible(is_any_custom)
+        self.custom_mapping_line.setReadOnly(is_aoi)
+        self.linear_offset_spin.setVisible(not is_any_custom)
+        self.linear_offset_label.setVisible(not is_any_custom)
+        self.aoi_group.setVisible(is_aoi)
+        self.show_shapes_checkbox.setVisible(is_aoi)
         if hasattr(self, "guidance_label"):
-            self.guidance_label.setVisible(is_custom)
+            self.guidance_label.setVisible(is_any_custom)
+        if not is_aoi:
+            self.aoi_summary_browser.setVisible(False)
+        if is_aoi:
+            self._regenerate_aoi_mapping()
+        else:
+            self.overlay_widget.set_aoi_overlay(None, show=False)
 
         # Update preview if data is loaded
         if (
@@ -567,6 +709,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             show_stimulus_ids=show_labels,
             show_segmentation=show_segmentation,
         )
+        self._update_aoi_overlay_visibility()
 
     def _get_mapping_strategy(self) -> str:
         """Get the currently selected mapping strategy"""
@@ -579,6 +722,99 @@ class CellposeImportDialog(QtWidgets.QDialog):
             int(self.linear_offset_spin.value())
             if hasattr(self, "linear_offset_spin")
             else 0
+        )
+
+    def _role_from_button_group(self, group: QtWidgets.QButtonGroup) -> AOIRole:
+        checked = group.checkedButton()
+        if checked is not None and checked.text() == AOIRole.EXCLUSION.value:
+            return AOIRole.EXCLUSION
+        return AOIRole.PREFERENTIAL
+
+    def _set_role_button_group(
+        self, group: QtWidgets.QButtonGroup, role: AOIRole
+    ) -> None:
+        for button in group.buttons():
+            if button.text() == role.value:
+                button.setChecked(True)
+                return
+
+    def _current_aoi_config(self) -> AreasOfInterestConfig | None:
+        if self.importer.image_data is None:
+            return None
+        return AreasOfInterestConfig(
+            square=self._current_square_aoi(),
+            circle=self._current_circle_aoi(),
+            show_shapes=self.show_shapes_checkbox.isChecked(),
+        )
+
+    def _current_square_aoi(self):
+        return SquareAOI(
+            enabled=self.square_enabled_cb.isChecked(),
+            role=self._role_from_button_group(self.square_role_buttons),
+            x=float(self.square_x_spin.value()),
+            y=float(self.square_y_spin.value()),
+            side=float(self.square_side_spin.value()),
+        )
+
+    def _current_circle_aoi(self):
+        return CircleAOI(
+            enabled=self.circle_enabled_cb.isChecked(),
+            role=self._role_from_button_group(self.circle_role_buttons),
+            cx=float(self.circle_cx_spin.value()),
+            cy=float(self.circle_cy_spin.value()),
+            diameter=float(self.circle_diameter_spin.value()),
+        )
+
+    def _set_aoi_controls(self, config: AreasOfInterestConfig) -> None:
+        self._suppress_aoi_signals = True
+        try:
+            self.square_enabled_cb.setChecked(config.square.enabled)
+            self._set_role_button_group(self.square_role_buttons, config.square.role)
+            self.square_x_spin.setValue(float(config.square.x))
+            self.square_y_spin.setValue(float(config.square.y))
+            self.square_side_spin.setValue(float(config.square.side))
+
+            self.circle_enabled_cb.setChecked(config.circle.enabled)
+            self._set_role_button_group(self.circle_role_buttons, config.circle.role)
+            self.circle_cx_spin.setValue(float(config.circle.cx))
+            self.circle_cy_spin.setValue(float(config.circle.cy))
+            self.circle_diameter_spin.setValue(float(config.circle.diameter))
+
+            self.show_shapes_checkbox.setChecked(bool(config.show_shapes))
+            self._set_square_controls_enabled(config.square.enabled)
+            self._set_circle_controls_enabled(config.circle.enabled)
+        finally:
+            self._suppress_aoi_signals = False
+
+    def _ensure_aoi_defaults(self, force: bool = False) -> None:
+        if self.importer.image_data is None:
+            return
+        shape = tuple(self.importer.image_data.shape[:2])
+        if not force and self._aoi_initialized_shape == shape:
+            return
+        self._set_aoi_controls(default_aoi_config(shape))
+        self._aoi_initialized_shape = shape
+
+    def _compute_aoi_mapping(self) -> dict[int, int]:
+        config = self._current_aoi_config()
+        if config is None or self.importer.image_data is None:
+            return {}
+        return generate_aoi_stimulus_mapping(
+            self.importer._original_cellpose_ids,
+            self.overlay_widget.overlay_view._label_centers,
+            config,
+            self.importer.image_data.shape[0],
+        )
+
+    def _mapping_to_text(self, mapping: dict[int, int]) -> str:
+        filtered_pairs = [
+            (stim_id, cellpose_id)
+            for stim_id, cellpose_id in mapping.items()
+            if stim_id != cellpose_id
+        ]
+        filtered_pairs.sort(key=lambda pair: pair[0])
+        return ",".join(
+            f"{stim_id}:{cellpose_id}" for stim_id, cellpose_id in filtered_pairs
         )
 
     def _parse_custom_mapping(self, mapping_str: str) -> dict[int, int]:
@@ -612,6 +848,115 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         return mapping
 
+    def _role_html(self, role: AOIRole) -> str:
+        color = "#b42318" if role == AOIRole.EXCLUSION else "#1a7f37"
+        return f"<span style='color:{color}; font-weight:600'>{role.value}</span>"
+
+    def _format_aoi_indices(
+        self,
+        *,
+        shape_name: str,
+        enabled: bool,
+        role: AOIRole,
+        members: list[tuple[int, int]],
+    ) -> str:
+        status = "" if enabled else " <span style='color:#666'>(disabled)</span>"
+        if members:
+            stim_ids = ", ".join(str(stim_id) for stim_id, _ in members)
+            cellpose_ids = ", ".join(str(cellpose_id) for _, cellpose_id in members)
+        else:
+            stim_ids = "none"
+            cellpose_ids = "none"
+        return (
+            f"<p><b>{shape_name}</b> {self._role_html(role)}{status}<br>"
+            f"Stim IDs: {stim_ids}<br>"
+            f"Cellpose IDs: {cellpose_ids}</p>"
+        )
+
+    def _update_aoi_summary(self, mapping: dict[int, int] | None = None) -> None:
+        if self._get_mapping_strategy() != CUSTOM_AOI_STRATEGY:
+            self.aoi_summary_browser.clear()
+            self.aoi_summary_browser.setVisible(False)
+            return
+
+        config = self._current_aoi_config()
+        if config is None or self.importer.image_data is None:
+            self.aoi_summary_browser.clear()
+            self.aoi_summary_browser.setVisible(False)
+            return
+
+        if mapping is None:
+            mapping = self._compute_aoi_mapping()
+
+        image_height = self.importer.image_data.shape[0]
+        reverse_mapping = {
+            cellpose_id: stim_id for stim_id, cellpose_id in mapping.items()
+        }
+        square_members: list[tuple[int, int]] = []
+        circle_members: list[tuple[int, int]] = []
+        for cellpose_id, (
+            world_x,
+            world_y,
+        ) in self.overlay_widget.overlay_view._label_centers.items():
+            user_x = float(world_x)
+            user_y = float(image_height - world_y)
+            stim_id = reverse_mapping.get(int(cellpose_id))
+            if stim_id is None:
+                continue
+            if config.square.enabled and point_in_square(user_x, user_y, config.square):
+                square_members.append((int(stim_id), int(cellpose_id)))
+            if config.circle.enabled and point_in_circle(user_x, user_y, config.circle):
+                circle_members.append((int(stim_id), int(cellpose_id)))
+
+        square_members.sort()
+        circle_members.sort()
+        html = (
+            "<div>"
+            "<p><b>Areas of interest summary</b></p>"
+            f"{self._format_aoi_indices(shape_name='Square', enabled=config.square.enabled, role=config.square.role, members=square_members)}"
+            f"{self._format_aoi_indices(shape_name='Circle', enabled=config.circle.enabled, role=config.circle.role, members=circle_members)}"
+            "<p style='color:#666'>If shapes overlap, exclusion cells still receive the highest stimulus IDs.</p>"
+            "</div>"
+        )
+        self.aoi_summary_browser.setHtml(html)
+        self.aoi_summary_browser.setVisible(True)
+
+    def _regenerate_aoi_mapping(self, *_args) -> None:
+        if self._suppress_aoi_signals:
+            return
+        if self._get_mapping_strategy() != CUSTOM_AOI_STRATEGY:
+            return
+
+        config = self._current_aoi_config()
+        if config is None:
+            return
+
+        mapping = self._compute_aoi_mapping()
+        self.custom_mapping_line.blockSignals(True)
+        try:
+            self.custom_mapping_line.setText(self._mapping_to_text(mapping))
+        finally:
+            self.custom_mapping_line.blockSignals(False)
+        self.overlay_widget.set_aoi_overlay(
+            config,
+            show=self.show_shapes_checkbox.isChecked(),
+        )
+        self._update_aoi_summary(mapping)
+        self._update_preview_mapping()
+
+    def _update_aoi_overlay_visibility(self, *_args) -> None:
+        is_aoi = self._get_mapping_strategy() == CUSTOM_AOI_STRATEGY
+        self.overlay_widget.set_aoi_overlay(
+            self._current_aoi_config() if is_aoi else None,
+            show=is_aoi and self.show_shapes_checkbox.isChecked(),
+        )
+
+    def _on_overlay_aoi_geometry_changed(self, config: AreasOfInterestConfig) -> None:
+        if self._get_mapping_strategy() != CUSTOM_AOI_STRATEGY:
+            return
+        self._set_aoi_controls(config)
+        self._regenerate_aoi_mapping()
+
     def _generate_stimulus_mapping(self, strategy: str) -> dict[int, int]:
         """Generate stimulus-to-cellpose mapping based on strategy"""
         if self.importer._original_cellpose_ids is None:
@@ -625,6 +970,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
         elif strategy == "Custom":
             # Parse custom mapping string
             return self._parse_custom_mapping(self.custom_mapping_line.text())
+        elif strategy == CUSTOM_AOI_STRATEGY:
+            return self._compute_aoi_mapping()
         else:
             return {}
 
@@ -639,9 +986,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 self.importer.segmentation_data,
                 self.importer._original_cellpose_ids,
                 preview_mapping,
-                highlight_mappings=(mapping_strategy == "Custom"),
+                highlight_mappings=(
+                    mapping_strategy in ("Custom", CUSTOM_AOI_STRATEGY)
+                ),
                 base_image=self.importer.image_data,
             )
+            self._update_aoi_overlay_visibility()
         except Exception as exc:
             self.logger.warning("Error updating preview mapping: %s", exc)
 
@@ -750,6 +1100,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
                     self.importer.segmentation_data, copy=True
                 )
             self._apply_segmentation_transformations()
+            self._ensure_aoi_defaults()
             self.import_button.setEnabled(True)
             self._set_ui_loaded_state(True)
             # Generate preview mapping to show in overlay
@@ -777,9 +1128,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 self.importer.segmentation_data,
                 self.importer._original_cellpose_ids,
                 preview_mapping,
-                highlight_mappings=(mapping_strategy == "Custom"),
+                highlight_mappings=(
+                    mapping_strategy in ("Custom", CUSTOM_AOI_STRATEGY)
+                ),
                 base_image=self.importer.image_data,
             )
+            self._update_aoi_overlay_visibility()
             self._hide_info()
         except Exception as exc:
             self.logger.exception("Error preparing cellpose preview")
@@ -831,6 +1185,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
             # Generate stimulus-to-cellpose mapping based on selected strategy
             mapping_strategy = self._get_mapping_strategy()
             stimulus_mapping = self._generate_stimulus_mapping(mapping_strategy)
+            if mapping_strategy == CUSTOM_AOI_STRATEGY:
+                self._update_aoi_summary(stimulus_mapping)
             if mapping_strategy == "Custom":
                 original_ids = (
                     []
@@ -849,13 +1205,23 @@ class CellposeImportDialog(QtWidgets.QDialog):
                     ):
                         continue
                     stimulus_mapping[cellpose_id] = cellpose_id
-            stored_mapping = stimulus_mapping if mapping_strategy == "Custom" else None
+            stored_mapping = (
+                stimulus_mapping
+                if mapping_strategy in ("Custom", CUSTOM_AOI_STRATEGY)
+                else None
+            )
+            stored_aoi_config = (
+                clone_aoi_config(self._current_aoi_config())
+                if mapping_strategy == CUSTOM_AOI_STRATEGY
+                else None
+            )
 
             self._imported_data = self.importer.create_result(
                 self.image_path,
                 stored_mapping,
                 mapping_strategy=mapping_strategy,
                 linear_offset=self._get_linear_offset(),
+                aoi_config=stored_aoi_config,
             )
 
             info = self.importer.get_info()
@@ -872,7 +1238,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             if mapping_strategy == "Linear" and linear_offset:
                 success_msg += f" (offset {linear_offset})"
 
-            if mapping_strategy == "Custom" and stimulus_mapping:
+            if mapping_strategy in ("Custom", CUSTOM_AOI_STRATEGY) and stimulus_mapping:
                 success_msg += f"\nStimulus mapping: {dict(list(stimulus_mapping.items())[:5])}{'...' if len(stimulus_mapping) > 5 else ''}"
 
             QtWidgets.QMessageBox.information(self, "Import Successful", success_msg)
@@ -908,12 +1274,21 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 else np.array(self.importer.segmentation_data, copy=True)
             )
             self._apply_segmentation_transformations()
+            self._ensure_aoi_defaults(force=True)
 
             mapping = self.existing_data.stimulus_to_cellpose_mapping or {}
             mapping_strategy = getattr(self.existing_data, "mapping_strategy", "")
             if not mapping_strategy:
                 mapping_strategy = "Custom" if mapping else "Linear"
             linear_offset = getattr(self.existing_data, "linear_offset", 0)
+            aoi_config = clone_aoi_config(
+                getattr(self.existing_data, "aoi_config", None)
+            )
+            if mapping_strategy == CUSTOM_AOI_STRATEGY:
+                if aoi_config is None and self.importer.image_data is not None:
+                    aoi_config = default_aoi_config(self.importer.image_data.shape[:2])
+                if aoi_config is not None:
+                    self._set_aoi_controls(aoi_config)
             self._apply_existing_mapping(mapping, mapping_strategy, linear_offset)
             self.logger.info(
                 "cellpose restore: strategy=%s mapping=%s linear_offset=%s",

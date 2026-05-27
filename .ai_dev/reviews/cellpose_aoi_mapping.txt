@@ -1,0 +1,138 @@
+cellpose_aoi_mapping — review notes
+====================================
+
+The implementation is functionally correct. All 29 new tests pass. The full
+suite (`uv run pytest`) passes on a clean run (777 passed, 2 skipped). Logic,
+coordinate handling, persistence, drag/resize, autofill, and reopening all
+work as specified.
+
+The fixes below are mechanical — ruff/format hygiene plus two small nits.
+
+────────────────────────────────────────────────────────────────────────────────
+FIX 1 — ruff lint (will fail pre-commit)
+────────────────────────────────────────────────────────────────────────────────
+
+`ruff check` reports four errors:
+
+    I001  src/neuroseq/cellpose_import_dialog.py:1   import block un-sorted
+    UP042 src/neuroseq/importer_cellpose.py:19       Class AOIRole inherits from both `str` and `enum.Enum`
+    I001  src/neuroseq/io.py:1                       import block un-sorted
+    I001  tests/test_cellpose_aoi_mapping.py:1       import block un-sorted
+
+Fix:
+
+1. The I001 errors are because `SquareAOI` is alphabetised below `S…` but
+   appears after `generate_aoi_stimulus_mapping` / `generate_linear_stimulus_mapping`
+   in the from-imports. Run `ruff check --fix` on those three files OR
+   manually reorder so the imports come out as:
+
+       from neuroseq.importer_cellpose import AOIRole
+       from neuroseq.importer_cellpose import AreasOfInterestConfig
+       from neuroseq.importer_cellpose import CellPoseImporter
+       from neuroseq.importer_cellpose import CellposeImportResult
+       from neuroseq.importer_cellpose import CircleAOI
+       from neuroseq.importer_cellpose import SquareAOI
+       from neuroseq.importer_cellpose import clone_aoi_config
+       from neuroseq.importer_cellpose import clone_cellpose_result
+       from neuroseq.importer_cellpose import default_aoi_config
+       from neuroseq.importer_cellpose import generate_aoi_stimulus_mapping
+       from neuroseq.importer_cellpose import generate_linear_stimulus_mapping
+
+   (Same shape in `io.py`, `cell_overlay_widget.py`, and the test file —
+   each has one or two out-of-order names.)
+
+2. UP042: rather than disabling the rule, swap `AOIRole(str, Enum)` for
+   `AOIRole(StrEnum)`:
+
+       from enum import StrEnum
+
+       class AOIRole(StrEnum):
+           PREFERENTIAL = "preferential"
+           EXCLUSION = "exclusion"
+
+   `StrEnum` is in the stdlib from 3.11 (the project's interpreter). All
+   existing usages — `role.value`, `AOIRole(string)` for parsing — work
+   identically. Verify by re-running tests.
+
+────────────────────────────────────────────────────────────────────────────────
+FIX 2 — ruff format
+────────────────────────────────────────────────────────────────────────────────
+
+`ruff format --check` flags four files that need reformatting:
+
+    src/neuroseq/cell_overlay_widget.py
+    src/neuroseq/cellpose_import_dialog.py
+    src/neuroseq/importer_cellpose.py
+    tests/test_cellpose_aoi_mapping.py
+
+Run `ruff format` on them. No content changes expected — these are
+line-wrapping / spacing adjustments around the long boolean conditions in
+`_drag_square`, `_drag_circle`, and `generate_aoi_stimulus_mapping`.
+
+────────────────────────────────────────────────────────────────────────────────
+FIX 3 — undo the `_reset_importer_state` line-clear change
+────────────────────────────────────────────────────────────────────────────────
+
+In `cellpose_import_dialog.py:_reset_importer_state` (around the line
+previously commented `# self.custom_mapping_line.clear()`), the comment
+marker was removed so the line now actively clears the line edit:
+
+    -        # self.custom_mapping_line.clear()
+    +        self.custom_mapping_line.clear()
+
+This was not part of the spec. The original deliberately left the user's
+hand-typed custom mapping intact across reset (e.g., after a failed file
+load). Restore the comment so this behavior is unchanged.
+
+If keeping the change is desired, that's a separate decision — but it
+should not ride along in this handoff.
+
+────────────────────────────────────────────────────────────────────────────────
+NIT — hit-test structure in cell_overlay_widget.OverlayView._aoi_hit_test
+────────────────────────────────────────────────────────────────────────────────
+
+The square-body check appears twice: once inside the `if circle.enabled:`
+branch (so both bodies get tested when circle is on) and once in a separate
+`if square.enabled:` block afterwards (for when circle is off). This works
+correctly but reads awkwardly. Suggested refactor:
+
+    if square.enabled:
+        for idx, point in enumerate(square_corners):
+            if hit: return ("square", f"corner_{idx}")
+    if circle.enabled:
+        for idx, point in enumerate(circle_handles):
+            if hit: return ("circle", f"handle_{idx}")
+
+    user_x, user_y = world_to_user_point(world_x, world_y, image_height)
+    if circle.enabled and point_in_circle_body(circle, user_x, user_y):
+        return ("circle", "body")
+    if square.enabled and point_in_square_body(square, user_x, user_y):
+        return ("square", "body")
+    return None
+
+Same behaviour, no duplicated branch. Optional — not blocking.
+
+────────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────────
+
+After applying FIX 1 + FIX 2 + FIX 3:
+
+    .venv/bin/ruff check src/neuroseq/aoi_shapes.py \
+        src/neuroseq/importer_cellpose.py \
+        src/neuroseq/cellpose_import_dialog.py \
+        src/neuroseq/cell_overlay_widget.py \
+        src/neuroseq/io.py \
+        tests/test_cellpose_aoi_mapping.py
+    .venv/bin/ruff format --check src/neuroseq/aoi_shapes.py \
+        src/neuroseq/importer_cellpose.py \
+        src/neuroseq/cellpose_import_dialog.py \
+        src/neuroseq/cell_overlay_widget.py \
+        src/neuroseq/io.py \
+        tests/test_cellpose_aoi_mapping.py
+    PYTHONPATH=src .venv/bin/python -m pytest \
+        tests/test_cellpose_aoi_mapping.py \
+        tests/test_cellpose_import_dialog.py \
+        tests/test_cellpose_importer.py -v
+
+The first two must report zero issues. The third must show 29 + 3 + N passes.

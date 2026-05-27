@@ -14,10 +14,18 @@ class StimIntensityDialog(QtWidgets.QDialog):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Stimulus intensity")
+        self.setWindowTitle("Draw designer stimuli")
         self.draw_stim = draw_stim
         self.stim_units = stim_units
         self.stim_type = stim_type
+        # Restored designs may previously have stored Logarithmic / Random;
+        # those modes are no longer offered here. Fall back to Linear (Ramp)
+        # so the dialog always opens on a supported radio.
+        if self.draw_stim.draw_stim_type not in (
+            DrawStimType.Constant,
+            DrawStimType.Linear,
+        ):
+            self.draw_stim.draw_stim_type = DrawStimType.Linear
 
         self.layout = QtWidgets.QVBoxLayout(self)
 
@@ -32,30 +40,14 @@ class StimIntensityDialog(QtWidgets.QDialog):
         self.layout.addWidget(self.rad_intensity_constant)
         self.rad_group_intensity.addButton(self.rad_intensity_constant)
         self.rad_intensity_constant.clicked.connect(self.intensity_type_changed)
-        # DrawStimType.Linear
-        self.rad_intensity_linear = QtWidgets.QRadioButton("Linear gradient", self)
+        # DrawStimType.Linear — surfaced as "Ramp" in the UI.
+        self.rad_intensity_linear = QtWidgets.QRadioButton("Ramp", self)
         self.rad_intensity_linear.setChecked(
             self.draw_stim.draw_stim_type == DrawStimType.Linear
         )
         self.layout.addWidget(self.rad_intensity_linear)
         self.rad_group_intensity.addButton(self.rad_intensity_linear)
         self.rad_intensity_linear.clicked.connect(self.intensity_type_changed)
-        # DrawStimType.Logarithmic
-        self.rad_intensity_log = QtWidgets.QRadioButton("Logarithmic gradient", self)
-        self.rad_intensity_log.setChecked(
-            self.draw_stim.draw_stim_type == DrawStimType.Logarithmic
-        )
-        self.layout.addWidget(self.rad_intensity_log)
-        self.rad_group_intensity.addButton(self.rad_intensity_log)
-        self.rad_intensity_log.clicked.connect(self.intensity_type_changed)
-        # DrawStimType.Random
-        self.rad_intensity_random = QtWidgets.QRadioButton("Random", self)
-        self.rad_intensity_random.setChecked(
-            self.draw_stim.draw_stim_type == DrawStimType.Random
-        )
-        self.layout.addWidget(self.rad_intensity_random)
-        self.rad_group_intensity.addButton(self.rad_intensity_random)
-        self.rad_intensity_random.clicked.connect(self.intensity_type_changed)
 
         self.label_value1 = QtWidgets.QLabel("", self)
         self.layout.addWidget(self.label_value1)
@@ -90,31 +82,19 @@ class StimIntensityDialog(QtWidgets.QDialog):
             self.txt_value2.setEnabled(False)
             self.txt_value2.setVisible(False)
         else:
+            self.draw_stim.draw_stim_type = DrawStimType.Linear
             self.label_value1.setText(f"Initial intensity in {self.stim_units}:")
             self.label_value2.setText(f"Final intensity in {self.stim_units}:")
             self.label_value2.setEnabled(True)
             self.label_value2.setVisible(True)
             self.txt_value2.setEnabled(True)
             self.txt_value2.setVisible(True)
-            if self.rad_intensity_linear.isChecked():
-                self.draw_stim.draw_stim_type = DrawStimType.Linear
-            elif self.rad_intensity_log.isChecked():
-                self.draw_stim.draw_stim_type = DrawStimType.Logarithmic
-            elif self.rad_intensity_random.isChecked():
-                self.draw_stim.draw_stim_type = DrawStimType.Random
-                self.label_value1.setText(f"Minimum intensity in {self.stim_units}:")
-                self.label_value2.setText(f"Maximum intensity in {self.stim_units}:")
             self.end_intensity_changed(self.txt_value2.text())
 
     def _parse_intensity(self, text, input_widget: QtWidgets.QLineEdit) -> float | None:
         try:
             intensity = float(text)
-            if (
-                self.stim_type != StimType.External
-                and intensity < 0
-                or self.draw_stim.draw_stim_type == DrawStimType.Logarithmic
-                and intensity <= 0
-            ):
+            if self.stim_type != StimType.External and intensity < 0:
                 raise ValueError
             input_widget.setStyleSheet("")
             return intensity

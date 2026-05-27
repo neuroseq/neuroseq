@@ -1,0 +1,692 @@
+stim_pattern_designer — "Design stimulation pattern" guided generator dialog [IMPLEMENTED]
+==========================================================================================
+
+A new non-modal dialog (launched from a toolbar button in `stim_editor`) that
+guides the user through building common stimulus patterns: sequential and
+simultaneous trains across all neurons, the Für Elise musical phrase across
+the first 13 neurons, and per-neuron pulse trains with the Constant /
+Linear / Logarithmic / Random intensity profiles that already exist
+elsewhere. Each Apply places one pattern on the currently selected stim
+array, automatically advances a "start time" cursor so successive Applies
+stack cleanly, and is fully undoable — even when padding the project to fit.
+
+Files to change:
+    src/neuroseq/stim_editor.py             (toolbar action + apply_pattern method + invoke dialog)
+    src/neuroseq/stim_array_modifier.py     (new ResizableReversibleAction class)
+
+Files to create:
+    src/neuroseq/stim_patterns.py           (pure-math pattern generators, no Qt)
+    src/neuroseq/stim_pattern_dialog.py     (non-modal Qt dialog)
+    tests/test_stim_patterns.py             (pure-math tests)
+    tests/test_stim_pattern_dialog.py       (Qt + undo integration tests)
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+DEFAULTS — match the Getting Started example
+────────────────────────────────────────────────────────────────────────────────────────────
+
+The "Getting Started" project (example_projects.py:165-187) is the
+reference: 100 ms pulses, 18 ms inter-pulse gap, amplitude 1.0,
+units "siemens", stim_dt 1 ms. All four pattern types take the same
+inputs (where they apply):
+
+    pulse_duration_ms : float = 100.0
+    magnitude         : float = 1.0
+    units             : str   = (preserved from current stim array — read-only display)
+    inter_pulse_ms    : float = 18.0   # gap between pulses / events
+    repeats           : int   = 1      # only Simultaneous, Für Elise, and per-neuron use this
+
+`units` is shown as a label, not editable: stim array units are owned by the
+stim array itself and changing them is an `Edit stim array` operation. The
+label exists so the user knows what scale `magnitude` is in.
+
+For the per-neuron intensity-profile patterns (Constant / Linear / Log /
+Random), the magnitude field expands to TWO fields when the profile is not
+Constant — start/end for Linear, start/end for Log, min/max for Random —
+matching the existing `StimIntensityDialog` exactly.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+PATTERN MATH — src/neuroseq/stim_patterns.py (new, pure functions)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+All generators return `np.ndarray` of shape `(n_samples, n_neurons)` and
+take a `dt_seconds` argument used to convert ms → samples via
+`round(ms / 1000 / dt_seconds)`.
+
+1.  `generate_sequential(n_neurons, pulse_ms, ipi_ms, magnitude, dt_seconds) -> ndarray`
+
+    Per the Getting Started example. Each neuron is stimulated alone, in
+    order 0..n-1, for `pulse_ms`, with `ipi_ms` gap between pulses.
+    Returns shape `(n_neurons * (pulse_n + ipi_n), n_neurons)`.
+
+2.  `generate_simultaneous(n_neurons, pulse_ms, ipi_ms, magnitude, repeats, dt_seconds) -> ndarray`
+
+    All neurons fire at once. One "event" is `pulse_n` on samples followed
+    by `ipi_n` zero samples. Stacked `repeats` times.
+    Returns shape `(repeats * (pulse_n + ipi_n), n_neurons)`.
+
+3.  `generate_fuer_elise(n_neurons, pulse_ms, ipi_ms, magnitude, repeats, dt_seconds) -> ndarray`
+
+    Uses the existing `_FUER_ELISE_INTRO` event list (24 events with 13
+    pitches). Reuse the constant from `example_projects.py` by lifting it
+    into `stim_patterns.py` (and importing the existing one from
+    `example_projects` for back-compat). Each event lasts `pulse_n`
+    samples followed by `ipi_n` zeros. Multi-pitch chord events write
+    `magnitude` simultaneously to each chord pitch. The phrase is
+    repeated `repeats` times back-to-back.
+
+    Neuron handling:
+        - Use only the first `min(n_neurons, 13)` pitches.
+        - For chord events whose other pitch indices exceed `n_neurons-1`,
+          those pitches are silently dropped (clip). If a chord's only
+          notes are all out of range the event becomes silent. This
+          matches "use any number of available neurons, clipping the
+          pattern accordingly".
+
+    Returns shape `(repeats * 24 * (pulse_n + ipi_n), n_neurons)`.
+    Note the trailing IPI after the last event is INCLUDED — required so
+    repeats stack cleanly.
+
+4.  `generate_per_neuron(neuron_index, n_neurons, pulse_ms, ipi_ms,
+        profile, value1, value2, repeats, dt_seconds) -> ndarray`
+
+    A single-neuron train of `repeats` pulses on the column
+    `neuron_index`, with intensity per pulse determined by `profile`:
+
+        profile = DrawStimType.Constant     → every pulse has value1
+        profile = DrawStimType.Linear       → np.linspace(value1, value2, repeats)
+        profile = DrawStimType.Logarithmic  → np.logspace(log(value1), log(value2), repeats)
+                                              (require value1>0, value2>0)
+        profile = DrawStimType.Random       → np.random.uniform(value1, value2, repeats)
+                                              (treat value1 as min, value2 as max — same as StimIntensityDialog)
+
+    All other neuron columns are zero.
+
+    Returns shape `(repeats * (pulse_n + ipi_n), n_neurons)`.
+
+5.  `pattern_total_samples(...)` — small helpers to compute the resulting
+    length without building the full array (used to validate against the
+    current stim array's length without allocating).
+
+All five generators include a **trailing IPI of `ipi_n` zero samples** at
+the very end. This is required so the user's next Apply can land
+immediately after without the two pulses fusing.
+
+Edge cases:
+    - pulse_ms <= 0  → ValueError
+    - ipi_ms < 0     → ValueError (zero is allowed for back-to-back pulses)
+    - magnitude == 0 → allowed (writes zeros; effectively just advances the
+                       cursor — useful for inserting deliberate gaps)
+    - repeats < 1    → ValueError
+    - Logarithmic with non-positive value1/value2 → ValueError
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+PROJECT-LEVEL UNDO — src/neuroseq/stim_array_modifier.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Applying a pattern may require padding the target stim array to fit. The
+project's `pad_stim_arrays` pads EVERY stim array to the new length, which
+breaks the existing slice-based undo model (other stim arrays' modifiers
+hold slices that may no longer be in-bounds after a future undo shrinks
+the arrays).
+
+ADD a new compound action class `ResizableReversibleAction` next to
+`ReversibleAction`:
+
+    class ResizableReversibleAction:
+        """One-step undo for: pad project to new length + overwrite slice
+        on a single target stim array. Restores all arrays' previous
+        lengths and the target's previous values on undo."""
+
+        def __init__(
+            self,
+            project: Project,
+            target_stim_name: str,
+            neuron_slice: slice,
+            time_slice: slice,
+            new_values: np.ndarray,
+            stim_widget: StimWidget,
+        ) -> None:
+            self.project = project
+            self.target_stim_name = target_stim_name
+            self.neuron_slice = neuron_slice
+            self.time_slice = time_slice
+            self.new_values = np.array(new_values, copy=True)
+            self.stim_widget = stim_widget
+            # Snapshot full pre-state of every stim array in the project.
+            self.before_lengths: dict[str, int] = {
+                name: arr.values.shape[0]
+                for name, arr in project.stim_arrays.items()
+            }
+            self.before_target_values: np.ndarray | None = None  # set in __call__
+            # The new total length needed (in samples on the target's dt).
+            self.new_length = time_slice.stop
+
+        def __call__(self, stim_array: StimArray, stim_widget: StimWidget) -> None:
+            # Pad every array whose length is < new_length (computed in
+            # target dt — see "PAD ALIGNMENT" below). Snapshot the
+            # target's old slice values BEFORE overwriting.
+            self._ensure_padded()
+            target = self.project.stim_arrays[self.target_stim_name]
+            self.before_target_values = target.values[
+                self.time_slice, self.neuron_slice
+            ].copy()
+            target.values[self.time_slice, self.neuron_slice] = self.new_values
+            stim_widget.update_data_slice(
+                self.neuron_slice, self.time_slice, self.new_values
+            )
+            self.project.update_limits()
+
+        def undo(self, stim_array: StimArray, stim_widget: StimWidget) -> None:
+            # Restore target slice values, then truncate every array back
+            # to its pre-action length.
+            if self.before_target_values is not None:
+                target = self.project.stim_arrays[self.target_stim_name]
+                target.values[self.time_slice, self.neuron_slice] = (
+                    self.before_target_values
+                )
+            for name, old_length in self.before_lengths.items():
+                if name not in self.project.stim_arrays:
+                    continue
+                arr = self.project.stim_arrays[name]
+                if arr.values.shape[0] > old_length:
+                    arr.values = arr.values[:old_length, :]
+            self.project.update_limits()
+
+        def _ensure_padded(self) -> None:
+            # Convert self.new_length (samples in target dt) to seconds,
+            # then call project.pad_stim_arrays which handles per-array
+            # dt conversion.
+            target_dt = self.project.stim_arrays[self.target_stim_name].dt
+            new_secs = self.new_length * target_dt
+            self.project.pad_stim_arrays(new_secs)
+
+The existing `StimArrayModifier.do/undo/redo` call `action(stim_array,
+stim_widget)` and `action.undo(stim_array, stim_widget)`. Both methods on
+the new class have matching signatures (they ignore `stim_array` and use
+the project reference instead). So no changes are needed to
+`StimArrayModifier` itself.
+
+WHAT ABOUT STALE ACTIONS in OTHER modifiers' stacks (or in the same
+modifier's stack predating this compound action)?
+
+After a pad, all existing slice ranges in OTHER modifiers' stacks are
+still valid (pad only grows). After an undo of the compound action, the
+arrays shrink — any older action with `time_slice.stop > new_length`
+becomes invalid.
+
+To keep the undo model simple and predictable:
+
+    1. When the editor pushes a `ResizableReversibleAction` onto the
+       current modifier, it ALSO clears every OTHER modifier's
+       `action_stack` (and resets their `current_index = -1`).
+
+    2. It does NOT clear the current modifier's own prior history.
+       Prior slice-based actions whose slices remain in-bounds after a
+       future undo of the compound action will still work; ones that
+       don't are silently no-op'd via a bounds-check inside
+       `ReversibleAction._asign_values` (add a guard there:
+       `if self.time_slice.stop > stim_array.values.shape[0] or
+       self.neuron_slice.stop > stim_array.values.shape[1]: return`).
+
+    3. Even if pattern Apply does NOT require padding (the array is
+       already long enough), still use `ResizableReversibleAction` for
+       uniformity. The pad step becomes a no-op (`pad_stim_arrays`
+       skips arrays already at-or-beyond `new_secs`), the `before_lengths`
+       snapshot equals the current lengths, and undo restores values
+       without truncation.
+
+(2) is a small safety net for an edge case; it's documented as a one-line
+addition to `ReversibleAction._asign_values`.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+EDITOR WIRING — src/neuroseq/stim_editor.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1.  Add a new toolbar action between `Loop stim array` (line ~952) and
+    `Show all stim arrays` (line ~960):
+
+        add_action(
+            "Design stimulation pattern",
+            self.open_pattern_designer,
+            menu,
+            toolbar,
+            self,
+            icon=qta.icon("mdi6.creation"),   # or another evocative icon
+        )
+
+2.  Hold a single instance of the dialog on `self._pattern_dialog` (None
+    until opened). `open_pattern_designer` lazily creates it, raises it if
+    already open, and pushes the current stim context into it:
+
+        def open_pattern_designer(self) -> None:
+            if self.current_stim_modifier is None or self.project is None:
+                return
+            if self._pattern_dialog is None:
+                self._pattern_dialog = StimPatternDialog(self)
+            self._pattern_dialog.set_context(self._current_pattern_context())
+            self._pattern_dialog.show()
+            self._pattern_dialog.raise_()
+            self._pattern_dialog.activateWindow()
+
+    The dialog is non-modal (`setModal(False)`). It survives the user
+    switching stim arrays — `set_context` is called on every selection
+    change (hook into `select_stim`).
+
+3.  Add a public method `apply_pattern(neuron_slice, time_slice, new_values)`:
+
+        def apply_pattern(
+            self,
+            neuron_slice: slice,
+            time_slice: slice,
+            new_values: np.ndarray,
+        ) -> None:
+            """Apply a pattern as a single undoable action, padding the
+            project if needed."""
+            if self.current_stim_modifier is None or self.project is None:
+                return
+            target_name = self.current_stim_modifier.stim_array.name
+            action = ResizableReversibleAction(
+                self.project,
+                target_name,
+                neuron_slice,
+                time_slice,
+                new_values,
+                self.stim_widget,
+            )
+            # Append to current modifier's stack.
+            modifier = self.current_stim_modifier
+            modifier.action_stack = modifier.action_stack[: modifier.current_index + 1]
+            modifier.action_stack.append(action)
+            action(modifier.stim_array, self.stim_widget)
+            modifier.current_index = len(modifier.action_stack) - 1
+            # Clear OTHER modifiers' stacks (their slices may be invalidated by
+            # future undo of this compound action).
+            for name, other in self.stims_dict.items():
+                if other is not modifier:
+                    other.action_stack = []
+                    other.current_index = -1
+            # Refresh the controller's limits and widgets that depend on length.
+            self.controller.set_limits(
+                float(self.project.max_time_secs),
+                max(1, int(self.project.max_neurons)),
+            )
+            self.limits_modified.emit()
+            self._stim_values_updated()
+
+    Yes, this duplicates a little of `StimArrayModifier.do` — that's
+    deliberate, because `do` constructs a `ReversibleAction` itself from
+    raw slices/values, whereas here we already have the compound action
+    object.
+
+4.  Add a "Clear stim array" pathway used by the dialog that delegates
+    to the existing `clear_stim_array` method (which already uses
+    `replace_stim_values_with_undo`). The dialog calls
+    `self.editor.clear_stim_array()` for its Clear button. No change
+    needed in the editor — `clear_stim_array` already works.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+DIALOG — src/neuroseq/stim_pattern_dialog.py (new, non-modal)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+`StimPatternDialog(QtWidgets.QDialog)` with `setModal(False)`. Two columns
+or a single column — single column is simplest. Layout from top:
+
+    [Target] Stim array: <name> (read-only label)         Units: <units> (label)
+                                                          dt: <dt_ms> ms
+
+    [Scope]   ( ) All neurons          (•) Specific neuron: [ 0 ▾ ]
+
+    [Pattern type]
+        when scope = all neurons:
+            (•) Sequential
+            ( ) Simultaneous
+            ( ) Für Elise
+        when scope = specific neuron:
+            (•) Constant
+            ( ) Linear gradient
+            ( ) Logarithmic gradient
+            ( ) Random
+
+    [Parameters — fields shown / hidden based on scope + pattern]
+        Pulse duration (ms):  [ 100.0 ]
+        Inter-pulse interval (ms): [ 18.0 ]
+        Magnitude:            [ 1.0 ]                  (Constant / Sequential / Simultaneous / Für Elise)
+        Initial magnitude:    [ 1.0 ]                  (Linear / Log)
+        Final magnitude:      [ 2.0 ]                  (Linear / Log)
+        Minimum magnitude:    [ 0.0 ]                  (Random)
+        Maximum magnitude:    [ 1.0 ]                  (Random)
+        Repeats:              [ 1 ]                    (Simultaneous, Für Elise, per-neuron)
+        Start time (ms):      [ 0.0 ]                  (auto-advances on Apply)
+
+    [Buttons]
+        [Apply]   [Reset start time]   [Clear stim array]   [Close]
+
+Behaviour:
+
+- `set_context(ctx)` populates: target stim name, n_neurons (caps the
+  neuron-index spin's max), units label, dt_ms label. Also resets the
+  pattern type radios to a sensible default given the current scope.
+
+- Scope toggle: All vs. Specific. Switching from All to Specific shows
+  the neuron-index spinbox and the per-neuron pattern radios; the all-
+  neurons radios are hidden. The reverse on switching back.
+
+- Pattern radio toggle: shows/hides the magnitude fields and the
+  Repeats spin per the table above.
+
+- `Apply` button:
+    1. Validate all numeric inputs (positive pulse_ms, non-negative
+       ipi_ms, repeats >= 1, magnitudes finite, plus Log requires
+       positive). Show a `QMessageBox.warning` on failure and abort.
+    2. Build the pattern via the matching `generate_*` function.
+    3. Compute `start_samples = round(start_time_ms / 1000 / dt)` and
+       `end_samples = start_samples + pattern.shape[0]`.
+    4. Construct `time_slice = slice(start_samples, end_samples)` and
+       `neuron_slice = slice(0, n_neurons)`.  (Always full-width on the
+       neuron axis — the pattern matrix itself has zeros where it doesn't
+       paint. This keeps the undo slice math consistent.)
+    5. Call `self.editor.apply_pattern(neuron_slice, time_slice, pattern)`.
+    6. Auto-advance: `start_time_ms = (end_samples + ipi_n) * dt * 1000`.
+       Note `pattern` already includes a trailing IPI; the auto-advance
+       does NOT add a second IPI — the cursor lands exactly where the
+       trailing IPI ends so the next Apply starts a clean pulse. (The
+       trailing IPI is *inside* the pattern's `time_slice`.)
+
+       Wait — re-read the requirement: "the next pattern can start
+       safely" and "add an inter-pulse interval automatically at the end
+       of every stimulation pattern". The trailing IPI is the safe gap.
+       Auto-advance to `end_samples` (which IS the position right after
+       the trailing IPI, because the trailing IPI is the last `ipi_n`
+       samples of `pattern`). So:
+
+           new_start_ms = end_samples * dt * 1000
+
+- `Reset start time` button: sets the Start time spin back to 0.
+
+- `Clear stim array` button: calls `self.editor.clear_stim_array()` —
+  reuses the existing undoable clear path.
+
+- `Close` button: `self.hide()`. Don't destroy the dialog; the editor
+  reuses the same instance.
+
+- The dialog reflects context changes: when the user picks a different
+  stim array in the editor, `set_context` updates the target/units/dt
+  labels and clamps the neuron-index spin to the new n_neurons. The
+  Start time cursor is NOT reset on context change (user can hit Reset
+  if they want).
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+PAD ALIGNMENT (read this before implementing the pad path)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+`project.pad_stim_arrays(total_time_seconds)` pads each array
+independently using its own `dt`. So if other stim arrays in the project
+have different `dt` than the target, their sample counts after pad will
+differ. That's already the case in the codebase and is fine.
+
+The compound action stores per-array sample counts BEFORE pad
+(`before_lengths`), so on undo it can restore each array's exact
+pre-pad shape regardless of dt mismatches. Use `arr.values.shape[0]`
+(samples), not seconds, in `before_lengths` for exact restoration.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_stim_patterns.py (new, pure math, no Qt)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    test_sequential_default_matches_getting_started
+        result = generate_sequential(n_neurons=10, pulse_ms=100,
+            ipi_ms=18, magnitude=1.0, dt_seconds=0.001)
+        # Per neuron i, samples [i*(100+18), i*(100+18)+100) on column i
+        # should be 1.0; everywhere else 0.0 except the trailing IPI.
+        for i in range(10):
+            t0 = i * 118
+            assert (result[t0:t0+100, i] == 1.0).all()
+            assert (result[t0+100:t0+118, i] == 0.0).all()
+        # All other columns are zero throughout.
+        ...
+
+    test_sequential_includes_trailing_ipi
+        result = generate_sequential(3, 10, 5, 1.0, 0.001)
+        # Last 5 samples (the trailing IPI) are all zero.
+        assert (result[-5:] == 0).all()
+        # Total length = 3 * (10 + 5)
+        assert result.shape == (45, 3)
+
+    test_simultaneous_all_columns_fire_together
+        result = generate_simultaneous(4, 50, 10, 0.7, repeats=3,
+            dt_seconds=0.001)
+        # repeats * (50 + 10) samples; each pulse fires all 4 columns
+        assert result.shape == (180, 4)
+        for r in range(3):
+            t0 = r * 60
+            assert (result[t0:t0+50, :] == 0.7).all()
+            assert (result[t0+50:t0+60, :] == 0.0).all()
+
+    test_fuer_elise_uses_first_13_neurons
+        result = generate_fuer_elise(13, 100, 18, 1.0, repeats=1,
+            dt_seconds=0.001)
+        # Length = 24 events * (100 + 18)
+        assert result.shape == (24 * 118, 13)
+        # Event 0 in _FUER_ELISE_INTRO is pitch 0, so column 0 fires in
+        # the first 100 samples; columns 1..12 are zero in those samples.
+        assert (result[:100, 0] == 1.0).all()
+        assert (result[:100, 1:] == 0.0).all()
+        # Event 8 is a chord (5, 11), so columns 5 and 11 fire together.
+        t0 = 8 * 118
+        assert (result[t0:t0+100, 5] == 1.0).all()
+        assert (result[t0:t0+100, 11] == 1.0).all()
+        # Other columns zero at that event.
+        for col in [0,1,2,3,4,6,7,8,9,10,12]:
+            assert (result[t0:t0+100, col] == 0.0).all()
+
+    test_fuer_elise_clips_to_available_neurons
+        # With 6 neurons, pitches >= 6 are dropped. Event 8 is (5, 11);
+        # only pitch 5 should fire.
+        result = generate_fuer_elise(6, 100, 18, 1.0, repeats=1,
+            dt_seconds=0.001)
+        assert result.shape == (24 * 118, 6)
+        t0 = 8 * 118
+        assert (result[t0:t0+100, 5] == 1.0).all()
+        # Pitch 11 not present (would be column 11; we only have 6 cols).
+        # Verify columns 0..4 are zero at this event.
+        for col in range(5):
+            assert (result[t0:t0+100, col] == 0.0).all()
+
+    test_fuer_elise_repeats_with_trailing_ipi_between
+        result = generate_fuer_elise(13, 10, 5, 1.0, repeats=2,
+            dt_seconds=0.001)
+        # Each phrase has 24 events of (10+5) = 24*15 samples.
+        # 2 repeats means 2 * 24 * 15 = 720 samples (the trailing IPI
+        # after the last event of the first phrase is part of that
+        # phrase; the second phrase starts at sample 360).
+        assert result.shape == (720, 13)
+        # Verify the gap between phrases is the trailing IPI.
+        assert (result[24*15-5 : 24*15, :] == 0.0).all()
+
+    test_per_neuron_constant
+        result = generate_per_neuron(neuron_index=2, n_neurons=4,
+            pulse_ms=100, ipi_ms=18, profile=DrawStimType.Constant,
+            value1=0.5, value2=0.0, repeats=3, dt_seconds=0.001)
+        assert result.shape == (3 * 118, 4)
+        for r in range(3):
+            t0 = r * 118
+            assert (result[t0:t0+100, 2] == 0.5).all()
+            assert (result[t0+100:t0+118, 2] == 0.0).all()
+        # Other neurons are silent throughout.
+        for col in [0, 1, 3]:
+            assert (result[:, col] == 0.0).all()
+
+    test_per_neuron_linear_intensity_ramps
+        result = generate_per_neuron(0, 1, 10, 5,
+            DrawStimType.Linear, value1=0.0, value2=1.0, repeats=5,
+            dt_seconds=0.001)
+        expected = np.linspace(0.0, 1.0, 5)
+        for r in range(5):
+            t0 = r * 15
+            assert (result[t0:t0+10, 0] == expected[r]).all()
+
+    test_per_neuron_logarithmic_requires_positive
+        with pytest.raises(ValueError):
+            generate_per_neuron(0, 1, 10, 5, DrawStimType.Logarithmic,
+                value1=0.0, value2=1.0, repeats=3, dt_seconds=0.001)
+
+    test_per_neuron_random_seeded_reproducible
+        # Use a numpy seed via default_rng / monkeypatch np.random.
+        # Assert that the placed values are within [value1, value2].
+        result = generate_per_neuron(0, 1, 10, 5,
+            DrawStimType.Random, value1=0.2, value2=0.8, repeats=10,
+            dt_seconds=0.001)
+        # Pull out one sample from each pulse and check range.
+        for r in range(10):
+            v = result[r*15 + 0, 0]
+            assert 0.2 <= v <= 0.8
+
+    test_invalid_inputs_raise
+        with pytest.raises(ValueError):
+            generate_sequential(5, 0, 5, 1.0, 0.001)        # pulse_ms = 0
+        with pytest.raises(ValueError):
+            generate_sequential(5, 10, -1, 1.0, 0.001)      # negative ipi
+        with pytest.raises(ValueError):
+            generate_simultaneous(5, 10, 5, 1.0, 0, 0.001)  # repeats = 0
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_stim_pattern_dialog.py (new, qtbot integration)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Pattern these on the existing dialog tests in
+`tests/test_stim_editor.py` (study its fixtures).
+
+    test_dialog_apply_sequential_writes_pattern_and_advances_cursor
+        # Build a minimal project with one stim array of 0.5 s duration,
+        # 10 neurons, dt 1 ms.
+        # Open editor, open pattern dialog, choose Sequential, hit Apply.
+        # Assert: array values match generate_sequential output at slice
+        # [0:1180, :], and the Start time spin now shows
+        # 1180 * 1 = 1180.0 ms.
+
+    test_dialog_apply_twice_stacks_two_patterns
+        # Apply sequential, then apply simultaneous. The second should
+        # land at the auto-advanced cursor and leave the first untouched.
+        # Two undos restore the array to all zeros.
+
+    test_dialog_apply_undo_redo
+        # One Apply, one undo → array is back to zeros. One redo → array
+        # has pattern again.
+
+    test_dialog_apply_with_padding_is_one_undo
+        # Start with a short array. Apply a long pattern that requires
+        # padding. Verify: project.max_time_secs grew; one undo restores
+        # both the values AND the project length.
+
+    test_dialog_clear_button_clears_via_undoable_path
+        # Apply, then Clear. Two undos: first restores pattern, second
+        # restores zeros.
+
+    test_dialog_specific_neuron_constant_writes_only_that_column
+        # Choose specific neuron 2, profile Constant, magnitude 0.7,
+        # Apply. Assert columns 0, 1, 3, ..., 9 stay zero; column 2 has
+        # the expected pulse train.
+
+    test_dialog_fuer_elise_clipped_to_six_neurons
+        # Stim array has 6 neurons. Choose Für Elise, Apply. Chord events
+        # that would use pitches 6-12 only fire their lower pitch (if
+        # any) — matching generate_fuer_elise(6, ...).
+
+    test_dialog_context_updates_when_user_switches_stim_array
+        # Open dialog, switch combo to a different stim array, assert the
+        # dialog's target label / neuron-index spin max updated.
+
+    test_dialog_invalid_pulse_duration_shows_warning_and_no_change
+        # Use qmessagebox_calls fixture (see tests/conftest.py).
+        # Set pulse_ms to 0, Apply, assert dialog showed a warning and
+        # the array values are unchanged.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NOTES
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- The dialog reuses the existing `DrawStimType` enum (`stim.py:35`) for
+  the per-neuron profile selection — don't introduce a parallel enum.
+
+- Reuse `_FUER_ELISE_INTRO` from `example_projects.py` by importing it
+  into `stim_patterns.py`. Don't copy the constant. Keep the example
+  project's import unchanged.
+
+- When `clear_stim_array` runs (via the dialog's Clear button or the
+  existing toolbar button), the user's auto-advanced `start_time_ms`
+  should reset to 0. Reuse the dialog's `Reset start time` logic — wire
+  the editor to emit a signal when `clear_stim_array` completes, OR
+  simply call `self._pattern_dialog.reset_start_time()` from
+  `clear_stim_array` if the dialog exists.
+
+- The toolbar button uses `qta.icon("mdi6.creation")`. If that icon
+  doesn't render, fall back to `"mdi6.auto-fix"` or
+  `"mdi6.gesture-tap-button"` — pick the first one that loads.
+
+- The non-modal dialog must NOT be added to the autouse
+  `patch_b2w_exec_show` fixture's blacklist — that fixture replaces
+  `.exec()` with `.show()`, which is exactly what we want for this
+  dialog anyway.
+
+- Test ergonomics: the integration tests should use the same Qt
+  fixtures (`qtbot`, `suppress_message_boxes`, `qmessagebox_calls`)
+  that `test_stim_editor.py` uses. See `tests/conftest.py`.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NON-GOALS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- ADDING values to existing stim contents. Each Apply overwrites the
+  target region (slice). The user wanted overwrite.
+
+- WRITING into more than one stim array per Apply. Für Elise stays a
+  single-array generator — no opsin exc/inh pair generation, no second
+  stim array.
+
+- A "preview before Apply" toggle. The user can Apply → eyeball → undo.
+
+- KEYBOARD SHORTCUT. The button has no shortcut. The dialog is mouse-
+  driven; users who want it can configure a shortcut on the toolbar
+  action later.
+
+- AUTO-SHRINKING THE PROJECT after an Apply that doesn't fill the
+  previously padded length. The trailing IPI inside `pattern` plus the
+  cursor advance leaves whatever pad existed alone.
+
+- AUTOMATIC RE-RUN of a previous Apply when parameters change. The user
+  must hit Apply each time.
+
+- A "PROGRESS" indicator for very long patterns. Pattern generation is
+  pure numpy and bounded — even Für Elise × 100 is sub-millisecond.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    .venv/bin/ruff check src/neuroseq/stim_patterns.py \
+        src/neuroseq/stim_pattern_dialog.py src/neuroseq/stim_editor.py \
+        src/neuroseq/stim_array_modifier.py \
+        tests/test_stim_patterns.py tests/test_stim_pattern_dialog.py
+    .venv/bin/ruff format --check src/neuroseq/stim_patterns.py \
+        src/neuroseq/stim_pattern_dialog.py src/neuroseq/stim_editor.py \
+        src/neuroseq/stim_array_modifier.py \
+        tests/test_stim_patterns.py tests/test_stim_pattern_dialog.py
+    PYTHONPATH=src .venv/bin/python -m pytest \
+        tests/test_stim_patterns.py tests/test_stim_pattern_dialog.py \
+        tests/test_stim_editor.py -v
+    PYTHONPATH=src .venv/bin/python -m pytest
+
+The full suite is required because the `ReversibleAction._asign_values`
+bounds guard could affect any existing test that exercises the undo
+stack (paste, clear, etc.).

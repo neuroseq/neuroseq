@@ -31,6 +31,7 @@ def test_cellpose_dialog_linear_offset_persisted(
     tmp_path, qtbot: QtBot, qmessagebox_calls: list
 ):
     dialog = _make_cellpose_dialog(tmp_path, qtbot)
+    assert dialog.windowTitle() == "Import cell spatial footprints"
     dialog.linear_offset_spin.setValue(3)
 
     assert dialog.linear_offset_spin.value() == 3

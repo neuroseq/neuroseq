@@ -46,6 +46,81 @@ def test_stim_editor_no_data(qtbot: QtBot) -> None:
     qtbot.waitUntil(lambda: not stim_editor.isVisible())
 
 
+def _make_ramp_editor(qtbot: QtBot) -> tuple[StimEditor, Project]:
+    project = Project()
+    project.stim_arrays = {
+        "a": StimArray(
+            "a",
+            neuroseq.stim.StimType.Excitation,
+            np.zeros((200, 4)),
+            "mV",
+            0.001,
+        )
+    }
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.show()
+    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    stim_editor.set_project(project)
+    stim_editor.draw_stim = DrawStim(DrawStimType.Linear, 0.0, 1.0)
+    stim_editor.draw_stim_length = 4
+    return stim_editor, project
+
+
+def test_ramp_drag_paints_single_monotonic_ramp_anchored_at_click(
+    qtbot: QtBot,
+) -> None:
+    stim_editor, project = _make_ramp_editor(qtbot)
+
+    # Replay the sequence the StimWidget actually emits during a drag:
+    # the first emit comes from pointer_down with initial == current ==
+    # the click position; subsequent emits carry initial = *previous*
+    # sampled position, not the original click. Without the editor's
+    # drag-origin tracking this leaves many short ramps stamped between
+    # consecutive sampled positions.
+    stim_editor.stim_widget_mouse_dragged(1, 1, 20, 20, 1)  # pointer_down
+    stim_editor.stim_widget_mouse_dragged(1, 1, 20, 30, 1)
+    stim_editor.stim_widget_mouse_dragged(1, 1, 30, 50, 1)
+    stim_editor.stim_widget_mouse_dragged(1, 1, 50, 70, 1)
+    # Release at sample 70 — must NOT stamp a fresh draw_stim_length-wide
+    # ramp at the right end of the long one.
+    stim_editor.stim_widget_mouse_clicked(1, 70, 1)
+
+    values = project.stim_arrays["a"].values
+    drawn = values[20:74, 1]
+    assert drawn.shape == (54,)
+    assert drawn[0] == approx(0.0)
+    assert drawn[-1] == approx(1.0)
+    # No discontinuity: a single ramp must be strictly increasing.
+    assert np.all(np.diff(drawn) > 0)
+    # Drag-origin tracker is cleared on release.
+    assert stim_editor._draw_drag_origin_time_index is None
+    # Other columns untouched.
+    assert np.all(values[:, [0, 2, 3]] == 0.0)
+
+
+def test_ramp_backward_drag_keeps_value1_at_click_position(qtbot: QtBot) -> None:
+    stim_editor, project = _make_ramp_editor(qtbot)
+
+    # Click at sample 70, then drag leftward to sample 20.
+    stim_editor.stim_widget_mouse_dragged(1, 1, 70, 70, 1)
+    stim_editor.stim_widget_mouse_dragged(1, 1, 70, 50, 1)
+    stim_editor.stim_widget_mouse_dragged(1, 1, 50, 20, 1)
+    stim_editor.stim_widget_mouse_clicked(1, 20, 1)
+
+    values = project.stim_arrays["a"].values
+    drawn = values[20:74, 1]
+    # Slice spans min(20, 70)=20 to max(20, 70)+4=74. value1 belongs at the
+    # click position (=70 ≈ right end of slice), value2 at the release
+    # position (=20 = left end of slice). So the ramp DESCENDS left-to-right.
+    assert drawn[0] == approx(1.0)
+    assert drawn[-1] == approx(0.0)
+    assert np.all(np.diff(drawn) < 0)
+
+
 def test_stim_editor_zoom_pan(qtbot: QtBot) -> None:
     project = Project()
     project.stim_arrays = {
@@ -460,6 +535,7 @@ def test_stim_editor_mouse_click_draws_and_erases() -> None:
         draw_stim=DrawStim(DrawStimType.Constant, 2.5, 2.5),
         _is_valid_slice=lambda neuron_slice, time_slice: True,
         draw_stim_region=_draw_stim_region,
+        _draw_drag_origin_time_index=None,
     )
 
     StimEditor.stim_widget_mouse_clicked(fake_editor, 0, 2, 1)
@@ -524,11 +600,13 @@ def test_stim_editor_draw_region_extends_short_stim_for_follow_up_input() -> Non
             and time_slice.start >= 0
             and time_slice.stop <= stim_widget.n_timestamps
         ),
-        _current_draw_stim_values=lambda erase=False: 0.0 if erase else 2.5,
+        _current_draw_stim_values=lambda erase=False, length=None, reverse=False: (
+            0.0 if erase else 2.5
+        ),
         _stim_values_updated=lambda: None,
     )
-    fake_editor._ensure_time_capacity_for_slice = (
-        lambda time_slice: StimEditor._ensure_time_capacity_for_slice(
+    fake_editor._ensure_time_capacity_for_slice = lambda time_slice: (
+        StimEditor._ensure_time_capacity_for_slice(
             fake_editor,
             time_slice,
         )

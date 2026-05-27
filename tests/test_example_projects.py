@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import pathlib
 
+import brian2.numpy_ as np
 import pytest
 
 import neuroseq.example_projects as example_projects
+from neuroseq.example_projects import default_project
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
 
@@ -44,3 +46,22 @@ def test_example_projects(project_generator, tmp_path: pathlib.Path) -> None:
     assert list(model2.b2_model.functions.keys()) == list(
         project.b2_model.functions.keys()
     )
+
+
+def test_default_project_uses_10_neurons_and_sequential_stimulus() -> None:
+    project = default_project()
+
+    stimulus = project.stim_arrays["stimulus"]
+    assert stimulus.values.shape == (1180, 10)
+    assert project.b2_model.neurongroups["P"]["neuronnumber"] == 10
+
+    pulse_n = int(round(0.100 / stimulus.dt))
+    gap_n = int(round(0.018 / stimulus.dt))
+    for i in range(stimulus.values.shape[1]):
+        t0 = i * (pulse_n + gap_n)
+        assert np.all(stimulus.values[t0 : t0 + pulse_n, i] == 1.0)
+        if t0 > 0:
+            assert np.all(stimulus.values[t0 - gap_n : t0, i] == 0.0)
+        for j in range(stimulus.values.shape[1]):
+            if j != i:
+                assert np.all(stimulus.values[t0 : t0 + pulse_n, j] == 0.0)

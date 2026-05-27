@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import math
+from collections.abc import Callable
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Protocol
 from typing import TypedDict
 
@@ -11,7 +14,18 @@ import pygfx
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+from neuroseq.aoi_shapes import circle_world_handles
+from neuroseq.aoi_shapes import circle_world_polyline
+from neuroseq.aoi_shapes import square_user_corners
+from neuroseq.aoi_shapes import square_world_corners
+from neuroseq.aoi_shapes import square_world_polyline
+from neuroseq.aoi_shapes import world_to_user_point
 from neuroseq.fpl_widget import FullScreenFPLWidget
+from neuroseq.importer_cellpose import AOIRole
+from neuroseq.importer_cellpose import AreasOfInterestConfig
+from neuroseq.importer_cellpose import CircleAOI
+from neuroseq.importer_cellpose import SquareAOI
+from neuroseq.importer_cellpose import clone_aoi_config
 from neuroseq.utils import neuron_indices_to_colors
 
 
@@ -44,11 +58,34 @@ class ImageGraphic(Protocol):
     visible: bool
 
 
+class LineGraphic(Protocol):
+    data: np.ndarray
+    colors: Color
+    thickness: float
+    visible: bool
+
+
+class ScatterGraphic(Protocol):
+    data: np.ndarray
+    colors: Color
+    edge_colors: Color
+    sizes: float | np.ndarray
+    visible: bool
+
+
 class LabelGraphics(TypedDict):
     stim: TextGraphic
     stim_dash: TextGraphic
     cellpose: TextGraphic
     all: list[VisibleGraphic]
+
+
+@dataclass
+class _AOIDragState:
+    shape: str
+    part: str
+    anchor_world: tuple[float, float]
+    original_config: AreasOfInterestConfig
 
 
 class OverlayView(FullScreenFPLWidget):
@@ -70,8 +107,18 @@ class OverlayView(FullScreenFPLWidget):
         self._segmentation_shape: tuple[int, int] | None = None
         self.base_camera_state: CameraState | None = None
         self.zoom_factor = 1
+        self._aoi_config: AreasOfInterestConfig | None = None
+        self._aoi_visible = True
+        self._square_line: LineGraphic | None = None
+        self._square_handles: list[ScatterGraphic] = []
+        self._circle_line: LineGraphic | None = None
+        self._circle_handles: list[ScatterGraphic] = []
+        self._drag_state: _AOIDragState | None = None
+        self.on_geometry_changed: Callable[[AreasOfInterestConfig], None] | None = None
         self._configure_subplot()
         self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
+        self.figure.renderer.add_event_handler(self._aoi_pointer_down, "pointer_down")
+        self.figure.renderer.add_event_handler(self._aoi_pointer_up, "pointer_up")
         self.setMinimumSize(QtCore.QSize(200, 200))
 
     def _configure_subplot(self) -> None:
@@ -173,6 +220,7 @@ class OverlayView(FullScreenFPLWidget):
             self.figure.renderer.request_draw()
         else:
             self._reset_camera()
+        self.set_aoi_shapes(self._aoi_config, self._aoi_visible)
 
     def _reset_graphics(self, *, clear_subplot: bool = False) -> None:
         if clear_subplot and getattr(self.subplot, "renderer", None) is not None:
@@ -183,6 +231,118 @@ class OverlayView(FullScreenFPLWidget):
         self.text = None
         self.base_camera_state = None
         self._clear_label_graphics()
+        self._clear_aoi_graphics()
+
+    def set_aoi_shapes(
+        self,
+        config: AreasOfInterestConfig | None,
+        visible: bool,
+    ) -> None:
+        self._aoi_config = clone_aoi_config(config)
+        self._aoi_visible = visible
+        if self.overlay_image is None or self._aoi_config is None or not visible:
+            self._hide_aoi_graphics()
+            self.figure.renderer.request_draw()
+            return
+
+        image_height = self.overlay_image.shape[0]
+        self._update_square_graphics(self._aoi_config.square, image_height)
+        self._update_circle_graphics(self._aoi_config.circle, image_height)
+        self.figure.renderer.request_draw()
+
+    def _clear_aoi_graphics(self) -> None:
+        graphics: list[VisibleGraphic] = []
+        if self._square_line is not None:
+            graphics.append(self._square_line)
+        if self._circle_line is not None:
+            graphics.append(self._circle_line)
+        graphics.extend(self._square_handles)
+        graphics.extend(self._circle_handles)
+        for graphic in graphics:
+            with contextlib.suppress(Exception):
+                self.subplot.remove_graphic(graphic)
+        self._square_line = None
+        self._circle_line = None
+        self._square_handles = []
+        self._circle_handles = []
+
+    def _hide_aoi_graphics(self) -> None:
+        graphics: list[VisibleGraphic] = []
+        if self._square_line is not None:
+            graphics.append(self._square_line)
+        if self._circle_line is not None:
+            graphics.append(self._circle_line)
+        graphics.extend(self._square_handles)
+        graphics.extend(self._circle_handles)
+        for graphic in graphics:
+            graphic.visible = False
+
+    def _shape_color(self, role: AOIRole) -> tuple[float, float, float, float]:
+        if role == AOIRole.EXCLUSION:
+            return (0.95, 0.3, 0.3, 0.9)
+        return (0.3, 0.85, 0.3, 0.9)
+
+    def _update_square_graphics(self, square: SquareAOI, image_height: int) -> None:
+        if self._square_line is None:
+            self._square_line = self.subplot.add_line(
+                square_world_polyline(square, image_height),
+                colors=self._shape_color(square.role),
+                thickness=2.0,
+                size_space="model",
+            )
+        else:
+            self._square_line.data = square_world_polyline(square, image_height)
+            self._square_line.colors = self._shape_color(square.role)
+            self._square_line.thickness = 2.0
+        self._square_line.visible = square.enabled
+
+        corner_points = square_world_corners(square, image_height)
+        while len(self._square_handles) < 4:
+            handle = self.subplot.add_scatter(
+                np.asarray([[0.0, 0.0, 220.0]], dtype=np.float32),
+                colors=self._shape_color(square.role),
+                edge_colors=(1.0, 1.0, 1.0, 1.0),
+                sizes=8,
+                size_space="screen",
+                uniform_size=True,
+                uniform_color=True,
+            )
+            self._square_handles.append(handle)
+        for idx, handle in enumerate(self._square_handles):
+            handle.data = corner_points[idx : idx + 1]
+            handle.colors = self._shape_color(square.role)
+            handle.visible = square.enabled
+
+    def _update_circle_graphics(self, circle: CircleAOI, image_height: int) -> None:
+        if self._circle_line is None:
+            self._circle_line = self.subplot.add_line(
+                circle_world_polyline(circle, image_height),
+                colors=self._shape_color(circle.role),
+                thickness=2.0,
+                size_space="model",
+            )
+        else:
+            self._circle_line.data = circle_world_polyline(circle, image_height)
+            self._circle_line.colors = self._shape_color(circle.role)
+            self._circle_line.thickness = 2.0
+        self._circle_line.visible = circle.enabled
+
+        handle_points = circle_world_handles(circle, image_height)
+        while len(self._circle_handles) < 4:
+            handle = self.subplot.add_scatter(
+                np.asarray([[0.0, 0.0, 220.0]], dtype=np.float32),
+                colors=self._shape_color(circle.role),
+                edge_colors=(1.0, 1.0, 1.0, 1.0),
+                sizes=8,
+                size_space="screen",
+                uniform_size=True,
+                uniform_color=True,
+            )
+            self._circle_handles.append(handle)
+        for idx, handle in enumerate(self._circle_handles):
+            handle.data = handle_points[idx : idx + 1]
+            handle.colors = self._shape_color(circle.role)
+            handle.visible = circle.enabled
 
     def _clear_label_graphics(self) -> None:
         for graphic_set in self._label_graphics.values():
@@ -483,7 +643,229 @@ class OverlayView(FullScreenFPLWidget):
         self.subplot.camera.set_state(cam_state)
         self.figure.renderer.request_draw()
 
+    def _aoi_pointer_down(self, ev: pygfx.PointerEvent) -> None:
+        if (
+            self._aoi_config is None
+            or not self._aoi_visible
+            or self.overlay_image is None
+        ):
+            return
+
+        mouse_pos = self.subplot.map_screen_to_world(ev)
+        if mouse_pos is None:
+            return
+
+        hit = self._aoi_hit_test(float(mouse_pos[0]), float(mouse_pos[1]))
+        if hit is None:
+            return
+
+        original_config = clone_aoi_config(self._aoi_config)
+        assert original_config is not None
+        self._drag_state = _AOIDragState(
+            shape=hit[0],
+            part=hit[1],
+            anchor_world=(float(mouse_pos[0]), float(mouse_pos[1])),
+            original_config=original_config,
+        )
+        self.subplot.controller.enabled = False
+        if self.text is not None:
+            self.text.visible = False
+        ev.stop_propagation()
+
+    def _aoi_pointer_up(self, ev: pygfx.PointerEvent) -> None:
+        if self._drag_state is None:
+            return
+        self._drag_state = None
+        self.subplot.controller.enabled = True
+        if self._aoi_config is not None and self.on_geometry_changed is not None:
+            config = clone_aoi_config(self._aoi_config)
+            assert config is not None
+            self.on_geometry_changed(config)
+        ev.stop_propagation()
+
+    def _aoi_hit_test(self, world_x: float, world_y: float) -> tuple[str, str] | None:
+        if self._aoi_config is None or self.overlay_image is None:
+            return None
+
+        image_height = self.overlay_image.shape[0]
+        tolerance = self._world_tolerance()
+        square_corners = square_world_corners(self._aoi_config.square, image_height)
+        if self._aoi_config.square.enabled:
+            for idx, point in enumerate(square_corners):
+                if np.hypot(world_x - point[0], world_y - point[1]) <= tolerance:
+                    return ("square", f"corner_{idx}")
+
+        circle_handles = circle_world_handles(self._aoi_config.circle, image_height)
+        if self._aoi_config.circle.enabled:
+            for idx, point in enumerate(circle_handles):
+                if np.hypot(world_x - point[0], world_y - point[1]) <= tolerance:
+                    return ("circle", f"handle_{idx}")
+
+        user_x, user_y = world_to_user_point(world_x, world_y, image_height)
+        if self._aoi_config.circle.enabled and self._point_in_circle_body(
+            self._aoi_config.circle, user_x, user_y
+        ):
+            return ("circle", "body")
+        if self._aoi_config.square.enabled and self._point_in_square_body(
+            self._aoi_config.square, user_x, user_y
+        ):
+            return ("square", "body")
+
+        return None
+
+    def _world_tolerance(self) -> float:
+        camera_state = self.subplot.camera.get_state()
+        camera_width = float(camera_state.get("width", 1.0))
+        return max(2.0, (camera_width / max(1, self.width())) * 10.0)
+
+    def _point_in_square_body(self, square: SquareAOI, ux: float, uy: float) -> bool:
+        return (
+            square.enabled
+            and square.x <= ux <= square.x + square.side
+            and square.y <= uy <= square.y + square.side
+        )
+
+    def _point_in_circle_body(self, circle: CircleAOI, ux: float, uy: float) -> bool:
+        if not circle.enabled:
+            return False
+        radius = circle.diameter / 2.0
+        return (ux - circle.cx) ** 2 + (uy - circle.cy) ** 2 <= radius * radius
+
+    def _apply_drag(self, world_x: float, world_y: float) -> None:
+        if (
+            self._drag_state is None
+            or self._aoi_config is None
+            or self.overlay_image is None
+        ):
+            return
+
+        original = self._drag_state.original_config
+        delta_world_x = world_x - self._drag_state.anchor_world[0]
+        delta_world_y = world_y - self._drag_state.anchor_world[1]
+        delta_user_x = delta_world_x
+        delta_user_y = -delta_world_y
+        image_height, image_width = self.overlay_image.shape[:2]
+
+        if self._drag_state.shape == "square":
+            updated_square = self._drag_square(
+                original.square,
+                self._drag_state.part,
+                delta_user_x,
+                delta_user_y,
+                world_x,
+                world_y,
+                image_width,
+                image_height,
+            )
+            self._aoi_config.square = updated_square
+        elif self._drag_state.shape == "circle":
+            updated_circle = self._drag_circle(
+                original.circle,
+                self._drag_state.part,
+                delta_user_x,
+                delta_user_y,
+                world_x,
+                world_y,
+                image_width,
+                image_height,
+            )
+            self._aoi_config.circle = updated_circle
+
+        self.set_aoi_shapes(self._aoi_config, self._aoi_visible)
+        if self.on_geometry_changed is not None:
+            config = clone_aoi_config(self._aoi_config)
+            assert config is not None
+            self.on_geometry_changed(config)
+
+    def _drag_square(
+        self,
+        original: SquareAOI,
+        part: str,
+        delta_user_x: float,
+        delta_user_y: float,
+        world_x: float,
+        world_y: float,
+        image_width: int,
+        image_height: int,
+    ) -> SquareAOI:
+        if part == "body":
+            side = max(4.0, float(original.side))
+            x = min(
+                max(0.0, float(original.x) + delta_user_x), max(0.0, image_width - side)
+            )
+            y = min(
+                max(0.0, float(original.y) + delta_user_y),
+                max(0.0, image_height - side),
+            )
+            return SquareAOI(original.enabled, original.role, x, y, side)
+
+        handle_index = int(part.rsplit("_", 1)[1])
+        corners = square_user_corners(original)
+        opposite_corner = corners[(handle_index + 2) % 4]
+        handle_user = world_to_user_point(world_x, world_y, image_height)
+        dx = handle_user[0] - opposite_corner[0]
+        dy = handle_user[1] - opposite_corner[1]
+        side = max(4.0, abs(dx), abs(dy))
+        sign_x = 1.0 if dx >= 0 else -1.0
+        sign_y = 1.0 if dy >= 0 else -1.0
+        moved_x = opposite_corner[0] + (sign_x * side)
+        moved_y = opposite_corner[1] + (sign_y * side)
+        x = min(opposite_corner[0], moved_x)
+        y = min(opposite_corner[1], moved_y)
+        x = min(max(0.0, x), max(0.0, image_width - side))
+        y = min(max(0.0, y), max(0.0, image_height - side))
+        return SquareAOI(original.enabled, original.role, x, y, side)
+
+    def _drag_circle(
+        self,
+        original: CircleAOI,
+        part: str,
+        delta_user_x: float,
+        delta_user_y: float,
+        world_x: float,
+        world_y: float,
+        image_width: int,
+        image_height: int,
+    ) -> CircleAOI:
+        if part == "body":
+            radius = max(2.0, float(original.diameter) / 2.0)
+            cx = min(
+                max(radius, float(original.cx) + delta_user_x),
+                max(radius, image_width - radius),
+            )
+            cy = min(
+                max(radius, float(original.cy) + delta_user_y),
+                max(radius, image_height - radius),
+            )
+            return CircleAOI(original.enabled, original.role, cx, cy, radius * 2.0)
+
+        handle_user = world_to_user_point(world_x, world_y, image_height)
+        radius = math.dist((float(original.cx), float(original.cy)), handle_user)
+        radius = max(2.0, radius)
+        radius = min(
+            radius,
+            float(original.cx),
+            float(image_width - original.cx),
+            float(original.cy),
+            float(image_height - original.cy),
+        )
+        return CircleAOI(
+            original.enabled,
+            original.role,
+            float(original.cx),
+            float(original.cy),
+            radius * 2.0,
+        )
+
     def pointer_move(self, ev: pygfx.PointerEvent) -> None:
+        if self._drag_state is not None:
+            mouse_pos = self.subplot.map_screen_to_world(ev)
+            if mouse_pos is None:
+                return
+            self._apply_drag(float(mouse_pos[0]), float(mouse_pos[1]))
+            ev.stop_propagation()
+            return
+
         if self.text is None or self.segmentation is None:
             return
 
@@ -548,6 +930,8 @@ class OverlayView(FullScreenFPLWidget):
 
 
 class CellOverlayWidget(QtWidgets.QGroupBox):
+    aoi_geometry_changed = QtCore.Signal(object)
+
     def __init__(self, title: str = "Color-coded Preview") -> None:
         super().__init__(title)
         self.logger = logging.getLogger(__name__)
@@ -561,6 +945,8 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.show_stimulus_ids = False
         self.show_segmentation = True
         self.highlight_mappings = True
+        self._aoi_config: AreasOfInterestConfig | None = None
+        self._show_aoi = True
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -571,6 +957,9 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.overlay_view.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Expanding,
+        )
+        self.overlay_view.on_geometry_changed = lambda config: (
+            self.aoi_geometry_changed.emit(config)
         )
         layout.addWidget(self.overlay_view)
         self.logger.info(
@@ -621,6 +1010,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             highlight_mappings=self.highlight_mappings,
             label_segmentation=self.segmentation,
         )
+        self.overlay_view.set_aoi_shapes(self._aoi_config, self._show_aoi)
 
     def _get_display_segmentation(self) -> np.ndarray | None:
         if self.segmentation is None:
@@ -695,6 +1085,16 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
 
         self._update_overlay_display()
 
+    def set_aoi_overlay(
+        self,
+        config: AreasOfInterestConfig | None,
+        *,
+        show: bool,
+    ) -> None:
+        self._aoi_config = clone_aoi_config(config)
+        self._show_aoi = show
+        self.overlay_view.set_aoi_shapes(self._aoi_config, self._show_aoi)
+
     def set_empty_message(self, message: str) -> None:
         self.overlay_image = None
         self.base_image = None
@@ -703,6 +1103,8 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.original_cellpose_ids = None
         self.stimulus_to_cellpose_mapping = None
         self.highlight_mappings = True
+        self._aoi_config = None
+        self._show_aoi = False
         self.overlay_view.add_overlay_data(
             None,
             None,
