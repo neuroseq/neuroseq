@@ -7,18 +7,27 @@ It is recommended to use Anaconda environment (package manager) for the installa
 Once Anaconda installed, create and activate a new environment in a command line:
 
 ```
-conda create -n neuroseq python=3.10
+conda create -n neuroseq python=3.11
 conda activate neuroseq
 ```
 
-Alternatively, the new enviroment can be created within Anaconda Navigator. For this, open Anaconda Navigator and go to "Enviroments". Click "Create" button, write "neuroseq" as a name and select Python 3.10.
+Alternatively, the new enviroment can be created within Anaconda Navigator. For this, open Anaconda Navigator and go to "Enviroments". Click "Create" button, write "neuroseq" as a name and select Python 3.11.
 
 ## Installation of the neuroseq
+
+NeuroSeq requires Python 3.11 or newer.
 
 If you have ssh authentication to GitHub set up you can install directly from this repository with pip:
 
 ```bash
 pip install git+ssh://git@github.com/ssciwr/neuroseq
+```
+
+If you want the optional in-app LLM assistant in the same step, install the `chat`
+extra from the repository directly:
+
+```bash
+pip install "neuroseq[chat] @ git+ssh://git@github.com/ssciwr/neuroseq.git"
 ```
 
 Alternatively you can clone the repository and then install it:
@@ -27,6 +36,13 @@ Alternatively you can clone the repository and then install it:
 git clone git@github.com:ssciwr/neuroseq.git
 cd neuroseq
 pip install .
+```
+
+If you cloned the repository locally and want the optional in-app LLM assistant,
+install the chat extra from the checkout:
+
+```bash
+pip install ".[chat]"
 ```
 
 ## How to install Cython on Windows
