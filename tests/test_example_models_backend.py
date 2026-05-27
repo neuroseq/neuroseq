@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import sys
 import types
 from typing import Any
@@ -227,6 +228,26 @@ def test_elise_import_initialize_and_cached_types(
     assert dt_ms == expected_dt_ms
     assert opt_vis.eta == pytest.approx(expected_eta_vis / expected_dt_ms)
     assert opt_lat.eta == pytest.approx(expected_eta_lat / expected_dt_ms)
+
+
+def test_elise_missing_dependency_error_is_explanatory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_import = builtins.__import__
+
+    def _fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "elise.model":
+            raise ModuleNotFoundError("No module named 'elise'")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+    sim = Elise()
+
+    with pytest.raises(
+        ImportError,
+        match="requires the separate private 'elise' package",
+    ):
+        sim._import_elise_types()
 
 
 def test_elise_simulate_with_fake_backend_and_wrapper(

@@ -16,6 +16,7 @@ preserving simulation state across repeated runs.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Mapping
 from types import SimpleNamespace
 
@@ -376,11 +377,25 @@ class Elise(NN):
         # tolerates over/underflow. Save and restore the global errstate around the
         # import so the change is scoped to ELISE-internal computation.
         _prev_seterr = np.seterr()
-        from elise.model import Network
-        from elise.optimizer import SimpleUpdater
-        from elise.rate_buffer import Buffer
-        from elise.weights import DendriticWeights
-        from elise.weights import SomaticWeights
+        try:
+            from elise.model import Network
+            from elise.optimizer import SimpleUpdater
+            from elise.rate_buffer import Buffer
+            from elise.weights import DendriticWeights
+            from elise.weights import SomaticWeights
+        except ModuleNotFoundError as exc:
+            np.seterr(**_prev_seterr)
+            if (
+                (exc.name and (exc.name == "elise" or exc.name.startswith("elise.")))
+                or "No module named 'elise'" in str(exc)
+            ):
+                raise ImportError(
+                    "The Elise example model requires the separate private "
+                    f"'elise' package in the active Python environment "
+                    f"({sys.executable}). Install/configure that package there "
+                    "before running this example."
+                ) from exc
+            raise
 
         np.seterr(**_prev_seterr)
         self._elise_types = (Network, SimpleUpdater, Buffer, DendriticWeights, SomaticWeights)
