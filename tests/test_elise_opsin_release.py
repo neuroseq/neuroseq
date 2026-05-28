@@ -165,6 +165,14 @@ def test_simulate_mixed_stim_drives_per_pitch_u_tgt(
         ),
     )
 
+    # Bypass the kinetic step so the test can exercise the matching-
+    # potential code path with directly-specified open fractions
+    # (the input arrays act as O values via this identity step).
+    def _identity_step(open_fraction, D, phi, k_a_max, phi_m, k_d, k_r, dt):
+        open_fraction[:] = phi
+
+    monkeypatch.setattr("neuroseq.example_models.elise._step_kinetics", _identity_step)
+
     g_exc = np.array([[1.0, 0.0, 0.0]], dtype=np.float32)
     g_inh = np.array([[2.0, 0.0, 0.0]], dtype=np.float32)
     sim.simulate(
@@ -173,7 +181,13 @@ def test_simulate_mixed_stim_drives_per_pitch_u_tgt(
             "opsin_inh": {"array": g_inh, "dt": 0.1},
         },
         0.1,
-        params={"num_lat": 1, "dt_ms": 100.0, "learn": False},
+        params={
+            "num_lat": 1,
+            "dt_ms": 100.0,
+            "learn": False,
+            "g0_exc": 1.0,
+            "g0_inh": 1.0,
+        },
     )
 
     network = cast(Any, sim._network)
@@ -242,10 +256,21 @@ def test_simulate_preserves_network_across_releases(
         ),
     )
 
+    def _identity_step(open_fraction, D, phi, k_a_max, phi_m, k_d, k_r, dt):
+        open_fraction[:] = phi
+
+    monkeypatch.setattr("neuroseq.example_models.elise._step_kinetics", _identity_step)
+
     active_exc = np.ones((2, 2), dtype=np.float32)
     active_inh = np.full((2, 2), 2.0, dtype=np.float32)
     zero = np.zeros((2, 2), dtype=np.float32)
-    params = {"num_lat": 2, "dt_ms": 100.0, "learn": False}
+    params = {
+        "num_lat": 2,
+        "dt_ms": 100.0,
+        "learn": False,
+        "g0_exc": 1.0,
+        "g0_inh": 1.0,
+    }
 
     sim.simulate(
         {

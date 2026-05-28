@@ -282,7 +282,18 @@ def test_elise_simulate_with_fake_backend_and_wrapper(
         "dt_ms": 100.0,
         "weight_snapshot_interval_ms": 100.0,
         "learn": True,
+        # Identity g0 so the monkeypatched kinetic step (O := phi)
+        # makes the matching-potential math equivalent to the pre-
+        # kinetic model.
+        "g0_exc": 1.0,
+        "g0_inh": 1.0,
     }
+
+    def _identity_step(open_fraction, D, phi, k_a_max, phi_m, k_d, k_r, dt):
+        open_fraction[:] = phi
+
+    monkeypatch.setattr("neuroseq.example_models.elise._step_kinetics", _identity_step)
+
     u_tgt = np.array(
         [[-10.0, -20.0], [-30.0, -40.0], [-50.0, -60.0], [-25.0, -35.0]],
         dtype=np.float32,

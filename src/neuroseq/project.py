@@ -135,6 +135,9 @@ class Project:
         self.external_simulate_params: dict[str, dict] = {}
         self.external_simulator: object | None = None
         self.external_simulate_function: ExternalSimulateFn | None = None
+        # Schema version of the most recently loaded archive (1 == pre-kinetic).
+        # New archives are written at version 2.
+        self._loaded_schema_version: int = 1
 
         self.logger = logging.getLogger(__name__)
         if filepath:
@@ -163,12 +166,14 @@ class Project:
                     self.external_simulate_params = _meta.get(
                         "external_simulate_params", {}
                     )
+                    self._loaded_schema_version = int(_meta.get("schema_version", 1))
             if not _dt_from_metadata:
                 self.dt = self._derive_dt_from_data()
             if self.external_simulate_path is not None:
                 try:
                     self.load_NN()
                     self._migrate_legacy_elise_stim()
+                    self._migrate_legacy_elise_kinetics_units()
                 except Exception as e:
                     self.logger.warning(
                         f"Failed to resolve external_simulate_path "
@@ -856,6 +861,84 @@ class Project:
             "'opsin_exc'/'opsin_inh' opsin-activation pair."
         )
 
+    def _migrate_legacy_elise_kinetics_units(self) -> None:
+        """Convert pre-kinetic ELISE opsin stims (values in [0,1]) to photon flux.
+
+        Pre-kinetic archives store opsin activations as fractional
+        conductances in [0, 1]. After the 3-state kinetic layer
+        landed, the stim arrays are interpreted as photon flux density
+        (mm^-2 s^-1) instead. Without migration, a 1.0 stim value
+        would be ~17 orders of magnitude below the Hill K_M and the
+        opsin would never open.
+
+        Detection: external_simulate_path is ELISE, both opsin stims
+        exist, the loaded archive predates schema_version 2, and the
+        stim values are within [-2, 2] (allows small float noise above
+        1.0). Migration uses the kinetic defaults from
+        ``Elise.DEFAULT_PARAMS`` to invert the Hill — if a user had
+        already retuned k_a_max etc., they'd have saved at
+        schema_version >= 2 and this migration wouldn't fire.
+        """
+        if self.external_simulate_path != "neuroseq:elise":
+            return
+        if self._loaded_schema_version >= 2:
+            return
+        if "opsin_exc" not in self.stim_arrays or "opsin_inh" not in self.stim_arrays:
+            return
+
+        exc = self.stim_arrays["opsin_exc"]
+        inh = self.stim_arrays["opsin_inh"]
+        exc_max = float(np.max(np.abs(exc.values))) if exc.values.size else 0.0
+        inh_max = float(np.max(np.abs(inh.values))) if inh.values.size else 0.0
+        if exc_max > 2.0 or inh_max > 2.0:
+            # Values already look like photon flux; leave alone.
+            return
+
+        from neuroseq.example_models.elise import DEFAULT_PARAMS
+        from neuroseq.example_projects import _calibrate_phi_for_target_open_fraction
+
+        def _side_kin(side: str) -> dict:
+            return dict(
+                k_a_max=float(DEFAULT_PARAMS[f"k_a_max_{side}"]["default"]),
+                phi_m=float(DEFAULT_PARAMS[f"phi_m_{side}"]["default"]),
+                k_d=float(DEFAULT_PARAMS[f"k_d_{side}"]["default"]),
+                k_r=float(DEFAULT_PARAMS[f"k_r_{side}"]["default"]),
+            )
+
+        def _convert(values: np.ndarray, side: str) -> np.ndarray:
+            kin = _side_kin(side)
+            g0 = float(DEFAULT_PARAMS[f"g0_{side}"]["default"])
+            # Old fractional conductance g_old corresponds to an open
+            # fraction O_target = g_old / g0; invert the Hill to get φ.
+            # The largest O reachable at finite flux is the saturating
+            # steady-state O_sat = k_a_max·k_r / (k_a_max·k_r + k_a_max·k_d + k_d·k_r).
+            # Legacy g values above g0·O_sat saturate: clamp O_target so
+            # the inverse Hill stays finite. Migration is lossy here —
+            # this is the documented trade-off for non-default archives.
+            O_sat = (kin["k_a_max"] * kin["k_r"]) / (
+                kin["k_a_max"] * kin["k_r"]
+                + kin["k_a_max"] * kin["k_d"]
+                + kin["k_d"] * kin["k_r"]
+            )
+            O_max = O_sat * (1.0 - 1e-3)  # 0.1% below saturation
+            out = np.empty_like(values, dtype=np.float32)
+            flat_in = values.ravel()
+            flat_out = out.ravel()
+            for i, g_old in enumerate(flat_in):
+                # noqa naming: 'O' is the open-state fraction (per the 3-state spec).
+                O_target = max(0.0, min(float(g_old) / g0, O_max))
+                flat_out[i] = _calibrate_phi_for_target_open_fraction(O_target, **kin)
+            return out
+
+        exc.values = _convert(exc.values, "exc")
+        inh.values = _convert(inh.values, "inh")
+        exc.units = "mm**-2 / second"
+        inh.units = "mm**-2 / second"
+        self.logger.info(
+            "Migrated pre-kinetic ELISE opsin stims (values in [0,1]) "
+            "to photon-flux density (mm^-2 s^-1)."
+        )
+
     def load_external_simulator(self) -> None:
         """Compatibility wrapper for loading external simulation entry points.
 
@@ -903,7 +986,7 @@ class Project:
         """
 
         with zipfile.ZipFile(filepath, "w", zipfile.ZIP_DEFLATED) as zf:
-            metadata: dict = {"dt": self.dt}
+            metadata: dict = {"dt": self.dt, "schema_version": 2}
             if self.external_simulate_path is not None:
                 metadata["external_simulate_path"] = self.external_simulate_path
             if self.external_simulate_params:
