@@ -16,6 +16,7 @@ from qtpy.compat import getsavefilename
 
 from neuroseq import __version__
 from neuroseq.analysis_plugins import AnalysisPlugin
+from neuroseq.analysis_plugins import discover_analysis_plugins
 from neuroseq.cellpose_import_dialog import CellposeImportDialog
 from neuroseq.chat_widget import ChatWidget
 from neuroseq.console_widget import ConsoleWidget
@@ -61,6 +62,10 @@ from neuroseq.utils import add_action
 from neuroseq.utils import add_items_to_combobox
 from neuroseq.utils import getSimulationTime
 from neuroseq.utils import with_wait_cursor
+
+
+class SimulationCancelledError(Exception):
+    """Raised from a progress callback when the user clicks Cancel."""
 
 
 def _external_simulator_accepts_progress(simulate_fn: Callable) -> bool:
@@ -231,6 +236,7 @@ class Gui(QtWidgets.QMainWindow):
         self.stim_editor.set_project(self.project, keep_undo_history)
         self.update_limits()
         self._update_combo_boxes()
+        self._refresh_elise_replay_action()
 
     def _update_combo_box(
         self,
@@ -631,6 +637,7 @@ class Gui(QtWidgets.QMainWindow):
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
         self._update_combo_boxes()
+        self._refresh_elise_replay_action()
 
     def _cellpose_neuron_count(self, imported: CellposeImportResult | None) -> int:
         if imported is None:
@@ -862,6 +869,10 @@ class Gui(QtWidgets.QMainWindow):
     def _do_external_simulation(self, simulation_time: float):
         if self.project.external_simulate_function is None:
             return
+        # Make the progress dialog cancellable for the simulation run.
+        # Restored to non-cancellable in the finally block.
+        self.progress_dialog.setCancelButtonText("Cancel")
+        self.progress_dialog.reset()
         try:
             cumulative_so_far = 0.0
             sim = getattr(self.project, "external_simulator", None)
@@ -899,6 +910,15 @@ class Gui(QtWidgets.QMainWindow):
             self.logger.info(
                 f"External simulation complete, returned {experiment.duration}s experiment '{experiment.name}' with {len(experiment.data)} data objects"
             )
+        except SimulationCancelledError:
+            self.progress_dialog.reset()
+            self.logger.info("External simulation cancelled by user.")
+            QtWidgets.QMessageBox.information(
+                self,
+                "Simulation cancelled",
+                "Simulation cancelled — no data was added to the project.",
+            )
+            return
         except Exception as e:
             QtWidgets.QMessageBox.critical(
                 self,
@@ -907,13 +927,29 @@ class Gui(QtWidgets.QMainWindow):
             )
             self.logger.exception(e)
             return
+        finally:
+            # Restore "no cancel" default so other long-running paths
+            # (project load, etc.) don't show a stray cancel button.
+            self.progress_dialog.setCancelButton(None)
         QtWidgets.QApplication.restoreOverrideCursor()
         self._append_experimental_data(experiment)
 
     def _update_external_simulation_progress(self, fraction: float) -> None:
-        """Translate a [0, 1] completion fraction into the shared progress dialog."""
+        """Translate a [0, 1] completion fraction into the shared progress dialog.
+
+        Also pumps the Qt event loop so the window keeps repainting during
+        long training runs, and raises ``SimulationCancelledError`` if the
+        user clicked the dialog's Cancel button. ``ExcludeUserInputEvents``
+        keeps clicks queued so the simulation can't be re-entered from the
+        callback context.
+        """
         clamped = max(0.0, min(1.0, float(fraction)))
         self.progress_dialog.setValue(int(round(clamped * 100)))
+        QtWidgets.QApplication.processEvents(
+            QtCore.QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents
+        )
+        if self.progress_dialog.wasCanceled():
+            raise SimulationCancelledError("user cancelled the simulation")
 
     def btn_do_external_simulation_clicked(self) -> None:
         if self.project.external_simulate_function is None:
@@ -1528,6 +1564,7 @@ class Gui(QtWidgets.QMainWindow):
         self._create_actions_settings(menu=self.menu_settings, toolbar=None)
         self._create_actions_help(menu=self.menu_help, toolbar=None)
         self._create_action_experiment(self.menu_experiment, self.toolbar_experiment)
+        self._create_actions_replay_analysis()
 
     def _create_actions_file(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
@@ -1911,6 +1948,189 @@ class Gui(QtWidgets.QMainWindow):
             shortcut=None,
             icon=qta.icon("mdi6.rocket-launch-outline"),
         )
+
+    def _create_actions_replay_analysis(self) -> None:
+        """Left-toolbar one-click ELiSe target MSE."""
+        self.elise_replay_action = add_action(
+            "Analyse ELiSe replay (target MSE)",
+            self._analyse_elise_replay,
+            menu=None,
+            toolbar=self.toolbar_stim_editor,
+            shortcut=None,
+            icon=qta.icon("mdi6.delta"),
+        )
+        self.elise_replay_action.setToolTip(
+            "Compute the paper-style replay MSE and correlation against "
+            "the binary teaching pattern, on the output-neuron firing "
+            "rate. Requires an ELiSe project with a completed simulation."
+        )
+        self._refresh_elise_replay_action()
+
+    def _refresh_elise_replay_action(self) -> None:
+        """Enable the toolbar action only for ELiSe projects with a sim run."""
+        action = getattr(self, "elise_replay_action", None)
+        if action is None:
+            return
+        action.setEnabled(self._elise_replay_inputs() is not None)
+
+    def _elise_replay_inputs(
+        self,
+    ) -> tuple[TraceData, np.ndarray, float] | None:
+        """Return (firing_rate_r, opsin_exc_values, opsin_dt_s) if available."""
+        if self.project.external_simulate_path != "neuroseq:elise":
+            return None
+        trace = None
+        for experiment in self.project.experiments.values():
+            for datum in experiment.data:
+                if isinstance(datum, TraceData) and datum.name == "firing_rate_r":
+                    trace = datum
+        if trace is None or np.asarray(trace.traces).size == 0:
+            return None
+        stim = self.project.stim_arrays.get("opsin_exc")
+        if stim is None:
+            return None
+        return trace, np.asarray(stim.values), float(stim.dt)
+
+    def _analyse_elise_replay(self) -> None:
+        from neuroseq.example_models.elise import build_target_rate_pattern
+        from neuroseq.replay_metrics import compute_performance_against_target
+        from neuroseq.replay_metrics import save_replay_metrics_csv
+        from neuroseq.resources.analysis_plugins import elise_target_mse as plugin_mod
+
+        inputs = self._elise_replay_inputs()
+        if inputs is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "ELiSe replay analysis",
+                "This action requires an ELiSe project with a completed "
+                "simulation (needs the 'firing_rate_r' trace and an "
+                "'opsin_exc' stim).",
+            )
+            return
+        trace, opsin_exc, stim_dt_s = inputs
+        params_dict = self.project.external_simulate_params or {}
+
+        def _param(key: str, default: float) -> float:
+            entry = params_dict.get(key)
+            if isinstance(entry, dict) and "value" in entry:
+                try:
+                    return float(entry["value"])
+                except (TypeError, ValueError):
+                    return default
+            return default
+
+        target_rate, cycle_stim_samples = build_target_rate_pattern(
+            opsin_exc,
+            E_l=_param("E_l", -70.0),
+            a=_param("a", 0.3),
+            b=_param("b", -58.0),
+        )
+
+        trace_dt_s = float(trace.dt)
+        if trace_dt_s <= 0:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "ELiSe replay analysis",
+                "Firing-rate trace has non-positive dt; cannot align target.",
+            )
+            return
+        upsample = int(round(stim_dt_s / trace_dt_s))
+        if upsample < 1 or abs(stim_dt_s - upsample * trace_dt_s) > 1e-9:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "ELiSe replay analysis",
+                f"Stim dt ({stim_dt_s * 1000:.4g} ms) is not an integer "
+                f"multiple of trace dt ({trace_dt_s * 1000:.4g} ms); "
+                "cannot align target.",
+            )
+            return
+        target_rate_resampled = np.repeat(target_rate, upsample, axis=1)
+        num_vis = target_rate_resampled.shape[0]
+
+        n_total_neurons = int(np.asarray(trace.traces).shape[0])
+        if num_vis > n_total_neurons:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "ELiSe replay analysis",
+                f"Opsin stim has {num_vis} pitches but the trace only "
+                f"covers {n_total_neurons} neurons.",
+            )
+            return
+
+        # Ask the user where to save the per-cycle CSV before running.
+        default_stem = "elise_replay_mse"
+        if self.project.filepath is not None:
+            default_stem = pathlib.Path(self.project.filepath).stem + "_replay_mse"
+        csv_filename, _ = getsavefilename(
+            self,
+            "Save replay MSE analysis as CSV",
+            default_stem + ".csv",
+            "CSV files (*.csv)",
+        )
+        if not csv_filename:
+            return
+        csv_path = pathlib.Path(csv_filename)
+        if csv_path.suffix.lower() != ".csv":
+            csv_path = csv_path.with_suffix(".csv")
+
+        output_rates = np.asarray(trace.traces)[:num_vis, :].astype(np.float64)
+        try:
+            mses, corrs, shifts = compute_performance_against_target(
+                output_rates, target_rate_resampled
+            )
+        except ValueError as exc:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "ELiSe replay analysis",
+                f"Cannot compute replay metrics: {exc}",
+            )
+            return
+
+        try:
+            save_replay_metrics_csv(
+                csv_path,
+                mses,
+                corrs,
+                shifts,
+                cycle_dt_ms=trace_dt_s * 1000.0,
+                cycle_length_samples=int(target_rate_resampled.shape[1]),
+                n_output_neurons=num_vis,
+                source=str(self.project.filepath) if self.project.filepath else None,
+            )
+        except OSError as exc:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "ELiSe replay analysis",
+                f"Could not write CSV to {csv_path}: {exc}",
+            )
+            return
+
+        analysis_window = CustomAnalysisWindow(parent=self)
+        analysis_widget = analysis_window.analysis_widget
+        setattr(analysis_widget, plugin_mod.TARGET_ATTR, target_rate_resampled)
+        setattr(analysis_widget, plugin_mod.TARGET_DT_ATTR, trace_dt_s)
+
+        plugin = next(
+            (p for p in discover_analysis_plugins() if p.id == plugin_mod.PLUGIN_ID),
+            None,
+        )
+        if plugin is None:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "ELiSe replay analysis",
+                "Could not find the ELiSe target MSE analysis plugin.",
+            )
+            return
+
+        n_samples = int(np.asarray(trace.traces).shape[1])
+        analysis_widget.set_data(
+            trace,
+            plugin,
+            slice(0, num_vis),
+            slice(0, n_samples),
+        )
+        analysis_window.setWindowTitle(f"ELiSe replay MSE — saved to {csv_path.name}")
+        analysis_window.show()
 
     def closeEvent(self, event):
         # Stop timers and queued widget updates before tearing down owned widgets.

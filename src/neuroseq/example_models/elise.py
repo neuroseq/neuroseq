@@ -380,6 +380,89 @@ def _step_kinetics(
     D += dD
 
 
+def _detect_pattern_cycle(stim: np.ndarray) -> int:
+    """Return the smallest period (in samples) at which ``stim`` repeats.
+
+    A period ``T`` is accepted only if **every** whole cycle of length
+    ``T`` matches the first one, i.e. ``stim[k·T : (k+1)·T] == stim[:T]``
+    for all ``k = 1 .. n // T - 1``. Falls back to ``stim.shape[0]`` if
+    no shorter period is found.
+    """
+    n = int(stim.shape[0])
+    for T in range(2, n // 2 + 1):
+        n_full = n // T
+        if n_full < 2:
+            break
+        first = stim[:T]
+        if all(
+            np.array_equal(stim[k * T : (k + 1) * T], first) for k in range(1, n_full)
+        ):
+            return T
+    return n
+
+
+def build_target_rate_pattern(
+    opsin_exc: np.ndarray,
+    *,
+    E_l: float = -70.0,
+    a: float = 0.3,
+    b: float = -58.0,
+    u_active_offset: float = 20.0,
+    cycle_length: int | None = None,
+) -> tuple[np.ndarray, int]:
+    """Construct one cycle of the paper-style target firing rate.
+
+    Implements the target ``y`` of Kriener et al. (2024), Sec. 5.3.3 +
+    Eq. 6. A pitch is "active" at a stim sample whenever ``opsin_exc > 0``;
+    the corresponding output neuron is being teacher-driven toward
+    ``u_tgt = E_l + u_active_offset`` (default −50 mV), and toward ``E_l``
+    otherwise. The asymptotic firing rate the soma would produce at that
+    voltage is ``y = 1 / (1 + exp(a · (b − u_tgt)))``.
+
+    Parameters
+    ----------
+    opsin_exc : np.ndarray, shape ``(T_total, num_vis)``
+        Excitatory opsin photon-flux stim array. Only the binary
+        on/off footprint per sample is used; absolute fluxes are ignored.
+    E_l, a, b, u_active_offset : float
+        Neuron parameters (must match the running simulation).
+    cycle_length : int, optional
+        Pattern period in stim samples. Autodetected if ``None``.
+
+    Returns
+    -------
+    target_rate : np.ndarray, shape ``(num_vis, cycle_length)``
+        Target firing rate in [0, 1], one full cycle.
+    cycle_length : int
+        Detected (or supplied) cycle length, in stim samples.
+    """
+    if opsin_exc.ndim != 2:
+        raise ValueError("opsin_exc must be 2-D (T_total, num_vis)")
+
+    pattern = (np.asarray(opsin_exc) > 0).astype(np.float64)
+    if cycle_length is None:
+        # Trim trailing all-zero rows (ELiSe ring-out is encoded that way)
+        # before detecting the period, so the silence tail doesn't force
+        # the detector to fall back to the full stim length.
+        active_mask = np.any(pattern > 0, axis=1)
+        active_idx = np.flatnonzero(active_mask)
+        if active_idx.size == 0:
+            raise ValueError(
+                "opsin_exc has no active samples; cannot infer a target pattern"
+            )
+        active_len = int(active_idx[-1]) + 1
+        cycle_length = _detect_pattern_cycle(pattern[:active_len])
+    if cycle_length < 2 or cycle_length > pattern.shape[0]:
+        raise ValueError(
+            f"cycle_length must be in [2, {pattern.shape[0]}]; got {cycle_length}"
+        )
+
+    one_cycle = pattern[:cycle_length, :].T  # (num_vis, cycle_length)
+    u_tgt = E_l + u_active_offset * one_cycle
+    target_rate = 1.0 / (1.0 + np.exp(a * (b - u_tgt)))
+    return target_rate, int(cycle_length)
+
+
 def _build_namespaces(
     params: Mapping[str, ParamValue], num_vis: int
 ) -> tuple[SimpleNamespace, SimpleNamespace, SimpleNamespace]:
@@ -644,9 +727,10 @@ class Elise(NN):
         stim_T = g_exc_full.shape[0]
         t0_s = self._simulated_time_s
 
-        # Throttle progress callbacks so they refresh roughly every 5 % of
-        # the simulation without dominating the loop's runtime.
-        progress_stride = max(1, n_steps // 20) if progress is not None else 0
+        # Throttle progress callbacks so they refresh ~0.1 % of the run.
+        # Frequent enough that the GUI can pump events smoothly during long
+        # training, sparse enough that the callback's own cost is < 1 %.
+        progress_stride = max(1, n_steps // 1000) if progress is not None else 0
         if progress is not None and n_steps > 0:
             progress(0.0)
 

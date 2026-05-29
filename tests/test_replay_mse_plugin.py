@@ -87,6 +87,84 @@ def test_compute_cycle_mse_rejects_one_d_input() -> None:
         mod.compute_cycle_mse(np.zeros(20, dtype=np.float32), n_cycle_samples=4)
 
 
+def test_compute_cycle_performance_periodic_signal_is_optimal() -> None:
+    mod = _load_plugin_module()
+    rng = np.random.default_rng(0)
+    cycle = rng.standard_normal((3, 64)).astype(np.float64)
+    traces = np.tile(cycle, (1, 4))  # 4 identical cycles
+
+    mses, corrs, shifts = mod.compute_cycle_performance(traces, n_cycle_samples=64)
+
+    # Last cycle is dropped due to shift slack → 3 evaluable cycles.
+    assert mses.shape == (3,)
+    assert corrs.shape == (3,)
+    assert shifts.shape == (3,)
+    np.testing.assert_array_almost_equal(mses, np.zeros(3), decimal=8)
+    np.testing.assert_array_almost_equal(corrs, np.ones(3), decimal=8)
+    np.testing.assert_array_equal(shifts, np.zeros(3, dtype=np.int64))
+
+
+def test_compute_cycle_performance_recovers_time_shifted_cycle() -> None:
+    mod = _load_plugin_module()
+    rng = np.random.default_rng(1)
+    T = 32
+    n_cycles = 4
+    cycle = rng.standard_normal((2, T)).astype(np.float64)
+
+    # The "replay" part (cycles 1..n_cycles-1) is a continuous periodic
+    # signal that is identical to the reference but shifted by +5 samples.
+    # The optimal alignment for every replay cycle is therefore s=5.
+    shifted_part = np.roll(np.tile(cycle, (1, n_cycles - 1)), 5, axis=1)
+    traces = np.concatenate([cycle, shifted_part], axis=1)
+
+    mses, corrs, shifts = mod.compute_cycle_performance(traces, n_cycle_samples=T)
+
+    # 4 cycles, last one dropped → 3 evaluable.
+    assert mses.shape == (3,)
+    # k=0 is the trivial reference cycle.
+    assert int(shifts[0]) == 0
+    assert mses[0] == pytest.approx(0.0, abs=1e-10)
+    assert corrs[0] == pytest.approx(1.0, abs=1e-10)
+    # k=1 and k=2 recover the +5-sample shift exactly.
+    assert int(shifts[1]) == 5
+    assert int(shifts[2]) == 5
+    assert mses[1] == pytest.approx(0.0, abs=1e-8)
+    assert mses[2] == pytest.approx(0.0, abs=1e-8)
+    assert corrs[1] == pytest.approx(1.0, abs=1e-8)
+    assert corrs[2] == pytest.approx(1.0, abs=1e-8)
+
+
+def test_compute_cycle_performance_detects_uncorrelated_noise() -> None:
+    mod = _load_plugin_module()
+    rng = np.random.default_rng(2)
+    T = 64
+    reference = rng.standard_normal((4, T)).astype(np.float64)
+    # 4 cycles: reference, noise, noise, noise. With shift slack, only
+    # cycles 0..2 are evaluable.
+    noise = rng.standard_normal((4, 3 * T)).astype(np.float64)
+    traces = np.concatenate([reference, noise], axis=1)
+
+    mses, corrs, _ = mod.compute_cycle_performance(traces, n_cycle_samples=T)
+
+    assert mses.shape == (3,)
+    # Cycle 0 is trivial.
+    assert mses[0] == pytest.approx(0.0, abs=1e-10)
+    assert corrs[0] == pytest.approx(1.0, abs=1e-10)
+    # Cycles 1, 2: independent noise → MSE bounded away from 0 and
+    # correlation near 0 (low magnitude).
+    assert mses[1] > 0.5
+    assert mses[2] > 0.5
+    assert abs(corrs[1]) < 0.5
+    assert abs(corrs[2]) < 0.5
+
+
+def test_compute_cycle_performance_rejects_too_short_selection() -> None:
+    mod = _load_plugin_module()
+    traces = np.zeros((2, 5), dtype=np.float32)
+    with pytest.raises(ValueError, match="two whole cycles"):
+        mod.compute_cycle_performance(traces, n_cycle_samples=5)
+
+
 def _make_periodic_trace(
     n_neurons: int, cycle_samples: int, n_cycles: int, dt: float, noise: float = 0.0
 ) -> TraceData:
@@ -121,9 +199,11 @@ def test_widget_renders_replay_mse_bar_chart(qtbot: QtBot) -> None:
     widget.set_data(data, plugin, slice(0, 4), slice(0, 1920 * 3))
     qtbot.wait(20)
 
-    # The default cycle (1920 ms) splits into 3 bars; all should be 0.
+    # Shift-corrected MSE drops the last cycle (no shift slack), so we
+    # expect n_cycles - 1 = 2 bars; both should be ≈ 0 since the signal
+    # is perfectly periodic.
     bars = [patch for patch in widget.subplot.patches if hasattr(patch, "get_height")]
-    assert len(bars) == 3
+    assert len(bars) == 2
     heights = [float(b.get_height()) for b in bars]
     assert all(h == pytest.approx(0.0, abs=1e-6) for h in heights)
 
