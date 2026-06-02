@@ -31,6 +31,8 @@ jobs:
           environment-file: environment.yml
       - run: pip install . --no-deps
       - run: pytest -sv || pytest -sv || pytest -sv
+        env:
+          NEUROSEQ_HEADLESS_TEST: TRUE
   pypi:
     runs-on: ${{ matrix.os }}
     name: "${{ matrix.os }} :: pypi :: ${{ matrix.python-version }}"
@@ -50,8 +52,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - run: uv run pytest -sv --cov --cov-report=xml || uv run pytest -sv --cov --cov-report=xml || uv run pytest -sv --cov --cov-report=xml
         env:
-          QT_API: pyside6
-          PYTEST_QT_API: pyside6
+          NEUROSEQ_HEADLESS_TEST: TRUE
       - run: uv run diff-cover coverage.xml -c pyproject.toml
   pre-commit:
     runs-on: "macos-arm64-ssc"

@@ -77,8 +77,8 @@ io.py                         — .nseq archive persistence (ZIP + JSON + .npy b
 ## Code Style & Tooling
 
 - **Linter/formatter**: `ruff` — line length limit ignored (`E501` ignored), isort with `force-single-line = true`
-- **Type checking**: `mypy` with `--ignore-missing-imports`, stubs for numpy and PySide6
-- **Qt abstraction**: use `qtpy` imports (not `PyQt5`/`PySide6` directly) for portability
+- **Type checking**: `mypy` with `--ignore-missing-imports`, stubs for numpy and Qt bindings via qtpy
+- **Qt abstraction**: use `qtpy` imports (not `PyQt6`/`PySide6` directly) for portability
 - **Test coverage**: minimum 75% (both full suite and diff coverage via `diff-cover`)
 - **Test markers**: `@pytest.mark.screenshot` for screenshot-based tests
 
@@ -120,7 +120,7 @@ Projects are saved as `.nseq` archives: ZIP files containing a JSON metadata fil
 
 ## Important Notes
 
-- `pyside6!=6.9.1` and `pyqtgraph!=0.14.0` are pinned exclusions due to known bugs
+- `pyqtgraph!=0.14.0` is excluded due to known bugs
 - `pyparsing!=3.2.4` excluded due to SysCon2 parsing regression
 - GPU monitoring uses `nvidia-ml-py` (optional, gracefully absent on non-NVIDIA systems)
 - The `external_simulation_example/` directory is excluded from ruff and mypy
