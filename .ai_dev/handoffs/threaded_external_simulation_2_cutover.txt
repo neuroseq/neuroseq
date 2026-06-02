@@ -1,0 +1,478 @@
+threaded_external_simulation_2_cutover — switch dispatch to the worker thread  [IMPLEMENTED]
+=============================================================================================
+
+This is **chunk 2 of 3**. Prerequisite: chunk 1 must be
+[IMPLEMENTED] (worker class, slots, action capture, init attributes).
+
+This chunk does the actual cutover: `_do_external_simulation` stops
+running the simulator inline and instead dispatches it on a worker
+QThread. The slot stubs from chunk 1 grow into the real terminal
+handlers. Cancellation goes from "raise inside the same call stack"
+to "set a `threading.Event` from the dialog's cancel signal, worker
+polls it." `closeEvent` learns to drain an in-flight sim.
+
+
+CONTEXT (read this first)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Before this chunk:
+  • `ExternalSimWorker` exists and is unit-tested.
+  • `Gui._on_external_sim_progress/finished/cancelled/failed` exist
+    as slots but are not connected to any signal.
+  • `_set_simulation_actions_enabled` exists.
+  • `_do_external_simulation_action` is captured.
+  • `_external_sim_thread`, `_external_sim_worker`,
+    `_external_sim_cancel` exist on `Gui` as `None`.
+  • `_do_external_simulation` STILL runs the simulator inline (the
+    partial fix from before: pumps `processEvents`, raises
+    `SimulationCancelledError` from a Cancel-button-aware callback).
+
+After this chunk:
+  • `_do_external_simulation` dispatches a worker and returns
+    immediately; the simulator runs off the main thread.
+  • Slots are the real terminal handlers (append experiment, show
+    cancelled box, show error box) — no longer stubs.
+  • Cancellation is via `threading.Event` set from the dialog's
+    `canceled` signal.
+  • Re-entrancy is prevented by disabling the Run actions during
+    the run.
+  • The window close event cleans up an in-flight worker.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+FILES TO CHANGE
+────────────────────────────────────────────────────────────────────────────────────────────
+
+src/neuroseq/gui.py
+  • Rewrite `_do_external_simulation` (the entire method body) — see
+    DETAILED IMPLEMENTATION (1).
+  • Add `_teardown_external_sim` private helper next to the slots —
+    see (2).
+  • Replace each slot's stub body with the real terminal handler —
+    see (3).
+  • Modify `closeEvent` to drain an in-flight sim — see (4).
+  • `_do_external_simulation` is no longer `@with_wait_cursor`. The
+    cursor is set explicitly in dispatch and restored in
+    `_teardown_external_sim`. Remove the decorator.
+
+  Do NOT touch `_update_external_simulation_progress` in this chunk.
+  Chunk 3 removes the now-redundant `processEvents` line.
+
+
+FILES TO CREATE
+────────────────────────────────────────────────────────────────────────────────────────────
+
+tests/test_threaded_external_dispatch.py
+  Five GUI-level tests. Uses pytest-qt's `qtbot` and the existing
+  Qt autouse fixtures (`suppress_message_boxes`,
+  `patch_b2w_exec_show`) so the cancelled / error dialogs don't
+  block. See TESTS section.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+DETAILED IMPLEMENTATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1. Rewrite `_do_external_simulation`. Replace the current body
+   entirely. The pre-flight bookkeeping (cumulative time, tiling,
+   stim_dict build, params extraction) stays on the main thread; the
+   sim call itself moves into the worker.
+
+```python
+def _do_external_simulation(self, simulation_time: float) -> None:
+    if self.project.external_simulate_function is None:
+        return
+    if self._external_sim_worker is not None:
+        # Defensive: the Run actions are disabled while a sim is
+        # running, so this is unreachable from the UI. Logged so a
+        # programmatic re-entry attempt shows up in the log.
+        self.logger.warning(
+            "External simulation dispatch ignored — a sim is already running."
+        )
+        return
+
+    # Pre-flight: bookkeeping + stim dict construction on the main
+    # thread (touches self.stim_editor and self.project).
+    cumulative_so_far = 0.0
+    sim = getattr(self.project, "external_simulator", None)
+    if sim is not None and hasattr(sim, "simulated_time_seconds"):
+        cumulative_so_far = float(sim.simulated_time_seconds)
+    target_seconds = cumulative_so_far + simulation_time
+    self.project.tile_stim_arrays_to_length(target_seconds)
+    self.stim_editor.set_project(self.project)
+    stims_dict = {
+        k: {"array": v.stim_array.values, "dt": v.stim_array.dt}
+        for k, v in self.stim_editor.stims_dict.items()
+    }
+    params = self.project.external_simulate_params_flat()
+    accepts_progress = _external_simulator_accepts_progress(
+        self.project.external_simulate_function
+    )
+
+    # Capture which project should receive the experiment (the user
+    # might switch projects mid-run — see subtle thing C in this
+    # chunk). The terminal slot uses this capture, NOT self.project.
+    dispatch_project = self.project
+
+    # Progress dialog + cancel button.
+    self.progress_dialog.setLabelText("Simulating...")
+    self.progress_dialog.setValue(0)
+    self.progress_dialog.setCancelButtonText("Cancel")
+    self.progress_dialog.show()
+
+    # Cancel plumbing. The dialog's canceled signal is connected to
+    # an Event.set; the worker polls the Event from its progress
+    # callback.
+    self._external_sim_cancel = threading.Event()
+    self.progress_dialog.canceled.connect(self._external_sim_cancel.set)
+
+    # Wait cursor — restored in _teardown_external_sim regardless of
+    # the terminal path.
+    QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+
+    # Prevent re-entry while the worker is busy.
+    self._set_simulation_actions_enabled(False)
+
+    # Worker + thread.
+    thread = QtCore.QThread(self)
+    worker = ExternalSimWorker(
+        simulate_fn=self.project.external_simulate_function,
+        stims_dict=stims_dict,
+        simulation_time=simulation_time,
+        params=params,
+        accepts_progress=accepts_progress,
+        cancel_event=self._external_sim_cancel,
+    )
+    worker.moveToThread(thread)
+
+    thread.started.connect(worker.run)
+    worker.progress.connect(self._on_external_sim_progress)
+    # The finished slot needs the dispatch_project capture — wrap.
+    worker.finished.connect(
+        lambda exp, p=dispatch_project: self._on_external_sim_finished(exp, p)
+    )
+    worker.cancelled.connect(self._on_external_sim_cancelled)
+    worker.failed.connect(self._on_external_sim_failed)
+    # Auto-quit the thread on any terminal signal.
+    for sig in (worker.finished, worker.cancelled, worker.failed):
+        sig.connect(thread.quit)
+    thread.finished.connect(worker.deleteLater)
+    thread.finished.connect(thread.deleteLater)
+
+    self._external_sim_thread = thread
+    self._external_sim_worker = worker
+    self.logger.info(
+        f"Dispatching external simulation: {simulation_time} s "
+        f"(accepts_progress={accepts_progress})"
+    )
+    thread.start()
+```
+
+2. `_teardown_external_sim` helper, next to the slots:
+
+```python
+def _teardown_external_sim(self) -> None:
+    """Common UI restoration on any terminal signal (finished /
+    cancelled / failed). Idempotent."""
+    QtWidgets.QApplication.restoreOverrideCursor()
+    self.progress_dialog.setCancelButton(None)
+    if self._external_sim_cancel is not None:
+        try:
+            self.progress_dialog.canceled.disconnect(
+                self._external_sim_cancel.set
+            )
+        except (TypeError, RuntimeError):
+            # Either the connection wasn't made, or the dialog is
+            # mid-teardown. Either way nothing to do.
+            pass
+    self._external_sim_worker = None
+    self._external_sim_thread = None
+    self._external_sim_cancel = None
+    self._set_simulation_actions_enabled(True)
+```
+
+3. Replace the four slot bodies (currently stubs from chunk 1).
+   The `_finished` slot now takes the captured project as a second
+   argument (bound via lambda in dispatch).
+
+```python
+@QtCore.Slot(float)
+def _on_external_sim_progress(self, fraction: float) -> None:
+    clamped = max(0.0, min(1.0, float(fraction)))
+    self.progress_dialog.setValue(int(round(clamped * 100)))
+
+def _on_external_sim_finished(
+    self, experiment: Experiment, dispatch_project: Project
+) -> None:
+    """Worker → main thread: append to the dispatched project.
+
+    `dispatch_project` is the project that owned the simulator at
+    the moment of dispatch. If the user has since swapped projects,
+    we still land the experiment in the original — anything else
+    would silently overwrite the user's now-active project with
+    foreign data.
+    """
+    self._teardown_external_sim()
+    self.progress_dialog.setValue(100)
+    self.progress_dialog.reset()
+    self.logger.info(
+        f"External simulation complete: '{experiment.name}' "
+        f"{experiment.duration}s, {len(experiment.data)} data objects"
+    )
+    if self.project is dispatch_project:
+        # Common case — current project is still the one that
+        # dispatched. Use the existing append flow which surfaces
+        # the import dialog and refreshes the GUI.
+        self._append_experimental_data(experiment)
+    else:
+        # The user swapped projects during the run. Push the result
+        # to the original project directly (no GUI refresh — that
+        # project isn't current) and notify the user.
+        dispatch_project.add_experiment(experiment)
+        self.logger.warning(
+            f"Project swapped during external simulation. Experiment "
+            f"'{experiment.name}' was appended to the dispatch-time "
+            f"project, not the currently active one."
+        )
+        QtWidgets.QMessageBox.information(
+            self,
+            "Simulation finished",
+            f"The external simulation finished after a project switch.\n"
+            f"Experiment '{experiment.name}' was added to the project "
+            f"that started it ('{dispatch_project.project_name or '(unnamed)'}'),"
+            " not the project currently open.",
+        )
+
+@QtCore.Slot()
+def _on_external_sim_cancelled(self) -> None:
+    self._teardown_external_sim()
+    self.progress_dialog.reset()
+    self.logger.info("External simulation cancelled by user.")
+    QtWidgets.QMessageBox.information(
+        self,
+        "Simulation cancelled",
+        "Simulation cancelled — no data was added to the project.",
+    )
+
+@QtCore.Slot(str)
+def _on_external_sim_failed(self, message: str) -> None:
+    self._teardown_external_sim()
+    self.progress_dialog.reset()
+    self.logger.error(f"External simulation failed: {message}")
+    QtWidgets.QMessageBox.critical(
+        self,
+        "External Simulation error",
+        f"Could not run external simulation: {message}",
+    )
+```
+
+`_on_external_sim_finished` takes two positional args (the lambda
+in dispatch curries the second). It is therefore not directly
+decorated with `@QtCore.Slot(object)` — the lambda is what's
+connected to the signal. That's fine; Qt accepts callables.
+
+4. `closeEvent` drain. Find the current closeEvent (around line
+   1916). Add at the very top of the method, before any other
+   teardown:
+
+```python
+def closeEvent(self, event):
+    # Drain any in-flight external simulation so the worker thread
+    # doesn't outlive the GUI.
+    if (
+        self._external_sim_thread is not None
+        and self._external_sim_thread.isRunning()
+    ):
+        if self._external_sim_cancel is not None:
+            self._external_sim_cancel.set()
+        # The simulator polls cancel every ~0.1 % of progress, so
+        # this should return in milliseconds. Wait up to 2 s; after
+        # that, hard-quit the thread (data was going to be
+        # discarded anyway because the window is closing).
+        if not self._external_sim_thread.wait(2000):
+            self.logger.warning(
+                "External simulation worker did not stop in 2 s; "
+                "force-quitting the thread."
+            )
+            self._external_sim_thread.quit()
+            self._external_sim_thread.wait(1000)
+
+    # ... existing closeEvent body unchanged below this point.
+```
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+SUBTLE THINGS RELEVANT TO THIS CHUNK
+────────────────────────────────────────────────────────────────────────────────────────────
+
+A.  Queued connections. Qt picks queued automatically because the
+    worker is on a different thread. Do NOT pass
+    `Qt.DirectConnection`. The lambda for `finished` is connected
+    cross-thread, so it too is queued — the lambda body runs on the
+    main thread, which is what we need.
+
+B.  Dispatch-project capture. `self.project` may change between
+    dispatch and completion. The wrapper lambda captures
+    `dispatch_project` at dispatch time and passes it into the
+    slot. The slot uses the capture, NOT `self.project`. Failing to
+    do this lets a long-running ELiSe run land its result in
+    whatever project the user has since loaded — a silent data
+    corruption hazard. The tests below cover this.
+
+C.  `Elise` simulator state on the project (e.g.
+    `project.external_simulator.simulated_time_seconds`). The
+    worker mutates this on the worker thread during the sim. If a
+    main-thread code path were to *read* this field during the run,
+    we'd race. As of today no main-thread code does. If you add
+    such a read in a later feature, you'll need a lock.
+
+D.  `progress_dialog.canceled` is a signal, not a method. Wire it
+    via `self.progress_dialog.canceled.connect(
+    self._external_sim_cancel.set)`. The teardown disconnects it
+    inside a `try/except (TypeError, RuntimeError)` — Qt raises one
+    of those if the connection no longer exists.
+
+E.  `setCancelButton(None)` on teardown. The progress dialog is
+    shared with other long-running paths (load project, import).
+    Leaving it cancellable after the sim ends would let the user
+    accidentally cancel a project save. Restore `None` every time.
+
+F.  `Experiment` object passes through the signal as-is (Qt does
+    not deep-copy `object`-typed arguments). The worker stops
+    owning the arrays after `emit`; the main-thread slot takes
+    ownership. Don't manually free anything.
+
+G.  Reset semantics. If the user cancels and then immediately
+    clicks Run again, the simulator resumes from the post-cancel
+    state (not from zero), because `Elise.simulate` doesn't reset
+    on exception. This is the existing behaviour and is desirable.
+    Do NOT add a reset on cancel.
+
+H.  pytest-qt sync. Tests must use `qtbot.waitSignal` to
+    synchronise on terminal worker signals. Polling / sleep is
+    forbidden — it makes tests flaky on slow CI.
+
+I.  `_append_experimental_data` shows an import dialog. The autouse
+    `patch_b2w_exec_show` fixture in `conftest.py` replaces `.exec()`
+    with `.show()` on QDialog, so the import dialog won't block.
+    Tests for the finished path need to assert the experiment was
+    added to the project, not that the dialog showed something.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_threaded_external_dispatch.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Use `qtbot` and a real `Gui` instance (see existing tests like
+`tests/test_replay_mse_plugin.py` for the construction pattern).
+Patch `gui.project.external_simulate_function` and
+`gui.project.external_simulate_path` to point at a fake.
+
+Helper (top of file):
+
+```python
+def _wire_fake_external_simulator(gui, fake_simulate_fn):
+    """Make `gui.project` look like an external-sim project that
+    runs `fake_simulate_fn` when dispatched."""
+    gui.project.external_simulate_path = "test:fake"
+    gui.project.external_simulate_function = fake_simulate_fn
+    # Existing add_stim_array / params not strictly required if the
+    # fake ignores them — but tile_stim_arrays_to_length will skip
+    # cleanly when stim_arrays is empty.
+```
+
+Required tests:
+
+4.  `test_cancel_via_progress_dialog_raises_and_emits_cancelled(qtbot, gui)`
+    Fake `simulate_fn` calls `progress(k/100)` for k=0..99 in a
+    Python loop. Use `QTimer.singleShot(50, lambda:
+    gui.progress_dialog.cancel())` to fire a cancel ~50 ms after
+    dispatch. Then call `gui._do_external_simulation(1.0)` (which
+    returns immediately). `qtbot.waitSignal(
+    gui._external_sim_worker.cancelled, timeout=5000)`. After the
+    signal:
+      (a) `gui.project` has no new experiment;
+      (b) `gui.continue_simulation_action.isEnabled()` is True;
+      (c) `gui._external_sim_worker is None`;
+      (d) the override cursor stack is empty
+          (`QApplication.overrideCursor() is None`).
+
+6.  `test_simulation_actions_disabled_during_run(qtbot, gui)`
+    Fake `simulate_fn` blocks until a test-controlled `threading.Event`
+    is set. Dispatch. Immediately (before the worker can complete)
+    assert `gui.continue_simulation_action.isEnabled()` is False
+    and `gui._do_external_simulation_action.isEnabled()` is False.
+    Then set the event; wait on `worker.finished`; assert both
+    actions are re-enabled.
+
+7.  `test_dispatch_is_idempotent_while_running(qtbot, gui)`
+    Same blocking fake as #6. Dispatch once; capture the worker
+    reference. Call `gui._do_external_simulation(1.0)` a second
+    time and assert it returned without creating a new worker
+    (`gui._external_sim_worker is original_worker`). Release the
+    event; wait on finished.
+
+8.  `test_close_event_cancels_inflight_sim(qtbot, gui)`
+    Fake `simulate_fn` loops until cancelled via the
+    `progress(...)` cancel-event check (i.e., loops `for _ in
+    range(1_000_000): progress(i / 1_000_000)`). Dispatch. Call
+    `gui.close()`. Assert `gui._external_sim_thread is None` (or
+    that the thread is not running) within 3 seconds. Catch any
+    exception escaping `close()` and fail the test.
+
+10. `test_experiment_appended_to_dispatch_project_not_current(qtbot, gui)`
+    Fake `simulate_fn` blocks until a `threading.Event` is set,
+    then returns an `Experiment(name="dispatched")`. Dispatch.
+    Before completion, call `gui.update_project(other_project)`
+    where `other_project = Project()` is freshly built. Set the
+    event; wait on `worker.finished` (note: the signal is on the
+    *original* worker, captured before update_project — the
+    update_project call does NOT cancel the in-flight sim). After
+    completion:
+      (a) `original_project.experiments["dispatched"]` exists;
+      (b) `other_project.experiments` does NOT contain
+          "dispatched";
+      (c) the project-swap warning dialog was triggered (catch via
+          the `qmessagebox_calls` fixture).
+
+Each test must call `gui.close()` and `qtbot.waitUntil(lambda:
+gui._external_sim_thread is None, timeout=3000)` in a teardown
+fixture to avoid leaking threads.
+
+(Tests numbered to match the chunk-spec list — chunks 1 already
+covered #1, #2, #3, #5; chunk 3 will add #9.)
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+ACCEPTANCE CRITERIA
+────────────────────────────────────────────────────────────────────────────────────────────
+
+  □ `_do_external_simulation` no longer runs the sim inline. It
+    builds the worker, starts the thread, returns immediately.
+  □ `@with_wait_cursor` decorator removed from
+    `_do_external_simulation`; cursor managed by dispatch + teardown.
+  □ `_teardown_external_sim` exists and is called by all three
+    terminal slots.
+  □ Cancellation path is via `progress_dialog.canceled →
+    threading.Event.set → worker polls → raise
+    SimulationCancelledError → worker.cancelled emit`.
+  □ Re-entrant dispatch is a no-op + log warning.
+  □ `closeEvent` cancels and drains an in-flight worker.
+  □ `dispatch_project` capture works: experiment lands in the
+    project that started the sim, not in `self.project` if it has
+    since been swapped.
+  □ All five tests in `tests/test_threaded_external_dispatch.py`
+    pass.
+  □ All chunk-1 tests still pass
+    (`tests/test_external_sim_worker.py`).
+  □ Regression: `tests/test_replay_mse_plugin.py`,
+    `tests/test_elise_target_mse.py`,
+    `tests/test_elise_opsin_release.py` still pass.
+  □ ruff format + ruff check clean.
+  □ Manual smoke check: launch a real ELiSe run from the GUI.
+    Drag the trace ROI mid-run — must respond. Click Cancel —
+    must abort and show the cancelled box. Run a deliberately-
+    erroring fake (e.g. set `external_simulate_function` to a
+    function that raises) and confirm the error box appears.
+
+Once green, hand off chunk 3.

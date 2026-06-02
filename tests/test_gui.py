@@ -469,6 +469,7 @@ def test_gui_open(
         lambda *args: (f"{project_path}", True),
     )
     gui.btn_open_clicked()
+    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
 
     assert gui.project.b2_model.parameters is not None
     assert list(gui.project.b2_model.parameters.keys()) == list(
@@ -551,6 +552,7 @@ def test_gui_save(
         lambda *args: (f"{filename_without_extension}", True),
     )
     gui.btn_save_clicked()
+    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
     assert filename.exists()
     assert gui.project.filepath == filename
     assert str(filename) in gui.windowTitle()
@@ -613,6 +615,7 @@ def test_gui_import(
         MockSaveLoadOptionsDialog,
     )
     gui.btn_import_clicked()
+    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
     # b2model is not modified
     assert (
         project_ornstein.b2_model.neurongroups.keys()

@@ -1,0 +1,212 @@
+from __future__ import annotations
+
+import threading
+import time
+
+import pytest
+from pytestqt.qtbot import QtBot
+from qtpy import QtCore
+from qtpy import QtWidgets
+
+from neuroseq.data import Experiment
+from neuroseq.gui import Gui
+from neuroseq.project import Project
+
+
+def _wire_fake_external_simulator(gui: Gui, fake_simulate_fn) -> None:
+    gui.project.external_simulate_path = "test:fake"
+    gui.project.external_simulate_function = fake_simulate_fn
+
+
+def _make_blocking_simulation(block: threading.Event, name: str):
+    def _simulate(stims_dict, simulation_time, params, progress):
+        progress(0.0)
+        while not block.is_set():
+            time.sleep(0.05)
+            progress(0.0)
+        return Experiment(name=name, duration=simulation_time, timepoints=[], data=[])
+
+    return _simulate
+
+
+@pytest.fixture
+def gui(qtbot: QtBot):
+    widget = Gui()
+    qtbot.addWidget(widget)
+    yield widget
+    try:
+        widget.close()
+    except RuntimeError:
+        return
+    qtbot.waitUntil(
+        lambda: (
+            widget._external_sim_thread is None
+            or not widget._external_sim_thread.isRunning()
+        ),
+        timeout=3000,
+    )
+
+
+def test_cancel_via_progress_dialog_raises_and_emits_cancelled(
+    qtbot: QtBot, gui: Gui
+) -> None:
+    def _simulate(stims_dict, simulation_time, params, progress):
+        for k in range(200):
+            progress(k / 200)
+            time.sleep(0.01)
+        return Experiment("should_not_finish", simulation_time, [], [])
+
+    _wire_fake_external_simulator(gui, _simulate)
+    original_experiments = dict(gui.project.experiments)
+
+    gui._do_external_simulation(1.0)
+    worker = gui._external_sim_worker
+    assert worker is not None
+    cancelled: list[bool] = []
+    worker.cancelled.connect(lambda: cancelled.append(True))
+    QtCore.QTimer.singleShot(150, gui.progress_dialog.canceled.emit)
+
+    qtbot.waitUntil(
+        lambda: (
+            bool(cancelled)
+            and gui._external_sim_worker is None
+            and QtWidgets.QApplication.overrideCursor() is None
+        ),
+        timeout=5000,
+    )
+    assert gui.project.experiments == original_experiments
+    assert gui.continue_simulation_action.isEnabled()
+    assert gui._do_external_simulation_action.isEnabled()
+    assert gui._external_sim_worker is None
+    assert QtWidgets.QApplication.overrideCursor() is None
+
+
+def test_simulation_actions_disabled_during_run(qtbot: QtBot, gui: Gui) -> None:
+    block = threading.Event()
+    _wire_fake_external_simulator(
+        gui, _make_blocking_simulation(block, "disabled_during_run")
+    )
+
+    gui._do_external_simulation(1.0)
+    worker = gui._external_sim_worker
+    assert worker is not None
+    qtbot.waitUntil(lambda: gui.progress_dialog.isVisible(), timeout=2000)
+    assert not gui.continue_simulation_action.isEnabled()
+    assert not gui._do_external_simulation_action.isEnabled()
+
+    finished: list[bool] = []
+    worker.finished.connect(lambda *_: finished.append(True))
+    block.set()
+    qtbot.waitUntil(
+        lambda: bool(finished) and gui._external_sim_thread is None,
+        timeout=5000,
+    )
+
+    assert gui.continue_simulation_action.isEnabled()
+    assert gui._do_external_simulation_action.isEnabled()
+
+
+def test_dispatch_is_idempotent_while_running(qtbot: QtBot, gui: Gui) -> None:
+    block = threading.Event()
+    call_count = 0
+
+    def _simulate(stims_dict, simulation_time, params, progress):
+        nonlocal call_count
+        call_count += 1
+        progress(0.0)
+        while not block.is_set():
+            time.sleep(0.05)
+            progress(0.0)
+        return Experiment("idempotent", simulation_time, [], [])
+
+    _wire_fake_external_simulator(gui, _simulate)
+
+    gui._do_external_simulation(1.0)
+    original_worker = gui._external_sim_worker
+    assert original_worker is not None
+    qtbot.waitUntil(lambda: call_count == 1, timeout=2000)
+
+    gui._do_external_simulation(1.0)
+
+    assert gui._external_sim_worker is original_worker
+    assert call_count == 1
+
+    finished: list[bool] = []
+    original_worker.finished.connect(lambda *_: finished.append(True))
+    block.set()
+    qtbot.waitUntil(lambda: bool(finished), timeout=5000)
+
+
+def test_close_event_cancels_inflight_sim(qtbot: QtBot, gui: Gui) -> None:
+    def _simulate(stims_dict, simulation_time, params, progress):
+        for i in range(1_000_000):
+            progress(i / 1_000_000)
+        return Experiment("should_not_finish", simulation_time, [], [])
+
+    _wire_fake_external_simulator(gui, _simulate)
+
+    gui._do_external_simulation(1.0)
+    assert gui._external_sim_worker is not None
+
+    gui.close()
+
+    qtbot.waitUntil(
+        lambda: (
+            gui._external_sim_thread is None or not gui._external_sim_thread.isRunning()
+        ),
+        timeout=3000,
+    )
+
+
+def test_experiment_appended_to_dispatch_project_not_current(
+    qtbot: QtBot, gui: Gui, qmessagebox_calls: list[dict[str, str]]
+) -> None:
+    block = threading.Event()
+    _wire_fake_external_simulator(gui, _make_blocking_simulation(block, "dispatched"))
+    original_project = gui.project
+
+    gui._do_external_simulation(1.0)
+    worker = gui._external_sim_worker
+    assert worker is not None
+
+    other_project = Project()
+    gui.update_project(other_project)
+
+    finished: list[bool] = []
+    worker.finished.connect(lambda *_: finished.append(True))
+    block.set()
+    qtbot.waitUntil(lambda: bool(finished), timeout=5000)
+
+    assert "dispatched" in original_project.experiments
+    assert "dispatched" not in other_project.experiments
+    assert any(
+        call["name"] == "information" and call["title"] == "Simulation finished"
+        for call in qmessagebox_calls
+    )
+
+
+def test_progress_dialog_cancel_button_text_lifecycle(qtbot: QtBot, gui: Gui) -> None:
+    block = threading.Event()
+    _wire_fake_external_simulator(
+        gui, _make_blocking_simulation(block, "text_lifecycle")
+    )
+
+    cancel_button = gui.progress_dialog.findChild(QtWidgets.QPushButton)
+    assert cancel_button is None or not cancel_button.isVisible()
+
+    gui._do_external_simulation(1.0)
+    worker = gui._external_sim_worker
+    assert worker is not None
+    qtbot.waitUntil(lambda: gui.progress_dialog.isVisible(), timeout=2000)
+
+    cancel_button = gui.progress_dialog.findChild(QtWidgets.QPushButton)
+    assert cancel_button is not None
+    assert cancel_button.isEnabled()
+
+    finished: list[bool] = []
+    worker.finished.connect(lambda *_: finished.append(True))
+    block.set()
+    qtbot.waitUntil(lambda: bool(finished), timeout=5000)
+
+    cancel_button = gui.progress_dialog.findChild(QtWidgets.QPushButton)
+    assert cancel_button is None or not cancel_button.isVisible()
