@@ -1,0 +1,453 @@
+threaded_brian2_simulation — move native Brian2 sim runs onto a worker thread  [IMPLEMENTED]
+============================================================================================
+
+The external-simulation threading work (`threaded_external_simulation_*`)
+is `[IMPLEMENTED]` and has already shipped `BackgroundIOWorker` plus the
+full dispatch/teardown/closeEvent plumbing. Brian2 native sims still run
+synchronously on the main thread, freezing the GUI for the entire run.
+This handoff threads that path using the existing infrastructure — no
+new worker class.
+
+
+CONTEXT (read first)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+`Gui.btn_continue_simulation_clicked` (gui.py ≈ line 935) branches:
+
+  • `project.external_simulate_path is not None` →
+    `_do_external_simulation(simulation_time)`. Already threaded via
+    `ExternalSimWorker` (see `.ai_dev/specs/threaded_external_simulation.md`).
+  • otherwise → falls through to `project.run_simulation(...)` at
+    `gui.py` ≈ line 950, **synchronously on the main thread**.
+
+The synchronous Brian2 branch today:
+
+```python
+try:
+    self.progress_dialog.setLabelText("Compiling...")
+    self.progress_dialog.setValue(0)
+    self.progress_dialog.setVisible(True)
+    QtCore.QCoreApplication.processEvents()
+    self.project.run_simulation(
+        simulation_time,
+        report=self._update_simulation_progress,
+        stim_array_padding_seconds=self.settings.stim_padding_secs,
+    )
+except Exception as e:
+    QtWidgets.QMessageBox.critical(...)
+    return
+self._update_data(keep_undo_history=True)
+```
+
+It uses the shared `progress_dialog` (modal) and a single `processEvents()`
+pump before Brian2 takes over the main thread. Once Brian2 starts:
+
+  • With cython codegen (project default): the inner loop runs in C
+    with the GIL released — a worker thread *would* get cycles and the
+    GUI *would* repaint, but right now there's no worker.
+  • With numpy codegen: pure Python + numpy, GIL released only during
+    numpy C calls (same profile as ELiSe).
+
+In either codegen, threading helps: the main thread stays in its event
+loop, the worker either truly runs in parallel (cython, multi-core) or
+shares CPU via GIL hand-off (numpy).
+
+
+GOAL
+────────────────────────────────────────────────────────────────────────────────────────────
+
+After this work:
+
+  1. Clicking Run on a project without `external_simulate_path` set
+     dispatches `project.run_simulation(...)` on a worker thread via
+     the existing `BackgroundIOWorker`.
+  2. The shared `progress_dialog` shows non-modally with a "Compiling…"
+     → "Simulating…" label and the bar moves with Brian2's native
+     `report=` callback.
+  3. The Run actions AND File menu are gated for the duration of the
+     run (Brian2 mutates `project.b2_model` state — saving mid-run
+     would race the worker).
+  4. The window stays interactive (trace ROI drag, heatmap browse,
+     console output, chat) for the duration of the run.
+  5. Failures surface as a critical message box, same shape as today.
+  6. The window's `closeEvent` drains a running Brian2 sim before
+     teardown.
+  7. No new worker class is added. `BackgroundIOWorker` is reused.
+
+
+NON-GOALS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+  • Cancellation. Brian2 supports `Network.stop()` from another thread
+    but adding it adds API surface and edge cases (partial simulation
+    state, monitor data half-written). Keep the v1 simple: no Cancel
+    button on the dialog, no cooperative cancel. Add later if a user
+    actually asks for it. (Cancel via window-close already works via
+    the closeEvent drain.)
+  • Code-generation threading. Cython compile inside `run_simulation`
+    runs on whichever thread invokes it. No change to that here.
+  • The external-simulation path. It is already threaded with its own
+    worker class; leave it alone.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+ARCHITECTURE
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Reuse `BackgroundIOWorker` (gui.py top-level, alongside `ExternalSimWorker`).
+Its existing contract — `task(report)` where `report(percent: int)` is
+translated into `progress(int)` — is a clean match for Brian2:
+
+```python
+def _brian2_task(report):
+    def _brian2_report(elapsed, completed, start, duration):
+        # Brian2's 4-arg signature → our 1-arg report.
+        report(int(100 * completed))
+    self.project.run_simulation(
+        simulation_time,
+        report=_brian2_report,
+        stim_array_padding_seconds=padding_secs,
+    )
+    return None
+```
+
+Dispatch flow mirrors the existing save/load path that already uses
+`BackgroundIOWorker`: build a closure that captures the project +
+simulation_time + padding, hand it to `_dispatch_io_task`, let the
+existing slots handle progress / finished / failed.
+
+One wrinkle: `_dispatch_io_task` was written for **IO** tasks and gates
+the File menu + Run actions via `_set_io_actions_enabled`. For Brian2
+that gating is exactly what we want (both classes of work mutate
+project state). So `_dispatch_io_task` is reusable as-is — but the
+**dialog label** and the **on_success** behaviour differ. Both are
+already parameters to `_dispatch_io_task(task, label, on_success)`,
+so no new helper needed.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+FILES TO CHANGE
+────────────────────────────────────────────────────────────────────────────────────────────
+
+src/neuroseq/gui.py
+  • Add `_do_brian2_simulation_threaded(simulation_time)` method next to
+    `_do_external_simulation`. Full body below.
+  • Rewrite the Brian2 branch of `btn_continue_simulation_clicked` to
+    call the new method. The pre-flight error case (no project loaded,
+    etc.) stays.
+  • Update `_update_simulation_progress` if necessary — see SUBTLE
+    THINGS section.
+
+Optionally:
+  • `_set_io_actions_enabled` already gates File + Run. Rename to
+    `_set_long_running_actions_enabled` if you want naming clarity;
+    not required.
+
+
+FILES TO CREATE
+────────────────────────────────────────────────────────────────────────────────────────────
+
+tests/test_gui_brian2_threaded_dispatch.py
+  Six tests, listed in TESTS section.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+DETAILED IMPLEMENTATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1. New method on `Gui`, placed near `_do_external_simulation`:
+
+```python
+def _do_brian2_simulation_threaded(self, simulation_time: float) -> None:
+    if self._io_worker is not None:
+        QtWidgets.QMessageBox.information(
+            self,
+            "Busy",
+            "Another operation is already in progress.",
+        )
+        return
+
+    project = self.project
+    padding_secs = self.settings.stim_padding_secs
+
+    def _brian2_task(report: Callable[[int], None]) -> None:
+        # Brian2's native report has 4 positional args; adapt to our
+        # single-int report. The compile phase (with cython codegen)
+        # does not call `report`, so the bar sits at 0 % until the
+        # actual integration starts. The "Compiling..." → "Simulating..."
+        # label transition is handled by the report callback flipping
+        # the label on its first call.
+        first_report_seen = []
+
+        def _brian2_report(elapsed, completed, start, duration):
+            if not first_report_seen:
+                first_report_seen.append(True)
+                # The first report means compile is done and integration
+                # has begun. Update the label from "Compiling..." to
+                # "Simulating...".
+                # NOTE: invokeMethod queued so the label update lands on
+                # the main thread.
+                QtCore.QMetaObject.invokeMethod(
+                    self.progress_dialog,
+                    "setLabelText",
+                    QtCore.Qt.ConnectionType.QueuedConnection,
+                    QtCore.Q_ARG(str, "Simulating Brian2..."),
+                )
+            report(int(100 * float(completed)))
+
+        project.run_simulation(
+            simulation_time,
+            report=_brian2_report,
+            stim_array_padding_seconds=padding_secs,
+        )
+        return None
+
+    def _on_brian2_finished(_result: object) -> None:
+        self.logger.info("Brian2 simulation finished.")
+        self._update_data(keep_undo_history=True)
+
+    self._dispatch_io_task(
+        _brian2_task,
+        "Compiling Brian2 model…",
+        _on_brian2_finished,
+    )
+```
+
+2. Update `btn_continue_simulation_clicked` to call the new method
+   instead of running Brian2 inline:
+
+```python
+def btn_continue_simulation_clicked(self) -> None:
+    simulation_time = getSimulationTime(
+        self,
+        default_seconds=self.project.suggested_simulation_time_seconds(),
+    )
+    if simulation_time is None:
+        return
+    if self.project.external_simulate_path is not None:
+        self._do_external_simulation(simulation_time)
+        return
+    self._do_brian2_simulation_threaded(simulation_time)
+```
+
+   The original `try/except Exception` block is gone — failures arrive
+   via `BackgroundIOWorker.failed` and the existing `_on_io_failed`
+   slot already shows the critical message box (the message will say
+   "File operation failed" — we should update that label, see (3)).
+
+3. `_on_io_failed` is currently hard-coded to "File operation failed".
+   For Brian2 sim failures this label is misleading. Two options:
+
+     (i) Generalise the label to "Operation failed". Acceptable but
+         a bit vague.
+     (ii) Let dispatch supply a custom failure label. Add an optional
+         `failure_title: str = "File operation failed"` parameter to
+         `_dispatch_io_task` and store it as `self._io_failure_title`
+         (alongside `self._io_on_success`). `_on_io_failed` reads it.
+
+   Pick (ii). Mechanical change, no surprises. Same pattern for the
+   `Post-IO error` title in `_on_io_finished` when `on_success` raises
+   — generalise via a second optional title or just keep the existing
+   "Post-IO error" since it's already vague enough.
+
+4. `_update_simulation_progress` (the legacy callback at gui.py ≈ line
+   333) is no longer wired up by the new path. Two choices:
+
+     (a) Delete the method. Confirm with grep that nothing else
+         references it.
+     (b) Keep it for any callers I'm missing.
+
+   Grep first:
+
+       grep -rn "_update_simulation_progress" src/ tests/
+
+   If only the (now-removed) inline call references it, delete.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+SUBTLE THINGS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+A.  **Compile phase has no progress.** Brian2's cython compile path
+    invokes the C compiler synchronously inside `run_simulation` and
+    does NOT call `report`. The user will see "Compiling Brian2 model…"
+    with 0 % progress until the compile finishes and integration
+    begins, at which point the label flips to "Simulating Brian2…" and
+    the bar starts moving. Document this behaviour in the spec; do
+    not try to fake compile progress.
+
+B.  **Label transition across threads.** The label update at the first
+    Brian2 `report` call happens *on the worker thread*. Calling
+    `self.progress_dialog.setLabelText(...)` directly from the worker
+    is illegal (widgets are main-thread-only). Use
+    `QMetaObject.invokeMethod(... QueuedConnection ...)` as shown in
+    the snippet above so the label update is dispatched back to the
+    main thread.
+
+C.  **`update_project` vs `_update_data`.** The old inline code called
+    `self._update_data(keep_undo_history=True)` after the sim. Do the
+    same in the `_on_brian2_finished` slot. Note that `_update_data`
+    refreshes combo boxes, action enable states, etc. — it must run
+    on the main thread (and it does, since the slot is queued there).
+
+D.  **Re-entrancy.** Using `_dispatch_io_task` automatically gives you
+    the `_io_worker is not None` guard. A second Run click while a
+    sim is running is a no-op + info dialog. Don't add a separate
+    `_brian2_worker` attribute — there is no state that needs to live
+    beyond `BackgroundIOWorker`.
+
+E.  **closeEvent.** The existing `closeEvent` already drains
+    `_io_thread` (10 s cooperative wait + 2 s force-quit). Brian2 sims
+    can be much longer than that. Two options:
+      (i)   Accept the force-quit on close. If a user closes the
+            window during a Brian2 sim, they probably want it dead.
+      (ii)  Increase the wait timeout for the IO path to e.g. 30 s
+            or 60 s.
+    Pick (i). Users who close during a sim are accepting data loss;
+    the cleanup is purely about not leaking the thread. The force-quit
+    on QThread is documented as "use at your own risk" but in practice
+    works for Brian2 because no shared resources are corrupted by the
+    abrupt termination — the partial run's state is discarded with the
+    closing GUI.
+
+F.  **Brian2 codegen thread-safety.** Brian2 with cython codegen
+    invokes `setuptools`/`distutils` during compile, which is *not*
+    thread-safe in older Python versions. In practice, the project
+    only runs ONE Brian2 sim at a time (re-entrancy guarded), so this
+    is not an issue. If a future feature wants to compile multiple
+    Brian2 networks concurrently, this caveat resurfaces.
+
+G.  **Progress reporting frequency.** Brian2's report fires roughly
+    every `report_period` seconds (default 10 s for the
+    `b2.network.run` "text" reporter). That's a LOT less frequent
+    than ELiSe's `n_steps // 1000`. The user will see the bar move
+    every ~10 s during integration. This is acceptable for v1 —
+    Brian2 itself controls report cadence. If users want smoother
+    updates, follow up with `project.run_simulation(..., report_period=...)`
+    being made configurable.
+
+H.  **`stim_padding_secs`.** Capture the value from `self.settings`
+    at dispatch time, not inside the worker. The user could (in
+    theory) change the setting mid-run; the worker should use the
+    dispatch-time value.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_gui_brian2_threaded_dispatch.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Use `qtbot` and a tiny Brian2 model (the `test_project` fixture from
+`tests/conftest.py` is a good candidate; it has a small network that
+runs in well under a second). All tests rely on
+`b2.prefs.codegen.target = "numpy"` (set globally by conftest.py:34
+or so — confirm — so cython compile cost is zero in tests).
+
+1.  `test_brian2_sim_runs_on_worker_thread(qtbot, gui_with_b2_project)`
+    Patch `Project.run_simulation` with a spy that records
+    `threading.current_thread().ident`. Trigger via
+    `gui.btn_continue_simulation_clicked()` (you'll need to monkey-
+    patch `getSimulationTime` to return a small value, see existing
+    `test_gui_external_simulate_dispatch.py` for the pattern). Wait
+    on `gui._io_worker is None`. Assert the recorded thread id is
+    NOT `threading.main_thread().ident`.
+
+2.  `test_brian2_progress_dialog_shows_label_transition(qtbot, gui_with_b2_project)`
+    Subscribe to `gui.progress_dialog`'s text changes via a property
+    poll or a small spy. Trigger a sim. Wait until the dialog text
+    transitions from "Compiling Brian2 model…" to "Simulating Brian2…".
+
+3.  `test_brian2_finished_calls_update_data(qtbot, gui_with_b2_project, monkeypatch)`
+    Spy on `Gui._update_data`. After a successful Brian2 run, assert
+    `_update_data` was called with `keep_undo_history=True` exactly
+    once. (Note: `_update_data` is also called from `update_project`
+    and other paths — use a counter delta around the dispatch.)
+
+4.  `test_brian2_failure_surfaces_critical_dialog(qtbot, gui_with_b2_project, monkeypatch, qmessagebox_calls)`
+    Patch `Project.run_simulation` to raise
+    `RuntimeError("brian2 boom")`. Trigger via the Run button. Wait
+    for `_io_worker is None`. Assert:
+      (a) `qmessagebox_calls` contains a `critical` entry mentioning
+          "brian2 boom" (the existing `_on_io_failed` slot wraps the
+          message).
+      (b) `gui.menu_file.isEnabled()` and Run actions back to True.
+
+5.  `test_brian2_run_button_blocks_reentrancy(qtbot, gui_with_b2_project, monkeypatch)`
+    Patch `Project.run_simulation` with a blocking fake (waits on a
+    `threading.Event`). Trigger. Immediately call
+    `gui.btn_continue_simulation_clicked()` a second time. Assert no
+    second worker was created (`gui._io_worker` is the original).
+    Release the event.
+
+6.  `test_brian2_close_event_drains_inflight_sim(qtbot, gui_with_b2_project, monkeypatch)`
+    Patch `run_simulation` with a fake that loops until cancelled by
+    its `report` callback raising. `gui.close()`. Assert the thread
+    finishes within the closeEvent's 10 s timeout. (If the fake
+    can't cooperate, the test will exercise the force-quit path —
+    that's acceptable; assert `gui._io_thread is None` or
+    `not isRunning()`.)
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+ACCEPTANCE CRITERIA
+────────────────────────────────────────────────────────────────────────────────────────────
+
+  □ `_do_brian2_simulation_threaded` exists on `Gui` and is the only
+    code path for native Brian2 runs.
+  □ `btn_continue_simulation_clicked` branches: external → existing
+    threaded path, Brian2 → new threaded path. The synchronous
+    `try/except` block around `project.run_simulation` is removed.
+  □ Brian2 progress arrives on the main thread via the existing
+    `_on_io_progress` slot; the label flips from "Compiling…" to
+    "Simulating Brian2…" on the first report.
+  □ File menu and Run actions are gated for the duration of the run
+    (via the existing `_set_io_actions_enabled`).
+  □ `_dispatch_io_task` optionally accepts a `failure_title` (or the
+    code is updated some other way) so the critical dialog on Brian2
+    failure isn't titled "File operation failed".
+  □ `_update_simulation_progress` is removed if no remaining
+    references exist (grep first); otherwise kept untouched.
+  □ All 6 tests in `tests/test_gui_brian2_threaded_dispatch.py` pass.
+  □ Existing GUI test suites still green:
+      `tests/test_gui.py`,
+      `tests/test_gui_external_simulate_dispatch.py`,
+      `tests/test_background_io_worker.py`,
+      `tests/test_gui_threaded_io.py`,
+      `tests/test_external_sim_worker.py`,
+      `tests/test_threaded_external_dispatch.py`.
+  □ ruff format + ruff check clean on the touched files.
+  □ `.ai_dev/specs/threaded_brian2_simulation.md` written: short,
+    present-tense, describes the shipped design.
+  □ Manual test on real hardware (the only real validation):
+      • Run a Brian2 sim long enough that integration is visible
+        (e.g. 5 s of simulated time with the default project).
+      • Pan/zoom the trace widget mid-run. Window must respond.
+      • Save project mid-run. Save action must be disabled (File
+        menu greyed).
+      • Close the window mid-run. Worker must drain within 10 s.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+THINGS NOT TO TOUCH
+────────────────────────────────────────────────────────────────────────────────────────────
+
+  • `ExternalSimWorker` and the `_do_external_simulation` path.
+    Already shipped, has its own tests, and is independent.
+  • `_external_sim_*` Gui attributes. Brian2 reuses the `_io_*`
+    family via `_dispatch_io_task`, not those.
+  • `BackgroundIOWorker`. It's already generic; no changes needed.
+  • The `progress_dialog` defaults set in `_create_progressbar`.
+    `_dispatch_io_task` already overrides them per-call and
+    `_teardown_io_task` restores them.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+ESTIMATED EFFORT
+────────────────────────────────────────────────────────────────────────────────────────────
+
+  • Implementation: ~60–100 LOC, all in `gui.py`.
+  • Tests: ~150–200 LOC, single file.
+  • Spec writeup: ~60–80 lines.
+  • Manual hardware verification: 30 minutes.
+  • Total: half a day to a full day, considerably less than the
+    external-simulation threading work since the infrastructure is
+    already in place.

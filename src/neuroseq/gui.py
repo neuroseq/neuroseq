@@ -289,6 +289,8 @@ class Gui(QtWidgets.QMainWindow):
         self._io_thread: QtCore.QThread | None = None
         self._io_worker: BackgroundIOWorker | None = None
         self._io_on_success: Callable[[object], None] | None = None
+        self._io_failure_title = "File operation failed"
+        self._io_failure_prefix = "The file operation could not complete:"
         if filename is not None:
             self.load_project(filename)
         else:
@@ -361,20 +363,6 @@ class Gui(QtWidgets.QMainWindow):
                 + [f"{d} [synapse]" for d in self.project.get_data_names(SynapseData)],
             )
             self.cmb_data.setCurrentText(cmb_data_text)
-
-    def _update_simulation_progress(
-        self,
-        elapsed: b2.Quantity,
-        completed: b2.Quantity,
-        start: b2.Quantity,
-        duration: b2.Quantity,
-    ) -> None:
-        completed_percent = int(100 * completed)
-        self.logger.info(
-            f"simulating {start} -> {duration} :: {completed_percent}% complete in {elapsed}"
-        )
-        self.progress_dialog.setLabelText("Simulating...")
-        self.progress_dialog.setValue(completed_percent)
 
     def _update_load_progress(
         self,
@@ -942,25 +930,7 @@ class Gui(QtWidgets.QMainWindow):
         if self.project.external_simulate_path is not None:
             self._do_external_simulation(simulation_time)
             return
-        try:
-            self.progress_dialog.setLabelText("Compiling...")
-            self.progress_dialog.setValue(0)
-            self.progress_dialog.setVisible(True)
-            QtCore.QCoreApplication.processEvents()
-            self.project.run_simulation(
-                simulation_time,
-                report=self._update_simulation_progress,
-                stim_array_padding_seconds=self.settings.stim_padding_secs,
-            )
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Simulation error",
-                f"Could not run simulation: {e}",
-            )
-            self.logger.exception(e)
-            return
-        self._update_data(keep_undo_history=True)
+        self._do_brian2_simulation_threaded(simulation_time)
 
     def _append_experimental_data(self, experiment: Experiment) -> None:
         try:
@@ -1160,6 +1130,8 @@ class Gui(QtWidgets.QMainWindow):
         task: Callable[[Callable[[int], None]], object],
         label: str,
         on_success: Callable[[object], None],
+        failure_title: str = "File operation failed",
+        failure_prefix: str = "The file operation could not complete:",
     ) -> bool:
         """Run a blocking IO task on a worker thread.
 
@@ -1199,6 +1171,8 @@ class Gui(QtWidgets.QMainWindow):
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
         self._set_io_actions_enabled(False)
         self._io_on_success = on_success
+        self._io_failure_title = failure_title
+        self._io_failure_prefix = failure_prefix
 
         thread = QtCore.QThread(self)
         worker = BackgroundIOWorker(task)
@@ -1230,6 +1204,8 @@ class Gui(QtWidgets.QMainWindow):
         self._io_thread = None
         self._io_worker = None
         self._io_on_success = None
+        self._io_failure_title = "File operation failed"
+        self._io_failure_prefix = "The file operation could not complete:"
         self._set_io_actions_enabled(True)
 
     @QtCore.Slot(int)
@@ -1256,13 +1232,70 @@ class Gui(QtWidgets.QMainWindow):
 
     @QtCore.Slot(str)
     def _on_io_failed(self, message: str) -> None:
+        failure_title = self._io_failure_title
+        failure_prefix = self._io_failure_prefix
         # _teardown_io_task resets the dialog and restores its defaults.
         self._teardown_io_task()
         self.logger.error(f"IO task failed: {message}")
         QtWidgets.QMessageBox.critical(
             self,
-            "File operation failed",
-            f"The file operation could not complete: {message}",
+            failure_title,
+            f"{failure_prefix} {message}",
+        )
+
+    def _do_brian2_simulation_threaded(self, simulation_time: float) -> None:
+        if self._io_worker is not None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Busy",
+                "Another operation is already in progress.",
+            )
+            return
+
+        project = self.project
+        padding_secs = self.settings.stim_padding_secs
+
+        def _brian2_task(report: Callable[[int], None]) -> None:
+            first_report_seen: list[bool] = []
+
+            def _brian2_report(
+                elapsed: b2.Quantity,
+                completed: b2.Quantity,
+                start: b2.Quantity,
+                duration: b2.Quantity,
+            ) -> None:
+                completed_percent = int(100 * completed)
+                self.logger.info(
+                    f"simulating {start} -> {duration} :: "
+                    f"{completed_percent}% complete in {elapsed}"
+                )
+                if not first_report_seen:
+                    first_report_seen.append(True)
+                    QtCore.QMetaObject.invokeMethod(
+                        self.progress_dialog,
+                        "setLabelText",
+                        QtCore.Qt.ConnectionType.QueuedConnection,
+                        QtCore.Q_ARG(str, "Simulating Brian2..."),
+                    )
+                report(int(100 * float(completed)))
+
+            project.run_simulation(
+                simulation_time,
+                report=_brian2_report,
+                stim_array_padding_seconds=padding_secs,
+            )
+            return None
+
+        def _on_brian2_finished(_result: object) -> None:
+            self.logger.info("Brian2 simulation finished.")
+            self._update_data(keep_undo_history=True)
+
+        self._dispatch_io_task(
+            _brian2_task,
+            "Compiling Brian2 model...",
+            _on_brian2_finished,
+            failure_title="Simulation error",
+            failure_prefix="Could not run simulation:",
         )
 
     def btn_do_external_simulation_clicked(self) -> None:
@@ -2460,9 +2493,10 @@ class Gui(QtWidgets.QMainWindow):
                 )
                 self._external_sim_thread.quit()
                 self._external_sim_thread.wait(1000)
-        # IO tasks are not cooperatively cancellable; wait for them to
-        # finish naturally. Save/load times are bounded by filesystem
-        # speed, not by user-defined run lengths.
+        # BackgroundIOWorker also carries native Brian2 simulation runs.
+        # These tasks are not cooperatively cancellable through the shared
+        # IO path, so close waits for them and then force-quits as a last
+        # resort.
         if (
             self._io_thread is not None
             and self._io_thread.isRunning()

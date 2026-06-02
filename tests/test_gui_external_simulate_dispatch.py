@@ -101,12 +101,11 @@ def test_run_dispatches_to_b2_when_path_unset(
     def fake_external(simulation_time: float):
         calls["external"].append(simulation_time)
 
-    def fake_b2(time_seconds, **kwargs):
-        calls["b2"].append(time_seconds)
+    def fake_b2(simulation_time: float):
+        calls["b2"].append(simulation_time)
 
     monkeypatch.setattr(gui, "_do_external_simulation", fake_external)
-    monkeypatch.setattr(project, "run_simulation", fake_b2)
-    monkeypatch.setattr(gui, "_update_data", lambda **kw: None)
+    monkeypatch.setattr(gui, "_do_brian2_simulation_threaded", fake_b2)
     _set_simulation_time(monkeypatch, 0.5)
 
     gui.btn_continue_simulation_clicked()
