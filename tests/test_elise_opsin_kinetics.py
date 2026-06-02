@@ -8,22 +8,31 @@ contracts, and signature-driven cache invalidation.
 
 from __future__ import annotations
 
+import importlib.util
+
 import numpy as np
 import pytest
 
-from neuroseq.example_models.elise import DEFAULT_PARAMS
-from neuroseq.example_models.elise import Elise
-from neuroseq.example_models.elise import _step_kinetics
-from neuroseq.example_projects import _ELISE_G0_EXC
-from neuroseq.example_projects import _ELISE_G0_INH
-from neuroseq.example_projects import _ELISE_KIN_EXC
-from neuroseq.example_projects import _ELISE_KIN_INH
-from neuroseq.example_projects import _FUER_ELISE_PHI_EXC_ACTIVE
-from neuroseq.example_projects import _FUER_ELISE_PHI_EXC_REST
-from neuroseq.example_projects import _FUER_ELISE_PHI_INH_ACTIVE
-from neuroseq.example_projects import _FUER_ELISE_PHI_INH_REST
-from neuroseq.example_projects import _calibrate_phi_for_target_open_fraction
-from neuroseq.example_projects import elise_project
+pytestmark = pytest.mark.skipif(
+    importlib.util.find_spec("elise") is None,
+    reason="ELISE opsin kinetics tests require the private 'elise' package.",
+)
+
+from neuroseq.example_models.elise import DEFAULT_PARAMS  # noqa: E402
+from neuroseq.example_models.elise import Elise  # noqa: E402
+from neuroseq.example_models.elise import _step_kinetics  # noqa: E402
+from neuroseq.example_projects import _ELISE_G0_EXC  # noqa: E402
+from neuroseq.example_projects import _ELISE_G0_INH  # noqa: E402
+from neuroseq.example_projects import _ELISE_KIN_EXC  # noqa: E402
+from neuroseq.example_projects import _ELISE_KIN_INH  # noqa: E402
+from neuroseq.example_projects import _FUER_ELISE_PHI_EXC_ACTIVE  # noqa: E402
+from neuroseq.example_projects import _FUER_ELISE_PHI_EXC_REST  # noqa: E402
+from neuroseq.example_projects import _FUER_ELISE_PHI_INH_ACTIVE  # noqa: E402
+from neuroseq.example_projects import _FUER_ELISE_PHI_INH_REST  # noqa: E402
+from neuroseq.example_projects import (  # noqa: E402
+    _calibrate_phi_for_target_open_fraction,
+)
+from neuroseq.example_projects import elise_project  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # _step_kinetics — standalone tests (no ELISE wrapper)

@@ -42,12 +42,13 @@ def _set_simulation_time(monkeypatch: MonkeyPatch, seconds: float) -> None:
 
 
 def _wait_for_external_simulation(qtbot: QtBot, gui: Gui):
-    worker = gui._external_sim_worker
-    assert worker is not None
-    with qtbot.waitSignal(worker.finished, timeout=5000):
-        pass
-    qtbot.waitUntil(lambda: gui._external_sim_thread is None, timeout=5000)
-    return worker
+    # Poll until the worker has been fully torn down. Using waitUntil
+    # rather than waitSignal here is robust to the race where a fast
+    # simulator (e.g. an "old-style" sim with no progress callback) emits
+    # `finished` before the test enters the wait — `waitSignal` only
+    # catches future emissions, while `waitUntil` is true whether the
+    # worker is still running or already gone.
+    qtbot.waitUntil(lambda: gui._external_sim_thread is None, timeout=10000)
 
 
 def test_run_dispatches_to_external_when_path_set(
