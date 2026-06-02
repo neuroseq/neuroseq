@@ -38,6 +38,10 @@ from neuroseq.utils import InteractMode
 delay_after_update_model_call_in_ms = 50
 
 
+def _wait_for_brian2_simulation(qtbot: QtBot, gui: Gui, timeout: int = 15000) -> None:
+    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=timeout)
+
+
 class _MockAxes:
     def __init__(self) -> None:
         self.plot_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
@@ -333,6 +337,7 @@ def test_gui_simulate_and_playback(
     qtbot.wait(delay_after_update_model_call_in_ms)
     simulation_time_ms = simulation_time_s * 1000
     gui.btn_continue_simulation_clicked()
+    _wait_for_brian2_simulation(qtbot, gui)
     assert gui.cmb_synapse.count() == 1
     assert gui.cmb_synapse.itemText(0) == "Simulation :: Ce / we"
     assert gui.cmb_trace.count() == 1
@@ -469,6 +474,7 @@ def test_gui_open(
         lambda *args: (f"{project_path}", True),
     )
     gui.btn_open_clicked()
+    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
 
     assert gui.project.b2_model.parameters is not None
     assert list(gui.project.b2_model.parameters.keys()) == list(
@@ -551,6 +557,7 @@ def test_gui_save(
         lambda *args: (f"{filename_without_extension}", True),
     )
     gui.btn_save_clicked()
+    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
     assert filename.exists()
     assert gui.project.filepath == filename
     assert str(filename) in gui.windowTitle()
@@ -613,6 +620,7 @@ def test_gui_import(
         MockSaveLoadOptionsDialog,
     )
     gui.btn_import_clicked()
+    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
     # b2model is not modified
     assert (
         project_ornstein.b2_model.neurongroups.keys()
@@ -642,7 +650,7 @@ def test_gui_export_with_simulation_data(
     # generate some simulation data
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.1", True))
     gui.btn_continue_simulation_clicked()
-    qtbot.wait(delay_after_update_model_call_in_ms)
+    _wait_for_brian2_simulation(qtbot, gui)
     filename = tmp_path / "test.h5"
     assert not filename.exists()
     # mock getSaveFileName to return the desired filename
@@ -1959,6 +1967,7 @@ def test_gui_checkpoints(
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
     )
     gui.btn_continue_simulation_clicked()
+    _wait_for_brian2_simulation(qtbot, gui)
     assert "run" not in gui.continue_simulation_action.text().lower()
     assert "continue" in gui.continue_simulation_action.text().lower()
     assert gui.project.b2_model.network["M"].t[-1] == approx(simulation_time, rel=1e-2)
@@ -2023,7 +2032,7 @@ def test_gui_synapse_ram_limit(
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time}", True)
     )
     gui.btn_continue_simulation_clicked()
-    qtbot.wait(delay_after_update_model_call_in_ms)
+    _wait_for_brian2_simulation(qtbot, gui)
     assert gui.heatmap_widget.data is not None
     assert gui.heatmap_widget.timestamps is not None
     n_timesteps = gui.heatmap_widget.timestamps.size
@@ -2107,7 +2116,7 @@ def test_gui_stim_padding(
     # simulate 0.1s
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.1", True))
     gui.btn_continue_simulation_clicked()
-    qtbot.wait(delay_after_update_model_call_in_ms)
+    _wait_for_brian2_simulation(qtbot, gui)
     # should have ~0.1 secs of simulation data, and ~10.1 secs of stim array data with dt=0.1ms
     assert gui.heatmap_widget.data is not None
     assert gui.heatmap_widget.timestamps is not None

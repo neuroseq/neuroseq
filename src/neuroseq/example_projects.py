@@ -1520,38 +1520,131 @@ _FUER_ELISE_INTRO: list[int | tuple[int, ...]] = [
     5,
 ]
 _FUER_ELISE_N_PITCHES = 13
-# Normalized so g_exc + g_inh = 1 in each state while preserving the
-# ratios that reproduce u_tgt = -50 mV (active) and -70 mV (rest).
-_FUER_ELISE_OPSIN_EXC_REST: float = 1.0 / 15.0
-_FUER_ELISE_OPSIN_INH_REST: float = 14.0 / 15.0
-_FUER_ELISE_OPSIN_EXC_ACTIVE: float = 1.0 / 3.0
-_FUER_ELISE_OPSIN_INH_ACTIVE: float = 2.0 / 3.0
+
+
+def _calibrate_phi_for_target_open_fraction(
+    O_target: float,
+    k_a_max: float,
+    phi_m: float,
+    k_d: float,
+    k_r: float,
+) -> float:
+    """Inverse Hill — return φ such that the 3-state steady-state ``O*(φ) == O_target``.
+
+    O* = k_a · k_r / (k_a · k_r + k_a · k_d + k_d · k_r), with
+    k_a = k_a_max · φ / (φ + phi_m). Solving for φ yields:
+        k_a = O_target · k_d · k_r / (k_r · (1 - O_target) - k_d · O_target)
+        φ   = k_a · phi_m / (k_a_max - k_a)
+    """
+    if O_target <= 0:
+        return 0.0
+    denom = k_r * (1.0 - O_target) - k_d * O_target
+    if denom <= 0:
+        raise ValueError(
+            f"O_target={O_target} exceeds physical maximum "
+            f"for k_d={k_d}, k_r={k_r} (denominator <= 0)."
+        )
+    k_a = O_target * k_d * k_r / denom
+    if k_a >= k_a_max:
+        raise ValueError(
+            f"O_target={O_target} exceeds k_a_max={k_a_max} "
+            f"saturation limit (need k_a={k_a:.3e})."
+        )
+    return k_a * phi_m / (k_a_max - k_a)
+
+
+# Default opsin kinetic parameters. Kept as literals here so the
+# photon-flux constants below stay stable across Elise refactors —
+# they must match the corresponding entries in
+# ``neuroseq.example_models.elise.DEFAULT_PARAMS``.
+_ELISE_KIN_EXC = dict(k_a_max=1000.0, phi_m=5e17, k_d=50.0, k_r=5.0)
+_ELISE_KIN_INH = dict(k_a_max=800.0, phi_m=5e17, k_d=10.0, k_r=5.0)
+
+# Active flux is one Hill K_M (≈ 1 mW/mm² at 470 nm), a standard
+# benchtop optogenetic irradiance. Rest is "lights off". Both opsins
+# pulse on/off together; the teaching signal is encoded by which pitch
+# is illuminated at each 10 ms slot, not by sustained inhibitory light.
+_FUER_ELISE_PHI_EXC_ACTIVE: float = float(_ELISE_KIN_EXC["phi_m"])
+_FUER_ELISE_PHI_INH_ACTIVE: float = float(_ELISE_KIN_INH["phi_m"])
+_FUER_ELISE_PHI_EXC_REST: float = 0.0
+_FUER_ELISE_PHI_INH_REST: float = 0.0
+_FUER_ELISE_EVENT_MS: int = 10
+
+
+def _peak_open_fractions_for_pulse(
+    phi_exc: float,
+    phi_inh: float,
+    pulse_ms: int,
+    kin_exc: dict,
+    kin_inh: dict,
+    dt_s: float = 1e-4,
+) -> tuple[float, float]:
+    """Numerically integrate the 3-state kinetics for one square pulse
+    from ``O = D = 0``, returning the peak ``O`` reached for each opsin."""
+    # Deferred import to keep example_projects light when Elise isn't loaded.
+    from neuroseq.example_models.elise import _step_kinetics
+
+    O_e = np.zeros(1, dtype=np.float64)  # noqa: E741
+    D_e = np.zeros(1, dtype=np.float64)
+    O_i = np.zeros(1, dtype=np.float64)  # noqa: E741
+    D_i = np.zeros(1, dtype=np.float64)
+    phi_e_arr = np.array([phi_exc], dtype=np.float64)
+    phi_i_arr = np.array([phi_inh], dtype=np.float64)
+    peak_e = peak_i = 0.0
+    for _ in range(int(round(pulse_ms * 1e-3 / dt_s))):
+        _step_kinetics(O_e, D_e, phi_e_arr, dt=dt_s, **kin_exc)
+        _step_kinetics(O_i, D_i, phi_i_arr, dt=dt_s, **kin_inh)
+        if O_e[0] > peak_e:
+            peak_e = float(O_e[0])
+        if O_i[0] > peak_i:
+            peak_i = float(O_i[0])
+    return peak_e, peak_i
+
+
+# Transient g0 calibration: with the active flux above pulsed for
+# `_FUER_ELISE_EVENT_MS` ms from a fully-closed start, choose g0 so the
+# matching potential at pulse peak hits −50 mV (the active ELISE target).
+# Constraint: g0_exc + g0_inh = 1, plus
+#     (g0_exc · O_exc_peak) / (g0_inh · O_inh_peak) = (1/3)/(2/3) = 0.5
+# ⇒ g0_inh / g0_exc = 2 · O_exc_peak / O_inh_peak.
+# Rest is "lights off"; inactive pitches in the same time slot fall through
+# to E_l = −70 mV via the matching-potential code path's `np.where` branch.
+_O_EXC_PEAK, _O_INH_PEAK = _peak_open_fractions_for_pulse(
+    _FUER_ELISE_PHI_EXC_ACTIVE,
+    _FUER_ELISE_PHI_INH_ACTIVE,
+    _FUER_ELISE_EVENT_MS,
+    _ELISE_KIN_EXC,
+    _ELISE_KIN_INH,
+)
+_ELISE_G0_RATIO = 2.0 * _O_EXC_PEAK / _O_INH_PEAK  # = g0_inh / g0_exc
+_ELISE_G0_EXC = 1.0 / (1.0 + _ELISE_G0_RATIO)
+_ELISE_G0_INH = _ELISE_G0_RATIO / (1.0 + _ELISE_G0_RATIO)
 
 
 def _build_fuer_elise_opsin_stims(
     tfinal_ms: int = 1920,
     event_ms: int = 10,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Two opsin-activation arrays encoding the Für Elise intro.
+    """Two opsin photon-flux arrays encoding the Für Elise intro.
 
-    Returns ``(stim_exc, stim_inh)`` of shape ``(tfinal_ms, 13)``. The
-    wrapper's matching-potential math turns these into ``u_tgt = -50 mV`` for
-    active pitches and ``u_tgt = -70 mV`` for inactive pitches, reproducing
-    the same teaching as the previous single-stim pattern.
-
-    Background voltages match the upstream ``to_biounits`` transform:
-    rest = ``E_l = -70 mV``, active = ``E_l + biounits_scale = -50 mV``.
+    Returns ``(stim_exc, stim_inh)`` of shape ``(tfinal_ms, 13)`` in
+    units of mm⁻²·s⁻¹. Active pitches receive a 10 ms square pulse of
+    ``phi_m`` (≈ 1 mW/mm², a standard benchtop irradiance); inactive
+    pitches are dark (flux = 0). After the 3-state kinetic step, the
+    pulse drives the active pitch's matching potential to −50 mV at
+    peak; inactive pitches in the same time slot fall through to
+    ``E_l = −70 mV`` via the simulator's ``np.where`` branch.
     """
     n_pitches = _FUER_ELISE_N_PITCHES
     stim_exc = np.full(
-        (tfinal_ms, n_pitches), _FUER_ELISE_OPSIN_EXC_REST, dtype=np.float32
+        (tfinal_ms, n_pitches), _FUER_ELISE_PHI_EXC_REST, dtype=np.float32
     )
     stim_inh = np.full(
-        (tfinal_ms, n_pitches), _FUER_ELISE_OPSIN_INH_REST, dtype=np.float32
+        (tfinal_ms, n_pitches), _FUER_ELISE_PHI_INH_REST, dtype=np.float32
     )
     cycle_ms = len(_FUER_ELISE_INTRO) * event_ms
 
-    # Only emit complete cycles; any remainder is left at the rest ratio so the
+    # Only emit complete cycles; any remainder is left at the rest flux so the
     # trailing tail isn't a half-phrase.
     for cycle_start in range(0, tfinal_ms - cycle_ms + 1, cycle_ms):
         for event_idx, event in enumerate(_FUER_ELISE_INTRO):
@@ -1559,8 +1652,8 @@ def _build_fuer_elise_opsin_stims(
             t_end = t_start + event_ms
             pitches = event if isinstance(event, tuple) else (event,)
             for pitch in pitches:
-                stim_exc[t_start:t_end, pitch] = _FUER_ELISE_OPSIN_EXC_ACTIVE
-                stim_inh[t_start:t_end, pitch] = _FUER_ELISE_OPSIN_INH_ACTIVE
+                stim_exc[t_start:t_end, pitch] = _FUER_ELISE_PHI_EXC_ACTIVE
+                stim_inh[t_start:t_end, pitch] = _FUER_ELISE_PHI_INH_ACTIVE
     return stim_exc, stim_inh
 
 
@@ -1610,7 +1703,7 @@ def elise_project() -> Project:
             name="opsin_exc",
             stim_type=StimType.Excitation,
             values=stim_exc,
-            units="1",
+            units="mm**-2 / second",
             dt=0.001,
         )
     )
@@ -1619,7 +1712,7 @@ def elise_project() -> Project:
             name="opsin_inh",
             stim_type=StimType.Inhibition,
             values=stim_inh,
-            units="1",
+            units="mm**-2 / second",
             dt=0.001,
         )
     )

@@ -7,10 +7,10 @@ import importlib.util
 import numpy as np
 import pytest
 
-from neuroseq.example_projects import _FUER_ELISE_OPSIN_EXC_ACTIVE
-from neuroseq.example_projects import _FUER_ELISE_OPSIN_EXC_REST
-from neuroseq.example_projects import _FUER_ELISE_OPSIN_INH_ACTIVE
-from neuroseq.example_projects import _FUER_ELISE_OPSIN_INH_REST
+from neuroseq.example_projects import _FUER_ELISE_PHI_EXC_ACTIVE
+from neuroseq.example_projects import _FUER_ELISE_PHI_EXC_REST
+from neuroseq.example_projects import _FUER_ELISE_PHI_INH_ACTIVE
+from neuroseq.example_projects import _FUER_ELISE_PHI_INH_REST
 from neuroseq.example_projects import _build_fuer_elise_opsin_stims
 from neuroseq.example_projects import example_projects
 from neuroseq.utils import detect_period
@@ -41,10 +41,10 @@ def test_elise_example_project_builds():
 
     first_exc = stim_exc.values[0:10, :]
     first_inh = stim_inh.values[0:10, :]
-    assert np.allclose(first_exc[:, 0], _FUER_ELISE_OPSIN_EXC_ACTIVE)
-    assert np.allclose(first_exc[:, 1:], _FUER_ELISE_OPSIN_EXC_REST)
-    assert np.allclose(first_inh[:, 0], _FUER_ELISE_OPSIN_INH_ACTIVE)
-    assert np.allclose(first_inh[:, 1:], _FUER_ELISE_OPSIN_INH_REST)
+    assert np.allclose(first_exc[:, 0], _FUER_ELISE_PHI_EXC_ACTIVE)
+    assert np.allclose(first_exc[:, 1:], _FUER_ELISE_PHI_EXC_REST)
+    assert np.allclose(first_inh[:, 0], _FUER_ELISE_PHI_INH_ACTIVE)
+    assert np.allclose(first_inh[:, 1:], _FUER_ELISE_PHI_INH_REST)
 
 
 @pytest.mark.skipif(
@@ -112,14 +112,14 @@ def test_fuer_elise_opsin_stims_first_events():
         slot_inh = stim_inh[event_idx * 10 : (event_idx + 1) * 10, :]
         for pitch in range(13):
             expected_exc = (
-                _FUER_ELISE_OPSIN_EXC_ACTIVE
+                _FUER_ELISE_PHI_EXC_ACTIVE
                 if pitch in active_pitches
-                else _FUER_ELISE_OPSIN_EXC_REST
+                else _FUER_ELISE_PHI_EXC_REST
             )
             expected_inh = (
-                _FUER_ELISE_OPSIN_INH_ACTIVE
+                _FUER_ELISE_PHI_INH_ACTIVE
                 if pitch in active_pitches
-                else _FUER_ELISE_OPSIN_INH_REST
+                else _FUER_ELISE_PHI_INH_REST
             )
             assert np.allclose(slot_exc[:, pitch], expected_exc), (
                 f"event {event_idx} pitch {pitch}: "
@@ -144,7 +144,9 @@ def test_fuer_elise_opsin_stims_default_are_eight_full_cycles():
 
 
 def test_fuer_elise_opsin_stims_default_are_detected_as_periodic():
-    """Both default opsin stims encode the 240-ms cycle."""
+    """Both opsin stims pulse on/off together at each event slot
+    (lights-off rest, phi_m active), so the 240-ms cycle is detectable
+    on either array."""
     stim_exc, stim_inh = _build_fuer_elise_opsin_stims()
     assert detect_period(stim_exc) == 240
     assert detect_period(stim_inh) == 240

@@ -16,6 +16,7 @@ preserving simulation state across repeated runs.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Mapping
 from types import SimpleNamespace
 
@@ -243,6 +244,78 @@ DEFAULT_PARAMS: dict[str, dict[str, ParamValue | str]] = {
         "group": "RNG",
         "description": "Master seed for weight and delay sampling.",
     },
+    # Opsin kinetics (excitatory) — 3-state collapsed PyRho model.
+    "k_a_max_exc": {
+        "value": 1000.0,
+        "default": 1000.0,
+        "type": "float",
+        "group": "Opsin (excitatory)",
+        "description": "Saturating activation rate (1/s).",
+    },
+    "phi_m_exc": {
+        "value": 5e17,
+        "default": 5e17,
+        "type": "float",
+        "group": "Opsin (excitatory)",
+        "description": "Hill half-activation photon flux (1/mm^2/s).",
+    },
+    "k_d_exc": {
+        "value": 50.0,
+        "default": 50.0,
+        "type": "float",
+        "group": "Opsin (excitatory)",
+        "description": "Desensitization rate O→D (1/s).",
+    },
+    "k_r_exc": {
+        "value": 5.0,
+        "default": 5.0,
+        "type": "float",
+        "group": "Opsin (excitatory)",
+        "description": "Recovery rate D→C (1/s).",
+    },
+    "g0_exc": {
+        "value": 0.3690150955780965,
+        "default": 0.3690150955780965,
+        "type": "float",
+        "group": "Opsin (excitatory)",
+        "description": "Peak conductance scaling (dimensionless).",
+    },
+    # Opsin kinetics (inhibitory).
+    "k_a_max_inh": {
+        "value": 800.0,
+        "default": 800.0,
+        "type": "float",
+        "group": "Opsin (inhibitory)",
+        "description": "Saturating activation rate (1/s).",
+    },
+    "phi_m_inh": {
+        "value": 5e17,
+        "default": 5e17,
+        "type": "float",
+        "group": "Opsin (inhibitory)",
+        "description": "Hill half-activation photon flux (1/mm^2/s).",
+    },
+    "k_d_inh": {
+        "value": 10.0,
+        "default": 10.0,
+        "type": "float",
+        "group": "Opsin (inhibitory)",
+        "description": "Desensitization rate O→D (1/s).",
+    },
+    "k_r_inh": {
+        "value": 5.0,
+        "default": 5.0,
+        "type": "float",
+        "group": "Opsin (inhibitory)",
+        "description": "Recovery rate D→C (1/s).",
+    },
+    "g0_inh": {
+        "value": 0.6309849044219035,
+        "default": 0.6309849044219035,
+        "type": "float",
+        "group": "Opsin (inhibitory)",
+        "description": "Peak conductance scaling (dimensionless).",
+    },
 }
 
 
@@ -283,10 +356,119 @@ def _bool_param(params: Mapping[str, ParamValue], key: str) -> bool:
     raise TypeError(f"Parameter '{key}' must be bool-compatible, got {type(value)}")
 
 
+def _step_kinetics(
+    O: np.ndarray,  # noqa: E741 — "O" is the open-state fraction (matches the 3-state PyRho spec)
+    D: np.ndarray,
+    phi: np.ndarray,
+    k_a_max: float,
+    phi_m: float,
+    k_d: float,
+    k_r: float,
+    dt: float,
+) -> None:
+    """Forward-Euler step on the 3-state opsin kinetics.
+
+    Mutates ``O`` (open) and ``D`` (desensitized) in place. ``C = 1 - O - D``
+    (closed) is reconstructed each step. Hill activation with exponent 1;
+    ``phi = 0`` yields ``k_a = 0`` cleanly. ``dt`` is in seconds; rates in s^-1.
+    """
+    k_a = k_a_max * phi / (phi + phi_m)
+    C = 1.0 - O - D
+    dO = (k_a * C - k_d * O) * dt
+    dD = (k_d * O - k_r * D) * dt
+    O += dO  # noqa: E741
+    D += dD
+
+
+def _detect_pattern_cycle(stim: np.ndarray) -> int:
+    """Return the smallest period (in samples) at which ``stim`` repeats.
+
+    A period ``T`` is accepted only if **every** whole cycle of length
+    ``T`` matches the first one, i.e. ``stim[k·T : (k+1)·T] == stim[:T]``
+    for all ``k = 1 .. n // T - 1``. Falls back to ``stim.shape[0]`` if
+    no shorter period is found.
+    """
+    n = int(stim.shape[0])
+    for T in range(2, n // 2 + 1):
+        n_full = n // T
+        if n_full < 2:
+            break
+        first = stim[:T]
+        if all(
+            np.array_equal(stim[k * T : (k + 1) * T], first) for k in range(1, n_full)
+        ):
+            return T
+    return n
+
+
+def build_target_rate_pattern(
+    opsin_exc: np.ndarray,
+    *,
+    E_l: float = -70.0,
+    a: float = 0.3,
+    b: float = -58.0,
+    u_active_offset: float = 20.0,
+    cycle_length: int | None = None,
+) -> tuple[np.ndarray, int]:
+    """Construct one cycle of the paper-style target firing rate.
+
+    Implements the target ``y`` of Kriener et al. (2024), Sec. 5.3.3 +
+    Eq. 6. A pitch is "active" at a stim sample whenever ``opsin_exc > 0``;
+    the corresponding output neuron is being teacher-driven toward
+    ``u_tgt = E_l + u_active_offset`` (default −50 mV), and toward ``E_l``
+    otherwise. The asymptotic firing rate the soma would produce at that
+    voltage is ``y = 1 / (1 + exp(a · (b − u_tgt)))``.
+
+    Parameters
+    ----------
+    opsin_exc : np.ndarray, shape ``(T_total, num_vis)``
+        Excitatory opsin photon-flux stim array. Only the binary
+        on/off footprint per sample is used; absolute fluxes are ignored.
+    E_l, a, b, u_active_offset : float
+        Neuron parameters (must match the running simulation).
+    cycle_length : int, optional
+        Pattern period in stim samples. Autodetected if ``None``.
+
+    Returns
+    -------
+    target_rate : np.ndarray, shape ``(num_vis, cycle_length)``
+        Target firing rate in [0, 1], one full cycle.
+    cycle_length : int
+        Detected (or supplied) cycle length, in stim samples.
+    """
+    if opsin_exc.ndim != 2:
+        raise ValueError("opsin_exc must be 2-D (T_total, num_vis)")
+
+    pattern = (np.asarray(opsin_exc) > 0).astype(np.float64)
+    if cycle_length is None:
+        # Trim trailing all-zero rows (ELiSe ring-out is encoded that way)
+        # before detecting the period, so the silence tail doesn't force
+        # the detector to fall back to the full stim length.
+        active_mask = np.any(pattern > 0, axis=1)
+        active_idx = np.flatnonzero(active_mask)
+        if active_idx.size == 0:
+            raise ValueError(
+                "opsin_exc has no active samples; cannot infer a target pattern"
+            )
+        active_len = int(active_idx[-1]) + 1
+        cycle_length = _detect_pattern_cycle(pattern[:active_len])
+    if cycle_length < 2 or cycle_length > pattern.shape[0]:
+        raise ValueError(
+            f"cycle_length must be in [2, {pattern.shape[0]}]; got {cycle_length}"
+        )
+
+    one_cycle = pattern[:cycle_length, :].T  # (num_vis, cycle_length)
+    u_tgt = E_l + u_active_offset * one_cycle
+    target_rate = 1.0 / (1.0 + np.exp(a * (b - u_tgt)))
+    return target_rate, int(cycle_length)
+
+
 def _build_namespaces(
     params: Mapping[str, ParamValue], num_vis: int
 ) -> tuple[SimpleNamespace, SimpleNamespace, SimpleNamespace]:
-    network_params = SimpleNamespace(num_vis=num_vis, num_lat=_int_param(params, "num_lat"))
+    network_params = SimpleNamespace(
+        num_vis=num_vis, num_lat=_int_param(params, "num_lat")
+    )
     neuron_params = SimpleNamespace(
         C_v=_float_param(params, "C_v"),
         C_u=_float_param(params, "C_u"),
@@ -344,11 +526,19 @@ class Elise(NN):
         self._network = None
         self._signature: tuple[int, tuple[tuple[str, ParamValue], ...]] | None = None
         self._elise_types: tuple[type, type, type, type, type] | None = None
+        self._O_exc: np.ndarray | None = None
+        self._D_exc: np.ndarray | None = None
+        self._O_inh: np.ndarray | None = None
+        self._D_inh: np.ndarray | None = None
 
     def reset(self) -> None:
         self._network = None
         self._simulated_time_s = 0.0
         self._signature = None
+        self._O_exc = None
+        self._D_exc = None
+        self._O_inh = None
+        self._D_inh = None
 
     def update_params(self, params: Mapping[str, ParamValue] | None) -> None:
         merged = self._flat_defaults()
@@ -376,14 +566,33 @@ class Elise(NN):
         # tolerates over/underflow. Save and restore the global errstate around the
         # import so the change is scoped to ELISE-internal computation.
         _prev_seterr = np.seterr()
-        from elise.model import Network
-        from elise.optimizer import SimpleUpdater
-        from elise.rate_buffer import Buffer
-        from elise.weights import DendriticWeights
-        from elise.weights import SomaticWeights
+        try:
+            from elise.model import Network
+            from elise.optimizer import SimpleUpdater
+            from elise.rate_buffer import Buffer
+            from elise.weights import DendriticWeights
+            from elise.weights import SomaticWeights
+        except ModuleNotFoundError as exc:
+            np.seterr(**_prev_seterr)
+            if (
+                exc.name and (exc.name == "elise" or exc.name.startswith("elise."))
+            ) or "No module named 'elise'" in str(exc):
+                raise ImportError(
+                    "The Elise example model requires the separate private "
+                    f"'elise' package in the active Python environment "
+                    f"({sys.executable}). Install/configure that package there "
+                    "before running this example."
+                ) from exc
+            raise
 
         np.seterr(**_prev_seterr)
-        self._elise_types = (Network, SimpleUpdater, Buffer, DendriticWeights, SomaticWeights)
+        self._elise_types = (
+            Network,
+            SimpleUpdater,
+            Buffer,
+            DendriticWeights,
+            SomaticWeights,
+        )
         return self._elise_types
 
     def _initialize_network(self, num_vis: int) -> None:
@@ -394,7 +603,9 @@ class Elise(NN):
             DendriticWeights,
             SomaticWeights,
         ) = self._import_elise_types()
-        network_params, neuron_params, weight_params = _build_namespaces(self._params, num_vis)
+        network_params, neuron_params, weight_params = _build_namespaces(
+            self._params, num_vis
+        )
 
         # Spawn child RNGs (mirrors sequence-learning/scripts/train.py:setup_network).
         child_seeds = np.random.SeedSequence(_int_param(self._params, "seed")).spawn(4)
@@ -405,7 +616,9 @@ class Elise(NN):
         dendritic_weights = DendriticWeights(
             weight_params, rng_w=rng_w_den, rng_d=rng_d_den
         )
-        somatic_weights = SomaticWeights(weight_params, rng_w=rng_w_som, rng_d=rng_d_som)
+        somatic_weights = SomaticWeights(
+            weight_params, rng_w=rng_w_som, rng_d=rng_d_som
+        )
 
         network = Network(
             network_params, neuron_params, dendritic_weights, somatic_weights, Buffer
@@ -419,6 +632,12 @@ class Elise(NN):
             SimpleUpdater(_float_param(self._params, "eta_lat") / dt_ms),
         )
         self._network = network
+        # 3-state opsin kinetics: O (open) and D (desensitized) per pitch.
+        # C = 1 - O - D is reconstructed each step. All start fully closed.
+        self._O_exc = np.zeros(num_vis, dtype=np.float64)
+        self._D_exc = np.zeros(num_vis, dtype=np.float64)
+        self._O_inh = np.zeros(num_vis, dtype=np.float64)
+        self._D_inh = np.zeros(num_vis, dtype=np.float64)
 
     def simulate(
         self,
@@ -453,7 +672,9 @@ class Elise(NN):
             num_vis,
             tuple(
                 sorted(
-                    (k, v) for k, v in self._params.items() if k not in self._PHASE_PARAMS
+                    (k, v)
+                    for k, v in self._params.items()
+                    if k not in self._PHASE_PARAMS
                 )
             ),
         )
@@ -466,12 +687,31 @@ class Elise(NN):
             raise RuntimeError("ELISE network failed to initialize")
 
         dt_ms = _float_param(self._params, "dt_ms")
+        dt_s = dt_ms / 1000.0
         n_steps = int(np.round(simulation_time * 1000.0 / dt_ms))
         n_total = self._network.num_all
         learn = _bool_param(self._params, "learn")
         E_exc = _float_param(self._params, "E_exc")
         E_inh = _float_param(self._params, "E_inh")
         E_l = _float_param(self._params, "E_l")
+        # Opsin kinetic parameters — read once per run.
+        # NOTE: g_exc_full and g_inh_full now carry photon-flux density
+        # (mm^-2 s^-1), not fractional conductance. The kinetic step
+        # below converts flux → open fraction → conductance.
+        k_a_max_exc = _float_param(self._params, "k_a_max_exc")
+        phi_m_exc = _float_param(self._params, "phi_m_exc")
+        k_d_exc = _float_param(self._params, "k_d_exc")
+        k_r_exc = _float_param(self._params, "k_r_exc")
+        g0_exc = _float_param(self._params, "g0_exc")
+        k_a_max_inh = _float_param(self._params, "k_a_max_inh")
+        phi_m_inh = _float_param(self._params, "phi_m_inh")
+        k_d_inh = _float_param(self._params, "k_d_inh")
+        k_r_inh = _float_param(self._params, "k_r_inh")
+        g0_inh = _float_param(self._params, "g0_inh")
+        assert self._O_exc is not None
+        assert self._D_exc is not None
+        assert self._O_inh is not None
+        assert self._D_inh is not None
 
         u_trace = np.empty((n_total, n_steps), dtype=np.float32)
         v_trace = np.empty((n_total, n_steps), dtype=np.float32)
@@ -487,9 +727,10 @@ class Elise(NN):
         stim_T = g_exc_full.shape[0]
         t0_s = self._simulated_time_s
 
-        # Throttle progress callbacks so they refresh roughly every 5 % of
-        # the simulation without dominating the loop's runtime.
-        progress_stride = max(1, n_steps // 20) if progress is not None else 0
+        # Throttle progress callbacks so they refresh ~0.1 % of the run.
+        # Frequent enough that the GUI can pump events smoothly during long
+        # training, sparse enough that the callback's own cost is < 1 %.
+        progress_stride = max(1, n_steps // 1000) if progress is not None else 0
         if progress is not None and n_steps > 0:
             progress(0.0)
 
@@ -497,8 +738,33 @@ class Elise(NN):
             t_s = step * dt_ms / 1000.0
             t_abs_s = t0_s + t_s
             stim_idx = min(int(t_abs_s / stim_dt_s), stim_T - 1)
-            g_exc_k = g_exc_full[stim_idx]
-            g_inh_k = g_inh_full[stim_idx]
+            phi_exc = g_exc_full[stim_idx]
+            phi_inh = g_inh_full[stim_idx]
+
+            # Forward-Euler kinetic step in place on singleton state arrays.
+            _step_kinetics(
+                self._O_exc,
+                self._D_exc,
+                phi_exc,
+                k_a_max_exc,
+                phi_m_exc,
+                k_d_exc,
+                k_r_exc,
+                dt_s,
+            )
+            _step_kinetics(
+                self._O_inh,
+                self._D_inh,
+                phi_inh,
+                k_a_max_inh,
+                phi_m_inh,
+                k_d_inh,
+                k_r_inh,
+                dt_s,
+            )
+
+            g_exc_k = g0_exc * self._O_exc
+            g_inh_k = g0_inh * self._O_inh
             sum_k = g_exc_k + g_inh_k
             if not np.any(sum_k > 0):
                 u_inp_step = None
@@ -581,7 +847,6 @@ def simulate(
 
 def get_simulator() -> Elise:
     return _SIMULATOR
-
 
 
 _SIMULATOR = Elise()

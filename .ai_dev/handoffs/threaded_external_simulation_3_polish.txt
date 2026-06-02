@@ -1,0 +1,248 @@
+threaded_external_simulation_3_polish — drop redundant pump, finalise tests  [IMPLEMENTED]
+===========================================================================================
+
+This is **chunk 3 of 3**. Prerequisite: chunks 1 and 2 must both be
+[IMPLEMENTED] (worker class wired, dispatch on a thread, cancel
+plumbing live, closeEvent drain live).
+
+This chunk cleans up the partial-fix code that is no longer needed
+now that the simulator runs off the main thread, adds the last
+test, and gates the work on a real-hardware manual check.
+
+
+CONTEXT (read this first)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Before this chunk:
+  • External sim runs on a worker QThread (chunk 2).
+  • `_update_external_simulation_progress` (the old inline
+    callback) is no longer invoked from the simulator. It still
+    exists on `Gui`, called by chunk-1's `_on_external_sim_progress`
+    slot indirectly (the chunk-1 slot actually does the
+    `setValue(...)` itself; the old inline method is now dead code
+    *unless something else still references it*).
+
+  Search the codebase before deleting — `grep -n
+  _update_external_simulation_progress src/neuroseq/`. If the only
+  remaining reference is the method definition itself, delete it.
+  If anything else (an old `connect`, a test, an `external_simulator_
+  accepts_progress` example) still calls it, keep it but strip the
+  `processEvents` line.
+
+After this chunk:
+  • The redundant `processEvents(ExcludeUserInputEvents)` call in
+    the progress slot is gone. The main thread is its own event
+    loop now, so the pump is unnecessary and adds noise to the
+    paint pipeline.
+  • Test #9 (cancel-button text lifecycle) is added.
+  • The manual rollout checklist is run on real hardware.
+  • Spec file is written; handoff marked [IMPLEMENTED].
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+FILES TO CHANGE
+────────────────────────────────────────────────────────────────────────────────────────────
+
+src/neuroseq/gui.py
+  • `_on_external_sim_progress` slot (chunk 1 added it, chunk 2
+    kept it): the body should be just `setValue(...)`. If chunk 2's
+    body matches that already, no change. If it still carries a
+    `processEvents` call, remove it.
+  • `_update_external_simulation_progress`: if grep finds no
+    remaining references, delete the method entirely. Otherwise
+    delete *only* the `processEvents` call and document with a
+    one-line comment that the slot delegates to the threaded
+    progress signal.
+
+src/neuroseq/example_models/elise.py
+  • No change. The `progress_stride = max(1, n_steps // 1000)`
+    setting stays — chunk-2 dispatch still needs frequent
+    progress callbacks for smooth bar updates and timely cancel
+    detection.
+
+
+FILES TO CREATE
+────────────────────────────────────────────────────────────────────────────────────────────
+
+`.ai_dev/specs/threaded_external_simulation.md`
+  Short spec capturing the final design (worker class, signals,
+  cancel path, project-capture semantics, closeEvent drain). Aim
+  for ~80–120 lines. The body of the chunk-2 handoff is a good
+  starting point; rewrite as a present-tense description of the
+  shipped system, not an implementation plan.
+
+(No new test file. Test #9 lands in
+`tests/test_threaded_external_dispatch.py` from chunk 2.)
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+DETAILED IMPLEMENTATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1. Remove the redundant pump. Find the chunk-1 progress slot
+   (`_on_external_sim_progress`). Confirm its body is exactly:
+
+```python
+@QtCore.Slot(float)
+def _on_external_sim_progress(self, fraction: float) -> None:
+    clamped = max(0.0, min(1.0, float(fraction)))
+    self.progress_dialog.setValue(int(round(clamped * 100)))
+```
+
+   If chunk 2 leaked a `QApplication.processEvents(...)` call into
+   the body (it shouldn't have, but check), remove it.
+
+2. The old `_update_external_simulation_progress` method. Locate
+   it (currently around the slot definitions). Run:
+
+```
+grep -rn "_update_external_simulation_progress" \
+    src/neuroseq tests
+```
+
+   If the only result is the method definition itself, delete the
+   whole method. If there are other references, they are most
+   likely:
+     - Manual integration scripts under `external_simulation_example/`
+       — leave those alone; they're excluded from lint and shouldn't
+       block the cleanup.
+     - A test that still calls the old method to exercise the
+       cancel path. Update that test to instead use the threaded
+       dispatch + `qtbot.waitSignal(worker.cancelled)`.
+
+   When deleting the method, also remove the now-orphaned
+   `SimulationCancelledError` raise site if any remained in the
+   old inline path — but per chunk 2 the inline path is already
+   gone, so this is a final sanity sweep.
+
+3. Test #9, in `tests/test_threaded_external_dispatch.py`:
+
+```python
+def test_progress_dialog_cancel_button_text_lifecycle(qtbot, gui):
+    """The dialog shows a Cancel button only while a sim runs."""
+    import threading
+    from neuroseq.data import Experiment
+
+    block = threading.Event()
+
+    def _blocking_simulate(stims_dict, simulation_time, params, progress):
+        progress(0.0)
+        block.wait(timeout=5.0)
+        return Experiment(name="text_lifecycle", duration=0.0,
+                          timepoints=[], data=[])
+
+    _wire_fake_external_simulator(gui, _blocking_simulate)
+
+    # Before dispatch: no cancel button (the default state set in
+    # _create_progressbar).
+    assert gui.progress_dialog.findChild(QtWidgets.QPushButton) is None or (
+        # On some platforms findChild returns the hidden button; check it.
+        not gui.progress_dialog.findChild(QtWidgets.QPushButton).isVisible()
+    )
+
+    # Dispatch.
+    gui._do_external_simulation(1.0)
+    worker = gui._external_sim_worker
+    qtbot.waitUntil(lambda: gui.progress_dialog.isVisible(), timeout=2000)
+
+    # During dispatch the cancel button is present and clickable.
+    cancel_btn = gui.progress_dialog.findChild(QtWidgets.QPushButton)
+    assert cancel_btn is not None
+    assert cancel_btn.isEnabled()
+
+    # Release the worker.
+    block.set()
+    with qtbot.waitSignal(worker.finished, timeout=5000):
+        pass
+
+    # After completion the dialog is back to no-cancel.
+    assert gui.progress_dialog.findChild(QtWidgets.QPushButton) is None or (
+        not gui.progress_dialog.findChild(QtWidgets.QPushButton).isVisible()
+    )
+```
+
+   Note: QProgressDialog's "button shows/hides" semantics differ
+   slightly between Qt 5 and 6. The two-clause assertion above is
+   defensive; if the test fails locally check what
+   `findChild(QPushButton)` returns in your Qt version and tighten
+   the assertion.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+MANUAL ROLLOUT CHECKLIST
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Run these on real hardware after all automated tests pass. None of
+them should be skipped — the threaded path's failure modes are
+exactly the ones the test harness can't catch (real Qt event loop
+under user input, real numpy/numba work releasing the GIL).
+
+  □ Launch a 10 000-phrase ELiSe training run.
+  □ Mid-run, drag the trace widget's ROI. The selection must
+    respond fluidly (no lag, no frame drops).
+  □ Mid-run, switch between traces in the `cmb_data` dropdown
+    (e.g. somatic_potential_u → firing_rate_r). The trace must
+    redraw.
+  □ Mid-run, open the Heatmap. It must render synapse weights from
+    the *pre-dispatch* checkpoint (the new weights aren't available
+    yet).
+  □ Mid-run, click "Save project". The save dialog must open and
+    save the *current* project (without the still-running sim's
+    result, by design).
+  □ Mid-run, click "Cancel" on the progress dialog. The dialog
+    must close within ~1 s and the "Simulation cancelled" info
+    box must appear.
+  □ Mid-run, close the main window. The thread must drain within
+    2 s; no orphan thread warnings in stderr.
+  □ Mid-run, swap to a different example project via the menu.
+    After the original sim completes, the project-swap warning
+    dialog must appear and the experiment must be in the
+    original (now non-active) project.
+  □ Run a deliberately-erroring fake simulator. The error box
+    must appear and the project must be unchanged.
+  □ Verify CPU usage during the run shows the worker thread
+    actively churning (e.g. `htop` or Activity Monitor).
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+ACCEPTANCE CRITERIA
+────────────────────────────────────────────────────────────────────────────────────────────
+
+  □ The redundant `processEvents(ExcludeUserInputEvents)` call is
+    removed from `_on_external_sim_progress`.
+  □ `_update_external_simulation_progress`, if dead, is deleted;
+    if still referenced, its `processEvents` call is removed.
+  □ Test #9 added in `tests/test_threaded_external_dispatch.py`
+    and green.
+  □ Full repo test suite passes (`pytest`).
+  □ ruff format + ruff check clean.
+  □ All ten items on the manual rollout checklist passed by a
+    human running the GUI on real hardware.
+  □ `.ai_dev/specs/threaded_external_simulation.md` written:
+    short, present-tense, describes the *shipped* design.
+  □ The three handoff files
+    (`threaded_external_simulation_1_scaffold.txt`,
+    `threaded_external_simulation_2_cutover.txt`,
+    `threaded_external_simulation_3_polish.txt`) are each marked
+    `[IMPLEMENTED]` per the project's handoff workflow.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+KNOWN LIMITATIONS (acceptable, document in the spec)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+  • Only one external sim at a time. Re-entrant dispatch is a no-op
+    by design. Users who want to compare multiple parameter
+    settings should script their runs sequentially.
+
+  • The simulator is still pure Python+numpy. CPU utilisation by
+    the worker is bounded by the GIL release frequency in
+    `elise.Network.__call__`. A future numba-jit pass on the inner
+    loop would multiply throughput by 10–100× without changing the
+    threading design.
+
+  • If a main-thread code path is later added that reads
+    `project.external_simulator.simulated_time_seconds` (or any
+    other mutating attribute on the simulator) while a sim is
+    running, locking will be required. As of this work no such
+    path exists.

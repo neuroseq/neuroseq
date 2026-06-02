@@ -1,0 +1,143 @@
+REVIEW — threaded_external_simulation_2_cutover
+=================================================
+
+Implementation logic is correct end-to-end. Five chunk-2 tests pass
+plus the existing 11-test `test_gui_external_simulate_dispatch.py`
+suite. The cutover, teardown, dispatch-project capture, cancel
+plumbing, and closeEvent drain all match the spec semantics.
+
+Two **lint/format fixes** are needed before this chunk can be marked
+`[IMPLEMENTED]`.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+FIXES REQUIRED
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1.  `src/neuroseq/gui.py` — SIM105 (use `contextlib.suppress(...)`)
+
+    Two locations carry the `try / except ... / pass` pattern that
+    the project's `ruff` config (`tool.ruff.lint.select` includes
+    `"SIM"`) does not allow. Both are essentially "ignore expected
+    exception types" — exactly the case `contextlib.suppress` was
+    designed for. Add `import contextlib` near the other standard-
+    library imports (currently `gc`, `inspect`, `logging`, `pathlib`,
+    `threading`), then rewrite the two sites:
+
+    Site A — inside `ExternalSimWorker.run` (gui.py ≈ line 99):
+
+        Before:
+            def _progress_cb(fraction: float) -> None:
+                if self._cancel_event.is_set():
+                    raise SimulationCancelledError("user cancelled")
+                try:
+                    self.progress.emit(float(fraction))
+                except Exception:
+                    pass
+
+        After:
+            def _progress_cb(fraction: float) -> None:
+                if self._cancel_event.is_set():
+                    raise SimulationCancelledError("user cancelled")
+                with contextlib.suppress(Exception):
+                    self.progress.emit(float(fraction))
+
+    Site B — inside `Gui._teardown_external_sim` (gui.py ≈ line 1001):
+
+        Before:
+            if self._external_sim_cancel is not None:
+                try:
+                    self.progress_dialog.canceled.disconnect(
+                        self._external_sim_cancel.set
+                    )
+                except (TypeError, RuntimeError):
+                    pass
+
+        After:
+            if self._external_sim_cancel is not None:
+                with contextlib.suppress(TypeError, RuntimeError):
+                    self.progress_dialog.canceled.disconnect(
+                        self._external_sim_cancel.set
+                    )
+
+    Semantics are identical (suppress those exception types and
+    continue). Verify with:
+
+        .venv/bin/python -m ruff check src/neuroseq/gui.py
+
+    Expected: no SIM105 errors. Other lints already pass.
+
+2.  `tests/test_threaded_external_dispatch.py` — `ruff format`
+
+    Two `qtbot.waitUntil(lambda: ...)` calls use an unbracketed
+    multi-line `or` / `and` expression that the formatter wants
+    parenthesised. Just run:
+
+        .venv/bin/python -m ruff format tests/test_threaded_external_dispatch.py
+
+    No logic change; the formatter will wrap the lambda bodies in
+    parentheses. Verify with:
+
+        .venv/bin/python -m ruff format --check tests/test_threaded_external_dispatch.py
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+THINGS THAT ARE OK (do not change)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+  A.  Dispatch-project capture via `self._external_sim_dispatch_project`
+      instance attribute, rather than via the lambda-binding approach
+      in the spec. This is a valid alternative — re-entrancy is
+      prevented by `_set_simulation_actions_enabled(False)` plus the
+      `if self._external_sim_worker is not None: return` guard, so
+      the attribute can't be overwritten while in-flight. The slot
+      reads it into a local **before** calling `_teardown_external_sim`
+      (which nulls it), so there is no read-after-clear hazard.
+      Verified by `test_experiment_appended_to_dispatch_project_not_current`.
+
+  B.  Chunk-3's test (`test_progress_dialog_cancel_button_text_lifecycle`)
+      lives in `tests/test_threaded_external_dispatch.py` rather than
+      a chunk-3-specific file. Since codex implemented all three
+      chunks in one pass and the test is structurally identical to
+      the chunk-2 tests, keeping them together is fine.
+
+  C.  `@with_wait_cursor` decorator was correctly removed from
+      `_do_external_simulation`; cursor management is now explicit
+      (set on dispatch, restore in `_teardown_external_sim`).
+
+  D.  `QThread(self)` parents the QThread to the Gui on the main
+      thread. The worker is constructed without a parent and then
+      moved onto the thread. Standard Qt pattern; no issue.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+KNOWN LIMITATIONS (not blocking — note in the spec, do not fix here)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+  •   The dispatch builds `stims_dict` from `v.stim_array.values`
+      by reference, not copy. If the user edits a stim through the
+      stim editor while a sim is running, the worker thread would
+      observe the mutation mid-run. Action-disable only locks the
+      Run buttons, not the stim editor. This is a real data race
+      but the consequence is a corrupted run, not a crash, and the
+      workflow is unusual. Either:
+        (i)   document as a known limitation in the spec, OR
+        (ii)  (future hardening) deep-copy the array references at
+              dispatch time, e.g. `v.stim_array.values.copy()`.
+      Out of scope for this chunk — flag in the spec written in
+      chunk 3.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+RE-VERIFICATION CHECKLIST AFTER FIXES
+────────────────────────────────────────────────────────────────────────────────────────────
+
+  □ `.venv/bin/python -m ruff check src/neuroseq/gui.py tests/test_external_sim_worker.py tests/test_threaded_external_dispatch.py`
+    — all checks pass.
+  □ `.venv/bin/python -m ruff format --check src/neuroseq/gui.py tests/test_external_sim_worker.py tests/test_threaded_external_dispatch.py`
+    — all files formatted.
+  □ `.venv/bin/python -m pytest tests/test_external_sim_worker.py tests/test_threaded_external_dispatch.py tests/test_gui_external_simulate_dispatch.py -q`
+    — all tests still pass.
+
+Once the two fixes are in and the re-verification is green, the
+chunk-2 handoff can be marked `[IMPLEMENTED]`.

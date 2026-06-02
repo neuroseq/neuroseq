@@ -41,6 +41,16 @@ def _set_simulation_time(monkeypatch: MonkeyPatch, seconds: float) -> None:
     )
 
 
+def _wait_for_external_simulation(qtbot: QtBot, gui: Gui):
+    # Poll until the worker has been fully torn down. Using waitUntil
+    # rather than waitSignal here is robust to the race where a fast
+    # simulator (e.g. an "old-style" sim with no progress callback) emits
+    # `finished` before the test enters the wait — `waitSignal` only
+    # catches future emissions, while `waitUntil` is true whether the
+    # worker is still running or already gone.
+    qtbot.waitUntil(lambda: gui._external_sim_thread is None, timeout=10000)
+
+
 def test_run_dispatches_to_external_when_path_set(
     qtbot: QtBot, monkeypatch: MonkeyPatch
 ) -> None:
@@ -92,12 +102,11 @@ def test_run_dispatches_to_b2_when_path_unset(
     def fake_external(simulation_time: float):
         calls["external"].append(simulation_time)
 
-    def fake_b2(time_seconds, **kwargs):
-        calls["b2"].append(time_seconds)
+    def fake_b2(simulation_time: float):
+        calls["b2"].append(simulation_time)
 
     monkeypatch.setattr(gui, "_do_external_simulation", fake_external)
-    monkeypatch.setattr(project, "run_simulation", fake_b2)
-    monkeypatch.setattr(gui, "_update_data", lambda **kw: None)
+    monkeypatch.setattr(gui, "_do_brian2_simulation_threaded", fake_b2)
     _set_simulation_time(monkeypatch, 0.5)
 
     gui.btn_continue_simulation_clicked()
@@ -147,6 +156,7 @@ def test_external_simulation_passes_params_kwarg(
     monkeypatch.setattr(neuroseq.gui, "ImportExperimentDialog", _MockImportDialog)
 
     gui._do_external_simulation(2.0)
+    _wait_for_external_simulation(qtbot, gui)
 
     fn = project.external_simulate_function
     assert isinstance(fn, FunctionType)
@@ -224,6 +234,7 @@ def test_run_with_overshoot_tiles_stim_before_dispatch(
     gui.stim_editor.set_project(project)
 
     gui.btn_continue_simulation_clicked()
+    _wait_for_external_simulation(qtbot, gui)
 
     fn = project.external_simulate_function
     assert isinstance(fn, FunctionType)
@@ -375,12 +386,13 @@ def test_external_simulation_passes_progress_when_accepted(
     monkeypatch.setattr(gui.progress_dialog, "setValue", _spy_set_value)
 
     gui._do_external_simulation(1.0)
+    _wait_for_external_simulation(qtbot, gui)
 
     fn = project.external_simulate_function
     assert isinstance(fn, FunctionType)
     captured = fn.__globals__["captured"]
     assert captured["progress_was_passed"] is True
-    # The simulator emitted 0.0, 0.5, 1.0 plus the final 100 set by the GUI.
+    # The simulator emitted 0.0, 0.5, 1.0, and the GUI also sets 0 then 100.
     assert 50 in set_value_calls
     assert 100 in set_value_calls
     gui.close()
@@ -408,6 +420,7 @@ def test_external_simulation_skips_progress_for_old_simulators(
     monkeypatch.setattr(neuroseq.gui, "ImportExperimentDialog", _MockImportDialog)
 
     gui._do_external_simulation(1.0)
+    _wait_for_external_simulation(qtbot, gui)
 
     fn = project.external_simulate_function
     assert isinstance(fn, FunctionType)

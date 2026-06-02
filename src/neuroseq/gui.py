@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import contextlib
 import gc
 import inspect
 import logging
 import pathlib
+import threading
 from collections.abc import Callable
 
 import brian2 as b2
@@ -16,6 +18,7 @@ from qtpy.compat import getsavefilename
 
 from neuroseq import __version__
 from neuroseq.analysis_plugins import AnalysisPlugin
+from neuroseq.analysis_plugins import discover_analysis_plugins
 from neuroseq.cellpose_import_dialog import CellposeImportDialog
 from neuroseq.chat_widget import ChatWidget
 from neuroseq.console_widget import ConsoleWidget
@@ -61,6 +64,99 @@ from neuroseq.utils import add_action
 from neuroseq.utils import add_items_to_combobox
 from neuroseq.utils import getSimulationTime
 from neuroseq.utils import with_wait_cursor
+
+
+class SimulationCancelledError(Exception):
+    """Raised from a progress callback when the user clicks Cancel."""
+
+
+class BackgroundIOWorker(QtCore.QObject):
+    """Runs a blocking IO task on a worker QThread.
+
+    The task is a callable taking a single argument: a
+    ``report(percent: int)`` callback that the worker translates into the
+    ``progress(int)`` signal. Tasks that don't natively report progress can
+    ignore the callback. The task's return value is delivered to the main
+    thread via ``finished(result)``; any exception is stringified and
+    delivered via ``failed(str)``.
+    """
+
+    progress = QtCore.Signal(int)
+    finished = QtCore.Signal(object)
+    failed = QtCore.Signal(str)
+
+    def __init__(self, task: Callable[[Callable[[int], None]], object]) -> None:
+        super().__init__()
+        self._task = task
+
+    @QtCore.Slot()
+    def run(self) -> None:
+        def _report(percent: int) -> None:
+            with contextlib.suppress(Exception):
+                self.progress.emit(int(percent))
+
+        try:
+            result = self._task(_report)
+        except Exception as exc:
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
+            return
+        self.finished.emit(result)
+
+
+class ExternalSimWorker(QtCore.QObject):
+    """Runs an external simulation on a worker QThread."""
+
+    progress = QtCore.Signal(float)
+    finished = QtCore.Signal(object)
+    cancelled = QtCore.Signal()
+    failed = QtCore.Signal(str)
+
+    def __init__(
+        self,
+        simulate_fn: Callable,
+        stims_dict: dict,
+        simulation_time: float,
+        params: dict,
+        accepts_progress: bool,
+        cancel_event: threading.Event,
+    ) -> None:
+        super().__init__()
+        self._simulate_fn = simulate_fn
+        self._stims_dict = stims_dict
+        self._simulation_time = float(simulation_time)
+        self._params = params
+        self._accepts_progress = accepts_progress
+        self._cancel_event = cancel_event
+
+    @QtCore.Slot()
+    def run(self) -> None:
+        def _progress_cb(fraction: float) -> None:
+            if self._cancel_event.is_set():
+                raise SimulationCancelledError("user cancelled")
+            with contextlib.suppress(Exception):
+                self.progress.emit(float(fraction))
+
+        try:
+            if self._accepts_progress:
+                experiment = self._simulate_fn(
+                    self._stims_dict,
+                    self._simulation_time,
+                    params=self._params,
+                    progress=_progress_cb,
+                )
+            else:
+                experiment = self._simulate_fn(
+                    self._stims_dict,
+                    self._simulation_time,
+                    params=self._params,
+                )
+        except SimulationCancelledError:
+            self.cancelled.emit()
+            return
+        except Exception as exc:
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
+            return
+        self.finished.emit(experiment)
 
 
 def _external_simulator_accepts_progress(simulate_fn: Callable) -> bool:
@@ -186,6 +282,15 @@ class Gui(QtWidgets.QMainWindow):
         self.stim_editor.limits_modified.connect(self.update_limits)
         self.last_cellpose_import: CellposeImportResult | None = None
         self._llm_settings_dialog: LLMSettingsDialog | None = None
+        self._external_sim_thread: QtCore.QThread | None = None
+        self._external_sim_worker: ExternalSimWorker | None = None
+        self._external_sim_cancel: threading.Event | None = None
+        self._external_sim_dispatch_project: Project | None = None
+        self._io_thread: QtCore.QThread | None = None
+        self._io_worker: BackgroundIOWorker | None = None
+        self._io_on_success: Callable[[object], None] | None = None
+        self._io_failure_title = "File operation failed"
+        self._io_failure_prefix = "The file operation could not complete:"
         if filename is not None:
             self.load_project(filename)
         else:
@@ -231,6 +336,7 @@ class Gui(QtWidgets.QMainWindow):
         self.stim_editor.set_project(self.project, keep_undo_history)
         self.update_limits()
         self._update_combo_boxes()
+        self._refresh_elise_replay_action()
 
     def _update_combo_box(
         self,
@@ -257,20 +363,6 @@ class Gui(QtWidgets.QMainWindow):
                 + [f"{d} [synapse]" for d in self.project.get_data_names(SynapseData)],
             )
             self.cmb_data.setCurrentText(cmb_data_text)
-
-    def _update_simulation_progress(
-        self,
-        elapsed: b2.Quantity,
-        completed: b2.Quantity,
-        start: b2.Quantity,
-        duration: b2.Quantity,
-    ) -> None:
-        completed_percent = int(100 * completed)
-        self.logger.info(
-            f"simulating {start} -> {duration} :: {completed_percent}% complete in {elapsed}"
-        )
-        self.progress_dialog.setLabelText("Simulating...")
-        self.progress_dialog.setValue(completed_percent)
 
     def _update_load_progress(
         self,
@@ -310,24 +402,30 @@ class Gui(QtWidgets.QMainWindow):
         options_dialog = SaveLoadOptionsDialog(action="Import")
         if not options_dialog.exec():
             return
-        try:
-            self.progress_dialog.setLabelText("Importing from project...")
-            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
-            self.project.import_project(
-                filename, options_dialog.options, report=self._update_load_progress
-            )
-            QtWidgets.QApplication.restoreOverrideCursor()
-        except Exception as e:
-            QtWidgets.QApplication.restoreOverrideCursor()
-            self.logger.warning(f"Failed to import from project {filename}: {e}")
-            QtWidgets.QMessageBox.critical(
+        if self._io_worker is not None:
+            QtWidgets.QMessageBox.information(
                 self,
-                "Import error",
-                f"Could not import from file '{filename}': {e}",
+                "Busy",
+                "A file operation is already in progress.",
             )
-            self.progress_dialog.reset()
             return
-        self.update_project(self.project)
+
+        project = self.project
+        options = options_dialog.options
+        filename_path = pathlib.Path(filename)
+
+        def _import_task(report: Callable[[int], None]) -> None:
+            project.import_project(filename_path, options, report=report)
+            return None
+
+        def _on_imported(_: object) -> None:
+            self.update_project(self.project)
+
+        self._dispatch_io_task(
+            _import_task,
+            f"Importing from {filename_path.name}…",
+            _on_imported,
+        )
 
     def btn_generate_synthetic_data_clicked(self) -> None:
         dialog = SyntheticDataDialog(self.project, parent=self)
@@ -337,6 +435,13 @@ class Gui(QtWidgets.QMainWindow):
             self._update_combo_boxes()
 
     def btn_save_clicked(self) -> None:
+        if self._io_worker is not None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Busy",
+                "A file operation is already in progress.",
+            )
+            return
         options_dialog = SaveLoadOptionsDialog(action="Save")
         if not options_dialog.exec():
             return
@@ -351,20 +456,23 @@ class Gui(QtWidgets.QMainWindow):
         filename = pathlib.Path(filename)
         if filename.suffix != ".nseq":
             filename = filename.with_suffix(".nseq")
-        try:
-            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
-            self.project.save(filename, options_dialog.options)
-            QtWidgets.QApplication.restoreOverrideCursor()
-        except Exception as e:
-            QtWidgets.QApplication.restoreOverrideCursor()
-            self.logger.warning(f"Failed to save file {filename}: {e}")
-            QtWidgets.QMessageBox.critical(
-                self,
-                "File save error",
-                f"Could not save file '{filename}': {e}",
-            )
-            return
-        self._update_window_title()
+
+        project = self.project
+        options = options_dialog.options
+
+        def _save_task(report: Callable[[int], None]) -> pathlib.Path:
+            # project.save has no native progress callback; bracket it with
+            # 0% / 100% so the dialog at least shows start/end.
+            report(0)
+            project.save(filename, options)
+            report(100)
+            return filename
+
+        def _on_saved(result: object) -> None:
+            self.logger.info(f"Project saved to '{result}'.")
+            self._update_window_title()
+
+        self._dispatch_io_task(_save_task, f"Saving to {filename.name}…", _on_saved)
 
     def btn_export_simulation_results_clicked(self) -> None:
         filename, _ = getsavefilename(
@@ -570,30 +678,38 @@ class Gui(QtWidgets.QMainWindow):
             # Update the GUI with changes made in the dialog
             self.update_project(self.project)
 
-    @with_wait_cursor
     def load_project(self, project: str | pathlib.Path | Project) -> None:
-        try:
-            self.progress_dialog.setLabelText("Loading project...")
-            if not isinstance(project, Project):
-                filename = pathlib.Path(project)
-                project = Project(filename, report=self._update_load_progress)
-                self.logger.info(f"Project loaded from {filename}")
-            else:
-                self.logger.info("Project loaded from Project object")
-        except Exception as e:
-            self.logger.warning(f"Failed to load project from file {filename}: {e}")
-            self.logger.exception(e)
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Project load error",
-                f"Could not load project from file '{filename}': {e}",
-            )
-            self.progress_dialog.reset()
-            return
-        self.last_cellpose_import = clone_cellpose_result(project.cellpose_data)
-        if project is not None:
+        """Load a project. File paths run on a worker thread; in-memory
+        ``Project`` instances (test fixtures, example projects) load
+        synchronously since there is no file IO to thread off."""
+        if isinstance(project, Project):
+            self.logger.info("Project loaded from Project object")
+            self.last_cellpose_import = clone_cellpose_result(project.cellpose_data)
             project.cellpose_data = self.last_cellpose_import
-        self.update_project(project, reset_controller=True)
+            self.update_project(project, reset_controller=True)
+            return
+
+        if self._io_worker is not None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Busy",
+                "A file operation is already in progress.",
+            )
+            return
+        filename = pathlib.Path(project)
+
+        def _load_task(report: Callable[[int], None]) -> Project:
+            return Project(filename, report=report)
+
+        def _on_loaded(result: object) -> None:
+            if not isinstance(result, Project):
+                return
+            self.logger.info(f"Project loaded from {filename}")
+            self.last_cellpose_import = clone_cellpose_result(result.cellpose_data)
+            result.cellpose_data = self.last_cellpose_import
+            self.update_project(result, reset_controller=True)
+
+        self._dispatch_io_task(_load_task, f"Loading {filename.name}…", _on_loaded)
 
     def _update_window_title(self) -> None:
         title_context: str | None = None
@@ -631,6 +747,7 @@ class Gui(QtWidgets.QMainWindow):
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
         self._update_combo_boxes()
+        self._refresh_elise_replay_action()
 
     def _cellpose_neuron_count(self, imported: CellposeImportResult | None) -> int:
         if imported is None:
@@ -813,25 +930,7 @@ class Gui(QtWidgets.QMainWindow):
         if self.project.external_simulate_path is not None:
             self._do_external_simulation(simulation_time)
             return
-        try:
-            self.progress_dialog.setLabelText("Compiling...")
-            self.progress_dialog.setValue(0)
-            self.progress_dialog.setVisible(True)
-            QtCore.QCoreApplication.processEvents()
-            self.project.run_simulation(
-                simulation_time,
-                report=self._update_simulation_progress,
-                stim_array_padding_seconds=self.settings.stim_padding_secs,
-            )
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Simulation error",
-                f"Could not run simulation: {e}",
-            )
-            self.logger.exception(e)
-            return
-        self._update_data(keep_undo_history=True)
+        self._do_brian2_simulation_threaded(simulation_time)
 
     def _append_experimental_data(self, experiment: Experiment) -> None:
         try:
@@ -858,62 +957,346 @@ class Gui(QtWidgets.QMainWindow):
             self.logger.exception(e)
             return
 
-    @with_wait_cursor
-    def _do_external_simulation(self, simulation_time: float):
+    def _do_external_simulation(self, simulation_time: float) -> None:
         if self.project.external_simulate_function is None:
             return
-        try:
-            cumulative_so_far = 0.0
-            sim = getattr(self.project, "external_simulator", None)
-            if sim is not None and hasattr(sim, "simulated_time_seconds"):
-                cumulative_so_far = float(sim.simulated_time_seconds)
-            target_seconds = cumulative_so_far + simulation_time
-            self.project.tile_stim_arrays_to_length(target_seconds)
-            self.stim_editor.set_project(self.project)
-            stims_dict = {
-                k: {"array": v.stim_array.values, "dt": v.stim_array.dt}
-                for k, v in self.stim_editor.stims_dict.items()
-            }
-            self.logger.info(
-                f"Running external simulation function for {simulation_time} seconds"
+        if self._external_sim_worker is not None:
+            self.logger.warning(
+                "External simulation dispatch ignored - a sim is already running."
             )
-            params = self.project.external_simulate_params_flat()
-            if _external_simulator_accepts_progress(
-                self.project.external_simulate_function
-            ):
-                self.progress_dialog.setLabelText("Simulating...")
-                self.progress_dialog.setValue(0)
-                experiment = self.project.external_simulate_function(
-                    stims_dict,
-                    simulation_time,
-                    params=params,
-                    progress=self._update_external_simulation_progress,  # type: ignore[call-arg]
-                )
-            else:
-                experiment = self.project.external_simulate_function(
-                    stims_dict,
-                    simulation_time,
-                    params=params,
-                )
-            self.progress_dialog.setValue(100)
-            self.logger.info(
-                f"External simulation complete, returned {experiment.duration}s experiment '{experiment.name}' with {len(experiment.data)} data objects"
-            )
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "External Simulation error",
-                f"Could not run external simulation: {e}",
-            )
-            self.logger.exception(e)
             return
-        QtWidgets.QApplication.restoreOverrideCursor()
-        self._append_experimental_data(experiment)
 
-    def _update_external_simulation_progress(self, fraction: float) -> None:
-        """Translate a [0, 1] completion fraction into the shared progress dialog."""
+        cumulative_so_far = 0.0
+        sim = getattr(self.project, "external_simulator", None)
+        if sim is not None and hasattr(sim, "simulated_time_seconds"):
+            cumulative_so_far = float(sim.simulated_time_seconds)
+        target_seconds = cumulative_so_far + simulation_time
+        self.project.tile_stim_arrays_to_length(target_seconds)
+        self.stim_editor.set_project(self.project)
+        stims_dict = {
+            k: {"array": v.stim_array.values, "dt": v.stim_array.dt}
+            for k, v in self.stim_editor.stims_dict.items()
+        }
+        params = self.project.external_simulate_params_flat()
+        accepts_progress = _external_simulator_accepts_progress(
+            self.project.external_simulate_function
+        )
+        self._external_sim_dispatch_project = self.project
+
+        self.progress_dialog.setLabelText("Simulating...")
+        self.progress_dialog.setValue(0)
+        self.progress_dialog.setCancelButtonText("Cancel")
+        # Threaded path: make the dialog non-modal so the rest of the
+        # GUI stays interactive while the worker runs. Other entry
+        # points (project load, import) keep the default WindowModal
+        # via _teardown_external_sim restoring it.
+        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.NonModal)
+        self.progress_dialog.show()
+
+        self._external_sim_cancel = threading.Event()
+        self.progress_dialog.canceled.connect(self._external_sim_cancel.set)
+
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        self._set_simulation_actions_enabled(False)
+
+        thread = QtCore.QThread(self)
+        worker = ExternalSimWorker(
+            simulate_fn=self.project.external_simulate_function,
+            stims_dict=stims_dict,
+            simulation_time=simulation_time,
+            params=params,
+            accepts_progress=accepts_progress,
+            cancel_event=self._external_sim_cancel,
+        )
+        worker.moveToThread(thread)
+
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._on_external_sim_progress)
+        worker.finished.connect(self._on_external_sim_finished)
+        worker.cancelled.connect(self._on_external_sim_cancelled)
+        worker.failed.connect(self._on_external_sim_failed)
+        for signal in (worker.finished, worker.cancelled, worker.failed):
+            signal.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+
+        self._external_sim_thread = thread
+        self._external_sim_worker = worker
+        self.logger.info(
+            f"Dispatching external simulation: {simulation_time} s "
+            f"(accepts_progress={accepts_progress})"
+        )
+        thread.start()
+
+    def _teardown_external_sim(self) -> None:
+        QtWidgets.QApplication.restoreOverrideCursor()
+        self.progress_dialog.setCancelButton(None)
+        # Restore the default modality used by other long-running paths
+        # (project load, import) that block the main thread.
+        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
+        if self._external_sim_cancel is not None:
+            with contextlib.suppress(TypeError, RuntimeError):
+                self.progress_dialog.canceled.disconnect(self._external_sim_cancel.set)
+        self._external_sim_worker = None
+        self._external_sim_thread = None
+        self._external_sim_cancel = None
+        self._external_sim_dispatch_project = None
+        self._set_simulation_actions_enabled(True)
+
+    @QtCore.Slot(float)
+    def _on_external_sim_progress(self, fraction: float) -> None:
         clamped = max(0.0, min(1.0, float(fraction)))
         self.progress_dialog.setValue(int(round(clamped * 100)))
+
+    @QtCore.Slot(object)
+    def _on_external_sim_finished(self, experiment: Experiment) -> None:
+        dispatch_project = self._external_sim_dispatch_project
+        self._teardown_external_sim()
+        self.progress_dialog.setValue(100)
+        self.progress_dialog.reset()
+        self.logger.info(
+            f"External simulation complete: '{experiment.name}' "
+            f"{experiment.duration}s, {len(experiment.data)} data objects"
+        )
+        if dispatch_project is None:
+            self.logger.warning(
+                "External simulation finished without a dispatch-time project; "
+                "using the current project."
+            )
+            self._append_experimental_data(experiment)
+            return
+        if self.project is dispatch_project:
+            self._append_experimental_data(experiment)
+            return
+
+        dispatch_project.add_experiment(experiment)
+        self.logger.warning(
+            f"Project swapped during external simulation. Experiment "
+            f"'{experiment.name}' was appended to the dispatch-time project, "
+            "not the currently active one."
+        )
+        QtWidgets.QMessageBox.information(
+            self,
+            "Simulation finished",
+            "The external simulation finished after a project switch.\n"
+            f"Experiment '{experiment.name}' was added to the project that "
+            f"started it ('{dispatch_project.project_name or '(unnamed)'}'), "
+            "not the project currently open.",
+        )
+
+    @QtCore.Slot()
+    def _on_external_sim_cancelled(self) -> None:
+        self._teardown_external_sim()
+        self.progress_dialog.reset()
+        self.logger.info("External simulation cancelled by user.")
+        QtWidgets.QMessageBox.information(
+            self,
+            "Simulation cancelled",
+            "Simulation cancelled - no data was added to the project.",
+        )
+
+    @QtCore.Slot(str)
+    def _on_external_sim_failed(self, message: str) -> None:
+        self._teardown_external_sim()
+        self.progress_dialog.reset()
+        self.logger.error(f"External simulation failed: {message}")
+        QtWidgets.QMessageBox.critical(
+            self,
+            "External Simulation error",
+            f"Could not run external simulation: {message}",
+        )
+
+    def _set_simulation_actions_enabled(self, enabled: bool) -> None:
+        for attr in ("continue_simulation_action", "_do_external_simulation_action"):
+            action = getattr(self, attr, None)
+            if action is not None:
+                action.setEnabled(bool(enabled))
+
+    def _set_io_actions_enabled(self, enabled: bool) -> None:
+        """Gate file-IO entry points while a save/load worker is running.
+
+        Disables the File menu and toolbar plus the simulation entry
+        points (so a long-running sim can't start mid-save and race the
+        worker reading the project state).
+        """
+        for attr in ("menu_file", "toolbar_file"):
+            target = getattr(self, attr, None)
+            if target is not None:
+                target.setEnabled(bool(enabled))
+        self._set_simulation_actions_enabled(bool(enabled))
+
+    def _dispatch_io_task(
+        self,
+        task: Callable[[Callable[[int], None]], object],
+        label: str,
+        on_success: Callable[[object], None],
+        failure_title: str = "File operation failed",
+        failure_prefix: str = "The file operation could not complete:",
+    ) -> bool:
+        """Run a blocking IO task on a worker thread.
+
+        Returns ``True`` if the task was dispatched, ``False`` if another
+        IO task is already in flight.
+        """
+        if self._io_worker is not None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Busy",
+                "Another file operation is in progress. Please wait for it "
+                "to finish before starting a new one.",
+            )
+            return False
+
+        self.progress_dialog.setLabelText(label)
+        self.progress_dialog.setRange(0, 100)
+        # Suppress the dialog's "smart" hiding for IO: the load callback
+        # rapidly drives the bar 0 → 100 during the model phase, after
+        # which the rest of the load (experiments, stim arrays, cellpose)
+        # has no native progress. With the defaults (autoClose +
+        # autoReset + minimumDuration=10) the dialog would either flash
+        # briefly and disappear, or never show at all for fast tasks.
+        # We close it ourselves in _teardown_io_task.
+        self.progress_dialog.setAutoClose(False)
+        self.progress_dialog.setAutoReset(False)
+        self.progress_dialog.setMinimumDuration(0)
+        self.progress_dialog.setValue(0)
+        self.progress_dialog.setCancelButton(None)
+        # Non-modal so the rest of the GUI stays interactive while the
+        # worker thread does the IO. File-related actions are still
+        # gated via _set_io_actions_enabled below.
+        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.NonModal)
+        self.progress_dialog.show()
+        self.progress_dialog.raise_()
+
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        self._set_io_actions_enabled(False)
+        self._io_on_success = on_success
+        self._io_failure_title = failure_title
+        self._io_failure_prefix = failure_prefix
+
+        thread = QtCore.QThread(self)
+        worker = BackgroundIOWorker(task)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._on_io_progress)
+        worker.finished.connect(self._on_io_finished)
+        worker.failed.connect(self._on_io_failed)
+        for signal in (worker.finished, worker.failed):
+            signal.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+
+        self._io_thread = thread
+        self._io_worker = worker
+        self.logger.info(f"Dispatching IO task: {label}")
+        thread.start()
+        return True
+
+    def _teardown_io_task(self) -> None:
+        QtWidgets.QApplication.restoreOverrideCursor()
+        # Restore the dialog's default behaviour for synchronous users
+        # (project save options dialog, Brian2 sim, etc.).
+        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
+        self.progress_dialog.setAutoClose(True)
+        self.progress_dialog.setAutoReset(True)
+        self.progress_dialog.setMinimumDuration(10)
+        self.progress_dialog.reset()
+        self._io_thread = None
+        self._io_worker = None
+        self._io_on_success = None
+        self._io_failure_title = "File operation failed"
+        self._io_failure_prefix = "The file operation could not complete:"
+        self._set_io_actions_enabled(True)
+
+    @QtCore.Slot(int)
+    def _on_io_progress(self, percent: int) -> None:
+        clamped = max(0, min(100, int(percent)))
+        self.progress_dialog.setValue(clamped)
+
+    @QtCore.Slot(object)
+    def _on_io_finished(self, result: object) -> None:
+        on_success = self._io_on_success
+        # _teardown_io_task resets the dialog and restores its default
+        # auto-close/auto-reset/min-duration behaviour for the next user.
+        self._teardown_io_task()
+        if on_success is not None:
+            try:
+                on_success(result)
+            except Exception as exc:
+                self.logger.exception(exc)
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Post-IO error",
+                    f"Loading completed but a follow-up step failed: {exc}",
+                )
+
+    @QtCore.Slot(str)
+    def _on_io_failed(self, message: str) -> None:
+        failure_title = self._io_failure_title
+        failure_prefix = self._io_failure_prefix
+        # _teardown_io_task resets the dialog and restores its defaults.
+        self._teardown_io_task()
+        self.logger.error(f"IO task failed: {message}")
+        QtWidgets.QMessageBox.critical(
+            self,
+            failure_title,
+            f"{failure_prefix} {message}",
+        )
+
+    def _do_brian2_simulation_threaded(self, simulation_time: float) -> None:
+        if self._io_worker is not None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Busy",
+                "Another operation is already in progress.",
+            )
+            return
+
+        project = self.project
+        padding_secs = self.settings.stim_padding_secs
+
+        def _brian2_task(report: Callable[[int], None]) -> None:
+            first_report_seen: list[bool] = []
+
+            def _brian2_report(
+                elapsed: b2.Quantity,
+                completed: b2.Quantity,
+                start: b2.Quantity,
+                duration: b2.Quantity,
+            ) -> None:
+                completed_percent = int(100 * completed)
+                self.logger.info(
+                    f"simulating {start} -> {duration} :: "
+                    f"{completed_percent}% complete in {elapsed}"
+                )
+                if not first_report_seen:
+                    first_report_seen.append(True)
+                    QtCore.QMetaObject.invokeMethod(
+                        self.progress_dialog,
+                        "setLabelText",
+                        QtCore.Qt.ConnectionType.QueuedConnection,
+                        QtCore.Q_ARG(str, "Simulating Brian2..."),
+                    )
+                report(int(100 * float(completed)))
+
+            project.run_simulation(
+                simulation_time,
+                report=_brian2_report,
+                stim_array_padding_seconds=padding_secs,
+            )
+            return None
+
+        def _on_brian2_finished(_result: object) -> None:
+            self.logger.info("Brian2 simulation finished.")
+            self._update_data(keep_undo_history=True)
+
+        self._dispatch_io_task(
+            _brian2_task,
+            "Compiling Brian2 model...",
+            _on_brian2_finished,
+            failure_title="Simulation error",
+            failure_prefix="Could not run simulation:",
+        )
 
     def btn_do_external_simulation_clicked(self) -> None:
         if self.project.external_simulate_function is None:
@@ -1528,6 +1911,7 @@ class Gui(QtWidgets.QMainWindow):
         self._create_actions_settings(menu=self.menu_settings, toolbar=None)
         self._create_actions_help(menu=self.menu_help, toolbar=None)
         self._create_action_experiment(self.menu_experiment, self.toolbar_experiment)
+        self._create_actions_replay_analysis()
 
     def _create_actions_file(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
@@ -1903,7 +2287,7 @@ class Gui(QtWidgets.QMainWindow):
             shortcut=None,
             icon=qta.icon("mdi6.function"),
         )
-        add_action(
+        self._do_external_simulation_action = add_action(
             "&Run external stimulation function",
             self.btn_do_external_simulation_clicked,
             menu,
@@ -1912,7 +2296,215 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.rocket-launch-outline"),
         )
 
+    def _create_actions_replay_analysis(self) -> None:
+        """Left-toolbar one-click ELiSe target MSE."""
+        self.elise_replay_action = add_action(
+            "Analyse ELiSe replay (target MSE)",
+            self._analyse_elise_replay,
+            menu=None,
+            toolbar=self.toolbar_stim_editor,
+            shortcut=None,
+            icon=qta.icon("mdi6.delta"),
+        )
+        self.elise_replay_action.setToolTip(
+            "Compute the paper-style replay MSE and correlation against "
+            "the binary teaching pattern, on the output-neuron firing "
+            "rate. Requires an ELiSe project with a completed simulation."
+        )
+        self._refresh_elise_replay_action()
+
+    def _refresh_elise_replay_action(self) -> None:
+        """Enable the toolbar action only for ELiSe projects with a sim run."""
+        action = getattr(self, "elise_replay_action", None)
+        if action is None:
+            return
+        action.setEnabled(self._elise_replay_inputs() is not None)
+
+    def _elise_replay_inputs(
+        self,
+    ) -> tuple[TraceData, np.ndarray, float] | None:
+        """Return (firing_rate_r, opsin_exc_values, opsin_dt_s) if available."""
+        if self.project.external_simulate_path != "neuroseq:elise":
+            return None
+        trace = None
+        for experiment in self.project.experiments.values():
+            for datum in experiment.data:
+                if isinstance(datum, TraceData) and datum.name == "firing_rate_r":
+                    trace = datum
+        if trace is None or np.asarray(trace.traces).size == 0:
+            return None
+        stim = self.project.stim_arrays.get("opsin_exc")
+        if stim is None:
+            return None
+        return trace, np.asarray(stim.values), float(stim.dt)
+
+    def _analyse_elise_replay(self) -> None:
+        from neuroseq.example_models.elise import build_target_rate_pattern
+        from neuroseq.replay_metrics import compute_performance_against_target
+        from neuroseq.replay_metrics import save_replay_metrics_csv
+        from neuroseq.resources.analysis_plugins import elise_target_mse as plugin_mod
+
+        inputs = self._elise_replay_inputs()
+        if inputs is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "ELiSe replay analysis",
+                "This action requires an ELiSe project with a completed "
+                "simulation (needs the 'firing_rate_r' trace and an "
+                "'opsin_exc' stim).",
+            )
+            return
+        trace, opsin_exc, stim_dt_s = inputs
+        params_dict = self.project.external_simulate_params or {}
+
+        def _param(key: str, default: float) -> float:
+            entry = params_dict.get(key)
+            if isinstance(entry, dict) and "value" in entry:
+                try:
+                    return float(entry["value"])
+                except (TypeError, ValueError):
+                    return default
+            return default
+
+        target_rate, cycle_stim_samples = build_target_rate_pattern(
+            opsin_exc,
+            E_l=_param("E_l", -70.0),
+            a=_param("a", 0.3),
+            b=_param("b", -58.0),
+        )
+
+        trace_dt_s = float(trace.dt)
+        if trace_dt_s <= 0:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "ELiSe replay analysis",
+                "Firing-rate trace has non-positive dt; cannot align target.",
+            )
+            return
+        upsample = int(round(stim_dt_s / trace_dt_s))
+        if upsample < 1 or abs(stim_dt_s - upsample * trace_dt_s) > 1e-9:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "ELiSe replay analysis",
+                f"Stim dt ({stim_dt_s * 1000:.4g} ms) is not an integer "
+                f"multiple of trace dt ({trace_dt_s * 1000:.4g} ms); "
+                "cannot align target.",
+            )
+            return
+        target_rate_resampled = np.repeat(target_rate, upsample, axis=1)
+        num_vis = target_rate_resampled.shape[0]
+
+        n_total_neurons = int(np.asarray(trace.traces).shape[0])
+        if num_vis > n_total_neurons:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "ELiSe replay analysis",
+                f"Opsin stim has {num_vis} pitches but the trace only "
+                f"covers {n_total_neurons} neurons.",
+            )
+            return
+
+        # Ask the user where to save the per-cycle CSV before running.
+        default_stem = "elise_replay_mse"
+        if self.project.filepath is not None:
+            default_stem = pathlib.Path(self.project.filepath).stem + "_replay_mse"
+        csv_filename, _ = getsavefilename(
+            self,
+            "Save replay MSE analysis as CSV",
+            default_stem + ".csv",
+            "CSV files (*.csv)",
+        )
+        if not csv_filename:
+            return
+        csv_path = pathlib.Path(csv_filename)
+        if csv_path.suffix.lower() != ".csv":
+            csv_path = csv_path.with_suffix(".csv")
+
+        output_rates = np.asarray(trace.traces)[:num_vis, :].astype(np.float64)
+        try:
+            mses, corrs, shifts = compute_performance_against_target(
+                output_rates, target_rate_resampled
+            )
+        except ValueError as exc:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "ELiSe replay analysis",
+                f"Cannot compute replay metrics: {exc}",
+            )
+            return
+
+        try:
+            save_replay_metrics_csv(
+                csv_path,
+                mses,
+                corrs,
+                shifts,
+                cycle_dt_ms=trace_dt_s * 1000.0,
+                cycle_length_samples=int(target_rate_resampled.shape[1]),
+                n_output_neurons=num_vis,
+                source=str(self.project.filepath) if self.project.filepath else None,
+            )
+        except OSError as exc:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "ELiSe replay analysis",
+                f"Could not write CSV to {csv_path}: {exc}",
+            )
+            return
+
+        analysis_window = CustomAnalysisWindow(parent=self)
+        analysis_widget = analysis_window.analysis_widget
+        setattr(analysis_widget, plugin_mod.TARGET_ATTR, target_rate_resampled)
+        setattr(analysis_widget, plugin_mod.TARGET_DT_ATTR, trace_dt_s)
+
+        plugin = next(
+            (p for p in discover_analysis_plugins() if p.id == plugin_mod.PLUGIN_ID),
+            None,
+        )
+        if plugin is None:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "ELiSe replay analysis",
+                "Could not find the ELiSe target MSE analysis plugin.",
+            )
+            return
+
+        n_samples = int(np.asarray(trace.traces).shape[1])
+        analysis_widget.set_data(
+            trace,
+            plugin,
+            slice(0, num_vis),
+            slice(0, n_samples),
+        )
+        analysis_window.setWindowTitle(f"ELiSe replay MSE — saved to {csv_path.name}")
+        analysis_window.show()
+
     def closeEvent(self, event):
+        if (
+            self._external_sim_thread is not None
+            and self._external_sim_thread.isRunning()
+        ):
+            if self._external_sim_cancel is not None:
+                self._external_sim_cancel.set()
+            if not self._external_sim_thread.wait(2000):
+                self.logger.warning(
+                    "External simulation worker did not stop in 2 s; "
+                    "force-quitting the thread."
+                )
+                self._external_sim_thread.quit()
+                self._external_sim_thread.wait(1000)
+        # BackgroundIOWorker also carries native Brian2 simulation runs.
+        # These tasks are not cooperatively cancellable through the shared
+        # IO path, so close waits for them and then force-quits as a last
+        # resort.
+        if (
+            self._io_thread is not None
+            and self._io_thread.isRunning()
+            and not self._io_thread.wait(10000)
+        ):
+            self.logger.warning("IO worker did not stop in 10 s; force-quitting.")
+            self._io_thread.quit()
+            self._io_thread.wait(2000)
         # Stop timers and queued widget updates before tearing down owned widgets.
         self.time_slider.close()
         # explicitly close all fastplotlib figures to avoid renderer trying to access them after they have been destroyed

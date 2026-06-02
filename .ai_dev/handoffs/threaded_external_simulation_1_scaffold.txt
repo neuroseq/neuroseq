@@ -1,0 +1,451 @@
+threaded_external_simulation_1_scaffold — worker class + slot wiring, no behaviour change  [IMPLEMENTED]
+=========================================================================================================
+
+This is **chunk 1 of 3** of the threaded external simulation work.
+Chunks 2 and 3 are separate handoffs:
+    threaded_external_simulation_2_cutover.txt   — switch dispatch to worker
+    threaded_external_simulation_3_polish.txt    — remove redundant pump, final tests
+
+DO NOT touch `_do_external_simulation` in this chunk. It must keep
+running the simulator inline exactly as it does today. The goal here
+is to land the threading scaffold (worker class, signals, slots,
+action-enable helper, `Gui.__init__` attributes) in a state that is
+covered by direct worker-level tests, so chunk 2 has a known-good
+foundation to cut over to.
+
+
+CONTEXT (read this first)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+`Gui._do_external_simulation` (gui.py ≈ line 868) runs the ELiSe
+simulator function synchronously on the Qt main thread. For long
+training runs (≈ minutes) the window can paint via a progress
+callback but cannot accept input on other widgets.
+
+A partial fix has already shipped — visible in the current code:
+
+  • `example_models/elise.py` uses
+    `progress_stride = max(1, n_steps // 1000)` so the progress
+    callback fires often.
+  • `_update_external_simulation_progress` in gui.py calls
+    `QApplication.processEvents(ExcludeUserInputEvents)` so the
+    window keeps painting.
+  • A `SimulationCancelledError` class already exists at the top of
+    `gui.py`, raised when the progress dialog's Cancel button is
+    pressed. The dialog's cancel button is enabled in
+    `_do_external_simulation`'s entry and reset to `None` in its
+    `finally` block.
+
+Reuse this `SimulationCancelledError`. Do NOT define another.
+
+The real fix (this work) moves the sim into a worker QThread. The
+end-state design is documented in chunks 2 + 3. This chunk only
+lands the scaffold.
+
+
+GOAL
+────────────────────────────────────────────────────────────────────────────────────────────
+
+After this chunk:
+
+  1. `ExternalSimWorker` exists at module scope in `gui.py` and is
+     covered by direct unit tests that instantiate it, move it onto
+     a QThread, and assert its signal behaviour.
+  2. `Gui` has three new instance attributes
+     (`_external_sim_thread`, `_external_sim_worker`,
+     `_external_sim_cancel`), all `None` at startup.
+  3. Four new slots exist on `Gui` and are wired *as methods* but
+     are not yet *connected* to anything (they will be in chunk 2):
+     `_on_external_sim_progress`, `_on_external_sim_finished`,
+     `_on_external_sim_cancelled`, `_on_external_sim_failed`.
+  4. `_set_simulation_actions_enabled(enabled: bool)` helper exists.
+  5. `_create_actions_simulate` captures the result of the
+     `add_action("&Run external stimulation function", ...)` call
+     (currently discarded) as `self._do_external_simulation_action`.
+     Actually — note the existing code structure: the "Run external
+     stimulation function" action lives in `_create_action_experiment`,
+     not `_create_actions_simulate`. Capture it there.
+  6. `_do_external_simulation` is **unchanged** in this chunk. Tests
+     do not exercise the GUI dispatch path; they exercise the worker
+     class directly.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+FILES TO CHANGE
+────────────────────────────────────────────────────────────────────────────────────────────
+
+src/neuroseq/gui.py
+  • Add `import threading` near the other standard-lib imports.
+  • Add `from neuroseq.data import Experiment` if not already
+    present (it is — already imported around line 26).
+  • Add the `ExternalSimWorker` class at module scope, immediately
+    after the existing `SimulationCancelledError` class definition
+    and before `_external_simulator_accepts_progress`. Full source
+    below.
+  • In `Gui.__init__`, after the existing initialisation but before
+    the final `load_project` call, add:
+
+        self._external_sim_thread: QtCore.QThread | None = None
+        self._external_sim_worker: ExternalSimWorker | None = None
+        self._external_sim_cancel: threading.Event | None = None
+
+  • Add the four slot methods on `Gui`. Place them next to
+    `_update_external_simulation_progress` (which already exists).
+    Bodies are documented below; some are stubs in this chunk
+    (they'll get wired up in chunk 2).
+  • Add `_set_simulation_actions_enabled(enabled: bool)` method on
+    `Gui`. Body below.
+  • In `_create_action_experiment`, change the `add_action(...)`
+    call that creates the "Run external stimulation function" action
+    so its return value is captured as
+    `self._do_external_simulation_action`. The existing call
+    discards the return; just assign it.
+
+  Do NOT change `_do_external_simulation`. Do NOT remove the
+  `processEvents` line in `_update_external_simulation_progress`
+  (chunk 3 drops it).
+
+
+FILES TO CREATE
+────────────────────────────────────────────────────────────────────────────────────────────
+
+tests/test_external_sim_worker.py
+  Four tests, listed in TESTS section below. Uses `qtbot` from
+  pytest-qt.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+DETAILED IMPLEMENTATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1. The worker class. Lives in `gui.py`, top-level, after
+   `SimulationCancelledError` and before
+   `_external_simulator_accepts_progress`:
+
+```python
+class ExternalSimWorker(QtCore.QObject):
+    """Runs an external simulation on a worker QThread.
+
+    The worker is created on the main thread, then moved onto a
+    fresh QThread by the dispatcher (see Gui._do_external_simulation
+    in chunk 2). The simulator runs in `run()`; cancellation is
+    cooperative via a `threading.Event` that the dispatcher sets
+    when the user clicks Cancel on the shared progress dialog.
+
+    Communication back to the main thread is exclusively via Qt
+    signals (queued connection — Qt picks this automatically because
+    sender and receiver live on different threads).
+
+    Slots on the receiving side must not block; the worker is
+    free-running and would drop progress updates if a slot stalls
+    the event loop.
+    """
+
+    progress = QtCore.Signal(float)
+    finished = QtCore.Signal(object)   # carries Experiment; declared
+                                       # as `object` because PySide6
+                                       # can't introspect the
+                                       # `Experiment` dataclass for
+                                       # signal metatype registration.
+    cancelled = QtCore.Signal()
+    failed = QtCore.Signal(str)
+
+    def __init__(
+        self,
+        simulate_fn: Callable,
+        stims_dict: dict,
+        simulation_time: float,
+        params: dict,
+        accepts_progress: bool,
+        cancel_event: threading.Event,
+    ) -> None:
+        # NOTE: do NOT pass parent=self / any QObject parent here.
+        # The worker is about to be moveToThread()'d; a parent on
+        # the main thread would forbid the move.
+        super().__init__()
+        self._simulate_fn = simulate_fn
+        self._stims_dict = stims_dict
+        self._simulation_time = float(simulation_time)
+        self._params = params
+        self._accepts_progress = accepts_progress
+        self._cancel_event = cancel_event
+
+    @QtCore.Slot()
+    def run(self) -> None:
+        def _progress_cb(fraction: float) -> None:
+            # Runs on the worker thread. Do NOT touch widgets.
+            if self._cancel_event.is_set():
+                raise SimulationCancelledError("user cancelled")
+            try:
+                self.progress.emit(float(fraction))
+            except Exception:
+                # A broken receiver must not kill the simulation.
+                pass
+
+        try:
+            if self._accepts_progress:
+                experiment = self._simulate_fn(
+                    self._stims_dict,
+                    self._simulation_time,
+                    params=self._params,
+                    progress=_progress_cb,
+                )
+            else:
+                experiment = self._simulate_fn(
+                    self._stims_dict,
+                    self._simulation_time,
+                    params=self._params,
+                )
+        except SimulationCancelledError:
+            self.cancelled.emit()
+            return
+        except Exception as exc:
+            # Stringify here — the actual exception type won't
+            # necessarily survive marshalling cleanly; the message
+            # is what we need. Capture the type name for context.
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
+            return
+        self.finished.emit(experiment)
+```
+
+2. Slot stubs on `Gui`. Place them next to
+   `_update_external_simulation_progress`:
+
+```python
+@QtCore.Slot(float)
+def _on_external_sim_progress(self, fraction: float) -> None:
+    """Worker → main thread: update the progress dialog.
+
+    Chunk 1: stub. Will be the active progress slot once chunk 2
+    cuts dispatch over to the worker.
+    """
+    clamped = max(0.0, min(1.0, float(fraction)))
+    self.progress_dialog.setValue(int(round(clamped * 100)))
+
+@QtCore.Slot(object)
+def _on_external_sim_finished(self, experiment: Experiment) -> None:
+    """Worker → main thread: append the experiment, restore UI state.
+
+    Chunk 1: stub. Chunk 2 fills in the body. Leaving it as a
+    minimal logger call here so chunk-1 tests can verify the slot
+    runs on the main thread when the worker emits.
+    """
+    self.logger.info(
+        f"External simulation finished: '{experiment.name}' "
+        f"{experiment.duration}s, {len(experiment.data)} data objects"
+    )
+
+@QtCore.Slot()
+def _on_external_sim_cancelled(self) -> None:
+    """Worker → main thread: user cancelled. Stub for chunk 1."""
+    self.logger.info("External simulation cancelled (worker signal received).")
+
+@QtCore.Slot(str)
+def _on_external_sim_failed(self, message: str) -> None:
+    """Worker → main thread: simulator raised. Stub for chunk 1."""
+    self.logger.error(f"External simulation failed (worker signal): {message}")
+```
+
+3. Action enable/disable helper on `Gui`:
+
+```python
+def _set_simulation_actions_enabled(self, enabled: bool) -> None:
+    """Toggle all UI entry points that would trigger a sim dispatch.
+
+    Used by chunk 2 to prevent re-entrancy while a worker is busy.
+    Lives here in chunk 1 so the worker tests can verify the
+    helper exists and is no-op-safe when actions are missing.
+    """
+    for attr in (
+        "continue_simulation_action",
+        "_do_external_simulation_action",
+    ):
+        action = getattr(self, attr, None)
+        if action is not None:
+            action.setEnabled(bool(enabled))
+```
+
+4. Capture the experiment-run action. In
+   `_create_action_experiment` (gui.py around line 1907), the
+   existing call is:
+
+```python
+add_action(
+    "&Run external stimulation function",
+    self.btn_do_external_simulation_clicked,
+    menu,
+    toolbar,
+    shortcut=None,
+    icon=qta.icon("mdi6.rocket-launch-outline"),
+)
+```
+
+   Change to:
+
+```python
+self._do_external_simulation_action = add_action(
+    "&Run external stimulation function",
+    self.btn_do_external_simulation_clicked,
+    menu,
+    toolbar,
+    shortcut=None,
+    icon=qta.icon("mdi6.rocket-launch-outline"),
+)
+```
+
+5. `Gui.__init__` attributes. Find the existing init block (around
+   line 188, just before the `if filename is not None` branch). Add:
+
+```python
+self._external_sim_thread: QtCore.QThread | None = None
+self._external_sim_worker: ExternalSimWorker | None = None
+self._external_sim_cancel: threading.Event | None = None
+```
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+SUBTLE THINGS RELEVANT TO THIS CHUNK
+────────────────────────────────────────────────────────────────────────────────────────────
+
+A.  Queued vs direct connections. Qt picks queued automatically when
+    sender and receiver are on different threads. Don't pass
+    `Qt.DirectConnection` anywhere. Tests must trigger the worker
+    via `thread.start()` (which queues the `started → run` call to
+    the worker thread); do NOT call `worker.run()` directly from
+    the test thread or every test assertion below collapses.
+
+B.  No QObject parent on the worker. If you `moveToThread` an
+    object that has a parent on the original thread, Qt either
+    refuses or the parent/child invariant breaks. Constructor
+    takes no `parent=`.
+
+C.  The worker's `progress.emit(...)` call is safe across threads.
+    The emit itself returns immediately; the receiver runs later on
+    the main thread's event loop. No locking needed.
+
+D.  `Experiment` is a plain dataclass containing numpy arrays. Qt
+    signal marshalling for `object`-typed args ships the Python
+    reference across without serialising. The worker's reference
+    goes out of scope after `emit`; the main thread's slot takes
+    ownership in its parameter. No deep copy, no manual free.
+
+E.  `failed(str)` — never emit the raw exception. Stringify in the
+    worker. If you need richer error reporting later, emit
+    `traceback.format_exc()` as part of the message.
+
+F.  `SimulationCancelledError` already exists in `gui.py` (it shipped
+    with the partial fix). Import it in the worker class via the
+    same module scope — no need to redefine.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_external_sim_worker.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Use `qtbot` from pytest-qt. Each test creates a fresh QThread,
+moves a fresh worker onto it, connects signals, and asserts via
+`qtbot.waitSignal(...)`. Do NOT call `worker.run()` directly.
+
+Fake simulators (define inside the test or as module-level helpers):
+
+```python
+def _fake_simulate_success(stims_dict, simulation_time, params, progress):
+    """Emits progress 0..1 in 4 steps, then returns a tiny Experiment."""
+    from neuroseq.data import Experiment
+    for fraction in (0.0, 0.25, 0.5, 0.75, 1.0):
+        progress(fraction)
+    return Experiment(
+        name="fake_success",
+        duration=float(simulation_time),
+        timepoints=[],
+        data=[],
+    )
+
+def _fake_simulate_failure(stims_dict, simulation_time, params, progress):
+    progress(0.5)
+    raise ValueError("kaboom")
+```
+
+Worker construction helper:
+
+```python
+def _spawn_worker(simulate_fn, *, accepts_progress=True):
+    import threading
+    from qtpy import QtCore
+    from neuroseq.gui import ExternalSimWorker
+    thread = QtCore.QThread()
+    cancel_event = threading.Event()
+    worker = ExternalSimWorker(
+        simulate_fn=simulate_fn,
+        stims_dict={},
+        simulation_time=1.0,
+        params={},
+        accepts_progress=accepts_progress,
+        cancel_event=cancel_event,
+    )
+    worker.moveToThread(thread)
+    thread.started.connect(worker.run)
+    return thread, worker, cancel_event
+```
+
+Required tests:
+
+1.  `test_worker_runs_on_a_non_main_thread(qtbot)`
+    The fake simulator records `threading.current_thread().ident`
+    (or `.name`) inside its progress callback. After starting the
+    thread and waiting on `worker.finished`, assert the recorded id
+    differs from `threading.main_thread().ident`. This is the proof
+    the work is *actually* off the main thread.
+
+2.  `test_worker_progress_signals_arrive_in_main_thread(qtbot)`
+    Connect a list-appending slot to `worker.progress`. Use
+    `qtbot.waitSignal(worker.finished, timeout=2000)`. After
+    completion, assert the recorded fractions are monotonically
+    non-decreasing and that the slot ran on
+    `threading.main_thread()`.
+
+3.  `test_worker_emits_finished_with_experiment(qtbot)`
+    `qtbot.waitSignal(worker.finished)` captures the experiment via
+    the signal's payload (`blocker.args[0]`). Assert it is an
+    `Experiment` with `name == "fake_success"`.
+
+4.  `test_worker_emits_failed_on_simulator_exception(qtbot)`
+    Use `_fake_simulate_failure`. `qtbot.waitSignal(worker.failed)`.
+    Assert the payload string contains both `ValueError` and
+    `kaboom`. Assert `worker.finished` was NOT emitted (use
+    `qtbot.assertNotEmitted` or a sentinel slot).
+
+Each test must call `thread.quit()` and `thread.wait(2000)` in
+a teardown / finally block to avoid leaking threads.
+
+The tests do NOT need a `Gui` instance — they unit-test the
+worker class in isolation. This is the whole point of the chunk:
+green these before chunk 2 changes the GUI dispatch.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+ACCEPTANCE CRITERIA
+────────────────────────────────────────────────────────────────────────────────────────────
+
+  □ `ExternalSimWorker` class defined in `gui.py`, with the four
+    signals named above.
+  □ Worker has NO QObject parent in its `__init__`.
+  □ Four slots (`_on_external_sim_*`) exist on `Gui` as documented;
+    bodies are stubs that just log (slots are NOT connected yet).
+  □ `_set_simulation_actions_enabled` exists and is safe to call
+    before `_do_external_simulation_action` is set (i.e. before
+    `_create_actions` ran).
+  □ `_do_external_simulation_action` is captured in
+    `_create_action_experiment`.
+  □ `Gui.__init__` initialises `_external_sim_thread`,
+    `_external_sim_worker`, `_external_sim_cancel` to `None`.
+  □ `_do_external_simulation` is UNCHANGED. Existing manual ELiSe
+    runs still go through the inline path with the partial fix
+    (event pump + cancellable dialog) intact.
+  □ All four tests in `tests/test_external_sim_worker.py` pass.
+  □ `tests/test_replay_mse_plugin.py` and
+    `tests/test_elise_target_mse.py` still pass (regression check).
+  □ ruff format + ruff check clean on `gui.py` and the new test
+    file.
+
+Once green, hand off chunk 2.

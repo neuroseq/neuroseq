@@ -3,10 +3,17 @@
 Use this on a TraceData slice that starts on the **last training cycle**
 (used as the reference) and extends through one or more ring-out cycles.
 The plugin splits the selection into cycles of the configured length and
-reports the mean squared error of every cycle against cycle 0 (the
-reference). Cycle 0 is therefore always exactly zero by construction;
-cycles 1..N show how well the free-running network reproduces the
-trained pattern.
+reports, for each cycle, the mean squared error and the Pearson
+correlation coefficient against cycle 0 (the reference), following the
+two performance measures defined in Kriener et al. (2024), Sec. 5.6,
+Eq. 22–26.
+
+Because a free-running ELiSe network's replay drifts in time relative to
+the trained pattern, performance is evaluated at the time-shift
+``s ∈ [0, T]`` (one pattern length) that minimises MSE for each cycle
+(Eq. 25–26). The shift search uses an FFT-based cross-correlation. The
+last cycle of the selection cannot be evaluated because it has no shift
+slack — see the paper for details.
 """
 
 from __future__ import annotations
@@ -15,6 +22,10 @@ import brian2.numpy_ as np
 from qtpy import QtWidgets
 
 from neuroseq.data import TraceData
+from neuroseq.replay_metrics import compute_cycle_mse
+from neuroseq.replay_metrics import compute_cycle_performance
+
+__all__ = ["compute_cycle_mse", "compute_cycle_performance"]
 
 PLUGIN_ID = "replay_mse"
 PLUGIN_NAME = "Replay MSE (cycle vs reference)"
@@ -22,31 +33,6 @@ PLUGIN_ICON = "mdi6.delta"
 
 _CONTROLS_ATTR = "_replay_mse_controls"
 _DEFAULT_CYCLE_MS = 1920.0  # Für Elise intro phrase length.
-
-
-def compute_cycle_mse(traces: np.ndarray, n_cycle_samples: int) -> np.ndarray:
-    """Return per-cycle MSE of ``traces`` against the first cycle.
-
-    Cycle 0 is the reference, so ``result[0] == 0`` by construction. The
-    last partial cycle (if any) is dropped — cycles must be whole.
-    """
-    if traces.ndim != 2:
-        raise ValueError("traces must be 2-D (n_neurons, n_timepoints)")
-    if n_cycle_samples < 2:
-        raise ValueError("n_cycle_samples must be at least 2")
-    if traces.shape[1] < 2 * n_cycle_samples:
-        raise ValueError(
-            "selection must contain at least two whole cycles "
-            f"(needed {2 * n_cycle_samples} samples; have {traces.shape[1]})"
-        )
-
-    n_cycles = traces.shape[1] // n_cycle_samples
-    reference = traces[:, :n_cycle_samples]
-    out = np.empty(n_cycles, dtype=np.float64)
-    for k in range(n_cycles):
-        segment = traces[:, k * n_cycle_samples : (k + 1) * n_cycle_samples]
-        out[k] = float(np.mean((segment - reference) ** 2))
-    return out
 
 
 def _make_controls(widget) -> QtWidgets.QWidget:
@@ -141,21 +127,44 @@ def _replot(widget, data, cycle_ms: float = _DEFAULT_CYCLE_MS) -> None:
         )
         return
 
-    cycle_mses = compute_cycle_mse(traces, n_cycle_samples)
-    n_cycles = int(cycle_mses.size)
-    total_mse = float(np.mean(cycle_mses[1:])) if n_cycles > 1 else 0.0
+    mses, corrs, _ = compute_cycle_performance(traces, n_cycle_samples)
+    n_cycles = int(mses.size)
+    total_mse = float(np.mean(mses[1:])) if n_cycles > 1 else 0.0
+    total_corr = float(np.nanmean(corrs[1:])) if n_cycles > 1 else 1.0
 
     ax = widget.subplot
+    fig = ax.figure
+    for other_ax in list(fig.axes):
+        if other_ax is not ax:
+            other_ax.remove()
     ax.clear()
+
     bars_x = np.arange(n_cycles)
-    ax.bar(bars_x, cycle_mses, color="tab:purple")
+    ax.bar(bars_x, mses, color="tab:purple", label="MSE")
     ax.set_xlabel("Cycle index (0 = reference)")
     ax.set_ylabel(f"MSE [({data.units})²]" if data.units else "MSE")
-    ax.set_title(
-        f"Replay MSE vs cycle 0  ·  cycle = {cycle_ms:g} ms  ·  "
-        f"mean MSE (cycles 1..{n_cycles - 1}) = {total_mse:.4g}"
-    )
+    ax.tick_params(axis="y", labelcolor="tab:purple")
     ax.set_xticks(bars_x)
+
+    ax_corr = ax.twinx()
+    ax_corr.plot(
+        bars_x,
+        corrs,
+        color="tab:orange",
+        marker="o",
+        linewidth=1.5,
+        label="Corr. coeff.",
+    )
+    ax_corr.axhline(1.0, color="tab:orange", linestyle=":", linewidth=0.6, alpha=0.5)
+    ax_corr.set_ylabel("Pearson correlation coefficient")
+    ax_corr.set_ylim(-1.05, 1.05)
+    ax_corr.tick_params(axis="y", labelcolor="tab:orange")
+
+    ax.set_title(
+        f"Replay performance vs cycle 0  ·  cycle = {cycle_ms:g} ms  ·  "
+        f"mean MSE (1..{n_cycles - 1}) = {total_mse:.4g}  ·  "
+        f"mean corr = {total_corr:.3g}"
+    )
     widget._redraw()
 
 
