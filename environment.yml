@@ -8,7 +8,7 @@ dependencies:
   - qtpy
   - matplotlib
   - pillow
-  - pyside6 !=6.9.1
+  - pyqt6
   - pyqtgraph != 0.14.0
   - h5py
   - qtawesome

@@ -41,7 +41,7 @@ Target Python 3.10+ and use 4-space indentation. Keep names in `snake_case` for 
 
 ## Testing Guidelines
 
-Tests use `pytest` and `pytest-qt`. Add or update tests with every behavior change, especially for GUI flows, import/export logic, and data transformations. Keep test files named `test_<feature>.py`. If you need CI parity for Qt, run with `QT_API=pyside6` and `PYTEST_QT_API=pyside6`. Coverage must stay at or above the configured 75% threshold.
+Tests use `pytest` and `pytest-qt`. Add or update tests with every behavior change, especially for GUI flows, import/export logic, and data transformations. Keep test files named `test_<feature>.py`. If you need CI parity for Qt, run with `QT_API=pyqt6` and `PYTEST_QT_API=pyqt6`. Coverage must stay at or above the configured 75% threshold.
 
 ## Commit & Pull Request Guidelines
 
