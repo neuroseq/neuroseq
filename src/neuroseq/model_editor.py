@@ -1166,6 +1166,22 @@ class ModelEditorDialog(QtWidgets.QDialog):
                 self.logger.exception(e)
 
             if self.b2model.must_be_rebuilt:
+                if (
+                    self.b2model.has_simulation_data()
+                    and QtWidgets.QMessageBox.question(
+                        self,
+                        "Discard simulation data?",
+                        (
+                            "The model has been modified. Applying these changes will "
+                            "remove existing simulation data. Do you want to continue?"
+                        ),
+                        QtWidgets.QMessageBox.StandardButton.Yes
+                        | QtWidgets.QMessageBox.StandardButton.No,
+                        QtWidgets.QMessageBox.StandardButton.No,
+                    )
+                    != QtWidgets.QMessageBox.StandardButton.Yes
+                ):
+                    return
                 self.logger.info("rebuilding model after change")
                 self.b2model.assemble_network()  # keep underlying network in sync
                 self.b2model.must_be_rebuilt = False
