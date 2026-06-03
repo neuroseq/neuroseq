@@ -32,6 +32,9 @@ from neuroseq.exporter_syscon2 import shift_stim_values_right_for_initial_slm_lo
 from neuroseq.exporter_syscon2 import snap_stim_values_to_global_slm_windows
 from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm
 from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm_off_on_overlap
+from neuroseq.power_lut import PowerLut
+from neuroseq.power_lut import parse_power_lut_text
+from neuroseq.power_lut import resolve_power_lut
 
 if TYPE_CHECKING:
     from neuroseq.importer_cellpose import CellposeImportResult
@@ -143,6 +146,70 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         name_layout.addWidget(self.name_edit)
         config_layout.addLayout(name_layout)
 
+        self.binary_mode_checkbox = QtWidgets.QCheckBox(
+            "Force binary export intensity (all ON samples -> 1.0)"
+        )
+        self.binary_mode_checkbox.setChecked(True)
+        self.binary_mode_checkbox.setToolTip(
+            "When unchecked, export preprocessing preserves input stim amplitudes "
+            "(clipped to [0, 1]) instead of normalizing ON samples to 1.0."
+        )
+        config_layout.addWidget(self.binary_mode_checkbox)
+
+        self.spiralling_checkbox = QtWidgets.QCheckBox(
+            "Spiralling (TTL fires 1 tick before SLM load completes)"
+        )
+        self.spiralling_checkbox.setChecked(True)
+        self.spiralling_checkbox.setToolTip(
+            "When checked, every laser TTL pulse is shifted 1 tick earlier so the "
+            "laser edge aligns with the SLM-ready edge in spiralling mode. Uncheck "
+            "for legacy non-spiralling hardware: TTL fires exactly at SLM-ready "
+            "(start tick + 16.666 ms)."
+        )
+        config_layout.addWidget(self.spiralling_checkbox)
+
+        laser_layout = QtWidgets.QHBoxLayout()
+        laser_label = QtWidgets.QLabel("Laser timeline:")
+        self.laser_combo = QtWidgets.QComboBox()
+        self.laser_combo.addItem("940 nm digital", 940)
+        self.laser_combo.addItem("1030 nm digital", 1030)
+        self.laser_combo.addItem("1100 nm digital", 1100)
+        self.laser_combo.setCurrentIndex(self.laser_combo.findData(1100))
+        self.laser_combo.setToolTip(
+            "Select which fixed laser timeline receives stimulation TTLPulses."
+        )
+        laser_layout.addWidget(laser_label)
+        laser_layout.addWidget(self.laser_combo)
+        config_layout.addLayout(laser_layout)
+
+        power_layout = QtWidgets.QHBoxLayout()
+        self.target_power_spin = QtWidgets.QDoubleSpinBox()
+        self.target_power_spin.setRange(0.0, 1000.0)
+        self.target_power_spin.setDecimals(2)
+        self.target_power_spin.setSuffix(" mW")
+        self.target_power_spin.setSingleStep(0.5)
+        self.target_power_spin.setValue(0.0)
+        self.target_power_spin.setToolTip(
+            "Desired delivered power. Set to 0 to disable power control "
+            "(Intensity_0 fields written as 0 — current default behavior)."
+        )
+        self.load_lut_button = QtWidgets.QPushButton("Load LUT…")
+        self.load_lut_button.setToolTip(
+            "Load a SysCon .lut file for the currently selected laser wavelength. "
+            "The LUT is bundled with the project on save."
+        )
+        self.load_lut_button.clicked.connect(self._on_load_lut_clicked)
+        self.lut_status_label = QtWidgets.QLabel(self._format_lut_status())
+        self.lut_status_label.setStyleSheet("color: gray; font-style: italic;")
+        power_layout.addWidget(QtWidgets.QLabel("Target power:"))
+        power_layout.addWidget(self.target_power_spin)
+        power_layout.addWidget(self.load_lut_button)
+        power_layout.addWidget(self.lut_status_label, stretch=1)
+        config_layout.addLayout(power_layout)
+        self.laser_combo.currentIndexChanged.connect(
+            lambda _index: self.lut_status_label.setText(self._format_lut_status())
+        )
+
         # HOLO4D Configuration data
         config_data_label = QtWidgets.QLabel("HOLO4D Configuration:")
         config_layout.addWidget(config_data_label)
@@ -153,30 +220,6 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         default_config = self._default_syscon2_config_text()
         self.config_data_edit.setPlainText(default_config)
         config_layout.addWidget(self.config_data_edit)
-
-        self.binary_mode_checkbox = QtWidgets.QCheckBox(
-            "Force binary export intensity (all ON samples -> 1.0)"
-        )
-        self.binary_mode_checkbox.setChecked(True)
-        self.binary_mode_checkbox.setToolTip(
-            "When unchecked, exported Shape intensities preserve input stim amplitudes "
-            "(clipped to [0, 1])."
-        )
-        config_layout.addWidget(self.binary_mode_checkbox)
-
-        laser_layout = QtWidgets.QHBoxLayout()
-        laser_label = QtWidgets.QLabel("Laser timeline:")
-        self.laser_combo = QtWidgets.QComboBox()
-        self.laser_combo.addItem("940 nm digital", 940)
-        self.laser_combo.addItem("1030 nm digital", 1030)
-        self.laser_combo.addItem("1140 nm digital", 1140)
-        self.laser_combo.setCurrentIndex(self.laser_combo.findData(1140))
-        self.laser_combo.setToolTip(
-            "Select which fixed laser timeline receives stimulation TTLPulses."
-        )
-        laser_layout.addWidget(laser_label)
-        laser_layout.addWidget(self.laser_combo)
-        config_layout.addLayout(laser_layout)
 
         config_group.setLayout(config_layout)
         main_layout.addWidget(config_group)
@@ -380,6 +423,19 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 "Scripts Generated",
                 "\n".join(report_lines),
             )
+            if export_report.power_saturation_warnings:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Power saturation",
+                    "Some pulses requested more power than the LUT can deliver "
+                    "and were clamped:\n\n"
+                    + "\n".join(export_report.power_saturation_warnings[:20])
+                    + (
+                        "\n…"
+                        if len(export_report.power_saturation_warnings) > 20
+                        else ""
+                    ),
+                )
 
         except Exception as e:
             self.logger.error(f"Error generating scripts: {e}", exc_info=True)
@@ -554,6 +610,9 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             binary_intensity=1.0,
             force_binary_intensity=force_binary_intensity,
             active_laser_wavelength_nm=self._selected_laser_wavelength_nm(),
+            spiralling=self.spiralling_checkbox.isChecked(),
+            target_power_mw=self.target_power_spin.value(),
+            power_lut=self._selected_power_lut(),
         )
 
         sanitized_values = sanity_report.sanitized_values
@@ -989,13 +1048,52 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             binary_intensity=1.0,
             force_binary_intensity=self.binary_mode_checkbox.isChecked(),
             active_laser_wavelength_nm=self._selected_laser_wavelength_nm(),
+            spiralling=self.spiralling_checkbox.isChecked(),
+            target_power_mw=self.target_power_spin.value(),
+            power_lut=self._selected_power_lut(),
         )
 
     def _selected_laser_wavelength_nm(self) -> int:
         current_data = self.laser_combo.currentData()
         if current_data is None:
-            return 1140
+            return 1100
         return int(current_data)
+
+    def _selected_power_lut(self) -> PowerLut | None:
+        wavelength_nm = self._selected_laser_wavelength_nm()
+        lut, _ = resolve_power_lut(self.project.power_luts, wavelength_nm)
+        return lut
+
+    def _format_lut_status(self) -> str:
+        wavelength_nm = self._selected_laser_wavelength_nm()
+        lut, is_override = resolve_power_lut(self.project.power_luts, wavelength_nm)
+        if lut is None:
+            return f"No LUT loaded for {wavelength_nm} nm"
+        tag = "" if is_override else " (default)"
+        return f"LUT: {lut.description} (max {lut.max_mw:.1f} mW){tag}"
+
+    def _on_load_lut_clicked(self) -> None:
+        wavelength_nm = self._selected_laser_wavelength_nm()
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            f"Load SysCon LUT for {wavelength_nm} nm",
+            "",
+            "SysCon LUT (*.lut);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            with open(path, encoding="utf-8") as fh:
+                lut = parse_power_lut_text(fh.read())
+        except (OSError, ValueError) as exc:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "LUT load failed",
+                f"Could not parse LUT file:\n{exc}",
+            )
+            return
+        self.project.power_luts[wavelength_nm] = lut
+        self.lut_status_label.setText(self._format_lut_status())
 
     def _default_syscon2_config_text(self) -> str:
         imported_template = getattr(

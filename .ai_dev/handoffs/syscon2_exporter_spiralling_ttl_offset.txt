@@ -1,0 +1,324 @@
+syscon2_exporter_spiralling_ttl_offset — Shift every laser TTL by -1 tick when spiralling is on [IMPLEMENTED]
+==============================================================================================================
+
+SysCon v3 in spiralling mode requires the laser TTL pulse to start **one tick before**
+the SLM completes its 16.666 ms load (= 32 ticks at 520.8125 µs/tick). The 1-tick
+lead compensates for the spiralling hardware's own ~1-tick warm-up: when the SLM
+becomes ready at tick 32, the laser is already firing.
+
+Today the exporter emits laser TTL pulses at `adjusted_raw_segment.start_idx` (i.e.
+raw sample index + 32 ticks of preblank shift). With spiralling enabled this is one
+tick too late.
+
+This handoff adds a `spiralling` flag (UI checkbox, default ON) that subtracts 1 tick
+from every laser TTL pulse's start AND end (preserving duration). When the checkbox
+is unchecked, the current behavior is unchanged.
+
+The change is intentionally **minimal** — Option B from the design discussion:
+
+  - One TTL per drawn burst (current multi-burst-per-shape behavior preserved).
+  - Spiralling ON: pulse_start -= 1, pulse_end -= 1 (uniform shift).
+  - Spiralling OFF: no change vs. today.
+
+This is NOT the "one TTL per shape, anchored absolutely to shape_start + 31"
+reshaping (Option A) — the user explicitly chose B to keep sub-window burst timing
+intact.
+
+Files to change:
+    src/neuroseq/exporter_syscon2.py
+    src/neuroseq/stimulation_generator_dialog.py
+    tests/test_exporter_syscon2.py
+    tests/test_stimulation_generator_dialog.py  (only if a sanity-check call gains the new kwarg)
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/exporter_syscon2.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1.  ADD a constant near the other timing constants (around line 45–60), purely for
+    readability — it is the magnitude of the spiralling pre-trigger:
+
+        _SPIRALLING_TTL_LEAD_TICKS = 1  # TTL fires 1 tick before SLM load completes
+
+2.  ADD a `spiralling: bool = True` keyword parameter to
+    `generate_syscon2_sequence_text` (signature currently at line 482). Place it in
+    the same kwarg block as `active_laser_wavelength_nm`. Update the docstring's
+    "Shape objects are quantized to 32-tick ..." paragraph to mention that with
+    `spiralling=True` (default), every laser TTL pulse is shifted earlier by
+    `_SPIRALLING_TTL_LEAD_TICKS` to align with the SLM-load-complete edge.
+
+3.  APPLY the shift after `_build_pulse_window_state(...)` (current line 568) and
+    BEFORE `_validate_laser_pulse_end_before_overlapping_shapes` (line 570). The new
+    block — inserted between those two existing lines:
+
+        pulse_intervals = state.pulse_intervals
+        if spiralling:
+            # Spiralling hardware needs ~1 tick to arm; firing the laser TTL one
+            # tick before the SLM load completes (tick 32 of each shape) keeps the
+            # active laser edge aligned with SLM-ready. Shift both endpoints so the
+            # pulse duration is preserved.
+            pulse_intervals = [
+                (start - _SPIRALLING_TTL_LEAD_TICKS, end - _SPIRALLING_TTL_LEAD_TICKS)
+                for start, end in pulse_intervals
+            ]
+
+        _validate_laser_pulse_end_before_overlapping_shapes(
+            pulse_intervals,
+            state.scheduled_windows,
+            pulse_guard_ticks=0,
+        )
+
+    Then DELETE the existing line that re-binds `pulse_intervals = state.pulse_intervals`
+    further down (current line 580 area) — the local `pulse_intervals` now already
+    holds the (optionally shifted) intervals. Subsequent loops at lines 649 and 667
+    iterate over the local `pulse_intervals` variable and need no other changes.
+
+    DO NOT mutate `state.pulse_intervals` in place; build a fresh list. The state
+    object may be consumed elsewhere (e.g. by the debug CSV builder) that expects
+    the unshifted positions tied to `mapped_segments`.
+
+4.  ADD a `spiralling: bool = True` keyword parameter to `check_syscon2_input_sanity`
+    (signature currently at line 1829), positioned right after
+    `active_laser_wavelength_nm`. Pass it through to the inner
+    `generate_syscon2_sequence_text(...)` call at line 2013:
+
+            _, export_report = generate_syscon2_sequence_text(
+                ...
+                active_laser_wavelength_nm=active_laser_wavelength_nm,
+                spiralling=spiralling,
+            )
+
+    The `_build_pulse_window_state(...)` call at line 1990 (used for pulse-overrun
+    pre-fixing) intentionally still uses the UNSHIFTED `_pw_state.pulse_intervals`:
+    `_find_pulse_overrun_violations` clips samples relative to the original window
+    geometry, and the 1-tick shift would only narrow the fix region by one tick
+    while complicating the math. Leave that block alone — add a one-line comment
+    explaining why the spiralling shift does not apply to the overrun-fix path.
+
+5.  DEFENSIVE EDGE CASE — In practice every pulse interval has
+    `start >= _SYSCON2_WINDOW_TICKS == 32` because the preblank-window insertion in
+    `_apply_preblank_insertions_to_raw_segments` shifts every raw segment by one
+    full SLM window. So `start - 1 >= 31` and `end - 1 > start - 1`. No clamping is
+    required. Do NOT add `max(0, ...)` guards — if a pulse ever lands at start=0,
+    that means the preblank logic upstream broke, and we'd rather see the negative
+    value loudly fail the validator than silently mask the bug. Add a one-line
+    comment to that effect next to the list-comprehension.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/stimulation_generator_dialog.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+6.  ADD a "Spiralling" checkbox. Insert it between the existing
+    `binary_mode_checkbox` block (currently lines 157–165) and the `laser_layout`
+    block (lines 167+):
+
+        self.spiralling_checkbox = QtWidgets.QCheckBox(
+            "Spiralling (TTL fires 1 tick before SLM load completes)"
+        )
+        self.spiralling_checkbox.setChecked(True)
+        self.spiralling_checkbox.setToolTip(
+            "When checked, every laser TTL pulse is shifted 1 tick earlier so the "
+            "laser edge aligns with the SLM-ready edge in spiralling mode. Uncheck "
+            "for legacy non-spiralling hardware: TTL fires exactly at SLM-ready "
+            "(start tick + 16.666 ms)."
+        )
+        config_layout.addWidget(self.spiralling_checkbox)
+
+7.  PLUMB the checkbox into the two existing exporter/sanity-check call sites.
+
+    (a) In `_run_sanity_check` (around line 547–557), pass the new kwarg:
+
+            sanity_report = check_syscon2_input_sanity(
+                stim_array,
+                self.project.cellpose_data,
+                template_text=self.config_data_edit.toPlainText(),
+                tick_resolution_us=500,
+                active_threshold=0.0,
+                binary_intensity=1.0,
+                force_binary_intensity=force_binary_intensity,
+                active_laser_wavelength_nm=self._selected_laser_wavelength_nm(),
+                spiralling=self.spiralling_checkbox.isChecked(),
+            )
+
+    (b) In `_generate_holo4d_script` (around line 982–992), pass the same kwarg:
+
+            return generate_syscon2_sequence_text(
+                stim_array,
+                cellpose_data,
+                template_text=config_data,
+                tick_resolution_us=500,
+                active_threshold=0.0,
+                binary_intensity=1.0,
+                force_binary_intensity=self.binary_mode_checkbox.isChecked(),
+                active_laser_wavelength_nm=self._selected_laser_wavelength_nm(),
+                spiralling=self.spiralling_checkbox.isChecked(),
+            )
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — tests/test_exporter_syscon2.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Every existing call to `generate_syscon2_sequence_text` in this file currently
+inherits the new `spiralling=True` default. To keep the existing TTL-start
+assertions valid WITHOUT touching every numeric expectation, the simplest path is:
+
+  STRATEGY: add `spiralling=False` to every existing `generate_syscon2_sequence_text`
+  call in the file (and to `check_syscon2_input_sanity` calls in the dialog tests if
+  any need it). This preserves their original pulse-start expectations.
+
+  Then add a dedicated test that exercises `spiralling=True` and verifies the
+  expected 1-tick shift.
+
+8.  Search-and-add: for every `generate_syscon2_sequence_text(...)` call in
+    `tests/test_exporter_syscon2.py`, append `spiralling=False,` to the kwargs. There
+    are ~10 such calls; keep diffs minimal — just one extra kwarg per call.
+
+    NOTE: do NOT add `spiralling=False` to the two new parametrized tests
+    introduced by the previous handoff
+    (`test_export_seq_lightsource_id_matches_syscon_v3_template` and
+    `test_export_seq_accepts_legacy_1140_alias_as_1100_timeline`) — instead, switch
+    them to assert the spiralling-ON pulse positions explicitly (see step 10).
+
+9.  ADD a NEW test verifying the -1 tick shift with `spiralling=True`, paired with
+    the corresponding `spiralling=False` baseline:
+
+        def test_export_seq_spiralling_shifts_laser_pulse_one_tick_earlier() -> None:
+            values = np.zeros((40, 1), dtype=np.float32)
+            values[20:22, 0] = 1.0
+            stim_array = StimArray(
+                name="stim",
+                stim_type=StimType.Excitation,
+                values=values,
+                units="1",
+                dt=_DT_S,
+            )
+
+            seq_text_on, report_on = generate_syscon2_sequence_text(
+                stim_array,
+                _cellpose_result(mapping={0: 0}),
+                template_text=_template_header(),
+                tick_resolution_us=500,
+                active_threshold=0.0,
+                binary_intensity=1.0,
+                active_laser_wavelength_nm=1100,
+                spiralling=True,
+            )
+            seq_text_off, _ = generate_syscon2_sequence_text(
+                stim_array,
+                _cellpose_result(mapping={0: 0}),
+                template_text=_template_header(),
+                tick_resolution_us=500,
+                active_threshold=0.0,
+                binary_intensity=1.0,
+                active_laser_wavelength_nm=1100,
+                spiralling=False,
+            )
+
+            seq_on = parse_syscon2_seq_text(seq_text_on)
+            seq_off = parse_syscon2_seq_text(seq_text_off)
+
+            laser_on = [
+                obj for obj in seq_on.objects
+                if obj.object_type == "TTLPulse"
+                and _timeline_index(obj) == report_on.laser_timeline_index
+            ]
+            laser_off = [
+                obj for obj in seq_off.objects
+                if obj.object_type == "TTLPulse"
+                and _timeline_index(obj) == report_on.laser_timeline_index
+            ]
+            assert len(laser_on) == 1
+            assert len(laser_off) == 1
+
+            # 1-tick shift = 520.8125 µs
+            assert laser_off[0].start_time_us - laser_on[0].start_time_us == pytest.approx(
+                _TTL_QUANTUM_US
+            )
+            # Duration unchanged (TTLPulse repeats field is the duration encoding).
+            assert laser_on[0].repeats == laser_off[0].repeats
+            # And the TTL Out 1 mirror shifts identically (it shares pulse_intervals).
+            ttl_out_1_on = [
+                obj for obj in seq_on.objects
+                if obj.object_type == "TTLPulse"
+                and _timeline_index(obj) == report_on.ttl_out1_timeline_index
+            ]
+            ttl_out_1_off = [
+                obj for obj in seq_off.objects
+                if obj.object_type == "TTLPulse"
+                and _timeline_index(obj) == report_on.ttl_out1_timeline_index
+            ]
+            assert ttl_out_1_off[0].start_time_us - ttl_out_1_on[0].start_time_us == pytest.approx(
+                _TTL_QUANTUM_US
+            )
+
+10. UPDATE the two parametrized/legacy tests introduced by the prior handoff:
+
+    (a) `test_export_seq_accepts_legacy_1140_alias_as_1100_timeline` — let it use
+        the default `spiralling=True` (no extra kwarg needed). Its assertions only
+        check `report.laser_timeline_index == 1` and pulse count, not start ticks,
+        so no numeric updates required.
+
+    (b) `test_export_seq_lightsource_id_matches_syscon_v3_template` — same: only
+        checks structural fields (TimelineIndex, LightsourceID, port), no start
+        times. Let it use the default. No change needed.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — tests/test_stimulation_generator_dialog.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+11. If any test in this file constructs the dialog and reaches into
+    `dialog.spiralling_checkbox` — none should yet, but a smoke assertion that the
+    new checkbox exists and defaults to True is worth adding:
+
+        def test_stimulation_generator_dialog_spiralling_checkbox_defaults_to_enabled(
+            qtbot, ...
+        ) -> None:
+            dialog = StimulationGeneratorDialog(...)
+            qtbot.addWidget(dialog)
+            assert dialog.spiralling_checkbox.isChecked()
+
+    Place it adjacent to the existing
+    `test_stimulation_generator_dialog_binary_mode_checkbox_defaults_to_enabled`.
+
+12. If any existing dialog test calls `check_syscon2_input_sanity` directly (the
+    file imports it), no kwarg update is required — the new `spiralling` parameter
+    has a default of `True`, and dialog-level tests aren't asserting pulse start
+    times. Only the exporter unit tests need the explicit `spiralling=False`.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+OUT OF SCOPE — explicitly NOT in this patch
+────────────────────────────────────────────────────────────────────────────────────────────
+
+  - The "one TTL per shape" semantics (Option A). The user chose Option B; multi-
+    burst-per-shape stays as today.
+  - Changing `_validate_laser_pulse_end_before_overlapping_shapes`. The validator
+    is run on the post-shift intervals and remains correct: with `spiralling=True`,
+    pulse_end = original_end - 1, which only loosens the `pulse_end <= shape.end_tick`
+    constraint by one tick.
+  - Re-shifting the `pulse_overrun_fix_values` computation in
+    `check_syscon2_input_sanity` (around line 1990). The fix-region math is tied
+    to the unshifted geometry; add a comment but do not touch the logic.
+  - Updating `_build_debug_csv_text`. The debug CSV records `start_sys_tick` from
+    pulse intervals — these will reflect the shifted values when spiralling=True,
+    which is correct and what users debugging the output will want to see.
+    Re-verify by inspection that the laser/TTL-out blocks pulled into the CSV use
+    the local (shifted) `pulse_intervals`, not `state.pulse_intervals` directly.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    ruff check src/neuroseq/exporter_syscon2.py src/neuroseq/stimulation_generator_dialog.py
+    mypy --ignore-missing-imports src/neuroseq/exporter_syscon2.py
+    PYTHONPATH=src .venv/bin/python -m pytest tests/test_exporter_syscon2.py -v
+    PYTHONPATH=src .venv/bin/python -m pytest tests/test_stimulation_generator_dialog.py -v
+    PYTHONPATH=src .venv/bin/python -m pytest
+
+Manual sanity check: export a one-neuron / one-pulse stim with the dialog's
+spiralling checkbox ON, diff against the matching reference `.seq` file. The
+laser TTL `TimelineInfo0_starttime` should now match the reference exactly
+(e.g. 49477.1875 µs = 95 ticks for the 1100 nm reference, when the user-drawn
+stim spans the second half of an SLM window).
+
+Toggle the checkbox OFF and re-export: the same TTL should now appear at the
+reference start + 1 tick (= 49998.0 µs in the same example), and TTL Out 1
+should mirror it identically.

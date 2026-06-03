@@ -12,6 +12,7 @@ from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.example_projects import default_project
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.power_lut import PowerLut
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stim import StimArray
@@ -800,6 +801,24 @@ def test_project_dt_persists_through_save_load(tmp_path: Path) -> None:
 
     loaded = Project(filepath)
     assert loaded.dt == pytest.approx(0.0005)
+
+
+def test_project_power_luts_persist_through_save_load(tmp_path: Path) -> None:
+    project = Project()
+    project.power_luts = {
+        1100: PowerLut(
+            description="synthetic",
+            tuples=((0.0, 0.0), (100.0, 50.0)),
+        )
+    }
+    filepath = tmp_path / "power_lut_project.nseq"
+
+    project.save(filepath, SaveLoadOptions(True, True, True, True))
+
+    loaded = Project(filepath)
+    assert 1100 in loaded.power_luts
+    assert loaded.power_luts[1100].description == "synthetic"
+    assert loaded.power_luts[1100].tuples == ((0.0, 0.0), (100.0, 50.0))
 
 
 def test_project_dt_falls_back_to_stim_dt_for_old_files(tmp_path: Path) -> None:

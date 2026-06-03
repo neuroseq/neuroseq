@@ -1,0 +1,752 @@
+syscon2_exporter_power_lut — Stimulation power control via project-bundled SysCon .lut tables [IMPLEMENTED]
+============================================================================================================
+
+Today the SysCon2 exporter hard-writes `TimelineInfo0_Intensity_0 = "0"` on both
+the Shape block and the laser TTLPulse block (exporter_syscon2.py:644 and the
+`include_lightsource=True` branch of `_format_ttl_pulse_block`). The user has
+confirmed two facts that unlock power control:
+
+  - SysCon reads `Intensity_0` from **both** Shape AND laser TTLPulse to derive
+    the actual delivered power.
+  - The mW lookup table (`.lut` file, e.g. `20260526_1100-LUT_RAPP.lut`) is
+    **enabled by default** in SysCon's hardware configuration — NeuroSeq just
+    needs to write the right percent into `Intensity_0`; SysCon does the
+    percent→mW translation.
+
+This handoff:
+
+  1. Adds a tiny `.lut` parser + inverse-lookup helper in a new module.
+  2. Adds project-bundled per-wavelength LUTs (`Project.power_luts: dict[int, PowerLut]`)
+     persisted inside the `.nseq` archive's `project_metadata.json`.
+  3. Adds `target_power_mw` and `power_lut` parameters to the exporter; computes
+     percent per shape/pulse from `target_mw × window.intensity` (the existing
+     "Force binary" checkbox already collapses `window.intensity` to 1.0 when on,
+     so unchecked = stim-amplitude multiplier, checked = full target power).
+  4. Adds UI: a "Target power (mW)" spinbox and a "Load LUT for *N* nm…" button
+     to the stim-generator dialog. Clamps with a warning on saturation.
+
+Files to change:
+
+    NEW:  src/neuroseq/power_lut.py
+          src/neuroseq/resources/syscon_luts/default_1100nm.lut   (the user's reference LUT, see below)
+          tests/test_power_lut.py
+    EDIT: src/neuroseq/project.py
+          src/neuroseq/io.py                       (only if append_to_zip handles power_luts; otherwise just project.py)
+          src/neuroseq/exporter_syscon2.py
+          src/neuroseq/stimulation_generator_dialog.py
+          pyproject.toml                           (one line: include the resources dir in the wheel)
+          tests/test_exporter_syscon2.py
+          tests/test_stimulation_generator_dialog.py
+          tests/test_project_io.py                 (or wherever .nseq round-trip is tested)
+
+────────────────────────────────────────────────────────────────────────────────────────────
+DATA MODEL — src/neuroseq/power_lut.py (NEW FILE)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    from __future__ import annotations
+
+    import re
+    from dataclasses import dataclass
+    from dataclasses import field
+
+
+    _LUT_BLOCK_RE = re.compile(r"^\[(_|/_)\]$")
+    _KV_RE = re.compile(r"^(\w+)=(.*)$")
+    _TUPLE_RE = re.compile(r"^Tuple(\d+)$")
+
+
+    @dataclass(frozen=True)
+    class PowerLut:
+        """SysCon .lut: ordered (percent, mW) breakpoints for a single laser channel."""
+
+        description: str
+        tuples: tuple[tuple[float, float], ...]  # ((percent, mw), ...), sorted by percent
+
+        @property
+        def max_mw(self) -> float:
+            return max(mw for _, mw in self.tuples) if self.tuples else 0.0
+
+        def to_serializable(self) -> dict:
+            return {
+                "description": self.description,
+                "tuples": [list(pair) for pair in self.tuples],
+            }
+
+        @classmethod
+        def from_serializable(cls, data: dict) -> "PowerLut":
+            return cls(
+                description=str(data.get("description", "")),
+                tuples=tuple(
+                    (float(p), float(mw)) for p, mw in data.get("tuples", [])
+                ),
+            )
+
+
+    def parse_power_lut_text(text: str) -> PowerLut:
+        """Parse a SysCon `.lut` file.
+
+        Format (per the user's reference 20260526_1100-LUT_RAPP.lut):
+
+            <hash-line or 'nohash'>
+            [_]
+            Description=...
+            Unit=mW
+            Enabled=True|False
+            TuplesCount=N
+            Tuple0=percent;mW
+            Tuple1=percent;mW
+            ...
+            [/_]
+
+        The hash line and Enabled flag are accepted but ignored — they're
+        SysCon-internal. Unit MUST be 'mW' (the only unit we support); raise
+        ValueError otherwise.
+        """
+        description = ""
+        tuples_by_idx: dict[int, tuple[float, float]] = {}
+        unit = "mW"
+        in_block = False
+
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line == "[_]":
+                in_block = True
+                continue
+            if line == "[/_]":
+                in_block = False
+                continue
+            if not in_block:
+                continue
+            m = _KV_RE.match(line)
+            if not m:
+                continue
+            key, value = m.group(1), m.group(2).strip()
+            if key == "Description":
+                description = value
+            elif key == "Unit":
+                unit = value
+            elif key.startswith("Tuple"):
+                idx_match = _TUPLE_RE.match(key)
+                if idx_match is None:
+                    continue
+                idx = int(idx_match.group(1))
+                if ";" not in value:
+                    raise ValueError(f"Malformed LUT tuple at {key}: {value!r}")
+                percent_str, mw_str = value.split(";", 1)
+                tuples_by_idx[idx] = (float(percent_str), float(mw_str))
+
+        if unit != "mW":
+            raise ValueError(f"Unsupported LUT unit {unit!r}; only 'mW' is supported")
+        if not tuples_by_idx:
+            raise ValueError("LUT contains no tuples")
+
+        ordered = tuple(
+            tuples_by_idx[idx] for idx in sorted(tuples_by_idx)
+        )
+        # Tuples in the file are already in percent order; enforce monotonic
+        # non-decreasing percent so the inverse lookup is well-defined.
+        for prev, curr in zip(ordered, ordered[1:]):
+            if curr[0] < prev[0]:
+                raise ValueError(
+                    f"LUT tuples must be sorted by percent (got {curr[0]} after {prev[0]})"
+                )
+        return PowerLut(description=description, tuples=ordered)
+
+
+    def power_lut_mw_to_percent(lut: PowerLut, target_mw: float) -> tuple[float, bool]:
+        """Invert ``lut`` at ``target_mw``.
+
+        Returns (percent, saturated). ``saturated`` is True when the requested mW
+        exceeds the highest mW reachable by the LUT, in which case ``percent`` is
+        clamped to the percent value at that maximum mW.
+
+        Tuples with identical mW values are treated as a flat plateau at the
+        SMALLEST percent reaching that mW (so we always pick the most-efficient
+        operating point). Negative ``target_mw`` returns 0.0.
+        """
+        if not lut.tuples:
+            raise ValueError("LUT is empty")
+        if target_mw <= 0:
+            return 0.0, False
+
+        # Find smallest percent whose mW >= target_mw; interpolate within the
+        # segment that crosses target_mw.
+        prev_pct, prev_mw = lut.tuples[0]
+        if prev_mw >= target_mw:
+            return float(prev_pct), False
+        for pct, mw in lut.tuples[1:]:
+            if mw >= target_mw and mw > prev_mw:
+                t = (target_mw - prev_mw) / (mw - prev_mw)
+                return float(prev_pct + t * (pct - prev_pct)), False
+            prev_pct, prev_mw = pct, mw
+
+        # Past the top of the LUT — saturated. Return the percent of the first
+        # tuple that reaches max_mw (the most-efficient saturation point).
+        max_mw = lut.max_mw
+        saturating_pct = next(
+            (pct for pct, mw in lut.tuples if mw >= max_mw),
+            float(lut.tuples[-1][0]),
+        )
+        return float(saturating_pct), True
+
+────────────────────────────────────────────────────────────────────────────────────────────
+DEFAULT BUNDLED LUT
+────────────────────────────────────────────────────────────────────────────────────────────
+
+A copy of the user's reference 1100 nm LUT
+(`~/Downloads/20260526_1100-LUT_RAPP.lut`) ships with NeuroSeq so 1100 nm has a
+working LUT out of the box. The user can override it per-project via the dialog's
+"Load LUT…" button.
+
+  1. CREATE `src/neuroseq/resources/syscon_luts/default_1100nm.lut` with the
+     verbatim contents from `~/Downloads/20260526_1100-LUT_RAPP.lut`:
+
+            F2-EC-FD-4A-EB-0E-8C-29-3A-0D-22-7A-94-1D-D1-94
+            [_]
+            Description=1100nm 1 spot
+            Unit=mW
+            Enabled=False
+            TuplesCount=9
+            Tuple0=0;0
+            Tuple1=5;0
+            Tuple2=10;2.1
+            Tuple3=20;8.4
+            Tuple4=40;21.9
+            Tuple5=60;36
+            Tuple6=80;49
+            Tuple7=90;49
+            Tuple8=100;49
+            [/_]
+
+  2. CREATE `src/neuroseq/resources/__init__.py` and
+     `src/neuroseq/resources/syscon_luts/__init__.py` (empty) so the directory
+     is importable as a Python package — required for `importlib.resources`.
+
+  3. UPDATE `pyproject.toml` to include the resources directory in the
+     packaged wheel. The exact key depends on the build backend already in use
+     (hatchling / setuptools). For hatchling, add to `[tool.hatch.build.targets.wheel]`:
+
+            [tool.hatch.build.targets.wheel]
+            packages = ["src/neuroseq"]
+            force-include = { "src/neuroseq/resources" = "neuroseq/resources" }
+
+     For setuptools, add `include-package-data = true` and a `MANIFEST.in`
+     entry `recursive-include src/neuroseq/resources *.lut`. Verify which
+     backend the project uses before editing.
+
+  4. EXPOSE the bundled LUT via `power_lut.py`. Append to that module:
+
+            from importlib.resources import files as _resource_files
+
+
+            def load_bundled_default_luts() -> dict[int, PowerLut]:
+                """Parse all `default_<wavelength>nm.lut` files bundled with neuroseq.
+
+                Returns ``{wavelength_nm: PowerLut}``. Currently ships a default for
+                1100 nm only; 940 nm and 1030 nm fall back to "no LUT" until the
+                user provides one.
+                """
+                bundled: dict[int, PowerLut] = {}
+                lut_dir = _resource_files("neuroseq.resources.syscon_luts")
+                for entry in lut_dir.iterdir():
+                    name = entry.name
+                    if not name.startswith("default_") or not name.endswith("nm.lut"):
+                        continue
+                    try:
+                        wavelength_nm = int(name[len("default_") : -len("nm.lut")])
+                    except ValueError:
+                        continue
+                    bundled[wavelength_nm] = parse_power_lut_text(entry.read_text())
+                return bundled
+
+
+            DEFAULT_POWER_LUTS: dict[int, PowerLut] = load_bundled_default_luts()
+
+
+            def resolve_power_lut(
+                project_luts: dict[int, PowerLut],
+                wavelength_nm: int,
+            ) -> tuple[PowerLut | None, bool]:
+                """Resolve the LUT to use at export time.
+
+                Returns ``(lut, is_user_override)``: the project's LUT takes
+                precedence, falling back to the bundled default. The boolean is
+                True when the project overrode the default — useful for the UI
+                status label.
+                """
+                if wavelength_nm in project_luts:
+                    return project_luts[wavelength_nm], True
+                return DEFAULT_POWER_LUTS.get(wavelength_nm), False
+
+  5. UPDATE the dialog's `_format_lut_status` (step 18) to mention "(default)"
+     when the LUT comes from the bundled set:
+
+            def _format_lut_status(self) -> str:
+                wavelength_nm = self._selected_laser_wavelength_nm()
+                lut, is_override = resolve_power_lut(
+                    self.project.power_luts, wavelength_nm
+                )
+                if lut is None:
+                    return f"No LUT loaded for {wavelength_nm} nm"
+                tag = "" if is_override else " (default)"
+                return f"LUT: {lut.description} (max {lut.max_mw:.1f} mW){tag}"
+
+  6. UPDATE the two `power_lut=self.project.power_luts.get(...)` plumb-throughs
+     (step 19) to use the resolver instead:
+
+            from neuroseq.power_lut import resolve_power_lut
+            ...
+            lut, _ = resolve_power_lut(
+                self.project.power_luts, self._selected_laser_wavelength_nm()
+            )
+            sanity_report = check_syscon2_input_sanity(
+                ...,
+                target_power_mw=self.target_power_spin.value(),
+                power_lut=lut,
+            )
+
+     Same change in `_generate_holo4d_script`. DO NOT auto-populate
+     `project.power_luts[1100]` with the default — keeping the default off the
+     project state means (a) the project file stays minimal when the user
+     hasn't overridden anything, and (b) updates to the bundled default
+     propagate automatically to old projects.
+
+  7. ADD to `tests/test_power_lut.py`:
+
+      - `test_default_power_luts_includes_1100nm` — assert
+        `DEFAULT_POWER_LUTS[1100].description == "1100nm 1 spot"` and that the
+        tuple count and last tuple match the bundled file.
+      - `test_resolve_power_lut_prefers_project_override_over_default` — pass
+        `{1100: <synthetic LUT>}` and assert `resolve_power_lut(..., 1100)`
+        returns the synthetic one with `is_override=True`.
+      - `test_resolve_power_lut_falls_back_to_default_when_project_has_none` —
+        pass `{}` and assert the bundled 1100 nm LUT comes back with
+        `is_override=False`.
+      - `test_resolve_power_lut_returns_none_for_unknown_wavelength` — pass
+        wavelength 940; assert `(None, False)`.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Add a test file `tests/test_power_lut.py` covering:
+
+  - Parses the user's `20260526_1100-LUT_RAPP.lut` example correctly
+    (description == "1100nm 1 spot", 9 tuples, last tuple == (100, 49))
+  - `power_lut_mw_to_percent` linear-interpolates between bracketing tuples
+    (e.g. target_mw=4.2 lands halfway between (10, 2.1) and (15, ?) — pick an
+    interpolation that's easy to assert)
+  - Saturation: target_mw=60 → returns (80.0, True) since 80% already saturates
+    at 49 mW
+  - target_mw=0 → (0.0, False)
+  - Round-trip via `to_serializable` / `from_serializable`
+
+────────────────────────────────────────────────────────────────────────────────────────────
+PROJECT STATE — src/neuroseq/project.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1.  Import the new dataclass near the existing imports:
+
+        from neuroseq.power_lut import PowerLut
+
+2.  ADD a new field in `Project.__init__` (after `syscon2_export_template_text`,
+    around line 122):
+
+        # SysCon .lut tables keyed by wavelength (nm). Used at export time to
+        # convert a desired delivered power (mW) into the percent value SysCon
+        # writes to TimelineInfo0_Intensity_0. Persisted inside
+        # `project_metadata.json` as a small dict of dicts.
+        self.power_luts: dict[int, PowerLut] = {}
+
+3.  In the `__init__` load path (around lines 161–169 — where `project_metadata.json`
+    is parsed), ADD:
+
+        self.power_luts = {
+            int(wavelength_str): PowerLut.from_serializable(payload)
+            for wavelength_str, payload in _meta.get("power_luts", {}).items()
+        }
+
+4.  In `save_NN` (around lines 988–994 — where `metadata` is built), ADD:
+
+        if self.power_luts:
+            metadata["power_luts"] = {
+                str(wavelength_nm): lut.to_serializable()
+                for wavelength_nm, lut in self.power_luts.items()
+            }
+
+5.  Same treatment in the second load branch (around line 206-onwards if there
+    is one — search for `project_metadata.json` to confirm; the constructor and
+    `load_NN` may have parallel parsing). Keep both paths in sync.
+
+Add a small test in `tests/test_project_io.py` (or the equivalent existing file)
+asserting that a project with `power_luts = {1100: PowerLut(...)}` round-trips
+across `save_NN` / re-load.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+EXPORTER — src/neuroseq/exporter_syscon2.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+6.  IMPORT the new module at the top:
+
+        from neuroseq.power_lut import PowerLut
+        from neuroseq.power_lut import power_lut_mw_to_percent
+
+7.  ADD a new field on `SysconExportReport` (around line 150) for saturation
+    warnings:
+
+        power_saturation_warnings: list[str] = field(default_factory=list)
+
+    Also ADD optional fields for the active power state so the dialog can echo
+    them back to the user:
+
+        target_power_mw: float = 0.0
+        power_lut_description: str = ""
+
+8.  ADD two new kwargs to `generate_syscon2_sequence_text` (signature currently
+    at line 482, kwarg block runs through line 491):
+
+        target_power_mw: float = 0.0,
+        power_lut: PowerLut | None = None,
+
+    Update the docstring to explain the new path: when both `target_power_mw > 0`
+    and `power_lut is not None`, every Shape's and laser TTLPulse's
+    `TimelineInfo0_Intensity_0` is set to the LUT-inverted percent of
+    `target_power_mw × window.intensity`. Otherwise (current behavior) both
+    `Intensity_0` fields are written as "0".
+
+9.  EARLY in `generate_syscon2_sequence_text` (right after the existing
+    `_normalize_active_laser_wavelength_nm` block, around line 514), add:
+
+        power_enabled = bool(power_lut and target_power_mw > 0)
+        if power_enabled and not power_lut.tuples:
+            raise ValueError("power_lut has no tuples")
+        power_saturation_warnings: list[str] = []
+
+10. ADD a helper next to the existing `_format_float`:
+
+        def _shape_intensity_for_window(
+            window: _ScheduledEntityWindow,
+            *,
+            power_enabled: bool,
+            target_power_mw: float,
+            power_lut: PowerLut | None,
+            saturation_warnings: list[str],
+            label: str,
+        ) -> str:
+            if not power_enabled or power_lut is None:
+                return "0"
+            effective_mw = max(0.0, target_power_mw * float(window.intensity))
+            percent, saturated = power_lut_mw_to_percent(power_lut, effective_mw)
+            if saturated:
+                saturation_warnings.append(
+                    f"{label}: requested {effective_mw:.3f} mW exceeded LUT max "
+                    f"{power_lut.max_mw:.3f} mW; clamped to {percent:.2f}%."
+                )
+            return _format_float(percent)
+
+11. REPLACE the hard-coded "0" on the Shape block (current line 644):
+
+        ("TimelineInfo0_Intensity_0", _shape_intensity_for_window(
+            window,
+            power_enabled=power_enabled,
+            target_power_mw=target_power_mw,
+            power_lut=power_lut,
+            saturation_warnings=power_saturation_warnings,
+            label=f"Shape@neuron={window.neuron_index},tick={window.start_tick}",
+        )),
+
+12. PASS power into the laser TTL block. The laser block emission is around
+    line 666 (`for start_tick, end_tick in pulse_intervals:`). The current
+    `_format_ttl_pulse_block(...)` hard-codes intensity to "0" inside its body
+    (around line 3536). Extend it:
+
+        def _format_ttl_pulse_block(
+            *,
+            object_id: int,
+            block_index: int,
+            timeline_index: int,
+            start_tick: int,
+            duration_ticks: int,
+            port: str,
+            lightsource_id: str,
+            include_lightsource: bool,
+            intensity_percent: str = "0",     # NEW
+        ) -> list[str]:
+            ...
+            if include_lightsource:
+                properties.append(("TimelineInfo0_LightsourceID_0", lightsource_id))
+                properties.append(("TimelineInfo0_Intensity_0", intensity_percent))  # was hard "0"
+            ...
+
+    At the laser TTL emission site, compute the pulse's intensity by taking the
+    MAX of `window.intensity` across all `scheduled_windows` that overlap the
+    pulse interval `[start_tick, end_tick)`:
+
+        for start_tick, end_tick in pulse_intervals:
+            overlapping = [
+                w for w in scheduled_windows
+                if not (end_tick <= w.start_tick or w.end_tick <= start_tick)
+            ]
+            pulse_intensity_norm = max(
+                (float(w.intensity) for w in overlapping), default=0.0
+            )
+            effective_mw = max(0.0, target_power_mw * pulse_intensity_norm)
+            if power_enabled and power_lut is not None:
+                percent, saturated = power_lut_mw_to_percent(power_lut, effective_mw)
+                if saturated:
+                    power_saturation_warnings.append(
+                        f"Laser TTL@tick={start_tick}: requested {effective_mw:.3f} mW "
+                        f"exceeded LUT max {power_lut.max_mw:.3f} mW; clamped to {percent:.2f}%."
+                    )
+                intensity_percent = _format_float(percent)
+            else:
+                intensity_percent = "0"
+            object_blocks.append(
+                _format_ttl_pulse_block(
+                    ...,
+                    intensity_percent=intensity_percent,
+                )
+            )
+
+    The TTL Out 1 / TTL Out 2 emission loops keep `include_lightsource=False` and
+    omit `intensity_percent` entirely (default "0" never reaches output).
+
+13. POPULATE the new report fields when constructing `SysconExportReport` at the
+    bottom of `generate_syscon2_sequence_text` (around line 705):
+
+        report = SysconExportReport(
+            ...,
+            power_saturation_warnings=power_saturation_warnings,
+            target_power_mw=float(target_power_mw),
+            power_lut_description=(power_lut.description if power_lut else ""),
+        )
+
+14. THREAD `target_power_mw` + `power_lut` through `check_syscon2_input_sanity`
+    (signature at line 1829) and its inner `generate_syscon2_sequence_text` call
+    (line 2013). Add the saturation warnings to `SysconInputSanityReport.warnings`
+    so the dialog surfaces them alongside other warnings:
+
+        warnings.extend(export_report.power_saturation_warnings)
+
+    De-duplicate warnings if the same message is also produced by the inner
+    overrun-fix re-build.
+
+15. DO NOT touch the debug CSV columns / row writers for this patch — leave the
+    intensity columns reading from `window.intensity` (the normalized 0–1 value)
+    rather than the LUT-percent. The CSV is for upstream stim debugging, not
+    SysCon-layer debugging.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+DIALOG — src/neuroseq/stimulation_generator_dialog.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+16. IMPORT helpers near the existing imports:
+
+        from neuroseq.power_lut import parse_power_lut_text
+        from neuroseq.power_lut import PowerLut
+
+17. ADD a power-control row to the dialog UI, placed between the laser combo
+    (line ~167–179) and `config_data_edit`. Layout:
+
+        power_layout = QtWidgets.QHBoxLayout()
+        self.target_power_spin = QtWidgets.QDoubleSpinBox()
+        self.target_power_spin.setRange(0.0, 1000.0)
+        self.target_power_spin.setDecimals(2)
+        self.target_power_spin.setSuffix(" mW")
+        self.target_power_spin.setSingleStep(0.5)
+        self.target_power_spin.setValue(0.0)
+        self.target_power_spin.setToolTip(
+            "Desired delivered power. Set to 0 to disable power control "
+            "(Intensity_0 fields written as 0 — current default behavior)."
+        )
+        self.load_lut_button = QtWidgets.QPushButton("Load LUT…")
+        self.load_lut_button.setToolTip(
+            "Load a SysCon .lut file for the currently selected laser wavelength. "
+            "The LUT is bundled with the project on save."
+        )
+        self.load_lut_button.clicked.connect(self._on_load_lut_clicked)
+        self.lut_status_label = QtWidgets.QLabel(self._format_lut_status())
+        self.lut_status_label.setStyleSheet("color: gray; font-style: italic;")
+
+        power_layout.addWidget(QtWidgets.QLabel("Target power:"))
+        power_layout.addWidget(self.target_power_spin)
+        power_layout.addWidget(self.load_lut_button)
+        power_layout.addWidget(self.lut_status_label, stretch=1)
+        config_layout.addLayout(power_layout)
+
+    When the user changes `laser_combo`, refresh the status label:
+
+        self.laser_combo.currentIndexChanged.connect(
+            lambda _: self.lut_status_label.setText(self._format_lut_status())
+        )
+
+18. ADD the helper methods on the dialog class:
+
+        def _format_lut_status(self) -> str:
+            wavelength_nm = self._selected_laser_wavelength_nm()
+            lut = self.project.power_luts.get(wavelength_nm)
+            if lut is None:
+                return f"No LUT loaded for {wavelength_nm} nm"
+            return f"LUT: {lut.description} (max {lut.max_mw:.1f} mW)"
+
+        def _on_load_lut_clicked(self) -> None:
+            wavelength_nm = self._selected_laser_wavelength_nm()
+            path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self,
+                f"Load SysCon LUT for {wavelength_nm} nm",
+                "",
+                "SysCon LUT (*.lut);;All files (*)",
+            )
+            if not path:
+                return
+            try:
+                with open(path) as fh:
+                    lut = parse_power_lut_text(fh.read())
+            except (OSError, ValueError) as exc:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "LUT load failed",
+                    f"Could not parse LUT file:\n{exc}",
+                )
+                return
+            self.project.power_luts[wavelength_nm] = lut
+            self.lut_status_label.setText(self._format_lut_status())
+
+19. PLUMB `target_power_mw` + `power_lut` into both the sanity-check call (line
+    ~548) and the export call (line ~983):
+
+        sanity_report = check_syscon2_input_sanity(
+            ...,
+            target_power_mw=self.target_power_spin.value(),
+            power_lut=self.project.power_luts.get(
+                self._selected_laser_wavelength_nm()
+            ),
+        )
+
+        return generate_syscon2_sequence_text(
+            ...,
+            target_power_mw=self.target_power_spin.value(),
+            power_lut=self.project.power_luts.get(
+                self._selected_laser_wavelength_nm()
+            ),
+        )
+
+20. After a successful export, SHOW any saturation warnings to the user. Add
+    after the existing fix-message handling (in the dialog's export success
+    path — search for `sanity_fix_messages` and inject alongside):
+
+        if export_report.power_saturation_warnings:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Power saturation",
+                "Some pulses requested more power than the LUT can deliver "
+                "and were clamped:\n\n"
+                + "\n".join(export_report.power_saturation_warnings[:20])
+                + ("\n…" if len(export_report.power_saturation_warnings) > 20 else ""),
+            )
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_exporter_syscon2.py (additions only)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+DO NOT modify the existing intensity-related tests (they assert
+`Intensity_0 == "0"` and that contract still holds when no LUT / target=0).
+
+ADD three new tests:
+
+21. `test_export_seq_writes_lut_inverted_intensity_when_power_requested`
+    - Build a small stim with `values[20:22, 0] = 1.0` (one neuron, force-binary).
+    - Build a tiny synthetic `PowerLut` with two breakpoints: `(0, 0)` and
+      `(100, 50)` (linear 0..50 mW → 0..100%).
+    - Call `generate_syscon2_sequence_text(..., target_power_mw=25.0,
+      power_lut=lut, active_laser_wavelength_nm=1100)`.
+    - Assert the Shape's `TimelineInfo0_Intensity_0 ≈ "50"` (since 25 mW = 50%
+      on this linear LUT).
+    - Assert the laser TTLPulse's `TimelineInfo0_Intensity_0 ≈ "50"`.
+    - Assert `report.power_saturation_warnings == []`.
+    - Assert `report.target_power_mw == 25.0` and `report.power_lut_description == ""`.
+
+22. `test_export_seq_clamps_and_warns_when_target_power_exceeds_lut_max`
+    - Same setup but `target_power_mw=200.0` against the 0–50 mW LUT.
+    - Assert both `Intensity_0` fields == "100" (= saturating percent).
+    - Assert `len(report.power_saturation_warnings) >= 1` and the message
+      mentions the LUT max.
+
+23. `test_export_seq_uses_window_intensity_as_multiplier_when_non_binary`
+    - `values[20:22, 0] = 0.4` with `force_binary_intensity=False` and
+      `target_power_mw=50.0` against the 0–50 mW LUT.
+    - Expected effective mW = 0.4 × 50 = 20 mW → Intensity_0 = "40".
+
+ALSO ADD `test_power_lut.py` per step covered above.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_stimulation_generator_dialog.py (additions only)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+24. `test_stimulation_generator_dialog_load_lut_assigns_to_selected_wavelength`
+    - Monkeypatch `QtWidgets.QFileDialog.getOpenFileName` to return a tmp_path
+      `.lut` file containing the user's reference 1100 nm LUT text.
+    - Set `dialog.laser_combo` to 1100.
+    - Click `dialog.load_lut_button` (use qtbot.mouseClick or call
+      `_on_load_lut_clicked` directly).
+    - Assert `project.power_luts[1100].description == "1100nm 1 spot"` and that
+      the status label updated.
+
+25. `test_stimulation_generator_dialog_passes_target_power_and_lut_to_exporter`
+    - Use a `mock.patch` around `generate_syscon2_sequence_text` to capture
+      kwargs (`tests/test_stimulation_generator_dialog.py` already mocks the
+      sanity check — follow that pattern).
+    - Pre-populate `project.power_luts[1100]` with a tiny synthetic LUT.
+    - Set `dialog.target_power_spin.setValue(10.0)` and the laser combo to 1100.
+    - Trigger the export; assert the captured kwargs include
+      `target_power_mw=10.0` and `power_lut=that_lut`.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+OUT OF SCOPE — explicitly NOT in this patch
+────────────────────────────────────────────────────────────────────────────────────────────
+
+  - Multi-spot LUTs. The user's example file is called "1100nm 1 spot"; SysCon
+    has separate LUTs for stimulating N spots simultaneously (since the SLM
+    splits power across spots). For now, the project bundles ONE LUT per
+    wavelength regardless of simultaneous-spot count. A follow-up can key LUTs
+    by `(wavelength_nm, n_spots)` and pick at export time.
+  - Writing `.lut` files back to disk. NeuroSeq only READS the LUT for inverse
+    lookup; the canonical `.lut` lives in SysCon's hardware config.
+  - Validating the `.lut` hash line. We ignore it — SysCon-internal.
+  - Per-burst intensity inside a merged TTL pulse. The merged pulse takes the
+    MAX intensity of any overlapping shape. If you ever need per-burst power
+    modulation, that requires splitting `pulse_intervals` back into raw
+    segments — too invasive for this patch.
+  - UI for editing a loaded LUT inside NeuroSeq. The expectation is: user loads
+    a fresh `.lut` from disk when SysCon's hardware re-calibrates.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    ruff check src/neuroseq/power_lut.py src/neuroseq/project.py \
+              src/neuroseq/exporter_syscon2.py src/neuroseq/stimulation_generator_dialog.py
+    mypy --ignore-missing-imports src/neuroseq/power_lut.py src/neuroseq/exporter_syscon2.py
+    PYTHONPATH=src .venv/bin/python -m pytest tests/test_power_lut.py -v
+    PYTHONPATH=src .venv/bin/python -m pytest tests/test_exporter_syscon2.py -v
+    PYTHONPATH=src .venv/bin/python -m pytest tests/test_stimulation_generator_dialog.py -v
+    PYTHONPATH=src .venv/bin/python -m pytest
+
+Manual sanity check:
+  1. Open the dialog with 1100 nm selected on a project that has NEVER loaded
+     a custom LUT; confirm the status label reads
+     "LUT: 1100nm 1 spot (max 49.0 mW) (default)" — i.e. the bundled default
+     is picked up without any user action.
+  2. Set target = 20 mW, force-binary ON, export. Open the resulting `.seq` and
+     confirm both Shape and laser TTLPulse have
+     `TimelineInfo0_Intensity_0 ≈ 36.6` (linear interpolation between
+     (40,21.9) and (20,8.4) at 20 mW on the bundled LUT).
+  3. Set target = 60 mW, export. Confirm both fields are clamped to "80"
+     (the saturating percent) and the saturation-warning dialog appears.
+  4. Click "Load LUT…" and pick a different `.lut` file. Confirm the status
+     label drops the "(default)" tag. Save the project as `.nseq`, re-open,
+     confirm the user-loaded LUT (not the default) is in effect.
+  5. Switch the laser combo to 940 nm. Confirm the status label reads
+     "No LUT loaded for 940 nm" (no bundled default exists for 940 nm) and
+     setting a target_power_mw with no LUT keeps the export's Intensity_0
+     fields at "0".

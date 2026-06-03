@@ -25,6 +25,7 @@ from neuroseq.data import TraceData
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.io import append_to_zip
 from neuroseq.io import load_from_zip
+from neuroseq.power_lut import PowerLut
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
@@ -120,6 +121,7 @@ class Project:
         self.stim_arrays: dict[str, StimArray] = {}
         self.cellpose_data: CellposeImportResult | None = None
         self.syscon2_export_template_text: str | None = None
+        self.power_luts: dict[int, PowerLut] = {}
 
         self.max_ram_synapse_plot_matrix = 256
         self.max_time_secs = 0.0
@@ -166,6 +168,12 @@ class Project:
                     self.external_simulate_params = _meta.get(
                         "external_simulate_params", {}
                     )
+                    self.power_luts = {
+                        int(wavelength_str): PowerLut.from_serializable(payload)
+                        for wavelength_str, payload in _meta.get(
+                            "power_luts", {}
+                        ).items()
+                    }
                     self._loaded_schema_version = int(_meta.get("schema_version", 1))
             if not _dt_from_metadata:
                 self.dt = self._derive_dt_from_data()
@@ -991,6 +999,11 @@ class Project:
                 metadata["external_simulate_path"] = self.external_simulate_path
             if self.external_simulate_params:
                 metadata["external_simulate_params"] = self.external_simulate_params
+            if self.power_luts:
+                metadata["power_luts"] = {
+                    str(wavelength_nm): lut.to_serializable()
+                    for wavelength_nm, lut in self.power_luts.items()
+                }
             zf.writestr("project_metadata.json", json.dumps(metadata))
             if options.include_stim_arrays:
                 append_to_zip(self.stim_arrays, "stim_arrays", zf)
