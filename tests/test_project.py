@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import zipfile
 from pathlib import Path
 
 import brian2 as b2
@@ -427,6 +428,23 @@ def test_save_load(
         project_nmda.b2_model.network["Mn"].g,
         reconstructed_project.b2_model.network["Mn"].g,
     )
+
+
+def test_save_load_without_simulation(tmp_path: Path) -> None:
+    project = default_project()
+    assert project.b2_model.must_be_rebuilt is True
+    assert [obj.name for obj in project.b2_model.network.objects] == []
+
+    tmp_file = tmp_path / "nosim.nseq"
+    project.save(tmp_file, SaveLoadOptions(True, True, True, True))
+
+    with zipfile.ZipFile(tmp_file) as zf:
+        assert "b2_stored_state.pkl" not in zf.namelist()
+
+    reconstructed_project = Project(tmp_file)
+    assert reconstructed_project.b2_model.checkpoints == []
+    assert reconstructed_project.filepath == tmp_file
+    reconstructed_project.run_simulation(0.01)
 
 
 def test_stim_array_simulation_padding() -> None:
