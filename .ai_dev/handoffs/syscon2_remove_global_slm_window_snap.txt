@@ -1,5 +1,5 @@
-syscon2_remove_global_slm_window_snap — Remove obsolete "snap to allowed windows" sanity step
-==============================================================================================
+syscon2_remove_global_slm_window_snap — Remove obsolete "snap to allowed windows" sanity step [IMPLEMENTED]
+============================================================================================================
 
 The SysCon2 sanity-check flow used to detect stim starts that didn't align to the
 global 16.666 ms SLM grid and prompt the user with three buttons:
