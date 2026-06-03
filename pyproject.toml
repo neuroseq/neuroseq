@@ -8,12 +8,12 @@ description = "Protoype GUI to edit and run neuron models"
 readme = "README.md"
 license = { text = "NONE" }
 authors = [{ name = "SSC", email = "ssc@uni-heidelberg.de" }]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "brian2",
     "matplotlib",
     "pillow",
-    "numpy <= 2.0",
+    "numpy",
     "scipy",
     "qtpy",
     "pyqt6",

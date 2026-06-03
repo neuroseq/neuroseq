@@ -8,7 +8,6 @@ from collections.abc import Callable
 from collections.abc import Iterable
 from enum import Enum
 from typing import Any
-from typing import TypeVar
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -548,10 +547,7 @@ def get_cmap(stim_type: StimType, alpha: float = 1.0) -> Colormap:
             return Colormap([(1.0, 1.0, 1.0, 0.0), (0.0, 0.0, 0.0, alpha)])
 
 
-T = TypeVar("T")
-
-
-def find_by_name_and_type(
+def find_by_name_and_type[T](
     data: Iterable[object],
     name: str,
     cls: type[T],

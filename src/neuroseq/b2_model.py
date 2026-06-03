@@ -2367,6 +2367,9 @@ class B2Model:
             return float(self.network.t / b2.second)
         return 0.0
 
+    def has_simulation_data(self) -> bool:
+        return self.get_sim_time_secs() > 0 or len(self.checkpoints) > 0
+
     def get_max_neurons(self) -> int:
         max_neurons = 0
         for obj in self.network.objects:
@@ -2374,7 +2377,7 @@ class B2Model:
                 max_neurons = max(max_neurons, obj.N)
         return max_neurons
 
-    def to_dict(self) -> dict[Any, Any]:
+    def to_dict(self, include_simulation_data: bool = True) -> dict[Any, Any]:
         states = self.network.get_states(read_only_variables=False)
         # remove monitors from state to avoid saving their recorded data
         for key in self.monitors:
@@ -2384,7 +2387,7 @@ class B2Model:
         states["seed"] = self.seed
         states["parameters"] = self.parameters
         states["initials"] = self.initials
-        states["checkpoints"] = self.checkpoints
+        states["checkpoints"] = self.checkpoints if include_simulation_data else []
         states["objects"] = {
             "neurongroups": list(self.neurongroups.keys()),
             "synapses": list(self.synapses.keys()),
