@@ -867,6 +867,85 @@ def test_modeldialog_accept(
     assert "p1" in [obj.name for obj in diag.b2model.network.objects]
 
 
+def test_modeldialog_accept_does_not_prompt_without_simulation_data(
+    b2_model_nmda: B2Model,
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    diag = ModelEditorDialog(b2_model_nmda)
+    qtbot.addWidget(diag)
+
+    def fail_question(*args, **kwargs):
+        raise AssertionError("confirmation should not be shown")
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "question", fail_question)
+
+    diag.b2model.define_neuronnumber("p1", 25)
+    diag.b2model.define_solver_method("p1", "euler")
+    diag.b2model.define_equation("p1", "dv/dt=-v: 1")
+
+    diag.accept()
+
+    assert "p1" in [obj.name for obj in diag.b2model.network.objects]
+
+
+def test_modeldialog_accept_declines_simulation_data_removal(
+    b2_model_nmda: B2Model,
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    b2_model_nmda.checkpoints.append("Existing checkpoint")
+    diag = ModelEditorDialog(b2_model_nmda)
+    qtbot.addWidget(diag)
+
+    question_calls = []
+
+    def decline_question(parent, title, text, buttons, default_button):
+        question_calls.append({"title": title, "text": text})
+        return QtWidgets.QMessageBox.StandardButton.No
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "question", decline_question)
+
+    diag.b2model.define_neuronnumber("p1", 25)
+    diag.b2model.define_solver_method("p1", "euler")
+    diag.b2model.define_equation("p1", "dv/dt=-v: 1")
+
+    diag.accept()
+
+    assert len(question_calls) == 1
+    assert diag.b2model.must_be_rebuilt is True
+    assert "p1" not in [obj.name for obj in diag.b2model.network.objects]
+
+
+def test_modeldialog_accept_confirms_simulation_data_removal(
+    b2_model_nmda: B2Model,
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    b2_model_nmda.checkpoints.append("Existing checkpoint")
+    diag = ModelEditorDialog(b2_model_nmda)
+    qtbot.addWidget(diag)
+
+    question_calls = []
+
+    def accept_question(parent, title, text, buttons, default_button):
+        question_calls.append({"title": title, "text": text})
+        return QtWidgets.QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "question", accept_question)
+
+    diag.b2model.define_neuronnumber("p1", 25)
+    diag.b2model.define_solver_method("p1", "euler")
+    diag.b2model.define_equation("p1", "dv/dt=-v: 1")
+
+    diag.accept()
+
+    assert len(question_calls) == 1
+    assert diag.b2model.must_be_rebuilt is False
+    assert diag.b2model.checkpoints == []
+    assert "p1" in [obj.name for obj in diag.b2model.network.objects]
+
+
 def test_modeldialog_accept_exception(
     b2_model_nmda: B2Model,
     qtbot: QtBot,
