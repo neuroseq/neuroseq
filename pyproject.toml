@@ -63,7 +63,6 @@ path = "src/neuroseq/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/neuroseq"]
-force-include = { "src/neuroseq/resources" = "neuroseq/resources" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
