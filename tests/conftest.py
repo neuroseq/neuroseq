@@ -709,15 +709,15 @@ we= clip(we + Apre, -gmax, gmax)
 
     # define stim arrays
 
-    tfinal = 1000 * b2.ms
+    tfinal = 200 * b2.ms
 
     stim = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
-    stim[120, :nneurons_exc:2] = 1
-    stim[121, 1:nneurons_exc:2] = 1
-    stim[320, :nneurons_exc:2] = 1
-    stim[321, 1:nneurons_exc:2] = 1
-    stim[520, :nneurons_exc:2] = 1
-    stim[521, 1:nneurons_exc:2] = 1
+    stim[24, :nneurons_exc:2] = 1
+    stim[25, 1:nneurons_exc:2] = 1
+    stim[64, :nneurons_exc:2] = 1
+    stim[65, 1:nneurons_exc:2] = 1
+    stim[104, :nneurons_exc:2] = 1
+    stim[105, 1:nneurons_exc:2] = 1
     stim_array = StimArray(
         name="stimulus",
         stim_type=StimType.Excitation,
@@ -728,7 +728,7 @@ we= clip(we + Apre, -gmax, gmax)
     project.add_stim_array(stim_array)
 
     stim_inh = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
-    stim_inh[800:802, :nneurons_exc] = 1
+    stim_inh[160:162, :nneurons_exc] = 1
     stim_array_inh = StimArray(
         name="stimulus_inh",
         stim_type=StimType.Inhibition,

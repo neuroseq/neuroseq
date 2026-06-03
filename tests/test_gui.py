@@ -329,7 +329,7 @@ def test_gui_simulate_and_playback(
     assert gui.heatmap_widget.idx == 0
     assert "run" in gui.continue_simulation_action.text().lower()
     assert "continue" not in gui.continue_simulation_action.text().lower()
-    simulation_time_s = 1.0
+    simulation_time_s = 0.2
     # mock getText to return the desired simulation time
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time_s}", True)

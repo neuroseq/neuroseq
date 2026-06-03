@@ -30,7 +30,7 @@ jobs:
         with:
           environment-file: environment.yml
       - run: pip install . --no-deps
-      - run: pytest -sv || pytest -sv || pytest -sv
+      - run: pytest -sv
         env:
           NEUROSEQ_HEADLESS_TEST: TRUE
   pypi:
@@ -50,7 +50,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - uses: astral-sh/setup-uv@v7
-      - run: uv run pytest -sv --cov --cov-report=xml || uv run pytest -sv --cov --cov-report=xml || uv run pytest -sv --cov --cov-report=xml
+      - run: uv run pytest -sv --cov --cov-report=xml
         env:
           NEUROSEQ_HEADLESS_TEST: TRUE
       - run: uv run diff-cover coverage.xml -c pyproject.toml
