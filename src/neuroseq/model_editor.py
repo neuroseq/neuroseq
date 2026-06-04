@@ -566,12 +566,17 @@ class EditableSynapseTree(EditableParameterTree):
                     ],  # methods are static, so we can give a list
                 },
                 "origin": {
-                    "update_from": lambda: list(self.b2model.neurongroups.keys())
-                    + ["-"],
+                    "update_from": lambda: (
+                        list(self.b2model.neurongroups.keys()) + ["-"]
+                    ),
                 },
                 "target": {
-                    "update_from": lambda: list(self.b2model.neurongroups.keys())
-                    + ["-"],
+                    "update_from": lambda: (
+                        list(self.b2model.neurongroups.keys()) + ["-"]
+                    ),
+                },
+                "skip_if_invalid": {
+                    "update_from": lambda: ["False", "True"],
                 },
             },
         )
