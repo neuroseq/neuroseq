@@ -2479,32 +2479,28 @@ class Gui(QtWidgets.QMainWindow):
         analysis_window.setWindowTitle(f"ELiSe replay MSE — saved to {csv_path.name}")
         analysis_window.show()
 
+    def _stop_worker_thread(
+        self, thread: QtCore.QThread | None, timeout_ms: int, label: str
+    ) -> None:
+        """Stop a worker thread during shutdown."""
+        if thread is None or not thread.isRunning():
+            return
+        thread.quit()
+        if not thread.wait(timeout_ms):
+            self.logger.warning(
+                f"{label} did not stop in {timeout_ms} ms during shutdown."
+            )
+
     def closeEvent(self, event):
         if (
             self._external_sim_thread is not None
-            and self._external_sim_thread.isRunning()
+            and self._external_sim_cancel is not None
         ):
-            if self._external_sim_cancel is not None:
-                self._external_sim_cancel.set()
-            if not self._external_sim_thread.wait(2000):
-                self.logger.warning(
-                    "External simulation worker did not stop in 2 s; "
-                    "force-quitting the thread."
-                )
-                self._external_sim_thread.quit()
-                self._external_sim_thread.wait(1000)
-        # BackgroundIOWorker also carries native Brian2 simulation runs.
-        # These tasks are not cooperatively cancellable through the shared
-        # IO path, so close waits for them and then force-quits as a last
-        # resort.
-        if (
-            self._io_thread is not None
-            and self._io_thread.isRunning()
-            and not self._io_thread.wait(10000)
-        ):
-            self.logger.warning("IO worker did not stop in 10 s; force-quitting.")
-            self._io_thread.quit()
-            self._io_thread.wait(2000)
+            self._external_sim_cancel.set()
+        self._stop_worker_thread(
+            self._external_sim_thread, 2000, "External simulation worker"
+        )
+        self._stop_worker_thread(self._io_thread, 10000, "IO worker")
         # Stop timers and queued widget updates before tearing down owned widgets.
         self.time_slider.close()
         # explicitly close all fastplotlib figures to avoid renderer trying to access them after they have been destroyed

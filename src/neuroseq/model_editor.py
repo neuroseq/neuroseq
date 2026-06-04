@@ -740,7 +740,8 @@ class EditableMonitorTree(EditableParameterTree):
                         list(obj.equations.names) + list(obj.variables.keys())
                     )
 
-            return list(set(varnames)) + [
+            # use fromkeys instead of set to get deterministic order of elements in list
+            return list(dict.fromkeys(varnames)) + [
                 "None",
             ]
 

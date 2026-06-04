@@ -1005,7 +1005,7 @@ def test_method_selection(
 
     assert b2_model_nmda.network["Mn"].g.shape == (1, 0)
     # try to run
-    diag.b2model.run_simulation(1.0, stim_arrays={})
+    diag.b2model.run_simulation(0.1, stim_arrays={})
 
     exp_euler_data_shape = diag.b2model.network["Mn"].g.shape
 
@@ -1016,7 +1016,7 @@ def test_method_selection(
     assert diag.b2model.neurongroups["neuron_input"]["method"] == "euler"
 
     diag.b2model.assemble_network()
-    diag.b2model.run_simulation(1.0, stim_arrays={})
+    diag.b2model.run_simulation(0.1, stim_arrays={})
 
     euler_data_shape = diag.b2model.network["Mn"].g.shape
 
@@ -1041,9 +1041,9 @@ def test_monitordialog_modify_with_run(
         0,
     )[0]
 
-    b2_model_nmda.run_simulation(1, stim_arrays={})
+    b2_model_nmda.run_simulation(0.4, stim_arrays={})
 
-    assert b2_model_nmda.network["M"].g.shape[1] == 5
+    assert b2_model_nmda.network["M"].g.shape[1] == 2
     dtparam = m.child(3)
 
     b2_model_nmda.assemble_network()
@@ -1056,6 +1056,6 @@ def test_monitordialog_modify_with_run(
     b2_model_nmda.assemble_network()
     assert b2_model_nmda.network["M"].clock.dt == 100 * b2.ms
 
-    b2_model_nmda.run_simulation(1, stim_arrays={})
+    b2_model_nmda.run_simulation(0.4, stim_arrays={})
 
-    assert b2_model_nmda.network["M"].g.shape[1] == 10
+    assert b2_model_nmda.network["M"].g.shape[1] == 4
