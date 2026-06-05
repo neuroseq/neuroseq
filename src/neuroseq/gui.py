@@ -1029,9 +1029,8 @@ class Gui(QtWidgets.QMainWindow):
         # Restore the default modality used by other long-running paths
         # (project load, import) that block the main thread.
         self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
-        if self._external_sim_cancel is not None:
-            with contextlib.suppress(TypeError, RuntimeError):
-                self.progress_dialog.canceled.disconnect(self._external_sim_cancel.set)
+        with contextlib.suppress(TypeError, RuntimeError):
+            self.progress_dialog.canceled.disconnect()
         self._external_sim_worker = None
         self._external_sim_thread = None
         self._external_sim_cancel = None
@@ -1127,11 +1126,15 @@ class Gui(QtWidgets.QMainWindow):
         on_success: Callable[[object], None],
         failure_title: str = "File operation failed",
         failure_prefix: str = "The file operation could not complete:",
+        cancel_callback: Callable[[], None] | None = None,
     ) -> bool:
         """Run a blocking IO task on a worker thread.
 
         Returns ``True`` if the task was dispatched, ``False`` if another
         IO task is already in flight.
+
+        If ``cancel_callback`` is given, the progress dialog shows a Cancel
+        button wired to it that calls the callback on the GUI thread.
         """
         if self._io_worker is not None:
             QtWidgets.QMessageBox.information(
@@ -1155,7 +1158,22 @@ class Gui(QtWidgets.QMainWindow):
         self.progress_dialog.setAutoReset(False)
         self.progress_dialog.setMinimumDuration(0)
         self.progress_dialog.setValue(0)
-        self.progress_dialog.setCancelButton(None)
+        if cancel_callback is not None:
+            self.progress_dialog.setCancelButtonText("Cancel")
+
+            def _on_cancel() -> None:
+                # The dialog hides on cancel, but the worker can keep running
+                # (e.g. uninterruptible Brian2 compilation). Re-show a busy
+                # "Cancelling..." bar until the worker actually finishes.
+                cancel_callback()
+                self.progress_dialog.setLabelText("Cancelling...")
+                self.progress_dialog.setRange(0, 0)
+                self.progress_dialog.setCancelButton(None)
+                self.progress_dialog.show()
+
+            self.progress_dialog.canceled.connect(_on_cancel)
+        else:
+            self.progress_dialog.setCancelButton(None)
         # Non-modal so the rest of the GUI stays interactive while the
         # worker thread does the IO. File-related actions are still
         # gated via _set_io_actions_enabled below.
@@ -1195,6 +1213,9 @@ class Gui(QtWidgets.QMainWindow):
         self.progress_dialog.setAutoClose(True)
         self.progress_dialog.setAutoReset(True)
         self.progress_dialog.setMinimumDuration(10)
+        with contextlib.suppress(TypeError, RuntimeError):
+            self.progress_dialog.canceled.disconnect()
+        self.progress_dialog.setCancelButton(None)
         self.progress_dialog.reset()
         self._io_thread = None
         self._io_worker = None
@@ -1250,6 +1271,10 @@ class Gui(QtWidgets.QMainWindow):
         project = self.project
         padding_secs = self.settings.stim_padding_secs
 
+        def _request_brian2_cancel() -> None:
+            self.logger.info("Brian2 simulation cancellation requested by user.")
+            project.request_cancel_simulation()
+
         def _brian2_task(report: Callable[[int], None]) -> None:
             first_report_seen: list[bool] = []
 
@@ -1291,6 +1316,7 @@ class Gui(QtWidgets.QMainWindow):
             _on_brian2_finished,
             failure_title="Simulation error",
             failure_prefix="Could not run simulation:",
+            cancel_callback=_request_brian2_cancel,
         )
 
     def btn_do_external_simulation_clicked(self) -> None:

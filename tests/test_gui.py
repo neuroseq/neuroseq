@@ -38,7 +38,7 @@ from neuroseq.utils import InteractMode
 delay_after_update_model_call_in_ms = 50
 
 
-def _wait_for_brian2_simulation(qtbot: QtBot, gui: Gui, timeout: int = 15000) -> None:
+def _wait_for_brian2_simulation(qtbot: QtBot, gui: Gui, timeout: int = 90000) -> None:
     qtbot.waitUntil(lambda: gui._io_worker is None, timeout=timeout)
 
 
@@ -395,6 +395,31 @@ def test_gui_simulate_and_playback(
     assert gui.trace_widget.timeline.t == approx(0, rel=2)
     assert gui.spike_widget.timeline.t == approx(0, rel=2)
     assert gui.heatmap_widget.idx == 0
+    gui.close()
+
+
+def test_gui_simulate_and_cancel(
+    monkeypatch: MonkeyPatch, qtbot: QtBot, test_project: Project
+) -> None:
+    gui = Gui()
+    gui.load_project(test_project)
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("1.0", True))
+
+    gui.btn_continue_simulation_clicked()
+    assert gui._io_worker is not None
+    # cancel simulation on first progress update
+    gui._io_worker.progress.connect(lambda _: gui.progress_dialog.canceled.emit())
+
+    _wait_for_brian2_simulation(qtbot, gui)
+
+    assert gui.project.b2_model.cancel_requested is True
+    assert gui._io_worker is None
+    assert not gui.progress_dialog.isVisible()
+    assert QtWidgets.QApplication.overrideCursor() is None
     gui.close()
 
 

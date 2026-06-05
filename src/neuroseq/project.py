@@ -964,6 +964,10 @@ class Project:
         self.b2_model.run_simulation(time_seconds, self.stim_arrays, report)
         self.update_limits()
 
+    def request_cancel_simulation(self) -> None:
+        """Request that an in-progress simulation stop early."""
+        self.b2_model.request_cancel()
+
     def save(
         self,
         filepath: str | pathlib.Path,
