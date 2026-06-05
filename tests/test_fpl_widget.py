@@ -7,13 +7,47 @@ from qtpy import QtWidgets
 from neuroseq.fpl_widget import FPLWidget
 
 
+def test_fpl_widget_skips_rendering_until_canvas_is_sized(qtbot: QtBot) -> None:
+    widget = FPLWidget()
+    qtbot.addWidget(widget)
+
+    rendered: list[bool] = []
+    widget._fpl_figure_render = lambda draw=True: rendered.append(True)
+
+    assert widget._fpl_canvas_ready() is False
+    rendered.clear()
+    widget._fpl_guarded_render()
+    # invalid viewport so guarded renderer does not call the real renderer:
+    assert rendered == []
+
+    widget.show()
+    qtbot.waitExposed(widget)
+    qtbot.waitUntil(widget._fpl_canvas_ready)
+    rendered.clear()
+    widget._fpl_guarded_render()
+    # valid viewport so guarded renderer calls the real renderer:
+    assert rendered == [True]
+
+
+class _DummyCanvas:
+    def request_draw(self, draw_function=None) -> None:
+        return
+
+    def set_update_mode(self, update_mode, **kwargs) -> None:
+        return
+
+
 class _DummyFigure:
     def __init__(self, calls: list[dict[str, object]], **kwargs) -> None:
         self._calls = calls
         self._calls.append(kwargs)
+        self.canvas = _DummyCanvas()
 
     def show(self) -> QtWidgets.QWidget:
         return QtWidgets.QWidget()
+
+    def _render(self, draw: bool = True) -> None:
+        return
 
     def __getitem__(self, key: tuple[int, int]) -> object:
         return object()

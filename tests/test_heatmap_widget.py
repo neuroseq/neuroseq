@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from time import perf_counter
+import math
 
 import brian2.numpy_ as np
 import pytest
@@ -26,7 +26,9 @@ def test_heatmap_widget_no_data(qtbot: QtBot) -> None:
     heatmap_widget.close()
 
 
-@pytest.mark.parametrize("relative_playback_speed", [0.25, 0.66])
+@pytest.mark.parametrize(
+    "relative_playback_speed", [0.25, 0.66, 1.0, 1.71234, 2.0, 3.0]
+)
 def test_heatmap_widget_3d_data_with_timeline(
     qtbot: QtBot, relative_playback_speed: float, make_synapse_data
 ) -> None:
@@ -42,7 +44,6 @@ def test_heatmap_widget_3d_data_with_timeline(
     n_j = 10
     n_timestamps = 10
     time_s = 0.5
-    total_playback_time_secs = time_s / relative_playback_speed
     time_slider.set_max_time_secs(time_s)
     data = make_synapse_data("synapse", n_i, n_j, n_timestamps, max_time_secs=time_s)
     # SynapseData("synapse", values, timepoints_s)
@@ -52,13 +53,34 @@ def test_heatmap_widget_3d_data_with_timeline(
     assert heatmap_widget.data.shape == (n_timestamps, n_j, n_i)
     assert heatmap_widget.timestamps is not None
     assert heatmap_widget.timestamps.shape == (n_timestamps,)
-    qtbot.wait(100)  # allow time for initial rendering
-    time_slider.toggle_pause()
-    start_time_secs = perf_counter()
-    qtbot.waitUntil(lambda: heatmap_widget.idx == n_timestamps - 1)
-    elapsed_time_secs = perf_counter() - start_time_secs
-    # timing should be correct within 25%
-    assert elapsed_time_secs == pytest.approx(total_playback_time_secs, rel=0.25)
+
+    # use mock timer as real timing can be very variable in CI
+    class FakeElapsedTimer:
+        def __init__(self) -> None:
+            self.ms = 0
+
+        def restart(self) -> None:
+            self.ms = 0
+
+        def elapsed(self) -> int:
+            return self.ms
+
+    fake_timer = FakeElapsedTimer()
+    time_slider.elapsed_timer = fake_timer  # type: ignore[assignment]
+    time_slider.toggle_pause()  # start playback from t=0
+    assert time_slider.timer.isActive()
+
+    total_playback_ms = math.ceil(time_s * 1000 / relative_playback_speed)
+    for fraction in (0.25, 0.5, 0.75):
+        fake_timer.ms = int(total_playback_ms * fraction)
+        time_slider._tick()
+        assert heatmap_widget.idx == pytest.approx(fraction * (n_timestamps - 1), abs=1)
+        assert time_slider.timer.isActive()
+    fake_timer.ms = total_playback_ms
+    time_slider._tick()
+    assert heatmap_widget.idx == n_timestamps - 1
+    assert not time_slider.timer.isActive()
+
     heatmap_widget.close()
     qtbot.waitUntil(lambda: not heatmap_widget.isVisible())
 
