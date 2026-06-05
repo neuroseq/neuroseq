@@ -87,6 +87,14 @@ class StimWidget(TimeseriesWidget):
             z_offset=z_offset,
         )
 
+    @staticmethod
+    def _apply_cmap_alpha(image_graphic: fpl.ImageGraphic, cmap: object) -> None:
+        # set the graphic material texture colormap values directly, as add_image ignores any alpha values
+        image_graphic._material.map.texture.data[:] = cmap(  # type: ignore[operator]
+            np.linspace(0, 255, 256, dtype=int)
+        ).astype(np.float32)
+        image_graphic._material.map.texture.update_range((0, 0, 0), size=(256, 1, 1))
+
     def set_data(self, stim_array: StimArray | None = None) -> None:
         self.clear_data()
         if stim_array is None:
@@ -101,12 +109,16 @@ class StimWidget(TimeseriesWidget):
             self.vmin = -self.vmax
         self.units = "" if stim_array.units == "1" else stim_array.units
         self.dt_ms = float(stim_array.dt) * 1000.0  # convert to milliseconds
+        cmap = get_cmap(self.stim_type)
         self.graphic = self.subplot.add_image(
             stim_array.values.T,
             vmin=self.vmin,
             vmax=self.vmax,
-            cmap=get_cmap(self.stim_type),
+            cmap=cmap,
         )
+        # respect the colormap alpha so zero-valued stim is transparent (otherwise it
+        # is drawn as opaque white, hiding the reduced-opacity background stims)
+        self._apply_cmap_alpha(self.graphic, cmap)
         self._configure_time_scaled_image(self.graphic)
         self.n_neurons = stim_array.values.shape[1]
         self.n_timestamps = stim_array.values.shape[0]
@@ -135,13 +147,8 @@ class StimWidget(TimeseriesWidget):
         self._configure_time_scaled_image(
             image_graphic,
             dt_ms=float(stim_array.dt) * 1000.0,
-            z_offset=1.0,
         )
-        # set the graphic material texture colormap values directly, as add_image ignores any alpha values
-        image_graphic._material.map.texture.data[:] = cmap(
-            np.linspace(0, 255, 256, dtype=int)
-        ).astype(np.float32)
-        image_graphic._material.map.texture.update_range((0, 0, 0), size=(256, 1, 1))
+        self._apply_cmap_alpha(image_graphic, cmap)
         image_graphic.visible = self.show_background_graphics
         self.background_graphics.append(image_graphic)
         units_str = "" if stim_array.units == "1" else str(stim_array.units)
