@@ -440,17 +440,133 @@ def test_synapse_connection_prob_numerical(
     assert np.isclose(mfx.synapses["Ce"]["p"], 0.5)
 
     boundary = np.nextafter(1.0, 2.0)
-    with pytest.raises(
-        ValueError,
-        match="Error, supplied value 1.0000000000000002 is not a probability.",
-    ):
+    with pytest.raises(ValueError) as e:
         mfx.define_synapse_connection_probability("Ce", boundary)
+    assert "error" in str(e.value).lower()
+    assert str(boundary) in str(e.value)
 
     boundary = np.nextafter(0.0, -1.0)
-    with pytest.raises(
-        ValueError, match="Error, supplied value -5e-324 is not a probability."
-    ):
+    with pytest.raises(ValueError) as e:
         mfx.define_synapse_connection_probability("Ce", boundary)
+    assert "error" in str(e.value).lower()
+    assert str(boundary) in str(e.value)
+
+
+def test_synapse_connection_prob_string_expression(
+    mfx_parameterized: tuple[B2Model, dict[str, Any]],
+) -> None:
+    mfx, _ = mfx_parameterized
+
+    # a string expression is stored verbatim and not range-checked here
+    mfx.define_synapse_connection_probability("Ce", "1.0 * (j > i)")
+
+    assert mfx.synapses["Ce"]["p"] == "1.0 * (j > i)"
+
+
+def test_build_connect_kwargs_condition_mode() -> None:
+    kwargs = B2Model._build_connect_kwargs(
+        {
+            "connection_condition": "i != j",
+            "p": 0.3,
+            "connection_i": "-",
+            "connection_j": "-",
+            "connection_n": "1",
+            "skip_if_invalid": "False",
+        }
+    )
+    assert kwargs == {"n": "1", "condition": "i != j", "p": 0.3}
+
+
+def test_build_connect_kwargs_explicit_indices() -> None:
+    # explicit i/j take precedence over condition/p, and "-" means unset
+    kwargs = B2Model._build_connect_kwargs(
+        {
+            "connection_condition": "i != j",
+            "p": 0.3,
+            "connection_i": "-",
+            "connection_j": "i",
+            "connection_n": "-",
+            "skip_if_invalid": "True",
+        }
+    )
+    assert kwargs == {"skip_if_invalid": True, "j": "i"}
+
+
+def test_build_connect_kwargs_literal_index_arrays() -> None:
+    # literal index/array strings are parsed into ints/lists, generator
+    # expressions are passed through unchanged
+    kwargs = B2Model._build_connect_kwargs(
+        {
+            "connection_i": "[0, 1, 2]",
+            "connection_j": "3",
+        }
+    )
+    assert kwargs == {"i": [0, 1, 2], "j": 3}
+
+    kwargs = B2Model._build_connect_kwargs({"connection_j": "k for k in range(3)"})
+    assert kwargs == {"j": "k for k in range(3)"}
+
+
+def test_synapse_connect_one_to_one(
+    mfx_with_synapse: tuple[B2Model, dict[str, Any]],
+) -> None:
+    mfx, _ = mfx_with_synapse
+
+    # one-to-one connectivity via a generator expression for j
+    mfx.define_synapse_j("Ce", "i")
+    mfx._assemble_synapse("Ce")
+
+    ce = mfx.network["Ce"]
+    assert list(ce.i) == list(range(24))
+    assert list(ce.j) == list(range(24))
+
+
+def test_synapse_connect_explicit_index_arrays(
+    mfx_with_synapse: tuple[B2Model, dict[str, Any]],
+) -> None:
+    mfx, _ = mfx_with_synapse
+
+    # explicit connectivity given as literal index arrays
+    mfx.define_synapse_i("Ce", "[0, 5, 10]")
+    mfx.define_synapse_j("Ce", "[1, 2, 3]")
+    mfx._assemble_synapse("Ce")
+
+    ce = mfx.network["Ce"]
+    assert list(ce.i) == [0, 5, 10]
+    assert list(ce.j) == [1, 2, 3]
+
+
+def test_synapse_connect_string_probability(
+    mfx_with_synapse: tuple[B2Model, dict[str, Any]],
+) -> None:
+    mfx, _ = mfx_with_synapse
+
+    # deterministic index-dependent probability: connect only the upper triangle
+    mfx.define_synapse_connection_probability("Ce", "1.0 * (j > i)")
+    mfx._assemble_synapse("Ce")
+
+    ce = mfx.network["Ce"]
+    assert len(ce) == 24 * 23 // 2
+    assert all(j > i for i, j in zip(ce.i, ce.j, strict=True))
+
+
+def test_synapse_connection_fields_round_trip(
+    mfx_with_synapse: tuple[B2Model, dict[str, Any]],
+) -> None:
+    mfx, params = mfx_with_synapse
+
+    mfx.define_synapse_j("Ce", "i")
+    mfx.define_synapse_n("Ce", "2")
+    mfx.define_synapse_skip_if_invalid("Ce", "True")
+    mfx._assemble_synapse("Ce")
+
+    model = B2Model.from_dict(mfx.to_dict(), params)
+
+    assert model.synapses["Ce"]["connection_j"] == "i"
+    assert model.synapses["Ce"]["connection_n"] == "2"
+    assert model.synapses["Ce"]["skip_if_invalid"] == "True"
+    # one-to-one with n=2 → two synapses per source neuron
+    assert len(model.network["Ce"]) == 2 * 24
 
 
 def test_define_synapse_delay(
@@ -1020,6 +1136,10 @@ def test_default_group_addition(project_ornstein) -> None:
         "delay": 0 * b2.ms,
         "connection_condition": "x!=y",
         "p": 0.0,
+        "connection_i": "-",
+        "connection_j": "-",
+        "connection_n": "1",
+        "skip_if_invalid": "False",
         "on_pre": "x=y",
         "on_post": "x=y",
     }

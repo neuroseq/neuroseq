@@ -210,6 +210,10 @@ def test_default_synapse_addition(
             "delay",
             "p",
             "connection_condition",
+            "connection_i",
+            "connection_j",
+            "connection_n",
+            "skip_if_invalid",
         ],
         [
             "-",
@@ -222,6 +226,10 @@ def test_default_synapse_addition(
             0 * b2.ms,
             0.0,
             "x!=y",
+            "-",
+            "-",
+            "1",
+            "False",
         ],
         strict=True,
     ):
