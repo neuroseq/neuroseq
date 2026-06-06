@@ -278,9 +278,26 @@ def test_gui_open_example_project_menu_has_subsections(qtbot: QtBot) -> None:
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
 
-    assert gui.open_example_project_menu is not None
-    assert list(gui.open_example_project_section_menus) == list(example_projects)
-    assert len(gui.open_example_project_actions) == sum(
+    # locate the "Open example project" submenu in the File menu
+    example_menu = next(
+        (
+            action.menu()
+            for action in gui.menu_file.actions()
+            if action.menu() is not None
+            and "Open example project" in action.text().replace("&", "")
+        ),
+        None,
+    )
+    assert example_menu is not None
+
+    # its child submenus are the sections, each containing one action per project
+    section_menus = {
+        action.text().replace("&", ""): action.menu()
+        for action in example_menu.actions()
+        if action.menu() is not None
+    }
+    assert list(section_menus) == list(example_projects)
+    assert sum(len(menu.actions()) for menu in section_menus.values()) == sum(
         len(section_projects) for section_projects in example_projects.values()
     )
     assert {"Getting Started Project", "non_linear"}.issubset(

@@ -193,11 +193,6 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_synapse.setMinimumWidth(120)
         self.cmb_data = QtWidgets.QComboBox()
         self.cmb_data.setMinimumWidth(120)
-        # Keep strong Python references to these menus/actions to avoid premature
-        # PySide object deletion on some platforms (notably macOS CI).
-        self.open_example_project_menu: QtWidgets.QMenu | None = None
-        self.open_example_project_section_menus: dict[str, QtWidgets.QMenu] = {}
-        self.open_example_project_actions: list[QtWidgets.QAction] = []
         self.controller = ConstrainedPanZoomController()
         self.trace_widget = TraceWidget(self.controller, parent=self)
         self.heatmap_widget = HeatmapWidget(parent=self)
@@ -1925,16 +1920,13 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.file"),
         )
         # add "open example project" item to the file menu which opens a sub-menu containing the example projects from src/neuroseq/example_projects
-        self.open_example_project_menu = menu.addMenu("&Open example project")
-        assert self.open_example_project_menu is not None
-        self.open_example_project_section_menus = {}
-        self.open_example_project_actions = []
+        open_example_project_menu = menu.addMenu("&Open example project")
+        assert open_example_project_menu is not None
         for section, section_projects in example_projects.items():
-            section_menu = self.open_example_project_menu.addMenu(section)
+            section_menu = open_example_project_menu.addMenu(section)
             assert section_menu is not None
-            self.open_example_project_section_menus[section] = section_menu
             for name, generator in section_projects.items():
-                action = add_action(
+                add_action(
                     name,
                     lambda checked=False, _generator=generator: (
                         self._load_example_project(_generator)
@@ -1942,7 +1934,6 @@ class Gui(QtWidgets.QMainWindow):
                     section_menu,
                     None,
                 )
-                self.open_example_project_actions.append(action)
         add_action(
             "&Open project",
             self.btn_open_clicked,
@@ -2509,10 +2500,4 @@ class Gui(QtWidgets.QMainWindow):
         # Close any detached analysis windows that are parented to this GUI.
         for analysis_window in self.findChildren(CustomAnalysisWindow):
             analysis_window.close()
-        # Drop strong menu refs so closed GUI instances do not keep dangling
-        # QMenu/QAction wrappers alive across tests and CI runs.
-        self.menuBar().clear()
-        self.open_example_project_menu = None
-        self.open_example_project_section_menus.clear()
-        self.open_example_project_actions.clear()
         super().closeEvent(event)
