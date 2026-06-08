@@ -788,6 +788,7 @@ class B2Model:
         }
         self.checkpoints: list[str] = []
         self.must_be_rebuilt = False
+        self.cancel_requested = False
         self.logger = logging.getLogger(__name__)
         self.logger.info("Model creation complete")
 
@@ -2160,6 +2161,7 @@ class B2Model:
         time_seconds: float,
         stim_arrays: dict[str, StimArray],
         report: Callable | None = None,
+        report_period: b2.Quantity = 1.0 * b2.second,
     ) -> None:
         """
         Run the fully defined simulation
@@ -2174,7 +2176,12 @@ class B2Model:
             A dictionary of stimulus arrays to be used in the simulation
         report : Callable | None, optional
             A callable function to report progress, by default None
+        report_period : b2.Quantity, optional
+            Minimum wall-clock interval between ``report`` calls, by default 1s.
+            Pass a smaller value to report progress more frequently.
         """
+        self.cancel_requested = False
+
         if self.must_be_rebuilt:
             network_name = self.network.name if self.network else "Network"
             del self.network
@@ -2187,13 +2194,23 @@ class B2Model:
         namespace = self.parameters | {
             name: as_timed_array(stim_array) for name, stim_array in stim_arrays.items()
         }
+        if self.cancel_requested:
+            self.logger.info("simulation cancelled before run started")
+            return
         self.network.run(
             time_seconds * b2.second,
             report=report,
-            report_period=1.0 * b2.second,
+            report_period=report_period,
             namespace=namespace,
         )
         self.logger.info(f"run the system for {time_seconds}s")
+
+    def request_cancel(self) -> None:
+        """Request that an in-progress simulation stop early."""
+        self.logger.info("simulation cancellation requested")
+        self.cancel_requested = True
+        if self.network is not None:
+            self.network.stop()
 
     def store(self, checkpoint: str) -> None:
         """

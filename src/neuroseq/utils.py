@@ -115,7 +115,7 @@ def neuron_indices_to_colors(indices: np.ndarray) -> np.ndarray:
     # these values of a and m taken from table 2 of https://www.ams.org/journals/mcom/1999-68-225/S0025-5718-99-00996-5/S0025-5718-99-00996-5.pdf
     a = 23234
     m = 32749
-    return colormap(np.mod(np.asarray(indices) * a, m) / m).astype("float16")
+    return colormap(np.mod(np.asarray(indices) * a, m) / m).astype(np.float32)
 
 
 def init_brian2_logging(log_level: str = "ERROR") -> None:

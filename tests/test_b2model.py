@@ -817,6 +817,30 @@ def test_ornstein_uhlenbeck_other_dt() -> None:
     assert model.network["M"].y.shape == (5, 20)
 
 
+def test_request_cancel_during_run_truncates_simulation(
+    b2_model_nmda: B2Model,
+) -> None:
+    # Cancelling from the progress callback once the run is half complete stops
+    # it early, leaving recorded data for ~half of the requested runtime.
+    requested_seconds = 0.100
+
+    def _cancel_at_halfway(elapsed, completed, start, duration) -> None:
+        if completed >= 0.5:
+            b2_model_nmda.request_cancel()
+
+    # report_period=0 makes Brian2 invoke the callback every timestep, so the
+    # cancel lands close to the 50% mark.
+    b2_model_nmda.run_simulation(
+        requested_seconds,
+        stim_arrays={},
+        report=_cancel_at_halfway,
+        report_period=0 * b2.second,
+    )
+
+    recorded_seconds = float(b2_model_nmda.network["M"].t[-1])
+    assert recorded_seconds == pytest.approx(requested_seconds / 2, abs=0.005)
+
+
 def test_NMDA_model(b2_model_nmda: B2Model) -> None:
     # https://brian2.readthedocs.io/en/stable/examples/synapses.nonlinear.html
     b2.seed(4321)
