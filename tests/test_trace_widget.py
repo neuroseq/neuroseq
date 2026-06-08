@@ -134,14 +134,39 @@ def test_trace_widget_indices(qtbot: QtBot) -> None:
     for i, line in enumerate(trace_widget.graphic.graphics):
         idx = data.indices[i]
         assert line.offset[1] == pytest.approx(idx)
-        assert np.allclose(line.colors[0], colormap[data.indices[i]])
+        assert np.allclose(line.colors, colormap[data.indices[i]])
     # now set same data with same indices in a different order
     data.indices = np.array([15, 6, 11, 1, 0], dtype=np.uint32)
     trace_widget.set_data(data)
     for i, line in enumerate(trace_widget.graphic.graphics):
         idx = data.indices[i]
         assert line.offset[1] == pytest.approx(idx)
-        assert np.allclose(line.colors[0], colormap[data.indices[i]])
+        assert np.allclose(line.colors, colormap[data.indices[i]])
+
+
+def test_trace_widget_clear_data_releases_plot_buffers(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    data = TraceData(
+        name="traces",
+        traces=np.ones((2, 100), dtype=np.float32),
+        indices=np.array([0, 1], dtype=np.uint32),
+        dt=0.001,
+        units="mV",
+    )
+
+    trace_widget.set_data(data)
+    assert trace_widget.graphic is not None
+    assert trace_widget.data_values is not None
+    assert trace_widget.grid_lines is not None
+
+    trace_widget.clear_data()
+
+    assert trace_widget.graphic is None
+    assert trace_widget.data is None
+    assert trace_widget.data_values is None
+    assert trace_widget.grid_lines is None
 
 
 def test_trace_widget(qtbot: QtBot) -> None:

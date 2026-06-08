@@ -1052,6 +1052,21 @@ def test_assemble_network(b2_model_nmda, monkeypatch: MonkeyPatch) -> None:
         model.get_equation_names_of("neurons")
 
 
+def test_assemble_network_clears_monitor_lookup_caches(
+    b2_model_nmda: B2Model,
+) -> None:
+    assert b2_model_nmda.get_simulation_trace_names()
+    assert b2_model_nmda.get_simulation_synapse_names()
+    assert b2_model_nmda.trace_name_to_monitor
+    assert b2_model_nmda.synapse_name_to_monitor
+
+    b2_model_nmda.assemble_network()
+
+    assert b2_model_nmda.trace_name_to_monitor == {}
+    assert b2_model_nmda.spike_name_to_monitor == {}
+    assert b2_model_nmda.synapse_name_to_monitor == {}
+
+
 def test_hdf5(
     tmp_path: Path,
     project_ornstein: Project,

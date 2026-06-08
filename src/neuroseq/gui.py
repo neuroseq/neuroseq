@@ -722,7 +722,11 @@ class Gui(QtWidgets.QMainWindow):
             self.setWindowTitle(f"{model_suffix} - Neuroseq")
 
     @with_wait_cursor
-    def update_project(self, project: Project, reset_controller=False) -> None:
+    def update_project(
+        self,
+        project: Project,
+        reset_controller: bool = False,
+    ) -> None:
         self.project = project
         self._update_window_title()
         if reset_controller:
@@ -732,6 +736,7 @@ class Gui(QtWidgets.QMainWindow):
         self.continue_simulation_action.setText("&Run simulation")
         for widget in self.plot_widgets:
             widget.clear_data()
+        self.custom_analysis_widget.clear_data()
         if self.project is not None:
             self.last_cellpose_import = clone_cellpose_result(
                 self.project.cellpose_data

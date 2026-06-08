@@ -10,6 +10,7 @@ from typing import NoReturn
 
 import brian2 as b2
 import h5py
+import numpy as np
 
 from neuroseq import utils
 from neuroseq.b2_units import display_units
@@ -1951,7 +1952,11 @@ class B2Model:
         """
         Assemble the network from its predefined components.
         """
-        self.network = b2.Network(name=self.name)
+        network_name = self.name
+        self.trace_name_to_monitor.clear()
+        self.spike_name_to_monitor.clear()
+        self.synapse_name_to_monitor.clear()
+        self.network = b2.Network(name=network_name)
         self.checkpoints.clear()
 
         for n in self.neurongroups:
@@ -2289,7 +2294,7 @@ class B2Model:
         quantity = monitor.variables[variable_name]
         return TraceData(
             trace_name,
-            quantity.get_value().T,
+            quantity.get_value().T.astype(np.float32, copy=False),
             monitor.record,
             display_units(quantity),
             dt,
