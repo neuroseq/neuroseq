@@ -20,6 +20,7 @@ dependencies:
   - pytest
   - pytest-qt
   - pytest-mock
+  - pytest-timeout
   - pip
   - pip:
       - fastplotlib
