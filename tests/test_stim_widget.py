@@ -46,11 +46,12 @@ def mouse_click_and_drag(
     delay_ms=10,
     intermediate_points=4,
 ) -> None:
+    event_target = get_event_target(widget)
     qtbot.wait(delay_ms)
-    qtbot.mouseMove(get_event_target(widget), pos=start)
+    qtbot.mouseMove(event_target, pos=start)
     qtbot.wait(delay_ms)
     qtbot.mousePress(
-        get_event_target(widget),
+        event_target,
         button,
         pos=start,
     )
@@ -62,12 +63,12 @@ def mouse_click_and_drag(
     ):
         qtbot.wait(delay_ms)
         qtbot.mouseMove(
-            get_event_target(widget),
+            event_target,
             pos=QtCore.QPoint(int(x), int(y)),
         )
     qtbot.wait(delay_ms)
     qtbot.mouseRelease(
-        widget,
+        event_target,
         button,
         pos=end,
     )
@@ -335,7 +336,10 @@ def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: StimArray) -> Non
     x0 = stim_widget.size().width() // 4
     y0 = stim_widget.size().height() // 4
     mouse_click_and_drag(
-        qtbot, stim_widget, QtCore.QPoint(x0, y0), QtCore.QPoint(x0 * 3, y0 * 3)
+        qtbot,
+        stim_widget.figure.canvas,
+        QtCore.QPoint(x0, y0),
+        QtCore.QPoint(x0 * 3, y0 * 3),
     )
     assert stim_widget.selected_neuron_slice is not None
     assert stim_widget.selected_time_slice is not None
@@ -409,7 +413,10 @@ def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
         lambda n0, n1, t0, t1, btn: drag_signals.append((n0, n1, t0, t1, btn))
     )
     mouse_click_and_drag(
-        qtbot, stim_widget, QtCore.QPoint(x0, y0), QtCore.QPoint(x2, y0)
+        qtbot,
+        stim_widget.figure.canvas,
+        QtCore.QPoint(x0, y0),
+        QtCore.QPoint(x2, y0),
     )
     assert len(drag_signals) > 2
     # first signal on start of drag
