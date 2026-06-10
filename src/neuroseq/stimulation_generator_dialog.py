@@ -1008,6 +1008,9 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         )
         if not path:
             return
+        self._apply_lut_from_path(path, wavelength_nm)
+
+    def _apply_lut_from_path(self, path: str, wavelength_nm: int) -> None:
         try:
             with open(path, encoding="utf-8") as fh:
                 lut = parse_power_lut_text(fh.read())

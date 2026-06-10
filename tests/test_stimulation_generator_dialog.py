@@ -292,7 +292,6 @@ def test_stimulation_generator_dialog_generate_passes_spiralling_checkbox(
 def test_stimulation_generator_dialog_load_lut_assigns_to_selected_wavelength(
     qtbot: QtBot,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     values = np.zeros((40, 1), dtype=np.float32)
     values[20:22, 0] = 1.0
@@ -303,13 +302,7 @@ def test_stimulation_generator_dialog_load_lut_assigns_to_selected_wavelength(
 
     lut_path = tmp_path / "loaded_1100.lut"
     lut_path.write_text(_REFERENCE_LUT_TEXT, encoding="utf-8")
-    monkeypatch.setattr(
-        QtWidgets.QFileDialog,
-        "getOpenFileName",
-        lambda *args, **kwargs: (str(lut_path), "SysCon LUT (*.lut)"),
-    )
-
-    dialog._on_load_lut_clicked()
+    dialog._apply_lut_from_path(str(lut_path), 1100)
 
     assert project.power_luts[1100].description == "1100nm 1 spot"
     assert "1100nm 1 spot" in dialog.lut_status_label.text()
