@@ -127,8 +127,10 @@ def test_gui_patchclamp_append_doubles_duration(qtbot, monkeypatch):
     expected_indices = np.array([0, 1, 2], dtype=np.uint32)
     trace_first_timepoint = trace.traces[:, 0]
     trace_last_timepoint = trace.traces[:, -1]
-    raw_first_timepoint = raw[:, 0]
-    raw_last_timepoint = raw[:, -1]
+    # traces are stored as float32 (TraceData enforces its declared dtype), so
+    # compare against the raw data cast to the same dtype
+    raw_first_timepoint = raw[:, 0].astype(np.float32)
+    raw_last_timepoint = raw[:, -1].astype(np.float32)
 
     assert trace.traces.shape[1] == expected_timepoints
     assert np.array_equal(trace.indices, expected_indices)

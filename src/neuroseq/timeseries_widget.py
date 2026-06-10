@@ -70,6 +70,8 @@ class TimeseriesWidget(FPLWidget):
         self.logger = logging.getLogger(__name__)
         self.data: TraceData | SpikeData | SynapseData | None = None
         self.data_values: np.ndarray | None = None
+        # multiplier applied to data_values when shown as a hover value
+        self.data_values_scale: float = 1.0
         self.units = ""
         self.selection_in_progress = False
         self.mouse_pos: np.ndarray | None = None
@@ -141,14 +143,14 @@ class TimeseriesWidget(FPLWidget):
             action_label = f"{action_label} (new window)"
         add_action(
             action_label,
-            lambda *args,
-            _analysis_type=analysis_type,
-            _new_window=new_window: self.custom_analysis_requested.emit(
-                self.data,
-                _analysis_type,
-                _new_window,
-                self.selected_neuron_slice,
-                self.selected_time_slice,
+            lambda *args, _analysis_type=analysis_type, _new_window=new_window: (
+                self.custom_analysis_requested.emit(
+                    self.data,
+                    _analysis_type,
+                    _new_window,
+                    self.selected_neuron_slice,
+                    self.selected_time_slice,
+                )
             ),
             self.context_menu,
             None,
@@ -188,8 +190,8 @@ class TimeseriesWidget(FPLWidget):
         self.subplot.axes.x.points.visible = False
         self.subplot.axes.x.line.visible = False
         self.subplot.axes.x.min_tick_distance = 100
-        self.subplot.axes.x.tick_format = (
-            lambda x, x_min, x_max: f"{format_milliseconds(x)}ms"
+        self.subplot.axes.x.tick_format = lambda x, x_min, x_max: (
+            f"{format_milliseconds(x)}ms"
         )
         # Push axes (incl. tick labels) above gridline z=199 so labels render on top.
         self.subplot.axes.world_object.world.z = 300
@@ -213,9 +215,14 @@ class TimeseriesWidget(FPLWidget):
         if self.controller is not None and self.grid_lines is not None:
             self.controller.remove_grid_lines(self.grid_lines)
         super().clear_data()
+        self.graphic = None
         self.hover_slice_graphic = None
         self.background_graphics = []
         self.data = None
+        self.data_values = None
+        self.data_values_scale = 1.0
+        self.units = ""
+        self.grid_lines = None
         self.n_neurons = 0
         self.n_timestamps = 0
         self.dt_ms = 0.0
@@ -267,7 +274,9 @@ class TimeseriesWidget(FPLWidget):
             neuron_index = np.clip(
                 math.floor(self.mouse_pos[1] + 0.5), 0, self.data_values.shape[1] - 1
             )
-            hover_value = self.data_values[time_index, neuron_index]
+            hover_value = (
+                self.data_values[time_index, neuron_index] * self.data_values_scale
+            )
             hover_value_text = f"{hover_value:.3g} {self.units}"
         self.text.set_pos(self.mouse_pos, hover_value_text)
         if self.hover_slice_graphic is not None:

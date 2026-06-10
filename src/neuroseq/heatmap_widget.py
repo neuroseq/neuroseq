@@ -206,21 +206,23 @@ class HeatmapWidget(FPLWidget):
         self.logger.info(
             f"{data.values.shape} values with {data.timestamps.shape} timestamps"
         )
-        self.data = data.values.T.astype(np.float32)
+        self.data = data.values.T
         vmin = float(np.min(self.data))
         vmax = float(np.max(self.data))
         if vmin == vmax:
             vmax = vmin + 1.0
         self.idx = 0
         self.timestamps = data.timestamps
+        # the view's slices are non-contiguous; copy the small 2D slice we display
+        display_slice = np.ascontiguousarray(self.data[self.idx])
         self.ig = self.subplot.add_image(
-            self.data[self.idx],
+            display_slice,
             vmin=vmin,
             vmax=vmax,
             cmap="viridis",
             isolated_buffer=False,
         )
-        self.hlut = fpl.HistogramLUTTool(self.data[self.idx], self.ig)
+        self.hlut = fpl.HistogramLUTTool(display_slice, self.ig)
         self.subplot.docks["right"].add_graphic(self.hlut)
         self.subplot.docks["right"].size = 80
         self.subplot.docks["right"].auto_scale(maintain_aspect=False)
@@ -297,7 +299,8 @@ class HeatmapWidget(FPLWidget):
         if self.data is None or self.ig is None or self.hlut is None:
             return
         self.idx = idx
-        data = self.data[self.idx]
+        # copy the small displayed slice out of the non-contiguous source view
+        data = np.ascontiguousarray(self.data[self.idx])
         if self.subtract_idx is not None:
             data = data - self.data[self.subtract_idx]
         self.ig.data = data
@@ -319,8 +322,12 @@ class HeatmapWidget(FPLWidget):
             return
         self.subtract_idx = idx
         if idx is not None:
-            vmin = float(np.min(self.data - self.data[self.subtract_idx]))
-            vmax = float(np.max(self.data - self.data[self.subtract_idx]))
+            sub = self.data[self.subtract_idx]
+            # we need min/max of (data - sub): reduce data over time first
+            per_cell_min = self.data.min(axis=0)
+            per_cell_max = self.data.max(axis=0)
+            vmin = float((per_cell_min - sub).min())
+            vmax = float((per_cell_max - sub).max())
             if vmin == vmax:
                 vmax = vmin + 1.0
             self.hlut.vmin = vmin

@@ -89,8 +89,6 @@ class FPLWidget(QtWidgets.QWidget):
                 self.figure.canvas.request_draw()
             else:
                 self.figure.canvas.set_update_mode("manual")
-                # flush any remaining renders
-                self.figure.canvas.force_draw()
         except (AttributeError, TypeError, RuntimeError) as exc:
             self.logger.debug("Could not toggle fastplotlib rendering (%s).", exc)
 
