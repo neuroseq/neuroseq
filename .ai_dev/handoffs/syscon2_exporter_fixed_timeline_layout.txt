@@ -1,0 +1,368 @@
+syscon2_exporter_fixed_timeline_layout — Match SysCon v3 absolute timeline/lightsource layout [IMPLEMENTED]
+============================================================================================================
+
+The SysCon2 exporter currently writes laser TTLPulse objects onto **dynamic** timeline
+indices computed as `n_entity_lanes + offset`, with a wavelength→offset map and a
+wavelength→lightsource_id map that don't match what SysCon v3 actually expects. As a
+result, exported `.seq` files load into SysCon but the laser TTL pulses arrive on the
+wrong lane (e.g. on a TTL-out row, or on a different wavelength's row), and the
+lightsource named on the pulse doesn't match the lane.
+
+Three reference `.seq` files from the up-to-date SysCon software (each contains one
+Shape + one laser TTL + TTL Out 1 + TTL Out 2) establish the true layout:
+
+  ~/Downloads/laser_1100nm_TL2.seq
+  ~/Downloads/laser_940nm_TL3.seq
+  ~/Downloads/laser_1030nm_TL4.seq
+
+(The filename "TLn" is the 1-based SysCon UI row; the on-disk `TimelineInfo0_TimelineIndex`
+value is `n-1`. So "TL2" == TimelineIndex 1.)
+
+This handoff swaps the exporter to **absolute, fixed** timeline indices, fixes the
+wavelength↔lightsource_id mapping, fixes the wavelength label (1140 → 1100, with 1140
+kept as a legacy alias mirroring the existing 1040→1030 alias), and forces the Shape's
+LightsourceID to the SLM-driver value the references all use.
+
+Single file to change:
+    src/neuroseq/exporter_syscon2.py
+
+Tests to update (golden indices baked in):
+    tests/test_exporter_syscon2.py
+
+UI label to update:
+    src/neuroseq/stimulation_generator_dialog.py (one combo-box line)
+
+────────────────────────────────────────────────────────────────────────────────────────────
+BACKGROUND — what the reference files prove
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Across all three reference files, the layout is identical except for the active
+wavelength's TTLPulse row and its LightsourceID/port:
+
+  TimelineIndex  Purpose              LightsourceID  port
+  0              Shape (SLM)          dummy_2_0      (no port; Intensity_0=0)
+  1              Laser TTL @ 1100 nm  dummy_2_0      dummy_2_0 RMI In
+  2              Laser TTL @ 940  nm  dummy_1_0      dummy_1_0 RMI In
+  3              Laser TTL @ 1030 nm  dummy_0_0      dummy_0_0 RMI In
+  4              TTL Out 1 (mirror)   —              Holo4D TTL Out 1
+  5              TTL Out 2 (gate)     —              Holo4D TTL Out 2
+
+Key observations:
+
+  (a) Timeline indices for lanes 1..5 are **absolute and fixed** — they do NOT depend on
+      how many shape lanes a particular stim needs. This is the primary bug: today's code
+      writes `laser_timeline_index = n_entity_lanes + offset` (exporter_syscon2.py:577-581),
+      so when a stim uses 2+ shape lanes, the laser pulses spill onto rows 4/5/6 — which
+      SysCon shows as TTL-out / wrong-wavelength rows.
+
+  (b) The row↔lightsource_id binding is 1:1 in SysCon: row 1 always carries dummy_2_0,
+      row 2 always dummy_1_0, row 3 always dummy_0_0. Our current
+      `_LIGHTSOURCE_ID_BY_WAVELENGTH_NM` (exporter_syscon2.py:51-55) has 940 and 1030
+      **swapped** vs. the references.
+
+  (c) The Shape's `Intensity_0 = 0` in every reference file, with LightsourceID
+      `dummy_2_0` regardless of which laser TTL fires. So the Shape's lightsource is a
+      SLM-driver constant, NOT the active laser. We should emit `dummy_2_0` on every
+      Shape and ignore the active wavelength when picking that field.
+
+  (d) TTL Out 1 mirrors the laser TTL exactly: same `starttime`, same `repeats`
+      (16 ticks in every reference). This is the "spiraling trigger" the user described.
+      Our current code already emits this — but on the wrong absolute lane
+      (`n_entity_lanes + 3` instead of fixed 4). The mirroring itself is correct.
+
+  (e) TTL Out 2 is present in every reference and pre/post-pads the active stim window
+      (e.g. starts at tick 26 = 13541.125 µs; ends 22+ ticks past shape end). The exact
+      timing varies across the three reference files (repeats=123/140/123) — likely
+      because the user hand-tuned it per file. The exporter currently does NOT emit
+      TTL Out 2 (see comment at exporter_syscon2.py:582). **TTL Out 2 is OUT OF SCOPE
+      for this patch** — leaving the current "TTL Out 2 unused" behaviour as-is. A
+      follow-up patch can add it once the user specifies a deterministic timing rule
+      (e.g. "start at first-shape - N ticks, end at last-laser-TTL + M ticks").
+
+  (f) The wavelength label "1140" used throughout NeuroSeq is what SysCon and the
+      Rapp LUT file (`20260526_1100-LUT_RAPP.lut`) call "1100". Same physical lightsource
+      (`dummy_2_0`). Rename the canonical value to 1100 and keep 1140 as a legacy alias
+      (same shape as the existing `_LEGACY_LASER_WAVELENGTH_ALIASES_NM = {1040: 1030}`).
+
+────────────────────────────────────────────────────────────────────────────────────────────
+OPEN QUESTION — multi-shape-lane layout
+────────────────────────────────────────────────────────────────────────────────────────────
+
+The reference files all have exactly one shape, on TimelineIndex 0. The current
+exporter supports stims that need multiple simultaneous shape lanes (controlled by
+`_max_simultaneous_entity_windows` at exporter_syscon2.py:1305 and `_assign_entity_lanes`
+at 3309). With the new fixed layout, indices 1..5 are reserved — so additional shape
+lanes cannot live at 1/2/3/4/5.
+
+**Decision adopted in this patch:** shape lanes use the contiguous index set
+`{0, 6, 7, 8, ...}`, i.e. lane 0 stays on row 0 and any additional lanes go to row 6 and
+above. This preserves the convention shown in every reference, and "pushes" extra shape
+lanes safely past the reserved rows. If the user later confirms a different convention,
+this is a one-line constant change.
+
+In code: when `_assign_entity_lanes` returns a lane index `i`, map it to a
+TimelineIndex via `_shape_lane_to_timeline_index(i)`:
+
+    def _shape_lane_to_timeline_index(lane: int) -> int:
+        # Lane 0 → row 0; lanes 1..N → rows 6, 7, 8, …
+        # Rows 1..5 are reserved for lasers (1..3) and TTL outs (4..5).
+        return 0 if lane == 0 else lane + 5
+
+(If the user later confirms that all shape lanes should go above the reserved block,
+change this to `return lane + 6`. Add a `# TODO confirm with hardware owner` if helpful.)
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/exporter_syscon2.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1.  REPLACE the wavelength constants block (lines 47–55) with the absolute layout:
+
+        # SysCon v3 reserves timeline rows 1..5 for laser TTLPulses (per wavelength) and
+        # the two Holo4D TTL-out channels. Shape lanes live on row 0 (and, if more than
+        # one simultaneous lane is needed, rows 6..N). The row↔lightsource binding is
+        # fixed in SysCon's hardware config and must match exactly.
+        _SUPPORTED_LASER_WAVELENGTHS_NM = (940, 1030, 1100)
+        _LEGACY_LASER_WAVELENGTH_ALIASES_NM = {1040: 1030, 1140: 1100}
+        _DEFAULT_ACTIVE_LASER_WAVELENGTH_NM = 1100
+
+        # Absolute SysCon v3 timeline indices (NOT offsets — do not add n_entity_lanes).
+        _LASER_TIMELINE_INDEX_BY_WAVELENGTH_NM = {1100: 1, 940: 2, 1030: 3}
+        _TTL_OUT_1_TIMELINE_INDEX = 4
+        _TTL_OUT_2_TIMELINE_INDEX = 5
+
+        _LIGHTSOURCE_ID_BY_WAVELENGTH_NM = {
+            940: "dummy_1_0",   # swapped vs. previous code
+            1030: "dummy_0_0",  # swapped vs. previous code
+            1100: "dummy_2_0",  # was keyed under 1140
+        }
+        _SHAPE_LIGHTSOURCE_ID = "dummy_2_0"  # SLM driver; always emitted on Shape blocks
+
+    Delete the old `_LASER_TIMELINE_OFFSETS` constant — it is no longer used.
+
+2.  ADD a helper for the shape-lane → timeline-index mapping (place near the other
+    `_format_*` helpers, e.g. just above `_format_ttl_pulse_block` at line 3509):
+
+        def _shape_lane_to_timeline_index(lane: int) -> int:
+            # Lane 0 stays on row 0 (the SLM lane every reference file uses). Additional
+            # lanes are pushed past the reserved rows 1..5 (lasers + TTL outs).
+            return 0 if lane == 0 else lane + 5
+
+3.  REPLACE the timeline-index computation in `generate_syscon2_sequence_text`
+    (current lines 575–581). The new block:
+
+        n_entity_lanes = state.n_entity_lanes
+        laser_timeline_index = _LASER_TIMELINE_INDEX_BY_WAVELENGTH_NM[
+            active_laser_wavelength_nm
+        ]
+        ttl_out1_timeline_index = _TTL_OUT_1_TIMELINE_INDEX
+        ttl_out2_timeline_index = _TTL_OUT_2_TIMELINE_INDEX
+        _ = ttl_out_2_port  # TTL Out 2 emission is out of scope for this patch
+
+4.  UPDATE the Shape block writer in `generate_syscon2_sequence_text` (current line 603)
+    so it uses the shape-lane→timeline-index mapping AND forces the SLM driver as the
+    Shape's lightsource:
+
+        ("TimelineInfo0_TimelineIndex", str(_shape_lane_to_timeline_index(window.lane))),
+
+    and a few lines down (current line 616), change:
+
+        ("TimelineInfo0_LightsourceID_0", lightsource_id),
+    to:
+        ("TimelineInfo0_LightsourceID_0", _SHAPE_LIGHTSOURCE_ID),
+
+    The laser TTL block (line 643) keeps using `lightsource_id` (the wavelength-specific
+    one) — that part is correct.
+
+    Also force the Shape's `TimelineInfo0_Intensity_0` to "0" to match the references
+    (currently it's `_format_float(window.intensity)`). The reference files all have
+    `Intensity_0=0` on the Shape — the laser TTL carries the actual power signal. So:
+
+        ("TimelineInfo0_Intensity_0", "0"),
+
+    NOTE: this is a behaviour change — Shape intensity is no longer the per-window
+    `window.intensity`. If the user actually relies on per-shape SLM intensity (i.e.
+    drives the SLM lightsource at non-zero power), revisit this. The user has confirmed
+    Shape intensity is always 0 in the up-to-date SysCon workflow.
+
+5.  REVIEW (read-only) — `_validate_laser_pulse_end_before_overlapping_shapes`,
+    `_format_ttl_pulse_block`, and `_build_debug_csv_text` already accept timeline
+    indices as parameters and don't hard-code them. They should keep working with the
+    new absolute values without further edits.
+
+6.  Update the `Stepsize=1` literal on the Shape (current line 619) — the reference
+    files use `Stepsize=100` for the 940nm/1030nm cases and `Stepsize=1` for the 1100nm
+    case. The current code already writes `"100"` — leave it alone; both values are
+    valid in SysCon and `100` is what the existing tests assert.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/stimulation_generator_dialog.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+7.  UPDATE the laser combo box (current lines 169–173). Change the 1140 entry to 1100,
+    keep the default selection on the high-wavelength option:
+
+        self.laser_combo.addItem("940 nm digital", 940)
+        self.laser_combo.addItem("1030 nm digital", 1030)
+        self.laser_combo.addItem("1100 nm digital", 1100)
+        self.laser_combo.setCurrentIndex(self.laser_combo.findData(1100))
+
+    Update the fallback in `_selected_laser_wavelength_nm` (line 997) from `1140` to
+    `1100`. (The legacy alias dict in the exporter still accepts 1140 from any caller
+    that hasn't been migrated, so this is safe to change without coordinating callers.)
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — tests/test_exporter_syscon2.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Existing tests assert the OLD dynamic layout and must be rewritten against the new
+absolute layout. Specifically:
+
+  - `test_export_seq_uses_fixed_laser_and_ttl_out_timeline_layout` (line 129)
+      Currently asserts `entity_lanes == 2`, `laser_timeline_index == 4`,
+      `ttl_out1_timeline_index == 5`, `ttl_out2_timeline_index == 6`. With the new
+      layout for a 2-lane shape stim at 1100 nm:
+        - shape lanes should appear at TimelineIndex 0 and 6 (NOT 0 and 1)
+        - `report.laser_timeline_index == 1`
+        - `report.ttl_out1_timeline_index == 4`
+        - `report.ttl_out2_timeline_index == 5`
+      Update the lane filters in the body (`_timeline_index(obj) == 4/5/6`) accordingly.
+      Also switch the wavelength argument from `1140` to `1100`.
+
+  - `test_export_seq_routes_ttl_pulses_to_selected_1030_laser_timeline` (line 230)
+      Currently asserts `report.laser_timeline_index == 2`. With the new layout, 1030 nm
+      maps to TimelineIndex 3. Update the assertion and the body's neighbour-row checks
+      (the test peeks at adjacent rows to ensure pulses don't leak; the "neighbour"
+      indices will shift accordingly).
+
+  - `test_export_seq_accepts_legacy_1040_alias_as_1030_timeline` (line 398)
+      Same idea: `report.laser_timeline_index == 3` after the change.
+
+  - Add a NEW test verifying the 1140→1100 legacy alias:
+
+        def test_export_seq_accepts_legacy_1140_alias_as_1100_timeline() -> None:
+            values = np.zeros((40, 1), dtype=np.float32)
+            values[20:22, 0] = 1.0
+            stim_array = StimArray(
+                name="stim",
+                stim_type=StimType.Excitation,
+                values=values,
+                units="1",
+                dt=_DT_S,
+            )
+
+            seq_text, report = generate_syscon2_sequence_text(
+                stim_array,
+                _cellpose_result(mapping={0: 0}),
+                template_text=_template_header(),
+                tick_resolution_us=500,
+                active_threshold=0.0,
+                binary_intensity=1.0,
+                active_laser_wavelength_nm=1140,  # legacy
+            )
+            assert report.active_laser_wavelength_nm == 1100
+            assert report.laser_timeline_index == 1
+
+  - Add a NEW test verifying the wavelength↔lightsource_id binding matches the
+    reference files (one parametrize across all three wavelengths):
+
+        @pytest.mark.parametrize(
+            ("wavelength_nm", "expected_timeline_index", "expected_lightsource_id"),
+            [
+                (1100, 1, "dummy_2_0"),
+                (940,  2, "dummy_1_0"),
+                (1030, 3, "dummy_0_0"),
+            ],
+        )
+        def test_export_seq_lightsource_id_matches_syscon_v3_template(
+            wavelength_nm, expected_timeline_index, expected_lightsource_id
+        ):
+            values = np.zeros((40, 1), dtype=np.float32)
+            values[20:22, 0] = 1.0
+            stim_array = StimArray(name="stim", stim_type=StimType.Excitation,
+                                   values=values, units="1", dt=_DT_S)
+            seq_text, report = generate_syscon2_sequence_text(
+                stim_array,
+                _cellpose_result(mapping={0: 0}),
+                template_text=_template_header(),
+                tick_resolution_us=500,
+                active_threshold=0.0,
+                binary_intensity=1.0,
+                active_laser_wavelength_nm=wavelength_nm,
+            )
+            sequence = parse_syscon2_seq_text(seq_text)
+            laser_pulses = [
+                obj for obj in sequence.objects
+                if obj.object_type == "TTLPulse"
+                and _timeline_index(obj) == expected_timeline_index
+            ]
+            assert len(laser_pulses) >= 1
+            for pulse in laser_pulses:
+                assert pulse.properties["TimelineInfo0_LightsourceID_0"] == expected_lightsource_id
+                assert pulse.properties["port"] == f"{expected_lightsource_id} RMI In"
+
+            # Shape always carries dummy_2_0 with Intensity_0=0 regardless of laser.
+            shape_objs = [obj for obj in sequence.objects if obj.object_type == "Shape"]
+            assert len(shape_objs) >= 1
+            for shape in shape_objs:
+                assert shape.properties["TimelineInfo0_LightsourceID_0"] == "dummy_2_0"
+                assert shape.properties["TimelineInfo0_Intensity_0"] == "0"
+
+  - Search the test file for any other hard-coded `1140` literals and rewrite them to
+    `1100`, leaving exactly one test exercising the legacy 1140 alias.
+
+  - Search for any test that asserts `report.entity_lanes == N` AND simultaneously
+    asserts the timeline indices of shape blocks; with the new
+    `_shape_lane_to_timeline_index`, lane indices ≥ 1 now map to TimelineIndex ≥ 6.
+    Update those assertions accordingly.
+
+  - Re-run any screenshot/PNG-overview tests
+    (`test_generate_syscon2_timeline_overview_png_*` at lines 312, 341). The PNG plotter
+    in `exporter_syscon2.py:1747` reads the laser timeline index from the report — it
+    should keep working, but the visual layout will change (laser row sits at y=1 not
+    at y=N+offset). If a screenshot golden is committed, regenerate it with
+    `uv run pytest --update-screenshot`.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+OUT OF SCOPE — explicitly NOT in this patch
+────────────────────────────────────────────────────────────────────────────────────────────
+
+  - Emitting TTL Out 2 objects. The references show TTL Out 2 envelopes the stim, but
+    the timing (start/end ticks) varies between reference files and we don't have a
+    deterministic rule from the user. Leave the current "TTL Out 2 unused" behaviour
+    as-is. The `ttl_out2_timeline_index` field on `SysconExportReport` stays — it just
+    points at the (correct) reserved row 5 now.
+
+  - Integrating the Rapp LUT (`20260526_1100-LUT_RAPP.lut`) for intensity → mW power
+    calibration. Not part of the `.seq` exporter; LUT is loaded by SysCon directly.
+
+  - Changing the template's `SourceConnectorPort1=dummy_2_0 RMI In` /
+    `TargetConnectorPort1=Holo4D TTL Out 2` lines — those come from the user's
+    template, and `_build_header_lines` already strips/normalises them. Leave alone.
+
+  - Reworking `_max_simultaneous_entity_windows` / `_assign_entity_lanes`. The lane
+    *assignment* algorithm is unchanged — only the lane→timeline-index mapping changes,
+    via the new helper at the export boundary.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    ruff check src/neuroseq/exporter_syscon2.py src/neuroseq/stimulation_generator_dialog.py
+    mypy --ignore-missing-imports src/neuroseq/exporter_syscon2.py
+    PYTHONPATH=src .venv/bin/python -m pytest tests/test_exporter_syscon2.py -v
+    PYTHONPATH=src .venv/bin/python -m pytest tests/test_stimulation_generator_dialog.py -v
+    PYTHONPATH=src .venv/bin/python -m pytest
+
+Manual sanity check: export a one-neuron / one-pulse stim at each of the three
+wavelengths and diff against the matching reference file. The TTLPulse blocks should
+match on:
+  - `TimelineInfo0_TimelineIndex`
+  - `TimelineInfo0_LightsourceID_0`
+  - `port`
+and the Shape block should match on:
+  - `TimelineInfo0_TimelineIndex == 0`
+  - `TimelineInfo0_LightsourceID_0 == dummy_2_0`
+  - `TimelineInfo0_Intensity_0 == 0`
+
+(Start times and durations will differ because the references use hand-tuned stim
+positions — the structural fields are what we're matching.)

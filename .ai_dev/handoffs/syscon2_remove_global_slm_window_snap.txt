@@ -1,0 +1,181 @@
+syscon2_remove_global_slm_window_snap — Remove obsolete "snap to allowed windows" sanity step [IMPLEMENTED]
+============================================================================================================
+
+The SysCon2 sanity-check flow used to detect stim starts that didn't align to the
+global 16.666 ms SLM grid and prompt the user with three buttons:
+"Snap To Allowed Windows" / "Continue Without Fix" / "Cancel". With the
+spiralling + preblank-insertion pipeline in place, the exporter's internal
+alignment handles this automatically — the upfront snap-or-warn dance is dead
+weight that confuses users. Remove the entire detection-and-fix step (step 5 of
+`_run_sanity_check`) along with the now-unused exporter helpers and their tests.
+
+Files to change:
+
+    src/neuroseq/exporter_syscon2.py
+    src/neuroseq/stimulation_generator_dialog.py
+    tests/test_stimulation_generator_dialog.py
+
+────────────────────────────────────────────────────────────────────────────────────────────
+DELETIONS — src/neuroseq/exporter_syscon2.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1.  DELETE the `GlobalSlmWindowViolation` dataclass (the
+    `@dataclass(frozen=True)` line plus the class body, currently around
+    lines 303–311):
+
+        @dataclass(frozen=True)
+        class GlobalSlmWindowViolation:
+            neuron_index: int
+            start_idx: int
+            duration_idx: int
+            start_tick: int
+            snapped_start_tick: int
+            shift_ticks: int
+            shift_samples: int
+
+2.  DELETE these three functions in full (currently around lines 2738–2887):
+
+        find_global_slm_window_violations(stim_array, *, active_threshold, global_window_origin_tick)
+        snap_stim_values_to_global_slm_windows(stim_array, *, active_threshold, global_window_origin_tick)
+        _nearest_global_slm_window_start_tick(start_tick, *, global_window_origin_tick, pulse_start_offset_ticks, shape_quantum_ticks)
+
+    Also delete the (now-orphaned) blank lines between them. `_nearest_global_slm_window_start_tick`
+    is only called by the other two, so removal is safe.
+
+3.  Sanity-check that nothing else in the module still references the deleted
+    symbols. After deletion, run:
+
+        grep -n "GlobalSlmWindow\|find_global_slm_window\|snap_stim_values_to_global\|_nearest_global_slm_window" src/neuroseq/exporter_syscon2.py
+
+    Expect zero matches.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+DELETIONS — src/neuroseq/stimulation_generator_dialog.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+4.  DELETE the three imports at the top of the file (currently lines 14, 23,
+    and 32):
+
+        from neuroseq.exporter_syscon2 import GlobalSlmWindowViolation
+        from neuroseq.exporter_syscon2 import find_global_slm_window_violations
+        from neuroseq.exporter_syscon2 import snap_stim_values_to_global_slm_windows
+
+5.  DELETE the `_GlobalWindowFixChoice` inner enum class (currently lines
+    286–289):
+
+        class _GlobalWindowFixChoice(Enum):
+            SNAP = "snap"
+            CONTINUE = "continue"
+            CANCEL = "cancel"
+
+6.  DELETE step 5 of `_run_sanity_check` in full (currently lines 587–601).
+    The block to remove begins with the comment line
+    `# 5. Global SLM window misalignment: ...` and ends after the trailing
+    `# CONTINUE falls through to the full sanity check.` comment. The very next
+    statement is `force_binary_intensity = self.binary_mode_checkbox.isChecked()`;
+    it stays exactly as is — just becomes one blank line closer to the
+    preceding step.
+
+    Renumber surrounding comments only if they explicitly say "step 5"; the
+    other step comments use natural-language headings, not numbered references,
+    so a one-line check is sufficient.
+
+7.  DELETE `_prompt_global_slm_window_fix_choice` method in full (currently
+    lines 739–787). The next method (`_prompt_slm_off_on_overlap_fix_choice`,
+    line 789) stays unchanged.
+
+8.  After deletion, run:
+
+        grep -n "_GlobalWindowFixChoice\|GlobalSlmWindow\|find_global_slm_window\|snap_stim_values_to_global\|_prompt_global_slm_window" src/neuroseq/stimulation_generator_dialog.py
+
+    Expect zero matches.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+DELETIONS — tests/test_stimulation_generator_dialog.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+9.  DELETE the import at line 12:
+
+        from neuroseq.exporter_syscon2 import GlobalSlmWindowViolation
+
+10. DELETE the monkeypatch lines inside `_patch_no_slm_violations` (the autouse-
+    style helper fixture) that patch `find_global_slm_window_violations`
+    (currently lines 122–126):
+
+        monkeypatch.setattr(
+            stimulation_generator_dialog_module,
+            "find_global_slm_window_violations",
+            lambda *a, **kw: [],
+        )
+
+    Without removal this patch will fail at import time once the underlying
+    symbol no longer exists.
+
+11. DELETE the `_fake_global_window_violation` helper (currently lines
+    1088–1097):
+
+        def _fake_global_window_violation() -> GlobalSlmWindowViolation:
+            ...
+
+12. DELETE the section header comment block and the two tests below it
+    (currently lines 1083–1187):
+
+        # ------------------------------------------------------------
+        # Global SLM window violation (lines 534-539, 542-544)
+        # ------------------------------------------------------------
+
+        def test_stimulation_generator_dialog_cancels_on_global_slm_window_violation(...):
+            ...
+
+        def test_stimulation_generator_dialog_snaps_to_global_slm_windows(...):
+            ...
+
+13. After deletion, run:
+
+        grep -n "_GlobalWindowFixChoice\|GlobalSlmWindow\|find_global_slm_window\|snap_stim_values_to_global\|_prompt_global_slm_window\|_fake_global_window_violation" tests/test_stimulation_generator_dialog.py
+
+    Expect zero matches.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NO OTHER FILES SHOULD CHANGE
+────────────────────────────────────────────────────────────────────────────────────────────
+
+A repo-wide search confirms the four symbols (`GlobalSlmWindowViolation`,
+`find_global_slm_window_violations`, `snap_stim_values_to_global_slm_windows`,
+`_nearest_global_slm_window_start_tick`) plus the dialog-private
+`_GlobalWindowFixChoice` and `_prompt_global_slm_window_fix_choice` are
+referenced only in the three files above. After the patch, the same grep over
+`src/` and `tests/` should yield zero matches:
+
+    grep -rn "GlobalSlmWindow\|find_global_slm_window\|snap_stim_values_to_global\|_nearest_global_slm_window\|_GlobalWindowFixChoice\|_prompt_global_slm_window" src tests
+    # expect: no output
+
+`tests/test_exporter_syscon2.py` does NOT exercise any of these symbols (the
+detection function never had its own exporter-level unit test), so that file
+needs no changes.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    ruff check src/neuroseq/exporter_syscon2.py src/neuroseq/stimulation_generator_dialog.py \
+              tests/test_stimulation_generator_dialog.py
+    mypy --ignore-missing-imports src/neuroseq/exporter_syscon2.py src/neuroseq/stimulation_generator_dialog.py
+    PYTHONPATH=src .venv/bin/python -m pytest tests/test_exporter_syscon2.py tests/test_stimulation_generator_dialog.py -v
+    PYTHONPATH=src .venv/bin/python -m pytest
+
+Test counts after the patch should be exactly **two fewer** than before (the two
+deleted dialog tests). Every other test must still pass.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+RATIONALE
+────────────────────────────────────────────────────────────────────────────────────────────
+
+The exporter's preblank-window insertion in `_apply_preblank_insertions_to_raw_segments`
+already shifts every raw stim segment forward by one full 16.666 ms SLM window,
+guaranteeing that the resulting `adjusted_raw_segment.start_idx` is always on
+the global grid (modulo sub-window resolution, which is fine for TTL pulses but
+irrelevant for shape windows). Asking the user to manually snap their raw
+drawing to the same grid before that automatic shift happens is redundant —
+the snap-fix never had a different output than letting the pipeline proceed
+without it.

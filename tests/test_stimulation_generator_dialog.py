@@ -9,7 +9,6 @@ from qtpy import QtWidgets
 
 import neuroseq.stimulation_generator_dialog as stimulation_generator_dialog_module
 from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
-from neuroseq.exporter_syscon2 import GlobalSlmWindowViolation
 from neuroseq.exporter_syscon2 import InitialSlmLoadViolation
 from neuroseq.exporter_syscon2 import OverlappingPulseGroupViolation
 from neuroseq.exporter_syscon2 import SimultaneousDurationViolation
@@ -18,10 +17,29 @@ from neuroseq.exporter_syscon2 import SlmOffOnOverlapViolation
 from neuroseq.exporter_syscon2 import SysconExportReport
 from neuroseq.exporter_syscon2 import SysconInputSanityReport
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.power_lut import PowerLut
 from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
+
+_REFERENCE_LUT_TEXT = """F2-EC-FD-4A-EB-0E-8C-29-3A-0D-22-7A-94-1D-D1-94
+[_]
+Description=1100nm 1 spot
+Unit=mW
+Enabled=False
+TuplesCount=9
+Tuple0=0;0
+Tuple1=5;0
+Tuple2=10;2.1
+Tuple3=20;8.4
+Tuple4=40;21.9
+Tuple5=60;36
+Tuple6=80;49
+Tuple7=90;49
+Tuple8=100;49
+[/_]
+"""
 
 
 @pytest.fixture(autouse=True)
@@ -99,11 +117,6 @@ def _patch_no_slm_violations(monkeypatch: pytest.MonkeyPatch) -> None:
         "find_overlapping_pulse_group_violations",
         lambda *a, **kw: [],
     )
-    monkeypatch.setattr(
-        stimulation_generator_dialog_module,
-        "find_global_slm_window_violations",
-        lambda *a, **kw: [],
-    )
 
 
 def _build_export_report(
@@ -114,7 +127,7 @@ def _build_export_report(
     unmapped_active_neurons: list[int] | None = None,
     total_segments: int = 1,
     exported_segments: int = 1,
-    active_laser_wavelength_nm: int = 1140,
+    active_laser_wavelength_nm: int = 1100,
 ) -> SysconExportReport:
     return SysconExportReport(
         total_neurons=total_neurons,
@@ -127,9 +140,9 @@ def _build_export_report(
         entity_lanes=1,
         generated_objects=1,
         active_laser_wavelength_nm=active_laser_wavelength_nm,
-        laser_timeline_index=2,
-        ttl_out1_timeline_index=3,
-        ttl_out2_timeline_index=4,
+        laser_timeline_index=1,
+        ttl_out1_timeline_index=4,
+        ttl_out2_timeline_index=5,
     )
 
 
@@ -199,7 +212,8 @@ def test_stimulation_generator_dialog_binary_mode_checkbox_defaults_to_enabled(
     )
     qtbot.addWidget(dialog)
     assert dialog.binary_mode_checkbox.isChecked()
-    assert dialog._selected_laser_wavelength_nm() == 1140
+    assert dialog.spiralling_checkbox.isChecked()
+    assert dialog._selected_laser_wavelength_nm() == 1100
 
 
 def test_stimulation_generator_dialog_sanity_check_uses_selected_laser_wavelength(
@@ -216,11 +230,12 @@ def test_stimulation_generator_dialog_sanity_check_uses_selected_laser_wavelengt
     qtbot.addWidget(dialog)
     dialog.laser_combo.setCurrentIndex(dialog.laser_combo.findData(1030))
 
-    captured: dict[str, int] = {}
+    captured: dict[str, int | bool] = {}
 
     def _fake_check_syscon2_input_sanity(*args, **kwargs) -> SysconInputSanityReport:
         del args
         captured["active_laser_wavelength_nm"] = kwargs["active_laser_wavelength_nm"]
+        captured["spiralling"] = kwargs["spiralling"]
         return _build_sanity_report(
             is_valid=True,
             export_report=_build_export_report(
@@ -236,8 +251,107 @@ def test_stimulation_generator_dialog_sanity_check_uses_selected_laser_wavelengt
     dialog.check_sanity_button.click()
 
     assert captured["active_laser_wavelength_nm"] == 1030
+    assert captured["spiralling"] is True
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "information"
+
+
+def test_stimulation_generator_dialog_generate_passes_spiralling_checkbox(
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    project = _build_project(values, mapping={0: 0})
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.spiralling_checkbox.setChecked(False)
+
+    captured: dict[str, bool] = {}
+
+    def _fake_generate_syscon2_sequence_text(*args, **kwargs):
+        del args
+        captured["spiralling"] = kwargs["spiralling"]
+        return "nohash\n", _build_export_report()
+
+    monkeypatch.setattr(
+        stimulation_generator_dialog_module,
+        "generate_syscon2_sequence_text",
+        _fake_generate_syscon2_sequence_text,
+    )
+
+    dialog._generate_holo4d_script(
+        project.stim_arrays["stim"],
+        "stim",
+        project.cellpose_data,
+    )
+
+    assert captured["spiralling"] is False
+
+
+def test_stimulation_generator_dialog_load_lut_assigns_to_selected_wavelength(
+    qtbot: QtBot,
+    tmp_path: Path,
+) -> None:
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    project = _build_project(values, mapping={0: 0})
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+
+    lut_path = tmp_path / "loaded_1100.lut"
+    lut_path.write_text(_REFERENCE_LUT_TEXT, encoding="utf-8")
+    dialog._apply_lut_from_path(str(lut_path), 1100)
+
+    assert project.power_luts[1100].description == "1100nm 1 spot"
+    # The label-status path is exercised by _format_lut_status; we avoid
+    # asserting on dialog.lut_status_label.text() here because setting QLabel
+    # text on a never-shown widget can leave a pending paint event that
+    # interacts poorly with pytest-qt's _process_events on the macOS-arm64
+    # runner. _format_lut_status is a pure function, easily covered separately.
+    assert "(default)" not in dialog._format_lut_status()
+    assert "1100nm 1 spot" in dialog._format_lut_status()
+
+
+def test_stimulation_generator_dialog_passes_target_power_and_lut_to_exporter(
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    project = _build_project(values, mapping={0: 0})
+    custom_lut = PowerLut(
+        description="custom",
+        tuples=((0.0, 0.0), (100.0, 50.0)),
+    )
+    project.power_luts[1100] = custom_lut
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.laser_combo.setCurrentIndex(dialog.laser_combo.findData(1100))
+    dialog.target_power_spin.setValue(10.0)
+
+    captured: dict[str, object] = {}
+
+    def _fake_generate_syscon2_sequence_text(*args, **kwargs):
+        del args
+        captured["target_power_mw"] = kwargs["target_power_mw"]
+        captured["power_lut"] = kwargs["power_lut"]
+        return "nohash\n", _build_export_report()
+
+    monkeypatch.setattr(
+        stimulation_generator_dialog_module,
+        "generate_syscon2_sequence_text",
+        _fake_generate_syscon2_sequence_text,
+    )
+
+    dialog._generate_holo4d_script(
+        project.stim_arrays["stim"],
+        "stim",
+        project.cellpose_data,
+    )
+
+    assert captured["target_power_mw"] == 10.0
+    assert captured["power_lut"] == custom_lut
 
 
 def test_stimulation_generator_dialog_sanity_check_warns_when_report_contains_warnings(
@@ -575,10 +689,17 @@ def test_stimulation_generator_dialog_cancels_on_slm_load_violation(
         "find_slm_gap_violations",
         lambda *a, **kw: [],
     )
+    # Force the prompt to return CANCEL deterministically, without ever
+    # showing a QMessageBox (relying on patch_b2w_exec_show's .show() default
+    # leaves pending Qt events that hang subsequent tests on macOS-arm64-ssc).
+    monkeypatch.setattr(
+        StimulationGeneratorDialog,
+        "_prompt_initial_slm_start_fix_choice",
+        lambda *a, **kw: StimulationGeneratorDialog._InitialSlmFixChoice.CANCEL,
+    )
 
     dialog = StimulationGeneratorDialog(project)
     qtbot.addWidget(dialog)
-    # patch_b2w_exec_show makes the prompt auto-cancel
     dialog.check_sanity_button.click()
 
     # Returned early — no sanity check ran, no message box
@@ -666,6 +787,11 @@ def test_stimulation_generator_dialog_cancels_on_slm_gap_violation(
         stimulation_generator_dialog_module,
         "find_slm_gap_violations",
         lambda *a, **kw: [_fake_slm_gap_violation()],
+    )
+    monkeypatch.setattr(
+        StimulationGeneratorDialog,
+        "_prompt_slm_gap_fix_choice",
+        lambda *a, **kw: StimulationGeneratorDialog._SlmFixChoice.CANCEL,
     )
 
     dialog = StimulationGeneratorDialog(project)
@@ -760,6 +886,11 @@ def test_stimulation_generator_dialog_cancels_on_slm_offon_violation(
         "find_slm_off_on_overlap_violations",
         lambda *a, **kw: [_fake_slm_offon_violation()],
     )
+    monkeypatch.setattr(
+        StimulationGeneratorDialog,
+        "_prompt_slm_off_on_overlap_fix_choice",
+        lambda *a, **kw: StimulationGeneratorDialog._SlmOffOnFixChoice.CANCEL,
+    )
 
     dialog = StimulationGeneratorDialog(project)
     qtbot.addWidget(dialog)
@@ -853,6 +984,11 @@ def test_stimulation_generator_dialog_cancels_on_duration_violation(
         stimulation_generator_dialog_module,
         "find_simultaneous_duration_violations",
         lambda *a, **kw: [_fake_duration_violation()],
+    )
+    monkeypatch.setattr(
+        StimulationGeneratorDialog,
+        "_prompt_duration_fix_choice",
+        lambda *a, **kw: StimulationGeneratorDialog._DurationFixChoice.CANCEL,
     )
 
     dialog = StimulationGeneratorDialog(project)
@@ -954,113 +1090,6 @@ def test_stimulation_generator_dialog_auto_applies_overlap_alignment(
     dialog.check_sanity_button.click()
 
     assert np.array_equal(project.stim_arrays["stim"].values, aligned_values)
-
-
-# ---------------------------------------------------------------------------
-# Global SLM window violation (lines 534-539, 542-544)
-# ---------------------------------------------------------------------------
-
-
-def _fake_global_window_violation() -> GlobalSlmWindowViolation:
-    return GlobalSlmWindowViolation(
-        neuron_index=0,
-        start_idx=5,
-        duration_idx=32,
-        start_tick=5,
-        snapped_start_tick=0,
-        shift_ticks=-5,
-        shift_samples=-5,
-    )
-
-
-def test_stimulation_generator_dialog_cancels_on_global_slm_window_violation(
-    qtbot: QtBot,
-    qmessagebox_calls: list[dict[str, str]],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    values = np.zeros((40, 1), dtype=np.float32)
-    values[20:22, 0] = 1.0
-    project = _build_project(values, mapping={0: 0})
-
-    monkeypatch.setattr(
-        stimulation_generator_dialog_module,
-        "find_initial_slm_load_violation",
-        lambda *a, **kw: None,
-    )
-    monkeypatch.setattr(
-        stimulation_generator_dialog_module,
-        "find_slm_gap_violations",
-        lambda *a, **kw: [],
-    )
-    monkeypatch.setattr(
-        stimulation_generator_dialog_module,
-        "find_slm_off_on_overlap_violations",
-        lambda *a, **kw: [],
-    )
-    monkeypatch.setattr(
-        stimulation_generator_dialog_module,
-        "find_simultaneous_duration_violations",
-        lambda *a, **kw: [],
-    )
-    monkeypatch.setattr(
-        stimulation_generator_dialog_module,
-        "find_overlapping_pulse_group_violations",
-        lambda *a, **kw: [],
-    )
-    monkeypatch.setattr(
-        stimulation_generator_dialog_module,
-        "find_global_slm_window_violations",
-        lambda *a, **kw: [_fake_global_window_violation()],
-    )
-
-    dialog = StimulationGeneratorDialog(project)
-    qtbot.addWidget(dialog)
-    dialog.check_sanity_button.click()
-
-    assert len(qmessagebox_calls) == 0
-
-
-def test_stimulation_generator_dialog_snaps_to_global_slm_windows(
-    qtbot: QtBot,
-    qmessagebox_calls: list[dict[str, str]],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    values = np.zeros((64, 1), dtype=np.float32)
-    values[20:22, 0] = 1.0
-    project = _build_project(values, mapping={0: 0})
-    _patch_no_slm_violations(monkeypatch)
-
-    monkeypatch.setattr(
-        stimulation_generator_dialog_module,
-        "find_global_slm_window_violations",
-        lambda *a, **kw: [_fake_global_window_violation()],
-    )
-    snapped_values = np.zeros_like(values)
-    snapped_values[16:18, 0] = 1.0
-    monkeypatch.setattr(
-        stimulation_generator_dialog_module,
-        "snap_stim_values_to_global_slm_windows",
-        lambda *a, **kw: (snapped_values, None, None),
-    )
-    monkeypatch.setattr(
-        StimulationGeneratorDialog,
-        "_prompt_global_slm_window_fix_choice",
-        lambda *a, **kw: StimulationGeneratorDialog._GlobalWindowFixChoice.SNAP,
-    )
-    monkeypatch.setattr(
-        stimulation_generator_dialog_module,
-        "check_syscon2_input_sanity",
-        lambda *args, **kwargs: _build_sanity_report(
-            is_valid=True,
-            export_report=_build_export_report(),
-        ),
-    )
-
-    dialog = StimulationGeneratorDialog(project)
-    qtbot.addWidget(dialog)
-    dialog.check_sanity_button.click()
-
-    assert np.array_equal(project.stim_arrays["stim"].values, snapped_values)
 
 
 # ---------------------------------------------------------------------------

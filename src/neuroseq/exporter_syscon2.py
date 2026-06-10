@@ -14,6 +14,8 @@ import brian2.numpy_ as np
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_syscon2 import SysconSequenceObject
 from neuroseq.importer_syscon2 import parse_syscon2_seq_text
+from neuroseq.power_lut import PowerLut
+from neuroseq.power_lut import power_lut_mw_to_percent
 from neuroseq.stim import StimArray
 
 _BLOCK_START_RE = re.compile(r"^\[(\d+)\]$")
@@ -43,16 +45,24 @@ _SYSCON2_TTL_PULSE_QUANTUM_S = (
     0.0005208125  # exact literal; avoids float rounding from * 1e-6
 )
 _TTL_PULSE_BOUNDARY_GUARD_TICKS = 1
+_SPIRALLING_TTL_LEAD_TICKS = 1  # TTL fires 1 tick before SLM load completes
 
-_SUPPORTED_LASER_WAVELENGTHS_NM = (940, 1030, 1140)
-_LEGACY_LASER_WAVELENGTH_ALIASES_NM = {1040: 1030}
-_DEFAULT_ACTIVE_LASER_WAVELENGTH_NM = 1140
-_LASER_TIMELINE_OFFSETS = {940: 0, 1030: 1, 1140: 2}
+# SysCon v3 reserves timeline rows 1..5 for laser TTLPulses (per wavelength) and
+# the two Holo4D TTL-out channels. Shape lanes live on row 0 (and, if more than
+# one simultaneous lane is needed, rows 6..N). The row↔lightsource binding is
+# fixed in SysCon's hardware config and must match exactly.
+_SUPPORTED_LASER_WAVELENGTHS_NM = (940, 1030, 1100)
+_LEGACY_LASER_WAVELENGTH_ALIASES_NM = {1040: 1030, 1140: 1100}
+_DEFAULT_ACTIVE_LASER_WAVELENGTH_NM = 1100
+_LASER_TIMELINE_INDEX_BY_WAVELENGTH_NM = {1100: 1, 940: 2, 1030: 3}
+_TTL_OUT_1_TIMELINE_INDEX = 4
+_TTL_OUT_2_TIMELINE_INDEX = 5
 _LIGHTSOURCE_ID_BY_WAVELENGTH_NM = {
-    940: "dummy_0_0",
-    1030: "dummy_1_0",
-    1140: "dummy_2_0",
+    940: "dummy_1_0",
+    1030: "dummy_0_0",
+    1100: "dummy_2_0",
 }
+_SHAPE_LIGHTSOURCE_ID = "dummy_2_0"
 
 _SYSCON2_WINDOW_TICKS = 32
 _SYSCON2_WINDOW_US = _SYSCON2_WINDOW_TICKS * _SYSCON2_TTL_PULSE_QUANTUM_US
@@ -161,6 +171,9 @@ class SysconExportReport:
     laser_timeline_index: int
     ttl_out1_timeline_index: int
     ttl_out2_timeline_index: int
+    power_saturation_warnings: list[str] = field(default_factory=list)
+    target_power_mw: float = 0.0
+    power_lut_description: str = ""
     debug_csv_text: str = ""
     sanity_fix_messages: list[str] = field(default_factory=list)
 
@@ -285,17 +298,6 @@ class OverlappingPulseGroupViolation:
     segment_durations_idx: tuple[int, ...]
     aligned_start_idx: int  # = min(segment_starts_idx)
     aligned_duration_idx: int  # = min(segment_durations_idx)
-
-
-@dataclass(frozen=True)
-class GlobalSlmWindowViolation:
-    neuron_index: int
-    start_idx: int
-    duration_idx: int
-    start_tick: int
-    snapped_start_tick: int
-    shift_ticks: int
-    shift_samples: int
 
 
 @dataclass(frozen=True)
@@ -489,12 +491,21 @@ def generate_syscon2_sequence_text(
     binary_intensity: float = 1.0,
     force_binary_intensity: bool = True,
     active_laser_wavelength_nm: int = _DEFAULT_ACTIVE_LASER_WAVELENGTH_NM,
+    spiralling: bool = True,
+    target_power_mw: float = 0.0,
+    power_lut: PowerLut | None = None,
 ) -> tuple[str, SysconExportReport]:
     """Generate SysCon2 `.seq` content for Holo4D multiphoton stimulation.
 
     Shape objects are quantized to 32-tick (16.666 ms) SLM windows.  Laser TTL
     pulses are mapped directly from raw sample positions (sample_idx == tick_idx
     when ``stim_array.dt == 520.8125 µs``), giving sub-window pulse accuracy.
+    With ``spiralling=True`` (default), every laser TTL pulse is shifted earlier
+    by ``_SPIRALLING_TTL_LEAD_TICKS`` so the active edge aligns with the
+    SLM-ready edge in spiralling mode.
+    When ``target_power_mw > 0`` and ``power_lut is not None``, Shape and laser
+    TTLPulse intensity fields are written as LUT-inverted percent values for the
+    requested delivered power; otherwise they remain `0`.
 
     Returns the sequence text and a :class:`SysconExportReport` with per-neuron
     mapping stats and a debug CSV.
@@ -513,6 +524,10 @@ def generate_syscon2_sequence_text(
     active_laser_wavelength_nm = _normalize_active_laser_wavelength_nm(
         active_laser_wavelength_nm
     )
+    power_enabled = bool(power_lut and target_power_mw > 0)
+    if power_enabled and power_lut is not None and not power_lut.tuples:
+        raise ValueError("power_lut has no tuples")
+    power_saturation_warnings: list[str] = []
     if active_laser_wavelength_nm not in _SUPPORTED_LASER_WAVELENGTHS_NM:
         raise ValueError(
             "active_laser_wavelength_nm must be one of "
@@ -560,8 +575,21 @@ def generate_syscon2_sequence_text(
 
     state = _build_pulse_window_state(sanitized, neuron_to_cellpose, centroids)
 
+    pulse_intervals = state.pulse_intervals
+    if spiralling:
+        # Spiralling hardware needs ~1 tick to arm; firing the laser TTL one
+        # tick before the SLM load completes keeps the active laser edge aligned
+        # with SLM-ready. No clamp on negative ticks: upstream preblank insertion
+        # must guarantee valid pulse starts, and we want violations to surface.
+        pulse_intervals = [
+            (
+                start - _SPIRALLING_TTL_LEAD_TICKS,
+                end - _SPIRALLING_TTL_LEAD_TICKS,
+            )
+            for start, end in pulse_intervals
+        ]
     _validate_laser_pulse_end_before_overlapping_shapes(
-        state.pulse_intervals,
+        pulse_intervals,
         state.scheduled_windows,
         pulse_guard_ticks=0,
     )
@@ -570,15 +598,14 @@ def generate_syscon2_sequence_text(
     mapped_active_neurons = state.mapped_active_neurons
     unmapped_active_neurons = state.unmapped_active_neurons
     skipped_segments_unmapped = state.skipped_segments_unmapped
-    pulse_intervals = state.pulse_intervals
     scheduled_windows = state.scheduled_windows
     n_entity_lanes = state.n_entity_lanes
     mapped_holograms = state.mapped_holograms
-    laser_timeline_index = (
-        n_entity_lanes + _LASER_TIMELINE_OFFSETS[active_laser_wavelength_nm]
-    )
-    ttl_out1_timeline_index = n_entity_lanes + 3
-    ttl_out2_timeline_index = n_entity_lanes + 4
+    laser_timeline_index = _LASER_TIMELINE_INDEX_BY_WAVELENGTH_NM[
+        active_laser_wavelength_nm
+    ]
+    ttl_out1_timeline_index = _TTL_OUT_1_TIMELINE_INDEX
+    ttl_out2_timeline_index = _TTL_OUT_2_TIMELINE_INDEX
     _ = ttl_out_2_port  # TTL Out 2 is present in the template but unused in this layout
 
     object_blocks: list[list[str]] = []
@@ -600,7 +627,10 @@ def generate_syscon2_sequence_text(
                 object_type="Shape",
                 properties=[
                     ("TotalTimings", "1"),
-                    ("TimelineInfo0_TimelineIndex", str(window.lane)),
+                    (
+                        "TimelineInfo0_TimelineIndex",
+                        str(_shape_lane_to_timeline_index(window.lane)),
+                    ),
                     (
                         "TimelineInfo0_starttime",
                         _format_time_us(
@@ -613,8 +643,21 @@ def generate_syscon2_sequence_text(
                         str(_shape_repeats_from_duration_quanta(duration_shape_quanta)),
                     ),
                     ("TimelineInfo0_LightsourceCount", "1"),
-                    ("TimelineInfo0_LightsourceID_0", lightsource_id),
-                    ("TimelineInfo0_Intensity_0", _format_float(window.intensity)),
+                    ("TimelineInfo0_LightsourceID_0", _SHAPE_LIGHTSOURCE_ID),
+                    (
+                        "TimelineInfo0_Intensity_0",
+                        _shape_intensity_for_window(
+                            window,
+                            power_enabled=power_enabled,
+                            target_power_mw=target_power_mw,
+                            power_lut=power_lut,
+                            saturation_warnings=power_saturation_warnings,
+                            label=(
+                                f"Shape@neuron={window.neuron_index},"
+                                f"tick={window.start_tick}"
+                            ),
+                        ),
+                    ),
                     ("TimelineInfo0_timelinegroupid", "-1"),
                     ("TimelineInfo0_Stepsize", "100"),
                     (f"Shape{shape_counter}_Type", "0"),
@@ -638,6 +681,26 @@ def generate_syscon2_sequence_text(
 
     for start_tick, end_tick in pulse_intervals:
         duration_ticks = max(1, end_tick - start_tick)
+        overlapping = [
+            window
+            for window in scheduled_windows
+            if not (end_tick <= window.start_tick or window.end_tick <= start_tick)
+        ]
+        pulse_intensity_norm = max(
+            (float(window.intensity) for window in overlapping),
+            default=0.0,
+        )
+        if power_enabled and power_lut is not None:
+            effective_mw = max(0.0, target_power_mw * pulse_intensity_norm)
+            percent, saturated = power_lut_mw_to_percent(power_lut, effective_mw)
+            if saturated:
+                power_saturation_warnings.append(
+                    f"Laser TTL@tick={start_tick}: requested {effective_mw:.3f} mW "
+                    f"exceeded LUT max {power_lut.max_mw:.3f} mW; clamped to {percent:.2f}%."
+                )
+            intensity_percent = _format_float(percent)
+        else:
+            intensity_percent = "0"
         block_object_id = next_object_id
         object_blocks.append(
             _format_ttl_pulse_block(
@@ -649,6 +712,7 @@ def generate_syscon2_sequence_text(
                 port=lightsource_port,
                 lightsource_id=lightsource_id,
                 include_lightsource=True,
+                intensity_percent=intensity_percent,
             )
         )
         laser_block_rows.append((block_object_id, (start_tick, end_tick)))
@@ -707,6 +771,9 @@ def generate_syscon2_sequence_text(
         laser_timeline_index=laser_timeline_index,
         ttl_out1_timeline_index=ttl_out1_timeline_index,
         ttl_out2_timeline_index=ttl_out2_timeline_index,
+        power_saturation_warnings=power_saturation_warnings,
+        target_power_mw=float(target_power_mw),
+        power_lut_description=(power_lut.description if power_lut else ""),
         debug_csv_text=debug_csv_text,
         sanity_fix_messages=[fix.message for fix in sanitized.fixes],
     )
@@ -1557,9 +1624,9 @@ def _build_debug_csv_text(
                     mapped_holograms,
                     window.stimulation_start_tick // _SYSCON2_WINDOW_TICKS,
                 ),
-                timeline_index=window.lane,
+                timeline_index=_shape_lane_to_timeline_index(window.lane),
                 lane_index=window.lane,
-                lightsource_id=lightsource_id,
+                lightsource_id=_SHAPE_LIGHTSOURCE_ID,
                 laser_nm=active_laser_wavelength_nm,
                 start_sys_tick=window.start_tick,
                 duration_sys_tick=window.end_tick - window.start_tick,
@@ -1573,7 +1640,7 @@ def _build_debug_csv_text(
                 end_neuro_ms_excl=(start_win + win_count) * _SYSCON2_WINDOW_MS,
                 duration_neuro_ms=win_count * _SYSCON2_WINDOW_MS,
                 includes_load_window=True,
-                intensity_out=window.intensity,
+                intensity_out=0.0,
             )
         )
 
@@ -1826,6 +1893,9 @@ def check_syscon2_input_sanity(
     binary_intensity: float = 1.0,
     force_binary_intensity: bool = True,
     active_laser_wavelength_nm: int = _DEFAULT_ACTIVE_LASER_WAVELENGTH_NM,
+    spiralling: bool = True,
+    target_power_mw: float = 0.0,
+    power_lut: PowerLut | None = None,
 ) -> SysconInputSanityReport:
     """Validate ``stim_array`` for SysCon2 export and perform a dry-run export.
 
@@ -1980,6 +2050,8 @@ def check_syscon2_input_sanity(
             _pw_state = _build_pulse_window_state(
                 sanitized, _cp_neuron_to_cellpose, _cp_centroids
             )
+            # Keep overrun-fix geometry tied to the unshifted raw pulse windows;
+            # the spiralling export shift is an output-only timing adjustment.
             _overrun_violations = _find_pulse_overrun_violations(
                 _pw_state.pulse_intervals,
                 _pw_state.scheduled_windows,
@@ -2009,6 +2081,9 @@ def check_syscon2_input_sanity(
             binary_intensity=binary_intensity,
             force_binary_intensity=force_binary_intensity,
             active_laser_wavelength_nm=active_laser_wavelength_nm,
+            spiralling=spiralling,
+            target_power_mw=target_power_mw,
+            power_lut=power_lut,
         )
     except (TypeError, ValueError) as exc:
         errors.append(str(exc))
@@ -2027,6 +2102,9 @@ def check_syscon2_input_sanity(
             "Some active neurons are unmapped and will be skipped: "
             + ", ".join(str(idx) for idx in export_report.unmapped_active_neurons)
         )
+    for warning in export_report.power_saturation_warnings:
+        if warning not in warnings:
+            warnings.append(warning)
 
     return SysconInputSanityReport(
         is_valid=True,
@@ -2644,158 +2722,6 @@ def align_overlapping_pulses_to_shortest(
                 modified_timepoints += new_end - new_start
 
     return values, modified_timepoints
-
-
-def find_global_slm_window_violations(
-    stim_array: StimArray,
-    *,
-    active_threshold: float = 0.0,
-    global_window_origin_tick: int = 0,
-) -> list[GlobalSlmWindowViolation]:
-    """Find pulse starts that do not align to global 16.666ms SLM windows.
-
-    Alignment target:
-      start_tick == global_window_origin_tick + lead_ticks + guard_ticks + 32*k
-    where `k` is any integer.
-    """
-    if stim_array.values.ndim != 2:
-        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
-    if stim_array.dt <= 0:
-        raise ValueError("Stim array dt must be positive")
-
-    sample_us = float(stim_array.dt * 1e6)
-    lead_ticks = int(np.ceil(_SLM_LEAD_IN_US / _SYSCON2_TTL_PULSE_QUANTUM_US))
-    pulse_start_offset_ticks = lead_ticks + _TTL_PULSE_BOUNDARY_GUARD_TICKS
-    shape_quantum_ticks = _SYSCON2_WINDOW_TICKS
-
-    violations: list[GlobalSlmWindowViolation] = []
-    for segment in _extract_active_segments(stim_array.values, active_threshold):
-        start_tick = int(
-            np.rint((segment.start_idx * sample_us) / _SYSCON2_TTL_PULSE_QUANTUM_US)
-        )
-        snapped_start_tick = _nearest_global_slm_window_start_tick(
-            start_tick,
-            global_window_origin_tick=global_window_origin_tick,
-            pulse_start_offset_ticks=pulse_start_offset_ticks,
-            shape_quantum_ticks=shape_quantum_ticks,
-        )
-        if start_tick == snapped_start_tick:
-            continue
-        shift_ticks = snapped_start_tick - start_tick
-        shift_samples = int(
-            np.rint(shift_ticks * _SYSCON2_TTL_PULSE_QUANTUM_US / sample_us)
-        )
-        violations.append(
-            GlobalSlmWindowViolation(
-                neuron_index=int(segment.neuron_index),
-                start_idx=int(segment.start_idx),
-                duration_idx=int(segment.duration_idx),
-                start_tick=start_tick,
-                snapped_start_tick=snapped_start_tick,
-                shift_ticks=shift_ticks,
-                shift_samples=shift_samples,
-            )
-        )
-
-    return sorted(
-        violations,
-        key=lambda violation: (
-            abs(violation.shift_ticks),
-            violation.start_tick,
-            violation.neuron_index,
-        ),
-    )
-
-
-def snap_stim_values_to_global_slm_windows(
-    stim_array: StimArray,
-    *,
-    active_threshold: float = 0.0,
-    global_window_origin_tick: int = 0,
-) -> tuple[np.ndarray, int, int]:
-    """Snap active segment starts to nearest global 16.666ms SLM window.
-
-    Returns:
-      (new_values, moved_segments, truncated_tail_timepoints)
-    """
-    if stim_array.values.ndim != 2:
-        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
-    if stim_array.dt <= 0:
-        raise ValueError("Stim array dt must be positive")
-
-    values = np.array(stim_array.values, copy=True)
-    n_timepoints = values.shape[0]
-    sample_us = float(stim_array.dt * 1e6)
-    lead_ticks = int(np.ceil(_SLM_LEAD_IN_US / _SYSCON2_TTL_PULSE_QUANTUM_US))
-    pulse_start_offset_ticks = lead_ticks + _TTL_PULSE_BOUNDARY_GUARD_TICKS
-    shape_quantum_ticks = _SYSCON2_WINDOW_TICKS
-
-    segments = _extract_active_segments(values, active_threshold)
-    if len(segments) == 0:
-        return values, 0, 0
-
-    snapped_values = np.array(values, copy=True)
-    for segment in segments:
-        start_idx = int(segment.start_idx)
-        end_idx = int(start_idx + segment.duration_idx)
-        snapped_values[start_idx:end_idx, segment.neuron_index] = 0
-
-    moved_segments = 0
-    truncated_tail_timepoints = 0
-    for segment in segments:
-        start_idx = int(segment.start_idx)
-        duration_idx = int(segment.duration_idx)
-        end_idx = int(start_idx + duration_idx)
-        neuron_index = int(segment.neuron_index)
-        block = values[start_idx:end_idx, neuron_index].copy()
-        if block.shape[0] == 0:
-            continue
-
-        start_tick = int(
-            np.rint((start_idx * sample_us) / _SYSCON2_TTL_PULSE_QUANTUM_US)
-        )
-        snapped_start_tick = _nearest_global_slm_window_start_tick(
-            start_tick,
-            global_window_origin_tick=global_window_origin_tick,
-            pulse_start_offset_ticks=pulse_start_offset_ticks,
-            shape_quantum_ticks=shape_quantum_ticks,
-        )
-        snapped_start_idx = max(
-            0,
-            int(
-                np.rint(snapped_start_tick * _SYSCON2_TTL_PULSE_QUANTUM_US / sample_us)
-            ),
-        )
-        if snapped_start_idx != start_idx:
-            moved_segments += 1
-
-        target_end_idx = snapped_start_idx + block.shape[0]
-        writable_end_idx = min(n_timepoints, target_end_idx)
-        if writable_end_idx > snapped_start_idx:
-            writable_rows = writable_end_idx - snapped_start_idx
-            snapped_values[snapped_start_idx:writable_end_idx, neuron_index] = (
-                np.maximum(
-                    snapped_values[snapped_start_idx:writable_end_idx, neuron_index],
-                    block[:writable_rows],
-                )
-            )
-        if target_end_idx > n_timepoints:
-            truncated_tail_timepoints += target_end_idx - n_timepoints
-
-    return snapped_values, moved_segments, truncated_tail_timepoints
-
-
-def _nearest_global_slm_window_start_tick(
-    start_tick: int,
-    *,
-    global_window_origin_tick: int,
-    pulse_start_offset_ticks: int,
-    shape_quantum_ticks: int,
-) -> int:
-    base_tick = global_window_origin_tick + pulse_start_offset_ticks
-    relative = start_tick - base_tick
-    nearest_slot = int(np.rint(relative / float(shape_quantum_ticks)))
-    return base_tick + nearest_slot * shape_quantum_ticks
 
 
 def _build_active_set_runs(
@@ -3516,6 +3442,7 @@ def _format_ttl_pulse_block(
     port: str,
     lightsource_id: str,
     include_lightsource: bool,
+    intensity_percent: str = "0",
 ) -> list[str]:
     properties: list[tuple[str, str]] = [
         ("TotalTimings", "1"),
@@ -3533,7 +3460,7 @@ def _format_ttl_pulse_block(
     ]
     if include_lightsource:
         properties.append(("TimelineInfo0_LightsourceID_0", lightsource_id))
-        properties.append(("TimelineInfo0_Intensity_0", "0"))
+        properties.append(("TimelineInfo0_Intensity_0", intensity_percent))
     properties.extend(
         [
             ("TimelineInfo0_timelinegroupid", "-1"),
@@ -3566,11 +3493,38 @@ def _format_float(value: float) -> str:
     return f"{value:.6f}".rstrip("0").rstrip(".")
 
 
+def _shape_intensity_for_window(
+    window: _ScheduledEntityWindow,
+    *,
+    power_enabled: bool,
+    target_power_mw: float,
+    power_lut: PowerLut | None,
+    saturation_warnings: list[str],
+    label: str,
+) -> str:
+    if not power_enabled or power_lut is None:
+        return "0"
+    effective_mw = max(0.0, target_power_mw * float(window.intensity))
+    percent, saturated = power_lut_mw_to_percent(power_lut, effective_mw)
+    if saturated:
+        saturation_warnings.append(
+            f"{label}: requested {effective_mw:.3f} mW exceeded LUT max "
+            f"{power_lut.max_mw:.3f} mW; clamped to {percent:.2f}%."
+        )
+    return _format_float(percent)
+
+
 def _format_time_us(value_us: float) -> str:
     rounded_int = int(np.rint(value_us))
     if np.isclose(value_us, float(rounded_int), atol=1e-9, rtol=0.0):
         return str(rounded_int)
     return f"{value_us:.4f}".rstrip("0").rstrip(".")
+
+
+def _shape_lane_to_timeline_index(lane: int) -> int:
+    # Lane 0 stays on the reference SLM row. Additional lanes are pushed past the
+    # reserved laser/TTL rows 1..5.
+    return 0 if lane == 0 else lane + 5
 
 
 def _ttl_repeats_from_duration_ticks(duration_ticks: int) -> int:
@@ -3696,15 +3650,14 @@ def _build_timeline_axis_labels(
     shape_lane_by_timeline = {
         timeline_idx: lane_idx for lane_idx, timeline_idx in enumerate(shape_timelines)
     }
-    inferred_holo4d_base = _infer_holo4d_timeline_base(shape_timelines)
-    explicit_holo4d_labels: dict[int, str] = {}
-    if inferred_holo4d_base is not None:
-        for wavelength_nm, offset in _LASER_TIMELINE_OFFSETS.items():
-            explicit_holo4d_labels[inferred_holo4d_base + offset] = (
-                f"Laser {wavelength_nm} nm"
-            )
-        explicit_holo4d_labels[inferred_holo4d_base + 3] = "TTL Out 1"
-        explicit_holo4d_labels[inferred_holo4d_base + 4] = "TTL Out 2"
+    explicit_holo4d_labels: dict[int, str] = {
+        timeline_idx: f"Laser {wavelength_nm} nm"
+        for wavelength_nm, timeline_idx in (
+            _LASER_TIMELINE_INDEX_BY_WAVELENGTH_NM.items()
+        )
+    }
+    explicit_holo4d_labels[_TTL_OUT_1_TIMELINE_INDEX] = "TTL Out 1"
+    explicit_holo4d_labels[_TTL_OUT_2_TIMELINE_INDEX] = "TTL Out 2"
 
     labels: dict[int, str] = {}
     for timeline_idx in timeline_indices:
@@ -3779,12 +3732,3 @@ def _build_timeline_axis_labels(
             labels[timeline_idx] = f"TL {timeline_idx}"
 
     return labels
-
-
-def _infer_holo4d_timeline_base(shape_timelines: list[int]) -> int | None:
-    if len(shape_timelines) == 0:
-        return None
-    expected = list(range(shape_timelines[-1] + 1))
-    if shape_timelines != expected:
-        return None
-    return shape_timelines[-1] + 1

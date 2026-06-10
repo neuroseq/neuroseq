@@ -1,0 +1,16 @@
+F2-EC-FD-4A-EB-0E-8C-29-3A-0D-22-7A-94-1D-D1-94
+[_]
+Description=1100nm 1 spot
+Unit=mW
+Enabled=False
+TuplesCount=9
+Tuple0=0;0
+Tuple1=5;0
+Tuple2=10;2.1
+Tuple3=20;8.4
+Tuple4=40;21.9
+Tuple5=60;36
+Tuple6=80;49
+Tuple7=90;49
+Tuple8=100;49
+[/_]

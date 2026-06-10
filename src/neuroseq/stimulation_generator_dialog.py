@@ -11,7 +11,6 @@ from qtpy import QtWidgets
 from qtpy.compat import getexistingdirectory
 
 from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
-from neuroseq.exporter_syscon2 import GlobalSlmWindowViolation
 from neuroseq.exporter_syscon2 import InitialSlmLoadViolation
 from neuroseq.exporter_syscon2 import SimultaneousDurationViolation
 from neuroseq.exporter_syscon2 import SlmGapViolation
@@ -20,7 +19,6 @@ from neuroseq.exporter_syscon2 import SysconExportReport
 from neuroseq.exporter_syscon2 import align_overlapping_pulses_to_shortest
 from neuroseq.exporter_syscon2 import check_syscon2_input_sanity
 from neuroseq.exporter_syscon2 import equalize_simultaneous_durations_to_min
-from neuroseq.exporter_syscon2 import find_global_slm_window_violations
 from neuroseq.exporter_syscon2 import find_initial_slm_load_violation
 from neuroseq.exporter_syscon2 import find_overlapping_pulse_group_violations
 from neuroseq.exporter_syscon2 import find_simultaneous_duration_violations
@@ -29,9 +27,11 @@ from neuroseq.exporter_syscon2 import find_slm_off_on_overlap_violations
 from neuroseq.exporter_syscon2 import generate_syscon2_sequence_text
 from neuroseq.exporter_syscon2 import generate_syscon2_timeline_overview_png
 from neuroseq.exporter_syscon2 import shift_stim_values_right_for_initial_slm_load
-from neuroseq.exporter_syscon2 import snap_stim_values_to_global_slm_windows
 from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm
 from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm_off_on_overlap
+from neuroseq.power_lut import PowerLut
+from neuroseq.power_lut import parse_power_lut_text
+from neuroseq.power_lut import resolve_power_lut
 
 if TYPE_CHECKING:
     from neuroseq.importer_cellpose import CellposeImportResult
@@ -143,6 +143,70 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         name_layout.addWidget(self.name_edit)
         config_layout.addLayout(name_layout)
 
+        self.binary_mode_checkbox = QtWidgets.QCheckBox(
+            "Force binary export intensity (all ON samples -> 1.0)"
+        )
+        self.binary_mode_checkbox.setChecked(True)
+        self.binary_mode_checkbox.setToolTip(
+            "When unchecked, export preprocessing preserves input stim amplitudes "
+            "(clipped to [0, 1]) instead of normalizing ON samples to 1.0."
+        )
+        config_layout.addWidget(self.binary_mode_checkbox)
+
+        self.spiralling_checkbox = QtWidgets.QCheckBox(
+            "Spiralling (TTL fires 1 tick before SLM load completes)"
+        )
+        self.spiralling_checkbox.setChecked(True)
+        self.spiralling_checkbox.setToolTip(
+            "When checked, every laser TTL pulse is shifted 1 tick earlier so the "
+            "laser edge aligns with the SLM-ready edge in spiralling mode. Uncheck "
+            "for legacy non-spiralling hardware: TTL fires exactly at SLM-ready "
+            "(start tick + 16.666 ms)."
+        )
+        config_layout.addWidget(self.spiralling_checkbox)
+
+        laser_layout = QtWidgets.QHBoxLayout()
+        laser_label = QtWidgets.QLabel("Laser timeline:")
+        self.laser_combo = QtWidgets.QComboBox()
+        self.laser_combo.addItem("940 nm digital", 940)
+        self.laser_combo.addItem("1030 nm digital", 1030)
+        self.laser_combo.addItem("1100 nm digital", 1100)
+        self.laser_combo.setCurrentIndex(self.laser_combo.findData(1100))
+        self.laser_combo.setToolTip(
+            "Select which fixed laser timeline receives stimulation TTLPulses."
+        )
+        laser_layout.addWidget(laser_label)
+        laser_layout.addWidget(self.laser_combo)
+        config_layout.addLayout(laser_layout)
+
+        power_layout = QtWidgets.QHBoxLayout()
+        self.target_power_spin = QtWidgets.QDoubleSpinBox()
+        self.target_power_spin.setRange(0.0, 1000.0)
+        self.target_power_spin.setDecimals(2)
+        self.target_power_spin.setSuffix(" mW")
+        self.target_power_spin.setSingleStep(0.5)
+        self.target_power_spin.setValue(0.0)
+        self.target_power_spin.setToolTip(
+            "Desired delivered power. Set to 0 to disable power control "
+            "(Intensity_0 fields written as 0 — current default behavior)."
+        )
+        self.load_lut_button = QtWidgets.QPushButton("Load LUT…")
+        self.load_lut_button.setToolTip(
+            "Load a SysCon .lut file for the currently selected laser wavelength. "
+            "The LUT is bundled with the project on save."
+        )
+        self.load_lut_button.clicked.connect(self._on_load_lut_clicked)
+        self.lut_status_label = QtWidgets.QLabel(self._format_lut_status())
+        self.lut_status_label.setStyleSheet("color: gray; font-style: italic;")
+        power_layout.addWidget(QtWidgets.QLabel("Target power:"))
+        power_layout.addWidget(self.target_power_spin)
+        power_layout.addWidget(self.load_lut_button)
+        power_layout.addWidget(self.lut_status_label, stretch=1)
+        config_layout.addLayout(power_layout)
+        self.laser_combo.currentIndexChanged.connect(
+            lambda _index: self.lut_status_label.setText(self._format_lut_status())
+        )
+
         # HOLO4D Configuration data
         config_data_label = QtWidgets.QLabel("HOLO4D Configuration:")
         config_layout.addWidget(config_data_label)
@@ -153,30 +217,6 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         default_config = self._default_syscon2_config_text()
         self.config_data_edit.setPlainText(default_config)
         config_layout.addWidget(self.config_data_edit)
-
-        self.binary_mode_checkbox = QtWidgets.QCheckBox(
-            "Force binary export intensity (all ON samples -> 1.0)"
-        )
-        self.binary_mode_checkbox.setChecked(True)
-        self.binary_mode_checkbox.setToolTip(
-            "When unchecked, exported Shape intensities preserve input stim amplitudes "
-            "(clipped to [0, 1])."
-        )
-        config_layout.addWidget(self.binary_mode_checkbox)
-
-        laser_layout = QtWidgets.QHBoxLayout()
-        laser_label = QtWidgets.QLabel("Laser timeline:")
-        self.laser_combo = QtWidgets.QComboBox()
-        self.laser_combo.addItem("940 nm digital", 940)
-        self.laser_combo.addItem("1030 nm digital", 1030)
-        self.laser_combo.addItem("1140 nm digital", 1140)
-        self.laser_combo.setCurrentIndex(self.laser_combo.findData(1140))
-        self.laser_combo.setToolTip(
-            "Select which fixed laser timeline receives stimulation TTLPulses."
-        )
-        laser_layout.addWidget(laser_label)
-        laser_layout.addWidget(self.laser_combo)
-        config_layout.addLayout(laser_layout)
 
         config_group.setLayout(config_layout)
         main_layout.addWidget(config_group)
@@ -238,11 +278,6 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
 
     class _InitialSlmFixChoice(Enum):
         SHIFT_RIGHT = "shift_right"
-        CANCEL = "cancel"
-
-    class _GlobalWindowFixChoice(Enum):
-        SNAP = "snap"
-        CONTINUE = "continue"
         CANCEL = "cancel"
 
     def _update_stim_info(self) -> None:
@@ -380,6 +415,19 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 "Scripts Generated",
                 "\n".join(report_lines),
             )
+            if export_report.power_saturation_warnings:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Power saturation",
+                    "Some pulses requested more power than the LUT can deliver "
+                    "and were clamped:\n\n"
+                    + "\n".join(export_report.power_saturation_warnings[:20])
+                    + (
+                        "\n…"
+                        if len(export_report.power_saturation_warnings) > 20
+                        else ""
+                    ),
+                )
 
         except Exception as e:
             self.logger.error(f"Error generating scripts: {e}", exc_info=True)
@@ -528,22 +576,6 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 "Aligned overlapping pulse groups in stim '%s'.", stim_name
             )
 
-        # 5. Global SLM window misalignment: pulse starts not on allowed 16.66ms grid.
-        global_violations = find_global_slm_window_violations(stim_array)
-        if global_violations:
-            global_choice = self._prompt_global_slm_window_fix_choice(global_violations)
-            if global_choice == self._GlobalWindowFixChoice.CANCEL:
-                return
-            if global_choice == self._GlobalWindowFixChoice.SNAP:
-                fixed_values, _, _ = snap_stim_values_to_global_slm_windows(stim_array)
-                if not self._replace_stim_values_preserving_undo(
-                    stim_name, fixed_values
-                ):
-                    return
-                stim_array = self.project.stim_arrays[stim_name]
-                self._log_status("Snapped stim '%s' to global SLM windows.", stim_name)
-            # CONTINUE falls through to the full sanity check.
-
         force_binary_intensity = self.binary_mode_checkbox.isChecked()
         sanity_report = check_syscon2_input_sanity(
             stim_array,
@@ -554,6 +586,9 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             binary_intensity=1.0,
             force_binary_intensity=force_binary_intensity,
             active_laser_wavelength_nm=self._selected_laser_wavelength_nm(),
+            spiralling=self.spiralling_checkbox.isChecked(),
+            target_power_mw=self.target_power_spin.value(),
+            power_lut=self._selected_power_lut(),
         )
 
         sanitized_values = sanity_report.sanitized_values
@@ -676,56 +711,6 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         layout.addWidget(button_box)
         dlg.exec()
         return extra_clicked[0]
-
-    def _prompt_global_slm_window_fix_choice(
-        self,
-        violations: list[GlobalSlmWindowViolation],
-    ) -> _GlobalWindowFixChoice:
-        first_violation = violations[0]
-        start_ms = first_violation.start_tick * 520.8125 / 1e3
-        snapped_start_ms = first_violation.snapped_start_tick * 520.8125 / 1e3
-        shift_ms = first_violation.shift_ticks * 520.8125 / 1e3
-        text_lines = [
-            (
-                "Detected stimulation starts outside global 16.66ms SLM windows "
-                "(sub-ms SysCon2 alignment grid)."
-            ),
-            "",
-            f"Violations detected: {len(violations)}",
-            (
-                "Example: "
-                f"neuron {first_violation.neuron_index}, "
-                f"start={start_ms:.3f}ms -> nearest allowed={snapped_start_ms:.3f}ms "
-                f"(delta {shift_ms:+.3f}ms)"
-            ),
-            "",
-            "Choose how to proceed:",
-            "1) Snap starts to nearest allowed global window (optional auto-fix)",
-            "2) Continue without this fix",
-            "3) Cancel",
-        ]
-        msg_box = QtWidgets.QMessageBox(self)
-        msg_box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
-        msg_box.setWindowTitle("Global 16.66ms Window Misalignment Detected")
-        msg_box.setText("\n".join(text_lines))
-
-        snap_button = msg_box.addButton(
-            "Snap To Allowed Windows",
-            QtWidgets.QMessageBox.ButtonRole.ActionRole,
-        )
-        continue_button = msg_box.addButton(
-            "Continue Without Fix",
-            QtWidgets.QMessageBox.ButtonRole.ActionRole,
-        )
-        msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
-        msg_box.setDefaultButton(continue_button)
-        msg_box.exec()
-        clicked = msg_box.clickedButton()
-        if clicked == snap_button:
-            return self._GlobalWindowFixChoice.SNAP
-        if clicked == continue_button:
-            return self._GlobalWindowFixChoice.CONTINUE
-        return self._GlobalWindowFixChoice.CANCEL
 
     def _prompt_slm_off_on_overlap_fix_choice(
         self,
@@ -989,13 +974,55 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             binary_intensity=1.0,
             force_binary_intensity=self.binary_mode_checkbox.isChecked(),
             active_laser_wavelength_nm=self._selected_laser_wavelength_nm(),
+            spiralling=self.spiralling_checkbox.isChecked(),
+            target_power_mw=self.target_power_spin.value(),
+            power_lut=self._selected_power_lut(),
         )
 
     def _selected_laser_wavelength_nm(self) -> int:
         current_data = self.laser_combo.currentData()
         if current_data is None:
-            return 1140
+            return 1100
         return int(current_data)
+
+    def _selected_power_lut(self) -> PowerLut | None:
+        wavelength_nm = self._selected_laser_wavelength_nm()
+        lut, _ = resolve_power_lut(self.project.power_luts, wavelength_nm)
+        return lut
+
+    def _format_lut_status(self) -> str:
+        wavelength_nm = self._selected_laser_wavelength_nm()
+        lut, is_override = resolve_power_lut(self.project.power_luts, wavelength_nm)
+        if lut is None:
+            return f"No LUT loaded for {wavelength_nm} nm"
+        tag = "" if is_override else " (default)"
+        return f"LUT: {lut.description} (max {lut.max_mw:.1f} mW){tag}"
+
+    def _on_load_lut_clicked(self) -> None:
+        wavelength_nm = self._selected_laser_wavelength_nm()
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            f"Load SysCon LUT for {wavelength_nm} nm",
+            "",
+            "SysCon LUT (*.lut);;All files (*)",
+        )
+        if not path:
+            return
+        self._apply_lut_from_path(path, wavelength_nm)
+
+    def _apply_lut_from_path(self, path: str, wavelength_nm: int) -> None:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                lut = parse_power_lut_text(fh.read())
+        except (OSError, ValueError) as exc:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "LUT load failed",
+                f"Could not parse LUT file:\n{exc}",
+            )
+            return
+        self.project.power_luts[wavelength_nm] = lut
+        self.lut_status_label.setText(self._format_lut_status())
 
     def _default_syscon2_config_text(self) -> str:
         imported_template = getattr(

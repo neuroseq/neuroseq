@@ -27,11 +27,19 @@ from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm_off_on_overl
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_syscon2 import parse_syscon2_seq_text
 from neuroseq.importer_syscon2 import sequence_to_stim_values
+from neuroseq.power_lut import PowerLut
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
 _TTL_QUANTUM_US = 520.8125
 _DT_S = 0.0005208125  # exact literal; avoids float rounding from _TTL_QUANTUM_US * 1e-6
+
+
+def _linear_power_lut(max_mw: float = 50.0) -> PowerLut:
+    return PowerLut(
+        description="",
+        tuples=((0.0, 0.0), (100.0, max_mw)),
+    )
 
 
 def _template_header() -> str:
@@ -145,7 +153,8 @@ def test_export_seq_uses_fixed_laser_and_ttl_out_timeline_layout() -> None:
         tick_resolution_us=500,
         active_threshold=0.0,
         binary_intensity=1.0,
-        active_laser_wavelength_nm=1140,
+        active_laser_wavelength_nm=1100,
+        spiralling=False,
     )
 
     sequence = parse_syscon2_seq_text(seq_text)
@@ -153,20 +162,20 @@ def test_export_seq_uses_fixed_laser_and_ttl_out_timeline_layout() -> None:
     pulses = [obj for obj in sequence.objects if obj.object_type == "TTLPulse"]
 
     assert report.entity_lanes == 2
-    assert report.laser_timeline_index == 4
-    assert report.ttl_out1_timeline_index == 5
-    assert report.ttl_out2_timeline_index == 6
+    assert report.laser_timeline_index == 1
+    assert report.ttl_out1_timeline_index == 4
+    assert report.ttl_out2_timeline_index == 5
     assert report.unmapped_active_neurons == []
 
     assert len(entities) == 2
     entity_lanes = sorted(_timeline_index(obj) for obj in entities)
-    assert entity_lanes == [0, 1]
+    assert entity_lanes == [0, 6]
     assert all(obj.repeats >= 0 for obj in entities)
     assert all(obj.step_size == 100 for obj in entities)
 
-    laser_pulses = [obj for obj in pulses if _timeline_index(obj) == 4]
-    ttl_out_1_pulses = [obj for obj in pulses if _timeline_index(obj) == 5]
-    ttl_out_2_pulses = [obj for obj in pulses if _timeline_index(obj) == 6]
+    laser_pulses = [obj for obj in pulses if _timeline_index(obj) == 1]
+    ttl_out_1_pulses = [obj for obj in pulses if _timeline_index(obj) == 4]
+    ttl_out_2_pulses = [obj for obj in pulses if _timeline_index(obj) == 5]
 
     assert len(laser_pulses) == 1
     assert len(ttl_out_1_pulses) == 1
@@ -195,7 +204,8 @@ def test_export_seq_coalesces_nearby_segments_into_one_sanitized_window() -> Non
         tick_resolution_us=500,
         active_threshold=0.0,
         binary_intensity=1.0,
-        active_laser_wavelength_nm=1140,
+        active_laser_wavelength_nm=1100,
+        spiralling=False,
     )
 
     sequence = parse_syscon2_seq_text(seq_text)
@@ -222,9 +232,10 @@ def test_export_seq_coalesces_nearby_segments_into_one_sanitized_window() -> Non
         tick_resolution_us=500,
         include_non_shape=False,
     )
-    # Roundtrip preserves sub-window accuracy: each drawn segment is reconstructed
-    # at its original tick position (40-41 and 45-46).
-    assert np.array_equal(np.flatnonzero(imported_values[:, 0] > 0), [40, 41, 45, 46])
+    # Shape intensity is now always exported as 0 to match SysCon v3 reference
+    # files, so importer roundtrip via Shape windows no longer reconstructs the
+    # original ON samples from exporter output alone.
+    assert np.count_nonzero(imported_values[:, 0] > 0) == 0
 
 
 def test_export_seq_routes_ttl_pulses_to_selected_1030_laser_timeline() -> None:
@@ -246,6 +257,7 @@ def test_export_seq_routes_ttl_pulses_to_selected_1030_laser_timeline() -> None:
         active_threshold=0.0,
         binary_intensity=1.0,
         active_laser_wavelength_nm=1030,
+        spiralling=False,
     )
 
     sequence = parse_syscon2_seq_text(seq_text)
@@ -253,15 +265,17 @@ def test_export_seq_routes_ttl_pulses_to_selected_1030_laser_timeline() -> None:
 
     assert report.active_laser_wavelength_nm == 1030
     assert report.entity_lanes == 1
-    assert report.laser_timeline_index == 2
+    assert report.laser_timeline_index == 3
 
-    laser_pulses = [obj for obj in pulses if _timeline_index(obj) == 2]
-    lower_laser_timeline = [obj for obj in pulses if _timeline_index(obj) == 1]
-    upper_laser_timeline = [obj for obj in pulses if _timeline_index(obj) == 3]
+    laser_pulses = [obj for obj in pulses if _timeline_index(obj) == 3]
+    lower_laser_timeline = [obj for obj in pulses if _timeline_index(obj) == 2]
+    other_laser_timeline = [obj for obj in pulses if _timeline_index(obj) == 1]
+    ttl_out_1_pulses = [obj for obj in pulses if _timeline_index(obj) == 4]
 
     assert len(laser_pulses) == 1
     assert len(lower_laser_timeline) == 0
-    assert len(upper_laser_timeline) == 0
+    assert len(other_laser_timeline) == 0
+    assert len(ttl_out_1_pulses) == 1
 
 
 def test_export_seq_requires_syscon2_tick_rate() -> None:
@@ -283,7 +297,8 @@ def test_export_seq_requires_syscon2_tick_rate() -> None:
             tick_resolution_us=500,
             active_threshold=0.0,
             binary_intensity=1.0,
-            active_laser_wavelength_nm=1140,
+            active_laser_wavelength_nm=1100,
+            spiralling=False,
         )
 
 
@@ -327,7 +342,8 @@ def test_generate_syscon2_timeline_overview_png_writes_file(tmp_path: Path) -> N
         tick_resolution_us=500,
         active_threshold=0.0,
         binary_intensity=1.0,
-        active_laser_wavelength_nm=1140,
+        active_laser_wavelength_nm=1100,
+        spiralling=False,
     )
 
     png_path = tmp_path / "overview.png"
@@ -357,7 +373,8 @@ def test_generate_syscon2_timeline_overview_png_scales_width_for_long_duration(
         tick_resolution_us=500,
         active_threshold=0.0,
         binary_intensity=1.0,
-        active_laser_wavelength_nm=1140,
+        active_laser_wavelength_nm=1100,
+        spiralling=False,
     )
 
     long_values = np.zeros((200_000, 1), dtype=np.float32)
@@ -376,7 +393,8 @@ def test_generate_syscon2_timeline_overview_png_scales_width_for_long_duration(
         tick_resolution_us=500,
         active_threshold=0.0,
         binary_intensity=1.0,
-        active_laser_wavelength_nm=1140,
+        active_laser_wavelength_nm=1100,
+        spiralling=False,
     )
 
     short_png_path = tmp_path / "overview_short.png"
@@ -414,15 +432,174 @@ def test_export_seq_accepts_legacy_1040_alias_as_1030_timeline() -> None:
         active_threshold=0.0,
         binary_intensity=1.0,
         active_laser_wavelength_nm=1040,
+        spiralling=False,
     )
 
     sequence = parse_syscon2_seq_text(seq_text)
     pulses = [obj for obj in sequence.objects if obj.object_type == "TTLPulse"]
-    laser_pulses = [obj for obj in pulses if _timeline_index(obj) == 2]
+    laser_pulses = [obj for obj in pulses if _timeline_index(obj) == 3]
 
     assert report.active_laser_wavelength_nm == 1030
-    assert report.laser_timeline_index == 2
+    assert report.laser_timeline_index == 3
     assert len(laser_pulses) == 1
+
+
+def test_export_seq_accepts_legacy_1140_alias_as_1100_timeline() -> None:
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+
+    seq_text, report = generate_syscon2_sequence_text(
+        stim_array,
+        _cellpose_result(mapping={0: 0}),
+        template_text=_template_header(),
+        tick_resolution_us=500,
+        active_threshold=0.0,
+        binary_intensity=1.0,
+        active_laser_wavelength_nm=1140,
+    )
+
+    sequence = parse_syscon2_seq_text(seq_text)
+    pulses = [obj for obj in sequence.objects if obj.object_type == "TTLPulse"]
+    laser_pulses = [obj for obj in pulses if _timeline_index(obj) == 1]
+
+    assert report.active_laser_wavelength_nm == 1100
+    assert report.laser_timeline_index == 1
+    assert len(laser_pulses) == 1
+
+
+def test_export_seq_spiralling_shifts_laser_pulse_one_tick_earlier() -> None:
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+
+    seq_text_on, report_on = generate_syscon2_sequence_text(
+        stim_array,
+        _cellpose_result(mapping={0: 0}),
+        template_text=_template_header(),
+        tick_resolution_us=500,
+        active_threshold=0.0,
+        binary_intensity=1.0,
+        active_laser_wavelength_nm=1100,
+        spiralling=True,
+    )
+    seq_text_off, _ = generate_syscon2_sequence_text(
+        stim_array,
+        _cellpose_result(mapping={0: 0}),
+        template_text=_template_header(),
+        tick_resolution_us=500,
+        active_threshold=0.0,
+        binary_intensity=1.0,
+        active_laser_wavelength_nm=1100,
+        spiralling=False,
+    )
+
+    seq_on = parse_syscon2_seq_text(seq_text_on)
+    seq_off = parse_syscon2_seq_text(seq_text_off)
+
+    laser_on = [
+        obj
+        for obj in seq_on.objects
+        if obj.object_type == "TTLPulse"
+        and _timeline_index(obj) == report_on.laser_timeline_index
+    ]
+    laser_off = [
+        obj
+        for obj in seq_off.objects
+        if obj.object_type == "TTLPulse"
+        and _timeline_index(obj) == report_on.laser_timeline_index
+    ]
+    assert len(laser_on) == 1
+    assert len(laser_off) == 1
+
+    assert laser_off[0].start_time_us - laser_on[0].start_time_us == pytest.approx(
+        _TTL_QUANTUM_US
+    )
+    assert laser_on[0].repeats == laser_off[0].repeats
+
+    ttl_out_1_on = [
+        obj
+        for obj in seq_on.objects
+        if obj.object_type == "TTLPulse"
+        and _timeline_index(obj) == report_on.ttl_out1_timeline_index
+    ]
+    ttl_out_1_off = [
+        obj
+        for obj in seq_off.objects
+        if obj.object_type == "TTLPulse"
+        and _timeline_index(obj) == report_on.ttl_out1_timeline_index
+    ]
+    assert len(ttl_out_1_on) == 1
+    assert len(ttl_out_1_off) == 1
+    assert ttl_out_1_off[0].start_time_us - ttl_out_1_on[
+        0
+    ].start_time_us == pytest.approx(_TTL_QUANTUM_US)
+
+
+@pytest.mark.parametrize(
+    ("wavelength_nm", "expected_timeline_index", "expected_lightsource_id"),
+    [
+        (1100, 1, "dummy_2_0"),
+        (940, 2, "dummy_1_0"),
+        (1030, 3, "dummy_0_0"),
+    ],
+)
+def test_export_seq_lightsource_id_matches_syscon_v3_template(
+    wavelength_nm: int,
+    expected_timeline_index: int,
+    expected_lightsource_id: str,
+) -> None:
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+
+    seq_text, _ = generate_syscon2_sequence_text(
+        stim_array,
+        _cellpose_result(mapping={0: 0}),
+        template_text=_template_header(),
+        tick_resolution_us=500,
+        active_threshold=0.0,
+        binary_intensity=1.0,
+        active_laser_wavelength_nm=wavelength_nm,
+    )
+
+    sequence = parse_syscon2_seq_text(seq_text)
+    laser_pulses = [
+        obj
+        for obj in sequence.objects
+        if obj.object_type == "TTLPulse"
+        and _timeline_index(obj) == expected_timeline_index
+    ]
+    assert len(laser_pulses) >= 1
+    for pulse in laser_pulses:
+        assert (
+            pulse.properties["TimelineInfo0_LightsourceID_0"] == expected_lightsource_id
+        )
+        assert pulse.properties["port"] == f"{expected_lightsource_id} RMI In"
+
+    shape_objs = [obj for obj in sequence.objects if obj.object_type == "Shape"]
+    assert len(shape_objs) >= 1
+    for shape in shape_objs:
+        assert shape.properties["TimelineInfo0_LightsourceID_0"] == "dummy_2_0"
+        assert shape.properties["TimelineInfo0_Intensity_0"] == "0"
 
 
 def test_export_seq_roundtrip_preserves_burst_timing_at_exact_tick_positions() -> None:
@@ -459,7 +636,8 @@ def test_export_seq_roundtrip_preserves_burst_timing_at_exact_tick_positions() -
         tick_resolution_us=500,
         active_threshold=0.0,
         binary_intensity=1.0,
-        active_laser_wavelength_nm=1140,
+        active_laser_wavelength_nm=1100,
+        spiralling=False,
     )
     sequence = parse_syscon2_seq_text(seq_text)
     laser_pulses = [
@@ -485,15 +663,18 @@ def test_export_seq_roundtrip_preserves_burst_timing_at_exact_tick_positions() -
         tick_resolution_us=500,
         include_non_shape=False,
     )
-    # Each neuron's bursts are reconstructed at the original tick positions:
-    # 8 separate 2-tick segments for neurons 0-2, 4 for neurons 3-5.
+    # Shape intensity is now always 0 in the exported sequence, so roundtrip via
+    # Shape windows no longer reconstructs active samples even though the laser
+    # TTLPulse timing itself is preserved above.
     segment_counts = [
         _count_active_segments(imported_values[:, idx]) for idx in range(6)
     ]
-    assert segment_counts == [8, 8, 8, 4, 4, 4]
+    assert segment_counts == [0, 0, 0, 0, 0, 0]
 
 
-def test_export_seq_preserves_non_binary_shape_intensity_when_requested() -> None:
+def test_export_seq_shape_intensity_remains_zero_when_non_binary_input_is_requested() -> (
+    None
+):
     values = np.zeros((40, 1), dtype=np.float32)
     values[20:22, 0] = 0.37
     stim_array = StimArray(
@@ -512,14 +693,130 @@ def test_export_seq_preserves_non_binary_shape_intensity_when_requested() -> Non
         active_threshold=0.0,
         binary_intensity=1.0,
         force_binary_intensity=False,
-        active_laser_wavelength_nm=1140,
+        active_laser_wavelength_nm=1100,
+        spiralling=False,
     )
 
     sequence = parse_syscon2_seq_text(seq_text)
     shapes = [obj for obj in sequence.objects if obj.object_type == "Shape"]
 
     assert len(shapes) == 1
-    assert np.isclose(shapes[0].intensity, 0.37)
+    assert np.isclose(shapes[0].intensity, 0.0)
+
+
+def test_export_seq_writes_lut_inverted_intensity_when_power_requested() -> None:
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+
+    seq_text, report = generate_syscon2_sequence_text(
+        stim_array,
+        _cellpose_result(mapping={0: 0}),
+        template_text=_template_header(),
+        tick_resolution_us=500,
+        active_threshold=0.0,
+        binary_intensity=1.0,
+        active_laser_wavelength_nm=1100,
+        target_power_mw=25.0,
+        power_lut=_linear_power_lut(),
+    )
+
+    sequence = parse_syscon2_seq_text(seq_text)
+    shapes = [obj for obj in sequence.objects if obj.object_type == "Shape"]
+    laser_pulses = [
+        obj
+        for obj in sequence.objects
+        if obj.object_type == "TTLPulse"
+        and _timeline_index(obj) == report.laser_timeline_index
+    ]
+
+    assert shapes[0].properties["TimelineInfo0_Intensity_0"] == "50"
+    assert laser_pulses[0].properties["TimelineInfo0_Intensity_0"] == "50"
+    assert report.power_saturation_warnings == []
+    assert report.target_power_mw == 25.0
+    assert report.power_lut_description == ""
+
+
+def test_export_seq_clamps_and_warns_when_target_power_exceeds_lut_max() -> None:
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+
+    seq_text, report = generate_syscon2_sequence_text(
+        stim_array,
+        _cellpose_result(mapping={0: 0}),
+        template_text=_template_header(),
+        tick_resolution_us=500,
+        active_threshold=0.0,
+        binary_intensity=1.0,
+        active_laser_wavelength_nm=1100,
+        target_power_mw=200.0,
+        power_lut=_linear_power_lut(),
+    )
+
+    sequence = parse_syscon2_seq_text(seq_text)
+    shapes = [obj for obj in sequence.objects if obj.object_type == "Shape"]
+    laser_pulses = [
+        obj
+        for obj in sequence.objects
+        if obj.object_type == "TTLPulse"
+        and _timeline_index(obj) == report.laser_timeline_index
+    ]
+
+    assert shapes[0].properties["TimelineInfo0_Intensity_0"] == "100"
+    assert laser_pulses[0].properties["TimelineInfo0_Intensity_0"] == "100"
+    assert len(report.power_saturation_warnings) >= 1
+    assert any("LUT max" in warning for warning in report.power_saturation_warnings)
+
+
+def test_export_seq_uses_window_intensity_as_multiplier_when_non_binary() -> None:
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 0.4
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+
+    seq_text, _ = generate_syscon2_sequence_text(
+        stim_array,
+        _cellpose_result(mapping={0: 0}),
+        template_text=_template_header(),
+        tick_resolution_us=500,
+        active_threshold=0.0,
+        binary_intensity=1.0,
+        force_binary_intensity=False,
+        active_laser_wavelength_nm=1100,
+        target_power_mw=50.0,
+        power_lut=_linear_power_lut(),
+    )
+
+    sequence = parse_syscon2_seq_text(seq_text)
+    shapes = [obj for obj in sequence.objects if obj.object_type == "Shape"]
+    laser_pulses = [obj for obj in sequence.objects if obj.object_type == "TTLPulse"]
+
+    assert float(shapes[0].properties["TimelineInfo0_Intensity_0"]) == pytest.approx(
+        40.0
+    )
+    assert any(
+        float(pulse.properties["TimelineInfo0_Intensity_0"]) == pytest.approx(40.0)
+        for pulse in laser_pulses
+        if "TimelineInfo0_Intensity_0" in pulse.properties
+    )
 
 
 def test_export_seq_skips_unmapped_active_neurons_and_reports_them() -> None:
@@ -538,6 +835,7 @@ def test_export_seq_skips_unmapped_active_neurons_and_reports_them() -> None:
         stim_array,
         _cellpose_result(mapping={0: 0}),
         template_text=_template_header(),
+        spiralling=False,
     )
 
     sequence = parse_syscon2_seq_text(seq_text)
@@ -573,6 +871,7 @@ def test_export_seq_accepts_one_based_mapping_keys() -> None:
         stim_array,
         _cellpose_result(mapping={1: 0}),
         template_text=_template_header(),
+        spiralling=False,
     )
     sequence = parse_syscon2_seq_text(seq_text)
 
@@ -923,7 +1222,8 @@ def test_export_seq_restarts_and_aligns_objects_when_new_target_appears() -> Non
         tick_resolution_us=500,
         active_threshold=0.0,
         binary_intensity=1.0,
-        active_laser_wavelength_nm=1140,
+        active_laser_wavelength_nm=1100,
+        spiralling=False,
     )
     sequence = parse_syscon2_seq_text(seq_text)
     shapes = [obj for obj in sequence.objects if obj.object_type == "Shape"]
@@ -1190,6 +1490,7 @@ def test_export_clips_pulse_to_sanitized_window_extent_when_tail_is_truncated() 
         stim,
         _cellpose_result(mapping={0: 0, 1: 1}),
         template_text=_template_header(),
+        spiralling=False,
     )
     assert "TTLPulse" in seq_text
 
@@ -1227,6 +1528,7 @@ def test_generate_syscon2_sequence_text_raises_for_1d_values() -> None:
             _stim_1d(),
             _cellpose_result(mapping={0: 0}),
             template_text=_template_header(),
+            spiralling=False,
         )
 
 
@@ -1239,6 +1541,7 @@ def test_generate_syscon2_sequence_text_raises_for_non_positive_tick_resolution(
             _cellpose_result(mapping={0: 0}),
             template_text=_template_header(),
             tick_resolution_us=-1,
+            spiralling=False,
         )
 
 
@@ -1251,6 +1554,7 @@ def test_generate_syscon2_sequence_text_raises_for_out_of_range_binary_intensity
             _cellpose_result(mapping={0: 0}),
             template_text=_template_header(),
             binary_intensity=1.5,
+            spiralling=False,
         )
 
 
@@ -1260,6 +1564,7 @@ def test_generate_syscon2_sequence_text_raises_when_cellpose_data_is_none() -> N
             _stim_active(),
             None,
             template_text=_template_header(),
+            spiralling=False,
         )
 
 
@@ -1284,6 +1589,7 @@ def test_generate_syscon2_sequence_text_raises_when_segmentation_array_is_none()
             _stim_active(),
             no_seg,
             template_text=_template_header(),
+            spiralling=False,
         )
 
 
@@ -1294,6 +1600,7 @@ def test_generate_syscon2_sequence_text_raises_for_unsupported_wavelength() -> N
             _cellpose_result(mapping={0: 0}),
             template_text=_template_header(),
             active_laser_wavelength_nm=999,
+            spiralling=False,
         )
 
 
@@ -1311,6 +1618,7 @@ def test_generate_syscon2_sequence_text_raises_when_no_active_stimulation() -> N
             stim,
             _cellpose_result(mapping={0: 0}),
             template_text=_template_header(),
+            spiralling=False,
         )
 
 

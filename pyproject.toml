@@ -62,6 +62,9 @@ dev = [
 [tool.hatch.version]
 path = "src/neuroseq/__init__.py"
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/neuroseq"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
