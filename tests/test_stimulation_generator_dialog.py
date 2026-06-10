@@ -689,10 +689,17 @@ def test_stimulation_generator_dialog_cancels_on_slm_load_violation(
         "find_slm_gap_violations",
         lambda *a, **kw: [],
     )
+    # Force the prompt to return CANCEL deterministically, without ever
+    # showing a QMessageBox (relying on patch_b2w_exec_show's .show() default
+    # leaves pending Qt events that hang subsequent tests on macOS-arm64-ssc).
+    monkeypatch.setattr(
+        StimulationGeneratorDialog,
+        "_prompt_initial_slm_start_fix_choice",
+        lambda *a, **kw: StimulationGeneratorDialog._InitialSlmFixChoice.CANCEL,
+    )
 
     dialog = StimulationGeneratorDialog(project)
     qtbot.addWidget(dialog)
-    # patch_b2w_exec_show makes the prompt auto-cancel
     dialog.check_sanity_button.click()
 
     # Returned early — no sanity check ran, no message box
@@ -780,6 +787,11 @@ def test_stimulation_generator_dialog_cancels_on_slm_gap_violation(
         stimulation_generator_dialog_module,
         "find_slm_gap_violations",
         lambda *a, **kw: [_fake_slm_gap_violation()],
+    )
+    monkeypatch.setattr(
+        StimulationGeneratorDialog,
+        "_prompt_slm_gap_fix_choice",
+        lambda *a, **kw: StimulationGeneratorDialog._SlmFixChoice.CANCEL,
     )
 
     dialog = StimulationGeneratorDialog(project)
@@ -874,6 +886,11 @@ def test_stimulation_generator_dialog_cancels_on_slm_offon_violation(
         "find_slm_off_on_overlap_violations",
         lambda *a, **kw: [_fake_slm_offon_violation()],
     )
+    monkeypatch.setattr(
+        StimulationGeneratorDialog,
+        "_prompt_slm_off_on_overlap_fix_choice",
+        lambda *a, **kw: StimulationGeneratorDialog._SlmOffOnFixChoice.CANCEL,
+    )
 
     dialog = StimulationGeneratorDialog(project)
     qtbot.addWidget(dialog)
@@ -967,6 +984,11 @@ def test_stimulation_generator_dialog_cancels_on_duration_violation(
         stimulation_generator_dialog_module,
         "find_simultaneous_duration_violations",
         lambda *a, **kw: [_fake_duration_violation()],
+    )
+    monkeypatch.setattr(
+        StimulationGeneratorDialog,
+        "_prompt_duration_fix_choice",
+        lambda *a, **kw: StimulationGeneratorDialog._DurationFixChoice.CANCEL,
     )
 
     dialog = StimulationGeneratorDialog(project)
