@@ -10,6 +10,29 @@ NeuroSeq provides built-in custom analysis tools to support major types of analy
 4. Choose one of the built-in analysis actions:
 5. Optionally pick the `(new window)` variant to open results in a separate window.
 
+## The Custom Analysis widget
+
+When an analysis is run _without_ the `(new window)` variant, its output
+lands in the **Custom analysis** dock widget. Toggle it from **View → Show
+Custom analysis** in the menu or via the toolbar.
+
+The widget reuses the standard pan/zoom interaction of the other timeseries
+panels, so you can drag-select inside the analysis output itself and run a
+follow-up analysis on it.
+
+## ELiSe replay analysis
+
+Projects loaded from the **ELiSe Sequence Learning Network** example get an
+extra one-click action on the stim editor toolbar:
+**Analyse ELiSe replay (target MSE)**.
+
+It compares the simulated `firing_rate_r` trace against the binary teaching
+pattern derived from the project's `opsin_exc` stim, computing the
+paper-style replay MSE and correlation. The button is enabled only when the
+project is the ELiSe one _and_ a simulation has produced the required
+trace. Results are appended as a new analysis output and a metrics `.csv`
+file is written alongside.
+
 ## Use Installed Analysis Plugins
 
 NeuroSeq discovers plugins from this folder:

@@ -16,6 +16,18 @@ To load a custom simulator from a Python file:
 
 NeuroSeq will load that file and store the connection in the current project.
 
+### Connecting a Brian2-based backend
+
+There is a second entry, **Experiment → Connect brian2 external
+stimulation function**, for backends that themselves build a Brian2
+network. The contract is the same — a Python file exposing `simulate(...)`
+— but NeuroSeq forwards the project's existing Brian2 unit system and
+preferred code-generation target (see
+[Simulations → Choosing a Brian2 backend](simulations.md#choosing-a-brian2-backend))
+to the loaded module. Use this when your external model needs to share
+Brian2 state or units with the rest of the project; otherwise the plain
+**Connect external stimulation function** is sufficient.
+
 ## Run an External Simulator
 
 Once a simulator is connected:
