@@ -37,6 +37,16 @@ def mouse_click(
     )
 
 
+def wait_for_canvas(qtbot: QtBot, stim_widget, *points: QtCore.QPoint) -> None:
+    # ensure screen->world mapping succeeds for the given screen points
+    qtbot.waitUntil(
+        lambda: all(
+            stim_widget.subplot.map_screen_to_world((p.x(), p.y())) is not None
+            for p in points
+        )
+    )
+
+
 def mouse_click_and_drag(
     qtbot: QtBot,
     widget: QtGui.QWidget,
@@ -334,9 +344,10 @@ def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: StimArray) -> Non
     ## Select about half the neurons and half the time points
     x0 = stim_widget.size().width() // 4
     y0 = stim_widget.size().height() // 4
-    mouse_click_and_drag(
-        qtbot, stim_widget, QtCore.QPoint(x0, y0), QtCore.QPoint(x0 * 3, y0 * 3)
-    )
+    start = QtCore.QPoint(x0, y0)
+    end = QtCore.QPoint(x0 * 3, y0 * 3)
+    wait_for_canvas(qtbot, stim_widget, start, end)
+    mouse_click_and_drag(qtbot, stim_widget, start, end)
     assert stim_widget.selected_neuron_slice is not None
     assert stim_widget.selected_time_slice is not None
     assert 0.15 * n_neurons < stim_widget.selected_neuron_slice.start < 0.35 * n_neurons
@@ -374,6 +385,13 @@ def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
     x2 = x0 * 3
     assert stim_widget.selected_time_slice is None
     assert stim_widget.selected_neuron_slice is None
+    wait_for_canvas(
+        qtbot,
+        stim_widget,
+        QtCore.QPoint(x0, y0),
+        QtCore.QPoint(x1, y1),
+        QtCore.QPoint(x2, y0),
+    )
 
     # mouse clicks
     stim_widget.setFocus()

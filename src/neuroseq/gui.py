@@ -193,11 +193,6 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_synapse.setMinimumWidth(120)
         self.cmb_data = QtWidgets.QComboBox()
         self.cmb_data.setMinimumWidth(120)
-        # Keep strong Python references to these menus/actions to avoid premature
-        # PySide object deletion on some platforms (notably macOS CI).
-        self.open_example_project_menu: QtWidgets.QMenu | None = None
-        self.open_example_project_section_menus: dict[str, QtWidgets.QMenu] = {}
-        self.open_example_project_actions: list[QtWidgets.QAction] = []
         self.controller = ConstrainedPanZoomController()
         self.trace_widget = TraceWidget(self.controller, parent=self)
         self.heatmap_widget = HeatmapWidget(parent=self)
@@ -727,7 +722,11 @@ class Gui(QtWidgets.QMainWindow):
             self.setWindowTitle(f"{model_suffix} - Neuroseq")
 
     @with_wait_cursor
-    def update_project(self, project: Project, reset_controller=False) -> None:
+    def update_project(
+        self,
+        project: Project,
+        reset_controller: bool = False,
+    ) -> None:
         self.project = project
         self._update_window_title()
         if reset_controller:
@@ -737,6 +736,7 @@ class Gui(QtWidgets.QMainWindow):
         self.continue_simulation_action.setText("&Run simulation")
         for widget in self.plot_widgets:
             widget.clear_data()
+        self.custom_analysis_widget.clear_data()
         if self.project is not None:
             self.last_cellpose_import = clone_cellpose_result(
                 self.project.cellpose_data
@@ -1034,9 +1034,8 @@ class Gui(QtWidgets.QMainWindow):
         # Restore the default modality used by other long-running paths
         # (project load, import) that block the main thread.
         self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
-        if self._external_sim_cancel is not None:
-            with contextlib.suppress(TypeError, RuntimeError):
-                self.progress_dialog.canceled.disconnect(self._external_sim_cancel.set)
+        with contextlib.suppress(TypeError, RuntimeError):
+            self.progress_dialog.canceled.disconnect()
         self._external_sim_worker = None
         self._external_sim_thread = None
         self._external_sim_cancel = None
@@ -1132,11 +1131,15 @@ class Gui(QtWidgets.QMainWindow):
         on_success: Callable[[object], None],
         failure_title: str = "File operation failed",
         failure_prefix: str = "The file operation could not complete:",
+        cancel_callback: Callable[[], None] | None = None,
     ) -> bool:
         """Run a blocking IO task on a worker thread.
 
         Returns ``True`` if the task was dispatched, ``False`` if another
         IO task is already in flight.
+
+        If ``cancel_callback`` is given, the progress dialog shows a Cancel
+        button wired to it that calls the callback on the GUI thread.
         """
         if self._io_worker is not None:
             QtWidgets.QMessageBox.information(
@@ -1160,7 +1163,22 @@ class Gui(QtWidgets.QMainWindow):
         self.progress_dialog.setAutoReset(False)
         self.progress_dialog.setMinimumDuration(0)
         self.progress_dialog.setValue(0)
-        self.progress_dialog.setCancelButton(None)
+        if cancel_callback is not None:
+            self.progress_dialog.setCancelButtonText("Cancel")
+
+            def _on_cancel() -> None:
+                # The dialog hides on cancel, but the worker can keep running
+                # (e.g. uninterruptible Brian2 compilation). Re-show a busy
+                # "Cancelling..." bar until the worker actually finishes.
+                cancel_callback()
+                self.progress_dialog.setLabelText("Cancelling...")
+                self.progress_dialog.setRange(0, 0)
+                self.progress_dialog.setCancelButton(None)
+                self.progress_dialog.show()
+
+            self.progress_dialog.canceled.connect(_on_cancel)
+        else:
+            self.progress_dialog.setCancelButton(None)
         # Non-modal so the rest of the GUI stays interactive while the
         # worker thread does the IO. File-related actions are still
         # gated via _set_io_actions_enabled below.
@@ -1200,6 +1218,9 @@ class Gui(QtWidgets.QMainWindow):
         self.progress_dialog.setAutoClose(True)
         self.progress_dialog.setAutoReset(True)
         self.progress_dialog.setMinimumDuration(10)
+        with contextlib.suppress(TypeError, RuntimeError):
+            self.progress_dialog.canceled.disconnect()
+        self.progress_dialog.setCancelButton(None)
         self.progress_dialog.reset()
         self._io_thread = None
         self._io_worker = None
@@ -1255,6 +1276,10 @@ class Gui(QtWidgets.QMainWindow):
         project = self.project
         padding_secs = self.settings.stim_padding_secs
 
+        def _request_brian2_cancel() -> None:
+            self.logger.info("Brian2 simulation cancellation requested by user.")
+            project.request_cancel_simulation()
+
         def _brian2_task(report: Callable[[int], None]) -> None:
             first_report_seen: list[bool] = []
 
@@ -1296,6 +1321,7 @@ class Gui(QtWidgets.QMainWindow):
             _on_brian2_finished,
             failure_title="Simulation error",
             failure_prefix="Could not run simulation:",
+            cancel_callback=_request_brian2_cancel,
         )
 
     def btn_do_external_simulation_clicked(self) -> None:
@@ -1925,16 +1951,13 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.file"),
         )
         # add "open example project" item to the file menu which opens a sub-menu containing the example projects from src/neuroseq/example_projects
-        self.open_example_project_menu = menu.addMenu("&Open example project")
-        assert self.open_example_project_menu is not None
-        self.open_example_project_section_menus = {}
-        self.open_example_project_actions = []
+        open_example_project_menu = menu.addMenu("&Open example project")
+        assert open_example_project_menu is not None
         for section, section_projects in example_projects.items():
-            section_menu = self.open_example_project_menu.addMenu(section)
+            section_menu = open_example_project_menu.addMenu(section)
             assert section_menu is not None
-            self.open_example_project_section_menus[section] = section_menu
             for name, generator in section_projects.items():
-                action = add_action(
+                add_action(
                     name,
                     lambda checked=False, _generator=generator: (
                         self._load_example_project(_generator)
@@ -1942,7 +1965,6 @@ class Gui(QtWidgets.QMainWindow):
                     section_menu,
                     None,
                 )
-                self.open_example_project_actions.append(action)
         add_action(
             "&Open project",
             self.btn_open_clicked,
@@ -2479,32 +2501,28 @@ class Gui(QtWidgets.QMainWindow):
         analysis_window.setWindowTitle(f"ELiSe replay MSE — saved to {csv_path.name}")
         analysis_window.show()
 
+    def _stop_worker_thread(
+        self, thread: QtCore.QThread | None, timeout_ms: int, label: str
+    ) -> None:
+        """Stop a worker thread during shutdown."""
+        if thread is None or not thread.isRunning():
+            return
+        thread.quit()
+        if not thread.wait(timeout_ms):
+            self.logger.warning(
+                f"{label} did not stop in {timeout_ms} ms during shutdown."
+            )
+
     def closeEvent(self, event):
         if (
             self._external_sim_thread is not None
-            and self._external_sim_thread.isRunning()
+            and self._external_sim_cancel is not None
         ):
-            if self._external_sim_cancel is not None:
-                self._external_sim_cancel.set()
-            if not self._external_sim_thread.wait(2000):
-                self.logger.warning(
-                    "External simulation worker did not stop in 2 s; "
-                    "force-quitting the thread."
-                )
-                self._external_sim_thread.quit()
-                self._external_sim_thread.wait(1000)
-        # BackgroundIOWorker also carries native Brian2 simulation runs.
-        # These tasks are not cooperatively cancellable through the shared
-        # IO path, so close waits for them and then force-quits as a last
-        # resort.
-        if (
-            self._io_thread is not None
-            and self._io_thread.isRunning()
-            and not self._io_thread.wait(10000)
-        ):
-            self.logger.warning("IO worker did not stop in 10 s; force-quitting.")
-            self._io_thread.quit()
-            self._io_thread.wait(2000)
+            self._external_sim_cancel.set()
+        self._stop_worker_thread(
+            self._external_sim_thread, 2000, "External simulation worker"
+        )
+        self._stop_worker_thread(self._io_thread, 10000, "IO worker")
         # Stop timers and queued widget updates before tearing down owned widgets.
         self.time_slider.close()
         # explicitly close all fastplotlib figures to avoid renderer trying to access them after they have been destroyed
@@ -2513,10 +2531,4 @@ class Gui(QtWidgets.QMainWindow):
         # Close any detached analysis windows that are parented to this GUI.
         for analysis_window in self.findChildren(CustomAnalysisWindow):
             analysis_window.close()
-        # Drop strong menu refs so closed GUI instances do not keep dangling
-        # QMenu/QAction wrappers alive across tests and CI runs.
-        self.menuBar().clear()
-        self.open_example_project_menu = None
-        self.open_example_project_section_menus.clear()
-        self.open_example_project_actions.clear()
         super().closeEvent(event)

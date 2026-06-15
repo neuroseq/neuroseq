@@ -101,27 +101,31 @@ class TraceWidget(TimeseriesWidget):
     def trace_norm_dialog(self):
         TraceNormDialog(self).exec()
 
-    def get_normalized_trace_data(self) -> np.ndarray:
+    def get_normalized_trace_data(self, out: np.ndarray | None = None) -> np.ndarray:
         if self.data is None or not isinstance(self.data, TraceData):
-            return np.array([], dtype=np.float16)
-        # replace any NaN values with zero for normalisation
-        traces = np.nan_to_num(self.data.traces, copy=True, nan=0.0)
+            return np.array([], dtype=np.float32)
+        traces = self.data.traces
         if self.offset_by_median:
-            median_values = np.median(traces, axis=1)
-            max_values = np.max(traces, axis=1)
+            median_values = np.nanmedian(traces, axis=1)
+            max_values = np.nanmax(traces, axis=1)
             max_trace = np.max(np.abs(max_values - median_values))
         else:
-            max_trace = np.max(np.abs(traces))
+            max_trace = max(
+                abs(float(np.nanmin(traces))), abs(float(np.nanmax(traces)))
+            )
         norm = 0.5 if max_trace == 0 else 1.0 / (2.0 * max_trace)
         norm = np.float32((self.trace_norm_percent / 100.0) * norm)
         if self.offset_by_median:
             offset = (-median_values * norm).astype(np.float32)
         else:
             offset = np.zeros(traces.shape[0], dtype=np.float32)
-        data = norm * self.data.traces.astype(np.float32) + offset[:, np.newaxis]
+        if out is None:
+            out = np.empty_like(traces)
+        np.multiply(traces, norm, out=out)
+        out += offset[:, np.newaxis]
         if self.clip:
-            np.clip(data, -0.5, 0.5, out=data)
-        return data.astype(np.float16, copy=False)
+            np.clip(out, -0.5, 0.5, out=out)
+        return out
 
     def replot_traces(self) -> None:
         """Update the plotted traces based on the current normalization settings."""
@@ -148,11 +152,8 @@ class TraceWidget(TimeseriesWidget):
         # self.subplot.title = f"Traces: {data * V.name}"
         self.subplot.title = f"Traces: {data.name}"
         self.data = data
-        # Store the original trace data (transposed) for mouse hover value display
-        # Shape needs to be (n_timesteps, n_neurons) for pointer_move to index correctly
-        self.data_values = (
-            data.traces.T.astype(np.float32) * 1000
-        )  # convert to mV for display
+        self.data_values = data.traces.T
+        self.data_values_scale = 1000.0
         self.units = data.units if data.units else "mV"
         self.n_neurons = np.max(data.indices) + 1
         self.dt_ms = float(data.dt) * 1000.0  # convert to milliseconds
@@ -163,22 +164,14 @@ class TraceWidget(TimeseriesWidget):
         timestamps_ms = np.arange(data.traces.shape[1], dtype=np.float32) * np.float32(
             dt_ms
         )
-        tiled_timestamps_ms = np.tile(
-            timestamps_ms,
-            (data.traces.shape[0], 1),
-        )
-        normalized_traces = self.get_normalized_trace_data()
-        data = np.stack(
-            [
-                tiled_timestamps_ms,
-                normalized_traces,
-            ],
-            axis=2,
-            dtype=np.float32,
-        )
+        n_neurons, n_timesteps = data.traces.shape
+        line_data = np.empty((n_neurons, n_timesteps, 2), dtype=np.float32)
+        line_data[:, :, 0] = timestamps_ms
+        self.get_normalized_trace_data(out=line_data[:, :, 1])
         self.graphic = self.subplot.add_line_collection(
-            data,
+            line_data,
             colors=neuron_indices_to_colors(self.data.indices),
+            uniform_colors=True,
             thickness=2,
         )
         for i, line in enumerate(self.graphic.graphics):

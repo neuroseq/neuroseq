@@ -44,3 +44,10 @@ def test_custom_analysis_widget_runs_example_plugin(
         slice(10, 100),
     )
     qtbot.wait(20)
+
+    assert custom_analysis_widget.traces is not None
+    custom_analysis_widget.clear_data()
+    assert custom_analysis_widget.traces is None
+    assert custom_analysis_widget.spike_times_ms is None
+    assert custom_analysis_widget.spike_indices is None
+    assert custom_analysis_widget.spike_neuron_indices is None

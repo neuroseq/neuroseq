@@ -41,12 +41,17 @@ class CustomAnalysisWindow(QtWidgets.QWidget):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.Tool)
         self.setWindowTitle("Custom Analysis")
         self.resize(800, 600)
         self.layout = QtWidgets.QVBoxLayout(self)
         self.analysis_widget = CustomAnalysisWidget(self)
         self.layout.addWidget(self.analysis_widget)
+
+    def closeEvent(self, event) -> None:
+        self.analysis_widget.clear_data()
+        super().closeEvent(event)
 
 
 class CustomAnalysisWidget(MatplotlibWidget):
@@ -88,6 +93,14 @@ class CustomAnalysisWidget(MatplotlibWidget):
                     raise
 
         self.canvas.draw_idle()
+
+    def clear_data(self) -> None:
+        self.traces = None
+        self.spike_times_ms = None
+        self.spike_indices = None
+        self.spike_neuron_indices = None
+        self.subplot.clear()
+        self._redraw()
 
     def _preprocess_data(
         self,

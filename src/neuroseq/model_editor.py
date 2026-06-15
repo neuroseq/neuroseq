@@ -566,12 +566,17 @@ class EditableSynapseTree(EditableParameterTree):
                     ],  # methods are static, so we can give a list
                 },
                 "origin": {
-                    "update_from": lambda: list(self.b2model.neurongroups.keys())
-                    + ["-"],
+                    "update_from": lambda: (
+                        list(self.b2model.neurongroups.keys()) + ["-"]
+                    ),
                 },
                 "target": {
-                    "update_from": lambda: list(self.b2model.neurongroups.keys())
-                    + ["-"],
+                    "update_from": lambda: (
+                        list(self.b2model.neurongroups.keys()) + ["-"]
+                    ),
+                },
+                "skip_if_invalid": {
+                    "update_from": lambda: ["False", "True"],
                 },
             },
         )
@@ -740,7 +745,8 @@ class EditableMonitorTree(EditableParameterTree):
                         list(obj.equations.names) + list(obj.variables.keys())
                     )
 
-            return list(set(varnames)) + [
+            # use fromkeys instead of set to get deterministic order of elements in list
+            return list(dict.fromkeys(varnames)) + [
                 "None",
             ]
 
@@ -1166,6 +1172,22 @@ class ModelEditorDialog(QtWidgets.QDialog):
                 self.logger.exception(e)
 
             if self.b2model.must_be_rebuilt:
+                if (
+                    self.b2model.has_simulation_data()
+                    and QtWidgets.QMessageBox.question(
+                        self,
+                        "Discard simulation data?",
+                        (
+                            "The model has been modified. Applying these changes will "
+                            "remove existing simulation data. Do you want to continue?"
+                        ),
+                        QtWidgets.QMessageBox.StandardButton.Yes
+                        | QtWidgets.QMessageBox.StandardButton.No,
+                        QtWidgets.QMessageBox.StandardButton.No,
+                    )
+                    != QtWidgets.QMessageBox.StandardButton.Yes
+                ):
+                    return
                 self.logger.info("rebuilding model after change")
                 self.b2model.assemble_network()  # keep underlying network in sync
                 self.b2model.must_be_rebuilt = False

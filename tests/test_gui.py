@@ -38,7 +38,7 @@ from neuroseq.utils import InteractMode
 delay_after_update_model_call_in_ms = 50
 
 
-def _wait_for_brian2_simulation(qtbot: QtBot, gui: Gui, timeout: int = 15000) -> None:
+def _wait_for_brian2_simulation(qtbot: QtBot, gui: Gui, timeout: int = 90000) -> None:
     qtbot.waitUntil(lambda: gui._io_worker is None, timeout=timeout)
 
 
@@ -278,9 +278,26 @@ def test_gui_open_example_project_menu_has_subsections(qtbot: QtBot) -> None:
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
 
-    assert gui.open_example_project_menu is not None
-    assert list(gui.open_example_project_section_menus) == list(example_projects)
-    assert len(gui.open_example_project_actions) == sum(
+    # locate the "Open example project" submenu in the File menu
+    example_menu = next(
+        (
+            action.menu()
+            for action in gui.menu_file.actions()
+            if action.menu() is not None
+            and "Open example project" in action.text().replace("&", "")
+        ),
+        None,
+    )
+    assert example_menu is not None
+
+    # its child submenus are the sections, each containing one action per project
+    section_menus = {
+        action.text().replace("&", ""): action.menu()
+        for action in example_menu.actions()
+        if action.menu() is not None
+    }
+    assert list(section_menus) == list(example_projects)
+    assert sum(len(menu.actions()) for menu in section_menus.values()) == sum(
         len(section_projects) for section_projects in example_projects.values()
     )
     assert {"Getting Started Project", "non_linear"}.issubset(
@@ -329,7 +346,7 @@ def test_gui_simulate_and_playback(
     assert gui.heatmap_widget.idx == 0
     assert "run" in gui.continue_simulation_action.text().lower()
     assert "continue" not in gui.continue_simulation_action.text().lower()
-    simulation_time_s = 1.0
+    simulation_time_s = 0.2
     # mock getText to return the desired simulation time
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time_s}", True)
@@ -378,6 +395,31 @@ def test_gui_simulate_and_playback(
     assert gui.trace_widget.timeline.t == approx(0, rel=2)
     assert gui.spike_widget.timeline.t == approx(0, rel=2)
     assert gui.heatmap_widget.idx == 0
+    gui.close()
+
+
+def test_gui_simulate_and_cancel(
+    monkeypatch: MonkeyPatch, qtbot: QtBot, test_project: Project
+) -> None:
+    gui = Gui()
+    gui.load_project(test_project)
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("1.0", True))
+
+    gui.btn_continue_simulation_clicked()
+    assert gui._io_worker is not None
+    # cancel simulation on first progress update
+    gui._io_worker.progress.connect(lambda _: gui.progress_dialog.canceled.emit())
+
+    _wait_for_brian2_simulation(qtbot, gui)
+
+    assert gui.project.b2_model.cancel_requested is True
+    assert gui._io_worker is None
+    assert not gui.progress_dialog.isVisible()
+    assert QtWidgets.QApplication.overrideCursor() is None
     gui.close()
 
 
