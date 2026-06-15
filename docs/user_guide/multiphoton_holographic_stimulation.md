@@ -119,9 +119,28 @@ the corrected values back to the stim array via _Apply fixes_.
 
 1. Open **File → Export data → Export light stimulus** (or the toolbar button) and choose `SysCon2` in the pre-dialog.
 2. Select the stim array and Cellpose segmentation.
-3. Choose laser wavelength (default 1140 nm).
-4. Click **Check Input Sanity** and resolve any errors.
-5. Enter an output script name and click **Export**.
+3. Choose laser wavelength (`940 nm`, `1030 nm`, or `1100 nm` digital; default `1100 nm`).
+4. Optionally set a **Target power** and load a power LUT (see below).
+5. Click **Check Input Sanity** and resolve any errors.
+6. Enter an output script name and click **Export**.
+
+### Target power and power LUT
+
+The dialog has a **Target power** (mW) spinner next to a **Load LUT…**
+button:
+
+- Setting **Target power** to `0` disables power control — the exported
+  `Intensity_0` fields are written as zero, which matches the historical
+  default behaviour.
+- Loading a SysCon `.lut` file maps the requested mW to the laser's
+  intensity percentage at the currently selected wavelength. Each
+  wavelength has its own LUT slot.
+- LUTs are bundled into the `.nseq` archive when you save the project, so
+  the export stays reproducible across machines.
+
+The **status label** next to the button shows which LUT (if any) is
+currently loaded for the active wavelength. Switching the wavelength
+combobox swaps to that wavelength's LUT slot.
 
 The exporter writes:
 

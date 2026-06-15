@@ -33,7 +33,17 @@ Each widget can be shown or hidden in menu "View" by using the corresponding too
 
 ![Show/hide widgets](../images/toggle_widgets.png)
 
-In addition to elements 1-6, the toolbar contains a universal widget that can dupicate widgets (2) and (3), useful for subsequent visulisation and data analysis. The button with capital "T" toggles and untoggles text annotation next to a mouse cursor.
+In addition to elements 1-6, the toolbar contains a universal widget that can dupicate widgets (2) and (3), useful for subsequent visulisation and data analysis. The button with capital "T" toggles and untoggles text annotation next to a mouse cursor — turn it off when the per-pixel coordinate label gets in the way of dense plots, and back on when you need it for precise selection.
+
+**View → Toggle Grid** turns the time/neuron grid overlays on or off for the stim editor. The grid spacing follows the stim array's `dt`, so it doubles as a sample ruler.
+
+### Saving and loading
+
+`Open project` (`Ctrl+O`) and `Save project` (`Ctrl+S`) operate on `.nseq`
+archives. Both run in a background worker thread, so the main window stays
+responsive while large projects serialize. A progress dialog appears for any
+operation that takes more than a fraction of a second and exposes a
+**Cancel** button — cancelling a save leaves the original file untouched.
 
 The project may contrain not only one, but several stimulation arrays. The user can select which one to show in the widget one, using a drop down manu in the "Stim data:" section of the folloing toolbar:
 
@@ -72,18 +82,63 @@ The option "show all stim arrays" gives a possibility to show all stim arrays at
 
 Once the simulation is run or trace data is exported, it became availible in drop down menu "Neuron data". Natigation is done as described above. Normalization of traces can be set with buttons next it with a possibility to normalize traces on a median value and clip/upclip them to permit to restrict traces to the provided space for each neuron or provide a possibility to occupy an unlimited space within the widget. Spike data widget is analogous to the neuron data widget but constructed to represent binary spike events.
 
+The data-selection toolbar has dedicated **Trace normalization** and
+**Synapse normalization** buttons (vertical-double-arrow icons) that open
+the per-widget normalization dialogs — median normalization, clip/unclip
+range, and per-neuron scaling all live in those dialogs rather than in the
+Settings menu.
+
 ## Synaptic data widget
 
 The synaptic data widget contains the information about the states of synaptic connections in a given time point. Using the replay mechanism described below one can access the modifications of synapic changes.
+
+For large networks the full synapse matrix can be too big to render in real
+time. **Settings → Synapse matrix RAM limit** sets the memory budget (in
+MB); when the matrix would exceed it, the widget transparently downsamples
+along the time axis before rendering. The accompanying **Heatmap** widget
+(toggled via **View → Show Heatmap**) gives a 2D heatmap view of the same
+synaptic weight matrix.
 
 ## Universal widget
 
 During analysis, it may be desirable to show an additional copy of the widget, for example, to compare two different periods or neuronal populations within the same widget and at the same time. For this a universal "all data" widget was constructed.
 
+## Playback controls
+
+The **Playback** menu (and its mirror in the toolbar) drives the time
+cursor across every visualization widget simultaneously:
+
+| Action             | Shortcut | Behaviour                                                     |
+| ------------------ | -------- | ------------------------------------------------------------- |
+| Set playback speed |          | Opens a dialog to choose a playback rate multiplier.          |
+| Skip to start      |          | Jumps the cursor to t = 0 without affecting play/pause state. |
+| Stop               |          | Pauses playback and rewinds the cursor to t = 0.              |
+| Play / Pause       | `Space`  | Toggles continuous playback at the configured speed.          |
+| Skip to end        |          | Jumps the cursor to the last simulated/recorded timepoint.    |
+
+The time slider underneath the widgets stays clickable while playback is
+running, so you can scrub manually at any time.
+
+## Settings menu
+
+The **Settings** menu groups preferences that affect the rest of the
+application:
+
+| Setting                    | What it does                                                                                                                           |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Brian2 simulation backend  | Pick `cython` (default) or `numpy` (see [Simulations](simulations.md#choosing-a-brian2-backend)).                                      |
+| Stimulus automatic padding | Default duration (seconds) used when creating new stim arrays and as a prefill for the _Pad stim array_ dialog.                        |
+| LLM assistant              | Configure provider, model, and API key for the [in-app chat assistant](chat_assistant.md) (experimental).                              |
+| Synapse matrix RAM limit   | Memory budget for rendering the full synaptic weight matrix; controls when the synapse and heatmap widgets switch to downsampled mode. |
+
 ## Analysis widget
 
 The user can select a given region of the "neuron data" widget and access an analysis menu by right click of a mouse, and choosing a desired analysis plot/routine.
-It can shown within "analysis widget" or opened in a new window.
+The result lands in the dedicated **Custom analysis** dock widget — toggled
+from **View → Show Custom analysis** — or, with the `(new window)` variant
+of the action, in a separate window. See
+[Analysis Tools and Custom Plugins](analysis_and_plugins.md) for the full
+list of built-in analyses and how to write your own plugin.
 
 ## GUI Console
 

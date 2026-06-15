@@ -27,7 +27,7 @@ dependencies = [
     "platformdirs",
     "psutil",
     "nvidia-ml-py",
-    "cellpose[gui]",
+    "cellpose[gui]<4",
 ]
 dynamic = ["version"]
 

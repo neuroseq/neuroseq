@@ -23,26 +23,12 @@ If you have ssh authentication to GitHub set up you can install directly from th
 pip install git+ssh://git@github.com/ssciwr/neuroseq
 ```
 
-If you want the optional in-app LLM assistant in the same step, install the `chat`
-extra from the repository directly:
-
-```bash
-pip install "neuroseq[chat] @ git+ssh://git@github.com/ssciwr/neuroseq.git"
-```
-
 Alternatively you can clone the repository and then install it:
 
 ```bash
 git clone git@github.com:ssciwr/neuroseq.git
 cd neuroseq
 pip install .
-```
-
-If you cloned the repository locally and want the optional in-app LLM assistant,
-install the chat extra from the checkout:
-
-```bash
-pip install ".[chat]"
 ```
 
 ## How to install Cython on Windows
