@@ -19,7 +19,7 @@ conda create -n neuroseq python=3.12
 conda activate neuroseq
 ```
 
-Alternatively, the new enviroment can be created within Anaconda Navigator. For this, open Anaconda Navigator and go to "Enviroments". Click "Create" button, write "neuroseq" as a name and select Python 3.11.
+Alternatively, the new enviroment can be created within Anaconda Navigator. For this, open Anaconda Navigator and go to "Enviroments". Click "Create" button, write "neuroseq" as a name and select Python 3.12.
 
 ### Neuroseq
 
