@@ -15,15 +15,15 @@ It is recommended to use Anaconda environment (package manager) for the installa
 Once Anaconda installed, create and activate a new environment in a command line:
 
 ```
-conda create -n neuroseq python=3.11
+conda create -n neuroseq python=3.12
 conda activate neuroseq
 ```
 
-Alternatively, the new enviroment can be created within Anaconda Navigator. For this, open Anaconda Navigator and go to "Enviroments". Click "Create" button, write "neuroseq" as a name and select Python 3.11.
+Alternatively, the new enviroment can be created within Anaconda Navigator. For this, open Anaconda Navigator and go to "Enviroments". Click "Create" button, write "neuroseq" as a name and select Python 3.12.
 
 ### Neuroseq
 
-NeuroSeq requires Python 3.11 or newer.
+NeuroSeq requires Python 3.12 or newer.
 
 If you have ssh authentication to GitHub set up you can install directly from this repository with pip:
 
