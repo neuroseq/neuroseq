@@ -54,12 +54,16 @@ def _generate_patchclamp_trace(
     # Random interval spikes
     if num_spikes > 0:
         min_interval_samples = int(0.1 * sampling_rate)
+        spike_width = int(0.002 * sampling_rate)  # 2ms spike
+        # Keep spikes clear of the trace end: scipy.find_peaks cannot resolve a
+        # peak's prominence/width once the waveform reaches the array boundary.
+        end_margin = spike_width + 3
         spike_positions: list[int] = []
         # Clamp interval so randint has a valid range even for short traces
-        max_valid_start = n_samples - min_interval_samples
+        max_valid_start = n_samples - max(min_interval_samples, end_margin)
         if max_valid_start <= min_interval_samples:
             min_interval_samples = max(1, n_samples // 4)
-            max_valid_start = max(min_interval_samples + 1, n_samples)
+            max_valid_start = max(min_interval_samples + 1, n_samples - end_margin)
 
         for _ in range(num_spikes):
             # Find valid position
@@ -77,7 +81,6 @@ def _generate_patchclamp_trace(
 
         # Add spike waveforms
         for pos in spike_positions:
-            spike_width = int(0.002 * sampling_rate)  # 2ms spike
             start_idx = max(0, pos - spike_width // 4)
             end_idx = min(n_samples, pos + spike_width)
 

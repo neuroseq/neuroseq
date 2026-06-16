@@ -8,7 +8,6 @@ from collections.abc import Callable
 from collections.abc import Iterable
 from enum import Enum
 from typing import Any
-from typing import TypeVar
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -116,7 +115,7 @@ def neuron_indices_to_colors(indices: np.ndarray) -> np.ndarray:
     # these values of a and m taken from table 2 of https://www.ams.org/journals/mcom/1999-68-225/S0025-5718-99-00996-5/S0025-5718-99-00996-5.pdf
     a = 23234
     m = 32749
-    return colormap(np.mod(np.asarray(indices) * a, m) / m).astype("float16")
+    return colormap(np.mod(np.asarray(indices) * a, m) / m).astype(np.float32)
 
 
 def init_brian2_logging(log_level: str = "ERROR") -> None:
@@ -548,10 +547,7 @@ def get_cmap(stim_type: StimType, alpha: float = 1.0) -> Colormap:
             return Colormap([(1.0, 1.0, 1.0, 0.0), (0.0, 0.0, 0.0, alpha)])
 
 
-T = TypeVar("T")
-
-
-def find_by_name_and_type(
+def find_by_name_and_type[T](
     data: Iterable[object],
     name: str,
     cls: type[T],

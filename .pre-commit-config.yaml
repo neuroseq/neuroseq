@@ -41,7 +41,8 @@ repos:
     rev: v1.19.0
     hooks:
       - id: mypy
-        additional_dependencies: [numpy, PySide6-stubs]
+        language_version: python3.12
+        additional_dependencies: [numpy, PyQt6-stubs]
         args:
           [
             --ignore-missing-imports,

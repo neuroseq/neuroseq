@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import logging
 from collections.abc import Callable
 from copy import deepcopy
@@ -9,6 +10,7 @@ from typing import NoReturn
 
 import brian2 as b2
 import h5py
+import numpy as np
 
 from neuroseq import utils
 from neuroseq.b2_units import display_units
@@ -201,6 +203,10 @@ class B2Model:
                     "on_post",
                     "connection_condition",
                     "p",
+                    "connection_i",
+                    "connection_j",
+                    "connection_n",
+                    "skip_if_invalid",
                     "method",
                     "dt",
                 ],
@@ -212,6 +218,10 @@ class B2Model:
                     self.define_synapse_post,
                     self.define_synapse_connection,
                     self.define_synapse_connection_probability,
+                    self.define_synapse_i,
+                    self.define_synapse_j,
+                    self.define_synapse_n,
+                    self.define_synapse_skip_if_invalid,
                     self.define_synapse_solver_method,
                     self.define_synapse_dt,
                 ],
@@ -368,6 +378,71 @@ class B2Model:
             self._handle_exception(e, f"Error when adding subgroup {name}: {e}")
         self.logger.info(f"Neuron subgroup defined: {name}")
 
+    @staticmethod
+    def _build_connect_kwargs(args: dict[str, Any]) -> dict[str, Any]:
+        """
+        Build the keyword arguments for `brian2.Synapses.connect` from a synapse
+        definition dict. Values ("-", "", None) are ignored.
+
+        If explicit source/target indices `i`/`j` are given they take precedence
+        over `condition`/`p`.
+
+        Index values for `i`/`j` may be a literal index (`"3"`), a literal array
+        (`"[0, 1, 2]"`) or a generator expression (`"i"`, `"k for k in range(...)"`).
+        Literals are parsed into ints/lists; everything else is left as a string.
+
+        Parameters
+        ----------
+        args : dict[str, Any]
+            Synapse definition dict (an entry of `self.synapses`).
+
+        Returns
+        -------
+        dict[str, Any]
+            Keyword arguments to pass to `synapse.connect(...)`.
+        """
+
+        def _clean(value: Any) -> Any:
+            if isinstance(value, str):
+                return None if value in ("", "-") else value
+            return value
+
+        def _as_index(value: Any) -> Any:
+            # turn a literal index ("3") or array ("[0, 1, 2]") into the int/list
+            # brian2 expects; leave generator/condition expressions as strings.
+            if not isinstance(value, str):
+                return value
+            try:
+                parsed = ast.literal_eval(value)
+            except (ValueError, SyntaxError):
+                return value
+            return parsed if isinstance(parsed, (list, tuple, int)) else value
+
+        kwargs: dict[str, Any] = {}
+
+        n = _clean(args.get("connection_n"))
+        if n is not None:
+            kwargs["n"] = n
+
+        skip = args.get("skip_if_invalid", False)
+        if isinstance(skip, str):
+            skip = skip.strip().lower() in ("true", "1", "yes")
+        if skip:
+            kwargs["skip_if_invalid"] = True
+
+        i = _clean(args.get("connection_i"))
+        j = _clean(args.get("connection_j"))
+        if i is not None or j is not None:
+            if i is not None:
+                kwargs["i"] = _as_index(i)
+            if j is not None:
+                kwargs["j"] = _as_index(j)
+        else:
+            kwargs["condition"] = args.get("connection_condition")
+            kwargs["p"] = args.get("p", 1.0)
+
+        return kwargs
+
     @_trigger_rebuild
     def _assemble_synapse(
         self,
@@ -417,9 +492,7 @@ class B2Model:
             self._handle_exception(e, f"Error in defining synapse {name}: {e}")
 
         try:
-            synapse.connect(
-                args.get("connection_condition", None), p=args.get("p", 1.0)
-            )
+            synapse.connect(**self._build_connect_kwargs(args))
         except Exception as e:
             self._handle_exception(e, f"Error in connecting synapse {name}: {e}")
 
@@ -716,6 +789,7 @@ class B2Model:
         }
         self.checkpoints: list[str] = []
         self.must_be_rebuilt = False
+        self.cancel_requested = False
         self.logger = logging.getLogger(__name__)
         self.logger.info("Model creation complete")
 
@@ -1316,6 +1390,22 @@ class B2Model:
             name,
             0.0,
         )
+        self.define_synapse_i(
+            name,
+            "-",
+        )
+        self.define_synapse_j(
+            name,
+            "-",
+        )
+        self.define_synapse_n(
+            name,
+            "1",
+        )
+        self.define_synapse_skip_if_invalid(
+            name,
+            "False",
+        )
         self.define_synapse_pre(
             name,
             "x=y",
@@ -1335,32 +1425,7 @@ class B2Model:
         dt : b2.Quantity
             timestep to be used. Must be given as value * unit.
         """
-        if name not in self.synapses:
-            self.synapses[name] = {}
-
-        if name not in self.functions["synapses"]:
-            self._add_group_modifier(
-                name,
-                "synapses",
-                lambda: self.set_rebuilt(True),
-                lambda: self.set_rebuilt(True),
-            )
-
-        element_modifier = self.Modifier(
-            "dt",
-            self.synapses[name],
-            self.functions["synapses"][name],
-            lambda: self.set_rebuilt(True),
-        )
-
-        self.functions["synapses"][name]["dt"] = {
-            "delete": element_modifier.delete,
-            "rename": element_modifier.rename,
-            "modify": element_modifier.modify,
-        }
-
-        self.synapses[name]["dt"] = dt
-
+        self._register_synapse_value(name, "dt", dt)
         self.logger.info(f"dt defined: {dt} for synapse {name}")
 
     @_trigger_rebuild
@@ -1375,37 +1440,7 @@ class B2Model:
         method : str
             name of the method to use. Refer to the brian2 documentation for the currently available set of solvers.
         """
-
-        if name not in self.synapses:
-            self.synapses[name] = {}
-
-        if name not in self.functions["synapses"]:
-            self._add_group_modifier(
-                name,
-                "synapses",
-                lambda: self.set_rebuilt(True),
-                lambda: self.set_rebuilt(True),
-            )
-
-        element_modifier = self.Modifier(
-            "method",
-            self.synapses[name],
-            self.functions["synapses"][name],
-            lambda: self.set_rebuilt(True),
-        )
-        self.functions["synapses"][name]["method"] = {
-            "delete": element_modifier.delete,
-            "rename": element_modifier.rename,
-            "modify": element_modifier.modify,
-        }
-        utils.update_nested_dict(
-            self.synapses,
-            {
-                name: {
-                    "method": method,
-                },
-            },
-        )
+        self._register_synapse_value(name, "method", method)
         self.logger.info(f"Solver method defined: {method} for {name}")
 
     @_trigger_rebuild
@@ -1420,37 +1455,7 @@ class B2Model:
         target : str
             Name of the target neurongroup to use with the synapse.
         """
-        if name not in self.synapses:
-            self.synapses[name] = {}
-        if name not in self.functions["synapses"]:
-            self._add_group_modifier(
-                name,
-                "synapses",
-                lambda: self.set_rebuilt(True),
-                lambda: self.set_rebuilt(True),
-            )
-
-        element_modifier = self.Modifier(
-            "target",
-            self.synapses[name],
-            self.functions["synapses"][name],
-            lambda: self.set_rebuilt(True),
-        )
-
-        self.functions["synapses"][name]["target"] = {
-            "delete": element_modifier.delete,
-            "rename": element_modifier.rename,
-            "modify": element_modifier.modify,
-        }
-
-        utils.update_nested_dict(
-            self.synapses,
-            {
-                name: {
-                    "target": target,
-                }
-            },
-        )
+        self._register_synapse_value(name, "target", target)
 
     @_trigger_rebuild
     def define_synapse_origin(self, name: str, origin: str) -> None:
@@ -1464,37 +1469,7 @@ class B2Model:
         target : str
             Name of the origin neurongroup to use with the synapse.
         """
-        if name not in self.synapses:
-            self.synapses[name] = {}
-        if name not in self.functions["synapses"]:
-            self._add_group_modifier(
-                name,
-                "synapses",
-                lambda: self.set_rebuilt(True),
-                lambda: self.set_rebuilt(True),
-            )
-
-        element_modifier = self.Modifier(
-            "origin",
-            self.synapses[name],
-            self.functions["synapses"][name],
-            lambda: self.set_rebuilt(True),
-        )
-
-        self.functions["synapses"][name]["origin"] = {
-            "delete": element_modifier.delete,
-            "rename": element_modifier.rename,
-            "modify": element_modifier.modify,
-        }
-
-        utils.update_nested_dict(
-            self.synapses,
-            {
-                name: {
-                    "origin": origin,
-                }
-            },
-        )
+        self._register_synapse_value(name, "origin", origin)
 
     @_trigger_rebuild
     def define_synapse_equation(self, name: str, line: str) -> None:
@@ -1629,6 +1604,23 @@ class B2Model:
         connection_condition : str
             String representation of the connection condition.
         """
+        self._register_synapse_value(name, "connection_condition", connection_condition)
+
+    def _register_synapse_value(self, name: str, key: str, value: Any) -> None:
+        """
+        Register a simple scalar/string `value` under `key` for the synapse `name`,
+        wiring up the Modifier so the GUI can edit/delete/rename it. Used by the
+        `define_synapse_*` methods that just store a value on the synapse dict.
+
+        Parameters
+        ----------
+        name : str
+            Name of the synapse to set the value for.
+        key : str
+            Key under which the value is stored in the synapse dict.
+        value : Any
+            Value to store.
+        """
         if name not in self.synapses:
             self.synapses[name] = {}
         if name not in self.functions["synapses"]:
@@ -1638,27 +1630,90 @@ class B2Model:
                 lambda: self.set_rebuilt(True),
                 lambda: self.set_rebuilt(True),
             )
+
         element_modifier = self.Modifier(
-            "connection_condition",
+            key,
             self.synapses[name],
             self.functions["synapses"][name],
             lambda: self.set_rebuilt(True),
         )
 
-        self.functions["synapses"][name]["connection_condition"] = {
+        self.functions["synapses"][name][key] = {
             "delete": element_modifier.delete,
             "rename": element_modifier.rename,
             "modify": element_modifier.modify,
         }
 
-        utils.update_nested_dict(
-            self.synapses,
-            {
-                name: {
-                    "connection_condition": connection_condition,
-                },
-            },
-        )
+        utils.update_nested_dict(self.synapses, {name: {key: value}})
+
+    @_trigger_rebuild
+    def define_synapse_i(self, name: str, i: Any) -> None:
+        """
+        define_synapse_i Define the source indices `i` for a synapse called `name`.
+
+        This is an alternative to a connection condition: `i` may be an explicit
+        index (array) or a generator/string expression. When `i`/`j` are set they take
+        precedence over `connection_condition`.
+
+        Parameters
+        ----------
+        name : str
+            Name of the synapse to add the source indices for.
+        i : Any
+            Source index expression, e.g. an int, an array, or a string expression.
+        """
+        self._register_synapse_value(name, "connection_i", i)
+
+    @_trigger_rebuild
+    def define_synapse_j(self, name: str, j: Any) -> None:
+        """
+        define_synapse_j Define the source indices `j` for a synapse called `name`.
+
+        This is an alternative to a connection condition: `j` may be an explicit
+        index (array) or a generator/string expression. When `i`/`j` are set they take
+        precedence over `connection_condition`.
+
+        Parameters
+        ----------
+        name : str
+            Name of the synapse to add the target indices for.
+        j : Any
+            Target index expression, e.g. an int, an array, or a string expression.
+        """
+        self._register_synapse_value(name, "connection_j", j)
+
+    @_trigger_rebuild
+    def define_synapse_n(self, name: str, n: Any) -> None:
+        """
+        define_synapse_n Define the number of synapses to create per connected pair
+        (multapses) for a synapse called `name`.
+
+        Parameters
+        ----------
+        name : str
+            Name of the synapse to set the number of synapses per pair for.
+        n : Any
+            Number of synapses per pair. May be an int or a string expression that
+            depends on `i`/`j`. Please refer to the brian2 documentation.
+        """
+        self._register_synapse_value(name, "connection_n", n)
+
+    @_trigger_rebuild
+    def define_synapse_skip_if_invalid(self, name: str, skip_if_invalid: Any) -> None:
+        """
+        define_synapse_skip_if_invalid Define whether out-of-range indices produced
+        when connecting a synapse called `name` should be silently skipped instead
+        of raising an error.
+
+        Parameters
+        ----------
+        name : str
+            Name of the synapse to set the flag for.
+        skip_if_invalid : Any
+            Whether to skip invalid indices. Accepts a bool or a "True"/"False"
+            string (as produced by the GUI).
+        """
+        self._register_synapse_value(name, "skip_if_invalid", skip_if_invalid)
 
     @_trigger_rebuild
     def define_synapse_delay(self, name: str, delay: Any) -> None:
@@ -1672,39 +1727,10 @@ class B2Model:
         delay : Any
             delay expression
         """
-        if name not in self.synapses:
-            self.synapses[name] = {}
-        if name not in self.functions["synapses"]:
-            self._add_group_modifier(
-                name,
-                "synapses",
-                lambda: self.set_rebuilt(True),
-                lambda: self.set_rebuilt(True),
-            )
-        element_modifier = self.Modifier(
-            "delay",
-            self.synapses[name],
-            self.functions["synapses"][name],
-            lambda: self.set_rebuilt(True),
-        )
-
-        self.functions["synapses"][name]["delay"] = {
-            "delete": element_modifier.delete,
-            "rename": element_modifier.rename,
-            "modify": element_modifier.modify,
-        }
-
-        utils.update_nested_dict(
-            self.synapses,
-            {
-                name: {
-                    "delay": delay,
-                },
-            },
-        )
+        self._register_synapse_value(name, "delay", delay)
 
     @_trigger_rebuild
-    def define_synapse_connection_probability(self, name: str, p: float) -> None:
+    def define_synapse_connection_probability(self, name: str, p: float | str) -> None:
         """
         define_synapse_connection_probability Define the connection probability for a given synapse called `name`.
 
@@ -1712,43 +1738,16 @@ class B2Model:
         ----------
         name : str Name of the synapse to define the connection probability for.
 
-        p : float
-            Probability value. Must be in [0, 1]
+        p : float | str
+            Probability value. Floats must be in [0, 1]. Strings are
+            treated as expressions (e.g. ``"exp(-(x_pre - x_post)**2)"``).
         """
-        if not 0.0 <= p <= 1.0:
-            raise ValueError(f"Error, supplied value {p} is not a probability.")
-
-        if name not in self.synapses:
-            self.synapses[name] = {}
-        if name not in self.functions["synapses"]:
-            self._add_group_modifier(
-                name,
-                "synapses",
-                lambda: self.set_rebuilt(True),
-                lambda: self.set_rebuilt(True),
+        if not isinstance(p, str) and not 0.0 <= p <= 1.0:
+            raise ValueError(
+                f"Error, supplied numerical value {p} is not a probability."
             )
 
-        element_modifier = self.Modifier(
-            "p",
-            self.synapses[name],
-            self.functions["synapses"][name],
-            lambda: self.set_rebuilt(True),
-        )
-
-        self.functions["synapses"][name]["p"] = {
-            "delete": element_modifier.delete,
-            "rename": element_modifier.rename,
-            "modify": element_modifier.modify,
-        }
-
-        utils.update_nested_dict(
-            self.synapses,
-            {
-                name: {
-                    "p": p,
-                },
-            },
-        )
+        self._register_synapse_value(name, "p", p)
 
     # monitor
     @_trigger_rebuild
@@ -1953,7 +1952,11 @@ class B2Model:
         """
         Assemble the network from its predefined components.
         """
-        self.network = b2.Network(name=self.name)
+        network_name = self.name
+        self.trace_name_to_monitor.clear()
+        self.spike_name_to_monitor.clear()
+        self.synapse_name_to_monitor.clear()
+        self.network = b2.Network(name=network_name)
         self.checkpoints.clear()
 
         for n in self.neurongroups:
@@ -2163,6 +2166,7 @@ class B2Model:
         time_seconds: float,
         stim_arrays: dict[str, StimArray],
         report: Callable | None = None,
+        report_period: b2.Quantity = 1.0 * b2.second,
     ) -> None:
         """
         Run the fully defined simulation
@@ -2177,7 +2181,12 @@ class B2Model:
             A dictionary of stimulus arrays to be used in the simulation
         report : Callable | None, optional
             A callable function to report progress, by default None
+        report_period : b2.Quantity, optional
+            Minimum wall-clock interval between ``report`` calls, by default 1s.
+            Pass a smaller value to report progress more frequently.
         """
+        self.cancel_requested = False
+
         if self.must_be_rebuilt:
             network_name = self.network.name if self.network else "Network"
             del self.network
@@ -2190,13 +2199,23 @@ class B2Model:
         namespace = self.parameters | {
             name: as_timed_array(stim_array) for name, stim_array in stim_arrays.items()
         }
+        if self.cancel_requested:
+            self.logger.info("simulation cancelled before run started")
+            return
         self.network.run(
             time_seconds * b2.second,
             report=report,
-            report_period=1.0 * b2.second,
+            report_period=report_period,
             namespace=namespace,
         )
         self.logger.info(f"run the system for {time_seconds}s")
+
+    def request_cancel(self) -> None:
+        """Request that an in-progress simulation stop early."""
+        self.logger.info("simulation cancellation requested")
+        self.cancel_requested = True
+        if self.network is not None:
+            self.network.stop()
 
     def store(self, checkpoint: str) -> None:
         """
@@ -2275,7 +2294,7 @@ class B2Model:
         quantity = monitor.variables[variable_name]
         return TraceData(
             trace_name,
-            quantity.get_value().T,
+            quantity.get_value().T.astype(np.float32, copy=False),
             monitor.record,
             display_units(quantity),
             dt,
@@ -2367,6 +2386,9 @@ class B2Model:
             return float(self.network.t / b2.second)
         return 0.0
 
+    def has_simulation_data(self) -> bool:
+        return self.get_sim_time_secs() > 0 or len(self.checkpoints) > 0
+
     def get_max_neurons(self) -> int:
         max_neurons = 0
         for obj in self.network.objects:
@@ -2374,7 +2396,7 @@ class B2Model:
                 max_neurons = max(max_neurons, obj.N)
         return max_neurons
 
-    def to_dict(self) -> dict[Any, Any]:
+    def to_dict(self, include_simulation_data: bool = True) -> dict[Any, Any]:
         states = self.network.get_states(read_only_variables=False)
         # remove monitors from state to avoid saving their recorded data
         for key in self.monitors:
@@ -2384,7 +2406,7 @@ class B2Model:
         states["seed"] = self.seed
         states["parameters"] = self.parameters
         states["initials"] = self.initials
-        states["checkpoints"] = self.checkpoints
+        states["checkpoints"] = self.checkpoints if include_simulation_data else []
         states["objects"] = {
             "neurongroups": list(self.neurongroups.keys()),
             "synapses": list(self.synapses.keys()),

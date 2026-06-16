@@ -149,8 +149,11 @@ def test_dialog_accept_in_external_mode_does_not_touch_b2(
     assert dialog.result() == dialog.DialogCode.Accepted
 
 
-def test_connect_external_sim_params_skips_non_group_children(sample_params) -> None:
+def test_connect_external_sim_params_skips_non_group_children(
+    qtbot: QtBot, sample_params
+) -> None:
     tree = EditableExternalSimParamsTree(sample_params)
+    qtbot.addWidget(tree)
     connected: list[str] = []
     tree._connect_leaf = lambda leaf: connected.append(leaf.name())  # type: ignore[method-assign]
 

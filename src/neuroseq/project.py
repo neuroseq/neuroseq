@@ -972,6 +972,10 @@ class Project:
         self.b2_model.run_simulation(time_seconds, self.stim_arrays, report)
         self.update_limits()
 
+    def request_cancel_simulation(self) -> None:
+        """Request that an in-progress simulation stop early."""
+        self.b2_model.request_cancel()
+
     def save(
         self,
         filepath: str | pathlib.Path,
@@ -1005,17 +1009,24 @@ class Project:
                     for wavelength_nm, lut in self.power_luts.items()
                 }
             zf.writestr("project_metadata.json", json.dumps(metadata))
+            include_simulation_data = (
+                options.include_simulation_data and self.b2_model.has_simulation_data()
+            )
             if options.include_stim_arrays:
                 append_to_zip(self.stim_arrays, "stim_arrays", zf)
             if options.include_model:
-                append_to_zip(self.b2_model.to_dict(), "b2_model", zf)
-            if options.include_simulation_data:
+                append_to_zip(
+                    self.b2_model.to_dict(include_simulation_data), "b2_model", zf
+                )
+            if include_simulation_data:
                 # store the current simulation data state to a temporary checkpoint to be able to restore it on load
-                self.b2_model.store(save_store_name)
+                self.b2_model.network.store(save_store_name)
                 zf.writestr(
                     "b2_stored_state.pkl",
                     pickle.dumps(self.b2_model.network._stored_state, protocol=4),
                 )
+            elif options.include_simulation_data:
+                self.logger.info("Skipping simulation data save: no simulation data")
             # Todo: We could consider another option for cellpose data. I originally leaned towards that, but after merging  #388 and #390 this cellpose data may be in experimental data anyway, and seems inextricably related to it.
             if options.include_experimental_data:
                 append_to_zip(self.experiments, "experimental_data", zf)

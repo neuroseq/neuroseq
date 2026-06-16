@@ -438,7 +438,7 @@ class OverlayView(FullScreenFPLWidget):
         segmentation: np.ndarray,
         legend_data: Iterable[tuple[int, tuple[int, int, int]]] | None,
     ) -> np.ndarray:
-        rgb = np.zeros((*segmentation.shape, 4))
+        rgb = np.zeros((*segmentation.shape, 4), dtype=np.float32)
         neuron_ids = np.unique(segmentation)
         neuron_ids = neuron_ids[neuron_ids > 0]
         if neuron_ids.size == 0:

@@ -8,12 +8,12 @@ description = "Protoype GUI to edit and run neuron models"
 readme = "README.md"
 license = { text = "NONE" }
 authors = [{ name = "SSC", email = "ssc@uni-heidelberg.de" }]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "brian2",
     "matplotlib",
     "pillow",
-    "numpy <= 2.0",
+    "numpy",
     "scipy",
     "qtpy",
     "pyqt6",
@@ -55,6 +55,7 @@ dev = [
     "pytest-randomly",
     "pytest-cov",
     "pytest-mock",
+    "pytest-timeout",
     "pytest-memray ; platform_system != 'Windows'",
     "diff-cover",
     "mkdocs-material",
@@ -73,6 +74,10 @@ pythonpath = ["src"]
 markers = ["screenshot"]
 log_cli = "true"
 log_cli_level = "ERROR"
+# abort and dump a per-thread traceback if any single test hangs for >60s
+# (use the thread method so blocked Qt/GPU event loops are still interrupted)
+timeout = 60
+timeout_method = "thread"
 
 [tool.ruff]
 extend-include = ["*.ipynb"]
