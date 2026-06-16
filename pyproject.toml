@@ -27,7 +27,10 @@ dependencies = [
     "platformdirs",
     "psutil",
     "nvidia-ml-py",
-    "cellpose[gui]<4",
+    "cellpose[gui]",
+    "suite2p>=1.0",
+    "torch",
+    "tifffile",
 ]
 dynamic = ["version"]
 

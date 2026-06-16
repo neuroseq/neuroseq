@@ -1104,7 +1104,10 @@ def test_logger(caplog: pytest.LogCaptureFixture, project_ornstein: Project) -> 
     project_ornstein.run_simulation(1)
 
     logs = [record.message for record in caplog.records]
-    assert "run the system for 1" in logs[0]
+    # Brian2 may emit "object is getting deleted" warnings during setup that
+    # land in caplog before our INFO message; check membership rather than
+    # asserting on logs[0].
+    assert any("run the system for 1" in msg for msg in logs)
 
 
 def test_store_restore(project_ornstein: Project) -> None:

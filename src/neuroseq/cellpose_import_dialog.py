@@ -120,7 +120,14 @@ class CellposeImportDialog(QtWidgets.QDialog):
         instructions.setWordWrap(True)
         selection_layout.addWidget(instructions)
 
-        # Add button to run cellpose
+        # Add buttons to launch Fiji and run Cellpose
+        fiji_button_layout = QtWidgets.QHBoxLayout()
+        fiji_button_layout.addStretch()
+        self.open_fiji_button = QtWidgets.QPushButton("Open in Fiji")
+        self.open_fiji_button.clicked.connect(self._open_in_fiji)
+        fiji_button_layout.addWidget(self.open_fiji_button)
+        selection_layout.addLayout(fiji_button_layout)
+
         cellpose_button_layout = QtWidgets.QHBoxLayout()
         cellpose_button_layout.addStretch()
         run_cellpose_button = QtWidgets.QPushButton("Run Cellpose")
@@ -1021,6 +1028,32 @@ class CellposeImportDialog(QtWidgets.QDialog):
         )
         if filename:
             self._load_segmentation_file(filename)
+
+    def _open_in_fiji(self) -> None:
+        """Launch Fiji/ImageJ, optionally opening the currently selected image."""
+        from neuroseq.fiji import resolve_fiji_path
+
+        fiji_path = resolve_fiji_path(self)
+        if not fiji_path:
+            return
+
+        args: list[str] = []
+        if self.image_path is not None and self.image_path.exists():
+            args.append(str(self.image_path))
+
+        try:
+            started = QtCore.QProcess.startDetached(fiji_path, args)
+            if not started:
+                raise RuntimeError(
+                    f"QProcess.startDetached({fiji_path!r}) returned False"
+                )
+        except Exception as exc:
+            self.logger.exception("Failed to launch Fiji")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Failed to launch Fiji",
+                f"Could not launch Fiji:\n{exc}",
+            )
 
     def _run_cellpose(self) -> None:
         """Launch the cellpose application from the current Python environment."""

@@ -3,10 +3,43 @@ from __future__ import annotations
 import json
 import logging
 import pathlib
+import shutil
 from dataclasses import dataclass
 
 import brian2 as b2
 from platformdirs import user_config_dir
+
+_FIJI_AUTODETECT_PATHS = (
+    # New (2025+) Fiji layout: ~/Fiji/fiji shell-script launcher.
+    "/opt/Fiji/fiji",
+    "/opt/fiji/fiji",
+    "/usr/local/Fiji/fiji",
+    # Legacy Fiji.app layout with ImageJ-linux64 binary.
+    "/opt/Fiji.app/ImageJ-linux64",
+    "/opt/fiji/ImageJ-linux64",
+    "/usr/local/Fiji.app/ImageJ-linux64",
+    "/usr/bin/fiji",
+    # macOS bundle.
+    "/Applications/Fiji.app/Contents/MacOS/ImageJ-macosx",
+)
+
+_FIJI_HOME_CANDIDATES = (
+    pathlib.Path("Fiji") / "fiji",
+    pathlib.Path("Fiji.app") / "ImageJ-linux64",
+)
+
+
+def _autodetect_fiji() -> str:
+    home = pathlib.Path.home()
+    for rel in _FIJI_HOME_CANDIDATES:
+        home_candidate = home / rel
+        if home_candidate.exists():
+            return str(home_candidate)
+    for path_str in _FIJI_AUTODETECT_PATHS:
+        if pathlib.Path(path_str).exists():
+            return path_str
+    found = shutil.which("fiji") or shutil.which("ImageJ")
+    return found or ""
 
 
 @dataclass
@@ -18,11 +51,13 @@ class GuiSettings:
     llm_model: str = "qwen2.5:7b"
     llm_ollama_base_url: str = "http://localhost:11434"
     llm_openai_base_url: str = ""
+    fiji_executable_path: str = ""
 
     def __init__(self) -> None:
         self.logger: logging.Logger
         self.__dict__["logger"] = logging.getLogger(__name__)
         self.logger.info("loading GUI settings")
+        self.__dict__["fiji_executable_path"] = _autodetect_fiji()
         self.load_config_settings()
         b2.prefs.codegen.target = self.brian2_backend
 
@@ -46,6 +81,7 @@ class GuiSettings:
                         "llm_model": self.llm_model,
                         "llm_ollama_base_url": self.llm_ollama_base_url,
                         "llm_openai_base_url": self.llm_openai_base_url,
+                        "fiji_executable_path": self.fiji_executable_path,
                     },
                     f,
                 )
@@ -85,6 +121,7 @@ class GuiSettings:
             llm_openai_base_url = config.get(
                 "llm_openai_base_url", self.llm_openai_base_url
             )
+            fiji_executable_path = config.get("fiji_executable_path", None)
 
             # setting values
             if brian2_backend in ["cython", "numpy"]:
@@ -136,6 +173,10 @@ class GuiSettings:
                 str(llm_ollama_base_url).rstrip("/") or "http://localhost:11434"
             )
             self.__dict__["llm_openai_base_url"] = str(llm_openai_base_url).rstrip("/")
+            if fiji_executable_path is None or not str(fiji_executable_path).strip():
+                self.__dict__["fiji_executable_path"] = _autodetect_fiji()
+            else:
+                self.__dict__["fiji_executable_path"] = str(fiji_executable_path)
         except Exception as e:
             self.logger.warning(f"Could not load config file: {e}")
             self.logger.exception(e)
