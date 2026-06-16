@@ -128,3 +128,239 @@ def test_load_masks_from_seg_file_accepts_plain_array(tmp_path: Path):
 
     loaded = _load_masks_from_seg_file(seg_path)
     np.testing.assert_array_equal(loaded, masks)
+
+
+def test_run_suite2p_pipeline_orchestration(monkeypatch, tmp_path: Path):
+    """Exercise run_suite2p_pipeline with fully-mocked Suite2p modules.
+
+    Validates the orchestration: db assembly, channel handling, stat building,
+    extraction/preprocess/oasis call sequence, and cleanup of the tempdir.
+    """
+    import sys
+    import types
+
+    from neuroseq.importer_tif import TifPipelineParams
+    from neuroseq.importer_tif import run_suite2p_pipeline
+
+    Ly, Lx, nframes, n_neurons = 16, 16, 32, 3
+    masks = _make_mask_image((Ly, Lx))
+
+    # Fabricate a minimal suite2p surface area.
+    def default_db():
+        return {"placeholder": 0}
+
+    def default_settings():
+        return {
+            "extraction": {"neuropil_coefficient": 0.7, "batch_size": 200},
+        }
+
+    def get_file_list(db):
+        return ["/tmp/x.tif"], np.array([1], dtype=np.int64)
+
+    def init_dbs(db):
+        return [
+            {
+                "reg_file": str(tmp_path / "reg.bin"),
+                "reg_file_chan2": str(tmp_path / "reg2.bin"),
+                "Ly": Ly,
+                "Lx": Lx,
+                "nframes": nframes,
+            }
+        ]
+
+    def tiff_to_binary(dbs, settings, files, files_chan2):
+        return dbs
+
+    class FakeBinaryFile:
+        def __init__(self, Ly, Lx, filename):
+            self.Ly = Ly
+            self.Lx = Lx
+            self.data = np.zeros((nframes, Ly, Lx), dtype=np.float32)
+
+    def assign_overlaps(stat, Ly_, Lx_):
+        return stat
+
+    def roi_stats(stat, Ly_, Lx_):
+        return stat
+
+    def extraction_wrapper(stat, f_bin, f_reg_chan2, settings, device):
+        F = np.full((n_neurons, nframes), 5.0, dtype=np.float32)
+        Fneu = np.full((n_neurons, nframes), 1.0, dtype=np.float32)
+        return F, Fneu, None, None
+
+    def preprocess(F, fs, batch_size, device, **kwargs):
+        return F
+
+    def oasis(F, batch_size, tau, fs):
+        return np.zeros_like(F)
+
+    class FakeClassfile:
+        pass
+
+    def classify(stat, classfile):
+        return np.zeros((len(stat), 2), dtype=np.float32)
+
+    # Assemble fake modules (use setattr to keep mypy quiet about attribute
+    # assignments on ModuleType for names that resolve to real packages).
+    def _module(name: str, **attrs) -> types.ModuleType:
+        mod = types.ModuleType(name)
+        for k, v in attrs.items():
+            setattr(mod, k, v)
+        return mod
+
+    class _FakeCuda:
+        @staticmethod
+        def is_available() -> bool:
+            return False
+
+    suite2p_mod = _module(
+        "suite2p", default_db=default_db, default_settings=default_settings
+    )
+    s2io_mod = _module(
+        "suite2p.io",
+        get_file_list=get_file_list,
+        init_dbs=init_dbs,
+        tiff_to_binary=tiff_to_binary,
+        BinaryFile=FakeBinaryFile,
+    )
+    s2detection_mod = _module(
+        "suite2p.detection",
+        assign_overlaps=assign_overlaps,
+        roi_stats=roi_stats,
+    )
+    s2extraction_mod = _module(
+        "suite2p.extraction",
+        extraction_wrapper=extraction_wrapper,
+        preprocess=preprocess,
+        oasis=oasis,
+    )
+    s2classification_mod = _module(
+        "suite2p.classification",
+        classify=classify,
+        builtin_classfile=FakeClassfile(),
+    )
+    torch_mod = _module(
+        "torch",
+        cuda=_FakeCuda(),
+        device=lambda x: f"device:{x}",
+    )
+
+    monkeypatch.setitem(sys.modules, "suite2p", suite2p_mod)
+    monkeypatch.setitem(sys.modules, "suite2p.io", s2io_mod)
+    monkeypatch.setitem(sys.modules, "suite2p.detection", s2detection_mod)
+    monkeypatch.setitem(sys.modules, "suite2p.extraction", s2extraction_mod)
+    monkeypatch.setitem(sys.modules, "suite2p.classification", s2classification_mod)
+    monkeypatch.setitem(sys.modules, "torch", torch_mod)
+
+    tif = tmp_path / "data" / "stack.tif"
+    tif.parent.mkdir()
+    tif.write_bytes(b"")
+
+    progress_calls: list[tuple[str, float]] = []
+    result = run_suite2p_pipeline(
+        [tif],
+        masks,
+        TifPipelineParams(nchannels=2),
+        progress=lambda msg, frac: progress_calls.append((msg, frac)),
+    )
+
+    assert result.F.shape == (n_neurons, nframes)
+    assert result.Fneu.shape == (n_neurons, nframes)
+    assert result.spks.shape == (n_neurons, nframes)
+    assert result.mean_image.shape == (Ly, Lx)
+    # All Cellpose ROIs were marked as cells.
+    assert np.all(result.iscell[:, 0] == 1)
+    # Stat entries got snr/skew/std appended.
+    for entry in result.stat:
+        assert {"snr", "skew", "std"} <= set(entry.keys())
+    # Progress callback was invoked for the pipeline phases.
+    assert progress_calls
+    assert progress_calls[-1] == ("Done", 1.0)
+    # Temp dir cleaned up.
+    children = [d for d in tmp_path.iterdir() if d.name.startswith("neuroseq_suite2p_")]
+    assert children == []
+
+
+def test_run_suite2p_pipeline_rejects_mismatched_mask_shape(
+    monkeypatch, tmp_path: Path
+):
+    import sys
+    import types
+
+    from neuroseq.importer_tif import TifPipelineParams
+    from neuroseq.importer_tif import run_suite2p_pipeline
+
+    masks = np.zeros((8, 8), dtype=np.int32)
+
+    def _module(name: str, **attrs) -> types.ModuleType:
+        mod = types.ModuleType(name)
+        for k, v in attrs.items():
+            setattr(mod, k, v)
+        return mod
+
+    suite2p_mod = _module(
+        "suite2p",
+        default_db=lambda: {},
+        default_settings=lambda: {
+            "extraction": {"neuropil_coefficient": 0.7, "batch_size": 1},
+        },
+    )
+    s2io_mod = _module(
+        "suite2p.io",
+        get_file_list=lambda db: ([], np.array([1])),
+        init_dbs=lambda db: [
+            {
+                "reg_file": str(tmp_path / "r.bin"),
+                "reg_file_chan2": str(tmp_path / "r2.bin"),
+                "Ly": 16,
+                "Lx": 16,
+                "nframes": 1,
+            }
+        ],
+        tiff_to_binary=lambda dbs, *a, **kw: dbs,
+        BinaryFile=type(
+            "BF",
+            (),
+            {
+                "__init__": lambda self, **kw: setattr(
+                    self, "data", np.zeros((1, 16, 16), dtype=np.float32)
+                )
+            },
+        ),
+    )
+    s2det = _module(
+        "suite2p.detection",
+        assign_overlaps=lambda s, *a, **kw: s,
+        roi_stats=lambda s, *a, **kw: s,
+    )
+    s2ext = _module(
+        "suite2p.extraction",
+        extraction_wrapper=lambda *a, **kw: (None, None, None, None),
+        preprocess=lambda **kw: None,
+        oasis=lambda **kw: None,
+    )
+    s2cls = _module(
+        "suite2p.classification",
+        classify=lambda **kw: None,
+        builtin_classfile=None,
+    )
+    torch_mod = _module(
+        "torch",
+        cuda=type("C", (), {"is_available": staticmethod(lambda: False)})(),
+        device=lambda x: x,
+    )
+
+    for name, mod in {
+        "suite2p": suite2p_mod,
+        "suite2p.io": s2io_mod,
+        "suite2p.detection": s2det,
+        "suite2p.extraction": s2ext,
+        "suite2p.classification": s2cls,
+        "torch": torch_mod,
+    }.items():
+        monkeypatch.setitem(sys.modules, name, mod)
+
+    tif = tmp_path / "stack.tif"
+    tif.write_bytes(b"")
+    with pytest.raises(ValueError, match="does not match TIFF shape"):
+        run_suite2p_pipeline([tif], masks, TifPipelineParams(nchannels=1))

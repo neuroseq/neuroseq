@@ -106,3 +106,163 @@ def test_cellpose_result_to_masks_round_trip(seg, expected):
     fake_result = MagicMock()
     fake_result.segmentation_array = seg
     np.testing.assert_array_equal(_cellpose_result_to_masks(fake_result), expected)
+
+
+def test_browse_tifs_dedupes_added_paths(qtbot, mocker, tmp_path):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+
+    a = tmp_path / "a.tif"
+    b = tmp_path / "b.tif"
+    a.write_bytes(b"")
+    b.write_bytes(b"")
+
+    mocker.patch(
+        "neuroseq.tif_import_dialog.QtWidgets.QFileDialog.getOpenFileNames",
+        return_value=([str(a), str(b), str(a)], ""),
+    )
+    dialog._browse_tifs()
+
+    assert len(dialog._tif_paths) == 2
+    assert dialog._tif_list.count() == 2
+
+
+def test_remove_selected_tifs_clears_list_and_paths(qtbot, tmp_path):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+
+    a = tmp_path / "a.tif"
+    a.write_bytes(b"")
+    dialog._tif_paths.append(a)
+    dialog._tif_list.addItem(str(a))
+    dialog._tif_list.item(0).setSelected(True)
+
+    dialog._remove_selected_tifs()
+    assert dialog._tif_paths == []
+    assert dialog._tif_list.count() == 0
+
+
+def test_browse_seg_file_sets_path_and_switches_radio(qtbot, mocker, tmp_path):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=MagicMock())
+    qtbot.addWidget(dialog)
+
+    seg = tmp_path / "image_seg.npy"
+    seg.write_bytes(b"")
+    mocker.patch(
+        "neuroseq.tif_import_dialog.getopenfilename", return_value=(str(seg), "")
+    )
+    dialog._browse_seg_file()
+    assert dialog._seg_file_path == seg
+    assert dialog._use_seg_radio.isChecked()
+
+
+def test_resolve_masks_requires_seg_when_seg_radio_selected(qtbot):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+    # _use_seg_radio is checked because cellpose_import is None, but no file picked.
+    with pytest.raises(ValueError, match="No _seg.npy"):
+        dialog._resolve_masks()
+
+
+def test_resolve_masks_requires_cellpose_when_loaded_radio_selected(qtbot, mocker):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=MagicMock())
+    qtbot.addWidget(dialog)
+    # Force "use loaded" radio but clear the cellpose import.
+    dialog._cellpose_import = None
+    dialog._use_loaded_radio.setEnabled(True)
+    dialog._use_loaded_radio.setChecked(True)
+    with pytest.raises(ValueError, match="No Cellpose data"):
+        dialog._resolve_masks()
+
+
+def test_launch_fiji_runs_qprocess_with_selected_tif(qtbot, mocker, tmp_path):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+
+    fake_fiji = tmp_path / "fiji"
+    fake_fiji.write_text("")
+    a = tmp_path / "a.tif"
+    a.write_bytes(b"")
+    dialog._tif_paths.append(a)
+    dialog._tif_list.addItem(str(a))
+    dialog._tif_list.item(0).setSelected(True)
+
+    mocker.patch("neuroseq.fiji.resolve_fiji_path", return_value=str(fake_fiji))
+    start_detached = mocker.patch(
+        "neuroseq.tif_import_dialog.QtCore.QProcess.startDetached", return_value=True
+    )
+    dialog._launch_fiji()
+    start_detached.assert_called_once_with(str(fake_fiji), [str(a)])
+
+
+def test_launch_fiji_no_op_when_path_not_resolved(qtbot, mocker):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+    mocker.patch("neuroseq.fiji.resolve_fiji_path", return_value="")
+    start_detached = mocker.patch(
+        "neuroseq.tif_import_dialog.QtCore.QProcess.startDetached"
+    )
+    dialog._launch_fiji()
+    start_detached.assert_not_called()
+
+
+def test_launch_cellpose_invokes_subprocess(qtbot, mocker):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+    mocker.patch(
+        "neuroseq.tif_import_dialog.importlib.util.find_spec",
+        return_value=object(),  # cellpose "found"
+    )
+    popen = mocker.patch("neuroseq.tif_import_dialog.subprocess.Popen")
+    dialog._launch_cellpose()
+    popen.assert_called_once()
+
+
+def test_launch_cellpose_warns_when_missing(qtbot, mocker):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+    mocker.patch(
+        "neuroseq.tif_import_dialog.importlib.util.find_spec", return_value=None
+    )
+    popen = mocker.patch("neuroseq.tif_import_dialog.subprocess.Popen")
+    dialog._launch_cellpose()
+    popen.assert_not_called()
+
+
+def test_pipeline_failed_signal_re_enables_run_button(qtbot, mocker, tmp_path):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    cellpose_import = MagicMock()
+    cellpose_import.segmentation_array = np.zeros((16, 16), dtype=np.int32) - 1
+    dialog = TifImportDialog(parent=None, cellpose_import=cellpose_import)
+    qtbot.addWidget(dialog)
+    tif = tmp_path / "fake.tif"
+    tif.write_bytes(b"")
+    dialog._tif_paths.append(tif)
+    dialog._tif_list.addItem(str(tif))
+
+    mocker.patch(
+        "neuroseq.importer_tif.run_suite2p_pipeline",
+        side_effect=RuntimeError("synthetic failure"),
+    )
+    dialog._start_pipeline()
+    qtbot.waitUntil(lambda: dialog._run_button.isEnabled(), timeout=5000)
+    assert dialog._pipeline_result is None
