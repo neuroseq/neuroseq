@@ -10,6 +10,51 @@ NeuroSeq is a Qt-based desktop GUI application for computational neuroscience. I
 
 **Entry point**: `neuroseq` CLI → `src/neuroseq/__main__.py`
 
+## Experimental Context (Wiegert lab, Mannheim)
+
+Reference: Baio, C. (2024–2025) "Multiphoton Holographic Optogenetics in Hippocampal Slice Culture to Manipulate and Measure Neural Activity at Single-Cell and Network Level". Master's thesis, Università degli Studi di Trieste / Universität Heidelberg (Prof. Cingolani, co-supervised by Prof. Wiegert and Dr. Formozov). Stored at `/mnt/live3/svintila/random/papers/Baio et al. - Multiphoton Holographic Optogenetics in Hippocampal Slice Culture to Manipulate and Measure Neural A.pdf`.
+
+NeuroSeq supports a high-throughput all-optical pipeline that combines two-photon calcium imaging with two-photon holographic optogenetic stimulation on rat hippocampal organotypic slice cultures (hOSCs), targeting the CA3 module to study recurrent network connectivity.
+
+### Biological prep
+
+- **Tissue**: P5 rat pup hippocampal organotypic slice cultures, 300 µm cut on McIlwain Tissue Chopper, kept on Millicell-CM membranes in slice culture medium (MEM + 20% horse serum + insulin + glutamine + ascorbic acid).
+- **Maturation**: imaging done at DIV 17 (~100 µm thick at that point).
+- **Viral transduction at DIV 3** (always 5× dilution):
+  - **Calcium indicator**: `rAAV9-CaMKIIa-jGCaMP8m` — **jGCaMP8m** is the chosen indicator; picked for the best speed/sensitivity tradeoff (faster decay than jGCaMP7f / GCaMP6s, still large ΔF/F per spike).
+  - **Excitatory opsin**: `rAAV9-Syn-ChrimsonR-tdTomato` (red-light cation channel, tdTomato co-expression for identification).
+  - **Bidirectional opsin** (optional): `rAAV2-9-CaMKIIa_somBiPOLES-mCerulean` (ChrimsonR–GtACR2 tandem for depolarisation/hyperpolarisation in one construct, tagged with mCerulean).
+
+### Imaging acquisition (drives `importer_tif.py` defaults)
+
+- **Microscope**: RAPP HOLO-4D (Movable Objective Microscope + Ti:Sapphire laser + SLM holographic stimulation path).
+- **2-photon imaging laser**: tunable 660–1320 nm + fixed 1040 nm. **GCaMP excitation at 940 nm.**
+- **Detection**: 4 GaAsP PMTs (2 green, 2 red), plus Dodt contrast.
+- **Spontaneous Ca activity recording**: **27 000 frames over 15 minutes at 30 Hz** (this is where `DEFAULT_FS = 30.0` and `tau = 0.5 s` in `src/neuroseq/importer_tif.py` come from), 512×512 pixels, saved as multi-frame TIFF.
+- **Pre-record acquisitions**: an anatomical Dodt snap (2048×2048) and a 41-slice 1 µm Z-stack for spatial registration.
+
+### Holographic stimulation (drives `.seq` export and `stim_editor.py` semantics)
+
+- **2-photon stimulation lasers**: Carbide low-rep-rate / high-peak-pulse-power, two paths — fixed 1040 nm (up to ~40 W) and a tunable >/< 1000 nm path (~60 mW per output).
+- **ChrimsonR stimulation**: 1140 nm, 11 pulses × 16.6 ms at 10 Hz, power swept 23 → 60 mW per spot. Spiral illumination (≥16.6 ms minimum due to spiral period, 10 µm spiral diameter typical).
+- **BiPOLES reference (Vierock 2021)**: 1100 nm, 15 ms pulses at 10 Hz; AP probability curve saturates around 0.3 mW/µm².
+- **Heating budget**: holographic illumination can raise local temperature by 1–5 °C; protocols are bounded by power × number of simultaneous spots.
+- **Stimulation coordination software**: RAPP **SysCon** (driver for `.seq` exports — see `exporter_syscon2.py`, `importer_syscon2.py`); imaging via _ScanImage_; laser control via _Shortcut Chameleon_, _Carbide_, _Topas4_; power via _ThorLabs_.
+
+### Analysis pipeline (mirrors what `importer_tif.py` automates inside neuroseq)
+
+The thesis processes raw TIFFs externally before this PR existed; that workflow is what `importer_tif.run_suite2p_pipeline` now collapses into the GUI:
+
+1. **Cellpose** is run on the mean (or Z-projected) image to produce a mask of pyramidal somas.
+2. A **suite2p-based custom Python script** (modelled on W. Yang 2021 and A. Formozov 2022) takes those masks, extracts per-neuron F/Fneu traces, does neuropil subtraction, baseline correction, and OASIS deconvolution.
+3. **Fiji/ImageJ** is used for response heatmaps (per-stim ΔF over a 30-frame pre-stim baseline) and for projecting large TIFFs before Cellpose — the same role as the "Run Fiji" / Z-projection workflow documented in the TIFF import dialog.
+
+### Phenotypes seen across slices (useful sanity checks when running pipelines)
+
+- ~1/3 of slices are **silent**, ~1/3 show **highly synchronous network bursts**, ~1/3 are **sporadic** with isolated cellular / sub-population transients.
+- ~**40% of opsin-expressing cells** respond to single-cell holographic stimulation (vs. ~1/5 of opsin-negative controls — small sample, not definitive).
+- Single-cell stimulation rarely activates downstream network; reciprocal-connection probability in CA3 is low (≈1% in rats, up to ~10% short-range in mice).
+
 ## Development Setup
 
 ```bash
