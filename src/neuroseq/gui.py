@@ -1408,6 +1408,21 @@ class Gui(QtWidgets.QMainWindow):
                 )
             )
 
+    def btn_import_tif_clicked(self) -> None:
+        """Open dialog to run the Suite2p pipeline on raw 2-photon TIFFs."""
+        from neuroseq.tif_import_dialog import TifImportDialog
+
+        dialog = TifImportDialog(self, cellpose_import=self.last_cellpose_import)
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            self._append_experimental_data(
+                Experiment(
+                    dialog.experiment_name,
+                    dialog.experiment_duration,
+                    [],
+                    dialog.imported_data,
+                )
+            )
+
     def btn_import_cellpose_data_clicked(self) -> None:
         dialog = CellposeImportDialog(
             self,
@@ -1998,7 +2013,14 @@ class Gui(QtWidgets.QMainWindow):
         import_trace_menu = import_data_menu.addMenu("Import &trace")
         assert import_trace_menu is not None
         add_action(
-            "Import &calcium imaging",
+            "Import &calcium imaging (raw .tif)",
+            self.btn_import_tif_clicked,
+            import_trace_menu,
+            None,
+            icon=qta.icon("mdi6.import"),
+        )
+        add_action(
+            "Import calcium imaging (&Suite2p outputs)",
             self.btn_import_suite2p_data_clicked,
             import_trace_menu,
             None,
