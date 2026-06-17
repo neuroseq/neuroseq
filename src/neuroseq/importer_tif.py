@@ -150,6 +150,24 @@ def run_suite2p_pipeline(
         # that downstream Suite2p code calls .sum() on — building those by hand
         # breaks tiff_to_binary.
         file_list, first_files = s2io.get_file_list(db)
+        # Suite2p scans the full directory; restrict to only the user-selected
+        # files so that other TIFFs in the same folder (e.g. different-FOV
+        # acquisitions with mismatched dimensions) are not included.
+        selected = {str(p.resolve()) for p in tif_paths}
+        keep = np.array(
+            [str(Path(f).resolve()) in selected for f in file_list], dtype=bool
+        )
+        if keep.any():
+            file_list = [f for f, k in zip(file_list, keep, strict=True) if k]
+            first_files = first_files[keep]
+            # Ensure the first kept file in each folder is still marked True so
+            # frames_per_folder is sized correctly inside tiff_to_binary.
+            seen_folders: set[str] = set()
+            for i, f in enumerate(file_list):
+                folder = str(Path(f).parent)
+                if folder not in seen_folders:
+                    first_files[i] = True
+                    seen_folders.add(folder)
         db["file_list"] = file_list
         db["first_files"] = first_files
 

@@ -8,6 +8,7 @@ parameters through.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -279,6 +280,125 @@ def test_run_suite2p_pipeline_orchestration(monkeypatch, tmp_path: Path):
     # Temp dir cleaned up.
     children = [d for d in tmp_path.iterdir() if d.name.startswith("neuroseq_suite2p_")]
     assert children == []
+
+
+def test_run_suite2p_pipeline_filters_mixed_fov_tiffs(monkeypatch, tmp_path: Path):
+    """When the data folder contains TIFFs from other FOVs, only the selected
+    files should reach `db["file_list"]`, and `first_files` should be re-anchored
+    so each surviving folder still has a True entry."""
+    import sys
+    import types
+
+    from neuroseq.importer_tif import TifPipelineParams
+    from neuroseq.importer_tif import run_suite2p_pipeline
+
+    Ly, Lx, nframes, n_neurons = 16, 16, 8, 3
+    masks = _make_mask_image((Ly, Lx))
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    selected_a = data_dir / "fov1_run1.tif"
+    selected_b = data_dir / "fov1_run2.tif"
+    other_fov = data_dir / "fov2_run1.tif"
+    for p in (selected_a, selected_b, other_fov):
+        p.write_bytes(b"")
+
+    # Suite2p sees all three files; first_files marks the first per folder.
+    discovered_files = [str(other_fov), str(selected_a), str(selected_b)]
+    discovered_first = np.array([True, False, False], dtype=bool)
+
+    captured: dict[str, Any] = {}
+
+    def get_file_list(db):
+        return list(discovered_files), discovered_first.copy()
+
+    def init_dbs(db):
+        captured["file_list"] = list(db["file_list"])
+        captured["first_files"] = np.asarray(db["first_files"]).copy()
+        return [
+            {
+                "reg_file": str(tmp_path / "reg.bin"),
+                "reg_file_chan2": str(tmp_path / "reg2.bin"),
+                "Ly": Ly,
+                "Lx": Lx,
+                "nframes": nframes,
+            }
+        ]
+
+    class FakeBinaryFile:
+        def __init__(self, Ly, Lx, filename):
+            self.data = np.zeros((nframes, Ly, Lx), dtype=np.float32)
+
+    def extraction_wrapper(stat, f_bin, f_reg_chan2, settings, device):
+        F = np.full((n_neurons, nframes), 5.0, dtype=np.float32)
+        Fneu = np.full((n_neurons, nframes), 1.0, dtype=np.float32)
+        return F, Fneu, None, None
+
+    def _module(name: str, **attrs) -> types.ModuleType:
+        mod = types.ModuleType(name)
+        for k, v in attrs.items():
+            setattr(mod, k, v)
+        return mod
+
+    suite2p_mod = _module(
+        "suite2p",
+        default_db=lambda: {},
+        default_settings=lambda: {
+            "extraction": {"neuropil_coefficient": 0.7, "batch_size": 1},
+        },
+    )
+    s2io_mod = _module(
+        "suite2p.io",
+        get_file_list=get_file_list,
+        init_dbs=init_dbs,
+        tiff_to_binary=lambda dbs, *a, **kw: dbs,
+        BinaryFile=FakeBinaryFile,
+    )
+    s2det = _module(
+        "suite2p.detection",
+        assign_overlaps=lambda s, *a, **kw: s,
+        roi_stats=lambda s, *a, **kw: s,
+    )
+    s2ext = _module(
+        "suite2p.extraction",
+        extraction_wrapper=extraction_wrapper,
+        preprocess=lambda F, **kw: F,
+        oasis=lambda F, **kw: np.zeros_like(F),
+    )
+    s2cls = _module(
+        "suite2p.classification",
+        classify=lambda stat, classfile: np.zeros((len(stat), 2), dtype=np.float32),
+        builtin_classfile=None,
+    )
+    torch_mod = _module(
+        "torch",
+        cuda=type("C", (), {"is_available": staticmethod(lambda: False)})(),
+        device=lambda x: x,
+    )
+
+    for name, mod in {
+        "suite2p": suite2p_mod,
+        "suite2p.io": s2io_mod,
+        "suite2p.detection": s2det,
+        "suite2p.extraction": s2ext,
+        "suite2p.classification": s2cls,
+        "torch": torch_mod,
+    }.items():
+        monkeypatch.setitem(sys.modules, name, mod)
+
+    run_suite2p_pipeline(
+        [selected_a, selected_b], masks, TifPipelineParams(nchannels=1)
+    )
+
+    # Only the two selected files reached Suite2p; the other-FOV TIFF was dropped.
+    surviving = {str(Path(p).resolve()) for p in captured["file_list"]}
+    assert surviving == {str(selected_a.resolve()), str(selected_b.resolve())}
+    # first_files was repaired: the first surviving entry per folder is True.
+    first = captured["first_files"]
+    assert len(first) == len(captured["file_list"])
+    assert bool(first[0]) is True
+    # Only one True per folder; both files live in the same folder here.
+    assert int(np.count_nonzero(first)) == 1
 
 
 def test_run_suite2p_pipeline_rejects_mismatched_mask_shape(
