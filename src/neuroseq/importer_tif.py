@@ -158,7 +158,7 @@ def run_suite2p_pipeline(
             [str(Path(f).resolve()) in selected for f in file_list], dtype=bool
         )
         if keep.any():
-            file_list = [f for f, k in zip(file_list, keep) if k]
+            file_list = [f for f, k in zip(file_list, keep, strict=True) if k]
             first_files = first_files[keep]
             # Ensure the first kept file in each folder is still marked True so
             # frames_per_folder is sized correctly inside tiff_to_binary.
