@@ -87,13 +87,13 @@ class ConsoleWidget(ReplWidget):
             "project": None,
         }
         self._print_intro()
-        sample_btn = QtWidgets.QPushButton("Sample python code")
+        sample_btn = QtWidgets.QPushButton("Sample Python Code")
         sample_btn.clicked.connect(self._show_sample_code)
         self.layout.addWidget(sample_btn)
 
     def _print_intro(self) -> None:
         self.output.insertPlainText(
-            "This is a Python console where you can interact directly with the Model using the 'project' variable.\n"
+            "This is a Python console where you can interact directly with the Model using the 'project' object.\n"
         )
         self.output.insertPlainText(
             "Here are some examples you can try entering below:\n\n"
@@ -109,10 +109,13 @@ class ConsoleWidget(ReplWidget):
         self.output.insertPlainText(
             "\n\nNumpy is available as np, brian2 as b2, and indentation can be done with a single space.\n\n\n"
         )
+        self.output.insertPlainText(
+            "\n\nClick 'Sample Python Code' for more information and examples.\n\n\n"
+        )
 
     def _show_sample_code(self) -> None:
         dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle("Console — sample python code")
+        dlg.setWindowTitle("Console: sample python code")
         dlg.resize(620, 480)
         layout = QtWidgets.QVBoxLayout(dlg)
         text_edit = QtWidgets.QPlainTextEdit(SAMPLE_CODE)
