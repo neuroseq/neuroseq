@@ -95,16 +95,19 @@ class ConsoleWidget(ReplWidget):
         sample_btn = QtWidgets.QPushButton("Sample Python Code")
         sample_btn.clicked.connect(self._show_sample_code)
         sample_btn.setMaximumWidth(150)
+        sample_btn.setFixedHeight(20)
         btn_layout.addWidget(sample_btn)
 
         history_btn = QtWidgets.QPushButton("Console History")
         history_btn.clicked.connect(self._show_console_history)
         history_btn.setMaximumWidth(150)
+        history_btn.setFixedHeight(20)
         btn_layout.addWidget(history_btn)
 
         close_console_btn = QtWidgets.QPushButton("Close Console")
         close_console_btn.clicked.connect(self.close_requested)
         close_console_btn.setMaximumWidth(150)
+        close_console_btn.setFixedHeight(20)
         btn_layout.addWidget(close_console_btn)
 
         btn_layout.addStretch()
