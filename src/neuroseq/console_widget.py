@@ -75,6 +75,7 @@ b2                                   # brian2 (already imported)
 
 class ConsoleWidget(ReplWidget):
     console_command_entered = QtCore.Signal()
+    close_requested = QtCore.Signal()
 
     def __init__(
         self,
@@ -100,6 +101,11 @@ class ConsoleWidget(ReplWidget):
         history_btn.clicked.connect(self._show_console_history)
         history_btn.setMaximumWidth(150)
         btn_layout.addWidget(history_btn)
+
+        close_console_btn = QtWidgets.QPushButton("Close Console")
+        close_console_btn.clicked.connect(self.close_requested)
+        close_console_btn.setMaximumWidth(150)
+        btn_layout.addWidget(close_console_btn)
 
         btn_layout.addStretch()
         self.layout.addLayout(btn_layout)

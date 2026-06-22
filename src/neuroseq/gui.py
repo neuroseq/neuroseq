@@ -262,6 +262,12 @@ class Gui(QtWidgets.QMainWindow):
         self._create_progressbar()
         # connect widgets
         self.console_widget.console_command_entered.connect(self._update_data)
+        self.console_widget.close_requested.connect(
+            lambda: self._view_actions[self.console_widget].trigger()
+            if self._view_actions.get(self.console_widget, None) is not None
+            and self._view_actions[self.console_widget].isChecked()
+            else None
+        )
         self.trace_widget.custom_analysis_requested.connect(self._custom_analysis)
         self.data_widget.trace_widget.custom_analysis_requested.connect(
             self._custom_analysis
