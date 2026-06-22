@@ -89,6 +89,7 @@ class ConsoleWidget(ReplWidget):
         self._print_intro()
         sample_btn = QtWidgets.QPushButton("Sample Python Code")
         sample_btn.clicked.connect(self._show_sample_code)
+        sample_btn.setMaximumWidth(150)
         self.layout.addWidget(sample_btn)
 
     def _print_intro(self) -> None:
