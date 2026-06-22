@@ -87,10 +87,22 @@ class ConsoleWidget(ReplWidget):
             "project": None,
         }
         self._print_intro()
+
+        # Create button layout
+        btn_layout = QtWidgets.QHBoxLayout()
+
         sample_btn = QtWidgets.QPushButton("Sample Python Code")
         sample_btn.clicked.connect(self._show_sample_code)
         sample_btn.setMaximumWidth(150)
-        self.layout.addWidget(sample_btn)
+        btn_layout.addWidget(sample_btn)
+
+        history_btn = QtWidgets.QPushButton("Console History")
+        history_btn.clicked.connect(self._show_console_history)
+        history_btn.setMaximumWidth(150)
+        btn_layout.addWidget(history_btn)
+
+        btn_layout.addStretch()
+        self.layout.addLayout(btn_layout)
 
     def _print_intro(self) -> None:
         self.output.insertPlainText(
@@ -130,6 +142,36 @@ class ConsoleWidget(ReplWidget):
         font.setPointSize(9)
         text_edit.setFont(font)
         layout.addWidget(text_edit)
+        close_btn = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Close
+        )
+        close_btn.rejected.connect(dlg.reject)
+        layout.addWidget(close_btn)
+        dlg.exec()
+
+    def _show_console_history(self) -> None:
+        """Show a dialog with the console command history."""
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Console: command history")
+        dlg.resize(620, 480)
+        layout = QtWidgets.QVBoxLayout(dlg)
+
+        # Get history from CmdInput widget (self.input.history is a list)
+        history_list = [cmd for cmd in self.input.history if cmd.strip()]
+        history_text = "\n".join(history_list) if history_list else "(no history)"
+
+        text_edit = QtWidgets.QPlainTextEdit(history_text)
+        text_edit.setReadOnly(True)
+        text_edit.setVerticalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+        )
+        text_edit.setMaximumHeight(400)
+        font = text_edit.font()
+        font.setFamily("Monospace")
+        font.setPointSize(9)
+        text_edit.setFont(font)
+        layout.addWidget(text_edit)
+
         close_btn = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Close
         )
