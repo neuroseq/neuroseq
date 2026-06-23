@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import brian2.numpy_ as np
 import pytest
 from pytestqt.qtbot import QtBot
 
 from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.custom_analysis_widget import CustomAnalysisWindow
+from neuroseq.data import TraceData
 
 gui_delay_in_ms = 50
 
@@ -405,5 +407,77 @@ def test_custom_analysis_widget_spike_count_no_spikes_in_selection(
         child
         for child in custom_analysis_widget.subplot.get_children()
         if hasattr(child, "get_text") and "no spikes" in child.get_text().lower()
+    ]
+    assert len(text_children) > 0
+
+
+@pytest.mark.parametrize("new_window", [False, True])
+def test_custom_analysis_widget_trace_pearson_correlation(
+    qtbot: QtBot, new_window: bool
+) -> None:
+    custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    traces = np.asarray(
+        [
+            [0.0, 1.0, 2.0, 3.0],
+            [0.0, 2.0, 4.0, 6.0],
+            [3.0, 2.0, 1.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    data = TraceData(
+        name="corr_traces",
+        traces=traces,
+        indices=np.asarray([0, 1, 2], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+
+    custom_analysis_widget.set_data(
+        data,
+        CustomAnalysisType.PearsonCorrelation,
+        None,
+        None,
+    )
+    qtbot.wait(gui_delay_in_ms)
+
+    assert "pearson correlation" in custom_analysis_widget.subplot.get_title().lower()
+    assert custom_analysis_widget.subplot.get_xlabel() == "Neuron index"
+    assert custom_analysis_widget.subplot.get_ylabel() == "Neuron index"
+    assert len(custom_analysis_widget.subplot.images) == 1
+    corr = custom_analysis_widget.subplot.images[0].get_array()
+    assert corr.shape == (3, 3)
+    assert np.allclose(np.diag(corr), 1.0)
+    assert np.isclose(corr[0, 1], 1.0)
+    assert np.isclose(corr[0, 2], -1.0)
+
+
+@pytest.mark.parametrize("new_window", [False, True])
+def test_custom_analysis_widget_trace_pearson_correlation_short_selection(
+    qtbot: QtBot, new_window: bool
+) -> None:
+    custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    data = TraceData(
+        name="short_corr_traces",
+        traces=np.asarray([[1.0], [2.0]], dtype=np.float32),
+        indices=np.asarray([0, 1], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+
+    custom_analysis_widget.set_data(
+        data,
+        CustomAnalysisType.PearsonCorrelation,
+        None,
+        None,
+    )
+    qtbot.wait(gui_delay_in_ms)
+
+    text_children = [
+        child
+        for child in custom_analysis_widget.subplot.get_children()
+        if hasattr(child, "get_text")
+        and "need at least one neuron and two time samples" in child.get_text().lower()
     ]
     assert len(text_children) > 0

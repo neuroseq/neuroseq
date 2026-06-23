@@ -20,6 +20,7 @@ class CustomAnalysisType(PrettyPrintEnum):
     Histogram = "mdi6.chart-histogram"
     Histogram2d = "mdi6.data-matrix"
     SpikeCountPerNeuron = "mdi6.chart-bar"
+    PearsonCorrelation = "mdi6.chart-bell-curve-cumulative"
 
     @property
     def label(self) -> str:
@@ -27,6 +28,7 @@ class CustomAnalysisType(PrettyPrintEnum):
             CustomAnalysisType.Histogram: "Histogram",
             CustomAnalysisType.Histogram2d: "Histogram 2D",
             CustomAnalysisType.SpikeCountPerNeuron: "Spike count per neuron",
+            CustomAnalysisType.PearsonCorrelation: "Pearson correlation",
         }[self]
 
     def __str__(self) -> str:
@@ -255,6 +257,37 @@ class CustomAnalysisWidget(MatplotlibWidget):
                 self.subplot.bar(
                     self.spike_neuron_indices,
                     spike_counts[self.spike_neuron_indices],
+                )
+        elif analysis_type == CustomAnalysisType.PearsonCorrelation:
+            if not isinstance(data, TraceData):
+                return
+            assert self.traces is not None
+            traces = np.asarray(self.traces)
+            self.subplot.set_xlabel("Neuron index")
+            self.subplot.set_ylabel("Neuron index")
+            if traces.shape[0] == 0 or traces.shape[1] < 2:
+                self.subplot.text(
+                    0.5,
+                    0.5,
+                    "Need at least one neuron and two time samples",
+                    ha="center",
+                    va="center",
+                    transform=self.subplot.transAxes,
+                )
+            else:
+                corr = np.asarray(np.corrcoef(traces), dtype=np.float64)
+                corr = np.atleast_2d(corr)
+                image = self.subplot.imshow(
+                    corr,
+                    vmin=-1.0,
+                    vmax=1.0,
+                    cmap="coolwarm",
+                    origin="lower",
+                )
+                self.subplot.figure.colorbar(
+                    image,
+                    ax=self.subplot,
+                    label="Pearson r",
                 )
         else:
             return
