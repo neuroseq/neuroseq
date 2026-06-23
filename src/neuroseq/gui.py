@@ -175,6 +175,13 @@ def _external_simulator_accepts_progress(simulate_fn: Callable) -> bool:
 
 
 class Gui(QtWidgets.QMainWindow):
+    TOOLBAR_ICON_SIZE = QtCore.QSize(20, 20)
+
+    def _configure_toolbar_icon_style(self, toolbar: QtWidgets.QToolBar) -> None:
+        toolbar.setIconSize(self.TOOLBAR_ICON_SIZE)
+        toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonIconOnly)
+        toolbar.setStyleSheet("QToolButton { margin: 0px; padding: 2px 1px; }")
+
     def __init__(self, filename: pathlib.Path | str | None = None) -> None:
         super().__init__()
         self.logger = logging.getLogger(__name__)
@@ -194,7 +201,14 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_data = QtWidgets.QComboBox()
         self.cmb_data.setMinimumWidth(120)
         self.controller = ConstrainedPanZoomController()
-        self.trace_widget = TraceWidget(self.controller, parent=self)
+        self.trace_controller = ConstrainedPanZoomController()
+        self.spike_controller = ConstrainedPanZoomController()
+        self.trace_widget = TraceWidget(
+            self.trace_controller,
+            parent=self,
+            default_controller=self.controller,
+            show_axis_link_controls=True,
+        )
         self.heatmap_widget = HeatmapWidget(parent=self)
         self._create_menus_and_toolbars()
         self.setWindowIcon(qta.icon("fa6s.brain"))
@@ -204,6 +218,7 @@ class Gui(QtWidgets.QMainWindow):
         # vertical toolbar for stim editing on the left
         self.toolbar_stim_editor = QtWidgets.QToolBar()
         self.toolbar_stim_editor.setOrientation(QtCore.Qt.Orientation.Vertical)
+        self._configure_toolbar_icon_style(self.toolbar_stim_editor)
         main_horizontal_layout.addWidget(self.toolbar_stim_editor)
         # left/right splitters between heatmap and console
         split_left_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
@@ -228,8 +243,21 @@ class Gui(QtWidgets.QMainWindow):
             parent=self,
         )
         split_vertical.addWidget(self.stim_editor)
+        self.trace_widget.set_default_scroll_bars(
+            self.stim_editor.x_scrollbar,
+            self.stim_editor.y_scrollbar,
+        )
         split_vertical.addWidget(self.trace_widget)
-        self.spike_widget = SpikeWidget(self.controller, parent=self)
+        self.spike_widget = SpikeWidget(
+            self.spike_controller,
+            parent=self,
+            default_controller=self.controller,
+            show_axis_link_controls=True,
+        )
+        self.spike_widget.set_default_scroll_bars(
+            self.stim_editor.x_scrollbar,
+            self.stim_editor.y_scrollbar,
+        )
         split_vertical.addWidget(self.spike_widget)
         self.data_widget = DataWidget(self.controller, parent=self)
         self.data_widget.set_default_scroll_bars(
@@ -262,6 +290,12 @@ class Gui(QtWidgets.QMainWindow):
         self._create_progressbar()
         # connect widgets
         self.console_widget.console_command_entered.connect(self._update_data)
+        self.console_widget.close_requested.connect(
+            lambda: self._view_actions[self.console_widget].trigger()
+            if self._view_actions.get(self.console_widget, None) is not None
+            and self._view_actions[self.console_widget].isChecked()
+            else None
+        )
         self.trace_widget.custom_analysis_requested.connect(self._custom_analysis)
         self.data_widget.trace_widget.custom_analysis_requested.connect(
             self._custom_analysis
@@ -295,6 +329,8 @@ class Gui(QtWidgets.QMainWindow):
         max_time_secs = float(self.project.max_time_secs)
         max_neurons = int(self.project.max_neurons)
         self.controller.set_limits(max_time_secs, max_neurons)
+        self.trace_controller.set_limits(max_time_secs, max_neurons)
+        self.spike_controller.set_limits(max_time_secs, max_neurons)
         self.data_widget.set_limits(max_time_secs, max_neurons)
         self.time_slider.set_max_time_secs(max_time_secs)
 
@@ -731,6 +767,8 @@ class Gui(QtWidgets.QMainWindow):
         self._update_window_title()
         if reset_controller:
             self.controller.reset()
+            self.trace_controller.reset()
+            self.spike_controller.reset()
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
         self.continue_simulation_action.setText("&Run simulation")
@@ -1905,33 +1943,40 @@ class Gui(QtWidgets.QMainWindow):
     def _create_menus_and_toolbars(self) -> None:
         menu = self.menuBar()
         assert menu is not None
+        menu.setStyleSheet("QMenuBar::item { padding: 3px 6px; margin: 0px; }")
         self.menu_file = menu.addMenu("&File")
         assert self.menu_file is not None
         self.toolbar_file = QtWidgets.QToolBar("File")
+        self._configure_toolbar_icon_style(self.toolbar_file)
         self.addToolBar(self.toolbar_file)
         self.menu_simulate = menu.addMenu("&Simulate")
         assert self.menu_simulate is not None
         self.toolbar_simulate = QtWidgets.QToolBar("Simulate")
+        self._configure_toolbar_icon_style(self.toolbar_simulate)
         self.addToolBar(self.toolbar_simulate)
 
         self.menu_playback = menu.addMenu("&Playback")
         assert self.menu_playback is not None
         self.toolbar_playback = QtWidgets.QToolBar("Playback")
+        self._configure_toolbar_icon_style(self.toolbar_playback)
         self.addToolBar(self.toolbar_playback)
         self.menu_view = menu.addMenu("&View")
         assert self.menu_view is not None
         self.toolbar_view = QtWidgets.QToolBar("View")
         self.toolbar_data = QtWidgets.QToolBar("Data")
+        self._configure_toolbar_icon_style(self.toolbar_view)
+        self._configure_toolbar_icon_style(self.toolbar_data)
         self.addToolBar(self.toolbar_data)
 
         self.menu_experiment = menu.addMenu("&Experiment")
         assert self.menu_experiment is not None
         self.toolbar_experiment = QtWidgets.QToolBar("Experiment")
+        self._configure_toolbar_icon_style(self.toolbar_experiment)
         self.addToolBar(self.toolbar_experiment)
         self.addToolBarBreak()
         self.addToolBar(self.toolbar_view)
 
-        self.menu_settings = menu.addMenu("&Settings")
+        self.menu_settings = menu.addMenu("Se&ttings")
         assert self.menu_settings is not None
         self.menu_help = menu.addMenu("&Help")
         assert self.menu_help is not None
@@ -1966,7 +2011,7 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.file"),
         )
         # add "open example project" item to the file menu which opens a sub-menu containing the example projects from src/neuroseq/example_projects
-        open_example_project_menu = menu.addMenu("&Open example project")
+        open_example_project_menu = menu.addMenu("Open example &project")
         assert open_example_project_menu is not None
         for section, section_projects in example_projects.items():
             section_menu = open_example_project_menu.addMenu(section)
@@ -1981,7 +2026,7 @@ class Gui(QtWidgets.QMainWindow):
                     None,
                 )
         add_action(
-            "&Open project",
+            "&Open Project",
             self.btn_open_clicked,
             menu,
             toolbar,
@@ -1989,7 +2034,7 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.folder-open"),
         )
         add_action(
-            "&Import from project",
+            "Import &from Project",
             self.btn_import_clicked,
             menu,
             toolbar,
@@ -2004,7 +2049,7 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.image-edit-outline"),
         )
         add_action(
-            "&Save project",
+            "&Save Project",
             self.btn_save_clicked,
             menu,
             toolbar,
@@ -2015,73 +2060,73 @@ class Gui(QtWidgets.QMainWindow):
         import_data_menu = menu.addMenu("&Import data")
         assert import_data_menu is not None
 
-        import_stimulus_menu = import_data_menu.addMenu("Import &stimulus")
+        import_stimulus_menu = import_data_menu.addMenu("&Stimulus")
         assert import_stimulus_menu is not None
         add_action(
-            "Import &light stimulus",
+            "&Optogenetics",
             self.btn_import_stimulus_light_clicked,
             import_stimulus_menu,
             None,
             icon=qta.icon("mdi6.file-import-outline"),
         )
         add_action(
-            "Import &patch clamp",
+            "&Patch Clamp",
             self.btn_import_stimulus_patchclamp_clicked,
             import_stimulus_menu,
             None,
             icon=qta.icon("mdi6.waveform"),
         )
 
-        import_trace_menu = import_data_menu.addMenu("Import &trace")
+        import_trace_menu = import_data_menu.addMenu("&Trace")
         assert import_trace_menu is not None
         add_action(
-            "Import &calcium imaging (raw .tif)",
+            "&Calcium Imaging (raw .tif)",
             self.btn_import_tif_clicked,
             import_trace_menu,
             None,
             icon=qta.icon("mdi6.import"),
         )
         add_action(
-            "Import calcium imaging (&Suite2p outputs)",
+            "Calcium Imaging (&Suite2p outputs)",
             self.btn_import_suite2p_data_clicked,
             import_trace_menu,
             None,
             icon=qta.icon("mdi6.import"),
         )
         add_action(
-            "Import &patch clamp",
+            "&Patch Clamp",
             self.btn_import_trace_patchclamp_clicked,
             import_trace_menu,
             None,
             icon=qta.icon("mdi6.import"),
         )
 
-        export_data_menu = menu.addMenu("&Export data")
+        export_data_menu = menu.addMenu("E&xport")
         assert export_data_menu is not None
 
         add_action(
-            "Export &patch clamp stimulus",
+            "&Patch Clamp sStimulus",
             self.btn_export_patch_clamp_stim_clicked,
             export_data_menu,
             None,
             icon=qta.icon("mdi6.waveform"),
         )
         add_action(
-            "Export &light stimulus",
+            "&Optogenetic Stimulus",
             self.btn_export_light_stimulus_clicked,
             export_data_menu,
             None,
             icon=qta.icon("mdi6.file-code"),
         )
         add_action(
-            "Export &traces",
+            "&Traces",
             self.btn_export_traces_clicked,
             export_data_menu,
             None,
             icon=qta.icon("mdi.waves"),
         )
         add_action(
-            "Export &spikes",
+            "&Spikes",
             self.btn_export_spikes_clicked,
             export_data_menu,
             None,
@@ -2097,7 +2142,7 @@ class Gui(QtWidgets.QMainWindow):
         )
 
         add_action(
-            "&Edit model",
+            "&Edit Model",
             self.btn_edit_clicked,
             menu,
             toolbar,
@@ -2129,7 +2174,7 @@ class Gui(QtWidgets.QMainWindow):
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
     ) -> None:
         self.continue_simulation_action = add_action(
-            "&Run simulation",
+            "&Run Simulation",
             self.btn_continue_simulation_clicked,
             menu,
             toolbar,
@@ -2137,7 +2182,7 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.rocket-launch-outline"),
         )
         add_action(
-            "&Store simulation checkpoint",
+            "&Store Simulation Checkpoint",
             self.btn_store_checkpoint_clicked,
             menu,
             toolbar,
@@ -2145,7 +2190,7 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.timeline-check-outline"),
         )
         add_action(
-            "&Restore simulation checkpoint",
+            "&Restore Simulation Checkpoint",
             self.btn_restore_checkpoint_clicked,
             menu,
             toolbar,
@@ -2157,7 +2202,7 @@ class Gui(QtWidgets.QMainWindow):
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
     ) -> None:
         add_action(
-            "&Set playback speed",
+            "&Set Playback Speed",
             self.btn_playback_speed_clicked,
             menu,
             toolbar,
@@ -2165,7 +2210,7 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.speedometer"),
         )
         add_action(
-            "&Skip to start",
+            "&Skip to Start",
             self.time_slider.skip_to_start,
             menu,
             toolbar,
@@ -2189,7 +2234,7 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.play-pause"),
         )
         add_action(
-            "&Skip to end",
+            "&Skip to End",
             self.time_slider.skip_to_end,
             menu,
             toolbar,
@@ -2208,7 +2253,7 @@ class Gui(QtWidgets.QMainWindow):
             ("&Data", self.data_widget, "mdi6.chart-donut", False),
             ("&Heatmap", self.heatmap_widget, "mdi6.data-matrix", False),
             (
-                "&Custom analysis",
+                "&Custom Analysis",
                 self.custom_analysis_widget,
                 "mdi6.chart-histogram",
                 False,
@@ -2227,7 +2272,7 @@ class Gui(QtWidgets.QMainWindow):
                 is_checked=is_checked,
             )
         add_action(
-            "Toggle selection text",
+            "Toggle Selection Text",
             self.toggle_selection_text,
             menu,
             toolbar,
@@ -2258,11 +2303,11 @@ class Gui(QtWidgets.QMainWindow):
     def _create_actions_settings(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None
     ) -> None:
-        add_action("&Brian2 simulation backend", self.choose_brian2_backend, menu)
-        add_action("&Stimulus automatic padding", self.choose_stim_padding_secs, menu)
-        add_action("&LLM assistant", self.open_llm_settings, menu)
+        add_action("&Brian2 Simulation Backend", self.choose_brian2_backend, menu)
+        add_action("&Stimulus Automatic Padding", self.choose_stim_padding_secs, menu)
+        add_action("&LLM Assistant", self.open_llm_settings, menu)
         add_action(
-            "&Synapse matrix RAM limit", self.choose_max_ram_synapse_plot_matrix, menu
+            "&Synapse Matrix RAM Limit", self.choose_max_ram_synapse_plot_matrix, menu
         )
 
     def _create_actions_help(
@@ -2316,7 +2361,7 @@ class Gui(QtWidgets.QMainWindow):
         )
         menu.addSeparator()
         add_action(
-            "&Connect external stimulation function",
+            "&Connect External Stimulation Function",
             self.connect_external_simulation_function,
             menu,
             toolbar,
@@ -2324,7 +2369,7 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.code-braces"),
         )
         add_action(
-            "&Connect brian2 external stimulation function",
+            "&Connect Brian2 External Stimulation Function",
             self.connect_external_simulation_function_with_brian2,
             menu,
             toolbar,
@@ -2332,7 +2377,7 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.function"),
         )
         self._do_external_simulation_action = add_action(
-            "&Run external stimulation function",
+            "&Run External Stimulation Function",
             self.btn_do_external_simulation_clicked,
             menu,
             toolbar,
@@ -2343,7 +2388,7 @@ class Gui(QtWidgets.QMainWindow):
     def _create_actions_replay_analysis(self) -> None:
         """Left-toolbar one-click ELiSe target MSE."""
         self.elise_replay_action = add_action(
-            "Analyse ELiSe replay (target MSE)",
+            "Analyse ELiSe Replay (target MSE)",
             self._analyse_elise_replay,
             menu=None,
             toolbar=self.toolbar_stim_editor,

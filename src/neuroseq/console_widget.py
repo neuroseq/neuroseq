@@ -75,6 +75,7 @@ b2                                   # brian2 (already imported)
 
 class ConsoleWidget(ReplWidget):
     console_command_entered = QtCore.Signal()
+    close_requested = QtCore.Signal()
 
     def __init__(
         self,
@@ -87,13 +88,34 @@ class ConsoleWidget(ReplWidget):
             "project": None,
         }
         self._print_intro()
-        sample_btn = QtWidgets.QPushButton("Sample python code")
+
+        # Create button layout
+        btn_layout = QtWidgets.QHBoxLayout()
+
+        sample_btn = QtWidgets.QPushButton("Sample Python Code")
         sample_btn.clicked.connect(self._show_sample_code)
-        self.layout.addWidget(sample_btn)
+        sample_btn.setMaximumWidth(150)
+        sample_btn.setFixedHeight(20)
+        btn_layout.addWidget(sample_btn)
+
+        history_btn = QtWidgets.QPushButton("Console History")
+        history_btn.clicked.connect(self._show_console_history)
+        history_btn.setMaximumWidth(150)
+        history_btn.setFixedHeight(20)
+        btn_layout.addWidget(history_btn)
+
+        close_console_btn = QtWidgets.QPushButton("Close Console")
+        close_console_btn.clicked.connect(self.close_requested)
+        close_console_btn.setMaximumWidth(150)
+        close_console_btn.setFixedHeight(20)
+        btn_layout.addWidget(close_console_btn)
+
+        btn_layout.addStretch()
+        self.layout.addLayout(btn_layout)
 
     def _print_intro(self) -> None:
         self.output.insertPlainText(
-            "This is a Python console where you can interact directly with the Model using the 'project' variable.\n"
+            "This is a Python console where you can interact directly with the Model using the 'project' object.\n"
         )
         self.output.insertPlainText(
             "Here are some examples you can try entering below:\n\n"
@@ -109,10 +131,13 @@ class ConsoleWidget(ReplWidget):
         self.output.insertPlainText(
             "\n\nNumpy is available as np, brian2 as b2, and indentation can be done with a single space.\n\n\n"
         )
+        self.output.insertPlainText(
+            "\n\nClick 'Sample Python Code' for more information and examples.\n\n\n"
+        )
 
     def _show_sample_code(self) -> None:
         dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle("Console — sample python code")
+        dlg.setWindowTitle("Console: sample python code")
         dlg.resize(620, 480)
         layout = QtWidgets.QVBoxLayout(dlg)
         text_edit = QtWidgets.QPlainTextEdit(SAMPLE_CODE)
@@ -126,6 +151,36 @@ class ConsoleWidget(ReplWidget):
         font.setPointSize(9)
         text_edit.setFont(font)
         layout.addWidget(text_edit)
+        close_btn = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Close
+        )
+        close_btn.rejected.connect(dlg.reject)
+        layout.addWidget(close_btn)
+        dlg.exec()
+
+    def _show_console_history(self) -> None:
+        """Show a dialog with the console command history."""
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Console: command history")
+        dlg.resize(620, 480)
+        layout = QtWidgets.QVBoxLayout(dlg)
+
+        # Get history from CmdInput widget (self.input.history is a list)
+        history_list = [cmd for cmd in self.input.history if cmd.strip()]
+        history_text = "\n".join(history_list) if history_list else "(no history)"
+
+        text_edit = QtWidgets.QPlainTextEdit(history_text)
+        text_edit.setReadOnly(True)
+        text_edit.setVerticalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+        )
+        text_edit.setMaximumHeight(400)
+        font = text_edit.font()
+        font.setFamily("Monospace")
+        font.setPointSize(9)
+        text_edit.setFont(font)
+        layout.addWidget(text_edit)
+
         close_btn = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Close
         )

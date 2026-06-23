@@ -4,6 +4,7 @@ import brian2.numpy_ as np
 import pygfx
 from qtpy import QtWidgets
 
+from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import SpikeData
 from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.utils import neuron_indices_to_colors
@@ -19,8 +20,15 @@ class SpikeWidget(TimeseriesWidget):
         self,
         controller: pygfx.Controller,
         parent: QtWidgets.QWidget | None = None,
+        default_controller: ConstrainedPanZoomController | None = None,
+        show_axis_link_controls: bool = False,
     ) -> None:
-        super().__init__(controller, parent)
+        super().__init__(
+            controller,
+            parent,
+            default_controller=default_controller,
+            show_axis_link_controls=show_axis_link_controls,
+        )
         self.subplot.title = "Spikes"
 
     def set_data(self, data: SpikeData | None) -> None:
