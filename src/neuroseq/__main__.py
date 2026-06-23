@@ -200,6 +200,8 @@ def main(
         filename=log_file,
     )
     from qtpy import API_NAME
+    from qtpy import QtCore
+    from qtpy import QtGui
     from qtpy import QtWidgets
 
     from neuroseq.gui import Gui
@@ -207,6 +209,18 @@ def main(
     msg = f"Launching {API_NAME} GUI with {log_level} logging to {log_file if log_file else 'console'}"
     click.echo(msg)
     logging.getLogger(__name__).info(msg)
+
+    # Keep icon raster sizes on integer scale steps to reduce blur on HiDPI displays.
+    if hasattr(QtGui.QGuiApplication, "setHighDpiScaleFactorRoundingPolicy"):
+        QtGui.QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+            QtCore.Qt.HighDpiScaleFactorRoundingPolicy.RoundPreferFloor
+        )
+    if hasattr(QtCore.Qt.ApplicationAttribute, "AA_UseHighDpiPixmaps"):
+        QtWidgets.QApplication.setAttribute(
+            QtCore.Qt.ApplicationAttribute.AA_UseHighDpiPixmaps,
+            True,
+        )
+
     app = QtWidgets.QApplication(sys.argv)
     app._interrupt_timer = _install_interrupt_handlers(app)
     gui = Gui(filename=filename)

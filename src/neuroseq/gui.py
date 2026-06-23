@@ -175,6 +175,12 @@ def _external_simulator_accepts_progress(simulate_fn: Callable) -> bool:
 
 
 class Gui(QtWidgets.QMainWindow):
+    TOOLBAR_ICON_SIZE = QtCore.QSize(20, 20)
+
+    def _configure_toolbar_icon_style(self, toolbar: QtWidgets.QToolBar) -> None:
+        toolbar.setIconSize(self.TOOLBAR_ICON_SIZE)
+        toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonIconOnly)
+
     def __init__(self, filename: pathlib.Path | str | None = None) -> None:
         super().__init__()
         self.logger = logging.getLogger(__name__)
@@ -204,6 +210,7 @@ class Gui(QtWidgets.QMainWindow):
         # vertical toolbar for stim editing on the left
         self.toolbar_stim_editor = QtWidgets.QToolBar()
         self.toolbar_stim_editor.setOrientation(QtCore.Qt.Orientation.Vertical)
+        self._configure_toolbar_icon_style(self.toolbar_stim_editor)
         main_horizontal_layout.addWidget(self.toolbar_stim_editor)
         # left/right splitters between heatmap and console
         split_left_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
@@ -1914,25 +1921,31 @@ class Gui(QtWidgets.QMainWindow):
         self.menu_file = menu.addMenu("&File")
         assert self.menu_file is not None
         self.toolbar_file = QtWidgets.QToolBar("File")
+        self._configure_toolbar_icon_style(self.toolbar_file)
         self.addToolBar(self.toolbar_file)
         self.menu_simulate = menu.addMenu("&Simulate")
         assert self.menu_simulate is not None
         self.toolbar_simulate = QtWidgets.QToolBar("Simulate")
+        self._configure_toolbar_icon_style(self.toolbar_simulate)
         self.addToolBar(self.toolbar_simulate)
 
         self.menu_playback = menu.addMenu("&Playback")
         assert self.menu_playback is not None
         self.toolbar_playback = QtWidgets.QToolBar("Playback")
+        self._configure_toolbar_icon_style(self.toolbar_playback)
         self.addToolBar(self.toolbar_playback)
         self.menu_view = menu.addMenu("&View")
         assert self.menu_view is not None
         self.toolbar_view = QtWidgets.QToolBar("View")
         self.toolbar_data = QtWidgets.QToolBar("Data")
+        self._configure_toolbar_icon_style(self.toolbar_view)
+        self._configure_toolbar_icon_style(self.toolbar_data)
         self.addToolBar(self.toolbar_data)
 
         self.menu_experiment = menu.addMenu("&Experiment")
         assert self.menu_experiment is not None
         self.toolbar_experiment = QtWidgets.QToolBar("Experiment")
+        self._configure_toolbar_icon_style(self.toolbar_experiment)
         self.addToolBar(self.toolbar_experiment)
         self.addToolBarBreak()
         self.addToolBar(self.toolbar_view)
@@ -2214,7 +2227,7 @@ class Gui(QtWidgets.QMainWindow):
             ("&Data", self.data_widget, "mdi6.chart-donut", False),
             ("&Heatmap", self.heatmap_widget, "mdi6.data-matrix", False),
             (
-                "&Custom analysis",
+                "&Custom Analysis",
                 self.custom_analysis_widget,
                 "mdi6.chart-histogram",
                 False,
