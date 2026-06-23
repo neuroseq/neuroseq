@@ -201,7 +201,14 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_data = QtWidgets.QComboBox()
         self.cmb_data.setMinimumWidth(120)
         self.controller = ConstrainedPanZoomController()
-        self.trace_widget = TraceWidget(self.controller, parent=self)
+        self.trace_controller = ConstrainedPanZoomController()
+        self.spike_controller = ConstrainedPanZoomController()
+        self.trace_widget = TraceWidget(
+            self.trace_controller,
+            parent=self,
+            default_controller=self.controller,
+            show_axis_link_controls=True,
+        )
         self.heatmap_widget = HeatmapWidget(parent=self)
         self._create_menus_and_toolbars()
         self.setWindowIcon(qta.icon("fa6s.brain"))
@@ -236,8 +243,21 @@ class Gui(QtWidgets.QMainWindow):
             parent=self,
         )
         split_vertical.addWidget(self.stim_editor)
+        self.trace_widget.set_default_scroll_bars(
+            self.stim_editor.x_scrollbar,
+            self.stim_editor.y_scrollbar,
+        )
         split_vertical.addWidget(self.trace_widget)
-        self.spike_widget = SpikeWidget(self.controller, parent=self)
+        self.spike_widget = SpikeWidget(
+            self.spike_controller,
+            parent=self,
+            default_controller=self.controller,
+            show_axis_link_controls=True,
+        )
+        self.spike_widget.set_default_scroll_bars(
+            self.stim_editor.x_scrollbar,
+            self.stim_editor.y_scrollbar,
+        )
         split_vertical.addWidget(self.spike_widget)
         self.data_widget = DataWidget(self.controller, parent=self)
         self.data_widget.set_default_scroll_bars(
@@ -309,6 +329,8 @@ class Gui(QtWidgets.QMainWindow):
         max_time_secs = float(self.project.max_time_secs)
         max_neurons = int(self.project.max_neurons)
         self.controller.set_limits(max_time_secs, max_neurons)
+        self.trace_controller.set_limits(max_time_secs, max_neurons)
+        self.spike_controller.set_limits(max_time_secs, max_neurons)
         self.data_widget.set_limits(max_time_secs, max_neurons)
         self.time_slider.set_max_time_secs(max_time_secs)
 
@@ -745,6 +767,8 @@ class Gui(QtWidgets.QMainWindow):
         self._update_window_title()
         if reset_controller:
             self.controller.reset()
+            self.trace_controller.reset()
+            self.spike_controller.reset()
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
         self.continue_simulation_action.setText("&Run simulation")

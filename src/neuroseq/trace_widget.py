@@ -5,6 +5,7 @@ import pygfx
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import TraceData
 from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.utils import neuron_indices_to_colors
@@ -91,8 +92,15 @@ class TraceWidget(TimeseriesWidget):
         self,
         controller: pygfx.Controller,
         parent: QtWidgets.QWidget | None = None,
+        default_controller: ConstrainedPanZoomController | None = None,
+        show_axis_link_controls: bool = False,
     ) -> None:
-        super().__init__(controller, parent)
+        super().__init__(
+            controller,
+            parent,
+            default_controller=default_controller,
+            show_axis_link_controls=show_axis_link_controls,
+        )
         self.subplot.title = "Traces"
         self.trace_norm_percent = 100
         self.offset_by_median = True

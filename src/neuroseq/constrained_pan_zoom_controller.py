@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
 
 import brian2.numpy_ as np
 import pygfx
@@ -35,7 +36,21 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         self.x_scroll_bar: QtWidgets.QScrollBar | None = None
         self.y_scroll_bar: QtWidgets.QScrollBar | None = None
         self.grid_lines: list[GridLines] = []
+        self._state_change_listeners: list[Callable[[], None]] = []
         super().__init__(*args, **kwargs)
+
+    def add_state_change_listener(self, listener: Callable[[], None]) -> None:
+        if listener not in self._state_change_listeners:
+            self._state_change_listeners.append(listener)
+
+    def remove_state_change_listener(self, listener: Callable[[], None]) -> None:
+        with contextlib.suppress(ValueError):
+            self._state_change_listeners.remove(listener)
+
+    def _notify_state_change(self) -> None:
+        for listener in list(self._state_change_listeners):
+            with contextlib.suppress(Exception):
+                listener()
 
     def reset(self):
         self.max_width = 1.0
@@ -159,6 +174,7 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
             self.y_scroll_bar, 1 - (y + 0.5 + half_height) / max_height
         )
         super()._set_camera_state(new_state)
+        self._notify_state_change()
 
     def _set_scroll_bar_position(
         self, scroll_bar: QtWidgets.QScrollBar | None, relative_position: float
@@ -230,6 +246,7 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         )
         super()._set_camera_state(state)
         self._update_cameras()
+        self._notify_state_change()
 
     def y_scroll_event(self, value: int):
         assert self.y_scroll_bar is not None
@@ -256,3 +273,4 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         )
         super()._set_camera_state(state)
         self._update_cameras()
+        self._notify_state_change()
