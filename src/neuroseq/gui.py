@@ -505,25 +505,25 @@ class Gui(QtWidgets.QMainWindow):
 
         self._dispatch_io_task(_save_task, f"Saving to {filename.name}…", _on_saved)
 
-    # def btn_export_simulation_results_clicked(self) -> None:
-    #     filename, _ = getsavefilename(
-    #         self,
-    #         "Export results",
-    #         "data.h5",
-    #         "hdf5 file (*.h5)",
-    #     )
-    #     if filename == "":
-    #         return
-    #     try:
-    #         self.project.b2_model.save_to_h5(filename)
-    #     except Exception as e:
-    #         self.logger.warning(f"Failed to export to file {filename}: {e}")
-    #         QtWidgets.QMessageBox.critical(
-    #             self,
-    #             "Export error",
-    #             f"Could not export to file '{filename}': {e}",
-    #         )
-    #         return
+    def btn_export_simulation_results_clicked(self) -> None:
+        filename, _ = getsavefilename(
+            self,
+            "Export results",
+            "data.h5",
+            "hdf5 file (*.h5)",
+        )
+        if filename == "":
+            return
+        try:
+            self.project.b2_model.save_to_h5(filename)
+        except Exception as e:
+            self.logger.warning(f"Failed to export to file {filename}: {e}")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Export error",
+                f"Could not export to file '{filename}': {e}",
+            )
+            return
 
     def btn_export_igor2_single_wave_clicked(self) -> None:
         if not self.project.stim_arrays:
@@ -2011,7 +2011,7 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.file"),
         )
         # add "open example project" item to the file menu which opens a sub-menu containing the example projects from src/neuroseq/example_projects
-        open_example_project_menu = menu.addMenu("Open Example &Project")
+        open_example_project_menu = menu.addMenu("Open example &project")
         assert open_example_project_menu is not None
         for section, section_projects in example_projects.items():
             section_menu = open_example_project_menu.addMenu(section)
@@ -2042,7 +2042,7 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.file-import"),
         )
         add_action(
-            "Import Cell &Masks",
+            "Import cell spatial &footprints",
             self.btn_import_cellpose_data_clicked,
             menu,
             None,
@@ -2057,7 +2057,7 @@ class Gui(QtWidgets.QMainWindow):
             icon=qta.icon("mdi6.content-save"),
         )
 
-        import_data_menu = menu.addMenu("&Import")
+        import_data_menu = menu.addMenu("&Import data")
         assert import_data_menu is not None
 
         import_stimulus_menu = import_data_menu.addMenu("&Stimulus")
@@ -2132,14 +2132,14 @@ class Gui(QtWidgets.QMainWindow):
             None,
             icon=qta.icon("ph.barcode-light"),
         )
-        # add_action(
-        #     "Export &simulation results",
-        #     self.btn_export_simulation_results_clicked,
-        #     export_data_menu,
-        #     None,
-        #     shortcut="Ctrl+Shift+E",
-        #     icon=qta.icon("mdi6.content-save-move"),
-        # )
+        add_action(
+            "Export &simulation results",
+            self.btn_export_simulation_results_clicked,
+            export_data_menu,
+            None,
+            shortcut="Ctrl+Shift+E",
+            icon=qta.icon("mdi6.content-save-move"),
+        )
 
         add_action(
             "&Edit Model",
