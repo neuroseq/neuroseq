@@ -180,6 +180,7 @@ class Gui(QtWidgets.QMainWindow):
     def _configure_toolbar_icon_style(self, toolbar: QtWidgets.QToolBar) -> None:
         toolbar.setIconSize(self.TOOLBAR_ICON_SIZE)
         toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonIconOnly)
+        toolbar.setStyleSheet("QToolButton { margin: 0px; padding: 2px 1px; }")
 
     def __init__(self, filename: pathlib.Path | str | None = None) -> None:
         super().__init__()
@@ -1918,6 +1919,7 @@ class Gui(QtWidgets.QMainWindow):
     def _create_menus_and_toolbars(self) -> None:
         menu = self.menuBar()
         assert menu is not None
+        menu.setStyleSheet("QMenuBar::item { padding: 3px 6px; margin: 0px; }")
         self.menu_file = menu.addMenu("&File")
         assert self.menu_file is not None
         self.toolbar_file = QtWidgets.QToolBar("File")
