@@ -64,6 +64,7 @@ class TimeseriesWidget(FPLWidget):
         self.timeline = Timeline()
         self.grid_lines: GridLines | None = None
         self.show_grid = True
+        self._open_analysis_in_new_window = False
 
         self.context_menu = QtWidgets.QMenu("Custom analysis", self)
 
@@ -136,18 +137,14 @@ class TimeseriesWidget(FPLWidget):
         self,
         analysis_type: CustomAnalysisType | AnalysisPlugin,
         icon_name: str,
-        new_window: bool,
     ) -> None:
-        action_label = str(analysis_type)
-        if new_window:
-            action_label = f"{action_label} (new window)"
         add_action(
-            action_label,
-            lambda *args, _analysis_type=analysis_type, _new_window=new_window: (
+            str(analysis_type),
+            lambda *args, _analysis_type=analysis_type: (
                 self.custom_analysis_requested.emit(
                     self.data,
                     _analysis_type,
-                    _new_window,
+                    self._open_analysis_in_new_window,
                     self.selected_neuron_slice,
                     self.selected_time_slice,
                 )
@@ -158,26 +155,36 @@ class TimeseriesWidget(FPLWidget):
             icon=qta.icon(icon_name),
         )
 
+    def _set_open_analysis_in_new_window(self, checked: bool) -> None:
+        self._open_analysis_in_new_window = checked
+
     def _rebuild_custom_analysis_menu(self) -> None:
         self.context_menu.clear()
+        add_action(
+            "Open as a new window",
+            self._set_open_analysis_in_new_window,
+            self.context_menu,
+            None,
+            self,
+            icon=qta.icon("mdi6.open-in-new"),
+            checkable=True,
+            is_checked=self._open_analysis_in_new_window,
+        )
+        self.context_menu.addSeparator()
         for custom_analysis_type in CustomAnalysisType:
-            for new_window in [False, True]:
-                self._add_analysis_action(
-                    custom_analysis_type,
-                    custom_analysis_type.value,
-                    new_window,
-                )
+            self._add_analysis_action(
+                custom_analysis_type,
+                custom_analysis_type.value,
+            )
 
         plugin_analyses = discover_analysis_plugins()
         if plugin_analyses:
             self.context_menu.addSeparator()
             for plugin_analysis in plugin_analyses:
-                for new_window in [False, True]:
-                    self._add_analysis_action(
-                        plugin_analysis,
-                        plugin_analysis.icon,
-                        new_window,
-                    )
+                self._add_analysis_action(
+                    plugin_analysis,
+                    plugin_analysis.icon,
+                )
 
     def post_set_data(self):
         self.subplot.grids = False
