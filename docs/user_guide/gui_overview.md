@@ -130,6 +130,7 @@ application:
 | Stimulus automatic padding | Default duration (seconds) used when creating new stim arrays and as a prefill for the _Pad stim array_ dialog.                        |
 | LLM assistant              | Configure provider, model, and API key for the [in-app chat assistant](chat_assistant.md) (experimental).                              |
 | Synapse matrix RAM limit   | Memory budget for rendering the full synaptic weight matrix; controls when the synapse and heatmap widgets switch to downsampled mode. |
+| Theme                      | Switch between a **Light** and **Dark** appearance. The choice is remembered and re-applied on the next launch.                        |
 
 ## Analysis widget
 

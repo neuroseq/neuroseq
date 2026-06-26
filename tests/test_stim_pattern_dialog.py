@@ -159,7 +159,7 @@ def test_dialog_specific_neuron_constant_writes_only_that_column(qtbot: QtBot) -
     dialog = _open_dialog(editor)
 
     dialog.radio_scope_specific.setChecked(True)
-    dialog.spin_neuron_index.setValue(2)
+    dialog.edit_neuron_indices.setText("2")
     dialog.radio_constant.setChecked(True)
     dialog.spin_magnitude.setValue(0.7)
     dialog.spin_repeats.setValue(3)
@@ -179,6 +179,73 @@ def test_dialog_specific_neuron_constant_writes_only_that_column(qtbot: QtBot) -
     np.testing.assert_allclose(
         project.stim_arrays["a"].values[: expected.shape[0], :], expected
     )
+
+
+def test_dialog_specific_multiple_neurons_and_range(qtbot: QtBot) -> None:
+    editor, project = _make_editor(qtbot, length_samples=1000)
+    dialog = _open_dialog(editor)
+
+    dialog.radio_scope_specific.setChecked(True)
+    dialog.edit_neuron_indices.setText("1, 4, 6-8")
+    dialog.radio_constant.setChecked(True)
+    dialog.spin_magnitude.setValue(0.5)
+    dialog.spin_repeats.setValue(2)
+    dialog.btn_apply.click()
+
+    expected = generate_per_neuron(
+        neuron_index=[1, 4, 6, 7, 8],
+        n_neurons=10,
+        pulse_ms=100,
+        ipi_ms=18,
+        profile=DrawStimType.Constant,
+        value1=0.5,
+        value2=0.0,
+        repeats=2,
+        dt_seconds=0.001,
+    )
+    values = project.stim_arrays["a"].values
+    np.testing.assert_allclose(values[: expected.shape[0], :], expected)
+    for col in [1, 4, 6, 7, 8]:
+        assert np.any(values[:, col] != 0.0)
+    for col in [0, 2, 3, 5, 9]:
+        assert np.all(values[:, col] == 0.0)
+
+
+def test_dialog_specific_invalid_index_shows_warning_and_no_change(
+    qtbot: QtBot,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    editor, project = _make_editor(qtbot, length_samples=1000)
+    dialog = _open_dialog(editor)
+
+    dialog.radio_scope_specific.setChecked(True)
+    dialog.edit_neuron_indices.setText("2, 99")
+    dialog.radio_constant.setChecked(True)
+    dialog.btn_apply.click()
+
+    assert qmessagebox_calls[-1]["name"] == "warning"
+    assert "out of range" in qmessagebox_calls[-1]["text"]
+    assert np.allclose(project.stim_arrays["a"].values, 0.0)
+
+
+def test_dialog_apply_ramp_multiple_neurons(qtbot: QtBot) -> None:
+    editor, project = _make_editor(qtbot, length_samples=1000)
+    dialog = _open_dialog(editor)
+
+    dialog.radio_scope_specific.setChecked(True)
+    dialog.edit_neuron_indices.setText("0, 3-4")
+    dialog.radio_ramp.setChecked(True)
+    dialog.spin_value1.setValue(0.0)
+    dialog.spin_value2.setValue(1.0)
+    dialog.spin_repeats.setValue(1)
+    dialog.btn_apply.click()
+
+    expected = generate_ramp(10, 100, 18, 0.0, 1.0, 1, 0.001, neuron_index=[0, 3, 4])
+    np.testing.assert_allclose(
+        project.stim_arrays["a"].values[: expected.shape[0], :], expected
+    )
+    for col in [1, 2, 5, 6, 7, 8, 9]:
+        assert np.all(project.stim_arrays["a"].values[:, col] == 0.0)
 
 
 def test_dialog_fuer_elise_clipped_to_six_neurons(qtbot: QtBot) -> None:
@@ -201,13 +268,13 @@ def test_dialog_context_updates_when_user_switches_stim_array(qtbot: QtBot) -> N
 
     assert dialog.lbl_stim_name.text() == "a"
     assert dialog.lbl_units.text() == "siemens"
-    assert dialog.spin_neuron_index.maximum() == 9
+    assert "0–9" in dialog.lbl_neuron_hint.text()
 
     editor.cmb_stim.setCurrentText("b")
 
     assert dialog.lbl_stim_name.text() == "b"
     assert dialog.lbl_units.text() == "pA"
-    assert dialog.spin_neuron_index.maximum() == 5
+    assert "0–5" in dialog.lbl_neuron_hint.text()
 
 
 def test_dialog_invalid_pulse_duration_shows_warning_and_no_change(
@@ -248,7 +315,7 @@ def test_dialog_apply_ramp_specific_neuron(qtbot: QtBot) -> None:
     dialog = _open_dialog(editor)
 
     dialog.radio_scope_specific.setChecked(True)
-    dialog.spin_neuron_index.setValue(2)
+    dialog.edit_neuron_indices.setText("2")
     dialog.radio_ramp.setChecked(True)
     dialog.spin_value1.setValue(0.0)
     dialog.spin_value2.setValue(1.0)

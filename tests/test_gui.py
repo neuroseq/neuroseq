@@ -272,6 +272,60 @@ def test_gui_click_exit(qtbot: QtBot) -> None:
     gui.close()
 
 
+def test_gui_theme_menu_toggles_theme_and_persists(
+    qtbot: QtBot, tmp_config_dir
+) -> None:
+    from neuroseq import theme as theme_module
+
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+
+    # locate the Theme submenu in the Settings menu
+    theme_menu = next(
+        (
+            action.menu()
+            for action in gui.menu_settings.actions()
+            if action.menu() is not None and "Theme" in action.text().replace("&", "")
+        ),
+        None,
+    )
+    assert theme_menu is not None
+    labels = {action.text().replace("&", ""): action for action in theme_menu.actions()}
+    assert set(labels) == {"Light", "Dark"}
+
+    labels["Dark"].trigger()
+    assert gui.settings.theme == theme_module.DARK
+    assert gui.trace_widget._theme == theme_module.DARK
+    assert gui.data_widget.spike_widget._theme == theme_module.DARK
+    assert labels["Dark"].isChecked()
+
+    labels["Light"].trigger()
+    assert gui.settings.theme == theme_module.LIGHT
+    assert gui.trace_widget._theme == theme_module.LIGHT
+    assert labels["Light"].isChecked()
+    gui.close()
+
+
+def test_gui_applies_persisted_theme_on_startup(qtbot: QtBot, tmp_config_dir) -> None:
+    from neuroseq import theme as theme_module
+    from neuroseq.gui_settings import GuiSettings
+
+    # Persist a dark theme to the (temporary) config before launching.
+    GuiSettings().theme = theme_module.DARK
+
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+
+    assert gui.settings.theme == theme_module.DARK
+    assert gui.trace_widget._theme == theme_module.DARK
+    assert gui._theme_actions[theme_module.DARK].isChecked()
+    gui.close()
+
+
 def test_gui_open_example_project_menu_has_subsections(qtbot: QtBot) -> None:
     gui = Gui()
     gui.show()

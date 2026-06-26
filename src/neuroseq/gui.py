@@ -12,11 +12,13 @@ import brian2 as b2
 import brian2.numpy_ as np
 import qtawesome as qta
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
 from neuroseq import __version__
+from neuroseq import theme as theme_module
 from neuroseq.analysis_plugins import AnalysisPlugin
 from neuroseq.analysis_plugins import discover_analysis_plugins
 from neuroseq.cellpose_import_dialog import CellposeImportDialog
@@ -324,6 +326,7 @@ class Gui(QtWidgets.QMainWindow):
             self.load_project(filename)
         else:
             self.load_project(default_project())
+        self.apply_theme(self.settings.theme)
 
     def update_limits(self) -> None:
         max_time_secs = float(self.project.max_time_secs)
@@ -1912,6 +1915,19 @@ class Gui(QtWidgets.QMainWindow):
             f"Setting stimulus padding to {self.settings.stim_padding_secs}s"
         )
 
+    def apply_theme(self, theme: str) -> None:
+        """Apply a light/dark theme to the whole application and all plots."""
+        theme = theme_module.normalize_theme(theme)
+        self.logger.info(f"Applying {theme} theme")
+        theme_module.apply_app_theme(QtWidgets.QApplication.instance(), theme)
+        for widget in self.plot_widgets:
+            widget.apply_theme(theme)
+        self.custom_analysis_widget.apply_theme(theme)
+        action = getattr(self, "_theme_actions", {}).get(theme)
+        if action is not None and not action.isChecked():
+            action.setChecked(True)
+        self.settings.theme = theme
+
     def open_llm_settings(self) -> None:
         if self._llm_settings_dialog is None:
             self._llm_settings_dialog = LLMSettingsDialog(self)
@@ -2309,6 +2325,28 @@ class Gui(QtWidgets.QMainWindow):
         add_action(
             "&Synapse Matrix RAM Limit", self.choose_max_ram_synapse_plot_matrix, menu
         )
+        self._create_theme_menu(menu)
+
+    def _create_theme_menu(self, menu: QtWidgets.QMenu) -> None:
+        theme_menu = menu.addMenu("&Theme")
+        assert theme_menu is not None
+        self._theme_action_group = QtGui.QActionGroup(self)
+        self._theme_action_group.setExclusive(True)
+        current = theme_module.normalize_theme(self.settings.theme)
+        self._theme_actions: dict[str, QtWidgets.QAction] = {}
+        for label, name in (
+            ("&Light", theme_module.LIGHT),
+            ("&Dark", theme_module.DARK),
+        ):
+            action = add_action(
+                label,
+                lambda _checked=False, theme=name: self.apply_theme(theme),
+                theme_menu,
+                checkable=True,
+                is_checked=(name == current),
+            )
+            self._theme_action_group.addAction(action)
+            self._theme_actions[name] = action
 
     def _create_actions_help(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None

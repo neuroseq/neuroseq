@@ -9,6 +9,8 @@ from fastplotlib.layouts import Subplot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+from neuroseq import theme as theme_module
+
 
 class FPLWidget(QtWidgets.QWidget):
     """A base class for widgets that use fastplotlib to display data."""
@@ -21,6 +23,7 @@ class FPLWidget(QtWidgets.QWidget):
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.controller = controller
+        self._theme = theme_module.LIGHT
         canvas_kwargs: dict[str, object] = {"parent": self}
         if os.environ.get("NEUROSEQ_HEADLESS_TEST", "").lower() in {
             "1",
@@ -52,7 +55,7 @@ class FPLWidget(QtWidgets.QWidget):
                 "wgpu viewport warnings may appear during startup.",
                 exc,
             )
-        self._set_light_mode()
+        self._apply_fpl_theme()
         self.setMinimumSize(QtCore.QSize(100, 100))
         self.resize(800, 600)
 
@@ -107,23 +110,31 @@ class FPLWidget(QtWidgets.QWidget):
             if widget is not None:
                 widget.hide()
 
-    def _set_light_mode(self) -> None:
+    def apply_theme(self, theme: str) -> None:
+        """Switch this widget's canvas between light and dark themes."""
+        self._theme = theme_module.normalize_theme(theme)
+        self._apply_fpl_theme()
+
+    def _apply_fpl_theme(self) -> None:
         # some of these currently require accessing private attributes: should refactor when fastplotlib allows setting these colors directly
-        self.subplot.background_color = "w"
+        background, foreground = theme_module.fpl_colors(self._theme)
+        # background_color setter splats its argument, so a multi-character hex
+        # string must be wrapped in a tuple (a single corner color for all four).
+        self.subplot.background_color = (background,)
         self.subplot.axes.colors = (
-            "k",
-            "k",
-            "k",
+            foreground,
+            foreground,
+            foreground,
         )
-        self.subplot.axes.grids.xy.axis_color = "k"
-        self.subplot.axes.grids.xy.major_color = "k"
-        self.subplot.axes.grids.xy.minor_color = "k"
-        self.subplot.axes._x._text.material.color = "k"
-        self.subplot.axes._y._text.material.color = "k"
-        self.subplot.axes._x._line.material.color = "k"
-        self.subplot.axes._y._line.material.color = "k"
-        self.subplot.axes._x._points.material.color = "k"
-        self.subplot.axes._y._points.material.color = "k"
+        self.subplot.axes.grids.xy.axis_color = foreground
+        self.subplot.axes.grids.xy.major_color = foreground
+        self.subplot.axes.grids.xy.minor_color = foreground
+        self.subplot.axes._x._text.material.color = foreground
+        self.subplot.axes._y._text.material.color = foreground
+        self.subplot.axes._x._line.material.color = foreground
+        self.subplot.axes._y._line.material.color = foreground
+        self.subplot.axes._x._points.material.color = foreground
+        self.subplot.axes._y._points.material.color = foreground
 
     def clear_data(self) -> None:
         self.subplot.clear()

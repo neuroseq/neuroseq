@@ -12,6 +12,7 @@ from neuroseq.stim_patterns import generate_ramp
 from neuroseq.stim_patterns import generate_sequential
 from neuroseq.stim_patterns import generate_simultaneous
 from neuroseq.stim_patterns import is_finite_number
+from neuroseq.stim_patterns import parse_neuron_indices
 
 if TYPE_CHECKING:
     from neuroseq.stim_editor import StimEditor
@@ -52,16 +53,20 @@ class StimPatternDialog(QtWidgets.QDialog):
         scope_group = QtWidgets.QGroupBox("Scope", self)
         scope_layout = QtWidgets.QVBoxLayout(scope_group)
         self.radio_scope_all = QtWidgets.QRadioButton("All neurons", self)
-        self.radio_scope_specific = QtWidgets.QRadioButton("Specific neuron", self)
+        self.radio_scope_specific = QtWidgets.QRadioButton("Specific neurons", self)
         self.radio_scope_all.setChecked(True)
         scope_layout.addWidget(self.radio_scope_all)
         specific_row = QtWidgets.QHBoxLayout()
         specific_row.addWidget(self.radio_scope_specific)
-        self.spin_neuron_index = QtWidgets.QSpinBox(self)
-        self.spin_neuron_index.setRange(0, 0)
-        specific_row.addWidget(self.spin_neuron_index)
-        specific_row.addStretch(1)
+        self.edit_neuron_indices = QtWidgets.QLineEdit(self)
+        self.edit_neuron_indices.setPlaceholderText("e.g. 0, 2, 5-8")
+        specific_row.addWidget(self.edit_neuron_indices, 1)
         scope_layout.addLayout(specific_row)
+        self.lbl_neuron_hint = QtWidgets.QLabel(
+            "Comma-separated indices and ranges (e.g. 0, 2, 5-8).", self
+        )
+        self.lbl_neuron_hint.setWordWrap(True)
+        scope_layout.addWidget(self.lbl_neuron_hint)
         layout.addWidget(scope_group)
 
         pattern_group = QtWidgets.QGroupBox("Pattern type", self)
@@ -159,7 +164,10 @@ class StimPatternDialog(QtWidgets.QDialog):
         self.lbl_stim_name.setText(context.stim_name)
         self.lbl_units.setText(context.units)
         self.lbl_dt_ms.setText(f"{context.dt_seconds * 1000.0:g} ms")
-        self.spin_neuron_index.setRange(0, max(0, context.n_neurons - 1))
+        self.lbl_neuron_hint.setText(
+            "Comma-separated indices and ranges (e.g. 0, 2, 5-8); "
+            f"valid range 0–{max(0, context.n_neurons - 1)}."
+        )
         if self.radio_scope_specific.isChecked():
             self.radio_constant.setChecked(True)
         else:
@@ -171,7 +179,8 @@ class StimPatternDialog(QtWidgets.QDialog):
 
     def _scope_changed(self) -> None:
         is_all = self.radio_scope_all.isChecked()
-        self.spin_neuron_index.setVisible(not is_all)
+        self.edit_neuron_indices.setVisible(not is_all)
+        self.lbl_neuron_hint.setVisible(not is_all)
         for button in [
             self.radio_sequential,
             self.radio_simultaneous,
@@ -287,6 +296,16 @@ class StimPatternDialog(QtWidgets.QDialog):
         dt_seconds = self._context.dt_seconds
         n_neurons = self._context.n_neurons
 
+        neuron_indices: list[int] | None = None
+        if self.radio_scope_specific.isChecked():
+            try:
+                neuron_indices = parse_neuron_indices(
+                    self.edit_neuron_indices.text(), n_neurons
+                )
+            except ValueError as exc:
+                QtWidgets.QMessageBox.warning(self, "Invalid pattern", str(exc))
+                return
+
         try:
             if self.radio_ramp.isChecked():
                 pattern = generate_ramp(
@@ -297,11 +316,7 @@ class StimPatternDialog(QtWidgets.QDialog):
                     end_magnitude=float(self.spin_value2.value()),
                     repeats=repeats,
                     dt_seconds=dt_seconds,
-                    neuron_index=(
-                        int(self.spin_neuron_index.value())
-                        if self.radio_scope_specific.isChecked()
-                        else None
-                    ),
+                    neuron_index=neuron_indices,
                 )
             elif self.radio_scope_all.isChecked():
                 if self.radio_sequential.isChecked():
@@ -331,8 +346,9 @@ class StimPatternDialog(QtWidgets.QDialog):
                         dt_seconds=dt_seconds,
                     )
             else:
+                assert neuron_indices is not None
                 pattern = generate_per_neuron(
-                    neuron_index=int(self.spin_neuron_index.value()),
+                    neuron_index=neuron_indices,
                     n_neurons=n_neurons,
                     pulse_ms=pulse_ms,
                     ipi_ms=ipi_ms,

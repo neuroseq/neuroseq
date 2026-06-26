@@ -9,6 +9,8 @@ from dataclasses import dataclass
 import brian2 as b2
 from platformdirs import user_config_dir
 
+from neuroseq import theme as theme_module
+
 _FIJI_AUTODETECT_PATHS = (
     # New (2025+) Fiji layout: ~/Fiji/fiji shell-script launcher.
     "/opt/Fiji/fiji",
@@ -47,6 +49,7 @@ class GuiSettings:
     max_ram_synapse_plot_matrix: int = 256
     brian2_backend: str = "numpy"
     stim_padding_secs: int = 0
+    theme: str = theme_module.LIGHT
     llm_provider: str = "ollama"
     llm_model: str = "qwen2.5:7b"
     llm_ollama_base_url: str = "http://localhost:11434"
@@ -77,6 +80,7 @@ class GuiSettings:
                         "brian2_backend": self.brian2_backend,
                         "max_ram_synapse_plot_matrix": self.max_ram_synapse_plot_matrix,
                         "stim_padding_secs": self.stim_padding_secs,
+                        "theme": self.theme,
                         "llm_provider": self.llm_provider,
                         "llm_model": self.llm_model,
                         "llm_ollama_base_url": self.llm_ollama_base_url,
@@ -113,6 +117,7 @@ class GuiSettings:
                 "max_ram_synapse_plot_matrix", self.max_ram_synapse_plot_matrix
             )
             stim_padding_secs = config.get("stim_padding_secs", self.stim_padding_secs)
+            theme = config.get("theme", self.theme)
             llm_provider = config.get("llm_provider", self.llm_provider)
             llm_model = config.get("llm_model", self.llm_model)
             llm_ollama_base_url = config.get(
@@ -156,6 +161,17 @@ class GuiSettings:
                     f"Invalid stimulus padding in config file {config_file}: {stim_padding_secs}. Restoring default of 5s"
                 )
                 self.__dict__["stim_padding_secs"] = 0
+            if theme in theme_module.THEMES:
+                self.__dict__["theme"] = theme
+                self.logger.info(
+                    f"Loaded theme from config file {config_file}: {theme}"
+                )
+            else:
+                self.logger.warning(
+                    f"Invalid theme in config file {config_file}: {theme}. "
+                    f"Restoring default of {theme_module.LIGHT}"
+                )
+                self.__dict__["theme"] = theme_module.LIGHT
             valid_providers = {"ollama", "openai", "anthropic"}
             if llm_provider in valid_providers:
                 self.__dict__["llm_provider"] = llm_provider

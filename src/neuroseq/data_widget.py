@@ -299,6 +299,11 @@ class DataWidget(QtWidgets.QWidget):
         self.spike_widget.clear_data()
         self.heatmap_widget.clear_data()
 
+    def apply_theme(self, theme: str) -> None:
+        self.trace_widget.apply_theme(theme)
+        self.spike_widget.apply_theme(theme)
+        self.heatmap_widget.apply_theme(theme)
+
     def set_time_ms(self, time_ms: int) -> None:
         self.trace_widget.set_time_ms(time_ms)
         self.spike_widget.set_time_ms(time_ms)
