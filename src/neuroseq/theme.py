@@ -101,5 +101,12 @@ def apply_app_theme(app: QtCore.QCoreApplication | None, theme: str) -> None:
     """
     if not isinstance(app, QtWidgets.QApplication):
         return
+    palette = qt_palette(normalize_theme(theme))
     app.setStyle("Fusion")
-    app.setPalette(qt_palette(normalize_theme(theme)))
+    app.setPalette(palette)
+    # QApplication.setPalette does not reach already-polished menu bars, menus,
+    # or tool bars, which otherwise keep the previous theme's colors. Re-applying
+    # the palette to each top-level window propagates it to those children
+    # (widgets with an explicit palette of their own keep it).
+    for widget in app.topLevelWidgets():
+        widget.setPalette(palette)

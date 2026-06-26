@@ -52,3 +52,24 @@ def test_apply_app_theme_sets_palette_and_fusion_style(qtbot: QtBot) -> None:
 def test_apply_app_theme_none_app_is_noop() -> None:
     # Should not raise when there is no application instance to theme.
     theme.apply_app_theme(None, theme.DARK)
+
+
+def test_apply_app_theme_propagates_to_menu_bar(qtbot: QtBot) -> None:
+    # Regression: QApplication.setPalette does not reach an already-polished
+    # menu bar, so apply_app_theme must push the palette to top-level windows.
+    app = QtWidgets.QApplication.instance()
+    assert app is not None
+    window = QtWidgets.QMainWindow()
+    qtbot.addWidget(window)
+    menu_bar = window.menuBar()
+    menu_bar.addMenu("File")
+    role = QtGui.QPalette.ColorRole.Window
+
+    theme.apply_app_theme(app, theme.DARK)
+    dark = menu_bar.palette().color(role).name()
+    theme.apply_app_theme(app, theme.LIGHT)
+    light = menu_bar.palette().color(role).name()
+
+    assert dark != light
+    assert dark == theme.qt_palette(theme.DARK).color(role).name()
+    assert light == theme.qt_palette(theme.LIGHT).color(role).name()
