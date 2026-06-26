@@ -208,7 +208,7 @@ class TimeseriesWidget(FPLWidget):
         self.grid_lines.visible = self.show_grid
         self.controller.add_grid_lines(self.grid_lines)
         self.subplot.add_graphic(self.text, center=False)
-        self._set_light_mode()
+        self._apply_fpl_theme()
         self.roi.visible = False
 
     def clear_data(self) -> None:

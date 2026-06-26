@@ -9,6 +9,7 @@ from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 
+from neuroseq import theme as theme_module
 from neuroseq.analysis_plugins import AnalysisPlugin
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
@@ -100,6 +101,20 @@ class CustomAnalysisWidget(MatplotlibWidget):
         self.spike_indices = None
         self.spike_neuron_indices = None
         self.subplot.clear()
+        self._redraw()
+
+    def apply_theme(self, theme: str) -> None:
+        """Recolor the matplotlib figure to match the application theme."""
+        face, text = theme_module.mpl_colors(theme)
+        figure = self.getFigure()
+        figure.set_facecolor(face)
+        self.subplot.set_facecolor(face)
+        self.subplot.tick_params(colors=text)
+        for spine in self.subplot.spines.values():
+            spine.set_color(text)
+        for axis_label in (self.subplot.xaxis.label, self.subplot.yaxis.label):
+            axis_label.set_color(text)
+        self.subplot.title.set_color(text)
         self._redraw()
 
     def _preprocess_data(

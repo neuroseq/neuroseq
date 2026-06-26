@@ -22,9 +22,14 @@ def test_gui_save_config_settings(tmp_config_dir) -> None:
     # check if settings were saved correctly
     with open(config_file) as f:
         config = json.load(f)
+    settings.theme = "dark"
+
     assert config["brian2_backend"] == settings.brian2_backend
     assert config["max_ram_synapse_plot_matrix"] == settings.max_ram_synapse_plot_matrix
     assert config["stim_padding_secs"] == settings.stim_padding_secs
+    with open(config_file) as f:
+        config = json.load(f)
+    assert config["theme"] == "dark"
 
 
 def test_gui_load_config_settings(tmp_config_dir) -> None:
@@ -76,3 +81,18 @@ def test_gui_load_config_settings(tmp_config_dir) -> None:
     # should log a ValueError and default to 0s
     settings.load_config_settings()
     assert settings.stim_padding_secs == 0
+
+
+def test_gui_theme_setting_roundtrip_and_validation(tmp_config_dir) -> None:
+    settings = GuiSettings()
+    assert settings.theme == "light"
+
+    settings.theme = "dark"
+    settings.__dict__["theme"] = "light"
+    settings.load_config_settings()
+    assert settings.theme == "dark"
+
+    # invalid theme should fall back to the default light theme
+    settings.theme = "rainbow"
+    settings.load_config_settings()
+    assert settings.theme == "light"

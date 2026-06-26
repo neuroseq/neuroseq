@@ -1,10 +1,30 @@
 from __future__ import annotations
 
+import pygfx
 from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
+from neuroseq import theme
 from neuroseq.fpl_widget import FPLWidget
+
+
+def test_fpl_widget_apply_theme_updates_background(qtbot: QtBot) -> None:
+    widget = FPLWidget()
+    qtbot.addWidget(widget)
+
+    widget.apply_theme(theme.DARK)
+    assert widget._theme == theme.DARK
+    dark_bg, _ = theme.fpl_colors(theme.DARK)
+    assert tuple(widget.subplot.background_color[0]) == tuple(pygfx.Color(dark_bg))
+
+    widget.apply_theme(theme.LIGHT)
+    light_bg, _ = theme.fpl_colors(theme.LIGHT)
+    assert tuple(widget.subplot.background_color[0]) == tuple(pygfx.Color(light_bg))
+
+    # Unknown theme falls back to light.
+    widget.apply_theme("not-a-theme")
+    assert widget._theme == theme.LIGHT
 
 
 def test_fpl_widget_skips_rendering_until_canvas_is_sized(qtbot: QtBot) -> None:
@@ -66,7 +86,7 @@ def test_fpl_widget_uses_bitmap_present_method_for_headless_tests(
         "neuroseq.fpl_widget.fpl.Figure",
         lambda **kwargs: _DummyFigure(calls, **kwargs),
     )
-    monkeypatch.setattr(FPLWidget, "_set_light_mode", lambda self: None)
+    monkeypatch.setattr(FPLWidget, "_apply_fpl_theme", lambda self: None)
 
     widget = FPLWidget()
     qtbot.addWidget(widget)
@@ -87,7 +107,7 @@ def test_fpl_widget_uses_screen_present_method_by_default(
         "neuroseq.fpl_widget.fpl.Figure",
         lambda **kwargs: _DummyFigure(calls, **kwargs),
     )
-    monkeypatch.setattr(FPLWidget, "_set_light_mode", lambda self: None)
+    monkeypatch.setattr(FPLWidget, "_apply_fpl_theme", lambda self: None)
 
     widget = FPLWidget()
     qtbot.addWidget(widget)
