@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -152,14 +153,14 @@ def generate_ramp(
     end_magnitude: float,
     repeats: int,
     dt_seconds: float,
-    neuron_index: int | None = None,
+    neuron_index: int | Sequence[int] | None = None,
 ) -> np.ndarray:
     """Continuous linear ramp(s) from start_magnitude to end_magnitude.
 
     Each ramp runs for ramp_ms; consecutive repeats are separated by ipi_ms
     of zero samples. A trailing IPI is included so the next pattern can
     start immediately after. If neuron_index is None, the same ramp is
-    applied to every column; otherwise only that column gets the ramp.
+    applied to every column; otherwise only the given column(s) get the ramp.
     """
     pulse_n, ipi_n = _validate_common(
         n_neurons=n_neurons,
@@ -168,22 +169,26 @@ def generate_ramp(
         repeats=repeats,
         dt_seconds=dt_seconds,
     )
-    if neuron_index is not None and (neuron_index < 0 or neuron_index >= n_neurons):
-        raise ValueError("neuron_index out of range")
+    indices = (
+        None
+        if neuron_index is None
+        else _normalize_neuron_indices(neuron_index, n_neurons)
+    )
     ramp = np.linspace(start_magnitude, end_magnitude, pulse_n, dtype=float)
     total_n = repeats * (pulse_n + ipi_n)
     values = np.zeros((total_n, n_neurons), dtype=float)
     for repeat_index in range(repeats):
         t0 = repeat_index * (pulse_n + ipi_n)
-        if neuron_index is None:
+        if indices is None:
             values[t0 : t0 + pulse_n, :] = ramp[:, np.newaxis]
         else:
-            values[t0 : t0 + pulse_n, neuron_index] = ramp
+            for idx in indices:
+                values[t0 : t0 + pulse_n, idx] = ramp
     return values
 
 
 def generate_per_neuron(
-    neuron_index: int,
+    neuron_index: int | Sequence[int],
     n_neurons: int,
     pulse_ms: float,
     ipi_ms: float,
@@ -200,15 +205,63 @@ def generate_per_neuron(
         repeats=repeats,
         dt_seconds=dt_seconds,
     )
-    if neuron_index < 0 or neuron_index >= n_neurons:
-        raise ValueError("neuron_index out of range")
+    indices = _normalize_neuron_indices(neuron_index, n_neurons)
     magnitudes = _per_pulse_magnitudes(profile, value1, value2, repeats)
     total_n = repeats * (pulse_n + ipi_n)
     values = np.zeros((total_n, n_neurons), dtype=float)
     for repeat_index, magnitude in enumerate(magnitudes):
         t0 = repeat_index * (pulse_n + ipi_n)
-        values[t0 : t0 + pulse_n, neuron_index] = magnitude
+        for idx in indices:
+            values[t0 : t0 + pulse_n, idx] = magnitude
     return values
+
+
+def _normalize_neuron_indices(
+    neuron_index: int | Sequence[int],
+    n_neurons: int,
+) -> list[int]:
+    indices = [neuron_index] if isinstance(neuron_index, int) else list(neuron_index)
+    if not indices:
+        raise ValueError("at least one neuron index is required")
+    for idx in indices:
+        if idx < 0 or idx >= n_neurons:
+            raise ValueError("neuron_index out of range")
+    return indices
+
+
+def parse_neuron_indices(text: str, n_neurons: int) -> list[int]:
+    """Parse a neuron selection string into a sorted list of unique indices.
+
+    Accepts comma- (or whitespace-) separated indices and inclusive ranges,
+    e.g. ``"0, 2, 5-8"`` -> ``[0, 2, 5, 6, 7, 8]``. Ranges may be written in
+    either order (``"8-5"`` is the same as ``"5-8"``). Raises ValueError on
+    empty input, unparseable tokens, or indices outside ``[0, n_neurons)``.
+    """
+    indices: list[int] = []
+    tokens = text.replace(",", " ").split()
+    if not tokens:
+        raise ValueError("Specify at least one neuron index.")
+    for token in tokens:
+        if "-" in token:
+            lo_str, _, hi_str = token.partition("-")
+            try:
+                lo = int(lo_str.strip())
+                hi = int(hi_str.strip())
+            except ValueError:
+                raise ValueError(f"Invalid neuron range: {token!r}") from None
+            if lo > hi:
+                lo, hi = hi, lo
+            indices.extend(range(lo, hi + 1))
+        else:
+            try:
+                indices.append(int(token))
+            except ValueError:
+                raise ValueError(f"Invalid neuron index: {token!r}") from None
+    unique = sorted(set(indices))
+    for idx in unique:
+        if idx < 0 or idx >= n_neurons:
+            raise ValueError(f"Neuron index {idx} is out of range (0–{n_neurons - 1}).")
+    return unique
 
 
 def is_finite_number(value: float) -> bool:

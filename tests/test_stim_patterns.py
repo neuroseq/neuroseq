@@ -9,6 +9,7 @@ from neuroseq.stim_patterns import generate_per_neuron
 from neuroseq.stim_patterns import generate_ramp
 from neuroseq.stim_patterns import generate_sequential
 from neuroseq.stim_patterns import generate_simultaneous
+from neuroseq.stim_patterns import parse_neuron_indices
 
 
 def test_sequential_default_matches_getting_started() -> None:
@@ -217,3 +218,100 @@ def test_ramp_invalid_neuron_index_raises() -> None:
             dt_seconds=0.001,
             neuron_index=5,
         )
+
+
+def test_per_neuron_multiple_indices_sets_each_column() -> None:
+    result = generate_per_neuron(
+        neuron_index=[0, 2, 3],
+        n_neurons=4,
+        pulse_ms=100,
+        ipi_ms=18,
+        profile=DrawStimType.Constant,
+        value1=0.5,
+        value2=0.0,
+        repeats=3,
+        dt_seconds=0.001,
+    )
+    assert result.shape == (3 * 118, 4)
+    for repeat_index in range(3):
+        t0 = repeat_index * 118
+        for col in [0, 2, 3]:
+            assert np.all(result[t0 : t0 + 100, col] == 0.5)
+    assert np.all(result[:, 1] == 0.0)
+
+
+def test_per_neuron_empty_indices_raises() -> None:
+    with pytest.raises(ValueError):
+        generate_per_neuron(
+            neuron_index=[],
+            n_neurons=4,
+            pulse_ms=100,
+            ipi_ms=18,
+            profile=DrawStimType.Constant,
+            value1=0.5,
+            value2=0.0,
+            repeats=1,
+            dt_seconds=0.001,
+        )
+
+
+def test_ramp_multiple_neurons_sets_each_column() -> None:
+    result = generate_ramp(
+        n_neurons=5,
+        ramp_ms=10,
+        ipi_ms=5,
+        start_magnitude=0.0,
+        end_magnitude=1.0,
+        repeats=2,
+        dt_seconds=0.001,
+        neuron_index=[1, 3],
+    )
+    assert result.shape == (30, 5)
+    expected = np.linspace(0.0, 1.0, 10)
+    for repeat_index in range(2):
+        t0 = repeat_index * 15
+        for col in [1, 3]:
+            np.testing.assert_allclose(result[t0 : t0 + 10, col], expected)
+        for col in [0, 2, 4]:
+            assert np.all(result[t0 : t0 + 10, col] == 0.0)
+
+
+def test_ramp_multiple_neurons_out_of_range_raises() -> None:
+    with pytest.raises(ValueError):
+        generate_ramp(
+            n_neurons=4,
+            ramp_ms=10,
+            ipi_ms=5,
+            start_magnitude=0.0,
+            end_magnitude=1.0,
+            repeats=1,
+            dt_seconds=0.001,
+            neuron_index=[1, 9],
+        )
+
+
+def test_parse_neuron_indices_mixed_indices_and_ranges() -> None:
+    assert parse_neuron_indices("0, 2, 5-8", 10) == [0, 2, 5, 6, 7, 8]
+
+
+def test_parse_neuron_indices_dedupes_and_sorts() -> None:
+    assert parse_neuron_indices("3 1 2-3 1", 10) == [1, 2, 3]
+
+
+def test_parse_neuron_indices_reversed_range() -> None:
+    assert parse_neuron_indices("8-5", 10) == [5, 6, 7, 8]
+
+
+def test_parse_neuron_indices_empty_raises() -> None:
+    with pytest.raises(ValueError):
+        parse_neuron_indices("   ", 10)
+
+
+def test_parse_neuron_indices_non_integer_raises() -> None:
+    with pytest.raises(ValueError):
+        parse_neuron_indices("0, x", 10)
+
+
+def test_parse_neuron_indices_out_of_range_raises() -> None:
+    with pytest.raises(ValueError):
+        parse_neuron_indices("0, 10", 10)
