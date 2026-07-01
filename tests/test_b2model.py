@@ -36,6 +36,23 @@ def mfx_nmda_as_dict(b2_model_nmda: B2Model) -> dict:
     return b2_model_nmda.to_dict()
 
 
+def test_from_dict_empty_returns_default_model() -> None:
+    # Projects with no serialized model (e.g. stim-array-only archives) load an
+    # empty b2_model dict; from_dict must return a default model, not KeyError.
+    model = B2Model.from_dict({}, {})
+    assert model.seed == 123
+    assert model.parameters == {}
+    assert model.neurongroups == {}
+    assert model.synapses == {}
+
+
+def test_from_dict_missing_seed_uses_default(mfx_nmda_as_dict: dict) -> None:
+    data = dict(mfx_nmda_as_dict)
+    data.pop("seed", None)
+    model = B2Model.from_dict(data, {})
+    assert model.seed == 123
+
+
 def test_reconstruct_mfx_nmda_serialized(mfx_nmda_as_dict: dict) -> None:
     model = B2Model.from_dict(mfx_nmda_as_dict, {})
     assert "neurons" in model.network.get_states()

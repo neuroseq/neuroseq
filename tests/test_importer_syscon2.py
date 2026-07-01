@@ -1196,6 +1196,34 @@ def test_sequence_to_stim_values_holo4d_layout_uses_shared_laser_pulses(
     assert np.all(values[:, 2] == 0.0)
 
 
+def test_sequence_to_stim_values_holo4d_zero_intensity_renders_visible(
+    tmp_path: Path,
+) -> None:
+    # Real Holo4D exports often leave per-shape intensity at 0 (power is set by
+    # the hardware). Such events must still be visible, at a nominal 1.0.
+    seq_text = (
+        _sample_holo4d_layout_seq_text()
+        .replace("TimelineInfo0_Intensity_0=0.4", "TimelineInfo0_Intensity_0=0")
+        .replace("TimelineInfo0_Intensity_0=0.7", "TimelineInfo0_Intensity_0=0")
+    )
+    seq_path = tmp_path / "holo4d_zero_intensity.seq"
+    seq_path.write_text(seq_text, encoding="utf-8")
+    sequence = parse_syscon2_seq_file(seq_path)
+
+    values, result = sequence_to_stim_values(
+        sequence,
+        dt_seconds=0.001,
+        n_neurons=3,
+        tick_resolution_us=500,
+        include_non_shape=False,
+    )
+
+    assert result.mapped_objects == 2
+    assert values[20, 0] == 1.0
+    assert values[20, 1] == 1.0
+    assert np.all(values[:, 2] == 0.0)
+
+
 def test_sequence_to_stim_values_uses_pulse_path_even_with_shorter_startup_ttl(
     tmp_path: Path,
 ) -> None:
