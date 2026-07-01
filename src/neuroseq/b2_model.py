@@ -2449,7 +2449,14 @@ class B2Model:
         if report is not None:
             report(1)
 
-        model = cls(seed=b2_model_data["seed"])
+        if not b2_model_data:
+            # Projects that contain no model (e.g. stim-array-only archives)
+            # have no serialized b2_model; return a default empty model.
+            if report is not None:
+                report(100)
+            return cls()
+
+        model = cls(seed=b2_model_data.get("seed", 123))
         model.checkpoints = b2_model_data.get("checkpoints", [])
 
         if report is not None:

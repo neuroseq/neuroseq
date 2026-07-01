@@ -95,6 +95,21 @@ def _is_shape_like_object_type(object_type: str) -> bool:
     return object_type.strip().lower() in _MAPPABLE_SHAPE_TYPES
 
 
+def _display_intensity(obj: SysconSequenceObject) -> float:
+    """Intensity used when rendering a stimulation object into a stim array.
+
+    SysCon2 Holo4D exports frequently leave the per-shape intensity at 0 because
+    the laser power is controlled by the hardware rather than encoded in the
+    ``.seq`` file. Rendering those events verbatim would produce an all-zero
+    (invisible) stim array, so a shape-like object whose intensity is 0 falls
+    back to a nominal full-scale value of 1.0. Objects with an explicit positive
+    intensity keep it, and non-shape objects are left untouched.
+    """
+    if _is_shape_like_object_type(obj.object_type) and obj.intensity <= 0.0:
+        return 1.0
+    return obj.intensity
+
+
 def _safe_int(value: str | None, default: int = 0) -> int:
     if value is None or value.strip() == "":
         return default
@@ -698,7 +713,7 @@ def _sequence_to_stim_values_holo4d_layout(
                 )
                 end_idx = start_idx + duration_timepoints
                 intervals_by_neuron[neuron_idx].append(
-                    (start_idx, end_idx, entity.intensity)
+                    (start_idx, end_idx, _display_intensity(entity))
                 )
                 max_timepoints = max(max_timepoints, end_idx)
 
@@ -896,11 +911,12 @@ def sequence_to_stim_values(
                 tick_resolution_us=tick_resolution_us,
                 entity_timing_by_block=entity_timing_by_block,
             )
+            display_intensity = _display_intensity(obj)
             for time_index in valid_time_indices:
                 start_idx = int(time_index)
                 end_idx = min(n_timepoints, start_idx + duration_timepoints)
                 values[start_idx:end_idx, neuron_idx] = np.maximum(
-                    values[start_idx:end_idx, neuron_idx], obj.intensity
+                    values[start_idx:end_idx, neuron_idx], display_intensity
                 )
 
     result = SysconImportResult(

@@ -865,6 +865,33 @@ def test_project_dt_falls_back_to_stim_dt_for_old_files(tmp_path: Path) -> None:
     assert loaded.dt == pytest.approx(0.0005)
 
 
+def test_load_project_without_b2_model_json(tmp_path: Path) -> None:
+    """A stim-only .nseq (no serialized b2_model) must load, not KeyError 'seed'."""
+    import zipfile as _zf
+
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "s", StimType.External, np.ones((8, 3), dtype=np.float32), "pA", 0.001
+        )
+    )
+    filepath = tmp_path / "stim_only.nseq"
+    project.save(filepath, SaveLoadOptions(True, True, True, True))
+
+    # Strip the serialized model to simulate a stim-array-only archive.
+    stripped = tmp_path / "stim_only_stripped.nseq"
+    with _zf.ZipFile(filepath, "r") as src, _zf.ZipFile(stripped, "w") as dst:
+        for item in src.infolist():
+            if item.filename not in {"b2_model.json", "b2_stored_state.pkl"}:
+                dst.writestr(item, src.read(item.filename))
+
+    loaded = Project(stripped)
+    assert "s" in loaded.stim_arrays
+    assert loaded.stim_arrays["s"].values.shape == (8, 3)
+    # A default model is created rather than crashing.
+    assert loaded.b2_model.seed == 123
+
+
 def test_remappable_data_description_counts_correctly() -> None:
     project = Project()
     project.add_stim_array(
