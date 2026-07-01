@@ -232,10 +232,12 @@ def test_export_seq_coalesces_nearby_segments_into_one_sanitized_window() -> Non
         tick_resolution_us=500,
         include_non_shape=False,
     )
-    # Shape intensity is now always exported as 0 to match SysCon v3 reference
-    # files, so importer roundtrip via Shape windows no longer reconstructs the
-    # original ON samples from exporter output alone.
-    assert np.count_nonzero(imported_values[:, 0] > 0) == 0
+    # Shape intensity is exported as 0 to match SysCon v3 reference files, but
+    # the laser TTL pulses carry the ON positions, so the importer reconstructs
+    # the drawn ON samples at nominal full-scale intensity (1.0).
+    active_indices = np.flatnonzero(imported_values[:, 0] > 0)
+    assert active_indices.tolist() == [40, 41, 45, 46]
+    assert np.all(imported_values[active_indices, 0] == 1.0)
 
 
 def test_export_seq_routes_ttl_pulses_to_selected_1030_laser_timeline() -> None:
@@ -663,13 +665,13 @@ def test_export_seq_roundtrip_preserves_burst_timing_at_exact_tick_positions() -
         tick_resolution_us=500,
         include_non_shape=False,
     )
-    # Shape intensity is now always 0 in the exported sequence, so roundtrip via
-    # Shape windows no longer reconstructs active samples even though the laser
-    # TTLPulse timing itself is preserved above.
+    # Shape intensity is exported as 0, but the per-burst laser TTL pulses let
+    # the importer reconstruct each drawn burst (at nominal full-scale
+    # intensity): 8 bursts for the group-1 neurons, 4 for the group-2 neurons.
     segment_counts = [
         _count_active_segments(imported_values[:, idx]) for idx in range(6)
     ]
-    assert segment_counts == [0, 0, 0, 0, 0, 0]
+    assert segment_counts == [8, 8, 8, 4, 4, 4]
 
 
 def test_export_seq_shape_intensity_remains_zero_when_non_binary_input_is_requested() -> (
