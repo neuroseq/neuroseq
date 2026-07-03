@@ -102,11 +102,19 @@ def apply_app_theme(app: QtCore.QCoreApplication | None, theme: str) -> None:
     if not isinstance(app, QtWidgets.QApplication):
         return
     palette = qt_palette(normalize_theme(theme))
-    app.setStyle("Fusion")
     app.setPalette(palette)
     # QApplication.setPalette does not reach already-polished menu bars, menus,
-    # or tool bars, which otherwise keep the previous theme's colors. Re-applying
-    # the palette to each top-level window propagates it to those children
-    # (widgets with an explicit palette of their own keep it).
-    for widget in app.topLevelWidgets():
+    # or tool bars, so push the palette to every existing widget as well. In
+    # addition, widgets that carry a stylesheet are painted through
+    # QStyleSheetStyle, which caches palette-derived brushes and is not
+    # invalidated by a palette change alone; re-applying the same stylesheet
+    # forces it to re-resolve against the new palette (otherwise the top bar
+    # lags one theme behind).
+    for widget in app.allWidgets():
         widget.setPalette(palette)
+        style_sheet = widget.styleSheet()
+        if style_sheet:
+            widget.setStyleSheet(style_sheet)
+    # Re-assert the Fusion style last so every widget is repolished and
+    # repainted with the new palette already in place.
+    app.setStyle("Fusion")
