@@ -6,7 +6,6 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 import brian2.numpy_ as np
-import qtawesome as qta
 from qtpy import QtWidgets
 from qtpy.compat import getexistingdirectory
 
@@ -29,6 +28,7 @@ from neuroseq.exporter_syscon2 import generate_syscon2_timeline_overview_png
 from neuroseq.exporter_syscon2 import shift_stim_values_right_for_initial_slm_load
 from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm
 from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm_off_on_overlap
+from neuroseq.icon_manager import icons
 from neuroseq.power_lut import PowerLut
 from neuroseq.power_lut import parse_power_lut_text
 from neuroseq.power_lut import resolve_power_lut
@@ -230,7 +230,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         self.folder_edit.setPlaceholderText("Select output folder...")
         self.folder_edit.setReadOnly(True)
         self.folder_button = QtWidgets.QPushButton()
-        self.folder_button.setIcon(qta.icon("mdi6.folder-open"))
+        icons.set_widget_icon(self.folder_button, "mdi6.folder-open")
         self.folder_button.setToolTip("Browse for output folder")
         self.folder_button.clicked.connect(self._select_output_folder)
 
@@ -244,14 +244,14 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         # Buttons
         button_layout = QtWidgets.QHBoxLayout()
         self.check_sanity_button = QtWidgets.QPushButton("Check Input Sanity")
-        self.check_sanity_button.setIcon(qta.icon("mdi6.clipboard-check-outline"))
+        icons.set_widget_icon(self.check_sanity_button, "mdi6.clipboard-check-outline")
         self.check_sanity_button.clicked.connect(self._check_input_sanity)
 
         button_layout.addWidget(self.check_sanity_button)
         button_layout.addStretch()
 
         self.generate_button = QtWidgets.QPushButton("Generate Scripts")
-        self.generate_button.setIcon(qta.icon("mdi6.file-code"))
+        icons.set_widget_icon(self.generate_button, "mdi6.file-code")
         self.generate_button.clicked.connect(self._generate_scripts)
         self.generate_button.setEnabled(
             False

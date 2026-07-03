@@ -56,19 +56,26 @@ def test_apply_app_theme_none_app_is_noop() -> None:
 
 def test_apply_app_theme_propagates_to_menu_bar(qtbot: QtBot) -> None:
     # Regression: QApplication.setPalette does not reach an already-polished
-    # menu bar, so apply_app_theme must push the palette to top-level windows.
+    # menu bar, so apply_app_theme must push the palette to every widget.
+    # The menu bar carries a stylesheet (as in the real app), which is painted
+    # via QStyleSheetStyle and would otherwise lag one theme behind; the
+    # stylesheet must survive the theme switch.
     app = QtWidgets.QApplication.instance()
     assert app is not None
     window = QtWidgets.QMainWindow()
     qtbot.addWidget(window)
     menu_bar = window.menuBar()
     menu_bar.addMenu("File")
+    menu_bar_style = "QMenuBar::item { padding: 3px 6px; margin: 0px; }"
+    menu_bar.setStyleSheet(menu_bar_style)
     role = QtGui.QPalette.ColorRole.Window
 
     theme.apply_app_theme(app, theme.DARK)
     dark = menu_bar.palette().color(role).name()
+    assert menu_bar.styleSheet() == menu_bar_style
     theme.apply_app_theme(app, theme.LIGHT)
     light = menu_bar.palette().color(role).name()
+    assert menu_bar.styleSheet() == menu_bar_style
 
     assert dark != light
     assert dark == theme.qt_palette(theme.DARK).color(role).name()

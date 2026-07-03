@@ -21,6 +21,13 @@ _MPL_COLORS = {
     DARK: {"face": "#1e1e1e", "text": "#dcdcdc"},
 }
 
+# Foreground color for qtawesome toolbar/menu icons per theme. Dark glyphs read
+# well on the light chrome; light glyphs are needed on the dark chrome.
+_ICON_COLORS = {
+    LIGHT: "#000000",
+    DARK: "#dcdcdc",
+}
+
 
 def normalize_theme(theme: str | None) -> str:
     """Return a valid theme name, falling back to LIGHT for anything unknown."""
@@ -37,6 +44,11 @@ def mpl_colors(theme: str) -> tuple[str, str]:
     """(face, text) colors for matplotlib figures of this theme."""
     colors = _MPL_COLORS[normalize_theme(theme)]
     return colors["face"], colors["text"]
+
+
+def icon_color(theme: str) -> str:
+    """Foreground color for qtawesome icons of this theme."""
+    return _ICON_COLORS[normalize_theme(theme)]
 
 
 def _light_palette() -> QtGui.QPalette:
@@ -102,11 +114,19 @@ def apply_app_theme(app: QtCore.QCoreApplication | None, theme: str) -> None:
     if not isinstance(app, QtWidgets.QApplication):
         return
     palette = qt_palette(normalize_theme(theme))
-    app.setStyle("Fusion")
     app.setPalette(palette)
     # QApplication.setPalette does not reach already-polished menu bars, menus,
-    # or tool bars, which otherwise keep the previous theme's colors. Re-applying
-    # the palette to each top-level window propagates it to those children
-    # (widgets with an explicit palette of their own keep it).
-    for widget in app.topLevelWidgets():
+    # or tool bars, so push the palette to every existing widget as well. In
+    # addition, widgets that carry a stylesheet are painted through
+    # QStyleSheetStyle, which caches palette-derived brushes and is not
+    # invalidated by a palette change alone; re-applying the same stylesheet
+    # forces it to re-resolve against the new palette (otherwise the top bar
+    # lags one theme behind).
+    for widget in app.allWidgets():
         widget.setPalette(palette)
+        style_sheet = widget.styleSheet()
+        if style_sheet:
+            widget.setStyleSheet(style_sheet)
+    # Re-assert the Fusion style last so every widget is repolished and
+    # repainted with the new palette already in place.
+    app.setStyle("Fusion")

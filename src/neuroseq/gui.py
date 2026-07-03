@@ -41,6 +41,7 @@ from neuroseq.exporter_igor2 import export_igor2_ibw
 from neuroseq.exporter_igor2 import export_igor2_pxp
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
+from neuroseq.icon_manager import icons
 from neuroseq.igor2_pxp_stim_export_dialog import Igor2PxpStimExportDialog
 from neuroseq.igor2_single_wave_export_dialog import Igor2SingleWaveExportDialog
 from neuroseq.igor_import_dialog import IgorImportDialog
@@ -1920,6 +1921,7 @@ class Gui(QtWidgets.QMainWindow):
         theme = theme_module.normalize_theme(theme)
         self.logger.info(f"Applying {theme} theme")
         theme_module.apply_app_theme(QtWidgets.QApplication.instance(), theme)
+        icons.apply_theme(theme)
         for widget in self.plot_widgets:
             widget.apply_theme(theme)
         self.custom_analysis_widget.apply_theme(theme)
@@ -2024,7 +2026,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="Ctrl+N",
-            icon=qta.icon("mdi6.file"),
+            icon="mdi6.file",
         )
         # add "open example project" item to the file menu which opens a sub-menu containing the example projects from src/neuroseq/example_projects
         open_example_project_menu = menu.addMenu("Open example &project")
@@ -2047,7 +2049,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="Ctrl+O",
-            icon=qta.icon("mdi6.folder-open"),
+            icon="mdi6.folder-open",
         )
         add_action(
             "Import &from Project",
@@ -2055,14 +2057,14 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="None",
-            icon=qta.icon("mdi6.file-import"),
+            icon="mdi6.file-import",
         )
         add_action(
             "Import cell spatial &footprints",
             self.btn_import_cellpose_data_clicked,
             menu,
             None,
-            icon=qta.icon("mdi6.image-edit-outline"),
+            icon="mdi6.image-edit-outline",
         )
         add_action(
             "&Save Project",
@@ -2070,7 +2072,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="Ctrl+S",
-            icon=qta.icon("mdi6.content-save"),
+            icon="mdi6.content-save",
         )
 
         import_data_menu = menu.addMenu("&Import data")
@@ -2083,14 +2085,14 @@ class Gui(QtWidgets.QMainWindow):
             self.btn_import_stimulus_light_clicked,
             import_stimulus_menu,
             None,
-            icon=qta.icon("mdi6.file-import-outline"),
+            icon="mdi6.file-import-outline",
         )
         add_action(
             "&Patch Clamp",
             self.btn_import_stimulus_patchclamp_clicked,
             import_stimulus_menu,
             None,
-            icon=qta.icon("mdi6.waveform"),
+            icon="mdi6.waveform",
         )
 
         import_trace_menu = import_data_menu.addMenu("&Trace")
@@ -2100,21 +2102,21 @@ class Gui(QtWidgets.QMainWindow):
             self.btn_import_tif_clicked,
             import_trace_menu,
             None,
-            icon=qta.icon("mdi6.import"),
+            icon="mdi6.import",
         )
         add_action(
             "Calcium Imaging (&Suite2p outputs)",
             self.btn_import_suite2p_data_clicked,
             import_trace_menu,
             None,
-            icon=qta.icon("mdi6.import"),
+            icon="mdi6.import",
         )
         add_action(
             "&Patch Clamp",
             self.btn_import_trace_patchclamp_clicked,
             import_trace_menu,
             None,
-            icon=qta.icon("mdi6.import"),
+            icon="mdi6.import",
         )
 
         export_data_menu = menu.addMenu("E&xport")
@@ -2125,28 +2127,28 @@ class Gui(QtWidgets.QMainWindow):
             self.btn_export_patch_clamp_stim_clicked,
             export_data_menu,
             None,
-            icon=qta.icon("mdi6.waveform"),
+            icon="mdi6.waveform",
         )
         add_action(
             "&Optogenetic Stimulus",
             self.btn_export_light_stimulus_clicked,
             export_data_menu,
             None,
-            icon=qta.icon("mdi6.file-code"),
+            icon="mdi6.file-code",
         )
         add_action(
             "&Traces",
             self.btn_export_traces_clicked,
             export_data_menu,
             None,
-            icon=qta.icon("mdi.waves"),
+            icon="mdi.waves",
         )
         add_action(
             "&Spikes",
             self.btn_export_spikes_clicked,
             export_data_menu,
             None,
-            icon=qta.icon("ph.barcode-light"),
+            icon="ph.barcode-light",
         )
         add_action(
             "Export &simulation results",
@@ -2154,7 +2156,7 @@ class Gui(QtWidgets.QMainWindow):
             export_data_menu,
             None,
             shortcut="Ctrl+Shift+E",
-            icon=qta.icon("mdi6.content-save-move"),
+            icon="mdi6.content-save-move",
         )
 
         add_action(
@@ -2163,7 +2165,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="Ctrl+E",
-            icon=qta.icon("ph.polygon-light"),
+            icon="ph.polygon-light",
         )
         menu.addSeparator()
         add_action(
@@ -2172,7 +2174,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="Ctrl+G",
-            icon=qta.icon("mdi6.microsoft-xbox-controller-view")
+            icon="mdi6.microsoft-xbox-controller-view"
             if hasattr(qta, "icon")
             else None,
         )
@@ -2183,7 +2185,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             None,
             shortcut=None,
-            icon=qta.icon("mdi6.exit-to-app"),
+            icon="mdi6.exit-to-app",
         )
 
     def _create_actions_simulate(
@@ -2195,7 +2197,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="Ctrl+R",
-            icon=qta.icon("mdi6.rocket-launch-outline"),
+            icon="mdi6.rocket-launch-outline",
         )
         add_action(
             "&Store Simulation Checkpoint",
@@ -2203,7 +2205,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="Ctrl+Shift+S",
-            icon=qta.icon("mdi6.timeline-check-outline"),
+            icon="mdi6.timeline-check-outline",
         )
         add_action(
             "&Restore Simulation Checkpoint",
@@ -2211,7 +2213,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="Ctrl+Shift+R",
-            icon=qta.icon("mdi.ray-start-arrow"),
+            icon="mdi.ray-start-arrow",
         )
 
     def _create_actions_playback(
@@ -2223,7 +2225,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut=None,
-            icon=qta.icon("mdi6.speedometer"),
+            icon="mdi6.speedometer",
         )
         add_action(
             "&Skip to Start",
@@ -2231,7 +2233,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut=None,
-            icon=qta.icon("mdi6.skip-previous"),
+            icon="mdi6.skip-previous",
         )
         add_action(
             "&Stop",
@@ -2239,7 +2241,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut=None,
-            icon=qta.icon("mdi6.stop"),
+            icon="mdi6.stop",
         )
         add_action(
             "&Play / Pause",
@@ -2247,7 +2249,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut="Space",
-            icon=qta.icon("mdi6.play-pause"),
+            icon="mdi6.play-pause",
         )
         add_action(
             "&Skip to End",
@@ -2255,7 +2257,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut=None,
-            icon=qta.icon("mdi6.skip-next"),
+            icon="mdi6.skip-next",
         )
 
     def _create_actions_view(
@@ -2283,7 +2285,7 @@ class Gui(QtWidgets.QMainWindow):
                 lambda toggled, w=w: self._set_widget_visible(w, toggled),
                 menu,
                 toolbar,
-                icon=qta.icon(f"{icon}"),
+                icon=icon,
                 checkable=True,
                 is_checked=is_checked,
             )
@@ -2292,7 +2294,7 @@ class Gui(QtWidgets.QMainWindow):
             self.toggle_selection_text,
             menu,
             toolbar,
-            icon=qta.icon("mdi6.format-text"),
+            icon="mdi6.format-text",
             checkable=True,
             is_checked=True,
         )
@@ -2301,7 +2303,7 @@ class Gui(QtWidgets.QMainWindow):
             self.toggle_grid,
             menu,
             toolbar,
-            icon=qta.icon("mdi6.grid"),
+            icon="mdi6.grid",
             checkable=True,
             is_checked=True,
         )
@@ -2369,7 +2371,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut=None,
-            icon=qta.icon("mdi6.arrow-expand-vertical"),
+            icon="mdi6.arrow-expand-vertical",
         )
         toolbar.addWidget(QtWidgets.QLabel("  Spike data: "))
         toolbar.addWidget(self.cmb_spike)
@@ -2381,7 +2383,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut=None,
-            icon=qta.icon("mdi6.arrow-expand-vertical"),
+            icon="mdi6.arrow-expand-vertical",
         )
         toolbar.addWidget(QtWidgets.QLabel("  All data: "))
         toolbar.addWidget(self.cmb_data)
@@ -2395,7 +2397,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut=None,
-            icon=qta.icon("mdi6.beaker"),
+            icon="mdi6.beaker",
         )
         menu.addSeparator()
         add_action(
@@ -2404,7 +2406,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut=None,
-            icon=qta.icon("mdi6.code-braces"),
+            icon="mdi6.code-braces",
         )
         add_action(
             "&Connect Brian2 External Stimulation Function",
@@ -2412,7 +2414,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut=None,
-            icon=qta.icon("mdi6.function"),
+            icon="mdi6.function",
         )
         self._do_external_simulation_action = add_action(
             "&Run External Stimulation Function",
@@ -2420,7 +2422,7 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             shortcut=None,
-            icon=qta.icon("mdi6.rocket-launch-outline"),
+            icon="mdi6.rocket-launch-outline",
         )
 
     def _create_actions_replay_analysis(self) -> None:
@@ -2431,7 +2433,7 @@ class Gui(QtWidgets.QMainWindow):
             menu=None,
             toolbar=self.toolbar_stim_editor,
             shortcut=None,
-            icon=qta.icon("mdi6.delta"),
+            icon="mdi6.delta",
         )
         self.elise_replay_action.setToolTip(
             "Compute the paper-style replay MSE and correlation against "
