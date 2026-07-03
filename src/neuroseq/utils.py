@@ -6,6 +6,7 @@ import math
 import re
 from collections.abc import Callable
 from collections.abc import Iterable
+from collections.abc import Sequence
 from enum import Enum
 from typing import Any
 
@@ -162,7 +163,7 @@ def add_action(
     toolbar: QtWidgets.QToolBar | None = None,
     widget: QtWidgets.QWidget | None = None,
     shortcut: str | None = None,
-    icon: QtGui.QIcon | None = None,
+    icon: QtGui.QIcon | str | Sequence[str] | None = None,
     checkable: bool = False,
     is_checked: bool = False,
 ) -> QtWidgets.QAction:
@@ -172,8 +173,15 @@ def add_action(
     if checkable:
         action.setChecked(is_checked)
     action.triggered.connect(callback)
-    if icon is not None:
+    if isinstance(icon, QtGui.QIcon):
         action.setIcon(icon)
+    elif icon is not None:
+        # An icon name (or list of stacked names): render it in the current
+        # theme color and register it so it recolors on theme changes.
+        from neuroseq.icon_manager import icons
+
+        names = [icon] if isinstance(icon, str) else list(icon)
+        icons.set_action_icon(action, *names)
     if shortcut is not None:
         action.setShortcut(QtGui.QKeySequence(shortcut))
         action.setShortcutContext(QtCore.Qt.ShortcutContext.WindowShortcut)

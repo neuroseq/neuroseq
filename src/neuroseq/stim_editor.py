@@ -1007,17 +1007,18 @@ class StimEditor(QtWidgets.QWidget):
         self.limits_modified.emit()
         self._stim_values_updated()
 
-    def _pattern_designer_icon(self):
+    def _pattern_designer_icon(self) -> str:
         for icon_name in [
             "mdi6.creation",
             "mdi6.auto-fix",
             "mdi6.gesture-tap-button",
         ]:
             try:
-                return qta.icon(icon_name)
+                qta.icon(icon_name)
+                return icon_name
             except Exception:
                 continue
-        return qta.icon("mdi6.pencil")
+        return "mdi6.pencil"
 
     def _add_actions(self, toolbar: QtWidgets.QToolBar, menu: QtWidgets.QMenu) -> None:
         self.action_draw_mode = add_action(
@@ -1027,7 +1028,7 @@ class StimEditor(QtWidgets.QWidget):
             toolbar,
             self,
             shortcut="1",
-            icon=qta.icon("mdi6.cursor-default-gesture"),
+            icon="mdi6.cursor-default-gesture",
             checkable=True,
             is_checked=True,
         )
@@ -1038,7 +1039,7 @@ class StimEditor(QtWidgets.QWidget):
             toolbar,
             self,
             shortcut="2",
-            icon=qta.icon("mdi6.select"),
+            icon="mdi6.select",
             checkable=True,
             is_checked=False,
         )
@@ -1049,7 +1050,7 @@ class StimEditor(QtWidgets.QWidget):
             menu,
             toolbar,
             self,
-            icon=qta.icon("mdi6.text-box-plus"),
+            icon="mdi6.text-box-plus",
         )
         self.action_undo = add_action(
             "Edit stim array",
@@ -1057,7 +1058,7 @@ class StimEditor(QtWidgets.QWidget):
             menu,
             toolbar,
             self,
-            icon=qta.icon("mdi6.text-box-edit"),
+            icon="mdi6.text-box-edit",
         )
         self.action_undo = add_action(
             "Delete stim array",
@@ -1065,7 +1066,7 @@ class StimEditor(QtWidgets.QWidget):
             menu,
             toolbar,
             self,
-            icon=qta.icon("mdi6.text-box-remove"),
+            icon="mdi6.text-box-remove",
         )
         add_action(
             "Clear stim array",
@@ -1073,7 +1074,7 @@ class StimEditor(QtWidgets.QWidget):
             menu,
             toolbar,
             self,
-            icon=qta.icon("mdi6.text-box-minus"),
+            icon="mdi6.text-box-minus",
         )
         add_action(
             "Pad stim array (Ctrl+Shift+Plus)",
@@ -1082,7 +1083,7 @@ class StimEditor(QtWidgets.QWidget):
             toolbar,
             self,
             shortcut="Ctrl++",
-            icon=qta.icon("mdi6.timeline-plus"),
+            icon="mdi6.timeline-plus",
         )
         add_action(
             "Trim stim array (Ctrl+Shift+Minus)",
@@ -1091,7 +1092,7 @@ class StimEditor(QtWidgets.QWidget):
             toolbar,
             self,
             shortcut="Ctrl+Shift+-",
-            icon=qta.icon("mdi6.timeline-minus"),
+            icon="mdi6.timeline-minus",
         )
         add_action(
             "Loop stim array",
@@ -1099,7 +1100,7 @@ class StimEditor(QtWidgets.QWidget):
             menu,
             toolbar,
             self,
-            icon=qta.icon("mdi6.repeat-variant"),
+            icon="mdi6.repeat-variant",
         )
         add_action(
             "Design stimulation pattern",
@@ -1115,7 +1116,7 @@ class StimEditor(QtWidgets.QWidget):
             menu,
             toolbar,
             self,
-            icon=qta.icon("mdi6.view-list"),
+            icon="mdi6.view-list",
             checkable=True,
             is_checked=True,
         )
@@ -1127,7 +1128,7 @@ class StimEditor(QtWidgets.QWidget):
             toolbar,
             self,
             shortcut="Ctrl+Z",
-            icon=qta.icon("mdi6.undo"),
+            icon="mdi6.undo",
         )
         self.action_undo.setEnabled(False)
         self.action_redo = add_action(
@@ -1137,7 +1138,7 @@ class StimEditor(QtWidgets.QWidget):
             toolbar,
             self,
             shortcut="Ctrl+Shift+Z",
-            icon=qta.icon("mdi6.redo"),
+            icon="mdi6.redo",
         )
         self.action_redo.setEnabled(False)
         self.toolbar.addSeparator()
@@ -1149,7 +1150,7 @@ class StimEditor(QtWidgets.QWidget):
                 menu,
                 toolbar,
                 self,
-                icon=qta.icon("mdi6.pencil"),
+                icon="mdi6.pencil",
                 checkable=True,
                 is_checked=True,
             )
@@ -1161,7 +1162,7 @@ class StimEditor(QtWidgets.QWidget):
                 menu,
                 toolbar,
                 self,
-                icon=qta.icon("mdi6.eraser"),
+                icon="mdi6.eraser",
                 checkable=True,
                 is_checked=False,
             )
@@ -1173,7 +1174,7 @@ class StimEditor(QtWidgets.QWidget):
                 menu,
                 toolbar,
                 self,
-                icon=qta.icon("mdi6.network-strength-3"),
+                icon="mdi6.network-strength-3",
             )
         )
         self.actions_draw.append(
@@ -1183,7 +1184,7 @@ class StimEditor(QtWidgets.QWidget):
                 menu,
                 toolbar,
                 self,
-                icon=qta.icon("mdi6.arrow-expand-horizontal"),
+                icon="mdi6.arrow-expand-horizontal",
             )
         )
         self.actions_draw_group = QtWidgets.QActionGroup(self)
@@ -1200,7 +1201,7 @@ class StimEditor(QtWidgets.QWidget):
                 toolbar,
                 self,
                 shortcut="Ctrl+A",
-                icon=qta.icon("mdi6.select-all"),
+                icon="mdi6.select-all",
             )
         )
         self.actions_edit.append(
@@ -1211,7 +1212,7 @@ class StimEditor(QtWidgets.QWidget):
                 toolbar,
                 self,
                 shortcut="Ctrl+C",
-                icon=qta.icon("mdi6.content-copy"),
+                icon="mdi6.content-copy",
             )
         )
         self.actions_edit.append(
@@ -1222,7 +1223,7 @@ class StimEditor(QtWidgets.QWidget):
                 toolbar,
                 self,
                 shortcut="Ctrl+X",
-                icon=qta.icon("mdi6.content-cut"),
+                icon="mdi6.content-cut",
             )
         )
         self.actions_edit.append(
@@ -1233,7 +1234,7 @@ class StimEditor(QtWidgets.QWidget):
                 toolbar,
                 self,
                 shortcut="Ctrl+V",
-                icon=qta.icon("mdi6.content-paste"),
+                icon="mdi6.content-paste",
             )
         )
         self.actions_edit.append(
@@ -1244,7 +1245,7 @@ class StimEditor(QtWidgets.QWidget):
                 toolbar,
                 self,
                 shortcut="Ctrl+Shift+V",
-                icon=qta.icon("fa5s.paste"),
+                icon="fa5s.paste",
             )
         )
         self.actions_edit.append(
@@ -1254,7 +1255,7 @@ class StimEditor(QtWidgets.QWidget):
                 menu,
                 toolbar,
                 self,
-                icon=qta.icon("mdi6.application-export"),
+                icon="mdi6.application-export",
             )
         )
         self.actions_edit.append(
@@ -1264,7 +1265,7 @@ class StimEditor(QtWidgets.QWidget):
                 menu,
                 toolbar,
                 self,
-                icon=qta.icon("mdi6.application-import"),
+                icon="mdi6.application-import",
             )
         )
         self.actions_edit.append(
@@ -1275,7 +1276,7 @@ class StimEditor(QtWidgets.QWidget):
                 toolbar,
                 self,
                 shortcut="Delete",
-                icon=qta.icon("mdi6.delete"),
+                icon="mdi6.delete",
             )
         )
         for action in self.actions_edit:

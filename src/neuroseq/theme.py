@@ -21,6 +21,13 @@ _MPL_COLORS = {
     DARK: {"face": "#1e1e1e", "text": "#dcdcdc"},
 }
 
+# Foreground color for qtawesome toolbar/menu icons per theme. Dark glyphs read
+# well on the light chrome; light glyphs are needed on the dark chrome.
+_ICON_COLORS = {
+    LIGHT: "#000000",
+    DARK: "#dcdcdc",
+}
+
 
 def normalize_theme(theme: str | None) -> str:
     """Return a valid theme name, falling back to LIGHT for anything unknown."""
@@ -37,6 +44,11 @@ def mpl_colors(theme: str) -> tuple[str, str]:
     """(face, text) colors for matplotlib figures of this theme."""
     colors = _MPL_COLORS[normalize_theme(theme)]
     return colors["face"], colors["text"]
+
+
+def icon_color(theme: str) -> str:
+    """Foreground color for qtawesome icons of this theme."""
+    return _ICON_COLORS[normalize_theme(theme)]
 
 
 def _light_palette() -> QtGui.QPalette:

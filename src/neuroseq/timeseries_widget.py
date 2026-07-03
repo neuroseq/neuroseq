@@ -6,7 +6,6 @@ import math
 import brian2.numpy_ as np
 import fastplotlib as fpl
 import pygfx
-import qtawesome as qta
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
@@ -452,7 +451,7 @@ class TimeseriesWidget(FPLWidget):
             self.context_menu,
             None,
             self,
-            icon=qta.icon(icon_name),
+            icon=icon_name,
         )
 
     def _set_open_analysis_in_new_window(self, checked: bool) -> None:
@@ -466,7 +465,7 @@ class TimeseriesWidget(FPLWidget):
             self.context_menu,
             None,
             self,
-            icon=qta.icon("mdi6.open-in-new"),
+            icon="mdi6.open-in-new",
             checkable=True,
             is_checked=self._open_analysis_in_new_window,
         )
