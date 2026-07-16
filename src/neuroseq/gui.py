@@ -2767,6 +2767,42 @@ class Gui(QtWidgets.QMainWindow):
         clamped = max(0.0, min(1.0, float(fraction)))
         self.progress_dialog.setValue(int(round(clamped * 100)))
 
+    def _update_elise_stim_arrays(self, result: dict) -> None:
+        """Replace opsin_exc/opsin_inh with the protocol's full-timeline stims.
+
+        The teaching pattern is present during training cycles and blank during
+        teacher-off validation/replay, so the stim array reflects the true
+        timeline of what was simulated and lines up with the imported traces.
+        """
+        from neuroseq.stim import StimArray
+        from neuroseq.stim import StimType
+
+        exc_full = result.get("stim_exc_full")
+        inh_full = result.get("stim_inh_full")
+        if exc_full is None or inh_full is None:
+            return
+        dt = float(result.get("stim_dt_s") or 0.0)
+        if dt <= 0:
+            return
+        defaults = {
+            "opsin_exc": StimType.Excitation,
+            "opsin_inh": StimType.Inhibition,
+        }
+        for name, values in (("opsin_exc", exc_full), ("opsin_inh", inh_full)):
+            existing = self.project.stim_arrays.get(name)
+            stim_type = existing.stim_type if existing is not None else defaults[name]
+            units = existing.units if existing is not None else "mm**-2 / second"
+            self.project.add_stim_array(
+                StimArray(
+                    name=name,
+                    stim_type=stim_type,
+                    values=np.asarray(values),
+                    units=units,
+                    dt=dt,
+                )
+            )
+        self.stim_editor.set_project(self.project)
+
     @QtCore.Slot(object)
     def _on_elise_protocol_finished(self, result: dict) -> None:
         from neuroseq.replay_metrics import save_learning_curves_csv
@@ -2778,9 +2814,11 @@ class Gui(QtWidgets.QMainWindow):
         self.progress_dialog.setValue(100)
         self.progress_dialog.reset()
 
-        # Import the trained network's teacher-off replay as an Experiment so
-        # the activity traces line up with the opsin stim arrays in the GUI,
-        # like any other simulation result.
+        # Rebuild the opsin stim arrays to the full protocol timeline (teaching
+        # pattern during training, blank during teacher-off validation/replay)
+        # so the stim array shows the true timeline of what was simulated, then
+        # import the aligned activity Experiment.
+        self._update_elise_stim_arrays(result)
         experiment = result.get("experiment")
         if experiment is not None:
             self._append_experimental_data(experiment)

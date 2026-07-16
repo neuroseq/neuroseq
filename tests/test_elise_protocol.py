@@ -57,20 +57,28 @@ def test_run_protocol_direct_mode_learns() -> None:
     assert res["target_rate"].shape[0] == 13
     assert res["final_replay_rate"].shape == (13, 2 * res["cycle_trace_samples"])
 
-    # A standard stimulus-driven Experiment is returned for import into the
-    # project so the activity lines up with the opsin stim arrays.
+    # A full-timeline Experiment + matching stim arrays are returned for import.
     exp = res["experiment"]
     assert exp is not None
-    trace_names = {d.name for d in exp.data}
-    assert "firing_rate_r" in trace_names
+    fr = next(d for d in exp.data if d.name == "firing_rate_r")
+    n_rec = fr.traces.shape[1]
 
+    # The stim arrays span the same timeline as the recorded traces.
+    assert res["stim_exc_full"].shape[0] == n_rec
+    assert res["stim_inh_full"].shape[0] == n_rec
+    assert res["stim_dt_s"] == pytest.approx(fr.dt)
+
+    # True timeline: teaching stim is present during training and absent during
+    # the teacher-off replay tail (identifiable as a no-stim gap).
+    exc = res["stim_exc_full"]
+    assert float(exc.max()) > 0.0  # training cycles carry the pattern
+    assert float(exc[-1].max()) == 0.0  # final replay samples have no stimulus
+
+    # dendritic_weights evolve over the timeline and the snapshot timestamps lie
+    # within the trace duration, so the GUI's time slider can reach them.
     weights = next(d for d in exp.data if d.name == "dendritic_weights")
     assert weights.values.shape[2] >= 2
-    # Snapshots lie within the recording timeline so the GUI's time slider can
-    # actually reach them (the earlier bug put them beyond the trace duration).
     assert float(weights.timestamps.max()) <= exp.duration + 1e-6
-    # Plasticity is on during the recording, so the matrix genuinely changes —
-    # the slider is not stuck on a constant matrix.
     assert not np.allclose(weights.values[:, :, 0], weights.values[:, :, -1])
 
     # The crisp direct teacher must actually drive learning.
@@ -245,6 +253,9 @@ def _synthetic_result(experiment=None) -> dict:
         "num_vis": 13,
         "final_replay_rate": np.zeros((13, 2 * T)),
         "experiment": experiment,
+        "stim_exc_full": np.zeros((3 * T, 13), dtype=np.float32),
+        "stim_inh_full": np.zeros((3 * T, 13), dtype=np.float32),
+        "stim_dt_s": 1e-3,
         "config": {"teacher_mode": "direct", "training_cycles": 25},
     }
 
@@ -267,6 +278,11 @@ def test_on_protocol_finished_opens_window_and_imports_experiment(
         assert getattr(widget, _CURVES_ATTR, None) is not None
         # The replay Experiment is imported so traces line up with the stim.
         append.assert_called_once_with(sentinel_exp)
+        # The stim arrays were rebuilt to the protocol's full timeline.
+        sa = gui.project.stim_arrays.get("opsin_exc")
+        assert sa is not None
+        assert sa.values.shape[0] == 3 * 40
+        assert sa.dt == pytest.approx(1e-3)
     finally:
         gui.close()
 

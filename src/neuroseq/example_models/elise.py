@@ -1094,9 +1094,62 @@ class Elise(NN):
             if progress is not None and counter["n"] % 2000 == 0:
                 progress(counter["n"] / total_steps)
 
+        # --- full-timeline recording -------------------------------------
+        # Record the entire protocol (training with the teaching stim present,
+        # then the teacher-off validation and replay cycles as no-stim gaps)
+        # into activity traces + a matching stim array, so the GUI shows the
+        # true timeline of what was simulated. Recorded at stim resolution
+        # (downsampled further if the run is very long) to bound memory.
+        n_total = int(net.num_all)
+        one_exc_stim = opsin_exc[:cyc_samples, :]  # one teaching cycle (stim res)
+        one_inh_stim = opsin_inh[:cyc_samples, :]
+        zero_col = np.zeros(num_vis, dtype=np.float32)
+
+        rec_step = upsample
+        _MAX_REC_SAMPLES = 500_000
+        n_rec_est = (total_steps + rec_step - 1) // rec_step
+        if n_rec_est > _MAX_REC_SAMPLES:
+            rec_step *= int(np.ceil(n_rec_est / _MAX_REC_SAMPLES))
+            n_rec_est = (total_steps + rec_step - 1) // rec_step
+        rec_dt_s = rec_step * trace_dt_s
+
+        rec_u = np.empty((n_total, n_rec_est), dtype=np.float32)
+        rec_v = np.empty((n_total, n_rec_est), dtype=np.float32)
+        rec_r = np.empty((n_total, n_rec_est), dtype=np.float32)
+        stim_exc_rec = np.zeros((n_rec_est, num_vis), dtype=np.float32)
+        stim_inh_rec = np.zeros((n_rec_est, num_vis), dtype=np.float32)
+
+        # One dendritic-weight snapshot ~per recorded cycle, capped so the
+        # heatmap slider stays usable; timestamps land within [0, duration].
+        _MAX_SNAPS = 800
+        snap_stride = max(1, T // rec_step)
+        if n_rec_est // snap_stride > _MAX_SNAPS:
+            snap_stride *= int(np.ceil((n_rec_est / snap_stride) / _MAX_SNAPS))
+        w_snaps: list[np.ndarray] = []
+        w_times: list[float] = []
+        rstate = {"g": 0, "i": 0}
+
+        def _record(exc_col: np.ndarray, inh_col: np.ndarray) -> None:
+            if rstate["g"] % rec_step == 0:
+                i = rstate["i"]
+                if i < n_rec_est:
+                    rec_u[:, i] = net.u
+                    rec_v[:, i] = net.v
+                    rec_r[:, i] = net.r
+                    stim_exc_rec[i] = exc_col
+                    stim_inh_rec[i] = inh_col
+                    if i % snap_stride == 0:
+                        w_snaps.append(
+                            np.asarray(net.dendritic_weights, dtype=np.float32).copy()
+                        )
+                        w_times.append(i * rec_dt_s)
+                    rstate["i"] = i + 1
+            rstate["g"] += 1
+
         def _train(n_cycles: int) -> None:
             for k in range(n_cycles * T):
                 net(u_inp=_teacher_u(k % T), learn=True)
+                _record(one_exc_stim[(k % T) // upsample], one_inh_stim[(k % T) // upsample])
                 _tick()
 
         def _free_run(n_cycles: int, learn: bool) -> np.ndarray:
@@ -1104,6 +1157,7 @@ class Elise(NN):
             for k in range(n_cycles * T):
                 net(u_inp=None, learn=learn)
                 rate[:, k] = net.r[:num_vis]
+                _record(zero_col, zero_col)  # teacher off → no stim in the array
                 _tick()
             return rate
 
@@ -1127,18 +1181,44 @@ class Elise(NN):
             last_rate = _free_run(replay_cycles, replay_learning)
             rep_mse[e], rep_corr[e] = _score(last_rate)
 
-        # Record a stimulus-driven training pass as a standard Experiment: the
-        # network is driven by the actual opsin stims (teacher on, plasticity
-        # on) over the stim timeline, so the activity lines up with the opsin
-        # stim arrays AND the dendritic-weight snapshots (written every
-        # weight_snapshot_interval_ms, timestamps within [0, duration]) change
-        # over the run — the GUI's time slider can scrub the weights forming.
-        experiment = self._record_training_experiment(
-            opsin_exc, opsin_inh, stim_dt_s, base
-        )
-
         if progress is not None:
             progress(1.0)
+
+        n_rec = rstate["i"]
+        indices = np.arange(n_total, dtype=np.uint32)
+        experiment = Experiment(
+            name="ELiSe protocol (full timeline)",
+            duration=n_rec * rec_dt_s,
+            timepoints=[],
+            data=[
+                TraceData(
+                    name="somatic_potential_u",
+                    traces=rec_u[:, :n_rec],
+                    indices=indices,
+                    units="mV",
+                    dt=rec_dt_s,
+                ),
+                TraceData(
+                    name="dendritic_potential_v",
+                    traces=rec_v[:, :n_rec],
+                    indices=indices,
+                    units="mV",
+                    dt=rec_dt_s,
+                ),
+                TraceData(
+                    name="firing_rate_r",
+                    traces=rec_r[:, :n_rec],
+                    indices=indices,
+                    units="1",
+                    dt=rec_dt_s,
+                ),
+                SynapseData(
+                    name="dendritic_weights",
+                    values=np.stack(w_snaps, axis=2),
+                    timestamps=np.asarray(w_times, dtype=np.float32),
+                ),
+            ],
+        )
 
         return {
             "val_mse": val_mse,
@@ -1151,6 +1231,9 @@ class Elise(NN):
             "num_vis": num_vis,
             "final_replay_rate": last_rate,
             "experiment": experiment,
+            "stim_exc_full": stim_exc_rec[:n_rec],
+            "stim_inh_full": stim_inh_rec[:n_rec],
+            "stim_dt_s": rec_dt_s,
             "config": {
                 "teacher_mode": teacher_mode,
                 "training_epochs": training_epochs,
@@ -1161,44 +1244,6 @@ class Elise(NN):
                 "replay_learning": bool(replay_learning),
             },
         }
-
-    def _record_training_experiment(
-        self,
-        opsin_exc: np.ndarray,
-        opsin_inh: np.ndarray,
-        stim_dt_s: float,
-        base: Mapping[str, ParamValue],
-    ) -> Experiment:
-        """Record a stimulus-driven training pass as a standard Experiment.
-
-        Runs a fresh network driven by the *actual* opsin stims (teacher on,
-        plasticity on) over the full stim timeline via :meth:`simulate`, and
-        returns the standard Experiment (``somatic_potential_u`` /
-        ``dendritic_potential_v`` / ``firing_rate_r`` / ``dendritic_weights``).
-
-        Because the teaching stimulus is applied, the activity lines up with the
-        project's opsin stim arrays; because plasticity is on and the network
-        starts untrained, the dendritic-weight snapshots evolve over the run
-        (timestamps within ``[0, duration]``) so the GUI time slider shows the
-        weights changing. This is a bounded, self-contained illustration of
-        training with the stimulus — the full-length learning is summarised by
-        the returned MSE/correlation curves, not this trace.
-        """
-        rec_stims = {
-            "opsin_exc": {"array": opsin_exc, "dt": stim_dt_s},
-            "opsin_inh": {"array": opsin_inh, "dt": stim_dt_s},
-        }
-        rec_params = dict(base)
-        rec_params["learn"] = True
-        # Fresh network so the weights visibly learn over the recording, and
-        # restart the stim-index origin so the run covers [0, duration).
-        self.reset()
-        self._simulated_time_s = 0.0
-        experiment = self.simulate(
-            rec_stims, opsin_exc.shape[0] * stim_dt_s, params=rec_params
-        )
-        experiment.name = "ELiSe training (stimulus-driven)"
-        return experiment
 
 
 def simulate(

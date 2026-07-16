@@ -104,38 +104,43 @@ Eq. 22–26), averaged over its evaluated windows. `validation_cycles` and
 
 Returns a dict: `val_mse`, `val_corr`, `rep_mse`, `rep_corr` (per epoch),
 `target_rate`, `cycle_trace_samples`, `trace_dt_s`, `num_vis`,
-`final_replay_rate`, `experiment`, and `config`.
+`final_replay_rate`, `experiment` (full-timeline recording), `stim_exc_full` /
+`stim_inh_full` / `stim_dt_s` (the matching full-timeline stim arrays), and
+`config`.
 
-### Recorded training Experiment
+### Full-timeline recording + stim arrays
 
-After the learning curves are computed, `run_protocol` records a
-**stimulus-driven training pass** as a standard neuroseq `Experiment`
-(`_record_training_experiment`): a fresh network is driven by the _actual_
-`opsin_exc` / `opsin_inh` stims (teacher on, plasticity on) over the stim
-timeline via `Elise.simulate`. The GUI imports it (below), giving
-`somatic_potential_u`, `dendritic_potential_v`, `firing_rate_r`
-(`num_all × T_stim`) and `dendritic_weights` snapshots, all on the same
-`[0, stim_duration]` timeline as the project's stim arrays.
+`run_protocol` records the **entire protocol** as one continuous `Experiment`
+and rebuilds the opsin stim arrays to match, so the stim array shows the true
+timeline of what was simulated. As the same loops that train the network and
+score the curves step forward, every `rec_step`-th step is written into
+`somatic_potential_u` / `dendritic_potential_v` / `firing_rate_r`
+(`num_all × n_rec`) and into a stim array (`n_rec × num_vis`), plus a
+`dendritic_weights` snapshot roughly per cycle. All share one timeline at
+`rec_dt_s`:
 
-This choice fixes two problems seen with an earlier teacher-off / frozen-weight
-recording:
+- **The stim array reflects the true timeline.** During training cycles it holds
+  the teaching pattern; during the teacher-off validation cycles and the replay
+  phase it is zero — so replay/validation are visible as no-stim gaps and the
+  activity lines up with them. `run_protocol` returns `stim_exc_full`,
+  `stim_inh_full`, `stim_dt_s`; the GUI (`_update_elise_stim_arrays`) writes them
+  back as the project's `opsin_exc` / `opsin_inh` (via `add_stim_array`, which
+  overwrites by name), preserving each array's `stim_type` / `units`.
+- **The weight matrix changes as you scrub.** Because the recorded timeline now
+  spans the actual training, the weight snapshots evolve across it and their
+  timestamps lie within `[0, duration]` — so the GUI's global time slider (which
+  drives the heatmap via `set_time_ms`, nearest timestamp, bounded by the trace
+  length) reaches the training-time snapshots. This is the fix for two earlier
+  failed attempts: (a) a `learn=False` replay gave identical snapshots; (b)
+  per-epoch snapshots timestamped over training time fell outside a short
+  replay-only trace, so only snapshot 0 was ever selectable.
 
-- **Activity now reflects the stimulus.** Driving with the real opsin stims (not
-  zeros) means the activity is the network's response to the pattern shown in the
-  stim arrays, aligned in time.
-- **The weight matrix changes as you scrub.** `simulate` writes weight snapshots
-  every `weight_snapshot_interval_ms` with timestamps inside `[0, duration]`, and
-  because the recording starts untrained with plasticity on, they evolve over the
-  run. Two earlier attempts failed: (a) a `learn=False` replay gave identical
-  snapshots; (b) per-epoch snapshots timestamped over _training_ time
-  (0…hundreds of s) fell outside the trace duration, so the GUI's global time
-  slider — which drives the heatmap via `set_time_ms` (nearest timestamp) and is
-  bounded by the trace length — could only ever select snapshot 0.
-
-The recording is a bounded, self-contained illustration of training with the
-stimulus (it starts fresh, so the singleton is left in that short-trained state);
-the full-length training is summarised by the returned MSE/correlation curves,
-not by this trace.
+**Memory.** Recording is at stim resolution (`rec_step = upsample`), downsampled
+further if the run would exceed ~500 k samples; weight snapshots are capped at
+~800 frames. At the GUI defaults this is ~150 MB; at paper scale it is larger
+(the user opted into the full-faithful timeline). The per-cycle firing rate used
+for the MSE/correlation curves is still computed at full trace resolution,
+independent of the (coarser) recording.
 
 ### Cycle detection and resampling
 
@@ -226,10 +231,12 @@ uncheck it.
 - `EliseProtocolWorker` runs on a `QThread`; the shared non-modal
   `progress_dialog` shows progress and a **Cancel** button (cancellation raises
   through the progress callback, as `ExternalSimWorker` does).
-- On completion: import the recorded training `Experiment` via
-  `_append_experimental_data` (the same `ImportExperimentDialog` flow as
-  external-sim results — offset / append-vs-new), so the activity traces line up
-  with the opsin stim arrays. Then prompt for a CSV path (skippable) and open a
+- On completion: rebuild the project's `opsin_exc` / `opsin_inh` to the full
+  protocol timeline (`_update_elise_stim_arrays`), then import the recorded
+  full-timeline `Experiment` via `_append_experimental_data` (the same
+  `ImportExperimentDialog` flow as external-sim results — offset / append-vs-new),
+  so the activity traces line up with the (rebuilt) stim arrays. Then prompt for
+  a CSV path (skippable) and open a
   `CustomAnalysisWindow` whose `elise_learning_curves` plugin draws the four
   panels. The curves dict is attached to the widget via `CURVES_ATTR`; the
   final replay trace is passed as the `set_data` payload.
