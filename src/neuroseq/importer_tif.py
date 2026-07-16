@@ -102,10 +102,12 @@ def _run_with_cpu_fallback(
     try:
         return fn(device), device, device_label
     except Exception as exc:
-        import torch
-
         if device.type == "cpu":
             raise
+        # Only reached when a GPU attempt failed — torch is guaranteed importable
+        # here (the caller already used it to build the GPU device).
+        import torch
+
         logger.warning(
             "GPU compute on %s failed (%s: %s); falling back to CPU.",
             device_label,

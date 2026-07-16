@@ -587,10 +587,15 @@ def test_run_with_cpu_fallback_retries_on_cpu(monkeypatch) -> None:
     assert calls == ["cuda", "cpu"]  # tried GPU, then CPU
 
 
-def test_run_with_cpu_fallback_reraises_on_cpu_failure() -> None:
+def test_run_with_cpu_fallback_reraises_on_cpu_failure(monkeypatch) -> None:
+    import sys
     import types
 
     from neuroseq.importer_tif import _run_with_cpu_fallback
+
+    # Hide torch so the CPU-reraise path must not import it (regression guard:
+    # torch is absent in the conda-forge CI env).
+    monkeypatch.setitem(sys.modules, "torch", None)
 
     cpu = types.SimpleNamespace(type="cpu")
 
