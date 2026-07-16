@@ -139,6 +139,55 @@ def test_run_protocol_rejects_shape_mismatch() -> None:
         elise.run_protocol(exc, inh, 0.001)
 
 
+@pytest.mark.parametrize("teacher_mode", ["direct", "opsin"])
+def test_run_protocol_full_timeline_with_fake_backend(
+    monkeypatch, teacher_mode
+) -> None:
+    """Exercise run_protocol + recording without the private elise package.
+
+    Uses the shared fake elise backend so the whole protocol (and hence the
+    full-timeline recording + stim arrays) runs in CI, where the real package
+    is unavailable and the real-elise tests above are skipped.
+    """
+    from neuroseq.example_models import elise
+    from tests.test_example_models_backend import _install_fake_elise
+
+    _install_fake_elise(monkeypatch)
+    exc, inh = _build_fuer_elise_opsin_stims(tfinal_ms=480)  # 2 cycles
+    base = {k: v["default"] for k, v in elise.DEFAULT_PARAMS.items()}
+
+    sim = elise.Elise()  # fresh instance → its own (fake) type cache
+    res = sim.run_protocol(
+        exc.astype(float),
+        inh.astype(float),
+        stim_dt_s=0.001,
+        base_params=base,
+        teacher_mode=teacher_mode,
+        training_epochs=2,
+        training_cycles=2,
+        validation_cycles=2,
+        replay_epochs=1,
+        replay_cycles=2,
+    )
+
+    exp = res["experiment"]
+    fr = next(d for d in exp.data if d.name == "firing_rate_r")
+    n_rec = fr.traces.shape[1]
+    # Stim arrays span the same timeline as the recorded traces.
+    assert res["stim_exc_full"].shape[0] == n_rec
+    assert res["stim_inh_full"].shape[0] == n_rec
+    assert res["stim_dt_s"] == pytest.approx(fr.dt)
+    # True timeline: stim present during training, absent in the replay tail.
+    assert float(res["stim_exc_full"].max()) > 0.0
+    assert float(res["stim_exc_full"][-1].max()) == 0.0
+    # The fake network increments weights on each learn step, so the snapshots
+    # differ (and lie within the trace duration).
+    weights = next(d for d in exp.data if d.name == "dendritic_weights")
+    assert weights.values.shape[2] >= 2
+    assert float(weights.timestamps.max()) <= exp.duration + 1e-6
+    assert not np.allclose(weights.values[:, :, 0], weights.values[:, :, -1])
+
+
 # ---------- CSV export ----------
 
 
@@ -311,11 +360,20 @@ def test_on_protocol_cancelled_and_progress(qtbot: QtBot) -> None:
         gui.close()
 
 
-@_needs_elise
 def test_run_protocol_full_dispatch(qtbot: QtBot, monkeypatch) -> None:
+    """End-to-end GUI dispatch (worker thread + finished slot) on the fake backend."""
+    import copy
+
     from qtpy import QtWidgets
 
-    from neuroseq.example_projects import elise_project
+    from neuroseq.example_models import elise as elise_mod
+    from tests.test_example_models_backend import _install_fake_elise
+
+    _install_fake_elise(monkeypatch)
+    # Force the singleton (used by the module-level run_protocol the worker calls)
+    # to re-import the fake types, and restore afterwards.
+    monkeypatch.setattr(elise_mod._SIMULATOR, "_elise_types", None, raising=False)
+    elise_mod._SIMULATOR.reset()
 
     class _FakeDialog:
         def __init__(self, parent=None) -> None:
@@ -330,9 +388,8 @@ def test_run_protocol_full_dispatch(qtbot: QtBot, monkeypatch) -> None:
                 "training_epochs": 2,
                 "training_cycles": 2,
                 "validation_cycles": 2,
-                "replay_epochs": 2,
+                "replay_epochs": 1,
                 "replay_cycles": 2,
-                "replay_learning": True,
             }
 
     monkeypatch.setattr(
@@ -343,8 +400,27 @@ def test_run_protocol_full_dispatch(qtbot: QtBot, monkeypatch) -> None:
     gui = Gui()
     qtbot.addWidget(gui)
     try:
-        project = elise_project()
-        gui.load_project(project)
+        gui.project.external_simulate_path = "neuroseq:elise"
+        gui.project.external_simulate_params = copy.deepcopy(elise_mod.DEFAULT_PARAMS)
+        exc, inh = _build_fuer_elise_opsin_stims(tfinal_ms=480)
+        gui.project.add_stim_array(
+            StimArray(
+                name="opsin_exc",
+                stim_type=StimType.Excitation,
+                values=exc,
+                units="mm**-2 / second",
+                dt=0.001,
+            )
+        )
+        gui.project.add_stim_array(
+            StimArray(
+                name="opsin_inh",
+                stim_type=StimType.Inhibition,
+                values=inh,
+                units="mm**-2 / second",
+                dt=0.001,
+            )
+        )
         gui._refresh_elise_replay_action()
         assert gui.elise_protocol_action.isEnabled()
 
@@ -352,5 +428,8 @@ def test_run_protocol_full_dispatch(qtbot: QtBot, monkeypatch) -> None:
         # Worker dispatched on a thread; wait for the finished slot to tear down.
         qtbot.waitUntil(lambda: gui._elise_protocol_worker is None, timeout=60000)
         assert gui.findChildren(CustomAnalysisWindow)
+        # The stim arrays were rebuilt to the recorded full timeline.
+        sa = gui.project.stim_arrays.get("opsin_exc")
+        assert sa is not None and sa.values.shape[0] > 0
     finally:
         gui.close()
