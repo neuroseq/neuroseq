@@ -200,6 +200,51 @@ uncheck it.
   panels. The curves dict is attached to the widget via `CURVES_ATTR`; the
   final replay trace is passed as the `set_data` payload.
 
+## How to run it in the GUI (reproduce Fig. 2)
+
+0. **One-time:** install the private `elise` package into the same venv, else
+   the action errors with a "requires the private 'elise' package" message:
+
+   ```
+   uv pip install --no-deps -e /mnt/live1/svintila/sequence-learning
+   ```
+
+1. Launch (`uv run neuroseq`) and open **File → Open example project → Network
+   → "ELISE Sequence Learning Network"**. Its defaults already match the
+   reference (`num_lat=50`, `lam=0.7`, `seed=2`, `a=0.3`, `b=-58`, plus the
+   `opsin_exc`/`opsin_inh` stims); edit via the parameter tree if desired.
+
+2. On the stim-editor toolbar click **"Run ELiSe Protocol (learning curves)"**
+   (graduation-cap icon) — distinct from "Analyse ELiSe Replay (target MSE)",
+   which only post-processes one finished simulation. Set the dialog:
+
+   | Field                            | Match reference  | Quick demo (~1 min) |
+   | -------------------------------- | ---------------- | ------------------- |
+   | Teacher mode                     | Direct           | Direct              |
+   | Training epochs                  | 100              | 30                  |
+   | Training cycles / epoch          | 100 (10 000 cyc) | 25 (750 cyc)        |
+   | Validation cycles / epoch        | 2                | 2                   |
+   | Replay epochs                    | 100              | 20                  |
+   | Replay cycles / epoch            | 2                | 2                   |
+   | Keep plasticity on during replay | checked          | unchecked for flat  |
+
+3. It trains on a background thread (responsive, cancellable). On finish it
+   prompts for a CSV (`phase, epoch, mse, corr_coeff`; skippable) and opens the
+   four-panel analysis window — the same Fig. 2b/c layout as
+   `elise_reference_fig2.png`.
+
+Expectation: **Direct** + 100×100 + replay-plasticity-on closely tracks the
+reference (val MSE ~0.07 → ~0.006, val corr ~0.22 → ~0.95, replay MSE with a
+mild upward creep, replay corr ~0.9). It is not bit-identical — the wrapper's
+RNG streams and its opsin-free direct drive differ from `train.py`. For the
+cleanest flat-replay Fig. 2, use **Direct** with replay plasticity **off**
+(val/replay MSE ~0.005, corr ~0.96). See `replay_learning` caveat above and the
+teacher-mode notes for the `opsin` variant.
+
+Reproducing the raw ground-truth curves outside the GUI (the authors' own
+`train.py`) is a separate offline driver, documented in the results folder
+(`.../random/elise_neuroseq_results/`), not part of neuroseq.
+
 ## Files
 
 New:
