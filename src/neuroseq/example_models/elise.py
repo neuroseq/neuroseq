@@ -1114,25 +1114,11 @@ class Elise(NN):
         if progress is not None:
             progress(0.0)
 
-        # Snapshot the dendritic weight matrix as it learns: one snapshot at
-        # init (untrained) plus one after each training epoch. This is the
-        # weight-evolution series the GUI heatmap slider scrubs — the recorded
-        # replay (below) freezes weights, so the learning must be captured here.
-        epoch_train_dur = training_cycles * T * trace_dt_s
-        weight_snaps: list[np.ndarray] = [
-            np.asarray(net.dendritic_weights, dtype=np.float32).copy()
-        ]
-        weight_times: list[float] = [0.0]
-
         val_mse = np.empty(training_epochs, dtype=np.float64)
         val_corr = np.empty(training_epochs, dtype=np.float64)
         for e in range(training_epochs):
             _train(training_cycles)
             val_mse[e], val_corr[e] = _score(_free_run(validation_cycles, False))
-            weight_snaps.append(
-                np.asarray(net.dendritic_weights, dtype=np.float32).copy()
-            )
-            weight_times.append((e + 1) * epoch_train_dur)
 
         rep_mse = np.empty(replay_epochs, dtype=np.float64)
         rep_corr = np.empty(replay_epochs, dtype=np.float64)
@@ -1141,25 +1127,15 @@ class Elise(NN):
             last_rate = _free_run(replay_cycles, replay_learning)
             rep_mse[e], rep_corr[e] = _score(last_rate)
 
-        # Record a teacher-off replay over the full stim timeline as a standard
-        # Experiment, so the trained activity lines up with the opsin stim
-        # arrays in the GUI (u/v/r, exactly like a normal simulate() run).
-        # Weights are frozen (learn=False) so it captures the trained attractor
-        # without replay-time drift.
-        experiment = self._record_replay_experiment(opsin_exc, stim_dt_s, base)
-        # Replace the replay's (constant) weight snapshots with the training
-        # trajectory so the heatmap slider shows the weights forming.
-        weight_series = SynapseData(
-            name="dendritic_weights",
-            values=np.stack(weight_snaps, axis=2),
-            timestamps=np.asarray(weight_times, dtype=np.float32),
+        # Record a stimulus-driven training pass as a standard Experiment: the
+        # network is driven by the actual opsin stims (teacher on, plasticity
+        # on) over the stim timeline, so the activity lines up with the opsin
+        # stim arrays AND the dendritic-weight snapshots (written every
+        # weight_snapshot_interval_ms, timestamps within [0, duration]) change
+        # over the run — the GUI's time slider can scrub the weights forming.
+        experiment = self._record_training_experiment(
+            opsin_exc, opsin_inh, stim_dt_s, base
         )
-        experiment.data = [
-            d
-            for d in experiment.data
-            if not (isinstance(d, SynapseData) and d.name == "dendritic_weights")
-        ]
-        experiment.data.append(weight_series)
 
         if progress is not None:
             progress(1.0)
@@ -1186,33 +1162,42 @@ class Elise(NN):
             },
         }
 
-    def _record_replay_experiment(
+    def _record_training_experiment(
         self,
         opsin_exc: np.ndarray,
+        opsin_inh: np.ndarray,
         stim_dt_s: float,
         base: Mapping[str, ParamValue],
     ) -> Experiment:
-        """Record a teacher-off replay of the trained network as an Experiment.
+        """Record a stimulus-driven training pass as a standard Experiment.
 
-        Drives the (already trained) network with zeroed opsin stims for the
-        full stim timeline with plasticity off, via :meth:`simulate`, and
+        Runs a fresh network driven by the *actual* opsin stims (teacher on,
+        plasticity on) over the full stim timeline via :meth:`simulate`, and
         returns the standard Experiment (``somatic_potential_u`` /
-        ``dendritic_potential_v`` / ``firing_rate_r`` / ``dendritic_weights``)
-        so the GUI can line the learned activity up with the opsin stim arrays.
+        ``dendritic_potential_v`` / ``firing_rate_r`` / ``dendritic_weights``).
+
+        Because the teaching stimulus is applied, the activity lines up with the
+        project's opsin stim arrays; because plasticity is on and the network
+        starts untrained, the dendritic-weight snapshots evolve over the run
+        (timestamps within ``[0, duration]``) so the GUI time slider shows the
+        weights changing. This is a bounded, self-contained illustration of
+        training with the stimulus — the full-length learning is summarised by
+        the returned MSE/correlation curves, not this trace.
         """
-        zeros = np.zeros_like(opsin_exc)
         rec_stims = {
-            "opsin_exc": {"array": zeros, "dt": stim_dt_s},
-            "opsin_inh": {"array": zeros, "dt": stim_dt_s},
+            "opsin_exc": {"array": opsin_exc, "dt": stim_dt_s},
+            "opsin_inh": {"array": opsin_inh, "dt": stim_dt_s},
         }
         rec_params = dict(base)
-        rec_params["learn"] = False
-        # Restart the stim-index origin so the recording covers [0, duration).
+        rec_params["learn"] = True
+        # Fresh network so the weights visibly learn over the recording, and
+        # restart the stim-index origin so the run covers [0, duration).
+        self.reset()
         self._simulated_time_s = 0.0
         experiment = self.simulate(
             rec_stims, opsin_exc.shape[0] * stim_dt_s, params=rec_params
         )
-        experiment.name = "ELiSe replay (teacher off, trained)"
+        experiment.name = "ELiSe training (stimulus-driven)"
         return experiment
 
 

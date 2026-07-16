@@ -106,26 +106,36 @@ Returns a dict: `val_mse`, `val_corr`, `rep_mse`, `rep_corr` (per epoch),
 `target_rate`, `cycle_trace_samples`, `trace_dt_s`, `num_vis`,
 `final_replay_rate`, `experiment`, and `config`.
 
-### Recorded replay Experiment
+### Recorded training Experiment
 
-After training/replay, `run_protocol` records a **teacher-off replay of the
-trained network** over the full opsin-stim timeline (zeroed stims, plasticity
-off) via `Elise.simulate` (`_record_replay_experiment`). This returns a standard
-neuroseq `Experiment` — `somatic_potential_u`, `dendritic_potential_v`,
-`firing_rate_r` (all `num_all × T_stim`) — at the trace dt, so its duration and
-sampling match the project's `opsin_exc` / `opsin_inh` stim arrays. The GUI
-imports it (below) so the learned activity lines up with the stimuli in the
-trace/stim widgets, exactly like any other simulation result. Activity weights
-are frozen during this recording so it reflects the trained attractor without
-replay-time drift.
+After the learning curves are computed, `run_protocol` records a
+**stimulus-driven training pass** as a standard neuroseq `Experiment`
+(`_record_training_experiment`): a fresh network is driven by the _actual_
+`opsin_exc` / `opsin_inh` stims (teacher on, plasticity on) over the stim
+timeline via `Elise.simulate`. The GUI imports it (below), giving
+`somatic_potential_u`, `dendritic_potential_v`, `firing_rate_r`
+(`num_all × T_stim`) and `dendritic_weights` snapshots, all on the same
+`[0, stim_duration]` timeline as the project's stim arrays.
 
-The `dendritic_weights` `SynapseData` on the Experiment is **not** the replay's
-(constant) snapshots — those are replaced with the **weight-learning
-trajectory**: one snapshot of the dendritic weight matrix at init plus one after
-each training epoch (`training_epochs + 1` frames, timestamps = cumulative
-training time). This is what the weight-heatmap slider scrubs, so it shows the
-weights forming over training rather than a matrix that never changes (the
-original bug: a `learn=False` recording gave identical snapshots).
+This choice fixes two problems seen with an earlier teacher-off / frozen-weight
+recording:
+
+- **Activity now reflects the stimulus.** Driving with the real opsin stims (not
+  zeros) means the activity is the network's response to the pattern shown in the
+  stim arrays, aligned in time.
+- **The weight matrix changes as you scrub.** `simulate` writes weight snapshots
+  every `weight_snapshot_interval_ms` with timestamps inside `[0, duration]`, and
+  because the recording starts untrained with plasticity on, they evolve over the
+  run. Two earlier attempts failed: (a) a `learn=False` replay gave identical
+  snapshots; (b) per-epoch snapshots timestamped over _training_ time
+  (0…hundreds of s) fell outside the trace duration, so the GUI's global time
+  slider — which drives the heatmap via `set_time_ms` (nearest timestamp) and is
+  bounded by the trace length — could only ever select snapshot 0.
+
+The recording is a bounded, self-contained illustration of training with the
+stimulus (it starts fresh, so the singleton is left in that short-trained state);
+the full-length training is summarised by the returned MSE/correlation curves,
+not by this trace.
 
 ### Cycle detection and resampling
 
@@ -216,7 +226,7 @@ uncheck it.
 - `EliseProtocolWorker` runs on a `QThread`; the shared non-modal
   `progress_dialog` shows progress and a **Cancel** button (cancellation raises
   through the progress callback, as `ExternalSimWorker` does).
-- On completion: import the recorded replay `Experiment` via
+- On completion: import the recorded training `Experiment` via
   `_append_experimental_data` (the same `ImportExperimentDialog` flow as
   external-sim results — offset / append-vs-new), so the activity traces line up
   with the opsin stim arrays. Then prompt for a CSV path (skippable) and open a
@@ -344,11 +354,13 @@ Ordered roughly by value / effort.
    window (`u_disrupt = E_l` or `E_l+15`) and show recovery. `run_protocol`'s
    free-run loop is the natural hook for an optional per-step clamp.
 
-7. **(Done)** The protocol now records the trained network's teacher-off replay
-   as a standard `Experiment` (`u/v/r` + weight snapshots) and imports it, so the
-   trace/heatmap widgets show the learned attractor aligned to the stim. Possible
-   extensions: also expose a teacher-on recording, or the per-epoch scalar curves
-   as project data so they survive save/load.
+7. **(Done)** The protocol records a stimulus-driven training pass as a standard
+   `Experiment` (`u/v/r` + evolving weight snapshots) and imports it, so the
+   trace/heatmap widgets show activity aligned to the stim and the weights
+   forming. Possible extensions: also expose a teacher-off replay of the fully
+   trained network (the trained attractor), a full-training weight trajectory on
+   its own timeline, or the per-epoch scalar curves as project data that survive
+   save/load.
 
 8. **Performance.** For very large runs, the Python per-step loop dominates;
    consider batching the free-run scoring or reusing the (numba) private-package
