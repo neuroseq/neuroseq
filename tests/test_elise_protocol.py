@@ -66,7 +66,7 @@ def test_run_protocol_direct_mode_learns() -> None:
 
 
 @_needs_elise
-def test_run_protocol_opsin_mode_runs() -> None:
+def test_run_protocol_opsin_mode_learns_delivered_teacher() -> None:
     from neuroseq.example_models import elise
 
     exc, inh = _build_fuer_elise_opsin_stims(tfinal_ms=1920)
@@ -78,13 +78,19 @@ def test_run_protocol_opsin_mode_runs() -> None:
         stim_dt_s=0.001,
         base_params=base,
         teacher_mode="opsin",
-        training_epochs=2,
-        training_cycles=3,
+        training_epochs=8,
+        training_cycles=15,
+        validation_cycles=2,
         replay_epochs=2,
+        replay_cycles=2,
     )
-    assert res["val_mse"].shape == (2,)
+    assert res["val_mse"].shape == (8,)
     assert res["config"]["teacher_mode"] == "opsin"
     assert np.all(np.isfinite(res["val_mse"]))
+    # Scored against the delivered (smeared) opsin teacher, the network learns:
+    # MSE falls and correlation rises, just like the direct teacher.
+    assert res["val_mse"][-1] < res["val_mse"][0]
+    assert res["val_corr"][-1] > res["val_corr"][0]
 
 
 @_needs_elise
