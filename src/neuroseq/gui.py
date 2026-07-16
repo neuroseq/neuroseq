@@ -2778,6 +2778,13 @@ class Gui(QtWidgets.QMainWindow):
         self.progress_dialog.setValue(100)
         self.progress_dialog.reset()
 
+        # Import the trained network's teacher-off replay as an Experiment so
+        # the activity traces line up with the opsin stim arrays in the GUI,
+        # like any other simulation result.
+        experiment = result.get("experiment")
+        if experiment is not None:
+            self._append_experimental_data(experiment)
+
         default_stem = "elise_learning_curves"
         if self.project.filepath is not None:
             default_stem = pathlib.Path(self.project.filepath).stem + "_learning_curves"

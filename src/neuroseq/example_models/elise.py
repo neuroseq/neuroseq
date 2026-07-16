@@ -1127,6 +1127,13 @@ class Elise(NN):
             last_rate = _free_run(replay_cycles, replay_learning)
             rep_mse[e], rep_corr[e] = _score(last_rate)
 
+        # Record a teacher-off replay over the full stim timeline as a standard
+        # Experiment, so the trained activity lines up with the opsin stim
+        # arrays in the GUI (u/v/r + weight snapshots, exactly like a normal
+        # simulate() run). Weights are frozen (learn=False) so it captures the
+        # trained attractor without replay-time drift.
+        experiment = self._record_replay_experiment(opsin_exc, stim_dt_s, base)
+
         if progress is not None:
             progress(1.0)
 
@@ -1140,6 +1147,7 @@ class Elise(NN):
             "trace_dt_s": trace_dt_s,
             "num_vis": num_vis,
             "final_replay_rate": last_rate,
+            "experiment": experiment,
             "config": {
                 "teacher_mode": teacher_mode,
                 "training_epochs": training_epochs,
@@ -1150,6 +1158,35 @@ class Elise(NN):
                 "replay_learning": bool(replay_learning),
             },
         }
+
+    def _record_replay_experiment(
+        self,
+        opsin_exc: np.ndarray,
+        stim_dt_s: float,
+        base: Mapping[str, ParamValue],
+    ) -> Experiment:
+        """Record a teacher-off replay of the trained network as an Experiment.
+
+        Drives the (already trained) network with zeroed opsin stims for the
+        full stim timeline with plasticity off, via :meth:`simulate`, and
+        returns the standard Experiment (``somatic_potential_u`` /
+        ``dendritic_potential_v`` / ``firing_rate_r`` / ``dendritic_weights``)
+        so the GUI can line the learned activity up with the opsin stim arrays.
+        """
+        zeros = np.zeros_like(opsin_exc)
+        rec_stims = {
+            "opsin_exc": {"array": zeros, "dt": stim_dt_s},
+            "opsin_inh": {"array": zeros, "dt": stim_dt_s},
+        }
+        rec_params = dict(base)
+        rec_params["learn"] = False
+        # Restart the stim-index origin so the recording covers [0, duration).
+        self._simulated_time_s = 0.0
+        experiment = self.simulate(
+            rec_stims, opsin_exc.shape[0] * stim_dt_s, params=rec_params
+        )
+        experiment.name = "ELiSe replay (teacher off, trained)"
+        return experiment
 
 
 def simulate(

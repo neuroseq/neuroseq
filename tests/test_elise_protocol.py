@@ -57,6 +57,13 @@ def test_run_protocol_direct_mode_learns() -> None:
     assert res["target_rate"].shape[0] == 13
     assert res["final_replay_rate"].shape == (13, 2 * res["cycle_trace_samples"])
 
+    # A standard replay Experiment is returned for import into the project so
+    # the activity lines up with the opsin stim arrays.
+    exp = res["experiment"]
+    assert exp is not None
+    trace_names = {d.name for d in exp.data}
+    assert "firing_rate_r" in trace_names
+
     # The crisp direct teacher must actually drive learning.
     assert res["val_mse"][-1] < res["val_mse"][0]
     assert res["val_corr"][-1] > res["val_corr"][0]
@@ -216,7 +223,7 @@ def test_elise_protocol_dialog_values(qtbot: QtBot) -> None:
     assert "training cycles" in dlg._estimate.text()
 
 
-def _synthetic_result() -> dict:
+def _synthetic_result(experiment=None) -> dict:
     T = 40
     return {
         "val_mse": np.array([0.08, 0.02, 0.006]),
@@ -228,22 +235,29 @@ def _synthetic_result() -> dict:
         "trace_dt_s": 1e-4,
         "num_vis": 13,
         "final_replay_rate": np.zeros((13, 2 * T)),
+        "experiment": experiment,
         "config": {"teacher_mode": "direct", "training_cycles": 25},
     }
 
 
-def test_on_protocol_finished_opens_window(qtbot: QtBot, monkeypatch) -> None:
+def test_on_protocol_finished_opens_window_and_imports_experiment(
+    qtbot: QtBot, monkeypatch, mocker
+) -> None:
     monkeypatch.setattr("neuroseq.gui.getsavefilename", lambda *a, **k: ("", ""))
     gui = Gui()
     qtbot.addWidget(gui)
     try:
-        gui._on_elise_protocol_finished(_synthetic_result())
+        append = mocker.patch.object(gui, "_append_experimental_data")
+        sentinel_exp = object()
+        gui._on_elise_protocol_finished(_synthetic_result(experiment=sentinel_exp))
         # Slot tore the worker state down and produced an analysis window.
         assert gui._elise_protocol_worker is None
         windows = gui.findChildren(CustomAnalysisWindow)
         assert windows
         widget = windows[-1].analysis_widget
         assert getattr(widget, _CURVES_ATTR, None) is not None
+        # The replay Experiment is imported so traces line up with the stim.
+        append.assert_called_once_with(sentinel_exp)
     finally:
         gui.close()
 

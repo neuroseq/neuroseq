@@ -104,7 +104,20 @@ Eq. 22–26), averaged over its evaluated windows. `validation_cycles` and
 
 Returns a dict: `val_mse`, `val_corr`, `rep_mse`, `rep_corr` (per epoch),
 `target_rate`, `cycle_trace_samples`, `trace_dt_s`, `num_vis`,
-`final_replay_rate`, and `config`.
+`final_replay_rate`, `experiment`, and `config`.
+
+### Recorded replay Experiment
+
+After training/replay, `run_protocol` records a **teacher-off replay of the
+trained network** over the full opsin-stim timeline (zeroed stims, plasticity
+off) via `Elise.simulate` (`_record_replay_experiment`). This returns a standard
+neuroseq `Experiment` — `somatic_potential_u`, `dendritic_potential_v`,
+`firing_rate_r` (all `num_all × T_stim`), and `dendritic_weights` snapshots —
+at the trace dt, so its duration and sampling match the project's `opsin_exc` /
+`opsin_inh` stim arrays. The GUI imports it (below) so the learned activity
+lines up with the stimuli in the trace/stim widgets, exactly like any other
+simulation result. Weights are frozen during this recording so it reflects the
+trained attractor without replay-time drift.
 
 ### Cycle detection and resampling
 
@@ -195,7 +208,10 @@ uncheck it.
 - `EliseProtocolWorker` runs on a `QThread`; the shared non-modal
   `progress_dialog` shows progress and a **Cancel** button (cancellation raises
   through the progress callback, as `ExternalSimWorker` does).
-- On completion: prompt for a CSV path (skippable), then open a
+- On completion: import the recorded replay `Experiment` via
+  `_append_experimental_data` (the same `ImportExperimentDialog` flow as
+  external-sim results — offset / append-vs-new), so the activity traces line up
+  with the opsin stim arrays. Then prompt for a CSV path (skippable) and open a
   `CustomAnalysisWindow` whose `elise_learning_curves` plugin draws the four
   panels. The curves dict is attached to the widget via `CURVES_ATTR`; the
   final replay trace is passed as the `set_data` payload.
@@ -320,9 +336,11 @@ Ordered roughly by value / effort.
    window (`u_disrupt = E_l` or `E_l+15`) and show recovery. `run_protocol`'s
    free-run loop is the natural hook for an optional per-step clamp.
 
-7. **Expose the protocol's final trained network as an Experiment.** Emit the
-   final replay `u/v/r` as `TraceData` so the trace/spike/heatmap widgets can
-   inspect the learned attractor, not just the scalar curves.
+7. **(Done)** The protocol now records the trained network's teacher-off replay
+   as a standard `Experiment` (`u/v/r` + weight snapshots) and imports it, so the
+   trace/heatmap widgets show the learned attractor aligned to the stim. Possible
+   extensions: also expose a teacher-on recording, or the per-epoch scalar curves
+   as project data so they survive save/load.
 
 8. **Performance.** For very large runs, the Python per-step loop dominates;
    consider batching the free-run scoring or reusing the (numba) private-package
