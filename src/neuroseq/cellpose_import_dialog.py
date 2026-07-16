@@ -126,6 +126,13 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.open_fiji_button = QtWidgets.QPushButton("Open in Fiji")
         self.open_fiji_button.clicked.connect(self._open_in_fiji)
         fiji_button_layout.addWidget(self.open_fiji_button)
+        self.change_fiji_button = QtWidgets.QPushButton("Change Fiji path…")
+        self.change_fiji_button.setToolTip(
+            "Choose a different Fiji/ImageJ executable (e.g. if the saved path "
+            "is wrong)."
+        )
+        self.change_fiji_button.clicked.connect(self._change_fiji_path)
+        fiji_button_layout.addWidget(self.change_fiji_button)
         selection_layout.addLayout(fiji_button_layout)
 
         cellpose_button_layout = QtWidgets.QHBoxLayout()
@@ -1028,6 +1035,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
         )
         if filename:
             self._load_segmentation_file(filename)
+
+    def _change_fiji_path(self) -> None:
+        """Let the user pick a different Fiji executable, even if one is set."""
+        from neuroseq.fiji import resolve_fiji_path
+
+        resolve_fiji_path(self, force_prompt=True)
 
     def _open_in_fiji(self) -> None:
         """Launch Fiji/ImageJ, optionally opening the currently selected image."""

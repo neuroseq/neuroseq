@@ -29,9 +29,10 @@ class FijiPathDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
 
         info = QtWidgets.QLabel(
-            "Fiji/ImageJ was not auto-detected. Browse to the Fiji launcher "
-            "binary (e.g. <code>ImageJ-linux64</code> inside <code>Fiji.app</code>) "
-            "or paste the full path below. Install Fiji from "
+            "Browse to the Fiji launcher binary (e.g. "
+            "<code>ImageJ-linux64</code> inside <code>Fiji.app</code>) or paste "
+            "the full path below; use <b>Auto-detect</b> to search common "
+            "locations. Install Fiji from "
             "<a href='https://fiji.sc/'>https://fiji.sc/</a>."
         )
         info.setWordWrap(True)
@@ -100,14 +101,20 @@ class FijiPathDialog(QtWidgets.QDialog):
         return self._chosen_path
 
 
-def resolve_fiji_path(parent: QtWidgets.QWidget | None) -> str:
+def resolve_fiji_path(
+    parent: QtWidgets.QWidget | None, *, force_prompt: bool = False
+) -> str:
     """Return a valid Fiji path, prompting the user via dialog if needed.
+
+    With ``force_prompt=True`` the chooser is always shown (pre-filled with the
+    saved path) even when a valid path already exists, so a wrong-but-valid path
+    can be corrected from the GUI.
 
     Returns an empty string if the user cancels the dialog.
     """
     settings = GuiSettings()
     path = settings.fiji_executable_path
-    if path and Path(path).exists():
+    if not force_prompt and path and Path(path).exists():
         return path
 
     dialog = FijiPathDialog(parent, initial_path=path)

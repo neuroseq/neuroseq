@@ -166,9 +166,16 @@ class TifImportDialog(QtWidgets.QDialog):
             "Launch Fiji/ImageJ; if a TIFF is selected, open it for inspection."
         )
         self._run_fiji_button.clicked.connect(self._launch_fiji)
+        self._change_fiji_button = QtWidgets.QPushButton("Change Fiji path…")
+        self._change_fiji_button.setToolTip(
+            "Choose a different Fiji/ImageJ executable (e.g. if the saved path "
+            "is wrong)."
+        )
+        self._change_fiji_button.clicked.connect(self._change_fiji_path)
         tif_buttons.addWidget(add_btn)
         tif_buttons.addWidget(remove_btn)
         tif_buttons.addWidget(self._run_fiji_button)
+        tif_buttons.addWidget(self._change_fiji_button)
         tif_buttons.addStretch(1)
         tif_layout.addLayout(tif_buttons)
         layout.addWidget(tif_group)
@@ -291,6 +298,12 @@ class TifImportDialog(QtWidgets.QDialog):
             row = self._tif_list.row(item)
             self._tif_list.takeItem(row)
             del self._tif_paths[row]
+
+    def _change_fiji_path(self) -> None:
+        """Let the user pick a different Fiji executable, even if one is set."""
+        from neuroseq.fiji import resolve_fiji_path
+
+        resolve_fiji_path(self, force_prompt=True)
 
     def _launch_fiji(self) -> None:
         """Launch Fiji/ImageJ, opening the first selected TIFF if one is available."""
