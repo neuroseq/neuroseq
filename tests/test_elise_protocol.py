@@ -64,6 +64,13 @@ def test_run_protocol_direct_mode_learns() -> None:
     trace_names = {d.name for d in exp.data}
     assert "firing_rate_r" in trace_names
 
+    # dendritic_weights captures the learning trajectory: one snapshot at init
+    # plus one per training epoch, and the matrix actually changes across it
+    # (so the GUI slider is not stuck on a constant matrix).
+    weights = next(d for d in exp.data if d.name == "dendritic_weights")
+    assert weights.values.shape[2] == 8 + 1  # training_epochs + initial
+    assert not np.allclose(weights.values[:, :, 0], weights.values[:, :, -1])
+
     # The crisp direct teacher must actually drive learning.
     assert res["val_mse"][-1] < res["val_mse"][0]
     assert res["val_corr"][-1] > res["val_corr"][0]

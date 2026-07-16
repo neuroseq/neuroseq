@@ -112,12 +112,20 @@ After training/replay, `run_protocol` records a **teacher-off replay of the
 trained network** over the full opsin-stim timeline (zeroed stims, plasticity
 off) via `Elise.simulate` (`_record_replay_experiment`). This returns a standard
 neuroseq `Experiment` — `somatic_potential_u`, `dendritic_potential_v`,
-`firing_rate_r` (all `num_all × T_stim`), and `dendritic_weights` snapshots —
-at the trace dt, so its duration and sampling match the project's `opsin_exc` /
-`opsin_inh` stim arrays. The GUI imports it (below) so the learned activity
-lines up with the stimuli in the trace/stim widgets, exactly like any other
-simulation result. Weights are frozen during this recording so it reflects the
-trained attractor without replay-time drift.
+`firing_rate_r` (all `num_all × T_stim`) — at the trace dt, so its duration and
+sampling match the project's `opsin_exc` / `opsin_inh` stim arrays. The GUI
+imports it (below) so the learned activity lines up with the stimuli in the
+trace/stim widgets, exactly like any other simulation result. Activity weights
+are frozen during this recording so it reflects the trained attractor without
+replay-time drift.
+
+The `dendritic_weights` `SynapseData` on the Experiment is **not** the replay's
+(constant) snapshots — those are replaced with the **weight-learning
+trajectory**: one snapshot of the dendritic weight matrix at init plus one after
+each training epoch (`training_epochs + 1` frames, timestamps = cumulative
+training time). This is what the weight-heatmap slider scrubs, so it shows the
+weights forming over training rather than a matrix that never changes (the
+original bug: a `learn=False` recording gave identical snapshots).
 
 ### Cycle detection and resampling
 

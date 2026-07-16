@@ -1114,11 +1114,25 @@ class Elise(NN):
         if progress is not None:
             progress(0.0)
 
+        # Snapshot the dendritic weight matrix as it learns: one snapshot at
+        # init (untrained) plus one after each training epoch. This is the
+        # weight-evolution series the GUI heatmap slider scrubs — the recorded
+        # replay (below) freezes weights, so the learning must be captured here.
+        epoch_train_dur = training_cycles * T * trace_dt_s
+        weight_snaps: list[np.ndarray] = [
+            np.asarray(net.dendritic_weights, dtype=np.float32).copy()
+        ]
+        weight_times: list[float] = [0.0]
+
         val_mse = np.empty(training_epochs, dtype=np.float64)
         val_corr = np.empty(training_epochs, dtype=np.float64)
         for e in range(training_epochs):
             _train(training_cycles)
             val_mse[e], val_corr[e] = _score(_free_run(validation_cycles, False))
+            weight_snaps.append(
+                np.asarray(net.dendritic_weights, dtype=np.float32).copy()
+            )
+            weight_times.append((e + 1) * epoch_train_dur)
 
         rep_mse = np.empty(replay_epochs, dtype=np.float64)
         rep_corr = np.empty(replay_epochs, dtype=np.float64)
@@ -1129,10 +1143,23 @@ class Elise(NN):
 
         # Record a teacher-off replay over the full stim timeline as a standard
         # Experiment, so the trained activity lines up with the opsin stim
-        # arrays in the GUI (u/v/r + weight snapshots, exactly like a normal
-        # simulate() run). Weights are frozen (learn=False) so it captures the
-        # trained attractor without replay-time drift.
+        # arrays in the GUI (u/v/r, exactly like a normal simulate() run).
+        # Weights are frozen (learn=False) so it captures the trained attractor
+        # without replay-time drift.
         experiment = self._record_replay_experiment(opsin_exc, stim_dt_s, base)
+        # Replace the replay's (constant) weight snapshots with the training
+        # trajectory so the heatmap slider shows the weights forming.
+        weight_series = SynapseData(
+            name="dendritic_weights",
+            values=np.stack(weight_snaps, axis=2),
+            timestamps=np.asarray(weight_times, dtype=np.float32),
+        )
+        experiment.data = [
+            d
+            for d in experiment.data
+            if not (isinstance(d, SynapseData) and d.name == "dendritic_weights")
+        ]
+        experiment.data.append(weight_series)
 
         if progress is not None:
             progress(1.0)
