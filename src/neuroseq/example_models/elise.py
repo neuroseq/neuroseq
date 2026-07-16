@@ -29,6 +29,7 @@ from neuroseq.data import TraceData
 from neuroseq.example_models.NN import NN
 from neuroseq.example_models.NN import ParamValue
 from neuroseq.example_models.NN import ProgressCallback
+from neuroseq.replay_metrics import compute_performance_against_target
 
 FlatParams = dict[str, ParamValue]
 
@@ -832,6 +833,247 @@ class Elise(NN):
             data=data,
         )
 
+    def run_protocol(
+        self,
+        opsin_exc: np.ndarray,
+        opsin_inh: np.ndarray,
+        stim_dt_s: float,
+        *,
+        base_params: Mapping[str, ParamValue] | None = None,
+        teacher_mode: str = "direct",
+        training_epochs: int = 10,
+        training_cycles: int = 25,
+        validation_cycles: int = 2,
+        replay_epochs: int = 50,
+        replay_cycles: int = 2,
+        replay_learning: bool = True,
+        u_active_offset: float = 20.0,
+        cycle_length: int | None = None,
+        progress: ProgressCallback | None = None,
+    ) -> dict:
+        """Run the paper's train / validation / replay protocol (Fig. 2).
+
+        Reproduces Kriener et al. (2024), Sec. 5.5–5.6 inside neuroseq by
+        stepping the ELiSe network directly (not through :meth:`simulate`),
+        so learning, teacher release, and scoring all follow the paper:
+
+        * **Training** — the teaching pattern is presented for
+          ``training_cycles`` with plasticity on. The soma is nudged toward the
+          target voltage ``u_tgt`` (see ``teacher_mode``).
+        * **Validation** — after each training epoch the teacher is released
+          (``u_inp = None``) with plasticity off; the free replay over
+          ``validation_cycles`` is scored against ``y = φ(u_tgt)`` (Eq. 6).
+          This is the Fig. 2b/c *training* curve.
+        * **Replay** — after training, ``replay_epochs`` teacher-off epochs are
+          scored the same way (``learn=replay_learning``). This is the Fig. 2b/c
+          *replay* curve.
+
+        Network state (voltages, rates, weights) carries across every phase —
+        there is no reset between cycles, matching the paper. The metric is the
+        shift-aligned MSE / Pearson correlation
+        (:func:`neuroseq.replay_metrics.compute_performance_against_target`).
+
+        Parameters
+        ----------
+        opsin_exc, opsin_inh : np.ndarray, shape ``(T_total, num_vis)``
+            The project's excitatory / inhibitory opsin stim arrays. Only one
+            teaching cycle is used (autodetected, or ``cycle_length``); the rest
+            is ignored. For ``teacher_mode="direct"`` only the binary on/off
+            footprint of ``opsin_exc`` matters.
+        stim_dt_s : float
+            Stim sampling interval (seconds). Must be an integer multiple of the
+            simulation trace dt (``dt_ms / 1000``).
+        base_params : mapping, optional
+            Flat ``{name: value}`` parameter overrides (the project's editable
+            ELiSe params). The network is (re)initialised fresh from these.
+        teacher_mode : {"direct", "opsin"}
+            ``"direct"`` (default, paper-faithful): nudge the soma straight to
+            the crisp target voltage ``u_tgt = E_l + u_active_offset·pattern``,
+            exactly as ``scripts/train.py``. This matches the metric target and
+            reproduces Fig. 2. ``"opsin"``: derive ``u_tgt`` from the 3-state
+            opsin kinetics (as :meth:`simulate` does) — biologically realistic
+            for the holographic-stimulation story, but the kinetic ramp and
+            desensitization tail smear the teacher relative to the crisp target,
+            so it does *not* reproduce the paper's low replay error.
+        u_active_offset : float
+            mV above ``E_l`` for an active pitch's target (paper maps 1 → E_l+20).
+
+        Returns
+        -------
+        dict
+            ``val_mse``, ``val_corr`` (one entry per training epoch),
+            ``rep_mse``, ``rep_corr`` (one entry per replay epoch), plus
+            ``target_rate`` (resampled), ``cycle_trace_samples``, ``trace_dt_s``,
+            ``num_vis``, ``final_replay_rate`` and ``config``.
+        """
+        if teacher_mode not in ("direct", "opsin"):
+            raise ValueError(
+                f"teacher_mode must be 'direct' or 'opsin', got {teacher_mode!r}"
+            )
+        opsin_exc = np.asarray(opsin_exc, dtype=np.float64)
+        opsin_inh = np.asarray(opsin_inh, dtype=np.float64)
+        if opsin_exc.shape != opsin_inh.shape:
+            raise ValueError("opsin_exc and opsin_inh must have the same shape")
+        if opsin_exc.ndim != 2 or opsin_exc.shape[0] == 0:
+            raise ValueError("opsin arrays must be 2-D (T_total, num_vis)")
+
+        training_epochs = max(1, int(training_epochs))
+        training_cycles = max(1, int(training_cycles))
+        # compute_performance_against_target needs at least two whole cycles.
+        validation_cycles = max(2, int(validation_cycles))
+        replay_epochs = max(1, int(replay_epochs))
+        replay_cycles = max(2, int(replay_cycles))
+
+        # Fresh network initialised from the requested parameters.
+        self.reset()
+        self.update_params(base_params)
+        base = dict(self._params)
+
+        E_l = _float_param(base, "E_l")
+        a = _float_param(base, "a")
+        b = _float_param(base, "b")
+        trace_dt_s = _float_param(base, "dt_ms") / 1000.0
+
+        target_rate_stim, cyc_samples = build_target_rate_pattern(
+            opsin_exc,
+            E_l=E_l,
+            a=a,
+            b=b,
+            u_active_offset=u_active_offset,
+            cycle_length=cycle_length,
+        )
+        upsample = int(round(stim_dt_s / trace_dt_s))
+        if upsample < 1 or abs(stim_dt_s - upsample * trace_dt_s) > 1e-9:
+            raise ValueError(
+                f"stim dt ({stim_dt_s * 1000:.4g} ms) must be an integer "
+                f"multiple of trace dt ({trace_dt_s * 1000:.4g} ms)"
+            )
+        # Target firing rate and (per trace-step) drive, one cycle at trace dt.
+        target_rate = np.repeat(target_rate_stim, upsample, axis=1)
+        num_vis = int(target_rate.shape[0])
+        T = int(target_rate.shape[1])
+
+        pattern_cycle = (opsin_exc[:cyc_samples, :] > 0).T.astype(np.float64)
+        pattern_cycle = np.repeat(pattern_cycle, upsample, axis=1)  # (num_vis, T)
+        u_tgt_cycle = E_l + u_active_offset * pattern_cycle  # crisp direct teacher
+        flux_exc_cycle = np.repeat(opsin_exc[:cyc_samples, :].T, upsample, axis=1)
+        flux_inh_cycle = np.repeat(opsin_inh[:cyc_samples, :].T, upsample, axis=1)
+
+        self._initialize_network(num_vis)
+        net = self._network
+        assert net is not None
+
+        # Opsin drive parameters (only used for teacher_mode="opsin").
+        E_exc = _float_param(base, "E_exc")
+        E_inh = _float_param(base, "E_inh")
+        kin_exc = (
+            _float_param(base, "k_a_max_exc"),
+            _float_param(base, "phi_m_exc"),
+            _float_param(base, "k_d_exc"),
+            _float_param(base, "k_r_exc"),
+        )
+        kin_inh = (
+            _float_param(base, "k_a_max_inh"),
+            _float_param(base, "phi_m_inh"),
+            _float_param(base, "k_d_inh"),
+            _float_param(base, "k_r_inh"),
+        )
+        g0_exc = _float_param(base, "g0_exc")
+        g0_inh = _float_param(base, "g0_inh")
+
+        def _teacher_u(t_in_cycle: int) -> np.ndarray:
+            if teacher_mode == "direct":
+                return u_tgt_cycle[:, t_in_cycle]
+            # opsin: advance kinetics, then matching potential (as simulate()).
+            _step_kinetics(
+                self._O_exc,
+                self._D_exc,
+                flux_exc_cycle[:, t_in_cycle],
+                *kin_exc,
+                trace_dt_s,
+            )
+            _step_kinetics(
+                self._O_inh,
+                self._D_inh,
+                flux_inh_cycle[:, t_in_cycle],
+                *kin_inh,
+                trace_dt_s,
+            )
+            g_exc_k = g0_exc * self._O_exc
+            g_inh_k = g0_inh * self._O_inh
+            sum_k = g_exc_k + g_inh_k
+            with np.errstate(invalid="ignore", divide="ignore"):
+                u_tgt = (g_exc_k * E_exc + g_inh_k * E_inh) / sum_k
+            return np.where(sum_k > 0, u_tgt, E_l)
+
+        total_steps = (
+            training_epochs * (training_cycles + validation_cycles)
+            + replay_epochs * replay_cycles
+        ) * T
+        counter = {"n": 0}
+
+        def _tick() -> None:
+            counter["n"] += 1
+            if progress is not None and counter["n"] % 2000 == 0:
+                progress(counter["n"] / total_steps)
+
+        def _train(n_cycles: int) -> None:
+            for k in range(n_cycles * T):
+                net(u_inp=_teacher_u(k % T), learn=True)
+                _tick()
+
+        def _free_run(n_cycles: int, learn: bool) -> np.ndarray:
+            rate = np.empty((num_vis, n_cycles * T), dtype=np.float64)
+            for k in range(n_cycles * T):
+                net(u_inp=None, learn=learn)
+                rate[:, k] = net.r[:num_vis]
+                _tick()
+            return rate
+
+        def _score(rate: np.ndarray) -> tuple[float, float]:
+            mses, corrs, _ = compute_performance_against_target(rate, target_rate)
+            return float(np.mean(mses)), float(np.nanmean(corrs))
+
+        if progress is not None:
+            progress(0.0)
+
+        val_mse = np.empty(training_epochs, dtype=np.float64)
+        val_corr = np.empty(training_epochs, dtype=np.float64)
+        for e in range(training_epochs):
+            _train(training_cycles)
+            val_mse[e], val_corr[e] = _score(_free_run(validation_cycles, False))
+
+        rep_mse = np.empty(replay_epochs, dtype=np.float64)
+        rep_corr = np.empty(replay_epochs, dtype=np.float64)
+        last_rate: np.ndarray | None = None
+        for e in range(replay_epochs):
+            last_rate = _free_run(replay_cycles, replay_learning)
+            rep_mse[e], rep_corr[e] = _score(last_rate)
+
+        if progress is not None:
+            progress(1.0)
+
+        return {
+            "val_mse": val_mse,
+            "val_corr": val_corr,
+            "rep_mse": rep_mse,
+            "rep_corr": rep_corr,
+            "target_rate": target_rate,
+            "cycle_trace_samples": T,
+            "trace_dt_s": trace_dt_s,
+            "num_vis": num_vis,
+            "final_replay_rate": last_rate,
+            "config": {
+                "teacher_mode": teacher_mode,
+                "training_epochs": training_epochs,
+                "training_cycles": training_cycles,
+                "validation_cycles": validation_cycles,
+                "replay_epochs": replay_epochs,
+                "replay_cycles": replay_cycles,
+                "replay_learning": bool(replay_learning),
+            },
+        }
+
 
 def simulate(
     stims_dict: dict,
@@ -843,6 +1085,19 @@ def simulate(
     return _SIMULATOR.simulate(
         stims_dict, simulation_time, params=params, progress=progress
     )
+
+
+def run_protocol(
+    opsin_exc: np.ndarray,
+    opsin_inh: np.ndarray,
+    stim_dt_s: float,
+    **kwargs: object,
+) -> dict:
+    """Run the train/validation/replay protocol on the singleton simulator.
+
+    Thin wrapper around :meth:`Elise.run_protocol`; see it for the contract.
+    """
+    return _SIMULATOR.run_protocol(opsin_exc, opsin_inh, stim_dt_s, **kwargs)  # type: ignore[arg-type]
 
 
 def get_simulator() -> Elise:
