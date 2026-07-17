@@ -244,6 +244,9 @@ def test_run_suite2p_pipeline_orchestration(monkeypatch, tmp_path: Path):
         "torch",
         cuda=_FakeCuda(),
         device=lambda x: f"device:{x}",
+        # Distinct dummy so scipy's array-api probe sees a Tensor type that
+        # numpy arrays are (correctly) not instances of.
+        Tensor=type("Tensor", (), {}),
     )
 
     monkeypatch.setitem(sys.modules, "suite2p", suite2p_mod)
@@ -374,6 +377,7 @@ def test_run_suite2p_pipeline_filters_mixed_fov_tiffs(monkeypatch, tmp_path: Pat
         "torch",
         cuda=type("C", (), {"is_available": staticmethod(lambda: False)})(),
         device=lambda x: x,
+        Tensor=type("Tensor", (), {}),
     )
 
     for name, mod in {
@@ -468,6 +472,7 @@ def test_run_suite2p_pipeline_rejects_mismatched_mask_shape(
         "torch",
         cuda=type("C", (), {"is_available": staticmethod(lambda: False)})(),
         device=lambda x: x,
+        Tensor=type("Tensor", (), {}),
     )
 
     for name, mod in {
@@ -484,3 +489,118 @@ def test_run_suite2p_pipeline_rejects_mismatched_mask_shape(
     tif.write_bytes(b"")
     with pytest.raises(ValueError, match="does not match TIFF shape"):
         run_suite2p_pipeline([tif], masks, TifPipelineParams(nchannels=1))
+
+
+# ---------- GPU device auto-selection ----------
+
+
+def _fake_module(name: str, **attrs: Any):
+    """Build a stand-in module. Uses ``setattr`` with a variable key so neither
+    ruff (no constant-setattr) nor mypy (no attr-defined on ModuleType) complain.
+    """
+    import types
+
+    mod = types.ModuleType(name)
+    for key, value in attrs.items():
+        setattr(mod, key, value)
+    return mod
+
+
+def _fake_torch(*, cuda: bool, mps: bool | None):
+    """Build a minimal fake ``torch`` module for select_torch_device tests.
+
+    ``mps=None`` omits the ``backends`` attribute entirely (mimics older torch).
+    """
+    import types
+
+    attrs: dict[str, Any] = {
+        "cuda": type("C", (), {"is_available": staticmethod(lambda: cuda)})(),
+        "device": lambda x: f"device:{x}",
+    }
+    if mps is not None:
+        attrs["backends"] = types.SimpleNamespace(
+            mps=type("M", (), {"is_available": staticmethod(lambda: mps)})()
+        )
+    return _fake_module("torch", **attrs)
+
+
+@pytest.mark.parametrize(
+    ("cuda", "mps", "expected"),
+    [
+        (True, False, "GPU (CUDA)"),
+        (True, True, "GPU (CUDA)"),  # CUDA preferred over MPS
+        (False, True, "GPU (Apple MPS)"),
+        (False, False, "CPU"),
+        (False, None, "CPU"),  # torch without a backends/mps attribute
+    ],
+)
+def test_select_torch_device_prefers_available_gpu(
+    monkeypatch, cuda, mps, expected
+) -> None:
+    import sys
+
+    from neuroseq.importer_tif import select_torch_device
+
+    monkeypatch.delenv("NEUROSEQ_FORCE_CPU", raising=False)
+    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda=cuda, mps=mps))
+    device, label = select_torch_device()
+    assert label == expected
+
+
+def test_select_torch_device_force_cpu_env_overrides_gpu(monkeypatch) -> None:
+    import sys
+
+    from neuroseq.importer_tif import select_torch_device
+
+    monkeypatch.setenv("NEUROSEQ_FORCE_CPU", "1")
+    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda=True, mps=True))
+    device, label = select_torch_device()
+    assert label == "CPU (forced)"
+    assert device == "device:cpu"
+
+
+def test_run_with_cpu_fallback_retries_on_cpu(monkeypatch) -> None:
+    import sys
+    import types
+
+    from neuroseq.importer_tif import _run_with_cpu_fallback
+
+    # Fake torch whose device objects carry a ``.type`` (as the real ones do).
+    torch_mod = _fake_module(
+        "torch", device=lambda name: types.SimpleNamespace(type=name)
+    )
+    monkeypatch.setitem(sys.modules, "torch", torch_mod)
+
+    gpu = types.SimpleNamespace(type="cuda")
+    calls: list[str] = []
+
+    def fn(dev):
+        calls.append(dev.type)
+        if dev.type != "cpu":
+            raise RuntimeError("op not implemented on this GPU")
+        return "ok"
+
+    result, device, label = _run_with_cpu_fallback(fn, gpu, "GPU (CUDA)")
+    assert result == "ok"
+    assert device.type == "cpu"
+    assert label == "CPU (GPU fallback)"
+    assert calls == ["cuda", "cpu"]  # tried GPU, then CPU
+
+
+def test_run_with_cpu_fallback_reraises_on_cpu_failure(monkeypatch) -> None:
+    import sys
+    import types
+
+    from neuroseq.importer_tif import _run_with_cpu_fallback
+
+    # Hide torch so the CPU-reraise path must not import it (regression guard:
+    # torch is absent in the conda-forge CI env).
+    monkeypatch.setitem(sys.modules, "torch", None)
+
+    cpu = types.SimpleNamespace(type="cpu")
+
+    def fn(dev):
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        _run_with_cpu_fallback(fn, cpu, "CPU")

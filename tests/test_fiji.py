@@ -24,6 +24,35 @@ def test_resolve_fiji_path_returns_existing_path_without_dialog(
     dialog_cls.assert_not_called()
 
 
+def test_resolve_fiji_path_force_prompt_shows_dialog_even_when_valid(
+    qtbot, mocker, tmp_path: Path
+):
+    from neuroseq import fiji
+
+    old_fiji = tmp_path / "ImageJ-linux64"
+    old_fiji.write_text("")
+    new_fiji = tmp_path / "fiji"
+    new_fiji.write_text("")
+
+    settings = mocker.MagicMock()
+    settings.fiji_executable_path = str(old_fiji)  # already valid
+    mocker.patch("neuroseq.fiji.GuiSettings", return_value=settings)
+
+    fake_dialog = mocker.MagicMock()
+    fake_dialog.exec.return_value = 1  # Accepted
+    fake_dialog.chosen_path = str(new_fiji)
+    dialog_cls = mocker.patch("neuroseq.fiji.FijiPathDialog", return_value=fake_dialog)
+
+    result = fiji.resolve_fiji_path(parent=None, force_prompt=True)
+
+    # Dialog is shown despite the existing valid path, pre-filled with it, and
+    # the newly chosen path is persisted.
+    dialog_cls.assert_called_once()
+    assert dialog_cls.call_args.kwargs["initial_path"] == str(old_fiji)
+    assert result == str(new_fiji)
+    assert settings.fiji_executable_path == str(new_fiji)
+
+
 def test_resolve_fiji_path_pops_dialog_when_path_missing(qtbot, mocker, tmp_path: Path):
     from neuroseq import fiji
 

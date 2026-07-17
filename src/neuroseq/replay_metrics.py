@@ -216,6 +216,62 @@ def save_replay_metrics_csv(
     return out_path
 
 
+def save_learning_curves_csv(
+    path: str | Path,
+    curves: dict,
+    *,
+    source: str | None = None,
+) -> Path:
+    """Write per-epoch train + replay learning curves to a CSV.
+
+    ``curves`` is the dict returned by
+    :meth:`neuroseq.example_models.elise.Elise.run_protocol`. The output has a
+    ``#``-commented header with the run config and one data row per epoch,
+    tagged by phase (``training`` = teacher-off validation during training,
+    ``replay`` = free replay after training).
+    """
+    out_path = Path(path)
+    cfg = curves.get("config", {}) or {}
+    val_mse = np.asarray(curves.get("val_mse", []), dtype=np.float64)
+    val_corr = np.asarray(curves.get("val_corr", []), dtype=np.float64)
+    rep_mse = np.asarray(curves.get("rep_mse", []), dtype=np.float64)
+    rep_corr = np.asarray(curves.get("rep_corr", []), dtype=np.float64)
+
+    with out_path.open("w", newline="") as fh:
+        fh.write("# Analysis: ELiSe learning curves (Kriener et al. 2024, Fig. 2b/c)\n")
+        if source is not None:
+            fh.write(f"# Source: {source}\n")
+        fh.write(
+            f"# Timestamp: {datetime.datetime.now().isoformat(timespec='seconds')}\n"
+        )
+        for key in (
+            "teacher_mode",
+            "training_epochs",
+            "training_cycles",
+            "validation_cycles",
+            "replay_epochs",
+            "replay_cycles",
+            "replay_learning",
+        ):
+            if key in cfg:
+                fh.write(f"# {key}: {cfg[key]}\n")
+        if rep_mse.size:
+            fh.write(f"# Mean replay MSE: {float(np.mean(rep_mse)):.6g}\n")
+            fh.write(f"# Mean replay corr: {float(np.nanmean(rep_corr)):.6g}\n")
+
+        writer = csv.writer(fh)
+        writer.writerow(["phase", "epoch", "mse", "corr_coeff"])
+        for k in range(val_mse.size):
+            writer.writerow(
+                ["training", k, f"{float(val_mse[k]):.8g}", f"{float(val_corr[k]):.8g}"]
+            )
+        for k in range(rep_mse.size):
+            writer.writerow(
+                ["replay", k, f"{float(rep_mse[k]):.8g}", f"{float(rep_corr[k]):.8g}"]
+            )
+    return out_path
+
+
 def compute_cycle_mse(traces: np.ndarray, n_cycle_samples: int) -> np.ndarray:
     """Per-cycle MSE of ``traces`` against cycle 0, *without* shift correction.
 

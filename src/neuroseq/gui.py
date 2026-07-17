@@ -162,6 +162,44 @@ class ExternalSimWorker(QtCore.QObject):
         self.finished.emit(experiment)
 
 
+class EliseProtocolWorker(QtCore.QObject):
+    """Runs the ELiSe train/validation/replay protocol on a worker QThread."""
+
+    progress = QtCore.Signal(float)
+    finished = QtCore.Signal(object)
+    cancelled = QtCore.Signal()
+    failed = QtCore.Signal(str)
+
+    def __init__(
+        self,
+        run_fn: Callable,
+        kwargs: dict,
+        cancel_event: threading.Event,
+    ) -> None:
+        super().__init__()
+        self._run_fn = run_fn
+        self._kwargs = kwargs
+        self._cancel_event = cancel_event
+
+    @QtCore.Slot()
+    def run(self) -> None:
+        def _progress_cb(fraction: float) -> None:
+            if self._cancel_event.is_set():
+                raise SimulationCancelledError("user cancelled")
+            with contextlib.suppress(Exception):
+                self.progress.emit(float(fraction))
+
+        try:
+            result = self._run_fn(progress=_progress_cb, **self._kwargs)
+        except SimulationCancelledError:
+            self.cancelled.emit()
+            return
+        except Exception as exc:
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
+            return
+        self.finished.emit(result)
+
+
 def _external_simulator_accepts_progress(simulate_fn: Callable) -> bool:
     """True if ``simulate_fn`` advertises a ``progress`` keyword argument.
 
@@ -294,10 +332,12 @@ class Gui(QtWidgets.QMainWindow):
         # connect widgets
         self.console_widget.console_command_entered.connect(self._update_data)
         self.console_widget.close_requested.connect(
-            lambda: self._view_actions[self.console_widget].trigger()
-            if self._view_actions.get(self.console_widget, None) is not None
-            and self._view_actions[self.console_widget].isChecked()
-            else None
+            lambda: (
+                self._view_actions[self.console_widget].trigger()
+                if self._view_actions.get(self.console_widget, None) is not None
+                and self._view_actions[self.console_widget].isChecked()
+                else None
+            )
         )
         self.trace_widget.custom_analysis_requested.connect(self._custom_analysis)
         self.data_widget.trace_widget.custom_analysis_requested.connect(
@@ -318,6 +358,9 @@ class Gui(QtWidgets.QMainWindow):
         self._external_sim_worker: ExternalSimWorker | None = None
         self._external_sim_cancel: threading.Event | None = None
         self._external_sim_dispatch_project: Project | None = None
+        self._elise_protocol_thread: QtCore.QThread | None = None
+        self._elise_protocol_worker: EliseProtocolWorker | None = None
+        self._elise_protocol_cancel: threading.Event | None = None
         self._io_thread: QtCore.QThread | None = None
         self._io_worker: BackgroundIOWorker | None = None
         self._io_on_success: Callable[[object], None] | None = None
@@ -2440,14 +2483,33 @@ class Gui(QtWidgets.QMainWindow):
             "the binary teaching pattern, on the output-neuron firing "
             "rate. Requires an ELiSe project with a completed simulation."
         )
+        self.elise_protocol_action = add_action(
+            "Run ELiSe Protocol (learning curves)",
+            self._run_elise_protocol,
+            menu=None,
+            toolbar=self.toolbar_stim_editor,
+            shortcut=None,
+            icon="mdi6.school-outline",
+        )
+        self.elise_protocol_action.setToolTip(
+            "Train the ELiSe network on the teaching pattern and measure the "
+            "paper's train + replay learning curves (Kriener et al. 2024, "
+            "Fig. 2b/c). Requires an ELiSe project with 'opsin_exc' and "
+            "'opsin_inh' stims."
+        )
         self._refresh_elise_replay_action()
 
     def _refresh_elise_replay_action(self) -> None:
-        """Enable the toolbar action only for ELiSe projects with a sim run."""
-        action = getattr(self, "elise_replay_action", None)
-        if action is None:
-            return
-        action.setEnabled(self._elise_replay_inputs() is not None)
+        """Enable the ELiSe toolbar actions when the project supports them."""
+        replay_action = getattr(self, "elise_replay_action", None)
+        if replay_action is not None:
+            replay_action.setEnabled(self._elise_replay_inputs() is not None)
+        protocol_action = getattr(self, "elise_protocol_action", None)
+        if protocol_action is not None:
+            protocol_action.setEnabled(
+                self._elise_protocol_inputs() is not None
+                and self._elise_protocol_worker is None
+            )
 
     def _elise_replay_inputs(
         self,
@@ -2607,6 +2669,245 @@ class Gui(QtWidgets.QMainWindow):
         )
         analysis_window.setWindowTitle(f"ELiSe replay MSE — saved to {csv_path.name}")
         analysis_window.show()
+
+    def _elise_protocol_inputs(
+        self,
+    ) -> tuple[np.ndarray, np.ndarray, float] | None:
+        """Return (opsin_exc, opsin_inh, stim_dt_s) if this is an ELiSe project."""
+        if self.project.external_simulate_path != "neuroseq:elise":
+            return None
+        exc = self.project.stim_arrays.get("opsin_exc")
+        inh = self.project.stim_arrays.get("opsin_inh")
+        if exc is None or inh is None:
+            return None
+        exc_values = np.asarray(exc.values)
+        inh_values = np.asarray(inh.values)
+        if exc_values.size == 0 or exc_values.shape != inh_values.shape:
+            return None
+        return exc_values, inh_values, float(exc.dt)
+
+    def _run_elise_protocol(self) -> None:
+        from neuroseq.elise_protocol_dialog import EliseProtocolDialog
+        from neuroseq.example_models.elise import run_protocol as elise_run_protocol
+
+        inputs = self._elise_protocol_inputs()
+        if inputs is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Run ELiSe protocol",
+                "This action requires an ELiSe project with 'opsin_exc' and "
+                "'opsin_inh' stim arrays.",
+            )
+            return
+        if self._elise_protocol_worker is not None:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Run ELiSe protocol",
+                "An ELiSe protocol run is already in progress.",
+            )
+            return
+
+        dialog = EliseProtocolDialog(self)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        opsin_exc, opsin_inh, stim_dt_s = inputs
+        kwargs = {
+            "opsin_exc": opsin_exc.astype(float),
+            "opsin_inh": opsin_inh.astype(float),
+            "stim_dt_s": stim_dt_s,
+            "base_params": self.project.external_simulate_params_flat(),
+            **dialog.get_values(),
+        }
+
+        self.progress_dialog.setLabelText("Running ELiSe protocol...")
+        self.progress_dialog.setValue(0)
+        self.progress_dialog.setCancelButtonText("Cancel")
+        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.NonModal)
+        self.progress_dialog.show()
+
+        self._elise_protocol_cancel = threading.Event()
+        self.progress_dialog.canceled.connect(self._elise_protocol_cancel.set)
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        if getattr(self, "elise_protocol_action", None) is not None:
+            self.elise_protocol_action.setEnabled(False)
+
+        thread = QtCore.QThread(self)
+        worker = EliseProtocolWorker(
+            run_fn=elise_run_protocol,
+            kwargs=kwargs,
+            cancel_event=self._elise_protocol_cancel,
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._on_elise_protocol_progress)
+        worker.finished.connect(self._on_elise_protocol_finished)
+        worker.cancelled.connect(self._on_elise_protocol_cancelled)
+        worker.failed.connect(self._on_elise_protocol_failed)
+        for signal in (worker.finished, worker.cancelled, worker.failed):
+            signal.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+
+        self._elise_protocol_thread = thread
+        self._elise_protocol_worker = worker
+        thread.start()
+
+    def _teardown_elise_protocol(self) -> None:
+        QtWidgets.QApplication.restoreOverrideCursor()
+        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
+        with contextlib.suppress(TypeError, RuntimeError):
+            self.progress_dialog.canceled.disconnect()
+        self._elise_protocol_worker = None
+        self._elise_protocol_thread = None
+        self._elise_protocol_cancel = None
+        self._refresh_elise_replay_action()
+
+    @QtCore.Slot(float)
+    def _on_elise_protocol_progress(self, fraction: float) -> None:
+        clamped = max(0.0, min(1.0, float(fraction)))
+        self.progress_dialog.setValue(int(round(clamped * 100)))
+
+    def _update_elise_stim_arrays(self, result: dict) -> None:
+        """Replace opsin_exc/opsin_inh with the protocol's full-timeline stims.
+
+        The teaching pattern is present during training cycles and blank during
+        teacher-off validation/replay, so the stim array reflects the true
+        timeline of what was simulated and lines up with the imported traces.
+        """
+        from neuroseq.stim import StimArray
+        from neuroseq.stim import StimType
+
+        exc_full = result.get("stim_exc_full")
+        inh_full = result.get("stim_inh_full")
+        if exc_full is None or inh_full is None:
+            return
+        dt = float(result.get("stim_dt_s") or 0.0)
+        if dt <= 0:
+            return
+        defaults = {
+            "opsin_exc": StimType.Excitation,
+            "opsin_inh": StimType.Inhibition,
+        }
+        for name, values in (("opsin_exc", exc_full), ("opsin_inh", inh_full)):
+            existing = self.project.stim_arrays.get(name)
+            stim_type = existing.stim_type if existing is not None else defaults[name]
+            units = existing.units if existing is not None else "mm**-2 / second"
+            self.project.add_stim_array(
+                StimArray(
+                    name=name,
+                    stim_type=stim_type,
+                    values=np.asarray(values),
+                    units=units,
+                    dt=dt,
+                )
+            )
+        self.stim_editor.set_project(self.project)
+
+    @QtCore.Slot(object)
+    def _on_elise_protocol_finished(self, result: dict) -> None:
+        from neuroseq.replay_metrics import save_learning_curves_csv
+        from neuroseq.resources.analysis_plugins import (
+            elise_learning_curves as plugin_mod,
+        )
+
+        self._teardown_elise_protocol()
+        self.progress_dialog.setValue(100)
+        self.progress_dialog.reset()
+
+        # Rebuild the opsin stim arrays to the full protocol timeline (teaching
+        # pattern during training, blank during teacher-off validation/replay)
+        # so the stim array shows the true timeline of what was simulated, then
+        # import the aligned activity Experiment.
+        self._update_elise_stim_arrays(result)
+        experiment = result.get("experiment")
+        if experiment is not None:
+            self._append_experimental_data(experiment)
+
+        default_stem = "elise_learning_curves"
+        if self.project.filepath is not None:
+            default_stem = pathlib.Path(self.project.filepath).stem + "_learning_curves"
+        csv_filename, _ = getsavefilename(
+            self,
+            "Save ELiSe learning curves as CSV",
+            default_stem + ".csv",
+            "CSV files (*.csv)",
+        )
+        csv_path: pathlib.Path | None = None
+        if csv_filename:
+            csv_path = pathlib.Path(csv_filename)
+            if csv_path.suffix.lower() != ".csv":
+                csv_path = csv_path.with_suffix(".csv")
+            try:
+                save_learning_curves_csv(
+                    csv_path,
+                    result,
+                    source=(
+                        str(self.project.filepath) if self.project.filepath else None
+                    ),
+                )
+            except OSError as exc:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Run ELiSe protocol",
+                    f"Could not write CSV to {csv_path}: {exc}",
+                )
+                csv_path = None
+
+        num_vis = int(result["num_vis"])
+        final_rate = result.get("final_replay_rate")
+        analysis_window = CustomAnalysisWindow(parent=self)
+        analysis_widget = analysis_window.analysis_widget
+        setattr(analysis_widget, plugin_mod.CURVES_ATTR, result)
+        plugin = next(
+            (p for p in discover_analysis_plugins() if p.id == plugin_mod.PLUGIN_ID),
+            None,
+        )
+        if plugin is None:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Run ELiSe protocol",
+                "Could not find the ELiSe learning-curves analysis plugin.",
+            )
+            return
+        # The plugin reads the curves off the widget; set_data still needs a
+        # data object, so hand it the final replay trace.
+        final_arr = np.asarray(final_rate, dtype=np.float64)
+        data = TraceData(
+            name="firing_rate_r (final replay)",
+            traces=final_arr,
+            indices=np.arange(final_arr.shape[0], dtype=np.uint32),
+            units="1",
+            dt=float(result["trace_dt_s"]),
+        )
+        analysis_widget.set_data(
+            data, plugin, slice(0, num_vis), slice(0, final_arr.shape[1])
+        )
+        title = "ELiSe learning curves"
+        if csv_path is not None:
+            title += f" — saved to {csv_path.name}"
+        analysis_window.setWindowTitle(title)
+        analysis_window.show()
+
+    @QtCore.Slot()
+    def _on_elise_protocol_cancelled(self) -> None:
+        self._teardown_elise_protocol()
+        self.progress_dialog.reset()
+        QtWidgets.QMessageBox.information(
+            self,
+            "Run ELiSe protocol",
+            "ELiSe protocol cancelled - no learning curves were produced.",
+        )
+
+    @QtCore.Slot(str)
+    def _on_elise_protocol_failed(self, message: str) -> None:
+        self._teardown_elise_protocol()
+        self.progress_dialog.reset()
+        self.logger.error(f"ELiSe protocol failed: {message}")
+        QtWidgets.QMessageBox.critical(
+            self,
+            "Run ELiSe protocol",
+            f"Could not run the ELiSe protocol: {message}",
+        )
 
     def _stop_worker_thread(
         self, thread: QtCore.QThread | None, timeout_ms: int, label: str

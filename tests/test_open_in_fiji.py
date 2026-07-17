@@ -46,6 +46,19 @@ def test_open_in_fiji_without_image_starts_empty_fiji(qtbot, mocker, tmp_path: P
     start_detached.assert_called_once_with(str(fake_fiji), [])
 
 
+def test_change_fiji_path_button_forces_prompt(qtbot, mocker):
+    from neuroseq.cellpose_import_dialog import CellposeImportDialog
+
+    dialog = CellposeImportDialog(parent=None)
+    qtbot.addWidget(dialog)
+    resolve = mocker.patch("neuroseq.fiji.resolve_fiji_path", return_value="")
+
+    dialog.change_fiji_button.click()
+
+    resolve.assert_called_once()
+    assert resolve.call_args.kwargs.get("force_prompt") is True
+
+
 def test_open_in_fiji_no_op_when_fiji_unset(qtbot, mocker):
     from neuroseq.cellpose_import_dialog import CellposeImportDialog
 

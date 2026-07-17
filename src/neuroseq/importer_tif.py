@@ -70,6 +70,54 @@ def _noop_progress(_message: str, _fraction: float) -> None:
     return None
 
 
+def select_torch_device() -> tuple[Any, str]:
+    """Pick the best available torch device and a short human label.
+
+    Preference order: CUDA GPU > Apple-Silicon MPS GPU > CPU. Set the
+    ``NEUROSEQ_FORCE_CPU`` environment variable to force CPU (an escape hatch if
+    a GPU backend misbehaves). Returns ``(torch.device, label)``.
+    """
+    import torch
+
+    if os.environ.get("NEUROSEQ_FORCE_CPU"):
+        return torch.device("cpu"), "CPU (forced)"
+    if torch.cuda.is_available():
+        return torch.device("cuda"), "GPU (CUDA)"
+    backends = getattr(torch, "backends", None)
+    mps = getattr(backends, "mps", None) if backends is not None else None
+    if mps is not None and mps.is_available():
+        return torch.device("mps"), "GPU (Apple MPS)"
+    return torch.device("cpu"), "CPU"
+
+
+def _run_with_cpu_fallback(
+    fn: Callable[[Any], Any], device: Any, device_label: str
+) -> tuple[Any, Any, str]:
+    """Run ``fn(device)``; on a GPU runtime error, retry once on CPU.
+
+    Returns ``(result, device, device_label)`` reflecting the device actually
+    used, so a GPU that is present but unusable (e.g. an op missing on MPS)
+    degrades gracefully to CPU instead of failing the whole import.
+    """
+    try:
+        return fn(device), device, device_label
+    except Exception as exc:
+        if device.type == "cpu":
+            raise
+        # Only reached when a GPU attempt failed — torch is guaranteed importable
+        # here (the caller already used it to build the GPU device).
+        import torch
+
+        logger.warning(
+            "GPU compute on %s failed (%s: %s); falling back to CPU.",
+            device_label,
+            type(exc).__name__,
+            exc,
+        )
+        cpu = torch.device("cpu")
+        return fn(cpu), cpu, "CPU (GPU fallback)"
+
+
 def _masks_to_stat(masks: npt.NDArray[Any], Ly: int, Lx: int) -> npt.NDArray[Any]:
     """Convert a Cellpose label image into a Suite2p `stat` array."""
     from suite2p.detection import assign_overlaps
@@ -120,7 +168,6 @@ def run_suite2p_pipeline(
     import suite2p.classification as s2cls
     import suite2p.extraction as s2ext
     import suite2p.io as s2io
-    import torch
 
     progress = progress or _noop_progress
     progress("Preparing work directory", 0.0)
@@ -189,8 +236,9 @@ def run_suite2p_pipeline(
             },
         }
 
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        logger.info("Suite2p pipeline using device=%s", device)
+        device, device_label = select_torch_device()
+        logger.info("Suite2p pipeline using %s (device=%s)", device_label, device)
+        progress(f"Running suite2p on {device_label}", 0.05)
 
         progress("Initialising Suite2p output dirs", 0.05)
         dbs = s2io.init_dbs(db)
@@ -232,13 +280,17 @@ def run_suite2p_pipeline(
         progress("Building Suite2p stat from Cellpose masks", 0.4)
         stat = _masks_to_stat(masks, Ly, Lx)
 
-        progress("Extracting fluorescence traces", 0.5)
-        F, Fneu, F_chan2, Fneu_chan2 = s2ext.extraction_wrapper(
-            stat,
-            f_bin,
-            f_reg_chan2=f_bin_chan2,
-            settings=settings["extraction"],
-            device=device,
+        progress(f"Extracting fluorescence traces ({device_label})", 0.5)
+        (F, Fneu, F_chan2, Fneu_chan2), device, device_label = _run_with_cpu_fallback(
+            lambda dev: s2ext.extraction_wrapper(
+                stat,
+                f_bin,
+                f_reg_chan2=f_bin_chan2,
+                settings=settings["extraction"],
+                device=dev,
+            ),
+            device,
+            device_label,
         )
 
         progress("Computing per-cell SNR/skew/std", 0.7)
@@ -259,13 +311,17 @@ def run_suite2p_pipeline(
             s["skew"] = float(sk[k])
             s["std"] = float(sd[k])
 
-        progress("Baseline correction + OASIS deconvolution", 0.8)
-        dF_preproc = s2ext.preprocess(
-            F=dF.copy(),
-            fs=settings["fs"],
-            batch_size=settings["extraction"]["batch_size"],
-            device=device,
-            **settings["dcnv_preprocess"],
+        progress(f"Baseline correction + OASIS deconvolution ({device_label})", 0.8)
+        dF_preproc, device, device_label = _run_with_cpu_fallback(
+            lambda dev: s2ext.preprocess(
+                F=dF.copy(),
+                fs=settings["fs"],
+                batch_size=settings["extraction"]["batch_size"],
+                device=dev,
+                **settings["dcnv_preprocess"],
+            ),
+            device,
+            device_label,
         )
         spks = s2ext.oasis(
             F=dF_preproc,
@@ -279,7 +335,7 @@ def run_suite2p_pipeline(
         # All ROIs come from Cellpose — accept them all.
         iscell[:, 0] = 1
 
-        extra: dict[str, Any] = {}
+        extra: dict[str, Any] = {"compute_device": device_label}
         if params.nchannels >= 2:
             extra["F_chan2"] = F_chan2
             extra["Fneu_chan2"] = Fneu_chan2
