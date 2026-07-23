@@ -70,6 +70,50 @@ neuroseq --generate-cellpose-test-data ./cellpose_test_grid.tif \
 See [Multiphoton Holographic Stimulation → Generating test data](multiphoton_holographic_stimulation.md#generating-test-data-cli)
 for the full set of options.
 
+## GPU acceleration (Cellpose & Suite2p)
+
+Both Cellpose segmentation and the Suite2p extraction/deconvolution step run on
+**PyTorch** and are dramatically faster on a GPU. NeuroSeq uses the GPU
+automatically when one is available — **CUDA** on NVIDIA cards or **MPS** on
+Apple Silicon — and otherwise falls back to the CPU (which can be unusably slow
+for segmentation).
+
+Two things are required: a GPU that these tools support, and a GPU build of
+PyTorch. **Cellpose can use only NVIDIA (CUDA) and Apple (MPS) GPUs — Intel
+integrated graphics (Iris Xe / UHD) are not supported.**
+
+**Check what you have** (in the NeuroSeq environment):
+
+```bash
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+```
+
+A version ending in `+cpu` (e.g. `2.13.0+cpu`), or `False`, means a CPU-only
+build is installed — the Cellpose "use GPU" option will be greyed out.
+
+**Enable the GPU** (on a machine with an NVIDIA or Apple-Silicon GPU) by
+installing a GPU build of PyTorch into the NeuroSeq environment:
+
+```bash
+uv pip install --torch-backend=auto torch
+```
+
+`uv` auto-detects the machine's CUDA driver and installs the matching wheel.
+On **Windows this step is required**, because PyPI's default `torch` wheel is
+CPU-only there (on Linux the default PyPI wheel is already CUDA-enabled). A
+later `uv sync` can revert to the CPU build; re-run the command, or set
+`UV_TORCH_BACKEND=auto` in the environment. Verify with the check command above
+(expect e.g. `2.x.x+cu128 True`), then relaunch NeuroSeq.
+
+**No supported GPU** (e.g. an Intel-only laptop)? GPU segmentation is not
+possible on that machine. Instead, run Cellpose on one machine that _does_ have
+an NVIDIA/Apple GPU and import its `_seg.npy` output (the file-selection path
+above needs only the segmentation, not a GPU), and/or use a lighter Cellpose
+model or downsample the image before segmenting.
+
+When a GPU is unavailable, NeuroSeq shows a one-time hint after launching
+Cellpose and logs the same information before running the Suite2p pipeline.
+
 ## Suite2p calcium imaging
 
 **File → Import data → Import trace → Import calcium imaging** opens the

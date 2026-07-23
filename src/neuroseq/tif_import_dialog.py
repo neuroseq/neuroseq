@@ -350,6 +350,10 @@ class TifImportDialog(QtWidgets.QDialog):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+            # Explain (once) if Cellpose's GPU option will be unavailable.
+            from neuroseq.gpu import warn_if_gpu_unavailable
+
+            warn_if_gpu_unavailable(self)
         except Exception as exc:
             self.logger.exception("Failed to launch Cellpose")
             QtWidgets.QMessageBox.critical(
