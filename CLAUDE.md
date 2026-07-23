@@ -170,3 +170,12 @@ Projects are saved as `.nseq` archives: ZIP files containing a JSON metadata fil
 - GPU monitoring uses `nvidia-ml-py` (optional, gracefully absent on non-NVIDIA systems)
 - The `external_simulation_example/` directory is excluded from ruff and mypy
 - Example models in `src/neuroseq/example_models/` are excluded from pre-commit hooks
+- The **ELISE** example model (`src/neuroseq/example_models/elise.py`) imports a separate
+  private `elise` package (`elise.model`/`optimizer`/`rate_buffer`/`weights`). It is not a
+  declared dependency, so running the ELISE example raises a clear `ImportError` until it is
+  installed into the active venv. The source lives at
+  `/mnt/live1/svintila/sequence-learning` (package `elise` v0.3.x, `src/` layout). Install it
+  editable without deps — the imported modules need only `numba`+`numpy`, both already present:
+  `uv pip install --no-deps -e /mnt/live1/svintila/sequence-learning`. If you later hit
+  `ModuleNotFoundError` for `mlflow`/`networkx`/`tomli_w`/`coolname`/`tqdm` (pulled in by
+  `elise.simulator`/`main`/`data`), do a full `uv pip install -e` of that path instead.
