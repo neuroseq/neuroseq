@@ -1085,6 +1085,11 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+            # If PyTorch has no GPU backend, Cellpose's "use GPU" box is disabled;
+            # tell the user why and how to fix it (once per session).
+            from neuroseq.gpu import warn_if_gpu_unavailable
+
+            warn_if_gpu_unavailable(self)
             # todo: Ask Andrey if we can remove this commented code.
             # QtWidgets.QMessageBox.information(
             #    self,

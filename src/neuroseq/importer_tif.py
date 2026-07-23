@@ -239,6 +239,11 @@ def run_suite2p_pipeline(
         device, device_label = select_torch_device()
         logger.info("Suite2p pipeline using %s (device=%s)", device_label, device)
         progress(f"Running suite2p on {device_label}", 0.05)
+        if getattr(device, "type", None) == "cpu":
+            from neuroseq.gpu import torch_gpu_status
+
+            _, gpu_msg = torch_gpu_status()
+            logger.warning("Suite2p on CPU. %s", gpu_msg.replace("\n", " "))
 
         progress("Initialising Suite2p output dirs", 0.05)
         dbs = s2io.init_dbs(db)
