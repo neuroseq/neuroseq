@@ -1133,8 +1133,12 @@ def hh_neuron_with_plasticity() -> Project:
     # define Brian2 model
     b2_model = project.b2_model
 
-    nneurons = 40
-    nneurons_exc = 32
+    # Minimal 2-neuron STDP demo: neuron 0 is excitatory (subgroup Pe) and
+    # presynaptic, neuron 1 is inhibitory (subgroup Pi) and postsynaptic. The
+    # plastic synapse Ce (0 -> 1) potentiates when the pre-before-post stim
+    # pattern (built below) drives them.
+    nneurons = 2
+    nneurons_exc = 1
 
     b2_model.define_parameter("area", 20000 * b2.umetre**2)
     b2_model.define_parameter(
@@ -1227,7 +1231,7 @@ def hh_neuron_with_plasticity() -> Project:
 
     b2_model.define_synapse_connection("Ce", "i != j")
     b2_model.define_synapse_equation("Ce", ce_eq)
-    b2_model.define_synapse_connection_probability("Ce", 0.02)
+    b2_model.define_synapse_connection_probability("Ce", 1.0)
     b2_model.define_synapse_origin("Ce", "Pe")
     b2_model.define_synapse_target("Ce", "P")
 
@@ -1251,7 +1255,7 @@ def hh_neuron_with_plasticity() -> Project:
 
     b2_model.define_synapse_connection("Ci", "i != j")
     b2_model.define_synapse_equation("Ci", """wi : siemens""")
-    b2_model.define_synapse_connection_probability("Ci", 0.02)
+    b2_model.define_synapse_connection_probability("Ci", 1.0)
     b2_model.define_synapse_origin("Ci", "Pi")
     b2_model.define_synapse_target("Ci", "P")
 
@@ -1273,46 +1277,34 @@ def hh_neuron_with_plasticity() -> Project:
     b2_model.define_monitor_variable("synapse", "we")
 
     # define stim arrays
+    #
+    # STDP pairing protocol: on every cycle, drive neuron 0 (presynaptic) with
+    # a short excitation pulse and then neuron 1 (postsynaptic) a few ms later.
+    # Repeated pre-before-post pairings potentiate the plastic Ce synapse, so
+    # its weight `we` climbs toward gmax over the run. Swapping the two offsets
+    # (post before pre) would instead depress it.
+    tfinal = 500 * b2.ms
+    stim_dt = 0.001  # s (1 ms)
+    n_steps = int(tfinal / b2.ms)
 
-    tfinal = 2000 * b2.ms
+    i_stim = np.zeros((n_steps, nneurons), dtype="float")
+    exc_stim = np.zeros((n_steps, nneurons), dtype="float")
+    inh_stim = np.zeros((n_steps, nneurons), dtype="float")
 
-    i_stim = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
-    i_stim[:, :] = 0
-    # i_stim[200:300, :] = 1
-
-    exc_stim = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
-    exc_stim[:, :] = 0
-    # exc_stim[0:200, :] = 1
-
-    inh_stim = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
-    inh_stim[:, :] = 0
-    # inh_stim[300:900, :] = 1
-
-    sp = 10
-
-    for n in range(0, 5):
-        exc_stim[sp + 10 * n : sp + 10 * (n + 1), n * 8 : n * 8 + 8] = 1
-
-    sp = 100
-
-    for n in range(1, nneurons):
-        exc_stim[sp + 10 * n : sp + 10 * (n + 1), n] = 1
-        inh_stim[sp + 10 * n : sp + 10 * (n + 1), (n + 1) :] = 0.1
-        inh_stim[sp + 10 * n : sp + 10 * (n + 1), 1:n] = 0.1
-
-    sp = 1100
-
-    for n in range(1, nneurons):
-        exc_stim[sp + 10 * n : sp + 10 * (n + 1), n] = 1
-        inh_stim[sp + 10 * n : sp + 10 * (n + 1), (n + 1) :] = 0.1
-        inh_stim[sp + 10 * n : sp + 10 * (n + 1), 1:n] = 0.1
+    pulse_ms = 5  # length of each drive pulse
+    pre_post_gap_ms = 5  # neuron 1 fires ~5 ms after neuron 0 -> potentiation
+    period_ms = 40  # time between successive pairings
+    for t0 in range(50, n_steps - (pulse_ms + pre_post_gap_ms), period_ms):
+        exc_stim[t0 : t0 + pulse_ms, 0] = 1.0  # presynaptic neuron 0
+        post_start = t0 + pre_post_gap_ms
+        exc_stim[post_start : post_start + pulse_ms, 1] = 1.0  # postsynaptic neuron 1
 
     i_external = StimArray(
         name="I_external",
         stim_type=StimType.External,
         values=i_stim,
         units="pA",
-        dt=0.001,
+        dt=stim_dt,
     )
     project.add_stim_array(i_external)
 
@@ -1321,7 +1313,7 @@ def hh_neuron_with_plasticity() -> Project:
         stim_type=StimType.Excitation,
         values=exc_stim,
         units="mwatt / um2",
-        dt=0.001,
+        dt=stim_dt,
     )
     project.add_stim_array(exc_stimulation)
 
@@ -1330,7 +1322,7 @@ def hh_neuron_with_plasticity() -> Project:
         stim_type=StimType.Inhibition,
         values=inh_stim,
         units="mwatt / um2",
-        dt=0.001,
+        dt=stim_dt,
     )
     project.add_stim_array(inh_stimulation)
 
