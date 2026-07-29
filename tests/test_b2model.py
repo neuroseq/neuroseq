@@ -432,8 +432,51 @@ def test_neuron_subgroup_invalid_idxs(
     mfx, _ = mfx_parameterized
     mfx.define_neuronsubgroup_target("bad", "P")
     mfx.define_neuronsubgroup_idxs("bad", "not_a_range")
-    with pytest.raises(RuntimeError, match="Error parsing subgroup idxs"):
+    with pytest.raises(RuntimeError, match="could not parse subgroup idxs"):
         mfx._assemble_neuronsubgroup("bad")
+
+
+def test_parse_subgroup_idxs() -> None:
+    parse = B2Model._parse_subgroup_idxs
+    assert parse((0, 5)) == (0, 5)
+    assert parse([2, 7]) == (2, 7)
+    assert parse("[0, 3]") == (0, 3)
+    assert parse("(1, 4)") == (1, 4)
+    assert parse(3) == (3, 4)
+    assert parse("5") == (5, 6)
+    assert parse([4]) == (4, 5)
+    with pytest.raises(ValueError):
+        parse("not_a_range")
+    with pytest.raises(ValueError):
+        parse((1, 2, 3))
+
+
+def test_modify_neuronnumber_rescales_subgroups(b2model: B2Model) -> None:
+    b2model.define_neuronnumber("P", 2)
+    b2model.define_neuronsubgroup_target("Pe", "P")
+    b2model.define_neuronsubgroup_idxs("Pe", (0, 1))
+    b2model.define_neuronsubgroup_target("Pi", "P")
+    b2model.define_neuronsubgroup_idxs("Pi", (1, 2))
+
+    # the model-editor edit path for the neuron count
+    b2model.functions["neurongroups"]["P"]["neuronnumber"]["modify"](40)
+
+    assert b2model.neurongroups["P"]["neuronnumber"] == 40
+    # proportional rescale preserves the 50/50 split
+    assert b2model.neurongroups["Pe"]["idxs"] == (0, 20)
+    assert b2model.neurongroups["Pi"]["idxs"] == (20, 40)
+
+
+def test_modify_neuronnumber_preserves_uneven_ratio(b2model: B2Model) -> None:
+    b2model.define_neuronnumber("P", 10)
+    b2model.define_neuronsubgroup_target("Pe", "P")
+    b2model.define_neuronsubgroup_idxs("Pe", (0, 8))  # 80% excitatory
+    b2model.define_neuronsubgroup_target("Pi", "P")
+    b2model.define_neuronsubgroup_idxs("Pi", (8, 10))
+
+    b2model.functions["neurongroups"]["P"]["neuronnumber"]["modify"](40)
+    assert b2model.neurongroups["Pe"]["idxs"] == (0, 32)
+    assert b2model.neurongroups["Pi"]["idxs"] == (32, 40)
 
 
 def test_neuron_subgroup_remove_exception(

@@ -328,6 +328,53 @@ class B2Model:
             "add": modifier.add,
         }
 
+    @staticmethod
+    def _parse_subgroup_idxs(idxs: Any) -> tuple[int, int]:
+        """
+        Normalize a subgroup ``idxs`` specification into a ``(start, stop)`` pair.
+
+        Accepts an int (a single neuron), a one- or two-element list/tuple, or a
+        string form of any of those (the model editor stores edited idxs as
+        strings, e.g. ``"[0, 1]"`` or ``"3"``).
+
+        Parameters
+        ----------
+        idxs : Any
+            The subgroup index specification.
+
+        Returns
+        -------
+        tuple[int, int]
+            The ``(start, stop)`` range (``stop`` exclusive).
+
+        Raises
+        ------
+        ValueError
+            When ``idxs`` cannot be interpreted as an int or a (start, stop) pair.
+        """
+        if isinstance(idxs, str):
+            try:
+                idxs = ast.literal_eval(idxs)
+            except (ValueError, SyntaxError) as e:
+                raise ValueError(
+                    f"could not parse subgroup idxs {idxs!r}: "
+                    "expected an int or a (start, stop) pair"
+                ) from e
+
+        if isinstance(idxs, tuple | list):
+            if len(idxs) == 1:
+                return int(idxs[0]), int(idxs[0]) + 1
+            if len(idxs) == 2:
+                return int(idxs[0]), int(idxs[1])
+            raise ValueError(
+                "subgroups have to be contiguous: give an int or a (start, stop) pair"
+            )
+        if isinstance(idxs, int):
+            return idxs, idxs + 1
+        raise ValueError(
+            f"invalid subgroup idxs {idxs!r}: expected an int or a (start, stop) pair"
+        )
+
     @_trigger_rebuild
     def _assemble_neuronsubgroup(
         self,
@@ -343,38 +390,10 @@ class B2Model:
         """
         sng = None
 
-        idxs = self.neurongroups[name]["idxs"]
-        # The GUI stores edited idxs as a string (e.g. "[0, 1]" or "3"); parse
-        # it back into the int / (start, stop) form brian2 needs.
-        if isinstance(idxs, str):
-            try:
-                idxs = ast.literal_eval(idxs)
-            except (ValueError, SyntaxError) as e:
-                self._handle_exception(
-                    e,
-                    f"Error parsing subgroup idxs {idxs!r} for {name}: "
-                    "expected an int or a (start, stop) pair",
-                )
-
-        if isinstance(idxs, tuple | list):
-            if len(idxs) == 1:
-                start = idxs[0]
-                stop = idxs[0] + 1
-            elif len(idxs) == 2:
-                start = idxs[0]
-                stop = idxs[1]
-            else:
-                raise ValueError(
-                    "Subgroups have to be contiguous: give an int or a (start, stop) pair"
-                )
-        elif isinstance(idxs, int):
-            start = idxs
-            stop = idxs + 1
-        else:
-            raise ValueError(
-                f"Invalid subgroup idxs {idxs!r} for {name}: "
-                "expected an int or a (start, stop) pair"
-            )
+        try:
+            start, stop = self._parse_subgroup_idxs(self.neurongroups[name]["idxs"])
+        except ValueError as e:
+            self._handle_exception(e, f"Error for subgroup {name}: {e}")
 
         try:
             sng = b2.Subgroup(
@@ -1231,6 +1250,68 @@ class B2Model:
         )
         self.logger.info(f"Refractory period defined: {value}")
 
+    def _rescale_subgroups(self, parent: str, old_n: Any, new_n: Any) -> None:
+        """
+        Proportionally rescale the ``idxs`` of every subgroup that targets
+        ``parent`` when the parent's neuron count changes from ``old_n`` to
+        ``new_n``. This preserves each subgroup's fraction of the parent (e.g.
+        an excitatory/inhibitory split), so resizing a network from the model
+        editor keeps the subgroups consistent.
+
+        The rule is ``new_idx = round(old_idx / old_n * new_n)``, clamped to
+        ``[0, new_n]`` and kept non-empty for subgroups that were non-empty.
+
+        Parameters
+        ----------
+        parent : str
+            Name of the (full) neurongroup whose size changed.
+        old_n, new_n : Any
+            Previous and new neuron counts. Non-integer values are ignored.
+        """
+        try:
+            old_n = int(old_n)
+            new_n = int(new_n)
+        except (TypeError, ValueError):
+            return
+        if old_n <= 0 or new_n <= 0 or old_n == new_n:
+            return
+
+        for sub_name, group in self.neurongroups.items():
+            if "idxs" not in group or group.get("target") != parent:
+                continue
+            try:
+                start, stop = self._parse_subgroup_idxs(group["idxs"])
+            except ValueError:
+                # leave un-parseable idxs untouched; assembly will report it
+                continue
+
+            new_start = max(0, min(round(start / old_n * new_n), new_n))
+            new_stop = max(new_start, min(round(stop / old_n * new_n), new_n))
+            # keep a previously non-empty subgroup non-empty
+            if stop > start and new_stop == new_start:
+                if new_start < new_n:
+                    new_stop = new_start + 1
+                else:
+                    new_start = new_n - 1
+
+            group["idxs"] = (new_start, new_stop)
+            self.logger.info(
+                f"Rescaled subgroup {sub_name} idxs {(start, stop)} -> "
+                f"{(new_start, new_stop)} (parent {parent}: {old_n} -> {new_n})"
+            )
+
+    def _modify_neuronnumber(self, name: str, new_value: Any) -> None:
+        """
+        Modify callable bound to a neurongroup's ``neuronnumber`` field in the
+        model editor. Sets the new value and proportionally rescales the idxs
+        of any subgroups targeting this group, then flags a rebuild.
+        """
+        old_value = self.neurongroups.get(name, {}).get("neuronnumber")
+        self.neurongroups[name]["neuronnumber"] = new_value
+        self._rescale_subgroups(name, old_value, new_value)
+        self.logger.info(f"Neuron number modified: {name} {old_value} -> {new_value}")
+        self.set_rebuilt(True)
+
     @_trigger_rebuild
     def define_neuronnumber(self, name: str, n: int) -> None:
         """
@@ -1261,7 +1342,8 @@ class B2Model:
         )
         self.functions["neurongroups"][name]["neuronnumber"] = {
             "delete": element_modifier.delete,
-            "modify": element_modifier.modify,
+            # custom modify so editing the count cascades to subgroup idxs
+            "modify": lambda value, _name=name: self._modify_neuronnumber(_name, value),
             "rename": element_modifier.rename,
         }
 

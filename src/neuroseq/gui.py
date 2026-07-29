@@ -746,6 +746,11 @@ class Gui(QtWidgets.QMainWindow):
                 self.project.external_simulate_params = mdiag.external_simulate_params
             else:
                 self.project.b2_model = mdiag.b2model
+                # a larger neuron count needs wider stim arrays; grow them now
+                # so the resize is reflected immediately (also enforced at run)
+                self.project.pad_stim_arrays_to_neuron_count(
+                    self.project.b2_model.get_defined_neuron_count()
+                )
             self.project.update_limits()
             self.update_project(self.project)
 
