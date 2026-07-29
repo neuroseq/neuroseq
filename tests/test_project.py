@@ -468,6 +468,44 @@ def test_stim_array_simulation_padding() -> None:
     assert np.max(new_stim_array.values[100:, :]) == pytest.approx(0)
 
 
+def test_pad_stim_arrays_to_neuron_count() -> None:
+    arr = np.random.rand(100, 30)
+    project = default_project()
+    project.stim_arrays["stim"] = StimArray(
+        "stim", StimType.Excitation, arr.copy(), "mS", dt=0.001
+    )
+    # widen the neuron axis: new columns are zero, existing data preserved
+    project.pad_stim_arrays_to_neuron_count(50)
+    widened = project.stim_arrays["stim"]
+    assert widened.values.shape == (100, 50)
+    assert np.allclose(widened.values[:, :30], arr)
+    assert np.max(widened.values[:, 30:]) == pytest.approx(0)
+    # never shrinks: a smaller target is a no-op
+    project.pad_stim_arrays_to_neuron_count(10)
+    assert project.stim_arrays["stim"].values.shape == (100, 50)
+
+
+def test_run_simulation_widens_stim_arrays_to_neuron_count() -> None:
+    # Reproduces the "neuron count locked" bug: editing the neuron count up
+    # used to crash the run with an out-of-bounds stim index. The run must now
+    # auto-widen the stim arrays to the model's neuron count.
+    project = default_project()
+    model = project.b2_model
+    stim_names = list(project.stim_arrays.keys())
+    assert stim_names, "default project is expected to define stim arrays"
+    original_width = project.stim_arrays[stim_names[0]].values.shape[1]
+
+    new_count = original_width + 17
+    model.functions["neurongroups"]["P"]["neuronnumber"]["modify"](new_count)
+    assert model.get_defined_neuron_count() == new_count
+
+    project.run_simulation(0.01)
+
+    for name in stim_names:
+        assert project.stim_arrays[name].values.shape[1] >= new_count
+    assert new_count == model.network["P"].N
+
+
 def test_stim_array_padding() -> None:
     arr = np.random.rand(1000, 30)
     project = default_project()

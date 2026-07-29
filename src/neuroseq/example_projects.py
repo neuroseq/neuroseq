@@ -1225,15 +1225,11 @@ def hh_neuron_with_plasticity() -> Project:
     dApost/dt = -Apost / taupost : siemens (event-driven)
     """
 
-    b2_model.define_synapse_connection("Ce", None)
     b2_model.define_synapse_connection("Ce", "i != j")
-    # b2_model.define_synapse_equation("Ce", """we : siemens""")
     b2_model.define_synapse_equation("Ce", ce_eq)
     b2_model.define_synapse_connection_probability("Ce", 0.02)
     b2_model.define_synapse_origin("Ce", "Pe")
     b2_model.define_synapse_target("Ce", "P")
-
-    b2_model.define_synapse_pre("Ce", "ge += clip(we, 0*nS, 18*nS)")
 
     ce_on_pre = """
     ge += we
@@ -1253,7 +1249,6 @@ def hh_neuron_with_plasticity() -> Project:
     b2_model.define_neuronsubgroup_target("Pi", "P")
     b2_model.define_neuronsubgroup_idxs("Pi", (nneurons_exc, nneurons))
 
-    b2_model.define_synapse_connection("Ci", None)
     b2_model.define_synapse_connection("Ci", "i != j")
     b2_model.define_synapse_equation("Ci", """wi : siemens""")
     b2_model.define_synapse_connection_probability("Ci", 0.02)
@@ -1300,14 +1295,14 @@ def hh_neuron_with_plasticity() -> Project:
 
     sp = 100
 
-    for n in range(1, 40):
+    for n in range(1, nneurons):
         exc_stim[sp + 10 * n : sp + 10 * (n + 1), n] = 1
-        inh_stim[sp + 10 * n : sp + 10 * (n + 1), (n + 1) : 3200] = 0.1
+        inh_stim[sp + 10 * n : sp + 10 * (n + 1), (n + 1) :] = 0.1
         inh_stim[sp + 10 * n : sp + 10 * (n + 1), 1:n] = 0.1
 
     sp = 1100
 
-    for n in range(1, 40):
+    for n in range(1, nneurons):
         exc_stim[sp + 10 * n : sp + 10 * (n + 1), n] = 1
         inh_stim[sp + 10 * n : sp + 10 * (n + 1), (n + 1) :] = 0.1
         inh_stim[sp + 10 * n : sp + 10 * (n + 1), 1:n] = 0.1

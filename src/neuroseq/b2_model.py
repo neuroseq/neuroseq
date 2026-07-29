@@ -2396,6 +2396,35 @@ class B2Model:
                 max_neurons = max(max_neurons, obj.N)
         return max_neurons
 
+    def get_defined_neuron_count(self) -> int:
+        """
+        Largest neuron count across the full neurongroups in the *definition*
+        (intermediate representation), independent of whether the underlying
+        network has been (re)assembled yet.
+
+        Subgroups (entries with ``idxs``) are skipped, as their size derives
+        from their parent group. ``neuronnumber`` values that are not plain
+        integers (e.g. symbolic expressions) are ignored.
+
+        Returns
+        -------
+        int
+            The maximum ``neuronnumber`` over all full neurongroups, or 0 if
+            none is defined.
+        """
+        max_neurons = 0
+        for name, group in self.neurongroups.items():
+            if "idxs" in group:
+                continue
+            try:
+                max_neurons = max(max_neurons, int(group.get("neuronnumber", 0)))
+            except (TypeError, ValueError):
+                self.logger.debug(
+                    f"neurongroup {name} has a non-integer neuronnumber "
+                    f"{group.get('neuronnumber')!r}; skipping for stim-array sizing"
+                )
+        return max_neurons
+
     def to_dict(self, include_simulation_data: bool = True) -> dict[Any, Any]:
         states = self.network.get_states(read_only_variables=False)
         # remove monitors from state to avoid saving their recorded data

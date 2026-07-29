@@ -154,6 +154,22 @@ def test_define_neuron_number(b2model: B2Model) -> None:
     assert b2model.neurongroups["P"]["neuronnumber"] == 100
 
 
+def test_get_defined_neuron_count(b2model: B2Model) -> None:
+    # no groups yet
+    assert b2model.get_defined_neuron_count() == 0
+    # largest full-group count wins
+    b2model.define_neuronnumber("P", 40)
+    b2model.define_neuronnumber("Q", 100)
+    assert b2model.get_defined_neuron_count() == 100
+    # subgroups (with idxs) are skipped
+    b2model.define_neuronsubgroup_target("Pe", "P")
+    b2model.define_neuronsubgroup_idxs("Pe", (0, 32))
+    assert b2model.get_defined_neuron_count() == 100
+    # non-integer neuronnumbers are ignored, not fatal
+    b2model.define_neuronnumber("R", "not_an_int")
+    assert b2model.get_defined_neuron_count() == 100
+
+
 def test_assemble_neurongroup_exception(b2model: B2Model) -> None:
     with pytest.raises(RuntimeError, match="Error in assembling neuron group N"):
         b2model._assemble_neurongroup("N")
