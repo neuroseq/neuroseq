@@ -343,14 +343,38 @@ class B2Model:
         """
         sng = None
 
-        if isinstance(self.neurongroups[name]["idxs"], tuple | list):
-            if len(self.neurongroups[name]["idxs"]) > 2:
-                raise ValueError("Subgroups have to be contiguous")
-            start = self.neurongroups[name]["idxs"][0]
-            stop = self.neurongroups[name]["idxs"][1]
-        elif isinstance(self.neurongroups[name]["idxs"], int):
-            start = self.neurongroups[name]["idxs"]
-            stop = self.neurongroups[name]["idxs"] + 1
+        idxs = self.neurongroups[name]["idxs"]
+        # The GUI stores edited idxs as a string (e.g. "[0, 1]" or "3"); parse
+        # it back into the int / (start, stop) form brian2 needs.
+        if isinstance(idxs, str):
+            try:
+                idxs = ast.literal_eval(idxs)
+            except (ValueError, SyntaxError) as e:
+                self._handle_exception(
+                    e,
+                    f"Error parsing subgroup idxs {idxs!r} for {name}: "
+                    "expected an int or a (start, stop) pair",
+                )
+
+        if isinstance(idxs, tuple | list):
+            if len(idxs) == 1:
+                start = idxs[0]
+                stop = idxs[0] + 1
+            elif len(idxs) == 2:
+                start = idxs[0]
+                stop = idxs[1]
+            else:
+                raise ValueError(
+                    "Subgroups have to be contiguous: give an int or a (start, stop) pair"
+                )
+        elif isinstance(idxs, int):
+            start = idxs
+            stop = idxs + 1
+        else:
+            raise ValueError(
+                f"Invalid subgroup idxs {idxs!r} for {name}: "
+                "expected an int or a (start, stop) pair"
+            )
 
         try:
             sng = b2.Subgroup(

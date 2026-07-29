@@ -408,6 +408,34 @@ def test_neuron_subgroup(
     assert mfx.network["inhibitory"] is not None
 
 
+def test_neuron_subgroup_string_idxs(
+    mfx_parameterized: tuple[B2Model, dict[str, Any]],
+) -> None:
+    # The model editor stores edited idxs as strings; assembling must parse
+    # both a "(start, stop)" pair and a bare integer index.
+    mfx, _ = mfx_parameterized
+
+    mfx.define_neuronsubgroup_target("excitatory", "P")
+    mfx.define_neuronsubgroup_idxs("excitatory", "[0, 20]")
+    mfx._assemble_neuronsubgroup("excitatory")
+    assert mfx.network["excitatory"].N == 20
+
+    mfx.define_neuronsubgroup_target("single", "P")
+    mfx.define_neuronsubgroup_idxs("single", "5")
+    mfx._assemble_neuronsubgroup("single")
+    assert mfx.network["single"].N == 1
+
+
+def test_neuron_subgroup_invalid_idxs(
+    mfx_parameterized: tuple[B2Model, dict[str, Any]],
+) -> None:
+    mfx, _ = mfx_parameterized
+    mfx.define_neuronsubgroup_target("bad", "P")
+    mfx.define_neuronsubgroup_idxs("bad", "not_a_range")
+    with pytest.raises(RuntimeError, match="Error parsing subgroup idxs"):
+        mfx._assemble_neuronsubgroup("bad")
+
+
 def test_neuron_subgroup_remove_exception(
     mfx_parameterized: tuple[B2Model, dict[str, Any]],
     monkeypatch: MonkeyPatch,
