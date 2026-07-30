@@ -87,3 +87,41 @@ def test_hh_stdp_example_is_two_neuron_and_potentiates() -> None:
     project.run_simulation(project.suggested_simulation_time_seconds())
     we = np.asarray(model.network["synapse"].we).ravel() / float(b2.nS)
     assert we[-1] > we[0]
+
+
+def _abs_synapse_pairs(model, name):
+    """Return (list of (abs_source, target) pairs, autapse_count) for a synapse."""
+    synapse = model.network[name]
+    start = getattr(synapse.source, "start", 0)
+    src = start + np.asarray(synapse.i)
+    tgt = np.asarray(synapse.j)
+    return list(zip(src.tolist(), tgt.tolist(), strict=True)), int((src == tgt).sum())
+
+
+def test_hh_stdp_example_has_no_autapses_and_reciprocal_wiring() -> None:
+    # The excitatory plastic synapse Ce runs 0 -> 1; the inhibitory Ci provides
+    # feedback 1 -> 0. Neither should contain a self-connection (autapse).
+    project = example_projects.hh_neuron_with_plasticity()
+    model = project.b2_model
+    model.assemble_network()
+
+    ce_pairs, ce_autapses = _abs_synapse_pairs(model, "Ce")
+    ci_pairs, ci_autapses = _abs_synapse_pairs(model, "Ci")
+
+    assert ce_autapses == 0
+    assert ci_autapses == 0
+    assert (0, 1) in ce_pairs
+    assert (1, 0) in ci_pairs
+
+
+def test_hh_stdp_example_no_autapses_after_resize() -> None:
+    # The gid-based condition must stay autapse-free when the network is resized
+    # (subgroups start at non-zero offsets, which broke the old "i != j").
+    project = example_projects.hh_neuron_with_plasticity()
+    model = project.b2_model
+    model.functions["neurongroups"]["P"]["neuronnumber"]["modify"](40)
+    model.assemble_network()
+
+    for name in ("Ce", "Ci"):
+        _, autapses = _abs_synapse_pairs(model, name)
+        assert autapses == 0, f"{name} has {autapses} autapses after resize"

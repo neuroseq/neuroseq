@@ -1195,6 +1195,7 @@ def hh_neuron_with_plasticity() -> Project:
     Iext = I_external(t,i) : amp
     geopto = g_exc * Exc_stimulation(t, i)/opto_units: siemens
     giopto = g_inh * Inh_stimulation(t, i)/opto_units: siemens
+    gid = i : integer  # absolute neuron index, for subgroup-safe connectivity
     dm/dt = alpha_m*(1-m)-beta_m*m : 1
     dn/dt = alpha_n*(1-n)-beta_n*n : 1
     dh/dt = alpha_h*(1-h)-beta_h*h : 1
@@ -1229,7 +1230,7 @@ def hh_neuron_with_plasticity() -> Project:
     dApost/dt = -Apost / taupost : siemens (event-driven)
     """
 
-    b2_model.define_synapse_connection("Ce", "i != j")
+    b2_model.define_synapse_connection("Ce", "gid_pre != gid_post")
     b2_model.define_synapse_equation("Ce", ce_eq)
     b2_model.define_synapse_connection_probability("Ce", 1.0)
     b2_model.define_synapse_origin("Ce", "Pe")
@@ -1253,7 +1254,7 @@ def hh_neuron_with_plasticity() -> Project:
     b2_model.define_neuronsubgroup_target("Pi", "P")
     b2_model.define_neuronsubgroup_idxs("Pi", (nneurons_exc, nneurons))
 
-    b2_model.define_synapse_connection("Ci", "i != j")
+    b2_model.define_synapse_connection("Ci", "gid_pre != gid_post")
     b2_model.define_synapse_equation("Ci", """wi : siemens""")
     b2_model.define_synapse_connection_probability("Ci", 1.0)
     b2_model.define_synapse_origin("Ci", "Pi")
