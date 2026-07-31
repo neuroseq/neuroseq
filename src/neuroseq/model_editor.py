@@ -1119,7 +1119,24 @@ class ModelEditorDialog(QtWidgets.QDialog):
         self.button_box.rejected.connect(self.reject)
 
         self.setLayout(layout)
-        self.showMaximized()
+        # open at a reasonable size centred on the parent rather than maximized
+        self.resize(1000, 700)
+        self._center_on_parent()
+
+    def _center_on_parent(self) -> None:
+        """Move the dialog to the centre of its parent (or the screen)."""
+        reference = None
+        parent = self.parentWidget()
+        if parent is not None:
+            reference = parent.frameGeometry()
+        else:
+            screen = self.screen()
+            if screen is not None:
+                reference = screen.availableGeometry()
+        if reference is not None:
+            frame = self.frameGeometry()
+            frame.moveCenter(reference.center())
+            self.move(frame.topLeft())
 
     def _init_external_simulate(self, project: Project, b2model: B2Model) -> None:
         """Build a single-tree layout for editing external-simulation params."""
