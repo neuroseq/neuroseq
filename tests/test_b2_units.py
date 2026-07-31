@@ -96,7 +96,9 @@ def test_quantity_parser_round_trip_quantities(quantity: b2.Quantity) -> None:
 
 
 def test_quantity_parser() -> None:
-    assert str_to_quantity("3") == "3"
+    # plain numeric literals come back as numbers, not strings
+    assert str_to_quantity("3") == 3
+    assert isinstance(str_to_quantity("3"), int)
 
     assert str_to_quantity("3 * ms") == 3 * b2.ms
 
@@ -112,7 +114,16 @@ def test_quantity_parser() -> None:
 
     assert str_to_quantity("1/(10) * ms") == 1 / 10 * b2.ms
 
-    assert str_to_quantity("35") == "35"
+    assert str_to_quantity("35") == 35
+    assert isinstance(str_to_quantity("35"), int)
+
+    # a float literal round-trips as a float
+    assert str_to_quantity("0.02") == 0.02
+    assert isinstance(str_to_quantity("0.02"), float)
+
+    # booleans stay strings (dropdown values like skip_if_invalid)
+    assert str_to_quantity("True") == "True"
+    assert str_to_quantity("False") == "False"
 
     assert str_to_quantity("x*y") == "x*y"
 

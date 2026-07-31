@@ -328,6 +328,53 @@ class B2Model:
             "add": modifier.add,
         }
 
+    @staticmethod
+    def _parse_subgroup_idxs(idxs: Any) -> tuple[int, int]:
+        """
+        Normalize a subgroup ``idxs`` specification into a ``(start, stop)`` pair.
+
+        Accepts an int (a single neuron), a one- or two-element list/tuple, or a
+        string form of any of those (the model editor stores edited idxs as
+        strings, e.g. ``"[0, 1]"`` or ``"3"``).
+
+        Parameters
+        ----------
+        idxs : Any
+            The subgroup index specification.
+
+        Returns
+        -------
+        tuple[int, int]
+            The ``(start, stop)`` range (``stop`` exclusive).
+
+        Raises
+        ------
+        ValueError
+            When ``idxs`` cannot be interpreted as an int or a (start, stop) pair.
+        """
+        if isinstance(idxs, str):
+            try:
+                idxs = ast.literal_eval(idxs)
+            except (ValueError, SyntaxError) as e:
+                raise ValueError(
+                    f"could not parse subgroup idxs {idxs!r}: "
+                    "expected an int or a (start, stop) pair"
+                ) from e
+
+        if isinstance(idxs, tuple | list):
+            if len(idxs) == 1:
+                return int(idxs[0]), int(idxs[0]) + 1
+            if len(idxs) == 2:
+                return int(idxs[0]), int(idxs[1])
+            raise ValueError(
+                "subgroups have to be contiguous: give an int or a (start, stop) pair"
+            )
+        if isinstance(idxs, int):
+            return idxs, idxs + 1
+        raise ValueError(
+            f"invalid subgroup idxs {idxs!r}: expected an int or a (start, stop) pair"
+        )
+
     @_trigger_rebuild
     def _assemble_neuronsubgroup(
         self,
@@ -343,14 +390,10 @@ class B2Model:
         """
         sng = None
 
-        if isinstance(self.neurongroups[name]["idxs"], tuple | list):
-            if len(self.neurongroups[name]["idxs"]) > 2:
-                raise ValueError("Subgroups have to be contiguous")
-            start = self.neurongroups[name]["idxs"][0]
-            stop = self.neurongroups[name]["idxs"][1]
-        elif isinstance(self.neurongroups[name]["idxs"], int):
-            start = self.neurongroups[name]["idxs"]
-            stop = self.neurongroups[name]["idxs"] + 1
+        try:
+            start, stop = self._parse_subgroup_idxs(self.neurongroups[name]["idxs"])
+        except ValueError as e:
+            self._handle_exception(e, f"Error for subgroup {name}: {e}")
 
         try:
             sng = b2.Subgroup(
@@ -771,6 +814,9 @@ class B2Model:
         self.seed: int = seed
         self.network = b2.Network()
         self.parameters: dict[str, Any] = {}
+        # optional one-line descriptions per parameter name, shown in the editor
+        # and persisted in the .nseq archive
+        self.parameter_descriptions: dict[str, str] = {}
         self.neurongroups: dict[str, dict[str, Any]] = {}
         self.synapses: dict[str, dict[str, Any]] = {}
         self.monitors: dict[str, dict[str, Any]] = {}
@@ -863,7 +909,10 @@ class B2Model:
         self.define_init("group", "value", None)
 
     def define_parameter(
-        self, name: str, value: str | b2.Quantity | b2.TimedArray
+        self,
+        name: str,
+        value: str | b2.Quantity | b2.TimedArray,
+        description: str = "",
     ) -> None:
         """
         define_parameter Define a parameter for *any* model equation in the network. All elements will get the same set of parameters,
@@ -876,6 +925,9 @@ class B2Model:
 
         value : str | b2.Quantity | b2.TimedArray
             value to be used. Can be an expression in the form of a string or a quantity with units or a TimedArray.
+        description : str, optional
+            One-line description shown in the model editor and persisted in the
+            ``.nseq`` archive. Takes precedence over the shared registry.
         """
 
         element_modifier = self.Modifier(
@@ -892,6 +944,8 @@ class B2Model:
         }
 
         self.parameters[name] = value
+        if description:
+            self.parameter_descriptions[name] = description
 
         self.logger.info(f"Parameter defined: {name}")
         self.logger.debug(f"Parameter value: {value}")
@@ -1207,6 +1261,68 @@ class B2Model:
         )
         self.logger.info(f"Refractory period defined: {value}")
 
+    def _rescale_subgroups(self, parent: str, old_n: Any, new_n: Any) -> None:
+        """
+        Proportionally rescale the ``idxs`` of every subgroup that targets
+        ``parent`` when the parent's neuron count changes from ``old_n`` to
+        ``new_n``. This preserves each subgroup's fraction of the parent (e.g.
+        an excitatory/inhibitory split), so resizing a network from the model
+        editor keeps the subgroups consistent.
+
+        The rule is ``new_idx = round(old_idx / old_n * new_n)``, clamped to
+        ``[0, new_n]`` and kept non-empty for subgroups that were non-empty.
+
+        Parameters
+        ----------
+        parent : str
+            Name of the (full) neurongroup whose size changed.
+        old_n, new_n : Any
+            Previous and new neuron counts. Non-integer values are ignored.
+        """
+        try:
+            old_n = int(old_n)
+            new_n = int(new_n)
+        except (TypeError, ValueError):
+            return
+        if old_n <= 0 or new_n <= 0 or old_n == new_n:
+            return
+
+        for sub_name, group in self.neurongroups.items():
+            if "idxs" not in group or group.get("target") != parent:
+                continue
+            try:
+                start, stop = self._parse_subgroup_idxs(group["idxs"])
+            except ValueError:
+                # leave un-parseable idxs untouched; assembly will report it
+                continue
+
+            new_start = max(0, min(round(start / old_n * new_n), new_n))
+            new_stop = max(new_start, min(round(stop / old_n * new_n), new_n))
+            # keep a previously non-empty subgroup non-empty
+            if stop > start and new_stop == new_start:
+                if new_start < new_n:
+                    new_stop = new_start + 1
+                else:
+                    new_start = new_n - 1
+
+            group["idxs"] = (new_start, new_stop)
+            self.logger.info(
+                f"Rescaled subgroup {sub_name} idxs {(start, stop)} -> "
+                f"{(new_start, new_stop)} (parent {parent}: {old_n} -> {new_n})"
+            )
+
+    def _modify_neuronnumber(self, name: str, new_value: Any) -> None:
+        """
+        Modify callable bound to a neurongroup's ``neuronnumber`` field in the
+        model editor. Sets the new value and proportionally rescales the idxs
+        of any subgroups targeting this group, then flags a rebuild.
+        """
+        old_value = self.neurongroups.get(name, {}).get("neuronnumber")
+        self.neurongroups[name]["neuronnumber"] = new_value
+        self._rescale_subgroups(name, old_value, new_value)
+        self.logger.info(f"Neuron number modified: {name} {old_value} -> {new_value}")
+        self.set_rebuilt(True)
+
     @_trigger_rebuild
     def define_neuronnumber(self, name: str, n: int) -> None:
         """
@@ -1237,7 +1353,8 @@ class B2Model:
         )
         self.functions["neurongroups"][name]["neuronnumber"] = {
             "delete": element_modifier.delete,
-            "modify": element_modifier.modify,
+            # custom modify so editing the count cascades to subgroup idxs
+            "modify": lambda value, _name=name: self._modify_neuronnumber(_name, value),
             "rename": element_modifier.rename,
         }
 
@@ -1948,10 +2065,69 @@ class B2Model:
 
         self.logger.info(f"dt defined: {dt} for monitor {name}")
 
+    def _prune_orphaned_definitions(self) -> None:
+        """
+        Remove definitions that reference network elements which no longer
+        exist. After deleting a neurongroup or synapse in the editor, its
+        dependents (subgroups of it, synapses/monitors pointing at it, and its
+        initial conditions) would otherwise remain and make the next
+        ``assemble_network`` crash on a stale reference. Pruning them keeps the
+        model self-consistent (e.g. removing an inhibitory neuron group also
+        drops the inhibitory synapse that originated from it).
+        """
+
+        def _exists(ref: Any) -> bool:
+            return ref in self.neurongroups or ref in self.synapses
+
+        # subgroups whose target neurongroup was removed
+        for name in list(self.neurongroups):
+            group = self.neurongroups.get(name, {})
+            target = group.get("target")
+            if (
+                "idxs" in group
+                and target not in (None, "", "-")
+                and target not in self.neurongroups
+            ):
+                self.logger.warning(
+                    f"Pruning subgroup '{name}': target '{target}' no longer exists"
+                )
+                self._delete_dict_element("neurongroups", name)
+
+        # synapses whose origin/target neurongroup was removed
+        for name in list(self.synapses):
+            args = self.synapses.get(name, {})
+            for endpoint in ("origin", "target"):
+                ref = args.get(endpoint)
+                if ref not in (None, "", "-") and ref not in self.neurongroups:
+                    self.logger.warning(
+                        f"Pruning synapse '{name}': {endpoint} '{ref}' no longer exists"
+                    )
+                    self._delete_dict_element("synapses", name)
+                    break
+
+        # monitors whose source was removed
+        for name in list(self.monitors):
+            source = self.monitors.get(name, {}).get("source")
+            if source not in (None, "", "-") and not _exists(source):
+                self.logger.warning(
+                    f"Pruning monitor '{name}': source '{source}' no longer exists"
+                )
+                self._delete_dict_element("monitors", name)
+
+        # initial conditions for a deleted element
+        for name in list(self.initials):
+            if not _exists(name):
+                self.logger.warning(
+                    f"Pruning initial conditions for '{name}': element no longer exists"
+                )
+                self._delete_dict_element("initials", name)
+
     def assemble_network(self) -> None:
         """
         Assemble the network from its predefined components.
         """
+        self._prune_orphaned_definitions()
+
         network_name = self.name
         self.trace_name_to_monitor.clear()
         self.spike_name_to_monitor.clear()
@@ -2396,6 +2572,35 @@ class B2Model:
                 max_neurons = max(max_neurons, obj.N)
         return max_neurons
 
+    def get_defined_neuron_count(self) -> int:
+        """
+        Largest neuron count across the full neurongroups in the *definition*
+        (intermediate representation), independent of whether the underlying
+        network has been (re)assembled yet.
+
+        Subgroups (entries with ``idxs``) are skipped, as their size derives
+        from their parent group. ``neuronnumber`` values that are not plain
+        integers (e.g. symbolic expressions) are ignored.
+
+        Returns
+        -------
+        int
+            The maximum ``neuronnumber`` over all full neurongroups, or 0 if
+            none is defined.
+        """
+        max_neurons = 0
+        for name, group in self.neurongroups.items():
+            if "idxs" in group:
+                continue
+            try:
+                max_neurons = max(max_neurons, int(group.get("neuronnumber", 0)))
+            except (TypeError, ValueError):
+                self.logger.debug(
+                    f"neurongroup {name} has a non-integer neuronnumber "
+                    f"{group.get('neuronnumber')!r}; skipping for stim-array sizing"
+                )
+        return max_neurons
+
     def to_dict(self, include_simulation_data: bool = True) -> dict[Any, Any]:
         states = self.network.get_states(read_only_variables=False)
         # remove monitors from state to avoid saving their recorded data
@@ -2405,6 +2610,7 @@ class B2Model:
         states["current_time"] = self.network.t
         states["seed"] = self.seed
         states["parameters"] = self.parameters
+        states["parameter_descriptions"] = self.parameter_descriptions
         states["initials"] = self.initials
         states["checkpoints"] = self.checkpoints if include_simulation_data else []
         states["objects"] = {
@@ -2463,8 +2669,9 @@ class B2Model:
             report(20)
 
         # reconstruct parameters, timestep, seed.
+        param_descriptions = b2_model_data.get("parameter_descriptions", {})
         for k, v in b2_model_data["parameters"].items():
-            model.define_parameter(k, v)
+            model.define_parameter(k, v, param_descriptions.get(k, ""))
 
         if report is not None:
             report(30)

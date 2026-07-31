@@ -26,6 +26,8 @@ from qtpy.QtWidgets import QComboBox
 
 from neuroseq.b2_model import B2Model
 from neuroseq.b2_units import str_to_quantity
+from neuroseq.model_descriptions import describe_field
+from neuroseq.model_descriptions import describe_parameter
 
 if TYPE_CHECKING:
     from neuroseq.project import Project
@@ -491,6 +493,45 @@ class EditableParameterTree(ParameterTree):
         self._call_with_errormessage(
             self._connect_parameters, self.root, self.functions
         )
+
+        self._call_with_errormessage(self._apply_description_column)
+
+    def _description_for(self, param: Parameter) -> str:
+        """Return the one-line description for a leaf parameter row (or '')."""
+        if param.type() == "group":
+            return ""
+        name = param.name()
+        if self.name == "parameters":
+            overrides = getattr(self.b2model, "parameter_descriptions", None)
+            return describe_parameter(name, overrides)
+        if self.name == "initials":
+            return f"Initial value assigned to '{name}'."
+        return describe_field(name)
+
+    def _apply_description_column(self) -> None:
+        """Add/refresh a read-only 'Description' column (column 2) on the tree."""
+        self.setColumnCount(3)
+        header = self.headerItem()
+        if header is not None:
+            header.setText(2, "Description")
+        self._set_descriptions_recursive(self.invisibleRootItem())
+        # descriptions read best with everything visible
+        self.expandAll()
+        self.header().setSectionResizeMode(
+            QtWidgets.QHeaderView.ResizeMode.ResizeToContents
+        )
+
+    def _set_descriptions_recursive(self, item: Any) -> None:
+        for row in range(item.childCount()):
+            child = item.child(row)
+            param = getattr(child, "param", None)
+            if param is not None:
+                description = self._description_for(param)
+                if description:
+                    child.setText(2, description)
+                    child.setToolTip(2, description)
+                    child.setForeground(2, QtGui.QColor("#888888"))
+            self._set_descriptions_recursive(child)
 
     def _add_item(self) -> None:
         """
@@ -1038,42 +1079,23 @@ class ModelEditorDialog(QtWidgets.QDialog):
             ),
         }
 
-        layout = QtWidgets.QGridLayout()
+        # keep tree references for the accept()/rebuild path and for tests
+        self.trees = trees
+
+        layout = QtWidgets.QVBoxLayout()
+
+        # each of the five model domains becomes its own tab, mirroring the
+        # ELISE external-parameter dialog's single-window, tabbed layout
+        self.tab_widget = QtWidgets.QTabWidget(self)
+        for k, tree in trees.items():
+            self.tab_widget.addTab(tree, str(k))
+        layout.addWidget(self.tab_widget)
 
         btns = (
             QtWidgets.QDialogButtonBox.StandardButton.Ok
             | QtWidgets.QDialogButtonBox.StandardButton.Cancel
         )
-
         self.button_box = QtWidgets.QDialogButtonBox(btns)
-
-        i = 0
-        for k, tree in trees.items():
-            nameplate = QtWidgets.QLabel(str(k), parent=self)
-            bold_font = QtGui.QFont()
-            bold_font.setBold(True)
-            nameplate.setFont(bold_font)
-            layout.addWidget(nameplate, 0, i)
-
-            add_group_button = QtWidgets.QPushButton("New " + k[0 : len(k) - 1], self)
-            add_group_button.clicked.connect(tree._add_item)
-            add_group_button.setVisible(False)
-            layout.addWidget(add_group_button, 0, i + 1)
-            col_add = 0
-            if k == "Neurongroups":
-                col_add = 4
-                add_group_button_sub = QtWidgets.QPushButton("New Subgroup", self)
-                layout.addWidget(add_group_button_sub, 0, i + 2)
-                add_group_button_sub.clicked.connect(tree._add_neuronsubgroup)
-                add_group_button_sub.setVisible(False)
-            else:
-                col_add = 3
-            layout.addWidget(tree, 1, i, 1, col_add - 1)
-            separator = QtWidgets.QFrame()
-            separator.setFrameShape(QtWidgets.QFrame.VLine)
-            separator.setFrameShadow(QtWidgets.QFrame.Sunken)
-            layout.addWidget(separator, 0, i + col_add - 1, layout.rowCount(), 1)
-            i += col_add
 
         seed_widget = QtWidgets.QWidget(self)
         seed_layout = QtWidgets.QHBoxLayout(seed_widget)
@@ -1088,30 +1110,33 @@ class ModelEditorDialog(QtWidgets.QDialog):
 
         seed_layout.addWidget(seed_label)
         seed_layout.addWidget(self.seed_spin)
+        seed_layout.addStretch(1)
 
-        # place the seed widget above the dialog button box, spanning columns
-        layout.addWidget(
-            seed_widget,
-            layout.rowCount(),
-            0,
-            1,
-            layout.columnCount(),
-        )
-
-        layout.addWidget(
-            self.button_box,
-            layout.rowCount(),
-            1,
-            1,
-            layout.columnCount() - 1,
-            QtCore.Qt.AlignCenter,
-        )
+        layout.addWidget(seed_widget)
+        layout.addWidget(self.button_box)
 
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
 
         self.setLayout(layout)
-        self.showMaximized()
+        # open at a reasonable size centred on the parent rather than maximized
+        self.resize(1000, 700)
+        self._center_on_parent()
+
+    def _center_on_parent(self) -> None:
+        """Move the dialog to the centre of its parent (or the screen)."""
+        reference = None
+        parent = self.parentWidget()
+        if parent is not None:
+            reference = parent.frameGeometry()
+        else:
+            screen = self.screen()
+            if screen is not None:
+                reference = screen.availableGeometry()
+        if reference is not None:
+            frame = self.frameGeometry()
+            frame.moveCenter(reference.center())
+            self.move(frame.topLeft())
 
     def _init_external_simulate(self, project: Project, b2model: B2Model) -> None:
         """Build a single-tree layout for editing external-simulation params."""

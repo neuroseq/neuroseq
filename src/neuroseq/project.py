@@ -717,6 +717,69 @@ class Project:
                 )
         self.update_limits()
 
+    def pad_stim_arrays_to_neuron_count(self, n_neurons: int) -> None:
+        """
+        Widen every StimArray along the neuron axis so it has at least
+        ``n_neurons`` columns. New columns are filled with zeros (no
+        stimulation). Arrays that are already wide enough are left untouched;
+        arrays are never shrunk (so no user data is lost).
+
+        Parameters
+        ----------
+        n_neurons : int
+            Target minimum number of neuron columns.
+        """
+        if n_neurons <= 0:
+            return
+        for name, stim_array in self.stim_arrays.items():
+            current_n_neurons = int(stim_array.values.shape[1])
+            if current_n_neurons >= n_neurons:
+                continue
+            self.logger.info(
+                f"Widening StimArray {name} from {current_n_neurons} to "
+                f"{n_neurons} neurons: {stim_array.values.shape}"
+            )
+            stim_array.values = np.pad(
+                stim_array.values,
+                ((0, 0), (0, n_neurons - current_n_neurons)),
+                mode="constant",
+                constant_values=0,
+            )
+        self.update_limits()
+
+    def resize_stim_arrays_to_neuron_count(self, n_neurons: int) -> None:
+        """
+        Resize every StimArray along the neuron axis to *exactly* ``n_neurons``
+        columns: grow with trailing zero columns or trim surplus columns. Used
+        when the model's neuron count is reduced so the stim arrays follow the
+        network size back down (``pad_stim_arrays_to_neuron_count`` only grows).
+
+        Parameters
+        ----------
+        n_neurons : int
+            Exact number of neuron columns to resize to.
+        """
+        if n_neurons <= 0:
+            return
+        for name, stim_array in self.stim_arrays.items():
+            current_n_neurons = int(stim_array.values.shape[1])
+            if current_n_neurons == n_neurons:
+                continue
+            self.logger.info(
+                f"Resizing StimArray {name} from {current_n_neurons} to "
+                f"{n_neurons} neurons: {stim_array.values.shape}"
+            )
+            if current_n_neurons < n_neurons:
+                stim_array.values = np.pad(
+                    stim_array.values,
+                    ((0, 0), (0, n_neurons - current_n_neurons)),
+                    mode="constant",
+                    constant_values=0,
+                )
+            else:
+                stim_array.values = stim_array.values[:, :n_neurons]
+        self.update_limits()
+
     def trim_stim_arrays(self, total_time_seconds: float):
         """
         Trim all StimArrays in the project to a length of total_time_seconds
@@ -969,6 +1032,11 @@ class Project:
             + time_seconds
             + stim_array_padding_seconds
         )
+        # Stim arrays index the neuron axis (e.g. ``stimulus(t, i)``), so they
+        # must be at least as wide as the model's neuron count. Widen with
+        # trailing zero columns (= no stimulation) so increasing the neuron
+        # count in the model editor doesn't crash with an out-of-bounds index.
+        self.pad_stim_arrays_to_neuron_count(self.b2_model.get_defined_neuron_count())
         self.b2_model.run_simulation(time_seconds, self.stim_arrays, report)
         self.update_limits()
 

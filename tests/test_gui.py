@@ -2399,35 +2399,67 @@ def test_integration_modeleditor_delete_restore(
     assert "Ce" not in modeleditor.b2model.synapses
     assert "Ce" in gui.project.b2_model.synapses
 
-    # try to accept, error
+    # accept: the rebuild now succeeds by pruning the monitor / initial
+    # condition that depended on the deleted Ce synapse (this previously raised
+    # a "model rebuilding error" and forced a cancel).
     qtbot.mouseClick(
         modeleditor.button_box.button(QtWidgets.QDialogButtonBox.StandardButton.Ok),
-        QtCore.Qt.MouseButton.LeftButton,
-    )
-
-    # check error message
-    assert len(qmessagebox_calls) == 1
-    assert qmessagebox_calls[0]["name"] == "critical"
-    assert "model rebuilding error" in qmessagebox_calls[0]["title"].lower()
-    assert (
-        "error when rebuilding the model after editing"
-        in qmessagebox_calls[0]["text"].lower()
-    )
-
-    # reject-> only option available, restores old model
-    qtbot.mouseClick(
-        modeleditor.button_box.button(QtWidgets.QDialogButtonBox.StandardButton.Cancel),
         QtCore.Qt.MouseButton.LeftButton,
     )
     qtbot.waitUntil(lambda: not modeleditor.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)
 
-    # assert that Ce is in the definition and in the network -> restoring old state works
-    assert "Ce" in gui.project.b2_model.synapses
+    # no error dialog was shown
+    assert len(qmessagebox_calls) == 0
 
-    # run the model and make sure it works as it should
-    gui.project.run_simulation(0.1)
-    assert gui.project.b2_model.network["Ce"] is not None
-
-    assert gui.project.b2_model.network["trace"].v.shape == (30, 1000)
+    # the edited model rebuilt without Ce (and its orphaned dependents), and the
+    # network assembled cleanly
+    edited = modeleditor.b2model
+    assert "Ce" not in edited.synapses
+    assert "Ce" not in edited.initials
+    assert not any(m.get("source") == "Ce" for m in edited.monitors.values())
+    assert "Ce" not in [obj.name for obj in edited.network.objects]
     gui.close()
+
+
+def test_warn_if_cellpose_model_mismatch(qmessagebox_calls: list) -> None:
+    project = default_project()  # model has 10 neurons
+
+    class _FakeGui:
+        def __init__(self, project: Project) -> None:
+            self.project = project
+
+        def _cellpose_neuron_count(self, imported: CellposeImportResult | None) -> int:
+            return Gui._cellpose_neuron_count(self, imported)  # type: ignore[arg-type]
+
+    fake = _FakeGui(project)
+
+    def _cellpose_with(n_cells: int) -> CellposeImportResult:
+        return CellposeImportResult(
+            image_path=Path("dummy.png"),
+            segmentation_array=np.zeros((2, 2), dtype=np.int32),
+            overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+            trace_data=None,
+            spike_data=None,
+            original_cellpose_ids=np.arange(n_cells, dtype=np.int32),
+            stimulus_to_cellpose_mapping=None,
+        )
+
+    # no cellpose data -> no warning
+    project.cellpose_data = None
+    Gui._warn_if_cellpose_model_mismatch(fake)  # type: ignore[arg-type]
+    assert len(qmessagebox_calls) == 0
+
+    # matching counts (10 cells, 10 neurons) -> no warning
+    project.cellpose_data = _cellpose_with(10)
+    Gui._warn_if_cellpose_model_mismatch(fake)  # type: ignore[arg-type]
+    assert len(qmessagebox_calls) == 0
+
+    # mismatch (25 cells vs 10 neurons) -> warning
+    project.cellpose_data = _cellpose_with(25)
+    Gui._warn_if_cellpose_model_mismatch(fake)  # type: ignore[arg-type]
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "warning"
+    assert "mismatch" in qmessagebox_calls[0]["title"].lower()
+    assert "10" in qmessagebox_calls[0]["text"]
+    assert "25" in qmessagebox_calls[0]["text"]

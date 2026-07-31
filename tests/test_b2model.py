@@ -154,6 +154,22 @@ def test_define_neuron_number(b2model: B2Model) -> None:
     assert b2model.neurongroups["P"]["neuronnumber"] == 100
 
 
+def test_get_defined_neuron_count(b2model: B2Model) -> None:
+    # no groups yet
+    assert b2model.get_defined_neuron_count() == 0
+    # largest full-group count wins
+    b2model.define_neuronnumber("P", 40)
+    b2model.define_neuronnumber("Q", 100)
+    assert b2model.get_defined_neuron_count() == 100
+    # subgroups (with idxs) are skipped
+    b2model.define_neuronsubgroup_target("Pe", "P")
+    b2model.define_neuronsubgroup_idxs("Pe", (0, 32))
+    assert b2model.get_defined_neuron_count() == 100
+    # non-integer neuronnumbers are ignored, not fatal
+    b2model.define_neuronnumber("R", "not_an_int")
+    assert b2model.get_defined_neuron_count() == 100
+
+
 def test_assemble_neurongroup_exception(b2model: B2Model) -> None:
     with pytest.raises(RuntimeError, match="Error in assembling neuron group N"):
         b2model._assemble_neurongroup("N")
@@ -390,6 +406,77 @@ def test_neuron_subgroup(
 
     assert mfx.network["excitatory"] is not None
     assert mfx.network["inhibitory"] is not None
+
+
+def test_neuron_subgroup_string_idxs(
+    mfx_parameterized: tuple[B2Model, dict[str, Any]],
+) -> None:
+    # The model editor stores edited idxs as strings; assembling must parse
+    # both a "(start, stop)" pair and a bare integer index.
+    mfx, _ = mfx_parameterized
+
+    mfx.define_neuronsubgroup_target("excitatory", "P")
+    mfx.define_neuronsubgroup_idxs("excitatory", "[0, 20]")
+    mfx._assemble_neuronsubgroup("excitatory")
+    assert mfx.network["excitatory"].N == 20
+
+    mfx.define_neuronsubgroup_target("single", "P")
+    mfx.define_neuronsubgroup_idxs("single", "5")
+    mfx._assemble_neuronsubgroup("single")
+    assert mfx.network["single"].N == 1
+
+
+def test_neuron_subgroup_invalid_idxs(
+    mfx_parameterized: tuple[B2Model, dict[str, Any]],
+) -> None:
+    mfx, _ = mfx_parameterized
+    mfx.define_neuronsubgroup_target("bad", "P")
+    mfx.define_neuronsubgroup_idxs("bad", "not_a_range")
+    with pytest.raises(RuntimeError, match="could not parse subgroup idxs"):
+        mfx._assemble_neuronsubgroup("bad")
+
+
+def test_parse_subgroup_idxs() -> None:
+    parse = B2Model._parse_subgroup_idxs
+    assert parse((0, 5)) == (0, 5)
+    assert parse([2, 7]) == (2, 7)
+    assert parse("[0, 3]") == (0, 3)
+    assert parse("(1, 4)") == (1, 4)
+    assert parse(3) == (3, 4)
+    assert parse("5") == (5, 6)
+    assert parse([4]) == (4, 5)
+    with pytest.raises(ValueError):
+        parse("not_a_range")
+    with pytest.raises(ValueError):
+        parse((1, 2, 3))
+
+
+def test_modify_neuronnumber_rescales_subgroups(b2model: B2Model) -> None:
+    b2model.define_neuronnumber("P", 2)
+    b2model.define_neuronsubgroup_target("Pe", "P")
+    b2model.define_neuronsubgroup_idxs("Pe", (0, 1))
+    b2model.define_neuronsubgroup_target("Pi", "P")
+    b2model.define_neuronsubgroup_idxs("Pi", (1, 2))
+
+    # the model-editor edit path for the neuron count
+    b2model.functions["neurongroups"]["P"]["neuronnumber"]["modify"](40)
+
+    assert b2model.neurongroups["P"]["neuronnumber"] == 40
+    # proportional rescale preserves the 50/50 split
+    assert b2model.neurongroups["Pe"]["idxs"] == (0, 20)
+    assert b2model.neurongroups["Pi"]["idxs"] == (20, 40)
+
+
+def test_modify_neuronnumber_preserves_uneven_ratio(b2model: B2Model) -> None:
+    b2model.define_neuronnumber("P", 10)
+    b2model.define_neuronsubgroup_target("Pe", "P")
+    b2model.define_neuronsubgroup_idxs("Pe", (0, 8))  # 80% excitatory
+    b2model.define_neuronsubgroup_target("Pi", "P")
+    b2model.define_neuronsubgroup_idxs("Pi", (8, 10))
+
+    b2model.functions["neurongroups"]["P"]["neuronnumber"]["modify"](40)
+    assert b2model.neurongroups["Pe"]["idxs"] == (0, 32)
+    assert b2model.neurongroups["Pi"]["idxs"] == (32, 40)
 
 
 def test_neuron_subgroup_remove_exception(
@@ -1216,3 +1303,24 @@ def test_default_group_addition(project_ornstein) -> None:
 
     project_ornstein.b2_model.define_default_init()
     assert project_ornstein.b2_model.initials["group"]["value"] is None
+
+
+def test_prune_orphaned_definitions_on_assemble() -> None:
+    # Reviewer scenario: removing the inhibitory neuron group left the
+    # inhibitory synapse (origin=Pi) and its initial condition dangling, so the
+    # next assemble crashed on a stale reference. assemble_network must prune
+    # such orphans instead.
+    from neuroseq.example_projects import hh_neuron_with_plasticity
+
+    model = hh_neuron_with_plasticity().b2_model
+    model.functions["neurongroups"]["Pi"]["delete"]()
+    assert "Ci" in model.synapses
+    assert "Ci" in model.initials
+
+    model.assemble_network()
+
+    assert "Pi" not in model.neurongroups
+    assert "Ci" not in model.synapses  # origin gone -> synapse pruned
+    assert "Ci" not in model.initials  # its initial condition pruned too
+    assert "Ce" in model.synapses  # excitatory synapse untouched
+    assert "Ci" not in [obj.name for obj in model.network.objects]

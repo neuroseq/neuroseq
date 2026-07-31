@@ -64,21 +64,29 @@ def value_unit_str_to_quantity(
     return eval(_normalize_unit_str(unit_str)) * value
 
 
-def str_to_quantity(string: str) -> b2.Quantity | str:
+def str_to_quantity(string: str) -> b2.Quantity | int | float | str:
     try:
         quantity = eval(string)
-        if isinstance(quantity, b2.Quantity):
-            return quantity
-        else:
-            logging.warning(
-                f"'{string}' parsed to type {type(quantity)}, not b2.Quantity, returning original string"
-            )
-            return string
     except Exception:
         logging.warning(
             f"Could not parse '{string}' as b2.Quantity, returning original string"
         )
         return string
+
+    if isinstance(quantity, b2.Quantity):
+        return quantity
+    # Plain numeric literals (e.g. a neuron count or a connection probability)
+    # eval to int/float. Preserve them as numbers rather than falling back to
+    # the raw string, so integer-valued fields such as ``neuronnumber`` keep
+    # their type when edited through the model editor. ``bool`` is excluded
+    # (it is an ``int`` subclass) so "True"/"False" dropdown values stay strings.
+    if isinstance(quantity, (int, float)) and not isinstance(quantity, bool):
+        return quantity
+
+    logging.warning(
+        f"'{string}' parsed to type {type(quantity)}, not b2.Quantity, returning original string"
+    )
+    return string
 
 
 def display_units(quantity: b2.Quantity) -> str:

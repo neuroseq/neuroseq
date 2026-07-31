@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pathlib
 
+import brian2 as b2
 import brian2.numpy_ as np
 import pytest
 
@@ -65,3 +66,62 @@ def test_default_project_uses_10_neurons_and_sequential_stimulus() -> None:
         for j in range(stimulus.values.shape[1]):
             if j != i:
                 assert np.all(stimulus.values[t0 : t0 + pulse_n, j] == 0.0)
+
+
+def test_hh_stdp_example_is_two_neuron_and_potentiates() -> None:
+    project = example_projects.hh_neuron_with_plasticity()
+    model = project.b2_model
+
+    # 2-neuron layout: neuron 0 excitatory/pre (Pe), neuron 1 inhibitory/post (Pi)
+    assert model.neurongroups["P"]["neuronnumber"] == 2
+    for name, sa in project.stim_arrays.items():
+        assert sa.values.shape[1] == 2, name
+
+    model.assemble_network()
+    assert model.network["Pe"].N == 1
+    assert model.network["Pi"].N == 1
+    # the plastic Ce synapse wires the single 0 -> 1 pair
+    assert len(model.network["Ce"]) == 1
+
+    # the pre-before-post pairing protocol potentiates the plastic weight
+    project.run_simulation(project.suggested_simulation_time_seconds())
+    we = np.asarray(model.network["synapse"].we).ravel() / float(b2.nS)
+    assert we[-1] > we[0]
+
+
+def _abs_synapse_pairs(model, name):
+    """Return (list of (abs_source, target) pairs, autapse_count) for a synapse."""
+    synapse = model.network[name]
+    start = getattr(synapse.source, "start", 0)
+    src = start + np.asarray(synapse.i)
+    tgt = np.asarray(synapse.j)
+    return list(zip(src.tolist(), tgt.tolist(), strict=True)), int((src == tgt).sum())
+
+
+def test_hh_stdp_example_has_no_autapses_and_reciprocal_wiring() -> None:
+    # The excitatory plastic synapse Ce runs 0 -> 1; the inhibitory Ci provides
+    # feedback 1 -> 0. Neither should contain a self-connection (autapse).
+    project = example_projects.hh_neuron_with_plasticity()
+    model = project.b2_model
+    model.assemble_network()
+
+    ce_pairs, ce_autapses = _abs_synapse_pairs(model, "Ce")
+    ci_pairs, ci_autapses = _abs_synapse_pairs(model, "Ci")
+
+    assert ce_autapses == 0
+    assert ci_autapses == 0
+    assert (0, 1) in ce_pairs
+    assert (1, 0) in ci_pairs
+
+
+def test_hh_stdp_example_no_autapses_after_resize() -> None:
+    # The gid-based condition must stay autapse-free when the network is resized
+    # (subgroups start at non-zero offsets, which broke the old "i != j").
+    project = example_projects.hh_neuron_with_plasticity()
+    model = project.b2_model
+    model.functions["neurongroups"]["P"]["neuronnumber"]["modify"](40)
+    model.assemble_network()
+
+    for name in ("Ce", "Ci"):
+        _, autapses = _abs_synapse_pairs(model, name)
+        assert autapses == 0, f"{name} has {autapses} autapses after resize"
