@@ -2065,10 +2065,69 @@ class B2Model:
 
         self.logger.info(f"dt defined: {dt} for monitor {name}")
 
+    def _prune_orphaned_definitions(self) -> None:
+        """
+        Remove definitions that reference network elements which no longer
+        exist. After deleting a neurongroup or synapse in the editor, its
+        dependents (subgroups of it, synapses/monitors pointing at it, and its
+        initial conditions) would otherwise remain and make the next
+        ``assemble_network`` crash on a stale reference. Pruning them keeps the
+        model self-consistent (e.g. removing an inhibitory neuron group also
+        drops the inhibitory synapse that originated from it).
+        """
+
+        def _exists(ref: Any) -> bool:
+            return ref in self.neurongroups or ref in self.synapses
+
+        # subgroups whose target neurongroup was removed
+        for name in list(self.neurongroups):
+            group = self.neurongroups.get(name, {})
+            target = group.get("target")
+            if (
+                "idxs" in group
+                and target not in (None, "", "-")
+                and target not in self.neurongroups
+            ):
+                self.logger.warning(
+                    f"Pruning subgroup '{name}': target '{target}' no longer exists"
+                )
+                self._delete_dict_element("neurongroups", name)
+
+        # synapses whose origin/target neurongroup was removed
+        for name in list(self.synapses):
+            args = self.synapses.get(name, {})
+            for endpoint in ("origin", "target"):
+                ref = args.get(endpoint)
+                if ref not in (None, "", "-") and ref not in self.neurongroups:
+                    self.logger.warning(
+                        f"Pruning synapse '{name}': {endpoint} '{ref}' no longer exists"
+                    )
+                    self._delete_dict_element("synapses", name)
+                    break
+
+        # monitors whose source was removed
+        for name in list(self.monitors):
+            source = self.monitors.get(name, {}).get("source")
+            if source not in (None, "", "-") and not _exists(source):
+                self.logger.warning(
+                    f"Pruning monitor '{name}': source '{source}' no longer exists"
+                )
+                self._delete_dict_element("monitors", name)
+
+        # initial conditions for a deleted element
+        for name in list(self.initials):
+            if not _exists(name):
+                self.logger.warning(
+                    f"Pruning initial conditions for '{name}': element no longer exists"
+                )
+                self._delete_dict_element("initials", name)
+
     def assemble_network(self) -> None:
         """
         Assemble the network from its predefined components.
         """
+        self._prune_orphaned_definitions()
+
         network_name = self.name
         self.trace_name_to_monitor.clear()
         self.spike_name_to_monitor.clear()

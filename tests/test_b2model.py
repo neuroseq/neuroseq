@@ -1303,3 +1303,24 @@ def test_default_group_addition(project_ornstein) -> None:
 
     project_ornstein.b2_model.define_default_init()
     assert project_ornstein.b2_model.initials["group"]["value"] is None
+
+
+def test_prune_orphaned_definitions_on_assemble() -> None:
+    # Reviewer scenario: removing the inhibitory neuron group left the
+    # inhibitory synapse (origin=Pi) and its initial condition dangling, so the
+    # next assemble crashed on a stale reference. assemble_network must prune
+    # such orphans instead.
+    from neuroseq.example_projects import hh_neuron_with_plasticity
+
+    model = hh_neuron_with_plasticity().b2_model
+    model.functions["neurongroups"]["Pi"]["delete"]()
+    assert "Ci" in model.synapses
+    assert "Ci" in model.initials
+
+    model.assemble_network()
+
+    assert "Pi" not in model.neurongroups
+    assert "Ci" not in model.synapses  # origin gone -> synapse pruned
+    assert "Ci" not in model.initials  # its initial condition pruned too
+    assert "Ce" in model.synapses  # excitatory synapse untouched
+    assert "Ci" not in [obj.name for obj in model.network.objects]

@@ -26,7 +26,11 @@ STRUCTURAL_FIELD_DESCRIPTIONS: dict[str, str] = {
     "dt": "Integration/recording time step for this element.",
     # subgroup
     "target": "Name of the group/neurongroup this element acts on.",
-    "idxs": "Neuron index range (start, stop) that forms this subgroup.",
+    "idxs": (
+        "Neuron index range as (start, stop): a half-open interval selecting "
+        "neurons start..stop-1 of the target group. E.g. (0, 8) is the first 8 "
+        "neurons; (8, 10) is neurons 8 and 9. A single int n means just neuron n."
+    ),
     # synapse
     "origin": "Presynaptic (source) neurongroup.",
     "on_pre": "Statements executed on the arrival of a presynaptic spike.",
