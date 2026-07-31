@@ -814,6 +814,9 @@ class B2Model:
         self.seed: int = seed
         self.network = b2.Network()
         self.parameters: dict[str, Any] = {}
+        # optional one-line descriptions per parameter name, shown in the editor
+        # and persisted in the .nseq archive
+        self.parameter_descriptions: dict[str, str] = {}
         self.neurongroups: dict[str, dict[str, Any]] = {}
         self.synapses: dict[str, dict[str, Any]] = {}
         self.monitors: dict[str, dict[str, Any]] = {}
@@ -906,7 +909,10 @@ class B2Model:
         self.define_init("group", "value", None)
 
     def define_parameter(
-        self, name: str, value: str | b2.Quantity | b2.TimedArray
+        self,
+        name: str,
+        value: str | b2.Quantity | b2.TimedArray,
+        description: str = "",
     ) -> None:
         """
         define_parameter Define a parameter for *any* model equation in the network. All elements will get the same set of parameters,
@@ -919,6 +925,9 @@ class B2Model:
 
         value : str | b2.Quantity | b2.TimedArray
             value to be used. Can be an expression in the form of a string or a quantity with units or a TimedArray.
+        description : str, optional
+            One-line description shown in the model editor and persisted in the
+            ``.nseq`` archive. Takes precedence over the shared registry.
         """
 
         element_modifier = self.Modifier(
@@ -935,6 +944,8 @@ class B2Model:
         }
 
         self.parameters[name] = value
+        if description:
+            self.parameter_descriptions[name] = description
 
         self.logger.info(f"Parameter defined: {name}")
         self.logger.debug(f"Parameter value: {value}")
@@ -2540,6 +2551,7 @@ class B2Model:
         states["current_time"] = self.network.t
         states["seed"] = self.seed
         states["parameters"] = self.parameters
+        states["parameter_descriptions"] = self.parameter_descriptions
         states["initials"] = self.initials
         states["checkpoints"] = self.checkpoints if include_simulation_data else []
         states["objects"] = {
@@ -2598,8 +2610,9 @@ class B2Model:
             report(20)
 
         # reconstruct parameters, timestep, seed.
+        param_descriptions = b2_model_data.get("parameter_descriptions", {})
         for k, v in b2_model_data["parameters"].items():
-            model.define_parameter(k, v)
+            model.define_parameter(k, v, param_descriptions.get(k, ""))
 
         if report is not None:
             report(30)

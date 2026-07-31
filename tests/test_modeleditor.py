@@ -123,16 +123,8 @@ def test_default_neurongroup_addition(
     mdiag = ModelEditorDialog(b2_model_nmda)
     qtbot.addWidget(mdiag)
 
-    # find add neurongroup button
-    button = next(
-        filter(
-            lambda p: p.text() == "New Neurongroup",
-            mdiag.findChildren(QtWidgets.QPushButton),
-        )
-    )
-    assert button is not None
-    qtbot.mouseClick(button, QtCore.Qt.LeftButton)
     ntree = mdiag.findChild(EditableNeurongroupTree)
+    ntree._add_item()
 
     assert "new_neurongroup" in mdiag.b2model.neurongroups
     for name, should in zip(
@@ -186,15 +178,8 @@ def test_default_synapse_addition(
     mdiag = ModelEditorDialog(b2_model_nmda)
     qtbot.addWidget(mdiag)
 
-    button = next(
-        filter(
-            lambda p: p.text() == "New Synapse",
-            mdiag.findChildren(QtWidgets.QPushButton),
-        )
-    )
-    assert button is not None
-    qtbot.mouseClick(button, QtCore.Qt.LeftButton)
     stree = mdiag.findChild(EditableSynapseTree)
+    stree._add_item()
 
     assert "new_synapse" in mdiag.b2model.synapses
 
@@ -272,15 +257,8 @@ def test_default_monitor_addition(
     mdiag = ModelEditorDialog(b2_model_nmda)
     qtbot.addWidget(mdiag)
 
-    button = next(
-        filter(
-            lambda p: p.text() == "New Monitor",
-            mdiag.findChildren(QtWidgets.QPushButton),
-        )
-    )
-    assert button is not None
-    qtbot.mouseClick(button, QtCore.Qt.LeftButton)
     stree = mdiag.findChild(EditableMonitorTree)
+    stree._add_item()
 
     assert "new_monitor" in mdiag.b2model.monitors
 
@@ -373,15 +351,8 @@ def test_default_monitor_customization(
     mdiag = ModelEditorDialog(b2_model_nmda)
     qtbot.addWidget(mdiag)
 
-    button = next(
-        filter(
-            lambda p: p.text() == "New Monitor",
-            mdiag.findChildren(QtWidgets.QPushButton),
-        )
-    )
-    assert button is not None
-    qtbot.mouseClick(button, QtCore.Qt.LeftButton)
     stree = mdiag.findChild(EditableMonitorTree)
+    stree._add_item()
 
     # select stuff that makes sense and test that it is carried over correctly
 
@@ -455,18 +426,11 @@ def test_default_parameter_addition(
     mdiag = ModelEditorDialog(b2_model_nmda)
     qtbot.addWidget(mdiag)
 
-    button = next(
-        filter(
-            lambda p: p.text() == "New Parameter",
-            mdiag.findChildren(QtWidgets.QPushButton),
-        )
-    )
-    assert button is not None
-    qtbot.mouseClick(button, QtCore.Qt.LeftButton)
     forest = mdiag.findChildren(
         EditableParameterTree,
     )
     stree = [tree for tree in forest if tree.name == "parameters"][0]
+    stree._add_item()
 
     assert "new_parameter" in mdiag.b2model.parameters
 
@@ -488,19 +452,11 @@ def test_default_init_addition(
     mdiag = ModelEditorDialog(b2_model_nmda)
     qtbot.addWidget(mdiag)
 
-    button = next(
-        filter(
-            lambda p: p.text() == "New Initial Condition",
-            mdiag.findChildren(QtWidgets.QPushButton),
-        )
-    )
-    assert button is not None
-
-    qtbot.mouseClick(button, QtCore.Qt.LeftButton)
     forest = mdiag.findChildren(
         EditableParameterTree,
     )
     stree = [tree for tree in forest if tree.name == "initials"][0]
+    stree._add_item()
 
     assert "group" in mdiag.b2model.initials
 
@@ -1067,3 +1023,41 @@ def test_monitordialog_modify_with_run(
     b2_model_nmda.run_simulation(0.4, stim_arrays={})
 
     assert b2_model_nmda.network["M"].g.shape[1] == 4
+
+
+def test_model_editor_is_tabbed_with_description_column(qtbot: QtBot) -> None:
+    from neuroseq.example_projects import hh_neuron_with_plasticity
+
+    project = hh_neuron_with_plasticity()
+    mdiag = ModelEditorDialog(project.b2_model)
+    qtbot.addWidget(mdiag)
+
+    # five domains, one tab each
+    assert mdiag.tab_widget.count() == 5
+    assert [mdiag.tab_widget.tabText(i) for i in range(mdiag.tab_widget.count())] == [
+        "Neurongroups",
+        "Synapses",
+        "Monitors",
+        "Parameters",
+        "Initial Conditions",
+    ]
+
+    # every tree gains a third "Description" column
+    for tree in mdiag.trees.values():
+        assert tree.columnCount() == 3
+        assert tree.headerItem().text(2) == "Description"
+
+    def _find(tree, name):
+        return tree.findItems(
+            name,
+            QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
+            0,
+        )[0]
+
+    # a structural field is described
+    ng = mdiag.trees["Neurongroups"]
+    assert _find(ng, "neuronnumber").text(2) == "Number of neurons in the group."
+
+    # a model parameter is described from the shared registry
+    params = mdiag.trees["Parameters"]
+    assert "trace" in _find(params, "taupre").text(2).lower()
