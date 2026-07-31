@@ -485,6 +485,22 @@ def test_pad_stim_arrays_to_neuron_count() -> None:
     assert project.stim_arrays["stim"].values.shape == (100, 50)
 
 
+def test_resize_stim_arrays_to_neuron_count_grows_and_trims() -> None:
+    arr = np.random.rand(100, 30)
+    project = default_project()
+    project.stim_arrays["stim"] = StimArray(
+        "stim", StimType.Excitation, arr.copy(), "mS", dt=0.001
+    )
+    # grow to 50 (trailing zeros, existing data preserved)
+    project.resize_stim_arrays_to_neuron_count(50)
+    assert project.stim_arrays["stim"].values.shape == (100, 50)
+    assert np.allclose(project.stim_arrays["stim"].values[:, :30], arr)
+    # trim back to 10 (the reported case: neuron count reduced -> array cut)
+    project.resize_stim_arrays_to_neuron_count(10)
+    assert project.stim_arrays["stim"].values.shape == (100, 10)
+    assert np.allclose(project.stim_arrays["stim"].values, arr[:, :10])
+
+
 def test_run_simulation_widens_stim_arrays_to_neuron_count() -> None:
     # Reproduces the "neuron count locked" bug: editing the neuron count up
     # used to crash the run with an out-of-bounds stim index. The run must now

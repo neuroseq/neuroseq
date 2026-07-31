@@ -738,6 +738,7 @@ class Gui(QtWidgets.QMainWindow):
         )
 
     def btn_edit_clicked(self) -> None:
+        old_neuron_count = self.project.b2_model.get_defined_neuron_count()
         mdiag = ModelEditorDialog(
             self.project.b2_model, parent=self, project=self.project
         )
@@ -746,11 +747,15 @@ class Gui(QtWidgets.QMainWindow):
                 self.project.external_simulate_params = mdiag.external_simulate_params
             else:
                 self.project.b2_model = mdiag.b2model
-                # a larger neuron count needs wider stim arrays; grow them now
-                # so the resize is reflected immediately (also enforced at run)
-                self.project.pad_stim_arrays_to_neuron_count(
-                    self.project.b2_model.get_defined_neuron_count()
-                )
+                # keep the stim arrays in step with the (possibly changed)
+                # neuron count: grow to cover more neurons, or trim back when
+                # the count is reduced. Grow-only on increase/unchanged edits
+                # so a deliberately wider stim (e.g. from Cellpose) isn't lost.
+                new_neuron_count = self.project.b2_model.get_defined_neuron_count()
+                if 0 < new_neuron_count < old_neuron_count:
+                    self.project.resize_stim_arrays_to_neuron_count(new_neuron_count)
+                else:
+                    self.project.pad_stim_arrays_to_neuron_count(new_neuron_count)
             self.project.update_limits()
             self.update_project(self.project)
 
