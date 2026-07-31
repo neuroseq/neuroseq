@@ -277,7 +277,13 @@ def test_btn_edit_clicked_writes_external_params_back(
 def test_btn_edit_clicked_writes_b2model_back(
     qtbot: QtBot, monkeypatch: MonkeyPatch
 ) -> None:
-    replacement = object()
+    class _Replacement:
+        # minimal stand-in for the edited B2Model; btn_edit_clicked queries the
+        # neuron count to keep stim arrays in step
+        def get_defined_neuron_count(self) -> int:
+            return 0
+
+    replacement = _Replacement()
 
     class _Dialog:
         def __init__(self, *args, **kwargs):
