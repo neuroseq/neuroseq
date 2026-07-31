@@ -2431,3 +2431,46 @@ def test_integration_modeleditor_delete_restore(
 
     assert gui.project.b2_model.network["trace"].v.shape == (30, 1000)
     gui.close()
+
+
+def test_warn_if_cellpose_model_mismatch(qmessagebox_calls: list) -> None:
+    project = default_project()  # model has 10 neurons
+
+    class _FakeGui:
+        def __init__(self, project: Project) -> None:
+            self.project = project
+
+        def _cellpose_neuron_count(self, imported: CellposeImportResult | None) -> int:
+            return Gui._cellpose_neuron_count(self, imported)  # type: ignore[arg-type]
+
+    fake = _FakeGui(project)
+
+    def _cellpose_with(n_cells: int) -> CellposeImportResult:
+        return CellposeImportResult(
+            image_path=Path("dummy.png"),
+            segmentation_array=np.zeros((2, 2), dtype=np.int32),
+            overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+            trace_data=None,
+            spike_data=None,
+            original_cellpose_ids=np.arange(n_cells, dtype=np.int32),
+            stimulus_to_cellpose_mapping=None,
+        )
+
+    # no cellpose data -> no warning
+    project.cellpose_data = None
+    Gui._warn_if_cellpose_model_mismatch(fake)  # type: ignore[arg-type]
+    assert len(qmessagebox_calls) == 0
+
+    # matching counts (10 cells, 10 neurons) -> no warning
+    project.cellpose_data = _cellpose_with(10)
+    Gui._warn_if_cellpose_model_mismatch(fake)  # type: ignore[arg-type]
+    assert len(qmessagebox_calls) == 0
+
+    # mismatch (25 cells vs 10 neurons) -> warning
+    project.cellpose_data = _cellpose_with(25)
+    Gui._warn_if_cellpose_model_mismatch(fake)  # type: ignore[arg-type]
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "warning"
+    assert "mismatch" in qmessagebox_calls[0]["title"].lower()
+    assert "10" in qmessagebox_calls[0]["text"]
+    assert "25" in qmessagebox_calls[0]["text"]

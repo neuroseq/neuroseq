@@ -756,6 +756,7 @@ class Gui(QtWidgets.QMainWindow):
                     self.project.resize_stim_arrays_to_neuron_count(new_neuron_count)
                 else:
                     self.project.pad_stim_arrays_to_neuron_count(new_neuron_count)
+                self._warn_if_cellpose_model_mismatch()
             self.project.update_limits()
             self.update_project(self.project)
 
@@ -853,6 +854,24 @@ class Gui(QtWidgets.QMainWindow):
             return 0
         unique_ids = np.unique(imported.segmentation_array)
         return int(np.sum(unique_ids >= 0))
+
+    def _warn_if_cellpose_model_mismatch(self) -> None:
+        """Warn when Cellpose data is present but its cell count differs from the
+        model's neuron count (the two must agree for neuron-to-cell mapping,
+        e.g. holographic stimulation export)."""
+        if self.project is None or self.project.cellpose_data is None:
+            return
+        cellpose_count = self._cellpose_neuron_count(self.project.cellpose_data)
+        model_count = self.project.b2_model.get_defined_neuron_count()
+        if cellpose_count > 0 and model_count > 0 and cellpose_count != model_count:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Cellpose / model size mismatch",
+                f"The model has {model_count} neuron(s) but the Cellpose "
+                f"segmentation has {cellpose_count} cell(s).\n\n"
+                "These counts should match so that model neurons map one-to-one "
+                "onto segmented cells (e.g. for holographic stimulation export).",
+            )
 
     def _expand_stim_arrays_to_neuron_count(
         self, target_neuron_count: int
@@ -1569,6 +1588,7 @@ class Gui(QtWidgets.QMainWindow):
                 "Cell spatial footprint import",
                 message,
             )
+            self._warn_if_cellpose_model_mismatch()
 
     def btn_import_syscon2_seq_clicked(self) -> None:
         if not self.project.stim_arrays:
