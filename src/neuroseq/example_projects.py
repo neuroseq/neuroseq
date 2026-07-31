@@ -1300,15 +1300,8 @@ def hh_neuron_with_plasticity() -> Project:
         post_start = t0 + pre_post_gap_ms
         exc_stim[post_start : post_start + pulse_ms, 1] = 1.0  # postsynaptic neuron 1
 
-    i_external = StimArray(
-        name="I_external",
-        stim_type=StimType.External,
-        values=i_stim,
-        units="pA",
-        dt=stim_dt,
-    )
-    project.add_stim_array(i_external)
-
+    # Exc_stimulation carries the STDP pairing protocol, so add it first; the
+    # unused I_external current is added last.
     exc_stimulation = StimArray(
         name="Exc_stimulation",
         stim_type=StimType.Excitation,
@@ -1326,6 +1319,15 @@ def hh_neuron_with_plasticity() -> Project:
         dt=stim_dt,
     )
     project.add_stim_array(inh_stimulation)
+
+    i_external = StimArray(
+        name="I_external",
+        stim_type=StimType.External,
+        values=i_stim,
+        units="pA",
+        dt=stim_dt,
+    )
+    project.add_stim_array(i_external)
 
     return project
 
