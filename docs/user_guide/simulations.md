@@ -115,6 +115,15 @@ Common controls:
 The dialog stays open so you can iterate: change parameters, click **Apply**
 to overwrite, or **Reset start time** to rewind the cursor.
 
+## Closed-loop input design
+
+**Input Designer (beta)** is a separate NeuroSeq feature for routines that
+extend a stim array, run a simulation, analyze its traces, and decide what to
+append next. Its first routine uses five-pulse EPSP measurements and STDP
+pairings to move a postsynaptic response toward a percentage target. See the
+dedicated [Input Designer guide](input_designer.md) for setup, controls, the
+decision algorithm, live plots, and current limitations.
+
 ## Looping a stim array
 
 **Loop stim array** (toolbar) repeats the entire current array end-to-end a

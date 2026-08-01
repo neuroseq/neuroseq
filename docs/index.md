@@ -11,6 +11,7 @@
 
 - [GUI overview](user_guide/gui_overview.md)
 - [Simulations](user_guide/simulations.md)
+- [Input Designer (beta)](user_guide/input_designer.md)
 - [Run external simulators](user_guide/run_external_simulators.md)
 - [Experiments](user_guide/experiments.md)
 - [Analysis tools and custom plugins](user_guide/analysis_and_plugins.md)
