@@ -283,6 +283,9 @@ class Gui(QtWidgets.QMainWindow):
             toolbar=self.toolbar_stim_editor,
             parent=self,
         )
+        self.stim_editor.simulation_requested.connect(
+            self._do_brian2_simulation_threaded
+        )
         split_vertical.addWidget(self.stim_editor)
         self.trace_widget.set_default_scroll_bars(
             self.stim_editor.x_scrollbar,
@@ -364,6 +367,7 @@ class Gui(QtWidgets.QMainWindow):
         self._io_thread: QtCore.QThread | None = None
         self._io_worker: BackgroundIOWorker | None = None
         self._io_on_success: Callable[[object], None] | None = None
+        self._io_on_failure: Callable[[str], None] | None = None
         self._io_failure_title = "File operation failed"
         self._io_failure_prefix = "The file operation could not complete:"
         if filename is not None:
@@ -1246,6 +1250,7 @@ class Gui(QtWidgets.QMainWindow):
         failure_title: str = "File operation failed",
         failure_prefix: str = "The file operation could not complete:",
         cancel_callback: Callable[[], None] | None = None,
+        on_failure: Callable[[str], None] | None = None,
     ) -> bool:
         """Run a blocking IO task on a worker thread.
 
@@ -1305,6 +1310,7 @@ class Gui(QtWidgets.QMainWindow):
         self._io_on_success = on_success
         self._io_failure_title = failure_title
         self._io_failure_prefix = failure_prefix
+        self._io_on_failure = on_failure
 
         thread = QtCore.QThread(self)
         worker = BackgroundIOWorker(task)
@@ -1339,6 +1345,7 @@ class Gui(QtWidgets.QMainWindow):
         self._io_thread = None
         self._io_worker = None
         self._io_on_success = None
+        self._io_on_failure = None
         self._io_failure_title = "File operation failed"
         self._io_failure_prefix = "The file operation could not complete:"
         self._set_io_actions_enabled(True)
@@ -1369,6 +1376,7 @@ class Gui(QtWidgets.QMainWindow):
     def _on_io_failed(self, message: str) -> None:
         failure_title = self._io_failure_title
         failure_prefix = self._io_failure_prefix
+        on_failure = getattr(self, "_io_on_failure", None)
         # _teardown_io_task resets the dialog and restores its defaults.
         self._teardown_io_task()
         self.logger.error(f"IO task failed: {message}")
@@ -1377,6 +1385,8 @@ class Gui(QtWidgets.QMainWindow):
             failure_title,
             f"{failure_prefix} {message}",
         )
+        if on_failure is not None:
+            on_failure(message)
 
     def _do_brian2_simulation_threaded(self, simulation_time: float) -> None:
         if self._io_worker is not None:
@@ -1428,6 +1438,7 @@ class Gui(QtWidgets.QMainWindow):
         def _on_brian2_finished(_result: object) -> None:
             self.logger.info("Brian2 simulation finished.")
             self._update_data(keep_undo_history=True)
+            self.stim_editor.input_designer_simulation_finished()
 
         self._dispatch_io_task(
             _brian2_task,
@@ -1436,6 +1447,7 @@ class Gui(QtWidgets.QMainWindow):
             failure_title="Simulation error",
             failure_prefix="Could not run simulation:",
             cancel_callback=_request_brian2_cancel,
+            on_failure=self.stim_editor.input_designer_simulation_failed,
         )
 
     def btn_do_external_simulation_clicked(self) -> None:

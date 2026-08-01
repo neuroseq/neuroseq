@@ -14,6 +14,7 @@ from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.input_designer_dialog import InputDesignerDialog
 from neuroseq.project import Project
 from neuroseq.stim import DrawStim
 from neuroseq.stim import DrawStimType
@@ -55,6 +56,7 @@ class StimEditor(QtWidgets.QWidget):
     """A GUI to edit 2-d numpy arrays of neuron stimuli interactively using mouse and keyboard input."""
 
     limits_modified = QtCore.Signal()
+    simulation_requested = QtCore.Signal(float)
 
     def __init__(
         self,
@@ -82,6 +84,7 @@ class StimEditor(QtWidgets.QWidget):
         self.stims_dict: dict[str, StimArrayModifier] = {}
         self.copy_values = np.zeros((0, 0))
         self._pattern_dialog: StimPatternDialog | None = None
+        self._input_designer_dialog: InputDesignerDialog | None = None
         # Captures the time index the user clicked at, so a Ramp drag can
         # use it as the ramp's left edge for every subsequent mouse_dragged
         # emit (the signal's `initial_time_index` is the *previous* position
@@ -974,6 +977,27 @@ class StimEditor(QtWidgets.QWidget):
         self._pattern_dialog.raise_()
         self._pattern_dialog.activateWindow()
 
+    def open_input_designer(self) -> None:
+        if self.current_stim_modifier is None or self.project is None:
+            return
+        if self._input_designer_dialog is None:
+            self._input_designer_dialog = InputDesignerDialog(self, self)
+            self._input_designer_dialog.simulation_requested.connect(
+                self.simulation_requested
+            )
+        self._input_designer_dialog.refresh()
+        self._input_designer_dialog.show()
+        self._input_designer_dialog.raise_()
+        self._input_designer_dialog.activateWindow()
+
+    def input_designer_simulation_finished(self) -> None:
+        if self._input_designer_dialog is not None:
+            self._input_designer_dialog.simulation_finished()
+
+    def input_designer_simulation_failed(self, message: str) -> None:
+        if self._input_designer_dialog is not None:
+            self._input_designer_dialog.simulation_failed(message)
+
     def apply_pattern(
         self,
         neuron_slice: slice,
@@ -1103,12 +1127,20 @@ class StimEditor(QtWidgets.QWidget):
             icon="mdi6.repeat-variant",
         )
         add_action(
-            "Design stimulation pattern",
+            "Design static input (stimulaiton pattern)",
             self.open_pattern_designer,
             menu,
             toolbar,
             self,
             icon=self._pattern_designer_icon(),
+        )
+        add_action(
+            "Input Designer (beta)",
+            self.open_input_designer,
+            menu,
+            toolbar,
+            self,
+            icon="mdi6.robot-industrial-outline",
         )
         add_action(
             "Show all stim arrays",

@@ -92,7 +92,7 @@ as a sample ruler.
 ## Pre-built stimulation patterns
 
 For common stimulation motifs you do not need to draw manually. The toolbar
-action **Design stimulation pattern** opens a generator dialog that writes
+action **Design static input (stimulaiton pattern)** opens a generator dialog that writes
 patterns directly into the selected stim array:
 
 | Pattern         | Description                                                                       |

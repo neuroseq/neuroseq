@@ -36,7 +36,7 @@ class StimPatternDialog(QtWidgets.QDialog):
         self.editor = editor
         self._context: StimPatternContext | None = None
         self.setModal(False)
-        self.setWindowTitle("Design stimulation pattern")
+        self.setWindowTitle("Design static input (stimulaiton pattern)")
         self.resize(420, 480)
 
         layout = QtWidgets.QVBoxLayout(self)

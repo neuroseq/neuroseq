@@ -69,3 +69,27 @@ def test_focus_neuron_range_updates_height_and_y_position(monkeypatch) -> None:
 
     assert captured_state["height"] == 1.0
     assert captured_state["position"] == (500.0, 0.0, 1.0)
+
+
+def test_focus_time_range_updates_width_and_x_position(monkeypatch) -> None:
+    controller = ConstrainedPanZoomController()
+    controller.min_width = 1.0
+    controller.max_width = 10_000.0
+    dummy_state = {
+        "width": 1000.0,
+        "height": 10.0,
+        "position": (500.0, 4.5, 1.0),
+    }
+    captured_state = {}
+    monkeypatch.setattr(controller, "_get_camera_state", lambda: dummy_state.copy())
+    monkeypatch.setattr(
+        controller,
+        "_set_camera_state",
+        lambda state: captured_state.update(state),
+    )
+    monkeypatch.setattr(controller, "_update_cameras", lambda: None)
+
+    controller.focus_time_range(2.0, 2.25)
+
+    assert captured_state["width"] == 250.0
+    assert captured_state["position"] == (2125.0, 4.5, 1.0)

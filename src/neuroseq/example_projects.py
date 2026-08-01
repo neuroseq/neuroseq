@@ -1332,6 +1332,10 @@ def hh_neurons_with_plasticity() -> Project:
     return project
 
 
+# Backwards-compatible public name used by existing tests and scripts.
+hh_neuron_with_plasticity = hh_neurons_with_plasticity
+
+
 @register_example_project("Two Hodgkin-Huxley Neurons with STDP", section="Network")
 def two_hh_neurons_with_plasticity() -> Project:
     project = Project()

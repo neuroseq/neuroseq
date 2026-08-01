@@ -111,6 +111,25 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         self._set_camera_state(state)
         self._update_cameras()
 
+    def focus_time_range(self, start_seconds: float, stop_seconds: float) -> None:
+        """Move the shared plot camera to a time interval, in seconds."""
+        start_ms = 1000.0 * float(start_seconds)
+        stop_ms = 1000.0 * float(stop_seconds)
+        if stop_ms <= start_ms:
+            return
+        state = self._get_camera_state()
+        visible_time = float(
+            np.clip(stop_ms - start_ms, float(self.min_width), float(self.max_width))
+        )
+        state["width"] = visible_time
+        state["position"] = (
+            start_ms + 0.5 * visible_time,
+            float(state["position"][1]),
+            float(state["position"][2]),
+        )
+        self._set_camera_state(state)
+        self._update_cameras()
+
     def _set_camera_state(self, new_state):
         """Override the _set_camera_state method
         - limit the width, height and position to prevent scrolling or zooming beyond the data
