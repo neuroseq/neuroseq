@@ -20,9 +20,14 @@ def test_trace_widget_context_menu_contains_plugin_actions(qtbot: QtBot) -> None
     qtbot.addWidget(trace_widget)
 
     trace_widget._rebuild_custom_analysis_menu()
-    action_texts = [action.text() for action in trace_widget.context_menu.actions()]
+    actions = trace_widget.context_menu.actions()
+    action_texts = [action.text() for action in actions]
 
-    assert "Open as a new window" in action_texts
+    assert "Open analysis in a new window" in action_texts
+    open_in_new_action = next(
+        action for action in actions if action.text() == "Open analysis in a new window"
+    )
+    assert open_in_new_action.isChecked()
     assert "Mean activity" in action_texts
     assert "Mean activity (new window)" not in action_texts
 

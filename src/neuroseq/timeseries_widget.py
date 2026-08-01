@@ -87,7 +87,7 @@ class TimeseriesWidget(FPLWidget):
         self.timeline = Timeline()
         self.grid_lines: GridLines | None = None
         self.show_grid = True
-        self._open_analysis_in_new_window = False
+        self._open_analysis_in_new_window = True
 
         self.context_menu = QtWidgets.QMenu("Custom analysis", self)
 
@@ -460,7 +460,7 @@ class TimeseriesWidget(FPLWidget):
     def _rebuild_custom_analysis_menu(self) -> None:
         self.context_menu.clear()
         add_action(
-            "Open as a new window",
+            "Open analysis in a new window",
             self._set_open_analysis_in_new_window,
             self.context_menu,
             None,
