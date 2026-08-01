@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from matplotlib.colors import to_hex
+from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq import theme
@@ -152,6 +153,44 @@ def test_input_designer_protocol_defaults(qtbot) -> None:
     assert dialog.spn_pairing_interval_ms.value() == 30.0
     assert dialog.spn_tolerance.value() == 1.0
     assert dialog.spn_history_blocks.value() == 3
+    assert dialog.windowFlags() & QtCore.Qt.WindowType.WindowMinimizeButtonHint
+
+
+def test_input_designer_positions_native_minimized_window_without_moving_restore(
+    qtbot, monkeypatch
+) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    host = QtWidgets.QMainWindow()
+    host.resize(900, 700)
+    qtbot.addWidget(host)
+    host.show()
+    dialog = InputDesignerDialog(editor, parent=host)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    dialog.move(240, 180)
+    original_position = dialog.pos()
+    placements: list[tuple[int, int, int]] = []
+
+    def record_placement(hwnd: int, x: int, y: int) -> bool:
+        placements.append((hwnd, x, y))
+        return True
+
+    monkeypatch.setattr(
+        "neuroseq.input_designer_dialog._set_native_minimized_position",
+        record_placement,
+    )
+
+    dialog._position_minimized_window()
+
+    available = dialog.screen().availableGeometry()
+    assert placements == [
+        (
+            int(dialog.winId()),
+            available.left() + 12,
+            available.bottom() - 32 - 12 + 1,
+        )
+    ]
+    assert dialog.pos() == original_position
 
 
 def test_input_designer_initializes_missing_trace_then_starts_protocol(

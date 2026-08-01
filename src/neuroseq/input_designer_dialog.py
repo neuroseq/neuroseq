@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -26,6 +27,39 @@ class EPSPMeasurement:
     units: str = "mV"
 
 
+def _set_native_minimized_position(hwnd: int, x: int, y: int) -> bool:
+    """Set a Windows iconic-window position without changing restore geometry."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    class WindowPlacement(ctypes.Structure):
+        _fields_ = [
+            ("length", wintypes.UINT),
+            ("flags", wintypes.UINT),
+            ("show_cmd", wintypes.UINT),
+            ("min_position", wintypes.POINT),
+            ("max_position", wintypes.POINT),
+            ("normal_position", wintypes.RECT),
+        ]
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    get_placement = user32.GetWindowPlacement
+    get_placement.argtypes = [wintypes.HWND, ctypes.POINTER(WindowPlacement)]
+    get_placement.restype = wintypes.BOOL
+    set_placement = user32.SetWindowPlacement
+    set_placement.argtypes = [wintypes.HWND, ctypes.POINTER(WindowPlacement)]
+    set_placement.restype = wintypes.BOOL
+    placement = WindowPlacement()
+    placement.length = ctypes.sizeof(WindowPlacement)
+    if not get_placement(hwnd, ctypes.byref(placement)):
+        return False
+    placement.flags |= 0x0001  # WPF_SETMINPOSITION
+    placement.min_position = wintypes.POINT(int(x), int(y))
+    return bool(set_placement(hwnd, ctypes.byref(placement)))
+
+
 class InputDesignerDialog(QtWidgets.QDialog):
     """Closed-loop EPSP targeting with an STDP induction protocol."""
 
@@ -42,6 +76,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self.setWindowFlag(QtCore.Qt.WindowType.WindowMinimizeButtonHint, True)
         self.editor = editor
         self.project = editor.project
         self._running = False
@@ -147,6 +182,25 @@ class InputDesignerDialog(QtWidgets.QDialog):
         layout.addWidget(buttons)
         self.apply_theme(self._theme)
         self.refresh()
+
+    def changeEvent(self, event: QtCore.QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() == QtCore.QEvent.Type.WindowStateChange and self.isMinimized():
+            QtCore.QTimer.singleShot(0, self._position_minimized_window)
+
+    def _position_minimized_window(self) -> None:
+        """Place Windows' native minimized dialog at the screen bottom-left."""
+        screen = self.screen() or QtWidgets.QApplication.primaryScreen()
+        if screen is None:
+            return
+        margin = 12
+        available = screen.availableGeometry()
+        minimized_height = 32
+        _set_native_minimized_position(
+            int(self.winId()),
+            available.left() + margin,
+            available.bottom() - minimized_height - margin + 1,
+        )
 
     def refresh(self) -> None:
         self.project = self.editor.project
