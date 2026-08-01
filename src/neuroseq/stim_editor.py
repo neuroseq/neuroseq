@@ -85,6 +85,7 @@ class StimEditor(QtWidgets.QWidget):
         self.copy_values = np.zeros((0, 0))
         self._pattern_dialog: StimPatternDialog | None = None
         self._input_designer_dialog: InputDesignerDialog | None = None
+        self._input_designer_theme = "light"
         # Captures the time index the user clicked at, so a Ramp drag can
         # use it as the ramp's left edge for every subsequent mouse_dragged
         # emit (the signal's `initial_time_index` is the *previous* position
@@ -985,6 +986,7 @@ class StimEditor(QtWidgets.QWidget):
             self._input_designer_dialog.simulation_requested.connect(
                 self.simulation_requested
             )
+        self._input_designer_dialog.apply_theme(self._input_designer_theme)
         self._input_designer_dialog.refresh()
         self._input_designer_dialog.show()
         self._input_designer_dialog.raise_()
@@ -997,6 +999,11 @@ class StimEditor(QtWidgets.QWidget):
     def input_designer_simulation_failed(self, message: str) -> None:
         if self._input_designer_dialog is not None:
             self._input_designer_dialog.simulation_failed(message)
+
+    def apply_input_designer_theme(self, theme: str) -> None:
+        self._input_designer_theme = theme
+        if self._input_designer_dialog is not None:
+            self._input_designer_dialog.apply_theme(theme)
 
     def apply_pattern(
         self,

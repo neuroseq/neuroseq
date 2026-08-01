@@ -4,10 +4,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import brian2.numpy_ as np
-import pyqtgraph as pg
+from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+from neuroseq import theme as theme_module
 from neuroseq.data import TraceData
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import detect_epsps
@@ -49,10 +50,12 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self._probe_pulse_times: list[float] = []
         self._baseline_epsp: float | None = None
         self._epsp_percentages: list[float] = []
+        self._theme = theme_module.LIGHT
         self.setWindowTitle("Input Designer (beta)")
-        self.resize(650, 720)
+        self.resize(800, 860)
 
         layout = QtWidgets.QVBoxLayout(self)
+        layout.setSpacing(6)
         explanation = QtWidgets.QLabel(
             "Target a postsynaptic EPSP with five-pulse measurements and "
             "single pre/post STDP induction pairings.",
@@ -77,7 +80,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         amplitude_row.addWidget(self.lbl_units)
         self.spn_pairing_interval_ms = QtWidgets.QDoubleSpinBox(self)
         self.spn_pairing_interval_ms.setRange(0.001, 1000.0)
-        self.spn_pairing_interval_ms.setValue(10.0)
+        self.spn_pairing_interval_ms.setValue(30.0)
         self.spn_pairing_interval_ms.setSuffix(" ms")
         self.spn_target = QtWidgets.QDoubleSpinBox(self)
         self.spn_target.setRange(0.0, 10_000.0)
@@ -85,15 +88,20 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.spn_target.setSuffix(" %")
         self.spn_tolerance = QtWidgets.QDoubleSpinBox(self)
         self.spn_tolerance.setRange(0.001, 1000.0)
-        self.spn_tolerance.setValue(5.0)
+        self.spn_tolerance.setValue(1.0)
         self.spn_tolerance.setSuffix(" %")
         self.spn_max_iterations = QtWidgets.QSpinBox(self)
         self.spn_max_iterations.setRange(1, 10_000)
         self.spn_max_iterations.setValue(20)
-        self.chk_follow_input = QtWidgets.QCheckBox(
-            "Follow new input with three blocks of history", self
-        )
+        self.chk_follow_input = QtWidgets.QCheckBox("Follow new input", self)
         self.chk_follow_input.setChecked(True)
+        self.spn_history_blocks = QtWidgets.QSpinBox(self)
+        self.spn_history_blocks.setRange(0, 100)
+        self.spn_history_blocks.setValue(3)
+        self.spn_history_blocks.setSuffix(" blocks")
+        self.spn_history_blocks.setToolTip(
+            "Number of preceding generated-block lengths to keep visible."
+        )
         form.addRow("Trace to analyze:", self.cmb_trace)
         form.addRow("Presynaptic neuron ID:", self.spn_presynaptic)
         form.addRow("Postsynaptic neuron ID:", self.spn_postsynaptic)
@@ -103,24 +111,24 @@ class InputDesignerDialog(QtWidgets.QDialog):
         form.addRow("Tolerance:", self.spn_tolerance)
         form.addRow("Maximum induction pairings:", self.spn_max_iterations)
         form.addRow("Live view:", self.chk_follow_input)
+        form.addRow("Visible history:", self.spn_history_blocks)
         layout.addLayout(form)
 
-        self.epsp_plot = pg.PlotWidget(self)
-        self.epsp_plot.setLabel("left", "EPSP amplitude", units="%")
-        self.epsp_plot.setLabel("bottom", "Measurement")
-        self.epsp_plot.showGrid(x=True, y=True, alpha=0.25)
-        layout.addWidget(self.epsp_plot, 2)
+        self.epsp_plot = MatplotlibWidget(self)
+        self.epsp_plot.setMinimumHeight(430)
+        figure = self.epsp_plot.getFigure()
+        grid = figure.add_gridspec(2, 1, height_ratios=(3, 2), hspace=0.08)
+        self.epsp_axes = figure.add_subplot(grid[0, 0])
+        self.difference_axes = figure.add_subplot(grid[1, 0], sharex=self.epsp_axes)
+        # Compatibility alias: both axes now share one tightly packed canvas.
+        self.difference_plot = self.epsp_plot
+        layout.addWidget(self.epsp_plot, 4)
         self.lbl_relative_difference = QtWidgets.QLabel(
             "Relative difference from target: waiting for baseline", self
         )
         layout.addWidget(self.lbl_relative_difference)
-        self.difference_plot = pg.PlotWidget(self)
-        self.difference_plot.setLabel("left", "Current − target", units="%")
-        self.difference_plot.setLabel("bottom", "Measurement")
-        self.difference_plot.showGrid(x=True, y=True, alpha=0.25)
-        self.difference_plot.addItem(pg.InfiniteLine(angle=0, pen=pg.mkPen("k")))
-        layout.addWidget(self.difference_plot, 1)
         self.log = QtWidgets.QPlainTextEdit(self)
+        self.log.setMaximumHeight(130)
         self.log.setReadOnly(True)
         layout.addWidget(self.log, 1)
         buttons = QtWidgets.QDialogButtonBox(
@@ -137,6 +145,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.btn_stop.clicked.connect(self.stop)
         buttons.rejected.connect(self.close)
         layout.addWidget(buttons)
+        self.apply_theme(self._theme)
         self.refresh()
 
     def refresh(self) -> None:
@@ -161,10 +170,34 @@ class InputDesignerDialog(QtWidgets.QDialog):
             self._append_log("No stimulation array is selected.")
             return
         if not self.cmb_trace.currentText():
-            self._append_log("No simulation trace monitor is available.")
+            duration, accepted = QtWidgets.QInputDialog.getDouble(
+                self,
+                "Create simulation trace monitors",
+                "No simulation trace monitor is available. Run an initial "
+                "simulation to create trace monitors.\nSimulation time (seconds):",
+                0.001,
+                0.001,
+                1_000_000.0,
+                3,
+            )
+            if not accepted:
+                self._append_log("Trace-monitor initialization cancelled.")
+                return
+            self._running = True
+            self._phase = "initialize_trace"
+            self.btn_start.setEnabled(False)
+            self.btn_stop.setEnabled(True)
+            self._append_log(
+                f"Running an initial {duration:.6g} s simulation to create "
+                "trace monitors."
+            )
+            self.simulation_requested.emit(duration)
             return
+        self._begin_protocol(clear_log=True)
+
+    def _begin_protocol(self, *, clear_log: bool) -> None:
         if self.spn_presynaptic.value() == self.spn_postsynaptic.value():
-            self._append_log("Pre- and postsynaptic neuron IDs must differ.")
+            self._finish("Pre- and postsynaptic neuron IDs must differ.")
             return
         self._running = True
         self._iteration = 0
@@ -172,7 +205,8 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self._epsp_percentages = []
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
-        self.log.clear()
+        if clear_log:
+            self.log.clear()
         self._update_plots()
         self._append_probe()
 
@@ -256,7 +290,10 @@ class InputDesignerDialog(QtWidgets.QDialog):
             slice(0, stim.values.shape[1]), slice(start, start + block.shape[0]), block
         )
         if self.chk_follow_input.isChecked():
-            history_start = max(0, start - 3 * block.shape[0])
+            history_start = max(
+                0,
+                start - self.spn_history_blocks.value() * block.shape[0],
+            )
             self.editor.controller.focus_time_range(
                 history_start * stim.dt, (start + block.shape[0]) * stim.dt
             )
@@ -270,6 +307,18 @@ class InputDesignerDialog(QtWidgets.QDialog):
 
     def simulation_finished(self) -> None:
         if not self._running or self.project is None:
+            return
+        if self._phase == "initialize_trace":
+            self.refresh()
+            if not self.cmb_trace.currentText():
+                self._finish(
+                    "The initial simulation completed, but no simulation "
+                    "trace monitor became available. Add a StateMonitor to "
+                    "the model and try again."
+                )
+                return
+            self._append_log("Trace monitor created; starting the EPSP protocol.")
+            self._begin_protocol(clear_log=False)
             return
         if self._phase == "pairing":
             self._append_probe()
@@ -358,19 +407,14 @@ class InputDesignerDialog(QtWidgets.QDialog):
         x = np.arange(1, len(self._epsp_percentages) + 1)
         values = np.asarray(self._epsp_percentages)
         target = self.spn_target.value()
-        self.epsp_plot.clear()
-        self.epsp_plot.plot(x, values, pen=pg.mkPen("b", width=2), symbol="o")
+        self.epsp_axes.clear()
+        self.epsp_axes.plot(x, values, color="#1f77b4", linewidth=2, marker="o")
         if values.size:
-            self.target_line = pg.InfiniteLine(
-                pos=target,
-                angle=0,
-                pen=pg.mkPen("r", width=2, style=QtCore.Qt.PenStyle.DashLine),
-            )
-            self.epsp_plot.addItem(self.target_line)
-        self.difference_plot.clear()
-        self.difference_plot.addItem(pg.InfiniteLine(angle=0, pen=pg.mkPen("k")))
-        self.difference_plot.plot(
-            x, values - target, pen=pg.mkPen("m", width=2), symbol="o"
+            self.epsp_axes.axhline(target, color="#d62728", linewidth=2, linestyle="--")
+        self.difference_axes.clear()
+        self.difference_axes.axhline(0.0, color="#7f7f7f", linewidth=1)
+        self.difference_axes.plot(
+            x, values - target, color="#b245a8", linewidth=2, marker="o"
         )
         if values.size:
             difference = float(values[-1] - target)
@@ -382,6 +426,34 @@ class InputDesignerDialog(QtWidgets.QDialog):
             self.lbl_relative_difference.setText(
                 "Relative difference from target: waiting for baseline"
             )
+        self._style_plot_axes()
+        self.epsp_plot.getFigure().subplots_adjust(
+            left=0.13, right=0.98, bottom=0.11, top=0.98, hspace=0.08
+        )
+        self.epsp_plot.draw()
+
+    def _style_plot_axes(self) -> None:
+        face, text = theme_module.mpl_colors(self._theme)
+        for axes, ylabel in (
+            (self.epsp_axes, "EPSP\namplitude (%)"),
+            (self.difference_axes, "Δ target\n(%)"),
+        ):
+            axes.set_facecolor(face)
+            axes.set_ylabel(ylabel, color=text)
+            axes.tick_params(colors=text)
+            axes.grid(True, alpha=0.25)
+            for spine in axes.spines.values():
+                spine.set_color(text)
+        self.epsp_plot.getFigure().set_facecolor(face)
+        self.epsp_axes.tick_params(labelbottom=False)
+        self.epsp_axes.set_xlabel("")
+        self.difference_axes.set_xlabel("Measurement", color=text)
+
+    def apply_theme(self, theme: str) -> None:
+        """Recolor both Matplotlib canvases for the application theme."""
+        self._theme = theme_module.normalize_theme(theme)
+        self._style_plot_axes()
+        self.epsp_plot.draw()
 
     def simulation_failed(self, message: str) -> None:
         if self._running:

@@ -2,7 +2,10 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from matplotlib.colors import to_hex
+from qtpy import QtWidgets
 
+from neuroseq import theme
 from neuroseq.data import TraceData
 from neuroseq.input_designer_dialog import EPSPMeasurement
 from neuroseq.input_designer_dialog import InputDesignerDialog
@@ -12,6 +15,7 @@ from neuroseq.stim import StimType
 
 class _FakeProject:
     def __init__(self) -> None:
+        self.trace_available = True
         self.trace = TraceData(
             "Simulation :: P / v",
             np.zeros((2, 2000), dtype=np.float32),
@@ -23,7 +27,7 @@ class _FakeProject:
 
     def get_data_names(self, data_type: type[TraceData]) -> list[str]:
         assert data_type is TraceData
-        return [self.trace.name]
+        return [self.trace.name] if self.trace_available else []
 
     def get_data(self, name: str, data_type: type[TraceData]) -> TraceData:
         assert name == self.trace.name
@@ -89,7 +93,7 @@ def test_input_designer_runs_probe_pairing_probe_and_reaches_target(
     pairing = editor.calls[1]
     pre_sample = int(np.flatnonzero(pairing[:, 0])[0])
     post_sample = int(np.flatnonzero(pairing[:, 1])[0])
-    assert post_sample - pre_sample == 10
+    assert post_sample - pre_sample == 30
 
     dialog.simulation_finished()
     assert len(editor.calls) == 3
@@ -130,12 +134,59 @@ def test_input_designer_camera_includes_three_prior_blocks(qtbot) -> None:
     editor = _FakeEditor(project)
     dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
+    dialog.spn_history_blocks.setValue(0)
 
     dialog.start()
 
     block_samples = editor.calls[0].shape[0]
-    expected_start = max(0, 10 - 3 * block_samples) * 0.001
+    expected_start = 10 * 0.001
     assert editor.focused_ranges == [(expected_start, (10 + block_samples) * 0.001)]
+
+
+def test_input_designer_protocol_defaults(qtbot) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+
+    assert dialog.spn_pairing_interval_ms.value() == 30.0
+    assert dialog.spn_tolerance.value() == 1.0
+    assert dialog.spn_history_blocks.value() == 3
+
+
+def test_input_designer_initializes_missing_trace_then_starts_protocol(
+    qtbot, monkeypatch
+) -> None:
+    project = _FakeProject()
+    project.trace_available = False
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    input_arguments: list[tuple] = []
+
+    def get_duration(*args):
+        input_arguments.append(args)
+        return 0.001, True
+
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog,
+        "getDouble",
+        get_duration,
+    )
+    requested: list[float] = []
+    dialog.simulation_requested.connect(requested.append)
+
+    dialog.start()
+
+    assert requested == [0.001]
+    assert input_arguments[0][4] == 0.001
+    assert input_arguments[0][6] == 3
+    assert dialog._phase == "initialize_trace"
+    project.trace_available = True
+    dialog.simulation_finished()
+    assert len(editor.calls) == 1
+    assert requested[1] > 0.001
+    assert dialog._phase == "baseline_probe"
 
 
 def test_input_designer_reuses_epsp_plugin_detection(qtbot) -> None:
@@ -156,3 +207,22 @@ def test_input_designer_reuses_epsp_plugin_detection(qtbot) -> None:
     # rise, so its measured prominence is slightly below the injected 5 mV.
     assert measurement.amplitude == pytest.approx(4.62, abs=0.05)
     assert len(measurement.pulse_amplitudes) == 5
+
+
+def test_input_designer_matplotlib_plots_follow_theme(qtbot) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+
+    dialog.apply_theme(theme.DARK)
+    assert to_hex(dialog.epsp_axes.get_facecolor()) == "#1e1e1e"
+    assert to_hex(dialog.difference_axes.get_facecolor()) == "#1e1e1e"
+
+    dialog.apply_theme(theme.LIGHT)
+    assert to_hex(dialog.epsp_axes.get_facecolor()) == "#ffffff"
+    assert to_hex(dialog.difference_axes.get_facecolor()) == "#ffffff"
+    assert dialog.epsp_plot is dialog.difference_plot
+    assert dialog.epsp_plot.minimumHeight() == 430
+    assert dialog.epsp_axes.get_ylabel() == "EPSP\namplitude (%)"
+    assert dialog.difference_axes.get_ylabel() == "Δ target\n(%)"

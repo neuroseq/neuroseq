@@ -2010,6 +2010,7 @@ class Gui(QtWidgets.QMainWindow):
         for widget in self.plot_widgets:
             widget.apply_theme(theme)
         self.custom_analysis_widget.apply_theme(theme)
+        self.stim_editor.apply_input_designer_theme(theme)
         action = getattr(self, "_theme_actions", {}).get(theme)
         if action is not None and not action.isChecked():
             action.setChecked(True)
