@@ -1598,6 +1598,9 @@ class Gui(QtWidgets.QMainWindow):
         ]:
             widget.set_grid_visible(is_visible)
 
+    def toggle_minimum_stimulus_size(self, is_visible: bool) -> None:
+        self.stim_editor.stim_widget.set_keep_short_stimuli_visible(is_visible)
+
     def choose_max_ram_synapse_plot_matrix(self) -> None:
         new_max_ram, ok = QtWidgets.QInputDialog.getText(
             self,
@@ -2475,6 +2478,15 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             icon="mdi6.grid",
+            checkable=True,
+            is_checked=True,
+        )
+        add_action(
+            "Keep Short Stimuli Visible (4 px)",
+            self.toggle_minimum_stimulus_size,
+            menu,
+            toolbar,
+            icon="mdi6.square-medium",
             checkable=True,
             is_checked=True,
         )

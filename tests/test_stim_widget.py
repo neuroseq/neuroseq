@@ -269,6 +269,32 @@ def test_stim_widget_gridlines_follow_stim_dt(qtbot: QtBot) -> None:
     qtbot.waitUntil(lambda: not stim_widget.isVisible())
 
 
+def test_stim_widget_short_stimuli_minimum_size_toggle(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    values = np.zeros((100_000, 2))
+    values[50_000, 1] = 1.0
+    stim_widget.set_data(
+        StimArray("short", StimType.Excitation, values, "mV", dt=0.001)
+    )
+
+    graphic = stim_widget.minimum_size_graphic
+    assert graphic is not None
+    assert graphic.sizes == pytest.approx(4.0)
+    assert graphic.size_space == "screen"
+    assert stim_widget.graphic is not None
+    assert stim_widget.graphic.offset[2] > 199.0
+    assert np.all(graphic.data.value[:, 2] > 199.0)
+    assert graphic.visible
+
+    stim_widget.set_keep_short_stimuli_visible(False)
+    assert not graphic.visible
+    assert values[50_000, 1] == 1.0
+    stim_widget.set_keep_short_stimuli_visible(True)
+    assert graphic.visible
+
+
 def test_stim_widget_hover_preview_snaps_to_sample_on_pointer_move(
     qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:

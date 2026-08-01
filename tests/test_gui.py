@@ -639,6 +639,18 @@ def test_gui_toggle_grid(qtbot: QtBot) -> None:
     gui.close()
 
 
+def test_gui_toggle_minimum_stimulus_size(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    stim_widget = gui.stim_editor.stim_widget
+    assert stim_widget.keep_short_stimuli_visible
+    gui.toggle_minimum_stimulus_size(False)
+    assert not stim_widget.keep_short_stimuli_visible
+    gui.toggle_minimum_stimulus_size(True)
+    assert stim_widget.keep_short_stimuli_visible
+    gui.close()
+
+
 class MockSaveLoadOptionsDialog:
     options = SaveLoadOptions(
         include_stim_arrays=True,
