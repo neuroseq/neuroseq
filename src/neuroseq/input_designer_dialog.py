@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import brian2.numpy_ as np
+from matplotlib.ticker import MultipleLocator
 from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -128,6 +129,15 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.spn_max_iterations = QtWidgets.QSpinBox(self)
         self.spn_max_iterations.setRange(1, 10_000)
         self.spn_max_iterations.setValue(20)
+        self.chk_run_all_iterations = QtWidgets.QCheckBox(
+            "Run until the last iteration regardless of convergence to the target",
+            self,
+        )
+        self.chk_run_all_iterations.setChecked(False)
+        self.chk_run_all_iterations.setToolTip(
+            "Continue plasticity induction after the EPSP enters the target "
+            "tolerance, stopping only at the maximum iteration count."
+        )
         self.chk_follow_input = QtWidgets.QCheckBox("Follow new input", self)
         self.chk_follow_input.setChecked(True)
         self.spn_history_blocks = QtWidgets.QSpinBox(self)
@@ -145,6 +155,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         form.addRow("Target EPSP amplitude:", self.spn_target)
         form.addRow("Tolerance:", self.spn_tolerance)
         form.addRow("Maximum induction pairings:", self.spn_max_iterations)
+        form.addRow("Stopping rule:", self.chk_run_all_iterations)
         form.addRow("Live view:", self.chk_follow_input)
         form.addRow("Visible history:", self.spn_history_blocks)
         layout.addLayout(form)
@@ -409,12 +420,18 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self._epsp_percentages.append(percentage)
         self._update_plots()
         difference = percentage - self.spn_target.value()
-        if abs(difference) < self.spn_tolerance.value():
+        converged = abs(difference) < self.spn_tolerance.value()
+        if converged and not self.chk_run_all_iterations.isChecked():
             self._finish("EPSP is within tolerance; target achieved.")
             return
         if self._iteration >= self.spn_max_iterations.value():
             self._finish("Maximum induction pairings reached.")
             return
+        if converged:
+            self._append_log(
+                "EPSP is within tolerance, but the routine is configured to "
+                "run through the last iteration."
+            )
         self._iteration += 1
         self._append_pairing(potentiate=difference < 0.0)
 
@@ -472,6 +489,8 @@ class InputDesignerDialog(QtWidgets.QDialog):
             x, values - target, color="#b245a8", linewidth=2, marker="o"
         )
         if values.size:
+            self.difference_axes.set_xlim(0.5, values.size + 0.5)
+        if values.size:
             difference = float(values[-1] - target)
             self.lbl_relative_difference.setText(
                 f"Relative difference from target: {difference:+.3f}% "
@@ -500,6 +519,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
             for spine in axes.spines.values():
                 spine.set_color(text)
         self.epsp_plot.getFigure().set_facecolor(face)
+        self.difference_axes.xaxis.set_major_locator(MultipleLocator(1))
         self.epsp_axes.tick_params(labelbottom=False)
         self.epsp_axes.set_xlabel("")
         self.difference_axes.set_xlabel("Measurement", color=text)

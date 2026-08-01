@@ -153,7 +153,32 @@ def test_input_designer_protocol_defaults(qtbot) -> None:
     assert dialog.spn_pairing_interval_ms.value() == 30.0
     assert dialog.spn_tolerance.value() == 1.0
     assert dialog.spn_history_blocks.value() == 3
+    assert not dialog.chk_run_all_iterations.isChecked()
     assert dialog.windowFlags() & QtCore.Qt.WindowType.WindowMinimizeButtonHint
+
+
+def test_input_designer_can_continue_after_convergence(qtbot, monkeypatch) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    dialog.spn_target.setValue(100.0)
+    dialog.spn_tolerance.setValue(1.0)
+    dialog.spn_max_iterations.setValue(1)
+    dialog.chk_run_all_iterations.setChecked(True)
+    monkeypatch.setattr(
+        dialog,
+        "_measure_epsps",
+        lambda trace: EPSPMeasurement(2.0, (2.0,) * 5),
+    )
+
+    dialog.start()
+    dialog.simulation_finished()
+
+    assert dialog._running
+    assert dialog._phase == "pairing"
+    assert dialog._iteration == 1
+    assert "configured to run through the last iteration" in dialog.log.toPlainText()
 
 
 def test_input_designer_positions_native_minimized_window_without_moving_restore(
@@ -264,4 +289,11 @@ def test_input_designer_matplotlib_plots_follow_theme(qtbot) -> None:
     assert dialog.epsp_plot is dialog.difference_plot
     assert dialog.epsp_plot.minimumHeight() == 430
     assert dialog.epsp_axes.get_ylabel() == "EPSP\namplitude (%)"
+
+    dialog._epsp_percentages = [100.0, 101.0, 102.0]
+    dialog._update_plots()
+    visible_ticks = [
+        tick for tick in dialog.difference_axes.get_xticks() if 0.5 <= tick <= 3.5
+    ]
+    assert visible_ticks == [1.0, 2.0, 3.0]
     assert dialog.difference_axes.get_ylabel() == "Δ target\n(%)"

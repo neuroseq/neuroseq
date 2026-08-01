@@ -63,21 +63,28 @@ abs(current EPSP % - target EPSP %) < tolerance %
 
 ## Controls
 
-| Control                        | Meaning                                                                        |               Default |
-| ------------------------------ | ------------------------------------------------------------------------------ | --------------------: |
-| **Trace to analyze**           | Simulation voltage trace containing the postsynaptic neuron                    | First available trace |
-| **Presynaptic neuron ID**      | Stim-array column receiving probe pulses and the presynaptic side of a pairing |                   `0` |
-| **Postsynaptic neuron ID**     | Trace index used for EPSP measurement and the postsynaptic side of a pairing   |                   `1` |
-| **Pulse amplitude**            | Value written into the selected stim array during each 1 ms pulse              |  `1.0` in array units |
-| **Pre/post pulse interval**    | Time between the two induction pulses; their order is selected automatically   |               `30 ms` |
-| **Target EPSP amplitude**      | Desired EPSP relative to the first five-pulse baseline                         |                `120%` |
-| **Tolerance**                  | Maximum absolute distance from the target that counts as success               |                  `1%` |
-| **Maximum induction pairings** | Safety limit for closed-loop iterations                                        |                  `20` |
-| **Follow new input**           | Move the synchronized timeline camera to each appended block                   |               Enabled |
-| **Visible history**            | Number of preceding generated-block lengths shown together with the new block  |                   `3` |
+| Control                                                                  | Meaning                                                                        |               Default |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------ | --------------------: |
+| **Trace to analyze**                                                     | Simulation voltage trace containing the postsynaptic neuron                    | First available trace |
+| **Presynaptic neuron ID**                                                | Stim-array column receiving probe pulses and the presynaptic side of a pairing |                   `0` |
+| **Postsynaptic neuron ID**                                               | Trace index used for EPSP measurement and the postsynaptic side of a pairing   |                   `1` |
+| **Pulse amplitude**                                                      | Value written into the selected stim array during each 1 ms pulse              |  `1.0` in array units |
+| **Pre/post pulse interval**                                              | Time between the two induction pulses; their order is selected automatically   |               `30 ms` |
+| **Target EPSP amplitude**                                                | Desired EPSP relative to the first five-pulse baseline                         |                `120%` |
+| **Tolerance**                                                            | Maximum absolute distance from the target that counts as success               |                  `1%` |
+| **Maximum induction pairings**                                           | Safety limit for closed-loop iterations                                        |                  `20` |
+| **Run until the last iteration regardless of convergence to the target** | Ignore early convergence and continue until the maximum pairing count          |              Disabled |
+| **Follow new input**                                                     | Move the synchronized timeline camera to each appended block                   |               Enabled |
+| **Visible history**                                                      | Number of preceding generated-block lengths shown together with the new block  |                   `3` |
 
 Set **Visible history** to `0` to show only the newly appended block. Disable
 **Follow new input** to retain manual control of the shared pan and zoom state.
+
+Normally, entering the tolerance stops the routine immediately. Enable **Run
+until the last iteration regardless of convergence to the target** to keep
+applying induction pairings until **Maximum induction pairings** is reached.
+Convergence is still measured and recorded in the log while this override is
+active.
 
 ## EPSP measurement
 
