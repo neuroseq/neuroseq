@@ -62,6 +62,46 @@ def test_epsp_plugin_controls_and_percent_plot(qtbot) -> None:
     np.testing.assert_allclose(offsets[:, 1], [100 * 5 / 6.5, 100 * 8 / 6.5], atol=3)
 
 
+def test_epsp_plugin_uses_different_markers_for_neurons(qtbot) -> None:
+    widget = CustomAnalysisWidget()
+    qtbot.addWidget(widget)
+    plugin = next(p for p in discover_analysis_plugins() if p.id == "epsp_amplitudes")
+    data = TraceData(
+        "Vm", np.stack([_trace(), _trace()]), np.array([0, 1]), "mV", 0.0001
+    )
+    widget.set_data(data, plugin, None, None)
+
+    first_path = widget.subplot.collections[0].get_paths()[0]
+    second_path = widget.subplot.collections[1].get_paths()[0]
+    assert not np.array_equal(first_path.vertices, second_path.vertices)
+    assert [text.get_text() for text in widget.subplot.get_legend().get_texts()] == [
+        "Neuron 0",
+        "Neuron 1",
+    ]
+
+
+def test_epsp_percent_reference_is_calculated_per_neuron(qtbot) -> None:
+    widget = CustomAnalysisWidget()
+    qtbot.addWidget(widget)
+    plugin = next(p for p in discover_analysis_plugins() if p.id == "epsp_amplitudes")
+    data = TraceData(
+        "Vm",
+        np.stack([_trace(), -70.0 + 2.0 * (_trace() + 70.0)]),
+        np.array([0, 1]),
+        "mV",
+        0.0001,
+    )
+    widget.set_data(data, plugin, None, None)
+
+    controls = widget._epsp_amplitude_controls
+    controls.findChild(QtWidgets.QCheckBox).setChecked(True)
+    controls.findChild(QtWidgets.QSpinBox).setValue(2)
+
+    expected = [100 * 5 / 6.5, 100 * 8 / 6.5]
+    for collection in widget.subplot.collections:
+        np.testing.assert_allclose(collection.get_offsets()[:, 1], expected, atol=3)
+
+
 def test_explicit_input_units_override_unlabelled_trace(qtbot) -> None:
     widget = CustomAnalysisWidget()
     qtbot.addWidget(widget)

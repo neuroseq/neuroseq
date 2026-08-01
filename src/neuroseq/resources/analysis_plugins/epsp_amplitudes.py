@@ -17,6 +17,7 @@ PLUGIN_NAME = "EPSP amplitudes"
 PLUGIN_ICON = "mdi6.chart-scatter-plot"
 
 _CONTROLS_ATTR = "_epsp_amplitude_controls"
+_NEURON_MARKERS = ("+", "x", "o", "s", "^", "v", "D", "P", "*", "<", ">")
 
 
 @dataclass(frozen=True)
@@ -130,14 +131,14 @@ def _replot(
             reference = float(np.mean(values[:count]))
             if reference > 0:
                 values = values / reference * 100.0
+        source_row = row + (widget.neuron_slice.start or 0)
         label = None
         if traces.shape[0] > 1:
-            source_row = row + (widget.neuron_slice.start or 0)
             label = f"Neuron {source_row}"
         ax.scatter(
             result.times_ms + time_offset,
             values,
-            marker="+",
+            marker=_NEURON_MARKERS[source_row % len(_NEURON_MARKERS)],
             s=48,
             linewidths=1.5,
             color="black",
@@ -179,11 +180,14 @@ def _inject_controls(widget, data: TraceData, neuron_slice, time_slice) -> None:
     controls.addWidget(units)
     percent = QtWidgets.QCheckBox("Express amplitude as %")
     controls.addWidget(percent)
-    controls.addWidget(QtWidgets.QLabel("First EPSPs used as 100%:"))
+    controls.addWidget(QtWidgets.QLabel("First EPSPs used as 100% per neuron:"))
     count = QtWidgets.QSpinBox()
     count.setRange(1, 1000)
     count.setValue(3)
     count.setEnabled(False)
+    count.setToolTip(
+        "Each neuron is normalized independently to the mean of its own first N EPSPs."
+    )
     controls.addWidget(count)
     controls.addStretch()
 
