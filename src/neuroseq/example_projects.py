@@ -405,7 +405,7 @@ def single_lif_neuron_many_stims() -> Project:
     b2_model.define_parameter("Rext", 1 * b2.Mohm)
     b2_model.define_parameter("Rinh", 1 * b2.Mohm)
 
-    opto_units = 1 * b2.mwatt / b2.um2
+    opto_units = 1 * b2.mwatt / b2.mm2
 
     b2_model.define_parameter("opto_units", opto_units)
 
@@ -469,7 +469,7 @@ def single_lif_neuron_many_stims() -> Project:
         name="Exc_stimulation",
         stim_type=StimType.Excitation,
         values=exc_stim,
-        units="mwatt / um2",
+        units="mwatt / mm2",
         dt=0.001,
     )
     project.add_stim_array(exc_stimulation)
@@ -485,7 +485,7 @@ def single_lif_neuron_many_stims() -> Project:
         name="Inh_stimulation",
         stim_type=StimType.Inhibition,
         values=inh_stim,
-        units="mwatt / um2",
+        units="mwatt / mm2",
         dt=0.001,
     )
     project.add_stim_array(inh_stimulation)
@@ -542,7 +542,7 @@ def hh_neuron_with_synapses() -> Project:
     # b2_model.define_parameter("we", 6 * b2.nS)
     # b2_model.define_parameter("wi", 67 * b2.nS)
 
-    opto_units = 1 * b2.mwatt / b2.um2
+    opto_units = 1 * b2.mwatt / b2.mm2
 
     b2_model.define_parameter("opto_units", opto_units)
 
@@ -672,7 +672,7 @@ def hh_neuron_with_synapses() -> Project:
         name="Exc_stimulation",
         stim_type=StimType.Excitation,
         values=exc_stim,
-        units="mwatt / um2",
+        units="mwatt / mm2",
         dt=0.001,
     )
     project.add_stim_array(exc_stimulation)
@@ -681,7 +681,7 @@ def hh_neuron_with_synapses() -> Project:
         name="Inh_stimulation",
         stim_type=StimType.Inhibition,
         values=inh_stim,
-        units="mwatt / um2",
+        units="mwatt / mm2",
         dt=0.001,
     )
     project.add_stim_array(inh_stimulation)
@@ -741,7 +741,7 @@ def hh_neuron_with_synthetic_synapses() -> Project:
     # b2_model.define_parameter("we", 6 * b2.nS)
     # b2_model.define_parameter("wi", 67 * b2.nS)
 
-    opto_units = 1 * b2.mwatt / b2.um2
+    opto_units = 1 * b2.mwatt / b2.mm2
 
     b2_model.define_parameter("opto_units", opto_units)
 
@@ -871,7 +871,7 @@ def hh_neuron_with_synthetic_synapses() -> Project:
         name="Exc_stimulation",
         stim_type=StimType.Excitation,
         values=exc_stim,
-        units="mwatt / um2",
+        units="mwatt / mm2",
         dt=0.001,
     )
     project.add_stim_array(exc_stimulation)
@@ -880,7 +880,7 @@ def hh_neuron_with_synthetic_synapses() -> Project:
         name="Inh_stimulation",
         stim_type=StimType.Inhibition,
         values=inh_stim,
-        units="mwatt / um2",
+        units="mwatt / mm2",
         dt=0.001,
     )
     project.add_stim_array(inh_stimulation)
@@ -928,7 +928,7 @@ def hh_neurons_ei_model() -> Project:
         "g_inh", (3e-3 * b2.siemens * b2.cm**-2) * b2_model.parameters["area"]
     )
 
-    opto_units = 1 * b2.mwatt / b2.um2
+    opto_units = 1 * b2.mwatt / b2.mm2
 
     b2_model.define_parameter("opto_units", opto_units)
 
@@ -1006,7 +1006,7 @@ def hh_neurons_ei_model() -> Project:
         name="Exc_stimulation",
         stim_type=StimType.Excitation,
         values=exc_stim,
-        units="mwatt / um2",
+        units="mwatt / mm2",
         dt=0.001,
     )
     project.add_stim_array(exc_stimulation)
@@ -1018,7 +1018,7 @@ def hh_neurons_ei_model() -> Project:
         name="Inh_stimulation",
         stim_type=StimType.Inhibition,
         values=inh_stim,
-        units="mwatt / um2",
+        units="mwatt / mm2",
         dt=0.001,
     )
     project.add_stim_array(inh_stimulation)
@@ -1184,7 +1184,7 @@ def hh_neurons_with_plasticity() -> Project:
     # b2_model.define_parameter("we", 6 * b2.nS)
     # b2_model.define_parameter("wi", 67 * b2.nS)
 
-    opto_units = 1 * b2.mwatt / b2.um2
+    opto_units = 1 * b2.mwatt / b2.mm2
 
     b2_model.define_parameter("opto_units", opto_units)
 
@@ -1306,7 +1306,7 @@ def hh_neurons_with_plasticity() -> Project:
         name="Exc_stimulation",
         stim_type=StimType.Excitation,
         values=exc_stim,
-        units="mwatt / um2",
+        units="mwatt / mm2",
         dt=stim_dt,
     )
     project.add_stim_array(exc_stimulation)
@@ -1315,7 +1315,7 @@ def hh_neurons_with_plasticity() -> Project:
         name="Inh_stimulation",
         stim_type=StimType.Inhibition,
         values=inh_stim,
-        units="mwatt / um2",
+        units="mwatt / mm2",
         dt=stim_dt,
     )
     project.add_stim_array(inh_stimulation)
@@ -1394,7 +1394,7 @@ def two_hh_neurons_with_plasticity() -> Project:
     # b2_model.define_parameter("we", 6 * b2.nS)
     # b2_model.define_parameter("wi", 67 * b2.nS)
 
-    opto_units = 1 * b2.mwatt / b2.um2
+    opto_units = 1 * b2.mwatt / b2.mm2
 
     b2_model.define_parameter("opto_units", opto_units)
 
@@ -1542,7 +1542,7 @@ def two_hh_neurons_with_plasticity() -> Project:
         name="Exc_stimulation",
         stim_type=StimType.Excitation,
         values=exc_stim,
-        units="mwatt / um2",
+        units="mwatt / mm2",
         dt=stim_dt,
     )
     project.add_stim_array(exc_stimulation)
@@ -1551,7 +1551,7 @@ def two_hh_neurons_with_plasticity() -> Project:
         name="Inh_stimulation",
         stim_type=StimType.Inhibition,
         values=inh_stim,
-        units="mwatt / um2",
+        units="mwatt / mm2",
         dt=stim_dt,
     )
     project.add_stim_array(inh_stimulation)
