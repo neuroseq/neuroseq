@@ -44,7 +44,7 @@ class TimeseriesWidget(FPLWidget):
         int, int, int, int, int
     )  # initial neuron index, current neuron index, initial time index, current time index, mouse button (0 for no button, 1 for left, 2 for right, 3 for middle)
     custom_analysis_requested = QtCore.Signal(
-        object, object, bool, slice, slice
+        object, object, bool, object, object
     )  # data, analysis type, new window, neuron slice, time slice
     escape_pressed = QtCore.Signal()
 

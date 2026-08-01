@@ -32,6 +32,24 @@ def test_trace_widget_context_menu_contains_plugin_actions(qtbot: QtBot) -> None
     assert "Mean activity (new window)" not in action_texts
 
 
+def test_trace_widget_analysis_action_allows_no_selection(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+
+    trace_widget._rebuild_custom_analysis_menu()
+    mean_activity_action = next(
+        action
+        for action in trace_widget.context_menu.actions()
+        if action.text() == "Mean activity"
+    )
+
+    with qtbot.waitSignal(trace_widget.custom_analysis_requested) as blocker:
+        mean_activity_action.trigger()
+
+    assert blocker.args[3:] == [None, None]
+
+
 def test_custom_analysis_widget_runs_example_plugin(
     qtbot: QtBot, make_trace_data
 ) -> None:
