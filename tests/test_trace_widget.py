@@ -23,6 +23,22 @@ def test_trace_norm_dialog_minimum_is_50_percent(qtbot: QtBot) -> None:
     assert trace_norm_dialog.slider_norm.minimum() == 50
 
 
+def test_trace_norm_dialog_is_modeless_and_reused(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+
+    trace_widget.trace_norm_dialog()
+    dialog = trace_widget._trace_norm_dialog
+
+    assert dialog is not None
+    assert dialog.isVisible()
+    assert not dialog.isModal()
+
+    trace_widget.trace_norm_dialog()
+    assert trace_widget._trace_norm_dialog is dialog
+
+
 def test_trace_widget_zero_traces(qtbot: QtBot) -> None:
     controller = ConstrainedPanZoomController()
     trace_widget = TraceWidget(controller)

@@ -105,9 +105,14 @@ class TraceWidget(TimeseriesWidget):
         self.trace_norm_percent = 100
         self.offset_by_median = True
         self.clip = True
+        self._trace_norm_dialog: TraceNormDialog | None = None
 
-    def trace_norm_dialog(self):
-        TraceNormDialog(self).exec()
+    def trace_norm_dialog(self) -> None:
+        if self._trace_norm_dialog is None:
+            self._trace_norm_dialog = TraceNormDialog(self)
+        self._trace_norm_dialog.show()
+        self._trace_norm_dialog.raise_()
+        self._trace_norm_dialog.activateWindow()
 
     def get_normalized_trace_data(self, out: np.ndarray | None = None) -> np.ndarray:
         if self.data is None or not isinstance(self.data, TraceData):
