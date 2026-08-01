@@ -124,6 +124,10 @@ class ToolbarProgressWidget(QtWidgets.QWidget):
     def setLabelText(self, text: str) -> None:
         self.label.setText(text)
 
+    def labelText(self) -> str:
+        """Return the progress label, matching ``QProgressDialog``'s API."""
+        return self.label.text()
+
     def setRange(self, minimum: int, maximum: int) -> None:
         self.progress_bar.setRange(minimum, maximum)
 
