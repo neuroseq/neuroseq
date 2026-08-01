@@ -477,6 +477,37 @@ def test_gui_simulate_and_cancel(
     gui.close()
 
 
+def test_simulation_progress_is_embedded_in_view_toolbar(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    gui.show()
+    qtbot.waitUntil(gui.isVisible)
+
+    assert gui.progress_dialog.parentWidget() is gui.toolbar_view
+    assert isinstance(gui.progress_dialog.progress_bar, QtWidgets.QProgressBar)
+    assert not isinstance(gui.progress_dialog, QtWidgets.QDialog)
+    assert gui.progress_dialog.progress_bar.width() == 100
+    assert gui.progress_dialog.cancel_button.width() == 58
+    layout = gui.progress_dialog.layout()
+    assert layout is not None
+    assert layout.itemAt(0).widget() is gui.progress_dialog.progress_bar
+    assert layout.itemAt(1).widget() is gui.progress_dialog.cancel_button
+    assert layout.itemAt(2).widget() is gui.progress_dialog.label
+
+    gui.progress_dialog.setLabelText("Simulating Brian2...")
+    gui.progress_dialog.setCancelButtonText("Cancel")
+    gui.progress_dialog.setValue(42)
+    gui.progress_dialog.show()
+
+    assert gui.progress_dialog.isVisible()
+    assert gui.progress_dialog.value() == 42
+    assert gui.progress_dialog.cancel_button.isVisible()
+
+    gui.progress_dialog.reset()
+    assert not gui.progress_dialog.isVisible()
+    gui.close()
+
+
 def test_gui_new(tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
     gui = Gui()
     gui.show()

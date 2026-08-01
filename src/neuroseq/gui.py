@@ -73,6 +73,95 @@ class SimulationCancelledError(Exception):
     """Raised from a progress callback when the user clicks Cancel."""
 
 
+class ToolbarProgressWidget(QtWidgets.QWidget):
+    """Compact progress and cancellation controls embedded in a toolbar."""
+
+    canceled = QtCore.Signal()
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._toolbar_action: QtWidgets.QAction | None = None
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(6, 0, 2, 0)
+        layout.setSpacing(4)
+
+        self.label = QtWidgets.QLabel("Simulating...", self)
+        self.progress_bar = QtWidgets.QProgressBar(self)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFixedWidth(100)
+        self.cancel_button = QtWidgets.QPushButton("Cancel", self)
+        self.cancel_button.setFixedWidth(58)
+        self.cancel_button.clicked.connect(self._cancel)
+
+        layout.addWidget(self.progress_bar)
+        layout.addWidget(self.cancel_button)
+        layout.addWidget(self.label)
+        self._auto_close = True
+        self.cancel_button.hide()
+        self.hide()
+
+    def set_toolbar_action(self, action: QtWidgets.QAction) -> None:
+        self._toolbar_action = action
+        action.setVisible(False)
+
+    def show(self) -> None:
+        if self._toolbar_action is not None:
+            self._toolbar_action.setVisible(True)
+        super().show()
+
+    def hide(self) -> None:
+        if self._toolbar_action is not None:
+            self._toolbar_action.setVisible(False)
+        super().hide()
+
+    @QtCore.Slot()
+    def _cancel(self) -> None:
+        self.hide()
+        self.canceled.emit()
+
+    @QtCore.Slot(str)
+    def setLabelText(self, text: str) -> None:
+        self.label.setText(text)
+
+    def setRange(self, minimum: int, maximum: int) -> None:
+        self.progress_bar.setRange(minimum, maximum)
+
+    def setValue(self, value: int) -> None:
+        self.progress_bar.setValue(value)
+        if self._auto_close and value >= self.progress_bar.maximum():
+            self.hide()
+
+    def value(self) -> int:
+        return self.progress_bar.value()
+
+    def setCancelButtonText(self, text: str) -> None:
+        self.cancel_button.setText(text)
+        self.cancel_button.setEnabled(True)
+        self.cancel_button.show()
+
+    def setCancelButton(self, button: QtWidgets.QPushButton | None) -> None:
+        if button is None:
+            self.cancel_button.hide()
+
+    def setAutoClose(self, enabled: bool) -> None:
+        self._auto_close = enabled
+
+    def setAutoReset(self, _enabled: bool) -> None:
+        # Resetting is explicitly managed by the operation teardown paths.
+        pass
+
+    def setMinimumDuration(self, _milliseconds: int) -> None:
+        # Toolbar progress is shown immediately and never spawns a dialog.
+        pass
+
+    def reset(self) -> None:
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.cancel_button.hide()
+        self.hide()
+
+
 class BackgroundIOWorker(QtCore.QObject):
     """Runs a blocking IO task on a worker QThread.
 
@@ -2035,14 +2124,10 @@ class Gui(QtWidgets.QMainWindow):
         )
 
     def _create_progressbar(self) -> None:
-        self.progress_dialog = QtWidgets.QProgressDialog(
-            "Simulating...", "", 0, 100, self
-        )
-        self.progress_dialog.setCancelButton(None)
-        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
-        self.progress_dialog.setAutoClose(True)
-        self.progress_dialog.setMinimumDuration(10)
-        self.progress_dialog.reset()
+        self.progress_dialog = ToolbarProgressWidget(self.toolbar_view)
+        self.toolbar_view.addSeparator()
+        action = self.toolbar_view.addWidget(self.progress_dialog)
+        self.progress_dialog.set_toolbar_action(action)
 
     def _create_menus_and_toolbars(self) -> None:
         menu = self.menuBar()
