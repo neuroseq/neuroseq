@@ -1,0 +1,75 @@
+import importlib
+
+import numpy as np
+from qtpy import QtWidgets
+
+from neuroseq.analysis_plugins import discover_analysis_plugins
+from neuroseq.custom_analysis_widget import CustomAnalysisWidget
+from neuroseq.data import TraceData
+
+epsp = importlib.import_module("neuroseq.resources.analysis_plugins.epsp_amplitudes")
+
+
+def _trace() -> np.ndarray:
+    values = np.full(500, -70.0)
+    x = np.arange(values.size)
+    for center, amplitude, width in ((100, 5.0, 7.0), (250, 8.0, 9.0)):
+        values += amplitude * np.exp(-(((x - center) / width) ** 2))
+    values += 80.0 * np.exp(-(((x - 380) / 1.2) ** 2))  # action potential
+    return values
+
+
+def test_detect_epsps_excludes_action_potential_and_uses_local_baseline() -> None:
+    result = epsp.detect_epsps(_trace(), dt_ms=0.1)
+    np.testing.assert_allclose(result.times_ms, [10.0, 25.0], atol=0.2)
+    np.testing.assert_allclose(result.amplitudes_mv, [5.0, 8.0], atol=0.2)
+
+
+def test_voltage_unit_aliases_are_converted_to_mv() -> None:
+    values = np.array([-0.07, -0.065])
+    np.testing.assert_allclose(epsp._to_mv(values, "volt"), [-70.0, -65.0])
+    np.testing.assert_allclose(epsp._to_mv(values * 1000, "[millivolts]"), [-70, -65])
+    np.testing.assert_allclose(epsp._to_mv(values * 1e6, "µvolt"), [-70, -65])
+
+
+def test_unlabelled_voltage_units_are_inferred() -> None:
+    np.testing.assert_allclose(epsp._to_mv(np.array([-0.070, -0.065]), ""), [-70, -65])
+    np.testing.assert_allclose(epsp._to_mv(np.array([-70.0, -65.0]), ""), [-70, -65])
+
+
+def test_epsp_plugin_controls_and_percent_plot(qtbot) -> None:
+    widget = CustomAnalysisWidget()
+    qtbot.addWidget(widget)
+    plugin = next(p for p in discover_analysis_plugins() if p.id == "epsp_amplitudes")
+    data = TraceData("Vm", _trace()[None, :], np.array([0]), "mV", 0.0001)
+    widget.set_data(data, plugin, None, None)
+
+    controls = widget._epsp_amplitude_controls
+    checkbox = controls.findChild(QtWidgets.QCheckBox)
+    spin = controls.findChild(QtWidgets.QSpinBox)
+    units = controls.findChild(QtWidgets.QComboBox)
+    assert [units.itemText(i) for i in range(units.count())] == [
+        "Auto",
+        "V",
+        "mV",
+        "µV",
+    ]
+    assert widget.subplot.get_ylabel() == "EPSP amplitude (mV)"
+    checkbox.setChecked(True)
+    spin.setValue(2)
+    assert widget.subplot.get_ylabel() == "EPSP amplitude (%)"
+    offsets = widget.subplot.collections[0].get_offsets()
+    np.testing.assert_allclose(offsets[:, 1], [100 * 5 / 6.5, 100 * 8 / 6.5], atol=3)
+
+
+def test_explicit_input_units_override_unlabelled_trace(qtbot) -> None:
+    widget = CustomAnalysisWidget()
+    qtbot.addWidget(widget)
+    plugin = next(p for p in discover_analysis_plugins() if p.id == "epsp_amplitudes")
+    data = TraceData("Vm", (_trace() / 1000)[None, :], np.array([0]), "", 0.0001)
+    widget.set_data(data, plugin, None, None)
+
+    units = widget._epsp_amplitude_controls.findChild(QtWidgets.QComboBox)
+    units.setCurrentText("V")
+    offsets = widget.subplot.collections[0].get_offsets()
+    np.testing.assert_allclose(offsets[:, 1], [5.0, 8.0], atol=0.2)
