@@ -1351,7 +1351,7 @@ def two_hh_neurons_with_plasticity() -> Project:
         "Cm", (1 * b2.ufarad * b2.cm**-2) * b2_model.parameters["area"]
     )
     b2_model.define_parameter(
-        "gl", (5e-5 * b2.siemens * b2.cm**-2) * b2_model.parameters["area"]
+        "gl", (10e-5 * b2.siemens * b2.cm**-2) * b2_model.parameters["area"]
     )
 
     b2_model.define_parameter("El", -70 * b2.mV)
@@ -1384,8 +1384,8 @@ def two_hh_neurons_with_plasticity() -> Project:
     b2_model.define_parameter("taupre", 20 * b2.ms)
     b2_model.define_parameter("taupost", 20 * b2.ms)
     b2_model.define_parameter("gmax", 60 * b2.nS)
-    b2_model.define_parameter("dApre", 6 * b2.nS)
-    b2_model.define_parameter("dApost", -6 * 1.05 * b2.nS)
+    b2_model.define_parameter("dApre", 1 * b2.nS)
+    b2_model.define_parameter("dApost", -1 * 1.05 * b2.nS)
 
     # b2_model.define_parameter("we", 6 * b2.nS)
     # b2_model.define_parameter("wi", 67 * b2.nS)
@@ -1456,7 +1456,7 @@ def two_hh_neurons_with_plasticity() -> Project:
     b2_model.define_synapse_post("Ce", ce_on_post)
 
     # b2_model.define_init("Ce", "we", "exp(0.25*randn())*6*nS")
-    b2_model.define_init("Ce", "we", "6*nS")
+    b2_model.define_init("Ce", "we", "1*nS")
 
     b2_model.define_neuronsubgroup_target("Pi", "P")
     b2_model.define_neuronsubgroup_idxs("Pi", (nneurons_exc, nneurons))
@@ -1491,7 +1491,7 @@ def two_hh_neurons_with_plasticity() -> Project:
     # Repeated pre-before-post pairings potentiate the plastic Ce synapse, so
     # its weight `we` climbs toward gmax over the run. Swapping the two offsets
     # (post before pre) would instead depress it.
-    tfinal = 500 * b2.ms
+    tfinal = 2000 * b2.ms
     stim_dt = 0.001  # s (1 ms)
     n_steps = int(tfinal / b2.ms)
 
@@ -1501,11 +1501,36 @@ def two_hh_neurons_with_plasticity() -> Project:
 
     pulse_ms = 1  # length of each drive pulse
     pre_post_gap_ms = 5  # neuron 1 fires ~5 ms after neuron 0 -> potentiation
-    period_ms = 40  # time between successive pairings
-    for t0 in range(50, n_steps - (pulse_ms + pre_post_gap_ms), period_ms):
-        exc_stim[t0 : t0 + pulse_ms, 0] = 1.0  # presynaptic neuron 0
+
+    # Protocol phases:
+    # 1) 0-500 ms: no stimulation
+    # 2) 500-1000 ms: 5 pulses on neuron 0
+    # 3) then 5 pairings (neuron 0 then neuron 1)
+    # 4) then 5 pulses on neuron 0 again
+    first_phase_start_ms = 500
+    first_phase_period_ms = 100
+    for t0 in range(
+        first_phase_start_ms, first_phase_start_ms + 500, first_phase_period_ms
+    ):
+        exc_stim[t0 : t0 + pulse_ms, 0] = 1.0
+
+    pairing_start_ms = 1000
+    pairing_period_ms = 100
+    for t0 in range(
+        pairing_start_ms, pairing_start_ms + 5 * pairing_period_ms, pairing_period_ms
+    ):
+        exc_stim[t0 : t0 + pulse_ms, 0] = 1.0
         post_start = t0 + pre_post_gap_ms
-        exc_stim[post_start : post_start + pulse_ms, 1] = 1.0  # postsynaptic neuron 1
+        exc_stim[post_start : post_start + pulse_ms, 1] = 1.0
+
+    last_phase_start_ms = pairing_start_ms + 5 * pairing_period_ms
+    last_phase_period_ms = 100
+    for t0 in range(
+        last_phase_start_ms,
+        last_phase_start_ms + 5 * last_phase_period_ms,
+        last_phase_period_ms,
+    ):
+        exc_stim[t0 : t0 + pulse_ms, 0] = 1.0
 
     # Exc_stimulation carries the STDP pairing protocol, so add it first; the
     # unused I_external current is added last.
