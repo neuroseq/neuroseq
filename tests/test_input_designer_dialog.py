@@ -166,7 +166,7 @@ def test_input_designer_initializes_missing_trace_then_starts_protocol(
 
     def get_duration(*args):
         input_arguments.append(args)
-        return 0.001, True
+        return 0.00149, True
 
     monkeypatch.setattr(
         QtWidgets.QInputDialog,

@@ -172,7 +172,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         if not self.cmb_trace.currentText():
             duration, accepted = QtWidgets.QInputDialog.getDouble(
                 self,
-                "Create simulation trace monitors",
+                "Create stimulation trace monitor",
                 "No simulation trace monitor is available. Run an initial "
                 "simulation to create trace monitors.\nSimulation time (seconds):",
                 0.001,
@@ -183,12 +183,13 @@ class InputDesignerDialog(QtWidgets.QDialog):
             if not accepted:
                 self._append_log("Trace-monitor initialization cancelled.")
                 return
+            duration = round(duration, 3)
             self._running = True
             self._phase = "initialize_trace"
             self.btn_start.setEnabled(False)
             self.btn_stop.setEnabled(True)
             self._append_log(
-                f"Running an initial {duration:.6g} s simulation to create "
+                f"Running an initial {duration:.3f} s simulation to create "
                 "trace monitors."
             )
             self.simulation_requested.emit(duration)
