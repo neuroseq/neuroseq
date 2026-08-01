@@ -27,6 +27,21 @@ def _make_cellpose_dialog(tmp_path, qtbot: QtBot) -> CellposeImportDialog:
     return dialog
 
 
+def test_cellpose_dialog_opens_at_compact_file_selection_size(qtbot: QtBot):
+    dialog = CellposeImportDialog()
+    qtbot.addWidget(dialog)
+
+    dialog.showMaximized()
+    dialog._set_ui_loaded_state(False)
+    dialog.show()
+    qtbot.waitExposed(dialog)
+
+    assert not dialog.isMaximized()
+    assert dialog.main_content_container is not None
+    assert not dialog.main_content_container.isVisible()
+    assert dialog.size() == dialog.sizeHint()
+
+
 def test_cellpose_dialog_linear_offset_persisted(
     tmp_path, qtbot: QtBot, qmessagebox_calls: list
 ):
@@ -69,3 +84,10 @@ def test_cellpose_dialog_custom_mapping_restores_on_reopen(tmp_path, qtbot: QtBo
     assert reopened._get_mapping_strategy() == "Custom"
     assert reopened.custom_mapping_line.text().replace(" ", "") == "1:4,2:1"
     assert reopened.overlay_widget.stimulus_to_cellpose_mapping == mapping
+
+    screen = reopened._get_screen_for_window()
+    assert screen is not None
+    available = screen.availableGeometry()
+    assert not reopened.isMaximized()
+    assert reopened.width() <= min(1100, int(available.width() * 0.75))
+    assert reopened.height() <= min(760, int(available.height() * 0.75))
