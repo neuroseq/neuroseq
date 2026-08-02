@@ -158,7 +158,9 @@ class InputDesignerDialog(QtWidgets.QDialog):
             "Continue plasticity induction after the EPSP enters the target "
             "tolerance, stopping only at the maximum iteration count."
         )
-        self.chk_follow_input = QtWidgets.QCheckBox("Follow new input", self)
+        self.chk_follow_input = QtWidgets.QCheckBox(
+            "Follow new input on each iteration", self
+        )
         self.chk_follow_input.setChecked(True)
         self.spn_history_blocks = QtWidgets.QSpinBox(self)
         self.spn_history_blocks.setRange(0, 100)
@@ -171,10 +173,12 @@ class InputDesignerDialog(QtWidgets.QDialog):
         form.addRow("Presynaptic neuron ID:", self.spn_presynaptic)
         form.addRow("Postsynaptic neuron ID:", self.spn_postsynaptic)
         form.addRow("Pulse amplitude:", amplitude_row)
-        form.addRow("Pre/post pulse interval:", self.spn_pairing_interval_ms)
-        form.addRow("Target EPSP amplitude:", self.spn_target)
-        form.addRow("Tolerance:", self.spn_tolerance)
-        form.addRow("Maximum induction pairings:", self.spn_max_iterations)
+        form.addRow("Pre-post pairing time:", self.spn_pairing_interval_ms)
+        form.addRow("Target relative EPSP amplitude:", self.spn_target)
+        form.addRow("Tolerance window (deadband):", self.spn_tolerance)
+        form.addRow(
+            "Maximum plasticity induction interations:", self.spn_max_iterations
+        )
         form.addRow("Stopping rule:", self.chk_run_all_iterations)
         form.addRow("Live view:", self.chk_follow_input)
         form.addRow("Visible history:", self.spn_history_blocks)
@@ -478,7 +482,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
             self._finish("EPSP is within tolerance; target achieved.")
             return
         if self._iteration >= self.spn_max_iterations.value():
-            self._finish("Maximum induction pairings reached.")
+            self._finish("Maximum plasticity induction interations reached.")
             return
         if converged:
             self._append_log(

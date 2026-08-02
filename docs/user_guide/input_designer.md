@@ -44,7 +44,7 @@ sequence:
 2. Continue the simulation through the appended block.
 3. Detect and average the five EPSP amplitudes in the postsynaptic voltage
    trace. This first average is the baseline and is defined as **100%**.
-4. Compare the current percentage with **Target EPSP amplitude**.
+4. Compare the current percentage with **Target relative EPSP amplitude**.
 5. Append and simulate one plasticity-induction pairing:
    - below target: presynaptic pulse followed by postsynaptic pulse
      (**potentiation**),
@@ -69,20 +69,20 @@ abs(current EPSP % - target EPSP %) < tolerance %
 | **Presynaptic neuron ID**                                                | Stim-array column receiving probe pulses and the presynaptic side of a pairing |                   `0` |
 | **Postsynaptic neuron ID**                                               | Trace index used for EPSP measurement and the postsynaptic side of a pairing   |                   `1` |
 | **Pulse amplitude**                                                      | Value written into the selected stim array during each 1 ms pulse              |  `1.0` in array units |
-| **Pre/post pulse interval**                                              | Time between the two induction pulses; their order is selected automatically   |               `30 ms` |
-| **Target EPSP amplitude**                                                | Desired EPSP relative to the first five-pulse baseline                         |                `120%` |
-| **Tolerance**                                                            | Maximum absolute distance from the target that counts as success               |                  `1%` |
-| **Maximum induction pairings**                                           | Safety limit for closed-loop iterations                                        |                  `20` |
+| **Pre-post pairing time**                                                | Time between the two induction pulses; their order is selected automatically   |               `30 ms` |
+| **Target relative EPSP amplitude**                                       | Desired EPSP relative to the first five-pulse baseline                         |                `120%` |
+| **Tolerance window (deadband)**                                          | Maximum absolute distance from the target that counts as success               |                  `1%` |
+| **Maximum plasticity induction interations**                             | Safety limit for closed-loop iterations                                        |                  `20` |
 | **Run until the last iteration regardless of convergence to the target** | Ignore early convergence and continue until the maximum pairing count          |              Disabled |
-| **Follow new input**                                                     | Move the synchronized timeline camera to each appended block                   |               Enabled |
+| **Follow new input on each iteration**                                   | Move the synchronized timeline camera to each appended block                   |               Enabled |
 | **Visible history**                                                      | Number of preceding generated-block lengths shown together with the new block  |                   `3` |
 
 Set **Visible history** to `0` to show only the newly appended block. Disable
-**Follow new input** to retain manual control of the shared pan and zoom state.
+**Follow new input on each iteration** to retain manual control of the shared pan and zoom state.
 
 Normally, entering the tolerance stops the routine immediately. Enable **Run
 until the last iteration regardless of convergence to the target** to keep
-applying induction pairings until **Maximum induction pairings** is reached.
+applying induction pairings until **Maximum plasticity induction interations** is reached.
 Convergence is still measured and recorded in the log while this override is
 active.
 
