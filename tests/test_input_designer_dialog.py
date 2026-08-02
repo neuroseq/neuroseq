@@ -163,10 +163,81 @@ def test_input_designer_protocol_defaults(qtbot) -> None:
     qtbot.addWidget(dialog)
 
     assert dialog.spn_pairing_interval_ms.value() == 30.0
+    assert dialog.cmb_pairing_strategy.currentText() == dialog.FIXED_PAIRING_STRATEGY
+    assert not dialog.spn_pairing_interval_ms.isHidden()
+    assert dialog.spn_initial_pairing_time_ms.isHidden()
+    assert dialog.spn_pairing_increment_ms.isHidden()
     assert dialog.spn_tolerance.value() == 1.0
     assert dialog.spn_history_blocks.value() == 3
     assert not dialog.chk_run_all_iterations.isChecked()
     assert dialog.windowFlags() & QtCore.Qt.WindowType.WindowMinimizeButtonHint
+
+
+def test_input_designer_adaptive_strategy_updates_signed_pairing_time(
+    qtbot, monkeypatch
+) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    dialog.cmb_pairing_strategy.setCurrentText(dialog.ADAPTIVE_PAIRING_STRATEGY)
+    dialog.spn_initial_pairing_time_ms.setValue(10.0)
+    dialog.spn_pairing_increment_ms.setValue(5.0)
+    dialog.spn_target.setValue(120.0)
+    dialog.spn_tolerance.setValue(1.0)
+    monkeypatch.setattr(
+        dialog,
+        "_measure_epsps",
+        lambda trace: EPSPMeasurement(2.0, (2.0,) * 5),
+    )
+
+    assert dialog.spn_pairing_interval_ms.isHidden()
+    assert not dialog.spn_initial_pairing_time_ms.isHidden()
+    assert not dialog.spn_pairing_increment_ms.isHidden()
+
+    dialog.start()
+    dialog.simulation_finished()
+    first_pairing = editor.calls[1]
+    assert (
+        np.flatnonzero(first_pairing[:, 0])[0] < np.flatnonzero(first_pairing[:, 1])[0]
+    )
+    dialog.simulation_finished()
+    dialog.simulation_finished()
+
+    assert dialog._pairing_times_ms == [10.0, 5.0]
+    assert list(dialog.pairing_time_axes.lines[-1].get_ydata()) == [10.0, 5.0]
+
+
+def test_input_designer_adaptive_strategy_increases_time_and_changes_sign(
+    qtbot, monkeypatch
+) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    dialog.cmb_pairing_strategy.setCurrentText(dialog.ADAPTIVE_PAIRING_STRATEGY)
+    dialog.spn_initial_pairing_time_ms.setValue(10.0)
+    dialog.spn_pairing_increment_ms.setValue(5.0)
+    dialog.spn_target.setValue(120.0)
+    dialog.spn_tolerance.setValue(1.0)
+    amplitudes = iter([2.0, 2.6])
+    monkeypatch.setattr(
+        dialog,
+        "_measure_epsps",
+        lambda trace: EPSPMeasurement(next(amplitudes), (2.0,) * 5),
+    )
+
+    dialog.start()
+    dialog.simulation_finished()
+    dialog.simulation_finished()
+    dialog.simulation_finished()
+
+    assert dialog._pairing_times_ms == [10.0, -15.0]
+    second_pairing = editor.calls[3]
+    assert (
+        np.flatnonzero(second_pairing[:, 1])[0]
+        < np.flatnonzero(second_pairing[:, 0])[0]
+    )
 
 
 def test_input_designer_can_hide_parameters_to_expand_plots(qtbot) -> None:
@@ -324,18 +395,34 @@ def test_input_designer_matplotlib_plots_follow_theme(qtbot) -> None:
     dialog.apply_theme(theme.DARK)
     assert to_hex(dialog.epsp_axes.get_facecolor()) == "#1e1e1e"
     assert to_hex(dialog.difference_axes.get_facecolor()) == "#1e1e1e"
+    assert to_hex(dialog.pairing_time_axes.get_facecolor()) == "#1e1e1e"
 
     dialog.apply_theme(theme.LIGHT)
     assert to_hex(dialog.epsp_axes.get_facecolor()) == "#ffffff"
     assert to_hex(dialog.difference_axes.get_facecolor()) == "#ffffff"
+    assert to_hex(dialog.pairing_time_axes.get_facecolor()) == "#ffffff"
     assert dialog.epsp_plot is dialog.difference_plot
-    assert dialog.epsp_plot.minimumHeight() == 430
+    assert dialog.epsp_plot.minimumHeight() == 500
     assert dialog.epsp_axes.get_ylabel() == "EPSP\namplitude (%)"
 
     dialog._epsp_percentages = [100.0, 101.0, 102.0]
+    dialog.spn_target.setValue(101.0)
+    dialog.spn_tolerance.setValue(2.0)
     dialog._update_plots()
     visible_ticks = [
         tick for tick in dialog.difference_axes.get_xticks() if 0.5 <= tick <= 3.5
     ]
     assert visible_ticks == [1.0, 2.0, 3.0]
+    epsp_patch = dialog.epsp_axes.patches[0]
+    epsp_deadband_y = dialog.epsp_axes.transData.inverted().transform(
+        epsp_patch.get_transform().transform(epsp_patch.get_path().vertices)
+    )[:, 1]
+    difference_patch = dialog.difference_axes.patches[0]
+    difference_deadband_y = dialog.difference_axes.transData.inverted().transform(
+        difference_patch.get_transform().transform(difference_patch.get_path().vertices)
+    )[:, 1]
+    assert (min(epsp_deadband_y), max(epsp_deadband_y)) == pytest.approx((99.0, 103.0))
+    assert (min(difference_deadband_y), max(difference_deadband_y)) == pytest.approx(
+        (-2.0, 2.0)
+    )
     assert dialog.difference_axes.get_ylabel() == "Δ target\n(%)"

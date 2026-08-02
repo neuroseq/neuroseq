@@ -45,11 +45,8 @@ sequence:
 3. Detect and average the five EPSP amplitudes in the postsynaptic voltage
    trace. This first average is the baseline and is defined as **100%**.
 4. Compare the current percentage with **Target relative EPSP amplitude**.
-5. Append and simulate one plasticity-induction pairing:
-   - below target: presynaptic pulse followed by postsynaptic pulse
-     (**potentiation**),
-   - above target: postsynaptic pulse followed by presynaptic pulse
-     (**depression**).
+5. Append and simulate one plasticity-induction pairing. The selected pairing
+   strategy determines the pulse order and timing.
 
 6. Append and simulate another five-pulse presynaptic probe block.
 7. Measure the new five-EPSP average and repeat from step 4 until the target is
@@ -63,19 +60,22 @@ abs(current EPSP % - target EPSP %) < tolerance %
 
 ## Controls
 
-| Control                                                                  | Meaning                                                                        |               Default |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------ | --------------------: |
-| **Trace to analyze**                                                     | Simulation voltage trace containing the postsynaptic neuron                    | First available trace |
-| **Presynaptic neuron ID**                                                | Stim-array column receiving probe pulses and the presynaptic side of a pairing |                   `0` |
-| **Postsynaptic neuron ID**                                               | Trace index used for EPSP measurement and the postsynaptic side of a pairing   |                   `1` |
-| **Pulse amplitude**                                                      | Value written into the selected stim array during each 1 ms pulse              |  `1.0` in array units |
-| **Pre-post pairing time**                                                | Time between the two induction pulses; their order is selected automatically   |               `30 ms` |
-| **Target relative EPSP amplitude**                                       | Desired EPSP relative to the first five-pulse baseline                         |                `120%` |
-| **Tolerance window (deadband)**                                          | Maximum absolute distance from the target that counts as success               |                  `1%` |
-| **Maximum plasticity induction interations**                             | Safety limit for closed-loop iterations                                        |                  `20` |
-| **Run until the last iteration regardless of convergence to the target** | Ignore early convergence and continue until the maximum pairing count          |              Disabled |
-| **Follow new input on each iteration**                                   | Move the synchronized timeline camera to each appended block                   |               Enabled |
-| **Visible history**                                                      | Number of generated-block lengths kept visible throughout execution            |                   `3` |
+| Control                                                                  | Meaning                                                                        |                     Default |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------ | --------------------------: |
+| **Trace to analyze**                                                     | Simulation voltage trace containing the postsynaptic neuron                    |       First available trace |
+| **Presynaptic neuron ID**                                                | Stim-array column receiving probe pulses and the presynaptic side of a pairing |                         `0` |
+| **Postsynaptic neuron ID**                                               | Trace index used for EPSP measurement and the postsynaptic side of a pairing   |                         `1` |
+| **Pulse amplitude**                                                      | Value written into the selected stim array during each 1 ms pulse              |        `1.0` in array units |
+| **Pairing strategy**                                                     | Fixed timing with automatic direction, or adaptive signed timing               | Fixed pre-post pairing time |
+| **Pre-post pairing time**                                                | Fixed-strategy interval; pulse order is selected automatically                 |                     `30 ms` |
+| **Initial guess for pre-post pairing time**                              | Adaptive-strategy starting magnitude                                           |                     `30 ms` |
+| **dt increment**                                                         | Adaptive-strategy change applied to the signed pairing time each iteration     |                      `1 ms` |
+| **Target relative EPSP amplitude**                                       | Desired EPSP relative to the first five-pulse baseline                         |                      `120%` |
+| **Tolerance window (deadband)**                                          | Maximum absolute distance from the target that counts as success               |                        `1%` |
+| **Maximum plasticity induction interations**                             | Safety limit for closed-loop iterations                                        |                        `20` |
+| **Run until the last iteration regardless of convergence to the target** | Ignore early convergence and continue until the maximum pairing count          |                    Disabled |
+| **Follow new input on each iteration**                                   | Move the synchronized timeline camera to each appended block                   |                     Enabled |
+| **Visible history**                                                      | Number of generated-block lengths kept visible throughout execution            |                         `3` |
 
 Set **Visible history** to `0` to show only the newly appended block. Disable
 **Follow new input on each iteration** to retain manual control of the shared pan and zoom state.
@@ -85,6 +85,20 @@ until the last iteration regardless of convergence to the target** to keep
 applying induction pairings until **Maximum plasticity induction interations** is reached.
 Convergence is still measured and recorded in the log while this override is
 active.
+
+### Pairing strategies
+
+**Fixed pre-post pairing time** keeps the configured interval magnitude
+constant. Below the EPSP target it uses pre-before-post timing; above the target
+it uses post-before-pre timing.
+
+**Adaptive (single parameter, dt increment)** starts with the initial pairing
+time magnitude. After each new EPSP measurement, it compares the remaining
+target error with the change since the preceding measurement. If
+`abs(EPSP new - target) > abs(EPSP new - EPSP old)`, the magnitude is reduced by
+**dt increment** (not below zero); otherwise it is increased by **dt
+increment**. The current target side determines the sign: positive/pre-before-
+post below target and negative/post-before-pre above target.
 
 ## EPSP measurement
 
@@ -119,13 +133,18 @@ model**, then try again.
 
 ## Live plots
 
-The dialog contains two synchronized Matplotlib plots:
+The dialog contains three synchronized Matplotlib plots with enough spacing to
+keep their labels and tick marks separate:
 
 - **EPSP amplitude (%)** shows every five-pulse measurement relative to the
   initial baseline. The target appears as a dashed horizontal line after the
-  baseline has been measured.
+  baseline has been measured. The shaded region is the tolerance deadband.
 - **Δ target (%)** shows the signed difference between the current EPSP and the
-  target. Zero means that the measured value equals the target.
+  target. Zero means that the measured value equals the target; the shaded band
+  shows the same tolerance around zero.
+- **Pairing time (ms)** shows the signed pre-post pairing time used for each
+  induction. Positive points are pre-before-post and negative points are
+  post-before-pre.
 
 The text below the plots reports the signed difference, absolute difference,
 and active tolerance. Plot colors follow NeuroSeq's light or dark theme.

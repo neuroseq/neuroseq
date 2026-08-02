@@ -70,6 +70,8 @@ class InputDesignerDialog(QtWidgets.QDialog):
     PULSE_MS = 1.0
     LEAD_MS = 20.0
     RESPONSE_TAIL_MS = 50.0
+    FIXED_PAIRING_STRATEGY = "Fixed pre-post pairing time"
+    ADAPTIVE_PAIRING_STRATEGY = "Adaptive (single parameter, dt increment)"
 
     def __init__(
         self,
@@ -87,11 +89,13 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self._probe_pulse_times: list[float] = []
         self._baseline_epsp: float | None = None
         self._epsp_percentages: list[float] = []
+        self._pairing_times_ms: list[float] = []
+        self._adaptive_pairing_magnitude_ms = 0.0
         self._theme = theme_module.LIGHT
         self._expanded_height: int | None = None
         self._compact_height: int | None = None
         self.setWindowTitle("Input Designer (beta)")
-        self.resize(800, 860)
+        self.resize(800, 940)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setSpacing(6)
@@ -135,10 +139,22 @@ class InputDesignerDialog(QtWidgets.QDialog):
         amplitude_row = QtWidgets.QHBoxLayout()
         amplitude_row.addWidget(self.spn_amplitude)
         amplitude_row.addWidget(self.lbl_units)
+        self.cmb_pairing_strategy = QtWidgets.QComboBox(self)
+        self.cmb_pairing_strategy.addItems(
+            [self.FIXED_PAIRING_STRATEGY, self.ADAPTIVE_PAIRING_STRATEGY]
+        )
         self.spn_pairing_interval_ms = QtWidgets.QDoubleSpinBox(self)
         self.spn_pairing_interval_ms.setRange(0.001, 1000.0)
         self.spn_pairing_interval_ms.setValue(30.0)
         self.spn_pairing_interval_ms.setSuffix(" ms")
+        self.spn_initial_pairing_time_ms = QtWidgets.QDoubleSpinBox(self)
+        self.spn_initial_pairing_time_ms.setRange(0.0, 1000.0)
+        self.spn_initial_pairing_time_ms.setValue(30.0)
+        self.spn_initial_pairing_time_ms.setSuffix(" ms")
+        self.spn_pairing_increment_ms = QtWidgets.QDoubleSpinBox(self)
+        self.spn_pairing_increment_ms.setRange(0.001, 1000.0)
+        self.spn_pairing_increment_ms.setValue(1.0)
+        self.spn_pairing_increment_ms.setSuffix(" ms")
         self.spn_target = QtWidgets.QDoubleSpinBox(self)
         self.spn_target.setRange(0.0, 10_000.0)
         self.spn_target.setValue(120.0)
@@ -175,7 +191,15 @@ class InputDesignerDialog(QtWidgets.QDialog):
         form.addRow("Presynaptic neuron ID:", self.spn_presynaptic)
         form.addRow("Postsynaptic neuron ID:", self.spn_postsynaptic)
         form.addRow("Pulse amplitude:", amplitude_row)
-        form.addRow("Pre-post pairing time:", self.spn_pairing_interval_ms)
+        form.addRow("Pairing strategy:", self.cmb_pairing_strategy)
+        self.lbl_pairing_interval = QtWidgets.QLabel("Pre-post pairing time:", self)
+        form.addRow(self.lbl_pairing_interval, self.spn_pairing_interval_ms)
+        self.lbl_initial_pairing_time = QtWidgets.QLabel(
+            "Initial guess for pre-post pairing time:", self
+        )
+        form.addRow(self.lbl_initial_pairing_time, self.spn_initial_pairing_time_ms)
+        self.lbl_pairing_increment = QtWidgets.QLabel("dt increment:", self)
+        form.addRow(self.lbl_pairing_increment, self.spn_pairing_increment_ms)
         form.addRow("Target relative EPSP amplitude:", self.spn_target)
         form.addRow("Tolerance window (deadband):", self.spn_tolerance)
         form.addRow(
@@ -186,13 +210,20 @@ class InputDesignerDialog(QtWidgets.QDialog):
         form.addRow("Visible history:", self.spn_history_blocks)
         parameters_layout.addLayout(form)
         layout.addWidget(self.parameters_panel)
+        self.cmb_pairing_strategy.currentIndexChanged.connect(
+            self._update_pairing_strategy_controls
+        )
+        self._update_pairing_strategy_controls()
 
         self.epsp_plot = MatplotlibWidget(self)
-        self.epsp_plot.setMinimumHeight(430)
+        self.epsp_plot.setMinimumHeight(500)
         figure = self.epsp_plot.getFigure()
-        grid = figure.add_gridspec(2, 1, height_ratios=(3, 2), hspace=0.08)
+        grid = figure.add_gridspec(3, 1, height_ratios=(3, 2, 2), hspace=0.14)
         self.epsp_axes = figure.add_subplot(grid[0, 0])
         self.difference_axes = figure.add_subplot(grid[1, 0], sharex=self.epsp_axes)
+        self.pairing_time_axes = figure.add_subplot(grid[2, 0], sharex=self.epsp_axes)
+        self.spn_target.valueChanged.connect(lambda _value: self._update_plots())
+        self.spn_tolerance.valueChanged.connect(lambda _value: self._update_plots())
         # Compatibility alias: both axes now share one tightly packed canvas.
         self.difference_plot = self.epsp_plot
         layout.addWidget(self.epsp_plot, 4)
@@ -220,6 +251,17 @@ class InputDesignerDialog(QtWidgets.QDialog):
         layout.addWidget(buttons)
         self.apply_theme(self._theme)
         self.refresh()
+
+    def _update_pairing_strategy_controls(self) -> None:
+        adaptive = (
+            self.cmb_pairing_strategy.currentText() == self.ADAPTIVE_PAIRING_STRATEGY
+        )
+        self.lbl_pairing_interval.setVisible(not adaptive)
+        self.spn_pairing_interval_ms.setVisible(not adaptive)
+        self.lbl_initial_pairing_time.setVisible(adaptive)
+        self.spn_initial_pairing_time_ms.setVisible(adaptive)
+        self.lbl_pairing_increment.setVisible(adaptive)
+        self.spn_pairing_increment_ms.setVisible(adaptive)
 
     def _set_parameters_hidden(self, hidden: bool) -> None:
         """Collapse the parameter panel so the plots can use its space."""
@@ -329,6 +371,8 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self._view_block_samples = None
         self._baseline_epsp = None
         self._epsp_percentages = []
+        self._pairing_times_ms = []
+        self._adaptive_pairing_magnitude_ms = self.spn_initial_pairing_time_ms.value()
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         if clear_log:
@@ -377,7 +421,31 @@ class InputDesignerDialog(QtWidgets.QDialog):
         stim = self._require_stim()
         pulse_n = max(1, round(self.PULSE_MS / 1000.0 / stim.dt))
         lead_n = max(1, round(self.LEAD_MS / 1000.0 / stim.dt))
-        gap_n = max(1, round(self.spn_pairing_interval_ms.value() / 1000.0 / stim.dt))
+        adaptive = (
+            self.cmb_pairing_strategy.currentText() == self.ADAPTIVE_PAIRING_STRATEGY
+        )
+        if adaptive:
+            if len(self._epsp_percentages) > 1:
+                epsp_new = self._epsp_percentages[-1]
+                epsp_old = self._epsp_percentages[-2]
+                target_error = abs(epsp_new - self.spn_target.value())
+                epsp_change = abs(epsp_new - epsp_old)
+                increment = self.spn_pairing_increment_ms.value()
+                if target_error > epsp_change:
+                    self._adaptive_pairing_magnitude_ms = max(
+                        0.0, self._adaptive_pairing_magnitude_ms - increment
+                    )
+                else:
+                    self._adaptive_pairing_magnitude_ms += increment
+            pairing_time_ms = (
+                self._adaptive_pairing_magnitude_ms
+                if potentiate
+                else -self._adaptive_pairing_magnitude_ms
+            )
+        else:
+            magnitude_ms = self.spn_pairing_interval_ms.value()
+            pairing_time_ms = magnitude_ms if potentiate else -magnitude_ms
+        gap_n = max(1, round(abs(pairing_time_ms) / 1000.0 / stim.dt))
         samples = (
             lead_n
             + gap_n
@@ -385,14 +453,15 @@ class InputDesignerDialog(QtWidgets.QDialog):
             + max(1, round(self.RESPONSE_TAIL_MS / 1000.0 / stim.dt))
         )
         block = np.zeros((samples, stim.values.shape[1]), dtype=np.float32)
+        pre_before_post = pairing_time_ms >= 0.0
         first = (
             self.spn_presynaptic.value()
-            if potentiate
+            if pre_before_post
             else self.spn_postsynaptic.value()
         )
         second = (
             self.spn_postsynaptic.value()
-            if potentiate
+            if pre_before_post
             else self.spn_presynaptic.value()
         )
         block[lead_n : lead_n + pulse_n, first] = self.spn_amplitude.value()
@@ -401,10 +470,16 @@ class InputDesignerDialog(QtWidgets.QDialog):
         )
         block_start = self._append_block(block)
         self._phase = "pairing"
+        self._pairing_times_ms.append(pairing_time_ms)
         direction = (
-            "potentiation (pre → post)" if potentiate else "depression (post → pre)"
+            "potentiation (pre → post)"
+            if pre_before_post
+            else "depression (post → pre)"
         )
-        self._append_log(f"Appended one {direction} pairing.")
+        self._append_log(
+            f"Appended one {direction} pairing at {pairing_time_ms:+.3f} ms."
+        )
+        self._update_plots()
         self._run_to_sample(block_start + samples)
 
     def _append_block(self, block: np.ndarray) -> int:
@@ -542,14 +617,37 @@ class InputDesignerDialog(QtWidgets.QDialog):
         x = np.arange(1, len(self._epsp_percentages) + 1)
         values = np.asarray(self._epsp_percentages)
         target = self.spn_target.value()
+        tolerance = self.spn_tolerance.value()
         self.epsp_axes.clear()
+        self.epsp_axes.axhspan(
+            target - tolerance,
+            target + tolerance,
+            color="#2ca02c",
+            alpha=0.18,
+            label="Deadband",
+        )
+        self.epsp_axes.axhline(target, color="#d62728", linewidth=2, linestyle="--")
         self.epsp_axes.plot(x, values, color="#1f77b4", linewidth=2, marker="o")
-        if values.size:
-            self.epsp_axes.axhline(target, color="#d62728", linewidth=2, linestyle="--")
         self.difference_axes.clear()
+        self.difference_axes.axhspan(
+            -tolerance,
+            tolerance,
+            color="#2ca02c",
+            alpha=0.18,
+        )
         self.difference_axes.axhline(0.0, color="#7f7f7f", linewidth=1)
         self.difference_axes.plot(
             x, values - target, color="#b245a8", linewidth=2, marker="o"
+        )
+        self.pairing_time_axes.clear()
+        pairing_x = np.arange(1, len(self._pairing_times_ms) + 1)
+        self.pairing_time_axes.axhline(0.0, color="#7f7f7f", linewidth=1)
+        self.pairing_time_axes.plot(
+            pairing_x,
+            self._pairing_times_ms,
+            color="#e28743",
+            linewidth=2,
+            marker="o",
         )
         if values.size:
             self.difference_axes.set_xlim(0.5, values.size + 0.5)
@@ -565,7 +663,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
             )
         self._style_plot_axes()
         self.epsp_plot.getFigure().subplots_adjust(
-            left=0.13, right=0.98, bottom=0.11, top=0.98, hspace=0.08
+            left=0.14, right=0.98, bottom=0.09, top=0.98, hspace=0.14
         )
         self.epsp_plot.draw()
 
@@ -574,6 +672,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         for axes, ylabel in (
             (self.epsp_axes, "EPSP\namplitude (%)"),
             (self.difference_axes, "Δ target\n(%)"),
+            (self.pairing_time_axes, "Pairing time\n(ms)"),
         ):
             axes.set_facecolor(face)
             axes.set_ylabel(ylabel, color=text)
@@ -582,10 +681,12 @@ class InputDesignerDialog(QtWidgets.QDialog):
             for spine in axes.spines.values():
                 spine.set_color(text)
         self.epsp_plot.getFigure().set_facecolor(face)
-        self.difference_axes.xaxis.set_major_locator(MultipleLocator(1))
+        self.pairing_time_axes.xaxis.set_major_locator(MultipleLocator(1))
         self.epsp_axes.tick_params(labelbottom=False)
+        self.difference_axes.tick_params(labelbottom=False)
         self.epsp_axes.set_xlabel("")
-        self.difference_axes.set_xlabel("Measurement", color=text)
+        self.difference_axes.set_xlabel("")
+        self.pairing_time_axes.set_xlabel("Measurement / iteration", color=text)
 
     def apply_theme(self, theme: str) -> None:
         """Recolor both Matplotlib canvases for the application theme."""
