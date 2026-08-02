@@ -55,6 +55,9 @@ class _FakeEditor:
             )
         )
 
+    def focus_time_range(self, start: float, stop: float) -> None:
+        self.controller.focus_time_range(start, stop)
+
     def apply_pattern(
         self, neuron_slice: slice, time_slice: slice, values: np.ndarray
     ) -> None:
@@ -98,6 +101,8 @@ def test_input_designer_runs_probe_pairing_probe_and_reaches_target(
 
     dialog.simulation_finished()
     assert len(editor.calls) == 3
+    focused_widths = [stop - start for start, stop in editor.focused_ranges]
+    assert focused_widths == pytest.approx([focused_widths[0]] * 3)
     dialog.simulation_finished()
 
     assert not dialog._running
@@ -130,18 +135,25 @@ def test_input_designer_uses_post_pre_pairing_for_depression(
     assert "depression" in dialog.log.toPlainText()
 
 
-def test_input_designer_camera_includes_three_prior_blocks(qtbot) -> None:
+@pytest.mark.parametrize("visible_blocks", [0, 3])
+def test_input_designer_camera_keeps_configured_width(
+    qtbot, visible_blocks: int
+) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
     dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
-    dialog.spn_history_blocks.setValue(0)
+    dialog.spn_history_blocks.setValue(visible_blocks)
 
     dialog.start()
 
     block_samples = editor.calls[0].shape[0]
-    expected_start = 10 * 0.001
-    assert editor.focused_ranges == [(expected_start, (10 + block_samples) * 0.001)]
+    expected_blocks = max(1, visible_blocks)
+    expected_width = expected_blocks * block_samples
+    expected_start = max(0, 10 + block_samples - expected_width)
+    assert editor.focused_ranges == [
+        (expected_start * 0.001, (expected_start + expected_width) * 0.001)
+    ]
 
 
 def test_input_designer_protocol_defaults(qtbot) -> None:

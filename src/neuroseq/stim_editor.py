@@ -57,6 +57,7 @@ class StimEditor(QtWidgets.QWidget):
 
     limits_modified = QtCore.Signal()
     simulation_requested = QtCore.Signal(float)
+    time_range_focus_requested = QtCore.Signal(float, float)
 
     def __init__(
         self,
@@ -991,6 +992,11 @@ class StimEditor(QtWidgets.QWidget):
         self._input_designer_dialog.show()
         self._input_designer_dialog.raise_()
         self._input_designer_dialog.activateWindow()
+
+    def focus_time_range(self, start_seconds: float, stop_seconds: float) -> None:
+        """Keep stimulation and linked data views focused on the same interval."""
+        self.controller.focus_time_range(start_seconds, stop_seconds)
+        self.time_range_focus_requested.emit(start_seconds, stop_seconds)
 
     def input_designer_simulation_finished(self) -> None:
         if self._input_designer_dialog is not None:

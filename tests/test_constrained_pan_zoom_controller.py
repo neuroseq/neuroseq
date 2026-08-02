@@ -93,3 +93,47 @@ def test_focus_time_range_updates_width_and_x_position(monkeypatch) -> None:
 
     assert captured_state["width"] == 250.0
     assert captured_state["position"] == (2125.0, 4.5, 1.0)
+
+
+def test_focus_time_range_can_include_empty_future_space(monkeypatch) -> None:
+    controller = ConstrainedPanZoomController()
+    controller.min_width = 1.0
+    controller.max_width = 100.0
+    dummy_state = {
+        "width": 100.0,
+        "height": 10.0,
+        "position": (50.0, 4.5, 1.0),
+    }
+    captured_state = {}
+    monkeypatch.setattr(controller, "_get_camera_state", lambda: dummy_state.copy())
+    monkeypatch.setattr(
+        controller,
+        "_set_camera_state",
+        lambda state: captured_state.update(state),
+    )
+    monkeypatch.setattr(controller, "_update_cameras", lambda: None)
+
+    controller.focus_time_range(0.0, 0.3)
+
+    assert controller.max_width == 300.0
+    assert captured_state["width"] == 300.0
+    assert captured_state["position"] == (150.0, 4.5, 1.0)
+
+    controller.set_limits(0.1, 10)
+
+    assert controller.max_width == 300.0
+
+
+def test_current_time_range_reports_camera_interval(monkeypatch) -> None:
+    controller = ConstrainedPanZoomController()
+    monkeypatch.setattr(
+        controller,
+        "_get_camera_state",
+        lambda: {
+            "width": 300.0,
+            "height": 10.0,
+            "position": (250.0, 4.5, 1.0),
+        },
+    )
+
+    assert controller.current_time_range() == (0.1, 0.4)

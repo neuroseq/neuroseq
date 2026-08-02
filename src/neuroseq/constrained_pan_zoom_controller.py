@@ -32,6 +32,7 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         self.max_width = 1.0
         self.min_height = 1.0
         self.max_height = 1.0
+        self._minimum_time_extent = 0.0
         self.initialized = False
         self.x_scroll_bar: QtWidgets.QScrollBar | None = None
         self.y_scroll_bar: QtWidgets.QScrollBar | None = None
@@ -55,6 +56,7 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
     def reset(self):
         self.max_width = 1.0
         self.max_height = 1.0
+        self._minimum_time_extent = 0.0
         self.grid_lines.clear()
         self.initialized = False
 
@@ -63,7 +65,7 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         max_neurons = int(max_neurons)
         if max_time_secs <= 0.0 or max_neurons <= 0:
             return
-        self.max_width = 1000.0 * max_time_secs
+        self.max_width = max(1000.0 * max_time_secs, self._minimum_time_extent)
         self.max_height = float(max_neurons)
         for grid_line in self.grid_lines:
             if grid_line is not None:
@@ -117,6 +119,14 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         stop_ms = 1000.0 * float(stop_seconds)
         if stop_ms <= start_ms:
             return
+        # Explicit focus requests may intentionally include empty timeline space,
+        # for example to keep a live view at a stable width while data is appended.
+        requested_extent = max(stop_ms - min(0.0, start_ms), stop_ms)
+        self._minimum_time_extent = max(self._minimum_time_extent, requested_extent)
+        self.max_width = max(self.max_width, self._minimum_time_extent)
+        for grid_line in self.grid_lines:
+            if grid_line is not None:
+                grid_line.update_time_extent(self.max_width)
         state = self._get_camera_state()
         visible_time = float(
             np.clip(stop_ms - start_ms, float(self.min_width), float(self.max_width))
@@ -129,6 +139,16 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         )
         self._set_camera_state(state)
         self._update_cameras()
+
+    def current_time_range(self) -> tuple[float, float] | None:
+        """Return the visible time interval in seconds, if a camera is attached."""
+        try:
+            state = self._get_camera_state()
+        except ValueError:
+            return None
+        half_width = 0.5 * float(state["width"])
+        center = float(state["position"][0])
+        return ((center - half_width) / 1000.0, (center + half_width) / 1000.0)
 
     def _set_camera_state(self, new_state):
         """Override the _set_camera_state method

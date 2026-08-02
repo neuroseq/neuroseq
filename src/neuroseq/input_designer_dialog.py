@@ -83,6 +83,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self._running = False
         self._phase = "idle"
         self._iteration = 0
+        self._view_block_samples: int | None = None
         self._probe_pulse_times: list[float] = []
         self._baseline_epsp: float | None = None
         self._epsp_percentages: list[float] = []
@@ -167,7 +168,8 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.spn_history_blocks.setValue(3)
         self.spn_history_blocks.setSuffix(" blocks")
         self.spn_history_blocks.setToolTip(
-            "Number of preceding generated-block lengths to keep visible."
+            "Number of generated-block lengths to keep visible. Zero shows only "
+            "the newest block."
         )
         form.addRow("Trace to analyze:", self.cmb_trace)
         form.addRow("Presynaptic neuron ID:", self.spn_presynaptic)
@@ -324,6 +326,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
             return
         self._running = True
         self._iteration = 0
+        self._view_block_samples = None
         self._baseline_epsp = None
         self._epsp_percentages = []
         self.btn_start.setEnabled(False)
@@ -413,12 +416,15 @@ class InputDesignerDialog(QtWidgets.QDialog):
             slice(0, stim.values.shape[1]), slice(start, start + block.shape[0]), block
         )
         if self.chk_follow_input.isChecked():
-            history_start = max(
-                0,
-                start - self.spn_history_blocks.value() * block.shape[0],
-            )
-            self.editor.controller.focus_time_range(
-                history_start * stim.dt, (start + block.shape[0]) * stim.dt
+            if self._view_block_samples is None:
+                self._view_block_samples = block.shape[0]
+            visible_blocks = max(1, self.spn_history_blocks.value())
+            visible_samples = visible_blocks * self._view_block_samples
+            block_end = start + block.shape[0]
+            history_start = max(0, block_end - visible_samples)
+            history_stop = history_start + visible_samples
+            self.editor.focus_time_range(
+                history_start * stim.dt, history_stop * stim.dt
             )
         return start
 

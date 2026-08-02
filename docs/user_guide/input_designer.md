@@ -75,7 +75,7 @@ abs(current EPSP % - target EPSP %) < tolerance %
 | **Maximum plasticity induction interations**                             | Safety limit for closed-loop iterations                                        |                  `20` |
 | **Run until the last iteration regardless of convergence to the target** | Ignore early convergence and continue until the maximum pairing count          |              Disabled |
 | **Follow new input on each iteration**                                   | Move the synchronized timeline camera to each appended block                   |               Enabled |
-| **Visible history**                                                      | Number of preceding generated-block lengths shown together with the new block  |                   `3` |
+| **Visible history**                                                      | Number of generated-block lengths kept visible throughout execution            |                   `3` |
 
 Set **Visible history** to `0` to show only the newly appended block. Disable
 **Follow new input on each iteration** to retain manual control of the shared pan and zoom state.

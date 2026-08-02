@@ -379,6 +379,9 @@ class Gui(QtWidgets.QMainWindow):
         self.stim_editor.simulation_requested.connect(
             self._do_brian2_simulation_threaded
         )
+        self.stim_editor.time_range_focus_requested.connect(
+            self.trace_controller.focus_time_range
+        )
         split_vertical.addWidget(self.stim_editor)
         self.trace_widget.set_default_scroll_bars(
             self.stim_editor.x_scrollbar,
@@ -1533,8 +1536,16 @@ class Gui(QtWidgets.QMainWindow):
 
         def _on_brian2_finished(_result: object) -> None:
             self.logger.info("Brian2 simulation finished.")
+            visible_time_range = self.controller.current_time_range()
             self._update_data(keep_undo_history=True)
-            self.stim_editor.input_designer_simulation_finished()
+            if visible_time_range is not None:
+                self.controller.focus_time_range(*visible_time_range)
+                self.trace_controller.focus_time_range(*visible_time_range)
+            # Let Qt paint the newly refreshed trace before the Input Designer
+            # appends and focuses the next stimulation block.
+            QtCore.QTimer.singleShot(
+                0, self.stim_editor.input_designer_simulation_finished
+            )
 
         self._dispatch_io_task(
             _brian2_task,
