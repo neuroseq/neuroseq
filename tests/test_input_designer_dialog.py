@@ -157,6 +157,36 @@ def test_input_designer_protocol_defaults(qtbot) -> None:
     assert dialog.windowFlags() & QtCore.Qt.WindowType.WindowMinimizeButtonHint
 
 
+def test_input_designer_can_hide_parameters_to_expand_plots(qtbot) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    dialog.show()
+    expanded_size = dialog.size()
+
+    assert dialog.parameters_panel.isVisible()
+    assert dialog.btn_toggle_parameters.text() == "Hide parameters"
+
+    qtbot.mouseClick(dialog.btn_toggle_parameters, QtCore.Qt.MouseButton.LeftButton)
+    QtWidgets.QApplication.processEvents()
+
+    assert not dialog.parameters_panel.isVisible()
+    assert dialog.epsp_plot.isVisible()
+    assert dialog.width() == expanded_size.width()
+    assert dialog.height() < expanded_size.height()
+    assert dialog.btn_toggle_parameters.text() == "Show parameters"
+    assert dialog.btn_toggle_parameters.arrowType() == QtCore.Qt.ArrowType.RightArrow
+
+    qtbot.mouseClick(dialog.btn_toggle_parameters, QtCore.Qt.MouseButton.LeftButton)
+    QtWidgets.QApplication.processEvents()
+
+    assert dialog.parameters_panel.isVisible()
+    assert dialog.size() == expanded_size
+    assert dialog.btn_toggle_parameters.text() == "Hide parameters"
+    assert dialog.btn_toggle_parameters.arrowType() == QtCore.Qt.ArrowType.DownArrow
+
+
 def test_input_designer_can_continue_after_convergence(qtbot, monkeypatch) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)

@@ -87,18 +87,38 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self._baseline_epsp: float | None = None
         self._epsp_percentages: list[float] = []
         self._theme = theme_module.LIGHT
+        self._expanded_height: int | None = None
+        self._compact_height: int | None = None
         self.setWindowTitle("Input Designer (beta)")
         self.resize(800, 860)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setSpacing(6)
+
+        self.btn_toggle_parameters = QtWidgets.QToolButton(self)
+        self.btn_toggle_parameters.setText("Hide parameters")
+        self.btn_toggle_parameters.setCheckable(True)
+        self.btn_toggle_parameters.setToolButtonStyle(
+            QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        self.btn_toggle_parameters.setArrowType(QtCore.Qt.ArrowType.DownArrow)
+        self.btn_toggle_parameters.setToolTip(
+            "Hide the protocol parameters to give the plots more space."
+        )
+        self.btn_toggle_parameters.toggled.connect(self._set_parameters_hidden)
+        layout.addWidget(self.btn_toggle_parameters)
+
+        self.parameters_panel = QtWidgets.QWidget(self)
+        parameters_layout = QtWidgets.QVBoxLayout(self.parameters_panel)
+        parameters_layout.setContentsMargins(0, 0, 0, 0)
+        parameters_layout.setSpacing(6)
         explanation = QtWidgets.QLabel(
             "Target a postsynaptic EPSP with five-pulse measurements and "
             "single pre/post STDP induction pairings.",
-            self,
+            self.parameters_panel,
         )
         explanation.setWordWrap(True)
-        layout.addWidget(explanation)
+        parameters_layout.addWidget(explanation)
         form = QtWidgets.QFormLayout()
         self.cmb_trace = QtWidgets.QComboBox(self)
         self.spn_presynaptic = QtWidgets.QSpinBox(self)
@@ -158,7 +178,8 @@ class InputDesignerDialog(QtWidgets.QDialog):
         form.addRow("Stopping rule:", self.chk_run_all_iterations)
         form.addRow("Live view:", self.chk_follow_input)
         form.addRow("Visible history:", self.spn_history_blocks)
-        layout.addLayout(form)
+        parameters_layout.addLayout(form)
+        layout.addWidget(self.parameters_panel)
 
         self.epsp_plot = MatplotlibWidget(self)
         self.epsp_plot.setMinimumHeight(430)
@@ -193,6 +214,38 @@ class InputDesignerDialog(QtWidgets.QDialog):
         layout.addWidget(buttons)
         self.apply_theme(self._theme)
         self.refresh()
+
+    def _set_parameters_hidden(self, hidden: bool) -> None:
+        """Collapse the parameter panel so the plots can use its space."""
+        if hidden:
+            self._expanded_height = self.height()
+            panel_height = self.parameters_panel.height()
+            self._compact_height = max(
+                1, self.height() - panel_height - self.layout().spacing()
+            )
+        self.parameters_panel.setVisible(not hidden)
+        self.btn_toggle_parameters.setText(
+            "Show parameters" if hidden else "Hide parameters"
+        )
+        self.btn_toggle_parameters.setArrowType(
+            QtCore.Qt.ArrowType.RightArrow if hidden else QtCore.Qt.ArrowType.DownArrow
+        )
+        self.btn_toggle_parameters.setToolTip(
+            "Show the protocol parameters."
+            if hidden
+            else "Hide the protocol parameters to give the plots more space."
+        )
+        QtCore.QTimer.singleShot(0, self._resize_for_parameter_visibility)
+
+    def _resize_for_parameter_visibility(self) -> None:
+        """Resize after Qt has recalculated the layout's size constraints."""
+        height = (
+            self._compact_height
+            if self.btn_toggle_parameters.isChecked()
+            else self._expanded_height
+        )
+        if height is not None:
+            self.resize(self.width(), max(height, self.minimumSizeHint().height()))
 
     def changeEvent(self, event: QtCore.QEvent) -> None:
         super().changeEvent(event)
