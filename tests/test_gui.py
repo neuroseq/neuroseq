@@ -45,10 +45,14 @@ def _wait_for_brian2_simulation(qtbot: QtBot, gui: Gui, timeout: int = 90000) ->
 class _MockAxes:
     def __init__(self) -> None:
         self.plot_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        self.lines: list[_MockLine] = []
         self.scatter_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
-    def plot(self, *args: Any, **kwargs: Any) -> None:
+    def plot(self, *args: Any, **kwargs: Any) -> tuple[_MockLine]:
         self.plot_calls.append((args, kwargs))
+        line = _MockLine()
+        self.lines.append(line)
+        return (line,)
 
     def scatter(self, *args: Any, **kwargs: Any) -> None:
         self.scatter_calls.append((args, kwargs))
@@ -79,6 +83,14 @@ class _MockFigure:
         if self.save_error is not None:
             raise self.save_error
         self.saved.append((path, kwargs))
+
+
+class _MockLine:
+    def __init__(self) -> None:
+        self.gid: str | None = None
+
+    def set_gid(self, gid: str) -> None:
+        self.gid = gid
 
 
 def _make_trace_export_gui(
@@ -384,6 +396,36 @@ def test_gui_cellpose_import_action_moved_to_file_menu(qtbot: QtBot) -> None:
     import_data_action_texts = [action.text() for action in import_data_menu.actions()]
     assert "Import cell &segmentation" not in import_data_action_texts
     assert "Import cell spatial &footprints" not in import_data_action_texts
+
+    gui.close()
+
+
+def test_gui_plot_exports_are_in_export_graphics_menu(qtbot: QtBot) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+
+    submenus = {
+        action.text().replace("&", ""): action.menu()
+        for action in gui.menu_file.actions()
+        if action.menu() is not None
+    }
+    assert "Export graphics" in submenus
+    assert submenus["Export graphics"] is not None
+    graphics_actions = {
+        action.text().replace("&", "")
+        for action in submenus["Export graphics"].actions()
+    }
+    assert graphics_actions == {"Traces", "Spikes"}
+
+    assert "Export" in submenus
+    assert submenus["Export"] is not None
+    export_actions = {
+        action.text().replace("&", "") for action in submenus["Export"].actions()
+    }
+    assert "Traces" not in export_actions
+    assert "Spikes" not in export_actions
 
     gui.close()
 
@@ -1377,6 +1419,73 @@ def test_gui_export_traces_returns_when_file_dialog_cancelled(
     assert qmessagebox_calls == []
 
 
+def test_gui_vector_export_uses_svg_default(
+    monkeypatch: MonkeyPatch,
+    qmessagebox_calls: list,
+) -> None:
+    trace_data = TraceData(
+        name="voltage",
+        traces=np.zeros((1, 10), dtype=np.float32),
+        indices=np.array([0], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    fake_gui = _make_trace_export_gui("Simulation :: P / v", trace_data)
+    dialog_calls: list[tuple[Any, ...]] = []
+
+    def _cancel_dialog(*args: Any) -> tuple[str, str]:
+        dialog_calls.append(args)
+        return "", ""
+
+    monkeypatch.setattr(neuroseq.gui, "getsavefilename", _cancel_dialog)
+
+    Gui.btn_export_traces_vector_clicked(fake_gui)
+
+    assert dialog_calls[0][1] == "Export traces as vector graphic"
+    assert dialog_calls[0][2].endswith("_traces.svg")
+    assert dialog_calls[0][3] == "SVG vector (*.svg);;PDF document (*.pdf)"
+    assert qmessagebox_calls == []
+
+
+def test_gui_vector_export_saves_named_traces_on_transparent_background(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    qmessagebox_calls: list,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    trace_data = TraceData(
+        name="voltage",
+        traces=np.zeros((2, 10), dtype=np.float32),
+        indices=np.array([3, 7], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    output_path = tmp_path / "traces.svg"
+    fig = _MockFigure()
+    ax = _MockAxes()
+    fake_gui = _make_trace_export_gui("Simulation :: P / v", trace_data)
+
+    monkeypatch.setattr(plt, "subplots", lambda *args, **kwargs: (fig, ax))
+    monkeypatch.setattr(plt, "close", lambda figure: None)
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "getsavefilename",
+        lambda *args: (str(output_path), "SVG vector (*.svg)"),
+    )
+
+    Gui.btn_export_traces_vector_clicked(fake_gui)
+
+    assert [line.gid for line in ax.lines] == ["trace_3", "trace_7"]
+    assert fig.saved == [
+        (
+            str(output_path),
+            {"dpi": 300, "bbox_inches": "tight", "transparent": True},
+        ),
+    ]
+    assert any(call["name"] == "information" for call in qmessagebox_calls)
+
+
 def test_gui_export_traces_saves_figure(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
@@ -1408,7 +1517,10 @@ def test_gui_export_traces_saves_figure(
     Gui.btn_export_traces_clicked(fake_gui)
 
     assert fig.saved == [
-        (str(output_path), {"dpi": 300, "bbox_inches": "tight"}),
+        (
+            str(output_path),
+            {"dpi": 300, "bbox_inches": "tight", "transparent": False},
+        ),
     ]
     assert fig.tight_layout_called is True
     assert len(ax.plot_calls) == 3

@@ -436,6 +436,9 @@ class Gui(QtWidgets.QMainWindow):
             )
         )
         self.trace_widget.custom_analysis_requested.connect(self._custom_analysis)
+        self.trace_widget.vector_export_requested.connect(
+            self.btn_export_traces_vector_clicked
+        )
         self.data_widget.trace_widget.custom_analysis_requested.connect(
             self._custom_analysis
         )
@@ -1931,6 +1934,13 @@ class Gui(QtWidgets.QMainWindow):
         figure. The Y-axis label uses the units stored in the TraceData (e.g. 'mV'
         for current-clamp recordings, 'pA' for voltage-clamp recordings). DPI is 300.
         """
+        Gui._export_traces(self, vector_only=False)
+
+    def btn_export_traces_vector_clicked(self) -> None:
+        """Export the selected traces to an SVG or PDF vector graphic."""
+        Gui._export_traces(self, vector_only=True)
+
+    def _export_traces(self, *, vector_only: bool) -> None:
         import matplotlib.pyplot as plt
 
         trace_name = self.cmb_trace.currentText()
@@ -1950,11 +1960,17 @@ class Gui(QtWidgets.QMainWindow):
             )
             return
 
+        default_suffix = "svg" if vector_only else "png"
+        file_filter = (
+            "SVG vector (*.svg);;PDF document (*.pdf)"
+            if vector_only
+            else "PNG image (*.png);;SVG vector (*.svg);;PDF document (*.pdf)"
+        )
         filename, _ = getsavefilename(
             self,
-            "Export traces",
-            f"{trace_name.replace(' :: ', '_')}_traces.png",
-            "PNG image (*.png);;SVG vector (*.svg);;PDF document (*.pdf)",
+            "Export traces as vector graphic" if vector_only else "Export traces",
+            f"{trace_name.replace(' :: ', '_')}_traces.{default_suffix}",
+            file_filter,
         )
         if not filename:
             return
@@ -1965,13 +1981,21 @@ class Gui(QtWidgets.QMainWindow):
             times = np.arange(n_timepoints) * trace_data.dt
             fig, ax = plt.subplots(figsize=(12, max(4, n_neurons * 0.5 + 2)))
             for i in range(n_neurons):
-                ax.plot(times, trace_data.traces[i], linewidth=0.8, alpha=0.85)
+                (line,) = ax.plot(
+                    times, trace_data.traces[i], linewidth=0.8, alpha=0.85
+                )
+                line.set_gid(f"trace_{int(trace_data.indices[i])}")
             ax.set_xlabel("Time (s)", fontsize=12)
             ax.set_ylabel(trace_data.units or "Amplitude", fontsize=12)
             ax.set_title(trace_name, fontsize=13)
             ax.tick_params(labelsize=10)
             fig.tight_layout()
-            fig.savefig(filename, dpi=300, bbox_inches="tight")
+            fig.savefig(
+                filename,
+                dpi=300,
+                bbox_inches="tight",
+                transparent=vector_only,
+            )
             QtWidgets.QMessageBox.information(
                 self,
                 "Export successful",
@@ -2314,17 +2338,21 @@ class Gui(QtWidgets.QMainWindow):
             None,
             icon="mdi6.file-code",
         )
+
+        export_graphics_menu = menu.addMenu("Export &graphics")
+        assert export_graphics_menu is not None
+
         add_action(
             "&Traces",
             self.btn_export_traces_clicked,
-            export_data_menu,
+            export_graphics_menu,
             None,
             icon="mdi.waves",
         )
         add_action(
             "&Spikes",
             self.btn_export_spikes_clicked,
-            export_data_menu,
+            export_graphics_menu,
             None,
             icon="ph.barcode-light",
         )

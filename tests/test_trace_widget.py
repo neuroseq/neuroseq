@@ -13,6 +13,33 @@ from neuroseq.trace_widget import TraceWidget
 from neuroseq.utils import neuron_indices_to_colors
 
 
+def test_trace_widget_context_menu_offers_vector_export(
+    qtbot: QtBot, make_trace_data
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+
+    trace_widget._rebuild_custom_analysis_menu()
+    export_action = next(
+        action
+        for action in trace_widget.context_menu.actions()
+        if action.text() == "Export as vector graphic…"
+    )
+    assert not export_action.isEnabled()
+
+    trace_widget.set_data(make_trace_data())
+    trace_widget._rebuild_custom_analysis_menu()
+    export_action = next(
+        action
+        for action in trace_widget.context_menu.actions()
+        if action.text() == "Export as vector graphic…"
+    )
+    assert export_action.isEnabled()
+    with qtbot.waitSignal(trace_widget.vector_export_requested):
+        export_action.trigger()
+
+
 def test_trace_norm_dialog_minimum_is_50_percent(qtbot: QtBot) -> None:
     controller = ConstrainedPanZoomController()
     trace_widget = TraceWidget(controller)
