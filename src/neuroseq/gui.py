@@ -554,6 +554,27 @@ class Gui(QtWidgets.QMainWindow):
         self.progress_dialog.setValue(completed_percent)
 
     def btn_new_clicked(self) -> None:
+        answer = QtWidgets.QMessageBox.warning(
+            self,
+            "Start a new project",
+            "Starting a new project will discard any unsaved changes to the "
+            "current project.\n\nSave the current project first?",
+            QtWidgets.QMessageBox.StandardButton.Save
+            | QtWidgets.QMessageBox.StandardButton.Discard
+            | QtWidgets.QMessageBox.StandardButton.Cancel,
+            QtWidgets.QMessageBox.StandardButton.Save,
+        )
+        if answer == QtWidgets.QMessageBox.StandardButton.Cancel:
+            return
+        if answer == QtWidgets.QMessageBox.StandardButton.Save:
+            # Create the new project only after the save finishes, so it saves
+            # the current project rather than the freshly created one. If the
+            # user backs out of the save dialog, keep the current project.
+            self._save_project(on_success=lambda _result: self._create_new_project())
+            return
+        self._create_new_project()
+
+    def _create_new_project(self) -> None:
         gc.collect()
         self.load_project(default_project())
 
@@ -616,16 +637,27 @@ class Gui(QtWidgets.QMainWindow):
             self._update_combo_boxes()
 
     def btn_save_clicked(self) -> None:
+        self._save_project()
+
+    def _save_project(self, on_success: Callable[[object], None] | None = None) -> bool:
+        """Run the interactive save flow.
+
+        Returns True if a save task was dispatched, False if the user cancelled
+        at the options or file dialog (or a file operation is already running).
+        ``on_success`` runs after the save completes successfully; it lets a
+        caller (e.g. New) chain an action once the current project is safely
+        persisted.
+        """
         if self._io_worker is not None:
             QtWidgets.QMessageBox.information(
                 self,
                 "Busy",
                 "A file operation is already in progress.",
             )
-            return
+            return False
         options_dialog = SaveLoadOptionsDialog(action="Save")
         if not options_dialog.exec():
-            return
+            return False
         filename, _ = getsavefilename(
             self,
             "Save project",
@@ -633,7 +665,7 @@ class Gui(QtWidgets.QMainWindow):
             "neuroseq project (*.nseq)",
         )
         if filename == "":
-            return
+            return False
         filename = pathlib.Path(filename)
         if filename.suffix != ".nseq":
             filename = filename.with_suffix(".nseq")
@@ -652,8 +684,11 @@ class Gui(QtWidgets.QMainWindow):
         def _on_saved(result: object) -> None:
             self.logger.info(f"Project saved to '{result}'.")
             self._update_window_title()
+            if on_success is not None:
+                on_success(result)
 
         self._dispatch_io_task(_save_task, f"Saving to {filename.name}…", _on_saved)
+        return True
 
     def btn_export_simulation_results_clicked(self) -> None:
         filename, _ = getsavefilename(
@@ -943,6 +978,10 @@ class Gui(QtWidgets.QMainWindow):
             self.project.cellpose_data = self.last_cellpose_import
 
         self.stim_editor.set_project(self.project)
+        # A replaced project must not inherit the previous run's Design dynamic
+        # input state (plots, log, EPSP history); drop the cached dialog so it
+        # is rebuilt fresh on next open.
+        self.stim_editor.discard_input_designer()
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
         self._update_combo_boxes()

@@ -1011,6 +1011,18 @@ class StimEditor(QtWidgets.QWidget):
         self._input_designer_dialog.raise_()
         self._input_designer_dialog.activateWindow()
 
+    def discard_input_designer(self) -> None:
+        """Drop any cached Design dynamic input dialog.
+
+        Called when the project is replaced so the designer does not carry a
+        previous run's state (plots, log, EPSP history) into a new project. The
+        dialog is rebuilt fresh the next time it is opened.
+        """
+        if self._input_designer_dialog is not None:
+            self._input_designer_dialog.close()
+            self._input_designer_dialog.deleteLater()
+            self._input_designer_dialog = None
+
     def focus_time_range(self, start_seconds: float, stop_seconds: float) -> None:
         """Keep stimulation and linked data views focused on the same interval."""
         self.controller.focus_time_range(start_seconds, stop_seconds)

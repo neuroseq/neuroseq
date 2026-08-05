@@ -574,7 +574,7 @@ def test_gui_new(tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot) -> None
     gui.close()
 
 
-def test_btn_new_clicked_calls_gc_collect(monkeypatch: MonkeyPatch) -> None:
+def test_create_new_project_calls_gc_collect(monkeypatch: MonkeyPatch) -> None:
     collect_calls = [0]
     sentinel_project = Project()
     loaded_project: list[Project] = []
@@ -588,10 +588,49 @@ def test_btn_new_clicked_calls_gc_collect(monkeypatch: MonkeyPatch) -> None:
     fake_gui: Any = SimpleNamespace(
         load_project=lambda project: loaded_project.append(project)
     )
-    Gui.btn_new_clicked(fake_gui)
+    Gui._create_new_project(fake_gui)
 
     assert collect_calls[0] == 1
     assert loaded_project == [sentinel_project]
+
+
+def test_btn_new_clicked_prompts_before_discarding(monkeypatch: MonkeyPatch) -> None:
+    created = [0]
+    save_events: list[str] = []
+    answer_box = {"answer": QtWidgets.QMessageBox.StandardButton.Cancel}
+
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox, "warning", lambda *a, **k: answer_box["answer"]
+    )
+
+    def make_fake_gui() -> Any:
+        def fake_save(on_success: Any = None) -> bool:
+            save_events.append("save")
+            if on_success is not None:
+                on_success(None)
+            return True
+
+        return SimpleNamespace(
+            _create_new_project=lambda: created.__setitem__(0, created[0] + 1),
+            _save_project=fake_save,
+        )
+
+    # Cancel: neither save nor create the new project.
+    Gui.btn_new_clicked(make_fake_gui())
+    assert created[0] == 0
+    assert save_events == []
+
+    # Discard: create immediately, without saving.
+    answer_box["answer"] = QtWidgets.QMessageBox.StandardButton.Discard
+    Gui.btn_new_clicked(make_fake_gui())
+    assert created[0] == 1
+    assert save_events == []
+
+    # Save: save first, then create via the on_success chain.
+    answer_box["answer"] = QtWidgets.QMessageBox.StandardButton.Save
+    Gui.btn_new_clicked(make_fake_gui())
+    assert save_events == ["save"]
+    assert created[0] == 2
 
 
 def test_load_example_project_calls_gc_collect(monkeypatch: MonkeyPatch) -> None:
