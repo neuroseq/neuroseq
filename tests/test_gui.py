@@ -540,12 +540,18 @@ def test_simulation_progress_is_embedded_in_view_toolbar(qtbot: QtBot) -> None:
     gui.progress_dialog.setCancelButtonText("Cancel")
     gui.progress_dialog.setValue(42)
     gui.progress_dialog.show()
+    # Let the deferred show settle before toggling visibility again. Under the
+    # offscreen QPA plugin used in tests, calling reset()/hide() while this
+    # show is still pending leaves isVisible() stuck True (isHidden() is already
+    # True) and pumping events afterwards does not recover it.
+    qtbot.wait(10)
 
     assert gui.progress_dialog.isVisible()
     assert gui.progress_dialog.value() == 42
     assert gui.progress_dialog.cancel_button.isVisible()
 
     gui.progress_dialog.reset()
+    assert gui.progress_dialog.isHidden()
     assert not gui.progress_dialog.isVisible()
     gui.close()
 
