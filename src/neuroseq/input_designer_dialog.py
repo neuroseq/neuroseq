@@ -123,6 +123,19 @@ class InputDesignerDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setSpacing(6)
 
+        # Current stim-array info at the top, mirroring the Design static input
+        # window.
+        info_form = QtWidgets.QFormLayout()
+        self.lbl_stim_name = QtWidgets.QLabel("-", self)
+        self.lbl_stim_units = QtWidgets.QLabel("-", self)
+        self.lbl_stim_dt = QtWidgets.QLabel("-", self)
+        self.lbl_stim_neurons = QtWidgets.QLabel("-", self)
+        info_form.addRow("Stim array:", self.lbl_stim_name)
+        info_form.addRow("Units:", self.lbl_stim_units)
+        info_form.addRow("dt:", self.lbl_stim_dt)
+        info_form.addRow("Neurons:", self.lbl_stim_neurons)
+        layout.addLayout(info_form)
+
         self.btn_toggle_parameters = QtWidgets.QToolButton(self)
         self.btn_toggle_parameters.setText("Hide parameters")
         self.btn_toggle_parameters.setCheckable(True)
@@ -303,9 +316,13 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.btn_stop = buttons.addButton(
             "Stop", QtWidgets.QDialogButtonBox.ButtonRole.ActionRole
         )
+        self.btn_clear = buttons.addButton(
+            "Clear stim array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
+        )
         self.btn_stop.setEnabled(False)
         self.btn_start.clicked.connect(self.start)
         self.btn_stop.clicked.connect(self.stop)
+        self.btn_clear.clicked.connect(self.editor.clear_stim_array)
         buttons.rejected.connect(self.close)
         layout.addWidget(buttons)
         self.apply_theme(self._theme)
@@ -402,10 +419,20 @@ class InputDesignerDialog(QtWidgets.QDialog):
         modifier = self.editor.current_stim_modifier
         if modifier is not None:
             stim = modifier.stim_array
-            maximum = max(0, stim.values.shape[1] - 1)
+            n_neurons = stim.values.shape[1]
+            maximum = max(0, n_neurons - 1)
             self.spn_presynaptic.setMaximum(maximum)
             self.spn_postsynaptic.setMaximum(maximum)
             self.lbl_units.setText(stim.units)
+            self.lbl_stim_name.setText(stim.name)
+            self.lbl_stim_units.setText(stim.units or "-")
+            self.lbl_stim_dt.setText(f"{stim.dt * 1000.0:g} ms")
+            self.lbl_stim_neurons.setText(str(n_neurons))
+        else:
+            self.lbl_stim_name.setText("-")
+            self.lbl_stim_units.setText("-")
+            self.lbl_stim_dt.setText("-")
+            self.lbl_stim_neurons.setText("-")
 
     def start(self) -> None:
         self.refresh()

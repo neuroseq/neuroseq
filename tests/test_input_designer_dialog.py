@@ -49,6 +49,7 @@ class _FakeEditor:
         )
         self.current_stim_modifier = SimpleNamespace(stim_array=stim)
         self.calls: list[np.ndarray] = []
+        self.cleared = 0
         self.focused_ranges: list[tuple[float, float]] = []
         self.controller = SimpleNamespace(
             focus_time_range=lambda start, stop: self.focused_ranges.append(
@@ -58,6 +59,9 @@ class _FakeEditor:
 
     def focus_time_range(self, start: float, stop: float) -> None:
         self.controller.focus_time_range(start, stop)
+
+    def clear_stim_array(self) -> None:
+        self.cleared += 1
 
     def apply_pattern(
         self, neuron_slice: slice, time_slice: slice, values: np.ndarray
@@ -621,3 +625,21 @@ def test_input_designer_plots_open_in_separate_window(qtbot) -> None:
     qtbot.waitUntil(lambda: dialog.plot_window.isVisible())
     dialog.close()
     qtbot.waitUntil(lambda: not dialog.plot_window.isVisible())
+
+
+def test_input_designer_shows_stim_array_info_and_clear_button(qtbot) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+
+    # refresh() (run in __init__) fills the top info from the current array.
+    assert dialog.lbl_stim_name.text() == "Exc_stimulation"
+    assert dialog.lbl_stim_units.text() == "mwatt / um2"
+    assert dialog.lbl_stim_dt.text() == "1 ms"  # dt = 0.001 s
+    assert dialog.lbl_stim_neurons.text() == "2"
+
+    # The Clear stim array button delegates to the editor.
+    assert dialog.btn_clear.text() == "Clear stim array"
+    dialog.btn_clear.click()
+    assert editor.cleared == 1
