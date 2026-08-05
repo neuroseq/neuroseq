@@ -68,6 +68,8 @@ class RheobaseDialog(QtWidgets.QDialog):
         self._response_defaulting = False
         self._response_user_overridden = False
         self._logged_recovery_note = False
+        self._probe_checkpoint: str | None = None
+        self._probe_start_sample = 0
         self.setWindowTitle("Minimal stimulus for spiking (rheobase)")
         self.resize(640, 620)
 
@@ -483,6 +485,7 @@ class RheobaseDialog(QtWidgets.QDialog):
         self._chronaxie_ms = None
         self._fixed_spiking_duration_ms = None
         self._logged_recovery_note = False
+        self._setup_probe_baseline()
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         if clear_log:
@@ -549,6 +552,15 @@ class RheobaseDialog(QtWidgets.QDialog):
             raise RuntimeError("No project is available.")
         return self.project
 
+    def _setup_probe_baseline(self) -> None:
+        stim = self._require_stim()
+        project = self._require_project()
+        self._probe_checkpoint = f"Rheobase baseline {id(self)}"
+        self._probe_start_sample = int(
+            np.ceil(project.b2_model.get_sim_time_secs() / stim.dt)
+        )
+        project.b2_model.network.store(self._probe_checkpoint)
+
     def _probe(self, amplitude: float) -> None:
         stim = self._require_stim()
         neuron_id = self.spn_neuron.value()
@@ -561,13 +573,14 @@ class RheobaseDialog(QtWidgets.QDialog):
         samples = recovery_n + pulse_n + tail_n
         block = np.zeros((samples, stim.values.shape[1]), dtype=np.float32)
         block[recovery_n : recovery_n + pulse_n, neuron_id] = amplitude
-        block_start = self._append_block(block)
+        self._restore_probe_baseline()
+        block_start = self._place_probe_block(block)
         self._pending_amplitude = amplitude
         self._pulse_onset_seconds = (block_start + recovery_n) * stim.dt
         if not self._logged_recovery_note:
             self._append_log(
-                "Each probe includes a recovery lead so the membrane can rest "
-                "between amplitudes."
+                "Each probe restores the Brian2 state saved at the start of the "
+                "routine and includes a recovery lead before the pulse."
             )
             self._logged_recovery_note = True
         self._append_log(
@@ -577,11 +590,14 @@ class RheobaseDialog(QtWidgets.QDialog):
         )
         self._run_to_sample(block_start + samples)
 
-    def _append_block(self, block: np.ndarray) -> int:
+    def _restore_probe_baseline(self) -> None:
+        if self._probe_checkpoint is None:
+            return
+        self._require_project().b2_model.network.restore(self._probe_checkpoint)
+
+    def _place_probe_block(self, block: np.ndarray) -> int:
         stim = self._require_stim()
-        project = self._require_project()
-        current_sample = int(np.ceil(project.b2_model.get_sim_time_secs() / stim.dt))
-        start = max(stim.values.shape[0], current_sample)
+        start = self._probe_start_sample
         self.editor.apply_pattern(
             slice(0, stim.values.shape[1]), slice(start, start + block.shape[0]), block
         )

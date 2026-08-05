@@ -22,7 +22,16 @@ class _FakeProject:
             "mV",
             0.001,
         )
-        self.b2_model = SimpleNamespace(get_sim_time_secs=lambda: 0.0)
+        self.stored_checkpoints: list[str] = []
+        self.restored_checkpoints: list[str] = []
+        self.network = SimpleNamespace(
+            store=self.stored_checkpoints.append,
+            restore=self.restored_checkpoints.append,
+        )
+        self.b2_model = SimpleNamespace(
+            get_sim_time_secs=lambda: 0.0,
+            network=self.network,
+        )
 
     def get_data_names(self, data_type: type[TraceData]) -> list[str]:
         assert data_type is TraceData
@@ -46,6 +55,7 @@ class _FakeEditor:
         )
         self.current_stim_modifier = SimpleNamespace(stim_array=stim)
         self.calls: list[np.ndarray] = []
+        self.time_slices: list[slice] = []
         self.cleared = 0
         self.focused_ranges: list[tuple[float, float]] = []
         self.controller = SimpleNamespace(
@@ -63,7 +73,8 @@ class _FakeEditor:
     def apply_pattern(
         self, neuron_slice: slice, time_slice: slice, values: np.ndarray
     ) -> None:
-        del neuron_slice, time_slice
+        del neuron_slice
+        self.time_slices.append(time_slice)
         self.calls.append(values.copy())
         stim = self.current_stim_modifier.stim_array
         stim.values = np.vstack((stim.values, values))
@@ -114,6 +125,25 @@ def test_rheobase_brackets_then_bisects_to_threshold(qtbot, monkeypatch) -> None
     assert len(editor.calls) == len(tested)
     for block in editor.calls:
         assert np.count_nonzero(block[:, 1]) == 0
+
+
+def test_rheobase_restores_probe_baseline_each_iteration(qtbot, monkeypatch) -> None:
+    project, editor, dialog = _make_dialog(qtbot)
+    _use_fixed_duration_strategy(dialog)
+    monkeypatch.setattr(
+        dialog, "_measure_spikes", lambda trace: int(dialog._pending_amplitude >= 2.6)
+    )
+    dialog.spn_tolerance.setValue(0.1)
+
+    dialog.start()
+    _finish_search(dialog)
+
+    assert len(project.stored_checkpoints) == 1
+    assert project.stored_checkpoints[0].startswith("Rheobase baseline ")
+    assert project.restored_checkpoints == project.stored_checkpoints * len(
+        editor.calls
+    )
+    assert {time_slice.start for time_slice in editor.time_slices} == {0}
 
 
 def test_rheobase_sweeping_strategy_controls(qtbot) -> None:
