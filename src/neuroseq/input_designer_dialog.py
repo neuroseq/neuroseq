@@ -62,6 +62,27 @@ def _set_native_minimized_position(hwnd: int, x: int, y: int) -> bool:
     return bool(set_placement(hwnd, ctypes.byref(placement)))
 
 
+class _WheelToScrollFilter(QtCore.QObject):
+    """Redirect wheel events from value widgets to a scroll area.
+
+    Spin boxes and combo boxes change their value on a wheel scroll, which makes
+    scrolling the parameter panel accidentally edit fields. This filter forwards
+    the wheel to the scroll area so the panel scrolls and values stay put.
+    """
+
+    def __init__(self, scroll_area: QtWidgets.QScrollArea) -> None:
+        super().__init__(scroll_area)
+        self._scroll_area = scroll_area
+
+    def eventFilter(
+        self, obj: QtCore.QObject | None, event: QtCore.QEvent | None
+    ) -> bool:
+        if event is not None and event.type() == QtCore.QEvent.Type.Wheel:
+            QtWidgets.QApplication.sendEvent(self._scroll_area.viewport(), event)
+            return True
+        return super().eventFilter(obj, event)
+
+
 class InputDesignerDialog(QtWidgets.QDialog):
     """Closed-loop EPSP targeting with an STDP induction protocol."""
 
@@ -214,7 +235,29 @@ class InputDesignerDialog(QtWidgets.QDialog):
         form.addRow("Live view:", self.chk_follow_input)
         form.addRow("Visible history:", self.spn_history_blocks)
         parameters_layout.addLayout(form)
-        layout.addWidget(self.parameters_panel)
+        # Wrap the parameters in a scroll area so they scroll instead of being
+        # squished into unreadable rows on short screens.
+        self.parameters_scroll = QtWidgets.QScrollArea(self)
+        self.parameters_scroll.setWidget(self.parameters_panel)
+        self.parameters_scroll.setWidgetResizable(True)
+        self.parameters_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self.parameters_scroll.setHorizontalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        # A small minimum lets the panel yield space to the plots and scroll,
+        # rather than shrink its rows, when the dialog is short.
+        self.parameters_scroll.setMinimumHeight(80)
+        layout.addWidget(self.parameters_scroll)
+        # A wheel scroll over a value widget must scroll the panel, not silently
+        # change the field, so route those events to the scroll area.
+        self._wheel_filter = _WheelToScrollFilter(self.parameters_scroll)
+        value_widgets: list[QtWidgets.QWidget] = list(
+            self.parameters_panel.findChildren(QtWidgets.QAbstractSpinBox)
+        )
+        value_widgets += self.parameters_panel.findChildren(QtWidgets.QComboBox)
+        for value_widget in value_widgets:
+            value_widget.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
+            value_widget.installEventFilter(self._wheel_filter)
         self.cmb_pairing_strategy.currentIndexChanged.connect(
             self._update_pairing_strategy_controls
         )
@@ -272,11 +315,11 @@ class InputDesignerDialog(QtWidgets.QDialog):
         """Collapse the parameter panel so the plots can use its space."""
         if hidden:
             self._expanded_height = self.height()
-            panel_height = self.parameters_panel.height()
+            panel_height = self.parameters_scroll.height()
             self._compact_height = max(
                 1, self.height() - panel_height - self.layout().spacing()
             )
-        self.parameters_panel.setVisible(not hidden)
+        self.parameters_scroll.setVisible(not hidden)
         self.btn_toggle_parameters.setText(
             "Show parameters" if hidden else "Hide parameters"
         )

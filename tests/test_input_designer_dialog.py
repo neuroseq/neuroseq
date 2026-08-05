@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from matplotlib.colors import to_hex
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 
 from neuroseq import theme
@@ -560,3 +561,44 @@ def test_input_designer_pulse_amplitude_minimum_is_positive(qtbot) -> None:
     # The spin box must clamp an attempt to set zero up to its positive minimum.
     dialog.spn_amplitude.setValue(0.0)
     assert dialog.spn_amplitude.value() > 0.0
+
+
+def test_input_designer_parameters_are_scrollable(qtbot) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+
+    assert dialog.parameters_scroll.widget() is dialog.parameters_panel
+    assert dialog.parameters_scroll.widgetResizable()
+    # The panel can shrink below its natural height, forcing a scrollbar.
+    assert (
+        dialog.parameters_scroll.minimumHeight()
+        < dialog.parameters_panel.sizeHint().height()
+    )
+
+
+def test_input_designer_wheel_over_field_does_not_change_value(qtbot) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+
+    spin = dialog.spn_max_iterations
+    before = spin.value()
+    wheel = QtGui.QWheelEvent(
+        QtCore.QPointF(5.0, 5.0),
+        QtCore.QPointF(5.0, 5.0),
+        QtCore.QPoint(0, 0),
+        QtCore.QPoint(0, -120),
+        QtCore.Qt.MouseButton.NoButton,
+        QtCore.Qt.KeyboardModifier.NoModifier,
+        QtCore.Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+
+    # The filter intercepts the wheel (routes it to the scroll area) ...
+    assert dialog._wheel_filter.eventFilter(spin, wheel) is True
+    # ... so delivering a wheel scroll to the field leaves its value unchanged.
+    QtWidgets.QApplication.sendEvent(spin, wheel)
+    assert spin.value() == before
