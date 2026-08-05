@@ -45,10 +45,14 @@ def _wait_for_brian2_simulation(qtbot: QtBot, gui: Gui, timeout: int = 90000) ->
 class _MockAxes:
     def __init__(self) -> None:
         self.plot_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        self.lines: list[_MockLine] = []
         self.scatter_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
-    def plot(self, *args: Any, **kwargs: Any) -> None:
+    def plot(self, *args: Any, **kwargs: Any) -> tuple[_MockLine]:
         self.plot_calls.append((args, kwargs))
+        line = _MockLine()
+        self.lines.append(line)
+        return (line,)
 
     def scatter(self, *args: Any, **kwargs: Any) -> None:
         self.scatter_calls.append((args, kwargs))
@@ -79,6 +83,14 @@ class _MockFigure:
         if self.save_error is not None:
             raise self.save_error
         self.saved.append((path, kwargs))
+
+
+class _MockLine:
+    def __init__(self) -> None:
+        self.gid: str | None = None
+
+    def set_gid(self, gid: str) -> None:
+        self.gid = gid
 
 
 def _make_trace_export_gui(
@@ -388,6 +400,36 @@ def test_gui_cellpose_import_action_moved_to_file_menu(qtbot: QtBot) -> None:
     gui.close()
 
 
+def test_gui_plot_exports_are_in_export_graphics_menu(qtbot: QtBot) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+
+    submenus = {
+        action.text().replace("&", ""): action.menu()
+        for action in gui.menu_file.actions()
+        if action.menu() is not None
+    }
+    assert "Export graphics" in submenus
+    assert submenus["Export graphics"] is not None
+    graphics_actions = {
+        action.text().replace("&", "")
+        for action in submenus["Export graphics"].actions()
+    }
+    assert graphics_actions == {"Traces", "Spikes"}
+
+    assert "Export" in submenus
+    assert submenus["Export"] is not None
+    export_actions = {
+        action.text().replace("&", "") for action in submenus["Export"].actions()
+    }
+    assert "Traces" not in export_actions
+    assert "Spikes" not in export_actions
+
+    gui.close()
+
+
 def test_gui_simulate_and_playback(
     monkeypatch: MonkeyPatch, qtbot: QtBot, test_project: Project
 ) -> None:
@@ -477,6 +519,43 @@ def test_gui_simulate_and_cancel(
     gui.close()
 
 
+def test_simulation_progress_is_embedded_in_view_toolbar(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    gui.show()
+    qtbot.waitUntil(gui.isVisible)
+
+    assert gui.progress_dialog.parentWidget() is gui.toolbar_view
+    assert isinstance(gui.progress_dialog.progress_bar, QtWidgets.QProgressBar)
+    assert not isinstance(gui.progress_dialog, QtWidgets.QDialog)
+    assert gui.progress_dialog.progress_bar.width() == 100
+    assert gui.progress_dialog.cancel_button.width() == 58
+    layout = gui.progress_dialog.layout()
+    assert layout is not None
+    assert layout.itemAt(0).widget() is gui.progress_dialog.progress_bar
+    assert layout.itemAt(1).widget() is gui.progress_dialog.cancel_button
+    assert layout.itemAt(2).widget() is gui.progress_dialog.label
+
+    gui.progress_dialog.setLabelText("Simulating Brian2...")
+    gui.progress_dialog.setCancelButtonText("Cancel")
+    gui.progress_dialog.setValue(42)
+    gui.progress_dialog.show()
+    # Let the deferred show settle before toggling visibility again. Under the
+    # offscreen QPA plugin used in tests, calling reset()/hide() while this
+    # show is still pending leaves isVisible() stuck True (isHidden() is already
+    # True) and pumping events afterwards does not recover it.
+    qtbot.wait(10)
+
+    assert gui.progress_dialog.isVisible()
+    assert gui.progress_dialog.value() == 42
+    assert gui.progress_dialog.cancel_button.isVisible()
+
+    gui.progress_dialog.reset()
+    assert gui.progress_dialog.isHidden()
+    assert not gui.progress_dialog.isVisible()
+    gui.close()
+
+
 def test_gui_new(tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
     gui = Gui()
     gui.show()
@@ -501,7 +580,7 @@ def test_gui_new(tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot) -> None
     gui.close()
 
 
-def test_btn_new_clicked_calls_gc_collect(monkeypatch: MonkeyPatch) -> None:
+def test_create_new_project_calls_gc_collect(monkeypatch: MonkeyPatch) -> None:
     collect_calls = [0]
     sentinel_project = Project()
     loaded_project: list[Project] = []
@@ -515,10 +594,94 @@ def test_btn_new_clicked_calls_gc_collect(monkeypatch: MonkeyPatch) -> None:
     fake_gui: Any = SimpleNamespace(
         load_project=lambda project: loaded_project.append(project)
     )
-    Gui.btn_new_clicked(fake_gui)
+    Gui._create_new_project(fake_gui)
 
     assert collect_calls[0] == 1
     assert loaded_project == [sentinel_project]
+
+
+def test_prompt_save_before_action_branches(monkeypatch: MonkeyPatch) -> None:
+    proceeded = [0]
+    save_events: list[str] = []
+    answer_box = {"answer": QtWidgets.QMessageBox.StandardButton.Cancel}
+
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox, "warning", lambda *a, **k: answer_box["answer"]
+    )
+
+    def make_fake_gui() -> Any:
+        def fake_save(on_success: Any = None) -> bool:
+            save_events.append("save")
+            if on_success is not None:
+                on_success(None)
+            return True
+
+        return SimpleNamespace(_save_project=fake_save)
+
+    def proceed() -> None:
+        proceeded[0] += 1
+
+    # Cancel: neither save nor proceed.
+    Gui._prompt_save_before_action(make_fake_gui(), "T", "M", proceed)
+    assert proceeded[0] == 0
+    assert save_events == []
+
+    # Discard: proceed immediately, without saving.
+    answer_box["answer"] = QtWidgets.QMessageBox.StandardButton.Discard
+    Gui._prompt_save_before_action(make_fake_gui(), "T", "M", proceed)
+    assert proceeded[0] == 1
+    assert save_events == []
+
+    # Save: save first, then proceed via the on_success chain.
+    answer_box["answer"] = QtWidgets.QMessageBox.StandardButton.Save
+    Gui._prompt_save_before_action(make_fake_gui(), "T", "M", proceed)
+    assert save_events == ["save"]
+    assert proceeded[0] == 2
+
+
+def test_prompt_save_before_close_branches(monkeypatch: MonkeyPatch) -> None:
+    save_callbacks: list[Any] = []
+    closed = [0]
+    answer_box = {"answer": QtWidgets.QMessageBox.StandardButton.Cancel}
+
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox, "warning", lambda *a, **k: answer_box["answer"]
+    )
+
+    def fake_save(on_success: Any = None) -> bool:
+        save_callbacks.append(on_success)
+        return True
+
+    fake_gui: Any = SimpleNamespace(
+        _close_confirmed=False,
+        _save_project=fake_save,
+        close=lambda: closed.__setitem__(0, closed[0] + 1),
+    )
+
+    # Cancel: keep the app open.
+    assert not Gui._prompt_save_before_close(fake_gui)
+    assert not fake_gui._close_confirmed
+    assert save_callbacks == []
+    assert closed == [0]
+
+    # Discard: close immediately.
+    answer_box["answer"] = QtWidgets.QMessageBox.StandardButton.Discard
+    assert Gui._prompt_save_before_close(fake_gui)
+    assert fake_gui._close_confirmed
+    assert save_callbacks == []
+    assert closed == [0]
+
+    # Save: block the current close, then close from the save success callback.
+    fake_gui._close_confirmed = False
+    answer_box["answer"] = QtWidgets.QMessageBox.StandardButton.Save
+    assert not Gui._prompt_save_before_close(fake_gui)
+    assert not fake_gui._close_confirmed
+    assert len(save_callbacks) == 1
+    assert closed == [0]
+
+    save_callbacks[0](None)
+    assert fake_gui._close_confirmed
+    assert closed == [1]
 
 
 def test_load_example_project_calls_gc_collect(monkeypatch: MonkeyPatch) -> None:
@@ -605,6 +768,18 @@ def test_gui_toggle_grid(qtbot: QtBot) -> None:
     assert all(not widget.show_grid for widget in widgets)
     gui.toggle_grid(True)
     assert all(widget.show_grid for widget in widgets)
+    gui.close()
+
+
+def test_gui_toggle_minimum_stimulus_size(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    stim_widget = gui.stim_editor.stim_widget
+    assert stim_widget.keep_short_stimuli_visible
+    gui.toggle_minimum_stimulus_size(False)
+    assert not stim_widget.keep_short_stimuli_visible
+    gui.toggle_minimum_stimulus_size(True)
+    assert stim_widget.keep_short_stimuli_visible
     gui.close()
 
 
@@ -1334,6 +1509,73 @@ def test_gui_export_traces_returns_when_file_dialog_cancelled(
     assert qmessagebox_calls == []
 
 
+def test_gui_vector_export_uses_svg_default(
+    monkeypatch: MonkeyPatch,
+    qmessagebox_calls: list,
+) -> None:
+    trace_data = TraceData(
+        name="voltage",
+        traces=np.zeros((1, 10), dtype=np.float32),
+        indices=np.array([0], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    fake_gui = _make_trace_export_gui("Simulation :: P / v", trace_data)
+    dialog_calls: list[tuple[Any, ...]] = []
+
+    def _cancel_dialog(*args: Any) -> tuple[str, str]:
+        dialog_calls.append(args)
+        return "", ""
+
+    monkeypatch.setattr(neuroseq.gui, "getsavefilename", _cancel_dialog)
+
+    Gui.btn_export_traces_vector_clicked(fake_gui)
+
+    assert dialog_calls[0][1] == "Export traces as vector graphic"
+    assert dialog_calls[0][2].endswith("_traces.svg")
+    assert dialog_calls[0][3] == "SVG vector (*.svg);;PDF document (*.pdf)"
+    assert qmessagebox_calls == []
+
+
+def test_gui_vector_export_saves_named_traces_on_transparent_background(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    qmessagebox_calls: list,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    trace_data = TraceData(
+        name="voltage",
+        traces=np.zeros((2, 10), dtype=np.float32),
+        indices=np.array([3, 7], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    output_path = tmp_path / "traces.svg"
+    fig = _MockFigure()
+    ax = _MockAxes()
+    fake_gui = _make_trace_export_gui("Simulation :: P / v", trace_data)
+
+    monkeypatch.setattr(plt, "subplots", lambda *args, **kwargs: (fig, ax))
+    monkeypatch.setattr(plt, "close", lambda figure: None)
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "getsavefilename",
+        lambda *args: (str(output_path), "SVG vector (*.svg)"),
+    )
+
+    Gui.btn_export_traces_vector_clicked(fake_gui)
+
+    assert [line.gid for line in ax.lines] == ["trace_3", "trace_7"]
+    assert fig.saved == [
+        (
+            str(output_path),
+            {"dpi": 300, "bbox_inches": "tight", "transparent": True},
+        ),
+    ]
+    assert any(call["name"] == "information" for call in qmessagebox_calls)
+
+
 def test_gui_export_traces_saves_figure(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
@@ -1365,7 +1607,10 @@ def test_gui_export_traces_saves_figure(
     Gui.btn_export_traces_clicked(fake_gui)
 
     assert fig.saved == [
-        (str(output_path), {"dpi": 300, "bbox_inches": "tight"}),
+        (
+            str(output_path),
+            {"dpi": 300, "bbox_inches": "tight", "transparent": False},
+        ),
     ]
     assert fig.tight_layout_called is True
     assert len(ax.plot_calls) == 3
@@ -2463,3 +2708,48 @@ def test_warn_if_cellpose_model_mismatch(qmessagebox_calls: list) -> None:
     assert "mismatch" in qmessagebox_calls[0]["title"].lower()
     assert "10" in qmessagebox_calls[0]["text"]
     assert "25" in qmessagebox_calls[0]["text"]
+
+
+def test_brian2_busy_notifies_input_designer(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    gui.show()
+    qtbot.waitUntil(gui.isVisible)
+    gui._io_worker = object()  # type: ignore[assignment]  # in-flight IO task
+    dropped: list[str] = []
+    monkeypatch.setattr(
+        gui.stim_editor,
+        "input_designer_simulation_failed",
+        lambda message: dropped.append(message),
+    )
+
+    gui._do_brian2_simulation_threaded(0.1)
+
+    # The dropped request is reported to the designer instead of stalling it.
+    assert dropped
+    gui._io_worker = None
+    gui.close()
+
+
+def test_toolbar_progress_does_not_auto_hide_at_maximum(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    gui.show()
+    qtbot.waitUntil(gui.isVisible)
+    pd = gui.progress_dialog
+    pd.setRange(0, 100)
+    pd.setValue(50)
+    pd.show()
+    qtbot.wait(10)  # let the deferred show settle (offscreen QPA)
+
+    # Reaching the maximum must not hide the bar mid-operation.
+    pd.setValue(100)
+    assert pd.isVisible()
+    assert pd.value() == 100
+
+    # Teardown still hides it explicitly.
+    pd.reset()
+    assert pd.isHidden()
+    gui.close()

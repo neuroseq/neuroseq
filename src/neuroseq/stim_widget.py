@@ -24,6 +24,11 @@ class StimWidget(TimeseriesWidget):
     colormap ranging from purple (negative) to green (positive).
     """
 
+    # Grid lines use z=199. Keep every stimulus representation above them.
+    STIMULUS_Z = 200.0
+    MINIMUM_SIZE_Z = 210.0
+    HOVER_Z = 300.0
+
     def __init__(
         self,
         controller: pygfx.Controller,
@@ -39,6 +44,10 @@ class StimWidget(TimeseriesWidget):
         self.vmax = 1.0
         self.stim_type = StimType.Excitation
         self._background_stim_arrays: list[tuple[np.ndarray, str, float, StimType]] = []
+        self.keep_short_stimuli_visible = True
+        self.minimum_stimulus_pixels = 4.0
+        self.minimum_size_graphic: fpl.ScatterGraphic | None = None
+        self._background_minimum_size_graphics: list[fpl.ScatterGraphic] = []
 
     def _configure_time_scaled_image(
         self,
@@ -47,7 +56,7 @@ class StimWidget(TimeseriesWidget):
         dt_ms: float | None = None,
         time_index: int = 0,
         y_offset: float = 0.0,
-        z_offset: float = 0.0,
+        z_offset: float = STIMULUS_Z,
     ) -> None:
         if dt_ms is None:
             dt_ms = self.dt_ms
@@ -60,7 +69,7 @@ class StimWidget(TimeseriesWidget):
 
     def _hover_slice_position(self) -> tuple[int, float, float]:
         if self.mouse_pos is None:
-            return 0, 0.0, 100.0
+            return 0, 0.0, self.HOVER_Z
         time_index = 0
         if self.n_timestamps > 0 and self.dt_ms > 0.0:
             time_index = int(
@@ -70,7 +79,7 @@ class StimWidget(TimeseriesWidget):
                     self.n_timestamps - 1,
                 )
             )
-        return time_index, float(np.rint(self.mouse_pos[1])), 100.0
+        return time_index, float(np.rint(self.mouse_pos[1])), self.HOVER_Z
 
     def _update_hover_slice_position(self) -> None:
         if self.hover_slice_graphic is None:
@@ -120,6 +129,9 @@ class StimWidget(TimeseriesWidget):
         # is drawn as opaque white, hiding the reduced-opacity background stims)
         self._apply_cmap_alpha(self.graphic, cmap)
         self._configure_time_scaled_image(self.graphic)
+        self.minimum_size_graphic = self._add_minimum_size_graphic(
+            stim_array.values, self.dt_ms, self.stim_type
+        )
         self.n_neurons = stim_array.values.shape[1]
         self.n_timestamps = stim_array.values.shape[0]
         self.post_set_data()
@@ -131,7 +143,58 @@ class StimWidget(TimeseriesWidget):
 
     def clear_data(self) -> None:
         self._background_stim_arrays = []
+        self.minimum_size_graphic = None
+        self._background_minimum_size_graphics = []
         super().clear_data()
+
+    def _add_minimum_size_graphic(
+        self,
+        values: np.ndarray,
+        dt_ms: float,
+        stim_type: StimType,
+        *,
+        alpha: float = 1.0,
+    ) -> fpl.ScatterGraphic | None:
+        """Overlay nonzero samples with square, screen-sized markers."""
+        time_indices, neuron_indices = np.nonzero(values)
+        if time_indices.size == 0:
+            return None
+        sample_values = values[time_indices, neuron_indices]
+        vmax = float(np.max(np.abs(values))) or 1.0
+        if stim_type == StimType.External:
+            normalized_values = (sample_values + vmax) / (2.0 * vmax)
+        else:
+            normalized_values = np.abs(sample_values) / vmax
+        colors = get_cmap(stim_type, alpha=alpha)(normalized_values).astype(np.float32)
+        positions = np.column_stack(
+            (
+                (time_indices + 0.5) * dt_ms,
+                neuron_indices,
+                np.full(time_indices.shape, self.MINIMUM_SIZE_Z),
+            )
+        ).astype(np.float32)
+        graphic = self.subplot.add_scatter(
+            positions,
+            colors=colors,
+            sizes=self.minimum_stimulus_pixels,
+            size_space="screen",
+            uniform_size=True,
+            markers="s",
+            uniform_marker=True,
+            edge_width=0.0,
+        )
+        graphic.visible = self.keep_short_stimuli_visible
+        return graphic
+
+    def set_keep_short_stimuli_visible(self, visible: bool) -> None:
+        """Toggle the four-pixel minimum display size without changing stim data."""
+        self.keep_short_stimuli_visible = visible
+        if self.minimum_size_graphic is not None:
+            self.minimum_size_graphic.visible = visible
+        for graphic in self.background_graphics:
+            graphic.visible = self.show_background_graphics
+        for graphic in self._background_minimum_size_graphics:
+            graphic.visible = visible and self.show_background_graphics
 
     def set_background_data(self, stim_array: StimArray | None = None) -> None:
         if stim_array is None:
@@ -151,6 +214,14 @@ class StimWidget(TimeseriesWidget):
         self._apply_cmap_alpha(image_graphic, cmap)
         image_graphic.visible = self.show_background_graphics
         self.background_graphics.append(image_graphic)
+        minimum_graphic = self._add_minimum_size_graphic(
+            stim_array.values,
+            float(stim_array.dt) * 1000.0,
+            stim_array.stim_type,
+            alpha=0.25,
+        )
+        if minimum_graphic is not None:
+            self._background_minimum_size_graphics.append(minimum_graphic)
         units_str = "" if stim_array.units == "1" else str(stim_array.units)
         self._background_stim_arrays.append(
             (
@@ -165,6 +236,10 @@ class StimWidget(TimeseriesWidget):
         self.show_background_graphics = visible
         for graphic in self.background_graphics:
             graphic.visible = self.show_background_graphics
+        for graphic in self._background_minimum_size_graphics:
+            graphic.visible = (
+                self.show_background_graphics and self.keep_short_stimuli_visible
+            )
 
     def autoscale_colormap(self) -> None:
         """Autoscale the colormap based on the current data."""
@@ -191,6 +266,18 @@ class StimWidget(TimeseriesWidget):
             # directly update the relevant data in the graphic's texture
             self.graphic.data[neuron_slice, time_slice] = texture_values
             self.autoscale_colormap()
+            # Rebuilding the screen-size overlay scans the whole array and
+            # recreates a scatter graphic. Skip that while the overlay is hidden
+            # so interactive drawing does not pay the cost for an invisible
+            # graphic; it is refreshed on the next edit once shown again.
+            if self.keep_short_stimuli_visible:
+                if self.minimum_size_graphic is not None:
+                    self.subplot.remove_graphic(self.minimum_size_graphic)
+                    self.minimum_size_graphic = None
+                if self.data_values is not None:
+                    self.minimum_size_graphic = self._add_minimum_size_graphic(
+                        self.data_values, self.dt_ms, self.stim_type
+                    )
 
     def set_hover_slice(self, data: np.ndarray | None) -> None:
         """Set the slice of data (if any) to be displayed at the current mouse position."""
@@ -201,14 +288,19 @@ class StimWidget(TimeseriesWidget):
             self.subplot.canvas.unsetCursor()
             return
         self.subplot.canvas.setCursor(QtCore.Qt.CursorShape.CrossCursor)
-        self.hover_slice_graphic = self.subplot.add_image(data.T, offset=(0, 0, 100))
+        self.hover_slice_graphic = self.subplot.add_image(
+            data.T, offset=(0, 0, self.HOVER_Z)
+        )
         self._hover_pos_cache = None
+        self._update_hover_slice_position()
+
+    def _position_hover_slice(self) -> None:
+        # Snap the preview to the hovered time/neuron cell instead of following
+        # the raw pointer, so it does not jitter or drift within a cell.
         self._update_hover_slice_position()
 
     def pointer_move(self, ev: pygfx.PointerEvent) -> None:
         super().pointer_move(ev)
-        if self.hover_slice_graphic is not None and self.mouse_pos is not None:
-            self._update_hover_slice_position()
         if (
             self.mouse_pos is None
             or self.data_values is None

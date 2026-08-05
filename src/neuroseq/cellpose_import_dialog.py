@@ -74,14 +74,16 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self._setup_ui()
         self._load_existing_data_if_available()
 
-    def _maximise_screen(self, screen: QtGui.QScreen | None = None) -> None:
+    def _fit_preview_to_screen(self, screen: QtGui.QScreen | None = None) -> None:
         available = self._get_available_geometry(screen)
         if available is None:
             return
-        adjusted = available.adjusted(70, 70, -70, -70)
-        # Use the maximum available window size with a 100px margin
-        self.setGeometry(adjusted)
-        self.setWindowState(self.windowState() | QtCore.Qt.WindowState.WindowMaximized)
+        self.setWindowState(self.windowState() & ~QtCore.Qt.WindowState.WindowMaximized)
+        width = min(1100, int(available.width() * 0.75))
+        height = min(760, int(available.height() * 0.75))
+        geometry = QtCore.QRect(0, 0, width, height)
+        geometry.moveCenter(available.center())
+        self.setGeometry(geometry)
 
     def _get_available_geometry(
         self, screen: QtGui.QScreen | None = None
@@ -419,8 +421,17 @@ class CellposeImportDialog(QtWidgets.QDialog):
                     self.main_content_container.width(),
                     self.main_content_container.height(),
                 )
+            else:
+                self._resize_for_file_selection()
         if not loaded and hasattr(self, "import_button"):
             self.import_button.setEnabled(False)
+
+    def _resize_for_file_selection(self) -> None:
+        """Restore the compact, pre-import dialog size."""
+        self.setWindowState(self.windowState() & ~QtCore.Qt.WindowState.WindowMaximized)
+        if self.layout() is not None:
+            self.layout().activate()
+        self.adjustSize()
 
     def _make_aoi_spinbox(self) -> QtWidgets.QDoubleSpinBox:
         spin = QtWidgets.QDoubleSpinBox()
@@ -484,6 +495,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 self.main_content_container.width(),
                 self.main_content_container.height(),
             )
+        else:
+            self._resize_for_file_selection()
 
     def moveEvent(self, event) -> None:
         super().moveEvent(event)
@@ -522,7 +535,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.main_content_layout.setDirection(direction)
         self._vertical_layout = desired_vertical
         self._is_adjusting_position = True
-        self._maximise_screen(screen)
+        self._fit_preview_to_screen(screen)
         self._is_adjusting_position = False
         self._sync_overlay_size()
 

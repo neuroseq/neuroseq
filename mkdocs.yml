@@ -31,6 +31,7 @@ nav:
   - User Guide:
       - GUI Overview: user_guide/gui_overview.md
       - Simulations: user_guide/simulations.md
+      - Design dynamic input: user_guide/input_designer.md
       - Run External Simulators: user_guide/run_external_simulators.md
       - Experiments: user_guide/experiments.md
       - Analysis tools and plugins: user_guide/analysis_and_plugins.md

@@ -88,6 +88,8 @@ class TraceWidget(TimeseriesWidget):
     traces should be a 2d array, where the first index is the neuron index and the second index is the time index.
     """
 
+    vector_export_requested = QtCore.Signal()
+
     def __init__(
         self,
         controller: pygfx.Controller,
@@ -105,9 +107,14 @@ class TraceWidget(TimeseriesWidget):
         self.trace_norm_percent = 100
         self.offset_by_median = True
         self.clip = True
+        self._trace_norm_dialog: TraceNormDialog | None = None
 
-    def trace_norm_dialog(self):
-        TraceNormDialog(self).exec()
+    def trace_norm_dialog(self) -> None:
+        if self._trace_norm_dialog is None:
+            self._trace_norm_dialog = TraceNormDialog(self)
+        self._trace_norm_dialog.show()
+        self._trace_norm_dialog.raise_()
+        self._trace_norm_dialog.activateWindow()
 
     def get_normalized_trace_data(self, out: np.ndarray | None = None) -> np.ndarray:
         if self.data is None or not isinstance(self.data, TraceData):
@@ -145,6 +152,14 @@ class TraceWidget(TimeseriesWidget):
             normalized_traces = self.get_normalized_trace_data()
             for line_index, line_graphic in enumerate(self.graphic):
                 line_graphic.data[:, 1] = normalized_traces[line_index, :]
+
+    def _rebuild_custom_analysis_menu(self) -> None:
+        super()._rebuild_custom_analysis_menu()
+        self.context_menu.insertSeparator(self.context_menu.actions()[0])
+        export_action = QtWidgets.QAction("Export as vector graphic…", self)
+        export_action.setEnabled(isinstance(self.data, TraceData))
+        export_action.triggered.connect(self.vector_export_requested.emit)
+        self.context_menu.insertAction(self.context_menu.actions()[0], export_action)
 
     def set_data(
         self,

@@ -44,7 +44,7 @@ class TimeseriesWidget(FPLWidget):
         int, int, int, int, int
     )  # initial neuron index, current neuron index, initial time index, current time index, mouse button (0 for no button, 1 for left, 2 for right, 3 for middle)
     custom_analysis_requested = QtCore.Signal(
-        object, object, bool, slice, slice
+        object, object, bool, object, object
     )  # data, analysis type, new window, neuron slice, time slice
     escape_pressed = QtCore.Signal()
 
@@ -87,7 +87,7 @@ class TimeseriesWidget(FPLWidget):
         self.timeline = Timeline()
         self.grid_lines: GridLines | None = None
         self.show_grid = True
-        self._open_analysis_in_new_window = False
+        self._open_analysis_in_new_window = True
 
         self.context_menu = QtWidgets.QMenu("Custom analysis", self)
 
@@ -460,7 +460,7 @@ class TimeseriesWidget(FPLWidget):
     def _rebuild_custom_analysis_menu(self) -> None:
         self.context_menu.clear()
         add_action(
-            "Open as a new window",
+            "Open analysis in a new window",
             self._set_open_analysis_in_new_window,
             self.context_menu,
             None,
@@ -564,6 +564,20 @@ class TimeseriesWidget(FPLWidget):
         else:
             return
 
+    def _position_hover_slice(self) -> None:
+        """Place the hover-slice preview at the current pointer position.
+
+        Subclasses may override this to snap the preview to discrete cells;
+        the base implementation follows the raw pointer position.
+        """
+        if self.hover_slice_graphic is None or self.mouse_pos is None:
+            return
+        self.hover_slice_graphic.offset = (
+            self.mouse_pos[0],
+            self.mouse_pos[1],
+            100,
+        )
+
     def pointer_move(self, ev: pygfx.PointerEvent) -> None:
         self.mouse_pos = self.subplot.map_screen_to_world(ev)
         if self.mouse_pos is None:
@@ -590,11 +604,7 @@ class TimeseriesWidget(FPLWidget):
         self.text.set_pos(self.mouse_pos, hover_value_text)
         if self.hover_slice_graphic is not None:
             self.hover_slice_graphic.visible = True
-            self.hover_slice_graphic.offset = (
-                self.mouse_pos[0],
-                self.mouse_pos[1],
-                100,
-            )
+            self._position_hover_slice()
         if self.mouse_press_pos is None:
             return
         if self.mode == InteractMode.SELECT and self.selection_in_progress:

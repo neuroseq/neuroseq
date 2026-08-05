@@ -73,6 +73,102 @@ class SimulationCancelledError(Exception):
     """Raised from a progress callback when the user clicks Cancel."""
 
 
+class ToolbarProgressWidget(QtWidgets.QWidget):
+    """Compact progress and cancellation controls embedded in a toolbar."""
+
+    canceled = QtCore.Signal()
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._toolbar_action: QtWidgets.QAction | None = None
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(6, 0, 2, 0)
+        layout.setSpacing(4)
+
+        self.label = QtWidgets.QLabel("Simulating...", self)
+        self.progress_bar = QtWidgets.QProgressBar(self)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFixedWidth(100)
+        self.cancel_button = QtWidgets.QPushButton("Cancel", self)
+        self.cancel_button.setFixedWidth(58)
+        self.cancel_button.clicked.connect(self._cancel)
+
+        layout.addWidget(self.progress_bar)
+        layout.addWidget(self.cancel_button)
+        layout.addWidget(self.label)
+        self.cancel_button.hide()
+        self.hide()
+
+    def set_toolbar_action(self, action: QtWidgets.QAction) -> None:
+        self._toolbar_action = action
+        action.setVisible(False)
+
+    def show(self) -> None:
+        if self._toolbar_action is not None:
+            self._toolbar_action.setVisible(True)
+        super().show()
+
+    def hide(self) -> None:
+        if self._toolbar_action is not None:
+            self._toolbar_action.setVisible(False)
+        super().hide()
+
+    @QtCore.Slot()
+    def _cancel(self) -> None:
+        self.hide()
+        self.canceled.emit()
+
+    @QtCore.Slot(str)
+    def setLabelText(self, text: str) -> None:
+        self.label.setText(text)
+
+    def labelText(self) -> str:
+        """Return the progress label, matching ``QProgressDialog``'s API."""
+        return self.label.text()
+
+    def setRange(self, minimum: int, maximum: int) -> None:
+        self.progress_bar.setRange(minimum, maximum)
+
+    def setValue(self, value: int) -> None:
+        # Do not auto-hide when the bar reaches its maximum: progress callbacks
+        # can legitimately report 100% before an operation is fully done, and
+        # every operation hides the bar explicitly via reset() at teardown.
+        self.progress_bar.setValue(value)
+
+    def value(self) -> int:
+        return self.progress_bar.value()
+
+    def setCancelButtonText(self, text: str) -> None:
+        self.cancel_button.setText(text)
+        self.cancel_button.setEnabled(True)
+        self.cancel_button.show()
+
+    def setCancelButton(self, button: QtWidgets.QPushButton | None) -> None:
+        if button is None:
+            self.cancel_button.hide()
+
+    def setAutoClose(self, _enabled: bool) -> None:
+        # No-op: the bar is never auto-hidden on reaching its maximum; teardown
+        # paths hide it explicitly via reset(). Kept for QProgressDialog API
+        # compatibility.
+        pass
+
+    def setAutoReset(self, _enabled: bool) -> None:
+        # Resetting is explicitly managed by the operation teardown paths.
+        pass
+
+    def setMinimumDuration(self, _milliseconds: int) -> None:
+        # Toolbar progress is shown immediately and never spawns a dialog.
+        pass
+
+    def reset(self) -> None:
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.cancel_button.hide()
+        self.hide()
+
+
 class BackgroundIOWorker(QtCore.QObject):
     """Runs a blocking IO task on a worker QThread.
 
@@ -283,6 +379,12 @@ class Gui(QtWidgets.QMainWindow):
             toolbar=self.toolbar_stim_editor,
             parent=self,
         )
+        self.stim_editor.simulation_requested.connect(
+            self._do_brian2_simulation_threaded
+        )
+        self.stim_editor.time_range_focus_requested.connect(
+            self.trace_controller.focus_time_range
+        )
         split_vertical.addWidget(self.stim_editor)
         self.trace_widget.set_default_scroll_bars(
             self.stim_editor.x_scrollbar,
@@ -340,6 +442,9 @@ class Gui(QtWidgets.QMainWindow):
             )
         )
         self.trace_widget.custom_analysis_requested.connect(self._custom_analysis)
+        self.trace_widget.vector_export_requested.connect(
+            self.btn_export_traces_vector_clicked
+        )
         self.data_widget.trace_widget.custom_analysis_requested.connect(
             self._custom_analysis
         )
@@ -364,8 +469,10 @@ class Gui(QtWidgets.QMainWindow):
         self._io_thread: QtCore.QThread | None = None
         self._io_worker: BackgroundIOWorker | None = None
         self._io_on_success: Callable[[object], None] | None = None
+        self._io_on_failure: Callable[[str], None] | None = None
         self._io_failure_title = "File operation failed"
         self._io_failure_prefix = "The file operation could not complete:"
+        self._close_confirmed = False
         if filename is not None:
             self.load_project(filename)
         else:
@@ -450,7 +557,67 @@ class Gui(QtWidgets.QMainWindow):
         self.progress_dialog.setLabelText("Loading...")
         self.progress_dialog.setValue(completed_percent)
 
+    def _prompt_save_before_action(
+        self, title: str, message: str, proceed: Callable[[], None]
+    ) -> None:
+        """Warn that an action may discard unsaved changes, offering to save first.
+
+        Shows a Save / Discard / Cancel prompt. Cancel aborts. Discard runs
+        ``proceed`` immediately. Save persists the current project first and
+        runs ``proceed`` only after the save completes; if the user backs out
+        of the save dialog, ``proceed`` never runs and the current project is
+        left untouched.
+        """
+        answer = QtWidgets.QMessageBox.warning(
+            self,
+            title,
+            message,
+            QtWidgets.QMessageBox.StandardButton.Save
+            | QtWidgets.QMessageBox.StandardButton.Discard
+            | QtWidgets.QMessageBox.StandardButton.Cancel,
+            QtWidgets.QMessageBox.StandardButton.Save,
+        )
+        if answer == QtWidgets.QMessageBox.StandardButton.Cancel:
+            return
+        if answer == QtWidgets.QMessageBox.StandardButton.Save:
+            self._save_project(on_success=lambda _result: proceed())
+            return
+        proceed()
+
     def btn_new_clicked(self) -> None:
+        self._prompt_save_before_action(
+            "Start a new project",
+            "Starting a new project will discard any unsaved changes to the "
+            "current project.\n\nSave the current project first?",
+            self._create_new_project,
+        )
+
+    def _prompt_save_before_close(self) -> bool:
+        """Return True when the current close event may continue immediately."""
+        answer = QtWidgets.QMessageBox.warning(
+            self,
+            "Close NeuroSeq",
+            "Closing NeuroSeq will discard any unsaved changes to the "
+            "current project.\n\nSave the current project first?",
+            QtWidgets.QMessageBox.StandardButton.Save
+            | QtWidgets.QMessageBox.StandardButton.Discard
+            | QtWidgets.QMessageBox.StandardButton.Cancel,
+            QtWidgets.QMessageBox.StandardButton.Save,
+        )
+        if answer == QtWidgets.QMessageBox.StandardButton.Cancel:
+            return False
+        if answer == QtWidgets.QMessageBox.StandardButton.Save:
+
+            def _close_after_save(_result: object) -> None:
+                self._close_confirmed = True
+                self.close()
+
+            self._save_project(on_success=_close_after_save)
+            return False
+        self._close_confirmed = True
+        return True
+
+    def _create_new_project(self) -> None:
         gc.collect()
         self.load_project(default_project())
 
@@ -459,6 +626,14 @@ class Gui(QtWidgets.QMainWindow):
         self.load_project(generator())
 
     def btn_open_clicked(self) -> None:
+        self._prompt_save_before_action(
+            "Open a project",
+            "Opening a project will discard any unsaved changes to the current "
+            "project.\n\nSave the current project first?",
+            self._open_project_dialog,
+        )
+
+    def _open_project_dialog(self) -> None:
         filename, _ = getopenfilename(
             self,
             "load project",
@@ -469,6 +644,14 @@ class Gui(QtWidgets.QMainWindow):
             self.load_project(filename)
 
     def btn_import_clicked(self) -> None:
+        self._prompt_save_before_action(
+            "Import from a project",
+            "Importing may overwrite parts of the current project.\n\nSave the "
+            "current project first?",
+            self._import_project_dialog,
+        )
+
+    def _import_project_dialog(self) -> None:
         filename, _ = getopenfilename(
             self,
             "import from project",
@@ -513,16 +696,27 @@ class Gui(QtWidgets.QMainWindow):
             self._update_combo_boxes()
 
     def btn_save_clicked(self) -> None:
+        self._save_project()
+
+    def _save_project(self, on_success: Callable[[object], None] | None = None) -> bool:
+        """Run the interactive save flow.
+
+        Returns True if a save task was dispatched, False if the user cancelled
+        at the options or file dialog (or a file operation is already running).
+        ``on_success`` runs after the save completes successfully; it lets a
+        caller (e.g. New) chain an action once the current project is safely
+        persisted.
+        """
         if self._io_worker is not None:
             QtWidgets.QMessageBox.information(
                 self,
                 "Busy",
                 "A file operation is already in progress.",
             )
-            return
+            return False
         options_dialog = SaveLoadOptionsDialog(action="Save")
         if not options_dialog.exec():
-            return
+            return False
         filename, _ = getsavefilename(
             self,
             "Save project",
@@ -530,7 +724,7 @@ class Gui(QtWidgets.QMainWindow):
             "neuroseq project (*.nseq)",
         )
         if filename == "":
-            return
+            return False
         filename = pathlib.Path(filename)
         if filename.suffix != ".nseq":
             filename = filename.with_suffix(".nseq")
@@ -549,8 +743,11 @@ class Gui(QtWidgets.QMainWindow):
         def _on_saved(result: object) -> None:
             self.logger.info(f"Project saved to '{result}'.")
             self._update_window_title()
+            if on_success is not None:
+                on_success(result)
 
         self._dispatch_io_task(_save_task, f"Saving to {filename.name}…", _on_saved)
+        return True
 
     def btn_export_simulation_results_clicked(self) -> None:
         filename, _ = getsavefilename(
@@ -840,6 +1037,10 @@ class Gui(QtWidgets.QMainWindow):
             self.project.cellpose_data = self.last_cellpose_import
 
         self.stim_editor.set_project(self.project)
+        # A replaced project must not inherit the previous run's Design dynamic
+        # input state (plots, log, EPSP history); drop the cached dialog so it
+        # is rebuilt fresh on next open.
+        self.stim_editor.discard_input_designer()
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
         self._update_combo_boxes()
@@ -1246,6 +1447,7 @@ class Gui(QtWidgets.QMainWindow):
         failure_title: str = "File operation failed",
         failure_prefix: str = "The file operation could not complete:",
         cancel_callback: Callable[[], None] | None = None,
+        on_failure: Callable[[str], None] | None = None,
     ) -> bool:
         """Run a blocking IO task on a worker thread.
 
@@ -1305,6 +1507,7 @@ class Gui(QtWidgets.QMainWindow):
         self._io_on_success = on_success
         self._io_failure_title = failure_title
         self._io_failure_prefix = failure_prefix
+        self._io_on_failure = on_failure
 
         thread = QtCore.QThread(self)
         worker = BackgroundIOWorker(task)
@@ -1339,6 +1542,7 @@ class Gui(QtWidgets.QMainWindow):
         self._io_thread = None
         self._io_worker = None
         self._io_on_success = None
+        self._io_on_failure = None
         self._io_failure_title = "File operation failed"
         self._io_failure_prefix = "The file operation could not complete:"
         self._set_io_actions_enabled(True)
@@ -1369,6 +1573,7 @@ class Gui(QtWidgets.QMainWindow):
     def _on_io_failed(self, message: str) -> None:
         failure_title = self._io_failure_title
         failure_prefix = self._io_failure_prefix
+        on_failure = getattr(self, "_io_on_failure", None)
         # _teardown_io_task resets the dialog and restores its defaults.
         self._teardown_io_task()
         self.logger.error(f"IO task failed: {message}")
@@ -1377,6 +1582,8 @@ class Gui(QtWidgets.QMainWindow):
             failure_title,
             f"{failure_prefix} {message}",
         )
+        if on_failure is not None:
+            on_failure(message)
 
     def _do_brian2_simulation_threaded(self, simulation_time: float) -> None:
         if self._io_worker is not None:
@@ -1384,6 +1591,13 @@ class Gui(QtWidgets.QMainWindow):
                 self,
                 "Busy",
                 "Another operation is already in progress.",
+            )
+            # If Design dynamic input requested this run, tell it the request
+            # was dropped so its closed loop stops instead of stalling forever
+            # waiting for a completion callback that will never arrive. This is
+            # a no-op when no routine is awaiting a simulation.
+            self.stim_editor.input_designer_simulation_failed(
+                "another operation is already in progress"
             )
             return
 
@@ -1427,7 +1641,16 @@ class Gui(QtWidgets.QMainWindow):
 
         def _on_brian2_finished(_result: object) -> None:
             self.logger.info("Brian2 simulation finished.")
+            visible_time_range = self.controller.current_time_range()
             self._update_data(keep_undo_history=True)
+            if visible_time_range is not None:
+                self.controller.focus_time_range(*visible_time_range)
+                self.trace_controller.focus_time_range(*visible_time_range)
+            # Let Qt paint the newly refreshed trace before Design dynamic input
+            # appends and focuses the next stimulation block.
+            QtCore.QTimer.singleShot(
+                0, self.stim_editor.input_designer_simulation_finished
+            )
 
         self._dispatch_io_task(
             _brian2_task,
@@ -1436,6 +1659,7 @@ class Gui(QtWidgets.QMainWindow):
             failure_title="Simulation error",
             failure_prefix="Could not run simulation:",
             cancel_callback=_request_brian2_cancel,
+            on_failure=self.stim_editor.input_designer_simulation_failed,
         )
 
     def btn_do_external_simulation_clicked(self) -> None:
@@ -1496,6 +1720,9 @@ class Gui(QtWidgets.QMainWindow):
             self.data_widget.spike_widget,
         ]:
             widget.set_grid_visible(is_visible)
+
+    def toggle_minimum_stimulus_size(self, is_visible: bool) -> None:
+        self.stim_editor.stim_widget.set_keep_short_stimuli_visible(is_visible)
 
     def choose_max_ram_synapse_plot_matrix(self) -> None:
         new_max_ram, ok = QtWidgets.QInputDialog.getText(
@@ -1823,6 +2050,13 @@ class Gui(QtWidgets.QMainWindow):
         figure. The Y-axis label uses the units stored in the TraceData (e.g. 'mV'
         for current-clamp recordings, 'pA' for voltage-clamp recordings). DPI is 300.
         """
+        Gui._export_traces(self, vector_only=False)
+
+    def btn_export_traces_vector_clicked(self) -> None:
+        """Export the selected traces to an SVG or PDF vector graphic."""
+        Gui._export_traces(self, vector_only=True)
+
+    def _export_traces(self, *, vector_only: bool) -> None:
         import matplotlib.pyplot as plt
 
         trace_name = self.cmb_trace.currentText()
@@ -1842,11 +2076,17 @@ class Gui(QtWidgets.QMainWindow):
             )
             return
 
+        default_suffix = "svg" if vector_only else "png"
+        file_filter = (
+            "SVG vector (*.svg);;PDF document (*.pdf)"
+            if vector_only
+            else "PNG image (*.png);;SVG vector (*.svg);;PDF document (*.pdf)"
+        )
         filename, _ = getsavefilename(
             self,
-            "Export traces",
-            f"{trace_name.replace(' :: ', '_')}_traces.png",
-            "PNG image (*.png);;SVG vector (*.svg);;PDF document (*.pdf)",
+            "Export traces as vector graphic" if vector_only else "Export traces",
+            f"{trace_name.replace(' :: ', '_')}_traces.{default_suffix}",
+            file_filter,
         )
         if not filename:
             return
@@ -1857,13 +2097,21 @@ class Gui(QtWidgets.QMainWindow):
             times = np.arange(n_timepoints) * trace_data.dt
             fig, ax = plt.subplots(figsize=(12, max(4, n_neurons * 0.5 + 2)))
             for i in range(n_neurons):
-                ax.plot(times, trace_data.traces[i], linewidth=0.8, alpha=0.85)
+                (line,) = ax.plot(
+                    times, trace_data.traces[i], linewidth=0.8, alpha=0.85
+                )
+                line.set_gid(f"trace_{int(trace_data.indices[i])}")
             ax.set_xlabel("Time (s)", fontsize=12)
             ax.set_ylabel(trace_data.units or "Amplitude", fontsize=12)
             ax.set_title(trace_name, fontsize=13)
             ax.tick_params(labelsize=10)
             fig.tight_layout()
-            fig.savefig(filename, dpi=300, bbox_inches="tight")
+            fig.savefig(
+                filename,
+                dpi=300,
+                bbox_inches="tight",
+                transparent=vector_only,
+            )
             QtWidgets.QMessageBox.information(
                 self,
                 "Export successful",
@@ -1998,6 +2246,7 @@ class Gui(QtWidgets.QMainWindow):
         for widget in self.plot_widgets:
             widget.apply_theme(theme)
         self.custom_analysis_widget.apply_theme(theme)
+        self.stim_editor.apply_input_designer_theme(theme)
         action = getattr(self, "_theme_actions", {}).get(theme)
         if action is not None and not action.isChecked():
             action.setChecked(True)
@@ -2022,14 +2271,11 @@ class Gui(QtWidgets.QMainWindow):
         )
 
     def _create_progressbar(self) -> None:
-        self.progress_dialog = QtWidgets.QProgressDialog(
-            "Simulating...", "", 0, 100, self
-        )
-        self.progress_dialog.setCancelButton(None)
-        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
-        self.progress_dialog.setAutoClose(True)
-        self.progress_dialog.setMinimumDuration(10)
-        self.progress_dialog.reset()
+        self.progress_dialog = ToolbarProgressWidget(self.toolbar_view)
+        self.toolbar_view.addSeparator()
+        action = self.toolbar_view.addWidget(self.progress_dialog)
+        assert action is not None
+        self.progress_dialog.set_toolbar_action(action)
 
     def _create_menus_and_toolbars(self) -> None:
         menu = self.menuBar()
@@ -2209,17 +2455,21 @@ class Gui(QtWidgets.QMainWindow):
             None,
             icon="mdi6.file-code",
         )
+
+        export_graphics_menu = menu.addMenu("Export &graphics")
+        assert export_graphics_menu is not None
+
         add_action(
             "&Traces",
             self.btn_export_traces_clicked,
-            export_data_menu,
+            export_graphics_menu,
             None,
             icon="mdi.waves",
         )
         add_action(
             "&Spikes",
             self.btn_export_spikes_clicked,
-            export_data_menu,
+            export_graphics_menu,
             None,
             icon="ph.barcode-light",
         )
@@ -2377,6 +2627,15 @@ class Gui(QtWidgets.QMainWindow):
             menu,
             toolbar,
             icon="mdi6.grid",
+            checkable=True,
+            is_checked=True,
+        )
+        add_action(
+            "Keep Short Stimuli Visible (4 px)",
+            self.toggle_minimum_stimulus_size,
+            menu,
+            toolbar,
+            icon="mdi6.square-medium",
             checkable=True,
             is_checked=True,
         )
@@ -2560,10 +2819,10 @@ class Gui(QtWidgets.QMainWindow):
         return trace, np.asarray(stim.values), float(stim.dt)
 
     def _analyse_elise_replay(self) -> None:
+        import neuroseq.resources.analysis_plugins.elise_target_mse as plugin_mod
         from neuroseq.example_models.elise import build_target_rate_pattern
         from neuroseq.replay_metrics import compute_performance_against_target
         from neuroseq.replay_metrics import save_replay_metrics_csv
-        from neuroseq.resources.analysis_plugins import elise_target_mse as plugin_mod
 
         inputs = self._elise_replay_inputs()
         if inputs is None:
@@ -2835,10 +3094,8 @@ class Gui(QtWidgets.QMainWindow):
 
     @QtCore.Slot(object)
     def _on_elise_protocol_finished(self, result: dict) -> None:
+        import neuroseq.resources.analysis_plugins.elise_learning_curves as plugin_mod
         from neuroseq.replay_metrics import save_learning_curves_csv
-        from neuroseq.resources.analysis_plugins import (
-            elise_learning_curves as plugin_mod,
-        )
 
         self._teardown_elise_protocol()
         self.progress_dialog.setValue(100)
@@ -2952,6 +3209,9 @@ class Gui(QtWidgets.QMainWindow):
             )
 
     def closeEvent(self, event):
+        if not self._close_confirmed and not self._prompt_save_before_close():
+            event.ignore()
+            return
         if (
             self._external_sim_thread is not None
             and self._external_sim_cancel is not None

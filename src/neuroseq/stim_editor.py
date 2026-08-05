@@ -14,7 +14,9 @@ from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.input_designer_dialog import InputDesignerDialog
 from neuroseq.project import Project
+from neuroseq.rheobase_dialog import RheobaseDialog
 from neuroseq.stim import DrawStim
 from neuroseq.stim import DrawStimType
 from neuroseq.stim import StimArray
@@ -55,6 +57,13 @@ class StimEditor(QtWidgets.QWidget):
     """A GUI to edit 2-d numpy arrays of neuron stimuli interactively using mouse and keyboard input."""
 
     limits_modified = QtCore.Signal()
+    simulation_requested = QtCore.Signal(float)
+    time_range_focus_requested = QtCore.Signal(float, float)
+
+    # Dynamic-input routines offered when the user opens the designer.
+    TARGETED_STDP_ROUTINE = "Targeted STDP synaptic strength"
+    RHEOBASE_ROUTINE = "Minimal stimulus for spiking (rheobase)"
+    DYNAMIC_INPUT_ROUTINES = (TARGETED_STDP_ROUTINE, RHEOBASE_ROUTINE)
 
     def __init__(
         self,
@@ -82,6 +91,9 @@ class StimEditor(QtWidgets.QWidget):
         self.stims_dict: dict[str, StimArrayModifier] = {}
         self.copy_values = np.zeros((0, 0))
         self._pattern_dialog: StimPatternDialog | None = None
+        self._input_designer_dialog: InputDesignerDialog | None = None
+        self._rheobase_dialog: RheobaseDialog | None = None
+        self._input_designer_theme = "light"
         # Captures the time index the user clicked at, so a Ramp drag can
         # use it as the ramp's left edge for every subsequent mouse_dragged
         # emit (the signal's `initial_time_index` is the *previous* position
@@ -974,6 +986,81 @@ class StimEditor(QtWidgets.QWidget):
         self._pattern_dialog.raise_()
         self._pattern_dialog.activateWindow()
 
+    def open_input_designer(self) -> None:
+        if self.current_stim_modifier is None or self.project is None:
+            return
+        routine, ok = QtWidgets.QInputDialog.getItem(
+            self,
+            "Design dynamic input",
+            "Design routine:",
+            list(self.DYNAMIC_INPUT_ROUTINES),
+            0,
+            False,
+        )
+        if not ok:
+            return
+        if routine == self.TARGETED_STDP_ROUTINE:
+            self._show_routine_dialog("_input_designer_dialog", InputDesignerDialog)
+        elif routine == self.RHEOBASE_ROUTINE:
+            self._show_routine_dialog("_rheobase_dialog", RheobaseDialog)
+
+    def _show_routine_dialog(
+        self,
+        attr_name: Literal["_input_designer_dialog", "_rheobase_dialog"],
+        cls: type[InputDesignerDialog] | type[RheobaseDialog],
+    ) -> None:
+        dialog = getattr(self, attr_name)
+        if dialog is None:
+            dialog = cls(self, self)
+            dialog.simulation_requested.connect(self.simulation_requested)
+            setattr(self, attr_name, dialog)
+        dialog.apply_theme(self._input_designer_theme)
+        dialog.refresh()
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def discard_input_designer(self) -> None:
+        """Drop any cached Design dynamic input dialogs.
+
+        Called when the project is replaced so the designer does not carry a
+        previous run's state (plots, log, history) into a new project. Dialogs
+        are rebuilt fresh the next time they are opened.
+        """
+        for attr_name in ("_input_designer_dialog", "_rheobase_dialog"):
+            dialog = getattr(self, attr_name)
+            if dialog is not None:
+                dialog.close()
+                dialog.deleteLater()
+                setattr(self, attr_name, None)
+
+    def focus_time_range(self, start_seconds: float, stop_seconds: float) -> None:
+        """Keep stimulation and linked data views focused on the same interval."""
+        self.controller.focus_time_range(start_seconds, stop_seconds)
+        self.time_range_focus_requested.emit(start_seconds, stop_seconds)
+
+    def input_designer_simulation_finished(self) -> None:
+        for dialog in self._dynamic_input_dialogs():
+            dialog.simulation_finished()
+
+    def input_designer_simulation_failed(self, message: str) -> None:
+        for dialog in self._dynamic_input_dialogs():
+            dialog.simulation_failed(message)
+
+    def apply_input_designer_theme(self, theme: str) -> None:
+        self._input_designer_theme = theme
+        for dialog in self._dynamic_input_dialogs():
+            dialog.apply_theme(theme)
+
+    def _dynamic_input_dialogs(
+        self,
+    ) -> list[InputDesignerDialog | RheobaseDialog]:
+        return [
+            dialog
+            for dialog in (self._input_designer_dialog, self._rheobase_dialog)
+            if dialog is not None
+        ]
+
     def apply_pattern(
         self,
         neuron_slice: slice,
@@ -1103,12 +1190,20 @@ class StimEditor(QtWidgets.QWidget):
             icon="mdi6.repeat-variant",
         )
         add_action(
-            "Design stimulation pattern",
+            "Design static input",
             self.open_pattern_designer,
             menu,
             toolbar,
             self,
             icon=self._pattern_designer_icon(),
+        )
+        add_action(
+            "Design dynamic input",
+            self.open_input_designer,
+            menu,
+            toolbar,
+            self,
+            icon="mdi6.robot-industrial-outline",
         )
         add_action(
             "Show all stim arrays",
