@@ -594,8 +594,8 @@ def test_create_new_project_calls_gc_collect(monkeypatch: MonkeyPatch) -> None:
     assert loaded_project == [sentinel_project]
 
 
-def test_btn_new_clicked_prompts_before_discarding(monkeypatch: MonkeyPatch) -> None:
-    created = [0]
+def test_prompt_save_before_action_branches(monkeypatch: MonkeyPatch) -> None:
+    proceeded = [0]
     save_events: list[str] = []
     answer_box = {"answer": QtWidgets.QMessageBox.StandardButton.Cancel}
 
@@ -610,27 +610,27 @@ def test_btn_new_clicked_prompts_before_discarding(monkeypatch: MonkeyPatch) -> 
                 on_success(None)
             return True
 
-        return SimpleNamespace(
-            _create_new_project=lambda: created.__setitem__(0, created[0] + 1),
-            _save_project=fake_save,
-        )
+        return SimpleNamespace(_save_project=fake_save)
 
-    # Cancel: neither save nor create the new project.
-    Gui.btn_new_clicked(make_fake_gui())
-    assert created[0] == 0
+    def proceed() -> None:
+        proceeded[0] += 1
+
+    # Cancel: neither save nor proceed.
+    Gui._prompt_save_before_action(make_fake_gui(), "T", "M", proceed)
+    assert proceeded[0] == 0
     assert save_events == []
 
-    # Discard: create immediately, without saving.
+    # Discard: proceed immediately, without saving.
     answer_box["answer"] = QtWidgets.QMessageBox.StandardButton.Discard
-    Gui.btn_new_clicked(make_fake_gui())
-    assert created[0] == 1
+    Gui._prompt_save_before_action(make_fake_gui(), "T", "M", proceed)
+    assert proceeded[0] == 1
     assert save_events == []
 
-    # Save: save first, then create via the on_success chain.
+    # Save: save first, then proceed via the on_success chain.
     answer_box["answer"] = QtWidgets.QMessageBox.StandardButton.Save
-    Gui.btn_new_clicked(make_fake_gui())
+    Gui._prompt_save_before_action(make_fake_gui(), "T", "M", proceed)
     assert save_events == ["save"]
-    assert created[0] == 2
+    assert proceeded[0] == 2
 
 
 def test_load_example_project_calls_gc_collect(monkeypatch: MonkeyPatch) -> None:

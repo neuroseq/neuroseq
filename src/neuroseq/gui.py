@@ -553,12 +553,21 @@ class Gui(QtWidgets.QMainWindow):
         self.progress_dialog.setLabelText("Loading...")
         self.progress_dialog.setValue(completed_percent)
 
-    def btn_new_clicked(self) -> None:
+    def _prompt_save_before_action(
+        self, title: str, message: str, proceed: Callable[[], None]
+    ) -> None:
+        """Warn that an action may discard unsaved changes, offering to save first.
+
+        Shows a Save / Discard / Cancel prompt. Cancel aborts. Discard runs
+        ``proceed`` immediately. Save persists the current project first and
+        runs ``proceed`` only after the save completes; if the user backs out
+        of the save dialog, ``proceed`` never runs and the current project is
+        left untouched.
+        """
         answer = QtWidgets.QMessageBox.warning(
             self,
-            "Start a new project",
-            "Starting a new project will discard any unsaved changes to the "
-            "current project.\n\nSave the current project first?",
+            title,
+            message,
             QtWidgets.QMessageBox.StandardButton.Save
             | QtWidgets.QMessageBox.StandardButton.Discard
             | QtWidgets.QMessageBox.StandardButton.Cancel,
@@ -567,12 +576,17 @@ class Gui(QtWidgets.QMainWindow):
         if answer == QtWidgets.QMessageBox.StandardButton.Cancel:
             return
         if answer == QtWidgets.QMessageBox.StandardButton.Save:
-            # Create the new project only after the save finishes, so it saves
-            # the current project rather than the freshly created one. If the
-            # user backs out of the save dialog, keep the current project.
-            self._save_project(on_success=lambda _result: self._create_new_project())
+            self._save_project(on_success=lambda _result: proceed())
             return
-        self._create_new_project()
+        proceed()
+
+    def btn_new_clicked(self) -> None:
+        self._prompt_save_before_action(
+            "Start a new project",
+            "Starting a new project will discard any unsaved changes to the "
+            "current project.\n\nSave the current project first?",
+            self._create_new_project,
+        )
 
     def _create_new_project(self) -> None:
         gc.collect()
@@ -583,6 +597,14 @@ class Gui(QtWidgets.QMainWindow):
         self.load_project(generator())
 
     def btn_open_clicked(self) -> None:
+        self._prompt_save_before_action(
+            "Open a project",
+            "Opening a project will discard any unsaved changes to the current "
+            "project.\n\nSave the current project first?",
+            self._open_project_dialog,
+        )
+
+    def _open_project_dialog(self) -> None:
         filename, _ = getopenfilename(
             self,
             "load project",
@@ -593,6 +615,14 @@ class Gui(QtWidgets.QMainWindow):
             self.load_project(filename)
 
     def btn_import_clicked(self) -> None:
+        self._prompt_save_before_action(
+            "Import from a project",
+            "Importing may overwrite parts of the current project.\n\nSave the "
+            "current project first?",
+            self._import_project_dialog,
+        )
+
+    def _import_project_dialog(self) -> None:
         filename, _ = getopenfilename(
             self,
             "import from project",
