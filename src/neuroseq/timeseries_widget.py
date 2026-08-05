@@ -564,6 +564,20 @@ class TimeseriesWidget(FPLWidget):
         else:
             return
 
+    def _position_hover_slice(self) -> None:
+        """Place the hover-slice preview at the current pointer position.
+
+        Subclasses may override this to snap the preview to discrete cells;
+        the base implementation follows the raw pointer position.
+        """
+        if self.hover_slice_graphic is None or self.mouse_pos is None:
+            return
+        self.hover_slice_graphic.offset = (
+            self.mouse_pos[0],
+            self.mouse_pos[1],
+            100,
+        )
+
     def pointer_move(self, ev: pygfx.PointerEvent) -> None:
         self.mouse_pos = self.subplot.map_screen_to_world(ev)
         if self.mouse_pos is None:
@@ -590,11 +604,7 @@ class TimeseriesWidget(FPLWidget):
         self.text.set_pos(self.mouse_pos, hover_value_text)
         if self.hover_slice_graphic is not None:
             self.hover_slice_graphic.visible = True
-            self.hover_slice_graphic.offset = (
-                self.mouse_pos[0],
-                self.mouse_pos[1],
-                100,
-            )
+            self._position_hover_slice()
         if self.mouse_press_pos is None:
             return
         if self.mode == InteractMode.SELECT and self.selection_in_progress:

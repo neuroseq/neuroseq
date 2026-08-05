@@ -544,3 +544,42 @@ def test_stim_widget_minimum_size_overlay_not_rebuilt_while_hidden(
     stim_widget.set_keep_short_stimuli_visible(True)
     stim_widget.update_data_slice(slice(0, 2), slice(10, 11), np.ones((1, 2)))
     assert stim_widget.minimum_size_graphic is not hidden_graphic
+
+
+def test_stim_widget_hover_preview_stays_snapped_within_cell(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    stim_widget.show()
+    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    stim_array = StimArray(
+        "stim", StimType.Excitation, np.random.random((10, 8)), "mV", dt=0.0005
+    )
+    stim_widget.set_data(stim_array)
+    stim_widget.set_hover_slice(np.ones((2, 1)))
+    assert stim_widget.hover_slice_graphic is not None
+
+    # First move: pointer at world x=1.3 -> time cell 2 (centre 1.25).
+    monkeypatch.setattr(
+        stim_widget.subplot, "map_screen_to_world", lambda ev: np.array([1.3, 2.2, 0.0])
+    )
+    stim_widget.pointer_move(None)
+    assert stim_widget.hover_slice_graphic.offset[0] == pytest.approx(1.25)
+
+    # Second move within the SAME cell (x=1.45): the preview must stay snapped to
+    # the cell centre rather than drifting to the raw pointer position, and keep
+    # its hover z-order (regression: the base class used to overwrite both).
+    monkeypatch.setattr(
+        stim_widget.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([1.45, 2.2, 0.0]),
+    )
+    stim_widget.pointer_move(None)
+    assert stim_widget.hover_slice_graphic.offset[0] == pytest.approx(1.25)
+    assert stim_widget.hover_slice_graphic.offset[2] == pytest.approx(
+        stim_widget.HOVER_Z
+    )
+    stim_widget.close()
+    qtbot.waitUntil(lambda: not stim_widget.isVisible())

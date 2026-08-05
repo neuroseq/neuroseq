@@ -294,10 +294,13 @@ class StimWidget(TimeseriesWidget):
         self._hover_pos_cache = None
         self._update_hover_slice_position()
 
+    def _position_hover_slice(self) -> None:
+        # Snap the preview to the hovered time/neuron cell instead of following
+        # the raw pointer, so it does not jitter or drift within a cell.
+        self._update_hover_slice_position()
+
     def pointer_move(self, ev: pygfx.PointerEvent) -> None:
         super().pointer_move(ev)
-        if self.hover_slice_graphic is not None and self.mouse_pos is not None:
-            self._update_hover_slice_position()
         if (
             self.mouse_pos is None
             or self.data_values is None
