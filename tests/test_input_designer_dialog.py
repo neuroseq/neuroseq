@@ -426,3 +426,125 @@ def test_input_designer_matplotlib_plots_follow_theme(qtbot) -> None:
         (-2.0, 2.0)
     )
     assert dialog.difference_axes.get_ylabel() == "Δ target\n(%)"
+
+
+def test_input_designer_stops_routine_when_closed(qtbot, monkeypatch) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    monkeypatch.setattr(
+        dialog, "_measure_epsps", lambda trace: EPSPMeasurement(2.0, (2.0,) * 5)
+    )
+    dialog.start()
+    assert dialog._running
+    assert dialog._awaiting_simulation
+
+    dialog.close()
+
+    assert not dialog._running
+    assert not dialog._awaiting_simulation
+    assert "dialog closed" in dialog.log.toPlainText()
+
+
+def test_input_designer_ignores_unrequested_simulation(qtbot, monkeypatch) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    measurements: list[int] = []
+
+    def measure(trace: TraceData) -> EPSPMeasurement:
+        del trace
+        measurements.append(1)
+        return EPSPMeasurement(2.0, (2.0,) * 5)
+
+    monkeypatch.setattr(dialog, "_measure_epsps", measure)
+    dialog.start()
+    blocks_after_start = len(editor.calls)
+
+    # A simulation the designer did not request (e.g. a manual Run) completes.
+    dialog._awaiting_simulation = False
+    dialog.simulation_finished()
+
+    assert measurements == []
+    assert len(editor.calls) == blocks_after_start
+    assert dialog._running
+
+
+def test_input_designer_adaptive_magnitude_clamped_to_maximum(
+    qtbot, monkeypatch
+) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    dialog.cmb_pairing_strategy.setCurrentText(dialog.ADAPTIVE_PAIRING_STRATEGY)
+    dialog.spn_initial_pairing_time_ms.setMaximum(12.0)
+    dialog.spn_initial_pairing_time_ms.setValue(10.0)
+    dialog.spn_pairing_increment_ms.setValue(5.0)
+    dialog.spn_target.setValue(120.0)
+    dialog.spn_tolerance.setValue(1.0)
+    amplitudes = iter([2.0, 2.6])
+    monkeypatch.setattr(
+        dialog,
+        "_measure_epsps",
+        lambda trace: EPSPMeasurement(next(amplitudes), (2.0,) * 5),
+    )
+
+    dialog.start()
+    dialog.simulation_finished()  # baseline -> pairing +10
+    dialog.simulation_finished()  # probe 130% -> increase would be 15, clamp to 12
+    dialog.simulation_finished()
+
+    # Without the clamp the second magnitude would be 15; the spinbox max is 12.
+    assert dialog._pairing_times_ms == [10.0, -12.0]
+
+
+def test_input_designer_adaptive_magnitude_floored_above_zero(
+    qtbot, monkeypatch
+) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    dialog.cmb_pairing_strategy.setCurrentText(dialog.ADAPTIVE_PAIRING_STRATEGY)
+    dialog.spn_initial_pairing_time_ms.setValue(10.0)
+    dialog.spn_pairing_increment_ms.setValue(5.0)
+    dialog.spn_target.setValue(200.0)  # never reached, so magnitude keeps shrinking
+    dialog.spn_tolerance.setValue(1.0)
+    dialog.spn_max_iterations.setValue(6)
+    monkeypatch.setattr(
+        dialog, "_measure_epsps", lambda trace: EPSPMeasurement(2.0, (2.0,) * 5)
+    )
+
+    dialog.start()
+    for _ in range(14):
+        if not dialog._running:
+            break
+        dialog.simulation_finished()
+
+    # dt = 0.001 s -> one-sample floor of 1 ms; magnitude shrinks 10 -> 5 -> 1
+    # and never collapses to 0.
+    assert dialog._pairing_times_ms[:3] == [10.0, 5.0, 1.0]
+    assert 0.0 not in dialog._pairing_times_ms
+    assert min(abs(t) for t in dialog._pairing_times_ms) >= 1.0 - 1e-9
+
+
+def test_input_designer_measures_dominant_epsp_not_earlier_blip(qtbot) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    x = np.arange(project.trace.traces.shape[1])
+    project.trace.traces[1] = -70.0
+    onset = 100
+    # A small spurious bump just after the probe, then the real, larger EPSP.
+    project.trace.traces[1] += 2.0 * np.exp(-(((x - (onset + 5)) / 2.0) ** 2))
+    project.trace.traces[1] += 6.0 * np.exp(-(((x - (onset + 18)) / 3.0) ** 2))
+    dialog._probe_pulse_times = [onset * project.trace.dt]
+
+    measurement = dialog._measure_epsps(project.trace)
+
+    # The larger EPSP (~6 mV) is selected, not the ~2 mV early blip.
+    assert measurement.amplitude > 4.0

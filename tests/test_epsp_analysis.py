@@ -25,6 +25,15 @@ def test_detect_epsps_excludes_action_potential_and_uses_local_baseline() -> Non
     np.testing.assert_allclose(result.amplitudes_mv, [5.0, 8.0], atol=0.2)
 
 
+def test_detect_epsps_on_offset_removed_trace() -> None:
+    # Same signal shifted so the baseline sits at ~0 mV (DC offset removed).
+    # The absolute -20 mV action-potential guard must not apply here, but the
+    # AP-sized deflection must still be rejected by the amplitude guard.
+    result = epsp.detect_epsps(_trace() + 70.0, dt_ms=0.1)
+    np.testing.assert_allclose(result.times_ms, [10.0, 25.0], atol=0.2)
+    np.testing.assert_allclose(result.amplitudes_mv, [5.0, 8.0], atol=0.2)
+
+
 def test_voltage_unit_aliases_are_converted_to_mv() -> None:
     values = np.array([-0.07, -0.065])
     np.testing.assert_allclose(epsp._to_mv(values, "volt"), [-70.0, -65.0])

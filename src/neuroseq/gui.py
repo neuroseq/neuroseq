@@ -1563,6 +1563,13 @@ class Gui(QtWidgets.QMainWindow):
                 "Busy",
                 "Another operation is already in progress.",
             )
+            # If Design dynamic input requested this run, tell it the request
+            # was dropped so its closed loop stops instead of stalling forever
+            # waiting for a completion callback that will never arrive. This is
+            # a no-op when no routine is awaiting a simulation.
+            self.stim_editor.input_designer_simulation_failed(
+                "another operation is already in progress"
+            )
             return
 
         project = self.project

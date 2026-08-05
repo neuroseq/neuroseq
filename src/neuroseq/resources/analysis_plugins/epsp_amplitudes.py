@@ -79,6 +79,11 @@ def detect_epsps(trace_mv: np.ndarray, dt_ms: float) -> EPSPDetection:
 
     baseline_window = max(2, int(round(10.0 / dt_ms)))
     baseline_gap = max(1, int(round(1.0 / dt_ms)))
+    # An absolute-voltage trace sits near its (negative) resting potential; an
+    # offset-removed / ΔV trace hovers around zero. Only apply the absolute
+    # action-potential threshold when the trace is on an absolute scale, so
+    # EPSPs on offset-removed traces are not all discarded by it.
+    looks_absolute = float(np.median(trace)) < -30.0
     times: list[float] = []
     amplitudes: list[float] = []
     for peak in peak_indices:
@@ -88,9 +93,11 @@ def detect_epsps(trace_mv: np.ndarray, dt_ms: float) -> EPSPDetection:
             continue
         baseline = float(np.median(trace[baseline_start:baseline_end]))
         amplitude = float(trace[peak] - baseline)
-        # APs typically cross -20 mV; the amplitude guard also handles traces
-        # whose absolute voltage offset has been removed.
-        if amplitude < prominence_mv or trace[peak] >= -20.0 or amplitude >= 20.0:
+        # Reject action potentials: an AP rises tens of mV above baseline
+        # (caught regardless of DC offset) and, on an absolute trace, also
+        # crosses ~-20 mV.
+        is_ap = amplitude >= 20.0 or (looks_absolute and trace[peak] >= -20.0)
+        if amplitude < prominence_mv or is_ap:
             continue
         times.append(float(peak) * dt_ms)
         amplitudes.append(amplitude)

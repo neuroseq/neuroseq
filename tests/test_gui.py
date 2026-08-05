@@ -2663,3 +2663,26 @@ def test_warn_if_cellpose_model_mismatch(qmessagebox_calls: list) -> None:
     assert "mismatch" in qmessagebox_calls[0]["title"].lower()
     assert "10" in qmessagebox_calls[0]["text"]
     assert "25" in qmessagebox_calls[0]["text"]
+
+
+def test_brian2_busy_notifies_input_designer(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    gui.show()
+    qtbot.waitUntil(gui.isVisible)
+    gui._io_worker = object()  # type: ignore[assignment]  # in-flight IO task
+    dropped: list[str] = []
+    monkeypatch.setattr(
+        gui.stim_editor,
+        "input_designer_simulation_failed",
+        lambda message: dropped.append(message),
+    )
+
+    gui._do_brian2_simulation_threaded(0.1)
+
+    # The dropped request is reported to the designer instead of stalling it.
+    assert dropped
+    gui._io_worker = None
+    gui.close()

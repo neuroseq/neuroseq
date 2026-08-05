@@ -32,6 +32,12 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         self.max_width = 1.0
         self.min_height = 1.0
         self.max_height = 1.0
+        # A focus request (e.g. the live Design dynamic input view) may pin the
+        # scrollable extent wider than the current data so the view keeps a
+        # stable width while blocks are appended. This intentionally persists
+        # across set_max_extents() and only clears on reset() (project load);
+        # the trade-off is that the camera can scroll into empty space until
+        # then. See test_focus_time_range_can_include_empty_future_space.
         self._minimum_time_extent = 0.0
         self.initialized = False
         self.x_scroll_bar: QtWidgets.QScrollBar | None = None

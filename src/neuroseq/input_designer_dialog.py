@@ -8,6 +8,7 @@ import brian2.numpy_ as np
 from matplotlib.ticker import MultipleLocator
 from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 
 from neuroseq import theme as theme_module
@@ -83,6 +84,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.editor = editor
         self.project = editor.project
         self._running = False
+        self._awaiting_simulation = False
         self._phase = "idle"
         self._iteration = 0
         self._view_block_samples: int | None = None
@@ -293,6 +295,14 @@ class InputDesignerDialog(QtWidgets.QDialog):
         if height is not None:
             self.resize(self.width(), max(height, self.minimumSizeHint().height()))
 
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        # The dialog is cached and reused, so closing only hides it. Stop any
+        # running routine first, otherwise it would keep consuming simulation
+        # callbacks while hidden and resume mid-run when reopened.
+        if self._running:
+            self._finish("Routine stopped (dialog closed).")
+        super().closeEvent(event)
+
     def changeEvent(self, event: QtCore.QEvent) -> None:
         super().changeEvent(event)
         if event.type() == QtCore.QEvent.Type.WindowStateChange and self.isMinimized():
@@ -356,7 +366,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
                 f"Running an initial {duration:.3f} s simulation to create "
                 "trace monitors."
             )
-            self.simulation_requested.emit(duration)
+            self._request_simulation(duration)
             return
         self._begin_protocol(clear_log=True)
 
@@ -430,11 +440,18 @@ class InputDesignerDialog(QtWidgets.QDialog):
                 epsp_change = abs(epsp_new - epsp_old)
                 increment = self.spn_pairing_increment_ms.value()
                 if target_error > epsp_change:
-                    self._adaptive_pairing_magnitude_ms = max(
-                        0.0, self._adaptive_pairing_magnitude_ms - increment
-                    )
+                    self._adaptive_pairing_magnitude_ms -= increment
                 else:
                     self._adaptive_pairing_magnitude_ms += increment
+            # Keep the magnitude bounded: never below one simulation sample (so
+            # pre and post never collapse to the same time) and never above the
+            # configured spinbox maximum (so it cannot drift away unboundedly).
+            min_magnitude_ms = 1000.0 * stim.dt
+            max_magnitude_ms = self.spn_initial_pairing_time_ms.maximum()
+            self._adaptive_pairing_magnitude_ms = min(
+                max_magnitude_ms,
+                max(min_magnitude_ms, self._adaptive_pairing_magnitude_ms),
+            )
             pairing_time_ms = (
                 self._adaptive_pairing_magnitude_ms
                 if potentiate
@@ -505,11 +522,22 @@ class InputDesignerDialog(QtWidgets.QDialog):
         stim = self._require_stim()
         current_time = self._require_project().b2_model.get_sim_time_secs()
         run_seconds = max(stim.dt, stop_sample * stim.dt - current_time)
-        self.simulation_requested.emit(run_seconds)
+        self._request_simulation(run_seconds)
+
+    def _request_simulation(self, seconds: float) -> None:
+        """Ask the host to run a simulation, recording that the designer is now
+        waiting for its result so it reacts only to its own run."""
+        self._awaiting_simulation = True
+        self.simulation_requested.emit(seconds)
 
     def simulation_finished(self) -> None:
         if not self._running or self.project is None:
             return
+        if not self._awaiting_simulation:
+            # A simulation the designer did not request (e.g. a manual run)
+            # completed; do not advance the closed-loop protocol.
+            return
+        self._awaiting_simulation = False
         if self._phase == "initialize_trace":
             self.refresh()
             if not self.cmb_trace.currentText():
@@ -605,7 +633,10 @@ class InputDesignerDialog(QtWidgets.QDialog):
                 raise ValueError(
                     f"No EPSP was detected after the probe at {onset_ms:.3f} ms."
                 )
-            amplitudes.append(float(candidates[0]))
+            # Attribute the dominant depolarisation in the response window to the
+            # probe. Taking the largest candidate avoids latching onto a smaller
+            # spurious deflection that happens to precede the real EPSP.
+            amplitudes.append(float(np.max(candidates)))
         return EPSPMeasurement(
             amplitude=float(np.mean(amplitudes)),
             pulse_amplitudes=tuple(amplitudes),
@@ -693,11 +724,12 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.epsp_plot.draw()
 
     def simulation_failed(self, message: str) -> None:
-        if self._running:
+        if self._running and self._awaiting_simulation:
             self._finish(f"Simulation failed: {message}")
 
     def _finish(self, message: str) -> None:
         self._running = False
+        self._awaiting_simulation = False
         self._phase = "idle"
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
