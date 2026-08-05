@@ -118,7 +118,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self._expanded_height: int | None = None
         self._compact_height: int | None = None
         self.setWindowTitle("Design dynamic input")
-        self.resize(800, 940)
+        self.resize(640, 620)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setSpacing(6)
@@ -131,7 +131,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         )
         self.btn_toggle_parameters.setArrowType(QtCore.Qt.ArrowType.DownArrow)
         self.btn_toggle_parameters.setToolTip(
-            "Hide the protocol parameters to give the plots more space."
+            "Hide the protocol parameters to keep this window compact."
         )
         self.btn_toggle_parameters.toggled.connect(self._set_parameters_hidden)
         layout.addWidget(self.btn_toggle_parameters)
@@ -244,10 +244,10 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.parameters_scroll.setHorizontalScrollBarPolicy(
             QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
-        # A small minimum lets the panel yield space to the plots and scroll,
-        # rather than shrink its rows, when the dialog is short.
+        # A small minimum lets the panel scroll rather than shrink its rows when
+        # the dialog is short.
         self.parameters_scroll.setMinimumHeight(80)
-        layout.addWidget(self.parameters_scroll)
+        layout.addWidget(self.parameters_scroll, 1)
         # A wheel scroll over a value widget must scroll the panel, not silently
         # change the field, so route those events to the scroll area.
         self._wheel_filter = _WheelToScrollFilter(self.parameters_scroll)
@@ -263,7 +263,17 @@ class InputDesignerDialog(QtWidgets.QDialog):
         )
         self._update_pairing_strategy_controls()
 
-        self.epsp_plot = MatplotlibWidget(self)
+        # The plots live in their own window so the controls and the plots each
+        # get room, and the controls stay compact on small screens.
+        self.plot_window = QtWidgets.QDialog(self)
+        self.plot_window.setWindowTitle("Design dynamic input — plots")
+        self.plot_window.setWindowFlag(
+            QtCore.Qt.WindowType.WindowMinimizeButtonHint, True
+        )
+        self._plot_window_positioned = False
+        plot_layout = QtWidgets.QVBoxLayout(self.plot_window)
+        plot_layout.setContentsMargins(2, 2, 2, 2)
+        self.epsp_plot = MatplotlibWidget(self.plot_window)
         self.epsp_plot.setMinimumHeight(500)
         figure = self.epsp_plot.getFigure()
         grid = figure.add_gridspec(3, 1, height_ratios=(3, 2, 2), hspace=0.14)
@@ -274,7 +284,8 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.spn_tolerance.valueChanged.connect(lambda _value: self._update_plots())
         # Compatibility alias: both axes now share one tightly packed canvas.
         self.difference_plot = self.epsp_plot
-        layout.addWidget(self.epsp_plot, 4)
+        plot_layout.addWidget(self.epsp_plot)
+        self.plot_window.resize(720, 640)
         self.lbl_relative_difference = QtWidgets.QLabel(
             "Relative difference from target: waiting for baseline", self
         )
@@ -329,7 +340,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.btn_toggle_parameters.setToolTip(
             "Show the protocol parameters."
             if hidden
-            else "Hide the protocol parameters to give the plots more space."
+            else "Hide the protocol parameters to keep this window compact."
         )
         QtCore.QTimer.singleShot(0, self._resize_for_parameter_visibility)
 
@@ -343,12 +354,22 @@ class InputDesignerDialog(QtWidgets.QDialog):
         if height is not None:
             self.resize(self.width(), max(height, self.minimumSizeHint().height()))
 
+    def showEvent(self, event: QtGui.QShowEvent) -> None:
+        super().showEvent(event)
+        # The plots live in a separate window; bring it up alongside the dialog.
+        self.plot_window.show()
+        if not self._plot_window_positioned:
+            self._plot_window_positioned = True
+            self.plot_window.move(self.x() + self.width() + 20, self.y())
+        self.plot_window.raise_()
+
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         # The dialog is cached and reused, so closing only hides it. Stop any
         # running routine first, otherwise it would keep consuming simulation
         # callbacks while hidden and resume mid-run when reopened.
         if self._running:
             self._finish("Routine stopped (dialog closed).")
+        self.plot_window.close()
         super().closeEvent(event)
 
     def changeEvent(self, event: QtCore.QEvent) -> None:

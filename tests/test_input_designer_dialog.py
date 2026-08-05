@@ -241,11 +241,12 @@ def test_input_designer_adaptive_strategy_increases_time_and_changes_sign(
     )
 
 
-def test_input_designer_can_hide_parameters_to_expand_plots(qtbot) -> None:
+def test_input_designer_can_hide_parameters(qtbot) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
     dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
+    qtbot.addWidget(dialog.plot_window)
     dialog.show()
     expanded_size = dialog.size()
 
@@ -256,7 +257,6 @@ def test_input_designer_can_hide_parameters_to_expand_plots(qtbot) -> None:
     QtWidgets.QApplication.processEvents()
 
     assert not dialog.parameters_panel.isVisible()
-    assert dialog.epsp_plot.isVisible()
     assert dialog.width() == expanded_size.width()
     assert dialog.height() < expanded_size.height()
     assert dialog.btn_toggle_parameters.text() == "Show parameters"
@@ -602,3 +602,22 @@ def test_input_designer_wheel_over_field_does_not_change_value(qtbot) -> None:
     # ... so delivering a wheel scroll to the field leaves its value unchanged.
     QtWidgets.QApplication.sendEvent(spin, wheel)
     assert spin.value() == before
+
+
+def test_input_designer_plots_open_in_separate_window(qtbot) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    qtbot.addWidget(dialog.plot_window)
+
+    # The plot canvas lives in its own top-level window, not the dialog itself.
+    assert dialog.plot_window is not dialog
+    assert dialog.plot_window.isWindow()
+    assert dialog.epsp_plot.window() is dialog.plot_window
+
+    # Showing the dialog brings up the plot window; closing it hides the plots.
+    dialog.show()
+    qtbot.waitUntil(lambda: dialog.plot_window.isVisible())
+    dialog.close()
+    qtbot.waitUntil(lambda: not dialog.plot_window.isVisible())
