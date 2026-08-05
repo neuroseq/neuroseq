@@ -639,6 +639,51 @@ def test_prompt_save_before_action_branches(monkeypatch: MonkeyPatch) -> None:
     assert proceeded[0] == 2
 
 
+def test_prompt_save_before_close_branches(monkeypatch: MonkeyPatch) -> None:
+    save_callbacks: list[Any] = []
+    closed = [0]
+    answer_box = {"answer": QtWidgets.QMessageBox.StandardButton.Cancel}
+
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox, "warning", lambda *a, **k: answer_box["answer"]
+    )
+
+    def fake_save(on_success: Any = None) -> bool:
+        save_callbacks.append(on_success)
+        return True
+
+    fake_gui: Any = SimpleNamespace(
+        _close_confirmed=False,
+        _save_project=fake_save,
+        close=lambda: closed.__setitem__(0, closed[0] + 1),
+    )
+
+    # Cancel: keep the app open.
+    assert not Gui._prompt_save_before_close(fake_gui)
+    assert not fake_gui._close_confirmed
+    assert save_callbacks == []
+    assert closed == [0]
+
+    # Discard: close immediately.
+    answer_box["answer"] = QtWidgets.QMessageBox.StandardButton.Discard
+    assert Gui._prompt_save_before_close(fake_gui)
+    assert fake_gui._close_confirmed
+    assert save_callbacks == []
+    assert closed == [0]
+
+    # Save: block the current close, then close from the save success callback.
+    fake_gui._close_confirmed = False
+    answer_box["answer"] = QtWidgets.QMessageBox.StandardButton.Save
+    assert not Gui._prompt_save_before_close(fake_gui)
+    assert not fake_gui._close_confirmed
+    assert len(save_callbacks) == 1
+    assert closed == [0]
+
+    save_callbacks[0](None)
+    assert fake_gui._close_confirmed
+    assert closed == [1]
+
+
 def test_load_example_project_calls_gc_collect(monkeypatch: MonkeyPatch) -> None:
     collect_calls = [0]
     generator_calls = [0]

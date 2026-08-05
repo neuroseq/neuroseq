@@ -472,6 +472,7 @@ class Gui(QtWidgets.QMainWindow):
         self._io_on_failure: Callable[[str], None] | None = None
         self._io_failure_title = "File operation failed"
         self._io_failure_prefix = "The file operation could not complete:"
+        self._close_confirmed = False
         if filename is not None:
             self.load_project(filename)
         else:
@@ -590,6 +591,31 @@ class Gui(QtWidgets.QMainWindow):
             "current project.\n\nSave the current project first?",
             self._create_new_project,
         )
+
+    def _prompt_save_before_close(self) -> bool:
+        """Return True when the current close event may continue immediately."""
+        answer = QtWidgets.QMessageBox.warning(
+            self,
+            "Close NeuroSeq",
+            "Closing NeuroSeq will discard any unsaved changes to the "
+            "current project.\n\nSave the current project first?",
+            QtWidgets.QMessageBox.StandardButton.Save
+            | QtWidgets.QMessageBox.StandardButton.Discard
+            | QtWidgets.QMessageBox.StandardButton.Cancel,
+            QtWidgets.QMessageBox.StandardButton.Save,
+        )
+        if answer == QtWidgets.QMessageBox.StandardButton.Cancel:
+            return False
+        if answer == QtWidgets.QMessageBox.StandardButton.Save:
+
+            def _close_after_save(_result: object) -> None:
+                self._close_confirmed = True
+                self.close()
+
+            self._save_project(on_success=_close_after_save)
+            return False
+        self._close_confirmed = True
+        return True
 
     def _create_new_project(self) -> None:
         gc.collect()
@@ -2248,6 +2274,7 @@ class Gui(QtWidgets.QMainWindow):
         self.progress_dialog = ToolbarProgressWidget(self.toolbar_view)
         self.toolbar_view.addSeparator()
         action = self.toolbar_view.addWidget(self.progress_dialog)
+        assert action is not None
         self.progress_dialog.set_toolbar_action(action)
 
     def _create_menus_and_toolbars(self) -> None:
@@ -2792,10 +2819,10 @@ class Gui(QtWidgets.QMainWindow):
         return trace, np.asarray(stim.values), float(stim.dt)
 
     def _analyse_elise_replay(self) -> None:
+        import neuroseq.resources.analysis_plugins.elise_target_mse as plugin_mod
         from neuroseq.example_models.elise import build_target_rate_pattern
         from neuroseq.replay_metrics import compute_performance_against_target
         from neuroseq.replay_metrics import save_replay_metrics_csv
-        from neuroseq.resources.analysis_plugins import elise_target_mse as plugin_mod
 
         inputs = self._elise_replay_inputs()
         if inputs is None:
@@ -3067,10 +3094,8 @@ class Gui(QtWidgets.QMainWindow):
 
     @QtCore.Slot(object)
     def _on_elise_protocol_finished(self, result: dict) -> None:
+        import neuroseq.resources.analysis_plugins.elise_learning_curves as plugin_mod
         from neuroseq.replay_metrics import save_learning_curves_csv
-        from neuroseq.resources.analysis_plugins import (
-            elise_learning_curves as plugin_mod,
-        )
 
         self._teardown_elise_protocol()
         self.progress_dialog.setValue(100)
@@ -3184,6 +3209,9 @@ class Gui(QtWidgets.QMainWindow):
             )
 
     def closeEvent(self, event):
+        if not self._close_confirmed and not self._prompt_save_before_close():
+            event.ignore()
+            return
         if (
             self._external_sim_thread is not None
             and self._external_sim_cancel is not None
