@@ -1,0 +1,534 @@
+rheobase_dynamic_input_routine — "Minimal stimulus for spiking (rheobase)" Design dynamic input routine
+=======================================================================================================
+
+A second Design dynamic input routine, sitting alongside the existing
+"Targeted STDP synaptic strength" one. It answers a single question for one
+chosen neuron: what is the smallest stimulus amplitude that makes it fire an
+action potential (its rheobase)? It does this closed-loop — append a probe
+pulse of amplitude A to the neuron's stim column, run Brian2 forward over the
+pulse, check whether the neuron spiked, and search A (bracket + bisection)
+until the spiking threshold is pinned to a tolerance. The live output is a
+"rheobase plot": spike count vs. tested amplitude, with the converged rheobase
+marked.
+
+This reuses the closed-loop machinery already built for the STDP routine:
+the `simulation_requested(float)` signal → threaded Brian2 run → completion
+callback pattern, the append-block-and-run-forward model, the separate plot
+window, the scrollable-parameters panel with the wheel guard, the stim-array
+info header, and the Clear button. See `src/neuroseq/input_designer_dialog.py`
+as the reference implementation and mirror its structure.
+
+Files to change:
+    src/neuroseq/stim_editor.py          (routine list + dispatch + sim-callback fan-out)
+
+Files to create:
+    src/neuroseq/rheobase.py             (pure spike-detection + search step, no Qt)
+    src/neuroseq/rheobase_dialog.py      (RheobaseDialog — closed-loop Qt dialog)
+    tests/test_rheobase.py               (pure-function tests)
+    tests/test_rheobase_dialog.py        (Qt closed-loop tests, patterned on test_input_designer_dialog.py)
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+ARCHITECTURE — a standalone sibling dialog, NOT a base-class refactor
+────────────────────────────────────────────────────────────────────────────────────────────
+
+`InputDesignerDialog` (the STDP routine) is heavily tested and stays UNCHANGED.
+Build `RheobaseDialog` as a new, standalone `QtWidgets.QDialog` that follows the
+same patterns and REUSES the two module-level helpers already in
+`input_designer_dialog.py`:
+
+    from neuroseq.input_designer_dialog import _WheelToScrollFilter
+    from neuroseq.input_designer_dialog import _set_native_minimized_position
+
+(Those are private-by-convention but importing them here is deliberate reuse —
+do not duplicate them. If you prefer, lift both into a small shared module
+`src/neuroseq/_dialog_helpers.py` and import from there in BOTH dialogs; that is
+the only refactor of existing code allowed, and the STDP dialog's tests must
+still pass unchanged. A full shared base class is a NON-GOAL for this handoff.)
+
+The dialog exposes the SAME closed-loop contract the STDP dialog does, so the
+existing gui.py plumbing needs no changes:
+
+    simulation_requested = QtCore.Signal(float)     # emitted to ask for a run
+    def simulation_finished(self) -> None: ...       # called when a run completes
+    def simulation_failed(self, message: str) -> None: ...
+    def apply_theme(self, theme: str) -> None: ...
+    def refresh(self) -> None: ...
+
+Guard against reacting to runs it did not request with the same
+`_awaiting_simulation` flag pattern the STDP dialog uses (set it True in a
+`_request_simulation(seconds)` helper before emitting; clear it at the top of
+`simulation_finished`; ignore the callback when it is False). Stop the routine
+on `closeEvent` if it is running, exactly like the STDP dialog.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+WHAT "RHEOBASE" MEANS HERE
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Rheobase = the minimum stimulus amplitude that elicits at least one spike, for
+a FIXED pulse duration. It is a property of a single neuron driven directly, so
+there is ONE neuron ID: the same index is both the stim-array column that
+receives the pulse and the trace row whose voltage is checked for a spike.
+
+Amplitude is in the stim array's own units (whatever the injected quantity is —
+current, conductance, optogenetic power). The routine never assumes a unit; it
+just searches the numeric amplitude and reports it with the array's unit label,
+the same way the STDP routine treats `Pulse amplitude`.
+
+The strength–duration curve (threshold vs. pulse duration) is a NON-GOAL here
+(see NON-GOALS). This routine finds one rheobase for the one configured pulse
+duration.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+PURE HELPERS — src/neuroseq/rheobase.py (new, no Qt)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Keep the numeric core out of Qt so it is cheaply testable, mirroring how
+`stim_patterns.py` is split from `stim_pattern_dialog.py`.
+
+1.  count_spikes(trace_mv: np.ndarray, threshold_mv: float = -20.0) -> int
+
+    Count upward threshold crossings: samples where trace goes from
+    < threshold_mv to >= threshold_mv. Returns 0 for an empty/too-short trace.
+    Rationale: a plateau above threshold counts once, not once-per-sample. Use
+    the shared `_to_mv` from `neuroseq.resources.analysis_plugins.epsp_amplitudes`
+    at the call site to normalise units before calling this; `count_spikes`
+    itself takes already-in-mV data.
+
+        crossings = np.flatnonzero((trace_mv[:-1] < threshold_mv)
+                                   & (trace_mv[1:] >= threshold_mv))
+        return int(crossings.size)
+
+2.  next_bracket(low: float, high: float, mid: float, spiked: bool)
+        -> tuple[float, float]
+
+    One bisection update. `low` is the highest amplitude known NOT to spike,
+    `high` the lowest known TO spike, `mid` the amplitude just tested.
+        if spiked:  return (low, mid)      # threshold is <= mid
+        else:       return (mid, high)     # threshold is > mid
+
+3.  bisection_converged(low: float, high: float, tol: float) -> bool
+        return (high - low) <= tol
+
+These are trivial but testing them pins the search invariants and lets the Qt
+test focus on wiring.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+DIALOG — src/neuroseq/rheobase_dialog.py (new)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+`RheobaseDialog(QtWidgets.QDialog)`. Copy the window scaffolding from
+`InputDesignerDialog` verbatim where it matches (it is the intended template):
+
+  - Window title "Minimal stimulus for spiking (rheobase)"; minimise-button
+    hint; `_set_native_minimized_position` on minimise via `changeEvent`.
+  - Top: stim-array info header (Stim array / Units / dt / Neurons), populated in
+    `refresh()`; reset to "-" when no array is selected. Same as the STDP dialog.
+  - A "Hide parameters" QToolButton collapsing a QScrollArea-wrapped parameters
+    panel (min height ~80). Install `_WheelToScrollFilter` on every QAbstractSpinBox
+    and QComboBox so wheel scrolls the panel instead of editing fields.
+  - A read-only QPlainTextEdit log (max height 130) narrating each step.
+  - A `QDialogButtonBox` at the bottom with ActionRole "Start" and "Stop"
+    buttons, a ResetRole "Clear stim array" button wired to
+    `self.editor.clear_stim_array`, and the standard Close button
+    (`buttons.rejected.connect(self.close)`).
+  - A SEPARATE plot window (`self.plot_window`, a child QDialog) holding the
+    MatplotlibWidget, opened in `showEvent` (positioned beside the dialog on
+    first show) and closed in `closeEvent`. Theme-sync via `apply_theme` and a
+    `_style_plot_axes` that uses `theme_module.mpl_colors`.
+
+Parameters (QFormLayout inside the scrollable panel):
+
+    Trace to analyze:        QComboBox   (voltage StateMonitor names; same
+                                          population as the STDP dialog's cmb_trace)
+    Neuron ID:               QSpinBox    default 0, max = stim n_neurons - 1
+    Pulse amplitude range:   two QDoubleSpinBox (min, max), decimals 3,
+                                          defaults min=0.0, max=10.0 (array units)
+                                          shown with the array unit label
+    Pulse duration (ms):     QDoubleSpinBox  default 50.0, range 0.001..100000
+                                          (a long pulse — rheobase is a steady-state
+                                          threshold; 50 ms is a reasonable default,
+                                          not the STDP routine's 1 ms)
+    Recovery time (ms):      QDoubleSpinBox  default 200.0  (rest gap BEFORE each
+                                          probe so Vm settles back to baseline —
+                                          the membrane state carries across blocks)
+    Response window (ms):    QDoubleSpinBox  default = pulse duration + 20 ms;
+                                          window after pulse onset in which spikes
+                                          are counted (recompute default when the
+                                          pulse-duration field changes, but let the
+                                          user override)
+    Spike threshold (mV):    QDoubleSpinBox  default -20.0, range -100..100
+    Amplitude tolerance:     QDoubleSpinBox  default 0.05 (array units); stop when
+                                          the bracket width <= this
+    Maximum iterations:      QSpinBox    default 25, range 1..10000
+    Live view:               QCheckBox "Follow new input on each iteration"
+                                          checked; camera-tracks the appended block
+                                          via editor.focus_time_range (reuse the
+                                          STDP dialog's _append_block logic).
+
+Reuse the STDP dialog's `_append_block(block) -> int`, `_run_to_sample`,
+`_require_stim`, `_require_project`, `_request_simulation`, `_finish`,
+`_append_log` bodies (copy them; they are routine-agnostic). The
+`get_sim_time_secs`-based block placement and the `focus_time_range` live-view
+follow are identical.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+SEARCH — the closed-loop state machine
+────────────────────────────────────────────────────────────────────────────────────────────
+
+State on the dialog:
+    self._running: bool
+    self._awaiting_simulation: bool
+    self._phase: str            # "idle" | "probe_max" | "probe_min" | "bisect"
+    self._iteration: int
+    self._low: float            # highest amplitude known NOT to spike
+    self._high: float           # lowest amplitude known to spike
+    self._pending_amplitude: float          # amplitude of the block now running
+    self._pulse_onset_seconds: float        # onset time of the pending pulse
+    self._samples: list[tuple[float, int]]  # (amplitude, spike_count) tested, in order
+    self._rheobase: float | None
+
+start():
+    refresh(); guard project / stim modifier present (log + return if not);
+    guard trace available — if the trace combo is empty, prompt for an initial
+    simulation to create the trace monitor exactly like the STDP dialog's
+    "Create stimulation trace monitor" flow (phase "initialize_trace" → emit →
+    on finish, refresh and begin). Reuse that code path verbatim.
+    Validate: max_amplitude > min_amplitude (else _finish with a message).
+    Reset state; self._low = min_amplitude; self._high = max_amplitude.
+    Then probe the MAX first to confirm a spike is reachable:
+        self._phase = "probe_max"; self._probe(max_amplitude)
+
+_probe(amplitude):
+    Build a block (see BLOCK LAYOUT), append it, record onset time,
+    set self._pending_amplitude, run to the end of the block.
+
+simulation_finished():
+    if not running / not awaiting: return; clear awaiting.
+    if phase == "initialize_trace": refresh; begin as in start(); return.
+    Measure spikes for self._pending_amplitude (see SPIKE MEASUREMENT).
+    Append (amplitude, spike_count) to self._samples; update the plot.
+    Dispatch on phase:
+
+      probe_max:
+        if spike_count == 0:
+            _finish("No spike at the maximum amplitude "
+                    f"{max:g} {units}; increase the range."); return
+        self._high = max_amplitude
+        self._phase = "probe_min"; self._probe(min_amplitude); return
+
+      probe_min:
+        if spike_count > 0:
+            self._rheobase = min_amplitude
+            _finish(f"Neuron spikes already at the minimum amplitude "
+                    f"{min:g} {units}; rheobase <= minimum."); return
+        self._low = min_amplitude
+        self._phase = "bisect"; self._bisect_step(); return
+
+      bisect:
+        spiked = spike_count > 0
+        self._low, self._high = next_bracket(self._low, self._high,
+                                             self._pending_amplitude, spiked)
+        self._bisect_step()
+
+_bisect_step():
+    if bisection_converged(self._low, self._high, tolerance):
+        self._rheobase = self._high     # smallest confirmed spiking amplitude
+        self._update_plot()             # draw the rheobase marker
+        _finish(f"Rheobase ≈ {self._high:g} {units} "
+                f"(bracket [{self._low:g}, {self._high:g}])."); return
+    if self._iteration >= max_iterations:
+        self._rheobase = self._high
+        _finish("Maximum iterations reached; "
+                f"rheobase ≈ {self._high:g} {units}."); return
+    self._iteration += 1
+    mid = 0.5 * (self._low + self._high)
+    self._probe(mid)
+
+Log each probe: e.g. "Probe 3: amplitude 2.500 mV → 1 spike" /
+"→ no spike". Keep the numbers to a few significant figures.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+BLOCK LAYOUT — one probe = rest + pulse + observe
+────────────────────────────────────────────────────────────────────────────────────────────
+
+For stim `dt` seconds:
+    recovery_n = max(1, round(recovery_ms / 1000 / dt))     # rest BEFORE the pulse
+    pulse_n    = max(1, round(pulse_ms   / 1000 / dt))
+    tail_n     = max(1, round(response_window_ms / 1000 / dt))
+    samples    = recovery_n + pulse_n + tail_n
+    block = np.zeros((samples, stim.values.shape[1]), np.float32)
+    block[recovery_n : recovery_n + pulse_n, neuron_id] = amplitude
+    block_start = self._append_block(block)          # reused helper
+    self._pulse_onset_seconds = (block_start + recovery_n) * dt
+    self._run_to_sample(block_start + samples)
+
+The generous `recovery_n` lead matters: the framework never resets neuron
+state between blocks, so each probe must start from rest for the threshold to
+be meaningful. A neuron that just fired needs time to repolarise; 200 ms
+default is safe for the example models but is user-tunable.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+SPIKE MEASUREMENT
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    trace = project.get_data(cmb_trace.currentText(), TraceData)
+    (guard None → _finish with a message)
+    row = np.flatnonzero(trace.indices == neuron_id)
+        (empty → _finish f"Neuron {neuron_id} is not recorded in the trace.")
+    trace_mv = _to_mv(trace.traces[int(row[0])], trace.units)
+    dt_ms = 1000.0 * trace.dt
+    onset_ms  = 1000.0 * self._pulse_onset_seconds
+    start = max(0, int(np.floor(onset_ms / dt_ms)))
+    stop  = min(trace_mv.size,
+                int(np.ceil((onset_ms + response_window_ms) / dt_ms)) + 1)
+    spike_count = count_spikes(trace_mv[start:stop], threshold_mv)
+
+`_to_mv` is imported from the EPSP plugin
+(`neuroseq.resources.analysis_plugins.epsp_amplitudes`), same as the STDP
+dialog. It raises ValueError for a non-voltage trace — catch it and `_finish`
+with the message, do not crash.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+THE RHEOBASE PLOT
+────────────────────────────────────────────────────────────────────────────────────────────
+
+One MatplotlibWidget in the plot window, two stacked axes sharing nothing
+(different x units), created like the STDP dialog's gridspec:
+
+  Axis 1 — "Rheobase" (the headline plot):
+     x = tested amplitude (array units), y = spike count.
+     Plot the (amplitude, spike_count) points from self._samples SORTED by
+     amplitude. Draw non-spiking points as open markers and spiking points as
+     filled markers (or two scatter calls). When self._rheobase is not None,
+     draw a vertical dashed line at that amplitude and annotate it
+     ("rheobase ≈ …"). y-axis label "Spikes"; x-axis label
+     f"Stimulus amplitude ({units})".
+
+  Axis 2 — "Search" (convergence trajectory):
+     x = iteration index (1..N), y = tested amplitude, line+marker in probe
+     order (self._samples order, NOT sorted). Optionally shade the current
+     [low, high] bracket. y-axis label f"Amplitude ({units})"; x-axis label
+     "Probe".
+
+Style both axes through the same `_style_plot_axes`/`apply_theme` path the STDP
+dialog uses (theme face/text colours, grid alpha 0.25, integer x locator on the
+Search axis). Redraw on every `_update_plot()` and whenever the amplitude-range
+spin boxes change (so the deadband/axes track edits before a run), mirroring how
+the STDP dialog reconnects `spn_target`/`spn_tolerance.valueChanged`.
+
+A short status label under the plots (like the STDP dialog's
+`lbl_relative_difference`) reads e.g. "Rheobase ≈ 2.53 mV (bracket width 0.04)"
+or "waiting for first probe".
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+EDITOR WIRING — src/neuroseq/stim_editor.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1.  Add the routine to the selection list (lines ~65-66):
+
+        TARGETED_STDP_ROUTINE = "Targeted STDP synaptic strength"
+        RHEOBASE_ROUTINE = "Minimal stimulus for spiking (rheobase)"
+        DYNAMIC_INPUT_ROUTINES = (TARGETED_STDP_ROUTINE, RHEOBASE_ROUTINE)
+
+2.  `open_input_designer` (the routine-selection entry point, line ~988) already
+    shows a `QInputDialog.getItem` over `DYNAMIC_INPUT_ROUTINES`. Replace the
+    `if routine != TARGETED_STDP_ROUTINE: return` gate with a dispatch:
+
+        if routine == self.TARGETED_STDP_ROUTINE:
+            self._show_routine_dialog("_input_designer_dialog", InputDesignerDialog)
+        elif routine == self.RHEOBASE_ROUTINE:
+            self._show_routine_dialog("_rheobase_dialog", RheobaseDialog)
+
+    Factor the lazy-create + connect + theme + refresh + show/raise/activate
+    block (lines ~1003-1012) into `_show_routine_dialog(attr_name, cls)` so both
+    routines share it. Each created dialog has its `simulation_requested`
+    connected to `self.simulation_requested` (the editor's own signal), just as
+    the STDP dialog is today.
+
+3.  Track BOTH dialogs. Add `self._rheobase_dialog: RheobaseDialog | None = None`
+    next to `self._input_designer_dialog`. Make the three fan-out methods forward
+    to whichever routine dialogs exist (each dialog ignores the callback when it
+    is not running/awaiting, so forwarding to both is safe):
+
+        def _dynamic_input_dialogs(self):
+            return [d for d in (self._input_designer_dialog, self._rheobase_dialog)
+                    if d is not None]
+
+        def input_designer_simulation_finished(self):
+            for d in self._dynamic_input_dialogs(): d.simulation_finished()
+
+        def input_designer_simulation_failed(self, message):
+            for d in self._dynamic_input_dialogs(): d.simulation_failed(message)
+
+        def apply_input_designer_theme(self, theme):
+            self._input_designer_theme = theme
+            for d in self._dynamic_input_dialogs(): d.apply_theme(theme)
+
+        def discard_input_designer(self):    # called on project replace
+            for attr in ("_input_designer_dialog", "_rheobase_dialog"):
+                d = getattr(self, attr)
+                if d is not None:
+                    d.close(); d.deleteLater(); setattr(self, attr, None)
+
+    NOTE: keep the existing method NAMES (`input_designer_simulation_finished`
+    etc.) — gui.py calls them by those names and must not change. They are just
+    generalised to fan out.
+
+No gui.py changes are required: `_do_brian2_simulation_threaded`,
+`_on_brian2_finished`, and the busy-branch failure notification all already go
+through the editor methods above.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_rheobase.py (pure)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    test_count_spikes_counts_upward_crossings
+        # A trace resting at -70 with two AP-like excursions above -20 gives 2.
+        # A plateau that stays above -20 counts once. Sub-threshold bumps give 0.
+
+    test_count_spikes_short_or_empty_returns_zero
+
+    test_next_bracket_moves_high_down_on_spike
+        assert next_bracket(0.0, 4.0, 2.0, spiked=True) == (0.0, 2.0)
+    test_next_bracket_moves_low_up_on_no_spike
+        assert next_bracket(0.0, 4.0, 2.0, spiked=False) == (2.0, 4.0)
+    test_bisection_converged
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_rheobase_dialog.py (qtbot, closed-loop)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Pattern these on tests/test_input_designer_dialog.py — copy its `_FakeProject`
+and `_FakeEditor` doubles (the fake editor already has apply_pattern,
+focus_time_range, clear_stim_array, and a stim modifier). Drive the loop by
+calling `dialog.start()` then `dialog.simulation_finished()` repeatedly, and
+inject spike outcomes by monkeypatching the dialog's spike-measurement method
+(add a small `_measure_spikes(trace) -> int` seam so tests can patch it the way
+they patch `_measure_epsps`).
+
+    test_rheobase_brackets_then_bisects_to_threshold
+        # Fake spikes: amplitude >= 2.6 spikes, below does not. Range [0, 10],
+        # tolerance 0.1. Walk the loop; assert the reported rheobase is within
+        # tolerance of 2.6 and that every appended block put the amplitude only
+        # on the target neuron's column.
+
+    test_rheobase_reports_when_no_spike_at_max
+        # Fake: never spikes. First probe (max) yields 0 → routine finishes with
+        # the "increase the range" message; no bisection blocks appended.
+
+    test_rheobase_reports_when_spikes_at_min
+        # Fake: always spikes. probe_max spikes, probe_min spikes → finishes with
+        # "rheobase <= minimum".
+
+    test_rheobase_stops_when_dialog_closed
+        # start(), assert running, close(), assert not running (mirror the STDP
+        # closeEvent test).
+
+    test_rheobase_ignores_unrequested_simulation
+        # _awaiting_simulation guard: a stray simulation_finished does not append
+        # a block or advance the search.
+
+    test_rheobase_plot_marks_converged_rheobase
+        # After convergence, the "Rheobase" axis has a vertical line at the
+        # reported amplitude and the status label reports it.
+
+    test_rheobase_pulse_only_on_target_column
+        # neuron_id = 1; assert appended blocks are zero on column 0 and nonzero
+        # on column 1 during the pulse window.
+
+    test_rheobase_plots_open_in_separate_window
+        # dialog.epsp-equivalent plot canvas lives in dialog.plot_window (mirror
+        # the STDP separate-window test).
+
+Also add to tests/test_stim_editor.py (or extend the existing routine-selection
+tests):
+
+    test_open_dynamic_input_opens_rheobase_when_selected
+        # Monkeypatch QInputDialog.getItem to return
+        # (StimEditor.RHEOBASE_ROUTINE, True); assert stim_editor._rheobase_dialog
+        # is created and visible.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NOTES
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- Spike detection is voltage-threshold crossing in the recorded trace, NOT a
+  Brian2 SpikeMonitor. This keeps the routine dependent only on the same
+  StateMonitor the STDP routine already needs, and works with imported/replayed
+  traces. Reuse `_to_mv` for unit handling; do not re-implement unit parsing.
+
+- The neuron is stimulated through its own stim-array column and observed
+  through its own trace row — one `Neuron ID` field drives both. If the stim
+  array and the trace enumerate neurons differently in some project, that is the
+  user's responsibility (same assumption the STDP routine makes for pre/post IDs).
+
+- Bisection reports `self._high` (the smallest amplitude CONFIRMED to spike) as
+  the rheobase, so the reported value always spikes. The bracket is logged so the
+  user sees the resolution.
+
+- The 200 ms default recovery lead is deliberately generous. Document in the log
+  the first time a probe runs that Vm must rest between probes; if the neuron is
+  tonically active (spikes with zero stimulus), probe_min at the minimum amplitude
+  will already spike and the routine reports "rheobase <= minimum" — that is the
+  correct, honest outcome, not an error.
+
+- Follow the same wheel-guard + scrollable-params + separate-plot-window +
+  info-header + Clear-button structure the STDP dialog now has (added in recent
+  commits) so the two routines feel identical to use.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NON-GOALS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- STRENGTH–DURATION CURVE (threshold vs. pulse duration). One rheobase for one
+  configured pulse duration only. A follow-up routine can sweep durations and
+  reuse `count_spikes`.
+
+- f–I / GAIN CURVE beyond threshold. The plot shows spike count at the probed
+  amplitudes (which is f–I-like near threshold as a side effect), but the search
+  targets the first spike, not the full frequency–current relationship.
+
+- RESETTING neuron state between probes via Brian2 store/restore. The routine
+  relies on the recovery lead, consistent with the append-and-run-forward model
+  the framework already uses. Do not add checkpoint juggling.
+
+- A SHARED BASE CLASS with InputDesignerDialog. Reuse the two module-level
+  helpers (or lift them into `_dialog_helpers.py`); leave the STDP dialog's body
+  otherwise untouched.
+
+- CHANGING gui.py. The editor-level callback names are preserved specifically so
+  gui.py needs no edits.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    .venv/bin/ruff check src/neuroseq/rheobase.py src/neuroseq/rheobase_dialog.py \
+        src/neuroseq/stim_editor.py tests/test_rheobase.py tests/test_rheobase_dialog.py
+    .venv/bin/ruff format --check src/neuroseq/rheobase.py \
+        src/neuroseq/rheobase_dialog.py src/neuroseq/stim_editor.py \
+        tests/test_rheobase.py tests/test_rheobase_dialog.py
+    .venv/bin/mypy src/neuroseq/rheobase.py src/neuroseq/rheobase_dialog.py \
+        src/neuroseq/stim_editor.py
+    PYTHONPATH=src .venv/bin/python -m pytest \
+        tests/test_rheobase.py tests/test_rheobase_dialog.py \
+        tests/test_input_designer_dialog.py tests/test_stim_editor.py -v
+    PYTHONPATH=src .venv/bin/python -m pytest
+
+The STDP dialog's suite (test_input_designer_dialog.py) is listed explicitly:
+it must stay green, proving the shared-helper reuse / optional helper-module
+lift did not disturb the existing routine.
