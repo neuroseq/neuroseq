@@ -125,8 +125,10 @@ def test_rheobase_sweeping_strategy_controls(qtbot) -> None:
     assert dialog.spn_pulse_ms.value() == 10.0
     assert dialog.spn_max_pulse_ms.value() == 50.0
     assert dialog.spn_duration_tolerance_ms.value() == 1.0
+    assert dialog.lbl_amplitude_range.text() == "Pulse amplitude range/tolerance:"
     assert not dialog.spn_min_amplitude.isHidden()
     assert not dialog.spn_max_amplitude.isHidden()
+    assert not dialog.spn_tolerance.isHidden()
     assert dialog.spn_fixed_amplitude.isHidden()
 
     dialog.cmb_sweeping_strategy.setCurrentText(
@@ -134,6 +136,7 @@ def test_rheobase_sweeping_strategy_controls(qtbot) -> None:
     )
     assert dialog.spn_min_amplitude.isHidden()
     assert dialog.spn_max_amplitude.isHidden()
+    assert dialog.spn_tolerance.isHidden()
     assert not dialog.spn_fixed_amplitude.isHidden()
     assert not dialog.spn_max_pulse_ms.isHidden()
     assert not dialog.spn_duration_tolerance_ms.isHidden()
@@ -143,6 +146,7 @@ def test_rheobase_sweeping_strategy_controls(qtbot) -> None:
     )
     assert not dialog.spn_min_amplitude.isHidden()
     assert not dialog.spn_max_amplitude.isHidden()
+    assert not dialog.spn_tolerance.isHidden()
     assert dialog.spn_fixed_amplitude.isHidden()
     assert dialog.spn_max_pulse_ms.isHidden()
     assert dialog.spn_duration_tolerance_ms.isHidden()
