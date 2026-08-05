@@ -41,8 +41,8 @@ past.
 When **Start routine** is pressed, Design dynamic input performs the following
 sequence:
 
-1. Append five 1 ms pulses for the presynaptic neuron. Probe pulses are spaced
-   100 ms apart.
+1. Append five probe pulses (default 1 ms each) for the presynaptic neuron.
+   Probe pulses are spaced 100 ms apart.
 2. Continue the simulation through the appended block.
 3. Detect and average the five EPSP amplitudes in the postsynaptic voltage
    trace. This first average is the baseline and is defined as **100%**.
@@ -67,7 +67,8 @@ abs(current EPSP % - target EPSP %) < tolerance %
 | **Trace to analyze**                                                     | Simulation voltage trace containing the postsynaptic neuron                    |       First available trace |
 | **Presynaptic neuron ID**                                                | Stim-array column receiving probe pulses and the presynaptic side of a pairing |                         `0` |
 | **Postsynaptic neuron ID**                                               | Trace index used for EPSP measurement and the postsynaptic side of a pairing   |                         `1` |
-| **Pulse amplitude**                                                      | Value written into the selected stim array during each 1 ms pulse              |        `1.0` in array units |
+| **Pulse amplitude**                                                      | Value written into the selected stim array during each pulse                   |        `1.0` in array units |
+| **Pulse duration (ms)**                                                  | Width of every probe and pairing pulse                                         |                      `1 ms` |
 | **Pairing strategy**                                                     | Fixed timing with automatic direction, or adaptive signed timing               | Fixed pre-post pairing time |
 | **Pre-post pairing time**                                                | Fixed-strategy interval; pulse order is selected automatically                 |                     `30 ms` |
 | **Initial guess for pre-post pairing time**                              | Adaptive-strategy starting magnitude                                           |                     `30 ms` |
@@ -168,7 +169,8 @@ direction, termination, and errors.
 - The routine currently supports the built-in Brian2 simulation path.
 - The decision policy assumes excitatory EPSPs and an STDP model in which
   pre-before-post potentiates and post-before-pre depresses.
-- Probe timing is fixed to five 1 ms pulses at 100 ms intervals.
+- Probe timing is fixed to five pulses (of configurable duration) at 100 ms
+  intervals.
 - Only one selected stim array is modified, although NeuroSeq pads other arrays
   as needed to maintain a compatible project timeline.
 - EPSP detection requires a voltage `TraceData` object and a detectable response

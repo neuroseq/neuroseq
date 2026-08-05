@@ -178,6 +178,11 @@ class InputDesignerDialog(QtWidgets.QDialog):
         amplitude_row = QtWidgets.QHBoxLayout()
         amplitude_row.addWidget(self.spn_amplitude)
         amplitude_row.addWidget(self.lbl_units)
+        self.spn_pulse_ms = QtWidgets.QDoubleSpinBox(self)
+        self.spn_pulse_ms.setDecimals(3)
+        self.spn_pulse_ms.setRange(0.001, 1000.0)
+        self.spn_pulse_ms.setValue(self.PULSE_MS)
+        self.spn_pulse_ms.setSuffix(" ms")
         self.cmb_pairing_strategy = QtWidgets.QComboBox(self)
         self.cmb_pairing_strategy.addItems(
             [self.FIXED_PAIRING_STRATEGY, self.ADAPTIVE_PAIRING_STRATEGY]
@@ -232,6 +237,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         form.addRow("Presynaptic neuron ID:", self.spn_presynaptic)
         form.addRow("Postsynaptic neuron ID:", self.spn_postsynaptic)
         form.addRow("Pulse amplitude:", amplitude_row)
+        form.addRow("Pulse duration (ms):", self.spn_pulse_ms)
         form.addRow("Pairing strategy:", self.cmb_pairing_strategy)
         self.lbl_pairing_interval = QtWidgets.QLabel("Pre-post pairing time:", self)
         form.addRow(self.lbl_pairing_interval, self.spn_pairing_interval_ms)
@@ -500,7 +506,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
 
     def _append_probe(self) -> None:
         stim = self._require_stim()
-        pulse_n = max(1, round(self.PULSE_MS / 1000.0 / stim.dt))
+        pulse_n = max(1, round(self.spn_pulse_ms.value() / 1000.0 / stim.dt))
         lead_n = max(1, round(self.LEAD_MS / 1000.0 / stim.dt))
         period_n = max(pulse_n + 1, round(self.PROBE_PERIOD_MS / 1000.0 / stim.dt))
         tail_n = max(1, round(self.RESPONSE_TAIL_MS / 1000.0 / stim.dt))
@@ -523,7 +529,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
 
     def _append_pairing(self, potentiate: bool) -> None:
         stim = self._require_stim()
-        pulse_n = max(1, round(self.PULSE_MS / 1000.0 / stim.dt))
+        pulse_n = max(1, round(self.spn_pulse_ms.value() / 1000.0 / stim.dt))
         lead_n = max(1, round(self.LEAD_MS / 1000.0 / stim.dt))
         adaptive = (
             self.cmb_pairing_strategy.currentText() == self.ADAPTIVE_PAIRING_STRATEGY

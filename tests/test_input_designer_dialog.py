@@ -643,3 +643,18 @@ def test_input_designer_shows_stim_array_info_and_clear_button(qtbot) -> None:
     assert dialog.btn_clear.text() == "Clear stim array"
     dialog.btn_clear.click()
     assert editor.cleared == 1
+
+
+def test_input_designer_pulse_duration_controls_probe_width(qtbot) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+
+    assert dialog.spn_pulse_ms.value() == 1.0  # default = 1 ms
+
+    # dt = 1 ms, so a 3 ms pulse spans 3 samples; five probe pulses -> 15 samples.
+    dialog.spn_pulse_ms.setValue(3.0)
+    dialog.start()
+    probe = editor.calls[0]
+    assert np.count_nonzero(probe[:, 0]) == 5 * 3
