@@ -898,9 +898,29 @@ def test_open_input_designer_offers_routine_selection(
     stim_editor.open_input_designer()
 
     assert captured["title"] == "Design dynamic input"
-    assert captured["items"] == ["Targeted STDP synaptic strength"]
+    assert captured["items"] == [
+        "Targeted STDP synaptic strength",
+        "Minimal stimulus for spiking (rheobase)",
+    ]
     assert stim_editor._input_designer_dialog is not None
     assert stim_editor._input_designer_dialog.isVisible()
+    stim_editor.close()
+
+
+def test_open_input_designer_opens_rheobase_when_selected(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    stim_editor, _ = _make_ramp_editor(qtbot)
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog,
+        "getItem",
+        lambda *args: (StimEditor.RHEOBASE_ROUTINE, True),
+    )
+
+    stim_editor.open_input_designer()
+
+    assert stim_editor._rheobase_dialog is not None
+    assert stim_editor._rheobase_dialog.isVisible()
     stim_editor.close()
 
 
@@ -912,6 +932,7 @@ def test_open_input_designer_cancel_does_not_open_dialog(
     stim_editor.open_input_designer()
 
     assert stim_editor._input_designer_dialog is None
+    assert stim_editor._rheobase_dialog is None
     stim_editor.close()
 
 
@@ -926,12 +947,21 @@ def test_discard_input_designer_clears_cached_dialog(
     )
     stim_editor.open_input_designer()
     assert stim_editor._input_designer_dialog is not None
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog,
+        "getItem",
+        lambda *args: (StimEditor.RHEOBASE_ROUTINE, True),
+    )
+    stim_editor.open_input_designer()
+    assert stim_editor._rheobase_dialog is not None
 
     # Replacing the project must not carry the previous designer state over.
     stim_editor.discard_input_designer()
     assert stim_editor._input_designer_dialog is None
+    assert stim_editor._rheobase_dialog is None
 
     # Discarding again is a no-op and must not raise.
     stim_editor.discard_input_designer()
     assert stim_editor._input_designer_dialog is None
+    assert stim_editor._rheobase_dialog is None
     stim_editor.close()
