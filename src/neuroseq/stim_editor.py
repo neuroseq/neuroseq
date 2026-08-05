@@ -1140,7 +1140,7 @@ class StimEditor(QtWidgets.QWidget):
             icon="mdi6.repeat-variant",
         )
         add_action(
-            "Design static input (stimulaiton pattern)",
+            "Design static input",
             self.open_pattern_designer,
             menu,
             toolbar,
@@ -1148,7 +1148,7 @@ class StimEditor(QtWidgets.QWidget):
             icon=self._pattern_designer_icon(),
         )
         add_action(
-            "Input Designer (beta)",
+            "Design dynamic input",
             self.open_input_designer,
             menu,
             toolbar,

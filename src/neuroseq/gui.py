@@ -1541,7 +1541,7 @@ class Gui(QtWidgets.QMainWindow):
             if visible_time_range is not None:
                 self.controller.focus_time_range(*visible_time_range)
                 self.trace_controller.focus_time_range(*visible_time_range)
-            # Let Qt paint the newly refreshed trace before the Input Designer
+            # Let Qt paint the newly refreshed trace before Design dynamic input
             # appends and focuses the next stimulation block.
             QtCore.QTimer.singleShot(
                 0, self.stim_editor.input_designer_simulation_finished

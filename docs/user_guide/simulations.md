@@ -92,7 +92,7 @@ as a sample ruler.
 ## Pre-built stimulation patterns
 
 For common stimulation motifs you do not need to draw manually. The toolbar
-action **Design static input (stimulaiton pattern)** opens a generator dialog that writes
+action **Design static input** opens a generator dialog that writes
 patterns directly into the selected stim array:
 
 | Pattern         | Description                                                                       |
@@ -117,11 +117,11 @@ to overwrite, or **Reset start time** to rewind the cursor.
 
 ## Closed-loop input design
 
-**Input Designer (beta)** is a separate NeuroSeq feature for routines that
+**Design dynamic input** is a separate NeuroSeq feature for routines that
 extend a stim array, run a simulation, analyze its traces, and decide what to
 append next. Its first routine uses five-pulse EPSP measurements and STDP
 pairings to move a postsynaptic response toward a percentage target. See the
-dedicated [Input Designer guide](input_designer.md) for setup, controls, the
+dedicated [Design dynamic input guide](input_designer.md) for setup, controls, the
 decision algorithm, live plots, and current limitations.
 
 ## Looping a stim array

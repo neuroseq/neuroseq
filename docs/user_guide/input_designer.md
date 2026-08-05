@@ -1,21 +1,21 @@
-# Input Designer (beta)
+# Design dynamic input
 
-Input Designer is a closed-loop stimulation feature in NeuroSeq. Unlike
+Design dynamic input is a closed-loop stimulation feature in NeuroSeq. Unlike
 **Design static input**, which writes a complete pattern before a simulation,
-Input Designer repeatedly performs three operations:
+Design dynamic input repeatedly performs three operations:
 
 1. append stimulation to the selected stim array,
 2. continue the Brian2 simulation, and
 3. analyze the resulting voltage trace to decide what to append next.
 
 The first supported routine targets a postsynaptic EPSP amplitude by applying
-spike-timing-dependent plasticity (STDP) pairings. It is marked **beta** because
-the decision policy and protocol currently target this specific use case.
+spike-timing-dependent plasticity (STDP) pairings. The decision policy and
+protocol currently target this specific use case.
 
-## Opening Input Designer
+## Opening Design dynamic input
 
 Select the stim array that should receive the generated protocol, then click
-**Input Designer (beta)** in the stimulation-editor toolbar. The selected array
+**Design dynamic input** in the stimulation-editor toolbar. The selected array
 must have columns for both the pre- and postsynaptic neuron IDs.
 
 For a ready-to-run model, open:
@@ -29,14 +29,14 @@ In that example, use:
 - presynaptic neuron ID: `0`, and
 - postsynaptic neuron ID: `1`.
 
-Input Designer appends data; it does not clear an existing stim array. New
+Design dynamic input appends data; it does not clear an existing stim array. New
 blocks are placed after both the current array end and the current simulation
 time, so generated stimulation is never inserted into the already simulated
 past.
 
 ## Closed-loop routine
 
-When **Start routine** is pressed, Input Designer performs the following
+When **Start routine** is pressed, Design dynamic input performs the following
 sequence:
 
 1. Append five 1 ms pulses for the presynaptic neuron. Probe pulses are spaced
@@ -72,7 +72,7 @@ abs(current EPSP % - target EPSP %) < tolerance %
 | **dt increment**                                                         | Adaptive-strategy change applied to the signed pairing time each iteration     |                      `1 ms` |
 | **Target relative EPSP amplitude**                                       | Desired EPSP relative to the first five-pulse baseline                         |                      `120%` |
 | **Tolerance window (deadband)**                                          | Maximum absolute distance from the target that counts as success               |                        `1%` |
-| **Maximum plasticity induction interations**                             | Safety limit for closed-loop iterations                                        |                        `20` |
+| **Maximum plasticity induction iterations**                              | Safety limit for closed-loop iterations                                        |                        `20` |
 | **Run until the last iteration regardless of convergence to the target** | Ignore early convergence and continue until the maximum pairing count          |                    Disabled |
 | **Follow new input on each iteration**                                   | Move the synchronized timeline camera to each appended block                   |                     Enabled |
 | **Visible history**                                                      | Number of generated-block lengths kept visible throughout execution            |                         `3` |
@@ -82,7 +82,7 @@ Set **Visible history** to `0` to show only the newly appended block. Disable
 
 Normally, entering the tolerance stops the routine immediately. Enable **Run
 until the last iteration regardless of convergence to the target** to keep
-applying induction pairings until **Maximum plasticity induction interations** is reached.
+applying induction pairings until **Maximum plasticity induction iterations** is reached.
 Convergence is still measured and recorded in the log while this override is
 active.
 
@@ -102,7 +102,7 @@ post below target and negative/post-before-pre above target.
 
 ## EPSP measurement
 
-Input Designer reuses NeuroSeq's existing **EPSP amplitudes** analysis plugin.
+Design dynamic input reuses NeuroSeq's existing **EPSP amplitudes** analysis plugin.
 The plugin:
 
 - converts supported voltage units to millivolts,
@@ -110,7 +110,7 @@ The plugin:
 - measures amplitude relative to a local pre-peak baseline, and
 - rejects action-potential-sized peaks.
 
-Input Designer associates detections with the five known probe times and uses
+Design dynamic input associates detections with the five known probe times and uses
 their mean as the current EPSP amplitude. If the selected trace does not record
 the postsynaptic neuron, or if an EPSP cannot be detected after every probe,
 the routine stops and reports the reason in its log.
@@ -119,14 +119,14 @@ the routine stops and reports the reason in its log.
 
 A freshly loaded model may not expose its simulation trace names until Brian2
 has initialized the network. If no trace is available when the routine starts,
-Input Designer opens **Create stimulation trace monitor** and offers to run a
+Design dynamic input opens **Create stimulation trace monitor** and offers to run a
 short initialization simulation.
 
 - default duration: `0.001 s`,
 - precision: three decimal places,
 - minimum duration: `0.001 s`.
 
-After the initialization run, Input Designer refreshes the trace list and
+After the initialization run, Design dynamic input refreshes the trace list and
 starts the EPSP routine automatically. If no trace becomes available, add a
 Brian2 `StateMonitor` for the membrane-voltage variable in **File → Edit
 model**, then try again.

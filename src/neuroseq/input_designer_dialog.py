@@ -94,7 +94,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self._theme = theme_module.LIGHT
         self._expanded_height: int | None = None
         self._compact_height: int | None = None
-        self.setWindowTitle("Input Designer (beta)")
+        self.setWindowTitle("Design dynamic input")
         self.resize(800, 940)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -202,9 +202,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         form.addRow(self.lbl_pairing_increment, self.spn_pairing_increment_ms)
         form.addRow("Target relative EPSP amplitude:", self.spn_target)
         form.addRow("Tolerance window (deadband):", self.spn_tolerance)
-        form.addRow(
-            "Maximum plasticity induction interations:", self.spn_max_iterations
-        )
+        form.addRow("Maximum plasticity induction iterations:", self.spn_max_iterations)
         form.addRow("Stopping rule:", self.chk_run_all_iterations)
         form.addRow("Live view:", self.chk_follow_input)
         form.addRow("Visible history:", self.spn_history_blocks)
@@ -563,7 +561,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
             self._finish("EPSP is within tolerance; target achieved.")
             return
         if self._iteration >= self.spn_max_iterations.value():
-            self._finish("Maximum plasticity induction interations reached.")
+            self._finish("Maximum plasticity induction iterations reached.")
             return
         if converged:
             self._append_log(
