@@ -72,6 +72,8 @@ def default_project() -> Project:
     ### optogenetics parameters
     b2_model.define_parameter("Eeopto", 0 * b2.mV)
     b2_model.define_parameter("Eiopto", -80 * b2.mV)
+    b2_model.define_parameter("g_exc", 0.25 * b2.nS)
+    b2_model.define_parameter("g_inh", 0.25 * b2.nS)
 
     b2_model.define_parameter("we", 6 * b2.nS)
     b2_model.define_parameter("wi", 67 * b2.nS)
@@ -86,8 +88,8 @@ dn/dt = alpha_n*(1-n)-beta_n*n : 1
 dh/dt = alpha_h*(1-h)-beta_h*h : 1
 dge/dt = -ge*(1./taue) : siemens
 dgi/dt = -gi*(1./taui) : siemens
-giopto = stimulus_inh(t, i): siemens
-geopto = stimulus(t, i): siemens
+giopto = g_inh * stimulus_inh(t, i): siemens
+geopto = g_exc * stimulus(t, i): siemens
 alpha_m = 0.32*(mV**-1)*4*mV/exprel((13*mV-v+VT)/(4*mV))/ms : Hz
 beta_m = 0.28*(mV**-1)*5*mV/exprel((v-VT-40*mV)/(5*mV))/ms : Hz
 alpha_h = 0.128*exp((17*mV-v+VT)/(18*mV))/ms : Hz
@@ -181,7 +183,7 @@ we= clip(we + Apre, -gmax, gmax)
         name="stimulus",
         stim_type=StimType.Excitation,
         values=stim,
-        units="siemens",
+        units="1",
         dt=stim_dt,
     )
     project.add_stim_array(stim_array)
@@ -192,7 +194,7 @@ we= clip(we + Apre, -gmax, gmax)
         name="stimulus_inh",
         stim_type=StimType.Inhibition,
         values=stim_inh,
-        units="siemens",
+        units="1",
         dt=0.001,
     )
     project.add_stim_array(stim_array_inh)

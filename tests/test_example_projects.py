@@ -54,7 +54,13 @@ def test_default_project_uses_10_neurons_and_sequential_stimulus() -> None:
 
     stimulus = project.stim_arrays["stimulus"]
     assert stimulus.values.shape == (1180, 10)
+    assert stimulus.units == "1"
+    assert project.stim_arrays["stimulus_inh"].units == "1"
     assert project.b2_model.neurongroups["P"]["neuronnumber"] == 10
+    assert project.b2_model.parameters["g_exc"] == 0.25 * b2.nS
+    assert project.b2_model.parameters["g_inh"] == 0.25 * b2.nS
+    assert "g_exc * stimulus(t, i)" in project.b2_model.neurongroups["P"]["model"]
+    assert "g_inh * stimulus_inh(t, i)" in project.b2_model.neurongroups["P"]["model"]
 
     pulse_n = int(round(0.100 / stimulus.dt))
     gap_n = int(round(0.018 / stimulus.dt))
