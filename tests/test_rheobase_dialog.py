@@ -121,7 +121,7 @@ def test_rheobase_brackets_then_bisects_to_threshold(qtbot, monkeypatch) -> None
 
     assert dialog._rheobase is not None
     assert 2.6 <= dialog._rheobase <= 2.6 + dialog.spn_tolerance.value()
-    assert tested[:2] == [10.0, 0.0]
+    assert tested[:2] == [100.0, 1.0]
     assert len(editor.calls) == len(tested)
     for block in editor.calls:
         assert np.count_nonzero(block[:, 1]) == 0
@@ -155,6 +155,8 @@ def test_rheobase_sweeping_strategy_controls(qtbot) -> None:
     assert dialog.spn_pulse_ms.value() == 10.0
     assert dialog.spn_max_pulse_ms.value() == 50.0
     assert dialog.spn_duration_tolerance_ms.value() == 1.0
+    assert dialog.spn_min_amplitude.value() == 1.0
+    assert dialog.spn_max_amplitude.value() == 100.0
     assert dialog.lbl_amplitude_range.text() == "Pulse amplitude range/tolerance:"
     assert not dialog.spn_min_amplitude.isHidden()
     assert not dialog.spn_max_amplitude.isHidden()
