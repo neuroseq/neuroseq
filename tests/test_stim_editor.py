@@ -880,3 +880,36 @@ def test_stim_editor_actions(
     assert stim_editor.current_stim_modifier.stim_array.values[16, 7] == approx(0)
     assert stim_editor.current_stim_modifier.stim_array.values[17, 7] == approx(0)
     stim_editor.close()
+
+
+def test_open_input_designer_offers_routine_selection(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    stim_editor, _ = _make_ramp_editor(qtbot)
+    captured: dict[str, Any] = {}
+
+    def fake_get_item(parent, title, label, items, current, editable):
+        del parent, current, editable
+        captured["title"] = title
+        captured["items"] = list(items)
+        return (StimEditor.TARGETED_STDP_ROUTINE, True)
+
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getItem", fake_get_item)
+    stim_editor.open_input_designer()
+
+    assert captured["title"] == "Design dynamic input"
+    assert captured["items"] == ["Targeted STDP synaptic strength"]
+    assert stim_editor._input_designer_dialog is not None
+    assert stim_editor._input_designer_dialog.isVisible()
+    stim_editor.close()
+
+
+def test_open_input_designer_cancel_does_not_open_dialog(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    stim_editor, _ = _make_ramp_editor(qtbot)
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getItem", lambda *args: ("", False))
+    stim_editor.open_input_designer()
+
+    assert stim_editor._input_designer_dialog is None
+    stim_editor.close()

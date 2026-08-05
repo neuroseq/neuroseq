@@ -15,8 +15,10 @@ protocol currently target this specific use case.
 ## Opening Design dynamic input
 
 Select the stim array that should receive the generated protocol, then click
-**Design dynamic input** in the stimulation-editor toolbar. The selected array
-must have columns for both the pre- and postsynaptic neuron IDs.
+**Design dynamic input** in the stimulation-editor toolbar. A prompt asks which
+design routine to run; choose **Targeted STDP synaptic strength** (the only
+routine currently implemented) to open the designer. The selected array must
+have columns for both the pre- and postsynaptic neuron IDs.
 
 For a ready-to-run model, open:
 

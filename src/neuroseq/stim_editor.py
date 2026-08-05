@@ -59,6 +59,12 @@ class StimEditor(QtWidgets.QWidget):
     simulation_requested = QtCore.Signal(float)
     time_range_focus_requested = QtCore.Signal(float, float)
 
+    # Dynamic-input routines offered when the user opens the designer. Only the
+    # targeted-STDP routine is implemented so far; the selection exists so more
+    # routines can be added without changing the toolbar entry point.
+    TARGETED_STDP_ROUTINE = "Targeted STDP synaptic strength"
+    DYNAMIC_INPUT_ROUTINES = (TARGETED_STDP_ROUTINE,)
+
     def __init__(
         self,
         controller: ConstrainedPanZoomController,
@@ -981,6 +987,18 @@ class StimEditor(QtWidgets.QWidget):
 
     def open_input_designer(self) -> None:
         if self.current_stim_modifier is None or self.project is None:
+            return
+        routine, ok = QtWidgets.QInputDialog.getItem(
+            self,
+            "Design dynamic input",
+            "Design routine:",
+            list(self.DYNAMIC_INPUT_ROUTINES),
+            0,
+            False,
+        )
+        if not ok:
+            return
+        if routine != self.TARGETED_STDP_ROUTINE:
             return
         if self._input_designer_dialog is None:
             self._input_designer_dialog = InputDesignerDialog(self, self)
