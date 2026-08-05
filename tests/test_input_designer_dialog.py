@@ -344,16 +344,11 @@ def test_input_designer_initializes_missing_trace_then_starts_protocol(
     editor = _FakeEditor(project)
     dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
-    input_arguments: list[tuple] = []
-
-    def get_duration(*args):
-        input_arguments.append(args)
-        return 0.00149, True
 
     monkeypatch.setattr(
         QtWidgets.QInputDialog,
         "getDouble",
-        get_duration,
+        lambda *args: pytest.fail("trace initialization should be silent"),
     )
     requested: list[float] = []
     dialog.simulation_requested.connect(requested.append)
@@ -361,8 +356,6 @@ def test_input_designer_initializes_missing_trace_then_starts_protocol(
     dialog.start()
 
     assert requested == [0.001]
-    assert input_arguments[0][4] == 0.001
-    assert input_arguments[0][6] == 3
     assert dialog._phase == "initialize_trace"
     project.trace_available = True
     dialog.simulation_finished()

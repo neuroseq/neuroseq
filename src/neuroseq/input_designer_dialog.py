@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+from typing import cast
 
 import brian2.numpy_ as np
 from matplotlib.ticker import MultipleLocator
@@ -316,14 +317,21 @@ class InputDesignerDialog(QtWidgets.QDialog):
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Close
         )
-        self.btn_start = buttons.addButton(
-            "Start routine", QtWidgets.QDialogButtonBox.ButtonRole.ActionRole
+        self.btn_start = cast(
+            QtWidgets.QPushButton,
+            buttons.addButton(
+                "Start routine", QtWidgets.QDialogButtonBox.ButtonRole.ActionRole
+            ),
         )
-        self.btn_stop = buttons.addButton(
-            "Stop", QtWidgets.QDialogButtonBox.ButtonRole.ActionRole
+        self.btn_stop = cast(
+            QtWidgets.QPushButton,
+            buttons.addButton("Stop", QtWidgets.QDialogButtonBox.ButtonRole.ActionRole),
         )
-        self.btn_clear = buttons.addButton(
-            "Clear stim array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
+        self.btn_clear = cast(
+            QtWidgets.QPushButton,
+            buttons.addButton(
+                "Clear stim array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
+            ),
         )
         self.btn_stop.setEnabled(False)
         self.btn_start.clicked.connect(self.start)
@@ -350,9 +358,9 @@ class InputDesignerDialog(QtWidgets.QDialog):
         if hidden:
             self._expanded_height = self.height()
             panel_height = self.parameters_scroll.height()
-            self._compact_height = max(
-                1, self.height() - panel_height - self.layout().spacing()
-            )
+            dialog_layout = self.layout()
+            spacing = dialog_layout.spacing() if dialog_layout is not None else 0
+            self._compact_height = max(1, self.height() - panel_height - spacing)
         self.parameters_scroll.setVisible(not hidden)
         self.btn_toggle_parameters.setText(
             "Show parameters" if hidden else "Hide parameters"
@@ -377,7 +385,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         if height is not None:
             self.resize(self.width(), max(height, self.minimumSizeHint().height()))
 
-    def showEvent(self, event: QtGui.QShowEvent) -> None:
+    def showEvent(self, event: QtGui.QShowEvent | None) -> None:
         super().showEvent(event)
         # The plots live in a separate window; bring it up alongside the dialog.
         self.plot_window.show()
@@ -386,7 +394,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
             self.plot_window.move(self.x() + self.width() + 20, self.y())
         self.plot_window.raise_()
 
-    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+    def closeEvent(self, event: QtGui.QCloseEvent | None) -> None:
         # The dialog is cached and reused, so closing only hides it. Stop any
         # running routine first, otherwise it would keep consuming simulation
         # callbacks while hidden and resume mid-run when reopened.
@@ -395,9 +403,13 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.plot_window.close()
         super().closeEvent(event)
 
-    def changeEvent(self, event: QtCore.QEvent) -> None:
+    def changeEvent(self, event: QtCore.QEvent | None) -> None:
         super().changeEvent(event)
-        if event.type() == QtCore.QEvent.Type.WindowStateChange and self.isMinimized():
+        if (
+            event is not None
+            and event.type() == QtCore.QEvent.Type.WindowStateChange
+            and self.isMinimized()
+        ):
             QtCore.QTimer.singleShot(0, self._position_minimized_window)
 
     def _position_minimized_window(self) -> None:
@@ -446,20 +458,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
             self._append_log("No stimulation array is selected.")
             return
         if not self.cmb_trace.currentText():
-            duration, accepted = QtWidgets.QInputDialog.getDouble(
-                self,
-                "Create stimulation trace monitor",
-                "No simulation trace monitor is available. Run an initial "
-                "simulation to create trace monitors.\nSimulation time (seconds):",
-                0.001,
-                0.001,
-                1_000_000.0,
-                3,
-            )
-            if not accepted:
-                self._append_log("Trace-monitor initialization cancelled.")
-                return
-            duration = round(duration, 3)
+            duration = 0.001
             self._running = True
             self._phase = "initialize_trace"
             self.btn_start.setEnabled(False)

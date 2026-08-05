@@ -407,7 +407,7 @@ def test_rheobase_initializes_missing_trace_then_starts_search(
     monkeypatch.setattr(
         QtWidgets.QInputDialog,
         "getDouble",
-        lambda *args: (0.00149, True),
+        lambda *args: pytest.fail("trace initialization should be silent"),
     )
     requested: list[float] = []
     dialog.simulation_requested.connect(requested.append)

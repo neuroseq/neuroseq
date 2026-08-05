@@ -423,20 +423,7 @@ class RheobaseDialog(QtWidgets.QDialog):
             self._append_log("No stimulation array is selected.")
             return
         if not self.cmb_trace.currentText():
-            duration, accepted = QtWidgets.QInputDialog.getDouble(
-                self,
-                "Create stimulation trace monitor",
-                "No simulation trace monitor is available. Run an initial "
-                "simulation to create trace monitors.\nSimulation time (seconds):",
-                0.001,
-                0.001,
-                1_000_000.0,
-                3,
-            )
-            if not accepted:
-                self._append_log("Trace-monitor initialization cancelled.")
-                return
-            duration = round(duration, 3)
+            duration = 0.001
             self._running = True
             self._phase = "initialize_trace"
             self.btn_start.setEnabled(False)
