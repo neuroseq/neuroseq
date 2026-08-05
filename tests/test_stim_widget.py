@@ -520,3 +520,27 @@ def test_stim_widget_ext_stims(
     assert stim_widget.vmax == pytest.approx(3.0)
     stim_widget.close()
     qtbot.waitUntil(lambda: not stim_widget.isVisible())
+
+
+def test_stim_widget_minimum_size_overlay_not_rebuilt_while_hidden(
+    qtbot: QtBot,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    values = np.zeros((1000, 2))
+    values[500, 1] = 1.0
+    stim_widget.set_data(
+        StimArray("short", StimType.Excitation, values, "mV", dt=0.001)
+    )
+
+    stim_widget.set_keep_short_stimuli_visible(False)
+    hidden_graphic = stim_widget.minimum_size_graphic
+    # An edit while the overlay is hidden must not rebuild the invisible scatter.
+    stim_widget.update_data_slice(slice(0, 2), slice(0, 1), np.zeros((1, 2)))
+    assert stim_widget.minimum_size_graphic is hidden_graphic
+
+    # Once visible again, an edit refreshes the overlay (a new graphic object).
+    stim_widget.set_keep_short_stimuli_visible(True)
+    stim_widget.update_data_slice(slice(0, 2), slice(10, 11), np.ones((1, 2)))
+    assert stim_widget.minimum_size_graphic is not hidden_graphic

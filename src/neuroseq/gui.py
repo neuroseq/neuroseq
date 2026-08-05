@@ -97,7 +97,6 @@ class ToolbarProgressWidget(QtWidgets.QWidget):
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.cancel_button)
         layout.addWidget(self.label)
-        self._auto_close = True
         self.cancel_button.hide()
         self.hide()
 
@@ -132,9 +131,10 @@ class ToolbarProgressWidget(QtWidgets.QWidget):
         self.progress_bar.setRange(minimum, maximum)
 
     def setValue(self, value: int) -> None:
+        # Do not auto-hide when the bar reaches its maximum: progress callbacks
+        # can legitimately report 100% before an operation is fully done, and
+        # every operation hides the bar explicitly via reset() at teardown.
         self.progress_bar.setValue(value)
-        if self._auto_close and value >= self.progress_bar.maximum():
-            self.hide()
 
     def value(self) -> int:
         return self.progress_bar.value()
@@ -148,8 +148,11 @@ class ToolbarProgressWidget(QtWidgets.QWidget):
         if button is None:
             self.cancel_button.hide()
 
-    def setAutoClose(self, enabled: bool) -> None:
-        self._auto_close = enabled
+    def setAutoClose(self, _enabled: bool) -> None:
+        # No-op: the bar is never auto-hidden on reaching its maximum; teardown
+        # paths hide it explicitly via reset(). Kept for QProgressDialog API
+        # compatibility.
+        pass
 
     def setAutoReset(self, _enabled: bool) -> None:
         # Resetting is explicitly managed by the operation teardown paths.

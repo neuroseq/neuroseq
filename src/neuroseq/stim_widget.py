@@ -266,12 +266,18 @@ class StimWidget(TimeseriesWidget):
             # directly update the relevant data in the graphic's texture
             self.graphic.data[neuron_slice, time_slice] = texture_values
             self.autoscale_colormap()
-            if self.minimum_size_graphic is not None:
-                self.subplot.remove_graphic(self.minimum_size_graphic)
-            if self.data_values is not None:
-                self.minimum_size_graphic = self._add_minimum_size_graphic(
-                    self.data_values, self.dt_ms, self.stim_type
-                )
+            # Rebuilding the screen-size overlay scans the whole array and
+            # recreates a scatter graphic. Skip that while the overlay is hidden
+            # so interactive drawing does not pay the cost for an invisible
+            # graphic; it is refreshed on the next edit once shown again.
+            if self.keep_short_stimuli_visible:
+                if self.minimum_size_graphic is not None:
+                    self.subplot.remove_graphic(self.minimum_size_graphic)
+                    self.minimum_size_graphic = None
+                if self.data_values is not None:
+                    self.minimum_size_graphic = self._add_minimum_size_graphic(
+                        self.data_values, self.dt_ms, self.stim_type
+                    )
 
     def set_hover_slice(self, data: np.ndarray | None) -> None:
         """Set the slice of data (if any) to be displayed at the current mouse position."""

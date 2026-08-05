@@ -548,3 +548,15 @@ def test_input_designer_measures_dominant_epsp_not_earlier_blip(qtbot) -> None:
 
     # The larger EPSP (~6 mV) is selected, not the ~2 mV early blip.
     assert measurement.amplitude > 4.0
+
+
+def test_input_designer_pulse_amplitude_minimum_is_positive(qtbot) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+
+    assert dialog.spn_amplitude.minimum() > 0.0
+    # The spin box must clamp an attempt to set zero up to its positive minimum.
+    dialog.spn_amplitude.setValue(0.0)
+    assert dialog.spn_amplitude.value() > 0.0

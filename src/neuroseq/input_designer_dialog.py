@@ -135,7 +135,10 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.spn_postsynaptic.setMinimum(0)
         self.spn_postsynaptic.setValue(1)
         self.spn_amplitude = QtWidgets.QDoubleSpinBox(self)
-        self.spn_amplitude.setRange(0.0, 1e12)
+        self.spn_amplitude.setDecimals(3)
+        # A positive minimum: a zero-amplitude probe evokes no EPSP and dead-ends
+        # the routine at the measurement step.
+        self.spn_amplitude.setRange(0.001, 1e12)
         self.spn_amplitude.setValue(1.0)
         self.lbl_units = QtWidgets.QLabel(self)
         amplitude_row = QtWidgets.QHBoxLayout()
@@ -186,8 +189,10 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.spn_history_blocks.setValue(3)
         self.spn_history_blocks.setSuffix(" blocks")
         self.spn_history_blocks.setToolTip(
-            "Number of generated-block lengths to keep visible. Zero shows only "
-            "the newest block."
+            "Live-view width, in multiples of a five-pulse probe-block length, "
+            "held constant as blocks are appended so the view does not jitter "
+            "when shorter pairing blocks are added. Zero shows one probe-block "
+            "length (the newest block)."
         )
         form.addRow("Trace to analyze:", self.cmb_trace)
         form.addRow("Presynaptic neuron ID:", self.spn_presynaptic)
@@ -507,6 +512,10 @@ class InputDesignerDialog(QtWidgets.QDialog):
         )
         if self.chk_follow_input.isChecked():
             if self._view_block_samples is None:
+                # Size the live view in units of the first (probe) block so its
+                # width stays constant as blocks are appended; using each block's
+                # own length would make the view jitter when the shorter pairing
+                # blocks are added.
                 self._view_block_samples = block.shape[0]
             visible_blocks = max(1, self.spn_history_blocks.value())
             visible_samples = visible_blocks * self._view_block_samples

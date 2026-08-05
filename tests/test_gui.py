@@ -2686,3 +2686,25 @@ def test_brian2_busy_notifies_input_designer(
     assert dropped
     gui._io_worker = None
     gui.close()
+
+
+def test_toolbar_progress_does_not_auto_hide_at_maximum(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    gui.show()
+    qtbot.waitUntil(gui.isVisible)
+    pd = gui.progress_dialog
+    pd.setRange(0, 100)
+    pd.setValue(50)
+    pd.show()
+    qtbot.wait(10)  # let the deferred show settle (offscreen QPA)
+
+    # Reaching the maximum must not hide the bar mid-operation.
+    pd.setValue(100)
+    assert pd.isVisible()
+    assert pd.value() == 100
+
+    # Teardown still hides it explicitly.
+    pd.reset()
+    assert pd.isHidden()
+    gui.close()
