@@ -965,6 +965,16 @@ class StimEditor(QtWidgets.QWidget):
         if pattern_dialog is not None:
             pattern_dialog.reset_start_time()
 
+    def clear_all_stim_arrays(self) -> None:
+        """Zero every stim array in the project through the undoable pathway."""
+        if self.project is None:
+            return
+        for name in list(self.stims_dict.keys()):
+            modifier = self.stims_dict[name]
+            self.replace_stim_values_with_undo(
+                name, np.zeros_like(modifier.stim_array.values)
+            )
+
     def _current_pattern_context(self) -> StimPatternContext:
         if self.current_stim_modifier is None:
             raise ValueError("No current stim array selected.")

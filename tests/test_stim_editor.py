@@ -965,3 +965,27 @@ def test_discard_input_designer_clears_cached_dialog(
     assert stim_editor._input_designer_dialog is None
     assert stim_editor._rheobase_dialog is None
     stim_editor.close()
+
+
+def test_clear_all_stim_arrays_zeroes_every_array(qtbot: QtBot) -> None:
+    project = Project()
+    project.stim_arrays = {
+        "a": StimArray(
+            "a", neuroseq.stim.StimType.Excitation, np.ones((5, 3)), "mV", 0.001
+        ),
+        "b": StimArray(
+            "b", neuroseq.stim.StimType.Inhibition, np.full((5, 3), 2.0), "mV", 0.001
+        ),
+    }
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.set_project(project)
+
+    stim_editor.clear_all_stim_arrays()
+
+    for stim in project.stim_arrays.values():
+        assert not np.any(stim.values)
+    stim_editor.close()

@@ -22,16 +22,8 @@ class _FakeProject:
             "mV",
             0.001,
         )
-        self.stored_checkpoints: list[str] = []
-        self.restored_checkpoints: list[str] = []
-        self.network = SimpleNamespace(
-            store=self.stored_checkpoints.append,
-            restore=self.restored_checkpoints.append,
-        )
-        self.b2_model = SimpleNamespace(
-            get_sim_time_secs=lambda: 0.0,
-            network=self.network,
-        )
+        self.stim_arrays: dict[str, StimArray] = {}
+        self.b2_model = SimpleNamespace(get_sim_time_secs=lambda: 0.0)
 
     def get_data_names(self, data_type: type[TraceData]) -> list[str]:
         assert data_type is TraceData
@@ -57,6 +49,7 @@ class _FakeEditor:
         self.calls: list[np.ndarray] = []
         self.time_slices: list[slice] = []
         self.cleared = 0
+        self.cleared_all = 0
         self.focused_ranges: list[tuple[float, float]] = []
         self.controller = SimpleNamespace(
             focus_time_range=lambda start, stop: self.focused_ranges.append(
@@ -69,6 +62,10 @@ class _FakeEditor:
 
     def clear_stim_array(self) -> None:
         self.cleared += 1
+
+    def clear_all_stim_arrays(self) -> None:
+        self.cleared_all += 1
+        self.current_stim_modifier.stim_array.values[:] = 0.0
 
     def apply_pattern(
         self, neuron_slice: slice, time_slice: slice, values: np.ndarray
@@ -83,6 +80,8 @@ class _FakeEditor:
 def _make_dialog(qtbot) -> tuple[_FakeProject, _FakeEditor, RheobaseDialog]:
     project = _FakeProject()
     editor = _FakeEditor(project)
+    stim = editor.current_stim_modifier.stim_array
+    project.stim_arrays = {stim.name: stim}
     dialog = RheobaseDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     return project, editor, dialog
@@ -127,8 +126,8 @@ def test_rheobase_brackets_then_bisects_to_threshold(qtbot, monkeypatch) -> None
         assert np.count_nonzero(block[:, 1]) == 0
 
 
-def test_rheobase_restores_probe_baseline_each_iteration(qtbot, monkeypatch) -> None:
-    project, editor, dialog = _make_dialog(qtbot)
+def test_rheobase_appends_each_probe_forward(qtbot, monkeypatch) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
     _use_fixed_duration_strategy(dialog)
     monkeypatch.setattr(
         dialog, "_measure_spikes", lambda trace: int(dialog._pending_amplitude >= 2.6)
@@ -138,12 +137,12 @@ def test_rheobase_restores_probe_baseline_each_iteration(qtbot, monkeypatch) -> 
     dialog.start()
     _finish_search(dialog)
 
-    assert len(project.stored_checkpoints) == 1
-    assert project.stored_checkpoints[0].startswith("Rheobase baseline ")
-    assert project.restored_checkpoints == project.stored_checkpoints * len(
-        editor.calls
-    )
-    assert {time_slice.start for time_slice in editor.time_slices} == {0}
+    starts = [time_slice.start for time_slice in editor.time_slices]
+    # Each probe is appended after the previous one (STDP-style), never
+    # overwriting a fixed region, so block starts strictly increase.
+    assert starts == sorted(starts)
+    assert len(set(starts)) == len(starts)
+    assert starts[0] >= 10  # after the pre-existing 10-sample stim array
 
 
 def test_rheobase_sweeping_strategy_controls(qtbot) -> None:
@@ -445,3 +444,105 @@ def test_rheobase_matplotlib_plots_follow_theme(qtbot) -> None:
     dialog.apply_theme(theme.LIGHT)
     assert to_hex(dialog.rheobase_axes.get_facecolor()) == "#ffffff"
     assert to_hex(dialog.search_axes.get_facecolor()) == "#ffffff"
+
+
+def test_rheobase_no_warning_when_all_stim_arrays_empty(qtbot, monkeypatch) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    _use_fixed_duration_strategy(dialog)
+    monkeypatch.setattr(
+        dialog,
+        "_prompt_existing_input_choice",
+        lambda names: pytest.fail("no prompt expected for empty stim arrays"),
+    )
+    monkeypatch.setattr(dialog, "_measure_spikes", lambda trace: 1)
+
+    dialog.start()
+
+    assert editor.cleared_all == 0
+    assert len(editor.calls) >= 1
+
+
+def test_rheobase_cancel_keeps_existing_input(qtbot, monkeypatch) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    _use_fixed_duration_strategy(dialog)
+    editor.current_stim_modifier.stim_array.values[0, 0] = 1.0
+    monkeypatch.setattr(dialog, "_prompt_existing_input_choice", lambda names: "cancel")
+    monkeypatch.setattr(dialog, "_measure_spikes", lambda trace: 1)
+
+    dialog.start()
+
+    assert not dialog._running
+    assert editor.calls == []
+    assert editor.cleared_all == 0
+    assert "existing stimulation input kept" in dialog.log.toPlainText()
+
+
+def test_rheobase_clear_all_before_start(qtbot, monkeypatch) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    _use_fixed_duration_strategy(dialog)
+    editor.current_stim_modifier.stim_array.values[0, 0] = 1.0
+    monkeypatch.setattr(dialog, "_prompt_existing_input_choice", lambda names: "clear")
+    monkeypatch.setattr(dialog, "_measure_spikes", lambda trace: 1)
+
+    dialog.start()
+
+    assert editor.cleared_all == 1
+    assert len(editor.calls) >= 1
+    # The pre-existing input was zeroed before the routine appended its probes.
+    assert editor.current_stim_modifier.stim_array.values[0, 0] == 0.0
+
+
+def test_rheobase_append_anyway_keeps_input(qtbot, monkeypatch) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    _use_fixed_duration_strategy(dialog)
+    editor.current_stim_modifier.stim_array.values[0, 0] = 1.0
+    monkeypatch.setattr(dialog, "_prompt_existing_input_choice", lambda names: "append")
+    monkeypatch.setattr(dialog, "_measure_spikes", lambda trace: 1)
+
+    dialog.start()
+
+    assert editor.cleared_all == 0
+    assert len(editor.calls) >= 1
+
+
+def test_rheobase_estimate_updates_with_settings(qtbot) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    _use_fixed_duration_strategy(dialog)
+    dialog.spn_min_amplitude.setValue(0.0)
+    dialog.spn_max_amplitude.setValue(8.0)
+    dialog.spn_tolerance.setValue(1.0)
+
+    # span 8, tol 1 -> 3 bisections + 2 bracket probes.
+    assert dialog._estimated_probe_count() == 5
+    assert "~5" in dialog.lbl_estimate.text()
+
+    dialog.spn_max_amplitude.setValue(16.0)  # span 16 -> 4 bisections.
+    assert dialog._estimated_probe_count() == 6
+    assert "~6" in dialog.lbl_estimate.text()
+
+
+def test_rheobase_estimate_scales_with_duration_sweep(qtbot) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    dialog.cmb_sweeping_strategy.setCurrentText(dialog.AMPLITUDE_AND_DURATION_STRATEGY)
+    dialog.spn_min_amplitude.setValue(0.0)
+    dialog.spn_max_amplitude.setValue(8.0)
+    dialog.spn_tolerance.setValue(1.0)
+    dialog.spn_pulse_ms.setValue(0.0)
+    dialog.spn_max_pulse_ms.setValue(8.0)
+    dialog.spn_duration_tolerance_ms.setValue(1.0)
+
+    # A full amplitude search (5) per duration stage (2 + 3 bisections).
+    assert dialog._estimated_probe_count() == (2 + 3) * 5
+
+
+def test_rheobase_response_window_scales_with_pulse_duration(qtbot) -> None:
+    project, _editor, dialog = _make_dialog(qtbot)
+    dialog.spn_neuron.setValue(1)
+    dialog.spn_response_ms.setValue(20.0)
+    dialog._current_duration_ms = 10.0
+    dialog._pulse_onset_seconds = 0.1  # 100 ms; window is [100, 130] ms.
+    project.trace.traces[1] = -70.0
+    project.trace.traces[1, 105:107] = 25.0  # inside the window.
+    project.trace.traces[1, 160:162] = 25.0  # after the window, must be ignored.
+
+    assert dialog._measure_spikes(project.trace) == 1
