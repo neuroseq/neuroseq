@@ -145,6 +145,7 @@ Apost += dApost
 we= clip(we + Apre, -gmax, gmax)
 """
     b2_model.define_synapse_post("Ce", ce_on_post)
+    b2_model.define_init("Ce", "we", "6*nS")
 
     # initial conditions
     b2_model.define_init("P", "v", "El + (randn() * 5 - 5)*mV")

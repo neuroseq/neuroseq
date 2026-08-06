@@ -59,6 +59,7 @@ def test_default_project_uses_10_neurons_and_sequential_stimulus() -> None:
     assert project.b2_model.neurongroups["P"]["neuronnumber"] == 10
     assert project.b2_model.parameters["g_exc"] == 0.25 * b2.nS
     assert project.b2_model.parameters["g_inh"] == 0.25 * b2.nS
+    assert project.b2_model.initials["Ce"]["we"] == "6*nS"
     assert "g_exc * stimulus(t, i)" in project.b2_model.neurongroups["P"]["model"]
     assert "g_inh * stimulus_inh(t, i)" in project.b2_model.neurongroups["P"]["model"]
 
