@@ -32,3 +32,13 @@ def classify_window(delta_t_ms: float) -> str:
     if delta_t_ms < 0.0:
         return "LTD"
     return "none"
+
+
+def interleave_by_magnitude(values: list[float]) -> list[float]:
+    """Order Δt values by increasing magnitude, alternating sign.
+
+    A continuous (no-reset) sweep accumulates weight change; visiting the
+    smallest offsets first and alternating LTD/LTP keeps the running weight
+    near baseline instead of driving it monotonically into saturation.
+    """
+    return sorted(values, key=lambda value: (abs(value), value))

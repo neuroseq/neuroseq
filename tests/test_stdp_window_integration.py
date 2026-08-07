@@ -69,6 +69,8 @@ def test_stdp_window_closed_loop_measures_ltd_and_ltp_on_real_model(
 
     dialog.simulation_requested.connect(run)
 
+    # Continuous mode: append-and-run-forward, no checkpoints.
+    dialog.cmb_sweep_mode.setCurrentText(dialog.CONTINUOUS_MODE)
     dialog.spn_presynaptic.setValue(0)
     dialog.spn_postsynaptic.setValue(1)
     dialog.spn_dt_min_ms.setValue(-30.0)
@@ -114,6 +116,8 @@ def test_stdp_window_weight_readout_measures_ltd_and_ltp(qtbot, monkeypatch) -> 
 
     dialog.simulation_requested.connect(run)
 
+    # Reset mode (the default): each Δt is measured from the baseline weight via
+    # a store/restore checkpoint, giving a clean window on the real synapse.
     dialog.cmb_readout.setCurrentText(dialog.WEIGHT_READOUT)
     dialog.refresh()
     dialog.spn_presynaptic.setValue(0)
@@ -137,4 +141,5 @@ def test_stdp_window_weight_readout_measures_ltd_and_ltp(qtbot, monkeypatch) -> 
     for block in editor.calls:
         assert np.count_nonzero(block[:, 0]) > 0
         assert np.count_nonzero(block[:, 1]) > 0
-    assert b2_model.checkpoints == ["Initial state"]
+    # Reset mode stored a baseline checkpoint and restored it before each point.
+    assert any("STDP window baseline" in name for name in b2_model.checkpoints)

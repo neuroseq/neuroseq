@@ -11,9 +11,19 @@ pairing, as a function of the spike-timing difference Δt = t_post − t_pre.
 depression (LTD).
 
 Unlike the other two routines it is **not** a converging search — it is a
-**deterministic sweep** over a fixed Δt grid. State handling is **append +
-run-forward with a recovery lead, no `store`/`restore`** (the model standardised
-on for rheobase).
+**deterministic sweep** over a fixed Δt grid, with two selectable **sweep
+modes**:
+
+- **Reset to baseline each Δt** (default) — `store()` a baseline checkpoint once,
+  `restore()` before every Δt so each point measures one pairing from the
+  identical state; percent change is vs the fixed baseline. Blocks overwrite a
+  fixed region (the clock is rewound). This is the clean textbook window and is
+  the only mode that gives a physically meaningful curve on a real synapse — a
+  single running synapse accumulates and saturates, distorting the window.
+- **Continuous (interleaved, no reset)** — append-and-run-forward with a recovery
+  lead, no `store`/`restore`; Δt visited interleaved by magnitude (small offsets
+  first, alternating sign) to keep the running weight near baseline; percent
+  change is vs the current (drifting) value. Shows cumulative-induction dynamics.
 
 Two selectable **readouts**:
 

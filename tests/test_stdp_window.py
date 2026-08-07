@@ -2,6 +2,7 @@ import pytest
 
 from neuroseq.stdp_window import classify_window
 from neuroseq.stdp_window import delta_t_sweep
+from neuroseq.stdp_window import interleave_by_magnitude
 from neuroseq.stdp_window import percent_change
 
 
@@ -39,3 +40,12 @@ def test_classify_window_sign() -> None:
     assert classify_window(20.0) == "LTP"
     assert classify_window(-20.0) == "LTD"
     assert classify_window(0.0) == "none"
+
+
+def test_interleave_by_magnitude_alternates_sign() -> None:
+    assert interleave_by_magnitude([-100.0, -50.0, 50.0, 100.0]) == [
+        -50.0,
+        50.0,
+        -100.0,
+        100.0,
+    ]

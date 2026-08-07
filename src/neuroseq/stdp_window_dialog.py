@@ -20,6 +20,7 @@ from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import detect_epsps
 from neuroseq.stdp_window import classify_window
 from neuroseq.stdp_window import delta_t_sweep
+from neuroseq.stdp_window import interleave_by_magnitude
 from neuroseq.stdp_window import percent_change
 
 if TYPE_CHECKING:
@@ -48,6 +49,12 @@ class StdpWindowDialog(QtWidgets.QDialog):
     # feedback inhibition, so it works on recurrent networks.
     EPSP_READOUT = "EPSP amplitude change (%)"
     WEIGHT_READOUT = "Synaptic weight change (%)"
+    # Sweep modes. Reset restores a baseline checkpoint before each Δt so every
+    # point measures one pairing from the identical state (the clean textbook
+    # window). Continuous keeps one running synapse (shows cumulative drift) and
+    # visits Δt interleaved by magnitude to stay near baseline.
+    RESET_MODE = "Reset to baseline each Δt (independent points)"
+    CONTINUOUS_MODE = "Continuous sweep (interleaved, no reset)"
 
     def __init__(
         self,
@@ -71,6 +78,9 @@ class StdpWindowDialog(QtWidgets.QDialog):
         self._epsp_trajectory: list[float] = []
         self._probe_pulse_times: list[float] = []
         self._view_block_samples: int | None = None
+        self._checkpoint: str | None = None
+        self._baseline_sample = 0
+        self._point_start = 0
         self._theme = theme_module.LIGHT
         self._expanded_height: int | None = None
         self._compact_height: int | None = None
@@ -112,10 +122,12 @@ class StdpWindowDialog(QtWidgets.QDialog):
         parameters_layout.setContentsMargins(0, 0, 0, 0)
         parameters_layout.setSpacing(6)
         note = QtWidgets.QLabel(
-            "Sweep pre/post spike timing and measure the synaptic change after "
-            "each pairing. Use a suprathreshold pulse amplitude (the rheobase "
-            "routine can estimate one). The EPSP readout needs a clean "
-            "postsynaptic EPSP, so it suits an isolated pair (e.g. the two-neuron "
+            "Sweep pre/post spike timing and measure the synaptic change per "
+            "pairing. Use a suprathreshold pulse amplitude (the rheobase routine "
+            "can estimate one). Reset mode measures each Δt independently from the "
+            "baseline weight — the clean textbook window; continuous mode keeps "
+            "one running synapse and shows cumulative drift. The EPSP readout "
+            "needs a clean postsynaptic EPSP (isolated pair, e.g. the two-neuron "
             "plasticity example); on recurrent networks use the weight readout.",
             self.parameters_panel,
         )
@@ -124,6 +136,8 @@ class StdpWindowDialog(QtWidgets.QDialog):
         form = QtWidgets.QFormLayout()
         self.cmb_readout = QtWidgets.QComboBox(self)
         self.cmb_readout.addItems([self.EPSP_READOUT, self.WEIGHT_READOUT])
+        self.cmb_sweep_mode = QtWidgets.QComboBox(self)
+        self.cmb_sweep_mode.addItems([self.RESET_MODE, self.CONTINUOUS_MODE])
         self.cmb_trace = QtWidgets.QComboBox(self)
         self.cmb_synapse = QtWidgets.QComboBox(self)
         self.spn_presynaptic = QtWidgets.QSpinBox(self)
@@ -183,6 +197,7 @@ class StdpWindowDialog(QtWidgets.QDialog):
         self.spn_history_blocks.setSuffix(" blocks")
 
         form.addRow("Readout:", self.cmb_readout)
+        form.addRow("Sweep mode:", self.cmb_sweep_mode)
         self.lbl_trace = QtWidgets.QLabel("Trace to analyze:", self)
         form.addRow(self.lbl_trace, self.cmb_trace)
         self.lbl_synapse = QtWidgets.QLabel("Synapse weight:", self)
@@ -233,6 +248,9 @@ class StdpWindowDialog(QtWidgets.QDialog):
             else:
                 widget.valueChanged.connect(lambda _value: self._update_estimate())
         self.cmb_readout.currentIndexChanged.connect(self._on_readout_changed)
+        self.cmb_sweep_mode.currentIndexChanged.connect(
+            lambda _index: self._update_estimate()
+        )
 
         self.plot_window = QtWidgets.QDialog(self)
         self.plot_window.setWindowTitle("STDP timing window (LTP/LTD vs Δt) — plots")
@@ -421,6 +439,9 @@ class StdpWindowDialog(QtWidgets.QDialog):
     def _weight_mode(self) -> bool:
         return self._readout() == self.WEIGHT_READOUT
 
+    def _reset_mode(self) -> bool:
+        return self.cmb_sweep_mode.currentText() == self.RESET_MODE
+
     def _on_readout_changed(self, _index: int) -> None:
         self._update_readout_controls()
 
@@ -510,6 +531,7 @@ class StdpWindowDialog(QtWidgets.QDialog):
         self._probe_pulse_times = []
         self._view_block_samples = None
         self._saturation_warned = False
+        self._checkpoint = None
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         if clear_log:
@@ -523,6 +545,15 @@ class StdpWindowDialog(QtWidgets.QDialog):
             "rheobase first if needed."
         )
         self._update_plot()
+        if self._reset_mode():
+            stim = self._require_stim()
+            project = self._require_project()
+            self._baseline_sample = int(
+                np.ceil(project.b2_model.get_sim_time_secs() / stim.dt)
+            )
+            self._point_start = self._baseline_sample
+            self._checkpoint = f"STDP window baseline {id(self)}"
+            project.b2_model.store(self._checkpoint)
         if self._weight_mode():
             weight = self._read_synapse_weight()
             if weight is None:
@@ -567,7 +598,7 @@ class StdpWindowDialog(QtWidgets.QDialog):
             block[offset : offset + pulse_n, self.spn_presynaptic.value()] = (
                 self.spn_amplitude.value()
             )
-        block_start = self._append_block(block)
+        block_start = self._place_block(block)
         self._probe_pulse_times = [
             (block_start + offset) * stim.dt for offset in pulse_offsets
         ]
@@ -597,14 +628,28 @@ class StdpWindowDialog(QtWidgets.QDialog):
         block[lead_n + gap_n : lead_n + gap_n + pulse_n, second] = (
             self.spn_amplitude.value()
         )
-        block_start = self._append_block(block)
+        block_start = self._place_block(block)
         self._run_to_sample(block_start + samples)
 
-    def _append_block(self, block: np.ndarray) -> int:
+    def _restore_baseline(self) -> None:
+        """Reset mode: rewind the network to the baseline checkpoint."""
+        if self._checkpoint is not None:
+            self._require_project().b2_model.restore(self._checkpoint)
+        self._point_start = self._baseline_sample
+
+    def _place_block(self, block: np.ndarray) -> int:
         stim = self._require_stim()
         project = self._require_project()
-        current_sample = int(np.ceil(project.b2_model.get_sim_time_secs() / stim.dt))
-        start = max(stim.values.shape[0], current_sample)
+        if self._reset_mode():
+            # Overwrite a fixed region: the clock was rewound by _restore_baseline,
+            # and blocks within a point are laid down consecutively from there.
+            start = self._point_start
+            self._point_start = start + block.shape[0]
+        else:
+            current_sample = int(
+                np.ceil(project.b2_model.get_sim_time_secs() / stim.dt)
+            )
+            start = max(stim.values.shape[0], current_sample)
         self.editor.apply_pattern(
             slice(0, stim.values.shape[1]), slice(start, start + block.shape[0]), block
         )
@@ -732,11 +777,10 @@ class StdpWindowDialog(QtWidgets.QDialog):
             )
         else:
             self._epsp_trajectory.append(measurement.amplitude)
-            percent = percent_change(
-                self._last_epsp, measurement.amplitude, self._baseline_epsp
-            )
+            percent = self._percent_for(measurement.amplitude)
             self._results.append((delta_t, percent))
-            self._last_epsp = measurement.amplitude
+            if not self._reset_mode():
+                self._last_epsp = measurement.amplitude
             self._append_log(f"Δt {delta_t:+.3g} ms → {percent:+.3f}% EPSP ({label}).")
             self._maybe_warn_saturation(measurement.amplitude)
         self._update_plot()
@@ -753,13 +797,23 @@ class StdpWindowDialog(QtWidgets.QDialog):
         delta_t = self._pending_delta_t
         label = classify_window(delta_t)
         self._epsp_trajectory.append(weight)
-        percent = percent_change(self._last_epsp, weight, self._baseline_epsp)
+        percent = self._percent_for(weight)
         self._results.append((delta_t, percent))
-        self._last_epsp = weight
+        if not self._reset_mode():
+            self._last_epsp = weight
         self._append_log(f"Δt {delta_t:+.3g} ms → {percent:+.3f}% weight ({label}).")
         self._maybe_warn_saturation(weight)
         self._update_plot()
         self._advance_point()
+
+    def _percent_for(self, measure: float) -> float:
+        """Percent change: from the fixed baseline (reset) or the running
+        value (continuous)."""
+        baseline = self._baseline_epsp
+        last = self._last_epsp
+        assert baseline is not None and last is not None
+        reference = baseline if self._reset_mode() else last
+        return percent_change(reference, measure, reference)
 
     def _advance_point(self) -> None:
         self._index += 1
@@ -775,6 +829,8 @@ class StdpWindowDialog(QtWidgets.QDialog):
     def _begin_point(self) -> None:
         self._pending_delta_t = self._delta_ts[self._index]
         self._pairing_repeat = 0
+        if self._reset_mode():
+            self._restore_baseline()
         self._apply_next_pairing()
 
     def _apply_next_pairing(self) -> None:
@@ -845,12 +901,17 @@ class StdpWindowDialog(QtWidgets.QDialog):
             )
 
     def _current_delta_t_values(self) -> list[float]:
-        return delta_t_sweep(
+        values = delta_t_sweep(
             self.spn_dt_min_ms.value(),
             self.spn_dt_max_ms.value(),
             self.spn_dt_points.value(),
             self.chk_include_zero.isChecked(),
         )
+        if not self._reset_mode():
+            # Continuous sweep drifts, so visit offsets interleaved by magnitude
+            # to keep the running weight near baseline.
+            values = interleave_by_magnitude(values)
+        return values
 
     def _estimated_probe_count(self) -> int:
         n_points = len(self._current_delta_t_values())

@@ -30,7 +30,13 @@ class _FakeProject:
         self.traces = {self.trace.name: self.trace}
         self.synapses: dict[str, SynapseData] = {}
         self.stim_arrays: dict[str, StimArray] = {}
-        self.b2_model = SimpleNamespace(get_sim_time_secs=lambda: 0.0)
+        self.stored_checkpoints: list[str] = []
+        self.restored_checkpoints: list[str] = []
+        self.b2_model = SimpleNamespace(
+            get_sim_time_secs=lambda: 0.0,
+            store=self.stored_checkpoints.append,
+            restore=self.restored_checkpoints.append,
+        )
 
     def get_data_names(self, data_type: type) -> list[str]:
         if data_type is TraceData:
@@ -116,20 +122,22 @@ def _finish_sweep(dialog: StdpWindowDialog, limit: int = 200) -> None:
 def _patch_directional_measurement(
     monkeypatch, dialog: StdpWindowDialog, baseline: float = 2.0
 ) -> list[str]:
+    # Reset-mode friendly: the measured EPSP depends only on the current Δt
+    # (each point is independent), so LTP/LTD signs hold regardless of order.
     phases: list[str] = []
-    epsp = baseline
 
     def measure(trace: TraceData) -> EPSPMeasurement:
-        nonlocal epsp
         del trace
         phases.append(dialog._phase)
         if dialog._phase == "baseline_probe":
-            epsp = baseline
+            value = baseline
         elif dialog._pending_delta_t > 0.0:
-            epsp += 0.2
+            value = baseline + 0.2
         elif dialog._pending_delta_t < 0.0:
-            epsp -= 0.2
-        return EPSPMeasurement(epsp, (epsp,) * 5)
+            value = baseline - 0.2
+        else:
+            value = baseline
+        return EPSPMeasurement(value, (value,) * 5)
 
     monkeypatch.setattr(dialog, "_measure_epsps", measure)
     return phases
@@ -186,8 +194,9 @@ def test_pairings_per_point_applies_n_pairings_then_one_probe(
     assert "pairing 3/3" in dialog.log.toPlainText()
 
 
-def test_appends_each_block_forward(qtbot, monkeypatch) -> None:
+def test_continuous_mode_appends_each_block_forward(qtbot, monkeypatch) -> None:
     _project, editor, dialog = _make_dialog(qtbot)
+    dialog.cmb_sweep_mode.setCurrentText(dialog.CONTINUOUS_MODE)
     dialog.spn_dt_points.setValue(3)
     _patch_directional_measurement(monkeypatch, dialog)
 
@@ -197,6 +206,26 @@ def test_appends_each_block_forward(qtbot, monkeypatch) -> None:
     starts = [time_slice.start for time_slice in editor.time_slices]
     assert starts == sorted(starts)
     assert len(starts) == len(set(starts))
+    # No checkpoints in continuous mode.
+    assert _project.stored_checkpoints == []
+
+
+def test_reset_mode_restores_baseline_and_overwrites_region(qtbot, monkeypatch) -> None:
+    project, editor, dialog = _make_dialog(qtbot)  # reset is the default
+    dialog.spn_dt_points.setValue(3)
+    _patch_directional_measurement(monkeypatch, dialog)
+
+    dialog.start()
+    _finish_sweep(dialog)
+
+    # A baseline checkpoint is stored once and restored before each Δt point.
+    assert len(project.stored_checkpoints) == 1
+    assert len(project.restored_checkpoints) == len(dialog._results)
+    # Each point overwrites the same fixed region, so the pairing blocks reuse a
+    # small set of start samples rather than marching forward indefinitely.
+    starts = [time_slice.start for time_slice in editor.time_slices]
+    assert min(starts) == 0
+    assert max(starts) < sum(block.shape[0] for block in editor.calls)
 
 
 def test_pairing_only_on_pre_and_post_columns(qtbot, monkeypatch) -> None:
@@ -391,16 +420,13 @@ def test_weight_readout_sweeps_without_probes(qtbot, monkeypatch) -> None:
     dialog.spn_dt_max_ms.setValue(100.0)
     dialog.spn_dt_points.setValue(5)
 
-    weight = 6.0
-
     def read_weight() -> float:
-        nonlocal weight
-        # Baseline read happens before any pairing (pending Δt still 0).
+        # Reset mode: weight after one pairing depends only on the current Δt.
         if dialog._pending_delta_t > 0.0:
-            weight += 0.5
-        elif dialog._pending_delta_t < 0.0:
-            weight -= 0.5
-        return weight
+            return 6.5
+        if dialog._pending_delta_t < 0.0:
+            return 5.5
+        return 6.0  # baseline read (pending Δt still 0)
 
     monkeypatch.setattr(dialog, "_read_synapse_weight", read_weight)
 
