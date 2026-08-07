@@ -63,6 +63,19 @@ def milliseconds_to_samples_nearest(
     return seconds_to_samples_nearest(float(duration_milliseconds) / 1000.0, dt_seconds)
 
 
+def snap_milliseconds_to_dt(
+    time_ms: float,
+    dt_seconds: float,
+    minimum_samples: int = 1,
+) -> tuple[int, float]:
+    """Return the dt-snapped sample count and effective millisecond duration."""
+    n_samples = max(
+        int(minimum_samples),
+        milliseconds_to_samples_nearest(time_ms, dt_seconds),
+    )
+    return n_samples, samples_to_milliseconds(n_samples, dt_seconds)
+
+
 def format_milliseconds(time_ms: float | int) -> str:
     value = float(time_ms)
     rounded = round(value)

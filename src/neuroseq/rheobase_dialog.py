@@ -18,6 +18,8 @@ from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
 from neuroseq.rheobase import bisection_converged
 from neuroseq.rheobase import count_spikes
 from neuroseq.rheobase import next_bracket
+from neuroseq.stim_timing import samples_to_milliseconds
+from neuroseq.stim_timing import snap_milliseconds_to_dt
 
 if TYPE_CHECKING:
     from neuroseq.project import Project
@@ -66,6 +68,7 @@ class RheobaseDialog(QtWidgets.QDialog):
         self._expanded_height: int | None = None
         self._compact_height: int | None = None
         self._logged_recovery_note = False
+        self._resolution_warning_logged = False
         self.setWindowTitle("Minimal stimulus for spiking (rheobase)")
         self.resize(640, 620)
 
@@ -470,10 +473,12 @@ class RheobaseDialog(QtWidgets.QDialog):
         self._chronaxie_ms = None
         self._fixed_spiking_duration_ms = None
         self._logged_recovery_note = False
+        self._resolution_warning_logged = False
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         if clear_log:
             self.log.clear()
+        self._maybe_log_duration_resolution_warning()
         self._append_log(
             f"Estimated simulations for the current settings: "
             f"~{self._estimated_probe_count()}."
@@ -498,7 +503,7 @@ class RheobaseDialog(QtWidgets.QDialog):
     def _begin_duration_search(self, duration_ms: float, description: str) -> None:
         min_amplitude = self.spn_min_amplitude.value()
         max_amplitude = self.spn_max_amplitude.value()
-        self._current_duration_ms = duration_ms
+        self._current_duration_ms = self._effective_duration_ms(duration_ms)
         self._low = min_amplitude
         self._high = max_amplitude
         self._iteration = 0
@@ -517,7 +522,7 @@ class RheobaseDialog(QtWidgets.QDialog):
     def _probe_fixed_amplitude_duration(
         self, duration_ms: float, description: str
     ) -> None:
-        self._current_duration_ms = duration_ms
+        self._current_duration_ms = self._effective_duration_ms(duration_ms)
         self._phase = "duration_probe"
         self._append_log(
             f"Testing fixed amplitude {self.spn_fixed_amplitude.value():.6g} "
@@ -540,15 +545,58 @@ class RheobaseDialog(QtWidgets.QDialog):
             raise RuntimeError("No project is available.")
         return self.project
 
+    def _one_sample_ms(self) -> float:
+        return samples_to_milliseconds(1, self._require_stim().dt)
+
+    def _duration_tolerance_ms(self) -> float:
+        return max(self.spn_duration_tolerance_ms.value(), self._one_sample_ms())
+
+    def _effective_duration_ms(self, duration_ms: float) -> float:
+        _samples, effective_ms = snap_milliseconds_to_dt(
+            duration_ms, self._require_stim().dt
+        )
+        return effective_ms
+
+    def _duration_threshold_exists(self, duration_ms: float) -> bool:
+        return any(
+            abs(existing_duration - duration_ms) <= 1e-9
+            for existing_duration, _threshold in self._thresholds
+        )
+
+    def _duration_already_sampled(self, duration_ms: float) -> bool:
+        return any(
+            abs(existing_duration - duration_ms) <= 1e-9
+            for existing_duration, _amplitude, _spike_count in self._samples
+        )
+
+    def _maybe_log_duration_resolution_warning(self) -> None:
+        if self._resolution_warning_logged:
+            return
+        one_sample_ms = self._one_sample_ms()
+        if self.spn_duration_tolerance_ms.value() >= one_sample_ms:
+            return
+        self._resolution_warning_logged = True
+        self._append_log(
+            f"Stim dt is {one_sample_ms:.6g} ms; durations are snapped to that "
+            "grid, so finer tolerances cannot be resolved."
+        )
+
     def _probe(self, amplitude: float) -> None:
         stim = self._require_stim()
         neuron_id = self.spn_neuron.value()
         if neuron_id >= stim.values.shape[1]:
             self._finish(f"Neuron {neuron_id} is outside the stimulation array.")
             return
-        recovery_n = max(1, round(self.spn_recovery_ms.value() / 1000.0 / stim.dt))
-        pulse_n = max(1, round(self._current_duration_ms / 1000.0 / stim.dt))
-        tail_n = max(1, round(self.spn_response_ms.value() / 1000.0 / stim.dt))
+        recovery_n, _recovery_ms = snap_milliseconds_to_dt(
+            self.spn_recovery_ms.value(), stim.dt
+        )
+        pulse_n, effective_ms = snap_milliseconds_to_dt(
+            self._current_duration_ms, stim.dt
+        )
+        self._current_duration_ms = effective_ms
+        tail_n, _tail_ms = snap_milliseconds_to_dt(
+            self.spn_response_ms.value(), stim.dt
+        )
         samples = recovery_n + pulse_n + tail_n
         block = np.zeros((samples, stim.values.shape[1]), dtype=np.float32)
         block[recovery_n : recovery_n + pulse_n, neuron_id] = amplitude
@@ -699,13 +747,19 @@ class RheobaseDialog(QtWidgets.QDialog):
     def _bisect_fixed_amplitude_duration(self) -> None:
         if (
             self._duration_high_ms - self._duration_low_ms
-            <= self.spn_duration_tolerance_ms.value()
+            <= self._duration_tolerance_ms()
         ):
             self._fixed_spiking_duration_ms = self._duration_high_ms
             self._update_plot()
             self._finish(self._final_fixed_amplitude_summary())
             return
         mid = 0.5 * (self._duration_low_ms + self._duration_high_ms)
+        snapped_mid = self._effective_duration_ms(mid)
+        if self._duration_already_sampled(snapped_mid):
+            self._fixed_spiking_duration_ms = self._duration_high_ms
+            self._update_plot()
+            self._finish(self._final_fixed_amplitude_summary())
+            return
         self._probe_fixed_amplitude_duration(mid, "duration bisection")
 
     def _bisect_step(self) -> None:
@@ -772,13 +826,19 @@ class RheobaseDialog(QtWidgets.QDialog):
     def _bisect_strength_duration(self) -> None:
         if (
             self._duration_high_ms - self._duration_low_ms
-            <= self.spn_duration_tolerance_ms.value()
+            <= self._duration_tolerance_ms()
         ):
             self._update_strength_duration_metrics()
             self._update_plot()
             self._finish(self._final_summary())
             return
         mid = 0.5 * (self._duration_low_ms + self._duration_high_ms)
+        snapped_mid = self._effective_duration_ms(mid)
+        if self._duration_threshold_exists(snapped_mid):
+            self._update_strength_duration_metrics()
+            self._update_plot()
+            self._finish(self._final_summary())
+            return
         self._begin_duration_search(mid, "duration bisection")
 
     def _update_strength_duration_metrics(self) -> None:

@@ -546,3 +546,40 @@ def test_rheobase_response_window_scales_with_pulse_duration(qtbot) -> None:
     project.trace.traces[1, 160:162] = 25.0  # after the window, must be ignored.
 
     assert dialog._measure_spikes(project.trace) == 1
+
+
+def test_strength_duration_points_snap_to_dt_grid(qtbot, monkeypatch) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    _use_fixed_duration_strategy(dialog)
+    dialog.spn_pulse_ms.setValue(15.4)
+    monkeypatch.setattr(dialog, "_measure_spikes", lambda trace: 1)
+
+    dialog.start()
+    _finish_search(dialog)
+
+    assert {duration for duration, _amp, _count in dialog._samples} == {15.0}
+    assert dialog._thresholds == [(15.0, dialog.spn_min_amplitude.value())]
+
+
+def test_duration_bisection_stops_at_one_sample(qtbot, monkeypatch) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    dialog.spn_pulse_ms.setValue(10.0)
+    dialog.spn_max_pulse_ms.setValue(12.0)
+    dialog.spn_duration_tolerance_ms.setValue(0.01)
+    dialog.spn_tolerance.setValue(0.5)
+    dialog.spn_min_amplitude.setValue(0.0)
+    dialog.spn_max_amplitude.setValue(8.0)
+
+    def measure(trace: TraceData) -> int:
+        del trace
+        threshold = 20.0 / dialog._current_duration_ms
+        return int(dialog._pending_amplitude >= threshold)
+
+    monkeypatch.setattr(dialog, "_measure_spikes", measure)
+
+    dialog.start()
+    _finish_search(dialog)
+
+    threshold_durations = {duration for duration, _threshold in dialog._thresholds}
+    assert threshold_durations <= {10.0, 11.0, 12.0}
+    assert "durations are snapped" in dialog.log.toPlainText()

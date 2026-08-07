@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from math import copysign
 from typing import TYPE_CHECKING
 from typing import cast
 
@@ -22,6 +23,8 @@ from neuroseq.stdp_window import classify_window
 from neuroseq.stdp_window import delta_t_sweep
 from neuroseq.stdp_window import interleave_by_magnitude
 from neuroseq.stdp_window import percent_change
+from neuroseq.stim_timing import samples_to_milliseconds
+from neuroseq.stim_timing import snap_milliseconds_to_dt
 
 if TYPE_CHECKING:
     from neuroseq.project import Project
@@ -86,6 +89,7 @@ class StdpWindowDialog(QtWidgets.QDialog):
         self._compact_height: int | None = None
         self._plot_window_positioned = False
         self._saturation_warned = False
+        self._resolution_warning_logged = False
 
         self.setWindowTitle("STDP timing window (LTP/LTD vs Δt)")
         self.resize(640, 620)
@@ -531,6 +535,7 @@ class StdpWindowDialog(QtWidgets.QDialog):
         self._probe_pulse_times = []
         self._view_block_samples = None
         self._saturation_warned = False
+        self._resolution_warning_logged = False
         self._checkpoint = None
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
@@ -540,6 +545,7 @@ class StdpWindowDialog(QtWidgets.QDialog):
             f"Sweeping {len(self._delta_ts)} Δt points; estimated simulations "
             f"~{self._estimated_probe_count()}."
         )
+        self._maybe_log_delta_t_resolution_warning()
         self._append_log(
             "Pulse amplitude must evoke pre/post spikes during pairings; use "
             "rheobase first if needed."
@@ -585,10 +591,16 @@ class StdpWindowDialog(QtWidgets.QDialog):
 
     def _append_probe(self) -> None:
         stim = self._require_stim()
-        pulse_n = max(1, round(self.spn_pulse_ms.value() / 1000.0 / stim.dt))
-        lead_n = max(1, round(self.spn_recovery_ms.value() / 1000.0 / stim.dt))
-        period_n = max(pulse_n + 1, round(self.PROBE_PERIOD_MS / 1000.0 / stim.dt))
-        tail_n = max(1, round(self.spn_response_ms.value() / 1000.0 / stim.dt))
+        pulse_n, _pulse_ms = snap_milliseconds_to_dt(self.spn_pulse_ms.value(), stim.dt)
+        lead_n, _lead_ms = snap_milliseconds_to_dt(
+            self.spn_recovery_ms.value(), stim.dt
+        )
+        period_n, _period_ms = snap_milliseconds_to_dt(
+            self.PROBE_PERIOD_MS, stim.dt, minimum_samples=pulse_n + 1
+        )
+        tail_n, _tail_ms = snap_milliseconds_to_dt(
+            self.spn_response_ms.value(), stim.dt
+        )
         samples = lead_n + (self.PROBE_PULSES - 1) * period_n + pulse_n + tail_n
         block = np.zeros((samples, stim.values.shape[1]), dtype=np.float32)
         pulse_offsets = [
@@ -607,10 +619,16 @@ class StdpWindowDialog(QtWidgets.QDialog):
 
     def _append_pairing(self, delta_t_ms: float) -> None:
         stim = self._require_stim()
-        pulse_n = max(1, round(self.spn_pulse_ms.value() / 1000.0 / stim.dt))
-        lead_n = max(1, round(self.spn_recovery_ms.value() / 1000.0 / stim.dt))
-        gap_n = max(1, round(abs(delta_t_ms) / 1000.0 / stim.dt))
-        tail_n = max(1, round(self.spn_response_ms.value() / 1000.0 / stim.dt))
+        pulse_n, _pulse_ms = snap_milliseconds_to_dt(self.spn_pulse_ms.value(), stim.dt)
+        lead_n, _lead_ms = snap_milliseconds_to_dt(
+            self.spn_recovery_ms.value(), stim.dt
+        )
+        gap_n, gap_ms = snap_milliseconds_to_dt(abs(delta_t_ms), stim.dt)
+        self._pending_delta_t = copysign(gap_ms, delta_t_ms)
+        delta_t_ms = self._pending_delta_t
+        tail_n, _tail_ms = snap_milliseconds_to_dt(
+            self.spn_response_ms.value(), stim.dt
+        )
         samples = lead_n + gap_n + pulse_n + tail_n
         block = np.zeros((samples, stim.values.shape[1]), dtype=np.float32)
         pre_before_post = delta_t_ms >= 0.0
@@ -901,17 +919,60 @@ class StdpWindowDialog(QtWidgets.QDialog):
             )
 
     def _current_delta_t_values(self) -> list[float]:
-        values = delta_t_sweep(
-            self.spn_dt_min_ms.value(),
-            self.spn_dt_max_ms.value(),
-            self.spn_dt_points.value(),
-            self.chk_include_zero.isChecked(),
+        values = self._snapped_delta_ts(
+            delta_t_sweep(
+                self.spn_dt_min_ms.value(),
+                self.spn_dt_max_ms.value(),
+                self.spn_dt_points.value(),
+                self.chk_include_zero.isChecked(),
+            )
         )
         if not self._reset_mode():
             # Continuous sweep drifts, so visit offsets interleaved by magnitude
             # to keep the running weight near baseline.
             values = interleave_by_magnitude(values)
         return values
+
+    def _raw_delta_t_values(self) -> list[float]:
+        return delta_t_sweep(
+            self.spn_dt_min_ms.value(),
+            self.spn_dt_max_ms.value(),
+            self.spn_dt_points.value(),
+            self.chk_include_zero.isChecked(),
+        )
+
+    def _snapped_delta_ts(self, values: list[float]) -> list[float]:
+        if self.editor.current_stim_modifier is None:
+            return values
+        dt_seconds = self.editor.current_stim_modifier.stim_array.dt
+        snapped: list[float] = []
+        seen: set[int] = set()
+        for value in values:
+            samples, effective_ms = snap_milliseconds_to_dt(abs(value), dt_seconds)
+            signed_samples = samples if value >= 0.0 else -samples
+            if signed_samples in seen:
+                continue
+            seen.add(signed_samples)
+            snapped.append(copysign(effective_ms, value))
+        return snapped
+
+    def _maybe_log_delta_t_resolution_warning(self) -> None:
+        if self._resolution_warning_logged:
+            return
+        raw_values = self._raw_delta_t_values()
+        if len(raw_values) < 2:
+            return
+        spacing = min(
+            abs(b - a) for a, b in zip(raw_values, raw_values[1:], strict=False)
+        )
+        one_sample_ms = samples_to_milliseconds(1, self._require_stim().dt)
+        if spacing >= one_sample_ms:
+            return
+        self._resolution_warning_logged = True
+        self._append_log(
+            f"Stim dt is {one_sample_ms:.6g} ms; Δt values are snapped to that "
+            "grid, so finer spacing cannot be resolved."
+        )
 
     def _estimated_probe_count(self) -> int:
         n_points = len(self._current_delta_t_values())

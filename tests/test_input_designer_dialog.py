@@ -709,3 +709,31 @@ def test_input_designer_pulse_duration_controls_probe_width(qtbot) -> None:
     dialog.start()
     probe = editor.calls[0]
     assert np.count_nonzero(probe[:, 0]) == 5 * 3
+
+
+def test_input_designer_pairing_time_recorded_as_effective_grid_value(
+    qtbot, monkeypatch
+) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    dialog.cmb_pairing_strategy.setCurrentText(dialog.ADAPTIVE_PAIRING_STRATEGY)
+    dialog.spn_initial_pairing_time_ms.setValue(10.0)
+    dialog.spn_pairing_increment_ms.setValue(0.25)
+    dialog.spn_target.setValue(120.0)
+    dialog.spn_tolerance.setValue(1.0)
+    amplitudes = iter([2.0, 2.6])
+    monkeypatch.setattr(
+        dialog,
+        "_measure_epsps",
+        lambda trace: EPSPMeasurement(next(amplitudes), (2.0,) * 5),
+    )
+
+    dialog.start()
+    dialog.simulation_finished()
+    dialog.simulation_finished()
+    dialog.simulation_finished()
+
+    assert dialog._pairing_times_ms == [10.0, -10.0]
+    assert "pairing times are snapped" in dialog.log.toPlainText()

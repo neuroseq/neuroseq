@@ -488,6 +488,35 @@ def test_no_baseline_epsp_aborts_with_weight_hint(qtbot, monkeypatch) -> None:
     assert "Synaptic weight" in dialog.log.toPlainText()
 
 
+def test_delta_t_recorded_as_effective_grid_value(qtbot, monkeypatch) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    dialog.spn_dt_min_ms.setValue(20.0)
+    dialog.spn_dt_max_ms.setValue(20.4)
+    dialog.spn_dt_points.setValue(2)
+    _patch_directional_measurement(monkeypatch, dialog)
+
+    dialog.start()
+    _finish_sweep(dialog)
+
+    assert dialog._results == [(20.0, pytest.approx(10.0))]
+    pairing = editor.calls[1]
+    pre_sample = int(np.flatnonzero(pairing[:, 0])[0])
+    post_sample = int(np.flatnonzero(pairing[:, 1])[0])
+    assert post_sample - pre_sample == 20
+
+
+def test_warns_when_delta_t_step_finer_than_dt(qtbot, monkeypatch) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    dialog.spn_dt_min_ms.setValue(20.0)
+    dialog.spn_dt_max_ms.setValue(20.4)
+    dialog.spn_dt_points.setValue(2)
+    _patch_directional_measurement(monkeypatch, dialog)
+
+    dialog.start()
+
+    assert "Δt values are snapped" in dialog.log.toPlainText()
+
+
 def test_wheel_over_field_does_not_change_value(qtbot) -> None:
     _project, _editor, dialog = _make_dialog(qtbot)
     spin = dialog.spn_dt_points

@@ -1,0 +1,231 @@
+stim_dt_time_quantization — report effective (dt-snapped) times in the dynamic-input routines  [IMPLEMENTED]
+=============================================================================================
+
+BUG
+----
+All THREE dynamic-input routines — Targeted STDP synaptic strength
+(`InputDesignerDialog`), Minimal stimulus for spiking / rheobase
+(`RheobaseDialog`), and STDP timing window (`StdpWindowDialog`) — convert every
+millisecond timing input into an integer number of stim-array samples with
+`round(ms / 1000 / dt)`, but then record, plot, log, and interpolate the
+*requested* millisecond value rather than the quantized one that was actually
+simulated. When the stim array's `dt` is coarse relative to the requested
+resolution, several distinct requested times map to the SAME sample count →
+byte-identical stimulus → identical result, yet they appear at different x
+positions on the plot.
+
+Symptom the user saw (rheobase strength–duration sweep, dt = 1 ms): vertical
+slices at nearby durations (e.g. 15.0, 15.25, 15.5 ms) show the SAME point
+distribution, because all three build the same 15-sample pulse. The duration
+bisection also narrows the bracket below one sample (tolerance can be < dt),
+spending iterations on durations that cannot differ, and the chronaxie
+interpolation runs over those phantom x's.
+
+The STDP-window routine has the identical pattern for the pre/post gap
+(`gap_n = round(|Δt|/1000/dt)`) and records the requested `Δt` (`_pending_delta_t`)
+rather than the effective one, so nearby Δt values collapse the same way.
+
+The targeted-STDP routine (`InputDesignerDialog`) has it too: its adaptive
+pairing strategy nudges the pre/post pairing time by `spn_pairing_increment_ms`
+(a "dt increment"), plots `_pairing_times_ms` on its pairing-time axis, and
+`_append_pairing` uses `gap_n = round(|pairing_time_ms|/1000/dt)` while recording
+the requested `pairing_time_ms`. So an increment finer than dt moves the plotted
+pairing time without changing the stimulus or the EPSP outcome — the same
+phantom-resolution artifact.
+
+ROOT CAUSE (exact lines)
+------------------------
+src/neuroseq/rheobase_dialog.py
+  - `_probe`: `pulse_n = max(1, round(self._current_duration_ms / 1000.0 / stim.dt))`
+    builds the pulse, but `_current_duration_ms` (a continuous bisection midpoint
+    or spin-box value) is what gets recorded:
+        `self._samples.append((self._current_duration_ms, amplitude, spike_count))`
+        `self._thresholds.append((self._current_duration_ms, threshold))`
+    and it is what the plot, the logs, and `_update_strength_duration_metrics`
+    (chronaxie interpolation) all use.
+  - `_bisect_strength_duration` / `_bisect_fixed_amplitude_duration` converge when
+    `high_ms - low_ms <= spn_duration_tolerance_ms`, with no floor at one sample.
+  - recovery / response windows: `recovery_n`, `tail_n` are also `round(...)` but
+    are not reported per-point, so they are lower priority (see NON-GOALS).
+
+src/neuroseq/stdp_window_dialog.py
+  - `_append_pairing`: `gap_n = max(1, round(abs(delta_t_ms) / 1000.0 / stim.dt))`,
+    while `_pending_delta_t` (the requested Δt) is recorded in `_results` and
+    plotted / used for the LTP/LTD label.
+  - `_current_delta_t_values` builds the grid from `delta_t_sweep(...)` with no
+    awareness of dt, so a step finer than dt yields collapsing points.
+
+src/neuroseq/input_designer_dialog.py
+  - `_append_pairing`: `gap_n = max(1, round(abs(pairing_time_ms) / 1000.0 / stim.dt))`
+    builds the pre/post gap, but `self._pairing_times_ms.append(pairing_time_ms)`
+    records the requested pairing time, which is what the pairing-time plot axis
+    and the log show. The adaptive magnitude is already floored at one sample
+    (`min_magnitude_ms = 1000 * stim.dt`), but `spn_pairing_increment_ms` is not,
+    so successive magnitudes can differ by < dt and collapse.
+  - `_append_probe` / `_append_pairing` also `round(...)` the pulse/lead/period/
+    tail sample counts (no per-point reporting change needed for those).
+
+
+THE FIX
+-------
+Convert ms→samples ONCE, derive the *effective* time from that sample count, and
+use the effective value everywhere it is recorded / plotted / interpolated /
+logged. Identical-pulse requests then collapse onto one honest point on the dt
+grid instead of masquerading as distinct measurements.
+
+1. Add a small pure helper to `src/neuroseq/stim_timing.py` (it already has
+   `milliseconds_to_samples_nearest` and `samples_to_milliseconds`):
+
+       def snap_milliseconds_to_dt(
+           time_ms: float, dt_seconds: float, minimum_samples: int = 1
+       ) -> tuple[int, float]:
+           """Return (n_samples, effective_ms) for a requested duration.
+
+           n_samples is the nearest whole number of stim samples (clamped to
+           minimum_samples); effective_ms is what that many samples actually
+           span, i.e. the value that should be recorded/plotted.
+           """
+           n = max(minimum_samples, milliseconds_to_samples_nearest(time_ms, dt_seconds))
+           return n, samples_to_milliseconds(n, dt_seconds)
+
+   Keep the existing `max(1, ...)` clamp semantics (minimum_samples=1) so a
+   sub-sample request still yields a one-sample pulse.
+
+2. rheobase_dialog.py
+   - In `_probe`, snap the pulse once and REWRITE the working duration to the
+     effective value before recording anything:
+         pulse_n, effective_ms = snap_milliseconds_to_dt(
+             self._current_duration_ms, stim.dt
+         )
+         self._current_duration_ms = effective_ms
+     Then `pulse_n` builds the block and every later use of
+     `self._current_duration_ms` (samples/thresholds append, logs, plot x,
+     chronaxie) is automatically the effective, grid-aligned duration. Do the
+     same snap for `recovery_n` and `tail_n` locally (they need only the sample
+     count, no reporting change).
+   - Floor the duration-bisection tolerance at one sample so it never bisects
+     below what dt can resolve:
+         one_sample_ms = samples_to_milliseconds(1, stim.dt)
+         tol = max(self.spn_duration_tolerance_ms.value(), one_sample_ms)
+     use `tol` in `_bisect_strength_duration` and `_bisect_fixed_amplitude_duration`.
+   - Dedupe: if a bisection midpoint snaps to a duration already present in
+     `self._thresholds` (same effective ms, i.e. same sample count), treat the
+     search as converged for that branch instead of re-running an identical
+     amplitude search. (Compare on the snapped effective ms, or on `pulse_n`.)
+
+3. stdp_window_dialog.py
+   - In `_append_pairing`, snap the gap once and store the effective, signed Δt
+     as the pending value that gets recorded:
+         gap_n, gap_ms = snap_milliseconds_to_dt(abs(delta_t_ms), stim.dt)
+         self._pending_delta_t = math.copysign(gap_ms, delta_t_ms)
+     so `_results`, the plot x, the log, and the LTP/LTD label all use the
+     effective Δt. (Snap `pulse_n`, `lead_n`, `tail_n`, `period_n` via the helper
+     too — sample counts only.)
+   - In `_current_delta_t_values`, after building the grid, snap each Δt to the
+     dt lattice and drop duplicates that collapse to the same sample count, so
+     the sweep does not run identical points. Preserve order (reset mode: sorted;
+     continuous: interleaved). A helper on the dialog is fine:
+         def _snapped_delta_ts(self, raw): ...
+     Keep Δt = 0 exclusion behaviour.
+
+4. input_designer_dialog.py (targeted STDP)
+   - In `_append_pairing`, snap the gap once and record the effective, signed
+     pairing time instead of the requested one:
+         gap_n, gap_ms = snap_milliseconds_to_dt(abs(pairing_time_ms), stim.dt)
+         pairing_time_ms = math.copysign(gap_ms, pairing_time_ms)
+         self._pairing_times_ms.append(pairing_time_ms)
+     so the pairing-time plot axis and the log reflect what was actually applied.
+     Snap `pulse_n`, `lead_n`, `period_n`, `tail_n` in `_append_probe` /
+     `_append_pairing` via the helper too (sample counts only).
+   - This dialog is heavily tested — keep its public behaviour otherwise
+     unchanged; the only observable change is that recorded/plotted pairing times
+     are now grid-aligned. Its suite must stay green.
+
+5. Warn once, in all three routines, when the requested resolution is finer than
+   dt:
+   - rheobase: if `spn_duration_tolerance_ms.value() < one_sample_ms` (or the
+     requested duration step is finer than dt), log e.g. "Stim dt is 1 ms;
+     durations are snapped to that grid, so finer tolerances cannot be resolved."
+   - stdp_window: if the Δt grid spacing < one_sample_ms, log the analogous note.
+   - input_designer: if `spn_pairing_increment_ms.value() < one_sample_ms` (adaptive
+     strategy), log the analogous note.
+   Emit it at protocol/sweep start (once), next to the existing log lines.
+
+
+EFFECT
+------
+- Nearby requests that quantize identically now land on ONE x (the effective,
+  grid-aligned time), so the plot shows the true dt-limited resolution instead of
+  phantom distinct columns with identical distributions.
+- The duration bisection stops at one-sample resolution and skips re-simulating a
+  duration that maps to an already-tested sample count.
+- Chronaxie / window shapes are interpolated over real, distinct x's.
+
+
+TESTS
+-----
+tests/test_stim_timing.py  (extend)
+  test_snap_milliseconds_to_dt_rounds_and_reports_effective
+      # dt=0.001: (15.0 -> (15, 15.0)), (15.25 -> (15, 15.0)), (15.5 -> (16, 16.0)),
+      #           (15.6 -> (16, 16.0)); sub-sample (0.2 -> (1, 1.0)).
+
+tests/test_rheobase_dialog.py  (add)
+  test_strength_duration_points_snap_to_dt_grid
+      # Fixed-duration or amplitude+duration strategy, fake spike measurement.
+      # Drive two probes at durations that differ by < dt (e.g. 15.0 and 15.4 ms
+      # with dt=1 ms) and assert the recorded `_samples`/`_thresholds` durations
+      # are equal and equal to the effective (grid) value — not the requested one.
+  test_duration_bisection_stops_at_one_sample
+      # With duration tolerance set below dt, assert the routine does not run more
+      # duration stages than the one-sample bracket allows (no sub-dt bisection),
+      # and logs the resolution warning.
+
+tests/test_stdp_window_dialog.py  (add)
+  test_delta_t_recorded_as_effective_grid_value
+      # dt=1 ms, Δt requests 20.0 and 20.4 → both recorded at the same effective
+      # Δt in `_results`; assert the pairing block gap (gap_n) matches and the
+      # plotted x is grid-aligned.
+  test_warns_when_delta_t_step_finer_than_dt
+
+tests/test_input_designer_dialog.py  (add)
+  test_pairing_time_recorded_as_effective_grid_value
+      # Adaptive strategy, dt=1 ms, increment < dt: assert `_pairing_times_ms`
+      # entries are grid-aligned (multiples of the effective one-sample value)
+      # and match the applied gap, rather than the raw requested magnitude.
+  test_warns_when_pairing_increment_finer_than_dt
+
+Reuse the existing fake project/editor doubles in those test files (they already
+expose `stim.dt`). No real Brian2 run needed — the snapping is pure arithmetic on
+the recorded values.
+
+
+NON-GOALS
+---------
+- Changing the stim array's `dt` or resampling it. The fix reports the achievable
+  resolution honestly; it does not manufacture finer resolution.
+- Reworking recovery/response windows into reported quantities (only snap their
+  sample counts; they are not per-point plot axes).
+- Any change to the sweep/readout/convergence semantics (reset vs continuous,
+  EPSP vs weight, the adaptive STDP search) — this is purely about which time
+  value is recorded/plotted, not how the routines search.
+
+
+VERIFICATION
+------------
+    .venv/bin/ruff check src/neuroseq/stim_timing.py src/neuroseq/rheobase_dialog.py \
+        src/neuroseq/stdp_window_dialog.py src/neuroseq/input_designer_dialog.py \
+        tests/test_stim_timing.py tests/test_rheobase_dialog.py \
+        tests/test_stdp_window_dialog.py tests/test_input_designer_dialog.py
+    .venv/bin/ruff format --check <same files>
+    .venv/bin/mypy src/neuroseq/stim_timing.py src/neuroseq/rheobase_dialog.py \
+        src/neuroseq/stdp_window_dialog.py src/neuroseq/input_designer_dialog.py
+    PYTHONPATH=src .venv/bin/python -m pytest \
+        tests/test_stim_timing.py tests/test_rheobase.py tests/test_rheobase_dialog.py \
+        tests/test_stdp_window.py tests/test_stdp_window_dialog.py \
+        tests/test_input_designer_dialog.py tests/test_stdp_window_integration.py \
+        tests/test_rheobase_integration.py -v
+    PYTHONPATH=src .venv/bin/python -m pytest
+
+The two integration tests must stay green (the effective-time snap must not change
+the LTD/LTP signs), and all three dynamic-input dialog suites
+(input_designer / rheobase / stdp_window) must stay green.

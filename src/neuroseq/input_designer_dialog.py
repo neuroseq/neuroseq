@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
+from math import copysign
 from typing import TYPE_CHECKING
 from typing import cast
 
@@ -16,6 +17,7 @@ from neuroseq import theme as theme_module
 from neuroseq.data import TraceData
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import detect_epsps
+from neuroseq.stim_timing import snap_milliseconds_to_dt
 
 if TYPE_CHECKING:
     from neuroseq.project import Project
@@ -118,6 +120,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self._theme = theme_module.LIGHT
         self._expanded_height: int | None = None
         self._compact_height: int | None = None
+        self._resolution_warning_logged = False
         self.setWindowTitle("Design dynamic input")
         self.resize(640, 620)
 
@@ -511,6 +514,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self._epsp_percentages = []
         self._pairing_times_ms = []
         self._adaptive_pairing_magnitude_ms = self.spn_initial_pairing_time_ms.value()
+        self._resolution_warning_logged = False
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         if clear_log:
@@ -534,10 +538,12 @@ class InputDesignerDialog(QtWidgets.QDialog):
 
     def _append_probe(self) -> None:
         stim = self._require_stim()
-        pulse_n = max(1, round(self.spn_pulse_ms.value() / 1000.0 / stim.dt))
-        lead_n = max(1, round(self.LEAD_MS / 1000.0 / stim.dt))
-        period_n = max(pulse_n + 1, round(self.PROBE_PERIOD_MS / 1000.0 / stim.dt))
-        tail_n = max(1, round(self.RESPONSE_TAIL_MS / 1000.0 / stim.dt))
+        pulse_n, _pulse_ms = snap_milliseconds_to_dt(self.spn_pulse_ms.value(), stim.dt)
+        lead_n, _lead_ms = snap_milliseconds_to_dt(self.LEAD_MS, stim.dt)
+        period_n, _period_ms = snap_milliseconds_to_dt(
+            self.PROBE_PERIOD_MS, stim.dt, minimum_samples=pulse_n + 1
+        )
+        tail_n, _tail_ms = snap_milliseconds_to_dt(self.RESPONSE_TAIL_MS, stim.dt)
         samples = lead_n + (self.PROBE_PULSES - 1) * period_n + pulse_n + tail_n
         block = np.zeros((samples, stim.values.shape[1]), dtype=np.float32)
         pulse_offsets = [
@@ -557,11 +563,12 @@ class InputDesignerDialog(QtWidgets.QDialog):
 
     def _append_pairing(self, potentiate: bool) -> None:
         stim = self._require_stim()
-        pulse_n = max(1, round(self.spn_pulse_ms.value() / 1000.0 / stim.dt))
-        lead_n = max(1, round(self.LEAD_MS / 1000.0 / stim.dt))
+        pulse_n, _pulse_ms = snap_milliseconds_to_dt(self.spn_pulse_ms.value(), stim.dt)
+        lead_n, _lead_ms = snap_milliseconds_to_dt(self.LEAD_MS, stim.dt)
         adaptive = (
             self.cmb_pairing_strategy.currentText() == self.ADAPTIVE_PAIRING_STRATEGY
         )
+        self._maybe_log_pairing_resolution_warning(stim.dt)
         if adaptive:
             if len(self._epsp_percentages) > 1:
                 epsp_new = self._epsp_percentages[-1]
@@ -590,13 +597,10 @@ class InputDesignerDialog(QtWidgets.QDialog):
         else:
             magnitude_ms = self.spn_pairing_interval_ms.value()
             pairing_time_ms = magnitude_ms if potentiate else -magnitude_ms
-        gap_n = max(1, round(abs(pairing_time_ms) / 1000.0 / stim.dt))
-        samples = (
-            lead_n
-            + gap_n
-            + pulse_n
-            + max(1, round(self.RESPONSE_TAIL_MS / 1000.0 / stim.dt))
-        )
+        gap_n, gap_ms = snap_milliseconds_to_dt(abs(pairing_time_ms), stim.dt)
+        pairing_time_ms = copysign(gap_ms, pairing_time_ms)
+        tail_n, _tail_ms = snap_milliseconds_to_dt(self.RESPONSE_TAIL_MS, stim.dt)
+        samples = lead_n + gap_n + pulse_n + tail_n
         block = np.zeros((samples, stim.values.shape[1]), dtype=np.float32)
         pre_before_post = pairing_time_ms >= 0.0
         first = (
@@ -626,6 +630,20 @@ class InputDesignerDialog(QtWidgets.QDialog):
         )
         self._update_plots()
         self._run_to_sample(block_start + samples)
+
+    def _maybe_log_pairing_resolution_warning(self, dt_seconds: float) -> None:
+        if self._resolution_warning_logged:
+            return
+        if self.cmb_pairing_strategy.currentText() != self.ADAPTIVE_PAIRING_STRATEGY:
+            return
+        one_sample_ms = 1000.0 * dt_seconds
+        if self.spn_pairing_increment_ms.value() >= one_sample_ms:
+            return
+        self._resolution_warning_logged = True
+        self._append_log(
+            f"Stim dt is {one_sample_ms:.6g} ms; pairing times are snapped to "
+            "that grid, so finer adaptive increments cannot be resolved."
+        )
 
     def _append_block(self, block: np.ndarray) -> int:
         stim = self._require_stim()
