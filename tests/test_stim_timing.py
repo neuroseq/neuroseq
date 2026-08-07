@@ -10,6 +10,7 @@ from neuroseq.stim_timing import samples_to_milliseconds
 from neuroseq.stim_timing import samples_to_seconds
 from neuroseq.stim_timing import seconds_to_samples_ceil
 from neuroseq.stim_timing import seconds_to_samples_nearest
+from neuroseq.stim_timing import snap_milliseconds_to_dt
 from neuroseq.stim_timing import stim_dt_matches
 from neuroseq.stim_timing import validate_stim_dt_seconds
 
@@ -54,6 +55,14 @@ def test_milliseconds_to_samples_nearest_supports_non_standard_dt() -> None:
 
     assert milliseconds_to_samples_nearest(0.5208125, dt_seconds) == 1
     assert milliseconds_to_samples_nearest(1.0, dt_seconds) == 2
+
+
+def test_snap_milliseconds_to_dt_rounds_and_reports_effective() -> None:
+    assert snap_milliseconds_to_dt(15.0, 0.001) == (15, 15.0)
+    assert snap_milliseconds_to_dt(15.25, 0.001) == (15, 15.0)
+    assert snap_milliseconds_to_dt(15.5, 0.001) == (16, 16.0)
+    assert snap_milliseconds_to_dt(15.6, 0.001) == (16, 16.0)
+    assert snap_milliseconds_to_dt(0.2, 0.001) == (1, 1.0)
 
 
 def test_format_milliseconds_preserves_precision_without_trailing_zeros() -> None:

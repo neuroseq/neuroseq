@@ -25,16 +25,16 @@ class _FakeProject:
             "mV",
             0.001,
         )
+        self.traces = {self.trace.name: self.trace}
         self.b2_model = SimpleNamespace(get_sim_time_secs=lambda: 0.0)
 
     def get_data_names(self, data_type: type[TraceData]) -> list[str]:
         assert data_type is TraceData
-        return [self.trace.name] if self.trace_available else []
+        return list(self.traces) if self.trace_available else []
 
-    def get_data(self, name: str, data_type: type[TraceData]) -> TraceData:
-        assert name == self.trace.name
+    def get_data(self, name: str, data_type: type[TraceData]) -> TraceData | None:
         assert data_type is TraceData
-        return self.trace
+        return self.traces.get(name)
 
 
 class _FakeEditor:
@@ -94,7 +94,7 @@ def test_input_designer_runs_probe_pairing_probe_and_reaches_target(
 
     dialog.start()
     assert len(editor.calls) == 1
-    assert np.count_nonzero(editor.calls[0][:, 0]) == 5
+    assert np.count_nonzero(editor.calls[0][:, 0]) == 5 * 5
     assert np.count_nonzero(editor.calls[0][:, 1]) == 0
 
     dialog.simulation_finished()
@@ -174,6 +174,8 @@ def test_input_designer_protocol_defaults(qtbot) -> None:
     assert dialog.spn_pairing_increment_ms.isHidden()
     assert dialog.spn_tolerance.value() == 1.0
     assert dialog.spn_history_blocks.value() == 3
+    assert dialog.spn_amplitude.value() == 100.0
+    assert dialog.spn_pulse_ms.value() == 5.0
     assert not dialog.chk_run_all_iterations.isChecked()
     assert dialog.windowFlags() & QtCore.Qt.WindowType.WindowMinimizeButtonHint
 
@@ -364,6 +366,51 @@ def test_input_designer_initializes_missing_trace_then_starts_protocol(
     assert dialog._phase == "baseline_probe"
 
 
+def test_input_designer_initializes_when_only_imported_trace_exists(qtbot) -> None:
+    project = _FakeProject()
+    imported_trace = TraceData(
+        "Imported EPSP trace",
+        np.zeros((2, 100), dtype=np.float32),
+        np.array([0, 1]),
+        "mV",
+        0.001,
+    )
+    project.traces = {imported_trace.name: imported_trace}
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    requested: list[float] = []
+    dialog.simulation_requested.connect(requested.append)
+
+    dialog.start()
+
+    assert requested == [0.001]
+    assert dialog._phase == "initialize_trace"
+
+
+def test_input_designer_prefers_simulation_voltage_trace_for_measurement(qtbot) -> None:
+    project = _FakeProject()
+    imported_trace = TraceData(
+        "Imported EPSP trace",
+        np.zeros((2, 100), dtype=np.float32),
+        np.array([0, 1]),
+        "mV",
+        0.001,
+    )
+    project.traces = {
+        imported_trace.name: imported_trace,
+        project.trace.name: project.trace,
+    }
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+
+    dialog.cmb_trace.setCurrentText(imported_trace.name)
+    dialog.refresh()
+
+    assert dialog.cmb_trace.currentText() == project.trace.name
+
+
 def test_input_designer_reuses_epsp_plugin_detection(qtbot) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
@@ -382,6 +429,17 @@ def test_input_designer_reuses_epsp_plugin_detection(qtbot) -> None:
     # rise, so its measured prominence is slightly below the injected 5 mV.
     assert measurement.amplitude == pytest.approx(4.62, abs=0.05)
     assert len(measurement.pulse_amplitudes) == 5
+
+
+def test_input_designer_reports_when_selected_trace_ends_before_probe(qtbot) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    dialog._probe_pulse_times = [2.244]
+
+    with pytest.raises(ValueError, match="selected trace ends at 2000.000 ms"):
+        dialog._measure_epsps(project.trace)
 
 
 def test_input_designer_matplotlib_plots_follow_theme(qtbot) -> None:
@@ -644,10 +702,38 @@ def test_input_designer_pulse_duration_controls_probe_width(qtbot) -> None:
     dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
 
-    assert dialog.spn_pulse_ms.value() == 1.0  # default = 1 ms
+    assert dialog.spn_pulse_ms.value() == 5.0
 
     # dt = 1 ms, so a 3 ms pulse spans 3 samples; five probe pulses -> 15 samples.
     dialog.spn_pulse_ms.setValue(3.0)
     dialog.start()
     probe = editor.calls[0]
     assert np.count_nonzero(probe[:, 0]) == 5 * 3
+
+
+def test_input_designer_pairing_time_recorded_as_effective_grid_value(
+    qtbot, monkeypatch
+) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    dialog.cmb_pairing_strategy.setCurrentText(dialog.ADAPTIVE_PAIRING_STRATEGY)
+    dialog.spn_initial_pairing_time_ms.setValue(10.0)
+    dialog.spn_pairing_increment_ms.setValue(0.25)
+    dialog.spn_target.setValue(120.0)
+    dialog.spn_tolerance.setValue(1.0)
+    amplitudes = iter([2.0, 2.6])
+    monkeypatch.setattr(
+        dialog,
+        "_measure_epsps",
+        lambda trace: EPSPMeasurement(next(amplitudes), (2.0,) * 5),
+    )
+
+    dialog.start()
+    dialog.simulation_finished()
+    dialog.simulation_finished()
+    dialog.simulation_finished()
+
+    assert dialog._pairing_times_ms == [10.0, -10.0]
+    assert "pairing times are snapped" in dialog.log.toPlainText()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
+from math import copysign
 from typing import TYPE_CHECKING
 from typing import cast
 
@@ -16,6 +17,7 @@ from neuroseq import theme as theme_module
 from neuroseq.data import TraceData
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import detect_epsps
+from neuroseq.stim_timing import snap_milliseconds_to_dt
 
 if TYPE_CHECKING:
     from neuroseq.project import Project
@@ -90,7 +92,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
     simulation_requested = QtCore.Signal(float)
     PROBE_PULSES = 5
     PROBE_PERIOD_MS = 100.0
-    PULSE_MS = 1.0
+    PULSE_MS = 5.0
     LEAD_MS = 20.0
     RESPONSE_TAIL_MS = 50.0
     FIXED_PAIRING_STRATEGY = "Fixed pre-post pairing time"
@@ -118,6 +120,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self._theme = theme_module.LIGHT
         self._expanded_height: int | None = None
         self._compact_height: int | None = None
+        self._resolution_warning_logged = False
         self.setWindowTitle("Design dynamic input")
         self.resize(640, 620)
 
@@ -174,7 +177,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         # A positive minimum: a zero-amplitude probe evokes no EPSP and dead-ends
         # the routine at the measurement step.
         self.spn_amplitude.setRange(0.001, 1e12)
-        self.spn_amplitude.setValue(1.0)
+        self.spn_amplitude.setValue(100.0)
         self.lbl_units = QtWidgets.QLabel(self)
         amplitude_row = QtWidgets.QHBoxLayout()
         amplitude_row.addWidget(self.spn_amplitude)
@@ -432,8 +435,11 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.cmb_trace.clear()
         if self.project is None:
             return
-        self.cmb_trace.addItems(self.project.get_data_names(TraceData))
-        self.cmb_trace.setCurrentText(selected)
+        trace_names = self.project.get_data_names(TraceData)
+        self.cmb_trace.addItems(trace_names)
+        preferred_trace = self._preferred_trace_name(trace_names, selected)
+        if preferred_trace:
+            self.cmb_trace.setCurrentText(preferred_trace)
         modifier = self.editor.current_stim_modifier
         if modifier is not None:
             stim = modifier.stim_array
@@ -452,12 +458,38 @@ class InputDesignerDialog(QtWidgets.QDialog):
             self.lbl_stim_dt.setText("-")
             self.lbl_stim_neurons.setText("-")
 
+    def _preferred_trace_name(
+        self, trace_names: list[str], previously_selected: str
+    ) -> str:
+        if not trace_names:
+            return ""
+        if self._is_simulation_voltage_trace(previously_selected):
+            return previously_selected
+        for trace_name in trace_names:
+            if self._is_simulation_voltage_trace(trace_name):
+                return trace_name
+        if previously_selected in trace_names:
+            return previously_selected
+        return trace_names[0]
+
+    def _is_simulation_voltage_trace(self, trace_name: str) -> bool:
+        if self.project is None or not trace_name:
+            return False
+        if not trace_name.startswith("Simulation :: ") or not trace_name.endswith(
+            " / v"
+        ):
+            return False
+        trace = self.project.get_data(trace_name, TraceData)
+        if trace is None:
+            return False
+        return bool(np.any(trace.indices == self.spn_postsynaptic.value()))
+
     def start(self) -> None:
         self.refresh()
         if self.project is None or self.editor.current_stim_modifier is None:
             self._append_log("No stimulation array is selected.")
             return
-        if not self.cmb_trace.currentText():
+        if not self._is_simulation_voltage_trace(self.cmb_trace.currentText()):
             duration = 0.001
             self._running = True
             self._phase = "initialize_trace"
@@ -482,6 +514,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self._epsp_percentages = []
         self._pairing_times_ms = []
         self._adaptive_pairing_magnitude_ms = self.spn_initial_pairing_time_ms.value()
+        self._resolution_warning_logged = False
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         if clear_log:
@@ -505,10 +538,12 @@ class InputDesignerDialog(QtWidgets.QDialog):
 
     def _append_probe(self) -> None:
         stim = self._require_stim()
-        pulse_n = max(1, round(self.spn_pulse_ms.value() / 1000.0 / stim.dt))
-        lead_n = max(1, round(self.LEAD_MS / 1000.0 / stim.dt))
-        period_n = max(pulse_n + 1, round(self.PROBE_PERIOD_MS / 1000.0 / stim.dt))
-        tail_n = max(1, round(self.RESPONSE_TAIL_MS / 1000.0 / stim.dt))
+        pulse_n, _pulse_ms = snap_milliseconds_to_dt(self.spn_pulse_ms.value(), stim.dt)
+        lead_n, _lead_ms = snap_milliseconds_to_dt(self.LEAD_MS, stim.dt)
+        period_n, _period_ms = snap_milliseconds_to_dt(
+            self.PROBE_PERIOD_MS, stim.dt, minimum_samples=pulse_n + 1
+        )
+        tail_n, _tail_ms = snap_milliseconds_to_dt(self.RESPONSE_TAIL_MS, stim.dt)
         samples = lead_n + (self.PROBE_PULSES - 1) * period_n + pulse_n + tail_n
         block = np.zeros((samples, stim.values.shape[1]), dtype=np.float32)
         pulse_offsets = [
@@ -528,11 +563,12 @@ class InputDesignerDialog(QtWidgets.QDialog):
 
     def _append_pairing(self, potentiate: bool) -> None:
         stim = self._require_stim()
-        pulse_n = max(1, round(self.spn_pulse_ms.value() / 1000.0 / stim.dt))
-        lead_n = max(1, round(self.LEAD_MS / 1000.0 / stim.dt))
+        pulse_n, _pulse_ms = snap_milliseconds_to_dt(self.spn_pulse_ms.value(), stim.dt)
+        lead_n, _lead_ms = snap_milliseconds_to_dt(self.LEAD_MS, stim.dt)
         adaptive = (
             self.cmb_pairing_strategy.currentText() == self.ADAPTIVE_PAIRING_STRATEGY
         )
+        self._maybe_log_pairing_resolution_warning(stim.dt)
         if adaptive:
             if len(self._epsp_percentages) > 1:
                 epsp_new = self._epsp_percentages[-1]
@@ -561,13 +597,10 @@ class InputDesignerDialog(QtWidgets.QDialog):
         else:
             magnitude_ms = self.spn_pairing_interval_ms.value()
             pairing_time_ms = magnitude_ms if potentiate else -magnitude_ms
-        gap_n = max(1, round(abs(pairing_time_ms) / 1000.0 / stim.dt))
-        samples = (
-            lead_n
-            + gap_n
-            + pulse_n
-            + max(1, round(self.RESPONSE_TAIL_MS / 1000.0 / stim.dt))
-        )
+        gap_n, gap_ms = snap_milliseconds_to_dt(abs(pairing_time_ms), stim.dt)
+        pairing_time_ms = copysign(gap_ms, pairing_time_ms)
+        tail_n, _tail_ms = snap_milliseconds_to_dt(self.RESPONSE_TAIL_MS, stim.dt)
+        samples = lead_n + gap_n + pulse_n + tail_n
         block = np.zeros((samples, stim.values.shape[1]), dtype=np.float32)
         pre_before_post = pairing_time_ms >= 0.0
         first = (
@@ -597,6 +630,20 @@ class InputDesignerDialog(QtWidgets.QDialog):
         )
         self._update_plots()
         self._run_to_sample(block_start + samples)
+
+    def _maybe_log_pairing_resolution_warning(self, dt_seconds: float) -> None:
+        if self._resolution_warning_logged:
+            return
+        if self.cmb_pairing_strategy.currentText() != self.ADAPTIVE_PAIRING_STRATEGY:
+            return
+        one_sample_ms = 1000.0 * dt_seconds
+        if self.spn_pairing_increment_ms.value() >= one_sample_ms:
+            return
+        self._resolution_warning_logged = True
+        self._append_log(
+            f"Stim dt is {one_sample_ms:.6g} ms; pairing times are snapped to "
+            "that grid, so finer adaptive increments cannot be resolved."
+        )
 
     def _append_block(self, block: np.ndarray) -> int:
         stim = self._require_stim()
@@ -645,11 +692,11 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self._awaiting_simulation = False
         if self._phase == "initialize_trace":
             self.refresh()
-            if not self.cmb_trace.currentText():
+            if not self._is_simulation_voltage_trace(self.cmb_trace.currentText()):
                 self._finish(
-                    "The initial simulation completed, but no simulation "
-                    "trace monitor became available. Add a StateMonitor to "
-                    "the model and try again."
+                    "The initial simulation completed, but no simulation voltage "
+                    "trace for the postsynaptic neuron became available. Add a "
+                    "StateMonitor for v to the model and try again."
                 )
                 return
             self._append_log("Trace monitor created; starting the EPSP protocol.")
@@ -658,7 +705,15 @@ class InputDesignerDialog(QtWidgets.QDialog):
         if self._phase == "pairing":
             self._append_probe()
             return
-        trace = self.project.get_data(self.cmb_trace.currentText(), TraceData)
+        self.refresh()
+        trace_name = self.cmb_trace.currentText()
+        if not self._is_simulation_voltage_trace(trace_name):
+            self._finish(
+                "The routine could not find a simulation voltage trace for the "
+                "postsynaptic neuron after simulation."
+            )
+            return
+        trace = self.project.get_data(trace_name, TraceData)
         if trace is None:
             self._finish("The selected trace is unavailable after simulation.")
             return
@@ -724,6 +779,13 @@ class InputDesignerDialog(QtWidgets.QDialog):
             stop_ms = onset_ms + response_ms
             start = max(0, int(np.floor(start_ms / dt_ms)))
             stop = min(trace_mv.size, int(np.ceil(stop_ms / dt_ms)) + 1)
+            if start >= trace_mv.size:
+                trace_duration_ms = trace_mv.size * dt_ms
+                raise ValueError(
+                    f"The selected trace ends at {trace_duration_ms:.3f} ms, "
+                    f"before the probe at {onset_ms:.3f} ms. Select the current "
+                    "simulation voltage trace and try again."
+                )
             detection = detect_epsps(trace_mv[start:stop], dt_ms)
             relative_onset_ms = onset_ms - start * dt_ms
             sample_tolerance_ms = 0.5 * dt_ms

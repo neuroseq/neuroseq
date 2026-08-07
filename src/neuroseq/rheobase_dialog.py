@@ -18,6 +18,8 @@ from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
 from neuroseq.rheobase import bisection_converged
 from neuroseq.rheobase import count_spikes
 from neuroseq.rheobase import next_bracket
+from neuroseq.stim_timing import samples_to_milliseconds
+from neuroseq.stim_timing import snap_milliseconds_to_dt
 
 if TYPE_CHECKING:
     from neuroseq.project import Project
@@ -65,11 +67,8 @@ class RheobaseDialog(QtWidgets.QDialog):
         self._theme = theme_module.LIGHT
         self._expanded_height: int | None = None
         self._compact_height: int | None = None
-        self._response_defaulting = False
-        self._response_user_overridden = False
         self._logged_recovery_note = False
-        self._probe_checkpoint: str | None = None
-        self._probe_start_sample = 0
+        self._resolution_warning_logged = False
         self.setWindowTitle("Minimal stimulus for spiking (rheobase)")
         self.resize(640, 620)
 
@@ -166,8 +165,13 @@ class RheobaseDialog(QtWidgets.QDialog):
         self.spn_response_ms = QtWidgets.QDoubleSpinBox(self)
         self.spn_response_ms.setDecimals(3)
         self.spn_response_ms.setRange(0.001, 100_000.0)
-        self.spn_response_ms.setValue(70.0)
+        self.spn_response_ms.setValue(20.0)
         self.spn_response_ms.setSuffix(" ms")
+        self.spn_response_ms.setToolTip(
+            "Extra window kept after the pulse ends in which spikes still count. "
+            "The analysed window is the pulse duration plus this margin, so it "
+            "scales with the pulse rather than fixing a long tail for short pulses."
+        )
         self.spn_threshold_mv = QtWidgets.QDoubleSpinBox(self)
         self.spn_threshold_mv.setDecimals(3)
         self.spn_threshold_mv.setRange(-100.0, 100.0)
@@ -198,7 +202,7 @@ class RheobaseDialog(QtWidgets.QDialog):
         )
         form.addRow(self.lbl_duration_range, duration_row)
         form.addRow("Recovery time (ms):", self.spn_recovery_ms)
-        form.addRow("Response window (ms):", self.spn_response_ms)
+        form.addRow("Post-pulse window (ms):", self.spn_response_ms)
         form.addRow("Spike threshold (mV):", self.spn_threshold_mv)
         form.addRow("Maximum iterations:", self.spn_max_iterations)
         form.addRow("Live view:", self.chk_follow_input)
@@ -222,18 +226,19 @@ class RheobaseDialog(QtWidgets.QDialog):
             value_widget.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
             value_widget.installEventFilter(self._wheel_filter)
 
-        self.spn_pulse_ms.valueChanged.connect(self._update_response_default)
-        self.spn_max_pulse_ms.valueChanged.connect(self._update_response_default)
-        self.spn_duration_tolerance_ms.valueChanged.connect(
-            lambda _value: self._update_plot()
+        for spin in (
+            self.spn_pulse_ms,
+            self.spn_max_pulse_ms,
+            self.spn_duration_tolerance_ms,
+            self.spn_min_amplitude,
+            self.spn_max_amplitude,
+            self.spn_fixed_amplitude,
+            self.spn_tolerance,
+        ):
+            spin.valueChanged.connect(self._on_parameter_changed)
+        self.spn_max_iterations.valueChanged.connect(
+            lambda _value: self._update_estimate()
         )
-        self.spn_response_ms.valueChanged.connect(self._mark_response_overridden)
-        self.spn_min_amplitude.valueChanged.connect(lambda _value: self._update_plot())
-        self.spn_max_amplitude.valueChanged.connect(lambda _value: self._update_plot())
-        self.spn_fixed_amplitude.valueChanged.connect(
-            lambda _value: self._update_plot()
-        )
-        self.spn_tolerance.valueChanged.connect(lambda _value: self._update_plot())
         self.cmb_sweeping_strategy.currentIndexChanged.connect(
             self._update_sweeping_strategy_controls
         )
@@ -259,6 +264,8 @@ class RheobaseDialog(QtWidgets.QDialog):
 
         self.lbl_status = QtWidgets.QLabel("Rheobase: waiting for first probe", self)
         layout.addWidget(self.lbl_status)
+        self.lbl_estimate = QtWidgets.QLabel("", self)
+        layout.addWidget(self.lbl_estimate)
         self.log = QtWidgets.QPlainTextEdit(self)
         self.log.setMaximumHeight(130)
         self.log.setReadOnly(True)
@@ -291,6 +298,7 @@ class RheobaseDialog(QtWidgets.QDialog):
         self.apply_theme(self._theme)
         self._update_sweeping_strategy_controls()
         self.refresh()
+        self._update_estimate()
 
     def _set_parameters_hidden(self, hidden: bool) -> None:
         if hidden:
@@ -358,17 +366,6 @@ class RheobaseDialog(QtWidgets.QDialog):
             available.bottom() - minimized_height - margin + 1,
         )
 
-    def _update_response_default(self, _value: float) -> None:
-        if self._response_user_overridden:
-            return
-        self._response_defaulting = True
-        self.spn_response_ms.setValue(self.spn_max_pulse_ms.value() + 20.0)
-        self._response_defaulting = False
-
-    def _mark_response_overridden(self, _value: float) -> None:
-        if not self._response_defaulting:
-            self._response_user_overridden = True
-
     def _update_sweeping_strategy_controls(self) -> None:
         strategy = self.cmb_sweeping_strategy.currentText()
         fixed_amplitude = strategy == self.FIXED_AMPLITUDE_VARYING_DURATION_STRATEGY
@@ -389,6 +386,7 @@ class RheobaseDialog(QtWidgets.QDialog):
             else "Pulse duration range/tolerance (ms):"
         )
         self._update_plot()
+        self._update_estimate()
 
     def refresh(self) -> None:
         self.project = self.editor.project
@@ -421,6 +419,9 @@ class RheobaseDialog(QtWidgets.QDialog):
         self.refresh()
         if self.project is None or self.editor.current_stim_modifier is None:
             self._append_log("No stimulation array is selected.")
+            return
+        if not self._confirm_start_over_existing_input():
+            self._append_log("Routine cancelled; existing stimulation input kept.")
             return
         if not self.cmb_trace.currentText():
             duration = 0.001
@@ -472,11 +473,16 @@ class RheobaseDialog(QtWidgets.QDialog):
         self._chronaxie_ms = None
         self._fixed_spiking_duration_ms = None
         self._logged_recovery_note = False
-        self._setup_probe_baseline()
+        self._resolution_warning_logged = False
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         if clear_log:
             self.log.clear()
+        self._maybe_log_duration_resolution_warning()
+        self._append_log(
+            f"Estimated simulations for the current settings: "
+            f"~{self._estimated_probe_count()}."
+        )
         self._update_plot()
         if fixed_amplitude:
             self._begin_fixed_amplitude_duration_search()
@@ -497,7 +503,7 @@ class RheobaseDialog(QtWidgets.QDialog):
     def _begin_duration_search(self, duration_ms: float, description: str) -> None:
         min_amplitude = self.spn_min_amplitude.value()
         max_amplitude = self.spn_max_amplitude.value()
-        self._current_duration_ms = duration_ms
+        self._current_duration_ms = self._effective_duration_ms(duration_ms)
         self._low = min_amplitude
         self._high = max_amplitude
         self._iteration = 0
@@ -516,7 +522,7 @@ class RheobaseDialog(QtWidgets.QDialog):
     def _probe_fixed_amplitude_duration(
         self, duration_ms: float, description: str
     ) -> None:
-        self._current_duration_ms = duration_ms
+        self._current_duration_ms = self._effective_duration_ms(duration_ms)
         self._phase = "duration_probe"
         self._append_log(
             f"Testing fixed amplitude {self.spn_fixed_amplitude.value():.6g} "
@@ -539,14 +545,41 @@ class RheobaseDialog(QtWidgets.QDialog):
             raise RuntimeError("No project is available.")
         return self.project
 
-    def _setup_probe_baseline(self) -> None:
-        stim = self._require_stim()
-        project = self._require_project()
-        self._probe_checkpoint = f"Rheobase baseline {id(self)}"
-        self._probe_start_sample = int(
-            np.ceil(project.b2_model.get_sim_time_secs() / stim.dt)
+    def _one_sample_ms(self) -> float:
+        return samples_to_milliseconds(1, self._require_stim().dt)
+
+    def _duration_tolerance_ms(self) -> float:
+        return max(self.spn_duration_tolerance_ms.value(), self._one_sample_ms())
+
+    def _effective_duration_ms(self, duration_ms: float) -> float:
+        _samples, effective_ms = snap_milliseconds_to_dt(
+            duration_ms, self._require_stim().dt
         )
-        project.b2_model.network.store(self._probe_checkpoint)
+        return effective_ms
+
+    def _duration_threshold_exists(self, duration_ms: float) -> bool:
+        return any(
+            abs(existing_duration - duration_ms) <= 1e-9
+            for existing_duration, _threshold in self._thresholds
+        )
+
+    def _duration_already_sampled(self, duration_ms: float) -> bool:
+        return any(
+            abs(existing_duration - duration_ms) <= 1e-9
+            for existing_duration, _amplitude, _spike_count in self._samples
+        )
+
+    def _maybe_log_duration_resolution_warning(self) -> None:
+        if self._resolution_warning_logged:
+            return
+        one_sample_ms = self._one_sample_ms()
+        if self.spn_duration_tolerance_ms.value() >= one_sample_ms:
+            return
+        self._resolution_warning_logged = True
+        self._append_log(
+            f"Stim dt is {one_sample_ms:.6g} ms; durations are snapped to that "
+            "grid, so finer tolerances cannot be resolved."
+        )
 
     def _probe(self, amplitude: float) -> None:
         stim = self._require_stim()
@@ -554,20 +587,27 @@ class RheobaseDialog(QtWidgets.QDialog):
         if neuron_id >= stim.values.shape[1]:
             self._finish(f"Neuron {neuron_id} is outside the stimulation array.")
             return
-        recovery_n = max(1, round(self.spn_recovery_ms.value() / 1000.0 / stim.dt))
-        pulse_n = max(1, round(self._current_duration_ms / 1000.0 / stim.dt))
-        tail_n = max(1, round(self.spn_response_ms.value() / 1000.0 / stim.dt))
+        recovery_n, _recovery_ms = snap_milliseconds_to_dt(
+            self.spn_recovery_ms.value(), stim.dt
+        )
+        pulse_n, effective_ms = snap_milliseconds_to_dt(
+            self._current_duration_ms, stim.dt
+        )
+        self._current_duration_ms = effective_ms
+        tail_n, _tail_ms = snap_milliseconds_to_dt(
+            self.spn_response_ms.value(), stim.dt
+        )
         samples = recovery_n + pulse_n + tail_n
         block = np.zeros((samples, stim.values.shape[1]), dtype=np.float32)
         block[recovery_n : recovery_n + pulse_n, neuron_id] = amplitude
-        self._restore_probe_baseline()
-        block_start = self._place_probe_block(block)
+        block_start = self._append_block(block)
         self._pending_amplitude = amplitude
         self._pulse_onset_seconds = (block_start + recovery_n) * stim.dt
         if not self._logged_recovery_note:
             self._append_log(
-                "Each probe restores the Brian2 state saved at the start of the "
-                "routine and includes a recovery lead before the pulse."
+                "Each probe is appended after the existing input with a recovery "
+                "lead before the pulse so the membrane returns to rest, mirroring "
+                "the STDP routine's append-and-run-forward model."
             )
             self._logged_recovery_note = True
         self._append_log(
@@ -577,14 +617,11 @@ class RheobaseDialog(QtWidgets.QDialog):
         )
         self._run_to_sample(block_start + samples)
 
-    def _restore_probe_baseline(self) -> None:
-        if self._probe_checkpoint is None:
-            return
-        self._require_project().b2_model.network.restore(self._probe_checkpoint)
-
-    def _place_probe_block(self, block: np.ndarray) -> int:
+    def _append_block(self, block: np.ndarray) -> int:
         stim = self._require_stim()
-        start = self._probe_start_sample
+        project = self._require_project()
+        current_sample = int(np.ceil(project.b2_model.get_sim_time_secs() / stim.dt))
+        start = max(stim.values.shape[0], current_sample)
         self.editor.apply_pattern(
             slice(0, stim.values.shape[1]), slice(start, start + block.shape[0]), block
         )
@@ -710,13 +747,19 @@ class RheobaseDialog(QtWidgets.QDialog):
     def _bisect_fixed_amplitude_duration(self) -> None:
         if (
             self._duration_high_ms - self._duration_low_ms
-            <= self.spn_duration_tolerance_ms.value()
+            <= self._duration_tolerance_ms()
         ):
             self._fixed_spiking_duration_ms = self._duration_high_ms
             self._update_plot()
             self._finish(self._final_fixed_amplitude_summary())
             return
         mid = 0.5 * (self._duration_low_ms + self._duration_high_ms)
+        snapped_mid = self._effective_duration_ms(mid)
+        if self._duration_already_sampled(snapped_mid):
+            self._fixed_spiking_duration_ms = self._duration_high_ms
+            self._update_plot()
+            self._finish(self._final_fixed_amplitude_summary())
+            return
         self._probe_fixed_amplitude_duration(mid, "duration bisection")
 
     def _bisect_step(self) -> None:
@@ -783,13 +826,19 @@ class RheobaseDialog(QtWidgets.QDialog):
     def _bisect_strength_duration(self) -> None:
         if (
             self._duration_high_ms - self._duration_low_ms
-            <= self.spn_duration_tolerance_ms.value()
+            <= self._duration_tolerance_ms()
         ):
             self._update_strength_duration_metrics()
             self._update_plot()
             self._finish(self._final_summary())
             return
         mid = 0.5 * (self._duration_low_ms + self._duration_high_ms)
+        snapped_mid = self._effective_duration_ms(mid)
+        if self._duration_threshold_exists(snapped_mid):
+            self._update_strength_duration_metrics()
+            self._update_plot()
+            self._finish(self._final_summary())
+            return
         self._begin_duration_search(mid, "duration bisection")
 
     def _update_strength_duration_metrics(self) -> None:
@@ -849,10 +898,14 @@ class RheobaseDialog(QtWidgets.QDialog):
         trace_mv = _to_mv(trace.traces[int(matches[0])], trace.units)
         dt_ms = 1000.0 * trace.dt
         onset_ms = 1000.0 * self._pulse_onset_seconds
+        # Count spikes over the pulse plus a fixed post-pulse margin, so the
+        # window tracks the pulse instead of trailing a long fixed tail after a
+        # short pulse (which could catch unrelated rebound activity).
+        window_ms = self._current_duration_ms + self.spn_response_ms.value()
         start = max(0, int(np.floor(onset_ms / dt_ms)))
         stop = min(
             trace_mv.size,
-            int(np.ceil((onset_ms + self.spn_response_ms.value()) / dt_ms)) + 1,
+            int(np.ceil((onset_ms + window_ms) / dt_ms)) + 1,
         )
         return count_spikes(trace_mv[start:stop], self.spn_threshold_mv.value())
 
@@ -1067,3 +1120,105 @@ class RheobaseDialog(QtWidgets.QDialog):
         if spike_count == 1:
             return "1 spike"
         return f"{spike_count} spikes"
+
+    def _on_parameter_changed(self, _value: float) -> None:
+        self._update_plot()
+        self._update_estimate()
+
+    @staticmethod
+    def _bisection_steps(span: float, tolerance: float) -> int:
+        """Number of halvings to bring ``span`` down to ``tolerance``."""
+        if span <= 0.0 or tolerance <= 0.0:
+            return 0
+        steps = 0
+        width = span
+        while width > tolerance and steps < 10_000:
+            width *= 0.5
+            steps += 1
+        return steps
+
+    def _amplitude_search_estimate(self) -> int:
+        span = self.spn_max_amplitude.value() - self.spn_min_amplitude.value()
+        bisections = min(
+            self.spn_max_iterations.value(),
+            self._bisection_steps(span, self.spn_tolerance.value()),
+        )
+        # Two bracket probes (max, then min) plus the bisection probes.
+        return 2 + bisections
+
+    def _estimated_probe_count(self) -> int:
+        """Rough number of simulations the current settings will run."""
+        strategy = self.cmb_sweeping_strategy.currentText()
+        if strategy == self.FIXED_DURATION_VARYING_AMPLITUDE_STRATEGY:
+            return self._amplitude_search_estimate()
+        duration_span = self.spn_max_pulse_ms.value() - self.spn_pulse_ms.value()
+        duration_bisections = self._bisection_steps(
+            duration_span, self.spn_duration_tolerance_ms.value()
+        )
+        if strategy == self.FIXED_AMPLITUDE_VARYING_DURATION_STRATEGY:
+            # Two bracket probes plus the duration bisection probes.
+            return 2 + duration_bisections
+        # "Amplitude and duration" runs a full amplitude search at each duration
+        # stage (rheobase at the max duration, the min-duration bound, then the
+        # chronaxie bisection), so multiply the two searches out.
+        duration_stages = 2 + duration_bisections
+        return duration_stages * self._amplitude_search_estimate()
+
+    def _update_estimate(self) -> None:
+        self.lbl_estimate.setText(
+            "Estimated simulations for the current settings: "
+            f"~{self._estimated_probe_count()}"
+        )
+
+    def _nonempty_stim_array_names(self) -> list[str]:
+        project = self.project
+        if project is None:
+            return []
+        return [
+            name
+            for name, stim in project.stim_arrays.items()
+            if bool(np.any(stim.values))
+        ]
+
+    def _prompt_existing_input_choice(self, names: list[str]) -> str:
+        """Ask what to do about non-empty stim arrays; return the chosen action."""
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+        box.setWindowTitle("Existing stimulation input")
+        listed = "\n".join(f"  • {name}" for name in names)
+        box.setText(
+            "The routine appends its probe pulses after any existing input, which "
+            "lengthens every simulation. These stimulation arrays already contain "
+            f"input:\n\n{listed}"
+        )
+        box.setInformativeText(
+            "Clear all stimulation arrays first, append after the existing input, "
+            "or cancel."
+        )
+        clear_button = box.addButton(
+            "Clear all stim arrays", QtWidgets.QMessageBox.ButtonRole.DestructiveRole
+        )
+        box.addButton("Append anyway", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        cancel_button = box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(cancel_button)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is cancel_button or clicked is None:
+            return "cancel"
+        if clicked is clear_button:
+            return "clear"
+        return "append"
+
+    def _confirm_start_over_existing_input(self) -> bool:
+        """Warn about non-empty stim arrays; return whether to proceed."""
+        names = self._nonempty_stim_array_names()
+        if not names:
+            return True
+        choice = self._prompt_existing_input_choice(names)
+        if choice == "cancel":
+            return False
+        if choice == "clear":
+            self.editor.clear_all_stim_arrays()
+            self.refresh()
+            self._append_log("Cleared all stimulation arrays before starting.")
+        return True
