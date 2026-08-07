@@ -17,6 +17,7 @@ from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomControlle
 from neuroseq.input_designer_dialog import InputDesignerDialog
 from neuroseq.project import Project
 from neuroseq.rheobase_dialog import RheobaseDialog
+from neuroseq.stdp_window_dialog import StdpWindowDialog
 from neuroseq.stim import DrawStim
 from neuroseq.stim import DrawStimType
 from neuroseq.stim import StimArray
@@ -63,7 +64,12 @@ class StimEditor(QtWidgets.QWidget):
     # Dynamic-input routines offered when the user opens the designer.
     TARGETED_STDP_ROUTINE = "Targeted STDP synaptic strength"
     RHEOBASE_ROUTINE = "Minimal stimulus for spiking (rheobase)"
-    DYNAMIC_INPUT_ROUTINES = (TARGETED_STDP_ROUTINE, RHEOBASE_ROUTINE)
+    STDP_WINDOW_ROUTINE = "STDP timing window (LTP/LTD vs Δt)"
+    DYNAMIC_INPUT_ROUTINES = (
+        TARGETED_STDP_ROUTINE,
+        RHEOBASE_ROUTINE,
+        STDP_WINDOW_ROUTINE,
+    )
 
     def __init__(
         self,
@@ -93,6 +99,7 @@ class StimEditor(QtWidgets.QWidget):
         self._pattern_dialog: StimPatternDialog | None = None
         self._input_designer_dialog: InputDesignerDialog | None = None
         self._rheobase_dialog: RheobaseDialog | None = None
+        self._stdp_window_dialog: StdpWindowDialog | None = None
         self._input_designer_theme = "light"
         # Captures the time index the user clicked at, so a Ramp drag can
         # use it as the ramp's left edge for every subsequent mouse_dragged
@@ -1013,11 +1020,15 @@ class StimEditor(QtWidgets.QWidget):
             self._show_routine_dialog("_input_designer_dialog", InputDesignerDialog)
         elif routine == self.RHEOBASE_ROUTINE:
             self._show_routine_dialog("_rheobase_dialog", RheobaseDialog)
+        elif routine == self.STDP_WINDOW_ROUTINE:
+            self._show_routine_dialog("_stdp_window_dialog", StdpWindowDialog)
 
     def _show_routine_dialog(
         self,
-        attr_name: Literal["_input_designer_dialog", "_rheobase_dialog"],
-        cls: type[InputDesignerDialog] | type[RheobaseDialog],
+        attr_name: Literal[
+            "_input_designer_dialog", "_rheobase_dialog", "_stdp_window_dialog"
+        ],
+        cls: type[InputDesignerDialog] | type[RheobaseDialog] | type[StdpWindowDialog],
     ) -> None:
         dialog = getattr(self, attr_name)
         if dialog is None:
@@ -1037,7 +1048,11 @@ class StimEditor(QtWidgets.QWidget):
         previous run's state (plots, log, history) into a new project. Dialogs
         are rebuilt fresh the next time they are opened.
         """
-        for attr_name in ("_input_designer_dialog", "_rheobase_dialog"):
+        for attr_name in (
+            "_input_designer_dialog",
+            "_rheobase_dialog",
+            "_stdp_window_dialog",
+        ):
             dialog = getattr(self, attr_name)
             if dialog is not None:
                 dialog.close()
@@ -1064,10 +1079,14 @@ class StimEditor(QtWidgets.QWidget):
 
     def _dynamic_input_dialogs(
         self,
-    ) -> list[InputDesignerDialog | RheobaseDialog]:
+    ) -> list[InputDesignerDialog | RheobaseDialog | StdpWindowDialog]:
         return [
             dialog
-            for dialog in (self._input_designer_dialog, self._rheobase_dialog)
+            for dialog in (
+                self._input_designer_dialog,
+                self._rheobase_dialog,
+                self._stdp_window_dialog,
+            )
             if dialog is not None
         ]
 

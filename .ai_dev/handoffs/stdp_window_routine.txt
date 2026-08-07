@@ -1,0 +1,450 @@
+stdp_window_routine — "STDP timing window (LTP/LTD vs Δt)" Design dynamic input routine  [IMPLEMENTED]
+========================================================================================
+
+A third Design dynamic input routine, sitting alongside "Targeted STDP synaptic
+strength" (InputDesignerDialog) and "Minimal stimulus for spiking (rheobase)"
+(RheobaseDialog). It traces the classic STDP learning window for ONE synapse:
+the change in synaptic efficacy as a function of the pre→post spike timing
+difference Δt — potentiation (LTP) for Δt > 0 (pre before post) and depression
+(LTD) for Δt < 0 (post before pre).
+
+Unlike the other two routines, this is NOT a converging search (no bisection).
+It is a DETERMINISTIC SWEEP over a predetermined list of Δt values. For each Δt
+it does one cyclical step, then moves to the next Δt, accumulating the window.
+
+Readout is FUNCTIONAL (EPSP-based), reusing the exact measurement the STDP
+routine already uses — NOT the raw weight. State handling is APPEND +
+RUN-FORWARD with a recovery lead (the model we standardised on for rheobase),
+NO store/restore.
+
+Files to create:
+    src/neuroseq/stdp_window.py               (pure sweep/percent helpers, no Qt)
+    src/neuroseq/stdp_window_dialog.py         (StdpWindowDialog — closed-loop Qt)
+    tests/test_stdp_window.py                  (pure-function tests)
+    tests/test_stdp_window_dialog.py           (Qt closed-loop tests, faked measurement)
+    tests/test_stdp_window_integration.py      (real Brian2 closed loop)
+
+Files to change:
+    src/neuroseq/stim_editor.py                (routine list + dispatch + fan-out)
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+ARCHITECTURE — a standalone sibling dialog; reuse, do not refactor the others
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Build `StdpWindowDialog(QtWidgets.QDialog)` as a new standalone dialog that
+follows the SAME closed-loop contract as the other two, so gui.py needs no
+changes:
+
+    simulation_requested = QtCore.Signal(float)
+    def simulation_finished(self) -> None: ...
+    def simulation_failed(self, message: str) -> None: ...
+    def apply_theme(self, theme: str) -> None: ...
+    def refresh(self) -> None: ...
+
+`InputDesignerDialog` (the STDP-targeting routine) and `RheobaseDialog` are both
+heavily tested and stay UNCHANGED in behaviour. REUSE their building blocks:
+
+  - Module-level helpers from `input_designer_dialog.py`:
+        from neuroseq.input_designer_dialog import _WheelToScrollFilter
+        from neuroseq.input_designer_dialog import _set_native_minimized_position
+        from neuroseq.input_designer_dialog import EPSPMeasurement
+  - EPSP detection:
+        from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
+        from neuroseq.resources.analysis_plugins.epsp_amplitudes import detect_epsps
+
+  - COPY (they are routine-agnostic) the bodies of InputDesignerDialog's
+    `_append_probe`, `_append_pairing`-style block construction, `_append_block`,
+    `_run_to_sample`, `_request_simulation`, `_measure_epsps`,
+    `_is_simulation_voltage_trace`, `_preferred_trace_name`, and the
+    scrollable-params / wheel-guard / separate-plot-window / info-header /
+    minimise-position / collapse scaffolding. Do not re-derive them.
+
+  - COPY the existing-input warning + run-estimate that RheobaseDialog now has:
+    `_nonempty_stim_array_names`, `_prompt_existing_input_choice`,
+    `_confirm_start_over_existing_input` (Clear all / Append anyway / Cancel,
+    calling `self.editor.clear_all_stim_arrays()`), and the live
+    `lbl_estimate` + `_estimated_probe_count` + `_update_estimate` pattern.
+
+  OPTIONAL (allowed) refactor: lift the two module-level helpers and/or the
+  warning helpers into a shared `src/neuroseq/_dialog_helpers.py` imported by
+  all three dialogs. If you do, RheobaseDialog's and InputDesignerDialog's test
+  suites must still pass unchanged. A shared base class is a NON-GOAL.
+
+Guard against reacting to runs it did not request with the `_awaiting_simulation`
+flag (set True in `_request_simulation` before emitting; clear it at the top of
+`simulation_finished`; ignore the callback when False). Stop the routine on
+`closeEvent` if running, exactly like the other two.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+WHAT THE ROUTINE MEASURES
+────────────────────────────────────────────────────────────────────────────────────────────
+
+For a chosen presynaptic neuron `pre` and postsynaptic neuron `post`, the
+routine reports, per tested Δt, the fractional change in the postsynaptic EPSP
+amplitude caused by a single pre/post pairing at that Δt:
+
+    ΔEPSP%(Δt) = 100 * (EPSP_after - EPSP_before) / EPSP_baseline
+
+EPSP amplitude is measured exactly as the STDP routine measures it: a
+five-pulse presynaptic probe (`PROBE_PULSES = 5`, `PROBE_PERIOD_MS = 100`)
+whose postsynaptic response is scored with `detect_epsps` via `_measure_epsps`.
+
+Sign convention (Δt = t_post − t_pre):
+    Δt > 0  → pre before post → expect LTP (ΔEPSP% > 0)
+    Δt < 0  → post before pre → expect LTD (ΔEPSP% < 0)
+
+The pre/post pulses in a pairing must be SUPRATHRESHOLD so both neurons spike
+and drive the synapse's on_pre / on_post pathways (the probe pulses need only
+make `pre` spike; the resulting postsynaptic EPSP stays subthreshold). Note in
+the log that the amplitude must evoke spikes — point users at the rheobase
+routine to find a suprathreshold amplitude first.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+WHY NO RESTORE, AND WHY THE RECOVERY GAPS MATTER
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Synaptic weight does not passively recover (there is no decay term on `we`), so
+the rheobase-style recovery lead cannot return the WEIGHT to a fixed baseline
+between Δt points. We deliberately DO NOT use store/restore. Instead the routine
+measures the PER-PAIRING change from a rested ELIGIBILITY state:
+
+  - The recovery lead before each block must be ≫ taupre / taupost (default
+    150 ms; the example model uses 20 ms time constants, so ~5 τ). This lets the
+    `Apre` / `Apost` eligibility traces decay to ~0 before each pairing, so each
+    Δt point is an independent single-pairing measurement, and the probe's own
+    pre-spikes (which bump `Apre`) do not contaminate the following pairing.
+
+  - Measure EPSP by SUCCESSIVE DIFFERENCES so only one probe is needed per point:
+        baseline probe once  → EPSP_0  (also EPSP_baseline for normalisation)
+        for each Δt_k:  pairing at Δt_k → probe → EPSP_k
+                        ΔEPSP%_k = 100 * (EPSP_k − EPSP_{k-1}) / EPSP_0
+    (EPSP_{k-1} is the previous point's probe; EPSP_0 for the first point.)
+
+  - The absolute weight DRIFTS across the sweep. Normalising by EPSP_0 keeps the
+    window comparable, but if the running EPSP wanders far from EPSP_0 (e.g.
+    < 25% or > 400% of it — a proxy for approaching a `we` clip bound), append a
+    one-line saturation warning to the log so the user knows the tail of the
+    window is unreliable. Do NOT try to correct the drift; just report it.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+PURE HELPERS — src/neuroseq/stdp_window.py (new, no Qt)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1.  delta_t_sweep(dt_min_ms: float, dt_max_ms: float, n_points: int,
+                   include_zero: bool = False) -> list[float]
+
+    A sorted list of `n_points` Δt values evenly spaced on [dt_min_ms,
+    dt_max_ms]. If `include_zero` is False, drop any value within half a step of
+    0.0 (a zero-Δt "pairing" is ill-defined — pre and post coincide). Guard
+    n_points < 1 → [] ; n_points == 1 → [midpoint]. Keep it deterministic.
+
+2.  percent_change(before: float, after: float, baseline: float) -> float
+        return 0.0 if baseline == 0 else 100.0 * (after - before) / baseline
+
+3.  classify_window(delta_t_ms: float) -> str
+        "LTP" if delta_t_ms > 0 else "LTD" if delta_t_ms < 0 else "none"
+
+Trivial, but testing them pins the sweep grid and the sign convention.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+DIALOG — src/neuroseq/stdp_window_dialog.py (new)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+`StdpWindowDialog(QtWidgets.QDialog)`. Window title "STDP timing window
+(LTP/LTD vs Δt)". Scaffolding identical to the sibling dialogs (info header,
+collapsible scrollable params with the wheel guard, read-only log max height
+130, separate plot window opened in showEvent / closed in closeEvent, theme
+sync, native-minimised positioning, Start / Stop / "Clear stim array" /
+Close buttons, plus the live `lbl_estimate` label).
+
+Parameters (QFormLayout in the scrollable panel):
+
+    Trace to analyze:        QComboBox   (voltage StateMonitor names; prefer the
+                                          simulation voltage trace for `post`,
+                                          reuse `_preferred_trace_name`)
+    Presynaptic neuron ID:   QSpinBox    default 0
+    Postsynaptic neuron ID:  QSpinBox    default 1
+    Pulse amplitude:         QDoubleSpinBox (decimals 3, min 0.001) + unit label;
+                                          suprathreshold — see note above
+    Pulse duration (ms):     QDoubleSpinBox  default 5.0
+    Δt minimum (ms):         QDoubleSpinBox  default -100.0, range -1000..1000
+    Δt maximum (ms):         QDoubleSpinBox  default +100.0, range -1000..1000
+    Number of Δt points:     QSpinBox    default 21, range 2..500
+    Include Δt = 0:          QCheckBox   default off
+    Pairings per point:      QSpinBox    default 1, range 1..100
+    Recovery time (ms):      QDoubleSpinBox  default 150.0 (the isolation gap;
+                                          must be ≫ taupre/taupost)
+    Post-pulse window (ms):  QDoubleSpinBox  default 50.0 (EPSP response tail)
+    Live view:               QCheckBox "Follow new input on each iteration" (on)
+    Visible history:         QSpinBox (blocks) — reuse InputDesignerDialog's
+                                          jitter-free live-view sizing
+
+Validate on start: pre ≠ post (else _finish with a message); dt_max > dt_min;
+the sweep list is non-empty.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+SWEEP — the closed-loop state machine (deterministic, NOT bisection)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+State on the dialog:
+    self._running: bool
+    self._awaiting_simulation: bool
+    self._phase: str            # "idle"|"initialize_trace"|"baseline_probe"|"pair"|"probe"
+    self._delta_ts: list[float]
+    self._index: int                    # current Δt index
+    self._pairing_repeat: int           # how many pairings applied at the current Δt
+    self._baseline_epsp: float | None   # EPSP_0
+    self._last_epsp: float | None       # EPSP_{k-1}
+    self._pending_delta_t: float
+    self._results: list[tuple[float, float]]   # (Δt_ms, ΔEPSP%) in tested order
+    self._epsp_trajectory: list[float]         # EPSP amplitude at each probe (drift view)
+    self._probe_pulse_times: list[float]       # set by the probe append, used by _measure_epsps
+
+start():
+    refresh(); guard project / stim modifier (log + return).
+    if not self._confirm_start_over_existing_input(): log "cancelled"; return.
+    Validate pre ≠ post; dt_max > dt_min.
+    if the trace combo has no simulation voltage trace for `post`:
+        phase "initialize_trace"; run an initial 0.001 s sim to create monitors
+        (reuse the STDP dialog's initialize_trace flow verbatim); on finish,
+        refresh and begin the sweep.
+    else begin the sweep.
+
+begin_sweep():
+    self._delta_ts = delta_t_sweep(dt_min, dt_max, n_points, include_zero)
+    if not self._delta_ts: _finish("No Δt points to sweep."); return
+    reset state; log the estimate (~ 1 + n_points*(pairings_per_point + 1));
+    self._phase = "baseline_probe"; append a probe; run.
+
+simulation_finished():
+    guard running / awaiting; clear awaiting.
+    phase "initialize_trace": refresh; if still no trace → _finish; else begin_sweep.
+    Otherwise fetch the trace, measure EPSP via _measure_epsps (catch ValueError
+    → _finish). Then dispatch on phase:
+
+      baseline_probe:
+        self._baseline_epsp = EPSP; self._last_epsp = EPSP
+        self._epsp_trajectory.append(EPSP)
+        (guard EPSP <= 0 → _finish "Baseline EPSP must be positive.")
+        start the first Δt: self._index = 0; self._begin_point()
+
+      probe:                     # a probe that followed a pairing (or repeats)
+        self._epsp_trajectory.append(EPSP)
+        percent = percent_change(self._last_epsp, EPSP, self._baseline_epsp)
+        # Record the change for the CURRENT Δt (after all its pairings).
+        self._results.append((self._pending_delta_t, percent))
+        self._last_epsp = EPSP
+        self._maybe_warn_saturation(EPSP)     # vs 25%..400% of baseline
+        self._update_plot()
+        self._index += 1
+        if self._index >= len(self._delta_ts): _finish(summary); return
+        self._begin_point()
+
+    NOTE: "pair" phase runs do NOT measure — after a pairing run completes it is
+    handled below (see _begin_point / pairing loop). Only "probe"/"baseline_probe"
+    runs measure EPSP.
+
+_begin_point():
+    self._pending_delta_t = self._delta_ts[self._index]
+    self._pairing_repeat = 0
+    self._apply_next_pairing()
+
+_apply_next_pairing():
+    append a pairing block at self._pending_delta_t (see BLOCK LAYOUT);
+    self._pairing_repeat += 1; self._phase = "pair"; run.
+    On the "pair" run's completion (detect in simulation_finished when
+    self._phase == "pair"): if self._pairing_repeat < pairings_per_point:
+        self._apply_next_pairing()          # another pairing at the same Δt
+    else: self._phase = "probe"; append a probe; run.
+
+    (Implement the "pair" completion as an explicit branch at the TOP of
+    simulation_finished, before the EPSP measurement, since pairing runs are not
+    measured. Keep the phase names exact so tests can drive the loop.)
+
+Log each step, e.g. "Δt +20.0 ms: pairing 1/1", "Δt +20.0 ms → +3.24% EPSP
+(LTP)". Use classify_window for the LTP/LTD label.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+BLOCK LAYOUTS  (reuse InputDesignerDialog's, adapted)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Probe block — copy `_append_probe`: a recovery lead, then `PROBE_PULSES` pulses
+of `pulse duration` on the `pre` column spaced `PROBE_PERIOD_MS`, then a tail of
+`post-pulse window` ms. Record `self._probe_pulse_times` from the block start so
+`_measure_epsps` can find each pulse. Use the configured Recovery time as the
+lead (NOT the STDP dialog's fixed 20 ms) — the eligibility must rest.
+
+Pairing block — copy the body of `_append_pairing`, but take a SIGNED Δt instead
+of a `potentiate` bool: lead = Recovery time; `gap_n = round(|Δt| / 1000 / dt)`;
+pre pulse first if Δt ≥ 0 else post first; both pulses use `pulse amplitude`.
+Reuse `_append_block` (append at max(len, current_sample)) and `_run_to_sample`.
+
+Every appended block goes on the `pre`/`post` columns only; all other columns
+stay zero (assert this in tests).
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+THE STDP-WINDOW PLOT
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Separate plot window, one MatplotlibWidget, two stacked axes (add_gridspec(2,1)):
+
+  Axis 1 — "STDP window" (headline):
+     x = Δt (ms), y = ΔEPSP% from self._results, sorted by Δt for a connecting
+     line + markers. Colour LTP points (Δt>0) and LTD points (Δt<0) distinctly
+     (e.g. green / red), draw a horizontal zero line and a vertical line at
+     Δt = 0. x-label "Δt = t_post − t_pre (ms)", y-label "EPSP change (%)".
+     Annotate the LTP / LTD half-planes (text or shading).
+
+  Axis 2 — "EPSP trajectory" (drift view):
+     x = probe index (0..N), y = self._epsp_trajectory (absolute EPSP amplitude),
+     with a dashed horizontal line at EPSP_0. Lets the user see accumulation /
+     saturation. y-label "EPSP (mV)", x-label "Probe".
+
+Style both through the shared `_style_plot_axes` / `apply_theme` path
+(theme.mpl_colors, grid alpha 0.25, integer x locator on axis 2). Redraw on
+every `_update_plot()`. A status label under the plots reads e.g. "12/21 points
+· last Δt +20.0 ms → +3.2% (LTP)" or "waiting for baseline".
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+EDITOR WIRING — src/neuroseq/stim_editor.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1.  Add the routine constant and extend the tuple:
+        STDP_WINDOW_ROUTINE = "STDP timing window (LTP/LTD vs Δt)"
+        DYNAMIC_INPUT_ROUTINES = (
+            TARGETED_STDP_ROUTINE, RHEOBASE_ROUTINE, STDP_WINDOW_ROUTINE,
+        )
+
+2.  In `open_input_designer`, add a dispatch branch:
+        elif routine == self.STDP_WINDOW_ROUTINE:
+            self._show_routine_dialog("_stdp_window_dialog", StdpWindowDialog)
+
+3.  Add `self._stdp_window_dialog: StdpWindowDialog | None = None` next to the
+    other two. Extend `_show_routine_dialog`'s `attr_name` Literal, the
+    `_dynamic_input_dialogs()` tuple, and `discard_input_designer`'s attr tuple
+    to include `_stdp_window_dialog`. The fan-out methods
+    (`input_designer_simulation_finished` / `_failed`,
+    `apply_input_designer_theme`) already iterate `_dynamic_input_dialogs()`, so
+    no other change is needed. Keep the method NAMES unchanged (gui.py calls
+    them). No gui.py changes.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_stdp_window.py (pure)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    test_delta_t_sweep_symmetric_grid_excludes_zero
+        # (-100, 100, 5, include_zero=False) -> [-100,-50,50,100] (0 dropped)
+    test_delta_t_sweep_includes_zero_when_requested
+    test_delta_t_sweep_sorted_and_counted
+    test_percent_change_and_zero_baseline
+    test_classify_window_sign
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_stdp_window_dialog.py (qtbot, closed-loop, faked measurement)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Pattern on tests/test_rheobase_dialog.py: copy its `_FakeProject` (add
+`stim_arrays`, a simulation voltage TraceData) and `_FakeEditor` (with
+`apply_pattern`, `focus_time_range`, `clear_stim_array`, `clear_all_stim_arrays`,
+`current_stim_modifier`). Drive the loop by calling `dialog.start()` then
+`dialog.simulation_finished()` repeatedly, injecting EPSP outcomes by
+monkeypatching a small `_measure_epsps` seam that returns an EPSPMeasurement
+whose amplitude depends on `self._pending_delta_t` (e.g. amplitude rises for
+Δt>0, falls for Δt<0).
+
+    test_sweeps_all_delta_t_points_and_builds_window
+        # 5 points; assert len(results) == number of non-zero Δt, LTP points
+        # (Δt>0) have ΔEPSP% > 0 and LTD points (Δt<0) < 0.
+    test_baseline_probe_measured_before_first_pairing
+    test_pairings_per_point_applies_n_pairings_then_one_probe
+        # pairings_per_point = 3 → 3 "pair" runs then 1 "probe" run per Δt.
+    test_appends_each_block_forward            # strictly increasing block starts
+    test_pairing_only_on_pre_and_post_columns  # other columns zero
+    test_probe_only_on_pre_column
+    test_reports_saturation_warning_when_epsp_drifts_far
+    test_estimate_matches_run_count            # ~ 1 + n_points*(pairings+1)
+    test_warns_and_can_clear_existing_input    # cancel / clear / append paths
+    test_stops_when_dialog_closed
+    test_ignores_unrequested_simulation
+    test_initializes_missing_trace_then_starts_sweep
+    test_plots_open_in_separate_window
+    test_matplotlib_plots_follow_theme
+
+Also extend tests/test_stim_editor.py:
+    test_open_dynamic_input_opens_stdp_window_when_selected
+        # QInputDialog.getItem -> (StimEditor.STDP_WINDOW_ROUTINE, True);
+        # assert stim_editor._stdp_window_dialog is created and visible, and
+        # discard_input_designer clears it.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS — tests/test_stdp_window_integration.py (real Brian2 closed loop)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Pattern on tests/test_rheobase_integration.py. Use the `test_project` fixture
+(its `Ce` synapse implements the STDP rule: on_pre `we = clip(we + Apost,...)`,
+on_post `we = clip(we + Apre,...)`, dApre = +6 nS, dApost = −6.3 nS,
+taupre = taupost = 20 ms). Make initial conditions deterministic
+(`define_init("P","v","El")`, ge = gi = 0*nS) to remove RNG spikes. Wire a real
+StimEditor + a `run` slot that calls `b2_model.run_simulation(sec,
+project.stim_arrays)` then `dialog.simulation_finished()`, and clear the
+fixture's stim via the "clear" prompt path.
+
+Use pre = 0, post = 1 (both excitatory in `Pe`, connected by `Ce`), a
+suprathreshold amplitude, a small sweep (e.g. 3 points: −30, +30, and one more),
+and generous recovery. Assert:
+    - a positive-Δt point yields ΔEPSP% > 0 (LTP),
+    - a negative-Δt point yields ΔEPSP% < 0 (LTD),
+    - the trace is a real "Simulation :: … / v" trace,
+    - the stim array grew past its original length (append), and no checkpoint
+      was created (no store/restore).
+Choose the amplitude so `pre` and `post` actually spike (check with a quick
+probe if needed); if the pairing does not drive spikes the window is flat, which
+would make this test the canary it is meant to be.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NON-GOALS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- BISECTION / convergence to a target. This routine sweeps a fixed Δt grid.
+- store / restore / checkpoint juggling. Append-and-run-forward only; the
+  recovery lead rests the eligibility traces (see the rationale above).
+- DIRECT WEIGHT readout from the synapse weight matrix. We deliberately chose
+  the functional EPSP readout to reuse the validated detect_epsps path and stay
+  model-agnostic. (A weight-matrix variant could reuse the same sweep later.)
+- Correcting weight drift across the sweep (only report saturation).
+- A shared base class with the other dialogs (reuse helpers instead).
+- CHANGING gui.py — the editor fan-out already covers the new dialog.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    .venv/bin/ruff check src/neuroseq/stdp_window.py src/neuroseq/stdp_window_dialog.py \
+        src/neuroseq/stim_editor.py tests/test_stdp_window.py \
+        tests/test_stdp_window_dialog.py tests/test_stdp_window_integration.py
+    .venv/bin/ruff format --check <same files>
+    .venv/bin/mypy src/neuroseq/stdp_window.py src/neuroseq/stdp_window_dialog.py \
+        src/neuroseq/stim_editor.py
+    PYTHONPATH=src .venv/bin/python -m pytest \
+        tests/test_stdp_window.py tests/test_stdp_window_dialog.py \
+        tests/test_stdp_window_integration.py tests/test_input_designer_dialog.py \
+        tests/test_rheobase_dialog.py tests/test_stim_editor.py -v
+    PYTHONPATH=src .venv/bin/python -m pytest
+
+The InputDesignerDialog and RheobaseDialog suites are listed explicitly: they
+must stay green, proving the shared-helper reuse / optional helper-module lift
+did not disturb the existing routines.
