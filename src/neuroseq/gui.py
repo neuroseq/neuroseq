@@ -1861,6 +1861,16 @@ class Gui(QtWidgets.QMainWindow):
                 )
             )
 
+    def btn_open_fiji_clicked(self) -> None:
+        from neuroseq.external_tools import launch_fiji
+
+        launch_fiji(self)
+
+    def btn_open_cellpose_clicked(self) -> None:
+        from neuroseq.external_tools import launch_cellpose
+
+        launch_cellpose(self)
+
     def btn_import_cellpose_data_clicked(self) -> None:
         dialog = CellposeImportDialog(
             self,
@@ -2764,6 +2774,17 @@ class Gui(QtWidgets.QMainWindow):
     ) -> None:
         if toolbar is None:
             return
+        self.btn_open_fiji = QtWidgets.QPushButton("Open Fiji")
+        self.btn_open_fiji.setToolTip("Launch Fiji/ImageJ")
+        icons.set_widget_icon(self.btn_open_fiji, "mdi6.microscope")
+        self.btn_open_fiji.clicked.connect(self.btn_open_fiji_clicked)
+        toolbar.addWidget(self.btn_open_fiji)
+        self.btn_open_cellpose = QtWidgets.QPushButton("Open Cellpose")
+        self.btn_open_cellpose.setToolTip("Launch the Cellpose GUI")
+        icons.set_widget_icon(self.btn_open_cellpose, "mdi6.dots-hexagon")
+        self.btn_open_cellpose.clicked.connect(self.btn_open_cellpose_clicked)
+        toolbar.addWidget(self.btn_open_cellpose)
+        toolbar.addSeparator()
         self.cmb_stim = QtWidgets.QComboBox()
         toolbar.addWidget(QtWidgets.QLabel("  Stim data: "))
         toolbar.addWidget(self.cmb_stim)
