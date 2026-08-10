@@ -7,7 +7,6 @@ from typing import Literal
 from typing import overload
 
 import brian2.numpy_ as np
-import qtawesome as qta
 from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
@@ -1187,19 +1186,6 @@ class StimEditor(QtWidgets.QWidget):
         self.limits_modified.emit()
         self._stim_values_updated()
 
-    def _pattern_designer_icon(self) -> str:
-        for icon_name in [
-            "mdi6.creation",
-            "mdi6.auto-fix",
-            "mdi6.gesture-tap-button",
-        ]:
-            try:
-                qta.icon(icon_name)
-                return icon_name
-            except Exception:
-                continue
-        return "mdi6.pencil"
-
     def _add_actions(self, toolbar: QtWidgets.QToolBar, menu: QtWidgets.QMenu) -> None:
         self.action_draw_mode = add_action(
             "Draw mode (1)",
@@ -1282,13 +1268,16 @@ class StimEditor(QtWidgets.QWidget):
             self,
             icon="mdi6.repeat-variant",
         )
+        # Static and dynamic input design are a matched pair: the same
+        # pencil-box glyph, single vs stacked (a static block vs a dynamic
+        # sequence of inputs).
         add_action(
             "Design static input",
             self.open_pattern_designer,
             menu,
             toolbar,
             self,
-            icon=self._pattern_designer_icon(),
+            icon="mdi6.pencil-box-outline",
         )
         add_action(
             "Design dynamic input",
@@ -1296,7 +1285,7 @@ class StimEditor(QtWidgets.QWidget):
             menu,
             toolbar,
             self,
-            icon="mdi6.robot-industrial-outline",
+            icon="mdi6.pencil-box-multiple-outline",
         )
         add_action(
             "Show all stim arrays",
