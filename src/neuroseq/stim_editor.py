@@ -22,6 +22,7 @@ from neuroseq.stim import DrawStim
 from neuroseq.stim import DrawStimType
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
+from neuroseq.stim_array_modifier import PadReversibleAction
 from neuroseq.stim_array_modifier import ResizableReversibleAction
 from neuroseq.stim_array_modifier import StimArrayModifier
 from neuroseq.stim_array_modifier import TrimReversibleAction
@@ -273,7 +274,7 @@ class StimEditor(QtWidgets.QWidget):
         stim_array = self.current_stim_modifier.stim_array
         current_length_secs = stim_array.dt * stim_array.values.shape[0]
         try:
-            self.project.pad_stim_arrays(current_length_secs + self.pad_stim_array_secs)
+            self._apply_pad(current_length_secs + self.pad_stim_array_secs)
         except Exception as e:
             QtWidgets.QMessageBox.critical(
                 self,
@@ -281,7 +282,24 @@ class StimEditor(QtWidgets.QWidget):
                 f"Error padding stim arrays: '{e}'",
             )
             return
-        self.set_project(self.project, keep_undo_history=False)
+
+    def _apply_pad(self, total_length_secs: float) -> None:
+        """Pad every stim array up to ``total_length_secs`` as one undoable step.
+
+        Like :meth:`_apply_trim`, this is routed through the modifier's undo
+        stack (rather than clearing it) so Ctrl+Z removes the padding again --
+        and, because the stim array is the authoritative timeline, growing it
+        re-exposes any simulated data a prior trim had windowed out.
+        """
+        if self.current_stim_modifier is None or self.project is None:
+            return
+        action = PadReversibleAction(
+            self.project,
+            total_length_secs,
+            self.stim_widget,
+            self.current_stim_modifier.stim_array.name,
+        )
+        self._push_timeline_action(action)
 
     def trim_stim_array(self) -> None:
         if self.current_stim_modifier is None or self.project is None:
@@ -344,20 +362,31 @@ class StimEditor(QtWidgets.QWidget):
         """
         if self.current_stim_modifier is None or self.project is None:
             return
-        modifier = self.current_stim_modifier
         action = TrimReversibleAction(
             self.project,
             new_length_secs,
             self.stim_widget,
-            modifier.stim_array.name,
+            self.current_stim_modifier.stim_array.name,
         )
+        self._push_timeline_action(action)
+
+    def _push_timeline_action(
+        self, action: TrimReversibleAction | PadReversibleAction
+    ) -> None:
+        """Run a whole-timeline resize action and push it onto the undo stack.
+
+        Trim and pad both resize every stim array at once, so this applies the
+        action on the current modifier's stack (preserving undo history) and
+        clears the other per-array stacks, whose indices no longer line up with
+        the shared timeline (as ``apply_pattern`` does for the same reason).
+        """
+        if self.current_stim_modifier is None or self.project is None:
+            return
+        modifier = self.current_stim_modifier
         modifier.action_stack = modifier.action_stack[: modifier.current_index + 1]
         modifier.action_stack.append(action)
         action(modifier.stim_array, self.stim_widget)
         modifier.current_index = len(modifier.action_stack) - 1
-        # Trim resizes every array, so per-array undo stacks for the others no
-        # longer line up with the shared timeline; reset them (as apply_pattern
-        # does for the same reason).
         for other in self.stims_dict.values():
             if other is not modifier:
                 other.action_stack = []

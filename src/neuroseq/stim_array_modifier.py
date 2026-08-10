@@ -177,6 +177,64 @@ class TrimReversibleAction:
                 self.stim_widget.set_background_data(arr)
 
 
+class PadReversibleAction:
+    """One-step undo for padding every project stim array to a target length.
+
+    Padding appends trailing zeros to grow each stim array up to
+    ``total_length_seconds`` (the stim array is the project's authoritative
+    timeline). Undo trims each array back to the length it had before the pad;
+    because padding only adds zeros, restoring the original lengths restores the
+    original content exactly, so the removed rows need not be stored.
+    """
+
+    def __init__(
+        self,
+        project: Project,
+        total_length_seconds: float,
+        stim_widget: StimWidget,
+        target_stim_name: str,
+    ) -> None:
+        self.project = project
+        self.total_length_seconds = float(total_length_seconds)
+        self.stim_widget = stim_widget
+        self.target_stim_name = target_stim_name
+        # Populated on ``__call__``: each array's length before the pad, so undo
+        # can slice the trailing zeros back off.
+        self.before_lengths: dict[str, int] = {}
+        # The modifier logs these slice attributes; they are informational only.
+        self.neuron_slice = slice(None)
+        self.time_slice = slice(None)
+
+    def __call__(self, stim_array: StimArray, stim_widget: StimWidget) -> None:
+        del stim_array, stim_widget
+        self.before_lengths = {
+            name: int(arr.values.shape[0])
+            for name, arr in self.project.stim_arrays.items()
+        }
+        self.project.pad_stim_arrays(self.total_length_seconds)
+        self._refresh_stim_widget()
+        self.project.update_limits()
+
+    def undo(self, stim_array: StimArray, stim_widget: StimWidget) -> None:
+        del stim_array, stim_widget
+        for name, old_length in self.before_lengths.items():
+            if name not in self.project.stim_arrays:
+                continue
+            arr = self.project.stim_arrays[name]
+            if arr.values.shape[0] > old_length:
+                arr.values = arr.values[:old_length, :]
+        self._refresh_stim_widget()
+        self.project.update_limits()
+
+    def _refresh_stim_widget(self) -> None:
+        target = self.project.stim_arrays.get(self.target_stim_name)
+        if target is not None:
+            self.stim_widget.set_data(target)
+        for name, arr in self.project.stim_arrays.items():
+            if name != self.target_stim_name:
+                self.stim_widget.set_background_data(arr)
+
+
 class StimArrayModifier:
     """A class to track changes to a StimArray and allow undoing and redoing them."""
 
@@ -185,7 +243,10 @@ class StimArrayModifier:
         self.stim_array = stim_array
         self.stim_widget = stim_widget
         self.action_stack: list[
-            ReversibleAction | ResizableReversibleAction | TrimReversibleAction
+            ReversibleAction
+            | ResizableReversibleAction
+            | TrimReversibleAction
+            | PadReversibleAction
         ] = []
         self.current_index = -1
 

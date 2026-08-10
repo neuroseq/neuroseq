@@ -292,6 +292,41 @@ def test_stim_editor_trim_is_undoable(monkeypatch: MonkeyPatch, qtbot: QtBot):
     stim_editor.close()
 
 
+def test_stim_editor_pad_is_undoable(monkeypatch: MonkeyPatch, qtbot: QtBot):
+    project = Project()
+    values = np.zeros((1000, 4))
+    values[900:950, 0] = 1.0  # non-zero content that pad + undo must preserve
+    project.stim_arrays = {
+        "a": StimArray("a", neuroseq.stim.StimType.Excitation, values, "mV", 0.001)
+    }
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.show()
+    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    stim_editor.set_project(project)
+
+    # Pad 0.5 s (500 samples) onto the 1 s array.
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.5", True))
+    stim_editor.pad_stim_array()
+    modifier = stim_editor.current_stim_modifier
+    assert modifier is not None
+    assert modifier.stim_array.values.shape[0] == 1500
+    # The pad is on the undo stack instead of clearing it.
+    assert modifier.can_undo() is True
+
+    stim_editor.undo()
+    assert modifier.stim_array.values.shape[0] == 1000
+    assert np.allclose(modifier.stim_array.values[900:950, 0], 1.0)
+
+    stim_editor.redo()
+    assert modifier.stim_array.values.shape[0] == 1500
+    assert np.allclose(modifier.stim_array.values[1000:], 0.0)
+    stim_editor.close()
+
+
 def test_edit_stim_array_dt_change_requires_confirmation(
     monkeypatch: MonkeyPatch, qtbot: QtBot
 ) -> None:
