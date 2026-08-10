@@ -956,70 +956,76 @@ def test_stim_editor_actions(
     stim_editor.close()
 
 
-def test_open_input_designer_offers_routine_selection(
-    qtbot: QtBot, monkeypatch: MonkeyPatch
-) -> None:
+def _routine_combo_items(selector: Any) -> list[str]:
+    return [
+        selector.cmb_routine.itemText(i) for i in range(selector.cmb_routine.count())
+    ]
+
+
+def test_open_input_designer_shows_selector_with_preview(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
-    captured: dict[str, Any] = {}
-
-    def fake_get_item(parent, title, label, items, current, editable):
-        del parent, current, editable
-        captured["title"] = title
-        captured["items"] = list(items)
-        return (StimEditor.TARGETED_STDP_ROUTINE, True)
-
-    monkeypatch.setattr(QtWidgets.QInputDialog, "getItem", fake_get_item)
     stim_editor.open_input_designer()
 
-    assert captured["title"] == "Design dynamic input"
-    assert captured["items"] == [
+    selector = stim_editor._routine_selector_dialog
+    assert selector is not None
+    assert selector.isVisible()
+    assert selector.windowTitle() == "Design dynamic input"
+    assert _routine_combo_items(selector) == [
         "Targeted STDP synaptic strength",
         "Minimal stimulus for spiking (rheobase)",
         "STDP timing window (LTP/LTD vs Δt)",
     ]
-    # An overview is shown first; the routine dialog opens only on Continue.
-    assert stim_editor._routine_overview_dialog is not None
-    assert stim_editor._routine_overview_dialog.isVisible()
+    # The preview is always on: the initial selection already shows goal text
+    # and a sample plot in the same window as the dropdown.
+    assert selector.lbl_goal.text()
+    assert selector.lbl_params.text()
+    assert selector._axes.lines
+
+    # Selecting a routine and clicking Continue opens the matching dialog.
+    selector.cmb_routine.setCurrentText(StimEditor.TARGETED_STDP_ROUTINE)
     assert stim_editor._input_designer_dialog is None
-    stim_editor._routine_overview_dialog._on_continue()
+    selector._on_continue()
     assert stim_editor._input_designer_dialog is not None
     assert stim_editor._input_designer_dialog.isVisible()
     stim_editor.close()
 
 
-def test_open_input_designer_opens_rheobase_when_selected(
-    qtbot: QtBot, monkeypatch: MonkeyPatch
-) -> None:
+def test_routine_selector_preview_updates_on_selection_change(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog,
-        "getItem",
-        lambda *args: (StimEditor.RHEOBASE_ROUTINE, True),
-    )
-
     stim_editor.open_input_designer()
-    assert stim_editor._rheobase_dialog is None  # overview first, not the dialog
-    assert stim_editor._routine_overview_dialog is not None
-    stim_editor._routine_overview_dialog._on_continue()
+    selector = stim_editor._routine_selector_dialog
+    assert selector is not None
+
+    selector.cmb_routine.setCurrentText(StimEditor.RHEOBASE_ROUTINE)
+    assert "rheobase" in selector.lbl_goal.text().lower()
+    selector.cmb_routine.setCurrentText(StimEditor.STDP_WINDOW_ROUTINE)
+    assert "stdp" in selector.lbl_goal.text().lower()
+    stim_editor.close()
+
+
+def test_open_input_designer_opens_rheobase_when_selected(qtbot: QtBot) -> None:
+    stim_editor, _ = _make_ramp_editor(qtbot)
+    stim_editor.open_input_designer()
+    selector = stim_editor._routine_selector_dialog
+    assert selector is not None
+
+    selector.cmb_routine.setCurrentText(StimEditor.RHEOBASE_ROUTINE)
+    assert stim_editor._rheobase_dialog is None  # only opens on Continue
+    selector._on_continue()
 
     assert stim_editor._rheobase_dialog is not None
     assert stim_editor._rheobase_dialog.isVisible()
     stim_editor.close()
 
 
-def test_open_input_designer_opens_stdp_window_when_selected(
-    qtbot: QtBot, monkeypatch: MonkeyPatch
-) -> None:
+def test_open_input_designer_opens_stdp_window_when_selected(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog,
-        "getItem",
-        lambda *args: (StimEditor.STDP_WINDOW_ROUTINE, True),
-    )
-
     stim_editor.open_input_designer()
-    assert stim_editor._routine_overview_dialog is not None
-    stim_editor._routine_overview_dialog._on_continue()
+    selector = stim_editor._routine_selector_dialog
+    assert selector is not None
+
+    selector.cmb_routine.setCurrentText(StimEditor.STDP_WINDOW_ROUTINE)
+    selector._on_continue()
 
     assert stim_editor._stdp_window_dialog is not None
     assert stim_editor._stdp_window_dialog.isVisible()
@@ -1028,68 +1034,34 @@ def test_open_input_designer_opens_stdp_window_when_selected(
     stim_editor.close()
 
 
-def test_open_input_designer_cancel_does_not_open_dialog(
-    qtbot: QtBot, monkeypatch: MonkeyPatch
-) -> None:
+def test_routine_selector_cancel_does_not_open_routine_dialog(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
-    monkeypatch.setattr(QtWidgets.QInputDialog, "getItem", lambda *args: ("", False))
     stim_editor.open_input_designer()
+    selector = stim_editor._routine_selector_dialog
+    assert selector is not None and selector.isVisible()
 
-    assert stim_editor._routine_overview_dialog is None
+    selector.reject()  # user backs out of the selector
     assert stim_editor._input_designer_dialog is None
     assert stim_editor._rheobase_dialog is None
     assert stim_editor._stdp_window_dialog is None
     stim_editor.close()
 
 
-def test_routine_overview_cancel_does_not_open_routine_dialog(
-    qtbot: QtBot, monkeypatch: MonkeyPatch
-) -> None:
+def test_discard_input_designer_clears_cached_dialog(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog,
-        "getItem",
-        lambda *args: (StimEditor.RHEOBASE_ROUTINE, True),
-    )
-    stim_editor.open_input_designer()
-    overview = stim_editor._routine_overview_dialog
-    assert overview is not None and overview.isVisible()
 
-    overview.reject()  # user backs out of the overview
-    assert stim_editor._rheobase_dialog is None
-    stim_editor.close()
+    def _open(routine: str) -> None:
+        stim_editor.open_input_designer()
+        selector = stim_editor._routine_selector_dialog
+        assert selector is not None
+        selector.cmb_routine.setCurrentText(routine)
+        selector._on_continue()
 
-
-def test_discard_input_designer_clears_cached_dialog(
-    qtbot: QtBot, monkeypatch: MonkeyPatch
-) -> None:
-    stim_editor, _ = _make_ramp_editor(qtbot)
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog,
-        "getItem",
-        lambda *args: (StimEditor.TARGETED_STDP_ROUTINE, True),
-    )
-    stim_editor.open_input_designer()
-    assert stim_editor._routine_overview_dialog is not None
-    stim_editor._routine_overview_dialog._on_continue()
+    _open(StimEditor.TARGETED_STDP_ROUTINE)
     assert stim_editor._input_designer_dialog is not None
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog,
-        "getItem",
-        lambda *args: (StimEditor.RHEOBASE_ROUTINE, True),
-    )
-    stim_editor.open_input_designer()
-    assert stim_editor._routine_overview_dialog is not None
-    stim_editor._routine_overview_dialog._on_continue()
+    _open(StimEditor.RHEOBASE_ROUTINE)
     assert stim_editor._rheobase_dialog is not None
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog,
-        "getItem",
-        lambda *args: (StimEditor.STDP_WINDOW_ROUTINE, True),
-    )
-    stim_editor.open_input_designer()
-    assert stim_editor._routine_overview_dialog is not None
-    stim_editor._routine_overview_dialog._on_continue()
+    _open(StimEditor.STDP_WINDOW_ROUTINE)
     assert stim_editor._stdp_window_dialog is not None
 
     # Replacing the project must not carry the previous designer state over.
@@ -1097,7 +1069,7 @@ def test_discard_input_designer_clears_cached_dialog(
     assert stim_editor._input_designer_dialog is None
     assert stim_editor._rheobase_dialog is None
     assert stim_editor._stdp_window_dialog is None
-    assert stim_editor._routine_overview_dialog is None
+    assert stim_editor._routine_selector_dialog is None
 
     # Discarding again is a no-op and must not raise.
     stim_editor.discard_input_designer()

@@ -1,10 +1,11 @@
-"""Overview screen shown before a Design dynamic input routine opens.
+"""Routine selector with an always-on preview for Design dynamic input.
 
 Selecting a dynamic-input routine used to open its (dense) parameter dialog
-immediately. That gave no chance to understand what the routine does first.
-This module inserts a lightweight overview between the picker and the routine
-dialog: a one-line goal, the parameters the user will set, and a small
-illustrative sample plot, plus a Continue button that opens the real dialog.
+immediately, giving no chance to understand what the routine does first. This
+module provides a single selector window whose routine dropdown sits above a
+live preview -- a one-line goal, the parameters the user will set, and a small
+illustrative sample plot -- that is always shown and updates as the selection
+changes. A Continue button then opens the real routine dialog.
 """
 
 from __future__ import annotations
@@ -134,41 +135,51 @@ def routine_overview(routine_name: str) -> RoutineOverview | None:
     return ROUTINE_OVERVIEWS.get(routine_name)
 
 
-class RoutineOverviewDialog(QtWidgets.QDialog):
-    """Modeless overview shown before a routine's parameter dialog opens.
+class RoutineSelectorDialog(QtWidgets.QDialog):
+    """Pick a dynamic-input routine with its preview always shown below.
 
-    Emits :attr:`continue_requested` when the user clicks Continue; the caller
-    connects that to opening the real routine dialog. Kept modeless to match
-    how the routine dialogs themselves are shown.
+    A single window holds the routine dropdown and, beneath it, a live preview
+    (goal, parameters, sample plot) of the selected routine -- the preview is
+    always on and updates as the selection changes, rather than living in a
+    separate step. Emits :attr:`routine_chosen` with the selected routine name
+    when the user clicks Continue; the caller opens the real routine dialog.
     """
 
-    continue_requested = QtCore.Signal()
+    routine_chosen = QtCore.Signal(str)
 
     def __init__(
         self,
-        overview: RoutineOverview,
+        routines: list[str],
         theme: str = theme_module.LIGHT,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self._overview = overview
-        self.setWindowTitle(f"{overview.title} — overview")
-        self.resize(520, 560)
+        self._theme = theme
+        self.setWindowTitle("Design dynamic input")
+        self.resize(520, 600)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setSpacing(8)
 
-        title = QtWidgets.QLabel(overview.title, self)
-        title_font = title.font()
+        selector_row = QtWidgets.QHBoxLayout()
+        selector_row.addWidget(QtWidgets.QLabel("Design routine:", self))
+        self.cmb_routine = QtWidgets.QComboBox(self)
+        self.cmb_routine.addItems(routines)
+        selector_row.addWidget(self.cmb_routine, stretch=1)
+        layout.addLayout(selector_row)
+
+        # --- Preview (always visible, updates with the selection) ---
+        self.lbl_title = QtWidgets.QLabel(self)
+        title_font = self.lbl_title.font()
         title_font.setBold(True)
         title_font.setPointSizeF(title_font.pointSizeF() + 1.5)
-        title.setFont(title_font)
-        title.setWordWrap(True)
-        layout.addWidget(title)
+        self.lbl_title.setFont(title_font)
+        self.lbl_title.setWordWrap(True)
+        layout.addWidget(self.lbl_title)
 
-        goal = QtWidgets.QLabel(overview.goal, self)
-        goal.setWordWrap(True)
-        layout.addWidget(goal)
+        self.lbl_goal = QtWidgets.QLabel(self)
+        self.lbl_goal.setWordWrap(True)
+        layout.addWidget(self.lbl_goal)
 
         params_header = QtWidgets.QLabel("Parameters you'll set:", self)
         params_font = params_header.font()
@@ -176,12 +187,9 @@ class RoutineOverviewDialog(QtWidgets.QDialog):
         params_header.setFont(params_font)
         layout.addWidget(params_header)
 
-        params_text = "\n".join(
-            f"• {name} — {description}" for name, description in overview.parameters
-        )
-        params = QtWidgets.QLabel(params_text, self)
-        params.setWordWrap(True)
-        layout.addWidget(params)
+        self.lbl_params = QtWidgets.QLabel(self)
+        self.lbl_params.setWordWrap(True)
+        layout.addWidget(self.lbl_params)
 
         self.plot_widget = MatplotlibWidget(size=(4.5, 2.6))
         # The sample plot is illustrative, so drop the interactive navigation
@@ -189,9 +197,6 @@ class RoutineOverviewDialog(QtWidgets.QDialog):
         if getattr(self.plot_widget, "toolbar", None) is not None:
             self.plot_widget.toolbar.setVisible(False)
         self._axes = self.plot_widget.getFigure().add_subplot(111)
-        self._axes.set_title(overview.plot_title)
-        overview.plot(self._axes)
-        self.plot_widget.getFigure().tight_layout()
         layout.addWidget(self.plot_widget, stretch=1)
 
         sample_note = QtWidgets.QLabel(
@@ -212,17 +217,51 @@ class RoutineOverviewDialog(QtWidgets.QDialog):
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
 
-        self.apply_theme(theme)
+        self.cmb_routine.currentTextChanged.connect(self._update_preview)
+        self._update_preview(self.cmb_routine.currentText())
+
+    @property
+    def selected_routine(self) -> str:
+        return self.cmb_routine.currentText()
+
+    def _update_preview(self, routine_name: str) -> None:
+        overview = routine_overview(routine_name)
+        if self.btn_continue is not None:
+            self.btn_continue.setEnabled(overview is not None)
+        if overview is None:
+            self.lbl_title.setText(routine_name)
+            self.lbl_goal.setText("No preview available for this routine.")
+            self.lbl_params.clear()
+            self._axes.clear()
+            self.plot_widget.draw()
+            return
+        self.lbl_title.setText(overview.title)
+        self.lbl_goal.setText(overview.goal)
+        self.lbl_params.setText(
+            "\n".join(
+                f"• {name} — {description}" for name, description in overview.parameters
+            )
+        )
+        self._axes.clear()
+        overview.plot(self._axes)
+        self._axes.set_title(overview.plot_title)
+        self._recolor_axes()
+        self.plot_widget.getFigure().tight_layout()
+        self.plot_widget.draw()
 
     def _on_continue(self) -> None:
-        self.continue_requested.emit()
+        self.routine_chosen.emit(self.selected_routine)
         self.accept()
 
     def apply_theme(self, theme: str) -> None:
         """Recolor the sample plot to match the application theme."""
-        face, text = theme_module.mpl_colors(theme)
-        figure = self.plot_widget.getFigure()
-        figure.set_facecolor(face)
+        self._theme = theme
+        self._recolor_axes()
+        self.plot_widget.draw()
+
+    def _recolor_axes(self) -> None:
+        face, text = theme_module.mpl_colors(self._theme)
+        self.plot_widget.getFigure().set_facecolor(face)
         self._axes.set_facecolor(face)
         self._axes.tick_params(colors=text)
         for spine in self._axes.spines.values():
@@ -230,4 +269,3 @@ class RoutineOverviewDialog(QtWidgets.QDialog):
         for axis_label in (self._axes.xaxis.label, self._axes.yaxis.label):
             axis_label.set_color(text)
         self._axes.title.set_color(text)
-        self.plot_widget.draw()
