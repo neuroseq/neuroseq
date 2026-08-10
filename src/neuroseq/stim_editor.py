@@ -367,13 +367,16 @@ class StimEditor(QtWidgets.QWidget):
         self.trim_stim_array_secs = trim_seconds_as_float
         self._apply_trim(new_length_secs)
 
-    def _apply_trim(self, new_length_secs: float) -> None:
-        """Trim every stim array to ``new_length_secs`` as one undoable step.
+    def _apply_trim(
+        self, new_length_secs: float, only_stim_name: str | None = None
+    ) -> None:
+        """Trim stim arrays to ``new_length_secs`` as one undoable step.
 
         Trimming is routed through the modifier's undo stack (rather than
         clearing it) so Ctrl+Z restores the stim length -- and, because the
         stim array is the authoritative timeline, the simulated data that was
-        windowed out by the trim reappears with it.
+        windowed out by the trim reappears with it. ``only_stim_name`` limits
+        the trim to a single array (used by :meth:`reset_stim_array`).
         """
         if self.current_stim_modifier is None or self.project is None:
             return
@@ -382,8 +385,31 @@ class StimEditor(QtWidgets.QWidget):
             new_length_secs,
             self.stim_widget,
             self.current_stim_modifier.stim_array.name,
+            only_stim_name=only_stim_name,
         )
         self._push_timeline_action(action)
+
+    def reset_stim_array(self) -> None:
+        """Trim the current stim array back to the simulation head.
+
+        Design routines append their probe/pairing blocks after the end of the
+        current stim array, so a long left-over array makes each run simulate a
+        huge empty tail for nothing. Resetting trims the array to the current
+        simulation time (or to zero when nothing has run yet), so blocks are
+        appended right after the simulated state. It is undoable and never cuts
+        into the recorded simulation (it only removes the unused trailing tail).
+        """
+        if self.current_stim_modifier is None or self.project is None:
+            return
+        stim = self.current_stim_modifier.stim_array
+        current_secs = float(stim.dt) * stim.values.shape[0]
+        # Keep at least one sample so the array never becomes empty (an empty
+        # stim would break the widget's min/max scaling); when nothing has run
+        # this collapses the array to a single baseline sample.
+        target_secs = max(self.project.b2_model.get_sim_time_secs(), float(stim.dt))
+        if current_secs <= target_secs + float(stim.dt) * 0.5:
+            return  # already at (or within a sample of) the simulation head
+        self._apply_trim(target_secs, only_stim_name=stim.name)
 
     def _push_timeline_action(
         self, action: TrimReversibleAction | PadReversibleAction

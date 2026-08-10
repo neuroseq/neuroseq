@@ -336,10 +336,21 @@ class InputDesignerDialog(QtWidgets.QDialog):
                 "Clear stim array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
             ),
         )
+        self.btn_reset = cast(
+            QtWidgets.QPushButton,
+            buttons.addButton(
+                "Reset stim array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
+            ),
+        )
+        self.btn_reset.setToolTip(
+            "Trim the stim array back to the simulation head so the routine does "
+            "not run a long empty tail."
+        )
         self.btn_stop.setEnabled(False)
         self.btn_start.clicked.connect(self.start)
         self.btn_stop.clicked.connect(self.stop)
         self.btn_clear.clicked.connect(self.editor.clear_stim_array)
+        self.btn_reset.clicked.connect(self.editor.reset_stim_array)
         buttons.rejected.connect(self.close)
         layout.addWidget(buttons)
         self.apply_theme(self._theme)
@@ -489,6 +500,9 @@ class InputDesignerDialog(QtWidgets.QDialog):
         if self.project is None or self.editor.current_stim_modifier is None:
             self._append_log("No stimulation array is selected.")
             return
+        # Start from the simulation head so a long left-over stim array does not
+        # make the routine simulate a huge empty tail.
+        self.editor.reset_stim_array()
         if not self._is_simulation_voltage_trace(self.cmb_trace.currentText()):
             duration = 0.001
             self._running = True

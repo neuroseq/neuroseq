@@ -126,6 +126,31 @@ def test_trim_reversible_action_restores_all_arrays(qtbot: QtBot) -> None:
     stim_widget.close()
 
 
+def test_trim_reversible_action_only_one_array(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+
+    project = Project()
+    project.add_stim_array(
+        StimArray("a", StimType.Excitation, np.zeros((1000, 2)), "mV", 0.001)
+    )
+    project.add_stim_array(
+        StimArray("b", StimType.Inhibition, np.ones((1000, 2)), "mV", 0.001)
+    )
+
+    action = TrimReversibleAction(project, 0.4, stim_widget, "a", only_stim_name="a")
+    action(project.stim_arrays["a"], stim_widget)
+    # Only "a" is trimmed; "b" is left untouched.
+    assert project.stim_arrays["a"].values.shape[0] == 400
+    assert project.stim_arrays["b"].values.shape[0] == 1000
+
+    action.undo(project.stim_arrays["a"], stim_widget)
+    assert project.stim_arrays["a"].values.shape[0] == 1000
+    assert project.stim_arrays["b"].values.shape[0] == 1000
+    stim_widget.close()
+
+
 def test_pad_reversible_action_restores_all_arrays(qtbot: QtBot) -> None:
     controller = ConstrainedPanZoomController()
     stim_widget = StimWidget(controller)

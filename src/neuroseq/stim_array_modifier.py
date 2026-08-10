@@ -132,11 +132,15 @@ class TrimReversibleAction:
         new_length_seconds: float,
         stim_widget: StimWidget,
         target_stim_name: str,
+        only_stim_name: str | None = None,
     ) -> None:
         self.project = project
         self.new_length_seconds = float(new_length_seconds)
         self.stim_widget = stim_widget
         self.target_stim_name = target_stim_name
+        # When set, only this array is trimmed (used by the per-array "reset"
+        # action); otherwise every stim array is trimmed to the shared length.
+        self.only_stim_name = only_stim_name
         # Populated on ``__call__``: the trailing rows removed from each array,
         # keyed by stim name, so undo can re-append exactly what was cut.
         self.removed_tails: dict[str, np.ndarray] = {}
@@ -148,10 +152,12 @@ class TrimReversibleAction:
         del stim_array, stim_widget
         self.removed_tails = {}
         for name, arr in self.project.stim_arrays.items():
+            if self.only_stim_name is not None and name != self.only_stim_name:
+                continue
             n_keep = seconds_to_samples_nearest(self.new_length_seconds, arr.dt)
             if n_keep < arr.values.shape[0]:
                 self.removed_tails[name] = arr.values[n_keep:, :].copy()
-        self.project.trim_stim_arrays(self.new_length_seconds)
+                arr.values = arr.values[:n_keep, :]
         self._refresh_stim_widget()
         self.project.update_limits()
 

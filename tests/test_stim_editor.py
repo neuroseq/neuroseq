@@ -342,6 +342,103 @@ def test_trim_warns_when_cutting_into_simulated_trace(
     stim_editor.close()
 
 
+def test_routine_dialogs_have_reset_stim_array_button(qtbot: QtBot) -> None:
+    stim_editor, _ = _make_ramp_editor(qtbot)
+    for routine, attr in (
+        (StimEditor.TARGETED_STDP_ROUTINE, "_input_designer_dialog"),
+        (StimEditor.RHEOBASE_ROUTINE, "_rheobase_dialog"),
+        (StimEditor.STDP_WINDOW_ROUTINE, "_stdp_window_dialog"),
+    ):
+        stim_editor.open_input_designer()
+        selector = stim_editor._routine_selector_dialog
+        assert selector is not None
+        selector.cmb_routine.setCurrentText(routine)
+        selector._on_continue()
+        dialog = getattr(stim_editor, attr)
+        assert dialog is not None
+        assert dialog.btn_reset.text() == "Reset stim array"
+    stim_editor.close()
+
+
+def test_routine_reset_button_trims_stim_to_simulation_head(qtbot: QtBot) -> None:
+    stim_editor, project = _make_ramp_editor(qtbot)
+    stim_editor.open_input_designer()
+    selector = stim_editor._routine_selector_dialog
+    assert selector is not None
+    selector.cmb_routine.setCurrentText(StimEditor.TARGETED_STDP_ROUTINE)
+    selector._on_continue()
+    dialog = stim_editor._input_designer_dialog
+    assert dialog is not None
+
+    # No simulation yet, so the reset button trims the array to a single
+    # baseline sample (never empty).
+    assert project.b2_model.get_sim_time_secs() == 0
+    modifier = stim_editor.current_stim_modifier
+    assert modifier is not None
+    assert modifier.stim_array.values.shape[0] == 200
+    dialog.btn_reset.click()
+    assert modifier.stim_array.values.shape[0] == 1
+    stim_editor.close()
+
+
+def _make_editor_for_project(qtbot: QtBot, project: Project) -> StimEditor:
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.set_project(project)
+    return stim_editor
+
+
+def test_reset_stim_array_trims_to_simulation_head(qtbot: QtBot):
+    from neuroseq.example_projects import default_project
+    from neuroseq.stim_timing import seconds_to_samples_nearest
+
+    project = default_project()
+    project.run_simulation(0.05)
+    sim_time = project.b2_model.get_sim_time_secs()
+    # Leave a long empty tail past the simulated region.
+    project.pad_stim_arrays(2.0)
+
+    stim_editor = _make_editor_for_project(qtbot, project)
+    modifier = stim_editor.current_stim_modifier
+    assert modifier is not None
+    dt = modifier.stim_array.dt
+    before = modifier.stim_array.values.shape[0]
+    assert before == seconds_to_samples_nearest(2.0, dt)
+
+    stim_editor.reset_stim_array()
+    after = modifier.stim_array.values.shape[0]
+    assert after == seconds_to_samples_nearest(sim_time, dt)
+    assert after < before
+
+    # The reset is undoable (restores the trimmed tail).
+    stim_editor.undo()
+    assert modifier.stim_array.values.shape[0] == before
+    stim_editor.close()
+
+
+def test_reset_stim_array_no_op_when_already_at_simulation_head(qtbot: QtBot):
+    from neuroseq.example_projects import default_project
+
+    project = default_project()
+    project.run_simulation(0.05)
+    stim_editor = _make_editor_for_project(qtbot, project)
+    modifier = stim_editor.current_stim_modifier
+    assert modifier is not None
+
+    stim_editor.reset_stim_array()  # trims the tail down to the sim head
+    length_at_head = modifier.stim_array.values.shape[0]
+    stack_len = len(modifier.action_stack)
+
+    # A second reset has nothing to trim: no change and no new undo entry.
+    stim_editor.reset_stim_array()
+    assert modifier.stim_array.values.shape[0] == length_at_head
+    assert len(modifier.action_stack) == stack_len
+    stim_editor.close()
+
+
 def test_stim_editor_pad_is_undoable(monkeypatch: MonkeyPatch, qtbot: QtBot):
     project = Project()
     values = np.zeros((1000, 4))
