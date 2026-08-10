@@ -340,11 +340,25 @@ class StimEditor(QtWidgets.QWidget):
                 f"Trim seconds {trim_seconds_as_float} is greater than or equal to current stim length {current_length_secs}.",
             )
             return
+        caveats: list[str] = []
         if self.project.trim_stim_array_would_delete_data(new_length_secs):
+            caveats.append("• Trimming would delete non-zero stimulus data.")
+        if self.project.b2_model.get_sim_time_secs() > new_length_secs:
+            # The trim cuts into the recorded simulation. Trimming only windows
+            # the traces (see Project.get_data); it does not shorten the run,
+            # so a later "Continue" resumes from the full untrimmed state.
+            caveats.append(
+                "• A simulated trace extends past the new length. Trimming only "
+                "hides the simulated data beyond it (undo restores it) — it does "
+                "not shorten the simulation. Continuing the simulation resumes "
+                "from the full, untrimmed end of the last run, not the trimmed "
+                "point, and re-extends the stim so the hidden data reappears."
+            )
+        if caveats:
             continue_with_trim = QtWidgets.QMessageBox.question(
                 self,
                 "Trim stim arrays",
-                "Trimming the stim arrays would delete non-zero stimulus data. Do you want to continue?",
+                "Trim anyway?\n\n" + "\n\n".join(caveats),
                 QtWidgets.QMessageBox.StandardButton.Yes
                 | QtWidgets.QMessageBox.StandardButton.No,
             )

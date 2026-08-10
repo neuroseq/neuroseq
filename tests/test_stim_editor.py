@@ -292,6 +292,56 @@ def test_stim_editor_trim_is_undoable(monkeypatch: MonkeyPatch, qtbot: QtBot):
     stim_editor.close()
 
 
+def test_trim_warns_when_cutting_into_simulated_trace(
+    monkeypatch: MonkeyPatch, qtbot: QtBot
+):
+    from neuroseq.example_projects import default_project
+
+    project = default_project()
+    project.run_simulation(0.05)
+    sim_time = project.b2_model.get_sim_time_secs()
+    assert sim_time > 0
+
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.set_project(project)
+    modifier = stim_editor.current_stim_modifier
+    assert modifier is not None
+
+    stim = modifier.stim_array
+    current_secs = stim.dt * stim.values.shape[0]
+    new_length = sim_time / 2.0  # cut into the recorded simulation
+    trim = current_secs - new_length
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *a: (str(trim), True))
+
+    captured: dict[str, str] = {}
+
+    def fake_question(parent, title, text, *a, **k):
+        captured["text"] = text
+        return QtWidgets.QMessageBox.StandardButton.No
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "question", fake_question)
+
+    before = stim.values.shape[0]
+    stim_editor.trim_stim_array()
+    # The simulated-trace caveat is surfaced, and declining leaves the stim as is.
+    assert "resumes from the full, untrimmed end" in captured["text"]
+    assert modifier.stim_array.values.shape[0] == before
+
+    # Accepting the warning proceeds with the trim.
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *a, **k: QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+    stim_editor.trim_stim_array()
+    assert modifier.stim_array.values.shape[0] < before
+    stim_editor.close()
+
+
 def test_stim_editor_pad_is_undoable(monkeypatch: MonkeyPatch, qtbot: QtBot):
     project = Project()
     values = np.zeros((1000, 4))
