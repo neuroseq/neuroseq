@@ -311,6 +311,27 @@ def test_gui_open_fiji_and_cellpose_buttons(
     gui.close()
 
 
+def test_gui_choose_fiji_path_forces_prompt(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    import neuroseq.fiji as fiji_module
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        fiji_module,
+        "resolve_fiji_path",
+        lambda parent, *, force_prompt=False: calls.append(
+            {"parent": parent, "force_prompt": force_prompt}
+        ),
+    )
+    gui.choose_fiji_path()
+    assert calls == [{"parent": gui, "force_prompt": True}]
+    gui.close()
+
+
 def test_gui_theme_menu_toggles_theme_and_persists(
     qtbot: QtBot, tmp_config_dir
 ) -> None:

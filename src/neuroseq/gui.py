@@ -1871,6 +1871,12 @@ class Gui(QtWidgets.QMainWindow):
 
         launch_cellpose(self)
 
+    def choose_fiji_path(self) -> None:
+        """Let the user pick/correct the Fiji executable path from Settings."""
+        from neuroseq.fiji import resolve_fiji_path
+
+        resolve_fiji_path(self, force_prompt=True)
+
     def btn_import_cellpose_data_clicked(self) -> None:
         dialog = CellposeImportDialog(
             self,
@@ -2741,6 +2747,7 @@ class Gui(QtWidgets.QMainWindow):
             "&Synapse Matrix RAM Limit", self.choose_max_ram_synapse_plot_matrix, menu
         )
         add_action("&Trace Plot RAM Limit", self.choose_max_ram_trace_plot_matrix, menu)
+        add_action("&Change Fiji Path…", self.choose_fiji_path, menu)
         self._create_theme_menu(menu)
 
     def _create_theme_menu(self, menu: QtWidgets.QMenu) -> None:

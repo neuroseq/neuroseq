@@ -149,13 +149,13 @@ class TifImportDialog(QtWidgets.QDialog):
         workflow_label = QtWidgets.QLabel(
             "Raw 2-photon stacks are often >1 GB and will crash Cellpose. "
             "Segment a projection of the stack instead:\n"
-            "  1. Add your TIFF below and click <b>Run Fiji</b> to open it.\n"
+            "  1. Add your TIFF below and click <b>Open Fiji</b> to open it.\n"
             "  2. In Fiji: <b>Image → Stacks → Z Project…</b> "
             "(choose <i>Max Intensity</i> for sparse activity or "
             "<i>Mean Intensity</i> for dense activity).\n"
             "  3. <b>File → Save As → Tiff…</b> the projection (e.g. "
             "<code>MAX_&lt;name&gt;.tif</code>).\n"
-            "  4. Click <b>Run Cellpose</b>, open the projection, segment, "
+            "  4. Click <b>Open Cellpose</b>, open the projection, segment, "
             "and save the <code>_seg.npy</code>.\n"
             "  5. Back here, pick <b>Use a Cellpose _seg.npy file</b> and "
             "load the file. Suite2p will then run on the full raw stack."
@@ -178,21 +178,14 @@ class TifImportDialog(QtWidgets.QDialog):
         add_btn.clicked.connect(self._browse_tifs)
         remove_btn = QtWidgets.QPushButton("Remove selected")
         remove_btn.clicked.connect(self._remove_selected_tifs)
-        self._run_fiji_button = QtWidgets.QPushButton("Run Fiji")
+        self._run_fiji_button = QtWidgets.QPushButton("Open Fiji")
         self._run_fiji_button.setToolTip(
             "Launch Fiji/ImageJ; if a TIFF is selected, open it for inspection."
         )
         self._run_fiji_button.clicked.connect(self._launch_fiji)
-        self._change_fiji_button = QtWidgets.QPushButton("Change Fiji path…")
-        self._change_fiji_button.setToolTip(
-            "Choose a different Fiji/ImageJ executable (e.g. if the saved path "
-            "is wrong)."
-        )
-        self._change_fiji_button.clicked.connect(self._change_fiji_path)
         tif_buttons.addWidget(add_btn)
         tif_buttons.addWidget(remove_btn)
         tif_buttons.addWidget(self._run_fiji_button)
-        tif_buttons.addWidget(self._change_fiji_button)
         tif_buttons.addStretch(1)
         tif_layout.addLayout(tif_buttons)
         layout.addWidget(tif_group)
@@ -220,7 +213,7 @@ class TifImportDialog(QtWidgets.QDialog):
 
         run_cellpose_row = QtWidgets.QHBoxLayout()
         run_cellpose_row.addStretch(1)
-        self._run_cellpose_button = QtWidgets.QPushButton("Run Cellpose")
+        self._run_cellpose_button = QtWidgets.QPushButton("Open Cellpose")
         self._run_cellpose_button.setToolTip(
             "Launch the Cellpose GUI to segment a mean projection, then load the "
             "resulting _seg.npy above."
@@ -338,12 +331,6 @@ class TifImportDialog(QtWidgets.QDialog):
             row = self._tif_list.row(item)
             self._tif_list.takeItem(row)
             del self._tif_paths[row]
-
-    def _change_fiji_path(self) -> None:
-        """Let the user pick a different Fiji executable, even if one is set."""
-        from neuroseq.fiji import resolve_fiji_path
-
-        resolve_fiji_path(self, force_prompt=True)
 
     def _launch_fiji(self) -> None:
         """Launch Fiji/ImageJ, opening the first selected TIFF if one is available."""
