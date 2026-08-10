@@ -20,6 +20,7 @@ from neuroseq.data import TraceData
 from neuroseq.io import as_timed_array
 from neuroseq.stim import StimArray
 from neuroseq.utils import construct_synapse_matrix
+from neuroseq.utils import get_downsample_factor
 from neuroseq.utils import save_store_name
 
 
@@ -2444,7 +2445,9 @@ class B2Model:
                     self.trace_name_to_monitor[trace_name] = m
         return trace_names
 
-    def get_simulation_trace_data(self, trace_name: str) -> TraceData | None:
+    def get_simulation_trace_data(
+        self, trace_name: str, max_ram_mb: int = 0
+    ) -> TraceData | None:
         """
         Get trace data for the given trace name
 
@@ -2452,6 +2455,11 @@ class B2Model:
         ----------
         trace_name : str
             Name of the trace as returned by get_simulation_trace_names()
+        max_ram_mb : int
+            Maximum RAM (MB) for the returned trace matrix. When the recorded
+            (neuron x time) matrix would exceed this, it is downsampled along
+            the time axis to fit -- mirroring ``construct_synapse_matrix`` for
+            the synapse-plot path. ``0`` (the default) means no limit.
 
         Returns
         -------
@@ -2466,11 +2474,25 @@ class B2Model:
         timestamps = monitor.t / b2.second
         if timestamps.shape[0] < 2:
             return None
-        dt = timestamps[1] - timestamps[0]
         quantity = monitor.variables[variable_name]
+        values = quantity.get_value().T.astype(np.float32, copy=False)
+        n_floats = int(values.shape[0]) * int(values.shape[1])
+        downsample_factor = get_downsample_factor(
+            n_floats, max_ram_mb, bits_per_float=32
+        )
+        if downsample_factor > 1:
+            self.logger.info(
+                f"Downsampling {values.shape[0]}x{values.shape[1]} trace matrix by "
+                f"factor {downsample_factor} due to max RAM limit of {max_ram_mb} MB"
+            )
+            # Copy to a contiguous array so the full-resolution monitor buffer
+            # is not kept alive by the strided view we hand to the widget/GPU.
+            values = np.ascontiguousarray(values[:, ::downsample_factor])
+            timestamps = timestamps[::downsample_factor]
+        dt = timestamps[1] - timestamps[0]
         return TraceData(
             trace_name,
-            quantity.get_value().T.astype(np.float32, copy=False),
+            values,
             monitor.record,
             display_units(quantity),
             dt,

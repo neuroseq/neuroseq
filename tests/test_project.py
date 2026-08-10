@@ -499,6 +499,42 @@ def test_trim_windows_simulated_trace_and_restores_on_regrow() -> None:
     assert restored.traces.shape[1] == full_samples
 
 
+def test_trace_read_budget_downsamples_time_to_fit_ram() -> None:
+    """Simulated traces are decimated in time to fit max_ram_trace_plot_matrix.
+
+    Mirrors the synapse-plot RAM budget: the neuron axis is preserved and only
+    the time axis is strided, with dt scaled up to match. Non-destructive --
+    a larger budget yields the full-resolution trace again.
+    """
+    project = default_project()
+    # 3 s at 0.1 ms recording => ~1.1 MB for the 10-neuron trace, enough to
+    # exceed a 1 MB budget and trigger downsampling.
+    project.run_simulation(3.0)
+    trace_name = project.get_data_names(TraceData)[0]
+
+    project.max_ram_trace_plot_matrix = 0  # no limit
+    full = project.get_data(trace_name, TraceData)
+    assert full is not None
+    n_neurons, n_time = full.traces.shape
+    assert full.traces.nbytes > 1024 * 1024  # exceeds the 1 MB budget below
+
+    project.max_ram_trace_plot_matrix = 1
+    budgeted = project.get_data(trace_name, TraceData)
+    assert budgeted is not None
+    # Neuron axis untouched; time strided down; result fits the budget.
+    assert budgeted.traces.shape[0] == n_neurons
+    assert budgeted.traces.shape[1] < n_time
+    assert budgeted.traces.nbytes <= 1024 * 1024
+    # dt scales with the stride, and the array is a contiguous copy (so the
+    # full-resolution monitor buffer is not pinned by a strided view).
+    assert budgeted.dt > full.dt
+    assert budgeted.traces.flags["C_CONTIGUOUS"]
+
+    # Raising the budget again returns the full-resolution trace.
+    project.max_ram_trace_plot_matrix = 0
+    assert project.get_data(trace_name, TraceData).traces.shape[1] == n_time
+
+
 def test_pad_stim_arrays_to_neuron_count() -> None:
     arr = np.random.rand(100, 30)
     project = default_project()

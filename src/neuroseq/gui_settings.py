@@ -47,6 +47,7 @@ def _autodetect_fiji() -> str:
 @dataclass
 class GuiSettings:
     max_ram_synapse_plot_matrix: int = 256
+    max_ram_trace_plot_matrix: int = 256
     brian2_backend: str = "numpy"
     stim_padding_secs: int = 0
     theme: str = theme_module.LIGHT
@@ -79,6 +80,7 @@ class GuiSettings:
                     {
                         "brian2_backend": self.brian2_backend,
                         "max_ram_synapse_plot_matrix": self.max_ram_synapse_plot_matrix,
+                        "max_ram_trace_plot_matrix": self.max_ram_trace_plot_matrix,
                         "stim_padding_secs": self.stim_padding_secs,
                         "theme": self.theme,
                         "llm_provider": self.llm_provider,
@@ -116,6 +118,9 @@ class GuiSettings:
             max_ram_synapse_plot_matrix = config.get(
                 "max_ram_synapse_plot_matrix", self.max_ram_synapse_plot_matrix
             )
+            max_ram_trace_plot_matrix = config.get(
+                "max_ram_trace_plot_matrix", self.max_ram_trace_plot_matrix
+            )
             stim_padding_secs = config.get("stim_padding_secs", self.stim_padding_secs)
             theme = config.get("theme", self.theme)
             llm_provider = config.get("llm_provider", self.llm_provider)
@@ -151,6 +156,18 @@ class GuiSettings:
                     f"Invalid max RAM synapse plot matrix in config file {config_file}: {max_ram_synapse_plot_matrix}. Restoring default of 256MB"
                 )
                 self.__dict__["max_ram_synapse_plot_matrix"] = 256
+            try:
+                self.__dict__["max_ram_trace_plot_matrix"] = max(
+                    0, int(max_ram_trace_plot_matrix)
+                )
+                self.logger.info(
+                    f"Loaded max RAM for trace plot matrix from config file {config_file}: {max_ram_trace_plot_matrix}"
+                )
+            except ValueError:
+                self.logger.warning(
+                    f"Invalid max RAM trace plot matrix in config file {config_file}: {max_ram_trace_plot_matrix}. Restoring default of 256MB"
+                )
+                self.__dict__["max_ram_trace_plot_matrix"] = 256
             try:
                 self.__dict__["stim_padding_secs"] = max(0, int(stim_padding_secs))
                 self.logger.info(

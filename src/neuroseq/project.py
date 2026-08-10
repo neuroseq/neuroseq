@@ -131,6 +131,7 @@ class Project:
         self.power_luts: dict[int, PowerLut] = {}
 
         self.max_ram_synapse_plot_matrix = 256
+        self.max_ram_trace_plot_matrix = 256
         self.max_time_secs = 0.0
         self.max_neurons = 0
         self.dt: float = 0.001
@@ -307,7 +308,9 @@ class Project:
             # restores the simulated data along with the stim length.
             if data_type is TraceData:
                 return self._clip_trace_to_timeline(
-                    self.b2_model.get_simulation_trace_data(name)
+                    self.b2_model.get_simulation_trace_data(
+                        name, self.max_ram_trace_plot_matrix
+                    )
                 )
             if data_type is SpikeData:
                 return self._clip_spike_to_timeline(

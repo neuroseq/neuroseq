@@ -1170,6 +1170,9 @@ class Gui(QtWidgets.QMainWindow):
         # focused neuron range -- this is a re-window of already-shown data,
         # not a new user selection.
         if self.cmb_trace.currentText():
+            self.project.max_ram_trace_plot_matrix = (
+                self.settings.max_ram_trace_plot_matrix
+            )
             self.trace_widget.set_data(
                 self.project.get_data(self.cmb_trace.currentText(), TraceData)
             )
@@ -1196,6 +1199,7 @@ class Gui(QtWidgets.QMainWindow):
 
     @with_wait_cursor
     def set_neuron(self, cmb_name: str) -> None:
+        self.project.max_ram_trace_plot_matrix = self.settings.max_ram_trace_plot_matrix
         self._apply_trace_selection(cmb_name)
 
     @with_wait_cursor
@@ -1782,6 +1786,27 @@ class Gui(QtWidgets.QMainWindow):
             return
         try:
             self.settings.max_ram_synapse_plot_matrix = max(0, int(new_max_ram))
+        except ValueError:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Invalid input",
+                f"Could not parse RAM limit '{new_max_ram}' as a number",
+            )
+            return
+        self._update_data(keep_undo_history=True)
+
+    def choose_max_ram_trace_plot_matrix(self) -> None:
+        new_max_ram, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "RAM limit",
+            "RAM limit in MB for trace plot (0 for no limit)",
+            QtWidgets.QLineEdit.EchoMode.Normal,
+            f"{self.settings.max_ram_trace_plot_matrix}",
+        )
+        if not ok:
+            return
+        try:
+            self.settings.max_ram_trace_plot_matrix = max(0, int(new_max_ram))
         except ValueError:
             QtWidgets.QMessageBox.critical(
                 self,
@@ -2705,6 +2730,7 @@ class Gui(QtWidgets.QMainWindow):
         add_action(
             "&Synapse Matrix RAM Limit", self.choose_max_ram_synapse_plot_matrix, menu
         )
+        add_action("&Trace Plot RAM Limit", self.choose_max_ram_trace_plot_matrix, menu)
         self._create_theme_menu(menu)
 
     def _create_theme_menu(self, menu: QtWidgets.QMenu) -> None:

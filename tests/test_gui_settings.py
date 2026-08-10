@@ -12,6 +12,7 @@ def test_gui_save_config_settings(tmp_config_dir) -> None:
     # change all settings
     settings.brian2_backend = "cython"
     settings.max_ram_synapse_plot_matrix = 512
+    settings.max_ram_trace_plot_matrix = 384
     settings.stim_padding_secs = 6
 
     # check if settings file exists and contains the correct values
@@ -26,6 +27,7 @@ def test_gui_save_config_settings(tmp_config_dir) -> None:
 
     assert config["brian2_backend"] == settings.brian2_backend
     assert config["max_ram_synapse_plot_matrix"] == settings.max_ram_synapse_plot_matrix
+    assert config["max_ram_trace_plot_matrix"] == settings.max_ram_trace_plot_matrix
     assert config["stim_padding_secs"] == settings.stim_padding_secs
     with open(config_file) as f:
         config = json.load(f)
@@ -38,11 +40,13 @@ def test_gui_load_config_settings(tmp_config_dir) -> None:
     # change all settings
     settings.brian2_backend = "cython"
     settings.max_ram_synapse_plot_matrix = 512
+    settings.max_ram_trace_plot_matrix = 384
     settings.stim_padding_secs = 6
 
     # set settings to original to check if loading works
     settings.__dict__["brian2_backend"] = "numpy"
     settings.__dict__["max_ram_synapse_plot_matrix"] = 256
+    settings.__dict__["max_ram_trace_plot_matrix"] = 256
     settings.__dict__["stim_padding_secs"] = 0
 
     # load settings from file
@@ -51,6 +55,7 @@ def test_gui_load_config_settings(tmp_config_dir) -> None:
     # check if settings were loaded correctly
     assert settings.brian2_backend == "cython"
     assert settings.max_ram_synapse_plot_matrix == 512
+    assert settings.max_ram_trace_plot_matrix == 384
     assert settings.stim_padding_secs == 6
 
     # try loading invalid values
