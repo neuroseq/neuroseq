@@ -16,7 +16,8 @@ def test_every_dynamic_routine_has_an_overview() -> None:
         assert overview is not None
         assert overview.goal
         assert overview.parameters
-        assert overview.plot_title
+        # Exactly one preview source: a matplotlib plot or a static image.
+        assert (overview.plot is not None) != (overview.image_path is not None)
 
 
 def test_routine_overview_unknown_routine_returns_none() -> None:
@@ -47,8 +48,33 @@ def test_selector_preview_updates_when_selection_changes(qtbot: QtBot) -> None:
         overview = routine_overview(routine)
         assert overview is not None
         assert dialog.lbl_title.text() == overview.title
-        assert dialog._axes.get_title() == overview.plot_title
-        assert dialog._axes.lines
+        if overview.image_path is not None:
+            # Image-backed routines show the SVG widget, not the plot.
+            assert not dialog.image_widget.isHidden()
+            assert dialog.image_widget.is_valid()
+            assert dialog.plot_widget.isHidden()
+        else:
+            assert not dialog.plot_widget.isHidden()
+            assert dialog.image_widget.isHidden()
+            assert dialog._axes.get_title() == overview.plot_title
+            assert dialog._axes.lines
+    dialog.close()
+
+
+def test_rheobase_preview_uses_bundled_svg(qtbot: QtBot) -> None:
+    overview = routine_overview(StimEditor.RHEOBASE_ROUTINE)
+    assert overview is not None
+    # Rheobase previews the bundled strength-duration SVG diagram.
+    assert overview.plot is None
+    assert overview.image_path is not None
+    assert overview.image_path.name == "rheobase_chronaxie.svg"
+    assert overview.image_path.is_file()
+
+    dialog = RoutineSelectorDialog([StimEditor.RHEOBASE_ROUTINE])
+    qtbot.addWidget(dialog)
+    assert not dialog.image_widget.isHidden()
+    assert dialog.image_widget.is_valid()
+    assert dialog.plot_widget.isHidden()
     dialog.close()
 
 

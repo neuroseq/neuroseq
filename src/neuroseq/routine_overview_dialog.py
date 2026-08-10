@@ -12,25 +12,35 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 from matplotlib.axes import Axes
 from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
+from qtpy.QtSvg import QSvgRenderer
 
 from neuroseq import theme as theme_module
+
+_RESOURCES_DIR = Path(__file__).resolve().parent / "resources"
 
 
 @dataclass(frozen=True)
 class RoutineOverview:
-    """Static, human-facing summary of a dynamic-input routine."""
+    """Static, human-facing summary of a dynamic-input routine.
+
+    A preview is either a matplotlib sample plot (``plot``) or a static image
+    (``image_path``, e.g. a bundled SVG diagram) -- exactly one is set.
+    """
 
     title: str
     goal: str
     parameters: tuple[tuple[str, str], ...]
-    plot_title: str
-    plot: Callable[[Axes], None]
+    plot_title: str = ""
+    plot: Callable[[Axes], None] | None = None
+    image_path: Path | None = None
 
 
 def _plot_targeted_stdp(ax: Axes) -> None:
@@ -42,19 +52,6 @@ def _plot_targeted_stdp(ax: Axes) -> None:
     ax.set_xlabel("STDP pairing iteration")
     ax.set_ylabel("EPSP (% baseline)")
     ax.legend(loc="lower right", fontsize="small")
-
-
-def _plot_rheobase(ax: Axes) -> None:
-    amplitude = np.linspace(0.0, 10.0, 200)
-    peak_mv = -70.0 + 90.0 / (1.0 + np.exp(-(amplitude - 5.0) * 2.0))
-    threshold = -20.0
-    rheobase = amplitude[np.argmax(peak_mv >= threshold)]
-    ax.plot(amplitude, peak_mv, color="#1f77b4")
-    ax.axhline(threshold, ls="--", color="#d62728", label="spike threshold")
-    ax.axvline(rheobase, ls=":", color="#2ca02c", label="rheobase")
-    ax.set_xlabel("stimulus amplitude")
-    ax.set_ylabel("peak Vm (mV)")
-    ax.legend(loc="upper left", fontsize="small")
 
 
 def _plot_stdp_window(ax: Axes) -> None:
@@ -107,8 +104,9 @@ ROUTINE_OVERVIEWS: dict[str, RoutineOverview] = {
             ("Amplitude / duration range", "search bounds for the sweep"),
             ("Spike threshold & post-pulse window", "how a spike is detected"),
         ),
-        plot_title="Find the minimal spiking stimulus",
-        plot=_plot_rheobase,
+        # Strength-duration curve (rheobase & chronaxie), a public-domain
+        # diagram by Savvas Radevic bundled under resources/.
+        image_path=_RESOURCES_DIR / "rheobase_chronaxie.svg",
     ),
     "STDP timing window (LTP/LTD vs Δt)": RoutineOverview(
         title="STDP timing window (LTP/LTD vs Δt)",
@@ -133,6 +131,37 @@ ROUTINE_OVERVIEWS: dict[str, RoutineOverview] = {
 def routine_overview(routine_name: str) -> RoutineOverview | None:
     """Return the overview for ``routine_name``, or ``None`` if unknown."""
     return ROUTINE_OVERVIEWS.get(routine_name)
+
+
+class _SvgImageWidget(QtWidgets.QWidget):
+    """Render an SVG scaled to fit the widget while preserving aspect ratio."""
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._renderer = QSvgRenderer()
+        self.setMinimumHeight(180)
+
+    def load(self, path: Path) -> None:
+        self._renderer.load(str(path))
+        self.update()
+
+    def is_valid(self) -> bool:
+        return self._renderer.isValid()
+
+    def paintEvent(self, event: QtGui.QPaintEvent | None) -> None:
+        del event
+        if not self._renderer.isValid():
+            return
+        target = self._renderer.defaultSize()
+        target.scale(self.size(), QtCore.Qt.AspectRatioMode.KeepAspectRatio)
+        x = (self.width() - target.width()) / 2.0
+        y = (self.height() - target.height()) / 2.0
+        rect = QtCore.QRectF(x, y, target.width(), target.height())
+        painter = QtGui.QPainter(self)
+        # The diagram uses fixed dark strokes; paint it on a white card so it
+        # stays legible on a dark-theme dialog background.
+        painter.fillRect(rect, QtGui.QColor("white"))
+        self._renderer.render(painter, rect)
 
 
 class RoutineSelectorDialog(QtWidgets.QDialog):
@@ -199,9 +228,13 @@ class RoutineSelectorDialog(QtWidgets.QDialog):
         self._axes = self.plot_widget.getFigure().add_subplot(111)
         layout.addWidget(self.plot_widget, stretch=1)
 
-        sample_note = QtWidgets.QLabel(
-            "Sample plot — illustrative shape only, not your data.", self
-        )
+        # Some routines preview a static diagram (SVG) rather than a plot; only
+        # one of the two preview widgets is visible at a time.
+        self.image_widget = _SvgImageWidget(self)
+        self.image_widget.setVisible(False)
+        layout.addWidget(self.image_widget, stretch=1)
+
+        sample_note = QtWidgets.QLabel("Illustration only — not your data.", self)
         sample_note.setWordWrap(True)
         note_font = sample_note.font()
         note_font.setItalic(True)
@@ -234,6 +267,8 @@ class RoutineSelectorDialog(QtWidgets.QDialog):
             self.lbl_params.clear()
             self._axes.clear()
             self.plot_widget.draw()
+            self.plot_widget.setVisible(True)
+            self.image_widget.setVisible(False)
             return
         self.lbl_title.setText(overview.title)
         self.lbl_goal.setText(overview.goal)
@@ -242,12 +277,19 @@ class RoutineSelectorDialog(QtWidgets.QDialog):
                 f"• {name} — {description}" for name, description in overview.parameters
             )
         )
-        self._axes.clear()
-        overview.plot(self._axes)
-        self._axes.set_title(overview.plot_title)
-        self._recolor_axes()
-        self.plot_widget.getFigure().tight_layout()
-        self.plot_widget.draw()
+        if overview.image_path is not None:
+            self.image_widget.load(overview.image_path)
+            self.image_widget.setVisible(True)
+            self.plot_widget.setVisible(False)
+        elif overview.plot is not None:
+            self._axes.clear()
+            overview.plot(self._axes)
+            self._axes.set_title(overview.plot_title)
+            self._recolor_axes()
+            self.plot_widget.getFigure().tight_layout()
+            self.plot_widget.draw()
+            self.plot_widget.setVisible(True)
+            self.image_widget.setVisible(False)
 
     def _on_continue(self) -> None:
         self.routine_chosen.emit(self.selected_routine)
