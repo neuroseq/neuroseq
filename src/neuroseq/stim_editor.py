@@ -16,6 +16,8 @@ from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomControlle
 from neuroseq.input_designer_dialog import InputDesignerDialog
 from neuroseq.project import Project
 from neuroseq.rheobase_dialog import RheobaseDialog
+from neuroseq.routine_overview_dialog import RoutineOverviewDialog
+from neuroseq.routine_overview_dialog import routine_overview
 from neuroseq.stdp_window_dialog import StdpWindowDialog
 from neuroseq.stim import DrawStim
 from neuroseq.stim import DrawStimType
@@ -101,6 +103,7 @@ class StimEditor(QtWidgets.QWidget):
         self._input_designer_dialog: InputDesignerDialog | None = None
         self._rheobase_dialog: RheobaseDialog | None = None
         self._stdp_window_dialog: StdpWindowDialog | None = None
+        self._routine_overview_dialog: RoutineOverviewDialog | None = None
         self._input_designer_theme = "light"
         # Captures the time index the user clicked at, so a Ramp drag can
         # use it as the ramp's left edge for every subsequent mouse_dragged
@@ -1080,11 +1083,44 @@ class StimEditor(QtWidgets.QWidget):
         if not ok:
             return
         if routine == self.TARGETED_STDP_ROUTINE:
-            self._show_routine_dialog("_input_designer_dialog", InputDesignerDialog)
+            self._show_routine_overview(
+                routine, "_input_designer_dialog", InputDesignerDialog
+            )
         elif routine == self.RHEOBASE_ROUTINE:
-            self._show_routine_dialog("_rheobase_dialog", RheobaseDialog)
+            self._show_routine_overview(routine, "_rheobase_dialog", RheobaseDialog)
         elif routine == self.STDP_WINDOW_ROUTINE:
-            self._show_routine_dialog("_stdp_window_dialog", StdpWindowDialog)
+            self._show_routine_overview(
+                routine, "_stdp_window_dialog", StdpWindowDialog
+            )
+
+    def _show_routine_overview(
+        self,
+        routine: str,
+        attr_name: Literal[
+            "_input_designer_dialog", "_rheobase_dialog", "_stdp_window_dialog"
+        ],
+        cls: type[InputDesignerDialog] | type[RheobaseDialog] | type[StdpWindowDialog],
+    ) -> None:
+        """Show a routine overview; open its dialog only when the user continues.
+
+        Selecting a routine used to open its (parameter-dense) dialog directly.
+        The overview first explains the goal, lists the parameters, and shows a
+        sample plot, so the user knows what the routine does before committing.
+        """
+        overview = routine_overview(routine)
+        if overview is None:
+            # No overview registered for this routine; fall back to opening it.
+            self._show_routine_dialog(attr_name, cls)
+            return
+        dialog = RoutineOverviewDialog(overview, self._input_designer_theme, self)
+        dialog.continue_requested.connect(
+            lambda: self._show_routine_dialog(attr_name, cls)
+        )
+        dialog.finished.connect(dialog.deleteLater)
+        self._routine_overview_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def _show_routine_dialog(
         self,
@@ -1115,6 +1151,7 @@ class StimEditor(QtWidgets.QWidget):
             "_input_designer_dialog",
             "_rheobase_dialog",
             "_stdp_window_dialog",
+            "_routine_overview_dialog",
         ):
             dialog = getattr(self, attr_name)
             if dialog is not None:
