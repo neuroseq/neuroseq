@@ -457,6 +457,12 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_spike.currentTextChanged.connect(self.set_spike)
         self.cmb_data.currentTextChanged.connect(self.set_data)
         self.stim_editor.limits_modified.connect(self.update_limits)
+        self.stim_editor.limits_modified.connect(self._rewindow_simulation_views)
+        # Longest stim length last used to window simulated data; lets
+        # ``_rewindow_simulation_views`` re-fetch traces only when a stim
+        # edit actually changed the timeline (e.g. trim/undo), not on every
+        # pixel drawn.
+        self._last_sim_timeline_secs: float | None = None
         self.last_cellpose_import: CellposeImportResult | None = None
         self._llm_settings_dialog: LLMSettingsDialog | None = None
         self._external_sim_thread: QtCore.QThread | None = None
@@ -1140,6 +1146,46 @@ class Gui(QtWidgets.QMainWindow):
         if int(n_neurons) <= 0:
             return
         self.controller.focus_neuron_range(0, int(n_neurons))
+
+    def _rewindow_simulation_views(self) -> None:
+        """Re-fetch the shown simulated data when the stim timeline changes.
+
+        Simulated traces/spikes/synapses are windowed to the longest stim
+        array (see ``Project.get_data``), so trimming a stim (or undoing the
+        trim) must re-pull the currently displayed data. The combo selections
+        do not change, so ``currentTextChanged`` never fires; refresh here
+        instead -- but only when the timeline length actually changed, so
+        ordinary drawing edits don't trigger a costly re-fetch.
+        """
+        if self.project is None:
+            return
+        timeline = self.project.simulation_timeline_seconds()
+        if (
+            self._last_sim_timeline_secs is not None
+            and timeline == self._last_sim_timeline_secs
+        ):
+            return
+        self._last_sim_timeline_secs = timeline
+        # Refresh in place without auto-showing hidden widgets or changing the
+        # focused neuron range -- this is a re-window of already-shown data,
+        # not a new user selection.
+        if self.cmb_trace.currentText():
+            self.trace_widget.set_data(
+                self.project.get_data(self.cmb_trace.currentText(), TraceData)
+            )
+        if self.cmb_spike.currentText():
+            self.spike_widget.set_data(
+                self.project.get_data(self.cmb_spike.currentText(), SpikeData)
+            )
+        if self.cmb_synapse.currentText():
+            self.project.max_ram_synapse_plot_matrix = (
+                self.settings.max_ram_synapse_plot_matrix
+            )
+            self.heatmap_widget.set_data(
+                self.project.get_data(self.cmb_synapse.currentText(), SynapseData)
+            )
+        if self.cmb_data.currentText():
+            self._apply_data_selection(self.cmb_data.currentText())
 
     def _apply_trace_selection(self, cmb_name: str) -> None:
         data = self.project.get_data(cmb_name, TraceData)

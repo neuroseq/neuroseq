@@ -253,6 +253,45 @@ def test_stim_editor_pad_and_trim(
     stim_editor.close()
 
 
+def test_stim_editor_trim_is_undoable(monkeypatch: MonkeyPatch, qtbot: QtBot):
+    project = Project()
+    values = np.zeros((1000, 4))
+    values[900:950, 0] = 1.0  # non-zero tail that trimming would remove
+    project.stim_arrays = {
+        "a": StimArray("a", neuroseq.stim.StimType.Excitation, values, "mV", 0.001)
+    }
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.show()
+    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    stim_editor.set_project(project)
+
+    # Trim 0.4 s off; confirm the "would delete data" prompt with Yes.
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.4", True))
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args: QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+    stim_editor.trim_stim_array()
+    modifier = stim_editor.current_stim_modifier
+    assert modifier is not None
+    assert modifier.stim_array.values.shape[0] == 600
+    # The trim is now on the undo stack instead of clearing it.
+    assert modifier.can_undo() is True
+
+    stim_editor.undo()
+    assert modifier.stim_array.values.shape[0] == 1000
+    assert np.allclose(modifier.stim_array.values[900:950, 0], 1.0)
+
+    stim_editor.redo()
+    assert modifier.stim_array.values.shape[0] == 600
+    stim_editor.close()
+
+
 def test_edit_stim_array_dt_change_requires_confirmation(
     monkeypatch: MonkeyPatch, qtbot: QtBot
 ) -> None:

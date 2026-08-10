@@ -24,6 +24,7 @@ from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.stim_array_modifier import ResizableReversibleAction
 from neuroseq.stim_array_modifier import StimArrayModifier
+from neuroseq.stim_array_modifier import TrimReversibleAction
 from neuroseq.stim_dialog import EditStimDialog
 from neuroseq.stim_intensity_dialog import StimIntensityDialog
 from neuroseq.stim_loop_dialog import StimLoopDialog
@@ -331,8 +332,42 @@ class StimEditor(QtWidgets.QWidget):
             if continue_with_trim != QtWidgets.QMessageBox.StandardButton.Yes:
                 return
         self.trim_stim_array_secs = trim_seconds_as_float
-        self.project.trim_stim_arrays(new_length_secs)
-        self.set_project(self.project, keep_undo_history=False)
+        self._apply_trim(new_length_secs)
+
+    def _apply_trim(self, new_length_secs: float) -> None:
+        """Trim every stim array to ``new_length_secs`` as one undoable step.
+
+        Trimming is routed through the modifier's undo stack (rather than
+        clearing it) so Ctrl+Z restores the stim length -- and, because the
+        stim array is the authoritative timeline, the simulated data that was
+        windowed out by the trim reappears with it.
+        """
+        if self.current_stim_modifier is None or self.project is None:
+            return
+        modifier = self.current_stim_modifier
+        action = TrimReversibleAction(
+            self.project,
+            new_length_secs,
+            self.stim_widget,
+            modifier.stim_array.name,
+        )
+        modifier.action_stack = modifier.action_stack[: modifier.current_index + 1]
+        modifier.action_stack.append(action)
+        action(modifier.stim_array, self.stim_widget)
+        modifier.current_index = len(modifier.action_stack) - 1
+        # Trim resizes every array, so per-array undo stacks for the others no
+        # longer line up with the shared timeline; reset them (as apply_pattern
+        # does for the same reason).
+        for other in self.stims_dict.values():
+            if other is not modifier:
+                other.action_stack = []
+                other.current_index = -1
+        self.controller.set_limits(
+            float(self.project.max_time_secs),
+            max(1, int(self.project.max_neurons)),
+        )
+        self.limits_modified.emit()
+        self._stim_values_updated()
 
     def loop_stim_array(self) -> None:
         if self.current_stim_modifier is None or self.project is None:

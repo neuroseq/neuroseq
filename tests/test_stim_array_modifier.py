@@ -5,9 +5,11 @@ from pytest import approx
 from pytestqt.qtbot import QtBot
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.stim_array_modifier import StimArrayModifier
+from neuroseq.stim_array_modifier import TrimReversibleAction
 from neuroseq.stim_widget import StimWidget
 
 
@@ -88,4 +90,36 @@ def test_timed_array_modifier(qtbot: QtBot) -> None:
     assert tma.can_undo() is False
     assert tma.can_redo() is True
     assert len(tma) == 2
+    stim_widget.close()
+
+
+def test_trim_reversible_action_restores_all_arrays(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+
+    project = Project()
+    long_vals = np.zeros((1000, 3))
+    long_vals[900:950, 0] = 1.0  # non-zero data in the tail that gets trimmed
+    project.add_stim_array(
+        StimArray("stim", StimType.Excitation, long_vals, "mV", 0.001)
+    )
+    project.add_stim_array(
+        StimArray("stim2", StimType.Inhibition, np.ones((1000, 3)), "mV", 0.001)
+    )
+
+    action = TrimReversibleAction(project, 0.4, stim_widget, "stim")
+    action(project.stim_arrays["stim"], stim_widget)
+    # Every array is trimmed to the same 0.4 s timeline.
+    assert project.stim_arrays["stim"].values.shape[0] == 400
+    assert project.stim_arrays["stim2"].values.shape[0] == 400
+    assert project.simulation_timeline_seconds() == approx(0.4)
+
+    action.undo(project.stim_arrays["stim"], stim_widget)
+    # Undo restores the original lengths and the trimmed tail contents.
+    assert project.stim_arrays["stim"].values.shape[0] == 1000
+    assert project.stim_arrays["stim2"].values.shape[0] == 1000
+    assert np.allclose(project.stim_arrays["stim"].values[900:950, 0], 1.0)
+    assert np.allclose(project.stim_arrays["stim2"].values, 1.0)
+    assert project.simulation_timeline_seconds() == approx(1.0)
     stim_widget.close()

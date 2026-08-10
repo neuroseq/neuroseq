@@ -6,6 +6,7 @@ import numpy as np
 
 from neuroseq.project import Project
 from neuroseq.stim import StimArray
+from neuroseq.stim_timing import seconds_to_samples_nearest
 from neuroseq.stim_widget import StimWidget
 
 
@@ -116,6 +117,66 @@ class ResizableReversibleAction:
                 self.stim_widget.set_background_data(arr)
 
 
+class TrimReversibleAction:
+    """One-step undo for trimming every project stim array to a target length.
+
+    The stim array is the project's authoritative timeline, so trimming it
+    also windows out any simulated data past the new length (handled on read in
+    :meth:`neuroseq.project.Project.get_data`). Undo re-appends the removed stim
+    tails, which restores the timeline and, with it, the simulated data.
+    """
+
+    def __init__(
+        self,
+        project: Project,
+        new_length_seconds: float,
+        stim_widget: StimWidget,
+        target_stim_name: str,
+    ) -> None:
+        self.project = project
+        self.new_length_seconds = float(new_length_seconds)
+        self.stim_widget = stim_widget
+        self.target_stim_name = target_stim_name
+        # Populated on ``__call__``: the trailing rows removed from each array,
+        # keyed by stim name, so undo can re-append exactly what was cut.
+        self.removed_tails: dict[str, np.ndarray] = {}
+        # The modifier logs these slice attributes; they are informational only.
+        self.neuron_slice = slice(None)
+        self.time_slice = slice(None)
+
+    def __call__(self, stim_array: StimArray, stim_widget: StimWidget) -> None:
+        del stim_array, stim_widget
+        self.removed_tails = {}
+        for name, arr in self.project.stim_arrays.items():
+            n_keep = seconds_to_samples_nearest(self.new_length_seconds, arr.dt)
+            if n_keep < arr.values.shape[0]:
+                self.removed_tails[name] = arr.values[n_keep:, :].copy()
+        self.project.trim_stim_arrays(self.new_length_seconds)
+        self._refresh_stim_widget()
+        self.project.update_limits()
+
+    def undo(self, stim_array: StimArray, stim_widget: StimWidget) -> None:
+        del stim_array, stim_widget
+        for name, tail in self.removed_tails.items():
+            if name not in self.project.stim_arrays:
+                continue
+            arr = self.project.stim_arrays[name]
+            if tail.shape[1] != arr.values.shape[1]:
+                # Neuron count changed since the trim; can't safely re-append.
+                continue
+            arr.values = np.concatenate([arr.values, tail], axis=0)
+        self._refresh_stim_widget()
+        self.project.update_limits()
+
+    def _refresh_stim_widget(self) -> None:
+        target = self.project.stim_arrays.get(self.target_stim_name)
+        if target is not None:
+            self.stim_widget.set_data(target)
+        for name, arr in self.project.stim_arrays.items():
+            if name != self.target_stim_name:
+                self.stim_widget.set_background_data(arr)
+
+
 class StimArrayModifier:
     """A class to track changes to a StimArray and allow undoing and redoing them."""
 
@@ -123,7 +184,9 @@ class StimArrayModifier:
         self.logger = logging.getLogger(__name__)
         self.stim_array = stim_array
         self.stim_widget = stim_widget
-        self.action_stack: list[ReversibleAction | ResizableReversibleAction] = []
+        self.action_stack: list[
+            ReversibleAction | ResizableReversibleAction | TrimReversibleAction
+        ] = []
         self.current_index = -1
 
     def __len__(self) -> int:

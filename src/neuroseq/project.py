@@ -31,6 +31,7 @@ from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.stim_timing import ensure_2d_stim_values
 from neuroseq.stim_timing import remap_stim_values_to_dt
+from neuroseq.stim_timing import seconds_to_samples_nearest
 from neuroseq.stim_timing import stim_dt_matches
 from neuroseq.stim_timing import validate_stim_dt_seconds
 from neuroseq.utils import append_data
@@ -45,6 +46,12 @@ class ExternalSimulateFn(Protocol):
         simulation_time: float,
         params: Mapping[str, object] | None = None,
     ) -> Experiment: ...
+
+
+# Tolerance (seconds) when deciding whether a simulated sample falls within the
+# stim timeline, so float representation error at the boundary does not drop a
+# sample that lands exactly on the trimmed length.
+_TIMELINE_CLIP_EPS_SECONDS = 1e-9
 
 
 def _to_seconds(value: float | int) -> float:
@@ -293,13 +300,24 @@ class Project:
         self.logger.info(f"Getting '{name}' of type {data_type}")
         experiment_name, data_name = name.split(" :: ")
         if experiment_name == "Simulation":
+            # The stim array is the authoritative timeline: simulated data past
+            # the longest stim array is windowed out so trimming a stim also
+            # trims its traces/spikes/synapses. This is non-destructive (the
+            # Brian2 monitors keep the full recording), so undoing the trim
+            # restores the simulated data along with the stim length.
             if data_type is TraceData:
-                return self.b2_model.get_simulation_trace_data(name)
+                return self._clip_trace_to_timeline(
+                    self.b2_model.get_simulation_trace_data(name)
+                )
             if data_type is SpikeData:
-                return self.b2_model.get_simulation_spike_data(name)
+                return self._clip_spike_to_timeline(
+                    self.b2_model.get_simulation_spike_data(name)
+                )
             if data_type is SynapseData:
-                return self.b2_model.get_simulation_synapse_data(
-                    name, self.max_ram_synapse_plot_matrix
+                return self._clip_synapse_to_timeline(
+                    self.b2_model.get_simulation_synapse_data(
+                        name, self.max_ram_synapse_plot_matrix
+                    )
                 )
         if experiment_name not in self.experiments:
             self.logger.info(f"  - experiment '{experiment_name}' not found")
@@ -309,6 +327,61 @@ class Project:
                 return data
         self.logger.info(f"  - data '{data_name}' not found")
         return None
+
+    def simulation_timeline_seconds(self) -> float:
+        """Duration of the authoritative stim timeline in seconds.
+
+        The longest stim array defines the project's timeline; simulated data
+        is windowed to this length (see :meth:`get_data`) so trimming a stim
+        array also trims the simulated traces/spikes/synapses that extend past
+        it. Returns ``0.0`` when there are no stim arrays, in which case
+        simulated data is returned unclipped (there is no timeline to clip to).
+        """
+        longest = 0.0
+        for stim_array in self.stim_arrays.values():
+            longest = max(
+                longest, float(stim_array.dt) * float(stim_array.values.shape[0])
+            )
+        return longest
+
+    def _clip_trace_to_timeline(self, data: TraceData | None) -> TraceData | None:
+        """Window a simulated trace to the stim timeline (non-destructive)."""
+        if data is None:
+            return None
+        timeline = self.simulation_timeline_seconds()
+        if timeline <= 0.0 or data.dt <= 0.0:
+            return data
+        n_time = int(data.traces.shape[1])
+        n_keep = seconds_to_samples_nearest(timeline, data.dt)
+        if 1 <= n_keep < n_time:
+            data.traces = data.traces[:, :n_keep]
+        return data
+
+    def _clip_spike_to_timeline(self, data: SpikeData | None) -> SpikeData | None:
+        """Window simulated spikes to the stim timeline (non-destructive)."""
+        if data is None:
+            return None
+        timeline = self.simulation_timeline_seconds()
+        if timeline <= 0.0:
+            return data
+        keep = data.spike_times <= timeline + _TIMELINE_CLIP_EPS_SECONDS
+        if not bool(np.all(keep)):
+            data.spike_times = data.spike_times[keep]
+            data.spike_indices = data.spike_indices[keep]
+        return data
+
+    def _clip_synapse_to_timeline(self, data: SynapseData | None) -> SynapseData | None:
+        """Window simulated synapse data to the stim timeline (non-destructive)."""
+        if data is None:
+            return None
+        timeline = self.simulation_timeline_seconds()
+        if timeline <= 0.0:
+            return data
+        keep = data.timestamps <= timeline + _TIMELINE_CLIP_EPS_SECONDS
+        if not bool(np.all(keep)):
+            data.timestamps = data.timestamps[keep]
+            data.values = data.values[:, :, keep]
+        return data
 
     def add_stim_array(self, stim_array: StimArray):
         stim_dt = validate_stim_dt_seconds(stim_array.dt)
@@ -786,7 +859,9 @@ class Project:
         """
         for name, stim_array in self.stim_arrays.items():
             n_timestamps = stim_array.values.shape[0]
-            new_n_timestamps = int(total_time_seconds / stim_array.dt)
+            new_n_timestamps = seconds_to_samples_nearest(
+                total_time_seconds, stim_array.dt
+            )
             if new_n_timestamps < n_timestamps:
                 self.logger.info(
                     f"Reducing {name} number of timestamps: {n_timestamps} -> {new_n_timestamps}"
@@ -848,7 +923,9 @@ class Project:
         Check whether trimming all StimArrays in the project to a length of total_time_seconds would delete data
         """
         for stim_array in self.stim_arrays.values():
-            new_n_timestamps = int(total_time_seconds / stim_array.dt)
+            new_n_timestamps = seconds_to_samples_nearest(
+                total_time_seconds, stim_array.dt
+            )
             if (
                 new_n_timestamps < stim_array.values.shape[0]
                 and np.sum(stim_array.values[new_n_timestamps:, :]) > 0
