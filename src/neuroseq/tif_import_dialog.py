@@ -59,33 +59,42 @@ class _PipelineWorker(QtCore.QObject):
         tif_paths: list[Path],
         masks: npt.NDArray[Any],
         params: TifPipelineParams,
+        pipeline: str = "suite2p",
     ) -> None:
         super().__init__()
         self._tif_paths = tif_paths
         self._masks = masks
         self._params = params
+        self._pipeline = pipeline
 
     @QtCore.Slot()
     def run(self) -> None:
         try:
             # Imported here so test environments without suite2p can still import
             # this module.
-            from neuroseq.importer_tif import run_suite2p_pipeline
+            def callback(msg: str, frac: float) -> None:
+                self.progress.emit(msg, float(frac))
 
-            result = run_suite2p_pipeline(
-                self._tif_paths,
-                self._masks,
-                self._params,
-                progress=lambda msg, frac: self.progress.emit(msg, float(frac)),
-            )
+            if self._pipeline == "roi_average":
+                from neuroseq.importer_tif import run_roi_average_pipeline
+
+                result = run_roi_average_pipeline(
+                    self._tif_paths, self._masks, self._params, progress=callback
+                )
+            else:
+                from neuroseq.importer_tif import run_suite2p_pipeline
+
+                result = run_suite2p_pipeline(
+                    self._tif_paths, self._masks, self._params, progress=callback
+                )
             self.finished.emit(result)
         except Exception as exc:
-            logging.getLogger(__name__).exception("Suite2p pipeline failed")
+            logging.getLogger(__name__).exception("Calcium extraction pipeline failed")
             self.failed.emit(str(exc))
 
 
 class TifImportDialog(QtWidgets.QDialog):
-    """End-to-end TIFF → Suite2p → neuroseq Experiment importer."""
+    """End-to-end TIFF calcium-trace importer."""
 
     def __init__(
         self,
@@ -120,9 +129,9 @@ class TifImportDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
 
         instructions = QtWidgets.QLabel(
-            "Run Suite2p (TIFF → binary → fluorescence extraction → OASIS "
-            "deconvolution) using Cellpose-derived ROIs. Defaults target jGCaMP8m "
-            "at 30 Hz with a 2-channel acquisition."
+            "Extract calcium traces from TIFF stacks using Cellpose-derived ROIs. "
+            "Choose Suite2p for neuropil correction and deconvolution, or simple "
+            "ROI averaging for raw mean fluorescence."
         )
         instructions.setWordWrap(True)
         layout.addWidget(instructions)
@@ -225,6 +234,11 @@ class TifImportDialog(QtWidgets.QDialog):
         params_group = QtWidgets.QGroupBox("Acquisition & pipeline parameters")
         params_layout = QtWidgets.QFormLayout(params_group)
 
+        self._pipeline_combo = QtWidgets.QComboBox()
+        self._pipeline_combo.addItem("Suite2p", "suite2p")
+        self._pipeline_combo.addItem("Simply average from ROI", "roi_average")
+        params_layout.addRow("Pipeline:", self._pipeline_combo)
+
         self._fs_spin = QtWidgets.QDoubleSpinBox()
         self._fs_spin.setRange(0.1, 1000.0)
         self._fs_spin.setDecimals(2)
@@ -252,6 +266,7 @@ class TifImportDialog(QtWidgets.QDialog):
         self._functional_chan_spin.setValue(1)
         self._functional_chan_spin.setToolTip("1-indexed (Suite2p convention)")
         params_layout.addRow("Functional channel:", self._functional_chan_spin)
+        self._nchannels_spin.valueChanged.connect(self._functional_chan_spin.setMaximum)
 
         self._neucoeff_spin = QtWidgets.QDoubleSpinBox()
         self._neucoeff_spin.setRange(0.0, 1.0)
@@ -267,6 +282,14 @@ class TifImportDialog(QtWidgets.QDialog):
         self._spike_threshold_spin.setValue(0.02)
         params_layout.addRow("Spike threshold:", self._spike_threshold_spin)
 
+        self._params_layout = params_layout
+        self._suite2p_parameter_widgets = [
+            self._tau_spin,
+            self._neucoeff_spin,
+            self._spike_threshold_spin,
+        ]
+        self._pipeline_combo.currentIndexChanged.connect(self._update_pipeline_fields)
+
         layout.addWidget(params_group)
 
         # Run / Cancel
@@ -278,6 +301,15 @@ class TifImportDialog(QtWidgets.QDialog):
         cancel.clicked.connect(self.reject)
         button_layout.addWidget(cancel)
         layout.addLayout(button_layout)
+
+    def _update_pipeline_fields(self) -> None:
+        """Hide parameters unrelated to simple ROI averaging."""
+        suite2p = self._pipeline_combo.currentData() == "suite2p"
+        for widget in self._suite2p_parameter_widgets:
+            widget.setVisible(suite2p)
+            label = self._params_layout.labelForField(widget)
+            if label is not None:
+                label.setVisible(suite2p)
 
     # -- File pickers -------------------------------------------------------
     def _browse_tifs(self) -> None:
@@ -408,7 +440,7 @@ class TifImportDialog(QtWidgets.QDialog):
 
         self._run_button.setEnabled(False)
         self._progress_dialog = QtWidgets.QProgressDialog(
-            "Starting Suite2p pipeline…", "Cancel", 0, 100, self
+            "Starting trace extraction…", "Cancel", 0, 100, self
         )
         self._progress_dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
         self._progress_dialog.setAutoClose(False)
@@ -417,7 +449,8 @@ class TifImportDialog(QtWidgets.QDialog):
         self._progress_dialog.show()
 
         self._thread = QtCore.QThread(self)
-        self._worker = _PipelineWorker(list(self._tif_paths), masks, params)
+        pipeline = str(self._pipeline_combo.currentData())
+        self._worker = _PipelineWorker(list(self._tif_paths), masks, params, pipeline)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(self._on_progress)
@@ -478,6 +511,26 @@ class TifImportDialog(QtWidgets.QDialog):
         dt = 1.0 / fs
         n_neurons, n_timepoints = result.F.shape
         self.experiment_duration = n_timepoints * dt
+
+        if result.extra.get("pipeline") == "roi_average":
+            from neuroseq.data import TraceData
+
+            traces = TraceData(
+                "Simply averaged ROI traces",
+                result.F,
+                np.arange(n_neurons, dtype=np.uint32),
+                "fluorescence",
+                dt,
+            )
+            self.imported_data = [traces]
+            QtWidgets.QMessageBox.information(
+                self,
+                "Import successful",
+                f"Imported {n_neurons} neurons × {n_timepoints} frames "
+                f"({self.experiment_duration:.2f} s at {fs:.1f} Hz).",
+            )
+            self.accept()
+            return
 
         traces = prepare_suite2p_traces(
             result.F,

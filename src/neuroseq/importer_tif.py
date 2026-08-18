@@ -70,6 +70,98 @@ def _noop_progress(_message: str, _fraction: float) -> None:
     return None
 
 
+def run_roi_average_pipeline(
+    tif_paths: list[Path],
+    masks: npt.NDArray[Any],
+    params: TifPipelineParams,
+    *,
+    progress: ProgressCallback | None = None,
+) -> TifPipelineResult:
+    """Average ROI pixels from the selected channel across ordered TIFFs.
+
+    Both ``(time, channel, y, x)`` stacks and ``(frame, y, x)`` stacks with
+    interleaved channels are supported. Channel numbering is 1-based, matching
+    the Suite2p acquisition convention used by the dialog.
+    """
+    if not tif_paths:
+        raise ValueError("tif_paths must contain at least one TIFF file")
+    masks = np.asarray(masks)
+    if masks.ndim != 2:
+        raise ValueError(f"masks must be 2D, got shape {masks.shape}")
+    if params.nchannels < 1:
+        raise ValueError("nchannels must be at least 1")
+    if not 1 <= params.functional_chan <= params.nchannels:
+        raise ValueError("functional_chan must be between 1 and nchannels (inclusive)")
+
+    import tifffile
+
+    progress = progress or _noop_progress
+    labels = np.unique(masks)
+    labels = labels[labels != 0]
+    if labels.size == 0:
+        raise ValueError("masks must contain at least one labelled ROI")
+
+    trace_parts: list[npt.NDArray[Any]] = []
+    first_stack: npt.NDArray[Any] | None = None
+    for index, path in enumerate(tif_paths):
+        progress(f"Reading {path.name}", index / len(tif_paths))
+        stack = np.asarray(tifffile.imread(path))
+        if stack.ndim == 2:
+            stack = stack[np.newaxis, ...]
+        if stack.ndim not in (3, 4):
+            raise ValueError(
+                f"TIFF {path} must have shape (frame, y, x) or "
+                f"(time, channel, y, x), got {stack.shape}"
+            )
+        if stack.shape[-2:] != masks.shape:
+            raise ValueError(
+                f"masks shape {masks.shape} does not match TIFF frame shape "
+                f"{stack.shape[-2:]}"
+            )
+        if stack.ndim == 4:
+            file_channels = stack.shape[1]
+            if file_channels != params.nchannels:
+                raise ValueError(
+                    f"TIFF {path} contains {file_channels} channel(s), but the "
+                    f"pipeline is configured for {params.nchannels}"
+                )
+            stack = stack[:, params.functional_chan - 1, :, :]
+        else:
+            stack = stack[params.functional_chan - 1 :: params.nchannels]
+        if stack.shape[0] == 0:
+            raise ValueError(
+                f"TIFF {path} contains no frames for functional channel "
+                f"{params.functional_chan}"
+            )
+        if first_stack is None:
+            first_stack = stack
+        trace_parts.append(
+            np.vstack(
+                [stack[:, masks == label].mean(axis=1) for label in labels]
+            ).astype(np.float32)
+        )
+
+    F = np.concatenate(trace_parts, axis=1)
+    assert first_stack is not None
+    progress("Done", 1.0)
+    return TifPipelineResult(
+        F=F,
+        Fneu=np.zeros_like(F),
+        spks=np.zeros_like(F),
+        stat=np.array([], dtype=object),
+        iscell=np.ones((len(labels), 2), dtype=np.float32),
+        ops={},
+        mean_image=first_stack.mean(axis=0).astype(np.float32),
+        masks=masks,
+        extra={
+            "pipeline": "roi_average",
+            "roi_labels": np.asarray(labels),
+            "nchannels": params.nchannels,
+            "functional_chan": params.functional_chan,
+        },
+    )
+
+
 def select_torch_device() -> tuple[Any, str]:
     """Pick the best available torch device and a short human label.
 

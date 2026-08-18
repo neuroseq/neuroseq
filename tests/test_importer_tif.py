@@ -70,6 +70,87 @@ def test_run_suite2p_pipeline_rejects_empty_tif_list():
         run_suite2p_pipeline([], _make_mask_image(), TifPipelineParams())
 
 
+def test_run_roi_average_pipeline_extracts_and_concatenates_traces(tmp_path):
+    import tifffile
+
+    from neuroseq.importer_tif import run_roi_average_pipeline
+
+    masks = np.array([[1, 1], [0, 2]], dtype=np.int32)
+    first = np.array([[[2, 4], [99, 10]], [[6, 8], [99, 14]]], dtype=np.uint16)
+    second = np.array([[[10, 12], [99, 18]]], dtype=np.uint16)
+    first_path = tmp_path / "first.tif"
+    second_path = tmp_path / "second.tif"
+    tifffile.imwrite(first_path, first, photometric="minisblack")
+    tifffile.imwrite(second_path, second, photometric="minisblack")
+
+    result = run_roi_average_pipeline(
+        [first_path, second_path], masks, TifPipelineParams(nchannels=1)
+    )
+
+    np.testing.assert_allclose(result.F, [[3, 7, 11], [10, 14, 18]])
+    assert result.extra["pipeline"] == "roi_average"
+
+
+def test_run_roi_average_pipeline_rejects_mismatched_masks(tmp_path):
+    import tifffile
+
+    from neuroseq.importer_tif import run_roi_average_pipeline
+
+    path = tmp_path / "stack.tif"
+    tifffile.imwrite(
+        path, np.zeros((2, 3, 4), dtype=np.uint8), photometric="minisblack"
+    )
+    with pytest.raises(ValueError, match="does not match TIFF frame shape"):
+        run_roi_average_pipeline(
+            [path], np.ones((2, 2), dtype=np.int32), TifPipelineParams(nchannels=1)
+        )
+
+
+def test_run_roi_average_pipeline_uses_selected_interleaved_channel(tmp_path):
+    import tifffile
+
+    from neuroseq.importer_tif import run_roi_average_pipeline
+
+    masks = np.ones((2, 2), dtype=np.int32)
+    stack = np.array(
+        [
+            [[1, 1], [1, 1]],
+            [[10, 10], [10, 10]],
+            [[2, 2], [2, 2]],
+            [[20, 20], [20, 20]],
+        ],
+        dtype=np.uint16,
+    )
+    path = tmp_path / "two_channels.tif"
+    tifffile.imwrite(path, stack, photometric="minisblack")
+
+    result = run_roi_average_pipeline(
+        [path], masks, TifPipelineParams(nchannels=2, functional_chan=2)
+    )
+
+    np.testing.assert_allclose(result.F, [[10, 20]])
+    assert result.extra["functional_chan"] == 2
+
+
+def test_run_roi_average_pipeline_uses_channel_axis(tmp_path):
+    import tifffile
+
+    from neuroseq.importer_tif import run_roi_average_pipeline
+
+    masks = np.ones((2, 2), dtype=np.int32)
+    stack = np.zeros((3, 2, 2, 2), dtype=np.uint16)
+    stack[:, 0, :, :] = np.array([1, 2, 3])[:, None, None]
+    stack[:, 1, :, :] = np.array([10, 20, 30])[:, None, None]
+    path = tmp_path / "channel_axis.tif"
+    tifffile.imwrite(path, stack, photometric="minisblack")
+
+    result = run_roi_average_pipeline(
+        [path], masks, TifPipelineParams(nchannels=2, functional_chan=2)
+    )
+
+    np.testing.assert_allclose(result.F, [[10, 20, 30]])
+
+
 def test_run_suite2p_pipeline_rejects_non_2d_masks():
     from neuroseq.importer_tif import run_suite2p_pipeline
 

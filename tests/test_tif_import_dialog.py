@@ -50,6 +50,23 @@ def test_dialog_requires_tifs(qtbot):
     assert dialog._thread is None
 
 
+def test_pipeline_selector_hides_suite2p_parameters_for_roi_average(qtbot):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+    dialog.show()
+
+    assert dialog._pipeline_combo.currentText() == "Suite2p"
+    dialog._pipeline_combo.setCurrentIndex(1)
+
+    assert dialog._pipeline_combo.currentText() == "Simply average from ROI"
+    assert not dialog._tau_spin.isVisibleTo(dialog)
+    assert dialog._fs_spin.isVisibleTo(dialog)
+    assert dialog._nchannels_spin.isVisibleTo(dialog)
+    assert dialog._functional_chan_spin.isVisibleTo(dialog)
+
+
 def test_dialog_runs_mocked_pipeline_and_produces_imported_data(
     qtbot, mocker, tmp_path
 ):
