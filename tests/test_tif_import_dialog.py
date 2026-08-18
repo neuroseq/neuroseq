@@ -109,7 +109,7 @@ def test_dialog_runs_mocked_pipeline_and_produces_imported_data(
     [
         (
             np.array([[-1, 0], [1, -1]], dtype=np.int32),
-            np.array([[0, 1], [2, 0]], dtype=np.int32),
+            np.array([[2, 0], [0, 1]], dtype=np.int32),
         ),
         (
             np.array([[-1, -1], [-1, -1]], dtype=np.int32),

@@ -151,6 +151,34 @@ def test_run_roi_average_pipeline_uses_channel_axis(tmp_path):
     np.testing.assert_allclose(result.F, [[10, 20, 30]])
 
 
+def test_spatial_import_masks_extract_same_traces_as_direct_cellpose_masks(tmp_path):
+    import tifffile
+
+    from neuroseq.importer_tif import run_roi_average_pipeline
+    from neuroseq.tif_import_dialog import _cellpose_result_to_masks
+
+    raw_masks = np.array([[1, 1], [0, 2], [0, 2]], dtype=np.int32)
+    stack = np.array(
+        [
+            [[2, 4], [0, 10], [0, 14]],
+            [[6, 8], [0, 18], [0, 22]],
+        ],
+        dtype=np.uint16,
+    )
+    path = tmp_path / "stack.tif"
+    tifffile.imwrite(path, stack, photometric="minisblack")
+    params = TifPipelineParams(nchannels=1, functional_chan=1)
+
+    direct = run_roi_average_pipeline([path], raw_masks, params)
+    spatial_result = MagicMock()
+    spatial_result.segmentation_array = np.flipud(raw_masks - 1)
+    via_spatial_import = run_roi_average_pipeline(
+        [path], _cellpose_result_to_masks(spatial_result), params
+    )
+
+    np.testing.assert_allclose(via_spatial_import.F, direct.F)
+
+
 def test_run_suite2p_pipeline_rejects_non_2d_masks():
     from neuroseq.importer_tif import run_suite2p_pipeline
 
@@ -176,14 +204,15 @@ def test_cellpose_result_to_masks_round_trips_background_and_labels():
     result.segmentation_array = seg
 
     masks = _cellpose_result_to_masks(result)
-    # 0-based -> 1-based, -1 -> 0
+    # Undo the spatial import's vertical flip, then map 0-based -> 1-based
+    # and -1 -> background zero.
     np.testing.assert_array_equal(
         masks,
         np.array(
             [
-                [0, 0, 1, 1],
-                [0, 1, 1, 2],
                 [0, 0, 2, 2],
+                [0, 1, 1, 2],
+                [0, 0, 1, 1],
             ],
             dtype=np.int32,
         ),

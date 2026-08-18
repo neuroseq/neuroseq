@@ -28,8 +28,14 @@ from neuroseq.importer_tif import TifPipelineResult
 
 
 def _cellpose_result_to_masks(result: CellposeImportResult) -> npt.NDArray[Any]:
-    """Convert a stored CellposeImportResult (0-based, bg=-1) back to Suite2p layout (bg=0)."""
-    seg = np.asarray(result.segmentation_array, dtype=np.int32)
+    """Convert stored display-oriented masks back to raw TIFF coordinates.
+
+    The spatial-footprint importer flips Cellpose segmentation vertically for
+    NeuroSeq/Fiji display coordinates. TIFF extraction operates on the original
+    pixel coordinates, so undo that flip as well as restoring Cellpose's
+    1-based labels and zero-valued background.
+    """
+    seg = np.flipud(np.asarray(result.segmentation_array, dtype=np.int32))
     masks = seg.copy()
     # In CellposeImportResult: background = -1, cells = 0..N-1
     # Suite2p / Cellpose raw layout: background = 0, cells = 1..N
