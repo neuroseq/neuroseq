@@ -106,6 +106,70 @@ def test_run_roi_average_pipeline_rejects_mismatched_masks(tmp_path):
         )
 
 
+def test_run_roi_average_pipeline_validates_inputs(tmp_path):
+    import tifffile
+
+    from neuroseq.importer_tif import run_roi_average_pipeline
+
+    valid_masks = np.ones((2, 2), dtype=np.int32)
+    path = tmp_path / "stack.tif"
+    tifffile.imwrite(path, np.ones((2, 2), dtype=np.uint8))
+
+    with pytest.raises(ValueError, match="at least one TIFF"):
+        run_roi_average_pipeline([], valid_masks, TifPipelineParams())
+    with pytest.raises(ValueError, match="masks must be 2D"):
+        run_roi_average_pipeline(
+            [path], np.ones((1, 2, 2)), TifPipelineParams(nchannels=1)
+        )
+    with pytest.raises(ValueError, match="nchannels must be at least 1"):
+        run_roi_average_pipeline([path], valid_masks, TifPipelineParams(nchannels=0))
+    with pytest.raises(ValueError, match="functional_chan must be between"):
+        run_roi_average_pipeline(
+            [path], valid_masks, TifPipelineParams(nchannels=1, functional_chan=2)
+        )
+    with pytest.raises(ValueError, match="labelled ROI"):
+        run_roi_average_pipeline(
+            [path], np.zeros((2, 2), dtype=np.int32), TifPipelineParams(nchannels=1)
+        )
+
+
+def test_run_roi_average_pipeline_validates_tiff_layout(monkeypatch, tmp_path):
+    import tifffile
+
+    from neuroseq.importer_tif import run_roi_average_pipeline
+
+    path = tmp_path / "stack.tif"
+    path.touch()
+    masks = np.ones((2, 2), dtype=np.int32)
+
+    monkeypatch.setattr(tifffile, "imread", lambda _path: np.ones((1, 1, 1, 2, 2)))
+    with pytest.raises(ValueError, match="must have shape"):
+        run_roi_average_pipeline([path], masks, TifPipelineParams(nchannels=1))
+
+    monkeypatch.setattr(tifffile, "imread", lambda _path: np.ones((1, 2, 2, 2)))
+    with pytest.raises(ValueError, match="contains 2 channel"):
+        run_roi_average_pipeline([path], masks, TifPipelineParams(nchannels=1))
+
+    monkeypatch.setattr(tifffile, "imread", lambda _path: np.ones((1, 2, 2)))
+    with pytest.raises(ValueError, match="contains no frames"):
+        run_roi_average_pipeline(
+            [path], masks, TifPipelineParams(nchannels=2, functional_chan=2)
+        )
+
+
+def test_run_roi_average_pipeline_accepts_single_2d_image(tmp_path):
+    import tifffile
+
+    from neuroseq.importer_tif import run_roi_average_pipeline
+
+    path = tmp_path / "image.tif"
+    tifffile.imwrite(path, np.array([[1, 3], [5, 7]], dtype=np.uint8))
+    result = run_roi_average_pipeline(
+        [path], np.ones((2, 2), dtype=np.int32), TifPipelineParams(nchannels=1)
+    )
+    np.testing.assert_allclose(result.F, [[4]])
+
+
 def test_run_roi_average_pipeline_uses_selected_interleaved_channel(tmp_path):
     import tifffile
 

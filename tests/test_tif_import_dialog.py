@@ -29,6 +29,64 @@ def _make_pipeline_result():
     )
 
 
+@pytest.mark.parametrize(
+    ("pipeline", "function_name"),
+    [
+        ("roi_average", "run_roi_average_pipeline"),
+        ("suite2p", "run_suite2p_pipeline"),
+    ],
+)
+def test_pipeline_worker_dispatches_and_forwards_progress(
+    qtbot, mocker, pipeline, function_name
+):
+    from neuroseq.importer_tif import TifPipelineParams
+    from neuroseq.tif_import_dialog import _PipelineWorker
+
+    result = _make_pipeline_result()
+
+    def fake_pipeline(*_args, progress, **_kwargs):
+        progress("working", 0.5)
+        return result
+
+    run = mocker.patch(
+        f"neuroseq.importer_tif.{function_name}", side_effect=fake_pipeline
+    )
+    worker = _PipelineWorker(
+        [], np.ones((2, 2), dtype=np.int32), TifPipelineParams(), pipeline
+    )
+    progress_events = []
+    finished_results = []
+    worker.progress.connect(
+        lambda message, fraction: progress_events.append((message, fraction))
+    )
+    worker.finished.connect(finished_results.append)
+
+    worker.run()
+
+    run.assert_called_once()
+    assert progress_events == [("working", 0.5)]
+    assert finished_results == [result]
+
+
+def test_pipeline_worker_emits_failure(mocker):
+    from neuroseq.importer_tif import TifPipelineParams
+    from neuroseq.tif_import_dialog import _PipelineWorker
+
+    mocker.patch(
+        "neuroseq.importer_tif.run_roi_average_pipeline",
+        side_effect=ValueError("bad stack"),
+    )
+    worker = _PipelineWorker(
+        [], np.ones((2, 2), dtype=np.int32), TifPipelineParams(), "roi_average"
+    )
+    failures = []
+    worker.failed.connect(failures.append)
+
+    worker.run()
+
+    assert failures == ["bad stack"]
+
+
 def test_dialog_disables_loaded_radio_when_no_cellpose_data(qtbot):
     from neuroseq.tif_import_dialog import TifImportDialog
 
@@ -102,6 +160,31 @@ def test_dialog_runs_mocked_pipeline_and_produces_imported_data(
     spikes = dialog.imported_data[1]
     assert traces.traces.shape == result.F.shape
     assert spikes.spike_indices.size >= 2
+
+
+def test_finalize_roi_average_imports_raw_trace_only(qtbot, mocker):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+    result = _make_pipeline_result()
+    result.extra["pipeline"] = "roi_average"
+    information = mocker.patch(
+        "neuroseq.tif_import_dialog.QtWidgets.QMessageBox.information"
+    )
+    accept = mocker.patch.object(dialog, "accept")
+
+    dialog._finalize_import(result)
+
+    assert len(dialog.imported_data) == 1
+    traces = dialog.imported_data[0]
+    assert traces.name == "Simply averaged ROI traces"
+    np.testing.assert_array_equal(traces.traces, result.F)
+    assert dialog.experiment_duration == pytest.approx(
+        result.F.shape[1] / dialog._fs_spin.value()
+    )
+    information.assert_called_once()
+    accept.assert_called_once()
 
 
 @pytest.mark.parametrize(
