@@ -35,7 +35,7 @@ def _cellpose_result_to_masks(result: CellposeImportResult) -> npt.NDArray[Any]:
     pixel coordinates, so undo that flip as well as restoring Cellpose's
     1-based labels and zero-valued background.
     """
-if result.segmentation_array is None:
+    if result.segmentation_array is None:
         raise ValueError("Cellpose segmentation is missing; re-run Cellpose import.")
     seg = np.flipud(np.asarray(result.segmentation_array, dtype=np.int32))
     masks = seg.copy()
