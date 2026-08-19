@@ -2379,7 +2379,7 @@ class Gui(QtWidgets.QMainWindow):
             icon="mdi6.file-import",
         )
         add_action(
-            "Import cell spatial &footprints",
+            "Cell &segmentation",
             self.btn_import_cellpose_data_clicked,
             menu,
             None,

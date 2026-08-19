@@ -58,6 +58,7 @@ class CellposeImportResult:
     mapping_strategy: str | None = None
     linear_offset: int | None = None
     aoi_config: AreasOfInterestConfig | None = None
+    segmentation_path: Path | None = None
 
 
 def clone_aoi_config(
@@ -222,6 +223,7 @@ def clone_cellpose_result(
         mapping_strategy=result.mapping_strategy,
         linear_offset=result.linear_offset,
         aoi_config=clone_aoi_config(result.aoi_config),
+        segmentation_path=getattr(result, "segmentation_path", None),
     )
 
 
@@ -560,6 +562,7 @@ class CellPoseImporter:
         mapping_strategy: str = "Linear",
         linear_offset: int = 0,
         aoi_config: AreasOfInterestConfig | None = None,
+        segmentation_path: Path | None = None,
     ) -> CellposeImportResult:
         """Create import result after successful processing."""
         if self.segmentation_data is None or self.overlay_image is None:
@@ -576,6 +579,7 @@ class CellPoseImporter:
             mapping_strategy=mapping_strategy,
             linear_offset=linear_offset,
             aoi_config=clone_aoi_config(aoi_config),
+            segmentation_path=segmentation_path,
         )
 
     def restore_from_result(self, result: CellposeImportResult) -> None:

@@ -106,7 +106,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         return is_vertical_screen(self._get_available_geometry(screen))
 
     def _setup_ui(self) -> None:
-        self.setWindowTitle("Import cell spatial footprints")
+        self.setWindowTitle("Cell segmentation")
         self.setModal(True)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -115,41 +115,43 @@ class CellposeImportDialog(QtWidgets.QDialog):
         selection_layout = QtWidgets.QVBoxLayout(self.file_selection_container)
         selection_layout.setContentsMargins(0, 0, 0, 0)
 
-        instructions = QtWidgets.QLabel(
-            "Select a PNG/TIFF image and corresponding CSV or NPY segmentation file. "
-            "The segmentation file should contain pixel-by-pixel segmentation IDs."
-        )
-        instructions.setWordWrap(True)
-        selection_layout.addWidget(instructions)
-
-        # Add buttons to launch Fiji and run Cellpose
-        fiji_button_layout = QtWidgets.QHBoxLayout()
-        fiji_button_layout.addStretch()
+        # External GUI controls are added to the bottom of the dialog below.
         self.open_fiji_button = QtWidgets.QPushButton("Open in Fiji")
         self.open_fiji_button.clicked.connect(self._open_in_fiji)
-        fiji_button_layout.addWidget(self.open_fiji_button)
         self.change_fiji_button = QtWidgets.QPushButton("Change Fiji path…")
         self.change_fiji_button.setToolTip(
             "Choose a different Fiji/ImageJ executable (e.g. if the saved path "
             "is wrong)."
         )
         self.change_fiji_button.clicked.connect(self._change_fiji_path)
-        fiji_button_layout.addWidget(self.change_fiji_button)
-        selection_layout.addLayout(fiji_button_layout)
 
-        cellpose_button_layout = QtWidgets.QHBoxLayout()
+        self.segmentation_run_group = QtWidgets.QGroupBox(
+            "Select file and run segementation"
+        )
+        cellpose_button_layout = QtWidgets.QHBoxLayout(self.segmentation_run_group)
         cellpose_button_layout.addStretch()
-        run_cellpose_button = QtWidgets.QPushButton("Run Cellpose")
-        run_cellpose_button.clicked.connect(self._run_cellpose)
-        cellpose_button_layout.addWidget(run_cellpose_button)
-        selection_layout.addLayout(cellpose_button_layout)
+        self.annotate_tiff_button = QtWidgets.QPushButton(
+            "Select file for segmentation…"
+        )
+        self.annotate_tiff_button.setToolTip(
+            "Select a mean-fluorescence TIFF and immediately segment it with "
+            "the Cellpose cpsam model. Results are saved beside the TIFF."
+        )
+        self.annotate_tiff_button.clicked.connect(self._annotate_mean_tiff)
+        cellpose_button_layout.addWidget(self.annotate_tiff_button)
+        selection_layout.addWidget(self.segmentation_run_group)
+
+        self.run_cellpose_button = QtWidgets.QPushButton("Run Cellpose")
+        self.run_cellpose_button.clicked.connect(self._run_cellpose)
 
         # Create horizontal layout for file selection and info
         top_horizontal_layout = QtWidgets.QHBoxLayout()
 
         # File selection group
-        file_group = QtWidgets.QGroupBox("File Selection")
-        file_layout = QtWidgets.QFormLayout(file_group)
+        self.file_group = QtWidgets.QGroupBox(
+            "or load cell segmentation from the files"
+        )
+        file_layout = QtWidgets.QFormLayout(self.file_group)
 
         self.image_path_label = QtWidgets.QLabel("No image selected")
         self.image_path_label.setStyleSheet("QLabel { color: gray; }")
@@ -168,11 +170,11 @@ class CellposeImportDialog(QtWidgets.QDialog):
         seg_layout.addWidget(self.segmentation_path_label, stretch=1)
         seg_layout.addWidget(browse_seg_button)
         file_layout.addRow("Segmentation CSV/NPY:", seg_layout)
-        file_group.setMinimumHeight(
+        self.file_group.setMinimumHeight(
             file_layout.sizeHint().height() + 50
         )  # Ensure it does nto get clipped vertically
 
-        top_horizontal_layout.addWidget(file_group, stretch=2)
+        top_horizontal_layout.addWidget(self.file_group, stretch=2)
 
         # Data information group
         self.info_group = QtWidgets.QGroupBox("Data Information")
@@ -398,6 +400,15 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.main_content_layout.addWidget(self.right_container, stretch=2)
         layout.addWidget(self.main_content_container)
         self.main_content_container.setVisible(False)
+
+        self.external_gui_group = QtWidgets.QGroupBox("External GUIs")
+        external_gui_layout = QtWidgets.QHBoxLayout(self.external_gui_group)
+        external_gui_layout.addStretch(1)
+        external_gui_layout.addWidget(self.open_fiji_button)
+        external_gui_layout.addWidget(self.change_fiji_button)
+        external_gui_layout.addWidget(self.run_cellpose_button)
+        layout.addWidget(self.external_gui_group)
+
         self._connect_aoi_controls()
         self._set_square_controls_enabled(self.square_enabled_cb.isChecked())
         self._set_circle_controls_enabled(self.circle_enabled_cb.isChecked())
@@ -1049,6 +1060,51 @@ class CellposeImportDialog(QtWidgets.QDialog):
         if filename:
             self._load_segmentation_file(filename)
 
+    def _annotate_mean_tiff(self) -> None:
+        """Select and immediately annotate a mean-fluorescence TIFF with cpsam."""
+        filename, _ = getopenfilename(
+            self,
+            "Select mean fluorescence TIFF",
+            "",
+            "TIFF files (*.tif *.tiff);;All files (*)",
+        )
+        if not filename:
+            return
+        if importlib.util.find_spec("cellpose") is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Install Cellpose",
+                "Cellpose is not installed in the current Python environment.",
+            )
+            return
+
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        self.annotate_tiff_button.setEnabled(False)
+        try:
+            from neuroseq.cellpose_annotation import annotate_mean_fluorescence_tiff
+
+            segmentation_path, mask_path = annotate_mean_fluorescence_tiff(
+                filename, model_name="cpsam"
+            )
+            self._load_image_file(filename)
+            self._load_segmentation_file(str(segmentation_path))
+            QtWidgets.QMessageBox.information(
+                self,
+                "Cell annotation complete",
+                "Cellpose annotation was saved as:\n"
+                f"{segmentation_path.name}\n{mask_path.name}",
+            )
+        except Exception as exc:
+            self.logger.exception("Cellpose annotation failed")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Cellpose annotation failed",
+                f"Could not annotate {filename}:\n{exc}",
+            )
+        finally:
+            self.annotate_tiff_button.setEnabled(True)
+            QtWidgets.QApplication.restoreOverrideCursor()
+
     def _change_fiji_path(self) -> None:
         """Let the user pick a different Fiji executable, even if one is set."""
         from neuroseq.fiji import resolve_fiji_path
@@ -1286,6 +1342,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 mapping_strategy=mapping_strategy,
                 linear_offset=self._get_linear_offset(),
                 aoi_config=stored_aoi_config,
+                segmentation_path=self.segmentation_path,
             )
 
             info = self.importer.get_info()
@@ -1329,6 +1386,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.image_path = self.existing_data.image_path
             self.image_path_label.setText(self.image_path.name)
             self.image_path_label.setStyleSheet("QLabel { color: blue; }")
+            self.segmentation_path = getattr(
+                self.existing_data, "segmentation_path", None
+            )
+            if self.segmentation_path is not None:
+                self.segmentation_path_label.setText(self.segmentation_path.name)
+                self.segmentation_path_label.setStyleSheet("QLabel { color: blue; }")
 
             # Load the existing image and segmentation data
             self.importer.restore_from_result(self.existing_data)
