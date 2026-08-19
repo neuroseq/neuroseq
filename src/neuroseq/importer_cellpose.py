@@ -44,6 +44,7 @@ class AreasOfInterestConfig:
     square: SquareAOI
     circle: CircleAOI
     show_shapes: bool = True
+    coordinate_mode: str = "pixels"
 
 
 @dataclass
@@ -84,6 +85,7 @@ def clone_aoi_config(
             diameter=float(config.circle.diameter),
         ),
         show_shapes=bool(config.show_shapes),
+        coordinate_mode=str(config.coordinate_mode),
     )
 
 
@@ -92,7 +94,7 @@ def default_aoi_config(image_shape: tuple[int, int]) -> AreasOfInterestConfig:
     h, w = image_shape[:2]
     short = min(h, w)
     circle_d = short / 8.0
-    square_s = 3.0 * circle_d
+    square_s = 0.7 * short
     return AreasOfInterestConfig(
         square=SquareAOI(
             enabled=True,
@@ -109,6 +111,7 @@ def default_aoi_config(image_shape: tuple[int, int]) -> AreasOfInterestConfig:
             diameter=circle_d,
         ),
         show_shapes=True,
+        coordinate_mode="percent",
     )
 
 

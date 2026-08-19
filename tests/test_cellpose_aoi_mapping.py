@@ -9,6 +9,7 @@ from pytestqt.qtbot import QtBot
 
 from neuroseq import io
 from neuroseq.aoi_shapes import user_to_world_point
+from neuroseq.cellpose_import_dialog import AOI_PERCENT_MODE
 from neuroseq.cellpose_import_dialog import CUSTOM_AOI_STRATEGY
 from neuroseq.cellpose_import_dialog import CellposeImportDialog
 from neuroseq.importer_cellpose import AOIRole
@@ -63,16 +64,17 @@ def _select_aoi_strategy(dialog: CellposeImportDialog) -> None:
             break
 
 
-def test_default_aoi_config_centred_and_3x() -> None:
+def test_default_aoi_config_uses_centred_70_percent_square() -> None:
     cfg = default_aoi_config((400, 600))
     assert cfg.circle.diameter == 50
-    assert cfg.square.side == 150
+    assert cfg.square.side == 280
     assert cfg.circle.cx == 300
     assert cfg.circle.cy == 200
-    assert cfg.square.x == 225
-    assert cfg.square.y == 125
+    assert cfg.square.x == 160
+    assert cfg.square.y == 60
     assert cfg.square.role == AOIRole.PREFERENTIAL
     assert cfg.circle.role == AOIRole.EXCLUSION
+    assert cfg.coordinate_mode == "percent"
 
 
 def test_point_in_square_inclusive_edges() -> None:
@@ -194,6 +196,7 @@ def test_aoi_config_round_trips_through_io(tmp_path: Path) -> None:
         square=SquareAOI(True, AOIRole.EXCLUSION, x=12.5, y=23.5, side=44.0),
         circle=CircleAOI(False, AOIRole.PREFERENTIAL, cx=50.0, cy=60.0, diameter=18.5),
         show_shapes=False,
+        coordinate_mode="percent",
     )
     result = CellposeImportResult(
         image_path=tmp_path / "image.png",
@@ -217,7 +220,10 @@ def test_dialog_selects_aoi_strategy_shows_subgroup(
 
     assert not dialog.aoi_group.isHidden()
     assert not dialog.show_shapes_checkbox.isHidden()
-    assert dialog.square_side_spin.value() > 0
+    assert dialog.aoi_coordinate_mode_combo.currentText() == AOI_PERCENT_MODE
+    assert dialog.square_x_spin.value() == 50
+    assert dialog.square_y_spin.value() == 50
+    assert dialog.square_side_spin.value() == 70
     dialog.close()
 
 
@@ -257,6 +263,51 @@ def test_dialog_aoi_changes_remap_on_spinbox_edit(tmp_path: Path, qtbot: QtBot) 
 
     assert before != after
     assert dialog.custom_mapping_line.text() == ""
+    dialog.close()
+
+
+def test_dialog_aoi_percentage_mode_uses_centres_and_fov_size(
+    tmp_path: Path, qtbot: QtBot
+) -> None:
+    dialog = _make_dialog(tmp_path, qtbot)
+    _select_aoi_strategy(dialog)
+    dialog.aoi_coordinate_mode_combo.setCurrentText(AOI_PERCENT_MODE)
+    dialog.square_x_spin.setValue(50.0)
+    dialog.square_y_spin.setValue(50.0)
+    dialog.square_side_spin.setValue(70.0)
+    dialog.circle_cx_spin.setValue(25.0)
+    dialog.circle_cy_spin.setValue(75.0)
+    dialog.circle_diameter_spin.setValue(20.0)
+
+    config = dialog._current_aoi_config()
+    assert config is not None
+    assert config.coordinate_mode == "percent"
+    assert config.square.x == 3.0
+    assert config.square.y == 3.0
+    assert config.square.side == 14.0
+    assert config.circle.cx == 5.0
+    assert config.circle.cy == 15.0
+    assert config.circle.diameter == 4.0
+    dialog.close()
+
+
+def test_dialog_aoi_pixel_mode_uses_square_centre(tmp_path: Path, qtbot: QtBot) -> None:
+    dialog = _make_dialog(tmp_path, qtbot)
+    _select_aoi_strategy(dialog)
+    dialog.aoi_coordinate_mode_combo.setCurrentIndex(0)
+    dialog.square_x_spin.setValue(10.0)
+    dialog.square_y_spin.setValue(12.0)
+    dialog.square_side_spin.setValue(6.0)
+
+    config = dialog._current_aoi_config()
+    assert config is not None
+    assert config.square.x == 7.0
+    assert config.square.y == 9.0
+    assert config.square.side == 6.0
+
+    dialog._set_aoi_controls(config)
+    assert dialog.square_x_spin.value() == 10.0
+    assert dialog.square_y_spin.value() == 12.0
     dialog.close()
 
 

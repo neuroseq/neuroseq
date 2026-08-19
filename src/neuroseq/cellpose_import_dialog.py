@@ -32,6 +32,8 @@ from neuroseq.utils import get_primary_available_geometry
 from neuroseq.utils import is_vertical_screen
 
 CUSTOM_AOI_STRATEGY = "Custom with areas of interest"
+AOI_PIXELS_MODE = "Coordinates (pixels)"
+AOI_PERCENT_MODE = "% of FOV"
 
 
 class CellposeImportDialog(QtWidgets.QDialog):
@@ -256,6 +258,19 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.aoi_group = QtWidgets.QGroupBox("Areas of Interest")
         aoi_layout = QtWidgets.QVBoxLayout(self.aoi_group)
 
+        mode_layout = QtWidgets.QHBoxLayout()
+        mode_layout.addWidget(QtWidgets.QLabel("Position and size:"))
+        self.aoi_coordinate_mode_combo = QtWidgets.QComboBox()
+        self.aoi_coordinate_mode_combo.addItems((AOI_PIXELS_MODE, AOI_PERCENT_MODE))
+        self.aoi_coordinate_mode_combo.setToolTip(
+            "Percentage mode uses x/y as the shape centre; sizes are relative "
+            "to the shorter FOV dimension."
+        )
+        mode_layout.addWidget(self.aoi_coordinate_mode_combo)
+        mode_layout.addStretch(1)
+        aoi_layout.addLayout(mode_layout)
+        self._aoi_display_mode = "pixels"
+
         self.square_enabled_cb = QtWidgets.QCheckBox("Square")
         self.square_enabled_cb.setChecked(True)
         self.square_role_buttons = QtWidgets.QButtonGroup(self)
@@ -274,9 +289,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.square_x_spin = self._make_aoi_spinbox()
         self.square_y_spin = self._make_aoi_spinbox()
         self.square_side_spin = self._make_aoi_spinbox()
-        square_values.addWidget(QtWidgets.QLabel("x:"))
+        square_values.addWidget(QtWidgets.QLabel("Center x:"))
         square_values.addWidget(self.square_x_spin)
-        square_values.addWidget(QtWidgets.QLabel("y:"))
+        square_values.addWidget(QtWidgets.QLabel("Center y:"))
         square_values.addWidget(self.square_y_spin)
         square_values.addWidget(QtWidgets.QLabel("side:"))
         square_values.addWidget(self.square_side_spin)
@@ -300,13 +315,14 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.circle_cx_spin = self._make_aoi_spinbox()
         self.circle_cy_spin = self._make_aoi_spinbox()
         self.circle_diameter_spin = self._make_aoi_spinbox()
-        circle_values.addWidget(QtWidgets.QLabel("cx:"))
+        circle_values.addWidget(QtWidgets.QLabel("Center x:"))
         circle_values.addWidget(self.circle_cx_spin)
-        circle_values.addWidget(QtWidgets.QLabel("cy:"))
+        circle_values.addWidget(QtWidgets.QLabel("Center y:"))
         circle_values.addWidget(self.circle_cy_spin)
         circle_values.addWidget(QtWidgets.QLabel("diameter:"))
         circle_values.addWidget(self.circle_diameter_spin)
         aoi_layout.addLayout(circle_values)
+        self._configure_aoi_spinboxes("pixels")
         self.aoi_group.setVisible(False)
         mapping_layout.addRow(self.aoi_group)
 
@@ -461,6 +477,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.circle_diameter_spin,
         ):
             spin.valueChanged.connect(self._regenerate_aoi_mapping)
+        self.aoi_coordinate_mode_combo.currentIndexChanged.connect(
+            self._on_aoi_coordinate_mode_changed
+        )
 
         self.square_enabled_cb.toggled.connect(self._set_square_controls_enabled)
         self.square_enabled_cb.toggled.connect(self._regenerate_aoi_mapping)
@@ -471,6 +490,19 @@ class CellposeImportDialog(QtWidgets.QDialog):
             button.toggled.connect(self._regenerate_aoi_mapping)
         for button in self.circle_role_buttons.buttons():
             button.toggled.connect(self._regenerate_aoi_mapping)
+
+    def _configure_aoi_spinboxes(self, mode: str) -> None:
+        percent = mode == "percent"
+        for spin in (
+            self.square_x_spin,
+            self.square_y_spin,
+            self.square_side_spin,
+            self.circle_cx_spin,
+            self.circle_cy_spin,
+            self.circle_diameter_spin,
+        ):
+            spin.setRange(0.0, 100.0 if percent else 1_000_000.0)
+            spin.setSuffix(" %" if percent else "")
 
     def _set_square_controls_enabled(self, enabled: bool) -> None:
         for button in self.square_role_buttons.buttons():
@@ -783,40 +815,104 @@ class CellposeImportDialog(QtWidgets.QDialog):
             square=self._current_square_aoi(),
             circle=self._current_circle_aoi(),
             show_shapes=self.show_shapes_checkbox.isChecked(),
+            coordinate_mode=self._aoi_display_mode,
         )
 
+    def _aoi_dimensions(self) -> tuple[float, float, float]:
+        if self.importer.image_data is None:
+            return 1.0, 1.0, 1.0
+        height, width = self.importer.image_data.shape[:2]
+        return float(width), float(height), float(min(width, height))
+
     def _current_square_aoi(self):
+        x = float(self.square_x_spin.value())
+        y = float(self.square_y_spin.value())
+        side = float(self.square_side_spin.value())
+        if self._aoi_display_mode == "percent":
+            width, height, short = self._aoi_dimensions()
+            side = side * short / 100.0
+            x = x * width / 100.0
+            y = y * height / 100.0
+        x -= side / 2.0
+        y -= side / 2.0
         return SquareAOI(
             enabled=self.square_enabled_cb.isChecked(),
             role=self._role_from_button_group(self.square_role_buttons),
-            x=float(self.square_x_spin.value()),
-            y=float(self.square_y_spin.value()),
-            side=float(self.square_side_spin.value()),
+            x=x,
+            y=y,
+            side=side,
         )
 
     def _current_circle_aoi(self):
+        cx = float(self.circle_cx_spin.value())
+        cy = float(self.circle_cy_spin.value())
+        diameter = float(self.circle_diameter_spin.value())
+        if self._aoi_display_mode == "percent":
+            width, height, short = self._aoi_dimensions()
+            cx = cx * width / 100.0
+            cy = cy * height / 100.0
+            diameter = diameter * short / 100.0
         return CircleAOI(
             enabled=self.circle_enabled_cb.isChecked(),
             role=self._role_from_button_group(self.circle_role_buttons),
-            cx=float(self.circle_cx_spin.value()),
-            cy=float(self.circle_cy_spin.value()),
-            diameter=float(self.circle_diameter_spin.value()),
+            cx=cx,
+            cy=cy,
+            diameter=diameter,
         )
+
+    def _on_aoi_coordinate_mode_changed(self, index: int) -> None:
+        new_mode = "percent" if index == 1 else "pixels"
+        if new_mode == self._aoi_display_mode:
+            return
+        config = self._current_aoi_config()
+        self._aoi_display_mode = new_mode
+        self._configure_aoi_spinboxes(new_mode)
+        if config is not None:
+            config.coordinate_mode = new_mode
+            self._set_aoi_controls(config)
+        self._regenerate_aoi_mapping()
 
     def _set_aoi_controls(self, config: AreasOfInterestConfig) -> None:
         self._suppress_aoi_signals = True
         try:
+            mode = getattr(config, "coordinate_mode", "pixels")
+            self._aoi_display_mode = mode
+            self._configure_aoi_spinboxes(mode)
+            self.aoi_coordinate_mode_combo.setCurrentIndex(
+                1 if mode == "percent" else 0
+            )
+            width, height, short = self._aoi_dimensions()
             self.square_enabled_cb.setChecked(config.square.enabled)
             self._set_role_button_group(self.square_role_buttons, config.square.role)
-            self.square_x_spin.setValue(float(config.square.x))
-            self.square_y_spin.setValue(float(config.square.y))
-            self.square_side_spin.setValue(float(config.square.side))
+            if mode == "percent":
+                self.square_x_spin.setValue(
+                    (config.square.x + config.square.side / 2.0) * 100.0 / width
+                )
+                self.square_y_spin.setValue(
+                    (config.square.y + config.square.side / 2.0) * 100.0 / height
+                )
+                self.square_side_spin.setValue(config.square.side * 100.0 / short)
+            else:
+                self.square_x_spin.setValue(
+                    float(config.square.x + config.square.side / 2.0)
+                )
+                self.square_y_spin.setValue(
+                    float(config.square.y + config.square.side / 2.0)
+                )
+                self.square_side_spin.setValue(float(config.square.side))
 
             self.circle_enabled_cb.setChecked(config.circle.enabled)
             self._set_role_button_group(self.circle_role_buttons, config.circle.role)
-            self.circle_cx_spin.setValue(float(config.circle.cx))
-            self.circle_cy_spin.setValue(float(config.circle.cy))
-            self.circle_diameter_spin.setValue(float(config.circle.diameter))
+            if mode == "percent":
+                self.circle_cx_spin.setValue(config.circle.cx * 100.0 / width)
+                self.circle_cy_spin.setValue(config.circle.cy * 100.0 / height)
+                self.circle_diameter_spin.setValue(
+                    config.circle.diameter * 100.0 / short
+                )
+            else:
+                self.circle_cx_spin.setValue(float(config.circle.cx))
+                self.circle_cy_spin.setValue(float(config.circle.cy))
+                self.circle_diameter_spin.setValue(float(config.circle.diameter))
 
             self.show_shapes_checkbox.setChecked(bool(config.show_shapes))
             self._set_square_controls_enabled(config.square.enabled)
