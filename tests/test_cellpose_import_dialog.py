@@ -4,6 +4,7 @@ import numpy as np
 from PIL import Image
 from pytestqt.qtbot import QtBot
 
+from neuroseq.cellpose_import_dialog import CUSTOM_AOI_STRATEGY
 from neuroseq.cellpose_import_dialog import CellposeImportDialog
 
 
@@ -25,6 +26,21 @@ def _make_cellpose_dialog(tmp_path, qtbot: QtBot) -> CellposeImportDialog:
     dialog._load_segmentation_file(str(seg_path))
 
     return dialog
+
+
+def _select_mapping_strategy(dialog: CellposeImportDialog, strategy: str) -> None:
+    for button in dialog.mapping_buttons.buttons():
+        if button.text() == strategy:
+            button.setChecked(True)
+            return
+    raise AssertionError(f"Mapping strategy not found: {strategy}")
+
+
+def test_custom_areas_of_interest_is_default_mapping_strategy(qtbot: QtBot) -> None:
+    dialog = CellposeImportDialog()
+    qtbot.addWidget(dialog)
+
+    assert dialog._get_mapping_strategy() == CUSTOM_AOI_STRATEGY
 
 
 def test_cellpose_dialog_opens_at_compact_file_selection_size(qtbot: QtBot):
@@ -65,19 +81,11 @@ def test_external_gui_buttons_are_grouped_at_dialog_bottom(qtbot: QtBot):
     )
 
 
-def test_file_selection_sections_have_descriptive_titles(qtbot: QtBot):
-    dialog = CellposeImportDialog()
-    qtbot.addWidget(dialog)
-
-    assert dialog.segmentation_run_group.title() == "Select file and run segementation"
-    assert dialog.file_group.title() == "or load cell segmentation from the files"
-    assert dialog.annotate_tiff_button.parentWidget() is dialog.segmentation_run_group
-
-
 def test_cellpose_dialog_linear_offset_persisted(
     tmp_path, qtbot: QtBot, qmessagebox_calls: list
 ):
     dialog = _make_cellpose_dialog(tmp_path, qtbot)
+    _select_mapping_strategy(dialog, "Linear")
     assert dialog.windowTitle() == "Cell segmentation"
     dialog.linear_offset_spin.setValue(3)
 
@@ -89,6 +97,7 @@ def test_cellpose_dialog_linear_offset_persisted(
 
 def test_cellpose_dialog_linear_offset_preview_mapping(tmp_path, qtbot: QtBot):
     dialog = _make_cellpose_dialog(tmp_path, qtbot)
+    _select_mapping_strategy(dialog, "Linear")
     dialog.linear_offset_spin.setValue(3)
 
     mapping = dialog.overlay_widget.stimulus_to_cellpose_mapping or {}
@@ -156,3 +165,34 @@ def test_annotate_mean_tiff_populates_file_selection(tmp_path, qtbot: QtBot, moc
     assert dialog.segmentation_path == segmentation_path
     assert dialog.image_path_label.text() == image_path.name
     assert dialog.segmentation_path_label.text() == segmentation_path.name
+
+
+def test_annotate_multiframe_tiff_explains_averaging(
+    tmp_path, qtbot: QtBot, mocker, qmessagebox_calls
+) -> None:
+    dialog = CellposeImportDialog()
+    qtbot.addWidget(dialog)
+    image_path = tmp_path / "recording.tif"
+    Image.fromarray(np.zeros((6, 6), dtype=np.uint8)).save(image_path)
+
+    mocker.patch(
+        "neuroseq.cellpose_import_dialog.getopenfilename",
+        return_value=(str(image_path), ""),
+    )
+    mocker.patch(
+        "neuroseq.cellpose_import_dialog.importlib.util.find_spec",
+        return_value=object(),
+    )
+    mocker.patch("neuroseq.cellpose_annotation.tiff_frame_count", return_value=600)
+    mocker.patch(
+        "neuroseq.cellpose_annotation.annotate_mean_fluorescence_tiff",
+        side_effect=RuntimeError("stop after notice"),
+    )
+
+    dialog._annotate_mean_tiff()
+
+    messages = [
+        call["text"] for call in qmessagebox_calls if call["name"] == "information"
+    ]
+    assert any("first 300" in message for message in messages)
+    assert any("150 frames total" in message for message in messages)

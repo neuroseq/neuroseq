@@ -5,9 +5,12 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import tifffile
 from PIL import Image
 
 from neuroseq.cellpose_annotation import annotate_mean_fluorescence_tiff
+from neuroseq.cellpose_annotation import load_annotation_image
+from neuroseq.cellpose_annotation import tiff_frame_count
 
 
 def test_annotation_requires_gpu(tmp_path: Path, mocker) -> None:
@@ -55,3 +58,19 @@ def test_annotation_constructs_cellpose_with_gpu_enabled(
     annotate_mean_fluorescence_tiff(image_path)
 
     assert model_init == {"gpu": True, "pretrained_model": "cpsam"}
+
+
+def test_multiframe_tiff_averages_every_second_of_first_300_frames(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "recording.tif"
+    frames = np.arange(302, dtype=np.uint16)[:, None, None] * np.ones(
+        (1, 2, 3), dtype=np.uint16
+    )
+    tifffile.imwrite(image_path, frames, photometric="minisblack")
+
+    image = load_annotation_image(image_path)
+
+    assert tiff_frame_count(image_path) == 302
+    assert image.shape == (2, 3)
+    np.testing.assert_array_equal(image, np.full((2, 3), 149.0))

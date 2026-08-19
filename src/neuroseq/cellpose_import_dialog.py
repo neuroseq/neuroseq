@@ -130,7 +130,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.change_fiji_button.clicked.connect(self._change_fiji_path)
 
         self.segmentation_run_group = QtWidgets.QGroupBox(
-            "Select file and run segementation"
+            "Select file (single or multiframe TIFF)"
         )
         cellpose_button_layout = QtWidgets.QHBoxLayout(self.segmentation_run_group)
         cellpose_button_layout.addStretch()
@@ -224,9 +224,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
             strategy_layout.addWidget(button)
         strategy_layout.addStretch(1)
         strategy_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
-        if self.mapping_buttons.buttons():
-            first_button = self.mapping_buttons.buttons()[0]
-            first_button.setChecked(True)
+        for button in self.mapping_buttons.buttons():
+            if button.text() == CUSTOM_AOI_STRATEGY:
+                button.setChecked(True)
+                break
         mapping_layout.addRow("Mapping strategy:", strategy_layout)
 
         # Linear offset input
@@ -333,7 +334,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         for abstract_button in self.mapping_buttons.buttons():
             if hasattr(abstract_button, "toggled"):
                 abstract_button.toggled.connect(self._on_mapping_changed)
-        self._last_mapping_strategy = "Linear"
+        self._last_mapping_strategy = CUSTOM_AOI_STRATEGY
 
         # Place overlay first so the visual is top-most
         self.left_container = QtWidgets.QWidget()
@@ -432,6 +433,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self._connect_aoi_controls()
         self._set_square_controls_enabled(self.square_enabled_cb.isChecked())
         self._set_circle_controls_enabled(self.circle_enabled_cb.isChecked())
+        self._on_mapping_changed()
         self._set_ui_loaded_state(False)
         self._on_display_toggle_changed()
 
@@ -699,7 +701,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.aoi_summary_browser.clear()
         self.aoi_summary_browser.setVisible(False)
         for button in self.mapping_buttons.buttons():
-            if button.text() == "Linear":
+            if button.text() == CUSTOM_AOI_STRATEGY:
                 button.setChecked(True)
                 break
         self.overlay_widget.set_aoi_overlay(None, show=False)
@@ -1180,6 +1182,28 @@ class CellposeImportDialog(QtWidgets.QDialog):
             )
             return
 
+        try:
+            from neuroseq.cellpose_annotation import tiff_frame_count
+
+            frame_count = tiff_frame_count(filename)
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Invalid TIFF file",
+                f"Could not inspect {filename}:\n{exc}",
+            )
+            return
+        if frame_count > 1:
+            sampled_count = len(range(0, min(frame_count, 300), 2))
+            QtWidgets.QMessageBox.information(
+                self,
+                "Multi-frame TIFF selected",
+                f"This TIFF contains {frame_count} frames. NeuroSeq will use "
+                f"every second frame from the first {min(frame_count, 300)} "
+                f"frames ({sampled_count} frames total), calculate their "
+                "average, and process that average with Cellpose.",
+            )
+
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
         self.annotate_tiff_button.setEnabled(False)
         try:
@@ -1355,7 +1379,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 ),
                 base_image=self.importer.image_data,
             )
-            self._update_aoi_overlay_visibility()
+            if mapping_strategy == CUSTOM_AOI_STRATEGY:
+                self._regenerate_aoi_mapping()
+            else:
+                self._update_aoi_overlay_visibility()
             self._hide_info()
         except Exception as exc:
             self.logger.exception("Error preparing cellpose preview")

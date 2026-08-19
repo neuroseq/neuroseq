@@ -5,9 +5,32 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import tifffile
 from PIL import Image
 
 from neuroseq.gpu import torch_gpu_status
+
+MAX_SOURCE_FRAMES = 300
+FRAME_STEP = 2
+
+
+def tiff_frame_count(image_path: str | Path) -> int:
+    """Return the number of pages in the selected TIFF."""
+    with tifffile.TiffFile(Path(image_path)) as tif:
+        return len(tif.pages)
+
+
+def load_annotation_image(image_path: str | Path) -> np.ndarray:
+    """Load a single image or average sampled pages from a TIFF stack."""
+    path = Path(image_path)
+    frame_count = tiff_frame_count(path)
+    if frame_count <= 1:
+        with Image.open(path) as image:
+            return np.asarray(image)
+
+    frame_indices = range(0, min(frame_count, MAX_SOURCE_FRAMES), FRAME_STEP)
+    frames = tifffile.imread(path, key=frame_indices)
+    return np.mean(frames, axis=0)
 
 
 def annotate_mean_fluorescence_tiff(
@@ -31,8 +54,7 @@ def annotate_mean_fluorescence_tiff(
     from cellpose import models
 
     path = Path(image_path).resolve()
-    with Image.open(path) as image:
-        image_array = np.asarray(image)
+    image_array = load_annotation_image(path)
 
     # GPU availability was verified above. Passing True is intentional: never
     # silently downgrade this interactive annotation workflow to the CPU.
