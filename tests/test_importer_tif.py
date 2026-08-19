@@ -151,7 +151,7 @@ def test_run_roi_average_pipeline_validates_tiff_layout(monkeypatch, tmp_path):
         run_roi_average_pipeline([path], masks, TifPipelineParams(nchannels=1))
 
     monkeypatch.setattr(tifffile, "imread", lambda _path: np.ones((1, 2, 2)))
-    with pytest.raises(ValueError, match="contains no frames"):
+    with pytest.raises(ValueError, match="not divisible by nchannels"):
         run_roi_average_pipeline(
             [path], masks, TifPipelineParams(nchannels=2, functional_chan=2)
         )
