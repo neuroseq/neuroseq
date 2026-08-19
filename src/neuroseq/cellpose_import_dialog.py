@@ -119,8 +119,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         # External GUI controls are added to the bottom of the dialog below.
         self.open_fiji_button = QtWidgets.QPushButton("Open in Fiji")
+        self.open_fiji_button.setAutoDefault(False)
         self.open_fiji_button.clicked.connect(self._open_in_fiji)
         self.change_fiji_button = QtWidgets.QPushButton("Change Fiji path…")
+        self.change_fiji_button.setAutoDefault(False)
         self.change_fiji_button.setToolTip(
             "Choose a different Fiji/ImageJ executable (e.g. if the saved path "
             "is wrong)."
@@ -144,6 +146,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         selection_layout.addWidget(self.segmentation_run_group)
 
         self.run_cellpose_button = QtWidgets.QPushButton("Run Cellpose")
+        self.run_cellpose_button.setAutoDefault(False)
         self.run_cellpose_button.clicked.connect(self._run_cellpose)
 
         # Create horizontal layout for file selection and info
@@ -405,6 +408,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         self.import_button = QtWidgets.QPushButton("Import")
         self.import_button.setEnabled(False)
+        self.import_button.setDefault(True)
         self.import_button.clicked.connect(self._import_data)
         button_layout.addWidget(self.import_button)
 
@@ -448,6 +452,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
                     self.main_content_container.width(),
                     self.main_content_container.height(),
                 )
+                if self.import_button.isEnabled():
+                    self.import_button.setFocus(QtCore.Qt.FocusReason.OtherFocusReason)
             else:
                 self._resize_for_file_selection()
         if not loaded and hasattr(self, "import_button"):
