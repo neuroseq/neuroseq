@@ -127,6 +127,11 @@ def run_roi_average_pipeline(
                 )
             stack = stack[:, params.functional_chan - 1, :, :]
         else:
+            if stack.shape[0] % params.nchannels != 0:
+                raise ValueError(
+                    f"TIFF {path} has {stack.shape[0]} frame(s), which is not divisible by "
+                    f"nchannels={params.nchannels} for interleaved acquisition"
+                )
             stack = stack[params.functional_chan - 1 :: params.nchannels]
         if stack.shape[0] == 0:
             raise ValueError(
