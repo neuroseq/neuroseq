@@ -31,6 +31,10 @@ def _build_cellpose_import_result(tmp_path, qtbot, *, offset: int | None = None)
     dialog._load_image_file(str(image_path))
     dialog._load_segmentation_file(str(seg_path))
     if offset is not None:
+        for button in dialog.mapping_buttons.buttons():
+            if button.text() == "Linear":
+                button.setChecked(True)
+                break
         dialog.linear_offset_spin.setValue(offset)
 
     dialog.accept = lambda: None

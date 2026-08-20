@@ -58,6 +58,7 @@ def _aoi_to_json(config: AreasOfInterestConfig | None) -> dict | None:
             "diameter": float(config.circle.diameter),
         },
         "show_shapes": bool(config.show_shapes),
+        "coordinate_mode": str(config.coordinate_mode),
     }
 
 
@@ -82,6 +83,7 @@ def _aoi_from_json(config: dict | None) -> AreasOfInterestConfig | None:
             diameter=float(circle["diameter"]),
         ),
         show_shapes=bool(config.get("show_shapes", True)),
+        coordinate_mode=str(config.get("coordinate_mode", "pixels")),
     )
 
 

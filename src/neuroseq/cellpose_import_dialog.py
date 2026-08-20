@@ -32,6 +32,8 @@ from neuroseq.utils import get_primary_available_geometry
 from neuroseq.utils import is_vertical_screen
 
 CUSTOM_AOI_STRATEGY = "Custom with areas of interest"
+AOI_PIXELS_MODE = "Coordinates (pixels)"
+AOI_PERCENT_MODE = "% of FOV"
 
 
 class CellposeImportDialog(QtWidgets.QDialog):
@@ -106,7 +108,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         return is_vertical_screen(self._get_available_geometry(screen))
 
     def _setup_ui(self) -> None:
-        self.setWindowTitle("Import cell spatial footprints")
+        self.setWindowTitle("Cell segmentation")
         self.setModal(True)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -115,41 +117,46 @@ class CellposeImportDialog(QtWidgets.QDialog):
         selection_layout = QtWidgets.QVBoxLayout(self.file_selection_container)
         selection_layout.setContentsMargins(0, 0, 0, 0)
 
-        instructions = QtWidgets.QLabel(
-            "Select a PNG/TIFF image and corresponding CSV or NPY segmentation file. "
-            "The segmentation file should contain pixel-by-pixel segmentation IDs."
-        )
-        instructions.setWordWrap(True)
-        selection_layout.addWidget(instructions)
-
-        # Add buttons to launch Fiji and run Cellpose
-        fiji_button_layout = QtWidgets.QHBoxLayout()
-        fiji_button_layout.addStretch()
+        # External GUI controls are added to the bottom of the dialog below.
         self.open_fiji_button = QtWidgets.QPushButton("Open in Fiji")
+        self.open_fiji_button.setAutoDefault(False)
         self.open_fiji_button.clicked.connect(self._open_in_fiji)
-        fiji_button_layout.addWidget(self.open_fiji_button)
         self.change_fiji_button = QtWidgets.QPushButton("Change Fiji path…")
+        self.change_fiji_button.setAutoDefault(False)
         self.change_fiji_button.setToolTip(
             "Choose a different Fiji/ImageJ executable (e.g. if the saved path "
             "is wrong)."
         )
         self.change_fiji_button.clicked.connect(self._change_fiji_path)
-        fiji_button_layout.addWidget(self.change_fiji_button)
-        selection_layout.addLayout(fiji_button_layout)
 
-        cellpose_button_layout = QtWidgets.QHBoxLayout()
+        self.segmentation_run_group = QtWidgets.QGroupBox(
+            "Select file (single or multiframe TIFF)"
+        )
+        cellpose_button_layout = QtWidgets.QHBoxLayout(self.segmentation_run_group)
         cellpose_button_layout.addStretch()
-        run_cellpose_button = QtWidgets.QPushButton("Run Cellpose")
-        run_cellpose_button.clicked.connect(self._run_cellpose)
-        cellpose_button_layout.addWidget(run_cellpose_button)
-        selection_layout.addLayout(cellpose_button_layout)
+        self.annotate_tiff_button = QtWidgets.QPushButton(
+            "Select file for segmentation…"
+        )
+        self.annotate_tiff_button.setToolTip(
+            "Select a mean-fluorescence TIFF and immediately segment it with "
+            "the Cellpose cpsam model. Results are saved beside the TIFF."
+        )
+        self.annotate_tiff_button.clicked.connect(self._annotate_mean_tiff)
+        cellpose_button_layout.addWidget(self.annotate_tiff_button)
+        selection_layout.addWidget(self.segmentation_run_group)
+
+        self.run_cellpose_button = QtWidgets.QPushButton("Run Cellpose")
+        self.run_cellpose_button.setAutoDefault(False)
+        self.run_cellpose_button.clicked.connect(self._run_cellpose)
 
         # Create horizontal layout for file selection and info
         top_horizontal_layout = QtWidgets.QHBoxLayout()
 
         # File selection group
-        file_group = QtWidgets.QGroupBox("File Selection")
-        file_layout = QtWidgets.QFormLayout(file_group)
+        self.file_group = QtWidgets.QGroupBox(
+            "or load cell segmentation from the files"
+        )
+        file_layout = QtWidgets.QFormLayout(self.file_group)
 
         self.image_path_label = QtWidgets.QLabel("No image selected")
         self.image_path_label.setStyleSheet("QLabel { color: gray; }")
@@ -168,11 +175,11 @@ class CellposeImportDialog(QtWidgets.QDialog):
         seg_layout.addWidget(self.segmentation_path_label, stretch=1)
         seg_layout.addWidget(browse_seg_button)
         file_layout.addRow("Segmentation CSV/NPY:", seg_layout)
-        file_group.setMinimumHeight(
+        self.file_group.setMinimumHeight(
             file_layout.sizeHint().height() + 50
         )  # Ensure it does nto get clipped vertically
 
-        top_horizontal_layout.addWidget(file_group, stretch=2)
+        top_horizontal_layout.addWidget(self.file_group, stretch=2)
 
         # Data information group
         self.info_group = QtWidgets.QGroupBox("Data Information")
@@ -217,9 +224,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
             strategy_layout.addWidget(button)
         strategy_layout.addStretch(1)
         strategy_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
-        if self.mapping_buttons.buttons():
-            first_button = self.mapping_buttons.buttons()[0]
-            first_button.setChecked(True)
+        for button in self.mapping_buttons.buttons():
+            if button.text() == CUSTOM_AOI_STRATEGY:
+                button.setChecked(True)
+                break
         mapping_layout.addRow("Mapping strategy:", strategy_layout)
 
         # Linear offset input
@@ -254,6 +262,19 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.aoi_group = QtWidgets.QGroupBox("Areas of Interest")
         aoi_layout = QtWidgets.QVBoxLayout(self.aoi_group)
 
+        mode_layout = QtWidgets.QHBoxLayout()
+        mode_layout.addWidget(QtWidgets.QLabel("Position and size:"))
+        self.aoi_coordinate_mode_combo = QtWidgets.QComboBox()
+        self.aoi_coordinate_mode_combo.addItems((AOI_PIXELS_MODE, AOI_PERCENT_MODE))
+        self.aoi_coordinate_mode_combo.setToolTip(
+            "Percentage mode uses x/y as the shape centre; sizes are relative "
+            "to the shorter FOV dimension."
+        )
+        mode_layout.addWidget(self.aoi_coordinate_mode_combo)
+        mode_layout.addStretch(1)
+        aoi_layout.addLayout(mode_layout)
+        self._aoi_display_mode = "pixels"
+
         self.square_enabled_cb = QtWidgets.QCheckBox("Square")
         self.square_enabled_cb.setChecked(True)
         self.square_role_buttons = QtWidgets.QButtonGroup(self)
@@ -272,9 +293,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.square_x_spin = self._make_aoi_spinbox()
         self.square_y_spin = self._make_aoi_spinbox()
         self.square_side_spin = self._make_aoi_spinbox()
-        square_values.addWidget(QtWidgets.QLabel("x:"))
+        square_values.addWidget(QtWidgets.QLabel("Center x:"))
         square_values.addWidget(self.square_x_spin)
-        square_values.addWidget(QtWidgets.QLabel("y:"))
+        square_values.addWidget(QtWidgets.QLabel("Center y:"))
         square_values.addWidget(self.square_y_spin)
         square_values.addWidget(QtWidgets.QLabel("side:"))
         square_values.addWidget(self.square_side_spin)
@@ -298,13 +319,14 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.circle_cx_spin = self._make_aoi_spinbox()
         self.circle_cy_spin = self._make_aoi_spinbox()
         self.circle_diameter_spin = self._make_aoi_spinbox()
-        circle_values.addWidget(QtWidgets.QLabel("cx:"))
+        circle_values.addWidget(QtWidgets.QLabel("Center x:"))
         circle_values.addWidget(self.circle_cx_spin)
-        circle_values.addWidget(QtWidgets.QLabel("cy:"))
+        circle_values.addWidget(QtWidgets.QLabel("Center y:"))
         circle_values.addWidget(self.circle_cy_spin)
         circle_values.addWidget(QtWidgets.QLabel("diameter:"))
         circle_values.addWidget(self.circle_diameter_spin)
         aoi_layout.addLayout(circle_values)
+        self._configure_aoi_spinboxes("pixels")
         self.aoi_group.setVisible(False)
         mapping_layout.addRow(self.aoi_group)
 
@@ -312,7 +334,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         for abstract_button in self.mapping_buttons.buttons():
             if hasattr(abstract_button, "toggled"):
                 abstract_button.toggled.connect(self._on_mapping_changed)
-        self._last_mapping_strategy = "Linear"
+        self._last_mapping_strategy = CUSTOM_AOI_STRATEGY
 
         # Place overlay first so the visual is top-most
         self.left_container = QtWidgets.QWidget()
@@ -387,6 +409,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
         self.import_button = QtWidgets.QPushButton("Import")
         self.import_button.setEnabled(False)
+        self.import_button.setDefault(True)
         self.import_button.clicked.connect(self._import_data)
         button_layout.addWidget(self.import_button)
 
@@ -398,9 +421,19 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.main_content_layout.addWidget(self.right_container, stretch=2)
         layout.addWidget(self.main_content_container)
         self.main_content_container.setVisible(False)
+
+        self.external_gui_group = QtWidgets.QGroupBox("External GUIs")
+        external_gui_layout = QtWidgets.QHBoxLayout(self.external_gui_group)
+        external_gui_layout.addStretch(1)
+        external_gui_layout.addWidget(self.open_fiji_button)
+        external_gui_layout.addWidget(self.change_fiji_button)
+        external_gui_layout.addWidget(self.run_cellpose_button)
+        layout.addWidget(self.external_gui_group)
+
         self._connect_aoi_controls()
         self._set_square_controls_enabled(self.square_enabled_cb.isChecked())
         self._set_circle_controls_enabled(self.circle_enabled_cb.isChecked())
+        self._on_mapping_changed()
         self._set_ui_loaded_state(False)
         self._on_display_toggle_changed()
 
@@ -421,6 +454,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
                     self.main_content_container.width(),
                     self.main_content_container.height(),
                 )
+                if self.import_button.isEnabled():
+                    self.import_button.setFocus(QtCore.Qt.FocusReason.OtherFocusReason)
             else:
                 self._resize_for_file_selection()
         if not loaded and hasattr(self, "import_button"):
@@ -450,6 +485,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.circle_diameter_spin,
         ):
             spin.valueChanged.connect(self._regenerate_aoi_mapping)
+        self.aoi_coordinate_mode_combo.currentIndexChanged.connect(
+            self._on_aoi_coordinate_mode_changed
+        )
 
         self.square_enabled_cb.toggled.connect(self._set_square_controls_enabled)
         self.square_enabled_cb.toggled.connect(self._regenerate_aoi_mapping)
@@ -460,6 +498,19 @@ class CellposeImportDialog(QtWidgets.QDialog):
             button.toggled.connect(self._regenerate_aoi_mapping)
         for button in self.circle_role_buttons.buttons():
             button.toggled.connect(self._regenerate_aoi_mapping)
+
+    def _configure_aoi_spinboxes(self, mode: str) -> None:
+        percent = mode == "percent"
+        for spin in (
+            self.square_x_spin,
+            self.square_y_spin,
+            self.square_side_spin,
+            self.circle_cx_spin,
+            self.circle_cy_spin,
+            self.circle_diameter_spin,
+        ):
+            spin.setRange(0.0, 100.0 if percent else 1_000_000.0)
+            spin.setSuffix(" %" if percent else "")
 
     def _set_square_controls_enabled(self, enabled: bool) -> None:
         for button in self.square_role_buttons.buttons():
@@ -650,7 +701,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.aoi_summary_browser.clear()
         self.aoi_summary_browser.setVisible(False)
         for button in self.mapping_buttons.buttons():
-            if button.text() == "Linear":
+            if button.text() == CUSTOM_AOI_STRATEGY:
                 button.setChecked(True)
                 break
         self.overlay_widget.set_aoi_overlay(None, show=False)
@@ -772,40 +823,104 @@ class CellposeImportDialog(QtWidgets.QDialog):
             square=self._current_square_aoi(),
             circle=self._current_circle_aoi(),
             show_shapes=self.show_shapes_checkbox.isChecked(),
+            coordinate_mode=self._aoi_display_mode,
         )
 
+    def _aoi_dimensions(self) -> tuple[float, float, float]:
+        if self.importer.image_data is None:
+            return 1.0, 1.0, 1.0
+        height, width = self.importer.image_data.shape[:2]
+        return float(width), float(height), float(min(width, height))
+
     def _current_square_aoi(self):
+        x = float(self.square_x_spin.value())
+        y = float(self.square_y_spin.value())
+        side = float(self.square_side_spin.value())
+        if self._aoi_display_mode == "percent":
+            width, height, short = self._aoi_dimensions()
+            side = side * short / 100.0
+            x = x * width / 100.0
+            y = y * height / 100.0
+        x -= side / 2.0
+        y -= side / 2.0
         return SquareAOI(
             enabled=self.square_enabled_cb.isChecked(),
             role=self._role_from_button_group(self.square_role_buttons),
-            x=float(self.square_x_spin.value()),
-            y=float(self.square_y_spin.value()),
-            side=float(self.square_side_spin.value()),
+            x=x,
+            y=y,
+            side=side,
         )
 
     def _current_circle_aoi(self):
+        cx = float(self.circle_cx_spin.value())
+        cy = float(self.circle_cy_spin.value())
+        diameter = float(self.circle_diameter_spin.value())
+        if self._aoi_display_mode == "percent":
+            width, height, short = self._aoi_dimensions()
+            cx = cx * width / 100.0
+            cy = cy * height / 100.0
+            diameter = diameter * short / 100.0
         return CircleAOI(
             enabled=self.circle_enabled_cb.isChecked(),
             role=self._role_from_button_group(self.circle_role_buttons),
-            cx=float(self.circle_cx_spin.value()),
-            cy=float(self.circle_cy_spin.value()),
-            diameter=float(self.circle_diameter_spin.value()),
+            cx=cx,
+            cy=cy,
+            diameter=diameter,
         )
+
+    def _on_aoi_coordinate_mode_changed(self, index: int) -> None:
+        new_mode = "percent" if index == 1 else "pixels"
+        if new_mode == self._aoi_display_mode:
+            return
+        config = self._current_aoi_config()
+        self._aoi_display_mode = new_mode
+        self._configure_aoi_spinboxes(new_mode)
+        if config is not None:
+            config.coordinate_mode = new_mode
+            self._set_aoi_controls(config)
+        self._regenerate_aoi_mapping()
 
     def _set_aoi_controls(self, config: AreasOfInterestConfig) -> None:
         self._suppress_aoi_signals = True
         try:
+            mode = getattr(config, "coordinate_mode", "pixels")
+            self._aoi_display_mode = mode
+            self._configure_aoi_spinboxes(mode)
+            self.aoi_coordinate_mode_combo.setCurrentIndex(
+                1 if mode == "percent" else 0
+            )
+            width, height, short = self._aoi_dimensions()
             self.square_enabled_cb.setChecked(config.square.enabled)
             self._set_role_button_group(self.square_role_buttons, config.square.role)
-            self.square_x_spin.setValue(float(config.square.x))
-            self.square_y_spin.setValue(float(config.square.y))
-            self.square_side_spin.setValue(float(config.square.side))
+            if mode == "percent":
+                self.square_x_spin.setValue(
+                    (config.square.x + config.square.side / 2.0) * 100.0 / width
+                )
+                self.square_y_spin.setValue(
+                    (config.square.y + config.square.side / 2.0) * 100.0 / height
+                )
+                self.square_side_spin.setValue(config.square.side * 100.0 / short)
+            else:
+                self.square_x_spin.setValue(
+                    float(config.square.x + config.square.side / 2.0)
+                )
+                self.square_y_spin.setValue(
+                    float(config.square.y + config.square.side / 2.0)
+                )
+                self.square_side_spin.setValue(float(config.square.side))
 
             self.circle_enabled_cb.setChecked(config.circle.enabled)
             self._set_role_button_group(self.circle_role_buttons, config.circle.role)
-            self.circle_cx_spin.setValue(float(config.circle.cx))
-            self.circle_cy_spin.setValue(float(config.circle.cy))
-            self.circle_diameter_spin.setValue(float(config.circle.diameter))
+            if mode == "percent":
+                self.circle_cx_spin.setValue(config.circle.cx * 100.0 / width)
+                self.circle_cy_spin.setValue(config.circle.cy * 100.0 / height)
+                self.circle_diameter_spin.setValue(
+                    config.circle.diameter * 100.0 / short
+                )
+            else:
+                self.circle_cx_spin.setValue(float(config.circle.cx))
+                self.circle_cy_spin.setValue(float(config.circle.cy))
+                self.circle_diameter_spin.setValue(float(config.circle.diameter))
 
             self.show_shapes_checkbox.setChecked(bool(config.show_shapes))
             self._set_square_controls_enabled(config.square.enabled)
@@ -1049,6 +1164,73 @@ class CellposeImportDialog(QtWidgets.QDialog):
         if filename:
             self._load_segmentation_file(filename)
 
+    def _annotate_mean_tiff(self) -> None:
+        """Select and immediately annotate a mean-fluorescence TIFF with cpsam."""
+        filename, _ = getopenfilename(
+            self,
+            "Select mean fluorescence TIFF",
+            "",
+            "TIFF files (*.tif *.tiff);;All files (*)",
+        )
+        if not filename:
+            return
+        if importlib.util.find_spec("cellpose") is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Install Cellpose",
+                "Cellpose is not installed in the current Python environment.",
+            )
+            return
+
+        try:
+            from neuroseq.cellpose_annotation import tiff_frame_count
+
+            frame_count = tiff_frame_count(filename)
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Invalid TIFF file",
+                f"Could not inspect {filename}:\n{exc}",
+            )
+            return
+        if frame_count > 1:
+            sampled_count = len(range(0, min(frame_count, 300), 2))
+            QtWidgets.QMessageBox.information(
+                self,
+                "Multi-frame TIFF selected",
+                f"This TIFF contains {frame_count} frames. NeuroSeq will use "
+                f"every second frame from the first {min(frame_count, 300)} "
+                f"frames ({sampled_count} frames total), calculate their "
+                "average, and process that average with Cellpose.",
+            )
+
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        self.annotate_tiff_button.setEnabled(False)
+        try:
+            from neuroseq.cellpose_annotation import annotate_mean_fluorescence_tiff
+
+            segmentation_path, mask_path = annotate_mean_fluorescence_tiff(
+                filename, model_name="cpsam"
+            )
+            self._load_image_file(filename)
+            self._load_segmentation_file(str(segmentation_path))
+            QtWidgets.QMessageBox.information(
+                self,
+                "Cell annotation complete",
+                "Cellpose annotation was saved as:\n"
+                f"{segmentation_path.name}\n{mask_path.name}",
+            )
+        except Exception as exc:
+            self.logger.exception("Cellpose annotation failed")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Cellpose annotation failed",
+                f"Could not annotate {filename}:\n{exc}",
+            )
+        finally:
+            self.annotate_tiff_button.setEnabled(True)
+            QtWidgets.QApplication.restoreOverrideCursor()
+
     def _change_fiji_path(self) -> None:
         """Let the user pick a different Fiji executable, even if one is set."""
         from neuroseq.fiji import resolve_fiji_path
@@ -1197,7 +1379,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 ),
                 base_image=self.importer.image_data,
             )
-            self._update_aoi_overlay_visibility()
+            if mapping_strategy == CUSTOM_AOI_STRATEGY:
+                self._regenerate_aoi_mapping()
+            else:
+                self._update_aoi_overlay_visibility()
             self._hide_info()
         except Exception as exc:
             self.logger.exception("Error preparing cellpose preview")
@@ -1286,6 +1471,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 mapping_strategy=mapping_strategy,
                 linear_offset=self._get_linear_offset(),
                 aoi_config=stored_aoi_config,
+                segmentation_path=self.segmentation_path,
             )
 
             info = self.importer.get_info()
@@ -1329,6 +1515,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.image_path = self.existing_data.image_path
             self.image_path_label.setText(self.image_path.name)
             self.image_path_label.setStyleSheet("QLabel { color: blue; }")
+            self.segmentation_path = getattr(
+                self.existing_data, "segmentation_path", None
+            )
+            if self.segmentation_path is not None:
+                self.segmentation_path_label.setText(self.segmentation_path.name)
+                self.segmentation_path_label.setStyleSheet("QLabel { color: blue; }")
 
             # Load the existing image and segmentation data
             self.importer.restore_from_result(self.existing_data)

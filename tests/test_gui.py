@@ -380,7 +380,7 @@ def test_gui_cellpose_import_action_moved_to_file_menu(qtbot: QtBot) -> None:
     qtbot.waitUntil(lambda: gui.isVisible())
 
     file_action_texts = [action.text() for action in gui.menu_file.actions()]
-    assert "Import cell spatial &footprints" in file_action_texts
+    assert "Cell &segmentation" in file_action_texts
 
     import_data_action = next(
         (
@@ -395,7 +395,7 @@ def test_gui_cellpose_import_action_moved_to_file_menu(qtbot: QtBot) -> None:
     assert import_data_menu is not None
     import_data_action_texts = [action.text() for action in import_data_menu.actions()]
     assert "Import cell &segmentation" not in import_data_action_texts
-    assert "Import cell spatial &footprints" not in import_data_action_texts
+    assert "Cell &segmentation" not in import_data_action_texts
 
     gui.close()
 
