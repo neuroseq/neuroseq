@@ -171,7 +171,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         self.laser_combo.addItem("940 nm digital", 940)
         self.laser_combo.addItem("1030 nm digital", 1030)
         self.laser_combo.addItem("1100 nm digital", 1100)
-        self.laser_combo.setCurrentIndex(self.laser_combo.findData(1100))
+        self.laser_combo.setCurrentIndex(self.laser_combo.findData(940))
         self.laser_combo.setToolTip(
             "Select which fixed laser timeline receives stimulation TTLPulses."
         )
@@ -185,7 +185,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         self.target_power_spin.setDecimals(2)
         self.target_power_spin.setSuffix(" mW")
         self.target_power_spin.setSingleStep(0.5)
-        self.target_power_spin.setValue(0.0)
+        self.target_power_spin.setValue(92.0)
         self.target_power_spin.setToolTip(
             "Desired delivered power. Set to 0 to disable power control "
             "(Intensity_0 fields written as 0 — current default behavior)."

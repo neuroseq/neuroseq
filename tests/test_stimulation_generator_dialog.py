@@ -213,7 +213,8 @@ def test_stimulation_generator_dialog_binary_mode_checkbox_defaults_to_enabled(
     qtbot.addWidget(dialog)
     assert dialog.binary_mode_checkbox.isChecked()
     assert dialog.spiralling_checkbox.isChecked()
-    assert dialog._selected_laser_wavelength_nm() == 1100
+    assert dialog._selected_laser_wavelength_nm() == 940
+    assert dialog.target_power_spin.value() == 92.0
 
 
 def test_stimulation_generator_dialog_sanity_check_uses_selected_laser_wavelength(
@@ -302,6 +303,7 @@ def test_stimulation_generator_dialog_load_lut_assigns_to_selected_wavelength(
     lut_path = tmp_path / "loaded_1100.lut"
     lut_path.write_text(_REFERENCE_LUT_TEXT, encoding="utf-8")
     dialog._apply_lut_from_path(str(lut_path), 1100)
+    dialog.laser_combo.setCurrentIndex(dialog.laser_combo.findData(1100))
 
     assert project.power_luts[1100].description == "1100nm 1 spot"
     # The label-status path is exercised by _format_lut_status; we avoid
