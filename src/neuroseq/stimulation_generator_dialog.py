@@ -165,13 +165,22 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         )
         config_layout.addWidget(self.spiralling_checkbox)
 
+        self.ten_spots_per_roi_checkbox = QtWidgets.QCheckBox(
+            "Use 10 stimulation spots per ROI"
+        )
+        self.ten_spots_per_roi_checkbox.setChecked(False)
+        self.ten_spots_per_roi_checkbox.setToolTip(
+            "Place 10 evenly distributed stimulation spots inside each Cellpose mask."
+        )
+        config_layout.addWidget(self.ten_spots_per_roi_checkbox)
+
         laser_layout = QtWidgets.QHBoxLayout()
         laser_label = QtWidgets.QLabel("Laser timeline:")
         self.laser_combo = QtWidgets.QComboBox()
         self.laser_combo.addItem("940 nm digital", 940)
         self.laser_combo.addItem("1030 nm digital", 1030)
         self.laser_combo.addItem("1100 nm digital", 1100)
-        self.laser_combo.setCurrentIndex(self.laser_combo.findData(1100))
+        self.laser_combo.setCurrentIndex(self.laser_combo.findData(940))
         self.laser_combo.setToolTip(
             "Select which fixed laser timeline receives stimulation TTLPulses."
         )
@@ -185,7 +194,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         self.target_power_spin.setDecimals(2)
         self.target_power_spin.setSuffix(" mW")
         self.target_power_spin.setSingleStep(0.5)
-        self.target_power_spin.setValue(0.0)
+        self.target_power_spin.setValue(92.0)
         self.target_power_spin.setToolTip(
             "Desired delivered power. Set to 0 to disable power control "
             "(Intensity_0 fields written as 0 — current default behavior)."
@@ -589,6 +598,9 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             spiralling=self.spiralling_checkbox.isChecked(),
             target_power_mw=self.target_power_spin.value(),
             power_lut=self._selected_power_lut(),
+            stimulation_spots_per_roi=(
+                10 if self.ten_spots_per_roi_checkbox.isChecked() else 1
+            ),
         )
 
         sanitized_values = sanity_report.sanitized_values
@@ -977,6 +989,9 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             spiralling=self.spiralling_checkbox.isChecked(),
             target_power_mw=self.target_power_spin.value(),
             power_lut=self._selected_power_lut(),
+            stimulation_spots_per_roi=(
+                10 if self.ten_spots_per_roi_checkbox.isChecked() else 1
+            ),
         )
 
     def _selected_laser_wavelength_nm(self) -> int:
