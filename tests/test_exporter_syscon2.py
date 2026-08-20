@@ -185,6 +185,61 @@ def test_export_seq_uses_fixed_laser_and_ttl_out_timeline_layout() -> None:
     assert ttl_out_1_pulses[0].start_time_us == pytest.approx(27082.25)
 
 
+def test_export_seq_creates_ten_spots_inside_each_cellpose_roi() -> None:
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+    segmentation = np.full((8, 8), -1, dtype=np.int32)
+    segmentation[1:7, 1:7] = 0
+    cellpose_data = CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=segmentation,
+        overlay_image=np.zeros((8, 8, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.array([0], dtype=np.int32),
+        stimulus_to_cellpose_mapping={0: 0},
+    )
+
+    seq_text, report = generate_syscon2_sequence_text(
+        stim_array,
+        cellpose_data,
+        template_text=_template_header(),
+        spiralling=False,
+        stimulation_spots_per_roi=10,
+    )
+
+    shapes = [
+        obj
+        for obj in parse_syscon2_seq_text(seq_text).objects
+        if obj.object_type == "Shape"
+    ]
+    assert len(shapes) == 10
+    assert report.entity_lanes == 10
+    coordinates = []
+    for shape in shapes:
+        center_x = next(
+            float(value)
+            for key, value in shape.properties.items()
+            if key.endswith("_CenterX")
+        )
+        center_y = next(
+            float(value)
+            for key, value in shape.properties.items()
+            if key.endswith("_CenterY")
+        )
+        coordinates.append((center_x, center_y))
+        row = int(segmentation.shape[0] - 1 - center_y)
+        assert segmentation[row, int(center_x)] == 0
+    assert len(set(coordinates)) == 10
+
+
 def test_export_seq_coalesces_nearby_segments_into_one_sanitized_window() -> None:
     values = np.zeros((80, 1), dtype=np.float32)
     values[40:42, 0] = 1.0

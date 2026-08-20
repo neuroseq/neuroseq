@@ -349,6 +349,7 @@ def _build_pulse_window_state(
     sanitized: _SanitizedStimModel,
     neuron_to_cellpose: dict[int, int],
     centroids: dict[int, tuple[float, float]],
+    stimulation_spots: dict[int, list[tuple[float, float]]] | None = None,
 ) -> _PulseWindowState:
     """Map sanitized segments to Cellpose cells and build pulse/window state.
 
@@ -447,18 +448,25 @@ def _build_pulse_window_state(
             )
             center_x = matching_segments[0].center_x
             center_y = matching_segments[0].center_y
-            entity_windows.append(
-                _EntityWindow(
-                    neuron_index=neuron_idx,
-                    stimulation_start_tick=stimulation_start_tick,
-                    stimulation_end_tick=stimulation_end_tick,
-                    start_tick=start_tick,
-                    end_tick=end_tick,
-                    intensity=intensity,
-                    center_x=center_x,
-                    center_y=center_y,
-                )
+            cellpose_id = neuron_to_cellpose[neuron_idx]
+            spot_coordinates = (
+                stimulation_spots.get(cellpose_id, [(center_x, center_y)])
+                if stimulation_spots is not None
+                else [(center_x, center_y)]
             )
+            for spot_x, spot_y in spot_coordinates:
+                entity_windows.append(
+                    _EntityWindow(
+                        neuron_index=neuron_idx,
+                        stimulation_start_tick=stimulation_start_tick,
+                        stimulation_end_tick=stimulation_end_tick,
+                        start_tick=start_tick,
+                        end_tick=end_tick,
+                        intensity=intensity,
+                        center_x=spot_x,
+                        center_y=spot_y,
+                    )
+                )
 
     if len(entity_windows) == 0:
         raise ValueError("No shape windows could be generated for mapped stimulation.")
@@ -494,6 +502,7 @@ def generate_syscon2_sequence_text(
     spiralling: bool = True,
     target_power_mw: float = 0.0,
     power_lut: PowerLut | None = None,
+    stimulation_spots_per_roi: int = 1,
 ) -> tuple[str, SysconExportReport]:
     """Generate SysCon2 `.seq` content for Holo4D multiphoton stimulation.
 
@@ -516,6 +525,8 @@ def generate_syscon2_sequence_text(
         raise ValueError("tick_resolution_us must be positive")
     if force_binary_intensity and (binary_intensity < 0 or binary_intensity > 1):
         raise ValueError("binary_intensity must be within [0, 1]")
+    if stimulation_spots_per_roi < 1:
+        raise ValueError("stimulation_spots_per_roi must be at least 1")
     if cellpose_data is None:
         raise ValueError("Cellpose data is required to export SysCon2 .seq")
     if cellpose_data.segmentation_array is None:
@@ -563,6 +574,9 @@ def generate_syscon2_sequence_text(
 
     segmentation = cellpose_data.segmentation_array
     centroids = _compute_cell_centroids(segmentation)
+    stimulation_spots = _compute_cell_stimulation_spots(
+        segmentation, stimulation_spots_per_roi
+    )
     neuron_to_cellpose = _resolve_neuron_to_cellpose_mapping(
         cellpose_data,
         stim_array.values.shape[1],
@@ -573,7 +587,9 @@ def generate_syscon2_sequence_text(
         {segment.neuron_index for segment in sanitized.raw_segments}
     )
 
-    state = _build_pulse_window_state(sanitized, neuron_to_cellpose, centroids)
+    state = _build_pulse_window_state(
+        sanitized, neuron_to_cellpose, centroids, stimulation_spots
+    )
 
     pulse_intervals = state.pulse_intervals
     if spiralling:
@@ -1896,6 +1912,7 @@ def check_syscon2_input_sanity(
     spiralling: bool = True,
     target_power_mw: float = 0.0,
     power_lut: PowerLut | None = None,
+    stimulation_spots_per_roi: int = 1,
 ) -> SysconInputSanityReport:
     """Validate ``stim_array`` for SysCon2 export and perform a dry-run export.
 
@@ -2084,6 +2101,7 @@ def check_syscon2_input_sanity(
             spiralling=spiralling,
             target_power_mw=target_power_mw,
             power_lut=power_lut,
+            stimulation_spots_per_roi=stimulation_spots_per_roi,
         )
     except (TypeError, ValueError) as exc:
         errors.append(str(exc))
@@ -2857,6 +2875,52 @@ def _compute_cell_centroids(segmentation: np.ndarray) -> dict[int, tuple[float, 
         flipped_y = float(height - 1) - float(np.mean(y_coords))
         centroids[cell_int] = (float(np.mean(x_coords)), flipped_y)
     return centroids
+
+
+def _compute_cell_stimulation_spots(
+    segmentation: np.ndarray, spots_per_roi: int
+) -> dict[int, list[tuple[float, float]]]:
+    """Return deterministic, evenly spread stimulation points inside each ROI."""
+    if segmentation.ndim != 2:
+        raise ValueError("Cellpose segmentation must be a 2D array")
+    if spots_per_roi < 1:
+        raise ValueError("spots_per_roi must be at least 1")
+    if spots_per_roi == 1:
+        return {
+            cell_id: [centroid]
+            for cell_id, centroid in _compute_cell_centroids(segmentation).items()
+        }
+
+    height = int(segmentation.shape[0])
+    result: dict[int, list[tuple[float, float]]] = {}
+    for cell_id in np.unique(segmentation):
+        cell_int = int(cell_id)
+        if cell_int < 0:
+            continue
+        rows, cols = np.where(segmentation == cell_int)
+        if cols.size == 0:
+            continue
+
+        coordinates = np.column_stack((cols.astype(float), rows.astype(float)))
+        centroid = coordinates.mean(axis=0)
+        first_index = int(np.argmin(np.sum((coordinates - centroid) ** 2, axis=1)))
+        selected = [first_index]
+        min_squared_distance = np.sum(
+            (coordinates - coordinates[first_index]) ** 2, axis=1
+        )
+        while len(selected) < min(spots_per_roi, coordinates.shape[0]):
+            next_index = int(np.argmax(min_squared_distance))
+            selected.append(next_index)
+            min_squared_distance = np.minimum(
+                min_squared_distance,
+                np.sum((coordinates - coordinates[next_index]) ** 2, axis=1),
+            )
+
+        result[cell_int] = [
+            (float(coordinates[index, 0]), float(height - 1) - coordinates[index, 1])
+            for index in selected
+        ]
+    return result
 
 
 def _resolve_neuron_to_cellpose_mapping(

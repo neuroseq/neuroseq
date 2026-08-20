@@ -213,6 +213,7 @@ def test_stimulation_generator_dialog_binary_mode_checkbox_defaults_to_enabled(
     qtbot.addWidget(dialog)
     assert dialog.binary_mode_checkbox.isChecked()
     assert dialog.spiralling_checkbox.isChecked()
+    assert not dialog.ten_spots_per_roi_checkbox.isChecked()
     assert dialog._selected_laser_wavelength_nm() == 940
     assert dialog.target_power_spin.value() == 92.0
 
@@ -331,6 +332,7 @@ def test_stimulation_generator_dialog_passes_target_power_and_lut_to_exporter(
     qtbot.addWidget(dialog)
     dialog.laser_combo.setCurrentIndex(dialog.laser_combo.findData(1100))
     dialog.target_power_spin.setValue(10.0)
+    dialog.ten_spots_per_roi_checkbox.setChecked(True)
 
     captured: dict[str, object] = {}
 
@@ -338,6 +340,7 @@ def test_stimulation_generator_dialog_passes_target_power_and_lut_to_exporter(
         del args
         captured["target_power_mw"] = kwargs["target_power_mw"]
         captured["power_lut"] = kwargs["power_lut"]
+        captured["stimulation_spots_per_roi"] = kwargs["stimulation_spots_per_roi"]
         return "nohash\n", _build_export_report()
 
     monkeypatch.setattr(
@@ -354,6 +357,7 @@ def test_stimulation_generator_dialog_passes_target_power_and_lut_to_exporter(
 
     assert captured["target_power_mw"] == 10.0
     assert captured["power_lut"] == custom_lut
+    assert captured["stimulation_spots_per_roi"] == 10
 
 
 def test_stimulation_generator_dialog_sanity_check_warns_when_report_contains_warnings(

@@ -165,6 +165,15 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         )
         config_layout.addWidget(self.spiralling_checkbox)
 
+        self.ten_spots_per_roi_checkbox = QtWidgets.QCheckBox(
+            "Use 10 stimulation spots per ROI"
+        )
+        self.ten_spots_per_roi_checkbox.setChecked(False)
+        self.ten_spots_per_roi_checkbox.setToolTip(
+            "Place 10 evenly distributed stimulation spots inside each Cellpose mask."
+        )
+        config_layout.addWidget(self.ten_spots_per_roi_checkbox)
+
         laser_layout = QtWidgets.QHBoxLayout()
         laser_label = QtWidgets.QLabel("Laser timeline:")
         self.laser_combo = QtWidgets.QComboBox()
@@ -589,6 +598,9 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             spiralling=self.spiralling_checkbox.isChecked(),
             target_power_mw=self.target_power_spin.value(),
             power_lut=self._selected_power_lut(),
+            stimulation_spots_per_roi=(
+                10 if self.ten_spots_per_roi_checkbox.isChecked() else 1
+            ),
         )
 
         sanitized_values = sanity_report.sanitized_values
@@ -977,6 +989,9 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             spiralling=self.spiralling_checkbox.isChecked(),
             target_power_mw=self.target_power_spin.value(),
             power_lut=self._selected_power_lut(),
+            stimulation_spots_per_roi=(
+                10 if self.ten_spots_per_roi_checkbox.isChecked() else 1
+            ),
         )
 
     def _selected_laser_wavelength_nm(self) -> int:
