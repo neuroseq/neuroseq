@@ -72,7 +72,6 @@ def test_external_gui_buttons_are_grouped_at_dialog_bottom(qtbot: QtBot):
     ]
     assert grouped_widgets == [
         dialog.open_fiji_button,
-        dialog.change_fiji_button,
         dialog.run_cellpose_button,
     ]
     assert (
