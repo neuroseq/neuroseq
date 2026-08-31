@@ -284,6 +284,54 @@ def test_gui_click_exit(qtbot: QtBot) -> None:
     gui.close()
 
 
+def test_gui_open_fiji_and_cellpose_buttons(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    import neuroseq.external_tools as external_tools
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    assert gui.btn_open_fiji.text() == "Open Fiji"
+    assert gui.btn_open_cellpose.text() == "Open Cellpose"
+
+    fiji_calls: list[object] = []
+    cellpose_calls: list[object] = []
+    monkeypatch.setattr(
+        external_tools, "launch_fiji", lambda parent: fiji_calls.append(parent)
+    )
+    monkeypatch.setattr(
+        external_tools, "launch_cellpose", lambda parent: cellpose_calls.append(parent)
+    )
+
+    gui.btn_open_fiji.click()
+    gui.btn_open_cellpose.click()
+    assert fiji_calls == [gui]
+    assert cellpose_calls == [gui]
+    gui.close()
+
+
+def test_gui_choose_fiji_path_forces_prompt(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    import neuroseq.fiji as fiji_module
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        fiji_module,
+        "resolve_fiji_path",
+        lambda parent, *, force_prompt=False: calls.append(
+            {"parent": parent, "force_prompt": force_prompt}
+        ),
+    )
+    gui.choose_fiji_path()
+    assert calls == [{"parent": gui, "force_prompt": True}]
+    gui.close()
+
+
 def test_gui_theme_menu_toggles_theme_and_persists(
     qtbot: QtBot, tmp_config_dir
 ) -> None:

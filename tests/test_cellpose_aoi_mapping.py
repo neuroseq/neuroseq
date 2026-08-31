@@ -234,7 +234,6 @@ def test_import_button_is_default_after_files_load(
 
     assert dialog.import_button.isDefault()
     assert not dialog.open_fiji_button.autoDefault()
-    assert not dialog.change_fiji_button.autoDefault()
     assert not dialog.run_cellpose_button.autoDefault()
     dialog.close()
 

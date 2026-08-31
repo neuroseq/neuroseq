@@ -118,16 +118,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
         selection_layout.setContentsMargins(0, 0, 0, 0)
 
         # External GUI controls are added to the bottom of the dialog below.
-        self.open_fiji_button = QtWidgets.QPushButton("Open in Fiji")
+        self.open_fiji_button = QtWidgets.QPushButton("Open Fiji")
         self.open_fiji_button.setAutoDefault(False)
         self.open_fiji_button.clicked.connect(self._open_in_fiji)
-        self.change_fiji_button = QtWidgets.QPushButton("Change Fiji path…")
-        self.change_fiji_button.setAutoDefault(False)
-        self.change_fiji_button.setToolTip(
-            "Choose a different Fiji/ImageJ executable (e.g. if the saved path "
-            "is wrong)."
-        )
-        self.change_fiji_button.clicked.connect(self._change_fiji_path)
 
         self.segmentation_run_group = QtWidgets.QGroupBox(
             "Select file (single or multiframe TIFF)"
@@ -145,7 +138,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         cellpose_button_layout.addWidget(self.annotate_tiff_button)
         selection_layout.addWidget(self.segmentation_run_group)
 
-        self.run_cellpose_button = QtWidgets.QPushButton("Run Cellpose")
+        self.run_cellpose_button = QtWidgets.QPushButton("Open Cellpose")
         self.run_cellpose_button.setAutoDefault(False)
         self.run_cellpose_button.clicked.connect(self._run_cellpose)
 
@@ -426,7 +419,6 @@ class CellposeImportDialog(QtWidgets.QDialog):
         external_gui_layout = QtWidgets.QHBoxLayout(self.external_gui_group)
         external_gui_layout.addStretch(1)
         external_gui_layout.addWidget(self.open_fiji_button)
-        external_gui_layout.addWidget(self.change_fiji_button)
         external_gui_layout.addWidget(self.run_cellpose_button)
         layout.addWidget(self.external_gui_group)
 
@@ -1230,12 +1222,6 @@ class CellposeImportDialog(QtWidgets.QDialog):
         finally:
             self.annotate_tiff_button.setEnabled(True)
             QtWidgets.QApplication.restoreOverrideCursor()
-
-    def _change_fiji_path(self) -> None:
-        """Let the user pick a different Fiji executable, even if one is set."""
-        from neuroseq.fiji import resolve_fiji_path
-
-        resolve_fiji_path(self, force_prompt=True)
 
     def _open_in_fiji(self) -> None:
         """Launch Fiji/ImageJ, optionally opening the currently selected image."""

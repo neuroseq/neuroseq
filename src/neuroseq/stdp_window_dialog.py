@@ -300,10 +300,21 @@ class StdpWindowDialog(QtWidgets.QDialog):
                 "Clear stim array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
             ),
         )
+        self.btn_reset = cast(
+            QtWidgets.QPushButton,
+            buttons.addButton(
+                "Reset stim array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
+            ),
+        )
+        self.btn_reset.setToolTip(
+            "Trim the stim array back to the simulation head so the routine does "
+            "not run a long empty tail."
+        )
         self.btn_stop.setEnabled(False)
         self.btn_start.clicked.connect(self.start)
         self.btn_stop.clicked.connect(self.stop)
         self.btn_clear.clicked.connect(self.editor.clear_stim_array)
+        self.btn_reset.clicked.connect(self.editor.reset_stim_array)
         buttons.rejected.connect(self.close)
         layout.addWidget(buttons)
 
@@ -486,6 +497,9 @@ class StdpWindowDialog(QtWidgets.QDialog):
         if not self._confirm_start_over_existing_input():
             self._append_log("Routine cancelled; existing stimulation input kept.")
             return
+        # Start from the simulation head so a long left-over stim array does not
+        # make the routine simulate a huge empty tail.
+        self.editor.reset_stim_array()
         if self.spn_presynaptic.value() == self.spn_postsynaptic.value():
             self._finish("Pre- and postsynaptic neuron IDs must differ.")
             return

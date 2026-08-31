@@ -63,6 +63,9 @@ class _FakeEditor:
     def clear_stim_array(self) -> None:
         self.cleared += 1
 
+    def reset_stim_array(self) -> None:
+        self.reset_count = getattr(self, "reset_count", 0) + 1
+
     def apply_pattern(
         self, neuron_slice: slice, time_slice: slice, values: np.ndarray
     ) -> None:

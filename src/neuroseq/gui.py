@@ -457,6 +457,12 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_spike.currentTextChanged.connect(self.set_spike)
         self.cmb_data.currentTextChanged.connect(self.set_data)
         self.stim_editor.limits_modified.connect(self.update_limits)
+        self.stim_editor.limits_modified.connect(self._rewindow_simulation_views)
+        # Longest stim length last used to window simulated data; lets
+        # ``_rewindow_simulation_views`` re-fetch traces only when a stim
+        # edit actually changed the timeline (e.g. trim/undo), not on every
+        # pixel drawn.
+        self._last_sim_timeline_secs: float | None = None
         self.last_cellpose_import: CellposeImportResult | None = None
         self._llm_settings_dialog: LLMSettingsDialog | None = None
         self._external_sim_thread: QtCore.QThread | None = None
@@ -1141,6 +1147,49 @@ class Gui(QtWidgets.QMainWindow):
             return
         self.controller.focus_neuron_range(0, int(n_neurons))
 
+    def _rewindow_simulation_views(self) -> None:
+        """Re-fetch the shown simulated data when the stim timeline changes.
+
+        Simulated traces/spikes/synapses are windowed to the longest stim
+        array (see ``Project.get_data``), so trimming a stim (or undoing the
+        trim) must re-pull the currently displayed data. The combo selections
+        do not change, so ``currentTextChanged`` never fires; refresh here
+        instead -- but only when the timeline length actually changed, so
+        ordinary drawing edits don't trigger a costly re-fetch.
+        """
+        if self.project is None:
+            return
+        timeline = self.project.simulation_timeline_seconds()
+        if (
+            self._last_sim_timeline_secs is not None
+            and timeline == self._last_sim_timeline_secs
+        ):
+            return
+        self._last_sim_timeline_secs = timeline
+        # Refresh in place without auto-showing hidden widgets or changing the
+        # focused neuron range -- this is a re-window of already-shown data,
+        # not a new user selection.
+        if self.cmb_trace.currentText():
+            self.project.max_ram_trace_plot_matrix = (
+                self.settings.max_ram_trace_plot_matrix
+            )
+            self.trace_widget.set_data(
+                self.project.get_data(self.cmb_trace.currentText(), TraceData)
+            )
+        if self.cmb_spike.currentText():
+            self.spike_widget.set_data(
+                self.project.get_data(self.cmb_spike.currentText(), SpikeData)
+            )
+        if self.cmb_synapse.currentText():
+            self.project.max_ram_synapse_plot_matrix = (
+                self.settings.max_ram_synapse_plot_matrix
+            )
+            self.heatmap_widget.set_data(
+                self.project.get_data(self.cmb_synapse.currentText(), SynapseData)
+            )
+        if self.cmb_data.currentText():
+            self._apply_data_selection(self.cmb_data.currentText())
+
     def _apply_trace_selection(self, cmb_name: str) -> None:
         data = self.project.get_data(cmb_name, TraceData)
         self.trace_widget.set_data(data)
@@ -1150,6 +1199,7 @@ class Gui(QtWidgets.QMainWindow):
 
     @with_wait_cursor
     def set_neuron(self, cmb_name: str) -> None:
+        self.project.max_ram_trace_plot_matrix = self.settings.max_ram_trace_plot_matrix
         self._apply_trace_selection(cmb_name)
 
     @with_wait_cursor
@@ -1745,6 +1795,27 @@ class Gui(QtWidgets.QMainWindow):
             return
         self._update_data(keep_undo_history=True)
 
+    def choose_max_ram_trace_plot_matrix(self) -> None:
+        new_max_ram, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "RAM limit",
+            "RAM limit in MB for trace plot (0 for no limit)",
+            QtWidgets.QLineEdit.EchoMode.Normal,
+            f"{self.settings.max_ram_trace_plot_matrix}",
+        )
+        if not ok:
+            return
+        try:
+            self.settings.max_ram_trace_plot_matrix = max(0, int(new_max_ram))
+        except ValueError:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Invalid input",
+                f"Could not parse RAM limit '{new_max_ram}' as a number",
+            )
+            return
+        self._update_data(keep_undo_history=True)
+
     def connect_external_simulation_function(self) -> None:
         filename, _ = getopenfilename(
             self,
@@ -1789,6 +1860,22 @@ class Gui(QtWidgets.QMainWindow):
                     dialog.imported_data,
                 )
             )
+
+    def btn_open_fiji_clicked(self) -> None:
+        from neuroseq.external_tools import launch_fiji
+
+        launch_fiji(self)
+
+    def btn_open_cellpose_clicked(self) -> None:
+        from neuroseq.external_tools import launch_cellpose
+
+        launch_cellpose(self)
+
+    def choose_fiji_path(self) -> None:
+        """Let the user pick/correct the Fiji executable path from Settings."""
+        from neuroseq.fiji import resolve_fiji_path
+
+        resolve_fiji_path(self, force_prompt=True)
 
     def btn_import_cellpose_data_clicked(self) -> None:
         dialog = CellposeImportDialog(
@@ -2659,6 +2746,8 @@ class Gui(QtWidgets.QMainWindow):
         add_action(
             "&Synapse Matrix RAM Limit", self.choose_max_ram_synapse_plot_matrix, menu
         )
+        add_action("&Trace Plot RAM Limit", self.choose_max_ram_trace_plot_matrix, menu)
+        add_action("&Change Fiji Path…", self.choose_fiji_path, menu)
         self._create_theme_menu(menu)
 
     def _create_theme_menu(self, menu: QtWidgets.QMenu) -> None:
@@ -2692,6 +2781,17 @@ class Gui(QtWidgets.QMainWindow):
     ) -> None:
         if toolbar is None:
             return
+        self.btn_open_fiji = QtWidgets.QPushButton("Open Fiji")
+        self.btn_open_fiji.setToolTip("Launch Fiji/ImageJ")
+        icons.set_widget_icon(self.btn_open_fiji, "mdi6.microscope")
+        self.btn_open_fiji.clicked.connect(self.btn_open_fiji_clicked)
+        toolbar.addWidget(self.btn_open_fiji)
+        self.btn_open_cellpose = QtWidgets.QPushButton("Open Cellpose")
+        self.btn_open_cellpose.setToolTip("Launch the Cellpose GUI")
+        icons.set_widget_icon(self.btn_open_cellpose, "mdi6.dots-hexagon")
+        self.btn_open_cellpose.clicked.connect(self.btn_open_cellpose_clicked)
+        toolbar.addWidget(self.btn_open_cellpose)
+        toolbar.addSeparator()
         self.cmb_stim = QtWidgets.QComboBox()
         toolbar.addWidget(QtWidgets.QLabel("  Stim data: "))
         toolbar.addWidget(self.cmb_stim)

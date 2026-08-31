@@ -25,6 +25,9 @@ class _BrianEditor:
         self.cleared += 1
         self.current_stim_modifier.stim_array.values[:] = 0.0
 
+    def reset_stim_array(self) -> None:
+        self.reset_count = getattr(self, "reset_count", 0) + 1
+
     def clear_all_stim_arrays(self) -> None:
         self.cleared_all += 1
         for stim in self.project.stim_arrays.values():

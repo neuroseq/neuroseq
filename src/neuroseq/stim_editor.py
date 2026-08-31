@@ -7,7 +7,6 @@ from typing import Literal
 from typing import overload
 
 import brian2.numpy_ as np
-import qtawesome as qta
 from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
@@ -17,13 +16,16 @@ from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomControlle
 from neuroseq.input_designer_dialog import InputDesignerDialog
 from neuroseq.project import Project
 from neuroseq.rheobase_dialog import RheobaseDialog
+from neuroseq.routine_overview_dialog import RoutineSelectorDialog
 from neuroseq.stdp_window_dialog import StdpWindowDialog
 from neuroseq.stim import DrawStim
 from neuroseq.stim import DrawStimType
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
+from neuroseq.stim_array_modifier import PadReversibleAction
 from neuroseq.stim_array_modifier import ResizableReversibleAction
 from neuroseq.stim_array_modifier import StimArrayModifier
+from neuroseq.stim_array_modifier import TrimReversibleAction
 from neuroseq.stim_dialog import EditStimDialog
 from neuroseq.stim_intensity_dialog import StimIntensityDialog
 from neuroseq.stim_loop_dialog import StimLoopDialog
@@ -100,6 +102,7 @@ class StimEditor(QtWidgets.QWidget):
         self._input_designer_dialog: InputDesignerDialog | None = None
         self._rheobase_dialog: RheobaseDialog | None = None
         self._stdp_window_dialog: StdpWindowDialog | None = None
+        self._routine_selector_dialog: RoutineSelectorDialog | None = None
         self._input_designer_theme = "light"
         # Captures the time index the user clicked at, so a Ramp drag can
         # use it as the ramp's left edge for every subsequent mouse_dragged
@@ -272,7 +275,7 @@ class StimEditor(QtWidgets.QWidget):
         stim_array = self.current_stim_modifier.stim_array
         current_length_secs = stim_array.dt * stim_array.values.shape[0]
         try:
-            self.project.pad_stim_arrays(current_length_secs + self.pad_stim_array_secs)
+            self._apply_pad(current_length_secs + self.pad_stim_array_secs)
         except Exception as e:
             QtWidgets.QMessageBox.critical(
                 self,
@@ -280,7 +283,24 @@ class StimEditor(QtWidgets.QWidget):
                 f"Error padding stim arrays: '{e}'",
             )
             return
-        self.set_project(self.project, keep_undo_history=False)
+
+    def _apply_pad(self, total_length_secs: float) -> None:
+        """Pad every stim array up to ``total_length_secs`` as one undoable step.
+
+        Like :meth:`_apply_trim`, this is routed through the modifier's undo
+        stack (rather than clearing it) so Ctrl+Z removes the padding again --
+        and, because the stim array is the authoritative timeline, growing it
+        re-exposes any simulated data a prior trim had windowed out.
+        """
+        if self.current_stim_modifier is None or self.project is None:
+            return
+        action = PadReversibleAction(
+            self.project,
+            total_length_secs,
+            self.stim_widget,
+            self.current_stim_modifier.stim_array.name,
+        )
+        self._push_timeline_action(action)
 
     def trim_stim_array(self) -> None:
         if self.current_stim_modifier is None or self.project is None:
@@ -320,19 +340,104 @@ class StimEditor(QtWidgets.QWidget):
                 f"Trim seconds {trim_seconds_as_float} is greater than or equal to current stim length {current_length_secs}.",
             )
             return
+        caveats: list[str] = []
         if self.project.trim_stim_array_would_delete_data(new_length_secs):
+            caveats.append("• Trimming would delete non-zero stimulus data.")
+        if self.project.b2_model.get_sim_time_secs() > new_length_secs:
+            # The trim cuts into the recorded simulation. Trimming only windows
+            # the traces (see Project.get_data); it does not shorten the run,
+            # so a later "Continue" resumes from the full untrimmed state.
+            caveats.append(
+                "• A simulated trace extends past the new length. Trimming only "
+                "hides the simulated data beyond it (undo restores it) — it does "
+                "not shorten the simulation. Continuing the simulation resumes "
+                "from the full, untrimmed end of the last run, not the trimmed "
+                "point, and re-extends the stim so the hidden data reappears."
+            )
+        if caveats:
             continue_with_trim = QtWidgets.QMessageBox.question(
                 self,
                 "Trim stim arrays",
-                "Trimming the stim arrays would delete non-zero stimulus data. Do you want to continue?",
+                "Trim anyway?\n\n" + "\n\n".join(caveats),
                 QtWidgets.QMessageBox.StandardButton.Yes
                 | QtWidgets.QMessageBox.StandardButton.No,
             )
             if continue_with_trim != QtWidgets.QMessageBox.StandardButton.Yes:
                 return
         self.trim_stim_array_secs = trim_seconds_as_float
-        self.project.trim_stim_arrays(new_length_secs)
-        self.set_project(self.project, keep_undo_history=False)
+        self._apply_trim(new_length_secs)
+
+    def _apply_trim(
+        self, new_length_secs: float, only_stim_name: str | None = None
+    ) -> None:
+        """Trim stim arrays to ``new_length_secs`` as one undoable step.
+
+        Trimming is routed through the modifier's undo stack (rather than
+        clearing it) so Ctrl+Z restores the stim length -- and, because the
+        stim array is the authoritative timeline, the simulated data that was
+        windowed out by the trim reappears with it. ``only_stim_name`` limits
+        the trim to a single array (used by :meth:`reset_stim_array`).
+        """
+        if self.current_stim_modifier is None or self.project is None:
+            return
+        action = TrimReversibleAction(
+            self.project,
+            new_length_secs,
+            self.stim_widget,
+            self.current_stim_modifier.stim_array.name,
+            only_stim_name=only_stim_name,
+        )
+        self._push_timeline_action(action)
+
+    def reset_stim_array(self) -> None:
+        """Trim the current stim array back to the simulation head.
+
+        Design routines append their probe/pairing blocks after the end of the
+        current stim array, so a long left-over array makes each run simulate a
+        huge empty tail for nothing. Resetting trims the array to the current
+        simulation time (or to zero when nothing has run yet), so blocks are
+        appended right after the simulated state. It is undoable and never cuts
+        into the recorded simulation (it only removes the unused trailing tail).
+        """
+        if self.current_stim_modifier is None or self.project is None:
+            return
+        stim = self.current_stim_modifier.stim_array
+        current_secs = float(stim.dt) * stim.values.shape[0]
+        # Keep at least one sample so the array never becomes empty (an empty
+        # stim would break the widget's min/max scaling); when nothing has run
+        # this collapses the array to a single baseline sample.
+        target_secs = max(self.project.b2_model.get_sim_time_secs(), float(stim.dt))
+        if current_secs <= target_secs + float(stim.dt) * 0.5:
+            return  # already at (or within a sample of) the simulation head
+        self._apply_trim(target_secs, only_stim_name=stim.name)
+
+    def _push_timeline_action(
+        self, action: TrimReversibleAction | PadReversibleAction
+    ) -> None:
+        """Run a whole-timeline resize action and push it onto the undo stack.
+
+        Trim and pad both resize every stim array at once, so this applies the
+        action on the current modifier's stack (preserving undo history) and
+        clears the other per-array stacks, whose indices no longer line up with
+        the shared timeline (as ``apply_pattern`` does for the same reason).
+        """
+        if self.current_stim_modifier is None or self.project is None:
+            return
+        modifier = self.current_stim_modifier
+        modifier.action_stack = modifier.action_stack[: modifier.current_index + 1]
+        modifier.action_stack.append(action)
+        action(modifier.stim_array, self.stim_widget)
+        modifier.current_index = len(modifier.action_stack) - 1
+        for other in self.stims_dict.values():
+            if other is not modifier:
+                other.action_stack = []
+                other.current_index = -1
+        self.controller.set_limits(
+            float(self.project.max_time_secs),
+            max(1, int(self.project.max_neurons)),
+        )
+        self.limits_modified.emit()
+        self._stim_values_updated()
 
     def loop_stim_array(self) -> None:
         if self.current_stim_modifier is None or self.project is None:
@@ -1006,16 +1111,20 @@ class StimEditor(QtWidgets.QWidget):
     def open_input_designer(self) -> None:
         if self.current_stim_modifier is None or self.project is None:
             return
-        routine, ok = QtWidgets.QInputDialog.getItem(
-            self,
-            "Design dynamic input",
-            "Design routine:",
-            list(self.DYNAMIC_INPUT_ROUTINES),
-            0,
-            False,
+        # A single selector window shows the routine dropdown with an always-on
+        # preview (goal, parameters, sample plot) beneath it; the real routine
+        # dialog opens only when the user clicks Continue.
+        dialog = RoutineSelectorDialog(
+            list(self.DYNAMIC_INPUT_ROUTINES), self._input_designer_theme, self
         )
-        if not ok:
-            return
+        dialog.routine_chosen.connect(self._open_routine_dialog_for)
+        dialog.finished.connect(dialog.deleteLater)
+        self._routine_selector_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _open_routine_dialog_for(self, routine: str) -> None:
         if routine == self.TARGETED_STDP_ROUTINE:
             self._show_routine_dialog("_input_designer_dialog", InputDesignerDialog)
         elif routine == self.RHEOBASE_ROUTINE:
@@ -1052,6 +1161,7 @@ class StimEditor(QtWidgets.QWidget):
             "_input_designer_dialog",
             "_rheobase_dialog",
             "_stdp_window_dialog",
+            "_routine_selector_dialog",
         ):
             dialog = getattr(self, attr_name)
             if dialog is not None:
@@ -1122,19 +1232,6 @@ class StimEditor(QtWidgets.QWidget):
         )
         self.limits_modified.emit()
         self._stim_values_updated()
-
-    def _pattern_designer_icon(self) -> str:
-        for icon_name in [
-            "mdi6.creation",
-            "mdi6.auto-fix",
-            "mdi6.gesture-tap-button",
-        ]:
-            try:
-                qta.icon(icon_name)
-                return icon_name
-            except Exception:
-                continue
-        return "mdi6.pencil"
 
     def _add_actions(self, toolbar: QtWidgets.QToolBar, menu: QtWidgets.QMenu) -> None:
         self.action_draw_mode = add_action(
@@ -1218,13 +1315,16 @@ class StimEditor(QtWidgets.QWidget):
             self,
             icon="mdi6.repeat-variant",
         )
+        # Static and dynamic input design are a matched pair: the same
+        # pencil-box glyph, single vs stacked (a static block vs a dynamic
+        # sequence of inputs).
         add_action(
             "Design static input",
             self.open_pattern_designer,
             menu,
             toolbar,
             self,
-            icon=self._pattern_designer_icon(),
+            icon="mdi6.pencil-box-outline",
         )
         add_action(
             "Design dynamic input",
@@ -1232,7 +1332,7 @@ class StimEditor(QtWidgets.QWidget):
             menu,
             toolbar,
             self,
-            icon="mdi6.robot-industrial-outline",
+            icon="mdi6.pencil-box-multiple-outline",
         )
         add_action(
             "Show all stim arrays",

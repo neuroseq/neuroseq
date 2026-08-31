@@ -253,6 +253,227 @@ def test_stim_editor_pad_and_trim(
     stim_editor.close()
 
 
+def test_stim_editor_trim_is_undoable(monkeypatch: MonkeyPatch, qtbot: QtBot):
+    project = Project()
+    values = np.zeros((1000, 4))
+    values[900:950, 0] = 1.0  # non-zero tail that trimming would remove
+    project.stim_arrays = {
+        "a": StimArray("a", neuroseq.stim.StimType.Excitation, values, "mV", 0.001)
+    }
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.show()
+    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    stim_editor.set_project(project)
+
+    # Trim 0.4 s off; confirm the "would delete data" prompt with Yes.
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.4", True))
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args: QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+    stim_editor.trim_stim_array()
+    modifier = stim_editor.current_stim_modifier
+    assert modifier is not None
+    assert modifier.stim_array.values.shape[0] == 600
+    # The trim is now on the undo stack instead of clearing it.
+    assert modifier.can_undo() is True
+
+    stim_editor.undo()
+    assert modifier.stim_array.values.shape[0] == 1000
+    assert np.allclose(modifier.stim_array.values[900:950, 0], 1.0)
+
+    stim_editor.redo()
+    assert modifier.stim_array.values.shape[0] == 600
+    stim_editor.close()
+
+
+def test_trim_warns_when_cutting_into_simulated_trace(
+    monkeypatch: MonkeyPatch, qtbot: QtBot
+):
+    from neuroseq.example_projects import default_project
+
+    project = default_project()
+    project.run_simulation(0.05)
+    sim_time = project.b2_model.get_sim_time_secs()
+    assert sim_time > 0
+
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.set_project(project)
+    modifier = stim_editor.current_stim_modifier
+    assert modifier is not None
+
+    stim = modifier.stim_array
+    current_secs = stim.dt * stim.values.shape[0]
+    new_length = sim_time / 2.0  # cut into the recorded simulation
+    trim = current_secs - new_length
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *a: (str(trim), True))
+
+    captured: dict[str, str] = {}
+
+    def fake_question(parent, title, text, *a, **k):
+        captured["text"] = text
+        return QtWidgets.QMessageBox.StandardButton.No
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "question", fake_question)
+
+    before = stim.values.shape[0]
+    stim_editor.trim_stim_array()
+    # The simulated-trace caveat is surfaced, and declining leaves the stim as is.
+    assert "resumes from the full, untrimmed end" in captured["text"]
+    assert modifier.stim_array.values.shape[0] == before
+
+    # Accepting the warning proceeds with the trim.
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *a, **k: QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+    stim_editor.trim_stim_array()
+    assert modifier.stim_array.values.shape[0] < before
+    stim_editor.close()
+
+
+def test_routine_dialogs_have_reset_stim_array_button(qtbot: QtBot) -> None:
+    stim_editor, _ = _make_ramp_editor(qtbot)
+    for routine, attr in (
+        (StimEditor.TARGETED_STDP_ROUTINE, "_input_designer_dialog"),
+        (StimEditor.RHEOBASE_ROUTINE, "_rheobase_dialog"),
+        (StimEditor.STDP_WINDOW_ROUTINE, "_stdp_window_dialog"),
+    ):
+        stim_editor.open_input_designer()
+        selector = stim_editor._routine_selector_dialog
+        assert selector is not None
+        selector.cmb_routine.setCurrentText(routine)
+        selector._on_continue()
+        dialog = getattr(stim_editor, attr)
+        assert dialog is not None
+        assert dialog.btn_reset.text() == "Reset stim array"
+    stim_editor.close()
+
+
+def test_routine_reset_button_trims_stim_to_simulation_head(qtbot: QtBot) -> None:
+    stim_editor, project = _make_ramp_editor(qtbot)
+    stim_editor.open_input_designer()
+    selector = stim_editor._routine_selector_dialog
+    assert selector is not None
+    selector.cmb_routine.setCurrentText(StimEditor.TARGETED_STDP_ROUTINE)
+    selector._on_continue()
+    dialog = stim_editor._input_designer_dialog
+    assert dialog is not None
+
+    # No simulation yet, so the reset button trims the array to a single
+    # baseline sample (never empty).
+    assert project.b2_model.get_sim_time_secs() == 0
+    modifier = stim_editor.current_stim_modifier
+    assert modifier is not None
+    assert modifier.stim_array.values.shape[0] == 200
+    dialog.btn_reset.click()
+    assert modifier.stim_array.values.shape[0] == 1
+    stim_editor.close()
+
+
+def _make_editor_for_project(qtbot: QtBot, project: Project) -> StimEditor:
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.set_project(project)
+    return stim_editor
+
+
+def test_reset_stim_array_trims_to_simulation_head(qtbot: QtBot):
+    from neuroseq.example_projects import default_project
+    from neuroseq.stim_timing import seconds_to_samples_nearest
+
+    project = default_project()
+    project.run_simulation(0.05)
+    sim_time = project.b2_model.get_sim_time_secs()
+    # Leave a long empty tail past the simulated region.
+    project.pad_stim_arrays(2.0)
+
+    stim_editor = _make_editor_for_project(qtbot, project)
+    modifier = stim_editor.current_stim_modifier
+    assert modifier is not None
+    dt = modifier.stim_array.dt
+    before = modifier.stim_array.values.shape[0]
+    assert before == seconds_to_samples_nearest(2.0, dt)
+
+    stim_editor.reset_stim_array()
+    after = modifier.stim_array.values.shape[0]
+    assert after == seconds_to_samples_nearest(sim_time, dt)
+    assert after < before
+
+    # The reset is undoable (restores the trimmed tail).
+    stim_editor.undo()
+    assert modifier.stim_array.values.shape[0] == before
+    stim_editor.close()
+
+
+def test_reset_stim_array_no_op_when_already_at_simulation_head(qtbot: QtBot):
+    from neuroseq.example_projects import default_project
+
+    project = default_project()
+    project.run_simulation(0.05)
+    stim_editor = _make_editor_for_project(qtbot, project)
+    modifier = stim_editor.current_stim_modifier
+    assert modifier is not None
+
+    stim_editor.reset_stim_array()  # trims the tail down to the sim head
+    length_at_head = modifier.stim_array.values.shape[0]
+    stack_len = len(modifier.action_stack)
+
+    # A second reset has nothing to trim: no change and no new undo entry.
+    stim_editor.reset_stim_array()
+    assert modifier.stim_array.values.shape[0] == length_at_head
+    assert len(modifier.action_stack) == stack_len
+    stim_editor.close()
+
+
+def test_stim_editor_pad_is_undoable(monkeypatch: MonkeyPatch, qtbot: QtBot):
+    project = Project()
+    values = np.zeros((1000, 4))
+    values[900:950, 0] = 1.0  # non-zero content that pad + undo must preserve
+    project.stim_arrays = {
+        "a": StimArray("a", neuroseq.stim.StimType.Excitation, values, "mV", 0.001)
+    }
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.show()
+    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    stim_editor.set_project(project)
+
+    # Pad 0.5 s (500 samples) onto the 1 s array.
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.5", True))
+    stim_editor.pad_stim_array()
+    modifier = stim_editor.current_stim_modifier
+    assert modifier is not None
+    assert modifier.stim_array.values.shape[0] == 1500
+    # The pad is on the undo stack instead of clearing it.
+    assert modifier.can_undo() is True
+
+    stim_editor.undo()
+    assert modifier.stim_array.values.shape[0] == 1000
+    assert np.allclose(modifier.stim_array.values[900:950, 0], 1.0)
+
+    stim_editor.redo()
+    assert modifier.stim_array.values.shape[0] == 1500
+    assert np.allclose(modifier.stim_array.values[1000:], 0.0)
+    stim_editor.close()
+
+
 def test_edit_stim_array_dt_change_requires_confirmation(
     monkeypatch: MonkeyPatch, qtbot: QtBot
 ) -> None:
@@ -882,60 +1103,76 @@ def test_stim_editor_actions(
     stim_editor.close()
 
 
-def test_open_input_designer_offers_routine_selection(
-    qtbot: QtBot, monkeypatch: MonkeyPatch
-) -> None:
+def _routine_combo_items(selector: Any) -> list[str]:
+    return [
+        selector.cmb_routine.itemText(i) for i in range(selector.cmb_routine.count())
+    ]
+
+
+def test_open_input_designer_shows_selector_with_preview(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
-    captured: dict[str, Any] = {}
-
-    def fake_get_item(parent, title, label, items, current, editable):
-        del parent, current, editable
-        captured["title"] = title
-        captured["items"] = list(items)
-        return (StimEditor.TARGETED_STDP_ROUTINE, True)
-
-    monkeypatch.setattr(QtWidgets.QInputDialog, "getItem", fake_get_item)
     stim_editor.open_input_designer()
 
-    assert captured["title"] == "Design dynamic input"
-    assert captured["items"] == [
+    selector = stim_editor._routine_selector_dialog
+    assert selector is not None
+    assert selector.isVisible()
+    assert selector.windowTitle() == "Design dynamic input"
+    assert _routine_combo_items(selector) == [
         "Targeted STDP synaptic strength",
         "Minimal stimulus for spiking (rheobase)",
         "STDP timing window (LTP/LTD vs Δt)",
     ]
+    # The preview is always on: the initial selection already shows goal text
+    # and a sample plot in the same window as the dropdown.
+    assert selector.lbl_goal.text()
+    assert selector.lbl_params.text()
+    assert selector._axes.lines
+
+    # Selecting a routine and clicking Continue opens the matching dialog.
+    selector.cmb_routine.setCurrentText(StimEditor.TARGETED_STDP_ROUTINE)
+    assert stim_editor._input_designer_dialog is None
+    selector._on_continue()
     assert stim_editor._input_designer_dialog is not None
     assert stim_editor._input_designer_dialog.isVisible()
     stim_editor.close()
 
 
-def test_open_input_designer_opens_rheobase_when_selected(
-    qtbot: QtBot, monkeypatch: MonkeyPatch
-) -> None:
+def test_routine_selector_preview_updates_on_selection_change(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog,
-        "getItem",
-        lambda *args: (StimEditor.RHEOBASE_ROUTINE, True),
-    )
-
     stim_editor.open_input_designer()
+    selector = stim_editor._routine_selector_dialog
+    assert selector is not None
+
+    selector.cmb_routine.setCurrentText(StimEditor.RHEOBASE_ROUTINE)
+    assert "rheobase" in selector.lbl_goal.text().lower()
+    selector.cmb_routine.setCurrentText(StimEditor.STDP_WINDOW_ROUTINE)
+    assert "stdp" in selector.lbl_goal.text().lower()
+    stim_editor.close()
+
+
+def test_open_input_designer_opens_rheobase_when_selected(qtbot: QtBot) -> None:
+    stim_editor, _ = _make_ramp_editor(qtbot)
+    stim_editor.open_input_designer()
+    selector = stim_editor._routine_selector_dialog
+    assert selector is not None
+
+    selector.cmb_routine.setCurrentText(StimEditor.RHEOBASE_ROUTINE)
+    assert stim_editor._rheobase_dialog is None  # only opens on Continue
+    selector._on_continue()
 
     assert stim_editor._rheobase_dialog is not None
     assert stim_editor._rheobase_dialog.isVisible()
     stim_editor.close()
 
 
-def test_open_input_designer_opens_stdp_window_when_selected(
-    qtbot: QtBot, monkeypatch: MonkeyPatch
-) -> None:
+def test_open_input_designer_opens_stdp_window_when_selected(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog,
-        "getItem",
-        lambda *args: (StimEditor.STDP_WINDOW_ROUTINE, True),
-    )
-
     stim_editor.open_input_designer()
+    selector = stim_editor._routine_selector_dialog
+    assert selector is not None
+
+    selector.cmb_routine.setCurrentText(StimEditor.STDP_WINDOW_ROUTINE)
+    selector._on_continue()
 
     assert stim_editor._stdp_window_dialog is not None
     assert stim_editor._stdp_window_dialog.isVisible()
@@ -944,43 +1181,34 @@ def test_open_input_designer_opens_stdp_window_when_selected(
     stim_editor.close()
 
 
-def test_open_input_designer_cancel_does_not_open_dialog(
-    qtbot: QtBot, monkeypatch: MonkeyPatch
-) -> None:
+def test_routine_selector_cancel_does_not_open_routine_dialog(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
-    monkeypatch.setattr(QtWidgets.QInputDialog, "getItem", lambda *args: ("", False))
     stim_editor.open_input_designer()
+    selector = stim_editor._routine_selector_dialog
+    assert selector is not None and selector.isVisible()
 
+    selector.reject()  # user backs out of the selector
     assert stim_editor._input_designer_dialog is None
     assert stim_editor._rheobase_dialog is None
     assert stim_editor._stdp_window_dialog is None
     stim_editor.close()
 
 
-def test_discard_input_designer_clears_cached_dialog(
-    qtbot: QtBot, monkeypatch: MonkeyPatch
-) -> None:
+def test_discard_input_designer_clears_cached_dialog(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog,
-        "getItem",
-        lambda *args: (StimEditor.TARGETED_STDP_ROUTINE, True),
-    )
-    stim_editor.open_input_designer()
+
+    def _open(routine: str) -> None:
+        stim_editor.open_input_designer()
+        selector = stim_editor._routine_selector_dialog
+        assert selector is not None
+        selector.cmb_routine.setCurrentText(routine)
+        selector._on_continue()
+
+    _open(StimEditor.TARGETED_STDP_ROUTINE)
     assert stim_editor._input_designer_dialog is not None
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog,
-        "getItem",
-        lambda *args: (StimEditor.RHEOBASE_ROUTINE, True),
-    )
-    stim_editor.open_input_designer()
+    _open(StimEditor.RHEOBASE_ROUTINE)
     assert stim_editor._rheobase_dialog is not None
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog,
-        "getItem",
-        lambda *args: (StimEditor.STDP_WINDOW_ROUTINE, True),
-    )
-    stim_editor.open_input_designer()
+    _open(StimEditor.STDP_WINDOW_ROUTINE)
     assert stim_editor._stdp_window_dialog is not None
 
     # Replacing the project must not carry the previous designer state over.
@@ -988,6 +1216,7 @@ def test_discard_input_designer_clears_cached_dialog(
     assert stim_editor._input_designer_dialog is None
     assert stim_editor._rheobase_dialog is None
     assert stim_editor._stdp_window_dialog is None
+    assert stim_editor._routine_selector_dialog is None
 
     # Discarding again is a no-op and must not raise.
     stim_editor.discard_input_designer()

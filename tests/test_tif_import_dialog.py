@@ -320,19 +320,6 @@ def test_launch_fiji_no_op_when_path_not_resolved(qtbot, mocker):
     start_detached.assert_not_called()
 
 
-def test_change_fiji_path_button_forces_prompt(qtbot, mocker):
-    from neuroseq.tif_import_dialog import TifImportDialog
-
-    dialog = TifImportDialog(parent=None, cellpose_import=None)
-    qtbot.addWidget(dialog)
-    resolve = mocker.patch("neuroseq.fiji.resolve_fiji_path", return_value="")
-
-    dialog._change_fiji_button.click()
-
-    resolve.assert_called_once()
-    assert resolve.call_args.kwargs.get("force_prompt") is True
-
-
 def test_launch_cellpose_invokes_subprocess(qtbot, mocker):
     from neuroseq.tif_import_dialog import TifImportDialog
 
@@ -342,6 +329,12 @@ def test_launch_cellpose_invokes_subprocess(qtbot, mocker):
         "neuroseq.tif_import_dialog.importlib.util.find_spec",
         return_value=object(),  # cellpose "found"
     )
+    # Stub the post-launch GPU warning: it imports torch, whose first-time CUDA
+    # init shells out via subprocess.Popen (e.g. `ldconfig -p`). Because
+    # `neuroseq.tif_import_dialog.subprocess` is the real subprocess module,
+    # the patch below is global and would otherwise count that call too, making
+    # this assertion order-dependent on whether torch was already imported.
+    mocker.patch("neuroseq.gpu.warn_if_gpu_unavailable")
     popen = mocker.patch("neuroseq.tif_import_dialog.subprocess.Popen")
     dialog._launch_cellpose()
     popen.assert_called_once()

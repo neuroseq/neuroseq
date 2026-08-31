@@ -63,6 +63,9 @@ class _FakeEditor:
     def clear_stim_array(self) -> None:
         self.cleared += 1
 
+    def reset_stim_array(self) -> None:
+        self.reset_count = getattr(self, "reset_count", 0) + 1
+
     def clear_all_stim_arrays(self) -> None:
         self.cleared_all += 1
         self.current_stim_modifier.stim_array.values[:] = 0.0
