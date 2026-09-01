@@ -1,0 +1,733 @@
+spatial_footprint_viewer — Toggleable main-window viewer for cell spatial footprints, with click-to-grey linking to the trace/stim rows [IMPLEMENTED]
+=======================================================================================================================================================
+
+Add a new dockable panel to the main window, toggled from the top bar exactly
+like the existing "Heatmap" (Synapses) panel: a checkable toolbar/menu action
+that shows/hides a widget living in the same splitter as `heatmap_widget`.
+The panel shows the imported Cellpose segmentation (colour-coded cells with
+ID labels — the same "Color-coded Preview" already used in the Cellpose
+import dialog) for the CURRENT project's `Project.cellpose_data`. Clicking a
+cell toggles a persistent grey overlay on that cell in the picture AND on the
+corresponding row in both `trace_widget` and `stim_editor.stim_widget`.
+Clicking the same cell again removes all three grey overlays.
+
+There is no new cell-segmentation code to write: `Project.cellpose_data`
+(`CellposeImportResult`) already carries a ready-to-display
+`overlay_image` + `segmentation_array`, and `CellOverlayWidget` (used today
+only inside the Cellpose import dialog) already renders exactly this
+image with colour-coded, ID-labelled cells via `neuron_indices_to_colors` —
+the SAME colour function `TraceWidget` uses for its lines
+(`neuron_indices_to_colors`, `utils.py:111`), so cell colours in the new
+panel will already visually match trace colours. Reuse it.
+
+Files to change:
+    src/neuroseq/cell_overlay_widget.py   (add click-to-select support, gated behind a flag; extract legend helper)
+    src/neuroseq/timeseries_widget.py     (add set_neuron_greyed()/clear_greyed_neurons(), reusing RegionOfInterest)
+    src/neuroseq/gui.py                   (new panel, toolbar toggle, wiring, cellpose_data refresh call sites, closeEvent)
+
+Files to create:
+    src/neuroseq/spatial_footprint_widget.py   (new SpatialFootprintWidget)
+    tests/test_spatial_footprint_widget.py     (new widget's logic + Qt tests)
+
+Files to extend (tests):
+    tests/test_trace_widget.py    (set_neuron_greyed on TraceWidget)
+    tests/test_stim_widget.py     (set_neuron_greyed on StimWidget, inherited from TimeseriesWidget)
+    tests/test_gui.py             (panel toggle + end-to-end click-greys-rows wiring)
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+BACKGROUND — read before touching anything
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Neuron-index conventions (confirmed by reading the code, not assumed):
+
+- `TraceData.indices[i]` and a `StimArray`'s column index `j` are the SAME
+  integer space as `CellposeImportResult.stimulus_to_cellpose_mapping`'s KEY
+  (`stim_id`). See `importer_suite2p.py:97-138`
+  (`_resolve_suite2p_indices`): it builds the Suite2p `TraceData.indices`
+  array by inverting `stimulus_to_cellpose_mapping` (`stim_id -> cellpose_id`
+  becomes `cellpose_id -> stim_id`), falling back to `cellpose_id` itself
+  when a cellpose id has no explicit entry (identity mapping). Use the exact
+  same inversion + fallback for the new widget:
+
+        cellpose_to_stim = {v: k for k, v in (mapping or {}).items()}
+        stim_id = cellpose_to_stim.get(cellpose_id, cellpose_id)
+
+- In `TraceWidget`/`StimWidget` (both extend `TimeseriesWidget`), neuron `i`
+  occupies the world-space row `y ∈ [i - 0.5, i + 0.5]`, full time width.
+  This is the same convention `TimeseriesWidget.pointer_move`'s SELECT mode
+  already uses to build `neuron_slice` from a mouse position
+  (`timeseries_widget.py:610-619`), and it's what `RegionOfInterest.select_slice`
+  already draws (`region_of_interest.py:39-62`). Reuse `RegionOfInterest` for
+  the grey overlay rather than inventing a new graphic type.
+
+- `CellOverlayWidget.set_overlay(overlay_image, segmentation, original_cellpose_ids,
+  stimulus_to_cellpose_mapping, legend_data=None, ...)` already renders
+  everything needed: pass `legend_data=None` and it auto-computes colours via
+  `neuron_indices_to_colors` (`cell_overlay_widget.py:1139-1154`,
+  `_compute_segementation_colors`). `self.segmentation` inside `OverlayView`
+  is ALWAYS keyed by raw Cellpose ID regardless of the `show_stimulus_ids`
+  display toggle (`cell_overlay_widget.py:1011`,
+  `label_segmentation=self.segmentation` is passed separately from the
+  possibly-remapped `display_segmentation`) — so pixel lookups into
+  `OverlayView.segmentation` always give you a Cellpose ID, which is what you
+  invert to a stim_id via the mapping above.
+
+- Hit-testing a pixel under the pointer already has a working precedent in
+  `OverlayView.pointer_move` (`cell_overlay_widget.py:869-891`):
+
+        x = int(mouse_pos[0])
+        y = int(mouse_pos[1])
+        # bounds-check against self.segmentation.shape
+        neuron_index = self.segmentation[y, x]   # -1 == background
+
+  `mouse_pos` comes from `self.subplot.map_screen_to_world(ev)`. Use the
+  exact same formula for the new click handler — no y-flip/user-coord
+  conversion needed here (that conversion is only for the AOI *shapes*,
+  which are stored in "user" pixel coordinates; the segmentation ARRAY
+  lookup already works directly on world coords as shown above).
+
+- `CellposeImportResult.segmentation_array` and `.overlay_image` are
+  non-optional dataclass fields — whenever `Project.cellpose_data is not
+  None`, both are present (`importer_cellpose.py:50-62`).
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/cell_overlay_widget.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1. EXTRACT the legend-colour computation out of `CellOverlayWidget` into a
+   module-level function so the new widget can reuse it without importing a
+   "private" method of another class:
+
+        def compute_segmentation_legend(
+            segmentation: np.ndarray,
+        ) -> list[tuple[int, tuple[int, int, int]]]:
+            """Assign each segmented cell a colour via neuron_indices_to_colors,
+            keyed by its raw (Cellpose) id."""
+            unique_ids = np.unique(segmentation)
+            neuron_ids = [cell_id for cell_id in unique_ids if cell_id >= 0]
+            if not neuron_ids:
+                return []
+            zero_based = np.array(neuron_ids) - min(neuron_ids)
+            id_colors = neuron_indices_to_colors(zero_based)
+            return [
+                (
+                    int(cell_id),
+                    (int(c[0] * 255), int(c[1] * 255), int(c[2] * 255)),
+                )
+                for cell_id, c in zip(neuron_ids, id_colors, strict=False)
+            ]
+
+   Put it near the top of the module (after the dataclasses/Protocols, before
+   `OverlayView`). Change `CellOverlayWidget._compute_segementation_colors`
+   to just `return compute_segmentation_legend(segmentation)` (keep the
+   method for its one existing call site in `_get_display_legend`, or inline
+   it there and delete the method — either is fine, don't leave a pass-through
+   stub AND the free function both doing the same thing without one calling
+   the other).
+
+2. On `OverlayView.__init__` (`cell_overlay_widget.py:92-122`), ADD:
+
+        self.enable_cell_selection = False
+        self._cell_click_down_world: tuple[float, float] | None = None
+
+   and register two more event handlers alongside the existing three
+   (line 119-121):
+
+        self.figure.renderer.add_event_handler(
+            self._cell_selection_pointer_down, "pointer_down"
+        )
+        self.figure.renderer.add_event_handler(
+            self._cell_selection_pointer_up, "pointer_up"
+        )
+
+   pygfx dispatches an event to every handler registered for that event type
+   (the existing `_aoi_pointer_down`/`_aoi_pointer_up` already coexist with
+   `pointer_move` this way), so this is additive and does not disturb the
+   AOI drag handlers. `enable_cell_selection` defaults to `False`, so the
+   Cellpose import dialog's `OverlayView` instance is completely unaffected
+   unless something opts in — nothing will, in this change.
+
+3. ADD the new handlers (near `_aoi_pointer_down`/`_aoi_pointer_up`):
+
+        def _cell_selection_pointer_down(self, ev: pygfx.PointerEvent) -> None:
+            if not self.enable_cell_selection or self.segmentation is None:
+                return
+            mouse_pos = self.subplot.map_screen_to_world(ev)
+            if mouse_pos is None:
+                return
+            self._cell_click_down_world = (float(mouse_pos[0]), float(mouse_pos[1]))
+
+        def _cell_selection_pointer_up(self, ev: pygfx.PointerEvent) -> None:
+            if not self.enable_cell_selection or self._cell_click_down_world is None:
+                return
+            down_x, down_y = self._cell_click_down_world
+            self._cell_click_down_world = None
+            mouse_pos = self.subplot.map_screen_to_world(ev)
+            if mouse_pos is None:
+                return
+            # Only treat this as a click (not the end of a pan) if the pointer
+            # didn't move much between down and up.
+            if math.hypot(mouse_pos[0] - down_x, mouse_pos[1] - down_y) > self._world_tolerance():
+                return
+            cellpose_id = self._segmentation_id_at(float(mouse_pos[0]), float(mouse_pos[1]))
+            if cellpose_id is not None:
+                self.neuron_clicked.emit(cellpose_id)
+
+        def _segmentation_id_at(self, world_x: float, world_y: float) -> int | None:
+            if self.segmentation is None:
+                return None
+            x, y = int(world_x), int(world_y)
+            if x < 0 or y < 0 or y >= self.segmentation.shape[0] or x >= self.segmentation.shape[1]:
+                return None
+            cell_id = int(self.segmentation[y, x])
+            return cell_id if cell_id >= 0 else None
+
+   Factoring the lookup into `_segmentation_id_at` (rather than inlining it
+   in `_cell_selection_pointer_up`) matters for testability — see the TESTS
+   section below.
+
+   `_world_tolerance()` already exists (`cell_overlay_widget.py:716-719`) and
+   does exactly what's needed here too (a few screen pixels' worth of world
+   units) — reuse it, don't duplicate it.
+
+   `math` is already imported at the top of the module.
+
+4. ADD a Qt signal on `OverlayView`:
+
+        neuron_clicked = QtCore.Signal(int)  # emits the raw Cellpose id
+
+5. On `CellOverlayWidget`:
+   - ADD a pass-through signal: `neuron_clicked = QtCore.Signal(int)`.
+   - In `_setup_ui` (`cell_overlay_widget.py:952-971`), connect it:
+     `self.overlay_view.neuron_clicked.connect(self.neuron_clicked.emit)`.
+   - ADD `set_cell_selection_enabled(self, enabled: bool) -> None` that sets
+     `self.overlay_view.enable_cell_selection = enabled`.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/timeseries_widget.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Add a small, reusable "grey out one neuron's row" API to the shared base
+class so both `TraceWidget` and `StimWidget` get it for free (and so gui.py
+only has to call the same method name on either widget).
+
+1. Import `RegionOfInterest` is already there (used for `self.roi`).
+
+2. In `TimeseriesWidget.__init__`, ADD:
+
+        self._greyed_neuron_overlays: dict[int, RegionOfInterest] = {}
+
+3. ADD class-level constants near the top of the class body:
+
+        GREYED_NEURON_Z = 250.0
+        GREYED_NEURON_FILL_COLOR = (0.5, 0.5, 0.5, 0.75)
+
+   (Between grid lines at z=199 / the stim image at z=200-210, and the
+   hover text/axes at z=300 — see `stim_widget.py:27-30` and
+   `timeseries_widget.py:503` for the existing z-layering this must sit
+   inside.)
+
+4. ADD:
+
+        def set_neuron_greyed(self, neuron_index: int, greyed: bool) -> None:
+            """Add or remove a persistent grey overlay over one neuron's row.
+
+            Idempotent: calling with the same (index, greyed) twice is a no-op,
+            and this does not depend on any prior local state, so it's safe to
+            call from an external source of truth without first checking
+            is_neuron_greyed().
+            """
+            existing = self._greyed_neuron_overlays.get(neuron_index)
+            if greyed and existing is None:
+                overlay = RegionOfInterest(fill_color=self.GREYED_NEURON_FILL_COLOR)
+                overlay.fill.world.z = self.GREYED_NEURON_Z
+                overlay.text.world.z = self.GREYED_NEURON_Z
+                max_time_ms = float(self.n_timestamps) * float(self.dt_ms)
+                if isinstance(self.controller, ConstrainedPanZoomController):
+                    max_time_ms = max(max_time_ms, float(self.controller.max_width))
+                overlay.select(0.0, max_time_ms, neuron_index - 0.5, neuron_index + 0.5)
+                self.subplot.add_graphic(overlay, center=False)
+                self._greyed_neuron_overlays[neuron_index] = overlay
+            elif not greyed and existing is not None:
+                self.subplot.remove_graphic(existing)
+                del self._greyed_neuron_overlays[neuron_index]
+
+        def is_neuron_greyed(self, neuron_index: int) -> bool:
+            return neuron_index in self._greyed_neuron_overlays
+
+        def clear_greyed_neurons(self) -> None:
+            for overlay in self._greyed_neuron_overlays.values():
+                self.subplot.remove_graphic(overlay)
+            self._greyed_neuron_overlays.clear()
+
+   `RegionOfInterest.select()` only ever writes `x_left/x_right/y_bottom/y_top`
+   mesh vertices, never z (`region_of_interest.py:30-37`), so setting z once
+   right after construction is sufficient and survives all future `.select()`
+   calls (there won't be any here, but future-proofing costs nothing).
+
+   `RegionOfInterest.text` defaults to an empty/unset `pygfx.Text` — do NOT
+   call `.select_slice()` (that also writes a "Neurons X / time range" label,
+   which is the ROI-selection UI, not what we want here). Verify at runtime
+   that the unset text renders as empty; if it doesn't, add
+   `overlay.text.set_text("")` right after construction.
+
+5. `ConstrainedPanZoomController` needs to be importable in this module —
+   check the existing imports at the top of `timeseries_widget.py`; it's
+   already imported for `self.default_controller` typing, so no new import
+   should be needed.
+
+6. In `TimeseriesWidget.clear_data()` (`timeseries_widget.py:520-535`), ADD
+   a call to `self.clear_greyed_neurons()` (alongside the existing
+   `self.unselect_neurons()` at the end) — switching the displayed dataset
+   (a different `TraceData`/`StimArray`) invalidates any neuron-index-keyed
+   overlays, exactly like it already invalidates the ROI selection.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NEW FILE — src/neuroseq/spatial_footprint_widget.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+A thin widget that owns a `CellOverlayWidget`, knows about
+`CellposeImportResult` and the stim_id/cellpose_id mapping, and turns clicks
+into a `(stim_id, greyed)` signal. It does NOT know about `TraceWidget` or
+`StimWidget` — gui.py is the only thing that connects the two sides.
+
+    from __future__ import annotations
+
+    import brian2.numpy_ as np
+    from qtpy import QtCore
+    from qtpy import QtWidgets
+
+    from neuroseq.cell_overlay_widget import CellOverlayWidget
+    from neuroseq.cell_overlay_widget import compute_segmentation_legend
+    from neuroseq.importer_cellpose import CellposeImportResult
+
+    GREY_RGB_255 = (140, 140, 140)
+
+
+    class SpatialFootprintWidget(QtWidgets.QWidget):
+        """Shows the imported cell spatial footprints; clicking a cell toggles
+        a grey-out state that gui.py mirrors onto the trace/stim rows."""
+
+        # emits (stim_id, greyed) — stim_id is the same neuron-index space used
+        # by TraceData.indices / StimArray columns, NOT the raw Cellpose id.
+        neuron_greyed_out_changed = QtCore.Signal(int, bool)
+
+        def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+            super().__init__(parent)
+            layout = QtWidgets.QVBoxLayout(self)
+            layout.setContentsMargins(0, 0, 0, 0)
+            self.overlay_widget = CellOverlayWidget(title="Spatial Footprints")
+            self.overlay_widget.set_display_options(
+                show_cellpose_ids=False, show_stimulus_ids=True
+            )
+            self.overlay_widget.set_cell_selection_enabled(True)
+            self.overlay_widget.neuron_clicked.connect(self._on_neuron_clicked)
+            layout.addWidget(self.overlay_widget)
+            self._cellpose_data: CellposeImportResult | None = None
+            self._base_legend: list[tuple[int, tuple[int, int, int]]] = []
+            self._greyed_cellpose_ids: set[int] = set()
+
+        def set_data(self, cellpose_data: CellposeImportResult | None) -> None:
+            self._cellpose_data = cellpose_data
+            self._greyed_cellpose_ids = set()
+            if cellpose_data is None:
+                self._base_legend = []
+                self.overlay_widget.set_empty_message(
+                    "No cell spatial footprints loaded."
+                )
+                return
+            self._base_legend = compute_segmentation_legend(
+                cellpose_data.segmentation_array
+            )
+            self._refresh_overlay()
+
+        def _refresh_overlay(self) -> None:
+            if self._cellpose_data is None:
+                return
+            legend = [
+                (cell_id, GREY_RGB_255 if cell_id in self._greyed_cellpose_ids else rgb)
+                for cell_id, rgb in self._base_legend
+            ]
+            self.overlay_widget.set_overlay(
+                self._cellpose_data.overlay_image,
+                self._cellpose_data.segmentation_array,
+                self._cellpose_data.original_cellpose_ids,
+                self._cellpose_data.stimulus_to_cellpose_mapping,
+                legend_data=legend,
+            )
+
+        def _cellpose_to_stim_id(self, cellpose_id: int) -> int:
+            mapping = (
+                self._cellpose_data.stimulus_to_cellpose_mapping
+                if self._cellpose_data is not None
+                else None
+            )
+            cellpose_to_stim = {v: k for k, v in (mapping or {}).items()}
+            return cellpose_to_stim.get(cellpose_id, cellpose_id)
+
+        def _on_neuron_clicked(self, cellpose_id: int) -> None:
+            if cellpose_id in self._greyed_cellpose_ids:
+                self._greyed_cellpose_ids.discard(cellpose_id)
+                greyed = False
+            else:
+                self._greyed_cellpose_ids.add(cellpose_id)
+                greyed = True
+            self._refresh_overlay()
+            self.neuron_greyed_out_changed.emit(
+                self._cellpose_to_stim_id(cellpose_id), greyed
+            )
+
+        def close(self) -> bool:
+            self.overlay_widget.close()
+            return super().close()
+
+   Notes on the sketch above:
+   - `set_overlay(...)` is called with an explicit `legend_data` (not `None`)
+     every time so that a previously-computed colour assignment survives
+     toggling — recomputing from scratch via `_compute_segementation_colors`
+     inside `CellOverlayWidget` would still be *consistent* (same inputs,
+     same colours) but doing it once in `set_data` and reusing it is cheaper
+     and makes the "only the clicked cell's colour changes" behaviour
+     explicit and easy to test.
+   - Greying only recolours the cell's overlay region, not its ID label text
+     (`OverlayView._update_label_graphics` has substantial existing logic
+     around highlighting/crossing-out labels for remapped ids — leave it
+     untouched; see NON-GOALS).
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/gui.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1. IMPORT the new widget:
+
+        from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
+
+2. In `MainWindow.__init__`, next to `self.heatmap_widget = HeatmapWidget(parent=self)`
+   (`gui.py:349`), ADD:
+
+        self.spatial_footprint_widget = SpatialFootprintWidget(parent=self)
+        self.spatial_footprint_widget.neuron_greyed_out_changed.connect(
+            self._on_neuron_greyed_out_changed
+        )
+
+3. Place it in the same splitter as the heatmap, right after it
+   (`gui.py:361-362`):
+
+        split_left_right.addWidget(self.heatmap_widget)
+        split_left_right.addWidget(self.spatial_footprint_widget)
+
+   (`split_left_right.setSizes([...])` at line 371 currently has one entry
+   per widget already in the splitter — add one more entry, e.g. extend the
+   list from 4 to 5 equal values, so the new panel doesn't start squashed to
+   zero width.)
+
+4. Initially hidden, matching every other optional panel (`gui.py:422-426`):
+
+        self.spatial_footprint_widget.setVisible(False)
+
+   Do NOT add it to `self.plot_widgets` (`gui.py:412-418`) — that list feeds
+   `TimeSliderWidget.connect_widget`, and this panel has no time axis.
+
+5. ADD the toolbar/menu toggle in `_create_actions_view`
+   (`gui.py:2673-2701`), in the `for name, widget, icon, is_checked in [...]`
+   list — insert right after the Heatmap entry:
+
+        ("&Heatmap", self.heatmap_widget, "mdi6.data-matrix", False),
+        ("&Spatial Footprints", self.spatial_footprint_widget, "mdi6.map-marker-radius", False),
+
+   (If `mdi6.map-marker-radius` isn't a valid icon name in the installed
+   qtawesome/materialdesignicons set, pick any other reasonable `mdi6.*`
+   icon — this is cosmetic, not load-bearing.) This automatically gets you
+   a checkable action wired to `_set_widget_visible`, exactly like every
+   other panel — no widget-specific toggle logic needed.
+
+6. Refresh the panel whenever `Project.cellpose_data` changes. There is no
+   single funnel for this today (unlike TraceData/SpikeData/SynapseData,
+   which flow through combo-box selection) — `Project.cellpose_data` is
+   written directly in three places. Add the same one-line call at the end
+   of each:
+
+   a. `update_project()` (`gui.py:1022-1053`) — covers project load
+      (`load_project`, both the in-memory and file-path branches) and every
+      other import dialog that calls `update_project()` afterwards. Add at
+      the end of the method:
+
+          self.spatial_footprint_widget.set_data(self.project.cellpose_data)
+
+   b. `_apply_cellpose_import_result()` (`gui.py:1102-1143`) — the
+      non-resize path (the common case: cellpose import without needing to
+      grow existing stim arrays) returns WITHOUT calling `update_project()`
+      (see the early `return resized_names` inside the `if` block at line
+      1138-1139 vs. the trailing `return resized_names` at line 1143). Add
+      before the final `return resized_names`:
+
+          self.spatial_footprint_widget.set_data(self.project.cellpose_data)
+
+      Also auto-show the panel on a successful import, matching how
+      `set_synapse` auto-shows the heatmap (`gui.py:1205-1213`):
+
+          if hasattr(self, "_auto_show_widget"):
+              self._auto_show_widget(self.spatial_footprint_widget)
+
+      Add this in `btn_import_cellpose_data_clicked` right after the
+      `resized_names = self._apply_cellpose_import_result(imported)` call
+      (`gui.py:1890`), not inside `_apply_cellpose_import_result` itself —
+      the resize-confirmation branch already calls `update_project()`,
+      which will have refreshed `set_data` by the time control returns to
+      `btn_import_cellpose_data_clicked`, so gating the auto-show in one
+      place (the button handler) covers both branches.
+
+   c. `_delete_cellpose_data()` (`gui.py:1945-1949`) — add at the end:
+
+          self.spatial_footprint_widget.set_data(None)
+
+7. ADD the handler that mirrors a click's grey-state onto the trace/stim
+   rows:
+
+        def _on_neuron_greyed_out_changed(self, neuron_index: int, greyed: bool) -> None:
+            self.trace_widget.set_neuron_greyed(neuron_index, greyed)
+            self.stim_editor.stim_widget.set_neuron_greyed(neuron_index, greyed)
+
+   `set_neuron_greyed` is idempotent (see timeseries_widget.py changes
+   above), so this is safe to call even if one widget's local overlay state
+   has already been cleared by an unrelated `set_data()` call (e.g. the user
+   switched the selected trace in `cmb_trace` while a neuron was greyed —
+   see NON-GOALS for why that's an acceptable, not synchronised, corner
+   case).
+
+8. `MainWindow.closeEvent` (`gui.py:3311-3332`) explicitly closes every
+   widget in `self.plot_widgets` because embedded fastplotlib figures need
+   an explicit `.close()` before Qt tears down the window (see the comment
+   at line 3326). `spatial_footprint_widget` wraps one too (via
+   `CellOverlayWidget` → `OverlayView` → `FullScreenFPLWidget`) but isn't in
+   `plot_widgets`. Add, right after the `for widget in self.plot_widgets:`
+   loop:
+
+        self.spatial_footprint_widget.close()
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NOTES
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- Colour consistency is automatic, not something to engineer: both
+  `TraceWidget` (`neuron_indices_to_colors(self.data.indices)`,
+  `trace_widget.py:196`) and `compute_segmentation_legend` (extracted from
+  `CellOverlayWidget`) call the same `neuron_indices_to_colors` on the same
+  kind of zero-based index array. As long as the segmentation's cell ids,
+  once zero-based, line up with a neuron's `stim_id` (true whenever the
+  Cellpose import didn't need a custom remapping — the common case), the
+  cell's colour in the new panel and its trace's colour will already match
+  without any extra code. When a custom/AOI remapping IS in effect, colours
+  will diverge between the two views (the segmentation legend colours by
+  Cellpose id, not stim_id) — that's a pre-existing property of
+  `CellOverlayWidget` today (see `_get_display_legend`'s remapping branch)
+  and out of scope to change here.
+
+- `StimWidget.set_neuron_greyed` and `TraceWidget.set_neuron_greyed` are the
+  exact same inherited method — no per-widget override needed. Sanity-check
+  after implementing that the grey rectangle actually renders on top of the
+  stim image (z=250 vs. `StimWidget.STIMULUS_Z=200`/`MINIMUM_SIZE_Z=210`) and
+  underneath the hover crosshair/axes (z=300) — check by eye with
+  `uv run neuroseq` and a project that has both stim data and cellpose data
+  loaded, clicking a cell and confirming both rows visibly grey out.
+
+- The grey overlay spans the FULL time width of the widget's data
+  (`0` to `n_timestamps * dt_ms`, or the controller's `max_width` if data
+  hasn't loaded yet), not just the currently-visible/zoomed time range — so
+  panning/zooming the trace or stim view horizontally keeps the neuron
+  greyed the whole time, which matches "this neuron is excluded" semantics
+  better than a viewport-relative overlay would.
+
+- `RegionOfInterest.select(x0, x1, y0, y1)` takes world coordinates directly;
+  double-check the sign/order convention against how `self.roi.select_slice`
+  already calls it (`region_of_interest.py:57-62`) if the rendered rectangle
+  ends up in the wrong place — `y0 = neuron_index - 0.5` should end up as
+  the BOTTOM edge of the row, matching the ROI-selection convention exactly.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NON-GOALS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- SYNCHRONISING greyed state across a dataset switch. If the user greys
+  neuron 5, then picks a different entry in `cmb_trace`, `TraceWidget.clear_data()`
+  drops that neuron's overlay (same as it already drops the unrelated ROI
+  selection state today). The Spatial Footprints panel's own greyed set is
+  untouched by this — clicking the same cell again still works correctly
+  (idempotent `set_neuron_greyed` re-applies the correct state), but the
+  trace/stim panels won't "remember" the grey mark across a dataset switch
+  without a fresh click. Wiring re-application into every `set_data()` call
+  site in gui.py (`_apply_trace_selection`, `_rewindow_simulation_views`,
+  etc.) is explicitly out of scope.
+- GREYING the ID label text in the segmentation picture itself (only the
+  cell's coloured region is recoloured to grey).
+- MULTI-SELECT gestures (shift-click ranges, drag-select multiple cells,
+  "grey all" / "clear all" buttons). One click toggles one cell.
+- Any interaction with `AreasOfInterestConfig`/AOI shapes. The new panel
+  never sets `_aoi_config`, so no AOI shapes are ever drawn in it.
+- Persisting the greyed set into the `.nseq` project file. It's view-only
+  interaction state that resets when the project reloads or the app
+  restarts (consistent with the existing ROI-selection state, which also
+  isn't persisted).
+- A combo box / multi-dataset picker for the spatial footprint panel.
+  `Project.cellpose_data` is a single optional slot, not a named collection
+  like `TraceData`/`SpikeData`/`SynapseData`.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+tests/test_spatial_footprint_widget.py (new)
+
+    Build cellpose test fixtures the same way `test_cellpose_aoi_mapping.py`
+    / `test_cellpose_importer.py` do (check those files for the existing
+    helper that builds a small synthetic `CellposeImportResult` — reuse it
+    rather than hand-building segmentation arrays from scratch).
+
+    test_set_data_populates_overlay_and_clears_on_none
+        widget = SpatialFootprintWidget()
+        widget.set_data(a_cellpose_result_with_3_cells)
+        assert widget.overlay_widget.segmentation is not None
+        widget.set_data(None)
+        assert widget.overlay_widget.overlay_image is None   # or however
+            # set_empty_message's cleared state is observable — check
+            # CellOverlayWidget.set_empty_message's actual post-conditions.
+
+    test_clicking_a_cell_emits_stim_id_via_mapping
+        # cellpose ids [0, 1, 2], stimulus_to_cellpose_mapping = {0: 2, 1: 1, 2: 0}
+        # (cellpose id 2 maps to stim_id 0)
+        widget.set_data(result_with_that_mapping)
+        with qtbot.waitSignal(widget.neuron_greyed_out_changed) as blocker:
+            widget.overlay_widget.neuron_clicked.emit(2)   # simulate the click directly
+        assert blocker.args == [0, True]
+
+    test_clicking_same_cell_twice_toggles_back
+        widget.overlay_widget.neuron_clicked.emit(1)
+        widget.overlay_widget.neuron_clicked.emit(1)
+        # second call's signal args end in False
+        # and widget._greyed_cellpose_ids is empty again
+
+    test_identity_mapping_when_none_present
+        # stimulus_to_cellpose_mapping=None -> stim_id == cellpose_id
+        ...
+
+    test_greyed_cell_recolours_to_grey_in_legend
+        # After clicking cellpose id 1, call widget._refresh_overlay() (already
+        # called internally by the click handler) and inspect what was passed
+        # to overlay_widget.set_overlay — easiest via monkeypatching
+        # widget.overlay_widget.set_overlay to capture its legend_data arg,
+        # then assert the entry for id 1 is GREY_RGB_255 and others are not.
+
+    OverlayView click-detection tests (mirror the existing
+    `monkeypatch.setattr(widget.subplot, "map_screen_to_world", lambda ev: ...)`
+    pattern already used in tests/test_stim_widget.py:204-210 — do not try to
+    construct a real pygfx.PointerEvent):
+
+    test_overlay_view_emits_neuron_clicked_on_plain_click
+        overlay_view.enable_cell_selection = True
+        overlay_view.segmentation = np.array([[0, 0, 1], [0, 0, 1], [-1, -1, -1]])
+        monkeypatch.setattr(overlay_view.subplot, "map_screen_to_world", lambda ev: np.array([2.0, 0.0, 0.0]))
+        with qtbot.waitSignal(overlay_view.neuron_clicked) as blocker:
+            overlay_view._cell_selection_pointer_down(None)
+            overlay_view._cell_selection_pointer_up(None)
+        assert blocker.args == [1]
+
+    test_overlay_view_ignores_drag_past_tolerance
+        # down at one world position, up far enough away (beyond
+        # overlay_view._world_tolerance()) -> no signal emitted.
+        # Drive down/up via two different map_screen_to_world return values
+        # (monkeypatch it twice, or use a small stateful counter/side_effect).
+
+    test_overlay_view_ignores_click_when_selection_disabled
+        # enable_cell_selection stays False (the import-dialog default) ->
+        # no signal fires. This is the regression guard that the Cellpose
+        # import dialog's existing behaviour is untouched.
+
+    test_overlay_view_ignores_background_click
+        # click lands on a segmentation == -1 pixel -> no signal.
+
+tests/test_trace_widget.py — ADD
+
+    test_trace_widget_set_neuron_greyed_adds_and_removes_overlay
+        trace_widget.set_data(some_trace_data)
+        assert not trace_widget.is_neuron_greyed(2)
+        trace_widget.set_neuron_greyed(2, True)
+        assert trace_widget.is_neuron_greyed(2)
+        trace_widget.set_neuron_greyed(2, True)   # idempotent, no crash/duplicate
+        trace_widget.set_neuron_greyed(2, False)
+        assert not trace_widget.is_neuron_greyed(2)
+
+    test_trace_widget_clear_data_clears_greyed_neurons
+        trace_widget.set_neuron_greyed(1, True)
+        trace_widget.set_data(some_other_trace_data)   # or set_data(None)
+        assert not trace_widget.is_neuron_greyed(1)
+
+tests/test_stim_widget.py — ADD the mirrored pair of tests for `StimWidget`
+(same two tests, using `stim_widget.set_data(a_stim_array)`), since
+`set_neuron_greyed` is inherited from `TimeseriesWidget` but this is the
+only place `StimWidget` itself is exercised.
+
+tests/test_gui.py — ADD
+
+    test_spatial_footprint_panel_toggle_shows_and_hides
+        # find the "Show &Spatial Footprints" action the same way existing
+        # tests find "Show &Heatmap" (grep test_gui.py for that pattern),
+        # trigger it, assert main_window.spatial_footprint_widget.isVisible().
+
+    test_clicking_neuron_in_spatial_footprint_greys_trace_and_stim_rows
+        # Load (or build) a project with cellpose_data whose
+        # stimulus_to_cellpose_mapping is identity-ish, with a TraceData and
+        # a StimArray sized to match. Select them via the trace/stim combo
+        # boxes so trace_widget/stim_widget have data loaded. Emit
+        # main_window.spatial_footprint_widget.overlay_widget.neuron_clicked
+        # with a known cellpose id, then assert:
+        #     main_window.trace_widget.is_neuron_greyed(expected_stim_id)
+        #     main_window.stim_editor.stim_widget.is_neuron_greyed(expected_stim_id)
+        # Emit it again, assert both are False again.
+
+    test_import_cellpose_data_populates_and_shows_spatial_footprint_panel
+        # Drive it however existing cellpose-import gui.py tests do (grep
+        # test_gui.py for "btn_import_cellpose_data_clicked" or the dialog
+        # mocking pattern already used there) and assert
+        # main_window.spatial_footprint_widget.overlay_widget.segmentation
+        # is populated and the panel is visible afterward.
+
+    test_deleting_cellpose_data_clears_spatial_footprint_panel
+        # mirror whatever existing test already exercises
+        # _delete_cellpose_data, add an assertion that
+        # spatial_footprint_widget's overlay is cleared afterward.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    ruff check src/neuroseq/cell_overlay_widget.py src/neuroseq/timeseries_widget.py \
+               src/neuroseq/spatial_footprint_widget.py src/neuroseq/gui.py \
+               tests/test_spatial_footprint_widget.py tests/test_trace_widget.py \
+               tests/test_stim_widget.py tests/test_gui.py
+    ruff format --check src/neuroseq/cell_overlay_widget.py src/neuroseq/timeseries_widget.py \
+               src/neuroseq/spatial_footprint_widget.py src/neuroseq/gui.py \
+               tests/test_spatial_footprint_widget.py tests/test_trace_widget.py \
+               tests/test_stim_widget.py tests/test_gui.py
+    mypy --ignore-missing-imports src/neuroseq/cell_overlay_widget.py \
+               src/neuroseq/timeseries_widget.py src/neuroseq/spatial_footprint_widget.py \
+               src/neuroseq/gui.py
+    uv run pytest tests/test_spatial_footprint_widget.py -v
+    uv run pytest tests/test_trace_widget.py tests/test_stim_widget.py \
+               tests/test_cellpose_import_dialog.py tests/test_cellpose_aoi_mapping.py -v
+    uv run pytest tests/test_gui.py -v
+    uv run pytest
+
+The full suite is required at the end: `timeseries_widget.py` is a shared
+base class for `TraceWidget`, `StimWidget`, and `SpikeWidget` (NOT
+`DataWidget`, which is a plain `QWidget`), and `cell_overlay_widget.py`
+changes touch code shared with the Cellpose import dialog — regressions
+there would show up outside the files listed above.

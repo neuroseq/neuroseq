@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 
@@ -48,6 +49,9 @@ class TimeseriesWidget(FPLWidget):
     )  # data, analysis type, new window, neuron slice, time slice
     escape_pressed = QtCore.Signal()
 
+    GREYED_NEURON_Z = 250.0
+    GREYED_NEURON_FILL_COLOR = (0.5, 0.5, 0.5, 0.75)
+
     def __init__(
         self,
         controller: pygfx.Controller,
@@ -81,6 +85,7 @@ class TimeseriesWidget(FPLWidget):
         self.show_background_graphics = True
         self.mode = InteractMode.SELECT
         self.roi = RegionOfInterest(fill_color=(0.5, 0.5, 0.5, 0.2))
+        self._greyed_neuron_overlays: dict[int, RegionOfInterest] = {}
         self.hover_slice_graphic: fpl.Graphic | None = None
         self.text = Text()
         self.show_text = True
@@ -122,10 +127,11 @@ class TimeseriesWidget(FPLWidget):
     def _setup_scroll_bars(self) -> None:
         if not self._has_axis_link_controls:
             return
-        if not isinstance(self.controller, ConstrainedPanZoomController):
+        controller = self.controller
+        if not isinstance(controller, ConstrainedPanZoomController):
             return
         root_layout = self.layout()
-        if root_layout is None:
+        if not isinstance(root_layout, QtWidgets.QBoxLayout):
             return
 
         root_layout.removeWidget(self.widget)
@@ -138,21 +144,19 @@ class TimeseriesWidget(FPLWidget):
 
         self.y_scrollbar = QtWidgets.QScrollBar(QtCore.Qt.Orientation.Vertical)
         self.y_scrollbar.setFixedWidth(12)
-        self.controller.connect_y_scroll_bar(self.y_scrollbar)
+        controller.connect_y_scroll_bar(self.y_scrollbar)
         container_layout.addWidget(self.y_scrollbar, 0, 1)
 
         self.y_btn_zoom_in = QtWidgets.QPushButton("+", self.plot_container)
         self.y_btn_zoom_in.setFixedSize(14, 24)
         self.y_btn_zoom_in.setToolTip("Zoom in (Shift + Mouse Wheel Up)")
-        self.y_btn_zoom_in.clicked.connect(lambda: self.controller.zoom((0.0, 0.5), ()))
+        self.y_btn_zoom_in.clicked.connect(lambda: controller.zoom((0.0, 0.5), ()))
         container_layout.addWidget(self.y_btn_zoom_in, 1, 1)
 
         self.y_btn_zoom_out = QtWidgets.QPushButton("-", self.plot_container)
         self.y_btn_zoom_out.setFixedSize(14, 24)
         self.y_btn_zoom_out.setToolTip("Zoom out (Shift + Mouse Wheel Down)")
-        self.y_btn_zoom_out.clicked.connect(
-            lambda: self.controller.zoom((0.0, -0.5), ())
-        )
+        self.y_btn_zoom_out.clicked.connect(lambda: controller.zoom((0.0, -0.5), ()))
         container_layout.addWidget(self.y_btn_zoom_out, 2, 1)
 
         self.lock_y_checkbox = self._create_lock_button("Y")
@@ -167,21 +171,19 @@ class TimeseriesWidget(FPLWidget):
 
         self.x_scrollbar = QtWidgets.QScrollBar(QtCore.Qt.Orientation.Horizontal)
         self.x_scrollbar.setFixedHeight(12)
-        self.controller.connect_x_scroll_bar(self.x_scrollbar)
+        controller.connect_x_scroll_bar(self.x_scrollbar)
         self.x_controls_layout.addWidget(self.x_scrollbar, 1)
 
         self.x_btn_zoom_out = QtWidgets.QPushButton("-", self.plot_container)
         self.x_btn_zoom_out.setFixedSize(24, 14)
         self.x_btn_zoom_out.setToolTip("Zoom out (Ctrl + Mouse Wheel Down)")
-        self.x_btn_zoom_out.clicked.connect(
-            lambda: self.controller.zoom((-0.5, 0.0), ())
-        )
+        self.x_btn_zoom_out.clicked.connect(lambda: controller.zoom((-0.5, 0.0), ()))
         self.x_controls_layout.addWidget(self.x_btn_zoom_out)
 
         self.x_btn_zoom_in = QtWidgets.QPushButton("+", self.plot_container)
         self.x_btn_zoom_in.setFixedSize(24, 14)
         self.x_btn_zoom_in.setToolTip("Zoom in (Ctrl + Mouse Wheel Up)")
-        self.x_btn_zoom_in.clicked.connect(lambda: self.controller.zoom((0.5, 0.0), ()))
+        self.x_btn_zoom_in.clicked.connect(lambda: controller.zoom((0.5, 0.0), ()))
         self.x_controls_layout.addWidget(self.x_btn_zoom_in)
 
         self.lock_x_checkbox = self._create_lock_button("X")
@@ -533,9 +535,38 @@ class TimeseriesWidget(FPLWidget):
         self.n_timestamps = 0
         self.dt_ms = 0.0
         self.unselect_neurons()
+        self.clear_greyed_neurons()
 
     def closeEvent(self, event) -> None:
         super().closeEvent(event)
+
+    def set_neuron_greyed(self, neuron_index: int, greyed: bool) -> None:
+        """Add or remove a persistent grey overlay over one neuron's row."""
+        existing = self._greyed_neuron_overlays.get(neuron_index)
+        if greyed and existing is None:
+            overlay = RegionOfInterest(fill_color=self.GREYED_NEURON_FILL_COLOR)
+            overlay.fill.world.z = self.GREYED_NEURON_Z
+            overlay.text.world.z = self.GREYED_NEURON_Z
+            overlay.text.set_text("")
+            max_time_ms = float(self.n_timestamps) * float(self.dt_ms)
+            if isinstance(self.controller, ConstrainedPanZoomController):
+                max_time_ms = max(max_time_ms, float(self.controller.max_width))
+            overlay.select(0.0, max_time_ms, neuron_index - 0.5, neuron_index + 0.5)
+            self.subplot.add_graphic(overlay, center=False)
+            self._greyed_neuron_overlays[neuron_index] = overlay
+        elif not greyed and existing is not None:
+            with contextlib.suppress(Exception):
+                self.subplot.remove_graphic(existing)
+            del self._greyed_neuron_overlays[neuron_index]
+
+    def is_neuron_greyed(self, neuron_index: int) -> bool:
+        return neuron_index in self._greyed_neuron_overlays
+
+    def clear_greyed_neurons(self) -> None:
+        for overlay in self._greyed_neuron_overlays.values():
+            with contextlib.suppress(Exception):
+                self.subplot.remove_graphic(overlay)
+        self._greyed_neuron_overlays.clear()
 
     def set_time_ms(self, time_ms: int) -> None:
         self.timeline.t = time_ms

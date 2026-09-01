@@ -245,6 +245,41 @@ def test_stim_widget_clear_data_resets_background_stim_arrays(qtbot: QtBot) -> N
     qtbot.waitUntil(lambda: not stim_widget.isVisible())
 
 
+def test_stim_widget_set_neuron_greyed_adds_and_removes_overlay(
+    qtbot: QtBot,
+    positive_stims: StimArray,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    stim_widget.set_data(positive_stims)
+
+    assert not stim_widget.is_neuron_greyed(2)
+    stim_widget.set_neuron_greyed(2, True)
+    assert stim_widget.is_neuron_greyed(2)
+    stim_widget.set_neuron_greyed(2, True)
+    assert len(stim_widget._greyed_neuron_overlays) == 1
+    stim_widget.set_neuron_greyed(2, False)
+    assert not stim_widget.is_neuron_greyed(2)
+    stim_widget.close()
+
+
+def test_stim_widget_clear_data_clears_greyed_neurons(
+    qtbot: QtBot,
+    positive_stims: StimArray,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    stim_widget.set_data(positive_stims)
+    stim_widget.set_neuron_greyed(1, True)
+
+    stim_widget.set_data(positive_stims)
+
+    assert not stim_widget.is_neuron_greyed(1)
+    stim_widget.close()
+
+
 def test_stim_widget_gridlines_follow_stim_dt(qtbot: QtBot) -> None:
     controller = ConstrainedPanZoomController()
     stim_widget = StimWidget(controller)

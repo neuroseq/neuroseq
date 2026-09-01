@@ -37,6 +37,10 @@ class CameraState(TypedDict):
 
 
 Color = tuple[float, float, float] | tuple[float, float, float, float]
+STRIPED_CELL_GREY = (0.55, 0.55, 0.55)
+STRIPED_CELL_WHITE = (1.0, 1.0, 1.0)
+STRIPED_CELL_ALPHA = 1.0
+STRIPED_CELL_STRIPE_WIDTH = 4
 
 
 class TextGraphic(Protocol):
@@ -88,7 +92,29 @@ class _AOIDragState:
     original_config: AreasOfInterestConfig
 
 
+def compute_segmentation_legend(
+    segmentation: np.ndarray,
+) -> list[tuple[int, tuple[int, int, int]]]:
+    """Assign each segmented cell a colour keyed by its raw Cellpose id."""
+    unique_ids = np.unique(segmentation)
+    neuron_ids = [cell_id for cell_id in unique_ids if cell_id >= 0]
+    if not neuron_ids:
+        return []
+
+    zero_based = np.array(neuron_ids) - min(neuron_ids)
+    id_colors = neuron_indices_to_colors(zero_based)
+    return [
+        (
+            int(cell_id),
+            (int(c[0] * 255), int(c[1] * 255), int(c[2] * 255)),
+        )
+        for cell_id, c in zip(neuron_ids, id_colors, strict=False)
+    ]
+
+
 class OverlayView(FullScreenFPLWidget):
+    neuron_clicked = QtCore.Signal(int)
+
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent=parent)
         self.hide_controls()
@@ -99,6 +125,8 @@ class OverlayView(FullScreenFPLWidget):
         self.show_cellpose_ids = True
         self.show_stimulus_ids = False
         self.highlight_mappings = True
+        self.striped_cell_ids: set[int] = set()
+        self.striped_label_ids: set[int] = set()
         self._image_graphic: ImageGraphic | None = None
         self._segmentation_graphic: ImageGraphic | None = None
         self._label_centers: dict[int, tuple[float, float]] = {}
@@ -114,11 +142,19 @@ class OverlayView(FullScreenFPLWidget):
         self._circle_line: LineGraphic | None = None
         self._circle_handles: list[ScatterGraphic] = []
         self._drag_state: _AOIDragState | None = None
+        self.enable_cell_selection = False
+        self._cell_click_down_world: tuple[float, float] | None = None
         self.on_geometry_changed: Callable[[AreasOfInterestConfig], None] | None = None
         self._configure_subplot()
         self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
         self.figure.renderer.add_event_handler(self._aoi_pointer_down, "pointer_down")
         self.figure.renderer.add_event_handler(self._aoi_pointer_up, "pointer_up")
+        self.figure.renderer.add_event_handler(
+            self._cell_selection_pointer_down, "pointer_down"
+        )
+        self.figure.renderer.add_event_handler(
+            self._cell_selection_pointer_up, "pointer_up"
+        )
         self.setMinimumSize(QtCore.QSize(200, 200))
 
     def _configure_subplot(self) -> None:
@@ -141,6 +177,8 @@ class OverlayView(FullScreenFPLWidget):
         show_stimulus_ids: bool = False,
         highlight_mappings: bool = True,
         label_segmentation: np.ndarray | None = None,
+        striped_cell_ids: Iterable[int] | None = None,
+        striped_label_ids: Iterable[int] | None = None,
     ) -> None:
         previous_shape = (
             self.overlay_image.shape[:2] if self.overlay_image is not None else None
@@ -157,6 +195,8 @@ class OverlayView(FullScreenFPLWidget):
         self.show_cellpose_ids = show_cellpose_ids
         self.show_stimulus_ids = show_stimulus_ids
         self.highlight_mappings = highlight_mappings
+        self.striped_cell_ids = {int(cell_id) for cell_id in (striped_cell_ids or [])}
+        self.striped_label_ids = {int(cell_id) for cell_id in (striped_label_ids or [])}
 
         if overlay_image is None:
             self._reset_graphics(clear_subplot=True)
@@ -178,7 +218,9 @@ class OverlayView(FullScreenFPLWidget):
         if segmentation_for_display is not None:
             if show_segmentation:
                 color_image = self._build_segmentation_colors(
-                    segmentation_for_display, legend_data
+                    segmentation_for_display,
+                    legend_data,
+                    self.striped_cell_ids,
                 )
                 if (
                     self._segmentation_graphic is None
@@ -437,10 +479,11 @@ class OverlayView(FullScreenFPLWidget):
         self,
         segmentation: np.ndarray,
         legend_data: Iterable[tuple[int, tuple[int, int, int]]] | None,
+        striped_cell_ids: set[int] | None = None,
     ) -> np.ndarray:
         rgb = np.zeros((*segmentation.shape, 4), dtype=np.float32)
         neuron_ids = np.unique(segmentation)
-        neuron_ids = neuron_ids[neuron_ids > 0]
+        neuron_ids = neuron_ids[neuron_ids >= 0]
         if neuron_ids.size == 0:
             return rgb
 
@@ -458,6 +501,16 @@ class OverlayView(FullScreenFPLWidget):
 
         rgb[:, :, 3] = 0.4
         rgb[segmentation < 0, 3] = 0
+        if striped_cell_ids:
+            y_grid, x_grid = np.indices(segmentation.shape)
+            stripe_mask = ((x_grid + y_grid) // STRIPED_CELL_STRIPE_WIDTH) % 2 == 0
+            for neuron_id in striped_cell_ids:
+                mask = segmentation == neuron_id
+                if not np.any(mask):
+                    continue
+                rgb[mask & stripe_mask, :3] = STRIPED_CELL_GREY
+                rgb[mask & ~stripe_mask, :3] = STRIPED_CELL_WHITE
+                rgb[mask, 3] = STRIPED_CELL_ALPHA
         return rgb
 
     def _add_cell_labels(
@@ -515,6 +568,7 @@ class OverlayView(FullScreenFPLWidget):
             if stim_visible and cellpose_visible and stim_id == cellpose_id:
                 cellpose_visible = False
 
+            striped_label = cell_id in self.striped_label_ids
             base_offset = (center_x, center_y, 200.0)
             secondary_offset = (center_x + 7.25, center_y, 200.0)
             stim_offset = base_offset
@@ -535,7 +589,11 @@ class OverlayView(FullScreenFPLWidget):
                 cellpose_text = f"{cellpose_id}"
                 cellpose_face: Color
                 cellpose_outline: Color
-                if outdated_cellpose:
+                if striped_label:
+                    cellpose_face = (0.0, 0.0, 0.0, 1.0)
+                    cellpose_outline = (1.0, 1.0, 1.0, 1.0)
+                    cellpose_outline_thickness = 1.0
+                elif outdated_cellpose:
                     cellpose_face = (0.31, 0.31, 0.31, 0.6)
                     cellpose_outline = (0.8, 0.8, 0.8, 0.6)
                     cellpose_outline_thickness = 2.0
@@ -561,7 +619,11 @@ class OverlayView(FullScreenFPLWidget):
                 stim_face: Color = (0.25, 0.55, 0.9) if highlight else (0.0, 0.0, 0.0)
                 stim_outline: Color = (1.0, 1.0, 1.0)
                 stim_outline_thickness = 1.2 if mismatch else 0.6
-                if cross_out_default:
+                if striped_label:
+                    stim_face = (0.0, 0.0, 0.0, 1.0)
+                    stim_outline = (1.0, 1.0, 1.0, 1.0)
+                    stim_outline_thickness = 1.0
+                elif cross_out_default:
                     stim_face = (*stim_face, 0.25)
                     stim_outline = (*stim_outline, 0.25)
                 stim_graphic = graphics["stim"]
@@ -682,6 +744,45 @@ class OverlayView(FullScreenFPLWidget):
             assert config is not None
             self.on_geometry_changed(config)
         ev.stop_propagation()
+
+    def _cell_selection_pointer_down(self, ev: pygfx.PointerEvent) -> None:
+        if not self.enable_cell_selection or self.segmentation is None:
+            return
+        mouse_pos = self.subplot.map_screen_to_world(ev)
+        if mouse_pos is None:
+            return
+        self._cell_click_down_world = (float(mouse_pos[0]), float(mouse_pos[1]))
+
+    def _cell_selection_pointer_up(self, ev: pygfx.PointerEvent) -> None:
+        if not self.enable_cell_selection or self._cell_click_down_world is None:
+            return
+        down_x, down_y = self._cell_click_down_world
+        self._cell_click_down_world = None
+        mouse_pos = self.subplot.map_screen_to_world(ev)
+        if mouse_pos is None:
+            return
+        if (
+            math.hypot(float(mouse_pos[0]) - down_x, float(mouse_pos[1]) - down_y)
+            > self._world_tolerance()
+        ):
+            return
+        cellpose_id = self._segmentation_id_at(float(mouse_pos[0]), float(mouse_pos[1]))
+        if cellpose_id is not None:
+            self.neuron_clicked.emit(cellpose_id)
+
+    def _segmentation_id_at(self, world_x: float, world_y: float) -> int | None:
+        if self.segmentation is None:
+            return None
+        x, y = int(world_x), int(world_y)
+        if (
+            x < 0
+            or y < 0
+            or y >= self.segmentation.shape[0]
+            or x >= self.segmentation.shape[1]
+        ):
+            return None
+        cell_id = int(self.segmentation[y, x])
+        return cell_id if cell_id >= 0 else None
 
     def _aoi_hit_test(self, world_x: float, world_y: float) -> tuple[str, str] | None:
         if self._aoi_config is None or self.overlay_image is None:
@@ -931,6 +1032,7 @@ class OverlayView(FullScreenFPLWidget):
 
 class CellOverlayWidget(QtWidgets.QGroupBox):
     aoi_geometry_changed = QtCore.Signal(object)
+    neuron_clicked = QtCore.Signal(int)
 
     def __init__(self, title: str = "Color-coded Preview") -> None:
         super().__init__(title)
@@ -945,6 +1047,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.show_stimulus_ids = False
         self.show_segmentation = True
         self.highlight_mappings = True
+        self.striped_cell_ids: set[int] = set()
         self._aoi_config: AreasOfInterestConfig | None = None
         self._show_aoi = True
         self._setup_ui()
@@ -961,6 +1064,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.overlay_view.on_geometry_changed = lambda config: (
             self.aoi_geometry_changed.emit(config)
         )
+        self.overlay_view.neuron_clicked.connect(self.neuron_clicked.emit)
         layout.addWidget(self.overlay_view)
         self.logger.info(
             "overlay ui: widget=%sx%s view=%sx%s",
@@ -970,24 +1074,6 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             self.overlay_view.height(),
         )
 
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        target_width = max(1, self.width())
-        target_height = max(1, self.height())
-        self.overlay_view.setFixedSize(target_width, target_height)
-        self.overlay_view.widget.setFixedSize(target_width, target_height)
-        self.overlay_view.updateGeometry()
-        self.overlay_view.widget.updateGeometry()
-        self.logger.info(
-            "overlay resize: widget=%sx%s view=%sx%s canvas=%sx%s",
-            self.width(),
-            self.height(),
-            self.overlay_view.width(),
-            self.overlay_view.height(),
-            self.overlay_view.widget.width(),
-            self.overlay_view.widget.height(),
-        )
-
     def _update_overlay_display(self) -> None:
         display_segmentation = self._get_display_segmentation()
         display_legend = (
@@ -995,6 +1081,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             if not self.show_segmentation
             else self._get_display_legend(display_segmentation)
         )
+        display_striped_cell_ids = self._get_display_striped_cell_ids()
         if self.show_segmentation or self.base_image is None:
             image_to_show = self.overlay_image
         else:
@@ -1009,6 +1096,8 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             show_stimulus_ids=self.show_stimulus_ids,
             highlight_mappings=self.highlight_mappings,
             label_segmentation=self.segmentation,
+            striped_cell_ids=display_striped_cell_ids,
+            striped_label_ids=self.striped_cell_ids,
         )
         self.overlay_view.set_aoi_shapes(self._aoi_config, self._show_aoi)
 
@@ -1054,6 +1143,22 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
 
         return list(self.legend_data)
 
+    def _get_display_striped_cell_ids(self) -> set[int]:
+        if not self.striped_cell_ids:
+            return set()
+
+        if not self.show_stimulus_ids or self.stimulus_to_cellpose_mapping is None:
+            return set(self.striped_cell_ids)
+
+        cellpose_to_stimulus = {
+            v: k for k, v in self.stimulus_to_cellpose_mapping.items()
+        }
+        return {
+            int(stimulus_id)
+            for cellpose_id in self.striped_cell_ids
+            if (stimulus_id := cellpose_to_stimulus.get(cellpose_id)) is not None
+        }
+
     def set_overlay(
         self,
         overlay_image: np.ndarray | None,
@@ -1063,6 +1168,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         legend_data: Iterable[tuple[int, tuple[int, int, int]]] | None = None,
         base_image: np.ndarray | None = None,
         highlight_mappings: bool | None = None,
+        striped_cell_ids: Iterable[int] | None = None,
     ) -> None:
         self.logger.info(
             "set_overlay: image=%s seg=%s widget=%sx%s show_seg=%s show_cellpose=%s show_stim=%s",
@@ -1080,6 +1186,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.original_cellpose_ids = original_cellpose_ids
         self.stimulus_to_cellpose_mapping = stimulus_to_cellpose_mapping
         self.base_image = base_image
+        self.striped_cell_ids = {int(cell_id) for cell_id in (striped_cell_ids or [])}
         if highlight_mappings is not None:
             self.highlight_mappings = highlight_mappings
 
@@ -1103,6 +1210,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.original_cellpose_ids = None
         self.stimulus_to_cellpose_mapping = None
         self.highlight_mappings = True
+        self.striped_cell_ids = set()
         self._aoi_config = None
         self._show_aoi = False
         self.overlay_view.add_overlay_data(
@@ -1136,24 +1244,17 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             self.show_segmentation = show_segmentation
         self._update_overlay_display()
 
+    def set_cell_selection_enabled(self, enabled: bool) -> None:
+        self.overlay_view.enable_cell_selection = enabled
+
     def _compute_segementation_colors(
         self, segmentation: np.ndarray
     ) -> list[tuple[int, tuple[int, int, int]]]:
-        unique_ids = np.unique(segmentation)
-        neuron_ids = [cell_id for cell_id in unique_ids if cell_id >= 0]
-        if not neuron_ids:
-            return []
-
-        zero_based = np.array(neuron_ids) - min(neuron_ids)
-        id_colors = neuron_indices_to_colors(zero_based)
-
-        legend: list[tuple[int, tuple[int, int, int]]] = []
-        for cell_id, color in zip(neuron_ids, id_colors, strict=False):
-            rgb_255 = (int(color[0] * 255), int(color[1] * 255), int(color[2] * 255))
-            legend.append((int(cell_id), rgb_255))
-        return legend
+        return compute_segmentation_legend(segmentation)
 
     def closeEvent(self, event):
         # explicitly close all fastplotlib figures to avoid renderer trying to access them after they have been destroyed
-        self.overlay_view.close()
+        overlay_view = getattr(self, "overlay_view", None)
+        if overlay_view is not None:
+            overlay_view.close()
         super().closeEvent(event)

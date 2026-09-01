@@ -311,6 +311,169 @@ def test_gui_open_fiji_and_cellpose_buttons(
     gui.close()
 
 
+def _make_gui_cellpose_result(
+    mapping: dict[int, int] | None = None,
+) -> CellposeImportResult:
+    segmentation = np.array(
+        [
+            [0, 0, 1],
+            [0, 2, 2],
+            [-1, -1, -1],
+        ],
+        dtype=np.int32,
+    )
+    return CellposeImportResult(
+        image_path=Path("cellpose.png"),
+        segmentation_array=segmentation,
+        overlay_image=np.zeros((3, 3, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.array([0, 1, 2], dtype=np.int32),
+        stimulus_to_cellpose_mapping=mapping,
+    )
+
+
+def test_spatial_footprint_panel_toggle_shows_and_hides(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    action = gui._view_actions[gui.spatial_footprint_widget]
+
+    assert action.text() == "Show &Spatial Footprints"
+    assert action.isChecked()
+    assert gui.spatial_footprint_widget.isVisible()
+
+    action.trigger()
+    assert not action.isChecked()
+    assert not gui.spatial_footprint_widget.isVisible()
+
+    action.trigger()
+    assert action.isChecked()
+    assert gui.spatial_footprint_widget.isVisible()
+    gui.close()
+
+
+def test_clicking_neuron_in_spatial_footprint_greys_trace_and_stim_rows(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "stim",
+            StimType.Excitation,
+            np.zeros((10, 3), dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+    trace_data = TraceData(
+        name="traces",
+        traces=np.zeros((3, 10), dtype=np.float32),
+        indices=np.arange(3, dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    project.add_experiment(
+        Experiment(
+            name="Experiment",
+            duration=0.01,
+            timepoints=[0.01],
+            data=[trace_data],
+        )
+    )
+    project.cellpose_data = _make_gui_cellpose_result(mapping={0: 2, 1: 1, 2: 0})
+
+    gui.update_project(project)
+    gui._apply_trace_selection("Experiment :: traces")
+
+    gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(2)
+
+    assert gui.trace_widget.is_neuron_greyed(0)
+    assert gui.stim_editor.stim_widget.is_neuron_greyed(0)
+
+    gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(2)
+
+    assert not gui.trace_widget.is_neuron_greyed(0)
+    assert not gui.stim_editor.stim_widget.is_neuron_greyed(0)
+    gui.close()
+
+
+def test_import_cellpose_data_populates_and_shows_spatial_footprint_panel(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    imported = _make_gui_cellpose_result()
+
+    class _FakeDialog:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            return
+
+        def exec(self) -> QtWidgets.QDialog.DialogCode:
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+        def get_imported_data(self) -> CellposeImportResult:
+            return imported
+
+    monkeypatch.setattr("neuroseq.gui.CellposeImportDialog", _FakeDialog)
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    gui.btn_import_cellpose_data_clicked()
+
+    assert gui.spatial_footprint_widget.overlay_widget.segmentation is not None
+    assert gui.spatial_footprint_widget.empty_state_widget.isHidden()
+    assert not gui.spatial_footprint_widget.overlay_widget.isHidden()
+    assert gui.spatial_footprint_widget.isVisible()
+    gui.close()
+
+
+def test_spatial_footprint_empty_button_opens_cellpose_import(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    imported = _make_gui_cellpose_result()
+
+    class _FakeDialog:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            return
+
+        def exec(self) -> QtWidgets.QDialog.DialogCode:
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+        def get_imported_data(self) -> CellposeImportResult:
+            return imported
+
+    monkeypatch.setattr("neuroseq.gui.CellposeImportDialog", _FakeDialog)
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    gui.spatial_footprint_widget.import_button.click()
+
+    assert gui.project.cellpose_data is not None
+    assert gui.project.cellpose_data.image_path == imported.image_path
+    assert gui.spatial_footprint_widget.overlay_widget.segmentation is not None
+    assert gui.spatial_footprint_widget.empty_state_widget.isHidden()
+    assert not gui.spatial_footprint_widget.overlay_widget.isHidden()
+    gui.close()
+
+
+def test_deleting_cellpose_data_clears_spatial_footprint_panel(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    gui.project.cellpose_data = _make_gui_cellpose_result()
+    gui.spatial_footprint_widget.set_data(gui.project.cellpose_data)
+
+    gui._delete_cellpose_data()
+
+    assert gui.project.cellpose_data is None
+    assert gui.spatial_footprint_widget.overlay_widget.overlay_image is None
+    assert gui.spatial_footprint_widget.overlay_widget.segmentation is None
+    assert not gui.spatial_footprint_widget.empty_state_widget.isHidden()
+    assert gui.spatial_footprint_widget.overlay_widget.isHidden()
+    gui.close()
+
+
 def test_gui_choose_fiji_path_forces_prompt(
     qtbot: QtBot, monkeypatch: MonkeyPatch
 ) -> None:

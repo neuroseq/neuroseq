@@ -90,6 +90,13 @@ class TraceWidget(TimeseriesWidget):
 
     vector_export_requested = QtCore.Signal()
 
+    # Line thickness is expressed in screen pixels. Below this fraction of a
+    # neuron's pixel band, adjacent traces' strokes start to touch; above the
+    # default thickness there's nothing to gain from thickening further.
+    _THICKNESS_BAND_FRACTION = 0.7
+    _MIN_LINE_THICKNESS = 1.0
+    _MAX_LINE_THICKNESS = 2.0
+
     def __init__(
         self,
         controller: pygfx.Controller,
@@ -108,6 +115,53 @@ class TraceWidget(TimeseriesWidget):
         self.offset_by_median = True
         self.clip = True
         self._trace_norm_dialog: TraceNormDialog | None = None
+        if isinstance(self.controller, ConstrainedPanZoomController):
+            self.controller.add_state_change_listener(self._update_line_thickness)
+
+    def closeEvent(self, event) -> None:
+        if isinstance(self.controller, ConstrainedPanZoomController):
+            self.controller.remove_state_change_listener(self._update_line_thickness)
+        super().closeEvent(event)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_line_thickness()
+
+    def _update_line_thickness(self) -> None:
+        """Shrink line thickness once a neuron's pixel band gets thinner than the stroke.
+
+        At the default zoom (or zoomed into a handful of neurons) this clamps
+        to the default thickness, so nothing changes. Once the view is zoomed
+        out far enough that a neuron's band maps to fewer screen pixels than
+        the stroke width, adjacent traces would otherwise bleed into each
+        other's band; shrinking the stroke along with the band keeps them
+        visually separated for as long as that's physically possible.
+        """
+        if self.graphic is None or not isinstance(
+            self.controller, ConstrainedPanZoomController
+        ):
+            return
+        # _get_camera_state() reads the live pygfx camera, which state-change
+        # listeners can be notified ahead of (_update_cameras() applies pending
+        # state after _notify_state_change() fires); _last_cam_state is the
+        # pending state itself, so it's always current.
+        camera_state = self.controller._last_cam_state
+        if "height" not in camera_state:
+            return
+        visible_neurons = float(camera_state["height"])
+        render_height = self.subplot.frame.get_render_rect()[3]
+        if visible_neurons <= 0 or render_height <= 0:
+            return
+        pixels_per_band = render_height / visible_neurons
+        thickness = float(
+            np.clip(
+                pixels_per_band * self._THICKNESS_BAND_FRACTION,
+                self._MIN_LINE_THICKNESS,
+                self._MAX_LINE_THICKNESS,
+            )
+        )
+        for line in self.graphic.graphics:
+            line.thickness = thickness
 
     def trace_norm_dialog(self) -> None:
         if self._trace_norm_dialog is None:
@@ -199,4 +253,5 @@ class TraceWidget(TimeseriesWidget):
         )
         for i, line in enumerate(self.graphic.graphics):
             line.offset = (line.offset[0], self.data.indices[i], line.offset[2])
+        self._update_line_thickness()
         self.post_set_data()
