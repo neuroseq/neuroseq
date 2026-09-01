@@ -214,6 +214,41 @@ def test_trace_widget_clear_data_releases_plot_buffers(qtbot: QtBot) -> None:
     assert trace_widget.grid_lines is None
 
 
+def test_trace_widget_set_neuron_greyed_adds_and_removes_overlay(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+
+    assert not trace_widget.is_neuron_greyed(2)
+    trace_widget.set_neuron_greyed(2, True)
+    assert trace_widget.is_neuron_greyed(2)
+    trace_widget.set_neuron_greyed(2, True)
+    assert len(trace_widget._greyed_neuron_overlays) == 1
+    trace_widget.set_neuron_greyed(2, False)
+    assert not trace_widget.is_neuron_greyed(2)
+    trace_widget.close()
+
+
+def test_trace_widget_clear_data_clears_greyed_neurons(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+    trace_widget.set_neuron_greyed(1, True)
+
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+
+    assert not trace_widget.is_neuron_greyed(1)
+    trace_widget.close()
+
+
 def test_trace_widget(qtbot: QtBot) -> None:
     controller = ConstrainedPanZoomController()
     trace_widget = TraceWidget(controller)
@@ -393,6 +428,45 @@ def test_trace_widget_set_grid_visible(qtbot: QtBot) -> None:
     trace_widget.set_grid_visible(True)
     assert trace_widget.grid_lines is not None
     assert trace_widget.grid_lines.visible
+    trace_widget.close()
+
+
+def test_trace_widget_shrinks_line_thickness_when_zoomed_out(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    n_neurons = 300
+    data = TraceData(
+        name="traces",
+        traces=np.random.rand(n_neurons, 20).astype(np.float32),
+        indices=np.arange(n_neurons, dtype=np.uint32),
+        dt=0.001,
+        units="mV",
+    )
+    controller.set_limits(max_time_secs=1.0, max_neurons=n_neurons)
+    trace_widget.set_data(data)
+    # pin the render area so the test doesn't depend on real canvas resize timing
+    monkeypatch.setattr(
+        trace_widget.subplot.frame,
+        "get_render_rect",
+        lambda: (0.0, 0.0, 800.0, 600.0),
+    )
+
+    # 300 neurons in a 600px view is 2px/band; 0.7 * 2px clamps into (1, 2)
+    controller.focus_neuron_range(0, n_neurons)
+    assert trace_widget.graphic is not None
+    assert trace_widget.graphic.graphics[0].thickness == pytest.approx(1.4)
+
+    # a handful of neurons have plenty of room, so thickness reverts to the default
+    controller.focus_neuron_range(0, 3)
+    assert trace_widget.graphic.graphics[0].thickness == pytest.approx(
+        trace_widget._MAX_LINE_THICKNESS
+    )
+
+    controller.focus_neuron_range(0, n_neurons)
+    assert trace_widget.graphic.graphics[0].thickness == pytest.approx(1.4)
     trace_widget.close()
 
 

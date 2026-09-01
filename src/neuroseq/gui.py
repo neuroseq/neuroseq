@@ -55,6 +55,7 @@ from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
 from neuroseq.project import Project
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.save_load_options import SaveLoadOptionsDialog
+from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim_editor import StimEditor
 from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
@@ -347,6 +348,13 @@ class Gui(QtWidgets.QMainWindow):
             show_axis_link_controls=True,
         )
         self.heatmap_widget = HeatmapWidget(parent=self)
+        self.spatial_footprint_widget = SpatialFootprintWidget(parent=self)
+        self.spatial_footprint_widget.import_requested.connect(
+            self.btn_import_cellpose_data_clicked
+        )
+        self.spatial_footprint_widget.neuron_greyed_out_changed.connect(
+            self._on_neuron_greyed_out_changed
+        )
         self._create_menus_and_toolbars()
         self.setWindowIcon(qta.icon("fa6s.brain"))
         main_horizontal_layout = QtWidgets.QHBoxLayout()
@@ -360,6 +368,7 @@ class Gui(QtWidgets.QMainWindow):
         # left/right splitters between heatmap and console
         split_left_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         split_left_right.addWidget(self.heatmap_widget)
+        split_left_right.addWidget(self.spatial_footprint_widget)
         self.custom_analysis_widget = CustomAnalysisWidget(parent=self)
         split_left_right.addWidget(self.custom_analysis_widget)
         self.console_widget = ConsoleWidget(parent=self)
@@ -368,7 +377,7 @@ class Gui(QtWidgets.QMainWindow):
         self.chat_widget.setVisible(False)
         self.chat_widget.request_settings_dialog.connect(self.open_llm_settings)
         split_left_right.addWidget(self.chat_widget)
-        split_left_right.setSizes([1000, 1000, 1000, 1000])
+        split_left_right.setSizes([1000, 1000, 1000, 1000, 1000])
         # main vertical splitter layout
         split_vertical = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         split_vertical.setHandleWidth(0)
@@ -423,6 +432,7 @@ class Gui(QtWidgets.QMainWindow):
         self.trace_widget.setVisible(False)
         self.spike_widget.setVisible(False)
         self.heatmap_widget.setVisible(False)
+        self.spatial_footprint_widget.setVisible(True)
         self.custom_analysis_widget.setVisible(False)
         # heatmap / custom analysis widget / console
         split_vertical.addWidget(split_left_right)
@@ -528,6 +538,8 @@ class Gui(QtWidgets.QMainWindow):
         self.update_limits()
         self._update_combo_boxes()
         self._refresh_elise_replay_action()
+        if hasattr(self, "spatial_footprint_widget"):
+            self.spatial_footprint_widget.set_data(self.project.cellpose_data)
 
     def _update_combo_box(
         self,
@@ -1051,6 +1063,8 @@ class Gui(QtWidgets.QMainWindow):
         self.chat_widget.set_project(self.project)
         self._update_combo_boxes()
         self._refresh_elise_replay_action()
+        if hasattr(self, "spatial_footprint_widget"):
+            self.spatial_footprint_widget.set_data(self.project.cellpose_data)
 
     def _cellpose_neuron_count(self, imported: CellposeImportResult | None) -> int:
         if imported is None:
@@ -1140,6 +1154,8 @@ class Gui(QtWidgets.QMainWindow):
 
         self.project.update_limits()
         self.update_limits()
+        if hasattr(self, "spatial_footprint_widget"):
+            self.spatial_footprint_widget.set_data(self.project.cellpose_data)
         return resized_names
 
     def _focus_neuron_range(self, n_neurons: int) -> None:
@@ -1211,6 +1227,14 @@ class Gui(QtWidgets.QMainWindow):
         self.heatmap_widget.set_data(data)
         if data is not None and hasattr(self, "_auto_show_widget"):
             self._auto_show_widget(self.heatmap_widget)
+
+    def _on_neuron_greyed_out_changed(
+        self,
+        neuron_index: int,
+        greyed: bool,
+    ) -> None:
+        self.trace_widget.set_neuron_greyed(neuron_index, greyed)
+        self.stim_editor.stim_widget.set_neuron_greyed(neuron_index, greyed)
 
     def _apply_spike_selection(self, cmb_name: str) -> None:
         data = self.project.get_data(cmb_name, SpikeData)
@@ -1888,6 +1912,8 @@ class Gui(QtWidgets.QMainWindow):
             if imported is None:
                 return
             resized_names = self._apply_cellpose_import_result(imported)
+            if hasattr(self, "_auto_show_widget"):
+                self._auto_show_widget(self.spatial_footprint_widget)
             message = "Cell spatial footprints loaded."
             if resized_names:
                 detected_neurons = self._cellpose_neuron_count(
@@ -1947,6 +1973,8 @@ class Gui(QtWidgets.QMainWindow):
         self.last_cellpose_import = None
         if self.project is not None:
             self.project.cellpose_data = None
+        if hasattr(self, "spatial_footprint_widget"):
+            self.spatial_footprint_widget.set_data(None)
 
     def btn_import_patchclamp_data_clicked(self) -> None:
         dialog = PatchClampImportDialog(
@@ -2681,6 +2709,12 @@ class Gui(QtWidgets.QMainWindow):
             ("&Data", self.data_widget, "mdi6.chart-donut", False),
             ("&Heatmap", self.heatmap_widget, "mdi6.data-matrix", False),
             (
+                "&Spatial Footprints",
+                self.spatial_footprint_widget,
+                "mdi6.map-marker-radius",
+                True,
+            ),
+            (
                 "&Custom Analysis",
                 self.custom_analysis_widget,
                 "mdi6.chart-histogram",
@@ -3326,6 +3360,7 @@ class Gui(QtWidgets.QMainWindow):
         # explicitly close all fastplotlib figures to avoid renderer trying to access them after they have been destroyed
         for widget in self.plot_widgets:
             widget.close()
+        self.spatial_footprint_widget.close()
         # Close any detached analysis windows that are parented to this GUI.
         for analysis_window in self.findChildren(CustomAnalysisWindow):
             analysis_window.close()
