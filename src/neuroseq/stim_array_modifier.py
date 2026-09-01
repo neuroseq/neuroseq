@@ -59,7 +59,7 @@ class ResizableReversibleAction:
         self,
         project: Project,
         target_stim_name: str,
-        neuron_slice: slice,
+        neuron_slice: slice | list[int],
         time_slice: slice,
         new_values: np.ndarray,
         stim_widget: StimWidget,

@@ -211,6 +211,36 @@ def test_dialog_specific_multiple_neurons_and_range(qtbot: QtBot) -> None:
         assert np.all(values[:, col] == 0.0)
 
 
+def test_dialog_specific_neuron_does_not_erase_other_neurons_same_window(
+    qtbot: QtBot,
+) -> None:
+    """Regression test for issue #517.
+
+    Applying a specific-neuron pattern must not clear a pre-existing
+    stimulus on a different neuron in the same time window.
+    """
+    editor, project = _make_editor(qtbot, length_samples=1000)
+    dialog = _open_dialog(editor)
+
+    dialog.radio_scope_specific.setChecked(True)
+    dialog.edit_neuron_indices.setText("1")
+    dialog.radio_constant.setChecked(True)
+    dialog.spin_magnitude.setValue(0.7)
+    dialog.spin_repeats.setValue(1)
+    dialog.spin_start_time_ms.setValue(0)
+    dialog.btn_apply.click()
+    neuron_1_values = project.stim_arrays["a"].values[:, 1].copy()
+    assert np.any(neuron_1_values != 0.0)
+
+    dialog.edit_neuron_indices.setText("2")
+    dialog.spin_start_time_ms.setValue(0)
+    dialog.btn_apply.click()
+
+    values = project.stim_arrays["a"].values
+    np.testing.assert_allclose(values[:, 1], neuron_1_values)
+    assert np.any(values[:, 2] != 0.0)
+
+
 def test_dialog_specific_invalid_index_shows_warning_and_no_change(
     qtbot: QtBot,
     qmessagebox_calls: list[dict[str, str]],

@@ -370,9 +370,18 @@ class StimPatternDialog(QtWidgets.QDialog):
             round(self.spin_start_time_ms.value() / 1000.0 / dt_seconds)
         )
         end_samples = start_samples + pattern.shape[0]
+        # generate_ramp/generate_per_neuron fill unselected columns with zeros,
+        # so writing the full neuron range would erase other neurons' existing
+        # stimuli in this window. Restrict the write to the selected neurons.
+        if neuron_indices is not None:
+            neuron_target: slice | list[int] = neuron_indices
+            values_to_apply = pattern[:, neuron_indices]
+        else:
+            neuron_target = slice(0, n_neurons)
+            values_to_apply = pattern
         self.editor.apply_pattern(
-            slice(0, n_neurons),
+            neuron_target,
             slice(start_samples, end_samples),
-            pattern,
+            values_to_apply,
         )
         self.spin_start_time_ms.setValue(end_samples * dt_seconds * 1000.0)
