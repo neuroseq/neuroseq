@@ -1202,7 +1202,7 @@ class StimEditor(QtWidgets.QWidget):
 
     def apply_pattern(
         self,
-        neuron_slice: slice,
+        neuron_slice: slice | list[int],
         time_slice: slice,
         new_values: np.ndarray,
     ) -> None:

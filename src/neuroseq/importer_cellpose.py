@@ -93,8 +93,8 @@ def default_aoi_config(image_shape: tuple[int, int]) -> AreasOfInterestConfig:
     """Return the default AOI config centred within the field of view."""
     h, w = image_shape[:2]
     short = min(h, w)
-    circle_d = short / 8.0
-    square_s = 0.7 * short
+    circle_d = 0.095 * short
+    square_s = 0.5 * short
     return AreasOfInterestConfig(
         square=SquareAOI(
             enabled=True,
