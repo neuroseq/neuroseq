@@ -12,6 +12,13 @@ from __future__ import annotations
 # detection (picks the CUDA wheel matching the machine's driver, or CPU if none).
 INSTALL_GPU_TORCH_HINT = "uv pip install --torch-backend=auto torch"
 
+# Fallback for environments not managed by uv (e.g. a conda env NeuroSeq was
+# installed into with plain pip) — uv's auto backend detection doesn't apply there.
+INSTALL_GPU_TORCH_HINT_PIP = (
+    "pip install torch torchvision torchaudio "
+    "--index-url https://download.pytorch.org/whl/cu128"
+)
+
 
 def torch_gpu_status() -> tuple[bool, str]:
     """Return ``(gpu_available, message)`` for the installed PyTorch.
@@ -49,6 +56,9 @@ def torch_gpu_status() -> tuple[bool, str]:
         "To enable the GPU on a machine with an NVIDIA (or Apple-Silicon) GPU, "
         "install a GPU build of PyTorch into this environment:\n"
         f"    {INSTALL_GPU_TORCH_HINT}\n\n"
+        "Not using uv (e.g. NeuroSeq is installed into a conda environment)? "
+        "Install directly with pip instead:\n"
+        f"    {INSTALL_GPU_TORCH_HINT_PIP}\n\n"
         "Note: Cellpose can use only NVIDIA (CUDA) and Apple (MPS) GPUs — Intel "
         "integrated graphics are not supported."
     )

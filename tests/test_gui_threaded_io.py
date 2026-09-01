@@ -109,6 +109,7 @@ def test_file_menu_disabled_during_save(
     assert not gui.menu_file.isEnabled()
     assert not gui.toolbar_file.isEnabled()
     assert not gui.continue_simulation_action.isEnabled()
+    assert not gui.tab_bar.isEnabled()
 
     block.set()
     qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
@@ -116,6 +117,7 @@ def test_file_menu_disabled_during_save(
     assert gui.menu_file.isEnabled()
     assert gui.toolbar_file.isEnabled()
     assert gui.continue_simulation_action.isEnabled()
+    assert gui.tab_bar.isEnabled()
 
 
 def test_save_failure_surfaces_error_and_keeps_ui_unfrozen(

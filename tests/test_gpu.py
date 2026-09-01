@@ -48,6 +48,7 @@ def test_torch_gpu_status_mps(monkeypatch):
 
 def test_torch_gpu_status_cpu_only_gives_install_hint(monkeypatch):
     from neuroseq.gpu import INSTALL_GPU_TORCH_HINT
+    from neuroseq.gpu import INSTALL_GPU_TORCH_HINT_PIP
     from neuroseq.gpu import torch_gpu_status
 
     monkeypatch.setitem(
@@ -58,6 +59,9 @@ def test_torch_gpu_status_cpu_only_gives_install_hint(monkeypatch):
     assert "2.13.0+cpu" in message
     assert "CPU-only" in message
     assert INSTALL_GPU_TORCH_HINT in message
+    assert (
+        INSTALL_GPU_TORCH_HINT_PIP in message
+    )  # fallback for non-uv (e.g. conda) envs
     assert "Intel" in message  # explains Intel iGPUs are unsupported
 
 
