@@ -328,7 +328,10 @@ class Gui(QtWidgets.QMainWindow):
         self.status_bar = QtWidgets.QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.addPermanentWidget(ResourceMonitorLabel())
-        self.project = Project()
+        # Each open project lives in its own browser-style tab; ``self.project``
+        # (see the property below) always refers to the active tab's project.
+        self.tabs: list[Project] = [Project()]
+        self._active_tab_index = 0
         self.setWindowTitle("NeuroSeq")
         self.cmb_trace = QtWidgets.QComboBox()
         self.cmb_trace.setMinimumWidth(120)
@@ -357,6 +360,14 @@ class Gui(QtWidgets.QMainWindow):
         )
         self._create_menus_and_toolbars()
         self.setWindowIcon(qta.icon("fa6s.brain"))
+        self.tab_bar = QtWidgets.QTabBar()
+        self.tab_bar.setTabsClosable(True)
+        self.tab_bar.setMovable(True)
+        self.tab_bar.setExpanding(False)
+        self.tab_bar.setDocumentMode(True)
+        self.tab_bar.addTab(self._tab_label_for(self.tabs[0]))
+        self.tab_bar.currentChanged.connect(self._on_tab_bar_current_changed)
+        self.tab_bar.tabCloseRequested.connect(self._close_tab)
         main_horizontal_layout = QtWidgets.QHBoxLayout()
         central_widget = QtWidgets.QWidget()
         central_widget.setLayout(main_horizontal_layout)
@@ -437,7 +448,13 @@ class Gui(QtWidgets.QMainWindow):
         # heatmap / custom analysis widget / console
         split_vertical.addWidget(split_left_right)
         main_horizontal_layout.addWidget(split_vertical)
-        self.setCentralWidget(central_widget)
+        outer_widget = QtWidgets.QWidget()
+        outer_layout = QtWidgets.QVBoxLayout(outer_widget)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+        outer_layout.addWidget(self.tab_bar)
+        outer_layout.addWidget(central_widget)
+        self.setCentralWidget(outer_widget)
         self._create_actions()
         self.showMaximized()
         self._create_progressbar()
@@ -490,10 +507,64 @@ class Gui(QtWidgets.QMainWindow):
         self._io_failure_prefix = "The file operation could not complete:"
         self._close_confirmed = False
         if filename is not None:
-            self.load_project(filename)
+            self.load_project(filename, new_tab=False)
         else:
-            self.load_project(default_project())
+            self.load_project(default_project(), new_tab=False)
         self.apply_theme(self.settings.theme)
+
+    @property
+    def project(self) -> Project:
+        return self.tabs[self._active_tab_index]
+
+    @project.setter
+    def project(self, value: Project) -> None:
+        self.tabs[self._active_tab_index] = value
+
+    def _tab_label_for(self, project: Project) -> str:
+        if project.filepath is not None:
+            return pathlib.Path(project.filepath).name
+        if project.project_section and project.project_name:
+            return f"{project.project_section} / {project.project_name}"
+        return project.b2_model.name or "Untitled"
+
+    def _activate_tab_index(self, index: int, reset_controller: bool = False) -> None:
+        self._active_tab_index = index
+        self.update_project(self.tabs[index], reset_controller=reset_controller)
+
+    def _on_tab_bar_current_changed(self, index: int) -> None:
+        if index < 0 or index >= len(self.tabs) or index == self._active_tab_index:
+            return
+        self._activate_tab_index(index, reset_controller=True)
+
+    def _open_project_in_new_tab(
+        self, project: Project, reset_controller: bool = True
+    ) -> None:
+        self.tabs.append(project)
+        index = len(self.tabs) - 1
+        self.tab_bar.blockSignals(True)
+        self.tab_bar.addTab(self._tab_label_for(project))
+        self.tab_bar.setCurrentIndex(index)
+        self.tab_bar.blockSignals(False)
+        self._activate_tab_index(index, reset_controller=reset_controller)
+
+    def _close_tab(self, index: int) -> None:
+        if index < 0 or index >= len(self.tabs):
+            return
+        if index != self._active_tab_index:
+            self.tab_bar.setCurrentIndex(index)
+        self._prompt_save_before_action(
+            "Close tab",
+            "Closing this tab will discard any unsaved changes to its "
+            "project.\n\nSave the project first?",
+            lambda: self._remove_tab(index),
+        )
+
+    def _remove_tab(self, index: int) -> None:
+        if len(self.tabs) == 1:
+            self.update_project(default_project(), reset_controller=True)
+            return
+        del self.tabs[index]
+        self.tab_bar.removeTab(index)
 
     def update_limits(self) -> None:
         max_time_secs = float(self.project.max_time_secs)
@@ -603,20 +674,28 @@ class Gui(QtWidgets.QMainWindow):
         proceed()
 
     def btn_new_clicked(self) -> None:
-        self._prompt_save_before_action(
-            "Start a new project",
-            "Starting a new project will discard any unsaved changes to the "
-            "current project.\n\nSave the current project first?",
-            self._create_new_project,
-        )
+        # Opens in a new tab (see load_project), so there is nothing to
+        # discard here -- the current tab's project is left untouched.
+        self._create_new_project()
 
     def _prompt_save_before_close(self) -> bool:
         """Return True when the current close event may continue immediately."""
+        message = (
+            "Closing NeuroSeq will discard any unsaved changes to the "
+            "current project.\n\nSave the current project first?"
+        )
+        if len(self.tabs) > 1:
+            message = (
+                "Closing NeuroSeq will discard any unsaved changes in "
+                f"{len(self.tabs)} open project tabs.\n\nOnly the active tab "
+                "can be saved here -- switch to another tab first if you "
+                "need to save its changes.\n\nSave the active tab's project "
+                "first?"
+            )
         answer = QtWidgets.QMessageBox.warning(
             self,
             "Close NeuroSeq",
-            "Closing NeuroSeq will discard any unsaved changes to the "
-            "current project.\n\nSave the current project first?",
+            message,
             QtWidgets.QMessageBox.StandardButton.Save
             | QtWidgets.QMessageBox.StandardButton.Discard
             | QtWidgets.QMessageBox.StandardButton.Cancel,
@@ -644,12 +723,9 @@ class Gui(QtWidgets.QMainWindow):
         self.load_project(generator())
 
     def btn_open_clicked(self) -> None:
-        self._prompt_save_before_action(
-            "Open a project",
-            "Opening a project will discard any unsaved changes to the current "
-            "project.\n\nSave the current project first?",
-            self._open_project_dialog,
-        )
+        # Opens in a new tab (see load_project), so there is nothing to
+        # discard here -- the current tab's project is left untouched.
+        self._open_project_dialog()
 
     def _open_project_dialog(self) -> None:
         filename, _ = getopenfilename(
@@ -982,15 +1058,29 @@ class Gui(QtWidgets.QMainWindow):
             # Update the GUI with changes made in the dialog
             self.update_project(self.project)
 
-    def load_project(self, project: str | pathlib.Path | Project) -> None:
+    def load_project(
+        self, project: str | pathlib.Path | Project, new_tab: bool = True
+    ) -> None:
         """Load a project. File paths run on a worker thread; in-memory
         ``Project`` instances (test fixtures, example projects) load
-        synchronously since there is no file IO to thread off."""
+        synchronously since there is no file IO to thread off.
+
+        By default the project opens in a new tab, leaving any other open
+        tabs untouched. Pass ``new_tab=False`` to instead replace the active
+        tab's project in place (used only for the initial tab at startup).
+        """
+
+        def _place(loaded: Project) -> None:
+            if new_tab:
+                self._open_project_in_new_tab(loaded, reset_controller=True)
+            else:
+                self.update_project(loaded, reset_controller=True)
+
         if isinstance(project, Project):
             self.logger.info("Project loaded from Project object")
             self.last_cellpose_import = clone_cellpose_result(project.cellpose_data)
             project.cellpose_data = self.last_cellpose_import
-            self.update_project(project, reset_controller=True)
+            _place(project)
             return
 
         if self._io_worker is not None:
@@ -1011,7 +1101,7 @@ class Gui(QtWidgets.QMainWindow):
             self.logger.info(f"Project loaded from {filename}")
             self.last_cellpose_import = clone_cellpose_result(result.cellpose_data)
             result.cellpose_data = self.last_cellpose_import
-            self.update_project(result, reset_controller=True)
+            _place(result)
 
         self._dispatch_io_task(_load_task, f"Loading {filename.name}…", _on_loaded)
 
@@ -1038,6 +1128,10 @@ class Gui(QtWidgets.QMainWindow):
     ) -> None:
         self.project = project
         self._update_window_title()
+        if hasattr(self, "tab_bar"):
+            self.tab_bar.setTabText(
+                self._active_tab_index, self._tab_label_for(project)
+            )
         if reset_controller:
             self.controller.reset()
             self.trace_controller.reset()
@@ -1501,13 +1595,17 @@ class Gui(QtWidgets.QMainWindow):
                 action.setEnabled(bool(enabled))
 
     def _set_io_actions_enabled(self, enabled: bool) -> None:
-        """Gate file-IO entry points while a save/load worker is running.
+        """Gate file-IO entry points while a save/load/simulation worker is running.
 
         Disables the File menu and toolbar plus the simulation entry
         points (so a long-running sim can't start mid-save and race the
-        worker reading the project state).
+        worker reading the project state), and the tab bar itself -- a
+        background IO task (in particular a running Brian2 simulation)
+        always targets the tab that was active when it was dispatched, so
+        switching/closing/opening tabs mid-task would let its completion
+        callback land on the wrong tab's now-active widgets.
         """
-        for attr in ("menu_file", "toolbar_file"):
+        for attr in ("menu_file", "toolbar_file", "tab_bar"):
             target = getattr(self, attr, None)
             if target is not None:
                 target.setEnabled(bool(enabled))

@@ -867,6 +867,7 @@ def test_prompt_save_before_close_branches(monkeypatch: MonkeyPatch) -> None:
         _close_confirmed=False,
         _save_project=fake_save,
         close=lambda: closed.__setitem__(0, closed[0] + 1),
+        tabs=[Project()],
     )
 
     # Cancel: keep the app open.
