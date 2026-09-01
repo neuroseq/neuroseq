@@ -35,6 +35,13 @@ Apple-Silicon) GPU, install a GPU build and relaunch:
 uv pip install --torch-backend=auto torch
 ```
 
+Not using `uv` (e.g. NeuroSeq is installed into a conda environment)? Install
+directly with pip instead:
+
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+```
+
 If the machine has **only Intel integrated graphics**, Cellpose cannot use it
 (CUDA/MPS only) — run segmentation on a GPU machine and import its `_seg.npy`
 instead. See

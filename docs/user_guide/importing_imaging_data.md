@@ -105,6 +105,16 @@ later `uv sync` can revert to the CPU build; re-run the command, or set
 `UV_TORCH_BACKEND=auto` in the environment. Verify with the check command above
 (expect e.g. `2.x.x+cu128 True`), then relaunch NeuroSeq.
 
+If NeuroSeq is installed into an environment `uv` doesn't manage (e.g. a conda
+environment), install a CUDA build directly with pip instead:
+
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+```
+
+Pick the `cuXXX` index matching your NVIDIA driver if `cu128` doesn't fit
+(check the [PyTorch install page](https://pytorch.org/get-started/locally/)).
+
 **No supported GPU** (e.g. an Intel-only laptop)? GPU segmentation is not
 possible on that machine. Instead, run Cellpose on one machine that _does_ have
 an NVIDIA/Apple GPU and import its `_seg.npy` output (the file-selection path
