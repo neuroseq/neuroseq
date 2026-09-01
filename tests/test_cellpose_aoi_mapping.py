@@ -64,14 +64,14 @@ def _select_aoi_strategy(dialog: CellposeImportDialog) -> None:
             break
 
 
-def test_default_aoi_config_uses_centred_70_percent_square() -> None:
+def test_default_aoi_config_uses_centred_50_percent_square() -> None:
     cfg = default_aoi_config((400, 600))
-    assert cfg.circle.diameter == 50
-    assert cfg.square.side == 280
+    assert cfg.circle.diameter == 38
+    assert cfg.square.side == 200
     assert cfg.circle.cx == 300
     assert cfg.circle.cy == 200
-    assert cfg.square.x == 160
-    assert cfg.square.y == 60
+    assert cfg.square.x == 200
+    assert cfg.square.y == 100
     assert cfg.square.role == AOIRole.PREFERENTIAL
     assert cfg.circle.role == AOIRole.EXCLUSION
     assert cfg.coordinate_mode == "percent"
@@ -223,7 +223,7 @@ def test_dialog_selects_aoi_strategy_shows_subgroup(
     assert dialog.aoi_coordinate_mode_combo.currentText() == AOI_PERCENT_MODE
     assert dialog.square_x_spin.value() == 50
     assert dialog.square_y_spin.value() == 50
-    assert dialog.square_side_spin.value() == 70
+    assert dialog.square_side_spin.value() == 50
     dialog.close()
 
 
