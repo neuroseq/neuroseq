@@ -16,6 +16,7 @@ import pytest
 
 from neuroseq.importer_tif import TifPipelineParams
 from neuroseq.importer_tif import _masks_to_stat
+from neuroseq.importer_tif import _stat_to_masks
 
 
 def _make_mask_image(shape=(32, 32)) -> np.ndarray:
@@ -51,6 +52,25 @@ def test_masks_to_stat_emits_one_entry_per_cell():
         assert entry["lam"].shape == entry["xpix"].shape
 
 
+def _mask_partitions(masks: np.ndarray) -> set[frozenset[tuple[int, int]]]:
+    return {
+        frozenset(zip(*np.nonzero(masks == label), strict=False))
+        for label in np.unique(masks)
+        if label != 0
+    }
+
+
+def test_stat_to_masks_round_trips_with_masks_to_stat():
+    if not _suite2p_available():
+        pytest.skip("suite2p v1.x not installed")
+
+    masks = _make_mask_image()
+    stat = _masks_to_stat(masks, masks.shape[0], masks.shape[1])
+    rebuilt = _stat_to_masks(stat, masks.shape[0], masks.shape[1])
+
+    assert _mask_partitions(rebuilt) == _mask_partitions(masks)
+
+
 def test_tif_pipeline_params_defaults_target_jgcamp8m():
     params = TifPipelineParams()
     assert params.fs == pytest.approx(30.0)
@@ -58,6 +78,7 @@ def test_tif_pipeline_params_defaults_target_jgcamp8m():
     assert params.nchannels == 2
     assert params.functional_chan == 1
     assert params.neuropil_coefficient == pytest.approx(0.7)
+    assert params.diameter == pytest.approx(12.0)
     assert params.batch_size == 200
     assert params.baseline == "maximin"
 
@@ -243,7 +264,10 @@ def test_spatial_import_masks_extract_same_traces_as_direct_cellpose_masks(tmp_p
     np.testing.assert_allclose(via_spatial_import.F, direct.F)
 
 
-def test_run_suite2p_pipeline_rejects_non_2d_masks():
+def test_run_suite2p_pipeline_accepts_none_masks_but_rejects_bad_ndim(monkeypatch):
+    import sys
+    import types
+
     from neuroseq.importer_tif import run_suite2p_pipeline
 
     bad_masks = np.zeros((4, 4, 4), dtype=np.int32)
@@ -251,6 +275,27 @@ def test_run_suite2p_pipeline_rejects_non_2d_masks():
         run_suite2p_pipeline(
             [Path("/tmp/nonexistent.tif")], bad_masks, TifPipelineParams()
         )
+
+    def _module(name: str, **attrs) -> types.ModuleType:
+        mod = types.ModuleType(name)
+        for k, v in attrs.items():
+            setattr(mod, k, v)
+        return mod
+
+    def default_db():
+        raise RuntimeError("passed mask validation")
+
+    for name, mod in {
+        "suite2p": _module("suite2p", default_db=default_db),
+        "suite2p.io": _module("suite2p.io"),
+        "suite2p.detection": _module("suite2p.detection"),
+        "suite2p.extraction": _module("suite2p.extraction"),
+        "suite2p.classification": _module("suite2p.classification"),
+    }.items():
+        monkeypatch.setitem(sys.modules, name, mod)
+
+    with pytest.raises(RuntimeError, match="passed mask validation"):
+        run_suite2p_pipeline([Path("/tmp/nonexistent.tif")], None, TifPipelineParams())
 
 
 def test_cellpose_result_to_masks_round_trips_background_and_labels():
@@ -457,6 +502,168 @@ def test_run_suite2p_pipeline_orchestration(monkeypatch, tmp_path: Path):
     # Temp dir cleaned up.
     children = [d for d in tmp_path.iterdir() if d.name.startswith("neuroseq_suite2p_")]
     assert children == []
+
+
+def test_run_suite2p_pipeline_detects_rois_without_masks(monkeypatch, tmp_path: Path):
+    import sys
+    import types
+
+    from neuroseq.importer_tif import TifPipelineParams
+    from neuroseq.importer_tif import run_suite2p_pipeline
+
+    Ly, Lx, nframes = 16, 16, 32
+    detected_stat = np.array(
+        [
+            {
+                "ypix": np.array([0, 1]),
+                "xpix": np.array([0, 1]),
+                "lam": np.ones(2, np.float32),
+                "med": [0.0, 0.0],
+            },
+            {
+                "ypix": np.array([3, 4]),
+                "xpix": np.array([5, 6]),
+                "lam": np.ones(2, np.float32),
+                "med": [3.5, 5.5],
+            },
+            {
+                "ypix": np.array([8, 9]),
+                "xpix": np.array([2, 2]),
+                "lam": np.ones(2, np.float32),
+                "med": [8.5, 2.0],
+            },
+        ],
+        dtype=object,
+    )
+    classifier_result = np.array([[1.0, 0.9], [0.0, 0.1], [1.0, 0.8]], dtype=np.float32)
+    detection_calls: list[dict[str, Any]] = []
+
+    def default_db():
+        return {}
+
+    def default_settings():
+        return {
+            "detection": {"algorithm": "sparsery"},
+            "extraction": {"neuropil_coefficient": 0.7, "batch_size": 200},
+        }
+
+    def init_dbs(db):
+        return [
+            {
+                "reg_file": str(tmp_path / "reg.bin"),
+                "reg_file_chan2": str(tmp_path / "reg2.bin"),
+                "Ly": Ly,
+                "Lx": Lx,
+                "nframes": nframes,
+            }
+        ]
+
+    class FakeBinaryFile:
+        def __init__(self, Ly, Lx, filename):
+            self.Ly = Ly
+            self.Lx = Lx
+            self.filename = filename
+            self.data = np.zeros((nframes, Ly, Lx), dtype=np.float32)
+
+        @property
+        def shape(self):
+            return self.data.shape
+
+    def detection_wrapper(
+        f_reg, diameter, tau, fs, yrange, xrange, settings, classifier_path, device
+    ):
+        detection_calls.append(
+            {
+                "f_reg": f_reg,
+                "diameter": diameter,
+                "tau": tau,
+                "fs": fs,
+                "yrange": yrange,
+                "xrange": xrange,
+                "settings": settings,
+                "classifier_path": classifier_path,
+                "device": device,
+            }
+        )
+        return {}, detected_stat.copy(), None
+
+    def extraction_wrapper(stat, f_bin, f_reg_chan2, settings, device):
+        n_neurons = len(stat)
+        F = np.full((n_neurons, nframes), 5.0, dtype=np.float32)
+        Fneu = np.full((n_neurons, nframes), 1.0, dtype=np.float32)
+        return F, Fneu, None, None
+
+    def _module(name: str, **attrs) -> types.ModuleType:
+        mod = types.ModuleType(name)
+        for k, v in attrs.items():
+            setattr(mod, k, v)
+        return mod
+
+    class _FakeCuda:
+        @staticmethod
+        def is_available() -> bool:
+            return False
+
+    suite2p_mod = _module(
+        "suite2p", default_db=default_db, default_settings=default_settings
+    )
+    s2io_mod = _module(
+        "suite2p.io",
+        get_file_list=lambda db: ([str(tmp_path / "stack.tif")], np.array([True])),
+        init_dbs=init_dbs,
+        tiff_to_binary=lambda dbs, *a, **kw: dbs,
+        BinaryFile=FakeBinaryFile,
+    )
+    s2detection_mod = _module(
+        "suite2p.detection",
+        detection_wrapper=detection_wrapper,
+    )
+    s2extraction_mod = _module(
+        "suite2p.extraction",
+        extraction_wrapper=extraction_wrapper,
+        preprocess=lambda F, **kw: F,
+        oasis=lambda F, **kw: np.zeros_like(F),
+    )
+    s2classification_mod = _module(
+        "suite2p.classification",
+        classify=lambda stat, classfile: classifier_result.copy(),
+        builtin_classfile=object(),
+    )
+    torch_mod = _module(
+        "torch",
+        cuda=_FakeCuda(),
+        device=lambda x: f"device:{x}",
+        Tensor=type("Tensor", (), {}),
+    )
+
+    for name, mod in {
+        "suite2p": suite2p_mod,
+        "suite2p.io": s2io_mod,
+        "suite2p.detection": s2detection_mod,
+        "suite2p.extraction": s2extraction_mod,
+        "suite2p.classification": s2classification_mod,
+        "torch": torch_mod,
+    }.items():
+        monkeypatch.setitem(sys.modules, name, mod)
+
+    tif = tmp_path / "stack.tif"
+    tif.write_bytes(b"")
+    params = TifPipelineParams(nchannels=1, diameter=18.5)
+    result = run_suite2p_pipeline([tif], None, params)
+
+    assert len(detection_calls) == 1
+    assert detection_calls[0]["diameter"] == [18.5, 18.5]
+    assert detection_calls[0]["tau"] == params.tau
+    assert detection_calls[0]["fs"] == params.fs
+    assert detection_calls[0]["yrange"] == [0, Ly]
+    assert detection_calls[0]["xrange"] == [0, Lx]
+    np.testing.assert_array_equal(result.iscell, classifier_result)
+    assert result.extra["diameter"] == pytest.approx(params.diameter)
+    assert result.masks.shape == (Ly, Lx)
+    assert result.masks.dtype == np.int32
+    assert set(np.unique(result.masks)) == {0, 1, 2, 3}
+    for idx, entry in enumerate(result.stat, start=1):
+        assert np.all(result.masks[entry["ypix"], entry["xpix"]] == idx)
 
 
 def test_run_suite2p_pipeline_filters_mixed_fov_tiffs(monkeypatch, tmp_path: Path):

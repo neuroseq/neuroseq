@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from qtpy import QtCore
+from qtpy import QtGui
+from qtpy import QtWidgets
 
 
 def _make_pipeline_result():
@@ -27,6 +32,25 @@ def _make_pipeline_result():
         mean_image=np.zeros((16, 16), dtype=np.float32),
         masks=np.zeros((16, 16), dtype=np.int32),
     )
+
+
+def _make_pipeline_result_with_masks():
+    result = _make_pipeline_result()
+    result.mean_image = np.array(
+        [
+            [0.0, 1.0, 2.0],
+            [3.0, 4.0, 5.0],
+        ],
+        dtype=np.float32,
+    )
+    result.masks = np.array(
+        [
+            [0, 1, 0],
+            [2, 2, 0],
+        ],
+        dtype=np.int32,
+    )
+    return result
 
 
 @pytest.mark.parametrize(
@@ -68,6 +92,31 @@ def test_pipeline_worker_dispatches_and_forwards_progress(
     assert finished_results == [result]
 
 
+def test_pipeline_worker_forwards_log_signal(qtbot, mocker):
+    from neuroseq.importer_tif import TifPipelineParams
+    from neuroseq.tif_import_dialog import _PipelineWorker
+
+    result = _make_pipeline_result()
+
+    def fake_pipeline(*_args, progress, **_kwargs):
+        logging.getLogger("suite2p").info("hello")
+        progress("working", 0.5)
+        return result
+
+    mocker.patch(
+        "neuroseq.importer_tif.run_suite2p_pipeline", side_effect=fake_pipeline
+    )
+    worker = _PipelineWorker(
+        [], np.ones((2, 2), dtype=np.int32), TifPipelineParams(), "suite2p"
+    )
+    log_events = []
+    worker.log.connect(log_events.append)
+
+    worker.run()
+
+    assert "INFO: hello" in log_events
+
+
 def test_pipeline_worker_emits_failure(mocker):
     from neuroseq.importer_tif import TifPipelineParams
     from neuroseq.tif_import_dialog import _PipelineWorker
@@ -97,6 +146,91 @@ def test_dialog_disables_loaded_radio_when_no_cellpose_data(qtbot):
     assert dialog._use_seg_radio.isChecked()
 
 
+def test_third_radio_selected_resolves_to_none_masks(qtbot):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+
+    dialog._auto_detect_radio.setChecked(True)
+
+    assert dialog._resolve_masks() is None
+
+
+def test_auto_detect_radio_forces_and_disables_pipeline_combo(qtbot):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+    dialog._pipeline_combo.setCurrentIndex(1)
+
+    dialog._auto_detect_radio.setChecked(True)
+
+    assert dialog._pipeline_combo.currentData() == "suite2p"
+    assert not dialog._pipeline_combo.isEnabled()
+
+    dialog._use_seg_radio.setChecked(True)
+
+    assert dialog._pipeline_combo.isEnabled()
+
+
+def test_auto_detect_radio_shows_diameter_spinbox_only_in_auto_detect_mode(qtbot):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+    dialog.show()
+
+    assert not dialog._diameter_spin.isVisibleTo(dialog)
+
+    dialog._auto_detect_radio.setChecked(True)
+    assert dialog._diameter_spin.isVisibleTo(dialog)
+
+    dialog._use_seg_radio.setChecked(True)
+    assert not dialog._diameter_spin.isVisibleTo(dialog)
+
+
+def test_dialog_body_is_scrollable_but_run_buttons_stay_fixed(qtbot):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+
+    assert dialog._scroll_area.widgetResizable()
+    assert dialog._scroll_area.widget() is dialog._scroll_content
+    assert dialog._scroll_content.isAncestorOf(dialog._pipeline_combo)
+    assert not dialog._scroll_content.isAncestorOf(dialog._run_button)
+
+
+def test_wheel_over_parameter_field_scrolls_without_changing_value(qtbot):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+    dialog.resize(360, 220)
+    dialog.show()
+    scroll_bar = dialog._scroll_area.verticalScrollBar()
+    qtbot.waitUntil(lambda: scroll_bar.maximum() > 0)
+    scroll_bar.setValue(0)
+    old_value = dialog._fs_spin.value()
+    wheel_event = QtGui.QWheelEvent(
+        QtCore.QPointF(10.0, 10.0),
+        QtCore.QPointF(10.0, 10.0),
+        QtCore.QPoint(0, 0),
+        QtCore.QPoint(0, -120),
+        QtCore.Qt.MouseButton.NoButton,
+        QtCore.Qt.KeyboardModifier.NoModifier,
+        QtCore.Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+
+    handled = dialog.eventFilter(dialog._fs_spin, wheel_event)
+
+    assert handled
+    assert dialog._fs_spin.value() == old_value
+    assert scroll_bar.value() > 0
+
+
 def test_dialog_requires_tifs(qtbot):
     from neuroseq.tif_import_dialog import TifImportDialog
 
@@ -123,6 +257,84 @@ def test_pipeline_selector_hides_suite2p_parameters_for_roi_average(qtbot):
     assert dialog._fs_spin.isVisibleTo(dialog)
     assert dialog._nchannels_spin.isVisibleTo(dialog)
     assert dialog._functional_chan_spin.isVisibleTo(dialog)
+
+
+def test_start_pipeline_passes_diameter_param(qtbot, mocker, tmp_path):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+    tif = tmp_path / "fake.tif"
+    tif.write_bytes(b"")
+    dialog._tif_paths.append(tif)
+    dialog._tif_list.addItem(str(tif))
+    dialog._auto_detect_radio.setChecked(True)
+    dialog._diameter_spin.setValue(24.5)
+
+    result = _make_pipeline_result()
+    captured = {}
+
+    def fake_pipeline(tif_paths, masks, params, *, progress):
+        captured["tif_paths"] = tif_paths
+        captured["masks"] = masks
+        captured["params"] = params
+        progress("working", 0.5)
+        return result
+
+    mocker.patch(
+        "neuroseq.importer_tif.run_suite2p_pipeline", side_effect=fake_pipeline
+    )
+    mocker.patch(
+        "neuroseq.tif_import_dialog.QtWidgets.QMessageBox.question",
+        return_value=QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+    mocker.patch("neuroseq.tif_import_dialog.QtWidgets.QMessageBox.information")
+    accept = mocker.patch.object(dialog, "accept")
+
+    dialog._start_pipeline()
+    qtbot.waitUntil(lambda: dialog._pipeline_result is not None, timeout=5000)
+
+    assert captured["tif_paths"] == [tif]
+    assert captured["masks"] is None
+    assert captured["params"].diameter == pytest.approx(24.5)
+    accept.assert_called_once()
+
+
+def test_auto_detect_pipeline_run_prompts_before_proceeding(qtbot, mocker, tmp_path):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+    tif = tmp_path / "fake.tif"
+    tif.write_bytes(b"")
+    dialog._tif_paths.append(tif)
+    dialog._tif_list.addItem(str(tif))
+    dialog._auto_detect_radio.setChecked(True)
+    question = mocker.patch(
+        "neuroseq.tif_import_dialog.QtWidgets.QMessageBox.question",
+        return_value=QtWidgets.QMessageBox.StandardButton.No,
+    )
+    run = mocker.patch("neuroseq.importer_tif.run_suite2p_pipeline")
+
+    dialog._start_pipeline()
+
+    question.assert_called_once()
+    run.assert_not_called()
+    assert dialog._thread is None
+
+    result = _make_pipeline_result()
+    run.side_effect = lambda *_args, progress, **_kwargs: result
+    question.reset_mock()
+    question.return_value = QtWidgets.QMessageBox.StandardButton.Yes
+    mocker.patch("neuroseq.tif_import_dialog.QtWidgets.QMessageBox.information")
+    accept = mocker.patch.object(dialog, "accept")
+
+    dialog._start_pipeline()
+    qtbot.waitUntil(lambda: dialog._pipeline_result is not None, timeout=5000)
+
+    question.assert_called_once()
+    run.assert_called_once()
+    accept.assert_called_once()
 
 
 def test_dialog_runs_mocked_pipeline_and_produces_imported_data(
@@ -185,6 +397,116 @@ def test_finalize_roi_average_imports_raw_trace_only(qtbot, mocker):
     )
     information.assert_called_once()
     accept.assert_called_once()
+
+
+def test_seg_file_source_sets_new_cellpose_result_after_finalize(
+    qtbot,
+    mocker,
+    tmp_path,
+):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+    tif = tmp_path / "fake.tif"
+    seg = tmp_path / "fake_seg.npy"
+    tif.write_bytes(b"")
+    np.save(seg, np.zeros((2, 3), dtype=np.int32))
+    dialog._tif_paths.append(tif)
+    dialog._seg_file_path = seg
+    dialog._new_segmentation_path = seg
+    dialog._use_seg_radio.setChecked(True)
+    dialog._propagate_new_segmentation = True
+    result = _make_pipeline_result_with_masks()
+    mocker.patch("neuroseq.tif_import_dialog.QtWidgets.QMessageBox.information")
+    mocker.patch.object(dialog, "accept")
+
+    dialog._finalize_import(result)
+
+    assert dialog.new_cellpose_result is not None
+    assert dialog.new_cellpose_result.segmentation_array.shape == result.masks.shape
+    assert dialog.new_cellpose_result.segmentation_path == seg
+
+
+def test_auto_detect_source_sets_new_cellpose_result_with_no_segmentation_path(
+    qtbot,
+    mocker,
+    tmp_path,
+):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+    tif = tmp_path / "fake.tif"
+    tif.write_bytes(b"")
+    dialog._tif_paths.append(tif)
+    dialog._auto_detect_radio.setChecked(True)
+    dialog._propagate_new_segmentation = True
+    result = _make_pipeline_result_with_masks()
+    mocker.patch("neuroseq.tif_import_dialog.QtWidgets.QMessageBox.information")
+    mocker.patch.object(dialog, "accept")
+
+    dialog._finalize_import(result)
+
+    assert dialog.new_cellpose_result is not None
+    assert dialog.new_cellpose_result.segmentation_array.shape == result.masks.shape
+    assert dialog.new_cellpose_result.segmentation_path is None
+
+
+def test_use_loaded_radio_does_not_set_new_cellpose_result(qtbot, mocker, tmp_path):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    cellpose_import = MagicMock()
+    cellpose_import.segmentation_array = np.zeros((2, 3), dtype=np.int32) - 1
+    dialog = TifImportDialog(parent=None, cellpose_import=cellpose_import)
+    qtbot.addWidget(dialog)
+    tif = tmp_path / "fake.tif"
+    tif.write_bytes(b"")
+    dialog._tif_paths.append(tif)
+    dialog._use_loaded_radio.setChecked(True)
+    result = _make_pipeline_result_with_masks()
+    mocker.patch("neuroseq.tif_import_dialog.QtWidgets.QMessageBox.information")
+    mocker.patch.object(dialog, "accept")
+
+    dialog._finalize_import(result)
+
+    assert dialog.new_cellpose_result is None
+
+
+def test_build_cellpose_result_from_pipeline_matches_masks_and_mean_image():
+    from neuroseq.tif_import_dialog import _build_cellpose_result_from_pipeline
+
+    result = _make_pipeline_result_with_masks()
+
+    imported = _build_cellpose_result_from_pipeline(result, Path("stack.tif"))
+
+    assert imported.image_path == Path("stack.tif")
+    assert imported.segmentation_path is None
+    assert imported.segmentation_array.shape == result.masks.shape
+    np.testing.assert_array_equal(
+        imported.segmentation_array,
+        np.flipud(result.masks.astype(np.int32) - 1),
+    )
+    assert -1 in np.unique(imported.segmentation_array)
+    assert imported.overlay_image.shape == imported.segmentation_array.shape + (3,)
+
+
+def test_pipeline_progress_dialog_details_toggle(qtbot):
+    from neuroseq.tif_import_dialog import _PipelineProgressDialog
+
+    dialog = _PipelineProgressDialog("Starting", "Cancel", 0, 100)
+    qtbot.addWidget(dialog)
+
+    assert dialog._log_view.isHidden()
+
+    dialog._details_button.setChecked(True)
+    assert not dialog._log_view.isHidden()
+
+    dialog.appendLog("x")
+    assert "x" in dialog._log_view.toPlainText()
+
+    dialog._details_button.setChecked(False)
+    assert dialog._log_view.isHidden()
 
 
 @pytest.mark.parametrize(

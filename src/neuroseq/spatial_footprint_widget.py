@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import brian2.numpy_ as np
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+from neuroseq.cell_overlay_widget import STRIPED_CELL_GREY
+from neuroseq.cell_overlay_widget import STRIPED_CELL_STRIPE_WIDTH
+from neuroseq.cell_overlay_widget import STRIPED_CELL_WHITE
 from neuroseq.cell_overlay_widget import CellOverlayWidget
 from neuroseq.cell_overlay_widget import compute_segmentation_legend
 from neuroseq.importer_cellpose import CellposeImportResult
@@ -68,18 +72,56 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
     def _refresh_overlay(self) -> None:
         if self._cellpose_data is None:
             return
-        # The striped/grey look is drawn entirely by the (opaque, for striped
-        # cells) segmentation colour layer in OverlayView; it always renders on
-        # top of this base image, so there is nothing to gain from also
-        # recolouring the base image itself.
         self.overlay_widget.set_overlay(
-            self._cellpose_data.overlay_image,
+            self._greyed_overlay_image(),
             self._cellpose_data.segmentation_array,
             self._cellpose_data.original_cellpose_ids,
             self._cellpose_data.stimulus_to_cellpose_mapping,
             legend_data=self._base_legend,
             striped_cell_ids=self._greyed_cellpose_ids,
         )
+
+    def _greyed_overlay_image(self) -> np.ndarray:
+        cellpose_data = self._cellpose_data
+        assert cellpose_data is not None
+        if not self._greyed_cellpose_ids:
+            return cellpose_data.overlay_image
+
+        image = np.array(cellpose_data.overlay_image, copy=True)
+        segmentation = cellpose_data.segmentation_array
+        y_grid, x_grid = np.indices(segmentation.shape)
+        stripe_mask = ((x_grid + y_grid) // STRIPED_CELL_STRIPE_WIDTH) % 2 == 0
+        grey = self._image_color_value(image, STRIPED_CELL_GREY)
+        white = self._image_color_value(image, STRIPED_CELL_WHITE)
+
+        for cellpose_id in self._greyed_cellpose_ids:
+            mask = segmentation == cellpose_id
+            if not np.any(mask):
+                continue
+            if image.ndim == 2:
+                image[mask & stripe_mask] = grey[0]
+                image[mask & ~stripe_mask] = white[0]
+                continue
+
+            n_channels = min(image.shape[2], 3)
+            image[mask & stripe_mask, :n_channels] = grey[:n_channels]
+            image[mask & ~stripe_mask, :n_channels] = white[:n_channels]
+
+        return image
+
+    @staticmethod
+    def _image_color_value(
+        image: np.ndarray,
+        color: tuple[float, float, float],
+    ) -> np.ndarray:
+        if np.issubdtype(image.dtype, np.integer):
+            scale = float(np.iinfo(image.dtype).max)
+        else:
+            max_value = float(np.nanmax(image)) if image.size else 1.0
+            scale = 255.0 if max_value > 1.0 else 1.0
+        values = np.asarray(color, dtype=np.float32) * scale
+        values = np.clip(values, 0.0, scale)
+        return values.astype(image.dtype, copy=False)
 
     def _cellpose_to_stim_id(self, cellpose_id: int) -> int:
         mapping = (

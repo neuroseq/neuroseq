@@ -175,9 +175,6 @@ def test_clicking_cell_greys_rendered_spatial_footprint(qtbot: QtBot) -> None:
     graphic = widget.overlay_widget.overlay_view._segmentation_graphic
     assert image_graphic is not None
     assert graphic is not None
-    # The base image is untouched by greying: the opaque striped colour layer
-    # asserted on below always renders on top of it, so recolouring the base
-    # image too would be invisible, wasted work.
     before_image = np.asarray(image_graphic.data.value).copy()
     before_segmentation = np.asarray(graphic.data.value).copy()
 
@@ -185,18 +182,31 @@ def test_clicking_cell_greys_rendered_spatial_footprint(qtbot: QtBot) -> None:
 
     after_image = np.asarray(image_graphic.data.value)
     after_segmentation = np.asarray(graphic.data.value)
-    assert np.allclose(after_image, before_image)
-    stripe_colors = after_segmentation[result.segmentation_array == 1]
-    stripe_rgb = stripe_colors[:, :3]
-    assert np.any(np.all(np.isclose(stripe_rgb, STRIPED_CELL_GREY), axis=1))
-    assert np.any(np.all(np.isclose(stripe_rgb, STRIPED_CELL_WHITE), axis=1))
-    assert np.allclose(stripe_colors[:, 3], STRIPED_CELL_ALPHA)
+    cell_image_colors = after_image[result.segmentation_array == 1]
+    cell_image_rgb = cell_image_colors[:, :3].astype(np.float32) / 255.0
+    assert np.any(
+        np.all(np.isclose(cell_image_rgb, STRIPED_CELL_GREY, atol=1 / 255), axis=1)
+    )
+    assert np.any(
+        np.all(np.isclose(cell_image_rgb, STRIPED_CELL_WHITE, atol=1 / 255), axis=1)
+    )
+    assert not np.allclose(
+        after_image[result.segmentation_array == 1],
+        before_image[result.segmentation_array == 1],
+    )
+    assert np.allclose(
+        after_image[result.segmentation_array == 0],
+        before_image[result.segmentation_array == 0],
+    )
+    stripe_overlay_colors = after_segmentation[result.segmentation_array == 1]
+    assert np.allclose(stripe_overlay_colors[:, 3], STRIPED_CELL_ALPHA)
     assert np.allclose(
         after_segmentation[result.segmentation_array == 0],
         before_segmentation[result.segmentation_array == 0],
     )
 
     widget.overlay_widget.neuron_clicked.emit(1)
+    assert np.allclose(np.asarray(image_graphic.data.value), before_image)
     assert np.allclose(np.asarray(graphic.data.value), before_segmentation)
     widget.close()
 

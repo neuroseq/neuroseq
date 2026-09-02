@@ -428,6 +428,89 @@ def test_import_cellpose_data_populates_and_shows_spatial_footprint_panel(
     gui.close()
 
 
+def test_import_tif_with_new_segmentation_populates_spatial_footprint_panel(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    imported = _make_gui_cellpose_result()
+
+    class _FakeDialog:
+        experiment_name = "fake"
+        experiment_duration = 1.0
+        imported_data: list[Any] = []
+        new_cellpose_result = imported
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            return
+
+        def exec(self) -> QtWidgets.QDialog.DialogCode:
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr("neuroseq.tif_import_dialog.TifImportDialog", _FakeDialog)
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    gui.btn_import_tif_clicked()
+
+    assert gui.project.cellpose_data is not None
+    assert gui.project.cellpose_data.image_path == imported.image_path
+    assert gui.spatial_footprint_widget.overlay_widget.segmentation is not None
+    assert gui.spatial_footprint_widget.empty_state_widget.isHidden()
+    assert not gui.spatial_footprint_widget.overlay_widget.isHidden()
+    assert gui.spatial_footprint_widget.isVisible()
+    gui.close()
+
+
+def test_import_tif_reusing_loaded_segmentation_does_not_reset_spatial_footprint_panel(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    existing = _make_gui_cellpose_result(mapping={0: 2, 1: 1, 2: 0})
+    appended: list[Experiment] = []
+
+    class _FakeDialog:
+        experiment_name = "fake"
+        experiment_duration = 1.0
+        imported_data: list[Any] = []
+        new_cellpose_result = None
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            return
+
+        def exec(self) -> QtWidgets.QDialog.DialogCode:
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr("neuroseq.tif_import_dialog.TifImportDialog", _FakeDialog)
+
+    class _FakeGui:
+        def __init__(self) -> None:
+            self.project = Project()
+            self.project.cellpose_data = existing
+            self.last_cellpose_import = existing
+            self.spatial_footprint_widget = SimpleNamespace()
+
+        def _append_experimental_data(self, experiment: Experiment) -> None:
+            appended.append(experiment)
+
+        def _apply_cellpose_import_result(
+            self,
+            imported: CellposeImportResult,
+        ) -> list[str]:
+            raise AssertionError(f"unexpected Cellpose propagation: {imported}")
+
+    fake_gui = _FakeGui()
+
+    Gui.btn_import_tif_clicked(fake_gui)  # type: ignore[arg-type]
+
+    assert len(appended) == 1
+    assert fake_gui.project.cellpose_data is existing
+    assert fake_gui.last_cellpose_import is existing
+    assert fake_gui.project.cellpose_data.stimulus_to_cellpose_mapping == {
+        0: 2,
+        1: 1,
+        2: 0,
+    }
+
+
 def test_spatial_footprint_empty_button_opens_cellpose_import(
     qtbot: QtBot,
     monkeypatch: MonkeyPatch,

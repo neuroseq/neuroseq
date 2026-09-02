@@ -1982,6 +1982,10 @@ class Gui(QtWidgets.QMainWindow):
                     dialog.imported_data,
                 )
             )
+            if dialog.new_cellpose_result is not None:
+                self._apply_cellpose_import_result(dialog.new_cellpose_result)
+                if hasattr(self, "_auto_show_widget"):
+                    self._auto_show_widget(self.spatial_footprint_widget)
 
     def btn_open_fiji_clicked(self) -> None:
         from neuroseq.external_tools import launch_fiji
