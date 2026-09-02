@@ -1,0 +1,552 @@
+detachable_main_window_panels — right-click any main-window panel to "Detach
+panel" (pop into its own interactive window, hide the original) or "Detach
+copy of panel" (same, but the original stays visible too)
+================================================================================
+
+GOAL
+----
+For 7 of the 9 toggleable main-window panels registered in `Gui._view_actions`
+(`gui.py:2803-2837`) — Traces, Spikes, Data, Heatmap, Spatial Footprints,
+Custom Analysis, Console, Chat — add two right-click context-menu actions:
+
+  1. "Detach panel" — construct a fresh, fully-functional instance of that
+     panel showing its CURRENT data, place it in its own top-level window
+     (interactive, scrollable, all the panel's normal functionality intact),
+     and hide the original (via its existing View-menu toggle action, so it
+     can be re-shown the normal way later).
+  2. "Detach copy of panel" — identical, except the original stays visible.
+
+**Stimuli is explicitly OUT OF SCOPE.** `StimEditor`'s widget is entangled
+with a combo box (`cmb_stim`, living in the main toolbar) and a toolbar
+(`toolbar_stim_editor`, added directly to `main_horizontal_layout`, not part
+of either splitter) that live in *separate* parts of the main window —
+detaching the panel alone would strand its selection/actions. Do not add
+detach actions to `StimWidget`'s context menu (see the guard in the
+TimeseriesWidget section below); this is a deliberate exclusion, not an
+oversight, and a follow-up item for later.
+
+DESIGN — read this before writing any code
+--------------------------------------------
+**Mechanism: construct-fresh, never reparent.** Both actions build a BRAND
+NEW instance of the panel's widget class (never `setParent()` the live,
+already-displayed widget into a new window). This is the ONLY existing
+precedent in the codebase — `CustomAnalysisWindow` (`custom_analysis_widget.py:39-57`)
+already does exactly this for the Custom Analysis panel, via
+`Gui._custom_analysis` (`gui.py:578-601`) — and it sidesteps a real risk:
+these panels are `fastplotlib`/WGPU-backed (`FPLWidget` base,
+`fpl_widget.py:18-83`), whose GPU canvas surface is bound to a native window
+handle; reparenting a LIVE canvas across top-level windows is untested in
+this codebase (it has defensive "canvas isn't ready yet" guard code —
+`_fpl_canvas_ready`/`_fpl_guarded_render`, `fpl_widget.py:62-83` — for even
+routine viewport-size-zero situations at startup) and would likely need new,
+unproven guard logic. Constructing a fresh instance means each detached copy
+owns its own independent `fpl.Figure`/GPU device (confirmed: no panel
+instance shares a `Figure` with another today), so nothing about closing one
+copy risks another.
+
+**"Detach" and "Detach copy" are the SAME mechanism** — the only difference
+is whether the original panel's View-menu toggle action gets unchecked
+afterward. Implement them as one internal method with a `keep_original: bool`
+parameter, called from two thin action handlers.
+
+**Scope of "current data"**: a detached/copied instance is seeded with
+whatever is CURRENTLY displayed, and remains fully interactive from then on
+(pan/zoom, right-click-analyze, cell-click-to-grey, its own scrollbars/REPL/
+chat input — whatever that panel type normally supports). It does **not**
+need to keep tracking later, unrelated changes elsewhere in the main window
+(e.g. the user picking a different trace in `cmb_trace` after the detach) —
+this matches the one existing precedent (`CustomAnalysisWindow` also just
+seeds-and-forgets) and keeps this from becoming a much larger "live-mirror
+every combo-box change to every detached copy" project.
+
+**Seed data from the canonical source (`Project`/comboboxes), never from the
+widget's own stored state** — several widgets don't retain what they were
+given in a form usable for re-seeding:
+  - `HeatmapWidget.set_data(data: SynapseData)` stores `self.data =
+    data.values.T` (a transformed ndarray, NOT the original `SynapseData` —
+    `heatmap_widget.py:196-209`). Re-fetch via
+    `self.project.get_data(self.cmb_synapse.currentText(), SynapseData)`
+    instead (the same call `Gui` itself already makes, e.g. `gui.py:1297-1298`).
+  - `CustomAnalysisWidget.set_data(data, analysis_type, neuron_slice,
+    time_slice)` stores none of its four arguments — only derived
+    `self.traces`/`self.spike_indices`/etc. (`custom_analysis_widget.py:122-183`).
+    There is currently NO way to recover "what's shown right now" from
+    `self.custom_analysis_widget`. Fix: have `Gui._custom_analysis`
+    (`gui.py:578-601`) also stash the four arguments whenever `new_window` is
+    False (i.e. whenever the DOCKED panel is what got updated):
+    `self._last_custom_analysis = (data, analysis_type, neuron_slice,
+    time_slice)` (add this attribute, `None` initially, in `Gui.__init__`).
+    The Custom Analysis panel's own detach factory reads from
+    `self._last_custom_analysis`; if it's still `None` (nothing analyzed
+    there yet), show a `QMessageBox.information` ("Nothing to detach yet")
+    instead of opening an empty window.
+  - `TraceWidget`/`SpikeWidget` DO retain usable state on `self.data`
+    (`timeseries_widget.py:100`, set verbatim in `set_data`,
+    `trace_widget.py:218-231` / `spike_widget.py:34-40`) — but prefer
+    `self.project.get_data(self.cmb_trace.currentText(), TraceData)` /
+    `..., SpikeData)` anyway, for consistency with how `Gui` already re-derives
+    this data everywhere else (e.g. `gui.py:1286-1288,1289-1292`).
+  - `SpatialFootprintWidget._cellpose_data` (private, `spatial_footprint_widget.py:55-56`)
+    IS the same object as `self.project.cellpose_data` — either works; use
+    `self.project.cellpose_data` for consistency.
+  - `ConsoleWidget`/`ChatWidget` are genuinely stateful (REPL transcript/
+    history, chat message log) — see their own sections below.
+
+**Controllers**: `Gui.__init__` builds three separate `ConstrainedPanZoomController()`
+instances (`gui.py:344-346`): `self.controller` (used only as the optional
+`default_controller` for the "lock to default view" checkbox — NOT a live
+pan/zoom sync mechanism), `self.trace_controller` (Traces' own primary
+camera controller), `self.spike_controller` (Spikes' own). No panel shares a
+live primary controller with another. A detached Traces/Spikes/Data instance
+needs its OWN fresh `ConstrainedPanZoomController()` (takes no required args,
+`constrained_pan_zoom_controller.py:30-47`) as its primary controller, and
+may reuse `self.controller` as `default_controller` (safe — it only affects
+optional axis-locking, not automatic sync). `HeatmapWidget`/`SpatialFootprintWidget`
+take no controller argument at all (`heatmap_widget.py:87`,
+`spatial_footprint_widget.py:21`) — nothing to wire.
+
+**Signal reconnection**: for each panel type, grep `gui.py`'s `Gui.__init__`
+for every `self.<panel_attr>.<signal>.connect(...)` call and reproduce EVERY
+one of them on the fresh instance, connected to the identical bound `Gui`
+method. Do not assume the lists below are exhaustive — re-grep and confirm
+before writing each factory. Known ones from this investigation:
+  - `SpatialFootprintWidget.import_requested` → `Gui.btn_import_cellpose_data_clicked`
+    (`gui.py:355-357`); `neuron_greyed_out_changed` → `Gui._on_neuron_greyed_out_changed`
+    (`gui.py:358-360`).
+  - `TraceWidget`/`SpikeWidget.custom_analysis_requested` → `Gui._custom_analysis`
+    (connections around `gui.py:471,475,478,479` — re-grep to confirm exact
+    lines and whether both widgets connect to the same handler).
+  - `ConsoleWidget.console_command_entered` → `Gui._update_data` (`gui.py:462`);
+    `close_requested` → toggles its own view action (`gui.py:463-470`).
+  - `ChatWidget.request_settings_dialog` → `Gui.open_llm_settings` (`gui.py:389`).
+  - `HeatmapWidget`/`CustomAnalysisWidget`: confirm via grep whether either
+    emits anything `Gui` listens to (not confirmed either way in this
+    investigation — check before assuming there's nothing to wire).
+
+
+────────────────────────────────────────────────────────────────────────────
+NEW FILE — src/neuroseq/detached_panel_window.py
+────────────────────────────────────────────────────────────────────────────
+
+One generic, reusable wrapper for every detached panel (mirrors
+`CustomAnalysisWindow`'s shape, but generic over the embedded widget and
+scrollable per the explicit "still... scrollable" requirement — reuse the
+`QScrollArea` pattern `tif_import_dialog.py` already established for a
+similar "content might not fit the window" concern, `tif_import_dialog.py:260-266`):
+
+    from __future__ import annotations
+
+    from collections.abc import Callable
+
+    from qtpy import QtCore
+    from qtpy import QtWidgets
+
+
+    class DetachedPanelWindow(QtWidgets.QWidget):
+        """Top-level window wrapping one detached (freshly-built) panel instance."""
+
+        def __init__(
+            self,
+            widget: QtWidgets.QWidget,
+            title: str,
+            *,
+            on_close: Callable[[], None] | None = None,
+            parent: QtWidgets.QWidget | None = None,
+        ) -> None:
+            super().__init__(parent)
+            self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
+            self.setWindowFlags(
+                QtCore.Qt.WindowType.Window | QtCore.Qt.WindowType.Tool
+            )
+            self.setWindowTitle(title)
+            self.resize(800, 600)
+            self._widget = widget
+            self._on_close = on_close
+
+            layout = QtWidgets.QVBoxLayout(self)
+            layout.setContentsMargins(0, 0, 0, 0)
+            scroll_area = QtWidgets.QScrollArea(self)
+            scroll_area.setWidgetResizable(True)
+            scroll_area.setWidget(widget)
+            layout.addWidget(scroll_area)
+
+        def closeEvent(self, event: QtCore.QEvent) -> None:
+            # Fastplotlib-backed widgets need their renderer explicitly
+            # stopped before Qt destroys them (see FPLWidget.closeEvent,
+            # DataWidget.closeEvent, Gui.closeEvent for the same idiom) —
+            # widgets without a meaningful close() (ConsoleWidget, ChatWidget)
+            # just get the default QWidget.close(), which is a no-op beyond
+            # hiding, so calling it unconditionally here is always safe.
+            self._widget.close()
+            if self._on_close is not None:
+                self._on_close()
+            super().closeEvent(event)
+
+`setWidgetResizable(True)` is required — without it `QScrollArea` won't
+let the embedded widget grow to fill the window, defeating the point of a
+resizable detached window that's ALSO scrollable when made smaller than the
+content's natural size.
+
+
+────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/gui.py
+────────────────────────────────────────────────────────────────────────────
+
+1. Import the new module and `ConstrainedPanZoomController`/`TraceData`/
+   `SpikeData`/`SynapseData` (check which are already imported — likely all
+   are, given existing usages).
+
+2. `Gui.__init__`: add `self._last_custom_analysis: tuple[TraceData | SpikeData
+   | SynapseData, CustomAnalysisType | AnalysisPlugin | None, slice | None,
+   slice | None] | None = None` near the other panel-state attributes.
+
+3. `Gui._custom_analysis` (`gui.py:578-601`): in the `else` branch (docked
+   panel, not `new_window`), add before/after `self.custom_analysis_widget.set_data(...)`:
+
+       self._last_custom_analysis = (data, analysis_type, neuron_slice, time_slice)
+
+4. Add a small per-panel factory registry and the two generic entry points.
+   Place near `_view_actions`/`_set_widget_visible` (`gui.py:2803-2869`):
+
+       def _panel_title(self, widget: QtWidgets.QWidget) -> str:
+           action = self._view_actions.get(widget)
+           if action is None:
+               return "Panel"
+           # action.text() is like "Show &Traces" / "Hide &Traces" — strip the
+           # leading verb and the mnemonic ampersand for a clean window title.
+           return action.text().split(" ", 1)[-1].replace("&", "")
+
+       def _build_detached_widget(
+           self, source: QtWidgets.QWidget
+       ) -> QtWidgets.QWidget | None:
+           """Construct a fresh, fully-wired instance mirroring `source`'s
+           current data. Returns None if there is nothing to show yet
+           (e.g. Custom Analysis before anything has been analyzed)."""
+           if source is self.trace_widget:
+               return self._build_fresh_trace_widget()
+           if source is self.spike_widget:
+               return self._build_fresh_spike_widget()
+           if source is self.data_widget:
+               return self._build_fresh_data_widget()
+           if source is self.heatmap_widget:
+               return self._build_fresh_heatmap_widget()
+           if source is self.spatial_footprint_widget:
+               return self._build_fresh_spatial_footprint_widget()
+           if source is self.custom_analysis_widget:
+               return self._build_fresh_custom_analysis_widget()
+           if source is self.console_widget:
+               return self._build_fresh_console_widget()
+           if source is self.chat_widget:
+               return self._build_fresh_chat_widget()
+           return None
+
+       def detach_panel(self, source: QtWidgets.QWidget, *, keep_original: bool) -> None:
+           widget = self._build_detached_widget(source)
+           if widget is None:
+               QtWidgets.QMessageBox.information(
+                   self, "Nothing to detach", "This panel has nothing to show yet."
+               )
+               return
+           window = DetachedPanelWindow(
+               widget, self._panel_title(source), parent=self
+           )
+           window.show()
+           if not keep_original:
+               action = self._view_actions.get(source)
+               if action is not None:
+                   action.setChecked(False)  # goes through _set_widget_visible
+
+   Each `_build_fresh_*_widget` is a small private method — see per-panel
+   sections below for exactly what each must do.
+
+5. `Gui.closeEvent` (`gui.py:3447-3469`): extend the existing
+   `findChildren(CustomAnalysisWindow)` sweep with one more, identical loop
+   for the new generic wrapper (both are `parent=self`-owned, so
+   `findChildren` picks up any number of open detached windows regardless of
+   panel type):
+
+       for detached_window in self.findChildren(DetachedPanelWindow):
+           detached_window.close()
+
+   Place it right next to the existing `CustomAnalysisWindow` sweep
+   (`gui.py:3466-3468`) — order doesn't matter, both are independent.
+
+
+────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/timeseries_widget.py  (Traces + Spikes context menu)
+────────────────────────────────────────────────────────────────────────────
+
+`_rebuild_custom_analysis_menu` (`timeseries_widget.py:462-488`) already
+clears and repopulates `self.context_menu` on every right-click — add the two
+new actions there, guarded so `StimWidget` (out of scope) never gets them:
+
+    def _rebuild_custom_analysis_menu(self) -> None:
+        self.context_menu.clear()
+        ...  # existing "Open analysis in a new window" + CustomAnalysisType +
+             # plugin actions, unchanged
+        if not isinstance(self, StimWidget):
+            self.context_menu.addSeparator()
+            detach_action = self.context_menu.addAction("Detach panel")
+            detach_action.triggered.connect(
+                lambda: self.window().detach_panel(self, keep_original=False)
+            )
+            copy_action = self.context_menu.addAction("Detach copy of panel")
+            copy_action.triggered.connect(
+                lambda: self.window().detach_panel_copy(self)
+                if hasattr(self.window(), "detach_panel_copy")
+                else None
+            )
+
+  (Simplify the lambda above once `Gui.detach_panel_copy` exists as a thin
+  wrapper — see below; don't leave the `hasattr` guard in the final code,
+  it's only here to flag that `self.window()` must resolve to the `Gui`
+  instance. `self.window()` — NOT `self.parent()` — is required: `QSplitter.addWidget()`
+  reparents the widget's actual Qt parent to the splitter, so `self.parent()`
+  is the splitter, not `Gui`; `self.window()` walks up to the top-level
+  window, which is `Gui` for any panel still docked in the main window.)
+
+  `isinstance(self, StimWidget)` requires importing `StimWidget` into
+  `timeseries_widget.py` — check for an import cycle first (`stim_widget.py`
+  likely already imports FROM `timeseries_widget.py`, since `StimWidget`
+  extends `TimeseriesWidget` — a direct import back would cycle). If it
+  cycles, use a duck-typed check instead (e.g. a class attribute
+  `SUPPORTS_DETACH = True` overridden to `False` on `StimWidget`, checked as
+  `if getattr(self, "SUPPORTS_DETACH", True):`) rather than an isinstance
+  check that requires the cyclic import.
+
+  Add two thin dispatchers on `Gui` (next to `detach_panel` from gui.py
+  step 4): `detach_panel_copy(self, source): self.detach_panel(source, keep_original=True)`.
+
+
+────────────────────────────────────────────────────────────────────────────
+PER-PANEL FACTORY METHODS — src/neuroseq/gui.py
+────────────────────────────────────────────────────────────────────────────
+
+**Traces** (`_build_fresh_trace_widget`):
+
+    def _build_fresh_trace_widget(self) -> TraceWidget:
+        controller = ConstrainedPanZoomController()
+        widget = TraceWidget(
+            controller,
+            parent=None,
+            default_controller=self.controller,
+            show_axis_link_controls=True,
+        )
+        if self.project is not None:
+            widget.set_data(self.project.get_data(self.cmb_trace.currentText(), TraceData))
+        widget.custom_analysis_requested.connect(self._custom_analysis)
+        # grep gui.py for every other `self.trace_widget.<signal>.connect(...)`
+        # and reproduce each one identically here.
+        return widget
+
+**Spikes** (`_build_fresh_spike_widget`): mirror Traces exactly, substituting
+`SpikeWidget`/`self.spike_controller`-equivalent-fresh-controller/`self.cmb_spike`/`SpikeData`.
+
+**Data** (`_build_fresh_data_widget`): construct a whole fresh `DataWidget`
+(it privately owns its own nested Trace/Spike/Heatmap children and its own
+internal `ConstrainedPanZoomController`, `data_widget.py:17-44` — there is no
+simpler "just the active nested widget" extraction that doesn't hit the same
+`HeatmapWidget`-loses-its-`SynapseData` problem noted above when the active
+child is the heatmap). Re-derive `data` the same way `Gui._apply_data_selection`
+already does (`gui.py:1344-1358`, combobox-suffix-based lookup — read that
+method to copy its exact re-derivation logic) rather than reading anything
+off `self.data_widget`:
+
+    def _build_fresh_data_widget(self) -> DataWidget:
+        widget = DataWidget(ConstrainedPanZoomController(), parent=None)
+        data = self._current_data_selection()  # or however _apply_data_selection
+                                                  # derives it — extract that
+                                                  # lookup into a shared helper
+                                                  # if it isn't already one
+        widget.set_data(data)
+        return widget
+
+**Heatmap** (`_build_fresh_heatmap_widget`):
+
+    def _build_fresh_heatmap_widget(self) -> HeatmapWidget:
+        widget = HeatmapWidget(parent=None)
+        if self.project is not None:
+            widget.set_data(self.project.get_data(self.cmb_synapse.currentText(), SynapseData))
+        return widget
+
+**Spatial Footprints** (`_build_fresh_spatial_footprint_widget`):
+
+    def _build_fresh_spatial_footprint_widget(self) -> SpatialFootprintWidget:
+        widget = SpatialFootprintWidget(parent=None)
+        widget.set_data(self.project.cellpose_data if self.project is not None else None)
+        widget.import_requested.connect(self.btn_import_cellpose_data_clicked)
+        widget.neuron_greyed_out_changed.connect(self._on_neuron_greyed_out_changed)
+        return widget
+
+**Custom Analysis** (`_build_fresh_custom_analysis_widget`): returns `None`
+(via the `_build_detached_widget` dispatcher's "nothing to detach" path,
+NOT from this method — keep this method simple) when
+`self._last_custom_analysis is None`; otherwise:
+
+    def _build_fresh_custom_analysis_widget(self) -> CustomAnalysisWidget | None:
+        if self._last_custom_analysis is None:
+            return None
+        widget = CustomAnalysisWidget(parent=None)
+        data, analysis_type, neuron_slice, time_slice = self._last_custom_analysis
+        widget.set_data(data, analysis_type, neuron_slice, time_slice)
+        return widget
+
+  Adjust `_build_detached_widget`'s dispatch for this one case to allow
+  `None` to propagate through to the "Nothing to detach yet" message in
+  `detach_panel` (already written that way above — just confirm this method
+  itself may legitimately return `None` and that's expected, not an error).
+
+**Console** (`_build_fresh_console_widget`): genuinely stateful — copy the
+transcript/history across so the detached copy isn't a blank REPL:
+
+    def _build_fresh_console_widget(self) -> ConsoleWidget:
+        widget = ConsoleWidget(parent=None)
+        widget.set_project(self.project)
+        # Copy transcript + input history from the original. Confirm the
+        # exact attribute names on ReplWidget (base class) before writing
+        # this — investigation found self.input.history and an output
+        # transcript widget, but did not confirm the transcript widget's
+        # exact name/API; grep console_widget.py / its base class for the
+        # precise read (e.g. toPlainText()) and write (e.g. append()) calls.
+        widget.output.setPlainText(self.console_widget.output.toPlainText())
+        widget.input.history = list(self.console_widget.input.history)
+        widget.console_command_entered.connect(self._update_data)
+        widget.close_requested.connect(...)  # mirror gui.py:463-470 exactly
+        return widget
+
+  Flag explicitly in review: the exact transcript-widget attribute/API above
+  is NOT confirmed from this investigation (only `self.input.history` and "an
+  output transcript" were found) — verify against `console_widget.py`'s
+  actual base class (`ReplWidget`) before implementing, adjust accordingly.
+
+**Chat** (`_build_fresh_chat_widget`): also genuinely stateful
+(`chat_widget.py:55-71`, `self._history: list[Message]`):
+
+    def _build_fresh_chat_widget(self) -> ChatWidget:
+        widget = ChatWidget(parent=None)
+        widget.set_project(self.project)
+        widget._history = list(self.chat_widget._history)
+        widget._render_history()
+        widget.request_settings_dialog.connect(self.open_llm_settings)
+        return widget
+
+  Reaching into `_history`/`_render_history()` (both private) is acceptable
+  here since this is the SAME module reaching into a sibling instance of the
+  same class, not cross-module API abuse — but if `ChatWidget` grows a public
+  "export/import history" method for some other reason later, prefer that
+  instead. Note: if the original is mid-stream (an in-flight LLM response,
+  `self.chat_widget._worker is not None`), the copy will not receive
+  in-progress tokens — acceptable edge case, not worth solving here.
+
+
+────────────────────────────────────────────────────────────────────────────
+NON-GOALS
+────────────────────────────────────────────────────────────────────────────
+
+- Stimuli panel (see GOAL section — structurally entangled with main-window-
+  level widgets; explicitly excluded, follow-up item).
+- Live-mirroring: a detached/copied panel does not track subsequent changes
+  elsewhere in the main window (different combo-box selection, etc.) after
+  the moment it was built.
+- True widget reparenting of a live GPU canvas — always construct fresh.
+- Persisting detached-window layout/position across app restarts.
+- Any change to `DataWidget`'s existing internal `QStackedWidget` dispatch
+  logic, or to the existing `CustomAnalysisWindow`/`_custom_analysis(...,
+  new_window=True)` "Open analysis in a new window" feature already reachable
+  from the Traces/Spikes right-click menu — that stays as-is; this change
+  only adds the ability to detach the DOCKED `self.custom_analysis_widget`
+  panel itself via the same two new actions every other panel gets.
+
+
+────────────────────────────────────────────────────────────────────────────
+TESTS
+────────────────────────────────────────────────────────────────────────────
+
+tests/test_gui.py — ADD, mirroring the existing panel-toggle pattern
+(`test_spatial_footprint_panel_toggle_shows_and_hides`, `tests/test_gui.py:336-352`:
+construct `Gui()`, `qtbot.addWidget(gui)`, always `gui.close()` at the end):
+
+    test_detach_panel_hides_original_and_shows_fresh_window
+        # Parametrize (or write one per panel type — at minimum cover
+        # trace_widget, heatmap_widget, spatial_footprint_widget,
+        # console_widget as representative of: combo-driven fastplotlib,
+        # SynapseData-transforming fastplotlib, cellpose-data fastplotlib,
+        # and stateful-non-GPU). For each: load matching data, call
+        # gui.detach_panel(gui.<panel>, keep_original=False), assert a
+        # DetachedPanelWindow now exists via gui.findChildren(DetachedPanelWindow),
+        # assert gui.<panel>.isVisible() is False (or its _view_actions entry
+        # is unchecked), assert the new window's embedded widget shows
+        # equivalent data to what the original had. Close the detached
+        # window; assert no exception; gui.close() at the end.
+
+    test_detach_copy_keeps_original_visible
+        # Same as above with keep_original=True; assert original stays
+        # visible/checked AND the new window exists simultaneously.
+
+    test_detach_custom_analysis_before_anything_analyzed_shows_message
+        # gui._last_custom_analysis is None by default; call
+        # gui.detach_panel(gui.custom_analysis_widget, keep_original=False);
+        # assert a QMessageBox.information was shown (qmessagebox_calls
+        # fixture) and no DetachedPanelWindow was created.
+
+    test_detach_custom_analysis_after_analysis_seeds_from_last_shown
+        # Drive gui._custom_analysis(some_trace_data, CustomAnalysisType.Histogram,
+        # new_window=False, neuron_slice=None, time_slice=None) directly (or
+        # via the existing custom_analysis_requested signal path used by
+        # other tests in this file) so gui._last_custom_analysis is populated,
+        # then detach and assert the fresh CustomAnalysisWidget shows the same
+        # analysis type / data shape.
+
+    test_stim_widget_context_menu_has_no_detach_actions
+        # Regression guard for the explicit exclusion: build the Stimuli
+        # panel's context menu (however existing stim_editor tests trigger
+        # contextMenuEvent — check tests/test_stim_editor.py or
+        # tests/test_stim_widget.py for the pattern) and assert no action
+        # with text "Detach panel" / "Detach copy of panel" exists.
+
+    test_closing_gui_with_open_detached_windows_does_not_crash
+        # Open 2-3 detached windows of different panel types, then gui.close();
+        # assert no exception and (if feasible) that
+        # gui.findChildren(DetachedPanelWindow) is empty afterward.
+
+tests/test_timeseries_widget.py (or wherever TraceWidget/SpikeWidget context-
+menu construction is already tested — check for an existing
+`_rebuild_custom_analysis_menu` test) — ADD an assertion that the rebuilt
+menu for `TraceWidget`/`SpikeWidget` (not `StimWidget`) includes both new
+actions, and that `StimWidget`'s does not (may overlap with the `test_gui.py`
+guard above — keep whichever is more natural given the existing test
+structure in that file).
+
+new file tests/test_detached_panel_window.py — ADD
+
+    test_close_event_calls_widget_close_and_on_close_callback
+        # Build DetachedPanelWindow(some_widget, "Title", on_close=callback),
+        # qtbot.addWidget, call .close(), assert some_widget's close() ran
+        # (use a MagicMock/QWidget subclass with a spy) and callback was
+        # invoked once.
+
+    test_scroll_area_wraps_widget_and_is_resizable
+        # Assert the constructed window's QScrollArea has
+        # widgetResizable() is True and .widget() is the passed-in widget.
+
+
+────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────
+
+    ruff check src/neuroseq/gui.py src/neuroseq/timeseries_widget.py \
+               src/neuroseq/detached_panel_window.py \
+               tests/test_gui.py tests/test_detached_panel_window.py
+    ruff format --check <same files>
+    mypy --ignore-missing-imports src/neuroseq/gui.py src/neuroseq/timeseries_widget.py \
+               src/neuroseq/detached_panel_window.py
+    uv run pytest tests/test_detached_panel_window.py -v
+    uv run pytest tests/test_gui.py -v
+    uv run pytest tests/test_trace_widget.py tests/test_spike_widget.py tests/test_stim_widget.py -v
+    uv run pytest
+
+Full-suite run required: `timeseries_widget.py` is the shared base class for
+three widget types used throughout the app, and `gui.py` is the single most
+heavily-exercised file in the test suite — a mistake in the new dispatch
+methods or the `StimWidget` exclusion guard could easily surface as an
+unrelated-looking failure elsewhere.
