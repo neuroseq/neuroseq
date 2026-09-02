@@ -8,6 +8,8 @@ from qtpy import QtWidgets
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import TraceData
+from neuroseq.spike_widget import SpikeWidget
+from neuroseq.stim_widget import StimWidget
 from neuroseq.trace_widget import TraceNormDialog
 from neuroseq.trace_widget import TraceWidget
 from neuroseq.utils import neuron_indices_to_colors
@@ -38,6 +40,33 @@ def test_trace_widget_context_menu_offers_vector_export(
     assert export_action.isEnabled()
     with qtbot.waitSignal(trace_widget.vector_export_requested):
         export_action.trigger()
+
+
+@pytest.mark.parametrize("widget_cls", [TraceWidget, SpikeWidget])
+def test_timeseries_context_menu_offers_detach_actions(
+    qtbot: QtBot, widget_cls
+) -> None:
+    controller = ConstrainedPanZoomController()
+    widget = widget_cls(controller)
+    qtbot.addWidget(widget)
+
+    widget._rebuild_custom_analysis_menu()
+    action_texts = [action.text() for action in widget.context_menu.actions()]
+
+    assert "Detach panel" in action_texts
+    assert "Detach copy of panel" in action_texts
+
+
+def test_stim_widget_context_menu_has_no_detach_actions(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    widget = StimWidget(controller)
+    qtbot.addWidget(widget)
+
+    widget._rebuild_custom_analysis_menu()
+    action_texts = [action.text() for action in widget.context_menu.actions()]
+
+    assert "Detach panel" not in action_texts
+    assert "Detach copy of panel" not in action_texts
 
 
 def test_trace_norm_dialog_minimum_is_50_percent(qtbot: QtBot) -> None:

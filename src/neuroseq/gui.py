@@ -33,6 +33,7 @@ from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.data_widget import DataWidget
+from neuroseq.detached_panel_window import DetachedPanelWindow
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
 from neuroseq.experiments_manager_dialog import ExperimentsManagerDialog
@@ -479,6 +480,7 @@ class Gui(QtWidgets.QMainWindow):
         self.data_widget.spike_widget.custom_analysis_requested.connect(
             self._custom_analysis
         )
+        self._install_detach_context_menus()
         self.cmb_trace.currentTextChanged.connect(self.set_neuron)
         self.cmb_synapse.currentTextChanged.connect(self.set_synapse)
         self.cmb_spike.currentTextChanged.connect(self.set_spike)
@@ -491,6 +493,16 @@ class Gui(QtWidgets.QMainWindow):
         # pixel drawn.
         self._last_sim_timeline_secs: float | None = None
         self.last_cellpose_import: CellposeImportResult | None = None
+        self._last_custom_analysis: (
+            tuple[
+                TraceData | SpikeData | SynapseData,
+                CustomAnalysisType | AnalysisPlugin | None,
+                slice | None,
+                slice | None,
+            ]
+            | None
+        ) = None
+        self._detached_panel_windows: list[DetachedPanelWindow] = []
         self._llm_settings_dialog: LLMSettingsDialog | None = None
         self._external_sim_thread: QtCore.QThread | None = None
         self._external_sim_worker: ExternalSimWorker | None = None
@@ -526,6 +538,9 @@ class Gui(QtWidgets.QMainWindow):
         if project.project_section and project.project_name:
             return f"{project.project_section} / {project.project_name}"
         return project.b2_model.name or "Untitled"
+
+    def _popup_title(self, title: str) -> str:
+        return f"{title} - {self._tab_label_for(self.project)}"
 
     def _activate_tab_index(self, index: int, reset_controller: bool = False) -> None:
         self._active_tab_index = index
@@ -592,10 +607,16 @@ class Gui(QtWidgets.QMainWindow):
                 time_slice,
             )
             analysis_window.setWindowTitle(
-                analysis_window.analysis_widget.subplot.get_title()
+                self._popup_title(analysis_window.analysis_widget.subplot.get_title())
             )
             analysis_window.show()
         else:
+            self._last_custom_analysis = (
+                data,
+                analysis_type,
+                neuron_slice,
+                time_slice,
+            )
             self.custom_analysis_widget.set_data(
                 data, analysis_type, neuron_slice, time_slice
             )
@@ -1142,6 +1163,7 @@ class Gui(QtWidgets.QMainWindow):
         for widget in self.plot_widgets:
             widget.clear_data()
         self.custom_analysis_widget.clear_data()
+        self._last_custom_analysis = None
         if self.project is not None:
             self.last_cellpose_import = clone_cellpose_result(
                 self.project.cellpose_data
@@ -2873,6 +2895,219 @@ class Gui(QtWidgets.QMainWindow):
         if action is not None and not action.isChecked():
             action.trigger()
 
+    def _install_detach_context_menus(self) -> None:
+        for source, targets in {
+            self.data_widget: (
+                self.data_widget,
+                self.data_widget.stacked_widget,
+                self.data_widget.heatmap_widget,
+                self.data_widget.heatmap_widget.widget,
+            ),
+            self.heatmap_widget: (self.heatmap_widget, self.heatmap_widget.widget),
+            self.spatial_footprint_widget: (
+                self.spatial_footprint_widget,
+                self.spatial_footprint_widget.empty_state_widget,
+                self.spatial_footprint_widget.overlay_widget,
+                self.spatial_footprint_widget.overlay_widget.overlay_view,
+                self.spatial_footprint_widget.overlay_widget.overlay_view.widget,
+            ),
+            self.custom_analysis_widget: (
+                self.custom_analysis_widget,
+                self.custom_analysis_widget.canvas,
+            ),
+            self.console_widget: (self.console_widget,),
+            self.chat_widget: (
+                self.chat_widget,
+                self.chat_widget.history_view,
+            ),
+        }.items():
+            for target in targets:
+                target.setContextMenuPolicy(
+                    QtCore.Qt.ContextMenuPolicy.CustomContextMenu
+                )
+                target.customContextMenuRequested.connect(
+                    lambda pos, s=source, t=target: self._show_detach_context_menu(
+                        s,
+                        t.mapToGlobal(pos),
+                    )
+                )
+
+    def _show_detach_context_menu(
+        self,
+        widget: QtWidgets.QWidget,
+        global_position: QtCore.QPoint,
+    ) -> None:
+        menu = QtWidgets.QMenu(widget)
+        detach_action = menu.addAction("Detach panel")
+        assert detach_action is not None
+        detach_action.triggered.connect(
+            lambda: self.detach_panel(widget, keep_original=False)
+        )
+        copy_action = menu.addAction("Detach copy of panel")
+        assert copy_action is not None
+        copy_action.triggered.connect(
+            lambda: self.detach_panel(widget, keep_original=True)
+        )
+        menu.exec(global_position)
+
+    def _panel_title(self, widget: QtWidgets.QWidget) -> str:
+        source = self._detachable_panel_source(widget)
+        action = self._view_actions.get(source)
+        if action is None:
+            return "Panel"
+        return action.text().split(" ", 1)[-1].replace("&", "")
+
+    def _detachable_panel_source(self, widget: QtWidgets.QWidget) -> QtWidgets.QWidget:
+        if widget in (
+            self.data_widget.trace_widget,
+            self.data_widget.spike_widget,
+            self.data_widget.heatmap_widget,
+        ):
+            return self.data_widget
+        return widget
+
+    def _current_data_selection(self) -> TraceData | SpikeData | SynapseData | None:
+        cmb_name = self.cmb_data.currentText()
+        if cmb_name.endswith(" [trace]"):
+            return self.project.get_data(cmb_name[:-8], TraceData)
+        if cmb_name.endswith(" [spike]"):
+            return self.project.get_data(cmb_name[:-8], SpikeData)
+        if cmb_name.endswith(" [synapse]"):
+            return self.project.get_data(cmb_name[:-10], SynapseData)
+        return None
+
+    def _build_detached_widget(
+        self,
+        source: QtWidgets.QWidget,
+    ) -> QtWidgets.QWidget | None:
+        source = self._detachable_panel_source(source)
+        if source is self.trace_widget:
+            return self._build_fresh_trace_widget()
+        if source is self.spike_widget:
+            return self._build_fresh_spike_widget()
+        if source is self.data_widget:
+            return self._build_fresh_data_widget()
+        if source is self.heatmap_widget:
+            return self._build_fresh_heatmap_widget()
+        if source is self.spatial_footprint_widget:
+            return self._build_fresh_spatial_footprint_widget()
+        if source is self.custom_analysis_widget:
+            return self._build_fresh_custom_analysis_widget()
+        if source is self.console_widget:
+            return self._build_fresh_console_widget()
+        if source is self.chat_widget:
+            return self._build_fresh_chat_widget()
+        return None
+
+    def detach_panel(self, source: QtWidgets.QWidget, *, keep_original: bool) -> None:
+        source = self._detachable_panel_source(source)
+        widget = self._build_detached_widget(source)
+        if widget is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Nothing to detach",
+                "This panel has nothing to show yet.",
+            )
+            return
+
+        window: DetachedPanelWindow | None = None
+
+        def _forget_window() -> None:
+            if window in self._detached_panel_windows:
+                self._detached_panel_windows.remove(window)
+
+        window = DetachedPanelWindow(
+            widget,
+            self._popup_title(self._panel_title(source)),
+            on_close=_forget_window,
+            parent=self,
+        )
+        # A widget's own embedded "close" control (e.g. ConsoleWidget's
+        # close_requested) should close the detached window it's actually
+        # in, not reach back and toggle the original docked panel.
+        close_requested = getattr(widget, "close_requested", None)
+        if close_requested is not None:
+            close_requested.connect(window.close)
+        self._detached_panel_windows.append(window)
+        window.show()
+        if not keep_original:
+            action = self._view_actions.get(source)
+            if action is not None and action.isChecked():
+                action.trigger()
+
+    def detach_panel_copy(self, source: QtWidgets.QWidget) -> None:
+        self.detach_panel(source, keep_original=True)
+
+    def _build_fresh_trace_widget(self) -> TraceWidget:
+        widget = TraceWidget(
+            ConstrainedPanZoomController(),
+            parent=None,
+            default_controller=self.controller,
+            show_axis_link_controls=True,
+        )
+        widget.set_data(self.project.get_data(self.cmb_trace.currentText(), TraceData))
+        widget.custom_analysis_requested.connect(self._custom_analysis)
+        widget.vector_export_requested.connect(self.btn_export_traces_vector_clicked)
+        return widget
+
+    def _build_fresh_spike_widget(self) -> SpikeWidget:
+        widget = SpikeWidget(
+            ConstrainedPanZoomController(),
+            parent=None,
+            default_controller=self.controller,
+            show_axis_link_controls=True,
+        )
+        widget.set_data(self.project.get_data(self.cmb_spike.currentText(), SpikeData))
+        widget.custom_analysis_requested.connect(self._custom_analysis)
+        return widget
+
+    def _build_fresh_data_widget(self) -> DataWidget:
+        widget = DataWidget(ConstrainedPanZoomController(), parent=None)
+        widget.set_data(self._current_data_selection())
+        widget.trace_widget.custom_analysis_requested.connect(self._custom_analysis)
+        widget.spike_widget.custom_analysis_requested.connect(self._custom_analysis)
+        return widget
+
+    def _build_fresh_heatmap_widget(self) -> HeatmapWidget:
+        widget = HeatmapWidget(parent=None)
+        widget.set_data(
+            self.project.get_data(self.cmb_synapse.currentText(), SynapseData)
+        )
+        return widget
+
+    def _build_fresh_spatial_footprint_widget(self) -> SpatialFootprintWidget:
+        widget = SpatialFootprintWidget(parent=None)
+        widget.set_data(self.project.cellpose_data)
+        widget.import_requested.connect(self.btn_import_cellpose_data_clicked)
+        widget.neuron_greyed_out_changed.connect(self._on_neuron_greyed_out_changed)
+        return widget
+
+    def _build_fresh_custom_analysis_widget(self) -> CustomAnalysisWidget | None:
+        if self._last_custom_analysis is None:
+            return None
+        widget = CustomAnalysisWidget(parent=None)
+        data, analysis_type, neuron_slice, time_slice = self._last_custom_analysis
+        widget.set_data(data, analysis_type, neuron_slice, time_slice)
+        return widget
+
+    def _build_fresh_console_widget(self) -> ConsoleWidget:
+        widget = ConsoleWidget(parent=None)
+        widget.set_project(self.project)
+        widget.output.setPlainText(self.console_widget.output.toPlainText())
+        widget.input.history = list(self.console_widget.input.history)
+        widget.console_command_entered.connect(self._update_data)
+        # close_requested is wired generically in detach_panel() to close
+        # this widget's own detached window, not the original docked panel.
+        return widget
+
+    def _build_fresh_chat_widget(self) -> ChatWidget:
+        widget = ChatWidget(parent=None)
+        widget.set_project(self.project)
+        widget._history = list(self.chat_widget._history)
+        widget._render_history()
+        widget.request_settings_dialog.connect(self.open_llm_settings)
+        return widget
+
     def _create_actions_settings(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None
     ) -> None:
@@ -3192,7 +3427,9 @@ class Gui(QtWidgets.QMainWindow):
             slice(0, num_vis),
             slice(0, n_samples),
         )
-        analysis_window.setWindowTitle(f"ELiSe replay MSE — saved to {csv_path.name}")
+        analysis_window.setWindowTitle(
+            self._popup_title(f"ELiSe replay MSE — saved to {csv_path.name}")
+        )
         analysis_window.show()
 
     def _elise_protocol_inputs(
@@ -3408,7 +3645,7 @@ class Gui(QtWidgets.QMainWindow):
         title = "ELiSe learning curves"
         if csv_path is not None:
             title += f" — saved to {csv_path.name}"
-        analysis_window.setWindowTitle(title)
+        analysis_window.setWindowTitle(self._popup_title(title))
         analysis_window.show()
 
     @QtCore.Slot()
@@ -3466,4 +3703,6 @@ class Gui(QtWidgets.QMainWindow):
         # Close any detached analysis windows that are parented to this GUI.
         for analysis_window in self.findChildren(CustomAnalysisWindow):
             analysis_window.close()
+        for detached_window in self.findChildren(DetachedPanelWindow):
+            detached_window.close()
         super().closeEvent(event)

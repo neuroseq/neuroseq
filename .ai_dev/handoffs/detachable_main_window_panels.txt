@@ -1,6 +1,6 @@
 detachable_main_window_panels — right-click any main-window panel to "Detach
 panel" (pop into its own interactive window, hide the original) or "Detach
-copy of panel" (same, but the original stays visible too)
+copy of panel" (same, but the original stays visible too)  [IMPLEMENTED]
 ================================================================================
 
 GOAL
