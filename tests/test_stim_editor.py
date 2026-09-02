@@ -354,7 +354,7 @@ def test_routine_dialogs_have_reset_stim_array_button(qtbot: QtBot) -> None:
         assert selector is not None
         selector.cmb_routine.setCurrentText(routine)
         selector._on_continue()
-        qtbot.waitUntil(lambda: not selector.isVisible())
+        qtbot.waitUntil(lambda s=selector: not s.isVisible())
         dialog = getattr(stim_editor, attr)
         assert dialog is not None
         assert dialog.btn_reset.text() == "Reset stim array"
