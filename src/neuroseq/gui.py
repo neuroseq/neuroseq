@@ -543,6 +543,11 @@ class Gui(QtWidgets.QMainWindow):
         return f"{title} - {self._tab_label_for(self.project)}"
 
     def _activate_tab_index(self, index: int, reset_controller: bool = False) -> None:
+        if 0 <= self._active_tab_index < len(self.tabs):
+            # Remember where the outgoing tab's playback position was, so
+            # switching back to it later restores this instead of showing
+            # whatever the (shared) time slider happens to display.
+            self.tabs[self._active_tab_index].last_time_ms = self.time_slider.t_ms
         self._active_tab_index = index
         self.update_project(self.tabs[index], reset_controller=reset_controller)
 
@@ -1153,6 +1158,12 @@ class Gui(QtWidgets.QMainWindow):
             self.tab_bar.setTabText(
                 self._active_tab_index, self._tab_label_for(project)
             )
+        # Refresh the shared controllers/time-slider range for the newly
+        # active project unconditionally — StimEditor.set_project() below
+        # only does this itself when the project has stim arrays, which
+        # would otherwise leave a stale range (and a stale time-slider
+        # position) for any project with none.
+        self.update_limits()
         if reset_controller:
             self.controller.reset()
             self.trace_controller.reset()
@@ -1181,6 +1192,10 @@ class Gui(QtWidgets.QMainWindow):
         self._refresh_elise_replay_action()
         if hasattr(self, "spatial_footprint_widget"):
             self.spatial_footprint_widget.set_data(self.project.cellpose_data)
+        # Restore this project's own remembered playback position now that
+        # its data is loaded (rather than leaving whatever the previously
+        # active project's position happened to be).
+        self.time_slider.set_current_time_ms(project.last_time_ms)
 
     def _cellpose_neuron_count(self, imported: CellposeImportResult | None) -> int:
         if imported is None:

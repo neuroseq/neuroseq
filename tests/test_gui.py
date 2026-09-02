@@ -557,6 +557,70 @@ def test_custom_analysis_popup_title_includes_originating_tab(qtbot: QtBot) -> N
     gui.close()
 
 
+def _make_timed_project(n_timepoints: int, dt: float = 0.01) -> Project:
+    project = Project()
+    traces = TraceData(
+        name="trace",
+        traces=np.zeros((2, n_timepoints), dtype=np.float32),
+        indices=np.arange(2, dtype=np.uint32),
+        units="mV",
+        dt=dt,
+    )
+    project.add_experiment(
+        Experiment(
+            name="exp",
+            duration=n_timepoints * dt,
+            timepoints=[],
+            data=[traces],
+        )
+    )
+    return project
+
+
+def test_switching_project_tabs_restores_each_tabs_own_time_slider_position(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    tab0_project = gui.project
+    tab1_project = _make_timed_project(500, dt=0.01)  # 5.0s
+
+    gui._open_project_in_new_tab(tab1_project, reset_controller=True)
+    assert gui.time_slider.t_ms == 0  # a freshly opened tab has no history
+
+    gui.time_slider.set_current_time_ms(3000)
+    gui._activate_tab_index(0, reset_controller=True)
+    assert gui.time_slider.t_ms == 0  # tab0 was never scrubbed
+    assert tab1_project.last_time_ms == 3000  # remembered on the way out
+
+    gui.time_slider.set_current_time_ms(200)
+    gui._activate_tab_index(1, reset_controller=True)
+    assert gui.time_slider.t_ms == 3000  # restored from tab1_project.last_time_ms
+    assert tab0_project.last_time_ms == 200
+
+    gui._activate_tab_index(0, reset_controller=True)
+    assert gui.time_slider.t_ms == 200  # restored from tab0_project.last_time_ms
+    gui.close()
+
+
+def test_switching_to_tab_with_no_stim_arrays_still_updates_time_slider_range(
+    qtbot: QtBot,
+) -> None:
+    # StimEditor.set_project() only emits limits_modified (which historically
+    # drove the time-slider range) when the project has stim arrays. A tab
+    # with none previously left the slider's range stale from whichever
+    # project was active before it.
+    gui = Gui()
+    qtbot.addWidget(gui)
+    tab1_project = _make_timed_project(500, dt=0.01)  # 5.0s
+    assert not tab1_project.stim_arrays
+
+    gui._open_project_in_new_tab(tab1_project, reset_controller=True)
+
+    assert gui.time_slider.t_max_ms == 5000
+    gui.close()
+
+
 def test_closing_gui_with_open_detached_windows_does_not_crash(qtbot: QtBot) -> None:
     gui = Gui()
     qtbot.addWidget(gui)
