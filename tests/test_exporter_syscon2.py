@@ -8,6 +8,7 @@ from PIL import Image
 
 from neuroseq.exporter_syscon2 import PulseOverrunViolation
 from neuroseq.exporter_syscon2 import _compute_cell_centroids
+from neuroseq.exporter_syscon2 import _compute_cell_stimulation_spots
 from neuroseq.exporter_syscon2 import _find_pulse_overrun_violations
 from neuroseq.exporter_syscon2 import _ScheduledEntityWindow
 from neuroseq.exporter_syscon2 import align_overlapping_pulses_to_shortest
@@ -238,6 +239,25 @@ def test_export_seq_creates_ten_spots_inside_each_cellpose_roi() -> None:
         row = int(segmentation.shape[0] - 1 - center_y)
         assert segmentation[row, int(center_x)] == 0
     assert len(set(coordinates)) == 10
+
+
+def test_edge_balanced_spots_keep_clear_of_roi_border() -> None:
+    segmentation = np.full((24, 24), -1, dtype=np.int32)
+    segmentation[2:22, 2:22] = 0
+
+    legacy = _compute_cell_stimulation_spots(segmentation, 10)[0]
+    balanced = _compute_cell_stimulation_spots(
+        segmentation, 10, algorithm="edge_balanced"
+    )[0]
+
+    def edge_clearance(point: tuple[float, float]) -> float:
+        x, flipped_y = point
+        y = segmentation.shape[0] - 1 - flipped_y
+        return min(x - 2, 21 - x, y - 2, 21 - y)
+
+    assert min(map(edge_clearance, legacy)) == 0
+    assert min(map(edge_clearance, balanced)) > 0
+    assert len(set(balanced)) == 10
 
 
 def test_export_seq_coalesces_nearby_segments_into_one_sanitized_window() -> None:
