@@ -97,12 +97,16 @@ class StimPatternDialog(QtWidgets.QDialog):
         self.spin_repeats = QtWidgets.QSpinBox(self)
         self.spin_repeats.setRange(0, 10_000)
         self.spin_repeats.setValue(1)
+        self.spin_pulse_repetitions = QtWidgets.QSpinBox(self)
+        self.spin_pulse_repetitions.setRange(0, 10_000)
+        self.spin_pulse_repetitions.setValue(1)
         self.spin_start_time_ms = self._make_double_spin(0.0, minimum=0.0)
 
         self.lbl_magnitude = QtWidgets.QLabel("Magnitude:", self)
         self.lbl_value1 = QtWidgets.QLabel("Initial magnitude:", self)
         self.lbl_value2 = QtWidgets.QLabel("Final magnitude:", self)
         self.lbl_repeats = QtWidgets.QLabel("Repeats:", self)
+        self.lbl_pulse_repetitions = QtWidgets.QLabel("Pulse repetition:", self)
 
         self.parameters_form.addRow("Pulse duration (ms):", self.spin_pulse_ms)
         self.parameters_form.addRow(
@@ -113,6 +117,9 @@ class StimPatternDialog(QtWidgets.QDialog):
         self.parameters_form.addRow(self.lbl_value1, self.spin_value1)
         self.parameters_form.addRow(self.lbl_value2, self.spin_value2)
         self.parameters_form.addRow(self.lbl_repeats, self.spin_repeats)
+        self.parameters_form.addRow(
+            self.lbl_pulse_repetitions, self.spin_pulse_repetitions
+        )
         self.parameters_form.addRow("Start time (ms):", self.spin_start_time_ms)
         layout.addLayout(self.parameters_form)
         layout.addStretch(1)
@@ -230,6 +237,7 @@ class StimPatternDialog(QtWidgets.QDialog):
         )
         uses_value_pair = is_ramp or (is_specific and self.radio_linear.isChecked())
         uses_repeats = not (is_all and self.radio_sequential.isChecked())
+        uses_pulse_repetitions = is_all and self.radio_fuer_elise.isChecked()
 
         self._set_row_visible(
             self.lbl_magnitude, self.spin_magnitude, uses_single_magnitude
@@ -237,6 +245,11 @@ class StimPatternDialog(QtWidgets.QDialog):
         self._set_row_visible(self.lbl_value1, self.spin_value1, uses_value_pair)
         self._set_row_visible(self.lbl_value2, self.spin_value2, uses_value_pair)
         self._set_row_visible(self.lbl_repeats, self.spin_repeats, uses_repeats)
+        self._set_row_visible(
+            self.lbl_pulse_repetitions,
+            self.spin_pulse_repetitions,
+            uses_pulse_repetitions,
+        )
 
         if uses_value_pair:
             self.lbl_value1.setText("Initial magnitude:")
@@ -246,6 +259,7 @@ class StimPatternDialog(QtWidgets.QDialog):
         pulse_ms = float(self.spin_pulse_ms.value())
         ipi_ms = float(self.spin_ipi_ms.value())
         repeats = int(self.spin_repeats.value())
+        pulse_repetitions = int(self.spin_pulse_repetitions.value())
         magnitude_values = [
             float(self.spin_magnitude.value()),
             float(self.spin_value1.value()),
@@ -271,6 +285,13 @@ class StimPatternDialog(QtWidgets.QDialog):
                 self,
                 "Invalid pattern",
                 "Repeats must be at least 1.",
+            )
+            return False
+        if self.lbl_pulse_repetitions.isVisible() and pulse_repetitions < 1:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Invalid pattern",
+                "Pulse repetition must be at least 1.",
             )
             return False
         if not all(is_finite_number(value) for value in magnitude_values):
@@ -344,6 +365,7 @@ class StimPatternDialog(QtWidgets.QDialog):
                         magnitude=float(self.spin_magnitude.value()),
                         repeats=repeats,
                         dt_seconds=dt_seconds,
+                        pulse_repetitions=int(self.spin_pulse_repetitions.value()),
                     )
             else:
                 assert neuron_indices is not None

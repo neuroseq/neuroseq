@@ -72,6 +72,39 @@ def test_fuer_elise_repeats_with_trailing_ipi_between() -> None:
     assert np.all(result[24 * 15 - 5 : 24 * 15, :] == 0.0)
 
 
+def test_fuer_elise_pulse_repetitions_repeat_each_event() -> None:
+    result = generate_fuer_elise(
+        13,
+        10,
+        5,
+        1.0,
+        repeats=2,
+        dt_seconds=0.001,
+        pulse_repetitions=3,
+    )
+
+    assert result.shape == (2 * 24 * 3 * 15, 13)
+    for pulse_index in range(3):
+        t0 = pulse_index * 15
+        assert np.all(result[t0 : t0 + 10, 0] == 1.0)
+        assert np.all(result[t0 + 10 : t0 + 15, :] == 0.0)
+    # The second musical event starts only after all repetitions of the first.
+    assert np.all(result[45:55, 1] == 1.0)
+
+
+def test_fuer_elise_rejects_invalid_pulse_repetitions() -> None:
+    with pytest.raises(ValueError, match="pulse_repetitions"):
+        generate_fuer_elise(
+            13,
+            10,
+            5,
+            1.0,
+            repeats=1,
+            dt_seconds=0.001,
+            pulse_repetitions=0,
+        )
+
+
 def test_per_neuron_constant() -> None:
     result = generate_per_neuron(
         neuron_index=2,
