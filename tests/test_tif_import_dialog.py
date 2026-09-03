@@ -491,6 +491,99 @@ def test_build_cellpose_result_from_pipeline_matches_masks_and_mean_image():
     assert imported.overlay_image.shape == imported.segmentation_array.shape + (3,)
 
 
+def test_build_cellpose_result_from_pipeline_prefers_matching_background_image():
+    from neuroseq.tif_import_dialog import _build_cellpose_result_from_pipeline
+
+    result = _make_pipeline_result_with_masks()
+    # A non-monotonic pattern (unlike mean_image's plain ramp) so a min-max
+    # normalized copy can't coincidentally match mean_image's normalized output.
+    background = np.array([[60.0, 10.0, 40.0], [20.0, 50.0, 30.0]], dtype=np.float32)
+
+    imported = _build_cellpose_result_from_pipeline(
+        result, Path("stack.tif"), background_image=background
+    )
+
+    without_override = _build_cellpose_result_from_pipeline(result, Path("stack.tif"))
+    assert not np.array_equal(imported.overlay_image, without_override.overlay_image)
+
+
+def test_build_cellpose_result_from_pipeline_ignores_mismatched_background_image():
+    from neuroseq.tif_import_dialog import _build_cellpose_result_from_pipeline
+
+    result = _make_pipeline_result_with_masks()
+    wrong_shape_background = np.zeros((9, 9), dtype=np.float32)
+
+    imported = _build_cellpose_result_from_pipeline(
+        result, Path("stack.tif"), background_image=wrong_shape_background
+    )
+
+    without_override = _build_cellpose_result_from_pipeline(result, Path("stack.tif"))
+    np.testing.assert_array_equal(
+        imported.overlay_image, without_override.overlay_image
+    )
+
+
+def test_load_seg_file_background_image_prefers_embedded_img_key(tmp_path: Path):
+    from neuroseq.tif_import_dialog import _load_seg_file_background_image
+
+    seg_path = tmp_path / "fake_seg.npy"
+    embedded_img = np.arange(6, dtype=np.uint16).reshape(2, 3)
+    np.save(
+        seg_path,
+        np.array(
+            {"masks": np.zeros((2, 3), dtype=np.int32), "img": embedded_img},
+            dtype=object,
+        ),
+    )
+
+    loaded = _load_seg_file_background_image(seg_path)
+
+    np.testing.assert_array_equal(loaded, embedded_img)
+
+
+def test_load_seg_file_background_image_falls_back_to_filename(tmp_path: Path):
+    import tifffile
+
+    from neuroseq.tif_import_dialog import _load_seg_file_background_image
+
+    image_path = tmp_path / "AVG_projection.tif"
+    projection = np.arange(6, dtype=np.uint16).reshape(2, 3)
+    tifffile.imwrite(image_path, projection, photometric="minisblack")
+
+    seg_path = tmp_path / "fake_seg.npy"
+    np.save(
+        seg_path,
+        np.array(
+            {"masks": np.zeros((2, 3), dtype=np.int32), "filename": str(image_path)},
+            dtype=object,
+        ),
+    )
+
+    loaded = _load_seg_file_background_image(seg_path)
+
+    np.testing.assert_array_equal(loaded, projection)
+
+
+def test_load_seg_file_background_image_returns_none_when_unavailable(
+    tmp_path: Path,
+):
+    from neuroseq.tif_import_dialog import _load_seg_file_background_image
+
+    seg_path = tmp_path / "fake_seg.npy"
+    np.save(
+        seg_path,
+        np.array(
+            {
+                "masks": np.zeros((2, 3), dtype=np.int32),
+                "filename": "/does/not/exist.tif",
+            },
+            dtype=object,
+        ),
+    )
+
+    assert _load_seg_file_background_image(seg_path) is None
+
+
 def test_pipeline_progress_dialog_details_toggle(qtbot):
     from neuroseq.tif_import_dialog import _PipelineProgressDialog
 

@@ -61,16 +61,80 @@ def _load_masks_from_seg_file(path: Path) -> npt.NDArray[Any]:
     return np.asarray(loaded, dtype=np.int32)
 
 
+def _load_seg_file_background_image(path: Path) -> npt.NDArray[Any] | None:
+    """Best-effort: recover the image a Cellpose `_seg.npy` was segmented on.
+
+    Cellpose sometimes embeds it directly (an "img" key); other versions
+    only store a "filename" pointing at the image file on disk (e.g. a Fiji
+    Z-projection saved before segmenting) -- try the embedded image first,
+    then fall back to loading from that referenced path. Returns None if
+    neither is available/loadable, so the caller can fall back to its own
+    computed background image instead.
+    """
+    try:
+        loaded = np.load(path, allow_pickle=True)
+    except Exception:
+        return None
+    if not (
+        isinstance(loaded, np.ndarray) and loaded.dtype == object and loaded.ndim == 0
+    ):
+        return None
+    data = loaded.item()
+    if not isinstance(data, dict):
+        return None
+    img = data.get("img")
+    if img is not None:
+        try:
+            return np.asarray(img)
+        except Exception:
+            pass
+    filename = data.get("filename")
+    if filename:
+        try:
+            import tifffile
+
+            return np.asarray(tifffile.imread(str(filename)))
+        except Exception:
+            return None
+    return None
+
+
+def _prepare_background_rgb(image: npt.NDArray[Any]) -> npt.NDArray[Any]:
+    """Scale a 2D grayscale or 3D RGB(A) image into a uint8 (H, W, 3) array."""
+    image = np.asarray(image)
+    if image.ndim == 2:
+        gray = CellPoseImporter._scale_float_image_to_uint8(image)
+        return np.stack([gray, gray, gray], axis=-1)
+    if image.ndim == 3 and image.shape[-1] >= 3:
+        return CellPoseImporter._scale_float_image_to_uint8(image[..., :3])
+    raise ValueError(f"Unsupported background image shape {image.shape}")
+
+
 def _build_cellpose_result_from_pipeline(
     result: TifPipelineResult,
     image_path: Path,
     *,
     segmentation_path: Path | None = None,
+    background_image: npt.NDArray[Any] | None = None,
 ) -> CellposeImportResult:
-    """Wrap pipeline masks and mean image as a Cellpose-style import result."""
+    """Wrap pipeline masks and a background image as a Cellpose-style import
+    result.
+
+    Prefers `background_image` (e.g. recovered from a _seg.npy's embedded
+    image or referenced file -- the actual image Cellpose was shown when
+    segmenting) when its shape matches the masks; otherwise falls back to
+    the pipeline's own computed mean projection, which may look visually
+    different from what was actually segmented (e.g. a raw-stack mean vs.
+    a Fiji Z-projection).
+    """
     importer = CellPoseImporter()
-    gray = CellPoseImporter._scale_float_image_to_uint8(result.mean_image)
-    importer.image_data = np.flipud(np.stack([gray, gray, gray], axis=-1))
+    source = result.mean_image
+    if (
+        background_image is not None
+        and background_image.shape[:2] == result.masks.shape
+    ):
+        source = background_image
+    importer.image_data = np.flipud(_prepare_background_rgb(source))
     segmentation = result.masks.astype(np.int32) - 1
     importer.segmentation_data = np.flipud(segmentation)
     importer._segmentation_flipped_for_image = True
@@ -237,6 +301,7 @@ class TifImportDialog(QtWidgets.QDialog):
 
         self._tif_paths: list[Path] = []
         self._seg_file_path: Path | None = None
+        self._seg_file_background_image: npt.NDArray[Any] | None = None
         self._cellpose_import = cellpose_import
         self._pipeline_result: TifPipelineResult | None = None
         self.new_cellpose_result: CellposeImportResult | None = None
@@ -622,6 +687,9 @@ class TifImportDialog(QtWidgets.QDialog):
             return _cellpose_result_to_masks(self._cellpose_import)
         if self._seg_file_path is None:
             raise ValueError("No _seg.npy file selected")
+        self._seg_file_background_image = _load_seg_file_background_image(
+            self._seg_file_path
+        )
         return _load_masks_from_seg_file(self._seg_file_path)
 
     # -- Pipeline launch ----------------------------------------------------
@@ -634,6 +702,7 @@ class TifImportDialog(QtWidgets.QDialog):
         self.new_cellpose_result = None
         self._propagate_new_segmentation = False
         self._new_segmentation_path = None
+        self._seg_file_background_image = None
         try:
             masks = self._resolve_masks()
         except Exception as exc:
@@ -746,6 +815,7 @@ class TifImportDialog(QtWidgets.QDialog):
                 result,
                 self._tif_paths[0],
                 segmentation_path=self._new_segmentation_path,
+                background_image=self._seg_file_background_image,
             )
 
         if result.extra.get("pipeline") == "roi_average":
