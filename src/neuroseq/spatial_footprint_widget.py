@@ -23,6 +23,15 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
+        top_bar_layout = QtWidgets.QHBoxLayout()
+        top_bar_layout.addStretch(1)
+        self.clear_selection_button = QtWidgets.QPushButton("Clear cell selection")
+        self.clear_selection_button.setEnabled(False)
+        self.clear_selection_button.clicked.connect(self.clear_all_greyed)
+        top_bar_layout.addWidget(self.clear_selection_button)
+        top_bar_layout.addStretch(1)
+        layout.addLayout(top_bar_layout)
+
         self.empty_state_widget = QtWidgets.QWidget(self)
         empty_layout = QtWidgets.QVBoxLayout(self.empty_state_widget)
         empty_layout.addStretch(1)
@@ -55,6 +64,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
     def set_data(self, cellpose_data: CellposeImportResult | None) -> None:
         self._cellpose_data = cellpose_data
         self._greyed_cellpose_ids = set()
+        self._update_clear_selection_button()
         if cellpose_data is None:
             self._base_legend = []
             self.overlay_widget.set_empty_message("No cell spatial footprints loaded.")
@@ -132,6 +142,27 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         cellpose_to_stim = {v: k for k, v in (mapping or {}).items()}
         return cellpose_to_stim.get(cellpose_id, cellpose_id)
 
+    def _update_clear_selection_button(self) -> None:
+        self.clear_selection_button.setEnabled(bool(self._greyed_cellpose_ids))
+
+    def clear_all_greyed(self) -> None:
+        """Un-grey every currently greyed cell.
+
+        Emits the same neuron_greyed_out_changed(stim_id, False) signal a
+        click would for each one, so anything listening (trace/stim rows)
+        stays in sync without duplicating that propagation logic here.
+        """
+        if not self._greyed_cellpose_ids:
+            return
+        cellpose_ids = list(self._greyed_cellpose_ids)
+        self._greyed_cellpose_ids.clear()
+        self._update_clear_selection_button()
+        self._refresh_overlay()
+        for cellpose_id in cellpose_ids:
+            self.neuron_greyed_out_changed.emit(
+                self._cellpose_to_stim_id(cellpose_id), False
+            )
+
     def _on_neuron_clicked(self, cellpose_id: int) -> None:
         if cellpose_id in self._greyed_cellpose_ids:
             self._greyed_cellpose_ids.discard(cellpose_id)
@@ -139,6 +170,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         else:
             self._greyed_cellpose_ids.add(cellpose_id)
             greyed = True
+        self._update_clear_selection_button()
         self._refresh_overlay()
         self.neuron_greyed_out_changed.emit(
             self._cellpose_to_stim_id(cellpose_id),

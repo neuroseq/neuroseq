@@ -114,6 +114,58 @@ def test_clicking_same_cell_twice_toggles_back(qtbot: QtBot) -> None:
     widget.close()
 
 
+def test_clear_selection_button_disabled_until_a_cell_is_greyed(
+    qtbot: QtBot,
+) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+
+    assert not widget.clear_selection_button.isEnabled()
+
+    widget.set_data(_cellpose_result())
+    assert not widget.clear_selection_button.isEnabled()
+
+    widget.overlay_widget.neuron_clicked.emit(1)
+    assert widget.clear_selection_button.isEnabled()
+
+    widget.overlay_widget.neuron_clicked.emit(1)  # toggled back off
+    assert not widget.clear_selection_button.isEnabled()
+    widget.close()
+
+
+def test_clear_selection_button_ungreys_all_cells_and_disables_itself(
+    qtbot: QtBot,
+) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result(mapping={0: 2, 1: 1, 2: 0}))
+    widget.overlay_widget.neuron_clicked.emit(2)
+    widget.overlay_widget.neuron_clicked.emit(1)
+    assert widget._greyed_cellpose_ids == {1, 2}
+    emitted: list[list[Any]] = []
+    widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
+
+    widget.clear_selection_button.click()
+
+    assert widget._greyed_cellpose_ids == set()
+    assert not widget.clear_selection_button.isEnabled()
+    assert sorted(emitted) == [[0, False], [1, False]]
+    widget.close()
+
+
+def test_clear_selection_button_is_a_noop_with_nothing_greyed(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result())
+    emitted: list[list[Any]] = []
+    widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
+
+    widget.clear_all_greyed()
+
+    assert emitted == []
+    widget.close()
+
+
 def test_identity_mapping_when_none_present(qtbot: QtBot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
