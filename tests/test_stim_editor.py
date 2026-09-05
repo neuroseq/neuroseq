@@ -354,10 +354,14 @@ def test_routine_dialogs_have_reset_stim_array_button(qtbot: QtBot) -> None:
         assert selector is not None
         selector.cmb_routine.setCurrentText(routine)
         selector._on_continue()
+        qtbot.waitUntil(lambda s=selector: not s.isVisible())
         dialog = getattr(stim_editor, attr)
         assert dialog is not None
         assert dialog.btn_reset.text() == "Reset stim array"
+        dialog.close()
+        qtbot.waitUntil(lambda d=dialog: not d.isVisible())
     stim_editor.close()
+    qtbot.waitUntil(lambda: not stim_editor.isVisible())
 
 
 def test_routine_reset_button_trims_stim_to_simulation_head(qtbot: QtBot) -> None:
@@ -367,6 +371,7 @@ def test_routine_reset_button_trims_stim_to_simulation_head(qtbot: QtBot) -> Non
     assert selector is not None
     selector.cmb_routine.setCurrentText(StimEditor.TARGETED_STDP_ROUTINE)
     selector._on_continue()
+    qtbot.waitUntil(lambda: not selector.isVisible())
     dialog = stim_editor._input_designer_dialog
     assert dialog is not None
 
@@ -378,7 +383,10 @@ def test_routine_reset_button_trims_stim_to_simulation_head(qtbot: QtBot) -> Non
     assert modifier.stim_array.values.shape[0] == 200
     dialog.btn_reset.click()
     assert modifier.stim_array.values.shape[0] == 1
+    dialog.close()
+    qtbot.waitUntil(lambda: not dialog.isVisible())
     stim_editor.close()
+    qtbot.waitUntil(lambda: not stim_editor.isVisible())
 
 
 def _make_editor_for_project(qtbot: QtBot, project: Project) -> StimEditor:

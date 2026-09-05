@@ -292,6 +292,37 @@ def test_dialog_fuer_elise_clipped_to_six_neurons(qtbot: QtBot) -> None:
     )
 
 
+def test_dialog_fuer_elise_has_independent_pulse_and_sequence_repeats(
+    qtbot: QtBot,
+) -> None:
+    editor, project = _make_editor(qtbot, length_samples=20_000, n_neurons=13)
+    dialog = _open_dialog(editor)
+
+    dialog.radio_scope_all.setChecked(True)
+    dialog.radio_fuer_elise.setChecked(True)
+    assert dialog.spin_pulse_repetitions.isVisible()
+    assert dialog.spin_repeats.isVisible()
+    dialog.spin_pulse_ms.setValue(10)
+    dialog.spin_ipi_ms.setValue(5)
+    dialog.spin_pulse_repetitions.setValue(3)
+    dialog.spin_repeats.setValue(2)
+    dialog.btn_apply.click()
+
+    expected = generate_fuer_elise(
+        13,
+        10,
+        5,
+        1.0,
+        repeats=2,
+        dt_seconds=0.001,
+        pulse_repetitions=3,
+    )
+    np.testing.assert_allclose(
+        project.stim_arrays["a"].values[: expected.shape[0], :], expected
+    )
+    assert dialog.spin_start_time_ms.value() == expected.shape[0]
+
+
 def test_dialog_context_updates_when_user_switches_stim_array(qtbot: QtBot) -> None:
     editor, project = _make_editor(qtbot, include_second_stim=True)
     dialog = _open_dialog(editor)

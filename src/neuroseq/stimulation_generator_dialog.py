@@ -174,6 +174,26 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         )
         config_layout.addWidget(self.ten_spots_per_roi_checkbox)
 
+        spot_algorithm_layout = QtWidgets.QHBoxLayout()
+        spot_algorithm_layout.addWidget(QtWidgets.QLabel("10-spot placement:"))
+        self.spot_algorithm_combo = QtWidgets.QComboBox()
+        self.spot_algorithm_combo.addItem(
+            "Farthest apart (may use ROI border)", "farthest_point"
+        )
+        self.spot_algorithm_combo.addItem(
+            "Equal spacing from ROI border", "edge_balanced"
+        )
+        self.spot_algorithm_combo.setEnabled(False)
+        self.spot_algorithm_combo.setToolTip(
+            "Choose whether spacing is maximized only between spots or also "
+            "balanced against the ROI border."
+        )
+        self.ten_spots_per_roi_checkbox.toggled.connect(
+            self.spot_algorithm_combo.setEnabled
+        )
+        spot_algorithm_layout.addWidget(self.spot_algorithm_combo)
+        config_layout.addLayout(spot_algorithm_layout)
+
         laser_layout = QtWidgets.QHBoxLayout()
         laser_label = QtWidgets.QLabel("Laser timeline:")
         self.laser_combo = QtWidgets.QComboBox()
@@ -601,6 +621,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             stimulation_spots_per_roi=(
                 10 if self.ten_spots_per_roi_checkbox.isChecked() else 1
             ),
+            stimulation_spot_algorithm=str(self.spot_algorithm_combo.currentData()),
         )
 
         sanitized_values = sanity_report.sanitized_values
@@ -992,6 +1013,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             stimulation_spots_per_roi=(
                 10 if self.ten_spots_per_roi_checkbox.isChecked() else 1
             ),
+            stimulation_spot_algorithm=str(self.spot_algorithm_combo.currentData()),
         )
 
     def _selected_laser_wavelength_nm(self) -> int:
