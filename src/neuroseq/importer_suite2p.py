@@ -74,6 +74,7 @@ def prepare_suite2p_traces(
     *,
     max_neurons: int,
     sampling_rate: float = 30.0,
+    stimulus_to_cellpose_mapping: dict[int, int] | None = None,
 ) -> TraceData:
     """Create TraceData from Suite2p fluorescence data."""
 
@@ -84,11 +85,14 @@ def prepare_suite2p_traces(
     n_neurons, n_timepoints = f_data.shape
     n_neurons_to_import = min(max_neurons, n_neurons)
     normalized_traces, _, _ = compute_normalized_suite2p_traces(f_data, fneu_data)
+    indices = _resolve_suite2p_indices(
+        n_neurons_to_import, stimulus_to_cellpose_mapping
+    )
 
     return TraceData(
         "Suite2p contrasting traces",
         normalized_traces[:n_neurons_to_import, :],
-        np.arange(n_neurons_to_import, dtype=np.uint32),  # indices arg for the traces
+        indices,
         "units",
         dt,
     )

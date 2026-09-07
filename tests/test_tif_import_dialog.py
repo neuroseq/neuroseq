@@ -146,6 +146,17 @@ def test_dialog_disables_loaded_radio_when_no_cellpose_data(qtbot):
     assert dialog._use_seg_radio.isChecked()
 
 
+def test_current_experiment_masks_with_mapping_are_default(qtbot):
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    cellpose_import = MagicMock()
+    cellpose_import.stimulus_to_cellpose_mapping = {4: 0, 7: 1}
+    dialog = TifImportDialog(parent=None, cellpose_import=cellpose_import)
+    qtbot.addWidget(dialog)
+
+    assert dialog._use_loaded_radio.isChecked()
+    assert "with mapping applied" in dialog._use_loaded_radio.text()
+    assert dialog._selected_mapping() == {4: 0, 7: 1}
 def test_third_radio_selected_resolves_to_none_masks(qtbot):
     from neuroseq.tif_import_dialog import TifImportDialog
 
@@ -345,6 +356,7 @@ def test_dialog_runs_mocked_pipeline_and_produces_imported_data(
     # Build a fake cellpose result so the "use loaded" path works.
     cellpose_import = MagicMock()
     cellpose_import.segmentation_array = np.zeros((16, 16), dtype=np.int32) - 1
+    cellpose_import.stimulus_to_cellpose_mapping = {4: 0, 7: 1}
 
     dialog = TifImportDialog(parent=None, cellpose_import=cellpose_import)
     qtbot.addWidget(dialog)
@@ -372,6 +384,10 @@ def test_dialog_runs_mocked_pipeline_and_produces_imported_data(
     spikes = dialog.imported_data[1]
     assert traces.traces.shape == result.F.shape
     assert spikes.spike_indices.size >= 2
+    np.testing.assert_array_equal(
+        traces.indices, np.array([4, 7, 2, 3], dtype=np.uint32)
+    )
+    assert {4, 7}.issubset(set(spikes.spike_indices.tolist()))
 
 
 def test_finalize_roi_average_imports_raw_trace_only(qtbot, mocker):
