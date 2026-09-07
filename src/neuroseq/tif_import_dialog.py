@@ -21,6 +21,7 @@ from qtpy.compat import getopenfilename
 
 from neuroseq.data import Data
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importer_suite2p import _resolve_suite2p_indices
 from neuroseq.importer_suite2p import prepare_suite2p_spikes
 from neuroseq.importer_suite2p import prepare_suite2p_traces
 from neuroseq.importer_tif import TifPipelineParams
@@ -195,7 +196,7 @@ class TifImportDialog(QtWidgets.QDialog):
         mask_layout = QtWidgets.QVBoxLayout(mask_group)
         self._mask_source_buttons = QtWidgets.QButtonGroup(self)
         self._use_loaded_radio = QtWidgets.QRadioButton(
-            "Use Cellpose masks from the current experiment"
+            "Use Cellpose masks from the current experiment with mapping applied"
         )
         self._use_seg_radio = QtWidgets.QRadioButton("Use a Cellpose _seg.npy file")
         self._mask_source_buttons.addButton(self._use_loaded_radio, 0)
@@ -226,7 +227,8 @@ class TifImportDialog(QtWidgets.QDialog):
         else:
             self._use_loaded_radio.setEnabled(False)
             self._use_loaded_radio.setText(
-                "Use Cellpose masks from the current experiment (none loaded)"
+                "Use Cellpose masks from the current experiment with mapping applied "
+                "(none loaded)"
             )
             self._use_seg_radio.setChecked(True)
         layout.addWidget(mask_group)
@@ -412,6 +414,13 @@ class TifImportDialog(QtWidgets.QDialog):
             raise ValueError("No _seg.npy file selected")
         return _load_masks_from_seg_file(self._seg_file_path)
 
+    def _selected_mapping(self) -> dict[int, int] | None:
+        """Return the experiment mapping only for its stored Cellpose masks."""
+        if not self._use_loaded_radio.isChecked() or self._cellpose_import is None:
+            return None
+        mapping = self._cellpose_import.stimulus_to_cellpose_mapping
+        return mapping if isinstance(mapping, dict) else None
+
     # -- Pipeline launch ----------------------------------------------------
     def _start_pipeline(self) -> None:
         if not self._tif_paths:
@@ -510,10 +519,11 @@ class TifImportDialog(QtWidgets.QDialog):
         if result.extra.get("pipeline") == "roi_average":
             from neuroseq.data import TraceData
 
+            indices = _resolve_suite2p_indices(n_neurons, self._selected_mapping())
             traces = TraceData(
                 "Simply averaged ROI traces",
                 result.F,
-                np.arange(n_neurons, dtype=np.uint32),
+                indices,
                 "fluorescence",
                 dt,
             )
@@ -532,6 +542,7 @@ class TifImportDialog(QtWidgets.QDialog):
             result.Fneu,
             max_neurons=n_neurons,
             sampling_rate=fs,
+            stimulus_to_cellpose_mapping=self._selected_mapping(),
         )
 
         spike_data = prepare_suite2p_spikes(
@@ -539,6 +550,7 @@ class TifImportDialog(QtWidgets.QDialog):
             dt=dt,
             threshold=self._spike_threshold_spin.value(),
             max_neurons=n_neurons,
+            stimulus_to_cellpose_mapping=self._selected_mapping(),
         )
 
         self.imported_data = [traces, spike_data]

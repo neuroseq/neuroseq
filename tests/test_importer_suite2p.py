@@ -44,6 +44,20 @@ def test_prepare_suite2p_traces_works_without_fneu(suite2p_import_data_dir):
     np.testing.assert_allclose(data.traces, expected_traces[:2, :])
 
 
+def test_prepare_suite2p_traces_remaps_indices_by_cellpose_order(
+    suite2p_import_data_dir,
+):
+    f_data = np.load(suite2p_import_data_dir / "F.npy")
+    data = prepare_suite2p_traces(
+        f_data,
+        None,
+        max_neurons=2,
+        stimulus_to_cellpose_mapping={4: 0, 7: 1},
+    )
+
+    np.testing.assert_array_equal(data.indices, np.array([4, 7], dtype=np.uint32))
+
+
 def test_prepare_suite2p_spikes_respects_threshold_and_limits_neurons(
     suite2p_import_data_dir,
 ):
