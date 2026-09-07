@@ -4,6 +4,7 @@ import zipfile
 from pathlib import Path
 
 import brian2.numpy_ as np
+import pytest
 from PIL import Image
 from pytestqt.qtbot import QtBot
 
@@ -319,6 +320,42 @@ def test_dialog_aoi_pixel_mode_uses_square_centre(tmp_path: Path, qtbot: QtBot) 
     dialog._set_aoi_controls(config)
     assert dialog.square_x_spin.value() == 10.0
     assert dialog.square_y_spin.value() == 12.0
+    dialog.close()
+
+
+def test_dialog_aoi_percent_mode_round_trips_through_set_aoi_controls(
+    tmp_path: Path, qtbot: QtBot
+) -> None:
+    dialog = _make_dialog(tmp_path, qtbot)
+    _select_aoi_strategy(dialog)
+    dialog.aoi_coordinate_mode_combo.setCurrentText(AOI_PERCENT_MODE)
+    original = {
+        "square_x": 40.0,
+        "square_y": 45.0,
+        "square_side": 30.0,
+        "circle_cx": 70.0,
+        "circle_cy": 25.0,
+        "circle_diameter": 15.0,
+    }
+    dialog.square_x_spin.setValue(original["square_x"])
+    dialog.square_y_spin.setValue(original["square_y"])
+    dialog.square_side_spin.setValue(original["square_side"])
+    dialog.circle_cx_spin.setValue(original["circle_cx"])
+    dialog.circle_cy_spin.setValue(original["circle_cy"])
+    dialog.circle_diameter_spin.setValue(original["circle_diameter"])
+
+    config = dialog._current_aoi_config()
+    assert config is not None
+    dialog._set_aoi_controls(config)
+
+    assert dialog.square_x_spin.value() == pytest.approx(original["square_x"])
+    assert dialog.square_y_spin.value() == pytest.approx(original["square_y"])
+    assert dialog.square_side_spin.value() == pytest.approx(original["square_side"])
+    assert dialog.circle_cx_spin.value() == pytest.approx(original["circle_cx"])
+    assert dialog.circle_cy_spin.value() == pytest.approx(original["circle_cy"])
+    assert dialog.circle_diameter_spin.value() == pytest.approx(
+        original["circle_diameter"]
+    )
     dialog.close()
 
 

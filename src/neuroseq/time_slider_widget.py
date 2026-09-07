@@ -85,6 +85,17 @@ class TimeSliderWidget(QtWidgets.QWidget):
     def skip_to_start(self) -> None:
         self._set_time(0)
 
+    def set_current_time_ms(self, time_ms: float) -> None:
+        """Move the slider to an explicit position (e.g. restoring a
+        project's remembered playback time) and propagate it to registered
+        widgets. Propagation happens unconditionally, not just via the
+        slider's valueChanged signal, so newly-loaded widgets (freshly
+        cleared/reset to their own t=0 default) are resynced even when the
+        target time happens to equal the slider's current displayed value."""
+        self._set_time(time_ms)
+        for widget in self.widgets:
+            widget.set_time_ms(self.t_ms)
+
     def skip_to_end(self) -> None:
         self._set_time(self.t_max_ms)
 

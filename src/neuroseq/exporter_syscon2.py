@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from dataclasses import field
 
 import brian2.numpy_ as np
+from scipy.ndimage import distance_transform_edt
 
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_syscon2 import SysconSequenceObject
@@ -503,6 +504,7 @@ def generate_syscon2_sequence_text(
     target_power_mw: float = 0.0,
     power_lut: PowerLut | None = None,
     stimulation_spots_per_roi: int = 1,
+    stimulation_spot_algorithm: str = "farthest_point",
 ) -> tuple[str, SysconExportReport]:
     """Generate SysCon2 `.seq` content for Holo4D multiphoton stimulation.
 
@@ -575,7 +577,7 @@ def generate_syscon2_sequence_text(
     segmentation = cellpose_data.segmentation_array
     centroids = _compute_cell_centroids(segmentation)
     stimulation_spots = _compute_cell_stimulation_spots(
-        segmentation, stimulation_spots_per_roi
+        segmentation, stimulation_spots_per_roi, stimulation_spot_algorithm
     )
     neuron_to_cellpose = _resolve_neuron_to_cellpose_mapping(
         cellpose_data,
@@ -1913,6 +1915,7 @@ def check_syscon2_input_sanity(
     target_power_mw: float = 0.0,
     power_lut: PowerLut | None = None,
     stimulation_spots_per_roi: int = 1,
+    stimulation_spot_algorithm: str = "farthest_point",
 ) -> SysconInputSanityReport:
     """Validate ``stim_array`` for SysCon2 export and perform a dry-run export.
 
@@ -2102,6 +2105,7 @@ def check_syscon2_input_sanity(
             target_power_mw=target_power_mw,
             power_lut=power_lut,
             stimulation_spots_per_roi=stimulation_spots_per_roi,
+            stimulation_spot_algorithm=stimulation_spot_algorithm,
         )
     except (TypeError, ValueError) as exc:
         errors.append(str(exc))
@@ -2878,13 +2882,17 @@ def _compute_cell_centroids(segmentation: np.ndarray) -> dict[int, tuple[float, 
 
 
 def _compute_cell_stimulation_spots(
-    segmentation: np.ndarray, spots_per_roi: int
+    segmentation: np.ndarray,
+    spots_per_roi: int,
+    algorithm: str = "farthest_point",
 ) -> dict[int, list[tuple[float, float]]]:
     """Return deterministic, evenly spread stimulation points inside each ROI."""
     if segmentation.ndim != 2:
         raise ValueError("Cellpose segmentation must be a 2D array")
     if spots_per_roi < 1:
         raise ValueError("spots_per_roi must be at least 1")
+    if algorithm not in {"farthest_point", "edge_balanced"}:
+        raise ValueError("algorithm must be either 'farthest_point' or 'edge_balanced'")
     if spots_per_roi == 1:
         return {
             cell_id: [centroid]
@@ -2903,13 +2911,28 @@ def _compute_cell_stimulation_spots(
 
         coordinates = np.column_stack((cols.astype(float), rows.astype(float)))
         centroid = coordinates.mean(axis=0)
-        first_index = int(np.argmin(np.sum((coordinates - centroid) ** 2, axis=1)))
+        if algorithm == "edge_balanced":
+            roi_mask = segmentation == cell_int
+            # Padding makes image-edge ROIs behave like all other ROIs: outside
+            # the image is also treated as outside the mask.
+            padded_mask = np.pad(roi_mask, 1, constant_values=False)
+            boundary_distance = distance_transform_edt(padded_mask)[rows + 1, cols + 1]
+            first_index = int(np.argmax(boundary_distance))
+        else:
+            boundary_distance = None
+            first_index = int(np.argmin(np.sum((coordinates - centroid) ** 2, axis=1)))
         selected = [first_index]
         min_squared_distance = np.sum(
             (coordinates - coordinates[first_index]) ** 2, axis=1
         )
         while len(selected) < min(spots_per_roi, coordinates.shape[0]):
-            next_index = int(np.argmax(min_squared_distance))
+            scores = min_squared_distance
+            if boundary_distance is not None:
+                # Maximin packing with the ROI edge treated like another spot.
+                # Thus edge clearance and inter-spot spacing are balanced.
+                scores = np.minimum(scores, boundary_distance**2)
+            scores[selected] = -1
+            next_index = int(np.argmax(scores))
             selected.append(next_index)
             min_squared_distance = np.minimum(
                 min_squared_distance,

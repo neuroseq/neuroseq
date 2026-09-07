@@ -28,6 +28,7 @@ class StimWidget(TimeseriesWidget):
     STIMULUS_Z = 200.0
     MINIMUM_SIZE_Z = 210.0
     HOVER_Z = 300.0
+    SUPPORTS_DETACH = False
 
     def __init__(
         self,

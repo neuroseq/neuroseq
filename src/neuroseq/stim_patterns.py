@@ -102,6 +102,7 @@ def generate_fuer_elise(
     magnitude: float,
     repeats: int,
     dt_seconds: float,
+    pulse_repetitions: int = 1,
 ) -> np.ndarray:
     pulse_n, ipi_n = _validate_common(
         n_neurons=max(1, n_neurons),
@@ -110,17 +111,25 @@ def generate_fuer_elise(
         repeats=repeats,
         dt_seconds=dt_seconds,
     )
+    if pulse_repetitions < 1:
+        raise ValueError("pulse_repetitions must be at least 1")
     n_events = len(_FUER_ELISE_INTRO)
-    total_n = repeats * n_events * (pulse_n + ipi_n)
+    event_n = pulse_repetitions * (pulse_n + ipi_n)
+    total_n = repeats * n_events * event_n
     values = np.zeros((total_n, n_neurons), dtype=float)
     for repeat_index in range(repeats):
-        repeat_offset = repeat_index * n_events * (pulse_n + ipi_n)
+        repeat_offset = repeat_index * n_events * event_n
         for event_index, event in enumerate(_FUER_ELISE_INTRO):
-            t0 = repeat_offset + event_index * (pulse_n + ipi_n)
             pitches = event if isinstance(event, tuple) else (event,)
-            for pitch in pitches:
-                if 0 <= pitch < n_neurons:
-                    values[t0 : t0 + pulse_n, pitch] = magnitude
+            for pulse_index in range(pulse_repetitions):
+                t0 = (
+                    repeat_offset
+                    + event_index * event_n
+                    + pulse_index * (pulse_n + ipi_n)
+                )
+                for pitch in pitches:
+                    if 0 <= pitch < n_neurons:
+                        values[t0 : t0 + pulse_n, pitch] = magnitude
     return values
 
 

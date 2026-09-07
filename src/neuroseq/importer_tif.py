@@ -43,6 +43,7 @@ class TifPipelineParams:
     nchannels: int = 2
     functional_chan: int = 1  # 1-indexed, matching Suite2p convention
     neuropil_coefficient: float = DEFAULT_NEUROPIL_COEFFICIENT
+    diameter: float = 12.0
     batch_size: int = DEFAULT_BATCH_SIZE
     baseline: str = DEFAULT_BASELINE
     win_baseline: float = DEFAULT_WIN_BASELINE
@@ -242,9 +243,17 @@ def _masks_to_stat(masks: npt.NDArray[Any], Ly: int, Lx: int) -> npt.NDArray[Any
     return stat_arr
 
 
+def _stat_to_masks(stat: npt.NDArray[Any], Ly: int, Lx: int) -> npt.NDArray[Any]:
+    """Rebuild a Cellpose-style label image from a Suite2p `stat` array."""
+    mask_img = np.zeros((Ly, Lx), dtype=np.int32)
+    for idx, entry in enumerate(stat):
+        mask_img[entry["ypix"], entry["xpix"]] = idx + 1
+    return mask_img
+
+
 def run_suite2p_pipeline(
     tif_paths: list[Path],
-    masks: npt.NDArray[Any],
+    masks: npt.NDArray[Any] | None,
     params: TifPipelineParams,
     *,
     work_dir: Path | None = None,
@@ -252,17 +261,21 @@ def run_suite2p_pipeline(
 ) -> TifPipelineResult:
     """Run TIFF → Suite2p binary → trace extraction → OASIS deconvolution.
 
-    `masks` is a 2D integer label image (Cellpose output, 0 = background).
-    A temporary directory is created under `work_dir` (or system tempdir) for
-    Suite2p's binary cache and is removed before returning.
+    `masks` is an optional 2D integer label image (Cellpose output,
+    0 = background). If `masks` is None, ROIs are detected automatically using
+    Suite2p's own `sparsery` algorithm; `params.diameter` sets the expected
+    cell size in pixels. A temporary directory is created under `work_dir`
+    (or system tempdir) for Suite2p's binary cache and is removed before
+    returning.
     """
     if not tif_paths:
         raise ValueError("tif_paths must contain at least one TIFF file")
-    if masks.ndim != 2:
+    if masks is not None and masks.ndim != 2:
         raise ValueError(f"masks must be 2D, got shape {masks.shape}")
 
     import suite2p
     import suite2p.classification as s2cls
+    import suite2p.detection as s2detect
     import suite2p.extraction as s2ext
     import suite2p.io as s2io
 
@@ -365,7 +378,7 @@ def run_suite2p_pipeline(
         logger.info("Suite2p binary written: %d frames %dx%d", nframes, Ly, Lx)
 
         progress("Computing mean projection", 0.3)
-        if masks.shape != (Ly, Lx):
+        if masks is not None and masks.shape != (Ly, Lx):
             raise ValueError(
                 f"masks shape {masks.shape} does not match TIFF shape ({Ly}, {Lx})"
             )
@@ -379,8 +392,24 @@ def run_suite2p_pipeline(
 
         mean_image = f_bin.data.mean(axis=0).astype(np.float32)
 
-        progress("Building Suite2p stat from Cellpose masks", 0.4)
-        stat = _masks_to_stat(masks, Ly, Lx)
+        if masks is not None:
+            progress("Building Suite2p stat from Cellpose masks", 0.4)
+            stat = _masks_to_stat(masks, Ly, Lx)
+            masks_out = np.asarray(masks)
+        else:
+            progress(f"Detecting ROIs with Suite2p ({device_label})", 0.4)
+            _new_settings, stat, _redcell = s2detect.detection_wrapper(
+                f_bin,
+                diameter=[float(params.diameter), float(params.diameter)],
+                tau=float(params.tau),
+                fs=float(params.fs),
+                yrange=[0, Ly],
+                xrange=[0, Lx],
+                settings=defaults["detection"],
+                classifier_path=s2cls.builtin_classfile,
+                device=device,
+            )
+            masks_out = _stat_to_masks(stat, Ly, Lx)
 
         progress(f"Extracting fluorescence traces ({device_label})", 0.5)
         (F, Fneu, F_chan2, Fneu_chan2), device, device_label = _run_with_cpu_fallback(
@@ -434,10 +463,13 @@ def run_suite2p_pipeline(
 
         progress("Classifying ROIs", 0.95)
         iscell = s2cls.classify(stat=stat, classfile=s2cls.builtin_classfile)
-        # All ROIs come from Cellpose — accept them all.
-        iscell[:, 0] = 1
+        if masks is not None:
+            # All ROIs come from Cellpose — accept them all.
+            iscell[:, 0] = 1
 
         extra: dict[str, Any] = {"compute_device": device_label}
+        if masks is None:
+            extra["diameter"] = params.diameter
         if params.nchannels >= 2:
             extra["F_chan2"] = F_chan2
             extra["Fneu_chan2"] = Fneu_chan2
@@ -452,7 +484,7 @@ def run_suite2p_pipeline(
             iscell=np.asarray(iscell),
             ops={**settings, **plane_db},
             mean_image=mean_image,
-            masks=np.asarray(masks),
+            masks=masks_out,
             extra=extra,
         )
     finally:

@@ -10,16 +10,20 @@ import importlib.util
 import logging
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from typing import cast
 
 import numpy as np
 import numpy.typing as npt
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
 from neuroseq.data import Data
+from neuroseq.importer_cellpose import CellPoseImporter
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_suite2p import _resolve_suite2p_indices
 from neuroseq.importer_suite2p import prepare_suite2p_spikes
@@ -58,15 +62,114 @@ def _load_masks_from_seg_file(path: Path) -> npt.NDArray[Any]:
     return np.asarray(loaded, dtype=np.int32)
 
 
+def _load_seg_file_background_image(path: Path) -> npt.NDArray[Any] | None:
+    """Best-effort: recover the image a Cellpose `_seg.npy` was segmented on.
+
+    Cellpose sometimes embeds it directly (an "img" key); other versions
+    only store a "filename" pointing at the image file on disk (e.g. a Fiji
+    Z-projection saved before segmenting) -- try the embedded image first,
+    then fall back to loading from that referenced path. Returns None if
+    neither is available/loadable, so the caller can fall back to its own
+    computed background image instead.
+    """
+    try:
+        loaded = np.load(path, allow_pickle=True)
+    except Exception:
+        return None
+    if not (
+        isinstance(loaded, np.ndarray) and loaded.dtype == object and loaded.ndim == 0
+    ):
+        return None
+    data = loaded.item()
+    if not isinstance(data, dict):
+        return None
+    img = data.get("img")
+    if img is not None:
+        try:
+            return np.asarray(img)
+        except Exception:
+            pass
+    filename = data.get("filename")
+    if filename:
+        try:
+            import tifffile
+
+            return np.asarray(tifffile.imread(str(filename)))
+        except Exception:
+            return None
+    return None
+
+
+def _prepare_background_rgb(image: npt.NDArray[Any]) -> npt.NDArray[Any]:
+    """Scale a 2D grayscale or 3D RGB(A) image into a uint8 (H, W, 3) array."""
+    image = np.asarray(image)
+    if image.ndim == 2:
+        gray = CellPoseImporter._scale_float_image_to_uint8(image)
+        return np.stack([gray, gray, gray], axis=-1)
+    if image.ndim == 3 and image.shape[-1] >= 3:
+        return CellPoseImporter._scale_float_image_to_uint8(image[..., :3])
+    raise ValueError(f"Unsupported background image shape {image.shape}")
+
+
+def _build_cellpose_result_from_pipeline(
+    result: TifPipelineResult,
+    image_path: Path,
+    *,
+    segmentation_path: Path | None = None,
+    background_image: npt.NDArray[Any] | None = None,
+) -> CellposeImportResult:
+    """Wrap pipeline masks and a background image as a Cellpose-style import
+    result.
+
+    Prefers `background_image` (e.g. recovered from a _seg.npy's embedded
+    image or referenced file -- the actual image Cellpose was shown when
+    segmenting) when its shape matches the masks; otherwise falls back to
+    the pipeline's own computed mean projection, which may look visually
+    different from what was actually segmented (e.g. a raw-stack mean vs.
+    a Fiji Z-projection).
+    """
+    importer = CellPoseImporter()
+    source = result.mean_image
+    if (
+        background_image is not None
+        and background_image.shape[:2] == result.masks.shape
+    ):
+        source = background_image
+    importer.image_data = np.flipud(_prepare_background_rgb(source))
+    segmentation = result.masks.astype(np.int32) - 1
+    importer.segmentation_data = np.flipud(segmentation)
+    importer._segmentation_flipped_for_image = True
+    unique_ids = np.unique(importer.segmentation_data)
+    importer._original_cellpose_ids = unique_ids[unique_ids >= 0]
+    importer.generate_overlay()
+    return importer.create_result(
+        image_path=image_path,
+        segmentation_path=segmentation_path,
+    )
+
+
+class _QtLogHandler(logging.Handler):
+    """Formats log records and hands them to a thread-safe sink."""
+
+    def __init__(self, sink: Callable[[str], None]) -> None:
+        super().__init__(level=logging.INFO)
+        self._sink = sink
+        self.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self._sink(self.format(record))
+
+
 class _PipelineWorker(QtCore.QObject):
     progress = QtCore.Signal(str, float)
+    log = QtCore.Signal(str)
     finished = QtCore.Signal(object)  # TifPipelineResult
     failed = QtCore.Signal(str)
 
     def __init__(
         self,
         tif_paths: list[Path],
-        masks: npt.NDArray[Any],
+        masks: npt.NDArray[Any] | None,
         params: TifPipelineParams,
         pipeline: str = "suite2p",
     ) -> None:
@@ -78,6 +181,15 @@ class _PipelineWorker(QtCore.QObject):
 
     @QtCore.Slot()
     def run(self) -> None:
+        handler = _QtLogHandler(self.log.emit)
+        suite2p_logger = logging.getLogger("suite2p")
+        neuroseq_logger = logging.getLogger("neuroseq.importer_tif")
+        suite2p_level = suite2p_logger.level
+        neuroseq_level = neuroseq_logger.level
+        suite2p_logger.setLevel(logging.INFO)
+        neuroseq_logger.setLevel(logging.INFO)
+        suite2p_logger.addHandler(handler)
+        neuroseq_logger.addHandler(handler)
         try:
             # Imported here so test environments without suite2p can still import
             # this module.
@@ -87,6 +199,8 @@ class _PipelineWorker(QtCore.QObject):
             if self._pipeline == "roi_average":
                 from neuroseq.importer_tif import run_roi_average_pipeline
 
+                if self._masks is None:
+                    raise ValueError("ROI averaging requires Cellpose masks")
                 result = run_roi_average_pipeline(
                     self._tif_paths, self._masks, self._params, progress=callback
                 )
@@ -100,6 +214,74 @@ class _PipelineWorker(QtCore.QObject):
         except Exception as exc:
             logging.getLogger(__name__).exception("Calcium extraction pipeline failed")
             self.failed.emit(str(exc))
+        finally:
+            suite2p_logger.removeHandler(handler)
+            neuroseq_logger.removeHandler(handler)
+            suite2p_logger.setLevel(suite2p_level)
+            neuroseq_logger.setLevel(neuroseq_level)
+
+
+class _PipelineProgressDialog(QtWidgets.QDialog):
+    """QProgressDialog look-alike with an expandable log panel."""
+
+    canceled = QtCore.Signal()
+
+    def __init__(
+        self,
+        label_text: str,
+        cancel_text: str,
+        minimum: int,
+        maximum: int,
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        self._label = QtWidgets.QLabel(label_text)
+        layout.addWidget(self._label)
+
+        self._bar = QtWidgets.QProgressBar()
+        self._bar.setRange(minimum, maximum)
+        layout.addWidget(self._bar)
+
+        self._details_button = QtWidgets.QToolButton()
+        self._details_button.setText("Details")
+        self._details_button.setCheckable(True)
+        self._details_button.setArrowType(QtCore.Qt.ArrowType.RightArrow)
+        self._details_button.toggled.connect(self._toggle_details)
+        layout.addWidget(self._details_button)
+
+        self._log_view = QtWidgets.QPlainTextEdit()
+        self._log_view.setReadOnly(True)
+        self._log_view.setMaximumHeight(200)
+        self._log_view.setVisible(False)
+        layout.addWidget(self._log_view)
+
+        buttons = QtWidgets.QHBoxLayout()
+        buttons.addStretch(1)
+        cancel_button = QtWidgets.QPushButton(cancel_text)
+        cancel_button.clicked.connect(self.canceled.emit)
+        buttons.addWidget(cancel_button)
+        layout.addLayout(buttons)
+
+    def _toggle_details(self, expanded: bool) -> None:
+        self._details_button.setArrowType(
+            QtCore.Qt.ArrowType.DownArrow
+            if expanded
+            else QtCore.Qt.ArrowType.RightArrow
+        )
+        self._log_view.setVisible(expanded)
+        self.adjustSize()
+
+    def setLabelText(self, text: str) -> None:
+        self._label.setText(text)
+
+    def setValue(self, value: int) -> None:
+        self._bar.setValue(value)
+
+    def appendLog(self, message: str) -> None:
+        self._log_view.appendPlainText(message)
 
 
 class TifImportDialog(QtWidgets.QDialog):
@@ -120,12 +302,17 @@ class TifImportDialog(QtWidgets.QDialog):
 
         self._tif_paths: list[Path] = []
         self._seg_file_path: Path | None = None
+        self._seg_file_background_image: npt.NDArray[Any] | None = None
         self._cellpose_import = cellpose_import
         self._pipeline_result: TifPipelineResult | None = None
+        self.new_cellpose_result: CellposeImportResult | None = None
+        self._propagate_new_segmentation: bool = False
+        self._new_segmentation_path: Path | None = None
 
         self._thread: QtCore.QThread | None = None
         self._worker: _PipelineWorker | None = None
-        self._progress_dialog: QtWidgets.QProgressDialog | None = None
+        self._progress_dialog: _PipelineProgressDialog | None = None
+        self._wheel_passthrough_widgets: set[QtCore.QObject] = set()
 
         self._setup_ui()
 
@@ -136,6 +323,13 @@ class TifImportDialog(QtWidgets.QDialog):
         self.resize(560, 520)
 
         layout = QtWidgets.QVBoxLayout(self)
+        self._scroll_area = QtWidgets.QScrollArea(self)
+        self._scroll_area.setWidgetResizable(True)
+        self._scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self._scroll_content = QtWidgets.QWidget()
+        content_layout = QtWidgets.QVBoxLayout(self._scroll_content)
+        self._scroll_area.setWidget(self._scroll_content)
+        layout.addWidget(self._scroll_area, stretch=1)
 
         instructions = QtWidgets.QLabel(
             "Extract calcium traces from TIFF stacks using Cellpose-derived ROIs. "
@@ -143,7 +337,7 @@ class TifImportDialog(QtWidgets.QDialog):
             "ROI averaging for raw mean fluorescence."
         )
         instructions.setWordWrap(True)
-        layout.addWidget(instructions)
+        content_layout.addWidget(instructions)
 
         workflow_box = QtWidgets.QGroupBox("Recommended workflow for large TIFF stacks")
         workflow_layout = QtWidgets.QVBoxLayout(workflow_box)
@@ -164,7 +358,7 @@ class TifImportDialog(QtWidgets.QDialog):
         workflow_label.setWordWrap(True)
         workflow_label.setTextFormat(QtCore.Qt.TextFormat.RichText)
         workflow_layout.addWidget(workflow_label)
-        layout.addWidget(workflow_box)
+        content_layout.addWidget(workflow_box)
 
         # TIFF selection
         tif_group = QtWidgets.QGroupBox("TIFF file(s)")
@@ -189,7 +383,7 @@ class TifImportDialog(QtWidgets.QDialog):
         tif_buttons.addWidget(self._run_fiji_button)
         tif_buttons.addStretch(1)
         tif_layout.addLayout(tif_buttons)
-        layout.addWidget(tif_group)
+        content_layout.addWidget(tif_group)
 
         # Cellpose mask source
         mask_group = QtWidgets.QGroupBox("Cellpose masks")
@@ -199,10 +393,16 @@ class TifImportDialog(QtWidgets.QDialog):
             "Use Cellpose masks from the current experiment with mapping applied"
         )
         self._use_seg_radio = QtWidgets.QRadioButton("Use a Cellpose _seg.npy file")
+        self._auto_detect_radio = QtWidgets.QRadioButton(
+            "Auto-detect ROIs with Suite2p (no Cellpose masks)"
+        )
         self._mask_source_buttons.addButton(self._use_loaded_radio, 0)
         self._mask_source_buttons.addButton(self._use_seg_radio, 1)
+        self._mask_source_buttons.addButton(self._auto_detect_radio, 2)
         mask_layout.addWidget(self._use_loaded_radio)
         mask_layout.addWidget(self._use_seg_radio)
+        mask_layout.addWidget(self._auto_detect_radio)
+        self._auto_detect_radio.toggled.connect(self._update_pipeline_fields)
         seg_row = QtWidgets.QHBoxLayout()
         self._seg_path_label = QtWidgets.QLabel("No _seg.npy selected")
         self._seg_path_label.setStyleSheet("QLabel { color: gray; }")
@@ -231,7 +431,7 @@ class TifImportDialog(QtWidgets.QDialog):
                 "(none loaded)"
             )
             self._use_seg_radio.setChecked(True)
-        layout.addWidget(mask_group)
+        content_layout.addWidget(mask_group)
 
         # Acquisition / pipeline parameters
         params_group = QtWidgets.QGroupBox("Acquisition & pipeline parameters")
@@ -278,6 +478,17 @@ class TifImportDialog(QtWidgets.QDialog):
         self._neucoeff_spin.setValue(0.7)
         params_layout.addRow("Neuropil coefficient:", self._neucoeff_spin)
 
+        self._diameter_spin = QtWidgets.QDoubleSpinBox()
+        self._diameter_spin.setRange(2.0, 200.0)
+        self._diameter_spin.setDecimals(1)
+        self._diameter_spin.setValue(12.0)
+        self._diameter_spin.setSuffix(" px")
+        self._diameter_spin.setToolTip(
+            "Approximate soma diameter in pixels, used by Suite2p's own "
+            "ROI detector when no Cellpose masks are supplied."
+        )
+        params_layout.addRow("Cell diameter (auto-detect):", self._diameter_spin)
+
         self._spike_threshold_spin = QtWidgets.QDoubleSpinBox()
         self._spike_threshold_spin.setRange(0.0, 1.0)
         self._spike_threshold_spin.setSingleStep(0.01)
@@ -291,9 +502,10 @@ class TifImportDialog(QtWidgets.QDialog):
             self._neucoeff_spin,
             self._spike_threshold_spin,
         ]
+        self._auto_detect_parameter_widgets = [self._diameter_spin]
         self._pipeline_combo.currentIndexChanged.connect(self._update_pipeline_fields)
 
-        layout.addWidget(params_group)
+        content_layout.addWidget(params_group)
 
         # Run / Cancel
         button_layout = QtWidgets.QHBoxLayout()
@@ -304,15 +516,78 @@ class TifImportDialog(QtWidgets.QDialog):
         cancel.clicked.connect(self.reject)
         button_layout.addWidget(cancel)
         layout.addLayout(button_layout)
+        self._install_wheel_scroll_passthrough(
+            [
+                self._pipeline_combo,
+                self._fs_spin,
+                self._tau_spin,
+                self._nchannels_spin,
+                self._functional_chan_spin,
+                self._neucoeff_spin,
+                self._diameter_spin,
+                self._spike_threshold_spin,
+            ]
+        )
+        self._update_pipeline_fields()
+
+    def _install_wheel_scroll_passthrough(
+        self, widgets: list[QtWidgets.QWidget]
+    ) -> None:
+        for widget in widgets:
+            self._wheel_passthrough_widgets.add(widget)
+            widget.installEventFilter(self)
+            if isinstance(widget, QtWidgets.QAbstractSpinBox):
+                line_edit = widget.lineEdit()
+                if line_edit is not None:
+                    self._wheel_passthrough_widgets.add(line_edit)
+                    line_edit.installEventFilter(self)
+
+    def eventFilter(
+        self, watched: QtCore.QObject | None, event: QtCore.QEvent | None
+    ) -> bool:
+        if (
+            event is not None
+            and watched is not None
+            and event.type() == QtCore.QEvent.Type.Wheel
+            and watched in self._wheel_passthrough_widgets
+        ):
+            wheel_event = cast(QtGui.QWheelEvent, event)
+            self._scroll_from_wheel_event(wheel_event)
+            return True
+        return super().eventFilter(watched, event)
+
+    def _scroll_from_wheel_event(self, event: QtGui.QWheelEvent) -> None:
+        delta = event.pixelDelta().y()
+        if delta == 0:
+            delta = event.angleDelta().y()
+        if delta == 0:
+            return
+        scroll_bar = self._scroll_area.verticalScrollBar()
+        if scroll_bar is None:
+            return
+        scroll_bar.setValue(scroll_bar.value() - delta)
 
     def _update_pipeline_fields(self) -> None:
-        """Hide parameters unrelated to simple ROI averaging."""
+        """Hide parameters unrelated to the active pipeline/mask source."""
         suite2p = self._pipeline_combo.currentData() == "suite2p"
         for widget in self._suite2p_parameter_widgets:
             widget.setVisible(suite2p)
             label = self._params_layout.labelForField(widget)
             if label is not None:
                 label.setVisible(suite2p)
+
+        auto_detect = self._auto_detect_radio.isChecked()
+        for widget in self._auto_detect_parameter_widgets:
+            widget.setVisible(auto_detect)
+            label = self._params_layout.labelForField(widget)
+            if label is not None:
+                label.setVisible(auto_detect)
+
+        if auto_detect:
+            index = self._pipeline_combo.findData("suite2p")
+            if index >= 0:
+                self._pipeline_combo.setCurrentIndex(index)
+        self._pipeline_combo.setEnabled(not auto_detect)
 
     # -- File pickers -------------------------------------------------------
     def _browse_tifs(self) -> None:
@@ -405,13 +680,18 @@ class TifImportDialog(QtWidgets.QDialog):
             self._use_seg_radio.setChecked(True)
 
     # -- Mask resolution ----------------------------------------------------
-    def _resolve_masks(self) -> npt.NDArray[Any]:
+    def _resolve_masks(self) -> npt.NDArray[Any] | None:
+        if self._auto_detect_radio.isChecked():
+            return None
         if self._use_loaded_radio.isChecked():
             if self._cellpose_import is None:
                 raise ValueError("No Cellpose data is loaded in the current experiment")
             return _cellpose_result_to_masks(self._cellpose_import)
         if self._seg_file_path is None:
             raise ValueError("No _seg.npy file selected")
+        self._seg_file_background_image = _load_seg_file_background_image(
+            self._seg_file_path
+        )
         return _load_masks_from_seg_file(self._seg_file_path)
 
     def _selected_mapping(self) -> dict[int, int] | None:
@@ -428,11 +708,35 @@ class TifImportDialog(QtWidgets.QDialog):
                 self, "No TIFFs", "Add at least one TIFF stack before running."
             )
             return
+        self.new_cellpose_result = None
+        self._propagate_new_segmentation = False
+        self._new_segmentation_path = None
+        self._seg_file_background_image = None
         try:
             masks = self._resolve_masks()
         except Exception as exc:
             QtWidgets.QMessageBox.warning(self, "Cellpose masks required", str(exc))
             return
+
+        if masks is None:
+            proceed = QtWidgets.QMessageBox.question(
+                self,
+                "No cell segmentation",
+                "No Cellpose segmentation was provided. Suite2p will "
+                "auto-detect ROIs directly from the raw fluorescence movie "
+                "instead, which is typically less reliable than a "
+                "Cellpose-verified segmentation.\n\n"
+                "Proceed without cell segmentation?",
+                QtWidgets.QMessageBox.StandardButton.Yes
+                | QtWidgets.QMessageBox.StandardButton.No,
+                QtWidgets.QMessageBox.StandardButton.No,
+            )
+            if proceed != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+
+        self._propagate_new_segmentation = not self._use_loaded_radio.isChecked()
+        if self._propagate_new_segmentation and self._use_seg_radio.isChecked():
+            self._new_segmentation_path = self._seg_file_path
 
         params = TifPipelineParams(
             fs=self._fs_spin.value(),
@@ -440,15 +744,13 @@ class TifImportDialog(QtWidgets.QDialog):
             nchannels=self._nchannels_spin.value(),
             functional_chan=self._functional_chan_spin.value(),
             neuropil_coefficient=self._neucoeff_spin.value(),
+            diameter=self._diameter_spin.value(),
         )
 
         self._run_button.setEnabled(False)
-        self._progress_dialog = QtWidgets.QProgressDialog(
+        self._progress_dialog = _PipelineProgressDialog(
             "Starting trace extraction…", "Cancel", 0, 100, self
         )
-        self._progress_dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
-        self._progress_dialog.setAutoClose(False)
-        self._progress_dialog.setAutoReset(False)
         self._progress_dialog.canceled.connect(self._cancel_pipeline)
         self._progress_dialog.show()
 
@@ -458,6 +760,7 @@ class TifImportDialog(QtWidgets.QDialog):
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(self._on_progress)
+        self._worker.log.connect(self._progress_dialog.appendLog)
         self._worker.finished.connect(self._on_finished)
         self._worker.failed.connect(self._on_failed)
         self._worker.finished.connect(self._thread.quit)
@@ -515,6 +818,14 @@ class TifImportDialog(QtWidgets.QDialog):
         dt = 1.0 / fs
         n_neurons, n_timepoints = result.F.shape
         self.experiment_duration = n_timepoints * dt
+
+        if self._propagate_new_segmentation:
+            self.new_cellpose_result = _build_cellpose_result_from_pipeline(
+                result,
+                self._tif_paths[0],
+                segmentation_path=self._new_segmentation_path,
+                background_image=self._seg_file_background_image,
+            )
 
         if result.extra.get("pipeline") == "roi_average":
             from neuroseq.data import TraceData
