@@ -1,0 +1,390 @@
+tif_import_spatial_footprint_consistency — propagate any new segmentation
+from the TIFF calcium-import dialog into the main-window Spatial Footprints
+viewer, and warn before running the pipeline with no segmentation at all  [IMPLEMENTED]
+================================================================================
+
+Follow-up to suite2p_pipeline_enhancement.txt (issue #506), which added a
+third "Auto-detect ROIs with Suite2p (no Cellpose)" mask-source option to
+`TifImportDialog`. Two gaps identified since:
+
+  1. `TifImportDialog` can produce/load a NEW cell segmentation two ways —
+     browsing a `_seg.npy` file, or Suite2p auto-detection — but neither
+     result ever reaches `Project.cellpose_data`, so it never shows up in
+     the main window's Spatial Footprints panel (`spatial_footprint_widget`,
+     added in the earlier `spatial_footprint_viewer` change). Only the
+     THIRD mask source ("Use Cellpose masks from the current experiment")
+     is already consistent with the panel, because it reads its masks FROM
+     that same project state in the first place (see `_cellpose_result_to_masks`,
+     tif_import_dialog.py:33-49) — nothing "new" is produced there.
+  2. Running the pipeline in auto-detect mode has no confirmation step, even
+     though it's meaningfully less reliable than a human-verified Cellpose
+     segmentation (no popup warns the user before proceeding).
+
+Files to change:
+    src/neuroseq/tif_import_dialog.py
+    src/neuroseq/gui.py
+
+Files to extend (tests):
+    tests/test_tif_import_dialog.py
+    tests/test_gui.py
+
+
+────────────────────────────────────────────────────────────────────────────
+BACKGROUND — read before touching anything
+────────────────────────────────────────────────────────────────────────────
+
+- The canonical "a new Cellpose-style result just arrived, make the whole
+  app consistent" entry point already exists:
+  `Gui._apply_cellpose_import_result(self, imported: CellposeImportResult) ->
+  list[str]` (gui.py:1210-1253). It clones the result
+  (`clone_cellpose_result`), sets `self.last_cellpose_import` AND
+  `self.project.cellpose_data`, offers to resize existing stim arrays if the
+  new segmentation has more cells (a `QMessageBox.question` — see TESTS for
+  how to mock it), and — critically — calls
+  `self.spatial_footprint_widget.set_data(self.project.cellpose_data)`
+  (gui.py:1251-1252) at the end. This is exactly what needs to be called
+  for the two mask sources listed above; do not hand-roll panel refresh
+  logic in `tif_import_dialog.py` or `gui.py` — route through this method.
+  `btn_import_cellpose_data_clicked` (gui.py:2002-2029) is the existing
+  caller to mirror: it calls `_apply_cellpose_import_result`, then
+  `self._auto_show_widget(self.spatial_footprint_widget)` guarded by
+  `hasattr(self, "_auto_show_widget")` (gui.py:2013-2014) — copy that exact
+  guard style, it exists for test doubles that don't define the method.
+
+- `TifImportDialog._resolve_masks()` (tif_import_dialog.py:590-599) has
+  three branches, in mask-source-radio order: `_auto_detect_radio` (returns
+  `None`), `_use_loaded_radio` (returns `_cellpose_result_to_masks(self._cellpose_import)`
+  — i.e. reads FROM the already-loaded `Project.cellpose_data`, so this
+  branch produces nothing new to propagate), `_use_seg_radio` (returns
+  `_load_masks_from_seg_file(self._seg_file_path)` — genuinely new,
+  user-picked file, currently disconnected from `Project.cellpose_data`).
+
+- `TifPipelineResult` (importer_tif.py:53-63) always carries `masks`
+  (an (Ly, Lx) int32 label image, 0 = background, 1..N = cells — see the
+  suite2p_pipeline_enhancement change for how this is populated in the
+  auto-detect case via the new `_stat_to_masks` helper) and `mean_image`
+  ((Ly, Lx) float32), REGARDLESS of which of the two pipelines
+  (`run_suite2p_pipeline` / `run_roi_average_pipeline`) ran or which mask
+  source fed it — both `masks` and `mean_image` are always present. This is
+  what makes a uniform "build a CellposeImportResult from this
+  TifPipelineResult" helper possible without pipeline-specific branching.
+
+- `CellPoseImporter` (importer_cellpose.py:299-...) is the class that
+  normally builds a `CellposeImportResult` from a loaded image + segmentation
+  file, and it works entirely off two attributes you can set directly
+  instead of going through its file-loading methods:
+      importer.image_data          # (Ly, Lx, 3) uint8 RGB, VERTICALLY FLIPPED
+      importer.segmentation_data   # (Ly, Lx) int32, background = -1,
+                                    # cells = 0..N-1, VERTICALLY FLIPPED
+  The vertical flip and the background=-1/0-based-cells convention are the
+  same ones `_cellpose_result_to_masks` (tif_import_dialog.py:33-49) already
+  documents and undoes for the opposite direction — this change needs the
+  FORWARD conversion (raw masks -> CellposeImportResult convention):
+      segmentation = masks.astype(np.int32) - 1     # 0->-1 bg, 1..N -> 0..N-1
+      segmentation = np.flipud(segmentation)
+  `CellPoseImporter._scale_float_image_to_uint8` (importer_cellpose.py:385-400,
+  a `@staticmethod`) is the existing float->uint8 min/max normalizer — reuse
+  it for `mean_image` rather than writing a new one. After setting
+  `image_data`/`segmentation_data` directly, also set
+  `importer._segmentation_flipped_for_image = True` (so `_align_orientation_segmentation`,
+  if anything ever calls it later, treats the data as already flipped and is
+  a no-op — this mirrors what `load_segmentation_file` sets after its own
+  flip at importer_cellpose.py:438) and
+  `importer._original_cellpose_ids = unique_ids[unique_ids >= 0]` (matches
+  the "shifted to 0-based IDs" convention documented at
+  importer_cellpose.py:428-431). Then call `importer.generate_overlay()`
+  (importer_cellpose.py:474-503, builds `overlay_image` by color-blending
+  each cell's ID color from `neuron_indices_to_colors` onto `image_data`) and
+  `importer.create_result(image_path=..., segmentation_path=...)`
+  (importer_cellpose.py:560-584) to get the final `CellposeImportResult`.
+  `create_result`'s other keyword args (`stimulus_to_cellpose_mapping`,
+  `mapping_strategy`, `linear_offset`, `aoi_config`) all default sensibly
+  (`None`/`"Linear"`/`0`/`None`) — the TIFF dialog has no AOI/custom-mapping
+  UI, so leave them at their defaults.
+
+- IMPORTANT — do NOT propagate anything for the `_use_loaded_radio` branch.
+  Its masks already ARE `Project.cellpose_data`; rebuilding a fresh
+  `CellposeImportResult` from scratch there would silently DROP any existing
+  `stimulus_to_cellpose_mapping`/`aoi_config`/`mapping_strategy` the current
+  project's Cellpose data carries (e.g. a custom AOI-based stim mapping set
+  up via the main Cellpose import dialog) — a real regression, not a no-op.
+  Only the `_use_seg_radio` and `_auto_detect_radio` branches produce a
+  segmentation that ISN'T already `Project.cellpose_data`, so only those two
+  should trigger propagation.
+
+
+────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/tif_import_dialog.py
+────────────────────────────────────────────────────────────────────────────
+
+1. Imports (tif_import_dialog.py:26): add `CellPoseImporter` to the existing
+   `from neuroseq.importer_cellpose import CellposeImportResult` line (two
+   separate `from ... import ...` lines, matching this file's existing
+   one-import-per-line style):
+
+       from neuroseq.importer_cellpose import CellPoseImporter
+       from neuroseq.importer_cellpose import CellposeImportResult
+
+2. Add a new module-level helper right after `_load_masks_from_seg_file`
+   (tif_import_dialog.py:52-60), before the `_QtLogHandler` class:
+
+       def _build_cellpose_result_from_pipeline(
+           result: TifPipelineResult,
+           image_path: Path,
+           *,
+           segmentation_path: Path | None = None,
+       ) -> CellposeImportResult:
+           """Wrap a pipeline's masks + mean image as a CellposeImportResult.
+
+           Lets a segmentation that was loaded from a _seg.npy file or
+           auto-detected by Suite2p (rather than coming from the main
+           Cellpose import dialog) be shown in the Spatial Footprints panel,
+           using the same background=-1/vertically-flipped convention
+           CellPoseImporter.load_image_file/load_segmentation_file produce.
+           """
+           importer = CellPoseImporter()
+           gray = CellPoseImporter._scale_float_image_to_uint8(result.mean_image)
+           importer.image_data = np.flipud(np.stack([gray, gray, gray], axis=-1))
+           segmentation = result.masks.astype(np.int32) - 1
+           importer.segmentation_data = np.flipud(segmentation)
+           importer._segmentation_flipped_for_image = True
+           unique_ids = np.unique(importer.segmentation_data)
+           importer._original_cellpose_ids = unique_ids[unique_ids >= 0]
+           importer.generate_overlay()
+           return importer.create_result(
+               image_path=image_path, segmentation_path=segmentation_path
+           )
+
+3. `TifImportDialog.__init__` (tif_import_dialog.py:202-225): add, next to
+   `self._pipeline_result` (tif_import_dialog.py:218):
+
+       self.new_cellpose_result: CellposeImportResult | None = None
+       self._propagate_new_segmentation: bool = False
+
+   `new_cellpose_result` is the new public output `gui.py` reads after
+   `dialog.exec()` returns Accepted (mirrors how `imported_data` already
+   works). `_propagate_new_segmentation` is set in `_start_pipeline` (step 4)
+   and consumed in `_finalize_import` (step 5) — captured once at launch
+   time rather than re-read from the radios afterward, since the radios stay
+   interactive while the background pipeline thread runs and shouldn't be
+   trusted to still reflect the choice that was actually used.
+
+4. `_start_pipeline` (tif_import_dialog.py:602-612): after the existing
+   mask-resolution try/except, add the "no segmentation" confirmation and
+   capture which branch was used:
+
+       try:
+           masks = self._resolve_masks()
+       except Exception as exc:
+           QtWidgets.QMessageBox.warning(self, "Cellpose masks required", str(exc))
+           return
+
+       if masks is None:
+           proceed = QtWidgets.QMessageBox.question(
+               self,
+               "No cell segmentation",
+               "No Cellpose segmentation was provided. Suite2p will "
+               "auto-detect ROIs directly from the raw fluorescence movie "
+               "instead, which is typically less reliable than a "
+               "Cellpose-verified segmentation.\n\n"
+               "Proceed without cell segmentation?",
+               QtWidgets.QMessageBox.StandardButton.Yes
+               | QtWidgets.QMessageBox.StandardButton.No,
+               QtWidgets.QMessageBox.StandardButton.No,
+           )
+           if proceed != QtWidgets.QMessageBox.StandardButton.Yes:
+               return
+
+       self._propagate_new_segmentation = not self._use_loaded_radio.isChecked()
+
+   Place both additions between the existing try/except block and the
+   `params = TifPipelineParams(...)` construction (tif_import_dialog.py:614).
+   The `masks is None` check subsumes "auto-detect was chosen" (that's the
+   only branch `_resolve_masks` returns `None` from) without needing to
+   re-check `self._auto_detect_radio.isChecked()` directly.
+
+5. `_finalize_import` (tif_import_dialog.py:689-736): build the propagated
+   result once, right after `self.experiment_duration = ...`
+   (tif_import_dialog.py:693), before the `if result.extra.get("pipeline")`
+   branch:
+
+       if self._propagate_new_segmentation:
+           self.new_cellpose_result = _build_cellpose_result_from_pipeline(
+               result,
+               self._tif_paths[0],
+               segmentation_path=self._seg_file_path
+               if self._use_seg_radio.isChecked()
+               else None,
+           )
+
+   This runs before the `roi_average` early-return (tif_import_dialog.py:695-713),
+   so it covers BOTH pipelines — `run_roi_average_pipeline` can only be
+   reached via `_use_seg_radio` (auto-detect forces+disables the pipeline
+   combo to Suite2p, per the suite2p_pipeline_enhancement change), so
+   `self._seg_file_path` is always the right `segmentation_path` there;
+   `run_suite2p_pipeline` can be reached via either `_use_seg_radio` or
+   `_auto_detect_radio`, hence the conditional.
+
+
+────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/gui.py
+────────────────────────────────────────────────────────────────────────────
+
+6. `btn_import_tif_clicked` (gui.py:1971-1984): after appending the imported
+   experimental data, propagate a new segmentation if one was produced:
+
+       def btn_import_tif_clicked(self) -> None:
+           """Open dialog to run the Suite2p pipeline on raw 2-photon TIFFs."""
+           from neuroseq.tif_import_dialog import TifImportDialog
+
+           dialog = TifImportDialog(self, cellpose_import=self.last_cellpose_import)
+           if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+               self._append_experimental_data(
+                   Experiment(
+                       dialog.experiment_name,
+                       dialog.experiment_duration,
+                       [],
+                       dialog.imported_data,
+                   )
+               )
+               if dialog.new_cellpose_result is not None:
+                   self._apply_cellpose_import_result(dialog.new_cellpose_result)
+                   if hasattr(self, "_auto_show_widget"):
+                       self._auto_show_widget(self.spatial_footprint_widget)
+
+   No other changes needed in gui.py — `_apply_cellpose_import_result`
+   already updates `last_cellpose_import`, `project.cellpose_data`, the
+   stim-array-resize prompt, and `spatial_footprint_widget.set_data(...)`.
+
+
+────────────────────────────────────────────────────────────────────────────
+NON-GOALS
+────────────────────────────────────────────────────────────────────────────
+
+- Propagating anything for the `_use_loaded_radio` branch — see BACKGROUND;
+  doing so would regress existing AOI/mapping metadata.
+- Any AOI/custom-mapping UI in `TifImportDialog` itself. The propagated
+  `CellposeImportResult` always uses the `create_result` defaults
+  (`mapping_strategy="Linear"`, `linear_offset=0`, `aoi_config=None`).
+- Calling `_warn_if_cellpose_model_mismatch()` (gui.py, used after the main
+  Cellpose import dialog) from `btn_import_tif_clicked`. That check is about
+  a different concern (Cellpose model name bookkeeping) unrelated to this
+  change.
+- Changing the "Import successful" message box text in `_finalize_import`.
+  The stim-array-resize prompt (if triggered) already surfaces separately
+  via `_apply_cellpose_import_result`.
+
+
+────────────────────────────────────────────────────────────────────────────
+TESTS
+────────────────────────────────────────────────────────────────────────────
+
+tests/test_tif_import_dialog.py — ADD
+
+    test_seg_file_source_sets_new_cellpose_result_after_finalize
+        # Build the dialog, add a fake tif path, select _use_seg_radio with
+        # a real seg-file path (reuse whatever fixture/helper the existing
+        # seg-file tests use, e.g. test_resolve_masks_requires_seg_when_seg_radio_selected's
+        # setup), then call dialog._finalize_import(_make_pipeline_result())
+        # directly (mirrors how other _finalize_import tests in this file
+        # already bypass the thread — check test_finalize_roi_average_imports_raw_trace_only
+        # and test_dialog_runs_mocked_pipeline_and_produces_imported_data for
+        # the existing pattern). Assert dialog.new_cellpose_result is not
+        # None, .segmentation_array.shape matches the mean_image/masks shape,
+        # and .segmentation_path == the selected seg file path.
+
+    test_auto_detect_source_sets_new_cellpose_result_with_no_segmentation_path
+        # Same as above but with _auto_detect_radio checked (masks=None,
+        # _propagate_new_segmentation set via _start_pipeline's logic —
+        # either drive it through _start_pipeline with a mocked pipeline
+        # function like test_start_pipeline_passes_diameter_param does, or
+        # set self._propagate_new_segmentation = True directly and call
+        # _finalize_import if that's simpler/more isolated). Assert
+        # dialog.new_cellpose_result is not None and .segmentation_path is None.
+
+    test_use_loaded_radio_does_not_set_new_cellpose_result
+        # Dialog constructed with cellpose_import=<a real CellposeImportResult>,
+        # _use_loaded_radio checked (the default in that case). Drive
+        # _finalize_import directly; assert dialog.new_cellpose_result is None
+        # — this is the regression guard for the "don't clobber existing
+        # AOI/mapping metadata" rule in BACKGROUND.
+
+    test_auto_detect_pipeline_run_prompts_before_proceeding
+        # mocker.patch("neuroseq.tif_import_dialog.QtWidgets.QMessageBox.question")
+        # return_value=QtWidgets.QMessageBox.StandardButton.No; check
+        # _auto_detect_radio; add a fake tif path; call dialog._start_pipeline();
+        # assert the question mock was called once and dialog._thread is None
+        # (pipeline never launched). Then repeat with return_value=...Yes and
+        # a mocked run_suite2p_pipeline (pattern from
+        # test_start_pipeline_passes_diameter_param), asserting the pipeline
+        # DOES run this time.
+
+    test_build_cellpose_result_from_pipeline_matches_masks_and_mean_image
+        # Unit-test the new module-level helper directly (no Qt needed):
+        # build a small TifPipelineResult (reuse _make_pipeline_result() or a
+        # variant with a non-trivial masks array), call
+        # _build_cellpose_result_from_pipeline(result, Path("stack.tif")),
+        # and assert: segmentation_array.shape == result.masks.shape;
+        # np.unique(segmentation_array) has one fewer background-adjacent
+        # value than np.unique(result.masks) accounts for (i.e. -1 present,
+        # 0 absent unless a real cell id 1 mapped to 0); overlay_image.shape
+        # == segmentation_array.shape + (3,); image_path == the path passed in.
+
+tests/test_gui.py — ADD
+
+    test_import_tif_with_new_segmentation_populates_spatial_footprint_panel
+        # Mirror test_import_cellpose_data_populates_and_shows_spatial_footprint_panel
+        # (tests/test_gui.py:402-428) exactly, but faking TifImportDialog
+        # instead of CellposeImportDialog:
+        #     class _FakeDialog:
+        #         def __init__(self, *a, **kw): ...
+        #         def exec(self): return QtWidgets.QDialog.DialogCode.Accepted
+        #         experiment_name = "fake"
+        #         experiment_duration = 1.0
+        #         imported_data = []
+        #         new_cellpose_result = _make_gui_cellpose_result()  # reuse existing helper
+        #     monkeypatch.setattr("neuroseq.gui.TifImportDialog", _FakeDialog)
+        # gui.btn_import_tif_clicked(); assert
+        # gui.spatial_footprint_widget.overlay_widget.segmentation is not None
+        # and gui.spatial_footprint_widget.isVisible(), same as the Cellpose-
+        # import version of this test.
+        # NOTE: gui.py currently does `from neuroseq.tif_import_dialog import
+        # TifImportDialog` INSIDE btn_import_tif_clicked (a local/lazy import),
+        # not at module scope — monkeypatch.setattr("neuroseq.tif_import_dialog.TifImportDialog", _FakeDialog)
+        # instead (patch it where it's defined, not where gui.py would import
+        # it from, since there's no module-level `neuroseq.gui.TifImportDialog`
+        # attribute to patch until the function runs). Double check which of
+        # the two patch targets actually takes effect — the existing
+        # CellposeImportDialog test patches "neuroseq.gui.CellposeImportDialog"
+        # because THAT import is already at module scope in gui.py; TifImportDialog's
+        # import is local, so the same style of patch will not intercept it.
+
+    test_import_tif_reusing_loaded_segmentation_does_not_reset_spatial_footprint_panel
+        # Set gui.project.cellpose_data to a CellposeImportResult with a
+        # non-default aoi_config/stimulus_to_cellpose_mapping (or just a
+        # distinguishable sentinel), fake TifImportDialog with
+        # new_cellpose_result=None (the "_use_loaded_radio" outcome), call
+        # gui.btn_import_tif_clicked(), assert gui.project.cellpose_data is
+        # unchanged (same object identity or same aoi_config) — regression
+        # guard mirroring the dialog-level
+        # test_use_loaded_radio_does_not_set_new_cellpose_result.
+
+
+────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────
+
+    ruff check src/neuroseq/tif_import_dialog.py src/neuroseq/gui.py \
+               tests/test_tif_import_dialog.py tests/test_gui.py
+    ruff format --check src/neuroseq/tif_import_dialog.py src/neuroseq/gui.py \
+               tests/test_tif_import_dialog.py tests/test_gui.py
+    mypy --ignore-missing-imports src/neuroseq/tif_import_dialog.py src/neuroseq/gui.py
+    uv run pytest tests/test_tif_import_dialog.py -v
+    uv run pytest tests/test_gui.py -v
+    uv run pytest
+
+Full-suite run required at the end: `gui.py` is the most heavily-exercised
+file in the test suite (nearly every `test_gui.py` test constructs a `Gui`
+instance), so a mistake in `btn_import_tif_clicked` or
+`_apply_cellpose_import_result`'s call graph could easily surface as an
+unrelated-looking failure elsewhere.

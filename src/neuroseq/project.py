@@ -136,6 +136,12 @@ class Project:
         self.max_neurons = 0
         self.dt: float = 0.001
 
+        # Last time-slider position (ms) shown while this project's tab was
+        # active. Transient GUI state, per-project so switching tabs restores
+        # each project's own playback position instead of sharing one global
+        # slider value; not persisted to the saved archive.
+        self.last_time_ms: int = 0
+
         # External-simulation function state. `external_simulate_path` is either
         # a filesystem path to a `.py` file or a `neuroseq:<module_name>`
         # sentinel resolving to `neuroseq.example_models.<module_name>.simulate`.

@@ -1,0 +1,652 @@
+suite2p_pipeline_enhancement — mask-optional Suite2p auto-detect, an expandable
+detailed-log panel in the TIFF import dialog, and a missing regression test
+for the (already-shipped) percent-mode AOI round-trip  [IMPLEMENTED]
+================================================================================
+
+GitHub issue #506 ("Enhancement of suite2p analysis pipeline") lists three
+asks. Investigation (read every file below in full before starting) found:
+
+  1. "Enable quick analysis of the recordings without cellpose: Right now
+     cellpose masks are obligatory for suite2p analysis." — NOT implemented.
+     `run_suite2p_pipeline()` hard-requires a 2D Cellpose label mask.
+  2. "During the suite2p analysis provide a window with more detailed logs."
+     — NOT implemented. Suite2p logs richly via stdlib `logging`, all of it
+     silently discarded; the GUI shows one overwritten line of progress text.
+  3. "Cellpose import: exclusion/inclusion criteria add an option to set in %
+     from the image size." — ALREADY implemented AND already has passing
+     tests (`AreasOfInterestConfig.coordinate_mode`, the "% of FOV" combo,
+     `_current_square_aoi`/`_current_circle_aoi`/`_set_aoi_controls` percent
+     conversion, and `test_dialog_aoi_percentage_mode_uses_centres_and_fov_size`
+     / `test_dialog_aoi_pixel_mode_uses_square_centre` in
+     tests/test_cellpose_aoi_mapping.py). Do NOT re-implement or re-litigate
+     this — the only real gap is that the percent-mode round trip through
+     `_set_aoi_controls` (config -> spinboxes) is untested; only pixel mode
+     is (test at line 305-322). Add ONE small test to close that gap. This
+     item is otherwise DONE — don't spend time here beyond that one test.
+
+Files to change:
+    src/neuroseq/importer_tif.py         (sub-task 1)
+    src/neuroseq/tif_import_dialog.py    (sub-tasks 1 and 2)
+    tests/test_importer_tif.py           (sub-task 1)
+    tests/test_tif_import_dialog.py      (sub-tasks 1 and 2)
+    tests/test_cellpose_aoi_mapping.py   (sub-task 3 — one test only)
+
+
+────────────────────────────────────────────────────────────────────────────
+BACKGROUND — read before touching anything
+────────────────────────────────────────────────────────────────────────────
+
+- `run_suite2p_pipeline(tif_paths, masks, params, *, work_dir=None,
+  progress=None)` (importer_tif.py:245-465) is the only place a Cellpose
+  mask is consumed. Validation: `if masks.ndim != 2: raise ValueError(...)`
+  (importer_tif.py:261-262), and a shape check against the decoded TIFF
+  frame size (importer_tif.py:368-371). The mask is turned into a Suite2p
+  `stat` array by `_masks_to_stat(masks, Ly, Lx)` (importer_tif.py:218-242,
+  called at :383), which uses `suite2p.detection.roi_stats` /
+  `assign_overlaps` on a hand-built `stat` list (one dict per Cellpose
+  label, `ypix`/`xpix`/`npix`/`lam`/`med`).
+
+- The pipeline never calls Suite2p's own registration step — it goes
+  straight from `s2io.tiff_to_binary(...)` (importer_tif.py:357) to
+  `mean_image = f_bin.data.mean(axis=0)` (importer_tif.py:380). So
+  `yrange`/`xrange` for detection must be the full frame, `[0, Ly]` /
+  `[0, Lx]` — there is no registration crop to reuse.
+
+- Suite2p 1.1.0 (the version pinned in this repo's venv) ships
+  `suite2p.detection.detection_wrapper`, confirmed via
+  `inspect.signature`:
+
+      detection_wrapper(f_reg, diameter=[12.0, 12.0], tau=1.0, fs=30,
+          meanImg_chan2=None, yrange=None, xrange=None, badframes=None,
+          mov=None, preclassify=0.0, classifier_path=None,
+          settings=default_settings()["detection"], device=torch.device(...))
+      -> (new_settings: dict, stat: np.ndarray, redcell: np.ndarray | None)
+
+  `f_reg` just needs a `.shape` returning `(n_frames, Ly, Lx)` — confirmed
+  `suite2p.io.BinaryFile.shape` is a property returning exactly that, so
+  the already-open `f_bin` (importer_tif.py:373) can be passed directly,
+  no new binary read needed. `redcell` is only populated when
+  `meanImg_chan2` is given (2nd-channel red-cell detection) — do not wire
+  that up, it's out of scope; pass `meanImg_chan2=None` implicitly (leave
+  the kwarg unset) and ignore the returned `redcell`.
+
+  `defaults["detection"]` (where `defaults = suite2p.default_settings()`,
+  already computed at importer_tif.py:318) is the settings dict to pass —
+  its `"algorithm"` key defaults to `"sparsery"`, which is what to use; no
+  algorithm-choice UI (confirmed decision — do not add one).
+
+- Every Suite2p submodule logs via `logging.getLogger(__name__)` under the
+  `suite2p` namespace and none of them set `propagate=False` (confirmed by
+  grepping every `.venv/lib/python3.12/site-packages/suite2p/**/*.py`), so
+  a `logging.Handler` attached to `logging.getLogger("suite2p")` for the
+  duration of a pipeline run will receive everything Suite2p logs
+  internally (binning messages, timing, "Removing N ROIs with snr < ...",
+  etc.) even though `run_suite2p_pipeline` calls Suite2p's low-level
+  functions directly rather than `suite2p.pipeline`. `importer_tif.py`'s
+  own `logger = logging.getLogger(__name__)` (importer_tif.py:24, i.e.
+  `"neuroseq.importer_tif"`) is worth capturing the same way — its
+  `logger.info`/`logger.warning` calls at importer_tif.py:337,343,365
+  currently go nowhere the user can see.
+
+- `_PipelineWorker.run()` (tif_import_dialog.py:78-101) executes on a
+  background `QThread`; its `progress`/`finished`/`failed` signals
+  (tif_import_dialog.py:61-63) are already used to marshal data back to
+  the GUI thread safely via Qt's queued-connection mechanism. Follow the
+  exact same pattern for the new log signal — do not touch Qt widgets
+  from inside `run()` directly.
+
+- Existing reusable log-widget pattern: `stdp_window_dialog.py:279-282`
+  builds a read-only `QtWidgets.QPlainTextEdit` capped at
+  `setMaximumHeight(130)`, appended to via `self.log.appendPlainText(...)`
+  (`stdp_window_dialog.py:1120-1121`, method `_append_log`). Mirror this
+  widget style for the new details panel rather than inventing a new one.
+
+- Sub-task 3's actual (already-shipped) implementation, for reference
+  only — do not modify unless adding the one test below:
+  `AreasOfInterestConfig.coordinate_mode` (importer_cellpose.py:42-47,
+  default `"pixels"`; `default_aoi_config()` at :92-115 defaults new
+  imports to `"percent"`). Dialog side:
+  `AOI_PIXELS_MODE`/`AOI_PERCENT_MODE` (cellpose_import_dialog.py:35-36),
+  `_aoi_dimensions()` (cellpose_import_dialog.py:821-825, returns
+  `(width, height, min(width, height))`), `_current_square_aoi`/
+  `_current_circle_aoi` (cellpose_import_dialog.py:827-861, percent ->
+  pixel conversion using width/height/short-edge), `_set_aoi_controls`
+  (cellpose_import_dialog.py:875-921, pixel -> percent conversion for
+  display). `generate_aoi_stimulus_mapping` (importer_cellpose.py:129-192)
+  and `point_in_square`/`point_in_circle` (importer_cellpose.py:118-126)
+  ALWAYS operate in absolute pixel space regardless of `coordinate_mode` —
+  the dialog converts to pixels before constructing `SquareAOI`/
+  `CircleAOI`, so `coordinate_mode` is a pure UI/display-and-persistence
+  concern, never interpreted by the mapping logic itself. (This corrects
+  an earlier, wrong assumption that `generate_aoi_stimulus_mapping` needed
+  a percent-vs-pixel equivalence test — it doesn't; there's nothing to
+  test there that isn't already covered by the dialog-level conversion
+  tests.)
+
+
+────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/importer_tif.py  (sub-task 1)
+────────────────────────────────────────────────────────────────────────────
+
+1. `TifPipelineParams` (importer_tif.py:39-50): add one field, after
+   `neuropil_coefficient`:
+
+       diameter: float = 12.0  # Suite2p's own default cell diameter (px);
+                                # only used when auto-detecting ROIs (no
+                                # Cellpose masks supplied).
+
+2. `run_suite2p_pipeline` signature (importer_tif.py:245-252): widen the
+   `masks` type to `npt.NDArray[Any] | None` and relax validation
+   (importer_tif.py:261-262):
+
+       if masks is not None and masks.ndim != 2:
+           raise ValueError(f"masks must be 2D, got shape {masks.shape}")
+
+   Update the docstring (importer_tif.py:253-257) to say masks is now
+   optional: "If `masks` is None, ROIs are detected automatically using
+   Suite2p's own `sparsery` algorithm (`params.diameter` sets the expected
+   cell size in pixels)."
+
+3. Add the import alongside the other lazy Suite2p imports inside the
+   function body (importer_tif.py:264-267):
+
+       import suite2p.detection as s2detect
+
+4. The shape-check block (importer_tif.py:367-371) currently does
+   `if masks.shape != (Ly, Lx): raise ValueError(...)` — guard it the same
+   way: `if masks is not None and masks.shape != (Ly, Lx): raise ...`.
+
+5. Replace the single `stat = _masks_to_stat(masks, Ly, Lx)` line
+   (importer_tif.py:382-383) with a branch:
+
+       if masks is not None:
+           progress("Building Suite2p stat from Cellpose masks", 0.4)
+           stat = _masks_to_stat(masks, Ly, Lx)
+           masks_out = np.asarray(masks)
+       else:
+           progress(f"Detecting ROIs with Suite2p ({device_label})", 0.4)
+           _new_settings, stat, _redcell = s2detect.detection_wrapper(
+               f_bin,
+               diameter=[float(params.diameter), float(params.diameter)],
+               tau=float(params.tau),
+               fs=float(params.fs),
+               yrange=[0, Ly],
+               xrange=[0, Lx],
+               settings=defaults["detection"],
+               classifier_path=s2cls.builtin_classfile,
+               device=device,
+           )
+           masks_out = _stat_to_masks(stat, Ly, Lx)
+
+   `f_bin` and `device`/`device_label` are already in scope at this point
+   (importer_tif.py:336-373). `defaults` is already computed at
+   importer_tif.py:318 (`defaults = suite2p.default_settings()`).
+
+6. Add the inverse of `_masks_to_stat` right after it (importer_tif.py:242,
+   before `def run_suite2p_pipeline`):
+
+       def _stat_to_masks(stat: npt.NDArray[Any], Ly: int, Lx: int) -> npt.NDArray[Any]:
+           """Rebuild a Cellpose-style label image from a Suite2p `stat` array."""
+           mask_img = np.zeros((Ly, Lx), dtype=np.int32)
+           for idx, entry in enumerate(stat):
+               mask_img[entry["ypix"], entry["xpix"]] = idx + 1
+           return mask_img
+
+   This is what lets downstream code (overlay display, re-import) treat an
+   auto-detected result exactly like a Cellpose-derived one — same label
+   image shape/convention (0 = background, 1..N = cells in `stat` order).
+
+7. `iscell` force-accept (importer_tif.py:435-438) currently unconditionally
+   sets `iscell[:, 0] = 1` with the comment "All ROIs come from Cellpose —
+   accept them all." That reasoning only holds when `masks is not None`.
+   Change to:
+
+       iscell = s2cls.classify(stat=stat, classfile=s2cls.builtin_classfile)
+       if masks is not None:
+           # All ROIs come from Cellpose — accept them all.
+           iscell[:, 0] = 1
+       # else: keep Suite2p's own classifier verdict — not every
+       # auto-detected blob is guaranteed to be a real cell.
+
+8. Return statement (importer_tif.py:447-457): change `masks=np.asarray(masks)`
+   to `masks=masks_out`. Also add, in the `extra` dict (importer_tif.py:440),
+   when auto-detection ran:
+
+       if masks is None:
+           extra["diameter"] = params.diameter
+
+   (Keep the existing `extra["compute_device"]` / `extra["F_chan2"]` /
+   `extra["Fneu_chan2"]` entries untouched.)
+
+   NOTE: `run_roi_average_pipeline` (importer_tif.py:73-167) is NOT
+   touched — it literally averages pixels per labelled ROI and cannot run
+   without a mask; masks stay required there. The dialog change below
+   (step 3) prevents that pipeline from ever being selected in
+   no-mask mode.
+
+
+────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/tif_import_dialog.py  (sub-tasks 1 and 2)
+────────────────────────────────────────────────────────────────────────────
+
+--- Sub-task 1: third "auto-detect" mask-source radio ---
+
+1. Add `from collections.abc import Callable` to the imports
+   (tif_import_dialog.py:7-14) — needed for the log-handler sink type hint
+   in sub-task 2 below.
+
+2. Mask-source radio group (tif_import_dialog.py:194-232): add a third
+   button after `self._use_seg_radio`:
+
+       self._auto_detect_radio = QtWidgets.QRadioButton(
+           "Auto-detect ROIs with Suite2p (no Cellpose masks)"
+       )
+       self._mask_source_buttons.addButton(self._auto_detect_radio, 2)
+       mask_layout.addWidget(self._auto_detect_radio)
+       self._auto_detect_radio.toggled.connect(self._update_pipeline_fields)
+
+   Place the `addWidget`/`addButton` calls right after the existing
+   `self._use_seg_radio` ones (tif_import_dialog.py:202-204), so tab order
+   stays sensible. Leave the existing "none loaded" fallback logic
+   (tif_import_dialog.py:224-231) untouched — it only concerns the first
+   radio's enabled state.
+
+3. Add a diameter spinbox in the params group, right after
+   `self._neucoeff_spin` (tif_import_dialog.py:272-277):
+
+       self._diameter_spin = QtWidgets.QDoubleSpinBox()
+       self._diameter_spin.setRange(2.0, 200.0)
+       self._diameter_spin.setDecimals(1)
+       self._diameter_spin.setValue(12.0)
+       self._diameter_spin.setSuffix(" px")
+       self._diameter_spin.setToolTip(
+           "Approximate soma diameter in pixels — used by Suite2p's own "
+           "ROI detector when no Cellpose masks are supplied."
+       )
+       params_layout.addRow("Cell diameter (auto-detect):", self._diameter_spin)
+
+   It needs its own visibility list separate from
+   `self._suite2p_parameter_widgets` (tif_import_dialog.py:287-291) since
+   it should show ONLY in auto-detect mode, not in every Suite2p run:
+
+       self._auto_detect_parameter_widgets = [self._diameter_spin]
+
+4. Rewrite `_update_pipeline_fields` (tif_import_dialog.py:306-313) to
+   also react to the new radio and to lock the pipeline combo:
+
+       def _update_pipeline_fields(self) -> None:
+           """Hide parameters unrelated to the active pipeline/mask source."""
+           suite2p = self._pipeline_combo.currentData() == "suite2p"
+           for widget in self._suite2p_parameter_widgets:
+               widget.setVisible(suite2p)
+               label = self._params_layout.labelForField(widget)
+               if label is not None:
+                   label.setVisible(suite2p)
+
+           auto_detect = self._auto_detect_radio.isChecked()
+           for widget in self._auto_detect_parameter_widgets:
+               widget.setVisible(auto_detect)
+               label = self._params_layout.labelForField(widget)
+               if label is not None:
+                   label.setVisible(auto_detect)
+
+           if auto_detect:
+               index = self._pipeline_combo.findData("suite2p")
+               self._pipeline_combo.setCurrentIndex(index)
+           self._pipeline_combo.setEnabled(not auto_detect)
+
+   ROI-averaging (`"Simply average from ROI"`) cannot run without a mask —
+   forcing + disabling the combo here means `_start_pipeline` never has to
+   defend against that combination.
+
+   `_auto_detect_radio.toggled` is connected in step 2 above; also confirm
+   `self._pipeline_combo.currentIndexChanged` (tif_import_dialog.py:292)
+   still fires `_update_pipeline_fields` as before — no change needed
+   there, both signals feed the same method.
+
+5. `_resolve_masks` (tif_import_dialog.py:406-413): return type becomes
+   `npt.NDArray[Any] | None`, add the new branch first:
+
+       def _resolve_masks(self) -> npt.NDArray[Any] | None:
+           if self._auto_detect_radio.isChecked():
+               return None
+           if self._use_loaded_radio.isChecked():
+               if self._cellpose_import is None:
+                   raise ValueError("No Cellpose data is loaded in the current experiment")
+               return _cellpose_result_to_masks(self._cellpose_import)
+           if self._seg_file_path is None:
+               raise ValueError("No _seg.npy file selected")
+           return _load_masks_from_seg_file(self._seg_file_path)
+
+6. `_start_pipeline` (tif_import_dialog.py:428-434): pass the new param
+   through:
+
+       params = TifPipelineParams(
+           fs=self._fs_spin.value(),
+           tau=self._tau_spin.value(),
+           nchannels=self._nchannels_spin.value(),
+           functional_chan=self._functional_chan_spin.value(),
+           neuropil_coefficient=self._neucoeff_spin.value(),
+           diameter=self._diameter_spin.value(),
+       )
+
+7. `_PipelineWorker.__init__`/`.run()` (tif_import_dialog.py:65-101):
+   widen the `masks` parameter type to `npt.NDArray[Any] | None`. No
+   behavioural change needed inside `run()` — it already just forwards
+   `self._masks` to whichever pipeline function is selected, and step 4
+   above guarantees `roi_average` is never selected when masks is `None`.
+
+8. `_finalize_import` (tif_import_dialog.py:504-552): no changes needed —
+   it only branches on `result.extra.get("pipeline") == "roi_average"`
+   (impossible in auto-detect mode) vs. the Suite2p path, and the Suite2p
+   path already works off `result.F`/`result.Fneu`/`result.spks` regardless
+   of how `result.stat`/`result.masks` were produced.
+
+--- Sub-task 2: expandable "Details" log panel ---
+
+9. Add a plain (non-Qt) logging handler near the top of the module, after
+   the `_load_masks_from_seg_file` function (tif_import_dialog.py:49-57):
+
+       class _QtLogHandler(logging.Handler):
+           """Formats log records and hands them to a thread-safe sink.
+
+           The sink is expected to be a Qt signal's `.emit` (queued across
+           threads automatically by Qt), so `emit()` here is safe to call
+           from a background QThread.
+           """
+
+           def __init__(self, sink: Callable[[str], None]) -> None:
+               super().__init__(level=logging.INFO)
+               self._sink = sink
+               self.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+
+           def emit(self, record: logging.LogRecord) -> None:
+               self._sink(self.format(record))
+
+10. `_PipelineWorker` (tif_import_dialog.py:60-101): add a new signal and
+    attach/detach the handler around the pipeline call:
+
+        class _PipelineWorker(QtCore.QObject):
+            progress = QtCore.Signal(str, float)
+            log = QtCore.Signal(str)
+            finished = QtCore.Signal(object)  # TifPipelineResult
+            failed = QtCore.Signal(str)
+            ...
+            @QtCore.Slot()
+            def run(self) -> None:
+                handler = _QtLogHandler(self.log.emit)
+                suite2p_logger = logging.getLogger("suite2p")
+                neuroseq_logger = logging.getLogger("neuroseq.importer_tif")
+                suite2p_logger.addHandler(handler)
+                neuroseq_logger.addHandler(handler)
+                try:
+                    def callback(msg: str, frac: float) -> None:
+                        self.progress.emit(msg, float(frac))
+
+                    if self._pipeline == "roi_average":
+                        from neuroseq.importer_tif import run_roi_average_pipeline
+
+                        result = run_roi_average_pipeline(
+                            self._tif_paths, self._masks, self._params, progress=callback
+                        )
+                    else:
+                        from neuroseq.importer_tif import run_suite2p_pipeline
+
+                        result = run_suite2p_pipeline(
+                            self._tif_paths, self._masks, self._params, progress=callback
+                        )
+                    self.finished.emit(result)
+                except Exception as exc:
+                    logging.getLogger(__name__).exception("Calcium extraction pipeline failed")
+                    self.failed.emit(str(exc))
+                finally:
+                    suite2p_logger.removeHandler(handler)
+                    neuroseq_logger.removeHandler(handler)
+
+    (Keep the existing inner `callback` closure and both pipeline branches
+    exactly as they are today — only the handler attach/detach and the new
+    `log` signal are new.)
+
+11. Add a small custom progress dialog class, after `_PipelineWorker` and
+    before `TifImportDialog` (tif_import_dialog.py:104):
+
+        class _PipelineProgressDialog(QtWidgets.QDialog):
+            """QProgressDialog look-alike with an expandable log panel."""
+
+            canceled = QtCore.Signal()
+
+            def __init__(
+                self,
+                label_text: str,
+                cancel_text: str,
+                minimum: int,
+                maximum: int,
+                parent: QtWidgets.QWidget | None = None,
+            ) -> None:
+                super().__init__(parent)
+                self.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
+
+                layout = QtWidgets.QVBoxLayout(self)
+                self._label = QtWidgets.QLabel(label_text)
+                layout.addWidget(self._label)
+
+                self._bar = QtWidgets.QProgressBar()
+                self._bar.setRange(minimum, maximum)
+                layout.addWidget(self._bar)
+
+                self._details_button = QtWidgets.QToolButton()
+                self._details_button.setText("Details")
+                self._details_button.setCheckable(True)
+                self._details_button.setArrowType(QtCore.Qt.ArrowType.RightArrow)
+                self._details_button.toggled.connect(self._toggle_details)
+                layout.addWidget(self._details_button)
+
+                self._log_view = QtWidgets.QPlainTextEdit()
+                self._log_view.setReadOnly(True)
+                self._log_view.setMaximumHeight(200)
+                self._log_view.setVisible(False)
+                layout.addWidget(self._log_view)
+
+                buttons = QtWidgets.QHBoxLayout()
+                buttons.addStretch(1)
+                cancel_button = QtWidgets.QPushButton(cancel_text)
+                cancel_button.clicked.connect(self.canceled.emit)
+                buttons.addWidget(cancel_button)
+                layout.addLayout(buttons)
+
+            def _toggle_details(self, expanded: bool) -> None:
+                self._details_button.setArrowType(
+                    QtCore.Qt.ArrowType.DownArrow
+                    if expanded
+                    else QtCore.Qt.ArrowType.RightArrow
+                )
+                self._log_view.setVisible(expanded)
+                self.adjustSize()
+
+            def setLabelText(self, text: str) -> None:
+                self._label.setText(text)
+
+            def setValue(self, value: int) -> None:
+                self._bar.setValue(value)
+
+            def appendLog(self, message: str) -> None:
+                self._log_view.appendPlainText(message)
+
+    `canceled` (lowercase c, matching `QProgressDialog.canceled`'s name so
+    the existing `.canceled.connect(self._cancel_pipeline)` call site needs
+    no rename), `setLabelText`, `setValue`, `.show()` (inherited from
+    QWidget), and `.close()` (inherited) give this class the same surface
+    `_start_pipeline`/`_on_progress`/`_on_finished`/`_on_failed`/
+    `_cancel_pipeline` already call — see step 13.
+
+12. `TifImportDialog.__init__` (tif_import_dialog.py:126-127): update the
+    type annotation:
+
+        self._progress_dialog: _PipelineProgressDialog | None = None
+
+13. `_start_pipeline` (tif_import_dialog.py:436-457): replace the
+    `QtWidgets.QProgressDialog(...)` construction with the new class, and
+    drop the two calls that don't apply to a plain `QDialog` (it never
+    auto-closes/auto-resets the way `QProgressDialog` does, so there is
+    nothing to disable):
+
+        self._progress_dialog = _PipelineProgressDialog(
+            "Starting trace extraction…", "Cancel", 0, 100, self
+        )
+        self._progress_dialog.canceled.connect(self._cancel_pipeline)
+        self._progress_dialog.show()
+
+    (Delete the `setWindowModality`/`setAutoClose`/`setAutoReset` lines —
+    modality is now set inside `_PipelineProgressDialog.__init__`, and
+    auto-close/auto-reset have no equivalent to disable.)
+
+    Then, alongside the existing signal wiring a few lines down
+    (tif_import_dialog.py:451-453):
+
+        self._worker.log.connect(self._progress_dialog.appendLog)
+
+14. `_on_progress`/`_on_finished`/`_on_failed`/`_cancel_pipeline`
+    (tif_import_dialog.py:459-495): no changes needed — they only call
+    `setLabelText`/`setValue`/`.close()`, all of which
+    `_PipelineProgressDialog` provides with identical signatures.
+
+
+────────────────────────────────────────────────────────────────────────────
+NON-GOALS
+────────────────────────────────────────────────────────────────────────────
+
+- Wiring a Suite2p algorithm-choice dropdown (sparsery/sourcery/cellpose)
+  or exposing more `settings["detection"]` knobs. `sparsery` (the
+  library default) only, per the confirmed decision.
+- Second-channel red-cell detection (`meanImg_chan2`/`redcell`) in the
+  no-mask path.
+- Persisting/level-filtering the details log, or a "copy to clipboard" /
+  "save log" button. A plain scrollback `QPlainTextEdit` is enough.
+- Touching `run_roi_average_pipeline` — it stays mask-required, unreachable
+  in auto-detect mode via the disabled pipeline combo.
+- Any change to sub-task 3's implementation. It's done; only add the one
+  missing test listed below.
+
+
+────────────────────────────────────────────────────────────────────────────
+TESTS
+────────────────────────────────────────────────────────────────────────────
+
+tests/test_importer_tif.py — ADD
+
+    test_run_suite2p_pipeline_accepts_none_masks_but_rejects_bad_ndim
+        # masks=np.zeros((2,3,4)) still raises ValueError (existing
+        # behaviour preserved); masks=None does NOT raise at the
+        # validation step (drive it far enough to hit the ndim check only,
+        # e.g. via the same fully-mocked-modules harness as
+        # test_run_suite2p_pipeline_orchestration, or a narrower unit test
+        # if the full harness is overkill just for the validation branch).
+
+    test_run_suite2p_pipeline_detects_rois_without_masks
+        # Extend the fake-module harness from
+        # test_run_suite2p_pipeline_orchestration (tests/test_importer_tif.py:308-431)
+        # with a `detection_wrapper` fake added to `s2detection_mod`:
+        #     def detection_wrapper(f_reg, diameter, tau, fs, yrange, xrange,
+        #                            settings, classifier_path, device):
+        #         stat = np.array([
+        #             {"ypix": np.array([0, 1]), "xpix": np.array([0, 1]),
+        #              "lam": np.ones(2, np.float32), "med": [0.0, 0.0]}
+        #             for _ in range(n_neurons)
+        #         ])
+        #         return {}, stat, None
+        # Also make the fake `classify` (already in the harness) return a
+        # NON-uniform iscell, e.g. np.array([[1,.9],[0,.1],[1,.8]]), and
+        # assert the returned `result.iscell` matches it EXACTLY (proving
+        # the force-accept-all branch was skipped for masks=None).
+        # Call `run_suite2p_pipeline(tif_paths, None, params, ...)` and
+        # assert: detection_wrapper was called (mocker.patch with a
+        # MagicMock wrapping the fake, or a call-recording closure) with
+        # diameter=[params.diameter]*2; `result.masks` is an (Ly, Lx)
+        # int32 array with exactly n_neurons distinct nonzero labels,
+        # each label's pixels matching the corresponding stat entry's
+        # ypix/xpix; `result.extra["diameter"] == params.diameter`.
+
+    test_stat_to_masks_round_trips_with_masks_to_stat
+        # Build a mask image via the existing `_make_mask_image()` helper
+        # (tests/test_importer_tif.py:21-26), run it through `_masks_to_stat`
+        # then `_stat_to_masks`, and assert the label sets (ignoring exact
+        # label numbering, since `_stat_to_masks` numbers by stat order 1..N
+        # while the original mask may use different label values) produce
+        # the same PARTITION of pixels — e.g. compare
+        # `{frozenset(zip(*np.nonzero(out == lbl))) for lbl in np.unique(out) if lbl}`
+        # against the same computed from the input mask's labels.
+        # Skip with `_suite2p_available()` guard like the neighbouring
+        # `_masks_to_stat` tests.
+
+tests/test_tif_import_dialog.py — ADD
+
+    test_third_radio_selected_resolves_to_none_masks
+        # Build the dialog (qtbot), check self._auto_detect_radio,
+        # assert dialog._resolve_masks() is None (no exception).
+
+    test_auto_detect_radio_forces_and_disables_pipeline_combo
+        # Check auto-detect radio; assert
+        # dialog._pipeline_combo.currentData() == "suite2p" and
+        # not dialog._pipeline_combo.isEnabled(). Uncheck it (check one of
+        # the other two mask-source radios instead); assert the combo is
+        # enabled again.
+
+    test_auto_detect_radio_shows_diameter_spinbox_only_in_auto_detect_mode
+        # Assert dialog._diameter_spin.isVisible() is False initially
+        # (default radio is one of the mask-bearing ones per
+        # _setup_ui's existing default-selection logic), True after
+        # checking the auto-detect radio, False again after switching back.
+
+    test_start_pipeline_passes_diameter_param
+        # Mock _PipelineWorker (or inspect the constructed TifPipelineParams
+        # some other way consistent with existing dialog tests) and assert
+        # the diameter spinbox's value flows into TifPipelineParams.diameter.
+
+    test_pipeline_worker_forwards_log_signal
+        # Extend the existing fake-pipeline pattern
+        # (tests/test_tif_import_dialog.py:32-68): make the fake pipeline
+        # function call logging.getLogger("suite2p").info("hello") during
+        # its mocked run(); connect to worker.log and assert it received
+        # "INFO: hello" (per _QtLogHandler's formatter).
+
+    test_pipeline_progress_dialog_details_toggle
+        # Instantiate _PipelineProgressDialog directly (qtbot.addWidget),
+        # assert its internal log view starts hidden, toggling the details
+        # QToolButton shows it, appendLog("x") makes "x" appear in
+        # toPlainText(), toggling again hides it.
+
+tests/test_cellpose_aoi_mapping.py — ADD (the one gap for sub-task 3)
+
+    test_dialog_aoi_percent_mode_round_trips_through_set_aoi_controls
+        # Mirror test_dialog_aoi_pixel_mode_uses_square_centre
+        # (tests/test_cellpose_aoi_mapping.py:305-322) but in percent mode:
+        # build the dialog, select AOI strategy, set
+        # aoi_coordinate_mode_combo to AOI_PERCENT_MODE, set square/circle
+        # spinboxes to known percent values, read back via
+        # dialog._current_aoi_config(), then feed that config into
+        # dialog._set_aoi_controls(config) and assert the spinbox values
+        # match the ORIGINAL percent inputs (round-trip through pixel space
+        # and back to percent is lossless up to float rounding — use
+        # pytest.approx).
+
+
+────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────
+
+    ruff check src/neuroseq/importer_tif.py src/neuroseq/tif_import_dialog.py \
+               tests/test_importer_tif.py tests/test_tif_import_dialog.py \
+               tests/test_cellpose_aoi_mapping.py
+    ruff format --check src/neuroseq/importer_tif.py src/neuroseq/tif_import_dialog.py \
+               tests/test_importer_tif.py tests/test_tif_import_dialog.py \
+               tests/test_cellpose_aoi_mapping.py
+    mypy --ignore-missing-imports src/neuroseq/importer_tif.py src/neuroseq/tif_import_dialog.py
+    uv run pytest tests/test_importer_tif.py tests/test_tif_import_dialog.py -v
+    uv run pytest tests/test_cellpose_aoi_mapping.py tests/test_cellpose_import_dialog.py -v
+    uv run pytest
+
+Full-suite run is required at the end: `tif_import_dialog.py` is exercised
+indirectly by any GUI test that opens the TIFF import flow, and
+`importer_tif.py`'s `TifPipelineParams`/`TifPipelineResult` are consumed by
+`importer_suite2p.py`'s `prepare_suite2p_traces`/`prepare_suite2p_spikes` —
+regressions could surface there even though those two files aren't touched.

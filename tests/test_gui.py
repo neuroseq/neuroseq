@@ -16,9 +16,14 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 import neuroseq
+from neuroseq.custom_analysis_widget import CustomAnalysisType
+from neuroseq.custom_analysis_widget import CustomAnalysisWidget
+from neuroseq.custom_analysis_widget import CustomAnalysisWindow
 from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
+from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
+from neuroseq.detached_panel_window import DetachedPanelWindow
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
 from neuroseq.gui import Gui
@@ -333,6 +338,49 @@ def _make_gui_cellpose_result(
     )
 
 
+def _add_detach_panel_test_data(gui: Gui) -> tuple[TraceData, SpikeData, SynapseData]:
+    trace_data = TraceData(
+        name="trace",
+        traces=np.arange(12, dtype=np.float32).reshape(3, 4),
+        indices=np.arange(3, dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    spike_data = SpikeData(
+        name="spikes",
+        spike_indices=np.array([0, 1, 2], dtype=np.uint32),
+        spike_times=np.array([0.001, 0.002, 0.003], dtype=np.float32),
+    )
+    synapse_data = SynapseData(
+        name="synapses",
+        values=np.arange(18, dtype=np.float32).reshape(3, 3, 2),
+        timestamps=np.array([0.0, 0.001], dtype=np.float32),
+    )
+    project = Project()
+    project.project_section = "Section"
+    project.project_name = "Project"
+    project.add_experiment(
+        Experiment(
+            name="Experiment",
+            duration=0.004,
+            timepoints=[],
+            data=[trace_data, spike_data, synapse_data],
+        )
+    )
+    project.cellpose_data = _make_gui_cellpose_result()
+    gui.update_project(project)
+    gui.cmb_trace.setCurrentText("Experiment :: trace")
+    gui._apply_trace_selection("Experiment :: trace")
+    gui.cmb_spike.setCurrentText("Experiment :: spikes")
+    gui._apply_spike_selection("Experiment :: spikes")
+    gui.cmb_synapse.setCurrentText("Experiment :: synapses")
+    gui.set_synapse("Experiment :: synapses")
+    gui.cmb_data.setCurrentText("Experiment :: trace [trace]")
+    gui.console_widget.input.history = ["project"]
+    gui.console_widget.output.setPlainText(">>> project\n<Project>")
+    return trace_data, spike_data, synapse_data
+
+
 def test_spatial_footprint_panel_toggle_shows_and_hides(qtbot: QtBot) -> None:
     gui = Gui()
     qtbot.addWidget(gui)
@@ -350,6 +398,240 @@ def test_spatial_footprint_panel_toggle_shows_and_hides(qtbot: QtBot) -> None:
     assert action.isChecked()
     assert gui.spatial_footprint_widget.isVisible()
     gui.close()
+
+
+def test_detach_panel_hides_original_and_shows_fresh_window(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    trace_data, _, synapse_data = _add_detach_panel_test_data(gui)
+    panels: list[QtWidgets.QWidget] = [
+        gui.trace_widget,
+        gui.data_widget,
+        gui.heatmap_widget,
+        gui.spatial_footprint_widget,
+        gui.console_widget,
+    ]
+
+    for panel in panels:
+        gui._auto_show_widget(panel)
+        gui.detach_panel(panel, keep_original=False)
+        window = gui._detached_panel_windows[-1]
+
+        assert window.windowTitle().endswith(" - Section / Project")
+        assert not gui._view_actions[panel].isChecked()
+        assert not panel.isVisible()
+        if panel is gui.trace_widget:
+            assert window._widget.data is trace_data
+        elif panel is gui.data_widget:
+            assert window._widget.trace_widget.data is trace_data
+        elif panel is gui.heatmap_widget:
+            np.testing.assert_array_equal(window._widget.data, synapse_data.values.T)
+        elif panel is gui.spatial_footprint_widget:
+            assert window._widget.overlay_widget.segmentation is not None
+        elif panel is gui.console_widget:
+            assert window._widget.input.history == ["project"]
+            assert window._widget.output.toPlainText() == ">>> project\n<Project>"
+
+        window.close()
+
+    gui.close()
+
+
+def test_detach_copy_keeps_original_visible(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+    gui._auto_show_widget(gui.trace_widget)
+
+    gui.detach_panel_copy(gui.trace_widget)
+    window = gui._detached_panel_windows[-1]
+
+    assert window.windowTitle() == "Traces - Section / Project"
+    assert gui._view_actions[gui.trace_widget].isChecked()
+    assert gui.trace_widget.isVisible()
+    assert window.isVisible()
+    window.close()
+    gui.close()
+
+
+def test_detached_console_copy_close_button_closes_its_own_window_only(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+    gui._auto_show_widget(gui.console_widget)
+
+    gui.detach_panel_copy(gui.console_widget)
+    window = gui._detached_panel_windows[-1]
+
+    window._widget.close_requested.emit()
+
+    assert not window.isVisible()
+    assert gui.console_widget.isVisible()
+    assert gui._view_actions[gui.console_widget].isChecked()
+    gui.close()
+
+
+def test_detach_context_menu_installed_on_panel_canvases(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    for widget in (
+        gui.data_widget,
+        gui.data_widget.heatmap_widget.widget,
+        gui.heatmap_widget.widget,
+        gui.spatial_footprint_widget.overlay_widget.overlay_view.widget,
+        gui.custom_analysis_widget.canvas,
+        gui.console_widget,
+        gui.chat_widget.history_view,
+    ):
+        assert (
+            widget.contextMenuPolicy() == QtCore.Qt.ContextMenuPolicy.CustomContextMenu
+        )
+
+    assert (
+        gui.stim_editor.stim_widget.contextMenuPolicy()
+        != QtCore.Qt.ContextMenuPolicy.CustomContextMenu
+    )
+    gui.close()
+
+
+def test_detach_custom_analysis_before_anything_analyzed_shows_message(
+    qtbot: QtBot,
+    qmessagebox_calls: list,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    gui.detach_panel(gui.custom_analysis_widget, keep_original=False)
+
+    assert qmessagebox_calls[-1]["name"] == "information"
+    assert "nothing to detach" in qmessagebox_calls[-1]["title"].lower()
+    assert gui.findChildren(DetachedPanelWindow) == []
+    gui._close_confirmed = True
+    gui.close()
+
+
+def test_detach_custom_analysis_after_analysis_seeds_from_last_shown(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    trace_data, _, _ = _add_detach_panel_test_data(gui)
+
+    gui._custom_analysis(
+        trace_data,
+        CustomAnalysisType.Histogram,
+        False,
+        None,
+        None,
+    )
+    gui.detach_panel(gui.custom_analysis_widget, keep_original=True)
+    window = gui._detached_panel_windows[-1]
+
+    assert isinstance(window._widget, CustomAnalysisWidget)
+    assert window._widget.traces is not None
+    assert window._widget.traces.shape == trace_data.traces.shape
+    assert window.windowTitle() == "Custom Analysis - Section / Project"
+    window.close()
+    gui.close()
+
+
+def test_custom_analysis_popup_title_includes_originating_tab(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    trace_data, _, _ = _add_detach_panel_test_data(gui)
+
+    gui._custom_analysis(
+        trace_data,
+        CustomAnalysisType.Histogram,
+        True,
+        None,
+        None,
+    )
+    window = gui.findChildren(CustomAnalysisWindow)[-1]
+
+    assert window.windowTitle().endswith(" - Section / Project")
+    window.close()
+    gui.close()
+
+
+def _make_timed_project(n_timepoints: int, dt: float = 0.01) -> Project:
+    project = Project()
+    traces = TraceData(
+        name="trace",
+        traces=np.zeros((2, n_timepoints), dtype=np.float32),
+        indices=np.arange(2, dtype=np.uint32),
+        units="mV",
+        dt=dt,
+    )
+    project.add_experiment(
+        Experiment(
+            name="exp",
+            duration=n_timepoints * dt,
+            timepoints=[],
+            data=[traces],
+        )
+    )
+    return project
+
+
+def test_switching_project_tabs_restores_each_tabs_own_time_slider_position(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    tab0_project = gui.project
+    tab1_project = _make_timed_project(500, dt=0.01)  # 5.0s
+
+    gui._open_project_in_new_tab(tab1_project, reset_controller=True)
+    assert gui.time_slider.t_ms == 0  # a freshly opened tab has no history
+
+    gui.time_slider.set_current_time_ms(3000)
+    gui._activate_tab_index(0, reset_controller=True)
+    assert gui.time_slider.t_ms == 0  # tab0 was never scrubbed
+    assert tab1_project.last_time_ms == 3000  # remembered on the way out
+
+    gui.time_slider.set_current_time_ms(200)
+    gui._activate_tab_index(1, reset_controller=True)
+    assert gui.time_slider.t_ms == 3000  # restored from tab1_project.last_time_ms
+    assert tab0_project.last_time_ms == 200
+
+    gui._activate_tab_index(0, reset_controller=True)
+    assert gui.time_slider.t_ms == 200  # restored from tab0_project.last_time_ms
+    gui.close()
+
+
+def test_switching_to_tab_with_no_stim_arrays_still_updates_time_slider_range(
+    qtbot: QtBot,
+) -> None:
+    # StimEditor.set_project() only emits limits_modified (which historically
+    # drove the time-slider range) when the project has stim arrays. A tab
+    # with none previously left the slider's range stale from whichever
+    # project was active before it.
+    gui = Gui()
+    qtbot.addWidget(gui)
+    tab1_project = _make_timed_project(500, dt=0.01)  # 5.0s
+    assert not tab1_project.stim_arrays
+
+    gui._open_project_in_new_tab(tab1_project, reset_controller=True)
+
+    assert gui.time_slider.t_max_ms == 5000
+    gui.close()
+
+
+def test_closing_gui_with_open_detached_windows_does_not_crash(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+
+    gui.detach_panel(gui.console_widget, keep_original=True)
+    gui.detach_panel(gui.spatial_footprint_widget, keep_original=True)
+
+    assert len(gui._detached_panel_windows) == 2
+    gui.close()
+    assert gui._detached_panel_windows == []
 
 
 def test_clicking_neuron_in_spatial_footprint_greys_trace_and_stim_rows(
@@ -426,6 +708,89 @@ def test_import_cellpose_data_populates_and_shows_spatial_footprint_panel(
     assert not gui.spatial_footprint_widget.overlay_widget.isHidden()
     assert gui.spatial_footprint_widget.isVisible()
     gui.close()
+
+
+def test_import_tif_with_new_segmentation_populates_spatial_footprint_panel(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    imported = _make_gui_cellpose_result()
+
+    class _FakeDialog:
+        experiment_name = "fake"
+        experiment_duration = 1.0
+        imported_data: list[Any] = []
+        new_cellpose_result = imported
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            return
+
+        def exec(self) -> QtWidgets.QDialog.DialogCode:
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr("neuroseq.tif_import_dialog.TifImportDialog", _FakeDialog)
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    gui.btn_import_tif_clicked()
+
+    assert gui.project.cellpose_data is not None
+    assert gui.project.cellpose_data.image_path == imported.image_path
+    assert gui.spatial_footprint_widget.overlay_widget.segmentation is not None
+    assert gui.spatial_footprint_widget.empty_state_widget.isHidden()
+    assert not gui.spatial_footprint_widget.overlay_widget.isHidden()
+    assert gui.spatial_footprint_widget.isVisible()
+    gui.close()
+
+
+def test_import_tif_reusing_loaded_segmentation_does_not_reset_spatial_footprint_panel(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    existing = _make_gui_cellpose_result(mapping={0: 2, 1: 1, 2: 0})
+    appended: list[Experiment] = []
+
+    class _FakeDialog:
+        experiment_name = "fake"
+        experiment_duration = 1.0
+        imported_data: list[Any] = []
+        new_cellpose_result = None
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            return
+
+        def exec(self) -> QtWidgets.QDialog.DialogCode:
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr("neuroseq.tif_import_dialog.TifImportDialog", _FakeDialog)
+
+    class _FakeGui:
+        def __init__(self) -> None:
+            self.project = Project()
+            self.project.cellpose_data = existing
+            self.last_cellpose_import = existing
+            self.spatial_footprint_widget = SimpleNamespace()
+
+        def _append_experimental_data(self, experiment: Experiment) -> None:
+            appended.append(experiment)
+
+        def _apply_cellpose_import_result(
+            self,
+            imported: CellposeImportResult,
+        ) -> list[str]:
+            raise AssertionError(f"unexpected Cellpose propagation: {imported}")
+
+    fake_gui = _FakeGui()
+
+    Gui.btn_import_tif_clicked(fake_gui)  # type: ignore[arg-type]
+
+    assert len(appended) == 1
+    assert fake_gui.project.cellpose_data is existing
+    assert fake_gui.last_cellpose_import is existing
+    assert fake_gui.project.cellpose_data.stimulus_to_cellpose_mapping == {
+        0: 2,
+        1: 1,
+        2: 0,
+    }
 
 
 def test_spatial_footprint_empty_button_opens_cellpose_import(

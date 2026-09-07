@@ -51,6 +51,7 @@ class TimeseriesWidget(FPLWidget):
 
     GREYED_NEURON_Z = 250.0
     GREYED_NEURON_FILL_COLOR = (0.5, 0.5, 0.5, 0.75)
+    SUPPORTS_DETACH = True
 
     def __init__(
         self,
@@ -486,6 +487,24 @@ class TimeseriesWidget(FPLWidget):
                     plugin_analysis,
                     plugin_analysis.icon,
                 )
+
+        if self.SUPPORTS_DETACH:
+            self.context_menu.addSeparator()
+            detach_action = self.context_menu.addAction("Detach panel")
+            assert detach_action is not None
+            detach_action.triggered.connect(
+                lambda: self._request_detach_from_window(keep_original=False)
+            )
+            copy_action = self.context_menu.addAction("Detach copy of panel")
+            assert copy_action is not None
+            copy_action.triggered.connect(
+                lambda: self._request_detach_from_window(keep_original=True)
+            )
+
+    def _request_detach_from_window(self, *, keep_original: bool) -> None:
+        detach_panel = getattr(self.window(), "detach_panel", None)
+        if callable(detach_panel):
+            detach_panel(self, keep_original=keep_original)
 
     def post_set_data(self):
         self.subplot.grids = False
