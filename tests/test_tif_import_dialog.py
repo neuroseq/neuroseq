@@ -157,6 +157,8 @@ def test_current_experiment_masks_with_mapping_are_default(qtbot):
     assert dialog._use_loaded_radio.isChecked()
     assert "with mapping applied" in dialog._use_loaded_radio.text()
     assert dialog._selected_mapping() == {4: 0, 7: 1}
+
+
 def test_third_radio_selected_resolves_to_none_masks(qtbot):
     from neuroseq.tif_import_dialog import TifImportDialog
 
@@ -260,14 +262,30 @@ def test_pipeline_selector_hides_suite2p_parameters_for_roi_average(qtbot):
     qtbot.addWidget(dialog)
     dialog.show()
 
-    assert dialog._pipeline_combo.currentText() == "Suite2p"
-    dialog._pipeline_combo.setCurrentIndex(1)
-
     assert dialog._pipeline_combo.currentText() == "Simply average from ROI"
     assert not dialog._tau_spin.isVisibleTo(dialog)
     assert dialog._fs_spin.isVisibleTo(dialog)
     assert dialog._nchannels_spin.isVisibleTo(dialog)
     assert dialog._functional_chan_spin.isVisibleTo(dialog)
+    assert dialog._nchannels_spin.value() == 1
+    assert dialog._suppress_stimulation_artefact_checkbox.isVisibleTo(dialog)
+
+
+def test_stimulation_suppression_selector_uses_project_stim_arrays(qtbot):
+    from neuroseq.stim import StimArray
+    from neuroseq.stim import StimType
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    stim = StimArray("laser", StimType.Excitation, np.ones((2, 1)), "mW", 0.1)
+    dialog = TifImportDialog(stim_arrays={"laser": stim})
+    qtbot.addWidget(dialog)
+    dialog.show()
+    dialog._pipeline_combo.setCurrentIndex(1)
+
+    assert dialog._suppress_stimulation_artefact_checkbox.isChecked()
+    assert dialog._stim_array_combo.isVisibleTo(dialog)
+    assert dialog._stim_array_combo.currentText() == "laser"
+    assert dialog._stim_array_combo.currentData() is stim
 
 
 def test_start_pipeline_passes_diameter_param(qtbot, mocker, tmp_path):
@@ -360,6 +378,7 @@ def test_dialog_runs_mocked_pipeline_and_produces_imported_data(
 
     dialog = TifImportDialog(parent=None, cellpose_import=cellpose_import)
     qtbot.addWidget(dialog)
+    dialog._pipeline_combo.setCurrentIndex(0)
 
     # Stage one TIFF (file does not need to actually exist — pipeline is mocked).
     tif = tmp_path / "fake.tif"
@@ -791,6 +810,7 @@ def test_pipeline_failed_signal_re_enables_run_button(qtbot, mocker, tmp_path):
     cellpose_import.segmentation_array = np.zeros((16, 16), dtype=np.int32) - 1
     dialog = TifImportDialog(parent=None, cellpose_import=cellpose_import)
     qtbot.addWidget(dialog)
+    dialog._pipeline_combo.setCurrentIndex(0)
     tif = tmp_path / "fake.tif"
     tif.write_bytes(b"")
     dialog._tif_paths.append(tif)
