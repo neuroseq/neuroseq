@@ -2928,6 +2928,88 @@ def test_gui_apply_cellpose_import_result_expands_stim_arrays(
     assert fake_gui.update_limits_calls == 0
 
 
+class _RemapFakeGui:
+    def __init__(self, project: Project) -> None:
+        self.project = project
+        self.last_cellpose_import: CellposeImportResult | None = None
+
+    def update_limits(self) -> None:
+        pass
+
+    def _cellpose_neuron_count(
+        self,
+        imported: CellposeImportResult | None,
+    ) -> int:
+        return Gui._cellpose_neuron_count(self, imported)  # type: ignore[arg-type]
+
+
+def _cellpose_result_with_mapping(
+    mapping: dict[int, int] | None,
+) -> CellposeImportResult:
+    return CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=np.zeros((2, 2), dtype=np.int32),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        stimulus_to_cellpose_mapping=mapping,
+    )
+
+
+def test_gui_apply_cellpose_import_result_remaps_existing_trace_data() -> None:
+    """Reproduces the #518 scenario: import Suite2p trace data under one Cellpose
+    mapping, then re-run the Cellpose import with a different mapping - the
+    already-imported trace's displayed indices must follow the new mapping."""
+    project = Project()
+    project.cellpose_data = _cellpose_result_with_mapping({4: 0, 7: 1})
+    trace_data = TraceData(
+        "traces",
+        np.zeros((2, 10), dtype=np.float32),
+        np.array([4, 7], dtype=np.uint32),
+        "mV",
+        0.1,
+        np.array([0, 1], dtype=np.uint32),
+    )
+    project.add_experiment(Experiment("exp", 1.0, [0.0, 1.0], [trace_data]))
+    fake_gui = _RemapFakeGui(project)
+
+    Gui._apply_cellpose_import_result(
+        fake_gui,  # type: ignore[arg-type]
+        _cellpose_result_with_mapping({9: 0, 2: 1}),
+    )
+
+    np.testing.assert_array_equal(trace_data.indices, np.array([9, 2], dtype=np.uint32))
+
+
+def test_gui_apply_cellpose_import_result_warns_on_remap_conflict(
+    qmessagebox_calls: list,
+) -> None:
+    project = Project()
+    project.cellpose_data = _cellpose_result_with_mapping({4: 0, 7: 1})
+    trace_data = TraceData(
+        "traces",
+        np.zeros((2, 10), dtype=np.float32),
+        np.array([4, 7], dtype=np.uint32),
+        "mV",
+        0.1,
+        np.array([0, 1], dtype=np.uint32),
+    )
+    project.add_experiment(Experiment("exp", 1.0, [0.0, 1.0], [trace_data]))
+    fake_gui = _RemapFakeGui(project)
+
+    # Cellpose id 0 maps explicitly to stim 1, cellpose id 1 falls back to
+    # identity (stim 1 too) - a collision that cannot be resolved.
+    Gui._apply_cellpose_import_result(
+        fake_gui,  # type: ignore[arg-type]
+        _cellpose_result_with_mapping({1: 0}),
+    )
+
+    np.testing.assert_array_equal(trace_data.indices, np.array([4, 7], dtype=np.uint32))
+    assert any(call["name"] == "warning" for call in qmessagebox_calls)
+    warning_call = next(call for call in qmessagebox_calls if call["name"] == "warning")
+    assert "exp" in warning_call["text"]
+
+
 def test_gui_checkpoints(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

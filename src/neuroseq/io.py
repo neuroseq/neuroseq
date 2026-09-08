@@ -115,6 +115,13 @@ def _json_encoder_factory(zf: zipfile.ZipFile):
                         ),
                     }
                 case TraceData():
+                    raw_cellpose_ids_path = (
+                        None
+                        if obj.raw_cellpose_ids is None
+                        else _save_array(
+                            zf, f"_{obj.name}_raw_cellpose_ids", obj.raw_cellpose_ids
+                        )
+                    )
                     return {
                         "!TraceData": True,
                         "name": obj.name,
@@ -122,8 +129,18 @@ def _json_encoder_factory(zf: zipfile.ZipFile):
                         "indices": _save_array(zf, f"_{obj.name}_indices", obj.indices),
                         "units": obj.units,
                         "dt": obj.dt,
+                        "raw_cellpose_ids": raw_cellpose_ids_path,
                     }
                 case SpikeData():
+                    raw_cellpose_ids_path = (
+                        None
+                        if obj.raw_cellpose_ids is None
+                        else _save_array(
+                            zf,
+                            f"_{obj.name}_spike_raw_cellpose_ids",
+                            obj.raw_cellpose_ids,
+                        )
+                    )
                     return {
                         "!SpikeData": True,
                         "name": obj.name,
@@ -133,6 +150,7 @@ def _json_encoder_factory(zf: zipfile.ZipFile):
                         "spike_times": _save_array(
                             zf, f"_{obj.name}_spike_times", obj.spike_times
                         ),
+                        "raw_cellpose_ids": raw_cellpose_ids_path,
                     }
                 case StimArray():
                     return {
@@ -230,12 +248,23 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                 "name": name,
                 "spike_indices": spike_indices,
                 "spike_times": spike_times,
+                **rest,
             }:
                 with _zf.open(spike_indices) as fp:
                     loaded_spike_indices = np.load(fp)
                 with _zf.open(spike_times) as fp:
                     loaded_spike_times = np.load(fp)
-                return SpikeData(name, loaded_spike_indices, loaded_spike_times)
+                raw_cellpose_ids_path = rest.get("raw_cellpose_ids")
+                loaded_raw_cellpose_ids = None
+                if raw_cellpose_ids_path is not None:
+                    with _zf.open(raw_cellpose_ids_path) as fp:
+                        loaded_raw_cellpose_ids = np.load(fp)
+                return SpikeData(
+                    name,
+                    loaded_spike_indices,
+                    loaded_spike_times,
+                    loaded_raw_cellpose_ids,
+                )
             case {
                 "!TraceData": True,
                 "name": name,
@@ -243,17 +272,24 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                 "indices": indices,
                 "units": units,
                 "dt": dt,
+                **rest,
             }:
                 with _zf.open(traces) as fp:
                     loaded_traces = np.load(fp)
                 with _zf.open(indices) as fp:
                     loaded_indices = np.load(fp)
+                raw_cellpose_ids_path = rest.get("raw_cellpose_ids")
+                loaded_raw_cellpose_ids = None
+                if raw_cellpose_ids_path is not None:
+                    with _zf.open(raw_cellpose_ids_path) as fp:
+                        loaded_raw_cellpose_ids = np.load(fp)
                 return TraceData(
                     name,
                     loaded_traces,
                     loaded_indices,
                     units,
                     _to_seconds(dt),
+                    loaded_raw_cellpose_ids,
                 )
             case {
                 "!SynapseData": True,

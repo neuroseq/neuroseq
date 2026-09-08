@@ -23,6 +23,7 @@ from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importer_suite2p import remap_raw_cellpose_ids
 from neuroseq.io import append_to_zip
 from neuroseq.io import load_from_zip
 from neuroseq.power_lut import PowerLut
@@ -688,6 +689,51 @@ class Project:
             existing_experiment.duration, time_offset_seconds + duration_seconds
         )
         self.update_limits()
+
+    def remap_cellpose_indices(self) -> list[str]:
+        """
+        Re-resolve ``TraceData.indices``/``SpikeData.spike_indices`` for every
+        Suite2p-imported experiment against the current ``cellpose_data`` mapping.
+
+        Trace/spike data carries its raw, pre-mapping Cellpose ROI id
+        (``raw_cellpose_ids``) alongside the already-resolved ``indices``/
+        ``spike_indices``. Whenever ``cellpose_data``'s mapping changes, call this to
+        keep them in sync instead of leaving the old resolution in place.
+
+        Returns
+        -------
+        list[str]
+            Names of experiments whose data could not be remapped (e.g. the current
+            mapping collides for their raw ids) - those are left unchanged rather than
+            raising, so the caller can surface a warning.
+        """
+        mapping = (
+            self.cellpose_data.stimulus_to_cellpose_mapping
+            if self.cellpose_data is not None
+            else None
+        )
+        failed: list[str] = []
+        for name, experiment in self.experiments.items():
+            for datum in experiment.data:
+                if not isinstance(datum, TraceData | SpikeData):
+                    continue
+                if datum.raw_cellpose_ids is None:
+                    continue
+                try:
+                    new_ids = remap_raw_cellpose_ids(datum.raw_cellpose_ids, mapping)
+                except ValueError:
+                    self.logger.warning(
+                        f"Could not remap trace/spike indices for experiment "
+                        f"'{name}' under the current Cellpose mapping",
+                        exc_info=True,
+                    )
+                    failed.append(name)
+                    continue
+                if isinstance(datum, TraceData):
+                    datum.indices = new_ids
+                else:
+                    datum.spike_indices = new_ids
+        return failed
 
     def add_experiment(
         self,

@@ -1275,6 +1275,18 @@ class Gui(QtWidgets.QMainWindow):
             return []
 
         self.project.cellpose_data = imported_copy
+        failed_remaps = self.project.remap_cellpose_indices()
+        if failed_remaps:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Trace mapping conflict",
+                "Could not update the neuron mapping for previously imported "
+                "trace/spike data in: "
+                + ", ".join(sorted(set(failed_remaps)))
+                + ".\n\nThe new Cellpose mapping conflicts with this data (e.g. "
+                "duplicate or out-of-range IDs); their displayed indices were left "
+                "unchanged.",
+            )
         detected_neurons = self._cellpose_neuron_count(imported_copy)
         resized_names: list[str] = []
         if detected_neurons > 0 and self.project.stim_arrays:

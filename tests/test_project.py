@@ -887,6 +887,101 @@ def test_update_limits_include_cellpose_neuron_count() -> None:
     assert project.max_neurons == 100
 
 
+def _cellpose_data_with_mapping(
+    mapping: dict[int, int] | None,
+) -> CellposeImportResult:
+    return CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=np.zeros((2, 2), dtype=np.int32),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        stimulus_to_cellpose_mapping=mapping,
+    )
+
+
+def test_remap_cellpose_indices_updates_trace_and_spike_data() -> None:
+    project = Project()
+    project.cellpose_data = _cellpose_data_with_mapping({4: 0, 7: 1})
+    experiment = Experiment(
+        "exp",
+        1.0,
+        [0.0, 1.0],
+        [
+            TraceData(
+                "traces",
+                np.zeros((2, 10), dtype=np.float32),
+                np.array([4, 7], dtype=np.uint32),
+                "mV",
+                0.1,
+                np.array([0, 1], dtype=np.uint32),
+            ),
+            SpikeData(
+                "spikes",
+                np.array([4, 7, 4], dtype=np.uint32),
+                np.array([0.1, 0.2, 0.3], dtype=np.float32),
+                np.array([0, 1, 0], dtype=np.uint32),
+            ),
+        ],
+    )
+    project.add_experiment(experiment)
+
+    project.cellpose_data = _cellpose_data_with_mapping({9: 0, 2: 1})
+    failed = project.remap_cellpose_indices()
+
+    assert failed == []
+    remapped_trace, remapped_spike = project.experiments["exp"].data
+    assert isinstance(remapped_trace, TraceData)
+    assert isinstance(remapped_spike, SpikeData)
+    np.testing.assert_array_equal(
+        remapped_trace.indices, np.array([9, 2], dtype=np.uint32)
+    )
+    np.testing.assert_array_equal(
+        remapped_spike.spike_indices, np.array([9, 2, 9], dtype=np.uint32)
+    )
+
+
+def test_remap_cellpose_indices_leaves_data_without_raw_ids_untouched() -> None:
+    project = Project()
+    project.cellpose_data = _cellpose_data_with_mapping({4: 0})
+    patch_clamp_trace = TraceData(
+        "patch_clamp",
+        np.zeros((1, 10), dtype=np.float32),
+        np.array([12], dtype=np.uint32),
+        "mV",
+        0.1,
+    )
+    project.add_experiment(Experiment("exp", 1.0, [0.0, 1.0], [patch_clamp_trace]))
+
+    failed = project.remap_cellpose_indices()
+
+    assert failed == []
+    assert patch_clamp_trace.indices.tolist() == [12]
+
+
+def test_remap_cellpose_indices_reports_experiments_with_invalid_mapping() -> None:
+    project = Project()
+    project.cellpose_data = _cellpose_data_with_mapping({4: 0, 7: 1})
+    trace_data = TraceData(
+        "traces",
+        np.zeros((2, 10), dtype=np.float32),
+        np.array([4, 7], dtype=np.uint32),
+        "mV",
+        0.1,
+        np.array([0, 1], dtype=np.uint32),
+    )
+    project.add_experiment(Experiment("exp", 1.0, [0.0, 1.0], [trace_data]))
+
+    # Cellpose id 0 maps explicitly to stim 1, but cellpose id 1 falls back to
+    # identity (stim 1 too) - a collision that _resolve_suite2p_indices rejects.
+    project.cellpose_data = _cellpose_data_with_mapping({1: 0})
+    failed = project.remap_cellpose_indices()
+
+    assert failed == ["exp"]
+    # left unchanged rather than corrupted
+    np.testing.assert_array_equal(trace_data.indices, np.array([4, 7], dtype=np.uint32))
+
+
 def test_stim_array_rename() -> None:
     arr = np.random.rand(1000, 30)
     project = Project()
