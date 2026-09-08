@@ -51,6 +51,26 @@ def _cellpose_result(
     )
 
 
+def _cellpose_result_with_unmapped_cells() -> CellposeImportResult:
+    """8 segmented cells (ids 0-7): only 5,6,7 are mapped to neurons 0,1,2.
+    Ids 0-4 are unmapped stray cells - and crucially, their numbers collide
+    with the real neuron indices 0,1,2 (regression for issue: Apply hiding a
+    cell that should stay visible when Cellpose finds more cells than are
+    mapped to neurons)."""
+    segmentation = -1 * np.ones((2, 16), dtype=np.int32)
+    for cellpose_id in range(8):
+        segmentation[:, cellpose_id * 2 : cellpose_id * 2 + 2] = cellpose_id
+    return CellposeImportResult(
+        image_path=Path("cellpose.png"),
+        segmentation_array=segmentation,
+        overlay_image=np.zeros((2, 16, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.array(range(8), dtype=np.int32),
+        stimulus_to_cellpose_mapping={0: 5, 1: 6, 2: 7},
+    )
+
+
 def test_set_data_populates_overlay_and_clears_on_none(qtbot: QtBot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
@@ -406,6 +426,44 @@ def test_apply_ungreys_a_previously_greyed_cell_that_is_now_selected(
 
     assert widget._greyed_cellpose_ids == {0, 2}
     assert sorted(emitted) == [[0, True], [1, False], [2, True]]
+    widget.close()
+
+
+def test_cellpose_to_stim_id_returns_none_for_unmapped_cell() -> None:
+    state = SpatialFootprintState()
+    state.set_data(_cellpose_result_with_unmapped_cells())
+
+    # 5, 6, 7 are the real mapped cells (-> neurons 0, 1, 2)
+    assert state._cellpose_to_stim_id(5) == 0
+    assert state._cellpose_to_stim_id(6) == 1
+    assert state._cellpose_to_stim_id(7) == 2
+    # 0, 1, 2, 3, 4 are unmapped strays - must not alias onto neuron 0/1/2
+    for unmapped_id in range(5):
+        assert state._cellpose_to_stim_id(unmapped_id) is None
+
+
+def test_apply_does_not_hide_selected_cell_when_unmapped_cells_collide_with_its_id(
+    qtbot: QtBot,
+) -> None:
+    """Regression: Cellpose finding more cells than are mapped to neurons
+    used to make Apply hide the very cell the user picked to keep visible,
+    because an unrelated unmapped cell's id happened to equal that neuron's
+    real index (see _cellpose_to_stim_id's identity-fallback bug)."""
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result_with_unmapped_cells())
+    widget.preferential_mode_radio.setChecked(True)
+
+    # keep only cellpose cell 7 (-> neuron 2) visible
+    widget.overlay_widget.neuron_clicked.emit(7)
+    emitted: list[list[Any]] = []
+    widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
+
+    widget.apply_selection_button.click()
+
+    assert widget._greyed_cellpose_ids == {0, 1, 2, 3, 4, 5, 6}
+    # neuron 2 (the selected cell) must never be told it's greyed
+    assert [2, True] not in emitted
     widget.close()
 
 

@@ -30,14 +30,29 @@ class SpatialFootprintState(QtCore.QObject):
         self.greyed_cellpose_ids: set[int] = set()
         self.preferential_selected_cellpose_ids: set[int] = set()
 
-    def _cellpose_to_stim_id(self, cellpose_id: int) -> int:
+    def _cellpose_to_stim_id(self, cellpose_id: int) -> int | None:
+        """Resolve a segmented cell to the trace/stim row it drives, or
+        `None` if it doesn't drive one at all.
+
+        When there is no recorded mapping, cellpose ids are used directly as
+        neuron/stim indices (identity), so `cellpose_id` itself is correct.
+        But once a (possibly partial) mapping exists - e.g. Cellpose found
+        more cells than were mapped to simulated/imported neurons - falling
+        back to identity for an *unmapped* id would be wrong: that id's
+        number doesn't refer to a stim/trace row at all, and could easily
+        collide with the real row of some other, unrelated neuron (both id
+        spaces are small ints starting at 0). Such an id must resolve to
+        `None` (and callers must skip emitting for it), not to itself.
+        """
         mapping = (
             self.cellpose_data.stimulus_to_cellpose_mapping
             if self.cellpose_data is not None
             else None
         )
-        cellpose_to_stim = {v: k for k, v in (mapping or {}).items()}
-        return cellpose_to_stim.get(cellpose_id, cellpose_id)
+        if not mapping:
+            return cellpose_id
+        cellpose_to_stim = {v: k for k, v in mapping.items()}
+        return cellpose_to_stim.get(cellpose_id)
 
     def set_data(self, cellpose_data: CellposeImportResult | None) -> None:
         self.cellpose_data = cellpose_data
@@ -53,9 +68,9 @@ class SpatialFootprintState(QtCore.QObject):
             self.greyed_cellpose_ids.add(cellpose_id)
             greyed = True
         self.greyed_changed.emit()
-        self.neuron_greyed_out_changed.emit(
-            self._cellpose_to_stim_id(cellpose_id), greyed
-        )
+        stim_id = self._cellpose_to_stim_id(cellpose_id)
+        if stim_id is not None:
+            self.neuron_greyed_out_changed.emit(stim_id, greyed)
 
     def add_greyed(self, cellpose_ids: Iterable[int]) -> None:
         """Add every id to the greyed set (additive - never un-greys an id
@@ -66,9 +81,9 @@ class SpatialFootprintState(QtCore.QObject):
         self.greyed_cellpose_ids |= new_ids
         self.greyed_changed.emit()
         for cellpose_id in new_ids:
-            self.neuron_greyed_out_changed.emit(
-                self._cellpose_to_stim_id(cellpose_id), True
-            )
+            stim_id = self._cellpose_to_stim_id(cellpose_id)
+            if stim_id is not None:
+                self.neuron_greyed_out_changed.emit(stim_id, True)
 
     def toggle_preferential_selection(self, cellpose_id: int) -> None:
         if cellpose_id in self.preferential_selected_cellpose_ids:
@@ -110,13 +125,13 @@ class SpatialFootprintState(QtCore.QObject):
         self.preferential_selection_changed.emit()
         self.greyed_changed.emit()
         for cellpose_id in new_greyed - old_greyed:
-            self.neuron_greyed_out_changed.emit(
-                self._cellpose_to_stim_id(cellpose_id), True
-            )
+            stim_id = self._cellpose_to_stim_id(cellpose_id)
+            if stim_id is not None:
+                self.neuron_greyed_out_changed.emit(stim_id, True)
         for cellpose_id in old_greyed - new_greyed:
-            self.neuron_greyed_out_changed.emit(
-                self._cellpose_to_stim_id(cellpose_id), False
-            )
+            stim_id = self._cellpose_to_stim_id(cellpose_id)
+            if stim_id is not None:
+                self.neuron_greyed_out_changed.emit(stim_id, False)
 
     def clear_all(self) -> None:
         """Un-grey every currently greyed cell and drop any pending (unapplied)
@@ -139,6 +154,6 @@ class SpatialFootprintState(QtCore.QObject):
         if had_preferential:
             self.preferential_selection_changed.emit()
         for cellpose_id in cellpose_ids:
-            self.neuron_greyed_out_changed.emit(
-                self._cellpose_to_stim_id(cellpose_id), False
-            )
+            stim_id = self._cellpose_to_stim_id(cellpose_id)
+            if stim_id is not None:
+                self.neuron_greyed_out_changed.emit(stim_id, False)
