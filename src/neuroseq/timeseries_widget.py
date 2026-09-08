@@ -418,7 +418,16 @@ class TimeseriesWidget(FPLWidget):
         state = {"last_label": None}
 
         def format_tick(y, y_min, y_max):
-            label = f"{int(round(y))}"
+            # y is the display row (compacted position); labels always show the
+            # real neuron/stim id at that row, so the axis stays consistent with
+            # the cell segmentation's numbering regardless of any hidden/greyed
+            # neurons compacting the rows above/below it.
+            display_row = int(round(y))
+            if 0 <= display_row < len(self._visible_neuron_ids):
+                neuron_id = self._visible_neuron_ids[display_row]
+            else:
+                neuron_id = display_row
+            label = f"{neuron_id}"
             if label == state["last_label"]:
                 return ""
             state["last_label"] = label
@@ -685,7 +694,7 @@ class TimeseriesWidget(FPLWidget):
             hover_value = (
                 self.data_values[time_index, neuron_id] * self.data_values_scale
             )
-            hover_value_text = f"#{neuron_id} {hover_value:.3g} {self.units}"
+            hover_value_text = f"Neuron {neuron_id}\n{hover_value:.3g} {self.units}"
         self.text.set_pos(self.mouse_pos, hover_value_text)
         if self.hover_slice_graphic is not None:
             self.hover_slice_graphic.visible = True

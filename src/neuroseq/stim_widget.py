@@ -368,6 +368,7 @@ class StimWidget(TimeseriesWidget):
         if (
             self.mouse_pos is None
             or self.data_values is None
+            or not self._visible_neuron_ids
             or (
                 not self._background_stim_arrays
                 and self.stim_type != StimType.Inhibition
@@ -379,12 +380,11 @@ class StimWidget(TimeseriesWidget):
             0,
             self.data_values.shape[0] - 1,
         )
-        n_idx = np.clip(
-            math.floor(self.mouse_pos[1] + 0.5),
-            0,
-            self.data_values.shape[1] - 1,
+        display_row = np.clip(
+            math.floor(self.mouse_pos[1] + 0.5), 0, self.n_neurons - 1
         )
-        raw_fg = float(self.data_values[t_idx_fg, n_idx])
+        neuron_id = self._visible_neuron_ids[int(display_row)]
+        raw_fg = float(self.data_values[t_idx_fg, neuron_id])
         best_val = -raw_fg if self.stim_type == StimType.Inhibition else raw_fg
         best_units = self.units
         for arr, units, dt_ms, stim_type in self._background_stim_arrays:
@@ -393,14 +393,12 @@ class StimWidget(TimeseriesWidget):
                 0,
                 arr.shape[0] - 1,
             )
-            n_idx_bg = np.clip(
-                math.floor(self.mouse_pos[1] + 0.5),
-                0,
-                arr.shape[1] - 1,
-            )
+            n_idx_bg = int(np.clip(neuron_id, 0, arr.shape[1] - 1))
             raw_val = float(arr[t_idx, n_idx_bg])
             val = -raw_val if stim_type == StimType.Inhibition else raw_val
             if abs(val) > abs(best_val):
                 best_val = val
                 best_units = units
-        self.text.set_pos(self.mouse_pos, f"{best_val:.3g} {best_units}")
+        self.text.set_pos(
+            self.mouse_pos, f"Neuron {neuron_id}\n{best_val:.3g} {best_units}"
+        )

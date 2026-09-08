@@ -20,7 +20,8 @@ class Text(Graphic):
         self._set_world_object(group)
 
     def set_pos(self, pos: np.ndarray, additional_text: str):
+        # `additional_text` carries the neuron label itself (real id, not the raw
+        # display-row position `pos[1]`) - callers know the real id after any
+        # display-row translation, this class doesn't.
         self.text.world.position = (pos[0], pos[1], 200)
-        self.text.set_text(
-            f"Neuron {int(pos[1] + 0.5)}\n{int(pos[0])}ms\n{additional_text}"
-        )
+        self.text.set_text(f"{int(pos[0])}ms\n{additional_text}")

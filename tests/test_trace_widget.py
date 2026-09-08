@@ -223,6 +223,60 @@ def test_trace_widget_indices(qtbot: QtBot) -> None:
         assert np.allclose(line.colors, colormap[data.indices[i]])
 
 
+def test_trace_widget_y_tick_labels_show_real_neuron_id(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    data = TraceData(
+        name="traces",
+        traces=np.zeros((5, 10), dtype=np.float32),
+        indices=np.array([0, 1, 6, 11, 15], dtype=np.uint32),
+        dt=0.001,
+        units="mV",
+    )
+    trace_widget.set_data(data)
+
+    # sparse ids: display row 2 (compacted rank) is real id 6, not "2"
+    format_tick = trace_widget._create_y_tick_formatter()
+    assert format_tick(2, 0, 5) == "6"
+
+    trace_widget.set_neuron_greyed(6, True)
+    # after hiding id 6, display row 2 now corresponds to real id 11
+    format_tick = trace_widget._create_y_tick_formatter()
+    assert format_tick(2, 0, 5) == "11"
+    trace_widget.close()
+
+
+def test_trace_widget_hover_shows_real_neuron_id_when_only_one_visible(
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    make_trace_data,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=20, n_timestamps=10))
+    for neuron_id in range(20):
+        if neuron_id != 14:
+            trace_widget.set_neuron_greyed(neuron_id, True)
+    assert trace_widget.n_neurons == 1
+
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        trace_widget.text, "set_pos", lambda pos, text: captured.__setitem__("t", text)
+    )
+    monkeypatch.setattr(
+        trace_widget.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([0.0, 0.0, 0.0]),  # the only (display row 0) visible row
+    )
+
+    trace_widget.pointer_move(None)
+
+    assert captured["t"].startswith("Neuron 14\n")
+    trace_widget.close()
+
+
 def test_trace_widget_clear_data_releases_plot_buffers(qtbot: QtBot) -> None:
     controller = ConstrainedPanZoomController()
     trace_widget = TraceWidget(controller)

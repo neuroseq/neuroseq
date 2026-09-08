@@ -212,7 +212,7 @@ def test_stim_widget_hover_uses_background_values_in_show_all_mode(
     stim_widget.pointer_move(None)
 
     assert len(stim_widget._background_stim_arrays) == 1
-    assert captured["additional_text"] == "-4.5 pA"
+    assert captured["additional_text"] == "Neuron 1\n-4.5 pA"
     stim_widget.close()
     qtbot.waitUntil(lambda: not stim_widget.isVisible())
 
@@ -320,6 +320,36 @@ def test_stim_widget_greying_hides_and_compacts_rows(qtbot: QtBot) -> None:
     assert stim_widget.n_neurons == 3
     assert stim_widget.grid_lines.n_neurons == 3
     assert controller._get_camera_state()["height"] == pytest.approx(3)
+    stim_widget.close()
+
+
+def test_stim_widget_hover_shows_real_neuron_id_when_only_one_visible(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, positive_stims: StimArray
+) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    stim_widget.set_data(positive_stims)
+    # hide every neuron except 14 (simulating "preferential selection" of just
+    # neuron 14, then Apply greying out the rest)
+    for neuron_id in range(positive_stims.values.shape[1]):
+        if neuron_id != 14:
+            stim_widget.set_neuron_greyed(neuron_id, True)
+    assert stim_widget.n_neurons == 1
+
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        stim_widget.text, "set_pos", lambda pos, text: captured.__setitem__("t", text)
+    )
+    monkeypatch.setattr(
+        stim_widget.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([2.0, 0.0, 0.0]),  # the only (display row 0) visible row
+    )
+
+    stim_widget.pointer_move(None)
+
+    assert captured["t"].startswith("Neuron 14\n")
     stim_widget.close()
 
 
