@@ -415,6 +415,166 @@ def test_preferential_selection_renders_red_black_outline(qtbot: QtBot) -> None:
     widget.close()
 
 
+def test_lasso_toggle_flips_overlay_view_lasso_mode(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+
+    assert not widget.overlay_widget.overlay_view.lasso_mode
+    widget.lasso_selection_radio.setChecked(True)
+    assert widget.overlay_widget.overlay_view.lasso_mode
+    widget.click_selection_radio.setChecked(True)
+    assert not widget.overlay_widget.overlay_view.lasso_mode
+    widget.close()
+
+
+def test_lasso_selection_greys_all_lassoed_cells_in_exclusion_mode(
+    qtbot: QtBot,
+) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
+    emitted: list[list[Any]] = []
+    widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
+
+    widget.overlay_widget.neuron_lasso_selected.emit([1, 2])
+
+    assert widget._greyed_cellpose_ids == {1, 2}
+    assert sorted(emitted) == [[1, True], [2, True]]
+    widget.close()
+
+
+def test_lasso_selection_is_additive_and_only_emits_for_new_cells(
+    qtbot: QtBot,
+) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
+    widget.overlay_widget.neuron_lasso_selected.emit([1])
+    emitted: list[list[Any]] = []
+    widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
+
+    widget.overlay_widget.neuron_lasso_selected.emit([1, 2])
+
+    assert widget._greyed_cellpose_ids == {1, 2}
+    assert emitted == [[2, True]]
+    widget.close()
+
+
+def test_lasso_selection_marks_preferential_without_greying(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result())
+    widget.preferential_mode_radio.setChecked(True)
+    emitted: list[list[Any]] = []
+    widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
+
+    widget.overlay_widget.neuron_lasso_selected.emit([1, 2])
+
+    assert widget._preferential_selected_cellpose_ids == {1, 2}
+    assert widget._greyed_cellpose_ids == set()
+    assert emitted == []
+    assert widget.apply_selection_button.isEnabled()
+    widget.close()
+
+
+def test_overlay_view_lasso_selects_only_enclosed_cells(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    overlay_view = OverlayView()
+    qtbot.addWidget(overlay_view)
+    overlay_view.enable_cell_selection = True
+    overlay_view.lasso_mode = True
+    overlay_view.segmentation = np.zeros((10, 10), dtype=np.int32)
+    overlay_view._label_centers = {1: (2.0, 2.0), 2: (8.0, 8.0)}
+    positions = iter(
+        [
+            np.array([0.0, 0.0, 0.0]),
+            np.array([6.0, 0.0, 0.0]),
+            np.array([6.0, 6.0, 0.0]),
+            np.array([0.0, 6.0, 0.0]),
+        ]
+    )
+    monkeypatch.setattr(
+        overlay_view.subplot,
+        "map_screen_to_world",
+        lambda ev: next(positions),
+    )
+
+    with qtbot.waitSignal(overlay_view.neuron_lasso_selected) as blocker:
+        overlay_view._cell_selection_pointer_down(None)
+        overlay_view.pointer_move(None)
+        overlay_view.pointer_move(None)
+        overlay_view._cell_selection_pointer_up(None)
+
+    assert blocker.args == [[1]]
+    assert overlay_view._lasso_points == []
+    assert overlay_view._lasso_line is None
+    overlay_view.close()
+
+
+def test_overlay_view_lasso_ignores_loop_enclosing_nothing(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    overlay_view = OverlayView()
+    qtbot.addWidget(overlay_view)
+    overlay_view.enable_cell_selection = True
+    overlay_view.lasso_mode = True
+    overlay_view.segmentation = np.zeros((10, 10), dtype=np.int32)
+    overlay_view._label_centers = {1: (8.0, 8.0)}
+    positions = iter(
+        [
+            np.array([0.0, 0.0, 0.0]),
+            np.array([2.0, 0.0, 0.0]),
+            np.array([2.0, 2.0, 0.0]),
+            np.array([0.0, 2.0, 0.0]),
+        ]
+    )
+    monkeypatch.setattr(
+        overlay_view.subplot,
+        "map_screen_to_world",
+        lambda ev: next(positions),
+    )
+    emitted: list[list[int]] = []
+    overlay_view.neuron_lasso_selected.connect(emitted.append)
+
+    overlay_view._cell_selection_pointer_down(None)
+    overlay_view.pointer_move(None)
+    overlay_view.pointer_move(None)
+    overlay_view._cell_selection_pointer_up(None)
+    qtbot.wait(10)
+
+    assert emitted == []
+    overlay_view.close()
+
+
+def test_overlay_view_lasso_ignores_too_few_points(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    overlay_view = OverlayView()
+    qtbot.addWidget(overlay_view)
+    overlay_view.enable_cell_selection = True
+    overlay_view.lasso_mode = True
+    overlay_view.segmentation = np.zeros((10, 10), dtype=np.int32)
+    overlay_view._label_centers = {1: (2.0, 2.0)}
+    monkeypatch.setattr(
+        overlay_view.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([0.0, 0.0, 0.0]),
+    )
+    emitted: list[list[int]] = []
+    overlay_view.neuron_lasso_selected.connect(emitted.append)
+
+    overlay_view._cell_selection_pointer_down(None)
+    overlay_view._cell_selection_pointer_up(None)
+    qtbot.wait(10)
+
+    assert emitted == []
+    overlay_view.close()
+
+
 def test_overlay_view_renders_striped_cell_colors(qtbot: QtBot) -> None:
     overlay_view = OverlayView()
     qtbot.addWidget(overlay_view)

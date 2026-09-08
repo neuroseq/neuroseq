@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 import brian2.numpy_ as np
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -28,6 +30,18 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         super().__init__(parent)
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+
+        selection_tool_layout = QtWidgets.QHBoxLayout()
+        self.click_selection_radio = QtWidgets.QRadioButton("Click")
+        self.click_selection_radio.setChecked(True)
+        self.lasso_selection_radio = QtWidgets.QRadioButton("Lasso")
+        self._selection_tool_group = QtWidgets.QButtonGroup(self)
+        self._selection_tool_group.addButton(self.click_selection_radio)
+        self._selection_tool_group.addButton(self.lasso_selection_radio)
+        selection_tool_layout.addWidget(self.click_selection_radio)
+        selection_tool_layout.addWidget(self.lasso_selection_radio)
+        selection_tool_layout.addStretch(1)
+        layout.addLayout(selection_tool_layout)
 
         top_bar_layout = QtWidgets.QHBoxLayout()
         self.exclusion_mode_radio = QtWidgets.QRadioButton("Exclusion")
@@ -73,6 +87,12 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         )
         self.overlay_widget.set_cell_selection_enabled(True)
         self.overlay_widget.neuron_clicked.connect(self._on_neuron_clicked)
+        self.overlay_widget.neuron_lasso_selected.connect(
+            self._on_neuron_lasso_selected
+        )
+        self.lasso_selection_radio.toggled.connect(
+            self.overlay_widget.set_lasso_mode_enabled
+        )
         layout.addWidget(self.overlay_widget)
 
         self._cellpose_data: CellposeImportResult | None = None
@@ -286,6 +306,37 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             self._preferential_selected_cellpose_ids.discard(cellpose_id)
         else:
             self._preferential_selected_cellpose_ids.add(cellpose_id)
+        self._update_clear_selection_button()
+        self._update_apply_button()
+        self._refresh_overlay()
+
+    def _on_neuron_lasso_selected(self, cellpose_ids: list[int]) -> None:
+        if self.preferential_mode_radio.isChecked():
+            self._add_preferential_selection(cellpose_ids)
+        else:
+            self._add_greyed(cellpose_ids)
+
+    def _add_greyed(self, cellpose_ids: Iterable[int]) -> None:
+        """Add every id to the greyed set (additive - never un-greys an id already
+        in the lasso, unlike the single-click toggle)."""
+        new_ids = set(cellpose_ids) - self._greyed_cellpose_ids
+        if not new_ids:
+            return
+        self._greyed_cellpose_ids |= new_ids
+        self._update_clear_selection_button()
+        self._refresh_overlay()
+        for cellpose_id in new_ids:
+            self.neuron_greyed_out_changed.emit(
+                self._cellpose_to_stim_id(cellpose_id), True
+            )
+
+    def _add_preferential_selection(self, cellpose_ids: Iterable[int]) -> None:
+        """Add every id to the pending preferential selection (additive, same
+        rationale as _add_greyed)."""
+        new_ids = set(cellpose_ids) - self._preferential_selected_cellpose_ids
+        if not new_ids:
+            return
+        self._preferential_selected_cellpose_ids |= new_ids
         self._update_clear_selection_button()
         self._update_apply_button()
         self._refresh_overlay()

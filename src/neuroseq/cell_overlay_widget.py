@@ -11,6 +11,7 @@ from typing import TypedDict
 
 import brian2.numpy_ as np
 import pygfx
+from matplotlib.path import Path as MplPath
 from qtpy import QtCore
 from qtpy import QtWidgets
 
@@ -41,6 +42,7 @@ STRIPED_CELL_GREY = (0.55, 0.55, 0.55)
 STRIPED_CELL_WHITE = (1.0, 1.0, 1.0)
 STRIPED_CELL_ALPHA = 1.0
 STRIPED_CELL_STRIPE_WIDTH = 4
+LASSO_LINE_COLOR = (1.0, 1.0, 0.0, 0.9)
 
 
 class TextGraphic(Protocol):
@@ -114,6 +116,7 @@ def compute_segmentation_legend(
 
 class OverlayView(FullScreenFPLWidget):
     neuron_clicked = QtCore.Signal(int)
+    neuron_lasso_selected = QtCore.Signal(list)
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent=parent)
@@ -144,6 +147,9 @@ class OverlayView(FullScreenFPLWidget):
         self._drag_state: _AOIDragState | None = None
         self.enable_cell_selection = False
         self._cell_click_down_world: tuple[float, float] | None = None
+        self.lasso_mode = False
+        self._lasso_points: list[tuple[float, float]] = []
+        self._lasso_line: LineGraphic | None = None
         self.on_geometry_changed: Callable[[AreasOfInterestConfig], None] | None = None
         self._configure_subplot()
         self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
@@ -751,10 +757,26 @@ class OverlayView(FullScreenFPLWidget):
         mouse_pos = self.subplot.map_screen_to_world(ev)
         if mouse_pos is None:
             return
+        if self.lasso_mode:
+            self._lasso_points = [(float(mouse_pos[0]), float(mouse_pos[1]))]
+            self.subplot.controller.enabled = False
+            return
         self._cell_click_down_world = (float(mouse_pos[0]), float(mouse_pos[1]))
 
     def _cell_selection_pointer_up(self, ev: pygfx.PointerEvent) -> None:
-        if not self.enable_cell_selection or self._cell_click_down_world is None:
+        if not self.enable_cell_selection:
+            return
+        if self.lasso_mode:
+            points = self._lasso_points
+            self._lasso_points = []
+            self._clear_lasso_line()
+            self.subplot.controller.enabled = True
+            if len(points) >= 3:
+                cellpose_ids = self._cells_inside_polygon(points)
+                if cellpose_ids:
+                    self.neuron_lasso_selected.emit(cellpose_ids)
+            return
+        if self._cell_click_down_world is None:
             return
         down_x, down_y = self._cell_click_down_world
         self._cell_click_down_world = None
@@ -769,6 +791,46 @@ class OverlayView(FullScreenFPLWidget):
         cellpose_id = self._segmentation_id_at(float(mouse_pos[0]), float(mouse_pos[1]))
         if cellpose_id is not None:
             self.neuron_clicked.emit(cellpose_id)
+
+    def _cells_inside_polygon(self, points: list[tuple[float, float]]) -> list[int]:
+        if not self._label_centers:
+            return []
+        polygon = MplPath(points)
+        cell_ids, centers = zip(*self._label_centers.items(), strict=False)
+        inside = polygon.contains_points(np.asarray(centers))
+        return [
+            cell_id
+            for cell_id, is_inside in zip(cell_ids, inside, strict=False)
+            if is_inside
+        ]
+
+    def _update_lasso_line(self) -> None:
+        if len(self._lasso_points) < 2:
+            return
+        closed_points = [*self._lasso_points, self._lasso_points[0]]
+        data = np.asarray([(x, y, 220.0) for x, y in closed_points], dtype=np.float32)
+        # The line grows by one point per pointer_move; fastplotlib's LineGraphic
+        # buffer is fixed-size at creation and can't be resized via `.data = ...`
+        # (unlike the AOI square/circle lines, which always keep a constant point
+        # count), so recreate the graphic each time instead of updating in place.
+        if self._lasso_line is not None:
+            with contextlib.suppress(Exception):
+                self.subplot.remove_graphic(self._lasso_line)
+        self._lasso_line = self.subplot.add_line(
+            data,
+            colors=LASSO_LINE_COLOR,
+            thickness=2.0,
+            size_space="model",
+        )
+        self._lasso_line.visible = True
+        self.figure.renderer.request_draw()
+
+    def _clear_lasso_line(self) -> None:
+        if self._lasso_line is not None:
+            with contextlib.suppress(Exception):
+                self.subplot.remove_graphic(self._lasso_line)
+            self._lasso_line = None
+        self.figure.renderer.request_draw()
 
     def _segmentation_id_at(self, world_x: float, world_y: float) -> int | None:
         if self.segmentation is None:
@@ -967,6 +1029,14 @@ class OverlayView(FullScreenFPLWidget):
             ev.stop_propagation()
             return
 
+        if self.lasso_mode and self._lasso_points:
+            mouse_pos = self.subplot.map_screen_to_world(ev)
+            if mouse_pos is None:
+                return
+            self._lasso_points.append((float(mouse_pos[0]), float(mouse_pos[1])))
+            self._update_lasso_line()
+            return
+
         if self.text is None or self.segmentation is None:
             return
 
@@ -1033,6 +1103,7 @@ class OverlayView(FullScreenFPLWidget):
 class CellOverlayWidget(QtWidgets.QGroupBox):
     aoi_geometry_changed = QtCore.Signal(object)
     neuron_clicked = QtCore.Signal(int)
+    neuron_lasso_selected = QtCore.Signal(list)
 
     def __init__(self, title: str = "Color-coded Preview") -> None:
         super().__init__(title)
@@ -1065,6 +1136,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             self.aoi_geometry_changed.emit(config)
         )
         self.overlay_view.neuron_clicked.connect(self.neuron_clicked.emit)
+        self.overlay_view.neuron_lasso_selected.connect(self.neuron_lasso_selected.emit)
         layout.addWidget(self.overlay_view)
         self.logger.info(
             "overlay ui: widget=%sx%s view=%sx%s",
@@ -1246,6 +1318,9 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
 
     def set_cell_selection_enabled(self, enabled: bool) -> None:
         self.overlay_view.enable_cell_selection = enabled
+
+    def set_lasso_mode_enabled(self, enabled: bool) -> None:
+        self.overlay_view.lasso_mode = enabled
 
     def _compute_segementation_colors(
         self, segmentation: np.ndarray
