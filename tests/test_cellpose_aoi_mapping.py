@@ -22,6 +22,8 @@ from neuroseq.importer_cellpose import default_aoi_config
 from neuroseq.importer_cellpose import generate_aoi_stimulus_mapping
 from neuroseq.importer_cellpose import point_in_circle
 from neuroseq.importer_cellpose import point_in_square
+from neuroseq.project import Project
+from neuroseq.save_load_options import SaveLoadOptions
 
 
 def _save_and_reload_json(data: dict, tmp_path: Path) -> dict:
@@ -206,11 +208,13 @@ def test_aoi_config_round_trips_through_io(tmp_path: Path) -> None:
         trace_data=None,
         spike_data=None,
         aoi_config=config,
+        segmentation_path=tmp_path / "segmentation.npy",
     )
 
     reloaded = _save_and_reload_json({"cellpose": result}, tmp_path)
     loaded_result = reloaded["cellpose"]
     assert loaded_result.aoi_config == config
+    assert loaded_result.segmentation_path == result.segmentation_path
 
 
 def test_dialog_selects_aoi_strategy_shows_subgroup(
@@ -401,3 +405,54 @@ def test_dialog_aoi_persists_through_reopen(tmp_path: Path, qtbot: QtBot) -> Non
     assert not reopened.show_shapes_checkbox.isChecked()
     dialog.close()
     reopened.close()
+
+
+def test_aoi_drag_import_persists_through_project_save_reload(
+    tmp_path: Path,
+    qtbot: QtBot,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    """Reproduces the real user flow behind issue #518: drag an AOI shape,
+    click Import, apply the result to a project (as gui.py does), save the
+    project to a .nseq archive and reload it - the dragged mapping/config
+    must come back unchanged."""
+    dialog = _make_dialog(tmp_path, qtbot)
+    _select_aoi_strategy(dialog)
+
+    baseline_mapping = dialog._generate_stimulus_mapping(CUSTOM_AOI_STRATEGY)
+
+    # Simulate the geometry-changed signal that OverlayView emits after a
+    # real mouse drag (cell_overlay_widget.py: _aoi_pointer_up/_apply_drag).
+    dragged_config = dialog._current_aoi_config()
+    assert dragged_config is not None
+    dragged_config.square.x = 0.0
+    dragged_config.square.y = 0.0
+    dragged_config.square.role = AOIRole.EXCLUSION
+    dialog._on_overlay_aoi_geometry_changed(dragged_config)
+
+    dragged_mapping = dialog._generate_stimulus_mapping(CUSTOM_AOI_STRATEGY)
+    assert dragged_mapping != baseline_mapping
+
+    dialog._import_data()
+    imported = dialog.get_imported_data()
+    assert imported is not None
+    assert imported.aoi_config is not None
+    assert imported.aoi_config.square.role == AOIRole.EXCLUSION
+    assert imported.stimulus_to_cellpose_mapping == dragged_mapping
+
+    # Mirrors gui.py's _apply_cellpose_import_result, which unconditionally
+    # assigns the dialog's result onto the project.
+    project = Project()
+    project.cellpose_data = imported
+
+    tmp_file = tmp_path / "project_with_dragged_aoi.nseq"
+    project.save(tmp_file, SaveLoadOptions(True, True, False, True))
+
+    reloaded = Project(tmp_file)
+    assert reloaded.cellpose_data is not None
+    assert reloaded.cellpose_data.mapping_strategy == CUSTOM_AOI_STRATEGY
+    assert reloaded.cellpose_data.stimulus_to_cellpose_mapping == dragged_mapping
+    assert reloaded.cellpose_data.aoi_config == dragged_config
+    assert reloaded.cellpose_data.segmentation_path == imported.segmentation_path
+
+    dialog.close()

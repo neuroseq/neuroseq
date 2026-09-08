@@ -167,6 +167,11 @@ def _json_encoder_factory(zf: zipfile.ZipFile):
                         "mapping_strategy": obj.mapping_strategy,
                         "linear_offset": obj.linear_offset,
                         "aoi_config": _aoi_to_json(obj.aoi_config),
+                        "segmentation_path": (
+                            None
+                            if obj.segmentation_path is None
+                            else str(obj.segmentation_path)
+                        ),
                     }
                 case b2.Quantity():
                     value, unit = quantity_to_value_unit_str(obj)
@@ -273,6 +278,7 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                 "mapping_strategy": mapping_strategy,
                 "linear_offset": linear_offset,
                 "aoi_config": aoi_config,
+                **rest,
             }:
                 with _zf.open(segmentation_array) as fp:
                     loaded_segmentation = np.load(fp)
@@ -282,6 +288,7 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                 if original_cellpose_ids is not None:
                     with _zf.open(original_cellpose_ids) as fp:
                         loaded_original_ids = np.load(fp)
+                segmentation_path = rest.get("segmentation_path")
 
                 return CellposeImportResult(
                     image_path=Path(image_path),
@@ -303,6 +310,9 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                         None if linear_offset is None else int(linear_offset)
                     ),
                     aoi_config=_aoi_from_json(aoi_config),
+                    segmentation_path=(
+                        None if segmentation_path is None else Path(segmentation_path)
+                    ),
                 )
             case {
                 "!CellposeImportResult": True,
