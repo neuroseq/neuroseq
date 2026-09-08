@@ -13,6 +13,8 @@ from neuroseq.cell_overlay_widget import STRIPED_CELL_WHITE
 from neuroseq.cell_overlay_widget import CellOverlayWidget
 from neuroseq.cell_overlay_widget import OverlayView
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.spatial_footprint_widget import SELECTION_OUTLINE_BLACK
+from neuroseq.spatial_footprint_widget import SELECTION_OUTLINE_RED
 from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
 
 
@@ -260,6 +262,156 @@ def test_clicking_cell_greys_rendered_spatial_footprint(qtbot: QtBot) -> None:
     widget.overlay_widget.neuron_clicked.emit(1)
     assert np.allclose(np.asarray(image_graphic.data.value), before_image)
     assert np.allclose(np.asarray(graphic.data.value), before_segmentation)
+    widget.close()
+
+
+def test_preferential_click_selects_without_greying_or_signalling(
+    qtbot: QtBot,
+) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result())
+    widget.preferential_mode_radio.setChecked(True)
+    emitted: list[list[Any]] = []
+    widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
+
+    widget.overlay_widget.neuron_clicked.emit(1)
+
+    assert widget._preferential_selected_cellpose_ids == {1}
+    assert widget._greyed_cellpose_ids == set()
+    assert emitted == []
+    assert widget.apply_selection_button.isEnabled()
+    widget.close()
+
+
+def test_preferential_click_twice_deselects_and_disables_apply(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result())
+    widget.preferential_mode_radio.setChecked(True)
+
+    widget.overlay_widget.neuron_clicked.emit(1)
+    assert widget.apply_selection_button.isEnabled()
+    widget.overlay_widget.neuron_clicked.emit(1)
+
+    assert widget._preferential_selected_cellpose_ids == set()
+    assert not widget.apply_selection_button.isEnabled()
+    widget.close()
+
+
+def test_apply_greys_unselected_cells_and_emits_signals(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
+    widget.preferential_mode_radio.setChecked(True)
+    widget.overlay_widget.neuron_clicked.emit(1)
+    emitted: list[list[Any]] = []
+    widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
+
+    widget.apply_selection_button.click()
+
+    assert widget._greyed_cellpose_ids == {0, 2}
+    assert widget._preferential_selected_cellpose_ids == set()
+    assert sorted(emitted) == [[0, True], [2, True]]
+    assert not widget.apply_selection_button.isEnabled()
+    widget.close()
+
+
+def test_apply_ungreys_a_previously_greyed_cell_that_is_now_selected(
+    qtbot: QtBot,
+) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
+    # exclusion mode: grey cell 1 first
+    widget.overlay_widget.neuron_clicked.emit(1)
+    assert widget._greyed_cellpose_ids == {1}
+
+    widget.preferential_mode_radio.setChecked(True)
+    widget.overlay_widget.neuron_clicked.emit(1)  # mark it as interesting
+    emitted: list[list[Any]] = []
+    widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
+
+    widget.apply_selection_button.click()
+
+    assert widget._greyed_cellpose_ids == {0, 2}
+    assert sorted(emitted) == [[0, True], [1, False], [2, True]]
+    widget.close()
+
+
+def test_switching_away_from_preferential_clears_pending_selection(
+    qtbot: QtBot,
+) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result())
+    widget.preferential_mode_radio.setChecked(True)
+    widget.overlay_widget.neuron_clicked.emit(1)
+    assert widget.apply_selection_button.isEnabled()
+
+    widget.exclusion_mode_radio.setChecked(True)
+
+    assert widget._preferential_selected_cellpose_ids == set()
+    assert not widget.apply_selection_button.isEnabled()
+    widget.close()
+
+
+def test_clear_selection_enabled_by_pending_preferential_pick_alone(
+    qtbot: QtBot,
+) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result())
+    widget.preferential_mode_radio.setChecked(True)
+    widget.overlay_widget.neuron_clicked.emit(1)
+    assert widget.clear_selection_button.isEnabled()
+    emitted: list[list[Any]] = []
+    widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
+
+    widget.clear_selection_button.click()
+
+    assert widget._preferential_selected_cellpose_ids == set()
+    assert not widget.clear_selection_button.isEnabled()
+    assert not widget.apply_selection_button.isEnabled()
+    assert emitted == []
+    widget.close()
+
+
+def test_preferential_selection_renders_red_black_outline(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    segmentation = np.zeros((10, 10), dtype=np.int32)
+    segmentation[2:8, 2:8] = 1
+    overlay_image = np.zeros((10, 10, 3), dtype=np.uint8)
+    overlay_image[:, :] = (0, 0, 255)
+    result = CellposeImportResult(
+        image_path=Path("cellpose.png"),
+        segmentation_array=segmentation,
+        overlay_image=overlay_image,
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.array([0, 1], dtype=np.int32),
+        stimulus_to_cellpose_mapping={0: 0, 1: 1},
+    )
+    widget.set_data(result)
+    widget.preferential_mode_radio.setChecked(True)
+    image_graphic = widget.overlay_widget.overlay_view._image_graphic
+    assert image_graphic is not None
+
+    widget.overlay_widget.neuron_clicked.emit(1)
+
+    after_image = np.asarray(image_graphic.data.value)
+    cell_colors = after_image[segmentation == 1][:, :3].astype(np.float32) / 255.0
+    assert np.any(
+        np.all(np.isclose(cell_colors, SELECTION_OUTLINE_RED, atol=1 / 255), axis=1)
+    )
+    assert np.any(
+        np.all(np.isclose(cell_colors, SELECTION_OUTLINE_BLACK, atol=1 / 255), axis=1)
+    )
+    # the cell interior is not touched, only its boundary
+    assert np.any(
+        np.all(np.isclose(cell_colors, np.array([0.0, 0.0, 1.0]), atol=1 / 255), axis=1)
+    )
     widget.close()
 
 
