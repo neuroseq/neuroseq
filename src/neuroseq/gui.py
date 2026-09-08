@@ -60,6 +60,7 @@ from neuroseq.save_load_options import SaveLoadOptionsDialog
 from neuroseq.spatial_footprint_state import SpatialFootprintState
 from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
 from neuroseq.spike_widget import SpikeWidget
+from neuroseq.stim import StimArray
 from neuroseq.stim_editor import StimEditor
 from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.synthetic_data_dialog import SyntheticDataDialog
@@ -414,6 +415,7 @@ class Gui(QtWidgets.QMainWindow):
         self.stim_editor.time_range_focus_requested.connect(
             self.trace_controller.focus_time_range
         )
+        self.stim_editor.current_stim_changed.connect(self._on_current_stim_changed)
         split_vertical.addWidget(self.stim_editor)
         self.trace_widget.set_default_scroll_bars(
             self.stim_editor.x_scrollbar,
@@ -1404,6 +1406,34 @@ class Gui(QtWidgets.QMainWindow):
     ) -> None:
         self._trace_state.set_neuron_greyed(neuron_index, greyed)
         self.stim_editor.stim_widget.set_neuron_greyed(neuron_index, greyed)
+
+    def _current_stim_array(self) -> StimArray | None:
+        modifier = self.stim_editor.current_stim_modifier
+        return modifier.stim_array if modifier is not None else None
+
+    def _on_current_stim_changed(self, stim_array: StimArray | None) -> None:
+        if self.action_overlay_stim_on_traces.isChecked():
+            self.trace_widget.set_stim_overlay_data(stim_array)
+
+    def _toggle_stim_trace_overlay(self) -> None:
+        """Toggle between the separated Stimuli+Traces panels and a single
+        combined view where the stim heatmap renders behind the trace lines
+        (issue #530). Only overlays a neuron's stim row onto its own trace
+        row for now - overlaying a different neuron's stim/trace pair is
+        deferred."""
+        enabled = self.action_overlay_stim_on_traces.isChecked()
+        self.trace_widget.set_stim_overlay_enabled(enabled)
+        self.trace_widget.set_stim_overlay_data(self._current_stim_array())
+        stim_panel_action = self._view_actions[self.stim_editor]
+        if enabled:
+            self._stim_panel_visible_before_overlay = stim_panel_action.isChecked()
+            if stim_panel_action.isChecked():
+                stim_panel_action.trigger()
+        elif (
+            getattr(self, "_stim_panel_visible_before_overlay", True)
+            and not stim_panel_action.isChecked()
+        ):
+            stim_panel_action.trigger()
 
     def _apply_spike_selection(self, cmb_name: str) -> None:
         data = self.project.get_data(cmb_name, SpikeData)
@@ -3239,6 +3269,16 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             shortcut=None,
             icon="mdi6.arrow-expand-vertical",
+        )
+        self.action_overlay_stim_on_traces = add_action(
+            "Overlay stim on traces",
+            self._toggle_stim_trace_overlay,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon="mdi6.layers-outline",
+            checkable=True,
+            is_checked=False,
         )
         toolbar.addWidget(QtWidgets.QLabel("  Spike data: "))
         toolbar.addWidget(self.cmb_spike)

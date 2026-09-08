@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+import contextlib
+
 import brian2.numpy_ as np
+import fastplotlib as fpl
 import pygfx
 from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import TraceData
+from neuroseq.stim import StimArray
+from neuroseq.stim import StimType
+from neuroseq.stim_widget import apply_cmap_alpha
 from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.trace_widget_state import TraceWidgetState
+from neuroseq.utils import get_cmap
 from neuroseq.utils import neuron_indices_to_colors
 
 
@@ -98,6 +105,11 @@ class TraceWidget(TimeseriesWidget):
     _MIN_LINE_THICKNESS = 1.0
     _MAX_LINE_THICKNESS = 2.0
 
+    # Trace lines default to z=0; keep the stim overlay just behind them so
+    # the line is always visible on top, without affecting the grid (z=199).
+    STIM_OVERLAY_Z = -1.0
+    STIM_OVERLAY_ALPHA = 0.6
+
     def __init__(
         self,
         controller: pygfx.Controller,
@@ -117,6 +129,13 @@ class TraceWidget(TimeseriesWidget):
         self.offset_by_median = True
         self.clip = True
         self._trace_norm_dialog: TraceNormDialog | None = None
+        # Whether to overlay a stim array on top of these traces, and which
+        # one - a view-local display setting like trace normalization, not
+        # part of TraceWidgetState: each detached copy of this panel can
+        # independently show its own stim overlay.
+        self._stim_overlay_enabled = False
+        self._stim_overlay_array: StimArray | None = None
+        self._stim_overlay_graphic: fpl.ImageGraphic | None = None
         if isinstance(self.controller, ConstrainedPanZoomController):
             self.controller.add_state_change_listener(self._update_line_thickness)
         self._state = state if state is not None else TraceWidgetState()
@@ -266,12 +285,14 @@ class TraceWidget(TimeseriesWidget):
         )
         self._apply_visible_neuron_layout()
         self._update_line_thickness()
+        self._rebuild_stim_overlay()
         self.post_set_data()
 
     def _on_state_greyed_changed(self) -> None:
         self._greyed_neuron_ids = set(self._state.greyed_neuron_ids)
         self._rebuild_visible_neuron_mapping()
         self._apply_visible_neuron_layout()
+        self._rebuild_stim_overlay()
         self._refit_view_to_visible_neurons()
 
     def set_neuron_greyed(self, neuron_index: int, greyed: bool) -> None:
@@ -289,3 +310,67 @@ class TraceWidget(TimeseriesWidget):
             line.visible = display_row is not None
             if display_row is not None:
                 line.offset = (line.offset[0], display_row, line.offset[2])
+
+    def clear_data(self) -> None:
+        super().clear_data()
+        # super().clear_data() wipes every graphic from the subplot (see
+        # FPLWidget.clear_data), so the overlay graphic reference is already
+        # dangling; _stim_overlay_enabled/_stim_overlay_array are left alone
+        # so the setting survives a data refresh.
+        self._stim_overlay_graphic = None
+
+    def set_stim_overlay_enabled(self, enabled: bool) -> None:
+        """Toggle showing a stim array's heatmap behind the trace lines
+        (issue #530). Call set_stim_overlay_data() to pick/update which
+        StimArray is shown."""
+        if enabled == self._stim_overlay_enabled:
+            return
+        self._stim_overlay_enabled = enabled
+        self._rebuild_stim_overlay()
+
+    def set_stim_overlay_data(self, stim_array: StimArray | None) -> None:
+        self._stim_overlay_array = stim_array
+        self._rebuild_stim_overlay()
+
+    def _rebuild_stim_overlay(self) -> None:
+        if self._stim_overlay_graphic is not None:
+            with contextlib.suppress(Exception):
+                self.subplot.remove_graphic(self._stim_overlay_graphic)
+            self._stim_overlay_graphic = None
+
+        stim_array = self._stim_overlay_array
+        if (
+            not self._stim_overlay_enabled
+            or stim_array is None
+            or not isinstance(self.data, TraceData)
+            or not self._visible_neuron_ids
+        ):
+            return
+
+        n_timesteps, n_stim_neurons = stim_array.values.shape
+        # Same-neuron overlay only (see issue #530): row i shows the stim
+        # column for the same real neuron id as trace display row i, or is
+        # left at zero if that id has no corresponding stim column.
+        visible_values = np.zeros(
+            (n_timesteps, len(self._visible_neuron_ids)),
+            dtype=stim_array.values.dtype,
+        )
+        for column, neuron_id in enumerate(self._visible_neuron_ids):
+            if 0 <= neuron_id < n_stim_neurons:
+                visible_values[:, column] = stim_array.values[:, neuron_id]
+
+        vmax = float(np.max(np.abs(stim_array.values)))
+        if vmax == 0:
+            vmax = 1.0
+        vmin = -vmax if stim_array.stim_type == StimType.External else 0.0
+        cmap = get_cmap(stim_array.stim_type, alpha=self.STIM_OVERLAY_ALPHA)
+        self._stim_overlay_graphic = self.subplot.add_image(
+            visible_values.T,
+            vmin=vmin,
+            vmax=vmax,
+            cmap=cmap,
+        )
+        apply_cmap_alpha(self._stim_overlay_graphic, cmap)
+        dt_ms = float(stim_array.dt) * 1000.0
+        self._stim_overlay_graphic.offset = (0.5 * dt_ms, 0.0, self.STIM_OVERLAY_Z)
+        self._stim_overlay_graphic.world_object.world.scale = (dt_ms, 1.0, 1.0)

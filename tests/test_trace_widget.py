@@ -10,6 +10,8 @@ from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomControlle
 from neuroseq.data import TraceData
 from neuroseq.region_of_interest import RegionOfInterest
 from neuroseq.spike_widget import SpikeWidget
+from neuroseq.stim import StimArray
+from neuroseq.stim import StimType
 from neuroseq.stim_widget import StimWidget
 from neuroseq.trace_widget import TraceNormDialog
 from neuroseq.trace_widget import TraceWidget
@@ -774,3 +776,120 @@ def test_trace_widget_select_neurons_translates_display_rows_when_greyed(
     trace_widget.select_neurons(slice(1, 3), slice(0, 5))
 
     assert trace_widget.selected_neuron_slice == slice(2, 4)
+
+
+def _stim_array(n_timesteps: int = 10, n_neurons: int = 3) -> StimArray:
+    values = np.zeros((n_timesteps, n_neurons), dtype=np.float32)
+    values[2, :] = 1.0
+    return StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="mV",
+        dt=0.001,
+    )
+
+
+def test_stim_overlay_hidden_until_enabled(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+
+    trace_widget.set_stim_overlay_data(_stim_array())
+    assert trace_widget._stim_overlay_graphic is None
+
+    trace_widget.set_stim_overlay_enabled(True)
+    assert trace_widget._stim_overlay_graphic is not None
+    rendered = np.asarray(trace_widget._stim_overlay_graphic.data.value)
+    assert rendered.shape[0] == 3
+
+    trace_widget.set_stim_overlay_enabled(False)
+    assert trace_widget._stim_overlay_graphic is None
+    trace_widget.close()
+
+
+def test_stim_overlay_compacts_with_greyed_neurons(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+    trace_widget.set_stim_overlay_data(_stim_array())
+    trace_widget.set_stim_overlay_enabled(True)
+
+    trace_widget.set_neuron_greyed(1, True)
+
+    assert trace_widget._stim_overlay_graphic is not None
+    rendered = np.asarray(trace_widget._stim_overlay_graphic.data.value)
+    assert rendered.shape[0] == 2  # hidden neuron's row is gone, not just blank
+
+    trace_widget.set_neuron_greyed(1, False)
+    rendered = np.asarray(trace_widget._stim_overlay_graphic.data.value)
+    assert rendered.shape[0] == 3
+    trace_widget.close()
+
+
+def test_stim_overlay_aligns_rows_by_same_neuron_id(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    """Deferred cross-neuron pairing (issue #530): for now a trace row only
+    ever overlays the stim column for that same real neuron id."""
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+    stim = _stim_array()
+    stim.values[:, 1] = 5.0
+    trace_widget.set_stim_overlay_data(stim)
+    trace_widget.set_stim_overlay_enabled(True)
+
+    assert trace_widget._stim_overlay_graphic is not None
+    rendered = np.asarray(trace_widget._stim_overlay_graphic.data.value)
+    assert np.allclose(rendered[1, :], 5.0)
+    assert np.allclose(rendered[0, :], stim.values[:, 0])
+    trace_widget.close()
+
+
+def test_stim_overlay_survives_data_refresh(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+    trace_widget.set_stim_overlay_data(_stim_array())
+    trace_widget.set_stim_overlay_enabled(True)
+    assert trace_widget._stim_overlay_graphic is not None
+
+    # re-setting trace data (e.g. selecting a different trace) tears down and
+    # rebuilds every graphic - the overlay setting must survive that refresh
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+
+    assert trace_widget._stim_overlay_graphic is not None
+    trace_widget.close()
+
+
+def test_stim_overlay_cleared_when_trace_data_cleared(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+    trace_widget.set_stim_overlay_data(_stim_array())
+    trace_widget.set_stim_overlay_enabled(True)
+    assert trace_widget._stim_overlay_graphic is not None
+
+    trace_widget.set_data(None)
+
+    assert trace_widget._stim_overlay_graphic is None
+    trace_widget.close()

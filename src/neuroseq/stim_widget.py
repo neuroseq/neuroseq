@@ -14,6 +14,15 @@ from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.utils import get_cmap
 
 
+def apply_cmap_alpha(image_graphic: fpl.ImageGraphic, cmap: object) -> None:
+    """`add_image()` ignores a colormap's alpha channel; write it into the
+    texture directly instead (e.g. so zero-valued stim stays transparent)."""
+    image_graphic._material.map.texture.data[:] = cmap(  # type: ignore[operator]
+        np.linspace(0, 255, 256, dtype=int)
+    ).astype(np.float32)
+    image_graphic._material.map.texture.update_range((0, 0, 0), size=(256, 1, 1))
+
+
 class StimWidget(TimeseriesWidget):
     """A widget that displays a StimArray stimuli timeseries for neurons.
 
@@ -97,14 +106,6 @@ class StimWidget(TimeseriesWidget):
             z_offset=z_offset,
         )
 
-    @staticmethod
-    def _apply_cmap_alpha(image_graphic: fpl.ImageGraphic, cmap: object) -> None:
-        # set the graphic material texture colormap values directly, as add_image ignores any alpha values
-        image_graphic._material.map.texture.data[:] = cmap(  # type: ignore[operator]
-            np.linspace(0, 255, 256, dtype=int)
-        ).astype(np.float32)
-        image_graphic._material.map.texture.update_range((0, 0, 0), size=(256, 1, 1))
-
     def set_data(self, stim_array: StimArray | None = None) -> None:
         self.clear_data()
         if stim_array is None:
@@ -128,7 +129,7 @@ class StimWidget(TimeseriesWidget):
         )
         # respect the colormap alpha so zero-valued stim is transparent (otherwise it
         # is drawn as opaque white, hiding the reduced-opacity background stims)
-        self._apply_cmap_alpha(self.graphic, cmap)
+        apply_cmap_alpha(self.graphic, cmap)
         self._configure_time_scaled_image(self.graphic)
         self.minimum_size_graphic = self._add_minimum_size_graphic(
             stim_array.values, self.dt_ms, self.stim_type
@@ -171,7 +172,7 @@ class StimWidget(TimeseriesWidget):
             vmax=self.vmax,
             cmap=cmap,
         )
-        self._apply_cmap_alpha(self.graphic, cmap)
+        apply_cmap_alpha(self.graphic, cmap)
         self._configure_time_scaled_image(self.graphic)
         if self.minimum_size_graphic is not None:
             self.subplot.remove_graphic(self.minimum_size_graphic)
@@ -255,7 +256,7 @@ class StimWidget(TimeseriesWidget):
             image_graphic,
             dt_ms=float(stim_array.dt) * 1000.0,
         )
-        self._apply_cmap_alpha(image_graphic, cmap)
+        apply_cmap_alpha(image_graphic, cmap)
         image_graphic.visible = self.show_background_graphics
         self.background_graphics.append(image_graphic)
         minimum_graphic = self._add_minimum_size_graphic(

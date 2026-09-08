@@ -686,6 +686,7 @@ def test_selecting_smaller_stim_refocuses_y_view() -> None:
         set_draw_mode=lambda mode: None,
         _stim_values_updated=lambda: None,
         _current_stim_dt_seconds=lambda: 0.001,
+        current_stim_changed=SimpleNamespace(emit=lambda stim_array: None),
     )
 
     StimEditor.select_stim(fake_editor, "single")  # type: ignore[arg-type]

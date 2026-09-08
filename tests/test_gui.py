@@ -750,6 +750,97 @@ def test_clicking_neuron_in_spatial_footprint_greys_trace_and_stim_rows(
     gui.close()
 
 
+def _stim_trace_overlay_project() -> tuple[Project, TraceData]:
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "stim",
+            StimType.Excitation,
+            np.zeros((10, 3), dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+    trace_data = TraceData(
+        name="traces",
+        traces=np.zeros((3, 10), dtype=np.float32),
+        indices=np.arange(3, dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    project.add_experiment(
+        Experiment(
+            name="Experiment",
+            duration=0.01,
+            timepoints=[0.01],
+            data=[trace_data],
+        )
+    )
+    return project, trace_data
+
+
+def test_toggle_stim_trace_overlay_shows_and_hides_stim_panel(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project, _ = _stim_trace_overlay_project()
+    gui.update_project(project)
+    gui._apply_trace_selection("Experiment :: traces")
+
+    assert gui.trace_widget._stim_overlay_graphic is None
+    assert gui.stim_editor.isVisible()
+
+    gui.action_overlay_stim_on_traces.trigger()
+
+    assert gui.trace_widget._stim_overlay_enabled
+    assert gui.trace_widget._stim_overlay_graphic is not None
+    assert not gui.stim_editor.isVisible()
+
+    gui.action_overlay_stim_on_traces.trigger()
+
+    assert not gui.trace_widget._stim_overlay_enabled
+    assert gui.trace_widget._stim_overlay_graphic is None
+    assert gui.stim_editor.isVisible()
+    gui.close()
+
+
+def test_toggle_stim_trace_overlay_respects_manually_hidden_stim_panel(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project, _ = _stim_trace_overlay_project()
+    gui.update_project(project)
+    gui._apply_trace_selection("Experiment :: traces")
+    gui._view_actions[gui.stim_editor].trigger()
+    assert not gui.stim_editor.isVisible()
+
+    gui.action_overlay_stim_on_traces.trigger()
+    assert not gui.stim_editor.isVisible()  # already hidden, unaffected
+
+    gui.action_overlay_stim_on_traces.trigger()
+    assert not gui.stim_editor.isVisible()  # stays hidden, as it was before overlay
+    gui.close()
+
+
+def test_stim_trace_overlay_updates_when_selected_stim_changes(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project, _ = _stim_trace_overlay_project()
+    other_values = np.full((10, 3), 5.0, dtype=np.float32)
+    project.add_stim_array(
+        StimArray("stim2", StimType.Excitation, other_values, "mV", 0.001)
+    )
+    gui.update_project(project)
+    gui._apply_trace_selection("Experiment :: traces")
+    gui.action_overlay_stim_on_traces.trigger()
+    assert gui.trace_widget._stim_overlay_array is project.stim_arrays["stim"]
+
+    gui.cmb_stim.setCurrentText("stim2")
+
+    assert gui.trace_widget._stim_overlay_array is project.stim_arrays["stim2"]
+    gui.close()
+
+
 def test_import_cellpose_data_populates_and_shows_spatial_footprint_panel(
     qtbot: QtBot,
     monkeypatch: MonkeyPatch,
