@@ -935,7 +935,7 @@ class StimEditor(QtWidgets.QWidget):
     def _is_valid_slice(self, neuron_slice: slice, time_slice: slice) -> bool:
         return (
             neuron_slice.start >= 0
-            and neuron_slice.stop <= self.stim_widget.n_neurons
+            and neuron_slice.stop <= self.stim_widget.n_neurons_total
             and time_slice.start >= 0
             and time_slice.stop <= self.stim_widget.n_timestamps
         )

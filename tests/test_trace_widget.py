@@ -8,6 +8,7 @@ from qtpy import QtWidgets
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import TraceData
+from neuroseq.region_of_interest import RegionOfInterest
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim_widget import StimWidget
 from neuroseq.trace_widget import TraceNormDialog
@@ -206,15 +207,19 @@ def test_trace_widget_indices(qtbot: QtBot) -> None:
     trace_widget.set_data(data)
     assert trace_widget.graphic is not None
     for i, line in enumerate(trace_widget.graphic.graphics):
-        idx = data.indices[i]
-        assert line.offset[1] == pytest.approx(idx)
+        idx = int(data.indices[i])
+        assert line.offset[1] == pytest.approx(
+            trace_widget._neuron_id_to_display_row[idx]
+        )
         assert np.allclose(line.colors, colormap[data.indices[i]])
     # now set same data with same indices in a different order
     data.indices = np.array([15, 6, 11, 1, 0], dtype=np.uint32)
     trace_widget.set_data(data)
     for i, line in enumerate(trace_widget.graphic.graphics):
-        idx = data.indices[i]
-        assert line.offset[1] == pytest.approx(idx)
+        idx = int(data.indices[i])
+        assert line.offset[1] == pytest.approx(
+            trace_widget._neuron_id_to_display_row[idx]
+        )
         assert np.allclose(line.colors, colormap[data.indices[i]])
 
 
@@ -256,9 +261,43 @@ def test_trace_widget_set_neuron_greyed_adds_and_removes_overlay(
     trace_widget.set_neuron_greyed(2, True)
     assert trace_widget.is_neuron_greyed(2)
     trace_widget.set_neuron_greyed(2, True)
-    assert len(trace_widget._greyed_neuron_overlays) == 1
+    assert trace_widget._greyed_neuron_ids == {2}
     trace_widget.set_neuron_greyed(2, False)
     assert not trace_widget.is_neuron_greyed(2)
+    trace_widget.close()
+
+
+def test_trace_widget_greying_hides_and_compacts_lines(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    data = make_trace_data(n_neurons=3, n_timestamps=10)
+    original_traces = data.traces.copy()
+    trace_widget.set_data(data)
+    assert trace_widget.graphic is not None
+    assert isinstance(trace_widget.data, TraceData)
+
+    trace_widget.set_neuron_greyed(1, True)
+
+    lines = trace_widget.graphic.graphics
+    assert lines[0].visible
+    assert lines[0].offset[1] == pytest.approx(0)
+    assert not lines[1].visible
+    assert lines[2].visible
+    assert lines[2].offset[1] == pytest.approx(1)  # moved up to fill the gap
+    assert trace_widget.n_neurons == 2
+    assert trace_widget.n_neurons_total == 3
+    # underlying data is untouched
+    assert np.allclose(trace_widget.data.traces, original_traces)
+
+    trace_widget.set_neuron_greyed(1, False)
+    assert lines[1].visible
+    assert lines[1].offset[1] == pytest.approx(1)
+    assert lines[2].offset[1] == pytest.approx(2)  # restored to its original slot
+    assert trace_widget.n_neurons == 3
     trace_widget.close()
 
 
@@ -577,3 +616,43 @@ def test_trace_widget_x_lock_allows_independent_and_linked_scrolling(
 
     trace_widget.close()
     default_trace_widget.close()
+
+
+def test_region_of_interest_select_slice_label_uses_override_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    roi = RegionOfInterest(fill_color=(0.5, 0.5, 0.5, 0.2))
+    captured: list[str] = []
+    monkeypatch.setattr(roi.text, "set_text", captured.append)
+
+    roi.select_slice(slice(1, 3), slice(10, 20), dt_ms=1.0, label_neuron_range=(5, 8))
+
+    assert captured == ["Neurons 5-7\n10ms-20ms"]
+
+
+def test_region_of_interest_select_slice_label_falls_back_to_slice_bounds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    roi = RegionOfInterest(fill_color=(0.5, 0.5, 0.5, 0.2))
+    captured: list[str] = []
+    monkeypatch.setattr(roi.text, "set_text", captured.append)
+
+    roi.select_slice(slice(1, 3), slice(10, 20), dt_ms=1.0)
+
+    assert captured == ["Neurons 1-2\n10ms-20ms"]
+
+
+def test_trace_widget_select_neurons_translates_display_rows_when_greyed(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=5, n_timestamps=10))
+    trace_widget.set_neuron_greyed(1, True)
+
+    # display rows 1-2 now correspond to real neurons 2-3
+    trace_widget.select_neurons(slice(1, 3), slice(0, 5))
+
+    assert trace_widget.selected_neuron_slice == slice(2, 4)

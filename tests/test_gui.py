@@ -668,16 +668,30 @@ def test_clicking_neuron_in_spatial_footprint_greys_trace_and_stim_rows(
 
     gui.update_project(project)
     gui._apply_trace_selection("Experiment :: traces")
+    original_traces = trace_data.traces.copy()
+    original_stim_values = project.stim_arrays["stim"].values.copy()
 
     gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(2)
 
     assert gui.trace_widget.is_neuron_greyed(0)
     assert gui.stim_editor.stim_widget.is_neuron_greyed(0)
+    # the greyed row is actually hidden, and the remaining rows compact
+    assert gui.trace_widget.n_neurons == 2
+    assert gui.stim_editor.stim_widget.n_neurons == 2
+    assert gui.trace_widget.graphic is not None
+    assert not gui.trace_widget.graphic.graphics[0].visible
+    # underlying project data is never touched by hiding
+    reloaded_trace_data = project.experiments["Experiment"].data[0]
+    assert isinstance(reloaded_trace_data, TraceData)
+    assert np.allclose(reloaded_trace_data.traces, original_traces)
+    assert np.allclose(project.stim_arrays["stim"].values, original_stim_values)
 
     gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(2)
 
     assert not gui.trace_widget.is_neuron_greyed(0)
     assert not gui.stim_editor.stim_widget.is_neuron_greyed(0)
+    assert gui.trace_widget.n_neurons == 3
+    assert gui.stim_editor.stim_widget.n_neurons == 3
     gui.close()
 
 

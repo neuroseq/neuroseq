@@ -232,7 +232,8 @@ class TraceWidget(TimeseriesWidget):
         self.data_values = data.traces.T
         self.data_values_scale = 1000.0
         self.units = data.units if data.units else "mV"
-        self.n_neurons = np.max(data.indices) + 1
+        self._all_neuron_ids = sorted({int(i) for i in data.indices})
+        self._rebuild_visible_neuron_mapping()
         self.dt_ms = float(data.dt) * 1000.0  # convert to milliseconds
         self.n_timestamps = data.traces.shape[1]
         # convert timestamps to milliseconds and stack to produce a format suitable for line_stack
@@ -251,7 +252,16 @@ class TraceWidget(TimeseriesWidget):
             uniform_colors=True,
             thickness=2,
         )
-        for i, line in enumerate(self.graphic.graphics):
-            line.offset = (line.offset[0], self.data.indices[i], line.offset[2])
+        self._apply_visible_neuron_layout()
         self._update_line_thickness()
         self.post_set_data()
+
+    def _apply_visible_neuron_layout(self) -> None:
+        if self.graphic is None or not isinstance(self.data, TraceData):
+            return
+        for i, line in enumerate(self.graphic.graphics):
+            real_id = int(self.data.indices[i])
+            display_row = self._neuron_id_to_display_row.get(real_id)
+            line.visible = display_row is not None
+            if display_row is not None:
+                line.offset = (line.offset[0], display_row, line.offset[2])

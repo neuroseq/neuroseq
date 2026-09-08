@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 from pytestqt.qtbot import QtBot
@@ -258,7 +260,7 @@ def test_stim_widget_set_neuron_greyed_adds_and_removes_overlay(
     stim_widget.set_neuron_greyed(2, True)
     assert stim_widget.is_neuron_greyed(2)
     stim_widget.set_neuron_greyed(2, True)
-    assert len(stim_widget._greyed_neuron_overlays) == 1
+    assert stim_widget._greyed_neuron_ids == {2}
     stim_widget.set_neuron_greyed(2, False)
     assert not stim_widget.is_neuron_greyed(2)
     stim_widget.close()
@@ -277,6 +279,65 @@ def test_stim_widget_clear_data_clears_greyed_neurons(
     stim_widget.set_data(positive_stims)
 
     assert not stim_widget.is_neuron_greyed(1)
+    stim_widget.close()
+
+
+def test_stim_widget_greying_hides_and_compacts_rows(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    values = np.zeros((5, 3))  # (n_timestamps, n_neurons)
+    values[:, 0] = 0.1
+    values[:, 1] = 0.5
+    values[:, 2] = 0.9
+    stim_array = StimArray("", StimType.Excitation, values, "mV", dt=0.001)
+    original_values = stim_array.values.copy()
+    stim_widget.set_data(stim_array)
+    assert stim_widget.graphic is not None
+    assert stim_widget.data_values is not None
+
+    stim_widget.set_neuron_greyed(1, True)
+
+    rendered = np.asarray(stim_widget.graphic.data.value)
+    assert np.allclose(rendered[0, :], 0.1)
+    assert np.allclose(rendered[1, :], 0.9)  # neuron 2 shifted up to fill the gap
+    assert np.allclose(rendered[2, :], 0.0)  # trailing row zeroed (renders transparent)
+    assert stim_widget.n_neurons == 2
+    assert stim_widget.n_neurons_total == 3
+    assert np.allclose(stim_widget.data_values, original_values)  # untouched
+
+    stim_widget.set_neuron_greyed(1, False)
+    rendered = np.asarray(stim_widget.graphic.data.value)
+    assert np.allclose(rendered[0, :], 0.1)
+    assert np.allclose(rendered[1, :], 0.5)
+    assert np.allclose(rendered[2, :], 0.9)
+    assert stim_widget.n_neurons == 3
+    stim_widget.close()
+
+
+def test_stim_widget_draw_mode_translates_display_row_to_real_neuron_when_greyed(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    values = np.zeros((5, 3))
+    stim_array = StimArray("", StimType.Excitation, values, "mV", dt=0.001)
+    stim_widget.set_data(stim_array)
+    stim_widget.set_neuron_greyed(1, True)
+    stim_widget.set_mode(InteractMode.DRAW)
+
+    # display row 1 now corresponds to real neuron 2, since real neuron 1 is hidden
+    monkeypatch.setattr(
+        stim_widget.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([0.0, 1.0, 0.0]),
+    )
+    with qtbot.waitSignal(stim_widget.mouse_dragged) as blocker:
+        stim_widget.pointer_down(SimpleNamespace(button=1))
+
+    assert blocker.args[0] == 2
+    assert blocker.args[1] == 2
     stim_widget.close()
 
 
@@ -362,6 +423,24 @@ def test_stim_widget_hover_preview_snaps_to_sample_on_pointer_move(
     assert stim_widget.hover_slice_graphic.offset[1] == pytest.approx(2.0)
     stim_widget.close()
     qtbot.waitUntil(lambda: not stim_widget.isVisible())
+
+
+def test_stim_widget_select_neurons_translates_display_rows_when_greyed(
+    qtbot: QtBot, positive_stims: StimArray
+) -> None:
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    stim_widget.set_data(positive_stims)
+    stim_widget.set_neuron_greyed(1, True)
+    assert stim_widget.n_neurons == 19
+
+    # display rows 1-2 now correspond to real neurons 2-3, since real neuron 1
+    # is hidden and neuron 2 shifted up to display row 1.
+    stim_widget.select_neurons(slice(1, 3), slice(10, 20))
+
+    assert stim_widget.selected_neuron_slice == slice(2, 4)
+    stim_widget.close()
 
 
 def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: StimArray) -> None:

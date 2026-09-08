@@ -133,9 +133,32 @@ class StimWidget(TimeseriesWidget):
         self.minimum_size_graphic = self._add_minimum_size_graphic(
             stim_array.values, self.dt_ms, self.stim_type
         )
-        self.n_neurons = stim_array.values.shape[1]
+        self._all_neuron_ids = list(range(stim_array.values.shape[1]))
+        self._rebuild_visible_neuron_mapping()
         self.n_timestamps = stim_array.values.shape[0]
         self.post_set_data()
+
+    def _compacted_values(self) -> np.ndarray:
+        """The full-shape data array with visible neurons' columns moved to their
+        compacted display position and any remainder zero-filled (renders
+        transparent). The real, untouched data lives in self.data_values."""
+        assert self.data_values is not None
+        compacted = np.zeros_like(self.data_values)
+        for display_row, real_id in enumerate(self._visible_neuron_ids):
+            compacted[:, display_row] = self.data_values[:, real_id]
+        return compacted
+
+    def _apply_visible_neuron_layout(self) -> None:
+        if self.graphic is None or self.data_values is None:
+            return
+        compacted = self._compacted_values()
+        self.graphic.data[:] = compacted.T
+        if self.minimum_size_graphic is not None:
+            self.subplot.remove_graphic(self.minimum_size_graphic)
+            self.minimum_size_graphic = None
+        self.minimum_size_graphic = self._add_minimum_size_graphic(
+            compacted, self.dt_ms, self.stim_type
+        )
 
     def post_set_data(self):
         super().post_set_data()
@@ -254,18 +277,38 @@ class StimWidget(TimeseriesWidget):
                 self.vmin = -self.vmax
                 self.graphic.vmin = self.vmin
 
+    def _real_slice_to_display_slice(self, real_slice: slice) -> slice | None:
+        """Translate a slice of real neuron ids into the (contiguous) slice of
+        display rows they currently occupy, or None if any of them is hidden or
+        the resulting rows aren't contiguous (shouldn't happen for the
+        single-neuron slices live stim editing always uses)."""
+        display_rows = []
+        for real_id in range(real_slice.start, real_slice.stop):
+            row = self._neuron_id_to_display_row.get(real_id)
+            if row is None:
+                return None
+            display_rows.append(row)
+        if not display_rows:
+            return slice(0, 0)
+        if display_rows != list(range(display_rows[0], display_rows[-1] + 1)):
+            return None
+        return slice(display_rows[0], display_rows[-1] + 1)
+
     def update_data_slice(
         self, neuron_slice: slice, time_slice: slice, values: np.ndarray | float
     ) -> None:
         """Update a slice of the existing data in the widget.
 
         Values can be a 2d array matching the shape of the slice defined by neuron_slice and time_slice,
-        or a single float value to set the entire slice to.
+        or a single float value to set the entire slice to. ``neuron_slice`` is expressed
+        in real neuron ids; it's translated to the current display row(s) before touching
+        the texture, since hidden (greyed) neurons compact the displayed rows.
         """
         texture_values = values.T if isinstance(values, np.ndarray) else values
-        if self.graphic is not None:
+        display_slice = self._real_slice_to_display_slice(neuron_slice)
+        if self.graphic is not None and display_slice is not None:
             # directly update the relevant data in the graphic's texture
-            self.graphic.data[neuron_slice, time_slice] = texture_values
+            self.graphic.data[display_slice, time_slice] = texture_values
             self.autoscale_colormap()
             # Rebuilding the screen-size overlay scans the whole array and
             # recreates a scatter graphic. Skip that while the overlay is hidden
@@ -277,7 +320,7 @@ class StimWidget(TimeseriesWidget):
                     self.minimum_size_graphic = None
                 if self.data_values is not None:
                     self.minimum_size_graphic = self._add_minimum_size_graphic(
-                        self.data_values, self.dt_ms, self.stim_type
+                        self._compacted_values(), self.dt_ms, self.stim_type
                     )
 
     def set_hover_slice(self, data: np.ndarray | None) -> None:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import logging
 import math
 
@@ -49,8 +48,6 @@ class TimeseriesWidget(FPLWidget):
     )  # data, analysis type, new window, neuron slice, time slice
     escape_pressed = QtCore.Signal()
 
-    GREYED_NEURON_Z = 250.0
-    GREYED_NEURON_FILL_COLOR = (0.5, 0.5, 0.5, 0.75)
     SUPPORTS_DETACH = True
 
     def __init__(
@@ -86,7 +83,10 @@ class TimeseriesWidget(FPLWidget):
         self.show_background_graphics = True
         self.mode = InteractMode.SELECT
         self.roi = RegionOfInterest(fill_color=(0.5, 0.5, 0.5, 0.2))
-        self._greyed_neuron_overlays: dict[int, RegionOfInterest] = {}
+        self._greyed_neuron_ids: set[int] = set()
+        self._all_neuron_ids: list[int] = []
+        self._visible_neuron_ids: list[int] = []
+        self._neuron_id_to_display_row: dict[int, int] = {}
         self.hover_slice_graphic: fpl.Graphic | None = None
         self.text = Text()
         self.show_text = True
@@ -114,6 +114,7 @@ class TimeseriesWidget(FPLWidget):
         self.selected_time_slice: slice | None = None
         self.selected_neuron_slice: slice | None = None
         self.n_neurons = 0
+        self.n_neurons_total = 0
         self.dt_ms = 1.0
         self.n_timestamps = 0
         self.figure.renderer.add_event_handler(self.pointer_down, "pointer_down")
@@ -550,7 +551,9 @@ class TimeseriesWidget(FPLWidget):
         self.data_values_scale = 1.0
         self.units = ""
         self.grid_lines = None
+        self._all_neuron_ids = []
         self.n_neurons = 0
+        self.n_neurons_total = 0
         self.n_timestamps = 0
         self.dt_ms = 0.0
         self.unselect_neurons()
@@ -559,33 +562,49 @@ class TimeseriesWidget(FPLWidget):
     def closeEvent(self, event) -> None:
         super().closeEvent(event)
 
+    def _rebuild_visible_neuron_mapping(self) -> None:
+        self._visible_neuron_ids = sorted(
+            set(self._all_neuron_ids) - self._greyed_neuron_ids
+        )
+        self._neuron_id_to_display_row = {
+            neuron_id: row for row, neuron_id in enumerate(self._visible_neuron_ids)
+        }
+        self.n_neurons = len(self._visible_neuron_ids)
+        self.n_neurons_total = len(self._all_neuron_ids)
+
+    def _display_row_to_neuron_id(self, display_row: int) -> int | None:
+        if 0 <= display_row < len(self._visible_neuron_ids):
+            return self._visible_neuron_ids[display_row]
+        return None
+
+    def _apply_visible_neuron_layout(self) -> None:
+        """Subclasses override to reposition/hide/rewrite their graphics so only
+        currently-visible neurons are shown, compacted to fill the gaps left by
+        any greyed (hidden) ones."""
+
     def set_neuron_greyed(self, neuron_index: int, greyed: bool) -> None:
-        """Add or remove a persistent grey overlay over one neuron's row."""
-        existing = self._greyed_neuron_overlays.get(neuron_index)
-        if greyed and existing is None:
-            overlay = RegionOfInterest(fill_color=self.GREYED_NEURON_FILL_COLOR)
-            overlay.fill.world.z = self.GREYED_NEURON_Z
-            overlay.text.world.z = self.GREYED_NEURON_Z
-            overlay.text.set_text("")
-            max_time_ms = float(self.n_timestamps) * float(self.dt_ms)
-            if isinstance(self.controller, ConstrainedPanZoomController):
-                max_time_ms = max(max_time_ms, float(self.controller.max_width))
-            overlay.select(0.0, max_time_ms, neuron_index - 0.5, neuron_index + 0.5)
-            self.subplot.add_graphic(overlay, center=False)
-            self._greyed_neuron_overlays[neuron_index] = overlay
-        elif not greyed and existing is not None:
-            with contextlib.suppress(Exception):
-                self.subplot.remove_graphic(existing)
-            del self._greyed_neuron_overlays[neuron_index]
+        """Hide (or restore) one neuron's row, compacting the remaining visible
+        rows to fill the gap. The underlying data is never touched."""
+        if greyed:
+            if neuron_index in self._greyed_neuron_ids:
+                return
+            self._greyed_neuron_ids.add(neuron_index)
+        else:
+            if neuron_index not in self._greyed_neuron_ids:
+                return
+            self._greyed_neuron_ids.discard(neuron_index)
+        self._rebuild_visible_neuron_mapping()
+        self._apply_visible_neuron_layout()
 
     def is_neuron_greyed(self, neuron_index: int) -> bool:
-        return neuron_index in self._greyed_neuron_overlays
+        return neuron_index in self._greyed_neuron_ids
 
     def clear_greyed_neurons(self) -> None:
-        for overlay in self._greyed_neuron_overlays.values():
-            with contextlib.suppress(Exception):
-                self.subplot.remove_graphic(overlay)
-        self._greyed_neuron_overlays.clear()
+        if not self._greyed_neuron_ids:
+            return
+        self._greyed_neuron_ids.clear()
+        self._rebuild_visible_neuron_mapping()
+        self._apply_visible_neuron_layout()
 
     def set_time_ms(self, time_ms: int) -> None:
         self.timeline.t = time_ms
@@ -602,8 +621,12 @@ class TimeseriesWidget(FPLWidget):
             self.roi.visible = True
             self.selection_in_progress = True
         elif self.mode == InteractMode.DRAW:
+            display_row = math.floor(self.mouse_pos[1] + 0.5)
+            neuron_id = self._display_row_to_neuron_id(display_row)
+            if neuron_id is None:
+                return
             self.mouse_drag_time_index = math.floor(self.mouse_pos[0] / self.dt_ms)
-            self.mouse_drag_neuron_index = math.floor(self.mouse_pos[1] + 0.5)
+            self.mouse_drag_neuron_index = neuron_id
             self.mouse_dragged.emit(
                 self.mouse_drag_neuron_index,
                 self.mouse_drag_neuron_index,
@@ -638,19 +661,20 @@ class TimeseriesWidget(FPLWidget):
         self.logger.debug(f"pointer_move at {self.mouse_pos} in mode {self.mode}")
         self.text.visible = self.show_text
         hover_value_text = ""
-        if self.data_values is not None:
+        if self.data_values is not None and self._visible_neuron_ids:
             time_index = np.clip(
                 math.floor(self.mouse_pos[0] / self.dt_ms),
                 0,
                 self.data_values.shape[0] - 1,
             )
-            neuron_index = np.clip(
-                math.floor(self.mouse_pos[1] + 0.5), 0, self.data_values.shape[1] - 1
+            display_row = np.clip(
+                math.floor(self.mouse_pos[1] + 0.5), 0, self.n_neurons - 1
             )
+            neuron_id = self._visible_neuron_ids[int(display_row)]
             hover_value = (
-                self.data_values[time_index, neuron_index] * self.data_values_scale
+                self.data_values[time_index, neuron_id] * self.data_values_scale
             )
-            hover_value_text = f"{hover_value:.3g} {self.units}"
+            hover_value_text = f"#{neuron_id} {hover_value:.3g} {self.units}"
         self.text.set_pos(self.mouse_pos, hover_value_text)
         if self.hover_slice_graphic is not None:
             self.hover_slice_graphic.visible = True
@@ -670,7 +694,10 @@ class TimeseriesWidget(FPLWidget):
             return
         elif self.mode == InteractMode.DRAW:
             drag_time_index = math.floor(self.mouse_pos[0] / self.dt_ms)
-            drag_neuron_index = math.floor(self.mouse_pos[1] + 0.5)
+            drag_display_row = math.floor(self.mouse_pos[1] + 0.5)
+            drag_neuron_index = self._display_row_to_neuron_id(drag_display_row)
+            if drag_neuron_index is None:
+                return
             if (
                 drag_time_index != self.mouse_drag_time_index
                 or drag_neuron_index != self.mouse_drag_neuron_index
@@ -727,12 +754,31 @@ class TimeseriesWidget(FPLWidget):
         self.roi.visible = False
         self.selection_in_progress = False
 
+    def _display_slice_to_real_range(self, display_slice: slice) -> tuple[int, int]:
+        """Translate a display-row slice (as produced by mouse-driven selection)
+        into the smallest-to-largest real neuron id span it touches. Real ids are
+        not necessarily contiguous once neurons are hidden/compacted, so this is
+        an approximation - a real id that falls inside the span but is itself
+        hidden gets included too."""
+        if not self._visible_neuron_ids:
+            return (0, 0)
+        start_row = max(0, display_slice.start or 0)
+        stop_row = min(
+            len(self._visible_neuron_ids),
+            display_slice.stop
+            if display_slice.stop is not None
+            else len(self._visible_neuron_ids),
+        )
+        if stop_row <= start_row:
+            return (0, 0)
+        real_ids_in_range = self._visible_neuron_ids[start_row:stop_row]
+        return (real_ids_in_range[0], real_ids_in_range[-1] + 1)
+
     def select_neurons(
         self,
         neuron_index_slice: slice | None = None,
         time_index_slice: slice | None = None,
     ) -> None:
-        pass
         if neuron_index_slice is None:
             neuron_index_slice = slice(0, self.n_neurons)
         if time_index_slice is None:
@@ -741,10 +787,16 @@ class TimeseriesWidget(FPLWidget):
             neuron_index_slice = slice(neuron_index_slice.start, self.n_neurons)
         if time_index_slice.stop is None:
             time_index_slice = slice(time_index_slice.start, self.n_timestamps)
+        real_start, real_stop = self._display_slice_to_real_range(neuron_index_slice)
         self.roi.visible = True
-        self.roi.select_slice(neuron_index_slice, time_index_slice, self.dt_ms)
+        self.roi.select_slice(
+            neuron_index_slice,
+            time_index_slice,
+            self.dt_ms,
+            label_neuron_range=(real_start, real_stop),
+        )
         self.selected_time_slice = time_index_slice
-        self.selected_neuron_slice = neuron_index_slice
+        self.selected_neuron_slice = slice(real_start, real_stop)
         self.logger.debug(
-            f"Selecting neurons {neuron_index_slice} and times {time_index_slice}"
+            f"Selecting neurons {self.selected_neuron_slice} (display {neuron_index_slice}) and times {time_index_slice}"
         )

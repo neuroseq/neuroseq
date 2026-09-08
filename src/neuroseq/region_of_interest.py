@@ -37,12 +37,21 @@ class RegionOfInterest(Graphic):
         self.fill.geometry.positions.update_range()
 
     def select_slice(
-        self, neuron_index_slice: slice, time_index_slice: slice, dt_ms: float
+        self,
+        neuron_index_slice: slice,
+        time_index_slice: slice,
+        dt_ms: float,
+        label_neuron_range: tuple[int, int] | None = None,
     ):
+        label_start, label_stop = (
+            label_neuron_range
+            if label_neuron_range is not None
+            else (neuron_index_slice.start, neuron_index_slice.stop)
+        )
         neuron_text = (
-            f"Neurons {neuron_index_slice.start}-{neuron_index_slice.stop - 1}"
-            if neuron_index_slice.stop > neuron_index_slice.start + 1
-            else f"Neuron {neuron_index_slice.start}"
+            f"Neurons {label_start}-{label_stop - 1}"
+            if label_stop > label_start + 1
+            else f"Neuron {label_start}"
         )
         self.text.set_text(
             f"{neuron_text}\n"
