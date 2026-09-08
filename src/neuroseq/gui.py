@@ -55,6 +55,7 @@ from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
 from neuroseq.project import Project
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
+from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.save_load_options import SaveLoadOptionsDialog
 from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
 from neuroseq.spike_widget import SpikeWidget
@@ -818,8 +819,21 @@ class Gui(QtWidgets.QMainWindow):
     def btn_save_clicked(self) -> None:
         self._save_project()
 
-    def _save_project(self, on_success: Callable[[object], None] | None = None) -> bool:
+    def btn_save_as_clicked(self) -> None:
+        self._save_project(force_dialog=True)
+
+    def _save_project(
+        self,
+        on_success: Callable[[object], None] | None = None,
+        force_dialog: bool = False,
+    ) -> bool:
         """Run the interactive save flow.
+
+        If the project already has a file path and ``force_dialog`` is False
+        (a plain "Save"), it is written straight back to that path with no
+        prompts, including everything the archive supports. Otherwise (a
+        "Save As", or a first-ever save with no existing path) this shows
+        the options dialog followed by a file picker.
 
         Returns True if a save task was dispatched, False if the user cancelled
         at the options or file dialog (or a file operation is already running).
@@ -834,23 +848,28 @@ class Gui(QtWidgets.QMainWindow):
                 "A file operation is already in progress.",
             )
             return False
-        options_dialog = SaveLoadOptionsDialog(action="Save")
-        if not options_dialog.exec():
-            return False
-        filename, _ = getsavefilename(
-            self,
-            "Save project",
-            str(self.project.filepath) if self.project.filepath else "project.nseq",
-            "neuroseq project (*.nseq)",
-        )
-        if filename == "":
-            return False
-        filename = pathlib.Path(filename)
-        if filename.suffix != ".nseq":
-            filename = filename.with_suffix(".nseq")
+
+        if not force_dialog and self.project.filepath is not None:
+            filename = self.project.filepath
+            options = SaveLoadOptions(True, True, True, True)
+        else:
+            options_dialog = SaveLoadOptionsDialog(action="Save")
+            if not options_dialog.exec():
+                return False
+            picked_filename, _ = getsavefilename(
+                self,
+                "Save project",
+                str(self.project.filepath) if self.project.filepath else "project.nseq",
+                "neuroseq project (*.nseq)",
+            )
+            if picked_filename == "":
+                return False
+            filename = pathlib.Path(picked_filename)
+            if filename.suffix != ".nseq":
+                filename = filename.with_suffix(".nseq")
+            options = options_dialog.options
 
         project = self.project
-        options = options_dialog.options
 
         def _save_task(report: Callable[[int], None]) -> pathlib.Path:
             # project.save has no native progress callback; bracket it with
@@ -2646,6 +2665,13 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             shortcut="Ctrl+S",
             icon="mdi6.content-save",
+        )
+        add_action(
+            "Save Project &As...",
+            self.btn_save_as_clicked,
+            menu,
+            None,
+            icon="mdi6.content-save-edit",
         )
 
         import_data_menu = menu.addMenu("&Import data")

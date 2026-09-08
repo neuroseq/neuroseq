@@ -1426,6 +1426,81 @@ def test_gui_save(
     gui.close()
 
 
+def test_gui_save_quick_save_skips_dialogs_when_filepath_set(
+    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, project_ornstein: Project
+) -> None:
+    """Once a project has a file path, plain Save (Ctrl+S) writes straight
+    back to it without showing the options or file-picker dialogs."""
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    gui.update_project(project_ornstein)
+    qtbot.wait(delay_after_update_model_call_in_ms)
+
+    filename = tmp_path / "existing.nseq"
+    gui.project.save(filename, SaveLoadOptions(True, True, True, True))
+    gui.project.filepath = filename
+    assert filename.exists()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("dialog should not be shown for a quick save")
+
+    monkeypatch.setattr(neuroseq.gui, "SaveLoadOptionsDialog", _fail_if_called)
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", _fail_if_called)
+
+    gui.btn_save_clicked()
+    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
+    assert gui.project.filepath == filename
+    gui.close()
+
+
+def test_gui_save_as_always_shows_dialog_even_with_existing_filepath(
+    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, project_ornstein: Project
+) -> None:
+    """Save As always prompts for options and a destination, even for a
+    project that already has a file path."""
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    gui.update_project(project_ornstein)
+    qtbot.wait(delay_after_update_model_call_in_ms)
+
+    original_filename = tmp_path / "existing.nseq"
+    gui.project.save(original_filename, SaveLoadOptions(True, True, True, True))
+    gui.project.filepath = original_filename
+
+    new_filename_without_extension = tmp_path / "saved_as"
+    new_filename = new_filename_without_extension.with_suffix(".nseq")
+    assert not new_filename.exists()
+
+    MockSaveLoadOptionsDialog.options.include_stim_arrays = True
+    MockSaveLoadOptionsDialog.options.include_model = True
+    MockSaveLoadOptionsDialog.options.include_simulation_data = True
+    MockSaveLoadOptionsDialog.options.include_experimental_data = True
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "SaveLoadOptionsDialog",
+        MockSaveLoadOptionsDialog,
+    )
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getSaveFileName",
+        lambda *args: (f"{new_filename_without_extension}", True),
+    )
+
+    gui.btn_save_as_clicked()
+    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
+    assert new_filename.exists()
+    assert gui.project.filepath == new_filename
+    # the original file must be untouched by the Save As
+    assert original_filename.exists()
+    gui.close()
+
+
 def test_gui_import(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
