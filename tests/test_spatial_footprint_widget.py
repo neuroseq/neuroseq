@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import brian2.numpy_ as np
 from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 
+from neuroseq.aoi_shapes import square_world_corners
 from neuroseq.cell_overlay_widget import STRIPED_CELL_ALPHA
 from neuroseq.cell_overlay_widget import STRIPED_CELL_GREY
 from neuroseq.cell_overlay_widget import STRIPED_CELL_WHITE
 from neuroseq.cell_overlay_widget import CellOverlayWidget
 from neuroseq.cell_overlay_widget import OverlayView
+from neuroseq.importer_cellpose import AOIRole
+from neuroseq.importer_cellpose import AreasOfInterestConfig
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importer_cellpose import CircleAOI
+from neuroseq.importer_cellpose import SquareAOI
 from neuroseq.spatial_footprint_widget import SELECTION_OUTLINE_BLACK
 from neuroseq.spatial_footprint_widget import SELECTION_OUTLINE_RED
 from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
@@ -20,6 +26,7 @@ from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
 
 def _cellpose_result(
     mapping: dict[int, int] | None = None,
+    aoi_config: AreasOfInterestConfig | None = None,
 ) -> CellposeImportResult:
     segmentation = np.array(
         [
@@ -37,6 +44,7 @@ def _cellpose_result(
         spike_data=None,
         original_cellpose_ids=np.array([0, 1, 2], dtype=np.int32),
         stimulus_to_cellpose_mapping=mapping,
+        aoi_config=aoi_config,
     )
 
 
@@ -57,6 +65,54 @@ def test_set_data_populates_overlay_and_clears_on_none(qtbot: QtBot) -> None:
     assert widget.overlay_widget.segmentation is None
     assert not widget.empty_state_widget.isHidden()
     assert widget.overlay_widget.isHidden()
+    widget.close()
+
+
+def _aoi_config(show_shapes: bool = True) -> AreasOfInterestConfig:
+    return AreasOfInterestConfig(
+        square=SquareAOI(True, AOIRole.PREFERENTIAL, x=0.5, y=0.5, side=1.0),
+        circle=CircleAOI(True, AOIRole.EXCLUSION, cx=1.5, cy=1.5, diameter=1.0),
+        show_shapes=show_shapes,
+        coordinate_mode="pixels",
+    )
+
+
+def test_set_data_shows_persisted_aoi_shapes_as_a_read_only_reference(
+    qtbot: QtBot,
+) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+
+    widget.set_data(_cellpose_result(aoi_config=_aoi_config()))
+
+    overlay_view = widget.overlay_widget.overlay_view
+    assert overlay_view._aoi_config == _aoi_config()
+    assert overlay_view._aoi_visible
+    # shown for reference only - dragging must not be possible here (that's
+    # the Cell Segmentation import dialog's job)
+    assert not overlay_view.aoi_editable
+
+    widget.set_data(None)
+    assert overlay_view._aoi_config is None
+
+
+def test_set_data_hides_aoi_shapes_when_show_shapes_is_false(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+
+    widget.set_data(_cellpose_result(aoi_config=_aoi_config(show_shapes=False)))
+
+    assert not widget.overlay_widget.overlay_view._aoi_visible
+    widget.close()
+
+
+def test_set_data_with_no_aoi_config_shows_no_aoi_shapes(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+
+    widget.set_data(_cellpose_result())
+
+    assert widget.overlay_widget.overlay_view._aoi_config is None
     widget.close()
 
 
@@ -692,4 +748,33 @@ def test_overlay_view_ignores_background_click(
     qtbot.wait(10)
 
     assert emitted == []
+    overlay_view.close()
+
+
+def test_overlay_view_ignores_aoi_drag_when_not_editable(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    overlay_view = OverlayView()
+    qtbot.addWidget(overlay_view)
+    overlay_view.overlay_image = np.zeros((10, 10, 3), dtype=np.uint8)
+    config = _aoi_config()
+    overlay_view._aoi_config = config
+    overlay_view._aoi_visible = True
+    overlay_view.aoi_editable = False
+    corner = square_world_corners(config.square, overlay_view.overlay_image.shape[0])[0]
+    monkeypatch.setattr(
+        overlay_view.subplot,
+        "map_screen_to_world",
+        lambda ev: corner,
+    )
+
+    overlay_view._aoi_pointer_down(None)
+
+    assert overlay_view._drag_state is None
+
+    overlay_view.aoi_editable = True
+    overlay_view._aoi_pointer_down(SimpleNamespace(stop_propagation=lambda: None))
+
+    assert overlay_view._drag_state is not None
     overlay_view.close()

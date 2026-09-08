@@ -86,6 +86,10 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             show_stimulus_ids=True,
         )
         self.overlay_widget.set_cell_selection_enabled(True)
+        # AOI shapes are shown here purely as a reference of what produced the
+        # current mapping - editing them happens in the Cell Segmentation
+        # import dialog, not here.
+        self.overlay_widget.set_aoi_editable(False)
         self.overlay_widget.neuron_clicked.connect(self._on_neuron_clicked)
         self.overlay_widget.neuron_lasso_selected.connect(
             self._on_neuron_lasso_selected
@@ -112,6 +116,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             self.overlay_widget.set_empty_message("No cell spatial footprints loaded.")
             self.overlay_widget.setVisible(False)
             self.empty_state_widget.setVisible(True)
+            self.overlay_widget.set_aoi_overlay(None, show=False)
             return
 
         self.empty_state_widget.setVisible(False)
@@ -120,6 +125,10 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             cellpose_data.segmentation_array
         )
         self._refresh_overlay()
+        aoi_config = cellpose_data.aoi_config
+        self.overlay_widget.set_aoi_overlay(
+            aoi_config, show=bool(aoi_config is not None and aoi_config.show_shapes)
+        )
 
     def _refresh_overlay(self) -> None:
         if self._cellpose_data is None:

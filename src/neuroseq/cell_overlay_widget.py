@@ -145,6 +145,7 @@ class OverlayView(FullScreenFPLWidget):
         self._circle_line: LineGraphic | None = None
         self._circle_handles: list[ScatterGraphic] = []
         self._drag_state: _AOIDragState | None = None
+        self.aoi_editable = True
         self.enable_cell_selection = False
         self._cell_click_down_world: tuple[float, float] | None = None
         self.lasso_mode = False
@@ -716,6 +717,7 @@ class OverlayView(FullScreenFPLWidget):
             self._aoi_config is None
             or not self._aoi_visible
             or self.overlay_image is None
+            or not self.aoi_editable
         ):
             return
 
@@ -1321,6 +1323,11 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
 
     def set_lasso_mode_enabled(self, enabled: bool) -> None:
         self.overlay_view.lasso_mode = enabled
+
+    def set_aoi_editable(self, editable: bool) -> None:
+        """Whether the AOI square/circle (if shown) can be dragged to reshape
+        them, vs. displayed purely as a read-only reference."""
+        self.overlay_view.aoi_editable = editable
 
     def _compute_segementation_colors(
         self, segmentation: np.ndarray
