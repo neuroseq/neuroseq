@@ -2028,7 +2028,11 @@ class Gui(QtWidgets.QMainWindow):
         """Open dialog to run the Suite2p pipeline on raw 2-photon TIFFs."""
         from neuroseq.tif_import_dialog import TifImportDialog
 
-        dialog = TifImportDialog(self, cellpose_import=self.last_cellpose_import)
+        dialog = TifImportDialog(
+            self,
+            cellpose_import=self.last_cellpose_import,
+            stim_arrays=self.project.stim_arrays,
+        )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self._append_experimental_data(
                 Experiment(

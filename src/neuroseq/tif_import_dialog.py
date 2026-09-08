@@ -11,6 +11,7 @@ import logging
 import subprocess
 import sys
 from collections.abc import Callable
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 from typing import cast
@@ -30,6 +31,7 @@ from neuroseq.importer_suite2p import prepare_suite2p_spikes
 from neuroseq.importer_suite2p import prepare_suite2p_traces
 from neuroseq.importer_tif import TifPipelineParams
 from neuroseq.importer_tif import TifPipelineResult
+from neuroseq.stim import StimArray
 
 
 def _cellpose_result_to_masks(result: CellposeImportResult) -> npt.NDArray[Any]:
@@ -172,12 +174,14 @@ class _PipelineWorker(QtCore.QObject):
         masks: npt.NDArray[Any] | None,
         params: TifPipelineParams,
         pipeline: str = "suite2p",
+        stim_array: StimArray | None = None,
     ) -> None:
         super().__init__()
         self._tif_paths = tif_paths
         self._masks = masks
         self._params = params
         self._pipeline = pipeline
+        self._stim_array = stim_array
 
     @QtCore.Slot()
     def run(self) -> None:
@@ -202,7 +206,11 @@ class _PipelineWorker(QtCore.QObject):
                 if self._masks is None:
                     raise ValueError("ROI averaging requires Cellpose masks")
                 result = run_roi_average_pipeline(
-                    self._tif_paths, self._masks, self._params, progress=callback
+                    self._tif_paths,
+                    self._masks,
+                    self._params,
+                    progress=callback,
+                    stim_array=self._stim_array,
                 )
             else:
                 from neuroseq.importer_tif import run_suite2p_pipeline
@@ -292,6 +300,7 @@ class TifImportDialog(QtWidgets.QDialog):
         parent: QtWidgets.QWidget | None = None,
         *,
         cellpose_import: CellposeImportResult | None = None,
+        stim_arrays: Mapping[str, StimArray] | None = None,
     ) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
@@ -304,6 +313,7 @@ class TifImportDialog(QtWidgets.QDialog):
         self._seg_file_path: Path | None = None
         self._seg_file_background_image: npt.NDArray[Any] | None = None
         self._cellpose_import = cellpose_import
+        self._stim_arrays = dict(stim_arrays or {})
         self._pipeline_result: TifPipelineResult | None = None
         self.new_cellpose_result: CellposeImportResult | None = None
         self._propagate_new_segmentation: bool = False
@@ -440,6 +450,7 @@ class TifImportDialog(QtWidgets.QDialog):
         self._pipeline_combo = QtWidgets.QComboBox()
         self._pipeline_combo.addItem("Suite2p", "suite2p")
         self._pipeline_combo.addItem("Simply average from ROI", "roi_average")
+        self._pipeline_combo.setCurrentIndex(1)
         params_layout.addRow("Pipeline:", self._pipeline_combo)
 
         self._fs_spin = QtWidgets.QDoubleSpinBox()
@@ -496,6 +507,30 @@ class TifImportDialog(QtWidgets.QDialog):
         self._spike_threshold_spin.setValue(0.02)
         params_layout.addRow("Spike threshold:", self._spike_threshold_spin)
 
+        self._suppress_stimulation_artefact_checkbox = QtWidgets.QCheckBox(
+            "Stimulation artefact suppression"
+        )
+        self._suppress_stimulation_artefact_checkbox.setChecked(True)
+        self._suppress_stimulation_artefact_checkbox.setToolTip(
+            "Replace fluorescence in frames overlapping active stimulation with "
+            "the mean of the nearest clean values before and after the artefact."
+        )
+        params_layout.addRow(self._suppress_stimulation_artefact_checkbox)
+
+        self._stim_array_combo = QtWidgets.QComboBox()
+        for name, stim_array in self._stim_arrays.items():
+            self._stim_array_combo.addItem(name, stim_array)
+        params_layout.addRow("Stim array:", self._stim_array_combo)
+        has_stim_arrays = bool(self._stim_arrays)
+        self._suppress_stimulation_artefact_checkbox.setEnabled(has_stim_arrays)
+        if not has_stim_arrays:
+            self._suppress_stimulation_artefact_checkbox.setToolTip(
+                "No stimulation arrays are available in the current project."
+            )
+        self._suppress_stimulation_artefact_checkbox.toggled.connect(
+            self._update_pipeline_fields
+        )
+
         self._params_layout = params_layout
         self._suite2p_parameter_widgets = [
             self._tau_spin,
@@ -503,7 +538,7 @@ class TifImportDialog(QtWidgets.QDialog):
             self._spike_threshold_spin,
         ]
         self._auto_detect_parameter_widgets = [self._diameter_spin]
-        self._pipeline_combo.currentIndexChanged.connect(self._update_pipeline_fields)
+        self._pipeline_combo.currentIndexChanged.connect(self._on_pipeline_changed)
 
         content_layout.addWidget(params_group)
 
@@ -528,7 +563,7 @@ class TifImportDialog(QtWidgets.QDialog):
                 self._spike_threshold_spin,
             ]
         )
-        self._update_pipeline_fields()
+        self._on_pipeline_changed()
 
     def _install_wheel_scroll_passthrough(
         self, widgets: list[QtWidgets.QWidget]
@@ -569,6 +604,12 @@ class TifImportDialog(QtWidgets.QDialog):
 
     def _update_pipeline_fields(self) -> None:
         """Hide parameters unrelated to the active pipeline/mask source."""
+        auto_detect = self._auto_detect_radio.isChecked()
+        if auto_detect:
+            index = self._pipeline_combo.findData("suite2p")
+            if index >= 0:
+                self._pipeline_combo.setCurrentIndex(index)
+
         suite2p = self._pipeline_combo.currentData() == "suite2p"
         for widget in self._suite2p_parameter_widgets:
             widget.setVisible(suite2p)
@@ -576,18 +617,31 @@ class TifImportDialog(QtWidgets.QDialog):
             if label is not None:
                 label.setVisible(suite2p)
 
-        auto_detect = self._auto_detect_radio.isChecked()
         for widget in self._auto_detect_parameter_widgets:
             widget.setVisible(auto_detect)
             label = self._params_layout.labelForField(widget)
             if label is not None:
                 label.setVisible(auto_detect)
 
-        if auto_detect:
-            index = self._pipeline_combo.findData("suite2p")
-            if index >= 0:
-                self._pipeline_combo.setCurrentIndex(index)
         self._pipeline_combo.setEnabled(not auto_detect)
+
+        roi_average = not suite2p
+        self._suppress_stimulation_artefact_checkbox.setVisible(roi_average)
+        stim_label = self._params_layout.labelForField(self._stim_array_combo)
+        show_stim_array = (
+            roi_average
+            and self._suppress_stimulation_artefact_checkbox.isChecked()
+            and bool(self._stim_arrays)
+        )
+        self._stim_array_combo.setVisible(show_stim_array)
+        if stim_label is not None:
+            stim_label.setVisible(show_stim_array)
+
+    def _on_pipeline_changed(self) -> None:
+        """Apply pipeline-specific acquisition defaults and update the form."""
+        if self._pipeline_combo.currentData() == "roi_average":
+            self._nchannels_spin.setValue(1)
+        self._update_pipeline_fields()
 
     # -- File pickers -------------------------------------------------------
     def _browse_tifs(self) -> None:
@@ -756,7 +810,15 @@ class TifImportDialog(QtWidgets.QDialog):
 
         self._thread = QtCore.QThread(self)
         pipeline = str(self._pipeline_combo.currentData())
-        self._worker = _PipelineWorker(list(self._tif_paths), masks, params, pipeline)
+        stim_array = None
+        if (
+            pipeline == "roi_average"
+            and self._suppress_stimulation_artefact_checkbox.isChecked()
+        ):
+            stim_array = self._stim_array_combo.currentData()
+        self._worker = _PipelineWorker(
+            list(self._tif_paths), masks, params, pipeline, stim_array
+        )
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(self._on_progress)

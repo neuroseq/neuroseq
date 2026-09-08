@@ -16,10 +16,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import Any
 
 import brian2.numpy_ as np
 import numpy.typing as npt
+
+if TYPE_CHECKING:
+    from neuroseq.stim import StimArray
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +81,7 @@ def run_roi_average_pipeline(
     params: TifPipelineParams,
     *,
     progress: ProgressCallback | None = None,
+    stim_array: StimArray | None = None,
 ) -> TifPipelineResult:
     """Average ROI pixels from the selected channel across ordered TIFFs.
 
@@ -148,6 +153,12 @@ def run_roi_average_pipeline(
         )
 
     F = np.concatenate(trace_parts, axis=1)
+    contaminated_frames = np.array([], dtype=np.int64)
+    if stim_array is not None:
+        contaminated_frames = _stimulation_contaminated_frames(
+            stim_array, params.fs, F.shape[1]
+        )
+        _impute_contaminated_frames(F, contaminated_frames)
     assert first_stack is not None
     progress("Done", 1.0)
     return TifPipelineResult(
@@ -164,8 +175,60 @@ def run_roi_average_pipeline(
             "roi_labels": np.asarray(labels),
             "nchannels": params.nchannels,
             "functional_chan": params.functional_chan,
+            "stimulation_artefact_suppression": stim_array is not None,
+            "contaminated_frames": contaminated_frames,
         },
     )
+
+
+def _stimulation_contaminated_frames(
+    stim_array: StimArray, fs: float, n_frames: int
+) -> npt.NDArray[np.int64]:
+    """Return camera frames whose exposure overlaps non-zero stimulation."""
+    if fs <= 0:
+        raise ValueError("fs must be greater than zero")
+    if stim_array.dt <= 0:
+        raise ValueError("stim_array.dt must be greater than zero")
+    values = np.asarray(stim_array.values)
+    if values.ndim != 2:
+        raise ValueError("stim_array.values must be a 2D array")
+    active_samples = np.flatnonzero(np.any(values != 0, axis=1))
+    contaminated = np.zeros(n_frames, dtype=bool)
+    for sample in active_samples:
+        start = float(sample) * float(stim_array.dt)
+        end = float(sample + 1) * float(stim_array.dt)
+        first_frame = max(0, int(np.floor(start * fs)))
+        # nextafter prevents an interval ending exactly on a frame boundary
+        # from contaminating the following frame.
+        last_frame = min(n_frames - 1, int(np.floor(np.nextafter(end * fs, -np.inf))))
+        if first_frame <= last_frame:
+            contaminated[first_frame : last_frame + 1] = True
+    return np.flatnonzero(contaminated).astype(np.int64)
+
+
+def _impute_contaminated_frames(
+    traces: npt.NDArray[Any], contaminated_frames: npt.NDArray[np.int64]
+) -> None:
+    """Replace each contaminated run with its neighboring clean-value mean.
+
+    Runs at the beginning or end of a recording use their single available
+    clean neighbor. A fully contaminated trace cannot be inferred and is left
+    unchanged.
+    """
+    if contaminated_frames.size == 0:
+        return
+    run_starts = np.r_[0, np.flatnonzero(np.diff(contaminated_frames) > 1) + 1]
+    run_ends = np.r_[run_starts[1:] - 1, contaminated_frames.size - 1]
+    for start_index, end_index in zip(run_starts, run_ends, strict=True):
+        first = int(contaminated_frames[start_index])
+        last = int(contaminated_frames[end_index])
+        neighbors: list[npt.NDArray[Any]] = []
+        if first > 0:
+            neighbors.append(traces[:, first - 1])
+        if last + 1 < traces.shape[1]:
+            neighbors.append(traces[:, last + 1])
+        if neighbors:
+            traces[:, first : last + 1] = np.mean(neighbors, axis=0)[:, np.newaxis]
 
 
 def select_torch_device() -> tuple[Any, str]:

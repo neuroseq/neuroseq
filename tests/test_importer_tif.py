@@ -112,6 +112,36 @@ def test_run_roi_average_pipeline_extracts_and_concatenates_traces(tmp_path):
     assert result.extra["pipeline"] == "roi_average"
 
 
+def test_roi_average_suppresses_frames_overlapping_stimulation(tmp_path):
+    import tifffile
+
+    from neuroseq.importer_tif import run_roi_average_pipeline
+    from neuroseq.stim import StimArray
+    from neuroseq.stim import StimType
+
+    path = tmp_path / "stack.tif"
+    stack = np.arange(1, 7, dtype=np.uint16)[:, None, None]
+    tifffile.imwrite(path, stack, photometric="minisblack")
+    stim = StimArray(
+        "laser",
+        StimType.Excitation,
+        np.array([[0], [1], [0]], dtype=np.float32),
+        "mW",
+        0.2,
+    )
+
+    result = run_roi_average_pipeline(
+        [path],
+        np.ones((1, 1), dtype=np.int32),
+        TifPipelineParams(fs=10, nchannels=1),
+        stim_array=stim,
+    )
+
+    np.testing.assert_array_equal(result.F, [[1, 2, 3.5, 3.5, 5, 6]])
+    np.testing.assert_array_equal(result.extra["contaminated_frames"], [2, 3])
+    assert result.extra["stimulation_artefact_suppression"] is True
+
+
 def test_run_roi_average_pipeline_rejects_mismatched_masks(tmp_path):
     import tifffile
 
