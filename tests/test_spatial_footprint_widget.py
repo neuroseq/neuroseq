@@ -9,6 +9,7 @@ from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 
 from neuroseq.aoi_shapes import square_world_corners
+from neuroseq.aoi_shapes import user_to_world_point
 from neuroseq.cell_overlay_widget import STRIPED_CELL_ALPHA
 from neuroseq.cell_overlay_widget import STRIPED_CELL_GREY
 from neuroseq.cell_overlay_widget import STRIPED_CELL_WHITE
@@ -19,6 +20,7 @@ from neuroseq.importer_cellpose import AreasOfInterestConfig
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import CircleAOI
 from neuroseq.importer_cellpose import SquareAOI
+from neuroseq.importer_cellpose import clone_aoi_config
 from neuroseq.spatial_footprint_state import SpatialFootprintState
 from neuroseq.spatial_footprint_widget import SELECTION_OUTLINE_BLACK
 from neuroseq.spatial_footprint_widget import SELECTION_OUTLINE_RED
@@ -74,6 +76,17 @@ def _aoi_config(show_shapes: bool = True) -> AreasOfInterestConfig:
         square=SquareAOI(True, AOIRole.PREFERENTIAL, x=0.5, y=0.5, side=1.0),
         circle=CircleAOI(True, AOIRole.EXCLUSION, cx=1.5, cy=1.5, diameter=1.0),
         show_shapes=show_shapes,
+        coordinate_mode="pixels",
+    )
+
+
+def _wide_square_aoi_config() -> AreasOfInterestConfig:
+    """A square whose body center sits well outside the corner-handle hit
+    tolerance, so a click there unambiguously hits the body, not a handle."""
+    return AreasOfInterestConfig(
+        square=SquareAOI(True, AOIRole.PREFERENTIAL, x=2.0, y=2.0, side=16.0),
+        circle=CircleAOI(False, AOIRole.EXCLUSION, cx=1.5, cy=1.5, diameter=1.0),
+        show_shapes=True,
         coordinate_mode="pixels",
     )
 
@@ -778,6 +791,164 @@ def test_overlay_view_ignores_aoi_drag_when_not_editable(
     overlay_view._aoi_pointer_down(SimpleNamespace(stop_propagation=lambda: None))
 
     assert overlay_view._drag_state is not None
+    overlay_view.close()
+
+
+def test_overlay_view_body_drag_requires_shift(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Plain click-and-drag inside a shape's body must not hijack panning the
+    FOV (issue #531) - only Shift+drag starts a body move. Corner/handle hits
+    (see test_overlay_view_ignores_aoi_drag_when_not_editable) stay
+    always-active regardless of Shift."""
+    overlay_view = OverlayView()
+    qtbot.addWidget(overlay_view)
+    overlay_view.overlay_image = np.zeros((20, 20, 3), dtype=np.uint8)
+    config = _wide_square_aoi_config()
+    overlay_view._aoi_config = config
+    overlay_view._aoi_visible = True
+    overlay_view.aoi_editable = True
+    square = config.square
+    body_user = (square.x + square.side / 2, square.y + square.side / 2)
+    body_world = user_to_world_point(*body_user, overlay_view.overlay_image.shape[0])
+    monkeypatch.setattr(
+        overlay_view.subplot, "map_screen_to_world", lambda ev: body_world
+    )
+
+    overlay_view._aoi_pointer_down(
+        SimpleNamespace(stop_propagation=lambda: None, modifiers=())
+    )
+    assert overlay_view._drag_state is None
+
+    overlay_view._aoi_pointer_down(
+        SimpleNamespace(stop_propagation=lambda: None, modifiers=("Shift",))
+    )
+    assert overlay_view._drag_state is not None
+    assert overlay_view._drag_state.part == "body"
+    overlay_view.close()
+
+
+def test_aoi_undo_redo_noop_with_empty_history(qtbot: QtBot) -> None:
+    overlay_view = OverlayView()
+    qtbot.addWidget(overlay_view)
+
+    assert not overlay_view.can_undo_aoi_edit()
+    assert not overlay_view.can_redo_aoi_edit()
+    assert not overlay_view.undo_aoi_edit()
+    assert not overlay_view.redo_aoi_edit()
+    overlay_view.close()
+
+
+def test_aoi_click_without_movement_does_not_add_undo_entry(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    overlay_view = OverlayView()
+    qtbot.addWidget(overlay_view)
+    overlay_view.overlay_image = np.zeros((20, 20, 3), dtype=np.uint8)
+    config = _wide_square_aoi_config()
+    overlay_view._aoi_config = config
+    overlay_view._aoi_visible = True
+    overlay_view.aoi_editable = True
+    square = config.square
+    body_user = (square.x + square.side / 2, square.y + square.side / 2)
+    body_world = user_to_world_point(*body_user, overlay_view.overlay_image.shape[0])
+    monkeypatch.setattr(
+        overlay_view.subplot, "map_screen_to_world", lambda ev: body_world
+    )
+
+    overlay_view._aoi_pointer_down(
+        SimpleNamespace(stop_propagation=lambda: None, modifiers=("Shift",))
+    )
+    overlay_view._aoi_pointer_up(SimpleNamespace(stop_propagation=lambda: None))
+
+    assert not overlay_view.can_undo_aoi_edit()
+
+
+def test_aoi_body_drag_can_be_undone_and_redone(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    overlay_view = OverlayView()
+    qtbot.addWidget(overlay_view)
+    overlay_view.overlay_image = np.zeros((20, 20, 3), dtype=np.uint8)
+    image_height = overlay_view.overlay_image.shape[0]
+    original = _wide_square_aoi_config()
+    original_snapshot = clone_aoi_config(original)
+    overlay_view._aoi_config = original
+    overlay_view._aoi_visible = True
+    overlay_view.aoi_editable = True
+    square = original.square
+    body_user = (square.x + square.side / 2, square.y + square.side / 2)
+    body_world = user_to_world_point(*body_user, image_height)
+    moved_world = user_to_world_point(body_user[0] + 2.0, body_user[1], image_height)
+
+    monkeypatch.setattr(
+        overlay_view.subplot, "map_screen_to_world", lambda ev: body_world
+    )
+    overlay_view._aoi_pointer_down(
+        SimpleNamespace(stop_propagation=lambda: None, modifiers=("Shift",))
+    )
+    assert overlay_view._drag_state is not None
+
+    monkeypatch.setattr(
+        overlay_view.subplot, "map_screen_to_world", lambda ev: moved_world
+    )
+    overlay_view.pointer_move(SimpleNamespace(stop_propagation=lambda: None))
+    overlay_view._aoi_pointer_up(SimpleNamespace(stop_propagation=lambda: None))
+
+    assert overlay_view._aoi_config is not None
+    assert overlay_view._aoi_config != original_snapshot
+    moved_x = overlay_view._aoi_config.square.x
+    assert overlay_view.can_undo_aoi_edit()
+    assert not overlay_view.can_redo_aoi_edit()
+
+    assert overlay_view.undo_aoi_edit()
+    assert overlay_view._aoi_config == original_snapshot
+    assert not overlay_view.can_undo_aoi_edit()
+    assert overlay_view.can_redo_aoi_edit()
+
+    assert overlay_view.redo_aoi_edit()
+    assert overlay_view._aoi_config is not None
+    assert overlay_view._aoi_config.square.x == moved_x
+    overlay_view.close()
+
+
+def test_aoi_undo_redo_history_resets_on_new_image(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    overlay_view = OverlayView()
+    qtbot.addWidget(overlay_view)
+    overlay_view.overlay_image = np.zeros((20, 20, 3), dtype=np.uint8)
+    original = _wide_square_aoi_config()
+    overlay_view._aoi_config = original
+    overlay_view._aoi_visible = True
+    overlay_view.aoi_editable = True
+    square = original.square
+    body_user = (square.x + square.side / 2, square.y + square.side / 2)
+    body_world = user_to_world_point(*body_user, overlay_view.overlay_image.shape[0])
+    moved_world = user_to_world_point(
+        body_user[0] + 2.0, body_user[1], overlay_view.overlay_image.shape[0]
+    )
+    monkeypatch.setattr(
+        overlay_view.subplot, "map_screen_to_world", lambda ev: body_world
+    )
+    overlay_view._aoi_pointer_down(
+        SimpleNamespace(stop_propagation=lambda: None, modifiers=("Shift",))
+    )
+    monkeypatch.setattr(
+        overlay_view.subplot, "map_screen_to_world", lambda ev: moved_world
+    )
+    overlay_view.pointer_move(SimpleNamespace(stop_propagation=lambda: None))
+    overlay_view._aoi_pointer_up(SimpleNamespace(stop_propagation=lambda: None))
+    assert overlay_view.can_undo_aoi_edit()
+
+    overlay_view.add_overlay_data(np.zeros((20, 20, 3), dtype=np.uint8), None)
+
+    assert not overlay_view.can_undo_aoi_edit()
+    assert not overlay_view.can_redo_aoi_edit()
     overlay_view.close()
 
 

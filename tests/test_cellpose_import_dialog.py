@@ -36,6 +36,40 @@ def _select_mapping_strategy(dialog: CellposeImportDialog, strategy: str) -> Non
     raise AssertionError(f"Mapping strategy not found: {strategy}")
 
 
+def test_ctrl_z_and_ctrl_shift_z_shortcuts_drive_aoi_undo_redo(
+    qtbot: QtBot,
+    monkeypatch,
+) -> None:
+    """Regression for issue #531: an accidental shape move/resize should be
+    undoable with Ctrl+Z (Ctrl+Shift+Z to redo). The undo/redo logic itself is
+    covered at the OverlayView level in test_spatial_footprint_widget.py; this
+    just checks the dialog's shortcuts are wired to it."""
+    dialog = CellposeImportDialog()
+    qtbot.addWidget(dialog)
+    calls = {"undo": 0, "redo": 0}
+
+    def _record_undo() -> bool:
+        calls["undo"] += 1
+        return True
+
+    def _record_redo() -> bool:
+        calls["redo"] += 1
+        return True
+
+    monkeypatch.setattr(
+        dialog.overlay_widget.overlay_view, "undo_aoi_edit", _record_undo
+    )
+    monkeypatch.setattr(
+        dialog.overlay_widget.overlay_view, "redo_aoi_edit", _record_redo
+    )
+
+    dialog._undo_aoi_shortcut.activated.emit()
+    dialog._redo_aoi_shortcut.activated.emit()
+
+    assert calls == {"undo": 1, "redo": 1}
+    dialog.close()
+
+
 def test_custom_areas_of_interest_is_default_mapping_strategy(qtbot: QtBot) -> None:
     dialog = CellposeImportDialog()
     qtbot.addWidget(dialog)

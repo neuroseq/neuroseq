@@ -361,6 +361,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.overlay_widget.aoi_geometry_changed.connect(
             self._on_overlay_aoi_geometry_changed
         )
+        self._undo_aoi_shortcut = QtGui.QShortcut(QtGui.QKeySequence("Ctrl+Z"), self)
+        self._undo_aoi_shortcut.activated.connect(self._undo_aoi_edit)
+        self._redo_aoi_shortcut = QtGui.QShortcut(
+            QtGui.QKeySequence("Ctrl+Shift+Z"), self
+        )
+        self._redo_aoi_shortcut.activated.connect(self._redo_aoi_edit)
 
         self.main_content_layout.addWidget(self.left_container, stretch=3)
         self.right_container = QtWidgets.QWidget()
@@ -1090,6 +1096,13 @@ class CellposeImportDialog(QtWidgets.QDialog):
             return
         self._set_aoi_controls(config)
         self._regenerate_aoi_mapping()
+
+    def _undo_aoi_edit(self) -> None:
+        """Revert the last shape move/resize done by dragging (issue #531)."""
+        self.overlay_widget.overlay_view.undo_aoi_edit()
+
+    def _redo_aoi_edit(self) -> None:
+        self.overlay_widget.overlay_view.redo_aoi_edit()
 
     def _generate_stimulus_mapping(self, strategy: str) -> dict[int, int]:
         """Generate stimulus-to-cellpose mapping based on strategy"""

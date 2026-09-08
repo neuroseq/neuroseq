@@ -145,6 +145,8 @@ class OverlayView(FullScreenFPLWidget):
         self._circle_line: LineGraphic | None = None
         self._circle_handles: list[ScatterGraphic] = []
         self._drag_state: _AOIDragState | None = None
+        self._aoi_undo_stack: list[AreasOfInterestConfig] = []
+        self._aoi_redo_stack: list[AreasOfInterestConfig] = []
         self.aoi_editable = True
         self.enable_cell_selection = False
         self._cell_click_down_world: tuple[float, float] | None = None
@@ -219,6 +221,8 @@ class OverlayView(FullScreenFPLWidget):
             self._image_graphic = self.subplot.add_image(
                 overlay_image, interpolation="nearest"
             )
+            self._aoi_undo_stack = []
+            self._aoi_redo_stack = []
         else:
             self._image_graphic.data = overlay_image
 
@@ -728,6 +732,13 @@ class OverlayView(FullScreenFPLWidget):
         hit = self._aoi_hit_test(float(mouse_pos[0]), float(mouse_pos[1]))
         if hit is None:
             return
+        # Moving a shape by its body competes with panning the FOV by
+        # click-and-drag, since the body covers a large, easy-to-hit area;
+        # require Shift to disambiguate (see issue #531). The small
+        # corner/handle resize targets stay always-active - their footprint
+        # is tiny enough that accidental hits while panning are rare.
+        if hit[1] == "body" and not self._event_has_shift(ev):
+            return
 
         original_config = clone_aoi_config(self._aoi_config)
         assert original_config is not None
@@ -745,6 +756,12 @@ class OverlayView(FullScreenFPLWidget):
     def _aoi_pointer_up(self, ev: pygfx.PointerEvent) -> None:
         if self._drag_state is None:
             return
+        if (
+            self._aoi_config is not None
+            and self._aoi_config != self._drag_state.original_config
+        ):
+            self._aoi_undo_stack.append(self._drag_state.original_config)
+            self._aoi_redo_stack = []
         self._drag_state = None
         self.subplot.controller.enabled = True
         if self._aoi_config is not None and self.on_geometry_changed is not None:
@@ -752,6 +769,42 @@ class OverlayView(FullScreenFPLWidget):
             assert config is not None
             self.on_geometry_changed(config)
         ev.stop_propagation()
+
+    @staticmethod
+    def _event_has_shift(ev: pygfx.PointerEvent) -> bool:
+        modifiers = getattr(ev, "modifiers", None) or ()
+        return any(str(modifier).lower() == "shift" for modifier in modifiers)
+
+    def can_undo_aoi_edit(self) -> bool:
+        return bool(self._aoi_undo_stack)
+
+    def can_redo_aoi_edit(self) -> bool:
+        return bool(self._aoi_redo_stack)
+
+    def undo_aoi_edit(self) -> bool:
+        """Revert the most recent shape move/resize (see issue #531)."""
+        if not self._aoi_undo_stack or self._aoi_config is None:
+            return False
+        self._aoi_redo_stack.append(self._aoi_config)
+        previous = self._aoi_undo_stack.pop()
+        self.set_aoi_shapes(previous, self._aoi_visible)
+        self._notify_geometry_changed()
+        return True
+
+    def redo_aoi_edit(self) -> bool:
+        if not self._aoi_redo_stack or self._aoi_config is None:
+            return False
+        self._aoi_undo_stack.append(self._aoi_config)
+        next_config = self._aoi_redo_stack.pop()
+        self.set_aoi_shapes(next_config, self._aoi_visible)
+        self._notify_geometry_changed()
+        return True
+
+    def _notify_geometry_changed(self) -> None:
+        if self._aoi_config is not None and self.on_geometry_changed is not None:
+            config = clone_aoi_config(self._aoi_config)
+            assert config is not None
+            self.on_geometry_changed(config)
 
     def _cell_selection_pointer_down(self, ev: pygfx.PointerEvent) -> None:
         if not self.enable_cell_selection or self.segmentation is None:
