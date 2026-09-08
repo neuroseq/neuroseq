@@ -19,6 +19,7 @@ from neuroseq.importer_cellpose import AreasOfInterestConfig
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import CircleAOI
 from neuroseq.importer_cellpose import SquareAOI
+from neuroseq.spatial_footprint_state import SpatialFootprintState
 from neuroseq.spatial_footprint_widget import SELECTION_OUTLINE_BLACK
 from neuroseq.spatial_footprint_widget import SELECTION_OUTLINE_RED
 from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
@@ -778,3 +779,72 @@ def test_overlay_view_ignores_aoi_drag_when_not_editable(
 
     assert overlay_view._drag_state is not None
     overlay_view.close()
+
+
+def test_two_views_sharing_state_stay_in_sync_on_click(qtbot: QtBot) -> None:
+    state = SpatialFootprintState()
+    view_a = SpatialFootprintWidget(state=state)
+    view_b = SpatialFootprintWidget(state=state)
+    qtbot.addWidget(view_a)
+    qtbot.addWidget(view_b)
+    view_a.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
+
+    # data set via one view is visible in the other immediately
+    assert view_b._cellpose_data is not None
+    assert not view_b.empty_state_widget.isVisible()
+
+    view_a.overlay_widget.neuron_clicked.emit(1)
+
+    assert view_a._greyed_cellpose_ids == {1}
+    assert view_b._greyed_cellpose_ids == {1}
+    assert view_a.clear_selection_button.isEnabled()
+    assert view_b.clear_selection_button.isEnabled()
+
+    view_b.clear_selection_button.click()
+
+    assert view_a._greyed_cellpose_ids == set()
+    assert not view_a.clear_selection_button.isEnabled()
+    view_a.close()
+    view_b.close()
+
+
+def test_two_views_sharing_state_stay_in_sync_on_preferential_apply(
+    qtbot: QtBot,
+) -> None:
+    state = SpatialFootprintState()
+    view_a = SpatialFootprintWidget(state=state)
+    view_b = SpatialFootprintWidget(state=state)
+    qtbot.addWidget(view_a)
+    qtbot.addWidget(view_b)
+    view_a.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
+    view_a.preferential_mode_radio.setChecked(True)
+
+    view_a.overlay_widget.neuron_clicked.emit(1)
+
+    assert view_a._preferential_selected_cellpose_ids == {1}
+    assert view_b._preferential_selected_cellpose_ids == {1}
+    # Apply is only wired to view A's own button, but it acts on shared state
+    assert view_a.apply_selection_button.isEnabled()
+
+    view_a.apply_selection_button.click()
+
+    assert view_a._greyed_cellpose_ids == {0, 2}
+    assert view_b._greyed_cellpose_ids == {0, 2}
+    view_a.close()
+    view_b.close()
+
+
+def test_widget_with_no_state_arg_gets_a_private_state(qtbot: QtBot) -> None:
+    view_a = SpatialFootprintWidget()
+    view_b = SpatialFootprintWidget()
+    qtbot.addWidget(view_a)
+    qtbot.addWidget(view_b)
+
+    view_a.set_data(_cellpose_result())
+    view_a.overlay_widget.neuron_clicked.emit(1)
+
+    assert view_a._greyed_cellpose_ids == {1}
+    assert view_b._greyed_cellpose_ids == set()
+    assert view_b._cellpose_data is None
+    view_a.close()
+    view_b.close()

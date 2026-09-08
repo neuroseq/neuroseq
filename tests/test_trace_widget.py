@@ -13,6 +13,7 @@ from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim_widget import StimWidget
 from neuroseq.trace_widget import TraceNormDialog
 from neuroseq.trace_widget import TraceWidget
+from neuroseq.trace_widget_state import TraceWidgetState
 from neuroseq.utils import neuron_indices_to_colors
 
 
@@ -363,6 +364,59 @@ def test_trace_widget_greying_hides_and_compacts_lines(
     camera_state = controller._get_camera_state()
     assert camera_state["height"] == pytest.approx(3)
     trace_widget.close()
+
+
+def test_two_trace_views_sharing_state_stay_in_sync(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    state = TraceWidgetState()
+    controller_a = ConstrainedPanZoomController()
+    controller_b = ConstrainedPanZoomController()
+    view_a = TraceWidget(controller_a, state=state)
+    view_b = TraceWidget(controller_b, state=state)
+    qtbot.addWidget(view_a)
+    qtbot.addWidget(view_b)
+    controller_a.set_limits(max_time_secs=1.0, max_neurons=3)
+    controller_b.set_limits(max_time_secs=1.0, max_neurons=3)
+
+    view_a.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+
+    # data set via one view is visible in the other immediately
+    assert view_b.data is view_a.data
+    assert view_b.graphic is not None
+
+    view_a.set_neuron_greyed(1, True)
+
+    assert view_a.n_neurons == 2
+    assert view_b.n_neurons == 2
+    assert view_b.graphic is not None
+    assert not view_b.graphic.graphics[1].visible
+
+    view_b.set_neuron_greyed(1, False)
+
+    assert view_a.n_neurons == 3
+    assert view_a.graphic is not None
+    assert view_a.graphic.graphics[1].visible
+    view_a.close()
+    view_b.close()
+
+
+def test_trace_widget_with_no_state_arg_gets_a_private_state(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    view_a = TraceWidget(ConstrainedPanZoomController())
+    view_b = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(view_a)
+    qtbot.addWidget(view_b)
+
+    view_a.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+
+    assert view_a.data is not None
+    assert view_b.data is None
+    view_a.close()
+    view_b.close()
 
 
 def test_trace_widget_clear_data_clears_greyed_neurons(

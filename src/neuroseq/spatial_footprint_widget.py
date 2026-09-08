@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
-
 import brian2.numpy_ as np
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -13,6 +11,7 @@ from neuroseq.cell_overlay_widget import STRIPED_CELL_WHITE
 from neuroseq.cell_overlay_widget import CellOverlayWidget
 from neuroseq.cell_overlay_widget import compute_segmentation_legend
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.spatial_footprint_state import SpatialFootprintState
 
 SELECTION_OUTLINE_RED = (0.9, 0.15, 0.15)
 SELECTION_OUTLINE_BLACK = (0.0, 0.0, 0.0)
@@ -21,13 +20,25 @@ SELECTION_OUTLINE_THICKNESS = 2
 
 
 class SpatialFootprintWidget(QtWidgets.QWidget):
-    """Show imported cell spatial footprints with click-to-grey state."""
+    """Show imported cell spatial footprints with click-to-grey state.
+
+    A view over a `SpatialFootprintState`. Multiple instances can share one
+    state (pass the same object as `state` to each) and will stay in sync -
+    a mutation via any one of them refreshes all of them. If `state` is
+    omitted, this instance gets its own private state, matching the
+    behavior of a single, non-shared panel.
+    """
 
     import_requested = QtCore.Signal()
     neuron_greyed_out_changed = QtCore.Signal(int, bool)
 
-    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QtWidgets.QWidget | None = None,
+        state: SpatialFootprintState | None = None,
+    ) -> None:
         super().__init__(parent)
+        self._state = state if state is not None else SpatialFootprintState()
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -99,16 +110,34 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         )
         layout.addWidget(self.overlay_widget)
 
-        self._cellpose_data: CellposeImportResult | None = None
         self._base_legend: list[tuple[int, tuple[int, int, int]]] = []
-        self._greyed_cellpose_ids: set[int] = set()
-        self._preferential_selected_cellpose_ids: set[int] = set()
-        self.set_data(None)
+        self._state.data_changed.connect(self._on_state_data_changed)
+        self._state.greyed_changed.connect(self._on_state_greyed_changed)
+        self._state.preferential_selection_changed.connect(
+            self._on_state_preferential_changed
+        )
+        self._state.neuron_greyed_out_changed.connect(
+            self.neuron_greyed_out_changed.emit
+        )
+        self._on_state_data_changed()
+
+    @property
+    def _cellpose_data(self) -> CellposeImportResult | None:
+        return self._state.cellpose_data
+
+    @property
+    def _greyed_cellpose_ids(self) -> set[int]:
+        return self._state.greyed_cellpose_ids
+
+    @property
+    def _preferential_selected_cellpose_ids(self) -> set[int]:
+        return self._state.preferential_selected_cellpose_ids
 
     def set_data(self, cellpose_data: CellposeImportResult | None) -> None:
-        self._cellpose_data = cellpose_data
-        self._greyed_cellpose_ids = set()
-        self._preferential_selected_cellpose_ids = set()
+        self._state.set_data(cellpose_data)
+
+    def _on_state_data_changed(self) -> None:
+        cellpose_data = self._state.cellpose_data
         self._update_clear_selection_button()
         self._update_apply_button()
         if cellpose_data is None:
@@ -129,6 +158,15 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self.overlay_widget.set_aoi_overlay(
             aoi_config, show=bool(aoi_config is not None and aoi_config.show_shapes)
         )
+
+    def _on_state_greyed_changed(self) -> None:
+        self._update_clear_selection_button()
+        self._refresh_overlay()
+
+    def _on_state_preferential_changed(self) -> None:
+        self._update_clear_selection_button()
+        self._update_apply_button()
+        self._refresh_overlay()
 
     def _refresh_overlay(self) -> None:
         if self._cellpose_data is None:
@@ -237,15 +275,6 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         values = np.clip(values, 0.0, scale)
         return values.astype(image.dtype, copy=False)
 
-    def _cellpose_to_stim_id(self, cellpose_id: int) -> int:
-        mapping = (
-            self._cellpose_data.stimulus_to_cellpose_mapping
-            if self._cellpose_data is not None
-            else None
-        )
-        cellpose_to_stim = {v: k for k, v in (mapping or {}).items()}
-        return cellpose_to_stim.get(cellpose_id, cellpose_id)
-
     def _update_clear_selection_button(self) -> None:
         self.clear_selection_button.setEnabled(
             bool(self._greyed_cellpose_ids)
@@ -259,123 +288,32 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         )
 
     def clear_all_greyed(self) -> None:
-        """Un-grey every currently greyed cell and drop any pending (unapplied)
-        preferential selection.
-
-        Emits the same neuron_greyed_out_changed(stim_id, False) signal a
-        click would for each greyed cell, so anything listening (trace/stim rows)
-        stays in sync without duplicating that propagation logic here. Pending
-        preferential picks were never greyed, so no signal is emitted for those.
-        """
-        if (
-            not self._greyed_cellpose_ids
-            and not self._preferential_selected_cellpose_ids
-        ):
-            return
-        cellpose_ids = list(self._greyed_cellpose_ids)
-        self._greyed_cellpose_ids.clear()
-        self._preferential_selected_cellpose_ids.clear()
-        self._update_clear_selection_button()
-        self._update_apply_button()
-        self._refresh_overlay()
-        for cellpose_id in cellpose_ids:
-            self.neuron_greyed_out_changed.emit(
-                self._cellpose_to_stim_id(cellpose_id), False
-            )
+        self._state.clear_all()
 
     def _on_cell_mode_changed(self, preferential_checked: bool) -> None:
-        if not preferential_checked and self._preferential_selected_cellpose_ids:
-            self._preferential_selected_cellpose_ids.clear()
-            self._update_clear_selection_button()
-            self._refresh_overlay()
+        # NOTE: this clears the *shared* pending preferential selection when
+        # this view's own mode radio switches away from preferential. With
+        # multiple views sharing one state, switching one view's mode could
+        # discard another view's in-progress preferential picks - an accepted
+        # simplification for now, since the common case is a single view.
+        if not preferential_checked:
+            self._state.clear_preferential_selection()
         self._update_apply_button()
 
     def _on_neuron_clicked(self, cellpose_id: int) -> None:
         if self.preferential_mode_radio.isChecked():
-            self._toggle_preferential_selection(cellpose_id)
+            self._state.toggle_preferential_selection(cellpose_id)
         else:
-            self._toggle_greyed(cellpose_id)
-
-    def _toggle_greyed(self, cellpose_id: int) -> None:
-        if cellpose_id in self._greyed_cellpose_ids:
-            self._greyed_cellpose_ids.discard(cellpose_id)
-            greyed = False
-        else:
-            self._greyed_cellpose_ids.add(cellpose_id)
-            greyed = True
-        self._update_clear_selection_button()
-        self._refresh_overlay()
-        self.neuron_greyed_out_changed.emit(
-            self._cellpose_to_stim_id(cellpose_id),
-            greyed,
-        )
-
-    def _toggle_preferential_selection(self, cellpose_id: int) -> None:
-        if cellpose_id in self._preferential_selected_cellpose_ids:
-            self._preferential_selected_cellpose_ids.discard(cellpose_id)
-        else:
-            self._preferential_selected_cellpose_ids.add(cellpose_id)
-        self._update_clear_selection_button()
-        self._update_apply_button()
-        self._refresh_overlay()
+            self._state.toggle_greyed(cellpose_id)
 
     def _on_neuron_lasso_selected(self, cellpose_ids: list[int]) -> None:
         if self.preferential_mode_radio.isChecked():
-            self._add_preferential_selection(cellpose_ids)
+            self._state.add_preferential_selection(cellpose_ids)
         else:
-            self._add_greyed(cellpose_ids)
-
-    def _add_greyed(self, cellpose_ids: Iterable[int]) -> None:
-        """Add every id to the greyed set (additive - never un-greys an id already
-        in the lasso, unlike the single-click toggle)."""
-        new_ids = set(cellpose_ids) - self._greyed_cellpose_ids
-        if not new_ids:
-            return
-        self._greyed_cellpose_ids |= new_ids
-        self._update_clear_selection_button()
-        self._refresh_overlay()
-        for cellpose_id in new_ids:
-            self.neuron_greyed_out_changed.emit(
-                self._cellpose_to_stim_id(cellpose_id), True
-            )
-
-    def _add_preferential_selection(self, cellpose_ids: Iterable[int]) -> None:
-        """Add every id to the pending preferential selection (additive, same
-        rationale as _add_greyed)."""
-        new_ids = set(cellpose_ids) - self._preferential_selected_cellpose_ids
-        if not new_ids:
-            return
-        self._preferential_selected_cellpose_ids |= new_ids
-        self._update_clear_selection_button()
-        self._update_apply_button()
-        self._refresh_overlay()
+            self._state.add_greyed(cellpose_ids)
 
     def _apply_preferential_selection(self) -> None:
-        """Grey out every cell not marked as preferentially selected, and un-grey
-        any previously-greyed cell that was marked - an absolute "only the
-        selected cells stay visible" reset."""
-        if self._cellpose_data is None or not self._preferential_selected_cellpose_ids:
-            return
-        all_ids = {
-            int(cellpose_id)
-            for cellpose_id in np.unique(self._cellpose_data.segmentation_array)
-            if cellpose_id >= 0
-        }
-        old_greyed = self._greyed_cellpose_ids
-        new_greyed = all_ids - self._preferential_selected_cellpose_ids
-        self._preferential_selected_cellpose_ids = set()
-        self._greyed_cellpose_ids = new_greyed
-        self._update_clear_selection_button()
-        self._update_apply_button()
-        self._refresh_overlay()
-        for cellpose_id in new_greyed - old_greyed:
-            self.neuron_greyed_out_changed.emit(
-                self._cellpose_to_stim_id(cellpose_id), True
-            )
-        for cellpose_id in old_greyed - new_greyed:
-            self.neuron_greyed_out_changed.emit(
-                self._cellpose_to_stim_id(cellpose_id), False
-            )
+        self._state.apply_preferential_selection()
 
     def close(self) -> bool:
         overlay_widget = getattr(self, "overlay_widget", None)

@@ -454,6 +454,61 @@ def test_detach_copy_keeps_original_visible(qtbot: QtBot) -> None:
     gui.close()
 
 
+def test_detached_trace_copy_shares_state_with_original(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+    gui._auto_show_widget(gui.trace_widget)
+
+    gui.detach_panel_copy(gui.trace_widget)
+    window = gui._detached_panel_windows[-1]
+    detached_widget = window._widget
+
+    # both views are bound to the same shared state, so data set before the
+    # detach is already visible in the detached view too
+    assert detached_widget.data is gui.trace_widget.data
+
+    # greying a neuron via the detached view is reflected in the docked one
+    detached_widget.set_neuron_greyed(1, True)
+    assert gui.trace_widget.is_neuron_greyed(1)
+    assert gui.trace_widget.n_neurons == 2
+
+    # and greying via the docked view is reflected back in the detached one
+    gui.trace_widget.set_neuron_greyed(1, False)
+    assert not detached_widget.is_neuron_greyed(1)
+    assert detached_widget.n_neurons == 3
+
+    window.close()
+    gui.close()
+
+
+def test_detached_spatial_footprint_copy_shares_state_with_original(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+    gui._auto_show_widget(gui.spatial_footprint_widget)
+
+    gui.detach_panel_copy(gui.spatial_footprint_widget)
+    window = gui._detached_panel_windows[-1]
+    detached_widget = window._widget
+
+    # clicking a neuron in the detached view greys it in the docked one,
+    # including the downstream trace/stim rows the docked panel drives
+    detached_widget.overlay_widget.neuron_clicked.emit(1)
+    assert gui.spatial_footprint_widget._greyed_cellpose_ids == {1}
+    assert gui.trace_widget.is_neuron_greyed(1)
+
+    # clicking it again from the docked view un-greys it in both
+    gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(1)
+    assert detached_widget._greyed_cellpose_ids == set()
+    assert not gui.trace_widget.is_neuron_greyed(1)
+
+    window.close()
+    gui.close()
+
+
 def test_detached_console_copy_close_button_closes_its_own_window_only(
     qtbot: QtBot,
 ) -> None:

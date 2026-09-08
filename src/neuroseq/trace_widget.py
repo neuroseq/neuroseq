@@ -8,6 +8,7 @@ from qtpy import QtWidgets
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import TraceData
 from neuroseq.timeseries_widget import TimeseriesWidget
+from neuroseq.trace_widget_state import TraceWidgetState
 from neuroseq.utils import neuron_indices_to_colors
 
 
@@ -103,6 +104,7 @@ class TraceWidget(TimeseriesWidget):
         parent: QtWidgets.QWidget | None = None,
         default_controller: ConstrainedPanZoomController | None = None,
         show_axis_link_controls: bool = False,
+        state: TraceWidgetState | None = None,
     ) -> None:
         super().__init__(
             controller,
@@ -117,6 +119,11 @@ class TraceWidget(TimeseriesWidget):
         self._trace_norm_dialog: TraceNormDialog | None = None
         if isinstance(self.controller, ConstrainedPanZoomController):
             self.controller.add_state_change_listener(self._update_line_thickness)
+        self._state = state if state is not None else TraceWidgetState()
+        self._state.data_changed.connect(self._on_state_data_changed)
+        self._state.greyed_changed.connect(self._on_state_greyed_changed)
+        if self._state.data is not None:
+            self._on_state_data_changed()
 
     def closeEvent(self, event) -> None:
         if isinstance(self.controller, ConstrainedPanZoomController):
@@ -219,6 +226,10 @@ class TraceWidget(TimeseriesWidget):
         self,
         data: TraceData | None = None,
     ) -> None:
+        self._state.set_data(data)
+
+    def _on_state_data_changed(self) -> None:
+        data = self._state.data
         self.clear_data()
         if data is None:
             self.subplot.title = "Traces"
@@ -233,6 +244,7 @@ class TraceWidget(TimeseriesWidget):
         self.data_values_scale = 1000.0
         self.units = data.units if data.units else "mV"
         self._all_neuron_ids = sorted({int(i) for i in data.indices})
+        self._greyed_neuron_ids = set(self._state.greyed_neuron_ids)
         self._rebuild_visible_neuron_mapping()
         self.dt_ms = float(data.dt) * 1000.0  # convert to milliseconds
         self.n_timestamps = data.traces.shape[1]
@@ -255,6 +267,18 @@ class TraceWidget(TimeseriesWidget):
         self._apply_visible_neuron_layout()
         self._update_line_thickness()
         self.post_set_data()
+
+    def _on_state_greyed_changed(self) -> None:
+        self._greyed_neuron_ids = set(self._state.greyed_neuron_ids)
+        self._rebuild_visible_neuron_mapping()
+        self._apply_visible_neuron_layout()
+        self._refit_view_to_visible_neurons()
+
+    def set_neuron_greyed(self, neuron_index: int, greyed: bool) -> None:
+        self._state.set_neuron_greyed(neuron_index, greyed)
+
+    def clear_greyed_neurons(self) -> None:
+        self._state.clear_greyed_neurons()
 
     def _apply_visible_neuron_layout(self) -> None:
         if self.graphic is None or not isinstance(self.data, TraceData):

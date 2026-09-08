@@ -57,6 +57,7 @@ from neuroseq.project import Project
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.save_load_options import SaveLoadOptionsDialog
+from neuroseq.spatial_footprint_state import SpatialFootprintState
 from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim_editor import StimEditor
@@ -66,6 +67,7 @@ from neuroseq.syscon2_import_dialog import Syscon2ImportDialog
 from neuroseq.time_slider_widget import TimeSliderWidget
 from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.trace_widget import TraceWidget
+from neuroseq.trace_widget_state import TraceWidgetState
 from neuroseq.utils import add_action
 from neuroseq.utils import add_items_to_combobox
 from neuroseq.utils import getSimulationTime
@@ -346,14 +348,19 @@ class Gui(QtWidgets.QMainWindow):
         self.controller = ConstrainedPanZoomController()
         self.trace_controller = ConstrainedPanZoomController()
         self.spike_controller = ConstrainedPanZoomController()
+        self._trace_state = TraceWidgetState(parent=self)
+        self._spatial_footprint_state = SpatialFootprintState(parent=self)
         self.trace_widget = TraceWidget(
             self.trace_controller,
             parent=self,
             default_controller=self.controller,
             show_axis_link_controls=True,
+            state=self._trace_state,
         )
         self.heatmap_widget = HeatmapWidget(parent=self)
-        self.spatial_footprint_widget = SpatialFootprintWidget(parent=self)
+        self.spatial_footprint_widget = SpatialFootprintWidget(
+            parent=self, state=self._spatial_footprint_state
+        )
         self.spatial_footprint_widget.import_requested.connect(
             self.btn_import_cellpose_data_clicked
         )
@@ -1395,7 +1402,7 @@ class Gui(QtWidgets.QMainWindow):
         neuron_index: int,
         greyed: bool,
     ) -> None:
-        self.trace_widget.set_neuron_greyed(neuron_index, greyed)
+        self._trace_state.set_neuron_greyed(neuron_index, greyed)
         self.stim_editor.stim_widget.set_neuron_greyed(neuron_index, greyed)
 
     def _apply_spike_selection(self, cmb_name: str) -> None:
@@ -3101,8 +3108,8 @@ class Gui(QtWidgets.QMainWindow):
             parent=None,
             default_controller=self.controller,
             show_axis_link_controls=True,
+            state=self._trace_state,
         )
-        widget.set_data(self.project.get_data(self.cmb_trace.currentText(), TraceData))
         widget.custom_analysis_requested.connect(self._custom_analysis)
         widget.vector_export_requested.connect(self.btn_export_traces_vector_clicked)
         return widget
@@ -3133,10 +3140,10 @@ class Gui(QtWidgets.QMainWindow):
         return widget
 
     def _build_fresh_spatial_footprint_widget(self) -> SpatialFootprintWidget:
-        widget = SpatialFootprintWidget(parent=None)
-        widget.set_data(self.project.cellpose_data)
+        widget = SpatialFootprintWidget(
+            parent=None, state=self._spatial_footprint_state
+        )
         widget.import_requested.connect(self.btn_import_cellpose_data_clicked)
-        widget.neuron_greyed_out_changed.connect(self._on_neuron_greyed_out_changed)
         return widget
 
     def _build_fresh_custom_analysis_widget(self) -> CustomAnalysisWidget | None:
