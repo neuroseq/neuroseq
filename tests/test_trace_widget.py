@@ -274,11 +274,13 @@ def test_trace_widget_greying_hides_and_compacts_lines(
     controller = ConstrainedPanZoomController()
     trace_widget = TraceWidget(controller)
     qtbot.addWidget(trace_widget)
+    controller.set_limits(max_time_secs=1.0, max_neurons=3)
     data = make_trace_data(n_neurons=3, n_timestamps=10)
     original_traces = data.traces.copy()
     trace_widget.set_data(data)
     assert trace_widget.graphic is not None
     assert isinstance(trace_widget.data, TraceData)
+    assert trace_widget.grid_lines is not None
 
     trace_widget.set_neuron_greyed(1, True)
 
@@ -292,12 +294,20 @@ def test_trace_widget_greying_hides_and_compacts_lines(
     assert trace_widget.n_neurons_total == 3
     # underlying data is untouched
     assert np.allclose(trace_widget.data.traces, original_traces)
+    # the view is refit to exactly the 2 remaining rows, not left showing dead
+    # space where the whole original 3-row extent used to be
+    assert trace_widget.grid_lines.n_neurons == 2
+    camera_state = controller._get_camera_state()
+    assert camera_state["height"] == pytest.approx(2)
 
     trace_widget.set_neuron_greyed(1, False)
     assert lines[1].visible
     assert lines[1].offset[1] == pytest.approx(1)
     assert lines[2].offset[1] == pytest.approx(2)  # restored to its original slot
     assert trace_widget.n_neurons == 3
+    assert trace_widget.grid_lines.n_neurons == 3
+    camera_state = controller._get_camera_state()
+    assert camera_state["height"] == pytest.approx(3)
     trace_widget.close()
 
 

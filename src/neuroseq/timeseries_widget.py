@@ -582,6 +582,15 @@ class TimeseriesWidget(FPLWidget):
         currently-visible neurons are shown, compacted to fill the gaps left by
         any greyed (hidden) ones."""
 
+    def _refit_view_to_visible_neurons(self) -> None:
+        """Shrink the grid lines and snap the camera to exactly the currently
+        visible neuron count, so hidden rows leave no dead/blank space in the
+        view (rather than merely being blanked out within the old extent)."""
+        if self.grid_lines is not None:
+            self.grid_lines.update_neuron_extent(self.n_neurons)
+        if self.controller is not None and self.n_neurons > 0:
+            self.controller.focus_neuron_range(0, self.n_neurons)
+
     def set_neuron_greyed(self, neuron_index: int, greyed: bool) -> None:
         """Hide (or restore) one neuron's row, compacting the remaining visible
         rows to fill the gap. The underlying data is never touched."""
@@ -595,6 +604,7 @@ class TimeseriesWidget(FPLWidget):
             self._greyed_neuron_ids.discard(neuron_index)
         self._rebuild_visible_neuron_mapping()
         self._apply_visible_neuron_layout()
+        self._refit_view_to_visible_neurons()
 
     def is_neuron_greyed(self, neuron_index: int) -> bool:
         return neuron_index in self._greyed_neuron_ids
@@ -605,6 +615,7 @@ class TimeseriesWidget(FPLWidget):
         self._greyed_neuron_ids.clear()
         self._rebuild_visible_neuron_mapping()
         self._apply_visible_neuron_layout()
+        self._refit_view_to_visible_neurons()
 
     def set_time_ms(self, time_ms: int) -> None:
         self.timeline.t = time_ms

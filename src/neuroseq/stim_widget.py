@@ -138,26 +138,46 @@ class StimWidget(TimeseriesWidget):
         self.n_timestamps = stim_array.values.shape[0]
         self.post_set_data()
 
-    def _compacted_values(self) -> np.ndarray:
-        """The full-shape data array with visible neurons' columns moved to their
-        compacted display position and any remainder zero-filled (renders
-        transparent). The real, untouched data lives in self.data_values."""
+    def _visible_values(self) -> np.ndarray:
+        """The real data narrowed to just the currently-visible neurons' columns,
+        compacted (no gaps, no padding) - shape (n_timesteps, n_visible). The
+        real, untouched data lives in self.data_values."""
         assert self.data_values is not None
-        compacted = np.zeros_like(self.data_values)
-        for display_row, real_id in enumerate(self._visible_neuron_ids):
-            compacted[:, display_row] = self.data_values[:, real_id]
-        return compacted
+        if not self._visible_neuron_ids:
+            return np.zeros(
+                (self.data_values.shape[0], 0), dtype=self.data_values.dtype
+            )
+        return self.data_values[:, self._visible_neuron_ids]
 
     def _apply_visible_neuron_layout(self) -> None:
-        if self.graphic is None or self.data_values is None:
+        if (
+            self.graphic is None
+            or self.data_values is None
+            or not self._visible_neuron_ids
+        ):
+            # Leave the existing graphic in place rather than trying to build a
+            # zero-height image if every neuron is currently hidden.
             return
-        compacted = self._compacted_values()
-        self.graphic.data[:] = compacted.T
+        # ImageGraphic's buffer is fixed-size at creation (like the lasso-line
+        # buffer issue) - it can't be resized via `.data = ...`, so rebuild it
+        # at the new, smaller shape rather than zero-padding a full-size one
+        # (which would leave dead/blank space where hidden neurons used to be).
+        visible_values = self._visible_values()
+        self.subplot.remove_graphic(self.graphic)
+        cmap = get_cmap(self.stim_type)
+        self.graphic = self.subplot.add_image(
+            visible_values.T,
+            vmin=self.vmin,
+            vmax=self.vmax,
+            cmap=cmap,
+        )
+        self._apply_cmap_alpha(self.graphic, cmap)
+        self._configure_time_scaled_image(self.graphic)
         if self.minimum_size_graphic is not None:
             self.subplot.remove_graphic(self.minimum_size_graphic)
             self.minimum_size_graphic = None
         self.minimum_size_graphic = self._add_minimum_size_graphic(
-            compacted, self.dt_ms, self.stim_type
+            visible_values, self.dt_ms, self.stim_type
         )
 
     def post_set_data(self):
@@ -320,7 +340,7 @@ class StimWidget(TimeseriesWidget):
                     self.minimum_size_graphic = None
                 if self.data_values is not None:
                     self.minimum_size_graphic = self._add_minimum_size_graphic(
-                        self._compacted_values(), self.dt_ms, self.stim_type
+                        self._visible_values(), self.dt_ms, self.stim_type
                     )
 
     def set_hover_slice(self, data: np.ndarray | None) -> None:

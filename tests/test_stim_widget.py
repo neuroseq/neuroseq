@@ -286,6 +286,7 @@ def test_stim_widget_greying_hides_and_compacts_rows(qtbot: QtBot) -> None:
     controller = ConstrainedPanZoomController()
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
+    controller.set_limits(max_time_secs=1.0, max_neurons=3)
     values = np.zeros((5, 3))  # (n_timestamps, n_neurons)
     values[:, 0] = 0.1
     values[:, 1] = 0.5
@@ -295,23 +296,30 @@ def test_stim_widget_greying_hides_and_compacts_rows(qtbot: QtBot) -> None:
     stim_widget.set_data(stim_array)
     assert stim_widget.graphic is not None
     assert stim_widget.data_values is not None
+    assert stim_widget.grid_lines is not None
 
     stim_widget.set_neuron_greyed(1, True)
 
     rendered = np.asarray(stim_widget.graphic.data.value)
+    assert rendered.shape[0] == 2  # the hidden row is gone, not just blanked
     assert np.allclose(rendered[0, :], 0.1)
     assert np.allclose(rendered[1, :], 0.9)  # neuron 2 shifted up to fill the gap
-    assert np.allclose(rendered[2, :], 0.0)  # trailing row zeroed (renders transparent)
     assert stim_widget.n_neurons == 2
     assert stim_widget.n_neurons_total == 3
     assert np.allclose(stim_widget.data_values, original_values)  # untouched
+    # the view is refit to exactly the 2 remaining rows
+    assert stim_widget.grid_lines.n_neurons == 2
+    assert controller._get_camera_state()["height"] == pytest.approx(2)
 
     stim_widget.set_neuron_greyed(1, False)
     rendered = np.asarray(stim_widget.graphic.data.value)
+    assert rendered.shape[0] == 3
     assert np.allclose(rendered[0, :], 0.1)
     assert np.allclose(rendered[1, :], 0.5)
     assert np.allclose(rendered[2, :], 0.9)
     assert stim_widget.n_neurons == 3
+    assert stim_widget.grid_lines.n_neurons == 3
+    assert controller._get_camera_state()["height"] == pytest.approx(3)
     stim_widget.close()
 
 
