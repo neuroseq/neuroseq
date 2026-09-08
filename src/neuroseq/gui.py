@@ -840,12 +840,12 @@ class Gui(QtWidgets.QMainWindow):
 
         If the project already has a file path and ``force_dialog`` is False
         (a plain "Save"), it is written straight back to that path with no
-        prompts, including everything the archive supports. Otherwise (a
-        "Save As", or a first-ever save with no existing path) this shows
-        the options dialog followed by a file picker.
+        prompts. Otherwise (a "Save As", or a first-ever save with no existing
+        path), a file picker is shown. All four project components are always
+        included; the options dialog remains available for import workflows.
 
         Returns True if a save task was dispatched, False if the user cancelled
-        at the options or file dialog (or a file operation is already running).
+        at the file dialog (or a file operation is already running).
         ``on_success`` runs after the save completes successfully; it lets a
         caller (e.g. New) chain an action once the current project is safely
         persisted.
@@ -858,13 +858,10 @@ class Gui(QtWidgets.QMainWindow):
             )
             return False
 
+        options = SaveLoadOptions(True, True, True, True)
         if not force_dialog and self.project.filepath is not None:
             filename = self.project.filepath
-            options = SaveLoadOptions(True, True, True, True)
         else:
-            options_dialog = SaveLoadOptionsDialog(action="Save")
-            if not options_dialog.exec():
-                return False
             picked_filename, _ = getsavefilename(
                 self,
                 "Save project",
@@ -876,7 +873,6 @@ class Gui(QtWidgets.QMainWindow):
             filename = pathlib.Path(picked_filename)
             if filename.suffix != ".nseq":
                 filename = filename.with_suffix(".nseq")
-            options = options_dialog.options
 
         project = self.project
 
