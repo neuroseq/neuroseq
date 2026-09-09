@@ -279,6 +279,21 @@ class OverlayView(FullScreenFPLWidget):
             self._reset_camera()
         self.set_aoi_shapes(self._aoi_config, self._aoi_visible)
 
+    def set_overlay_image(self, overlay_image: np.ndarray) -> None:
+        """Swap in a new overlay image with the same shape as the current
+        one, without touching the segmentation color layer, labels, or
+        camera - a cheap alternative to `add_overlay_data` for updates that
+        only recolor pixels (e.g. a hover highlight), which can fire once
+        per pointer-move event and would otherwise pay for a full label/
+        legend rebuild every time.
+        """
+        if self._image_graphic is None or self.overlay_image is None:
+            return
+        if overlay_image.shape != self.overlay_image.shape:
+            return
+        self.overlay_image = overlay_image
+        self._image_graphic.data = overlay_image
+
     def _reset_graphics(self, *, clear_subplot: bool = False) -> None:
         if clear_subplot and getattr(self.subplot, "renderer", None) is not None:
             self.subplot.clear()
@@ -1342,6 +1357,12 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             self.highlight_mappings = highlight_mappings
 
         self._update_overlay_display()
+
+    def set_overlay_image(self, overlay_image: np.ndarray) -> None:
+        """See `OverlayView.set_overlay_image` - a cheap recolor-only
+        update, safe to call at pointer-move frequency."""
+        self.overlay_image = overlay_image
+        self.overlay_view.set_overlay_image(overlay_image)
 
     def set_aoi_overlay(
         self,

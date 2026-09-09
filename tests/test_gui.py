@@ -589,6 +589,45 @@ def test_detached_trace_copy_shares_state_with_original(qtbot: QtBot) -> None:
     gui.close()
 
 
+def test_hovering_a_neuron_in_trace_or_stim_highlights_it_in_spatial_footprints(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+
+    assert gui._spatial_footprint_state.hovered_stim_id is None
+
+    gui.trace_widget.neuron_hovered.emit(1)
+    assert gui._spatial_footprint_state.hovered_stim_id == 1
+
+    gui.stim_editor.stim_widget.neuron_hovered.emit(2)
+    assert gui._spatial_footprint_state.hovered_stim_id == 2
+
+    gui.trace_widget.neuron_hovered.emit(None)
+    assert gui._spatial_footprint_state.hovered_stim_id is None
+    gui.close()
+
+
+def test_hovering_in_a_detached_trace_copy_also_highlights_the_neuron(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+    gui._auto_show_widget(gui.trace_widget)
+
+    gui.detach_panel_copy(gui.trace_widget)
+    window = gui._detached_panel_windows[-1]
+    detached_widget = window._widget
+
+    detached_widget.neuron_hovered.emit(0)
+
+    assert gui._spatial_footprint_state.hovered_stim_id == 0
+    window.close()
+    gui.close()
+
+
 def test_detached_spatial_footprint_copy_shares_state_with_original(
     qtbot: QtBot,
 ) -> None:

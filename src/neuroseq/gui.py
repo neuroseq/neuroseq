@@ -358,6 +358,9 @@ class Gui(QtWidgets.QMainWindow):
             show_axis_link_controls=True,
             state=self._trace_state,
         )
+        self.trace_widget.neuron_hovered.connect(
+            self._spatial_footprint_state.set_hovered_stim_id
+        )
         self.heatmap_widget = HeatmapWidget(parent=self)
         self.spatial_footprint_widget = SpatialFootprintWidget(
             parent=self, state=self._spatial_footprint_state
@@ -419,6 +422,9 @@ class Gui(QtWidgets.QMainWindow):
             self.trace_controller.focus_time_range
         )
         self.stim_editor.current_stim_changed.connect(self._on_current_stim_changed)
+        self.stim_editor.stim_widget.neuron_hovered.connect(
+            self._spatial_footprint_state.set_hovered_stim_id
+        )
         split_vertical.addWidget(self.stim_editor)
         self.trace_widget.set_default_scroll_bars(
             self.stim_editor.x_scrollbar,
@@ -3191,6 +3197,7 @@ class Gui(QtWidgets.QMainWindow):
         )
         widget.custom_analysis_requested.connect(self._custom_analysis)
         widget.vector_export_requested.connect(self.btn_export_traces_vector_clicked)
+        widget.neuron_hovered.connect(self._spatial_footprint_state.set_hovered_stim_id)
         return widget
 
     def _build_fresh_spike_widget(self) -> SpikeWidget:

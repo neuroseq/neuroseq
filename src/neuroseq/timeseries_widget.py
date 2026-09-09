@@ -48,6 +48,7 @@ class TimeseriesWidget(FPLWidget):
         object, object, bool, object, object
     )  # data, analysis type, new window, neuron slice, time slice
     escape_pressed = QtCore.Signal()
+    neuron_hovered = QtCore.Signal(object)  # int | None - the real neuron/stim id
 
     SUPPORTS_DETACH = True
 
@@ -89,6 +90,7 @@ class TimeseriesWidget(FPLWidget):
         self._visible_neuron_ids: list[int] = []
         self._neuron_id_to_display_row: dict[int, int] = {}
         self.hover_slice_graphic: fpl.Graphic | None = None
+        self._last_hovered_neuron_id: int | None = None
         self.text = Text()
         self.show_text = True
         self.timeline = Timeline()
@@ -577,6 +579,7 @@ class TimeseriesWidget(FPLWidget):
         self.clear_greyed_neurons()
 
     def closeEvent(self, event) -> None:
+        self._set_hovered_neuron_id(None)
         super().closeEvent(event)
 
     def _rebuild_visible_neuron_mapping(self) -> None:
@@ -709,16 +712,24 @@ class TimeseriesWidget(FPLWidget):
             100,
         )
 
+    def _set_hovered_neuron_id(self, neuron_id: int | None) -> None:
+        if neuron_id == self._last_hovered_neuron_id:
+            return
+        self._last_hovered_neuron_id = neuron_id
+        self.neuron_hovered.emit(neuron_id)
+
     def pointer_move(self, ev: pygfx.PointerEvent) -> None:
         self.mouse_pos = self.subplot.map_screen_to_world(ev)
         if self.mouse_pos is None:
             self.text.visible = False
             if self.hover_slice_graphic is not None:
                 self.hover_slice_graphic.visible = False
+            self._set_hovered_neuron_id(None)
             return
         self.logger.debug(f"pointer_move at {self.mouse_pos} in mode {self.mode}")
         self.text.visible = self.show_text
         hover_value_text = ""
+        hovered_neuron_id: int | None = None
         if self.data_values is not None and self._visible_neuron_ids:
             time_index = np.clip(
                 math.floor(self.mouse_pos[0] / self.dt_ms),
@@ -729,10 +740,12 @@ class TimeseriesWidget(FPLWidget):
                 math.floor(self.mouse_pos[1] + 0.5), 0, self.n_neurons - 1
             )
             neuron_id = self._visible_neuron_ids[int(display_row)]
+            hovered_neuron_id = neuron_id
             hover_value = (
                 self.data_values[time_index, neuron_id] * self.data_values_scale
             )
             hover_value_text = f"Neuron {neuron_id}\n{hover_value:.3g} {self.units}"
+        self._set_hovered_neuron_id(hovered_neuron_id)
         self.text.set_pos(self.mouse_pos, hover_value_text)
         if self.hover_slice_graphic is not None:
             self.hover_slice_graphic.visible = True

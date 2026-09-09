@@ -22,8 +22,10 @@ from neuroseq.importer_cellpose import CircleAOI
 from neuroseq.importer_cellpose import SquareAOI
 from neuroseq.importer_cellpose import clone_aoi_config
 from neuroseq.spatial_footprint_state import SpatialFootprintState
+from neuroseq.spatial_footprint_widget import HOVERED_CELL_BRIGHTNESS_BOOST
 from neuroseq.spatial_footprint_widget import SELECTION_OUTLINE_BLACK
 from neuroseq.spatial_footprint_widget import SELECTION_OUTLINE_RED
+from neuroseq.spatial_footprint_widget import UNSELECTED_CELL_BRIGHTNESS
 from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
 
 
@@ -150,6 +152,61 @@ def test_set_data_with_no_aoi_config_shows_no_aoi_shapes(qtbot: QtBot) -> None:
     widget.close()
 
 
+def test_show_labels_checkbox_toggles_stimulus_id_labels(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
+    assert widget.overlay_widget.show_stimulus_ids
+    assert not widget.overlay_widget.show_cellpose_ids
+
+    widget.show_labels_checkbox.setChecked(False)
+
+    assert not widget.overlay_widget.show_stimulus_ids
+    assert not widget.overlay_widget.show_cellpose_ids  # never toggled on here
+    widget.close()
+
+
+def test_show_segmentation_checkbox_toggles_the_segmentation_layer(
+    qtbot: QtBot,
+) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result())
+    segmentation_graphic = widget.overlay_widget.overlay_view._segmentation_graphic
+    assert segmentation_graphic is not None
+    assert segmentation_graphic.visible
+
+    widget.show_segmentation_checkbox.setChecked(False)
+
+    assert widget.overlay_widget.show_segmentation is False
+    assert not segmentation_graphic.visible
+    widget.close()
+
+
+def test_show_shapes_checkbox_toggles_aoi_overlay_live(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result(aoi_config=_aoi_config()))
+    assert widget.show_shapes_checkbox.isEnabled()
+    assert widget.show_shapes_checkbox.isChecked()
+    assert widget.overlay_widget.overlay_view._aoi_visible
+
+    widget.show_shapes_checkbox.setChecked(False)
+
+    assert not widget.overlay_widget.overlay_view._aoi_visible
+    widget.close()
+
+
+def test_show_shapes_checkbox_disabled_without_an_aoi_config(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+
+    widget.set_data(_cellpose_result())
+
+    assert not widget.show_shapes_checkbox.isEnabled()
+    widget.close()
+
+
 def test_import_button_emits_import_requested(qtbot: QtBot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
@@ -203,6 +260,58 @@ def test_cell_overlay_resize_keeps_embedded_view_layout_driven(qtbot: QtBot) -> 
 
     assert widget.overlay_view.maximumWidth() > widget.overlay_view.minimumWidth()
     assert widget.overlay_view.maximumHeight() > widget.overlay_view.minimumHeight()
+    widget.close()
+
+
+def test_set_overlay_image_swaps_pixels_without_touching_segmentation_or_labels(
+    qtbot: QtBot,
+) -> None:
+    widget = CellOverlayWidget()
+    qtbot.addWidget(widget)
+    result = _cellpose_result()
+    widget.set_overlay(
+        result.overlay_image,
+        result.segmentation_array,
+        result.original_cellpose_ids,
+        result.stimulus_to_cellpose_mapping,
+    )
+    segmentation_graphic = widget.overlay_view._segmentation_graphic
+    new_image = np.full_like(result.overlay_image, 200)
+
+    widget.set_overlay_image(new_image)
+
+    image_graphic = widget.overlay_view._image_graphic
+    assert image_graphic is not None
+    np.testing.assert_array_equal(np.asarray(image_graphic.data.value), new_image)
+    # the segmentation color layer is untouched - same graphic, not rebuilt
+    assert widget.overlay_view._segmentation_graphic is segmentation_graphic
+    widget.close()
+
+
+def test_set_overlay_image_is_a_noop_with_a_mismatched_shape_or_no_graphic_yet(
+    qtbot: QtBot,
+) -> None:
+    widget = CellOverlayWidget()
+    qtbot.addWidget(widget)
+
+    # no overlay set yet - nothing to swap into
+    widget.set_overlay_image(np.zeros((3, 3, 3), dtype=np.uint8))
+    assert widget.overlay_view._image_graphic is None
+
+    result = _cellpose_result()
+    widget.set_overlay(
+        result.overlay_image,
+        result.segmentation_array,
+        result.original_cellpose_ids,
+        result.stimulus_to_cellpose_mapping,
+    )
+    image_graphic = widget.overlay_view._image_graphic
+    assert image_graphic is not None
+    before = np.asarray(image_graphic.data.value).copy()
+
+    widget.set_overlay_image(np.zeros((5, 5, 3), dtype=np.uint8))  # wrong shape
+
+    np.testing.assert_array_equal(np.asarray(image_graphic.data.value), before)
     widget.close()
 
 
@@ -352,9 +461,9 @@ def test_identity_mapping_when_none_present(qtbot: QtBot) -> None:
     widget.close()
 
 
-def test_selecting_a_cell_does_not_recolor_other_cells(qtbot: QtBot) -> None:
-    """No more striping for hidden ("excluded") cells - a cell that becomes
-    hidden from trace/stim keeps its normal segmentation color."""
+def test_selecting_a_cell_dims_the_other_unselected_cells(qtbot: QtBot) -> None:
+    """A cell that becomes hidden from trace/stim is dimmed in this view
+    too, to make the selected cell(s) stand out."""
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
     segmentation = np.zeros((8, 8), dtype=np.int32)
@@ -376,14 +485,33 @@ def test_selecting_a_cell_does_not_recolor_other_cells(qtbot: QtBot) -> None:
     assert image_graphic is not None
     before_image = np.asarray(image_graphic.data.value).copy()
 
-    # select cell 0 - cell 1 becomes hidden from trace/stim, color unchanged
+    # select cell 0 - cell 1 becomes hidden from trace/stim, and dimmed here
     widget.overlay_widget.neuron_clicked.emit(0)
 
     after_image = np.asarray(image_graphic.data.value)
-    assert np.allclose(
-        after_image[result.segmentation_array == 1],
-        before_image[result.segmentation_array == 1],
+    np.testing.assert_allclose(
+        after_image[result.segmentation_array == 1].astype(np.float32),
+        before_image[result.segmentation_array == 1].astype(np.float32)
+        * UNSELECTED_CELL_BRIGHTNESS,
+        atol=1.0,
     )
+    widget.close()
+
+
+def test_clearing_the_selection_restores_full_brightness(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
+    image_graphic = widget.overlay_widget.overlay_view._image_graphic
+    assert image_graphic is not None
+    original_image = np.asarray(image_graphic.data.value).copy()
+
+    widget.overlay_widget.neuron_clicked.emit(0)
+    assert not np.array_equal(np.asarray(image_graphic.data.value), original_image)
+
+    widget.clear_selection()
+
+    np.testing.assert_array_equal(np.asarray(image_graphic.data.value), original_image)
     widget.close()
 
 
@@ -415,6 +543,37 @@ def test_cellpose_to_stim_id_returns_none_for_unmapped_cell() -> None:
     # 0, 1, 2, 3, 4 are unmapped strays - must not alias onto neuron 0/1/2
     for unmapped_id in range(5):
         assert state._cellpose_to_stim_id(unmapped_id) is None
+
+
+def test_hovered_cellpose_id_resolves_via_mapping() -> None:
+    state = SpatialFootprintState()
+    state.set_data(_cellpose_result(mapping={0: 2, 1: 1, 2: 0}))
+
+    state.set_hovered_stim_id(0)
+    assert state.hovered_cellpose_id == 2
+
+    state.set_hovered_stim_id(None)
+    assert state.hovered_cellpose_id is None
+
+
+def test_hovered_cellpose_id_is_identity_when_no_mapping() -> None:
+    state = SpatialFootprintState()
+    state.set_data(_cellpose_result(mapping=None))
+
+    state.set_hovered_stim_id(1)
+    assert state.hovered_cellpose_id == 1
+
+
+def test_set_hovered_stim_id_is_a_noop_when_unchanged() -> None:
+    state = SpatialFootprintState()
+    state.set_data(_cellpose_result())
+    emitted: list[int | None] = []
+    state.hovered_stim_id_changed.connect(lambda: emitted.append(state.hovered_stim_id))
+
+    state.set_hovered_stim_id(1)
+    state.set_hovered_stim_id(1)
+
+    assert emitted == [1]
 
 
 def test_selecting_a_cell_does_not_hide_it_when_unmapped_cells_collide_with_its_id(
@@ -473,6 +632,110 @@ def test_selected_cell_renders_red_black_ring(qtbot: QtBot) -> None:
     assert np.any(
         np.all(np.isclose(cell_colors, np.array([0.0, 0.0, 1.0]), atol=1 / 255), axis=1)
     )
+    widget.close()
+
+
+def test_hovering_a_cell_boosts_its_brightness(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    segmentation = np.zeros((8, 8), dtype=np.int32)
+    segmentation[:, 4:] = 1
+    overlay_image = np.zeros((8, 8, 3), dtype=np.uint8)
+    overlay_image[:, :4] = (0, 0, 100)
+    overlay_image[:, 4:] = (100, 0, 0)
+    result = CellposeImportResult(
+        image_path=Path("cellpose.png"),
+        segmentation_array=segmentation,
+        overlay_image=overlay_image,
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.array([0, 1], dtype=np.int32),
+        stimulus_to_cellpose_mapping={0: 0, 1: 1},
+    )
+    widget.set_data(result)
+    image_graphic = widget.overlay_widget.overlay_view._image_graphic
+    assert image_graphic is not None
+    before_image = np.asarray(image_graphic.data.value).copy()
+
+    widget._state.set_hovered_stim_id(1)  # -> cellpose cell 1
+
+    after_image = np.asarray(image_graphic.data.value)
+    np.testing.assert_allclose(
+        after_image[segmentation == 1].astype(np.float32),
+        np.clip(
+            before_image[segmentation == 1].astype(np.float32)
+            * HOVERED_CELL_BRIGHTNESS_BOOST,
+            0,
+            255,
+        ),
+        atol=1.0,
+    )
+    # the other, unhovered cell is untouched
+    np.testing.assert_array_equal(
+        after_image[segmentation == 0], before_image[segmentation == 0]
+    )
+    widget.close()
+
+
+def test_hovering_a_dimmed_unselected_cell_restores_full_brightness(
+    qtbot: QtBot,
+) -> None:
+    """A cell that's currently dimmed (hidden from trace/stim) still gets
+    boosted to a bright highlight when hovered."""
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    segmentation = np.zeros((8, 8), dtype=np.int32)
+    segmentation[:, 4:] = 1
+    overlay_image = np.zeros((8, 8, 3), dtype=np.uint8)
+    overlay_image[:, :4] = (0, 0, 100)
+    overlay_image[:, 4:] = (100, 0, 0)
+    result = CellposeImportResult(
+        image_path=Path("cellpose.png"),
+        segmentation_array=segmentation,
+        overlay_image=overlay_image,
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.array([0, 1], dtype=np.int32),
+        stimulus_to_cellpose_mapping={0: 0, 1: 1},
+    )
+    widget.set_data(result)
+    widget.overlay_widget.neuron_clicked.emit(0)  # selects 0, dims 1
+    image_graphic = widget.overlay_widget.overlay_view._image_graphic
+    assert image_graphic is not None
+    dimmed_image = np.asarray(image_graphic.data.value).copy()
+
+    widget._state.set_hovered_stim_id(1)  # hover the dimmed cell 1
+
+    hovered_image = np.asarray(image_graphic.data.value)
+    assert not np.array_equal(
+        hovered_image[segmentation == 1], dimmed_image[segmentation == 1]
+    )
+    widget.close()
+
+
+def test_hover_update_does_not_trigger_a_full_overlay_rebuild(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A hover can fire at pointer-move frequency - it must only recolor
+    the existing image, never pay for set_overlay's legend/label rebuild."""
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
+
+    full_rebuild_calls = 0
+    original_set_overlay = widget.overlay_widget.set_overlay
+
+    def _counting_set_overlay(*args: Any, **kwargs: Any) -> None:
+        nonlocal full_rebuild_calls
+        full_rebuild_calls += 1
+        original_set_overlay(*args, **kwargs)
+
+    monkeypatch.setattr(widget.overlay_widget, "set_overlay", _counting_set_overlay)
+
+    widget._state.set_hovered_stim_id(1)
+
+    assert full_rebuild_calls == 0
     widget.close()
 
 

@@ -307,6 +307,47 @@ def test_trace_widget_hover_shows_real_neuron_id_when_only_one_visible(
     trace_widget.close()
 
 
+def test_pointer_move_emits_neuron_hovered_only_on_change(
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    make_trace_data,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+
+    emitted: list[int | None] = []
+    trace_widget.neuron_hovered.connect(emitted.append)
+
+    monkeypatch.setattr(
+        trace_widget.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([0.0, 1.0, 0.0]),  # row 1
+    )
+    trace_widget.pointer_move(None)
+    trace_widget.pointer_move(None)  # same row - no duplicate emission
+
+    assert emitted == [1]
+
+    monkeypatch.setattr(
+        trace_widget.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([0.0, 2.0, 0.0]),  # row 2
+    )
+    trace_widget.pointer_move(None)
+
+    assert emitted == [1, 2]
+
+    monkeypatch.setattr(
+        trace_widget.subplot, "map_screen_to_world", lambda ev: None
+    )  # pointer left the plot area
+    trace_widget.pointer_move(None)
+
+    assert emitted == [1, 2, None]
+    trace_widget.close()
+
+
 def test_trace_widget_clear_data_releases_plot_buffers(qtbot: QtBot) -> None:
     controller = ConstrainedPanZoomController()
     trace_widget = TraceWidget(controller)

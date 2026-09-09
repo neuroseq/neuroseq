@@ -35,11 +35,17 @@ class SpatialFootprintState(QtCore.QObject):
     # TimeseriesWidget.set_neuron_greyed) should use this instead of
     # neuron_greyed_out_changed to do that rebuild once, not N times.
     neurons_greyed_out_changed = QtCore.Signal(list, list)
+    hovered_stim_id_changed = QtCore.Signal()
 
     def __init__(self, parent: QtCore.QObject | None = None) -> None:
         super().__init__(parent)
         self.cellpose_data: CellposeImportResult | None = None
         self.selected_cellpose_ids: set[int] = set()
+        # The neuron/stim row currently hovered in the Trace/Stim panels, if
+        # any - lets the Spatial Footprints panel highlight where that
+        # neuron sits in the FOV. Not derived from a click, so it's tracked
+        # separately from selection.
+        self.hovered_stim_id: int | None = None
 
     def _all_cellpose_ids(self) -> set[int]:
         if self.cellpose_data is None:
@@ -82,9 +88,35 @@ class SpatialFootprintState(QtCore.QObject):
         cellpose_to_stim = {v: k for k, v in mapping.items()}
         return cellpose_to_stim.get(cellpose_id)
 
+    def _stim_id_to_cellpose_id(self, stim_id: int | None) -> int | None:
+        """The reverse of `_cellpose_to_stim_id`: resolve a trace/stim row
+        to the segmented cell that drives it, or `None` if `stim_id` is
+        `None` or there is no mapping entry for it."""
+        if stim_id is None:
+            return None
+        mapping = (
+            self.cellpose_data.stimulus_to_cellpose_mapping
+            if self.cellpose_data is not None
+            else None
+        )
+        if not mapping:
+            return stim_id
+        return mapping.get(stim_id)
+
+    @property
+    def hovered_cellpose_id(self) -> int | None:
+        return self._stim_id_to_cellpose_id(self.hovered_stim_id)
+
+    def set_hovered_stim_id(self, stim_id: int | None) -> None:
+        if stim_id == self.hovered_stim_id:
+            return
+        self.hovered_stim_id = stim_id
+        self.hovered_stim_id_changed.emit()
+
     def set_data(self, cellpose_data: CellposeImportResult | None) -> None:
         self.cellpose_data = cellpose_data
         self.selected_cellpose_ids = set()
+        self.hovered_stim_id = None
         self.data_changed.emit()
 
     def _set_selected(self, new_selected: set[int]) -> None:

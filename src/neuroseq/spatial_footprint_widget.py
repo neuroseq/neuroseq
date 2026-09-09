@@ -17,6 +17,8 @@ SELECTION_OUTLINE_RED = (0.9, 0.15, 0.15)
 SELECTION_OUTLINE_BLACK = (0.0, 0.0, 0.0)
 SELECTION_OUTLINE_STRIPE_WIDTH = 2
 SELECTION_OUTLINE_THICKNESS = 2
+UNSELECTED_CELL_BRIGHTNESS = 0.35
+HOVERED_CELL_BRIGHTNESS_BOOST = 1.8
 
 
 class SpatialFootprintWidget(QtWidgets.QWidget):
@@ -24,11 +26,13 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
 
     Clicking a cell selects it (marked with a red/black ring); every cell
     not currently selected is hidden from the trace/stim panels, live, with
-    no separate apply step - a ring is the only visual change to a cell
-    itself, its normal segmentation color is otherwise left alone. An empty
-    selection means no filtering is in effect. Dragging (rather than a
-    plain click) draws a lasso that selects every enclosed cell; clicking on
-    empty space between cells clears the whole selection.
+    no separate apply step, and is dimmed in this view so the selection
+    stands out. An empty selection means no filtering is in effect (nothing
+    dimmed). Dragging (rather than a plain click) draws a lasso that selects
+    every enclosed cell; clicking on empty space between cells clears the
+    whole selection. Hovering a row in the Trace/Stim panels highlights that
+    same neuron here, brighter than a normal selected cell, so its location
+    in the FOV is easy to spot.
 
     A view over a `SpatialFootprintState`. Multiple instances can share one
     state (pass the same object as `state` to each) and will stay in sync -
@@ -111,6 +115,26 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self.overlay_widget.background_clicked.connect(self.clear_selection)
         layout.addWidget(self.overlay_widget)
 
+        # Same three display toggles as the Cell Segmentation import dialog
+        # (cellpose_import_dialog.py), so this docked/detached panel offers
+        # the same at-a-glance controls.
+        checkbox_layout = QtWidgets.QHBoxLayout()
+        self.show_labels_checkbox = QtWidgets.QCheckBox("Show labels")
+        self.show_labels_checkbox.setChecked(True)
+        self.show_labels_checkbox.toggled.connect(self._on_display_toggle_changed)
+        checkbox_layout.addWidget(self.show_labels_checkbox)
+        self.show_segmentation_checkbox = QtWidgets.QCheckBox("Show segmentation")
+        self.show_segmentation_checkbox.setChecked(True)
+        self.show_segmentation_checkbox.toggled.connect(self._on_display_toggle_changed)
+        checkbox_layout.addWidget(self.show_segmentation_checkbox)
+        self.show_shapes_checkbox = QtWidgets.QCheckBox("Show shapes")
+        self.show_shapes_checkbox.setChecked(True)
+        self.show_shapes_checkbox.setEnabled(False)
+        self.show_shapes_checkbox.toggled.connect(self._on_display_toggle_changed)
+        checkbox_layout.addWidget(self.show_shapes_checkbox)
+        checkbox_layout.addStretch(1)
+        layout.addLayout(checkbox_layout)
+
         self._base_legend: list[tuple[int, tuple[int, int, int]]] = []
         # Keep the connection handles (not just the callables) so close() can
         # sever them precisely: a signal-to-signal connection like the third
@@ -127,6 +151,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             self._state.neurons_greyed_out_changed.connect(
                 self.neurons_greyed_out_changed.emit
             ),
+            self._state.hovered_stim_id_changed.connect(self._on_state_hovered_changed),
         ]
         self._on_state_data_changed()
 
@@ -158,6 +183,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             self.overlay_widget.set_empty_message("No cell spatial footprints loaded.")
             self.overlay_widget.setVisible(False)
             self.empty_state_widget.setVisible(True)
+            self.show_shapes_checkbox.setEnabled(False)
             self.overlay_widget.set_aoi_overlay(None, show=False)
             return
 
@@ -168,13 +194,42 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         )
         self._refresh_overlay()
         aoi_config = cellpose_data.aoi_config
+        self.show_shapes_checkbox.setEnabled(aoi_config is not None)
+        self.show_shapes_checkbox.setChecked(
+            bool(aoi_config is not None and aoi_config.show_shapes)
+        )
+        self._update_aoi_overlay_visibility()
+
+    def _on_display_toggle_changed(self) -> None:
+        """Sync overlay display options with the checkboxes, matching the
+        Cell Segmentation import dialog's own checkbox row."""
+        self.overlay_widget.set_display_options(
+            show_cellpose_ids=False,
+            show_stimulus_ids=self.show_labels_checkbox.isChecked(),
+            show_segmentation=self.show_segmentation_checkbox.isChecked(),
+        )
+        self._update_aoi_overlay_visibility()
+
+    def _update_aoi_overlay_visibility(self) -> None:
+        cellpose_data = self._cellpose_data
+        aoi_config = cellpose_data.aoi_config if cellpose_data is not None else None
         self.overlay_widget.set_aoi_overlay(
-            aoi_config, show=bool(aoi_config is not None and aoi_config.show_shapes)
+            aoi_config,
+            show=bool(aoi_config is not None and self.show_shapes_checkbox.isChecked()),
         )
 
     def _on_state_selection_changed(self) -> None:
         self._update_clear_selection_button()
         self._refresh_overlay()
+
+    def _on_state_hovered_changed(self) -> None:
+        # A hover can fire once per pointer-move event in the Trace/Stim
+        # panels - far too often to pay for a full legend/label rebuild
+        # (_refresh_overlay/add_overlay_data), so this only recolors the
+        # existing overlay image in place.
+        if self._cellpose_data is None:
+            return
+        self.overlay_widget.set_overlay_image(self._composed_overlay_image())
 
     def _refresh_overlay(self) -> None:
         if self._cellpose_data is None:
@@ -190,13 +245,65 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
     def _composed_overlay_image(self) -> np.ndarray:
         cellpose_data = self._cellpose_data
         assert cellpose_data is not None
-        if not self._selected_cellpose_ids:
+        hovered_cellpose_id = self._state.hovered_cellpose_id
+        if not self._selected_cellpose_ids and hovered_cellpose_id is None:
             return cellpose_data.overlay_image
 
         image = np.array(cellpose_data.overlay_image, copy=True)
         segmentation = cellpose_data.segmentation_array
-        self._paint_selection_ring(image, segmentation, self._selected_cellpose_ids)
+        if self._selected_cellpose_ids:
+            self._dim_unselected_cells(image, segmentation, self._selected_cellpose_ids)
+        if hovered_cellpose_id is not None:
+            self._highlight_hovered_cell(
+                image, cellpose_data.overlay_image, segmentation, hovered_cellpose_id
+            )
+        if self._selected_cellpose_ids:
+            self._paint_selection_ring(image, segmentation, self._selected_cellpose_ids)
         return image
+
+    @staticmethod
+    def _dim_unselected_cells(
+        image: np.ndarray,
+        segmentation: np.ndarray,
+        selected_cellpose_ids: set[int],
+    ) -> None:
+        """Darken every segmented cell that is not currently selected, so
+        the selected cell(s) stand out against the rest. Background pixels
+        (not part of any cell, negative ids) are left untouched."""
+        dim_mask = (segmentation >= 0) & ~np.isin(
+            segmentation, np.array(list(selected_cellpose_ids))
+        )
+        if not np.any(dim_mask):
+            return
+        image[dim_mask] = (
+            image[dim_mask].astype(np.float32) * UNSELECTED_CELL_BRIGHTNESS
+        ).astype(image.dtype, copy=False)
+
+    @staticmethod
+    def _highlight_hovered_cell(
+        image: np.ndarray,
+        original_image: np.ndarray,
+        segmentation: np.ndarray,
+        cellpose_id: int,
+    ) -> None:
+        """Boost the hovered cell's brightness beyond even a normal
+        selected cell's, so a neuron being inspected in the Trace/Stim
+        panels is unmistakable in the FOV - regardless of whether it's
+        currently dimmed (unselected) or not, computed from the pristine
+        `original_image` rather than the already-dimmed `image` so hovering
+        a dimmed cell always restores it to full brightness and beyond."""
+        mask = segmentation == cellpose_id
+        if not np.any(mask):
+            return
+        if np.issubdtype(image.dtype, np.integer):
+            max_value = float(np.iinfo(image.dtype).max)
+        else:
+            max_value = float(np.nanmax(original_image)) if original_image.size else 1.0
+            max_value = 255.0 if max_value > 1.0 else 1.0
+        boosted = (
+            original_image[mask].astype(np.float32) * HOVERED_CELL_BRIGHTNESS_BOOST
+        )
+        image[mask] = np.clip(boosted, 0.0, max_value).astype(image.dtype, copy=False)
 
     def _paint_selection_ring(
         self,
