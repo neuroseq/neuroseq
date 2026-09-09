@@ -73,6 +73,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self._current_screen: QtGui.QScreen | None = None
         self._suppress_aoi_signals = False
         self._aoi_initialized_shape: tuple[int, int] | None = None
+        # Cellpose ids in the order they were clicked while manual-click
+        # assignment is active - not persisted (see _refresh_manual_mapping_text).
+        self._manual_click_order: list[int] = []
         self._setup_ui()
         self._load_existing_data_if_available()
 
@@ -252,6 +255,31 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.custom_mapping_label.setVisible(False)
         mapping_layout.addRow(self.custom_mapping_label, self.custom_mapping_line)
 
+        # Manual click assignment - an alternative way to fill in the same
+        # custom mapping text field above: click cells in the viewer instead
+        # of typing ids by hand. Stimulus ids are assigned in click order;
+        # clicking an already-clicked cell again undoes it. Every cell not
+        # clicked gets the remaining ids afterward, in ascending cellpose-id
+        # order, so every segmented cell always ends up mapped to something.
+        manual_click_layout = QtWidgets.QHBoxLayout()
+        self.manual_click_checkbox = QtWidgets.QCheckBox("Assign by clicking cells")
+        self.manual_click_checkbox.setToolTip(
+            "Click cells in the viewer to assign stimulus ids in click order "
+            "(click again to undo). Unclicked cells get the remaining ids "
+            "automatically, in ascending cellpose-id order."
+        )
+        self.manual_click_checkbox.toggled.connect(self._on_manual_click_toggled)
+        manual_click_layout.addWidget(self.manual_click_checkbox)
+        self.manual_click_clear_button = QtWidgets.QPushButton("Clear")
+        self.manual_click_clear_button.setAutoDefault(False)
+        self.manual_click_clear_button.clicked.connect(self._clear_manual_click_order)
+        manual_click_layout.addWidget(self.manual_click_clear_button)
+        manual_click_layout.addStretch(1)
+        self.manual_click_row_widget = QtWidgets.QWidget()
+        self.manual_click_row_widget.setLayout(manual_click_layout)
+        self.manual_click_row_widget.setVisible(False)
+        mapping_layout.addRow(self.manual_click_row_widget)
+
         self.aoi_group = QtWidgets.QGroupBox("Areas of Interest")
         aoi_layout = QtWidgets.QVBoxLayout(self.aoi_group)
 
@@ -361,6 +389,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.overlay_widget.aoi_geometry_changed.connect(
             self._on_overlay_aoi_geometry_changed
         )
+        self.overlay_widget.neuron_clicked.connect(self._on_manual_click_cell)
         self._undo_aoi_shortcut = QtGui.QShortcut(QtGui.QKeySequence("Ctrl+Z"), self)
         self._undo_aoi_shortcut.activated.connect(self._undo_aoi_edit)
         self._redo_aoi_shortcut = QtGui.QShortcut(
@@ -679,6 +708,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
     def _reset_importer_state(self, clear_existing_data: bool = False) -> None:
         """Return dialog to initial state after an importer failure."""
         self._imported_data = None
+        self._manual_click_order = []
+        self.manual_click_checkbox.setChecked(False)
         if clear_existing_data:
             self.existing_data = None
             if hasattr(self, "delete_button"):
@@ -728,9 +759,14 @@ class CellposeImportDialog(QtWidgets.QDialog):
         mapping_strategy = self._get_mapping_strategy()
         is_aoi = mapping_strategy == CUSTOM_AOI_STRATEGY
         is_any_custom = mapping_strategy in ("Custom", CUSTOM_AOI_STRATEGY)
+        self.manual_click_row_widget.setVisible(mapping_strategy == "Custom")
+        if mapping_strategy != "Custom" and self.manual_click_checkbox.isChecked():
+            self.manual_click_checkbox.setChecked(False)
         self.custom_mapping_line.setVisible(is_any_custom)
         self.custom_mapping_label.setVisible(is_any_custom)
-        self.custom_mapping_line.setReadOnly(is_aoi)
+        self.custom_mapping_line.setReadOnly(
+            is_aoi or self.manual_click_checkbox.isChecked()
+        )
         self.linear_offset_spin.setVisible(not is_any_custom)
         self.linear_offset_label.setVisible(not is_any_custom)
         self.aoi_group.setVisible(is_aoi)
@@ -751,6 +787,58 @@ class CellposeImportDialog(QtWidgets.QDialog):
         ):
             self._update_preview_mapping()
         self._last_mapping_strategy = mapping_strategy
+
+    def _on_manual_click_toggled(self, checked: bool) -> None:
+        self.overlay_widget.set_cell_selection_enabled(checked)
+        self.custom_mapping_line.setReadOnly(
+            checked or self._get_mapping_strategy() == CUSTOM_AOI_STRATEGY
+        )
+        if checked:
+            self._refresh_manual_mapping_text()
+
+    def _on_manual_click_cell(self, cellpose_id: int) -> None:
+        if (
+            not self.manual_click_checkbox.isChecked()
+            or self._get_mapping_strategy() != "Custom"
+        ):
+            return
+        if cellpose_id in self._manual_click_order:
+            self._manual_click_order.remove(cellpose_id)
+        else:
+            self._manual_click_order.append(cellpose_id)
+        self._refresh_manual_mapping_text()
+
+    def _clear_manual_click_order(self) -> None:
+        self._manual_click_order = []
+        if self.manual_click_checkbox.isChecked():
+            self._refresh_manual_mapping_text()
+
+    def _refresh_manual_mapping_text(self) -> None:
+        """Fill in the custom mapping text field from the current click
+        order, plus every unclicked cell in ascending cellpose-id order -
+        every segmented cell ends up mapped to something, unlike a
+        hand-typed Custom mapping which may deliberately leave cells out.
+
+        Written directly rather than through _mapping_to_text(), which
+        drops stim_id == cellpose_id pairs for a shorter display - those
+        pairs are just as real here (a cell coincidentally keeping its own
+        id) and dropping them would silently leave that cell unmapped.
+        """
+        original_ids = self.importer._original_cellpose_ids
+        if original_ids is None:
+            return
+        clicked = [int(cellpose_id) for cellpose_id in self._manual_click_order]
+        remaining = sorted(
+            int(cellpose_id)
+            for cellpose_id in original_ids
+            if int(cellpose_id) not in clicked
+        )
+        ordered_cellpose_ids = clicked + remaining
+        text = ",".join(
+            f"{stim_id}:{cellpose_id}"
+            for stim_id, cellpose_id in enumerate(ordered_cellpose_ids)
+        )
+        self.custom_mapping_line.setText(text)
 
     def _on_custom_mapping_text_changed(self, _text: str) -> None:
         """Refresh preview live while editing custom mapping."""
@@ -1319,6 +1407,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.segmentation_path = Path(filename)
             self.segmentation_path_label.setText(self.segmentation_path.name)
             self.segmentation_path_label.setStyleSheet("QLabel { color: black; }")
+            # A new segmentation has a different set of cellpose ids - any
+            # click order recorded against the old one is meaningless now.
+            self._manual_click_order = []
+            self.manual_click_checkbox.setChecked(False)
 
             self.importer.load_segmentation_file(filename)
             self._base_segmentation_data = np.array(
