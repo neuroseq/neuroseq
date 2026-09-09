@@ -27,6 +27,14 @@ class SpatialFootprintState(QtCore.QObject):
     data_changed = QtCore.Signal()
     selection_changed = QtCore.Signal()
     neuron_greyed_out_changed = QtCore.Signal(int, bool)
+    # Batched equivalent of neuron_greyed_out_changed: (newly_hidden_stim_ids,
+    # newly_shown_stim_ids), emitted once per selection change regardless of
+    # how many rows it affects. A selection change on a segmentation with N
+    # cells can touch up to N-1 rows at once (selecting the first cell hides
+    # everyone else); consumers that rebuild a whole graphic per row (see
+    # TimeseriesWidget.set_neuron_greyed) should use this instead of
+    # neuron_greyed_out_changed to do that rebuild once, not N times.
+    neurons_greyed_out_changed = QtCore.Signal(list, list)
 
     def __init__(self, parent: QtCore.QObject | None = None) -> None:
         super().__init__(parent)
@@ -84,14 +92,25 @@ class SpatialFootprintState(QtCore.QObject):
         self.selected_cellpose_ids = new_selected
         new_greyed = self.greyed_cellpose_ids
         self.selection_changed.emit()
+
+        newly_hidden_stim_ids: list[int] = []
         for cellpose_id in new_greyed - old_greyed:
             stim_id = self._cellpose_to_stim_id(cellpose_id)
             if stim_id is not None:
+                newly_hidden_stim_ids.append(stim_id)
                 self.neuron_greyed_out_changed.emit(stim_id, True)
+
+        newly_shown_stim_ids: list[int] = []
         for cellpose_id in old_greyed - new_greyed:
             stim_id = self._cellpose_to_stim_id(cellpose_id)
             if stim_id is not None:
+                newly_shown_stim_ids.append(stim_id)
                 self.neuron_greyed_out_changed.emit(stim_id, False)
+
+        if newly_hidden_stim_ids or newly_shown_stim_ids:
+            self.neurons_greyed_out_changed.emit(
+                newly_hidden_stim_ids, newly_shown_stim_ids
+            )
 
     def toggle_selected(self, cellpose_id: int) -> None:
         """Select the cell, or deselect it if it was already selected -

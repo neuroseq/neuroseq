@@ -368,8 +368,8 @@ class Gui(QtWidgets.QMainWindow):
         self.spatial_footprint_widget.trim_to_mapped_neurons_requested.connect(
             self.btn_trim_to_mapped_neurons_clicked
         )
-        self.spatial_footprint_widget.neuron_greyed_out_changed.connect(
-            self._on_neuron_greyed_out_changed
+        self.spatial_footprint_widget.neurons_greyed_out_changed.connect(
+            self._on_neurons_greyed_out_changed
         )
         self._create_menus_and_toolbars()
         self.setWindowIcon(qta.icon("fa6s.brain"))
@@ -1398,13 +1398,13 @@ class Gui(QtWidgets.QMainWindow):
         if data is not None and hasattr(self, "_auto_show_widget"):
             self._auto_show_widget(self.heatmap_widget)
 
-    def _on_neuron_greyed_out_changed(
+    def _on_neurons_greyed_out_changed(
         self,
-        neuron_index: int,
-        greyed: bool,
+        newly_hidden: list[int],
+        newly_shown: list[int],
     ) -> None:
-        self._trace_state.set_neuron_greyed(neuron_index, greyed)
-        self.stim_editor.stim_widget.set_neuron_greyed(neuron_index, greyed)
+        self._trace_state.set_neurons_greyed(newly_hidden, newly_shown)
+        self.stim_editor.stim_widget.set_neurons_greyed(newly_hidden, newly_shown)
 
     def _current_stim_array(self) -> StimArray | None:
         modifier = self.stim_editor.current_stim_modifier

@@ -206,6 +206,31 @@ def test_cell_overlay_resize_keeps_embedded_view_layout_driven(qtbot: QtBot) -> 
     widget.close()
 
 
+def test_busy_indicator_shown_during_selection_change_and_hidden_after(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result())
+    assert widget.busy_indicator.isHidden()
+
+    seen_hidden_during_mutation: list[bool] = []
+    original_toggle_selected = widget._state.toggle_selected
+
+    def _spy_toggle_selected(cellpose_id: int) -> None:
+        seen_hidden_during_mutation.append(widget.busy_indicator.isHidden())
+        original_toggle_selected(cellpose_id)
+
+    monkeypatch.setattr(widget._state, "toggle_selected", _spy_toggle_selected)
+
+    widget.overlay_widget.neuron_clicked.emit(1)
+
+    assert seen_hidden_during_mutation == [False]
+    assert widget.busy_indicator.isHidden()
+    widget.close()
+
+
 def test_clicking_a_cell_selects_it_and_greys_the_rest(qtbot: QtBot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
 
 import brian2.numpy_ as np
 from qtpy import QtCore
@@ -39,6 +40,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
     import_requested = QtCore.Signal()
     trim_to_mapped_neurons_requested = QtCore.Signal()
     neuron_greyed_out_changed = QtCore.Signal(int, bool)
+    neurons_greyed_out_changed = QtCore.Signal(list, list)
 
     def __init__(
         self,
@@ -64,6 +66,12 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             self.trim_to_mapped_neurons_requested.emit
         )
         top_bar_layout.addWidget(self.trim_to_mapped_neurons_button)
+        self.busy_indicator = QtWidgets.QProgressBar()
+        self.busy_indicator.setRange(0, 0)  # indeterminate: no per-step progress
+        self.busy_indicator.setTextVisible(False)
+        self.busy_indicator.setMaximumWidth(120)
+        self.busy_indicator.setVisible(False)
+        top_bar_layout.addWidget(self.busy_indicator)
         top_bar_layout.addStretch(1)
         self.clear_selection_button = QtWidgets.QPushButton("Clear cell selection")
         self.clear_selection_button.setEnabled(False)
@@ -115,6 +123,9 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             self._state.selection_changed.connect(self._on_state_selection_changed),
             self._state.neuron_greyed_out_changed.connect(
                 self.neuron_greyed_out_changed.emit
+            ),
+            self._state.neurons_greyed_out_changed.connect(
+                self.neurons_greyed_out_changed.emit
             ),
         ]
         self._on_state_data_changed()
@@ -236,13 +247,33 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self.clear_selection_button.setEnabled(bool(self._selected_cellpose_ids))
 
     def clear_selection(self) -> None:
-        self._state.clear_selection()
+        self._with_busy_indicator(self._state.clear_selection)
 
     def _on_neuron_clicked(self, cellpose_id: int) -> None:
-        self._state.toggle_selected(cellpose_id)
+        self._with_busy_indicator(lambda: self._state.toggle_selected(cellpose_id))
 
     def _on_neuron_lasso_selected(self, cellpose_ids: list[int]) -> None:
-        self._state.add_selected(cellpose_ids)
+        self._with_busy_indicator(lambda: self._state.add_selected(cellpose_ids))
+
+    def _with_busy_indicator(self, mutate: Callable[[], None]) -> None:
+        """Run a selection-changing state mutation with a busy indicator
+        shown for its duration.
+
+        Selecting/deselecting a cell synchronously refreshes every view
+        sharing this state (recomposing the overlay image, updating the
+        trace/stim panels) - with a large segmentation or many neurons this
+        can take a noticeable moment, during which Qt would otherwise not
+        repaint at all (a single blocking call). Showing the indicator and
+        forcing one repaint via processEvents() before starting the mutation
+        is what makes it actually visible instead of flashing at the very
+        end alongside everything else.
+        """
+        self.busy_indicator.setVisible(True)
+        QtWidgets.QApplication.processEvents()
+        try:
+            mutate()
+        finally:
+            self.busy_indicator.setVisible(False)
 
     def close(self) -> bool:
         # A detached view shares self._state with every other view (docked

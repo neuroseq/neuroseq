@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Iterable
 
 import brian2.numpy_ as np
 import fastplotlib as fpl
@@ -318,6 +319,13 @@ class TraceWidget(TimeseriesWidget):
 
     def set_neuron_greyed(self, neuron_index: int, greyed: bool) -> None:
         self._state.set_neuron_greyed(neuron_index, greyed)
+
+    def set_neurons_greyed(
+        self,
+        newly_hidden: Iterable[int],
+        newly_shown: Iterable[int],
+    ) -> None:
+        self._state.set_neurons_greyed(newly_hidden, newly_shown)
 
     def clear_greyed_neurons(self) -> None:
         self._state.clear_greyed_neurons()

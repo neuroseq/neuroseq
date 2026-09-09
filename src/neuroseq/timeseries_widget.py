@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Iterable
 
 import brian2.numpy_ as np
 import fastplotlib as fpl
@@ -618,6 +619,36 @@ class TimeseriesWidget(FPLWidget):
             if neuron_index not in self._greyed_neuron_ids:
                 return
             self._greyed_neuron_ids.discard(neuron_index)
+        self._rebuild_visible_neuron_mapping()
+        self._apply_visible_neuron_layout()
+        self._refit_view_to_visible_neurons()
+
+    def set_neurons_greyed(
+        self,
+        newly_hidden: Iterable[int],
+        newly_shown: Iterable[int],
+    ) -> None:
+        """Batch version of set_neuron_greyed(): apply every change first,
+        then rebuild/refit the view exactly once.
+
+        A single selection change upstream (e.g. picking one cell in the
+        Spatial Footprints panel) can hide or show many rows at once - up to
+        every other neuron, for a segmentation with N cells. Calling
+        set_neuron_greyed() once per affected row would rebuild this
+        widget's entire graphic from scratch N times over for what is
+        conceptually one update; this does it once instead.
+        """
+        changed = False
+        for neuron_index in newly_hidden:
+            if neuron_index not in self._greyed_neuron_ids:
+                self._greyed_neuron_ids.add(neuron_index)
+                changed = True
+        for neuron_index in newly_shown:
+            if neuron_index in self._greyed_neuron_ids:
+                self._greyed_neuron_ids.discard(neuron_index)
+                changed = True
+        if not changed:
+            return
         self._rebuild_visible_neuron_mapping()
         self._apply_visible_neuron_layout()
         self._refit_view_to_visible_neurons()

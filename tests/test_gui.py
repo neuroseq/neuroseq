@@ -619,6 +619,52 @@ def test_detached_spatial_footprint_copy_shares_state_with_original(
     gui.close()
 
 
+def test_neuron_click_rebuilds_stim_and_trace_layout_only_once(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+
+    # Selecting one cell greys out every other cell in the segmentation at
+    # once; the stim/trace panels must recompute their layout exactly once
+    # for the whole change, not once per greyed-out row (see the batch
+    # `neurons_greyed_out_changed` signal added alongside the old
+    # per-neuron `neuron_greyed_out_changed`).
+    stim_layout_calls = 0
+    original_stim_layout = gui.stim_editor.stim_widget._apply_visible_neuron_layout
+
+    def _counting_stim_layout(*args: object, **kwargs: object) -> None:
+        nonlocal stim_layout_calls
+        stim_layout_calls += 1
+        original_stim_layout(*args, **kwargs)
+
+    gui.stim_editor.stim_widget._apply_visible_neuron_layout = (  # type: ignore[method-assign]
+        _counting_stim_layout
+    )
+
+    trace_layout_calls = 0
+    original_trace_layout = gui.trace_widget._apply_visible_neuron_layout
+
+    def _counting_trace_layout(*args: object, **kwargs: object) -> None:
+        nonlocal trace_layout_calls
+        trace_layout_calls += 1
+        original_trace_layout(*args, **kwargs)
+
+    gui.trace_widget._apply_visible_neuron_layout = (  # type: ignore[method-assign]
+        _counting_trace_layout
+    )
+
+    gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(0)
+
+    assert stim_layout_calls == 1
+    assert trace_layout_calls == 1
+    assert gui.trace_widget.is_neuron_greyed(1)
+    assert gui.trace_widget.is_neuron_greyed(2)
+    assert not gui.trace_widget.is_neuron_greyed(0)
+    gui.close()
+
+
 def test_detached_console_copy_close_button_closes_its_own_window_only(
     qtbot: QtBot,
 ) -> None:

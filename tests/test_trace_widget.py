@@ -431,6 +431,39 @@ def test_two_trace_views_sharing_state_stay_in_sync(
     view_b.close()
 
 
+def test_two_trace_views_sharing_state_stay_in_sync_for_batched_greying(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    state = TraceWidgetState()
+    controller_a = ConstrainedPanZoomController()
+    controller_b = ConstrainedPanZoomController()
+    view_a = TraceWidget(controller_a, state=state)
+    view_b = TraceWidget(controller_b, state=state)
+    qtbot.addWidget(view_a)
+    qtbot.addWidget(view_b)
+    controller_a.set_limits(max_time_secs=1.0, max_neurons=3)
+    controller_b.set_limits(max_time_secs=1.0, max_neurons=3)
+
+    view_a.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+
+    view_a.set_neurons_greyed([0, 1], [])
+
+    assert view_a.n_neurons == 1
+    assert view_b.n_neurons == 1
+    assert view_b.is_neuron_greyed(0)
+    assert view_b.is_neuron_greyed(1)
+
+    view_b.set_neurons_greyed([2], [0, 1])
+
+    assert view_a.n_neurons == 2
+    assert not view_a.is_neuron_greyed(0)
+    assert not view_a.is_neuron_greyed(1)
+    assert view_a.is_neuron_greyed(2)
+    view_a.close()
+    view_b.close()
+
+
 def test_trace_widget_with_no_state_arg_gets_a_private_state(
     qtbot: QtBot,
     make_trace_data,

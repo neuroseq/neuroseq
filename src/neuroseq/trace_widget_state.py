@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from qtpy import QtCore
 
 from neuroseq.data import TraceData
@@ -40,6 +42,25 @@ class TraceWidgetState(QtCore.QObject):
                 return
             self.greyed_neuron_ids.discard(neuron_index)
         self.greyed_changed.emit()
+
+    def set_neurons_greyed(
+        self,
+        newly_hidden: Iterable[int],
+        newly_shown: Iterable[int],
+    ) -> None:
+        """Batch version of set_neuron_greyed(): apply every change, then
+        emit greyed_changed exactly once."""
+        changed = False
+        for neuron_index in newly_hidden:
+            if neuron_index not in self.greyed_neuron_ids:
+                self.greyed_neuron_ids.add(neuron_index)
+                changed = True
+        for neuron_index in newly_shown:
+            if neuron_index in self.greyed_neuron_ids:
+                self.greyed_neuron_ids.discard(neuron_index)
+                changed = True
+        if changed:
+            self.greyed_changed.emit()
 
     def clear_greyed_neurons(self) -> None:
         if not self.greyed_neuron_ids:
