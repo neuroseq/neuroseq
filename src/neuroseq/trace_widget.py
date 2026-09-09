@@ -312,12 +312,19 @@ class TraceWidget(TimeseriesWidget):
                 line.offset = (line.offset[0], display_row, line.offset[2])
 
     def clear_data(self) -> None:
-        super().clear_data()
-        # super().clear_data() wipes every graphic from the subplot (see
-        # FPLWidget.clear_data), so the overlay graphic reference is already
-        # dangling; _stim_overlay_enabled/_stim_overlay_array are left alone
-        # so the setting survives a data refresh.
+        # Must be nulled *before* calling super(): TimeseriesWidget.clear_data()
+        # wipes the whole subplot via FPLWidget.clear_data() and then, at its
+        # own tail end, calls clear_greyed_neurons() - which (via
+        # TraceWidgetState) can synchronously emit greyed_changed and
+        # re-enter _rebuild_stim_overlay() before this method gets a chance
+        # to run its own cleanup. If the stale reference were still set at
+        # that point, _rebuild_stim_overlay() would try to remove a graphic
+        # the subplot wipe already discarded (pygfx logs, but does not
+        # raise, "Attempting to remove object that was not a child" for
+        # this). _stim_overlay_enabled/_stim_overlay_array are left alone so
+        # the setting survives a data refresh.
         self._stim_overlay_graphic = None
+        super().clear_data()
 
     def set_stim_overlay_enabled(self, enabled: bool) -> None:
         """Toggle showing a stim array's heatmap behind the trace lines

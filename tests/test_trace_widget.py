@@ -893,3 +893,36 @@ def test_stim_overlay_cleared_when_trace_data_cleared(
 
     assert trace_widget._stim_overlay_graphic is None
     trace_widget.close()
+
+
+def test_calling_clear_data_directly_with_greyed_neuron_and_overlay_does_not_warn(
+    qtbot: QtBot,
+    make_trace_data,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Regression: clear_data() used to null the stim overlay graphic
+    reference *after* calling super().clear_data(), which wipes the whole
+    subplot and, at its own tail end, calls clear_greyed_neurons() - if a
+    neuron was already greyed, that re-enters _rebuild_stim_overlay()
+    *before* the null happened, so it tried to remove a graphic the subplot
+    wipe had already discarded (pygfx logs a warning for this, it doesn't
+    raise, so `contextlib.suppress` around the removal call didn't help).
+
+    set_data() itself resets the greyed set to empty before clear_data()
+    even runs, so it never reproduced this - gui.py's update_project() calls
+    clear_data() directly (`for widget in self.plot_widgets: widget.clear_data()`)
+    without going through set_data() first, which is what actually hit it.
+    """
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+    trace_widget.set_stim_overlay_data(_stim_array())
+    trace_widget.set_stim_overlay_enabled(True)
+    trace_widget.set_neuron_greyed(1, True)
+
+    with caplog.at_level("WARNING"):
+        trace_widget.clear_data()
+
+    assert "not a child" not in caplog.text
+    trace_widget.close()
