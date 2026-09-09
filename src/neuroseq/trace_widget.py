@@ -225,7 +225,16 @@ class TraceWidget(TimeseriesWidget):
         if self.offset_by_median:
             median_values = np.nanmedian(traces, axis=1)
             max_values = np.nanmax(traces, axis=1)
-            max_trace = np.max(np.abs(max_values - median_values))
+            min_values = np.nanmin(traces, axis=1)
+            # A trace's excursion below its median can exceed its excursion
+            # above it (e.g. a calcium baseline with an occasional deep dip
+            # but only modest transients) - considering only max_values
+            # here left the downward side completely unbounded, able to
+            # swing many rows past its own and get cut off by whatever
+            # camera edge it hit first (worst case: the only visible row).
+            max_trace = np.max(
+                np.maximum(max_values - median_values, median_values - min_values)
+            )
         else:
             max_trace = max(
                 abs(float(np.nanmin(traces))), abs(float(np.nanmax(traces)))

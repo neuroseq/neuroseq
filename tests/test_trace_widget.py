@@ -192,6 +192,41 @@ def test_trace_widget_median_offset(qtbot: QtBot) -> None:
     trace_widget.close()
 
 
+def test_median_offset_normalization_bounds_negative_excursions_too(
+    qtbot: QtBot,
+) -> None:
+    """Regression for issue #533: a neuron whose deviation *below* its
+    median is bigger than its deviation above it (e.g. a calcium baseline
+    with an occasional deep dip but only modest transients) must still be
+    scaled to fit within +/-0.5 at 100% normalization - not just the side
+    above the median."""
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    traces = np.full((2, 5), 100.0, dtype=np.float32)
+    traces[0, 2] = 110.0  # +10 above median
+    traces[0, 3] = -900.0  # -1000 below median - the binding excursion
+    traces[1, 2] = 105.0
+    traces[1, 3] = 95.0
+    data = TraceData(
+        name="trace",
+        traces=traces,
+        indices=np.array([0, 1], dtype=np.uint32),
+        dt=0.01,
+        units="a.u.",
+    )
+    trace_widget.set_data(data)
+    trace_widget.offset_by_median = True
+    trace_widget.clip = False
+    trace_widget.trace_norm_percent = 100
+
+    normalized = trace_widget.get_normalized_trace_data()
+
+    assert normalized[0].min() == pytest.approx(-0.5)
+    assert normalized[0].max() == pytest.approx(0.005)
+    trace_widget.close()
+
+
 def test_trace_widget_indices(qtbot: QtBot) -> None:
     controller = ConstrainedPanZoomController()
     trace_widget = TraceWidget(controller)
