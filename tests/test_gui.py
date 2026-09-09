@@ -338,6 +338,113 @@ def _make_gui_cellpose_result(
     )
 
 
+def test_trim_to_mapped_neurons_reports_nothing_to_trim_without_mapping(
+    qtbot: QtBot,
+    qmessagebox_calls: list,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project = Project()
+    project.cellpose_data = _make_gui_cellpose_result(mapping=None)
+    gui.update_project(project)
+
+    gui.btn_trim_to_mapped_neurons_clicked()
+
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "information"
+    assert "Nothing to trim" in qmessagebox_calls[0]["title"]
+    gui.close()
+
+
+def test_trim_to_mapped_neurons_reports_nothing_to_trim_when_fully_mapped(
+    qtbot: QtBot,
+    qmessagebox_calls: list,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project = Project()
+    project.cellpose_data = _make_gui_cellpose_result(mapping={0: 0, 1: 1, 2: 2})
+    gui.update_project(project)
+
+    gui.btn_trim_to_mapped_neurons_clicked()
+
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "information"
+    assert "Nothing to trim" in qmessagebox_calls[0]["title"]
+    gui.close()
+
+
+def test_trim_to_mapped_neurons_cancelled_confirm_makes_no_changes(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "stim",
+            StimType.Excitation,
+            np.zeros((5, 3), dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+    project.cellpose_data = _make_gui_cellpose_result(mapping={0: 0, 1: 1})
+    gui.update_project(project)
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "warning",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.No,
+    )
+
+    gui.btn_trim_to_mapped_neurons_clicked()
+
+    assert gui.project.stim_arrays["stim"].values.shape == (5, 3)
+    gui.close()
+
+
+def test_trim_to_mapped_neurons_confirmed_trims_and_forces_save_as(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "stim",
+            StimType.Excitation,
+            np.zeros((5, 3), dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+    project.cellpose_data = _make_gui_cellpose_result(mapping={0: 0, 1: 1})
+    gui.update_project(project)
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "warning",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+    new_filename_without_extension = tmp_path / "trimmed"
+    new_filename = new_filename_without_extension.with_suffix(".nseq")
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getSaveFileName",
+        lambda *args: (f"{new_filename_without_extension}", True),
+    )
+
+    gui.btn_trim_to_mapped_neurons_clicked()
+    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
+
+    assert gui.project.stim_arrays["stim"].values.shape == (5, 2)
+    assert new_filename.exists()
+    assert gui.project.filepath == new_filename
+    gui.close()
+
+
 def _add_detach_panel_test_data(gui: Gui) -> tuple[TraceData, SpikeData, SynapseData]:
     trace_data = TraceData(
         name="trace",

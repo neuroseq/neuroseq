@@ -160,6 +160,33 @@ def test_import_button_emits_import_requested(qtbot: QtBot) -> None:
     widget.close()
 
 
+def test_trim_button_enabled_only_with_a_mapping(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    assert not widget.trim_to_mapped_neurons_button.isEnabled()
+
+    widget.set_data(_cellpose_result(mapping=None))
+    assert not widget.trim_to_mapped_neurons_button.isEnabled()
+
+    widget.set_data(_cellpose_result(mapping={0: 0}))
+    assert widget.trim_to_mapped_neurons_button.isEnabled()
+
+    widget.set_data(None)
+    assert not widget.trim_to_mapped_neurons_button.isEnabled()
+    widget.close()
+
+
+def test_trim_button_emits_trim_to_mapped_neurons_requested(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result(mapping={0: 0}))
+
+    with qtbot.waitSignal(widget.trim_to_mapped_neurons_requested):
+        widget.trim_to_mapped_neurons_button.click()
+
+    widget.close()
+
+
 def test_cell_overlay_resize_keeps_embedded_view_layout_driven(qtbot: QtBot) -> None:
     widget = CellOverlayWidget()
     qtbot.addWidget(widget)

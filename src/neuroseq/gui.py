@@ -365,6 +365,9 @@ class Gui(QtWidgets.QMainWindow):
         self.spatial_footprint_widget.import_requested.connect(
             self.btn_import_cellpose_data_clicked
         )
+        self.spatial_footprint_widget.trim_to_mapped_neurons_requested.connect(
+            self.btn_trim_to_mapped_neurons_clicked
+        )
         self.spatial_footprint_widget.neuron_greyed_out_changed.connect(
             self._on_neuron_greyed_out_changed
         )
@@ -2183,6 +2186,56 @@ class Gui(QtWidgets.QMainWindow):
         if hasattr(self, "spatial_footprint_widget"):
             self.spatial_footprint_widget.set_data(None)
 
+    def btn_trim_to_mapped_neurons_clicked(self) -> None:
+        """Permanently keep only Cellpose-mapped neurons across the whole
+        project, then require the result to be saved under a new file (never
+        silently overwriting the currently-open one)."""
+        if self.project is None or self.project.cellpose_data is None:
+            return
+        mapping = self.project.cellpose_data.stimulus_to_cellpose_mapping
+        if not mapping:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Nothing to trim",
+                "No Cellpose stimulus mapping is set, so there is nothing to trim to.",
+            )
+            return
+        n_kept = len(mapping)
+        n_removed = max(0, int(self.project.max_neurons) - n_kept)
+        if n_removed == 0:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Nothing to trim",
+                f"All {n_kept} neuron(s) already have a Cellpose cell mapped "
+                "to them - there is nothing to remove.",
+            )
+            return
+        reply = QtWidgets.QMessageBox.warning(
+            self,
+            "Trim to Cellpose-mapped neurons",
+            f"This will permanently remove {n_removed} neuron(s) with no "
+            f"Cellpose cell mapped to them, keeping the {n_kept} that do, "
+            "from every stim array and every experiment's trace/spike/synapse "
+            "data in this project.\n\n"
+            "This cannot be undone. You will be asked to save the result "
+            "under a new file name.\n\n"
+            "Continue?",
+            QtWidgets.QMessageBox.StandardButton.Yes
+            | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No,
+        )
+        if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+        self.project.trim_to_mapped_neurons()
+        self.update_project(self.project)
+        if not self._save_project(force_dialog=True):
+            QtWidgets.QMessageBox.information(
+                self,
+                "Not saved",
+                "The trim was applied in this open project, but hasn't been "
+                "saved yet - use Save Project As to keep it.",
+            )
+
     def btn_import_patchclamp_data_clicked(self) -> None:
         dialog = PatchClampImportDialog(
             cellpose_import=self.last_cellpose_import,
@@ -3170,6 +3223,9 @@ class Gui(QtWidgets.QMainWindow):
             parent=None, state=self._spatial_footprint_state
         )
         widget.import_requested.connect(self.btn_import_cellpose_data_clicked)
+        widget.trim_to_mapped_neurons_requested.connect(
+            self.btn_trim_to_mapped_neurons_clicked
+        )
         return widget
 
     def _build_fresh_custom_analysis_widget(self) -> CustomAnalysisWidget | None:

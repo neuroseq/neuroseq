@@ -908,6 +908,110 @@ class Project:
                 stim_array.values = stim_array.values[:, :n_neurons]
         self.update_limits()
 
+    def trim_to_mapped_neurons(self) -> None:
+        """
+        Permanently keep only the neurons that have a Cellpose cell mapped to
+        them (per ``cellpose_data.stimulus_to_cellpose_mapping``), discarding
+        every other neuron from every StimArray and every experiment's
+        TraceData/SpikeData/SynapseData. The kept neurons are re-indexed to a
+        contiguous ``0..n_kept-1`` numbering (in mapping order), and
+        ``stimulus_to_cellpose_mapping`` is rewritten to match.
+
+        This is a one-way, in-memory change - the caller is responsible for
+        having the result saved under a new file name rather than silently
+        overwriting anything the trim discarded data from.
+
+        Raises
+        ------
+        ValueError
+            If there is no Cellpose data, or its stimulus mapping is empty
+            (nothing to trim to).
+        """
+        if (
+            self.cellpose_data is None
+            or not self.cellpose_data.stimulus_to_cellpose_mapping
+        ):
+            raise ValueError(
+                "No Cellpose stimulus mapping to trim to - import Cellpose "
+                "data with a mapping first."
+            )
+        mapping = self.cellpose_data.stimulus_to_cellpose_mapping
+        kept_stim_ids = sorted(mapping.keys())
+        old_to_new = {old_id: new_id for new_id, old_id in enumerate(kept_stim_ids)}
+
+        for name, stim_array in self.stim_arrays.items():
+            n_neurons = int(stim_array.values.shape[1])
+            valid_ids = [i for i in kept_stim_ids if i < n_neurons]
+            if len(valid_ids) == n_neurons:
+                continue
+            self.logger.info(
+                f"Trimming StimArray {name} from {n_neurons} to "
+                f"{len(valid_ids)} Cellpose-mapped neurons"
+            )
+            stim_array.values = stim_array.values[:, valid_ids]
+
+        for exp_name, experiment in self.experiments.items():
+            for datum in experiment.data:
+                if isinstance(datum, TraceData):
+                    keep_mask = np.isin(datum.indices, kept_stim_ids)
+                    if keep_mask.all():
+                        continue
+                    self.logger.info(
+                        f"Trimming TraceData '{exp_name} :: {datum.name}' from "
+                        f"{datum.traces.shape[0]} to {int(keep_mask.sum())} "
+                        "Cellpose-mapped neurons"
+                    )
+                    datum.traces = datum.traces[keep_mask]
+                    datum.indices = np.asarray(
+                        [old_to_new[int(i)] for i in datum.indices[keep_mask]],
+                        dtype=np.uint32,
+                    )
+                    if datum.raw_cellpose_ids is not None:
+                        datum.raw_cellpose_ids = datum.raw_cellpose_ids[keep_mask]
+                elif isinstance(datum, SpikeData):
+                    keep_mask = np.isin(datum.spike_indices, kept_stim_ids)
+                    if keep_mask.all():
+                        continue
+                    self.logger.info(
+                        f"Trimming SpikeData '{exp_name} :: {datum.name}': dropping "
+                        f"{int((~keep_mask).sum())} spikes from neurons with no "
+                        "Cellpose mapping"
+                    )
+                    datum.spike_times = datum.spike_times[keep_mask]
+                    datum.spike_indices = np.asarray(
+                        [old_to_new[int(i)] for i in datum.spike_indices[keep_mask]],
+                        dtype=np.uint32,
+                    )
+                    if datum.raw_cellpose_ids is not None:
+                        datum.raw_cellpose_ids = datum.raw_cellpose_ids[keep_mask]
+                elif isinstance(datum, SynapseData):
+                    if datum.values.ndim < 2:
+                        continue
+                    n_pre, n_post = datum.values.shape[0], datum.values.shape[1]
+                    if n_pre != n_post:
+                        self.logger.warning(
+                            f"Skipping SynapseData '{exp_name} :: {datum.name}': "
+                            f"non-square neuron axes ({n_pre} x {n_post})"
+                        )
+                        continue
+                    valid_ids = [i for i in kept_stim_ids if i < n_pre]
+                    if len(valid_ids) == n_pre:
+                        continue
+                    self.logger.info(
+                        f"Trimming SynapseData '{exp_name} :: {datum.name}' from "
+                        f"{n_pre} to {len(valid_ids)} Cellpose-mapped neurons"
+                    )
+                    n_timesteps = datum.values.shape[2]
+                    valid_ids_arr = np.asarray(valid_ids, dtype=np.int64)
+                    datum.values = datum.values[
+                        np.ix_(valid_ids_arr, valid_ids_arr, np.arange(n_timesteps))
+                    ]
+
+        self.cellpose_data.stimulus_to_cellpose_mapping = {
+            new_id: mapping[old_id] for old_id, new_id in old_to_new.items()
+        }
+        self.update_limits()
+
     def trim_stim_arrays(self, total_time_seconds: float):
         """
         Trim all StimArrays in the project to a length of total_time_seconds

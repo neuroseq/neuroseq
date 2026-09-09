@@ -37,6 +37,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
     """
 
     import_requested = QtCore.Signal()
+    trim_to_mapped_neurons_requested = QtCore.Signal()
     neuron_greyed_out_changed = QtCore.Signal(int, bool)
 
     def __init__(
@@ -50,6 +51,19 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         top_bar_layout = QtWidgets.QHBoxLayout()
+        self.trim_to_mapped_neurons_button = QtWidgets.QPushButton(
+            "Trim to Mapped Neurons…"
+        )
+        self.trim_to_mapped_neurons_button.setEnabled(False)
+        self.trim_to_mapped_neurons_button.setToolTip(
+            "Permanently keep only the neurons with a Cellpose cell mapped to "
+            "them, removing the rest from every stim array and experiment in "
+            "this project."
+        )
+        self.trim_to_mapped_neurons_button.clicked.connect(
+            self.trim_to_mapped_neurons_requested.emit
+        )
+        top_bar_layout.addWidget(self.trim_to_mapped_neurons_button)
         top_bar_layout.addStretch(1)
         self.clear_selection_button = QtWidgets.QPushButton("Clear cell selection")
         self.clear_selection_button.setEnabled(False)
@@ -123,6 +137,11 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
     def _on_state_data_changed(self) -> None:
         cellpose_data = self._state.cellpose_data
         self._update_clear_selection_button()
+        self.trim_to_mapped_neurons_button.setEnabled(
+            bool(
+                cellpose_data is not None and cellpose_data.stimulus_to_cellpose_mapping
+            )
+        )
         if cellpose_data is None:
             self._base_legend = []
             self.overlay_widget.set_empty_message("No cell spatial footprints loaded.")
