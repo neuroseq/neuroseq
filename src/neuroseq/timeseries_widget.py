@@ -422,11 +422,18 @@ class TimeseriesWidget(FPLWidget):
             # real neuron/stim id at that row, so the axis stays consistent with
             # the cell segmentation's numbering regardless of any hidden/greyed
             # neurons compacting the rows above/below it.
+            #
+            # The axis can be asked for tick candidates beyond the currently
+            # visible row count - e.g. the broader pannable extent
+            # (controller.max_height) doesn't shrink just because some
+            # neurons are hidden, only the current camera view does. Such a
+            # position has no real neuron behind it at all: fabricating a
+            # label from the raw row index there would draw a "ghost" tick
+            # number with no corresponding grid line or data underneath it.
             display_row = int(round(y))
-            if 0 <= display_row < len(self._visible_neuron_ids):
-                neuron_id = self._visible_neuron_ids[display_row]
-            else:
-                neuron_id = display_row
+            if not (0 <= display_row < len(self._visible_neuron_ids)):
+                return ""
+            neuron_id = self._visible_neuron_ids[display_row]
             label = f"{neuron_id}"
             if label == state["last_label"]:
                 return ""

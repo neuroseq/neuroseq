@@ -250,6 +250,33 @@ def test_trace_widget_y_tick_labels_show_real_neuron_id(qtbot: QtBot) -> None:
     trace_widget.close()
 
 
+def test_trace_widget_y_tick_formatter_blanks_rows_beyond_visible_count(
+    qtbot: QtBot,
+) -> None:
+    """Regression: the axis can be asked for tick candidates beyond the
+    currently visible row count (the broader pannable extent doesn't shrink
+    just because some neurons are hidden). Such a position used to fall back
+    to labeling the raw row index as if it were a real neuron id, drawing a
+    "ghost" numbered tick with no grid line or data behind it."""
+    controller = ConstrainedPanZoomController()
+    controller.set_limits(max_time_secs=1.0, max_neurons=10)
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    data = TraceData(
+        name="traces",
+        traces=np.zeros((3, 10), dtype=np.float32),
+        indices=np.array([0, 1, 2], dtype=np.uint32),
+        dt=0.001,
+        units="mV",
+    )
+    trace_widget.set_data(data)
+
+    format_tick = trace_widget._create_y_tick_formatter()
+
+    assert format_tick(5, 0, 10) == ""
+    trace_widget.close()
+
+
 def test_trace_widget_hover_shows_real_neuron_id_when_only_one_visible(
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
