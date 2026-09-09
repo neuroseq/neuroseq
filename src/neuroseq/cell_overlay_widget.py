@@ -117,6 +117,7 @@ def compute_segmentation_legend(
 class OverlayView(FullScreenFPLWidget):
     neuron_clicked = QtCore.Signal(int)
     neuron_lasso_selected = QtCore.Signal(list)
+    background_clicked = QtCore.Signal()
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent=parent)
@@ -150,7 +151,10 @@ class OverlayView(FullScreenFPLWidget):
         self.aoi_editable = True
         self.enable_cell_selection = False
         self._cell_click_down_world: tuple[float, float] | None = None
-        self.lasso_mode = False
+        # A cell-selection gesture starts as a plain click; if the pointer
+        # moves past _world_tolerance() before release, it becomes a lasso
+        # (see pointer_move) - _lasso_points truthiness is that state, there
+        # is no separate mode toggle.
         self._lasso_points: list[tuple[float, float]] = []
         self._lasso_line: LineGraphic | None = None
         self.on_geometry_changed: Callable[[AreasOfInterestConfig], None] | None = None
@@ -812,18 +816,18 @@ class OverlayView(FullScreenFPLWidget):
         mouse_pos = self.subplot.map_screen_to_world(ev)
         if mouse_pos is None:
             return
-        if self.lasso_mode:
-            self._lasso_points = [(float(mouse_pos[0]), float(mouse_pos[1]))]
-            self.subplot.controller.enabled = False
-            return
+        # Whether this becomes a plain click or a lasso is decided in
+        # pointer_move, based on how far the pointer travels before release.
         self._cell_click_down_world = (float(mouse_pos[0]), float(mouse_pos[1]))
+        self._lasso_points = []
 
     def _cell_selection_pointer_up(self, ev: pygfx.PointerEvent) -> None:
         if not self.enable_cell_selection:
             return
-        if self.lasso_mode:
+        if self._lasso_points:
             points = self._lasso_points
             self._lasso_points = []
+            self._cell_click_down_world = None
             self._clear_lasso_line()
             self.subplot.controller.enabled = True
             if len(points) >= 3:
@@ -846,6 +850,8 @@ class OverlayView(FullScreenFPLWidget):
         cellpose_id = self._segmentation_id_at(float(mouse_pos[0]), float(mouse_pos[1]))
         if cellpose_id is not None:
             self.neuron_clicked.emit(cellpose_id)
+        else:
+            self.background_clicked.emit()
 
     def _cells_inside_polygon(self, points: list[tuple[float, float]]) -> list[int]:
         if not self._label_centers:
@@ -1084,10 +1090,21 @@ class OverlayView(FullScreenFPLWidget):
             ev.stop_propagation()
             return
 
-        if self.lasso_mode and self._lasso_points:
+        if self._cell_click_down_world is not None:
             mouse_pos = self.subplot.map_screen_to_world(ev)
             if mouse_pos is None:
                 return
+            if not self._lasso_points:
+                dist = math.hypot(
+                    float(mouse_pos[0]) - self._cell_click_down_world[0],
+                    float(mouse_pos[1]) - self._cell_click_down_world[1],
+                )
+                if dist <= self._world_tolerance():
+                    return
+                # Movement crossed the click/drag threshold: this gesture is
+                # a lasso, seeded with the original pointer_down position.
+                self._lasso_points = [self._cell_click_down_world]
+                self.subplot.controller.enabled = False
             self._lasso_points.append((float(mouse_pos[0]), float(mouse_pos[1])))
             self._update_lasso_line()
             return
@@ -1159,6 +1176,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
     aoi_geometry_changed = QtCore.Signal(object)
     neuron_clicked = QtCore.Signal(int)
     neuron_lasso_selected = QtCore.Signal(list)
+    background_clicked = QtCore.Signal()
 
     def __init__(self, title: str = "Color-coded Preview") -> None:
         super().__init__(title)
@@ -1192,6 +1210,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         )
         self.overlay_view.neuron_clicked.connect(self.neuron_clicked.emit)
         self.overlay_view.neuron_lasso_selected.connect(self.neuron_lasso_selected.emit)
+        self.overlay_view.background_clicked.connect(self.background_clicked.emit)
         layout.addWidget(self.overlay_view)
         self.logger.info(
             "overlay ui: widget=%sx%s view=%sx%s",
@@ -1373,9 +1392,6 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
 
     def set_cell_selection_enabled(self, enabled: bool) -> None:
         self.overlay_view.enable_cell_selection = enabled
-
-    def set_lasso_mode_enabled(self, enabled: bool) -> None:
-        self.overlay_view.lasso_mode = enabled
 
     def set_aoi_editable(self, editable: bool) -> None:
         """Whether the AOI square/circle (if shown) can be dragged to reshape

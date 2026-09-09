@@ -54,9 +54,9 @@ def _cellpose_result(
 def _cellpose_result_with_unmapped_cells() -> CellposeImportResult:
     """8 segmented cells (ids 0-7): only 5,6,7 are mapped to neurons 0,1,2.
     Ids 0-4 are unmapped stray cells - and crucially, their numbers collide
-    with the real neuron indices 0,1,2 (regression for issue: Apply hiding a
-    cell that should stay visible when Cellpose finds more cells than are
-    mapped to neurons)."""
+    with the real neuron indices 0,1,2 (regression for issue: selecting a
+    cell hiding it right back because an unrelated unmapped cell happens to
+    share its neuron index)."""
     segmentation = -1 * np.ones((2, 16), dtype=np.int32)
     for cellpose_id in range(8):
         segmentation[:, cellpose_id * 2 : cellpose_id * 2 + 2] = cellpose_id
@@ -179,34 +179,61 @@ def test_cell_overlay_resize_keeps_embedded_view_layout_driven(qtbot: QtBot) -> 
     widget.close()
 
 
-def test_clicking_a_cell_emits_stim_id_via_mapping(qtbot: QtBot) -> None:
+def test_clicking_a_cell_selects_it_and_greys_the_rest(qtbot: QtBot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
     widget.set_data(_cellpose_result(mapping={0: 2, 1: 1, 2: 0}))
+    emitted: list[list[Any]] = []
+    widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
 
-    with qtbot.waitSignal(widget.neuron_greyed_out_changed) as blocker:
-        widget.overlay_widget.neuron_clicked.emit(2)
+    widget.overlay_widget.neuron_clicked.emit(2)
 
-    assert blocker.args == [0, True]
+    assert widget._selected_cellpose_ids == {2}
+    assert widget._greyed_cellpose_ids == {0, 1}
+    # cellpose 0 -> stim 2, cellpose 1 -> stim 1 (mapping inverted)
+    assert sorted(emitted) == [[1, True], [2, True]]
     widget.close()
 
 
-def test_clicking_same_cell_twice_toggles_back(qtbot: QtBot) -> None:
+def test_clicking_same_cell_twice_deselects_and_shows_everyone_again(
+    qtbot: QtBot,
+) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
     widget.set_data(_cellpose_result())
+    widget.overlay_widget.neuron_clicked.emit(1)
+    assert widget._greyed_cellpose_ids == {0, 2}
     emitted: list[list[Any]] = []
     widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
 
     widget.overlay_widget.neuron_clicked.emit(1)
-    widget.overlay_widget.neuron_clicked.emit(1)
 
-    assert emitted[-1] == [1, False]
+    assert widget._selected_cellpose_ids == set()
     assert widget._greyed_cellpose_ids == set()
+    assert sorted(emitted) == [[0, False], [2, False]]
     widget.close()
 
 
-def test_clear_selection_button_disabled_until_a_cell_is_greyed(
+def test_selecting_a_second_cell_only_shows_both_selected_cells(
+    qtbot: QtBot,
+) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
+    widget.overlay_widget.neuron_clicked.emit(0)
+    assert widget._greyed_cellpose_ids == {1, 2}
+    emitted: list[list[Any]] = []
+    widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
+
+    widget.overlay_widget.neuron_clicked.emit(1)
+
+    assert widget._selected_cellpose_ids == {0, 1}
+    assert widget._greyed_cellpose_ids == {2}
+    assert emitted == [[1, False]]
+    widget.close()
+
+
+def test_clear_selection_button_disabled_until_a_cell_is_selected(
     qtbot: QtBot,
 ) -> None:
     widget = SpatialFootprintWidget()
@@ -225,7 +252,7 @@ def test_clear_selection_button_disabled_until_a_cell_is_greyed(
     widget.close()
 
 
-def test_clear_selection_button_ungreys_all_cells_and_disables_itself(
+def test_clear_selection_button_shows_all_cells_and_disables_itself(
     qtbot: QtBot,
 ) -> None:
     widget = SpatialFootprintWidget()
@@ -233,26 +260,28 @@ def test_clear_selection_button_ungreys_all_cells_and_disables_itself(
     widget.set_data(_cellpose_result(mapping={0: 2, 1: 1, 2: 0}))
     widget.overlay_widget.neuron_clicked.emit(2)
     widget.overlay_widget.neuron_clicked.emit(1)
-    assert widget._greyed_cellpose_ids == {1, 2}
+    assert widget._selected_cellpose_ids == {1, 2}
+    assert widget._greyed_cellpose_ids == {0}
     emitted: list[list[Any]] = []
     widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
 
     widget.clear_selection_button.click()
 
+    assert widget._selected_cellpose_ids == set()
     assert widget._greyed_cellpose_ids == set()
     assert not widget.clear_selection_button.isEnabled()
-    assert sorted(emitted) == [[0, False], [1, False]]
+    assert emitted == [[2, False]]
     widget.close()
 
 
-def test_clear_selection_button_is_a_noop_with_nothing_greyed(qtbot: QtBot) -> None:
+def test_clear_selection_button_is_a_noop_with_nothing_selected(qtbot: QtBot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
     widget.set_data(_cellpose_result())
     emitted: list[list[Any]] = []
     widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
 
-    widget.clear_all_greyed()
+    widget.clear_selection()
 
     assert emitted == []
     widget.close()
@@ -262,42 +291,18 @@ def test_identity_mapping_when_none_present(qtbot: QtBot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
     widget.set_data(_cellpose_result(mapping=None))
+    emitted: list[list[Any]] = []
+    widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
 
-    with qtbot.waitSignal(widget.neuron_greyed_out_changed) as blocker:
-        widget.overlay_widget.neuron_clicked.emit(2)
+    widget.overlay_widget.neuron_clicked.emit(2)
 
-    assert blocker.args == [2, True]
+    assert sorted(emitted) == [[0, True], [1, True]]
     widget.close()
 
 
-def test_greyed_cell_uses_striped_overlay_and_black_label(
-    qtbot: QtBot,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    widget = SpatialFootprintWidget()
-    qtbot.addWidget(widget)
-    widget.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
-    captured_striped_cell_ids: list[set[int]] = []
-
-    original_set_overlay = widget.overlay_widget.set_overlay
-
-    def capture_set_overlay(*args: Any, **kwargs: Any) -> None:
-        captured_striped_cell_ids.append(set(kwargs.get("striped_cell_ids") or []))
-        original_set_overlay(*args, **kwargs)
-
-    monkeypatch.setattr(widget.overlay_widget, "set_overlay", capture_set_overlay)
-
-    widget.overlay_widget.neuron_clicked.emit(1)
-
-    assert captured_striped_cell_ids[-1] == {1}
-    stim_label = widget.overlay_widget.overlay_view._label_graphics[1]["stim"]
-    assert stim_label.visible
-    assert stim_label.text == "1"
-    assert stim_label.face_color == (0.0, 0.0, 0.0, 1.0)
-    widget.close()
-
-
-def test_clicking_cell_greys_rendered_spatial_footprint(qtbot: QtBot) -> None:
+def test_selecting_a_cell_does_not_recolor_other_cells(qtbot: QtBot) -> None:
+    """No more striping for hidden ("excluded") cells - a cell that becomes
+    hidden from trace/stim keeps its normal segmentation color."""
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
     segmentation = np.zeros((8, 8), dtype=np.int32)
@@ -316,116 +321,34 @@ def test_clicking_cell_greys_rendered_spatial_footprint(qtbot: QtBot) -> None:
     )
     widget.set_data(result)
     image_graphic = widget.overlay_widget.overlay_view._image_graphic
-    graphic = widget.overlay_widget.overlay_view._segmentation_graphic
     assert image_graphic is not None
-    assert graphic is not None
     before_image = np.asarray(image_graphic.data.value).copy()
-    before_segmentation = np.asarray(graphic.data.value).copy()
 
-    widget.overlay_widget.neuron_clicked.emit(1)
+    # select cell 0 - cell 1 becomes hidden from trace/stim, color unchanged
+    widget.overlay_widget.neuron_clicked.emit(0)
 
     after_image = np.asarray(image_graphic.data.value)
-    after_segmentation = np.asarray(graphic.data.value)
-    cell_image_colors = after_image[result.segmentation_array == 1]
-    cell_image_rgb = cell_image_colors[:, :3].astype(np.float32) / 255.0
-    assert np.any(
-        np.all(np.isclose(cell_image_rgb, STRIPED_CELL_GREY, atol=1 / 255), axis=1)
-    )
-    assert np.any(
-        np.all(np.isclose(cell_image_rgb, STRIPED_CELL_WHITE, atol=1 / 255), axis=1)
-    )
-    assert not np.allclose(
+    assert np.allclose(
         after_image[result.segmentation_array == 1],
         before_image[result.segmentation_array == 1],
     )
-    assert np.allclose(
-        after_image[result.segmentation_array == 0],
-        before_image[result.segmentation_array == 0],
-    )
-    stripe_overlay_colors = after_segmentation[result.segmentation_array == 1]
-    assert np.allclose(stripe_overlay_colors[:, 3], STRIPED_CELL_ALPHA)
-    assert np.allclose(
-        after_segmentation[result.segmentation_array == 0],
-        before_segmentation[result.segmentation_array == 0],
-    )
-
-    widget.overlay_widget.neuron_clicked.emit(1)
-    assert np.allclose(np.asarray(image_graphic.data.value), before_image)
-    assert np.allclose(np.asarray(graphic.data.value), before_segmentation)
     widget.close()
 
 
-def test_preferential_click_selects_without_greying_or_signalling(
-    qtbot: QtBot,
-) -> None:
-    widget = SpatialFootprintWidget()
-    qtbot.addWidget(widget)
-    widget.set_data(_cellpose_result())
-    widget.preferential_mode_radio.setChecked(True)
-    emitted: list[list[Any]] = []
-    widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
-
-    widget.overlay_widget.neuron_clicked.emit(1)
-
-    assert widget._preferential_selected_cellpose_ids == {1}
-    assert widget._greyed_cellpose_ids == set()
-    assert emitted == []
-    assert widget.apply_selection_button.isEnabled()
-    widget.close()
-
-
-def test_preferential_click_twice_deselects_and_disables_apply(qtbot: QtBot) -> None:
-    widget = SpatialFootprintWidget()
-    qtbot.addWidget(widget)
-    widget.set_data(_cellpose_result())
-    widget.preferential_mode_radio.setChecked(True)
-
-    widget.overlay_widget.neuron_clicked.emit(1)
-    assert widget.apply_selection_button.isEnabled()
-    widget.overlay_widget.neuron_clicked.emit(1)
-
-    assert widget._preferential_selected_cellpose_ids == set()
-    assert not widget.apply_selection_button.isEnabled()
-    widget.close()
-
-
-def test_apply_greys_unselected_cells_and_emits_signals(qtbot: QtBot) -> None:
+def test_selecting_a_previously_hidden_cell_shows_it_again(qtbot: QtBot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
     widget.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
-    widget.preferential_mode_radio.setChecked(True)
-    widget.overlay_widget.neuron_clicked.emit(1)
+    widget.overlay_widget.neuron_clicked.emit(0)  # select 0, hides 1 and 2
+    assert widget._greyed_cellpose_ids == {1, 2}
     emitted: list[list[Any]] = []
     widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
 
-    widget.apply_selection_button.click()
+    widget.overlay_widget.neuron_clicked.emit(1)  # also select 1
 
-    assert widget._greyed_cellpose_ids == {0, 2}
-    assert widget._preferential_selected_cellpose_ids == set()
-    assert sorted(emitted) == [[0, True], [2, True]]
-    assert not widget.apply_selection_button.isEnabled()
-    widget.close()
-
-
-def test_apply_ungreys_a_previously_greyed_cell_that_is_now_selected(
-    qtbot: QtBot,
-) -> None:
-    widget = SpatialFootprintWidget()
-    qtbot.addWidget(widget)
-    widget.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
-    # exclusion mode: grey cell 1 first
-    widget.overlay_widget.neuron_clicked.emit(1)
-    assert widget._greyed_cellpose_ids == {1}
-
-    widget.preferential_mode_radio.setChecked(True)
-    widget.overlay_widget.neuron_clicked.emit(1)  # mark it as interesting
-    emitted: list[list[Any]] = []
-    widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
-
-    widget.apply_selection_button.click()
-
-    assert widget._greyed_cellpose_ids == {0, 2}
-    assert sorted(emitted) == [[0, True], [1, False], [2, True]]
+    assert widget._selected_cellpose_ids == {0, 1}
+    assert widget._greyed_cellpose_ids == {2}
+    assert emitted == [[1, False]]
     widget.close()
 
 
@@ -442,24 +365,21 @@ def test_cellpose_to_stim_id_returns_none_for_unmapped_cell() -> None:
         assert state._cellpose_to_stim_id(unmapped_id) is None
 
 
-def test_apply_does_not_hide_selected_cell_when_unmapped_cells_collide_with_its_id(
+def test_selecting_a_cell_does_not_hide_it_when_unmapped_cells_collide_with_its_id(
     qtbot: QtBot,
 ) -> None:
     """Regression: Cellpose finding more cells than are mapped to neurons
-    used to make Apply hide the very cell the user picked to keep visible,
-    because an unrelated unmapped cell's id happened to equal that neuron's
-    real index (see _cellpose_to_stim_id's identity-fallback bug)."""
+    used to hide the very cell the user selected, because an unrelated
+    unmapped cell's id happened to equal that neuron's real index (see
+    _cellpose_to_stim_id's identity-fallback bug)."""
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
     widget.set_data(_cellpose_result_with_unmapped_cells())
-    widget.preferential_mode_radio.setChecked(True)
-
-    # keep only cellpose cell 7 (-> neuron 2) visible
-    widget.overlay_widget.neuron_clicked.emit(7)
     emitted: list[list[Any]] = []
     widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
 
-    widget.apply_selection_button.click()
+    # select only cellpose cell 7 (-> neuron 2)
+    widget.overlay_widget.neuron_clicked.emit(7)
 
     assert widget._greyed_cellpose_ids == {0, 1, 2, 3, 4, 5, 6}
     # neuron 2 (the selected cell) must never be told it's greyed
@@ -467,45 +387,7 @@ def test_apply_does_not_hide_selected_cell_when_unmapped_cells_collide_with_its_
     widget.close()
 
 
-def test_switching_away_from_preferential_clears_pending_selection(
-    qtbot: QtBot,
-) -> None:
-    widget = SpatialFootprintWidget()
-    qtbot.addWidget(widget)
-    widget.set_data(_cellpose_result())
-    widget.preferential_mode_radio.setChecked(True)
-    widget.overlay_widget.neuron_clicked.emit(1)
-    assert widget.apply_selection_button.isEnabled()
-
-    widget.exclusion_mode_radio.setChecked(True)
-
-    assert widget._preferential_selected_cellpose_ids == set()
-    assert not widget.apply_selection_button.isEnabled()
-    widget.close()
-
-
-def test_clear_selection_enabled_by_pending_preferential_pick_alone(
-    qtbot: QtBot,
-) -> None:
-    widget = SpatialFootprintWidget()
-    qtbot.addWidget(widget)
-    widget.set_data(_cellpose_result())
-    widget.preferential_mode_radio.setChecked(True)
-    widget.overlay_widget.neuron_clicked.emit(1)
-    assert widget.clear_selection_button.isEnabled()
-    emitted: list[list[Any]] = []
-    widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
-
-    widget.clear_selection_button.click()
-
-    assert widget._preferential_selected_cellpose_ids == set()
-    assert not widget.clear_selection_button.isEnabled()
-    assert not widget.apply_selection_button.isEnabled()
-    assert emitted == []
-    widget.close()
-
-
-def test_preferential_selection_renders_red_black_outline(qtbot: QtBot) -> None:
+def test_selected_cell_renders_red_black_ring(qtbot: QtBot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
     segmentation = np.zeros((10, 10), dtype=np.int32)
@@ -522,7 +404,6 @@ def test_preferential_selection_renders_red_black_outline(qtbot: QtBot) -> None:
         stimulus_to_cellpose_mapping={0: 0, 1: 1},
     )
     widget.set_data(result)
-    widget.preferential_mode_radio.setChecked(True)
     image_graphic = widget.overlay_widget.overlay_view._image_graphic
     assert image_graphic is not None
 
@@ -543,21 +424,7 @@ def test_preferential_selection_renders_red_black_outline(qtbot: QtBot) -> None:
     widget.close()
 
 
-def test_lasso_toggle_flips_overlay_view_lasso_mode(qtbot: QtBot) -> None:
-    widget = SpatialFootprintWidget()
-    qtbot.addWidget(widget)
-
-    assert not widget.overlay_widget.overlay_view.lasso_mode
-    widget.lasso_selection_radio.setChecked(True)
-    assert widget.overlay_widget.overlay_view.lasso_mode
-    widget.click_selection_radio.setChecked(True)
-    assert not widget.overlay_widget.overlay_view.lasso_mode
-    widget.close()
-
-
-def test_lasso_selection_greys_all_lassoed_cells_in_exclusion_mode(
-    qtbot: QtBot,
-) -> None:
+def test_lasso_selection_adds_cells_and_hides_the_rest(qtbot: QtBot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
     widget.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
@@ -566,42 +433,26 @@ def test_lasso_selection_greys_all_lassoed_cells_in_exclusion_mode(
 
     widget.overlay_widget.neuron_lasso_selected.emit([1, 2])
 
-    assert widget._greyed_cellpose_ids == {1, 2}
-    assert sorted(emitted) == [[1, True], [2, True]]
+    assert widget._selected_cellpose_ids == {1, 2}
+    assert widget._greyed_cellpose_ids == {0}
+    assert emitted == [[0, True]]
     widget.close()
 
 
-def test_lasso_selection_is_additive_and_only_emits_for_new_cells(
-    qtbot: QtBot,
-) -> None:
+def test_lasso_selection_is_additive(qtbot: QtBot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
     widget.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
     widget.overlay_widget.neuron_lasso_selected.emit([1])
+    assert widget._greyed_cellpose_ids == {0, 2}
     emitted: list[list[Any]] = []
     widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
 
     widget.overlay_widget.neuron_lasso_selected.emit([1, 2])
 
-    assert widget._greyed_cellpose_ids == {1, 2}
-    assert emitted == [[2, True]]
-    widget.close()
-
-
-def test_lasso_selection_marks_preferential_without_greying(qtbot: QtBot) -> None:
-    widget = SpatialFootprintWidget()
-    qtbot.addWidget(widget)
-    widget.set_data(_cellpose_result())
-    widget.preferential_mode_radio.setChecked(True)
-    emitted: list[list[Any]] = []
-    widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
-
-    widget.overlay_widget.neuron_lasso_selected.emit([1, 2])
-
-    assert widget._preferential_selected_cellpose_ids == {1, 2}
-    assert widget._greyed_cellpose_ids == set()
-    assert emitted == []
-    assert widget.apply_selection_button.isEnabled()
+    assert widget._selected_cellpose_ids == {1, 2}
+    assert widget._greyed_cellpose_ids == {0}
+    assert emitted == [[2, False]]
     widget.close()
 
 
@@ -612,7 +463,6 @@ def test_overlay_view_lasso_selects_only_enclosed_cells(
     overlay_view = OverlayView()
     qtbot.addWidget(overlay_view)
     overlay_view.enable_cell_selection = True
-    overlay_view.lasso_mode = True
     overlay_view.segmentation = np.zeros((10, 10), dtype=np.int32)
     overlay_view._label_centers = {1: (2.0, 2.0), 2: (8.0, 8.0)}
     positions = iter(
@@ -631,6 +481,7 @@ def test_overlay_view_lasso_selects_only_enclosed_cells(
 
     with qtbot.waitSignal(overlay_view.neuron_lasso_selected) as blocker:
         overlay_view._cell_selection_pointer_down(None)
+        overlay_view.pointer_move(None)  # crosses tolerance -> becomes a lasso
         overlay_view.pointer_move(None)
         overlay_view.pointer_move(None)
         overlay_view._cell_selection_pointer_up(None)
@@ -648,7 +499,6 @@ def test_overlay_view_lasso_ignores_loop_enclosing_nothing(
     overlay_view = OverlayView()
     qtbot.addWidget(overlay_view)
     overlay_view.enable_cell_selection = True
-    overlay_view.lasso_mode = True
     overlay_view.segmentation = np.zeros((10, 10), dtype=np.int32)
     overlay_view._label_centers = {1: (8.0, 8.0)}
     positions = iter(
@@ -670,6 +520,7 @@ def test_overlay_view_lasso_ignores_loop_enclosing_nothing(
     overlay_view._cell_selection_pointer_down(None)
     overlay_view.pointer_move(None)
     overlay_view.pointer_move(None)
+    overlay_view.pointer_move(None)
     overlay_view._cell_selection_pointer_up(None)
     qtbot.wait(10)
 
@@ -677,29 +528,32 @@ def test_overlay_view_lasso_ignores_loop_enclosing_nothing(
     overlay_view.close()
 
 
-def test_overlay_view_lasso_ignores_too_few_points(
+def test_overlay_view_plain_click_does_not_start_a_lasso(
     qtbot: QtBot,
     monkeypatch: MonkeyPatch,
 ) -> None:
+    """A click with no (or minimal) movement stays a plain click/select,
+    never a lasso - lasso only kicks in once the drag crosses tolerance."""
     overlay_view = OverlayView()
     qtbot.addWidget(overlay_view)
     overlay_view.enable_cell_selection = True
-    overlay_view.lasso_mode = True
-    overlay_view.segmentation = np.zeros((10, 10), dtype=np.int32)
-    overlay_view._label_centers = {1: (2.0, 2.0)}
+    overlay_view.segmentation = np.array([[1]], dtype=np.int32)
+    overlay_view._label_centers = {1: (0.0, 0.0)}
     monkeypatch.setattr(
         overlay_view.subplot,
         "map_screen_to_world",
         lambda ev: np.array([0.0, 0.0, 0.0]),
     )
-    emitted: list[list[int]] = []
-    overlay_view.neuron_lasso_selected.connect(emitted.append)
+    lasso_emitted: list[list[int]] = []
+    overlay_view.neuron_lasso_selected.connect(lasso_emitted.append)
 
-    overlay_view._cell_selection_pointer_down(None)
-    overlay_view._cell_selection_pointer_up(None)
-    qtbot.wait(10)
+    with qtbot.waitSignal(overlay_view.neuron_clicked) as blocker:
+        overlay_view._cell_selection_pointer_down(None)
+        overlay_view._cell_selection_pointer_up(None)
+        qtbot.wait(10)
 
-    assert emitted == []
+    assert blocker.args == [1]
+    assert lasso_emitted == []
     overlay_view.close()
 
 
@@ -746,10 +600,14 @@ def test_overlay_view_emits_neuron_clicked_on_plain_click(
     overlay_view.close()
 
 
-def test_overlay_view_ignores_drag_past_tolerance(
+def test_overlay_view_ignores_drag_past_tolerance_with_no_move_event(
     qtbot: QtBot,
     monkeypatch: MonkeyPatch,
 ) -> None:
+    """Releasing far from the down position without any pointer_move in
+    between never became a lasso (that transition only happens in
+    pointer_move), so it's still treated as an over-tolerance click and
+    ignored."""
     overlay_view = OverlayView()
     qtbot.addWidget(overlay_view)
     overlay_view.enable_cell_selection = True
@@ -799,7 +657,7 @@ def test_overlay_view_ignores_click_when_selection_disabled(
     overlay_view.close()
 
 
-def test_overlay_view_ignores_background_click(
+def test_overlay_view_background_click_emits_background_clicked(
     qtbot: QtBot,
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -812,15 +670,32 @@ def test_overlay_view_ignores_background_click(
         "map_screen_to_world",
         lambda ev: np.array([0.0, 0.0, 0.0]),
     )
-    emitted: list[int] = []
-    overlay_view.neuron_clicked.connect(emitted.append)
+    clicked: list[int] = []
+    overlay_view.neuron_clicked.connect(clicked.append)
 
-    overlay_view._cell_selection_pointer_down(None)
-    overlay_view._cell_selection_pointer_up(None)
-    qtbot.wait(10)
+    with qtbot.waitSignal(overlay_view.background_clicked):
+        overlay_view._cell_selection_pointer_down(None)
+        overlay_view._cell_selection_pointer_up(None)
 
-    assert emitted == []
+    assert clicked == []
     overlay_view.close()
+
+
+def test_background_click_clears_the_whole_selection(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
+    widget.overlay_widget.neuron_clicked.emit(1)
+    assert widget._greyed_cellpose_ids == {0, 2}
+    emitted: list[list[Any]] = []
+    widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
+
+    widget.overlay_widget.background_clicked.emit()
+
+    assert widget._selected_cellpose_ids == set()
+    assert widget._greyed_cellpose_ids == set()
+    assert sorted(emitted) == [[0, False], [2, False]]
+    widget.close()
 
 
 def test_overlay_view_ignores_aoi_drag_when_not_editable(
@@ -1024,8 +899,8 @@ def test_two_views_sharing_state_stay_in_sync_on_click(qtbot: QtBot) -> None:
 
     view_a.overlay_widget.neuron_clicked.emit(1)
 
-    assert view_a._greyed_cellpose_ids == {1}
-    assert view_b._greyed_cellpose_ids == {1}
+    assert view_a._greyed_cellpose_ids == {0, 2}
+    assert view_b._greyed_cellpose_ids == {0, 2}
     assert view_a.clear_selection_button.isEnabled()
     assert view_b.clear_selection_button.isEnabled()
 
@@ -1037,26 +912,18 @@ def test_two_views_sharing_state_stay_in_sync_on_click(qtbot: QtBot) -> None:
     view_b.close()
 
 
-def test_two_views_sharing_state_stay_in_sync_on_preferential_apply(
-    qtbot: QtBot,
-) -> None:
+def test_two_views_sharing_state_stay_in_sync_on_lasso(qtbot: QtBot) -> None:
     state = SpatialFootprintState()
     view_a = SpatialFootprintWidget(state=state)
     view_b = SpatialFootprintWidget(state=state)
     qtbot.addWidget(view_a)
     qtbot.addWidget(view_b)
     view_a.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
-    view_a.preferential_mode_radio.setChecked(True)
 
-    view_a.overlay_widget.neuron_clicked.emit(1)
+    view_a.overlay_widget.neuron_lasso_selected.emit([1])
 
-    assert view_a._preferential_selected_cellpose_ids == {1}
-    assert view_b._preferential_selected_cellpose_ids == {1}
-    # Apply is only wired to view A's own button, but it acts on shared state
-    assert view_a.apply_selection_button.isEnabled()
-
-    view_a.apply_selection_button.click()
-
+    assert view_a._selected_cellpose_ids == {1}
+    assert view_b._selected_cellpose_ids == {1}
     assert view_a._greyed_cellpose_ids == {0, 2}
     assert view_b._greyed_cellpose_ids == {0, 2}
     view_a.close()
@@ -1072,7 +939,7 @@ def test_widget_with_no_state_arg_gets_a_private_state(qtbot: QtBot) -> None:
     view_a.set_data(_cellpose_result())
     view_a.overlay_widget.neuron_clicked.emit(1)
 
-    assert view_a._greyed_cellpose_ids == {1}
+    assert view_a._greyed_cellpose_ids == {0, 2}
     assert view_b._greyed_cellpose_ids == set()
     assert view_b._cellpose_data is None
     view_a.close()

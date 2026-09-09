@@ -17,18 +17,38 @@ class SpatialFootprintState(QtCore.QObject):
     `gui.py`) updates this object and emits a signal, which every connected
     view uses to refresh its own rendering. No widget/rendering logic lives
     here - only data and the operations that change it.
+
+    Clicking a cell selects it (a ring marks it); every trace/stim row not
+    backed by a currently selected cell is hidden - this applies live, there
+    is no separate "apply" step. An empty selection means no filtering is in
+    effect (every row shown).
     """
 
     data_changed = QtCore.Signal()
-    greyed_changed = QtCore.Signal()
-    preferential_selection_changed = QtCore.Signal()
+    selection_changed = QtCore.Signal()
     neuron_greyed_out_changed = QtCore.Signal(int, bool)
 
     def __init__(self, parent: QtCore.QObject | None = None) -> None:
         super().__init__(parent)
         self.cellpose_data: CellposeImportResult | None = None
-        self.greyed_cellpose_ids: set[int] = set()
-        self.preferential_selected_cellpose_ids: set[int] = set()
+        self.selected_cellpose_ids: set[int] = set()
+
+    def _all_cellpose_ids(self) -> set[int]:
+        if self.cellpose_data is None:
+            return set()
+        return {
+            int(cellpose_id)
+            for cellpose_id in np.unique(self.cellpose_data.segmentation_array)
+            if cellpose_id >= 0
+        }
+
+    @property
+    def greyed_cellpose_ids(self) -> set[int]:
+        """Cells currently hidden from trace/stim: everything not selected,
+        or none at all while nothing is selected (no filtering in effect)."""
+        if not self.selected_cellpose_ids:
+            return set()
+        return self._all_cellpose_ids() - self.selected_cellpose_ids
 
     def _cellpose_to_stim_id(self, cellpose_id: int) -> int | None:
         """Resolve a segmented cell to the trace/stim row it drives, or
@@ -56,74 +76,14 @@ class SpatialFootprintState(QtCore.QObject):
 
     def set_data(self, cellpose_data: CellposeImportResult | None) -> None:
         self.cellpose_data = cellpose_data
-        self.greyed_cellpose_ids = set()
-        self.preferential_selected_cellpose_ids = set()
+        self.selected_cellpose_ids = set()
         self.data_changed.emit()
 
-    def toggle_greyed(self, cellpose_id: int) -> None:
-        if cellpose_id in self.greyed_cellpose_ids:
-            self.greyed_cellpose_ids.discard(cellpose_id)
-            greyed = False
-        else:
-            self.greyed_cellpose_ids.add(cellpose_id)
-            greyed = True
-        self.greyed_changed.emit()
-        stim_id = self._cellpose_to_stim_id(cellpose_id)
-        if stim_id is not None:
-            self.neuron_greyed_out_changed.emit(stim_id, greyed)
-
-    def add_greyed(self, cellpose_ids: Iterable[int]) -> None:
-        """Add every id to the greyed set (additive - never un-greys an id
-        already in the set, unlike the single-toggle `toggle_greyed`)."""
-        new_ids = set(cellpose_ids) - self.greyed_cellpose_ids
-        if not new_ids:
-            return
-        self.greyed_cellpose_ids |= new_ids
-        self.greyed_changed.emit()
-        for cellpose_id in new_ids:
-            stim_id = self._cellpose_to_stim_id(cellpose_id)
-            if stim_id is not None:
-                self.neuron_greyed_out_changed.emit(stim_id, True)
-
-    def toggle_preferential_selection(self, cellpose_id: int) -> None:
-        if cellpose_id in self.preferential_selected_cellpose_ids:
-            self.preferential_selected_cellpose_ids.discard(cellpose_id)
-        else:
-            self.preferential_selected_cellpose_ids.add(cellpose_id)
-        self.preferential_selection_changed.emit()
-
-    def add_preferential_selection(self, cellpose_ids: Iterable[int]) -> None:
-        """Add every id to the pending preferential selection (additive, same
-        rationale as `add_greyed`)."""
-        new_ids = set(cellpose_ids) - self.preferential_selected_cellpose_ids
-        if not new_ids:
-            return
-        self.preferential_selected_cellpose_ids |= new_ids
-        self.preferential_selection_changed.emit()
-
-    def clear_preferential_selection(self) -> None:
-        if not self.preferential_selected_cellpose_ids:
-            return
-        self.preferential_selected_cellpose_ids = set()
-        self.preferential_selection_changed.emit()
-
-    def apply_preferential_selection(self) -> None:
-        """Grey out every cell not marked as preferentially selected, and
-        un-grey any previously-greyed cell that was marked - an absolute
-        "only the selected cells stay visible" reset."""
-        if self.cellpose_data is None or not self.preferential_selected_cellpose_ids:
-            return
-        all_ids = {
-            int(cellpose_id)
-            for cellpose_id in np.unique(self.cellpose_data.segmentation_array)
-            if cellpose_id >= 0
-        }
+    def _set_selected(self, new_selected: set[int]) -> None:
         old_greyed = self.greyed_cellpose_ids
-        new_greyed = all_ids - self.preferential_selected_cellpose_ids
-        self.preferential_selected_cellpose_ids = set()
-        self.greyed_cellpose_ids = new_greyed
-        self.preferential_selection_changed.emit()
-        self.greyed_changed.emit()
+        self.selected_cellpose_ids = new_selected
+        new_greyed = self.greyed_cellpose_ids
+        self.selection_changed.emit()
         for cellpose_id in new_greyed - old_greyed:
             stim_id = self._cellpose_to_stim_id(cellpose_id)
             if stim_id is not None:
@@ -133,27 +93,25 @@ class SpatialFootprintState(QtCore.QObject):
             if stim_id is not None:
                 self.neuron_greyed_out_changed.emit(stim_id, False)
 
-    def clear_all(self) -> None:
-        """Un-grey every currently greyed cell and drop any pending (unapplied)
-        preferential selection.
+    def toggle_selected(self, cellpose_id: int) -> None:
+        """Select the cell, or deselect it if it was already selected -
+        deselecting the last selected cell clears the whole selection."""
+        new_selected = set(self.selected_cellpose_ids)
+        if cellpose_id in new_selected:
+            new_selected.discard(cellpose_id)
+        else:
+            new_selected.add(cellpose_id)
+        self._set_selected(new_selected)
 
-        Emits the same neuron_greyed_out_changed(stim_id, False) signal a
-        toggle would for each greyed cell, so anything listening (trace/stim
-        rows) stays in sync without duplicating that propagation logic here.
-        Pending preferential picks were never greyed, so no signal is emitted
-        for those.
-        """
-        if not self.greyed_cellpose_ids and not self.preferential_selected_cellpose_ids:
+    def add_selected(self, cellpose_ids: Iterable[int]) -> None:
+        """Add every id to the selection (additive - a lasso never
+        deselects an id that was already selected)."""
+        new_ids = set(cellpose_ids) - self.selected_cellpose_ids
+        if not new_ids:
             return
-        cellpose_ids = list(self.greyed_cellpose_ids)
-        had_preferential = bool(self.preferential_selected_cellpose_ids)
-        self.greyed_cellpose_ids = set()
-        self.preferential_selected_cellpose_ids = set()
-        if cellpose_ids:
-            self.greyed_changed.emit()
-        if had_preferential:
-            self.preferential_selection_changed.emit()
-        for cellpose_id in cellpose_ids:
-            stim_id = self._cellpose_to_stim_id(cellpose_id)
-            if stim_id is not None:
-                self.neuron_greyed_out_changed.emit(stim_id, False)
+        self._set_selected(self.selected_cellpose_ids | new_ids)
+
+    def clear_selection(self) -> None:
+        if not self.selected_cellpose_ids:
+            return
+        self._set_selected(set())
