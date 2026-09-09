@@ -27,7 +27,7 @@ class SaveLoadOptionsDialog(QDialog):
         super().__init__(parent)
         self.options = SaveLoadOptions(True, True, True, True)
 
-        self.setWindowTitle(f"{action} Model")
+        self.setWindowTitle(f"{action} Project")
         self.setModal(True)
 
         self.layout = QVBoxLayout()
