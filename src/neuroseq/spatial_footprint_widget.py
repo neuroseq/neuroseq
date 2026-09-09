@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+
 import brian2.numpy_ as np
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -88,11 +90,19 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         layout.addWidget(self.overlay_widget)
 
         self._base_legend: list[tuple[int, tuple[int, int, int]]] = []
-        self._state.data_changed.connect(self._on_state_data_changed)
-        self._state.selection_changed.connect(self._on_state_selection_changed)
-        self._state.neuron_greyed_out_changed.connect(
-            self.neuron_greyed_out_changed.emit
-        )
+        # Keep the connection handles (not just the callables) so close() can
+        # sever them precisely: a signal-to-signal connection like the third
+        # one below can't be disconnected by passing the callable again (e.g.
+        # `signal.disconnect(other_signal.emit)` raises "is not connected"
+        # even though the connection is live) - only disconnecting the exact
+        # handle .connect() returned works.
+        self._state_connections = [
+            self._state.data_changed.connect(self._on_state_data_changed),
+            self._state.selection_changed.connect(self._on_state_selection_changed),
+            self._state.neuron_greyed_out_changed.connect(
+                self.neuron_greyed_out_changed.emit
+            ),
+        ]
         self._on_state_data_changed()
 
     @property
@@ -216,6 +226,19 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self._state.add_selected(cellpose_ids)
 
     def close(self) -> bool:
+        # A detached view shares self._state with every other view (docked
+        # or detached) bound to it. Qt is supposed to auto-disconnect a
+        # destroyed receiver, but this widget's underlying render canvas can
+        # be torn down (via overlay_widget.close() below) well before its
+        # Python/Qt object is actually deleted, leaving the connection live
+        # in between. A later mutation from another view synchronously
+        # invokes this (now GPU-resource-less) view's slot and segfaults
+        # touching its dead canvas - disconnect explicitly instead of
+        # relying on that timing.
+        for connection in self._state_connections:
+            with contextlib.suppress(TypeError, RuntimeError):
+                self._state.disconnect(connection)  # type: ignore[call-arg]
+        self._state_connections = []
         overlay_widget = getattr(self, "overlay_widget", None)
         if overlay_widget is not None:
             overlay_widget.close()

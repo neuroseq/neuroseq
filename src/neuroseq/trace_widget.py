@@ -139,14 +139,35 @@ class TraceWidget(TimeseriesWidget):
         if isinstance(self.controller, ConstrainedPanZoomController):
             self.controller.add_state_change_listener(self._update_line_thickness)
         self._state = state if state is not None else TraceWidgetState()
-        self._state.data_changed.connect(self._on_state_data_changed)
-        self._state.greyed_changed.connect(self._on_state_greyed_changed)
+        # Keep the connection handles (not just the callables): a
+        # signal-to-signal connection (`signal.connect(other_signal.emit)`,
+        # as used elsewhere for this same shared-state pattern) can't be
+        # disconnected by passing the callable again - only disconnecting
+        # the exact handle .connect() returned works. None of this widget's
+        # own connections are signal-to-signal today, but keep the same
+        # robust pattern used for SpatialFootprintWidget's equivalent state.
+        self._state_connections = [
+            self._state.data_changed.connect(self._on_state_data_changed),
+            self._state.greyed_changed.connect(self._on_state_greyed_changed),
+        ]
         if self._state.data is not None:
             self._on_state_data_changed()
 
     def closeEvent(self, event) -> None:
         if isinstance(self.controller, ConstrainedPanZoomController):
             self.controller.remove_state_change_listener(self._update_line_thickness)
+        # A detached view shares self._state with every other view (docked
+        # or detached) bound to it. Qt is supposed to auto-disconnect a
+        # destroyed receiver, but this widget's underlying render canvas can
+        # be torn down well before its Python/Qt object is actually deleted,
+        # leaving the connection live in between. A later mutation from
+        # another view would then synchronously invoke this (now
+        # GPU-resource-less) view's slot and segfault touching its dead
+        # canvas - disconnect explicitly instead of relying on that timing.
+        for connection in self._state_connections:
+            with contextlib.suppress(TypeError, RuntimeError):
+                self._state.disconnect(connection)  # type: ignore[call-arg]
+        self._state_connections = []
         super().closeEvent(event)
 
     def resizeEvent(self, event) -> None:

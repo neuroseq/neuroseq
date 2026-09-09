@@ -944,3 +944,32 @@ def test_widget_with_no_state_arg_gets_a_private_state(qtbot: QtBot) -> None:
     assert view_b._cellpose_data is None
     view_a.close()
     view_b.close()
+
+
+def test_close_fully_disconnects_from_shared_state(qtbot: QtBot) -> None:
+    """Regression: closing a view left one connection (the signal-to-signal
+    forwarding of neuron_greyed_out_changed) still wired to the shared state,
+    since disconnecting by re-passing the callable doesn't work for a
+    signal-to-signal connection - only disconnecting the exact handle
+    .connect() returned does. A stale connection to a closed (and
+    eventually garbage-collected) view crashes the next time any other view
+    mutates the shared state (see issue: repeated detach/close cycles)."""
+    state = SpatialFootprintState()
+    view_a = SpatialFootprintWidget(state=state)
+    qtbot.addWidget(view_a)
+    view_a.set_data(_cellpose_result())
+    baseline_data = state.receivers(state.data_changed)
+    baseline_selection = state.receivers(state.selection_changed)
+    baseline_greyed = state.receivers(state.neuron_greyed_out_changed)
+
+    view_b = SpatialFootprintWidget(state=state)
+    assert state.receivers(state.data_changed) == baseline_data + 1
+    assert state.receivers(state.selection_changed) == baseline_selection + 1
+    assert state.receivers(state.neuron_greyed_out_changed) == baseline_greyed + 1
+
+    view_b.close()
+
+    assert state.receivers(state.data_changed) == baseline_data
+    assert state.receivers(state.selection_changed) == baseline_selection
+    assert state.receivers(state.neuron_greyed_out_changed) == baseline_greyed
+    view_a.close()

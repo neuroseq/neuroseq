@@ -287,6 +287,11 @@ class OverlayView(FullScreenFPLWidget):
         self._segmentation_shape = None
         self.text = None
         self.base_camera_state = None
+        # subplot.clear() above already discarded any in-progress lasso line
+        # from the render tree; null the reference too, or a later lasso
+        # gesture's _update_lasso_line()/_clear_lasso_line() would try to
+        # remove a graphic that's already gone.
+        self._lasso_line = None
         self._clear_label_graphics()
         self._clear_aoi_graphics()
 

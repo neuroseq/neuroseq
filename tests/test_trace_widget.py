@@ -926,3 +926,28 @@ def test_calling_clear_data_directly_with_greyed_neuron_and_overlay_does_not_war
 
     assert "not a child" not in caplog.text
     trace_widget.close()
+
+
+def test_close_fully_disconnects_from_shared_state(qtbot: QtBot) -> None:
+    """Regression: repeated detach/close cycles of a view sharing state left
+    stale connections behind (disconnecting by re-passing the callable
+    doesn't sever a connection reliably in every case - only disconnecting
+    the exact handle .connect() returned does), eventually invoking a
+    slot on a closed, GPU-resource-less view and crashing."""
+    state = TraceWidgetState()
+    controller_a = ConstrainedPanZoomController()
+    controller_b = ConstrainedPanZoomController()
+    view_a = TraceWidget(controller_a, state=state)
+    qtbot.addWidget(view_a)
+    baseline_data = state.receivers(state.data_changed)
+    baseline_greyed = state.receivers(state.greyed_changed)
+
+    view_b = TraceWidget(controller_b, state=state)
+    assert state.receivers(state.data_changed) == baseline_data + 1
+    assert state.receivers(state.greyed_changed) == baseline_greyed + 1
+
+    view_b.close()
+
+    assert state.receivers(state.data_changed) == baseline_data
+    assert state.receivers(state.greyed_changed) == baseline_greyed
+    view_a.close()
