@@ -117,8 +117,10 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
 
         # Same three display toggles as the Cell Segmentation import dialog
         # (cellpose_import_dialog.py), so this docked/detached panel offers
-        # the same at-a-glance controls.
+        # the same at-a-glance controls. Only meaningful once there's a
+        # segmentation to toggle, so the whole row is hidden until then.
         checkbox_layout = QtWidgets.QHBoxLayout()
+        checkbox_layout.addStretch(1)
         self.show_labels_checkbox = QtWidgets.QCheckBox("Show labels")
         self.show_labels_checkbox.setChecked(True)
         self.show_labels_checkbox.toggled.connect(self._on_display_toggle_changed)
@@ -133,7 +135,10 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self.show_shapes_checkbox.toggled.connect(self._on_display_toggle_changed)
         checkbox_layout.addWidget(self.show_shapes_checkbox)
         checkbox_layout.addStretch(1)
-        layout.addLayout(checkbox_layout)
+        self.checkbox_container = QtWidgets.QWidget()
+        self.checkbox_container.setLayout(checkbox_layout)
+        self.checkbox_container.setVisible(False)
+        layout.addWidget(self.checkbox_container)
 
         self._base_legend: list[tuple[int, tuple[int, int, int]]] = []
         # Keep the connection handles (not just the callables) so close() can
@@ -183,12 +188,14 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             self.overlay_widget.set_empty_message("No cell spatial footprints loaded.")
             self.overlay_widget.setVisible(False)
             self.empty_state_widget.setVisible(True)
+            self.checkbox_container.setVisible(False)
             self.show_shapes_checkbox.setEnabled(False)
             self.overlay_widget.set_aoi_overlay(None, show=False)
             return
 
         self.empty_state_widget.setVisible(False)
         self.overlay_widget.setVisible(True)
+        self.checkbox_container.setVisible(True)
         self._base_legend = compute_segmentation_legend(
             cellpose_data.segmentation_array
         )

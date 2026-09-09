@@ -79,17 +79,20 @@ def test_set_data_populates_overlay_and_clears_on_none(qtbot: QtBot) -> None:
 
     assert not widget.empty_state_widget.isHidden()
     assert widget.overlay_widget.isHidden()
+    assert widget.checkbox_container.isHidden()
 
     widget.set_data(_cellpose_result())
     assert widget.overlay_widget.segmentation is not None
     assert widget.empty_state_widget.isHidden()
     assert not widget.overlay_widget.isHidden()
+    assert not widget.checkbox_container.isHidden()
 
     widget.set_data(None)
     assert widget.overlay_widget.overlay_image is None
     assert widget.overlay_widget.segmentation is None
     assert not widget.empty_state_widget.isHidden()
     assert widget.overlay_widget.isHidden()
+    assert widget.checkbox_container.isHidden()
     widget.close()
 
 
