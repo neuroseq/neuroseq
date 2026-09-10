@@ -405,64 +405,31 @@ def test_set_overlay_image_is_a_noop_with_a_mismatched_shape_or_no_graphic_yet(
     widget.close()
 
 
-def _busy_indicator_is_busy(indicator: QtWidgets.QProgressBar) -> bool:
-    """The indicator is always visible - `isHidden()` never distinguishes
-    busy from idle. Busy is the indeterminate range (0, 0); idle is a
-    determinate, empty (0, 1) / value 0 bar."""
-    return indicator.minimum() == 0 and indicator.maximum() == 0
-
-
-def test_busy_indicator_is_always_visible_and_shown_during_selection_change(
-    qtbot: QtBot,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    widget = SpatialFootprintWidget()
-    qtbot.addWidget(widget)
-    widget.set_data(_cellpose_result())
-    assert not widget.busy_indicator.isHidden()
-    assert not _busy_indicator_is_busy(widget.busy_indicator)
-
-    seen_busy_during_mutation: list[bool] = []
-    original_toggle_selected = widget._state.toggle_selected
-
-    def _spy_toggle_selected(cellpose_id: int) -> None:
-        seen_busy_during_mutation.append(_busy_indicator_is_busy(widget.busy_indicator))
-        original_toggle_selected(cellpose_id)
-
-    monkeypatch.setattr(widget._state, "toggle_selected", _spy_toggle_selected)
-
-    widget.overlay_widget.neuron_clicked.emit(1)
-
-    assert seen_busy_during_mutation == [True]
-    assert not widget.busy_indicator.isHidden()
-    assert not _busy_indicator_is_busy(widget.busy_indicator)
-    widget.close()
-
-
-def test_busy_indicator_sits_below_the_checkbox_row(qtbot: QtBot) -> None:
-    """Regression: the indicator used to live in a top bar above the view
-    and get setVisible(False)/(True) toggled, which shifted the view every
-    time it appeared/disappeared - it must now be a fixed, always-visible
-    row below the display-toggle checkboxes instead."""
+def test_checkbox_row_sits_at_the_top_of_the_widget(qtbot: QtBot) -> None:
+    """The display-toggle checkboxes are the first thing in the layout, so
+    they read as a fixed toolbar above the view rather than floating below
+    it."""
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
 
     layout = widget.layout()
     assert layout is not None
-    checkbox_index = layout.indexOf(widget.checkbox_container)
-    busy_index = layout.indexOf(widget.busy_indicator)
-    assert checkbox_index != -1
-    assert busy_index != -1
-    assert busy_index > checkbox_index
+    assert layout.indexOf(widget.checkbox_container) == 0
+    assert layout.indexOf(widget.checkbox_container) < layout.indexOf(
+        widget.empty_state_widget
+    )
+    assert layout.indexOf(widget.checkbox_container) < layout.indexOf(
+        widget.overlay_widget
+    )
     widget.close()
 
 
-def test_busy_indicator_is_a_quarter_of_its_default_height(qtbot: QtBot) -> None:
+def test_checkbox_row_is_half_its_default_height(qtbot: QtBot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
 
-    default_height = QtWidgets.QProgressBar().sizeHint().height()
-    assert widget.busy_indicator.height() == round(default_height / 4)
+    default_height = widget.checkbox_container.sizeHint().height()
+    assert widget.checkbox_container.height() == round(default_height / 2)
     widget.close()
 
 

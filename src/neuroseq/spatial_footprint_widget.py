@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable
 
 import brian2.numpy_ as np
 from qtpy import QtCore
@@ -63,6 +62,35 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
+        # Same three display toggles as the Cell Segmentation import dialog
+        # (cellpose_import_dialog.py), so this docked/detached panel offers
+        # the same at-a-glance controls. Only meaningful once there's a
+        # segmentation to toggle, so the whole row is hidden until then.
+        checkbox_layout = QtWidgets.QHBoxLayout()
+        checkbox_layout.addStretch(1)
+        self.show_labels_checkbox = QtWidgets.QCheckBox("Show labels")
+        self.show_labels_checkbox.setChecked(True)
+        self.show_labels_checkbox.toggled.connect(self._on_display_toggle_changed)
+        checkbox_layout.addWidget(self.show_labels_checkbox)
+        self.show_segmentation_checkbox = QtWidgets.QCheckBox("Show segmentation")
+        self.show_segmentation_checkbox.setChecked(True)
+        self.show_segmentation_checkbox.toggled.connect(self._on_display_toggle_changed)
+        checkbox_layout.addWidget(self.show_segmentation_checkbox)
+        self.show_shapes_checkbox = QtWidgets.QCheckBox("Show shapes")
+        self.show_shapes_checkbox.setChecked(True)
+        self.show_shapes_checkbox.setEnabled(False)
+        self.show_shapes_checkbox.toggled.connect(self._on_display_toggle_changed)
+        checkbox_layout.addWidget(self.show_shapes_checkbox)
+        checkbox_layout.addStretch(1)
+        self.checkbox_container = QtWidgets.QWidget()
+        self.checkbox_container.setLayout(checkbox_layout)
+        self.checkbox_container.setVisible(False)
+        # Half its natural height - a slim row, not a full-size toolbar.
+        self.checkbox_container.setFixedHeight(
+            max(1, round(self.checkbox_container.sizeHint().height() / 2))
+        )
+        layout.addWidget(self.checkbox_container)
+
         self.empty_state_widget = QtWidgets.QWidget(self)
         empty_layout = QtWidgets.QVBoxLayout(self.empty_state_widget)
         empty_layout.addStretch(1)
@@ -99,47 +127,6 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         )
         self.overlay_widget.background_clicked.connect(self.clear_selection)
         layout.addWidget(self.overlay_widget)
-
-        # Same three display toggles as the Cell Segmentation import dialog
-        # (cellpose_import_dialog.py), so this docked/detached panel offers
-        # the same at-a-glance controls. Only meaningful once there's a
-        # segmentation to toggle, so the whole row is hidden until then.
-        checkbox_layout = QtWidgets.QHBoxLayout()
-        checkbox_layout.addStretch(1)
-        self.show_labels_checkbox = QtWidgets.QCheckBox("Show labels")
-        self.show_labels_checkbox.setChecked(True)
-        self.show_labels_checkbox.toggled.connect(self._on_display_toggle_changed)
-        checkbox_layout.addWidget(self.show_labels_checkbox)
-        self.show_segmentation_checkbox = QtWidgets.QCheckBox("Show segmentation")
-        self.show_segmentation_checkbox.setChecked(True)
-        self.show_segmentation_checkbox.toggled.connect(self._on_display_toggle_changed)
-        checkbox_layout.addWidget(self.show_segmentation_checkbox)
-        self.show_shapes_checkbox = QtWidgets.QCheckBox("Show shapes")
-        self.show_shapes_checkbox.setChecked(True)
-        self.show_shapes_checkbox.setEnabled(False)
-        self.show_shapes_checkbox.toggled.connect(self._on_display_toggle_changed)
-        checkbox_layout.addWidget(self.show_shapes_checkbox)
-        checkbox_layout.addStretch(1)
-        self.checkbox_container = QtWidgets.QWidget()
-        self.checkbox_container.setLayout(checkbox_layout)
-        self.checkbox_container.setVisible(False)
-        layout.addWidget(self.checkbox_container)
-
-        # A fixed, always-visible row of its own so showing/hiding it never
-        # shifts the view above (which is what happened when this used to
-        # live in a top bar and get setVisible(False)/(True) toggled) - idle
-        # is a determinate, empty bar rather than the widget disappearing;
-        # busy switches it to the indeterminate (range 0, 0) animated form.
-        self.busy_indicator = QtWidgets.QProgressBar()
-        self.busy_indicator.setTextVisible(False)
-        self.busy_indicator.setRange(0, 1)
-        self.busy_indicator.setValue(0)
-        # A quarter of the style's normal height - thin enough to read as a
-        # slim strip rather than a full progress bar.
-        self.busy_indicator.setFixedHeight(
-            max(1, round(self.busy_indicator.sizeHint().height() / 4))
-        )
-        layout.addWidget(self.busy_indicator)
 
         self._base_legend: list[tuple[int, tuple[int, int, int]]] = []
         # Keep the connection handles (not just the callables) so close() can
@@ -385,38 +372,13 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         return values.astype(image.dtype, copy=False)
 
     def clear_selection(self) -> None:
-        self._with_busy_indicator(self._state.clear_selection)
+        self._state.clear_selection()
 
     def _on_neuron_clicked(self, cellpose_id: int) -> None:
-        self._with_busy_indicator(lambda: self._state.toggle_selected(cellpose_id))
+        self._state.toggle_selected(cellpose_id)
 
     def _on_neuron_lasso_selected(self, cellpose_ids: list[int]) -> None:
-        self._with_busy_indicator(
-            lambda: self._state.toggle_selected_many(cellpose_ids)
-        )
-
-    def _with_busy_indicator(self, mutate: Callable[[], None]) -> None:
-        """Run a selection-changing state mutation with a busy indicator
-        shown for its duration.
-
-        Selecting/deselecting a cell synchronously refreshes every view
-        sharing this state (recomposing the overlay image, updating the
-        trace/stim panels) - with a large segmentation or many neurons this
-        can take a noticeable moment, during which Qt would otherwise not
-        repaint at all (a single blocking call). Switching the indicator to
-        its indeterminate (animated) form and forcing one repaint via
-        processEvents() before starting the mutation is what makes it
-        actually visible instead of flashing at the very end alongside
-        everything else - the indicator itself stays visible throughout, so
-        the view underneath never shifts.
-        """
-        self.busy_indicator.setRange(0, 0)  # indeterminate: busy
-        QtWidgets.QApplication.processEvents()
-        try:
-            mutate()
-        finally:
-            self.busy_indicator.setRange(0, 1)
-            self.busy_indicator.setValue(0)
+        self._state.toggle_selected_many(cellpose_ids)
 
     def close(self) -> bool:
         # A detached view shares self._state with every other view (docked
