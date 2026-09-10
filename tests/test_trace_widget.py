@@ -73,6 +73,54 @@ def test_trace_preview_preserves_arrangement(qtbot, clip, center, tmp_path) -> N
     dialog.close()
 
 
+@pytest.mark.parametrize(
+    "neuron_range,time_range", [(slice(3, 8), slice(1, 3)), (slice(7, 8), slice(2, 3))]
+)
+def test_trace_preview_uses_selected_region(
+    qtbot, make_trace_data, neuron_range, time_range
+):
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+    controller = ConstrainedPanZoomController()
+    widget = TraceWidget(controller)
+    qtbot.addWidget(widget)
+    widget.set_data(
+        make_trace_data(
+            n_neurons=2,
+            n_timestamps=10,
+            indices=np.array([3, 7], dtype=np.uint32),
+            dt=0.002,
+        )
+    )
+    state = controller._get_camera_state()
+    widget.select_neurons(neuron_range, time_range)
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    assert ax.get_xlim() == pytest.approx((time_range.start * 2, time_range.stop * 2))
+    assert ax.get_ylim() == pytest.approx(
+        (neuron_range.start - 0.5, neuron_range.stop - 0.5)
+    )
+    for key in ("position", "width", "height"):
+        np.testing.assert_allclose(controller._get_camera_state()[key], state[key])
+    dialog.close()
+
+    widget.unselect_neurons()
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    cx, cy = state["position"][:2]
+    assert ax.get_xlim() == pytest.approx(
+        (cx - state["width"] / 2, cx + state["width"] / 2)
+    )
+    assert ax.get_ylim() == pytest.approx(
+        (cy - state["height"] / 2, cy + state["height"] / 2)
+    )
+    dialog.close()
+
+
 def test_trace_widget_context_menu_offers_vector_export(
     qtbot: QtBot, make_trace_data
 ) -> None:

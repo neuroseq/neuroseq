@@ -217,7 +217,7 @@ class TraceWidget(TimeseriesWidget):
         self.context_menu.insertAction(self.context_menu.actions()[0], export_action)
 
     def preview_traces(self) -> QtWidgets.QDialog | None:
-        """Open a modeless Matplotlib snapshot of this panel's displayed traces."""
+        """Preview the selected region, or the current view when nothing is selected."""
         controller = self.controller
         if (
             not isinstance(self.data, TraceData)
@@ -257,6 +257,15 @@ class TraceWidget(TimeseriesWidget):
         center_x, center_y = state["position"][:2]
         ax.set_xlim(center_x - state["width"] / 2, center_x + state["width"] / 2)
         ax.set_ylim(center_y - state["height"] / 2, center_y + state["height"] / 2)
+        if self.selected_time_slice is not None:
+            start, stop, _ = self.selected_time_slice.indices(self.n_timestamps)
+            if stop > start:
+                ax.set_xlim(start * self.dt_ms, stop * self.dt_ms)
+        if self.selected_neuron_slice is not None:
+            start, stop, _ = self.selected_neuron_slice.indices(int(self.n_neurons))
+            if stop > start:
+                # Match the selection rectangle's edges around the neuron bands.
+                ax.set_ylim(start - 0.5, stop - 0.5)
         ax.set_xlabel("Time (ms)")
         ax.set_ylabel("Neuron index (normalized traces)")
         ax.set_title(self.data.name)
