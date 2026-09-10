@@ -55,9 +55,12 @@ from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
 from neuroseq.project import Project
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
+from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.save_load_options import SaveLoadOptionsDialog
+from neuroseq.spatial_footprint_state import SpatialFootprintState
 from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
 from neuroseq.spike_widget import SpikeWidget
+from neuroseq.stim import StimArray
 from neuroseq.stim_editor import StimEditor
 from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.synthetic_data_dialog import SyntheticDataDialog
@@ -65,6 +68,7 @@ from neuroseq.syscon2_import_dialog import Syscon2ImportDialog
 from neuroseq.time_slider_widget import TimeSliderWidget
 from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.trace_widget import TraceWidget
+from neuroseq.trace_widget_state import TraceWidgetState
 from neuroseq.utils import add_action
 from neuroseq.utils import add_items_to_combobox
 from neuroseq.utils import getSimulationTime
@@ -345,19 +349,27 @@ class Gui(QtWidgets.QMainWindow):
         self.controller = ConstrainedPanZoomController()
         self.trace_controller = ConstrainedPanZoomController()
         self.spike_controller = ConstrainedPanZoomController()
+        self._trace_state = TraceWidgetState(parent=self)
+        self._spatial_footprint_state = SpatialFootprintState(parent=self)
         self.trace_widget = TraceWidget(
             self.trace_controller,
             parent=self,
             default_controller=self.controller,
             show_axis_link_controls=True,
+            state=self._trace_state,
+        )
+        self.trace_widget.neuron_hovered.connect(
+            self._spatial_footprint_state.set_hovered_stim_id
         )
         self.heatmap_widget = HeatmapWidget(parent=self)
-        self.spatial_footprint_widget = SpatialFootprintWidget(parent=self)
+        self.spatial_footprint_widget = SpatialFootprintWidget(
+            parent=self, state=self._spatial_footprint_state
+        )
         self.spatial_footprint_widget.import_requested.connect(
             self.btn_import_cellpose_data_clicked
         )
-        self.spatial_footprint_widget.neuron_greyed_out_changed.connect(
-            self._on_neuron_greyed_out_changed
+        self.spatial_footprint_widget.neurons_greyed_out_changed.connect(
+            self._on_neurons_greyed_out_changed
         )
         self._create_menus_and_toolbars()
         self.setWindowIcon(qta.icon("fa6s.brain"))
@@ -406,6 +418,16 @@ class Gui(QtWidgets.QMainWindow):
         self.stim_editor.time_range_focus_requested.connect(
             self.trace_controller.focus_time_range
         )
+        self.stim_editor.current_stim_changed.connect(self._on_current_stim_changed)
+        self.stim_editor.trim_to_mapped_neurons_requested.connect(
+            self.btn_trim_to_mapped_neurons_clicked
+        )
+        self._spatial_footprint_state.data_changed.connect(
+            self._on_spatial_footprint_data_changed_for_trim_action
+        )
+        self.stim_editor.stim_widget.neuron_hovered.connect(
+            self._spatial_footprint_state.set_hovered_stim_id
+        )
         split_vertical.addWidget(self.stim_editor)
         self.trace_widget.set_default_scroll_bars(
             self.stim_editor.x_scrollbar,
@@ -439,6 +461,7 @@ class Gui(QtWidgets.QMainWindow):
         ]
         for widget in self.plot_widgets:
             self.time_slider.connect_widget(widget)
+        self.time_slider.time_changed.connect(self._on_time_changed)
         split_vertical.addWidget(self.time_slider)
         self.data_widget.setVisible(False)
         self.trace_widget.setVisible(False)
@@ -503,6 +526,12 @@ class Gui(QtWidgets.QMainWindow):
             | None
         ) = None
         self._detached_panel_windows: list[DetachedPanelWindow] = []
+        # Tracks a panel's detached window only when it was detached via
+        # plain "Detach panel" (not "Detach copy of panel") - i.e. exactly
+        # the windows _set_widget_visible should close if the docked panel
+        # is shown again, so re-showing it doesn't leave both visible at
+        # once (which is what "Detach copy" is for).
+        self._plain_detached_windows: dict[QtWidgets.QWidget, DetachedPanelWindow] = {}
         self._llm_settings_dialog: LLMSettingsDialog | None = None
         self._external_sim_thread: QtCore.QThread | None = None
         self._external_sim_worker: ExternalSimWorker | None = None
@@ -818,11 +847,24 @@ class Gui(QtWidgets.QMainWindow):
     def btn_save_clicked(self) -> None:
         self._save_project()
 
-    def _save_project(self, on_success: Callable[[object], None] | None = None) -> bool:
+    def btn_save_as_clicked(self) -> None:
+        self._save_project(force_dialog=True)
+
+    def _save_project(
+        self,
+        on_success: Callable[[object], None] | None = None,
+        force_dialog: bool = False,
+    ) -> bool:
         """Run the interactive save flow.
 
+        If the project already has a file path and ``force_dialog`` is False
+        (a plain "Save"), it is written straight back to that path with no
+        prompts. Otherwise (a "Save As", or a first-ever save with no existing
+        path), a file picker is shown. All four project components are always
+        included; the options dialog remains available for import workflows.
+
         Returns True if a save task was dispatched, False if the user cancelled
-        at the options or file dialog (or a file operation is already running).
+        at the file dialog (or a file operation is already running).
         ``on_success`` runs after the save completes successfully; it lets a
         caller (e.g. New) chain an action once the current project is safely
         persisted.
@@ -834,23 +876,24 @@ class Gui(QtWidgets.QMainWindow):
                 "A file operation is already in progress.",
             )
             return False
-        options_dialog = SaveLoadOptionsDialog(action="Save")
-        if not options_dialog.exec():
-            return False
-        filename, _ = getsavefilename(
-            self,
-            "Save project",
-            str(self.project.filepath) if self.project.filepath else "project.nseq",
-            "neuroseq project (*.nseq)",
-        )
-        if filename == "":
-            return False
-        filename = pathlib.Path(filename)
-        if filename.suffix != ".nseq":
-            filename = filename.with_suffix(".nseq")
+
+        options = SaveLoadOptions(True, True, True, True)
+        if not force_dialog and self.project.filepath is not None:
+            filename = self.project.filepath
+        else:
+            picked_filename, _ = getsavefilename(
+                self,
+                "Save project",
+                str(self.project.filepath) if self.project.filepath else "project.nseq",
+                "neuroseq project (*.nseq)",
+            )
+            if picked_filename == "":
+                return False
+            filename = pathlib.Path(picked_filename)
+            if filename.suffix != ".nseq":
+                filename = filename.with_suffix(".nseq")
 
         project = self.project
-        options = options_dialog.options
 
         def _save_task(report: Callable[[int], None]) -> pathlib.Path:
             # project.save has no native progress callback; bracket it with
@@ -1256,6 +1299,18 @@ class Gui(QtWidgets.QMainWindow):
             return []
 
         self.project.cellpose_data = imported_copy
+        failed_remaps = self.project.remap_cellpose_indices()
+        if failed_remaps:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Trace mapping conflict",
+                "Could not update the neuron mapping for previously imported "
+                "trace/spike data in: "
+                + ", ".join(sorted(set(failed_remaps)))
+                + ".\n\nThe new Cellpose mapping conflicts with this data (e.g. "
+                "duplicate or out-of-range IDs); their displayed indices were left "
+                "unchanged.",
+            )
         detected_neurons = self._cellpose_neuron_count(imported_copy)
         resized_names: list[str] = []
         if detected_neurons > 0 and self.project.stim_arrays:
@@ -1359,13 +1414,60 @@ class Gui(QtWidgets.QMainWindow):
         if data is not None and hasattr(self, "_auto_show_widget"):
             self._auto_show_widget(self.heatmap_widget)
 
-    def _on_neuron_greyed_out_changed(
+    def _on_neurons_greyed_out_changed(
         self,
-        neuron_index: int,
-        greyed: bool,
+        newly_hidden: list[int],
+        newly_shown: list[int],
     ) -> None:
-        self.trace_widget.set_neuron_greyed(neuron_index, greyed)
-        self.stim_editor.stim_widget.set_neuron_greyed(neuron_index, greyed)
+        self._trace_state.set_neurons_greyed(newly_hidden, newly_shown)
+        self.stim_editor.stim_widget.set_neurons_greyed(newly_hidden, newly_shown)
+
+    def _current_stim_array(self) -> StimArray | None:
+        modifier = self.stim_editor.current_stim_modifier
+        return modifier.stim_array if modifier is not None else None
+
+    def _on_current_stim_changed(self, stim_array: StimArray | None) -> None:
+        if self.action_overlay_stim_on_traces.isChecked():
+            self.trace_widget.set_stim_overlay_data(stim_array)
+        self._on_time_changed(self.time_slider.t_ms)
+
+    def _on_time_changed(self, time_ms: int) -> None:
+        """Highlight, with a red cross in the Spatial Footprints panel,
+        every neuron receiving nonzero stimulation at the current time
+        slider position - driven by the currently active stim array, not
+        by an interaction with the panel itself."""
+        self._spatial_footprint_state.set_active_stim_ids(
+            self._stim_ids_active_at(self._current_stim_array(), time_ms)
+        )
+
+    @staticmethod
+    def _stim_ids_active_at(stim_array: StimArray | None, time_ms: int) -> set[int]:
+        if stim_array is None or stim_array.dt <= 0:
+            return set()
+        time_index = int(time_ms / (stim_array.dt * 1000.0))
+        if not (0 <= time_index < stim_array.values.shape[0]):
+            return set()
+        return {int(i) for i in np.nonzero(stim_array.values[time_index])[0]}
+
+    def _toggle_stim_trace_overlay(self) -> None:
+        """Toggle between the separated Stimuli+Traces panels and a single
+        combined view where the stim heatmap renders behind the trace lines
+        (issue #530). Only overlays a neuron's stim row onto its own trace
+        row for now - overlaying a different neuron's stim/trace pair is
+        deferred."""
+        enabled = self.action_overlay_stim_on_traces.isChecked()
+        self.trace_widget.set_stim_overlay_enabled(enabled)
+        self.trace_widget.set_stim_overlay_data(self._current_stim_array())
+        stim_panel_action = self._view_actions[self.stim_editor]
+        if enabled:
+            self._stim_panel_visible_before_overlay = stim_panel_action.isChecked()
+            if stim_panel_action.isChecked():
+                stim_panel_action.trigger()
+        elif (
+            getattr(self, "_stim_panel_visible_before_overlay", True)
+            and not stim_panel_action.isChecked()
+        ):
+            stim_panel_action.trigger()
 
     def _apply_spike_selection(self, cmb_name: str) -> None:
         data = self.project.get_data(cmb_name, SpikeData)
@@ -2119,6 +2221,68 @@ class Gui(QtWidgets.QMainWindow):
         if hasattr(self, "spatial_footprint_widget"):
             self.spatial_footprint_widget.set_data(None)
 
+    def _on_spatial_footprint_data_changed_for_trim_action(self) -> None:
+        """Keep the left toolbar's "Trim to Mapped Neurons…" action enabled
+        only once there's an actual mapping to trim to - it lives in
+        stim_editor.py's toolbar, not the Spatial Footprints panel itself,
+        so it can't gate its own enabled state off the panel's own data."""
+        cellpose_data = self._spatial_footprint_state.cellpose_data
+        self.stim_editor.action_trim_to_mapped_neurons.setEnabled(
+            bool(
+                cellpose_data is not None and cellpose_data.stimulus_to_cellpose_mapping
+            )
+        )
+
+    def btn_trim_to_mapped_neurons_clicked(self) -> None:
+        """Permanently keep only Cellpose-mapped neurons across the whole
+        project, then require the result to be saved under a new file (never
+        silently overwriting the currently-open one)."""
+        if self.project is None or self.project.cellpose_data is None:
+            return
+        mapping = self.project.cellpose_data.stimulus_to_cellpose_mapping
+        if not mapping:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Nothing to trim",
+                "No Cellpose stimulus mapping is set, so there is nothing to trim to.",
+            )
+            return
+        n_kept = len(mapping)
+        n_removed = max(0, int(self.project.max_neurons) - n_kept)
+        if n_removed == 0:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Nothing to trim",
+                f"All {n_kept} neuron(s) already have a Cellpose cell mapped "
+                "to them - there is nothing to remove.",
+            )
+            return
+        reply = QtWidgets.QMessageBox.warning(
+            self,
+            "Trim to Cellpose-mapped neurons",
+            f"This will permanently remove {n_removed} neuron(s) with no "
+            f"Cellpose cell mapped to them, keeping the {n_kept} that do, "
+            "from every stim array and every experiment's trace/spike/synapse "
+            "data in this project.\n\n"
+            "This cannot be undone. You will be asked to save the result "
+            "under a new file name.\n\n"
+            "Continue?",
+            QtWidgets.QMessageBox.StandardButton.Yes
+            | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No,
+        )
+        if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+        self.project.trim_to_mapped_neurons()
+        self.update_project(self.project)
+        if not self._save_project(force_dialog=True):
+            QtWidgets.QMessageBox.information(
+                self,
+                "Not saved",
+                "The trim was applied in this open project, but hasn't been "
+                "saved yet - use Save Project As to keep it.",
+            )
+
     def btn_import_patchclamp_data_clicked(self) -> None:
         dialog = PatchClampImportDialog(
             cellpose_import=self.last_cellpose_import,
@@ -2651,6 +2815,13 @@ class Gui(QtWidgets.QMainWindow):
             shortcut="Ctrl+S",
             icon="mdi6.content-save",
         )
+        add_action(
+            "Save Project &As...",
+            self.btn_save_as_clicked,
+            menu,
+            None,
+            icon="mdi6.content-save-edit",
+        )
 
         import_data_menu = menu.addMenu("&Import data")
         assert import_data_menu is not None
@@ -2905,6 +3076,14 @@ class Gui(QtWidgets.QMainWindow):
         )
 
     def _set_widget_visible(self, widget: QtWidgets.QWidget, toggled: bool) -> None:
+        if toggled:
+            # Showing a panel that's currently only visible as a plain
+            # (non-copy) detached window should bring it back into the
+            # dock, not leave both visible - close the floating window
+            # rather than leaving it stranded alongside the redocked panel.
+            detached_window = self._plain_detached_windows.pop(widget, None)
+            if detached_window is not None:
+                detached_window.close()
         widget.setVisible(toggled)
         if toggled and widget is self.data_widget:
             self.set_data(self.cmb_data.currentText())
@@ -2927,8 +3106,9 @@ class Gui(QtWidgets.QMainWindow):
                 self.spatial_footprint_widget,
                 self.spatial_footprint_widget.empty_state_widget,
                 self.spatial_footprint_widget.overlay_widget,
-                self.spatial_footprint_widget.overlay_widget.overlay_view,
-                self.spatial_footprint_widget.overlay_widget.overlay_view.widget,
+                # Deliberately excludes overlay_view/overlay_view.widget: a
+                # right click there is the panel's own lasso-select gesture
+                # (see SpatialFootprintWidget), not a request to detach.
             ),
             self.custom_analysis_widget: (
                 self.custom_analysis_widget,
@@ -3034,6 +3214,8 @@ class Gui(QtWidgets.QMainWindow):
         def _forget_window() -> None:
             if window in self._detached_panel_windows:
                 self._detached_panel_windows.remove(window)
+            if self._plain_detached_windows.get(source) is window:
+                del self._plain_detached_windows[source]
 
         window = DetachedPanelWindow(
             widget,
@@ -3050,6 +3232,7 @@ class Gui(QtWidgets.QMainWindow):
         self._detached_panel_windows.append(window)
         window.show()
         if not keep_original:
+            self._plain_detached_windows[source] = window
             action = self._view_actions.get(source)
             if action is not None and action.isChecked():
                 action.trigger()
@@ -3063,10 +3246,11 @@ class Gui(QtWidgets.QMainWindow):
             parent=None,
             default_controller=self.controller,
             show_axis_link_controls=True,
+            state=self._trace_state,
         )
-        widget.set_data(self.project.get_data(self.cmb_trace.currentText(), TraceData))
         widget.custom_analysis_requested.connect(self._custom_analysis)
         widget.vector_export_requested.connect(self.btn_export_traces_vector_clicked)
+        widget.neuron_hovered.connect(self._spatial_footprint_state.set_hovered_stim_id)
         return widget
 
     def _build_fresh_spike_widget(self) -> SpikeWidget:
@@ -3095,10 +3279,10 @@ class Gui(QtWidgets.QMainWindow):
         return widget
 
     def _build_fresh_spatial_footprint_widget(self) -> SpatialFootprintWidget:
-        widget = SpatialFootprintWidget(parent=None)
-        widget.set_data(self.project.cellpose_data)
+        widget = SpatialFootprintWidget(
+            parent=None, state=self._spatial_footprint_state
+        )
         widget.import_requested.connect(self.btn_import_cellpose_data_clicked)
-        widget.neuron_greyed_out_changed.connect(self._on_neuron_greyed_out_changed)
         return widget
 
     def _build_fresh_custom_analysis_widget(self) -> CustomAnalysisWidget | None:
@@ -3194,6 +3378,16 @@ class Gui(QtWidgets.QMainWindow):
             toolbar,
             shortcut=None,
             icon="mdi6.arrow-expand-vertical",
+        )
+        self.action_overlay_stim_on_traces = add_action(
+            "Overlay stim on traces",
+            self._toggle_stim_trace_overlay,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon="mdi6.layers-outline",
+            checkable=True,
+            is_checked=False,
         )
         toolbar.addWidget(QtWidgets.QLabel("  Spike data: "))
         toolbar.addWidget(self.cmb_spike)

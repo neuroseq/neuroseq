@@ -1,3 +1,4 @@
+import json
 import zipfile
 from pathlib import Path
 
@@ -28,11 +29,19 @@ def assert_equal(original: Data, loaded: Data) -> None:
         assert np.allclose(original.indices, loaded.indices)
         assert original.units == loaded.units
         assert original.dt == loaded.dt
+        if original.raw_cellpose_ids is None:
+            assert loaded.raw_cellpose_ids is None
+        else:
+            assert np.allclose(original.raw_cellpose_ids, loaded.raw_cellpose_ids)
     elif isinstance(original, SpikeData):
         assert isinstance(loaded, SpikeData)
         assert original.name == loaded.name
         assert np.allclose(original.spike_indices, loaded.spike_indices)
         assert np.allclose(original.spike_times, loaded.spike_times)
+        if original.raw_cellpose_ids is None:
+            assert loaded.raw_cellpose_ids is None
+        else:
+            assert np.allclose(original.raw_cellpose_ids, loaded.raw_cellpose_ids)
     elif isinstance(original, SynapseData):
         assert isinstance(loaded, SynapseData)
         assert original.name == loaded.name
@@ -197,6 +206,68 @@ def test_spike_data_json(tmp_path: Path) -> None:
     assert d["s"].name == read["s"].name
     assert np.allclose(d["s"].spike_indices, read["s"].spike_indices)
     assert np.allclose(d["s"].spike_times, read["s"].spike_times)
+
+
+def test_trace_data_json_round_trips_raw_cellpose_ids(tmp_path: Path) -> None:
+    d = {
+        "s": TraceData(
+            "name",
+            np.random.random_sample((10, 5)),
+            np.arange(4, 14, dtype=np.uint32),
+            "mV",
+            0.01,
+            np.arange(10, dtype=np.uint32),
+        )
+    }
+
+    read = _save_and_reload_json(d, tmp_path)
+
+    assert read["s"].raw_cellpose_ids is not None
+    assert np.allclose(d["s"].raw_cellpose_ids, read["s"].raw_cellpose_ids)
+
+
+def test_trace_data_json_missing_raw_cellpose_ids_key_defaults_to_none(
+    tmp_path: Path,
+) -> None:
+    """Archives saved before raw_cellpose_ids existed lack the key entirely; they
+    must still load, with raw_cellpose_ids defaulting to None."""
+    tmp_file = tmp_path / "legacy.nseq"
+    with zipfile.ZipFile(tmp_file, "w", zipfile.ZIP_DEFLATED) as zf:
+        traces_name = io._save_array(zf, "_name_traces", np.zeros((2, 3)))
+        indices_name = io._save_array(
+            zf, "_name_indices", np.array([0, 1], dtype=np.uint32)
+        )
+        payload = {
+            "data": {
+                "!TraceData": True,
+                "name": "name",
+                "traces": traces_name,
+                "indices": indices_name,
+                "units": "mV",
+                "dt": 0.01,
+            }
+        }
+        zf.writestr("data.json", json.dumps(payload))
+    with zipfile.ZipFile(tmp_file, "r", zipfile.ZIP_DEFLATED) as zf:
+        loaded = io.load_from_zip("data", zf)
+
+    assert loaded["data"].raw_cellpose_ids is None
+
+
+def test_spike_data_json_round_trips_raw_cellpose_ids(tmp_path: Path) -> None:
+    d = {
+        "s": SpikeData(
+            "name",
+            np.random.randint(0, 10, (10, 10)),
+            np.random.random_sample((10, 1)),
+            np.random.randint(0, 10, (10, 10)).astype(np.uint32),
+        )
+    }
+
+    read = _save_and_reload_json(d, tmp_path)
+
+    assert read["s"].raw_cellpose_ids is not None
+    assert np.allclose(d["s"].raw_cellpose_ids, read["s"].raw_cellpose_ids)
 
 
 def test_synapse_data_json(tmp_path: Path) -> None:

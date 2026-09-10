@@ -62,6 +62,8 @@ class StimEditor(QtWidgets.QWidget):
     limits_modified = QtCore.Signal()
     simulation_requested = QtCore.Signal(float)
     time_range_focus_requested = QtCore.Signal(float, float)
+    current_stim_changed = QtCore.Signal(object)  # StimArray | None
+    trim_to_mapped_neurons_requested = QtCore.Signal()
 
     # Dynamic-input routines offered when the user opens the designer.
     TARGETED_STDP_ROUTINE = "Targeted STDP synaptic strength"
@@ -184,6 +186,7 @@ class StimEditor(QtWidgets.QWidget):
         )
         if not have_stims:
             self.current_stim_modifier = None
+            self.current_stim_changed.emit(None)
             return
         self.limits_modified.emit()
         self.cmb_stim.addItems(list(self.stims_dict.keys()))
@@ -488,6 +491,7 @@ class StimEditor(QtWidgets.QWidget):
                 self.draw_stim.value1 = 1.0
             self.draw_stim.value2 = self.draw_stim.value1
             self.stim_widget.set_data(self.current_stim_modifier.stim_array)
+            self.current_stim_changed.emit(self.current_stim_modifier.stim_array)
             self.controller.focus_neuron_range(
                 0,
                 int(self.current_stim_modifier.stim_array.values.shape[1]),
@@ -935,7 +939,7 @@ class StimEditor(QtWidgets.QWidget):
     def _is_valid_slice(self, neuron_slice: slice, time_slice: slice) -> bool:
         return (
             neuron_slice.start >= 0
-            and neuron_slice.stop <= self.stim_widget.n_neurons
+            and neuron_slice.stop <= self.stim_widget.n_neurons_total
             and time_slice.start >= 0
             and time_slice.stop <= self.stim_widget.n_timestamps
         )
@@ -1288,6 +1292,20 @@ class StimEditor(QtWidgets.QWidget):
             toolbar,
             self,
             icon="mdi6.text-box-minus",
+        )
+        self.action_trim_to_mapped_neurons = add_action(
+            "Trim to Mapped Neurons…",
+            self.trim_to_mapped_neurons_requested.emit,
+            menu,
+            toolbar,
+            self,
+            icon="mdi6.content-cut",
+        )
+        self.action_trim_to_mapped_neurons.setEnabled(False)
+        self.action_trim_to_mapped_neurons.setToolTip(
+            "Permanently keep only the neurons with a Cellpose cell mapped to "
+            "them, removing the rest from every stim array and experiment in "
+            "this project."
         )
         add_action(
             "Pad stim array (Ctrl+Shift+Plus)",

@@ -40,3 +40,10 @@ def test_save_load_options(qtbot: QtBot):
     assert dialog.options.include_model is False
     assert dialog.options.include_simulation_data is False
     assert dialog.options.include_experimental_data is False
+
+
+def test_save_dialog_title_refers_to_project(qtbot: QtBot) -> None:
+    dialog = SaveLoadOptionsDialog(action="Save")
+    qtbot.addWidget(dialog)
+
+    assert dialog.windowTitle() == "Save Project"

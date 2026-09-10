@@ -8,10 +8,14 @@ from qtpy import QtWidgets
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import TraceData
+from neuroseq.region_of_interest import RegionOfInterest
 from neuroseq.spike_widget import SpikeWidget
+from neuroseq.stim import StimArray
+from neuroseq.stim import StimType
 from neuroseq.stim_widget import StimWidget
 from neuroseq.trace_widget import TraceNormDialog
 from neuroseq.trace_widget import TraceWidget
+from neuroseq.trace_widget_state import TraceWidgetState
 from neuroseq.utils import neuron_indices_to_colors
 
 
@@ -188,6 +192,41 @@ def test_trace_widget_median_offset(qtbot: QtBot) -> None:
     trace_widget.close()
 
 
+def test_median_offset_normalization_bounds_negative_excursions_too(
+    qtbot: QtBot,
+) -> None:
+    """Regression for issue #533: a neuron whose deviation *below* its
+    median is bigger than its deviation above it (e.g. a calcium baseline
+    with an occasional deep dip but only modest transients) must still be
+    scaled to fit within +/-0.5 at 100% normalization - not just the side
+    above the median."""
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    traces = np.full((2, 5), 100.0, dtype=np.float32)
+    traces[0, 2] = 110.0  # +10 above median
+    traces[0, 3] = -900.0  # -1000 below median - the binding excursion
+    traces[1, 2] = 105.0
+    traces[1, 3] = 95.0
+    data = TraceData(
+        name="trace",
+        traces=traces,
+        indices=np.array([0, 1], dtype=np.uint32),
+        dt=0.01,
+        units="a.u.",
+    )
+    trace_widget.set_data(data)
+    trace_widget.offset_by_median = True
+    trace_widget.clip = False
+    trace_widget.trace_norm_percent = 100
+
+    normalized = trace_widget.get_normalized_trace_data()
+
+    assert normalized[0].min() == pytest.approx(-0.5)
+    assert normalized[0].max() == pytest.approx(0.005)
+    trace_widget.close()
+
+
 def test_trace_widget_indices(qtbot: QtBot) -> None:
     controller = ConstrainedPanZoomController()
     trace_widget = TraceWidget(controller)
@@ -206,16 +245,142 @@ def test_trace_widget_indices(qtbot: QtBot) -> None:
     trace_widget.set_data(data)
     assert trace_widget.graphic is not None
     for i, line in enumerate(trace_widget.graphic.graphics):
-        idx = data.indices[i]
-        assert line.offset[1] == pytest.approx(idx)
+        idx = int(data.indices[i])
+        assert line.offset[1] == pytest.approx(
+            trace_widget._neuron_id_to_display_row[idx]
+        )
         assert np.allclose(line.colors, colormap[data.indices[i]])
     # now set same data with same indices in a different order
     data.indices = np.array([15, 6, 11, 1, 0], dtype=np.uint32)
     trace_widget.set_data(data)
     for i, line in enumerate(trace_widget.graphic.graphics):
-        idx = data.indices[i]
-        assert line.offset[1] == pytest.approx(idx)
+        idx = int(data.indices[i])
+        assert line.offset[1] == pytest.approx(
+            trace_widget._neuron_id_to_display_row[idx]
+        )
         assert np.allclose(line.colors, colormap[data.indices[i]])
+
+
+def test_trace_widget_y_tick_labels_show_real_neuron_id(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    data = TraceData(
+        name="traces",
+        traces=np.zeros((5, 10), dtype=np.float32),
+        indices=np.array([0, 1, 6, 11, 15], dtype=np.uint32),
+        dt=0.001,
+        units="mV",
+    )
+    trace_widget.set_data(data)
+
+    # sparse ids: display row 2 (compacted rank) is real id 6, not "2"
+    format_tick = trace_widget._create_y_tick_formatter()
+    assert format_tick(2, 0, 5) == "6"
+
+    trace_widget.set_neuron_greyed(6, True)
+    # after hiding id 6, display row 2 now corresponds to real id 11
+    format_tick = trace_widget._create_y_tick_formatter()
+    assert format_tick(2, 0, 5) == "11"
+    trace_widget.close()
+
+
+def test_trace_widget_y_tick_formatter_blanks_rows_beyond_visible_count(
+    qtbot: QtBot,
+) -> None:
+    """Regression: the axis can be asked for tick candidates beyond the
+    currently visible row count (the broader pannable extent doesn't shrink
+    just because some neurons are hidden). Such a position used to fall back
+    to labeling the raw row index as if it were a real neuron id, drawing a
+    "ghost" numbered tick with no grid line or data behind it."""
+    controller = ConstrainedPanZoomController()
+    controller.set_limits(max_time_secs=1.0, max_neurons=10)
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    data = TraceData(
+        name="traces",
+        traces=np.zeros((3, 10), dtype=np.float32),
+        indices=np.array([0, 1, 2], dtype=np.uint32),
+        dt=0.001,
+        units="mV",
+    )
+    trace_widget.set_data(data)
+
+    format_tick = trace_widget._create_y_tick_formatter()
+
+    assert format_tick(5, 0, 10) == ""
+    trace_widget.close()
+
+
+def test_trace_widget_hover_shows_real_neuron_id_when_only_one_visible(
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    make_trace_data,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=20, n_timestamps=10))
+    for neuron_id in range(20):
+        if neuron_id != 14:
+            trace_widget.set_neuron_greyed(neuron_id, True)
+    assert trace_widget.n_neurons == 1
+
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        trace_widget.text, "set_pos", lambda pos, text: captured.__setitem__("t", text)
+    )
+    monkeypatch.setattr(
+        trace_widget.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([0.0, 0.0, 0.0]),  # the only (display row 0) visible row
+    )
+
+    trace_widget.pointer_move(None)
+
+    assert captured["t"].startswith("Neuron 14\n")
+    trace_widget.close()
+
+
+def test_pointer_move_emits_neuron_hovered_only_on_change(
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    make_trace_data,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+
+    emitted: list[int | None] = []
+    trace_widget.neuron_hovered.connect(emitted.append)
+
+    monkeypatch.setattr(
+        trace_widget.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([0.0, 1.0, 0.0]),  # row 1
+    )
+    trace_widget.pointer_move(None)
+    trace_widget.pointer_move(None)  # same row - no duplicate emission
+
+    assert emitted == [1]
+
+    monkeypatch.setattr(
+        trace_widget.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([0.0, 2.0, 0.0]),  # row 2
+    )
+    trace_widget.pointer_move(None)
+
+    assert emitted == [1, 2]
+
+    monkeypatch.setattr(
+        trace_widget.subplot, "map_screen_to_world", lambda ev: None
+    )  # pointer left the plot area
+    trace_widget.pointer_move(None)
+
+    assert emitted == [1, 2, None]
+    trace_widget.close()
 
 
 def test_trace_widget_clear_data_releases_plot_buffers(qtbot: QtBot) -> None:
@@ -256,10 +421,140 @@ def test_trace_widget_set_neuron_greyed_adds_and_removes_overlay(
     trace_widget.set_neuron_greyed(2, True)
     assert trace_widget.is_neuron_greyed(2)
     trace_widget.set_neuron_greyed(2, True)
-    assert len(trace_widget._greyed_neuron_overlays) == 1
+    assert trace_widget._greyed_neuron_ids == {2}
     trace_widget.set_neuron_greyed(2, False)
     assert not trace_widget.is_neuron_greyed(2)
     trace_widget.close()
+
+
+def test_trace_widget_greying_hides_and_compacts_lines(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    controller.set_limits(max_time_secs=1.0, max_neurons=3)
+    data = make_trace_data(n_neurons=3, n_timestamps=10)
+    original_traces = data.traces.copy()
+    trace_widget.set_data(data)
+    assert trace_widget.graphic is not None
+    assert isinstance(trace_widget.data, TraceData)
+    assert trace_widget.grid_lines is not None
+
+    trace_widget.set_neuron_greyed(1, True)
+
+    lines = trace_widget.graphic.graphics
+    assert lines[0].visible
+    assert lines[0].offset[1] == pytest.approx(0)
+    assert not lines[1].visible
+    assert lines[2].visible
+    assert lines[2].offset[1] == pytest.approx(1)  # moved up to fill the gap
+    assert trace_widget.n_neurons == 2
+    assert trace_widget.n_neurons_total == 3
+    # underlying data is untouched
+    assert np.allclose(trace_widget.data.traces, original_traces)
+    # the view is refit to exactly the 2 remaining rows, not left showing dead
+    # space where the whole original 3-row extent used to be
+    assert trace_widget.grid_lines.n_neurons == 2
+    camera_state = controller._get_camera_state()
+    assert camera_state["height"] == pytest.approx(2)
+
+    trace_widget.set_neuron_greyed(1, False)
+    assert lines[1].visible
+    assert lines[1].offset[1] == pytest.approx(1)
+    assert lines[2].offset[1] == pytest.approx(2)  # restored to its original slot
+    assert trace_widget.n_neurons == 3
+    assert trace_widget.grid_lines.n_neurons == 3
+    camera_state = controller._get_camera_state()
+    assert camera_state["height"] == pytest.approx(3)
+    trace_widget.close()
+
+
+def test_two_trace_views_sharing_state_stay_in_sync(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    state = TraceWidgetState()
+    controller_a = ConstrainedPanZoomController()
+    controller_b = ConstrainedPanZoomController()
+    view_a = TraceWidget(controller_a, state=state)
+    view_b = TraceWidget(controller_b, state=state)
+    qtbot.addWidget(view_a)
+    qtbot.addWidget(view_b)
+    controller_a.set_limits(max_time_secs=1.0, max_neurons=3)
+    controller_b.set_limits(max_time_secs=1.0, max_neurons=3)
+
+    view_a.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+
+    # data set via one view is visible in the other immediately
+    assert view_b.data is view_a.data
+    assert view_b.graphic is not None
+
+    view_a.set_neuron_greyed(1, True)
+
+    assert view_a.n_neurons == 2
+    assert view_b.n_neurons == 2
+    assert view_b.graphic is not None
+    assert not view_b.graphic.graphics[1].visible
+
+    view_b.set_neuron_greyed(1, False)
+
+    assert view_a.n_neurons == 3
+    assert view_a.graphic is not None
+    assert view_a.graphic.graphics[1].visible
+    view_a.close()
+    view_b.close()
+
+
+def test_two_trace_views_sharing_state_stay_in_sync_for_batched_greying(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    state = TraceWidgetState()
+    controller_a = ConstrainedPanZoomController()
+    controller_b = ConstrainedPanZoomController()
+    view_a = TraceWidget(controller_a, state=state)
+    view_b = TraceWidget(controller_b, state=state)
+    qtbot.addWidget(view_a)
+    qtbot.addWidget(view_b)
+    controller_a.set_limits(max_time_secs=1.0, max_neurons=3)
+    controller_b.set_limits(max_time_secs=1.0, max_neurons=3)
+
+    view_a.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+
+    view_a.set_neurons_greyed([0, 1], [])
+
+    assert view_a.n_neurons == 1
+    assert view_b.n_neurons == 1
+    assert view_b.is_neuron_greyed(0)
+    assert view_b.is_neuron_greyed(1)
+
+    view_b.set_neurons_greyed([2], [0, 1])
+
+    assert view_a.n_neurons == 2
+    assert not view_a.is_neuron_greyed(0)
+    assert not view_a.is_neuron_greyed(1)
+    assert view_a.is_neuron_greyed(2)
+    view_a.close()
+    view_b.close()
+
+
+def test_trace_widget_with_no_state_arg_gets_a_private_state(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    view_a = TraceWidget(ConstrainedPanZoomController())
+    view_b = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(view_a)
+    qtbot.addWidget(view_b)
+
+    view_a.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+
+    assert view_a.data is not None
+    assert view_b.data is None
+    view_a.close()
+    view_b.close()
 
 
 def test_trace_widget_clear_data_clears_greyed_neurons(
@@ -577,3 +872,218 @@ def test_trace_widget_x_lock_allows_independent_and_linked_scrolling(
 
     trace_widget.close()
     default_trace_widget.close()
+
+
+def test_region_of_interest_select_slice_label_uses_override_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    roi = RegionOfInterest(fill_color=(0.5, 0.5, 0.5, 0.2))
+    captured: list[str] = []
+    monkeypatch.setattr(roi.text, "set_text", captured.append)
+
+    roi.select_slice(slice(1, 3), slice(10, 20), dt_ms=1.0, label_neuron_range=(5, 8))
+
+    assert captured == ["Neurons 5-7\n10ms-20ms"]
+
+
+def test_region_of_interest_select_slice_label_falls_back_to_slice_bounds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    roi = RegionOfInterest(fill_color=(0.5, 0.5, 0.5, 0.2))
+    captured: list[str] = []
+    monkeypatch.setattr(roi.text, "set_text", captured.append)
+
+    roi.select_slice(slice(1, 3), slice(10, 20), dt_ms=1.0)
+
+    assert captured == ["Neurons 1-2\n10ms-20ms"]
+
+
+def test_trace_widget_select_neurons_translates_display_rows_when_greyed(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=5, n_timestamps=10))
+    trace_widget.set_neuron_greyed(1, True)
+
+    # display rows 1-2 now correspond to real neurons 2-3
+    trace_widget.select_neurons(slice(1, 3), slice(0, 5))
+
+    assert trace_widget.selected_neuron_slice == slice(2, 4)
+
+
+def _stim_array(n_timesteps: int = 10, n_neurons: int = 3) -> StimArray:
+    values = np.zeros((n_timesteps, n_neurons), dtype=np.float32)
+    values[2, :] = 1.0
+    return StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="mV",
+        dt=0.001,
+    )
+
+
+def test_stim_overlay_hidden_until_enabled(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+
+    trace_widget.set_stim_overlay_data(_stim_array())
+    assert trace_widget._stim_overlay_graphic is None
+
+    trace_widget.set_stim_overlay_enabled(True)
+    assert trace_widget._stim_overlay_graphic is not None
+    rendered = np.asarray(trace_widget._stim_overlay_graphic.data.value)
+    assert rendered.shape[0] == 3
+
+    trace_widget.set_stim_overlay_enabled(False)
+    assert trace_widget._stim_overlay_graphic is None
+    trace_widget.close()
+
+
+def test_stim_overlay_compacts_with_greyed_neurons(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+    trace_widget.set_stim_overlay_data(_stim_array())
+    trace_widget.set_stim_overlay_enabled(True)
+
+    trace_widget.set_neuron_greyed(1, True)
+
+    assert trace_widget._stim_overlay_graphic is not None
+    rendered = np.asarray(trace_widget._stim_overlay_graphic.data.value)
+    assert rendered.shape[0] == 2  # hidden neuron's row is gone, not just blank
+
+    trace_widget.set_neuron_greyed(1, False)
+    rendered = np.asarray(trace_widget._stim_overlay_graphic.data.value)
+    assert rendered.shape[0] == 3
+    trace_widget.close()
+
+
+def test_stim_overlay_aligns_rows_by_same_neuron_id(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    """Deferred cross-neuron pairing (issue #530): for now a trace row only
+    ever overlays the stim column for that same real neuron id."""
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+    stim = _stim_array()
+    stim.values[:, 1] = 5.0
+    trace_widget.set_stim_overlay_data(stim)
+    trace_widget.set_stim_overlay_enabled(True)
+
+    assert trace_widget._stim_overlay_graphic is not None
+    rendered = np.asarray(trace_widget._stim_overlay_graphic.data.value)
+    assert np.allclose(rendered[1, :], 5.0)
+    assert np.allclose(rendered[0, :], stim.values[:, 0])
+    trace_widget.close()
+
+
+def test_stim_overlay_survives_data_refresh(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+    trace_widget.set_stim_overlay_data(_stim_array())
+    trace_widget.set_stim_overlay_enabled(True)
+    assert trace_widget._stim_overlay_graphic is not None
+
+    # re-setting trace data (e.g. selecting a different trace) tears down and
+    # rebuilds every graphic - the overlay setting must survive that refresh
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+
+    assert trace_widget._stim_overlay_graphic is not None
+    trace_widget.close()
+
+
+def test_stim_overlay_cleared_when_trace_data_cleared(
+    qtbot: QtBot,
+    make_trace_data,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+    trace_widget.set_stim_overlay_data(_stim_array())
+    trace_widget.set_stim_overlay_enabled(True)
+    assert trace_widget._stim_overlay_graphic is not None
+
+    trace_widget.set_data(None)
+
+    assert trace_widget._stim_overlay_graphic is None
+    trace_widget.close()
+
+
+def test_calling_clear_data_directly_with_greyed_neuron_and_overlay_does_not_warn(
+    qtbot: QtBot,
+    make_trace_data,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Regression: clear_data() used to null the stim overlay graphic
+    reference *after* calling super().clear_data(), which wipes the whole
+    subplot and, at its own tail end, calls clear_greyed_neurons() - if a
+    neuron was already greyed, that re-enters _rebuild_stim_overlay()
+    *before* the null happened, so it tried to remove a graphic the subplot
+    wipe had already discarded (pygfx logs a warning for this, it doesn't
+    raise, so `contextlib.suppress` around the removal call didn't help).
+
+    set_data() itself resets the greyed set to empty before clear_data()
+    even runs, so it never reproduced this - gui.py's update_project() calls
+    clear_data() directly (`for widget in self.plot_widgets: widget.clear_data()`)
+    without going through set_data() first, which is what actually hit it.
+    """
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+    trace_widget.set_stim_overlay_data(_stim_array())
+    trace_widget.set_stim_overlay_enabled(True)
+    trace_widget.set_neuron_greyed(1, True)
+
+    with caplog.at_level("WARNING"):
+        trace_widget.clear_data()
+
+    assert "not a child" not in caplog.text
+    trace_widget.close()
+
+
+def test_close_fully_disconnects_from_shared_state(qtbot: QtBot) -> None:
+    """Regression: repeated detach/close cycles of a view sharing state left
+    stale connections behind (disconnecting by re-passing the callable
+    doesn't sever a connection reliably in every case - only disconnecting
+    the exact handle .connect() returned does), eventually invoking a
+    slot on a closed, GPU-resource-less view and crashing."""
+    state = TraceWidgetState()
+    controller_a = ConstrainedPanZoomController()
+    controller_b = ConstrainedPanZoomController()
+    view_a = TraceWidget(controller_a, state=state)
+    qtbot.addWidget(view_a)
+    baseline_data = state.receivers(state.data_changed)
+    baseline_greyed = state.receivers(state.greyed_changed)
+
+    view_b = TraceWidget(controller_b, state=state)
+    assert state.receivers(state.data_changed) == baseline_data + 1
+    assert state.receivers(state.greyed_changed) == baseline_greyed + 1
+
+    view_b.close()
+
+    assert state.receivers(state.data_changed) == baseline_data
+    assert state.receivers(state.greyed_changed) == baseline_greyed
+    view_a.close()

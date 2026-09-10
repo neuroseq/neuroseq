@@ -68,36 +68,6 @@ def compute_normalized_suite2p_spikes(
     return _normalize_array_per_neuron(spike_data)
 
 
-def prepare_suite2p_traces(
-    f_data: npt.NDArray[Any],
-    fneu_data: npt.NDArray[Any] | None,
-    *,
-    max_neurons: int,
-    sampling_rate: float = 30.0,
-    stimulus_to_cellpose_mapping: dict[int, int] | None = None,
-) -> TraceData:
-    """Create TraceData from Suite2p fluorescence data."""
-
-    if max_neurons <= 0:
-        raise ValueError("max_neurons must be positive")
-
-    dt = 1.0 / float(sampling_rate)
-    n_neurons, n_timepoints = f_data.shape
-    n_neurons_to_import = min(max_neurons, n_neurons)
-    normalized_traces, _, _ = compute_normalized_suite2p_traces(f_data, fneu_data)
-    indices = _resolve_suite2p_indices(
-        n_neurons_to_import, stimulus_to_cellpose_mapping
-    )
-
-    return TraceData(
-        "Suite2p contrasting traces",
-        normalized_traces[:n_neurons_to_import, :],
-        indices,
-        "units",
-        dt,
-    )
-
-
 def _resolve_suite2p_indices(
     n_neurons_to_import: int,
     stimulus_to_cellpose_mapping: dict[int, int] | None,
@@ -142,6 +112,54 @@ def _resolve_suite2p_indices(
     return np.asarray(stim_ids, dtype=np.uint32)
 
 
+def remap_raw_cellpose_ids(
+    raw_cellpose_ids: npt.NDArray[Any],
+    stimulus_to_cellpose_mapping: dict[int, int] | None,
+) -> npt.NDArray[Any]:
+    """
+    Resolve stimulus IDs for an array of raw (pre-mapping) Cellpose ROI ids, e.g. to
+    re-derive ``TraceData.indices``/``SpikeData.spike_indices`` after
+    ``stimulus_to_cellpose_mapping`` changes, without re-importing from disk.
+    """
+    raw_cellpose_ids = np.asarray(raw_cellpose_ids, dtype=np.uint32)
+    if raw_cellpose_ids.size == 0:
+        return raw_cellpose_ids.copy()
+
+    n = int(raw_cellpose_ids.max()) + 1
+    lookup = _resolve_suite2p_indices(n, stimulus_to_cellpose_mapping)
+    return lookup[raw_cellpose_ids]
+
+
+def prepare_suite2p_traces(
+    f_data: npt.NDArray[Any],
+    fneu_data: npt.NDArray[Any] | None,
+    *,
+    max_neurons: int,
+    sampling_rate: float = 30.0,
+    stimulus_to_cellpose_mapping: dict[int, int] | None = None,
+) -> TraceData:
+    """Create TraceData from Suite2p fluorescence data."""
+
+    if max_neurons <= 0:
+        raise ValueError("max_neurons must be positive")
+
+    dt = 1.0 / float(sampling_rate)
+    n_neurons, n_timepoints = f_data.shape
+    n_neurons_to_import = min(max_neurons, n_neurons)
+    normalized_traces, _, _ = compute_normalized_suite2p_traces(f_data, fneu_data)
+    raw_cellpose_ids = np.arange(n_neurons_to_import, dtype=np.uint32)
+    indices = remap_raw_cellpose_ids(raw_cellpose_ids, stimulus_to_cellpose_mapping)
+
+    return TraceData(
+        "Suite2p contrasting traces",
+        normalized_traces[:n_neurons_to_import, :],
+        indices,
+        "units",
+        dt,
+        raw_cellpose_ids,
+    )
+
+
 def prepare_suite2p_spikes(
     spike_data: npt.NDArray[Any],
     *,
@@ -170,17 +188,19 @@ def prepare_suite2p_spikes(
         max_neurons=max_neurons,
         normalize_per_neuron=False,
     )
-    if stimulus_to_cellpose_mapping:
-        n_neurons = min(max_neurons, spike_data.shape[0])
-        indices = _resolve_suite2p_indices(
-            n_neurons_to_import=n_neurons,
-            stimulus_to_cellpose_mapping=stimulus_to_cellpose_mapping,
-        )
-        if result.spike_indices.size:
-            remapped_indices = indices[result.spike_indices]
-        else:
-            remapped_indices = result.spike_indices.astype(indices.dtype, copy=True)
-        result = SpikeData(result.name, remapped_indices, result.spike_times)
+    # Validate/resolve against the full declared neuron count (not just the ids that
+    # actually spiked) so a mapping collision among silent neurons is still caught.
+    n_neurons = min(max_neurons, spike_data.shape[0])
+    lookup = _resolve_suite2p_indices(n_neurons, stimulus_to_cellpose_mapping)
+    raw_cellpose_ids = result.spike_indices.astype(np.uint32, copy=True)
+    remapped_indices = (
+        lookup[raw_cellpose_ids]
+        if raw_cellpose_ids.size
+        else raw_cellpose_ids.astype(lookup.dtype, copy=True)
+    )
+    result = SpikeData(
+        result.name, remapped_indices, result.spike_times, raw_cellpose_ids
+    )
 
     logger.debug(
         "Spike detection complete: %d spikes across %d neurons",

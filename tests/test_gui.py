@@ -338,6 +338,157 @@ def _make_gui_cellpose_result(
     )
 
 
+def test_trim_to_mapped_neurons_action_lives_in_the_stim_toolbar(
+    qtbot: QtBot,
+) -> None:
+    """The action moved out of the Spatial Footprints panel and into the
+    left-side stim editor toolbar, disabled until there's an actual
+    mapping to trim to."""
+    gui = Gui()
+    qtbot.addWidget(gui)
+    action = gui.stim_editor.action_trim_to_mapped_neurons
+    assert action in gui.toolbar_stim_editor.actions()
+    assert not action.isEnabled()
+
+    project = Project()
+    project.cellpose_data = _make_gui_cellpose_result(mapping=None)
+    gui.update_project(project)
+    assert not action.isEnabled()
+
+    project.cellpose_data = _make_gui_cellpose_result(mapping={0: 0})
+    gui.spatial_footprint_widget.set_data(project.cellpose_data)
+    assert action.isEnabled()
+
+    gui.spatial_footprint_widget.set_data(None)
+    assert not action.isEnabled()
+    gui.close()
+
+
+def test_trim_to_mapped_neurons_action_triggers_the_trim_handler(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project = Project()
+    project.cellpose_data = _make_gui_cellpose_result(mapping={0: 0})
+    gui.update_project(project)
+    assert gui.stim_editor.action_trim_to_mapped_neurons.isEnabled()
+    calls: list[int] = []
+    gui.stim_editor.trim_to_mapped_neurons_requested.connect(lambda: calls.append(1))
+
+    gui.stim_editor.action_trim_to_mapped_neurons.trigger()
+
+    assert calls == [1]
+    gui.close()
+
+
+def test_trim_to_mapped_neurons_reports_nothing_to_trim_without_mapping(
+    qtbot: QtBot,
+    qmessagebox_calls: list,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project = Project()
+    project.cellpose_data = _make_gui_cellpose_result(mapping=None)
+    gui.update_project(project)
+
+    gui.btn_trim_to_mapped_neurons_clicked()
+
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "information"
+    assert "Nothing to trim" in qmessagebox_calls[0]["title"]
+    gui.close()
+
+
+def test_trim_to_mapped_neurons_reports_nothing_to_trim_when_fully_mapped(
+    qtbot: QtBot,
+    qmessagebox_calls: list,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project = Project()
+    project.cellpose_data = _make_gui_cellpose_result(mapping={0: 0, 1: 1, 2: 2})
+    gui.update_project(project)
+
+    gui.btn_trim_to_mapped_neurons_clicked()
+
+    assert len(qmessagebox_calls) == 1
+    assert qmessagebox_calls[0]["name"] == "information"
+    assert "Nothing to trim" in qmessagebox_calls[0]["title"]
+    gui.close()
+
+
+def test_trim_to_mapped_neurons_cancelled_confirm_makes_no_changes(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "stim",
+            StimType.Excitation,
+            np.zeros((5, 3), dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+    project.cellpose_data = _make_gui_cellpose_result(mapping={0: 0, 1: 1})
+    gui.update_project(project)
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "warning",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.No,
+    )
+
+    gui.btn_trim_to_mapped_neurons_clicked()
+
+    assert gui.project.stim_arrays["stim"].values.shape == (5, 3)
+    gui.close()
+
+
+def test_trim_to_mapped_neurons_confirmed_trims_and_forces_save_as(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "stim",
+            StimType.Excitation,
+            np.zeros((5, 3), dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+    project.cellpose_data = _make_gui_cellpose_result(mapping={0: 0, 1: 1})
+    gui.update_project(project)
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "warning",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+    new_filename_without_extension = tmp_path / "trimmed"
+    new_filename = new_filename_without_extension.with_suffix(".nseq")
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getSaveFileName",
+        lambda *args: (f"{new_filename_without_extension}", True),
+    )
+
+    gui.btn_trim_to_mapped_neurons_clicked()
+    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
+
+    assert gui.project.stim_arrays["stim"].values.shape == (5, 2)
+    assert new_filename.exists()
+    assert gui.project.filepath == new_filename
+    gui.close()
+
+
 def _add_detach_panel_test_data(gui: Gui) -> tuple[TraceData, SpikeData, SynapseData]:
     trace_data = TraceData(
         name="trace",
@@ -437,6 +588,55 @@ def test_detach_panel_hides_original_and_shows_fresh_window(qtbot: QtBot) -> Non
     gui.close()
 
 
+def test_reshowing_a_plainly_detached_panel_closes_its_detached_window(
+    qtbot: QtBot,
+) -> None:
+    """A plain "Detach panel" (not "Detach copy") hides the docked panel;
+    checking "Show X" again should bring it back into the dock and close
+    the now-redundant floating window, not leave both visible."""
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+    gui._auto_show_widget(gui.trace_widget)
+
+    gui.detach_panel(gui.trace_widget, keep_original=False)
+    window = gui._detached_panel_windows[-1]
+    assert not gui._view_actions[gui.trace_widget].isChecked()
+    assert window.isVisible()
+
+    gui._view_actions[gui.trace_widget].trigger()  # re-check "Show Traces"
+
+    assert gui.trace_widget.isVisible()
+    assert not window.isVisible()
+    assert window not in gui._detached_panel_windows
+    gui.close()
+
+
+def test_reshowing_a_copy_detached_panel_leaves_its_window_open(
+    qtbot: QtBot,
+) -> None:
+    """ "Detach copy of panel" never unchecks "Show X" in the first place,
+    but toggling it off and back on should not touch the independent
+    copy window either."""
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+    gui._auto_show_widget(gui.trace_widget)
+
+    gui.detach_panel_copy(gui.trace_widget)
+    window = gui._detached_panel_windows[-1]
+    action = gui._view_actions[gui.trace_widget]
+    assert action.isChecked()
+
+    action.trigger()  # uncheck
+    action.trigger()  # re-check
+
+    assert window.isVisible()
+    assert window in gui._detached_panel_windows
+    window.close()
+    gui.close()
+
+
 def test_detach_copy_keeps_original_visible(qtbot: QtBot) -> None:
     gui = Gui()
     qtbot.addWidget(gui)
@@ -451,6 +651,149 @@ def test_detach_copy_keeps_original_visible(qtbot: QtBot) -> None:
     assert gui.trace_widget.isVisible()
     assert window.isVisible()
     window.close()
+    gui.close()
+
+
+def test_detached_trace_copy_shares_state_with_original(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+    gui._auto_show_widget(gui.trace_widget)
+
+    gui.detach_panel_copy(gui.trace_widget)
+    window = gui._detached_panel_windows[-1]
+    detached_widget = window._widget
+
+    # both views are bound to the same shared state, so data set before the
+    # detach is already visible in the detached view too
+    assert detached_widget.data is gui.trace_widget.data
+
+    # greying a neuron via the detached view is reflected in the docked one
+    detached_widget.set_neuron_greyed(1, True)
+    assert gui.trace_widget.is_neuron_greyed(1)
+    assert gui.trace_widget.n_neurons == 2
+
+    # and greying via the docked view is reflected back in the detached one
+    gui.trace_widget.set_neuron_greyed(1, False)
+    assert not detached_widget.is_neuron_greyed(1)
+    assert detached_widget.n_neurons == 3
+
+    window.close()
+    gui.close()
+
+
+def test_hovering_a_neuron_in_trace_or_stim_highlights_it_in_spatial_footprints(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+
+    assert gui._spatial_footprint_state.hovered_stim_id is None
+
+    gui.trace_widget.neuron_hovered.emit(1)
+    assert gui._spatial_footprint_state.hovered_stim_id == 1
+
+    gui.stim_editor.stim_widget.neuron_hovered.emit(2)
+    assert gui._spatial_footprint_state.hovered_stim_id == 2
+
+    gui.trace_widget.neuron_hovered.emit(None)
+    assert gui._spatial_footprint_state.hovered_stim_id is None
+    gui.close()
+
+
+def test_hovering_in_a_detached_trace_copy_also_highlights_the_neuron(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+    gui._auto_show_widget(gui.trace_widget)
+
+    gui.detach_panel_copy(gui.trace_widget)
+    window = gui._detached_panel_windows[-1]
+    detached_widget = window._widget
+
+    detached_widget.neuron_hovered.emit(0)
+
+    assert gui._spatial_footprint_state.hovered_stim_id == 0
+    window.close()
+    gui.close()
+
+
+def test_detached_spatial_footprint_copy_shares_state_with_original(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+    gui._auto_show_widget(gui.spatial_footprint_widget)
+
+    gui.detach_panel_copy(gui.spatial_footprint_widget)
+    window = gui._detached_panel_windows[-1]
+    detached_widget = window._widget
+
+    # clicking a neuron in the detached view selects it in the docked one
+    # too, including the downstream trace/stim rows the docked panel drives
+    detached_widget.overlay_widget.neuron_clicked.emit(1)
+    assert gui.spatial_footprint_widget._greyed_cellpose_ids == {0, 2}
+    assert not gui.trace_widget.is_neuron_greyed(1)
+    assert gui.trace_widget.is_neuron_greyed(0)
+    assert gui.trace_widget.is_neuron_greyed(2)
+
+    # clicking it again from the docked view deselects it, un-greying both
+    gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(1)
+    assert detached_widget._greyed_cellpose_ids == set()
+    assert not gui.trace_widget.is_neuron_greyed(0)
+    assert not gui.trace_widget.is_neuron_greyed(2)
+
+    window.close()
+    gui.close()
+
+
+def test_neuron_click_rebuilds_stim_and_trace_layout_only_once(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+
+    # Selecting one cell greys out every other cell in the segmentation at
+    # once; the stim/trace panels must recompute their layout exactly once
+    # for the whole change, not once per greyed-out row (see the batch
+    # `neurons_greyed_out_changed` signal added alongside the old
+    # per-neuron `neuron_greyed_out_changed`).
+    stim_layout_calls = 0
+    original_stim_layout = gui.stim_editor.stim_widget._apply_visible_neuron_layout
+
+    def _counting_stim_layout(*args: object, **kwargs: object) -> None:
+        nonlocal stim_layout_calls
+        stim_layout_calls += 1
+        original_stim_layout(*args, **kwargs)
+
+    gui.stim_editor.stim_widget._apply_visible_neuron_layout = (  # type: ignore[method-assign]
+        _counting_stim_layout
+    )
+
+    trace_layout_calls = 0
+    original_trace_layout = gui.trace_widget._apply_visible_neuron_layout
+
+    def _counting_trace_layout(*args: object, **kwargs: object) -> None:
+        nonlocal trace_layout_calls
+        trace_layout_calls += 1
+        original_trace_layout(*args, **kwargs)
+
+    gui.trace_widget._apply_visible_neuron_layout = (  # type: ignore[method-assign]
+        _counting_trace_layout
+    )
+
+    gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(0)
+
+    assert stim_layout_calls == 1
+    assert trace_layout_calls == 1
+    assert gui.trace_widget.is_neuron_greyed(1)
+    assert gui.trace_widget.is_neuron_greyed(2)
+    assert not gui.trace_widget.is_neuron_greyed(0)
     gui.close()
 
 
@@ -481,7 +824,6 @@ def test_detach_context_menu_installed_on_panel_canvases(qtbot: QtBot) -> None:
         gui.data_widget,
         gui.data_widget.heatmap_widget.widget,
         gui.heatmap_widget.widget,
-        gui.spatial_footprint_widget.overlay_widget.overlay_view.widget,
         gui.custom_analysis_widget.canvas,
         gui.console_widget,
         gui.chat_widget.history_view,
@@ -489,6 +831,19 @@ def test_detach_context_menu_installed_on_panel_canvases(qtbot: QtBot) -> None:
         assert (
             widget.contextMenuPolicy() == QtCore.Qt.ContextMenuPolicy.CustomContextMenu
         )
+
+    # The Spatial Footprints panel's own rendering canvas is excluded - a
+    # right click there is its lasso-select gesture, not a detach request
+    # (see test_overlay_view_left_click_selects_right_click_does_not in
+    # tests/test_spatial_footprint_widget.py).
+    assert (
+        gui.spatial_footprint_widget.overlay_widget.overlay_view.widget.contextMenuPolicy()
+        != QtCore.Qt.ContextMenuPolicy.CustomContextMenu
+    )
+    assert (
+        gui.spatial_footprint_widget.overlay_widget.contextMenuPolicy()
+        == QtCore.Qt.ContextMenuPolicy.CustomContextMenu
+    )
 
     assert (
         gui.stim_editor.stim_widget.contextMenuPolicy()
@@ -668,16 +1023,167 @@ def test_clicking_neuron_in_spatial_footprint_greys_trace_and_stim_rows(
 
     gui.update_project(project)
     gui._apply_trace_selection("Experiment :: traces")
+    original_traces = trace_data.traces.copy()
+    original_stim_values = project.stim_arrays["stim"].values.copy()
 
-    gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(2)
-
-    assert gui.trace_widget.is_neuron_greyed(0)
-    assert gui.stim_editor.stim_widget.is_neuron_greyed(0)
-
+    # clicking selects cellpose cell 2 (-> stim 0), hiding everything else
     gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(2)
 
     assert not gui.trace_widget.is_neuron_greyed(0)
-    assert not gui.stim_editor.stim_widget.is_neuron_greyed(0)
+    assert gui.trace_widget.is_neuron_greyed(1)
+    assert gui.trace_widget.is_neuron_greyed(2)
+    assert gui.stim_editor.stim_widget.is_neuron_greyed(1)
+    assert gui.stim_editor.stim_widget.is_neuron_greyed(2)
+    # the greyed rows are actually hidden, and the remaining row compacts
+    assert gui.trace_widget.n_neurons == 1
+    assert gui.stim_editor.stim_widget.n_neurons == 1
+    assert gui.trace_widget.graphic is not None
+    assert gui.trace_widget.graphic.graphics[0].visible
+    # underlying project data is never touched by hiding
+    reloaded_trace_data = project.experiments["Experiment"].data[0]
+    assert isinstance(reloaded_trace_data, TraceData)
+    assert np.allclose(reloaded_trace_data.traces, original_traces)
+    assert np.allclose(project.stim_arrays["stim"].values, original_stim_values)
+
+    # deselecting the only selected cell clears the selection - show all again
+    gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(2)
+
+    assert not gui.trace_widget.is_neuron_greyed(1)
+    assert not gui.trace_widget.is_neuron_greyed(2)
+    assert not gui.stim_editor.stim_widget.is_neuron_greyed(1)
+    assert not gui.stim_editor.stim_widget.is_neuron_greyed(2)
+    assert gui.trace_widget.n_neurons == 3
+    assert gui.stim_editor.stim_widget.n_neurons == 3
+    gui.close()
+
+
+def _stim_trace_overlay_project() -> tuple[Project, TraceData]:
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "stim",
+            StimType.Excitation,
+            np.zeros((10, 3), dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+    trace_data = TraceData(
+        name="traces",
+        traces=np.zeros((3, 10), dtype=np.float32),
+        indices=np.arange(3, dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    project.add_experiment(
+        Experiment(
+            name="Experiment",
+            duration=0.01,
+            timepoints=[0.01],
+            data=[trace_data],
+        )
+    )
+    return project, trace_data
+
+
+def test_toggle_stim_trace_overlay_shows_and_hides_stim_panel(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project, _ = _stim_trace_overlay_project()
+    gui.update_project(project)
+    gui._apply_trace_selection("Experiment :: traces")
+
+    assert gui.trace_widget._stim_overlay_graphic is None
+    assert gui.stim_editor.isVisible()
+
+    gui.action_overlay_stim_on_traces.trigger()
+
+    assert gui.trace_widget._stim_overlay_enabled
+    assert gui.trace_widget._stim_overlay_graphic is not None
+    assert not gui.stim_editor.isVisible()
+
+    gui.action_overlay_stim_on_traces.trigger()
+
+    assert not gui.trace_widget._stim_overlay_enabled
+    assert gui.trace_widget._stim_overlay_graphic is None
+    assert gui.stim_editor.isVisible()
+    gui.close()
+
+
+def test_toggle_stim_trace_overlay_respects_manually_hidden_stim_panel(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project, _ = _stim_trace_overlay_project()
+    gui.update_project(project)
+    gui._apply_trace_selection("Experiment :: traces")
+    gui._view_actions[gui.stim_editor].trigger()
+    assert not gui.stim_editor.isVisible()
+
+    gui.action_overlay_stim_on_traces.trigger()
+    assert not gui.stim_editor.isVisible()  # already hidden, unaffected
+
+    gui.action_overlay_stim_on_traces.trigger()
+    assert not gui.stim_editor.isVisible()  # stays hidden, as it was before overlay
+    gui.close()
+
+
+def test_stim_trace_overlay_updates_when_selected_stim_changes(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project, _ = _stim_trace_overlay_project()
+    other_values = np.full((10, 3), 5.0, dtype=np.float32)
+    project.add_stim_array(
+        StimArray("stim2", StimType.Excitation, other_values, "mV", 0.001)
+    )
+    gui.update_project(project)
+    gui._apply_trace_selection("Experiment :: traces")
+    gui.action_overlay_stim_on_traces.trigger()
+    assert gui.trace_widget._stim_overlay_array is project.stim_arrays["stim"]
+
+    gui.cmb_stim.setCurrentText("stim2")
+
+    assert gui.trace_widget._stim_overlay_array is project.stim_arrays["stim2"]
+    gui.close()
+
+
+def test_time_slider_highlights_stimulated_neurons_in_spatial_footprints(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project, _ = _stim_trace_overlay_project()
+    project.stim_arrays["stim"].values[5, 1] = 3.0  # neuron 1 stimulated at t=5ms
+    project.cellpose_data = _make_gui_cellpose_result()
+    gui.update_project(project)
+
+    gui.time_slider.set_current_time_ms(5)
+    assert gui._spatial_footprint_state.active_stim_ids == frozenset({1})
+
+    gui.time_slider.set_current_time_ms(0)
+    assert gui._spatial_footprint_state.active_stim_ids == frozenset()
+    gui.close()
+
+
+def test_switching_current_stim_array_refreshes_active_stim_highlight(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project, _ = _stim_trace_overlay_project()
+    other_values = np.zeros((10, 3), dtype=np.float32)
+    other_values[0, 2] = 1.0
+    project.add_stim_array(
+        StimArray("stim2", StimType.Excitation, other_values, "mV", 0.001)
+    )
+    project.cellpose_data = _make_gui_cellpose_result()
+    gui.update_project(project)
+    assert gui._spatial_footprint_state.active_stim_ids == frozenset()
+
+    gui.cmb_stim.setCurrentText("stim2")
+
+    assert gui._spatial_footprint_state.active_stim_ids == frozenset({2})
     gui.close()
 
 
@@ -1389,15 +1895,11 @@ def test_gui_save(
     # the gui will add the .nseq extension automatically
     filename = filename_without_extension.with_suffix(".nseq")
     assert not filename.exists()
-    MockSaveLoadOptionsDialog.options.include_stim_arrays = True
-    MockSaveLoadOptionsDialog.options.include_model = True
-    MockSaveLoadOptionsDialog.options.include_simulation_data = True
-    MockSaveLoadOptionsDialog.options.include_experimental_data = True
-    monkeypatch.setattr(
-        neuroseq.gui,
-        "SaveLoadOptionsDialog",
-        MockSaveLoadOptionsDialog,
-    )
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("save options dialog should not be shown")
+
+    monkeypatch.setattr(neuroseq.gui, "SaveLoadOptionsDialog", _fail_if_called)
     # mock getSaveFileName to return the desired filename
     monkeypatch.setattr(
         QtWidgets.QFileDialog,
@@ -1423,6 +1925,75 @@ def test_gui_save(
         project_ornstein.b2_model.monitors.keys()
         == loaded_model.b2_model.monitors.keys()
     )
+    gui.close()
+
+
+def test_gui_save_quick_save_skips_dialogs_when_filepath_set(
+    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, project_ornstein: Project
+) -> None:
+    """Once a project has a file path, plain Save (Ctrl+S) writes straight
+    back to it without showing the options or file-picker dialogs."""
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    gui.update_project(project_ornstein)
+    qtbot.wait(delay_after_update_model_call_in_ms)
+
+    filename = tmp_path / "existing.nseq"
+    gui.project.save(filename, SaveLoadOptions(True, True, True, True))
+    gui.project.filepath = filename
+    assert filename.exists()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("dialog should not be shown for a quick save")
+
+    monkeypatch.setattr(neuroseq.gui, "SaveLoadOptionsDialog", _fail_if_called)
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", _fail_if_called)
+
+    gui.btn_save_clicked()
+    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
+    assert gui.project.filepath == filename
+    gui.close()
+
+
+def test_gui_save_as_uses_all_options_without_options_dialog(
+    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, project_ornstein: Project
+) -> None:
+    """Save As prompts for a destination and includes every project component."""
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    qtbot.wait(delay_after_update_model_call_in_ms)
+    gui.update_project(project_ornstein)
+    qtbot.wait(delay_after_update_model_call_in_ms)
+
+    original_filename = tmp_path / "existing.nseq"
+    gui.project.save(original_filename, SaveLoadOptions(True, True, True, True))
+    gui.project.filepath = original_filename
+
+    new_filename_without_extension = tmp_path / "saved_as"
+    new_filename = new_filename_without_extension.with_suffix(".nseq")
+    assert not new_filename.exists()
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("save options dialog should not be shown")
+
+    monkeypatch.setattr(neuroseq.gui, "SaveLoadOptionsDialog", _fail_if_called)
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getSaveFileName",
+        lambda *args: (f"{new_filename_without_extension}", True),
+    )
+
+    gui.btn_save_as_clicked()
+    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
+    assert new_filename.exists()
+    assert gui.project.filepath == new_filename
+    # the original file must be untouched by the Save As
+    assert original_filename.exists()
     gui.close()
 
 
@@ -2851,6 +3422,88 @@ def test_gui_apply_cellpose_import_result_expands_stim_arrays(
     assert project.stim_arrays["stim"].values.shape[1] == 100
     assert fake_gui.updated_projects == [project]
     assert fake_gui.update_limits_calls == 0
+
+
+class _RemapFakeGui:
+    def __init__(self, project: Project) -> None:
+        self.project = project
+        self.last_cellpose_import: CellposeImportResult | None = None
+
+    def update_limits(self) -> None:
+        pass
+
+    def _cellpose_neuron_count(
+        self,
+        imported: CellposeImportResult | None,
+    ) -> int:
+        return Gui._cellpose_neuron_count(self, imported)  # type: ignore[arg-type]
+
+
+def _cellpose_result_with_mapping(
+    mapping: dict[int, int] | None,
+) -> CellposeImportResult:
+    return CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=np.zeros((2, 2), dtype=np.int32),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        stimulus_to_cellpose_mapping=mapping,
+    )
+
+
+def test_gui_apply_cellpose_import_result_remaps_existing_trace_data() -> None:
+    """Reproduces the #518 scenario: import Suite2p trace data under one Cellpose
+    mapping, then re-run the Cellpose import with a different mapping - the
+    already-imported trace's displayed indices must follow the new mapping."""
+    project = Project()
+    project.cellpose_data = _cellpose_result_with_mapping({4: 0, 7: 1})
+    trace_data = TraceData(
+        "traces",
+        np.zeros((2, 10), dtype=np.float32),
+        np.array([4, 7], dtype=np.uint32),
+        "mV",
+        0.1,
+        np.array([0, 1], dtype=np.uint32),
+    )
+    project.add_experiment(Experiment("exp", 1.0, [0.0, 1.0], [trace_data]))
+    fake_gui = _RemapFakeGui(project)
+
+    Gui._apply_cellpose_import_result(
+        fake_gui,  # type: ignore[arg-type]
+        _cellpose_result_with_mapping({9: 0, 2: 1}),
+    )
+
+    np.testing.assert_array_equal(trace_data.indices, np.array([9, 2], dtype=np.uint32))
+
+
+def test_gui_apply_cellpose_import_result_warns_on_remap_conflict(
+    qmessagebox_calls: list,
+) -> None:
+    project = Project()
+    project.cellpose_data = _cellpose_result_with_mapping({4: 0, 7: 1})
+    trace_data = TraceData(
+        "traces",
+        np.zeros((2, 10), dtype=np.float32),
+        np.array([4, 7], dtype=np.uint32),
+        "mV",
+        0.1,
+        np.array([0, 1], dtype=np.uint32),
+    )
+    project.add_experiment(Experiment("exp", 1.0, [0.0, 1.0], [trace_data]))
+    fake_gui = _RemapFakeGui(project)
+
+    # Cellpose id 0 maps explicitly to stim 1, cellpose id 1 falls back to
+    # identity (stim 1 too) - a collision that cannot be resolved.
+    Gui._apply_cellpose_import_result(
+        fake_gui,  # type: ignore[arg-type]
+        _cellpose_result_with_mapping({1: 0}),
+    )
+
+    np.testing.assert_array_equal(trace_data.indices, np.array([4, 7], dtype=np.uint32))
+    assert any(call["name"] == "warning" for call in qmessagebox_calls)
+    warning_call = next(call for call in qmessagebox_calls if call["name"] == "warning")
+    assert "exp" in warning_call["text"]
 
 
 def test_gui_checkpoints(

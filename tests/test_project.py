@@ -791,6 +791,73 @@ def test_update_stim_array_properties_remaps_existing_stim_array() -> None:
     assert project.max_time_secs == pytest.approx(0.006)
 
 
+def test_update_stim_array_properties_decrease_trims_whole_project_consistently() -> (
+    None
+):
+    """Regression: decreasing a stim array's neuron count via "Edit stim
+    array" used to only truncate that one array's own columns, leaving
+    every other stim array and experiment's trace/spike data referencing
+    neurons that no longer existed anywhere else. It must trim the whole
+    project consistently - the same behavior as Trim to Mapped Neurons."""
+    project = Project()
+    project.cellpose_data = _cellpose_result_with_mapping({0: 10, 1: 11, 2: 12, 3: 13})
+    project.add_stim_array(
+        StimArray(
+            "edited",
+            StimType.Excitation,
+            np.array([[0, 1, 2, 3]], dtype=np.float32),
+            "mV",
+            dt=0.001,
+        )
+    )
+    project.add_stim_array(
+        StimArray(
+            "other",
+            StimType.Excitation,
+            np.array([[10, 11, 12, 13]], dtype=np.float32),
+            "mV",
+            dt=0.001,
+        )
+    )
+    trace = TraceData(
+        name="trace",
+        traces=np.array([[0], [1], [2], [3]], dtype=np.float32),
+        indices=np.array([0, 1, 2, 3], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    spikes = SpikeData(
+        name="spikes",
+        spike_indices=np.array([0, 1, 2, 3], dtype=np.uint32),
+        spike_times=np.array([0, 1, 2, 3], dtype=np.float32) * 0.001,
+    )
+    project.add_experiment(
+        Experiment(name="exp", duration=0.004, timepoints=[], data=[trace, spikes])
+    )
+
+    project.update_stim_array_properties(
+        "edited", n_neurons=2, stim_type=StimType.Excitation, units="mV", dt=0.001
+    )
+
+    # the edited array itself is trimmed (as before)
+    assert project.stim_arrays["edited"].values.shape == (1, 2)
+    assert np.allclose(project.stim_arrays["edited"].values, [[0, 1]])
+    # the OTHER stim array is now also trimmed to match, not left stale
+    assert project.stim_arrays["other"].values.shape == (1, 2)
+    assert np.allclose(project.stim_arrays["other"].values, [[10, 11]])
+    # experiment data is trimmed too
+    reloaded_trace = project.experiments["exp"].data[0]
+    assert isinstance(reloaded_trace, TraceData)
+    assert np.array_equal(reloaded_trace.indices, [0, 1])
+    assert np.allclose(reloaded_trace.traces, [[0], [1]])
+    reloaded_spikes = project.experiments["exp"].data[1]
+    assert isinstance(reloaded_spikes, SpikeData)
+    assert np.array_equal(reloaded_spikes.spike_indices, [0, 1])
+    # the cellpose mapping drops entries for the now-removed neurons (2, 3)
+    assert project.cellpose_data is not None
+    assert project.cellpose_data.stimulus_to_cellpose_mapping == {0: 10, 1: 11}
+
+
 def test_add_stim_array_coerces_1d_values_to_2d() -> None:
     project = Project()
     values = np.array([1.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
@@ -885,6 +952,101 @@ def test_update_limits_include_cellpose_neuron_count() -> None:
     project.update_limits()
 
     assert project.max_neurons == 100
+
+
+def _cellpose_data_with_mapping(
+    mapping: dict[int, int] | None,
+) -> CellposeImportResult:
+    return CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=np.zeros((2, 2), dtype=np.int32),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        stimulus_to_cellpose_mapping=mapping,
+    )
+
+
+def test_remap_cellpose_indices_updates_trace_and_spike_data() -> None:
+    project = Project()
+    project.cellpose_data = _cellpose_data_with_mapping({4: 0, 7: 1})
+    experiment = Experiment(
+        "exp",
+        1.0,
+        [0.0, 1.0],
+        [
+            TraceData(
+                "traces",
+                np.zeros((2, 10), dtype=np.float32),
+                np.array([4, 7], dtype=np.uint32),
+                "mV",
+                0.1,
+                np.array([0, 1], dtype=np.uint32),
+            ),
+            SpikeData(
+                "spikes",
+                np.array([4, 7, 4], dtype=np.uint32),
+                np.array([0.1, 0.2, 0.3], dtype=np.float32),
+                np.array([0, 1, 0], dtype=np.uint32),
+            ),
+        ],
+    )
+    project.add_experiment(experiment)
+
+    project.cellpose_data = _cellpose_data_with_mapping({9: 0, 2: 1})
+    failed = project.remap_cellpose_indices()
+
+    assert failed == []
+    remapped_trace, remapped_spike = project.experiments["exp"].data
+    assert isinstance(remapped_trace, TraceData)
+    assert isinstance(remapped_spike, SpikeData)
+    np.testing.assert_array_equal(
+        remapped_trace.indices, np.array([9, 2], dtype=np.uint32)
+    )
+    np.testing.assert_array_equal(
+        remapped_spike.spike_indices, np.array([9, 2, 9], dtype=np.uint32)
+    )
+
+
+def test_remap_cellpose_indices_leaves_data_without_raw_ids_untouched() -> None:
+    project = Project()
+    project.cellpose_data = _cellpose_data_with_mapping({4: 0})
+    patch_clamp_trace = TraceData(
+        "patch_clamp",
+        np.zeros((1, 10), dtype=np.float32),
+        np.array([12], dtype=np.uint32),
+        "mV",
+        0.1,
+    )
+    project.add_experiment(Experiment("exp", 1.0, [0.0, 1.0], [patch_clamp_trace]))
+
+    failed = project.remap_cellpose_indices()
+
+    assert failed == []
+    assert patch_clamp_trace.indices.tolist() == [12]
+
+
+def test_remap_cellpose_indices_reports_experiments_with_invalid_mapping() -> None:
+    project = Project()
+    project.cellpose_data = _cellpose_data_with_mapping({4: 0, 7: 1})
+    trace_data = TraceData(
+        "traces",
+        np.zeros((2, 10), dtype=np.float32),
+        np.array([4, 7], dtype=np.uint32),
+        "mV",
+        0.1,
+        np.array([0, 1], dtype=np.uint32),
+    )
+    project.add_experiment(Experiment("exp", 1.0, [0.0, 1.0], [trace_data]))
+
+    # Cellpose id 0 maps explicitly to stim 1, but cellpose id 1 falls back to
+    # identity (stim 1 too) - a collision that _resolve_suite2p_indices rejects.
+    project.cellpose_data = _cellpose_data_with_mapping({1: 0})
+    failed = project.remap_cellpose_indices()
+
+    assert failed == ["exp"]
+    # left unchanged rather than corrupted
+    np.testing.assert_array_equal(trace_data.indices, np.array([4, 7], dtype=np.uint32))
 
 
 def test_stim_array_rename() -> None:
@@ -1137,3 +1299,130 @@ def test_remappable_data_description_counts_correctly() -> None:
     assert "1 trace dataset(s)" in desc
 
     assert project.remappable_data_description(0.001) == ""
+
+
+def _cellpose_result_with_mapping(
+    mapping: dict[int, int] | None,
+) -> CellposeImportResult:
+    return CellposeImportResult(
+        image_path=Path("cellpose.png"),
+        segmentation_array=np.zeros((4, 4), dtype=np.int32),
+        overlay_image=np.zeros((4, 4, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        stimulus_to_cellpose_mapping=mapping,
+    )
+
+
+def test_trim_to_mapped_neurons_raises_without_a_mapping() -> None:
+    project = Project()
+    with pytest.raises(ValueError):
+        project.trim_to_mapped_neurons()
+
+    project.cellpose_data = _cellpose_result_with_mapping(None)
+    with pytest.raises(ValueError):
+        project.trim_to_mapped_neurons()
+
+    project.cellpose_data = _cellpose_result_with_mapping({})
+    with pytest.raises(ValueError):
+        project.trim_to_mapped_neurons()
+
+
+def test_trim_to_mapped_neurons_trims_everything_consistently() -> None:
+    # stim ids 0, 1, 3 are mapped (-> cellpose ids 10, 11, 13); 2, 4, 5 are not
+    project = Project()
+    project.cellpose_data = _cellpose_result_with_mapping({0: 10, 1: 11, 3: 13})
+    project.add_stim_array(
+        StimArray(
+            "stim",
+            StimType.Excitation,
+            np.array([[0, 1, 2, 3, 4, 5], [10, 11, 12, 13, 14, 15]], dtype=np.float32),
+            "mV",
+            dt=0.001,
+        )
+    )
+    trace = TraceData(
+        name="trace",
+        traces=np.array([[0], [1], [2], [3]], dtype=np.float32),
+        indices=np.array([0, 2, 3, 5], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+        raw_cellpose_ids=np.array([100, 102, 103, 105], dtype=np.uint32),
+    )
+    spikes = SpikeData(
+        name="spikes",
+        spike_indices=np.array([0, 2, 3, 4, 1, 5], dtype=np.uint32),
+        spike_times=np.array([0, 1, 2, 3, 4, 5], dtype=np.float32) * 0.001,
+    )
+    original_synapse_values = np.arange(6 * 6 * 2, dtype=np.float32).reshape(6, 6, 2)
+    synapses = SynapseData(
+        name="synapses",
+        values=original_synapse_values.copy(),
+        timestamps=np.array([0.0, 0.001], dtype=np.float32),
+    )
+    non_square_synapses = SynapseData(
+        name="non_square_synapses",
+        values=np.zeros((6, 4, 2), dtype=np.float32),
+        timestamps=np.array([0.0, 0.001], dtype=np.float32),
+    )
+    project.add_experiment(
+        Experiment(
+            name="exp",
+            duration=0.006,
+            timepoints=[],
+            data=[trace, spikes, synapses, non_square_synapses],
+        )
+    )
+
+    project.trim_to_mapped_neurons()
+
+    # stim array: only columns 0, 1, 3 survive
+    trimmed_stim = project.stim_arrays["stim"]
+    assert trimmed_stim.values.shape == (2, 3)
+    assert np.allclose(trimmed_stim.values, [[0, 1, 3], [10, 11, 13]])
+
+    # trace: rows for indices 0 and 3 survive (renumbered 0 -> 0, 3 -> 2)
+    reloaded_trace = project.experiments["exp"].data[0]
+    assert isinstance(reloaded_trace, TraceData)
+    assert np.allclose(reloaded_trace.traces, [[0], [2]])
+    assert np.array_equal(reloaded_trace.indices, [0, 2])
+    assert np.array_equal(reloaded_trace.raw_cellpose_ids, [100, 103])
+
+    # spikes: events for indices 0, 3, 1 survive (renumbered 0 -> 0, 3 -> 2, 1 -> 1)
+    reloaded_spikes = project.experiments["exp"].data[1]
+    assert isinstance(reloaded_spikes, SpikeData)
+    assert np.array_equal(reloaded_spikes.spike_indices, [0, 2, 1])
+    assert np.allclose(reloaded_spikes.spike_times, np.array([0, 2, 4]) * 0.001)
+
+    # synapses: both axes trimmed to [0, 1, 3], reordered/renumbered to match
+    reloaded_synapses = project.experiments["exp"].data[2]
+    assert isinstance(reloaded_synapses, SynapseData)
+    assert reloaded_synapses.values.shape == (3, 3, 2)
+    expected = original_synapse_values[np.ix_([0, 1, 3], [0, 1, 3], [0, 1])]
+    assert np.allclose(reloaded_synapses.values, expected)
+
+    # non-square synapse data is left untouched (skipped, not crashed)
+    reloaded_non_square = project.experiments["exp"].data[3]
+    assert isinstance(reloaded_non_square, SynapseData)
+    assert reloaded_non_square.values.shape == (6, 4, 2)
+
+    # the cellpose mapping itself is renumbered to the new contiguous ids
+    assert project.cellpose_data is not None
+    assert project.cellpose_data.stimulus_to_cellpose_mapping == {
+        0: 10,
+        1: 11,
+        2: 13,
+    }
+
+
+def test_trim_to_mapped_neurons_is_a_noop_when_already_fully_mapped() -> None:
+    project = Project()
+    project.cellpose_data = _cellpose_result_with_mapping({0: 10, 1: 11})
+    original_values = np.array([[1, 2], [3, 4]], dtype=np.float32)
+    project.add_stim_array(
+        StimArray("stim", StimType.Excitation, original_values.copy(), "mV", dt=0.001)
+    )
+
+    project.trim_to_mapped_neurons()
+
+    assert np.allclose(project.stim_arrays["stim"].values, original_values)
