@@ -67,9 +67,10 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         # the same at-a-glance controls. Only meaningful once there's a
         # segmentation to toggle, so the whole row is hidden until then.
         checkbox_layout = QtWidgets.QHBoxLayout()
-        # No outer padding around the row - shrinks it to roughly half its
-        # default height without touching the checkboxes' own size, so
-        # their text/indicator never gets clipped.
+        # No outer padding around the row - shrinks it to a slim strip
+        # without touching the checkboxes' own size, so their text/indicator
+        # never gets clipped (unlike forcing the container to some fixed
+        # height smaller than the checkboxes' own natural size, which does).
         checkbox_layout.setContentsMargins(0, 0, 0, 0)
         checkbox_layout.addStretch(1)
         self.show_labels_checkbox = QtWidgets.QCheckBox("Show labels")
@@ -89,10 +90,6 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self.checkbox_container = QtWidgets.QWidget()
         self.checkbox_container.setLayout(checkbox_layout)
         self.checkbox_container.setVisible(False)
-        # Half its natural height - a slim row, not a full-size toolbar.
-        self.checkbox_container.setFixedHeight(
-            max(1, round(self.checkbox_container.sizeHint().height() / 2))
-        )
         layout.addWidget(self.checkbox_container)
 
         self.empty_state_widget = QtWidgets.QWidget(self)
