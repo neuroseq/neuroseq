@@ -834,7 +834,8 @@ def test_detach_context_menu_installed_on_panel_canvases(qtbot: QtBot) -> None:
 
     # The Spatial Footprints panel's own rendering canvas is excluded - a
     # right click there is its lasso-select gesture, not a detach request
-    # (see test_right_click_in_spatial_footprint_view_does_not_open_detach_menu).
+    # (see test_overlay_view_left_click_selects_right_click_does_not in
+    # tests/test_spatial_footprint_widget.py).
     assert (
         gui.spatial_footprint_widget.overlay_widget.overlay_view.widget.contextMenuPolicy()
         != QtCore.Qt.ContextMenuPolicy.CustomContextMenu
