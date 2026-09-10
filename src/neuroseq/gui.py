@@ -523,6 +523,12 @@ class Gui(QtWidgets.QMainWindow):
             | None
         ) = None
         self._detached_panel_windows: list[DetachedPanelWindow] = []
+        # Tracks a panel's detached window only when it was detached via
+        # plain "Detach panel" (not "Detach copy of panel") - i.e. exactly
+        # the windows _set_widget_visible should close if the docked panel
+        # is shown again, so re-showing it doesn't leave both visible at
+        # once (which is what "Detach copy" is for).
+        self._plain_detached_windows: dict[QtWidgets.QWidget, DetachedPanelWindow] = {}
         self._llm_settings_dialog: LLMSettingsDialog | None = None
         self._external_sim_thread: QtCore.QThread | None = None
         self._external_sim_worker: ExternalSimWorker | None = None
@@ -3055,6 +3061,14 @@ class Gui(QtWidgets.QMainWindow):
         )
 
     def _set_widget_visible(self, widget: QtWidgets.QWidget, toggled: bool) -> None:
+        if toggled:
+            # Showing a panel that's currently only visible as a plain
+            # (non-copy) detached window should bring it back into the
+            # dock, not leave both visible - close the floating window
+            # rather than leaving it stranded alongside the redocked panel.
+            detached_window = self._plain_detached_windows.pop(widget, None)
+            if detached_window is not None:
+                detached_window.close()
         widget.setVisible(toggled)
         if toggled and widget is self.data_widget:
             self.set_data(self.cmb_data.currentText())
@@ -3184,6 +3198,8 @@ class Gui(QtWidgets.QMainWindow):
         def _forget_window() -> None:
             if window in self._detached_panel_windows:
                 self._detached_panel_windows.remove(window)
+            if self._plain_detached_windows.get(source) is window:
+                del self._plain_detached_windows[source]
 
         window = DetachedPanelWindow(
             widget,
@@ -3200,6 +3216,7 @@ class Gui(QtWidgets.QMainWindow):
         self._detached_panel_windows.append(window)
         window.show()
         if not keep_original:
+            self._plain_detached_windows[source] = window
             action = self._view_actions.get(source)
             if action is not None and action.isChecked():
                 action.trigger()

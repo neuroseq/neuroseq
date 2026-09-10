@@ -544,6 +544,55 @@ def test_detach_panel_hides_original_and_shows_fresh_window(qtbot: QtBot) -> Non
     gui.close()
 
 
+def test_reshowing_a_plainly_detached_panel_closes_its_detached_window(
+    qtbot: QtBot,
+) -> None:
+    """A plain "Detach panel" (not "Detach copy") hides the docked panel;
+    checking "Show X" again should bring it back into the dock and close
+    the now-redundant floating window, not leave both visible."""
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+    gui._auto_show_widget(gui.trace_widget)
+
+    gui.detach_panel(gui.trace_widget, keep_original=False)
+    window = gui._detached_panel_windows[-1]
+    assert not gui._view_actions[gui.trace_widget].isChecked()
+    assert window.isVisible()
+
+    gui._view_actions[gui.trace_widget].trigger()  # re-check "Show Traces"
+
+    assert gui.trace_widget.isVisible()
+    assert not window.isVisible()
+    assert window not in gui._detached_panel_windows
+    gui.close()
+
+
+def test_reshowing_a_copy_detached_panel_leaves_its_window_open(
+    qtbot: QtBot,
+) -> None:
+    """ "Detach copy of panel" never unchecks "Show X" in the first place,
+    but toggling it off and back on should not touch the independent
+    copy window either."""
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+    gui._auto_show_widget(gui.trace_widget)
+
+    gui.detach_panel_copy(gui.trace_widget)
+    window = gui._detached_panel_windows[-1]
+    action = gui._view_actions[gui.trace_widget]
+    assert action.isChecked()
+
+    action.trigger()  # uncheck
+    action.trigger()  # re-check
+
+    assert window.isVisible()
+    assert window in gui._detached_panel_windows
+    window.close()
+    gui.close()
+
+
 def test_detach_copy_keeps_original_visible(qtbot: QtBot) -> None:
     gui = Gui()
     qtbot.addWidget(gui)
