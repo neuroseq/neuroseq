@@ -67,6 +67,10 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         # the same at-a-glance controls. Only meaningful once there's a
         # segmentation to toggle, so the whole row is hidden until then.
         checkbox_layout = QtWidgets.QHBoxLayout()
+        # No outer padding around the row - shrinks it to roughly half its
+        # default height without touching the checkboxes' own size, so
+        # their text/indicator never gets clipped.
+        checkbox_layout.setContentsMargins(0, 0, 0, 0)
         checkbox_layout.addStretch(1)
         self.show_labels_checkbox = QtWidgets.QCheckBox("Show labels")
         self.show_labels_checkbox.setChecked(True)

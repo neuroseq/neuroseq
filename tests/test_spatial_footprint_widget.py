@@ -424,12 +424,24 @@ def test_checkbox_row_sits_at_the_top_of_the_widget(qtbot: QtBot) -> None:
     widget.close()
 
 
-def test_checkbox_row_is_half_its_default_height(qtbot: QtBot) -> None:
+def test_checkbox_row_has_no_outer_padding_and_is_not_clipped(qtbot: QtBot) -> None:
+    """Regression: forcing the row to a fixed height half its natural size
+    clipped the checkboxes' own text/indicator. Shrinking only the outer
+    layout margins (not the checkboxes themselves) keeps the row compact
+    without cutting anything off."""
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
 
-    default_height = widget.checkbox_container.sizeHint().height()
-    assert widget.checkbox_container.height() == round(default_height / 2)
+    checkbox_layout = widget.checkbox_container.layout()
+    assert checkbox_layout is not None
+    assert checkbox_layout.contentsMargins() == QtCore.QMargins(0, 0, 0, 0)
+
+    tallest_checkbox_height = max(
+        widget.show_labels_checkbox.sizeHint().height(),
+        widget.show_segmentation_checkbox.sizeHint().height(),
+        widget.show_shapes_checkbox.sizeHint().height(),
+    )
+    assert widget.checkbox_container.sizeHint().height() >= tallest_checkbox_height
     widget.close()
 
 
