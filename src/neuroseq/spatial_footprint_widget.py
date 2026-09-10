@@ -30,10 +30,13 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
     live, with no separate apply step, and is dimmed in this view so the
     selection stands out. An empty selection means no filtering is in
     effect (nothing dimmed). Left click-and-hold never selects - it just
-    pans the view, like everywhere else; a right click-and-hold instead
-    draws a lasso that selects every enclosed cell. Clicking on empty space
-    (left) clears the whole selection. Hovering a row in the Trace/Stim
-    panels highlights that same neuron here, brighter than a normal
+    pans the view, like everywhere else, unless Shift is held, in which
+    case it draws a lasso instead (same as a plain right click-and-hold,
+    with no Shift needed). A lasso toggles every enclosed cell: one already
+    selected is deselected, one that isn't is added - so lassoing over a
+    mix of selected and unselected cells is not purely additive. Clicking
+    on empty space (left) clears the whole selection. Hovering a row in the
+    Trace/Stim panels highlights that same neuron here, brighter than a normal
     selected cell, so its location in the FOV is easy to spot. Every cell
     currently receiving nonzero stimulation at the time slider's position
     is brightened the same way, driven by gui.py from the active stim
@@ -59,16 +62,6 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self._state = state if state is not None else SpatialFootprintState()
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-
-        top_bar_layout = QtWidgets.QHBoxLayout()
-        self.busy_indicator = QtWidgets.QProgressBar()
-        self.busy_indicator.setRange(0, 0)  # indeterminate: no per-step progress
-        self.busy_indicator.setTextVisible(False)
-        self.busy_indicator.setMaximumWidth(120)
-        self.busy_indicator.setVisible(False)
-        top_bar_layout.addWidget(self.busy_indicator)
-        top_bar_layout.addStretch(1)
-        layout.addLayout(top_bar_layout)
 
         self.empty_state_widget = QtWidgets.QWidget(self)
         empty_layout = QtWidgets.QVBoxLayout(self.empty_state_widget)
@@ -131,6 +124,22 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self.checkbox_container.setLayout(checkbox_layout)
         self.checkbox_container.setVisible(False)
         layout.addWidget(self.checkbox_container)
+
+        # A fixed, always-visible row of its own so showing/hiding it never
+        # shifts the view above (which is what happened when this used to
+        # live in a top bar and get setVisible(False)/(True) toggled) - idle
+        # is a determinate, empty bar rather than the widget disappearing;
+        # busy switches it to the indeterminate (range 0, 0) animated form.
+        self.busy_indicator = QtWidgets.QProgressBar()
+        self.busy_indicator.setTextVisible(False)
+        self.busy_indicator.setRange(0, 1)
+        self.busy_indicator.setValue(0)
+        # A quarter of the style's normal height - thin enough to read as a
+        # slim strip rather than a full progress bar.
+        self.busy_indicator.setFixedHeight(
+            max(1, round(self.busy_indicator.sizeHint().height() / 4))
+        )
+        layout.addWidget(self.busy_indicator)
 
         self._base_legend: list[tuple[int, tuple[int, int, int]]] = []
         # Keep the connection handles (not just the callables) so close() can
@@ -382,7 +391,9 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self._with_busy_indicator(lambda: self._state.toggle_selected(cellpose_id))
 
     def _on_neuron_lasso_selected(self, cellpose_ids: list[int]) -> None:
-        self._with_busy_indicator(lambda: self._state.add_selected(cellpose_ids))
+        self._with_busy_indicator(
+            lambda: self._state.toggle_selected_many(cellpose_ids)
+        )
 
     def _with_busy_indicator(self, mutate: Callable[[], None]) -> None:
         """Run a selection-changing state mutation with a busy indicator
@@ -392,17 +403,20 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         sharing this state (recomposing the overlay image, updating the
         trace/stim panels) - with a large segmentation or many neurons this
         can take a noticeable moment, during which Qt would otherwise not
-        repaint at all (a single blocking call). Showing the indicator and
-        forcing one repaint via processEvents() before starting the mutation
-        is what makes it actually visible instead of flashing at the very
-        end alongside everything else.
+        repaint at all (a single blocking call). Switching the indicator to
+        its indeterminate (animated) form and forcing one repaint via
+        processEvents() before starting the mutation is what makes it
+        actually visible instead of flashing at the very end alongside
+        everything else - the indicator itself stays visible throughout, so
+        the view underneath never shifts.
         """
-        self.busy_indicator.setVisible(True)
+        self.busy_indicator.setRange(0, 0)  # indeterminate: busy
         QtWidgets.QApplication.processEvents()
         try:
             mutate()
         finally:
-            self.busy_indicator.setVisible(False)
+            self.busy_indicator.setRange(0, 1)
+            self.busy_indicator.setValue(0)
 
     def close(self) -> bool:
         # A detached view shares self._state with every other view (docked

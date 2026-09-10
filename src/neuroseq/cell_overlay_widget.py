@@ -171,6 +171,18 @@ class OverlayView(FullScreenFPLWidget):
         self._lasso_points: list[tuple[float, float]] = []
         self._lasso_line: LineGraphic | None = None
         self.on_geometry_changed: Callable[[AreasOfInterestConfig], None] | None = None
+        # A right click inside the canvas is reserved for the lasso-select
+        # gesture above - Qt's default policy (NoContextMenu) explicitly
+        # *defers an unhandled context-menu event to the parent widget*, so
+        # without this a right click here would still pop open an
+        # ancestor's "Detach panel..." menu (see gui.py's
+        # _install_detach_context_menus) at the same time as starting the
+        # lasso. PreventContextMenu is the one policy that blocks that
+        # deferral; it must be set on both this widget and the actual
+        # rendering canvas (self.widget) since either can be the one that
+        # receives the event.
+        self.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.PreventContextMenu)
+        self.widget.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.PreventContextMenu)
         self._configure_subplot()
         self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
         self.figure.renderer.add_event_handler(self._aoi_pointer_down, "pointer_down")
@@ -847,7 +859,13 @@ class OverlayView(FullScreenFPLWidget):
         if not self.enable_cell_selection or self.segmentation is None:
             return
         allows_click = self.cell_click_button in (0, ev.button)
-        allows_lasso = self.cell_lasso_button in (0, ev.button)
+        allows_lasso = self.cell_lasso_button in (0, ev.button) or (
+            # Shift turns a click-only button (the Spatial Footprints
+            # panel's left button) into a lasso too, without needing the
+            # dedicated lasso button (right) - same gesture, alternate way
+            # to reach it.
+            allows_click and self._event_has_shift(ev)
+        )
         if not (allows_click or allows_lasso):
             return
         mouse_pos = self.subplot.map_screen_to_world(ev)

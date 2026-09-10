@@ -8,6 +8,9 @@ import brian2.numpy_ as np
 from PIL import Image
 from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
+from qtpy import QtCore
+from qtpy import QtGui
+from qtpy import QtWidgets
 
 from neuroseq.aoi_shapes import square_world_corners
 from neuroseq.aoi_shapes import user_to_world_point
@@ -402,28 +405,64 @@ def test_set_overlay_image_is_a_noop_with_a_mismatched_shape_or_no_graphic_yet(
     widget.close()
 
 
-def test_busy_indicator_shown_during_selection_change_and_hidden_after(
+def _busy_indicator_is_busy(indicator: QtWidgets.QProgressBar) -> bool:
+    """The indicator is always visible - `isHidden()` never distinguishes
+    busy from idle. Busy is the indeterminate range (0, 0); idle is a
+    determinate, empty (0, 1) / value 0 bar."""
+    return indicator.minimum() == 0 and indicator.maximum() == 0
+
+
+def test_busy_indicator_is_always_visible_and_shown_during_selection_change(
     qtbot: QtBot,
     monkeypatch: MonkeyPatch,
 ) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
     widget.set_data(_cellpose_result())
-    assert widget.busy_indicator.isHidden()
+    assert not widget.busy_indicator.isHidden()
+    assert not _busy_indicator_is_busy(widget.busy_indicator)
 
-    seen_hidden_during_mutation: list[bool] = []
+    seen_busy_during_mutation: list[bool] = []
     original_toggle_selected = widget._state.toggle_selected
 
     def _spy_toggle_selected(cellpose_id: int) -> None:
-        seen_hidden_during_mutation.append(widget.busy_indicator.isHidden())
+        seen_busy_during_mutation.append(_busy_indicator_is_busy(widget.busy_indicator))
         original_toggle_selected(cellpose_id)
 
     monkeypatch.setattr(widget._state, "toggle_selected", _spy_toggle_selected)
 
     widget.overlay_widget.neuron_clicked.emit(1)
 
-    assert seen_hidden_during_mutation == [False]
-    assert widget.busy_indicator.isHidden()
+    assert seen_busy_during_mutation == [True]
+    assert not widget.busy_indicator.isHidden()
+    assert not _busy_indicator_is_busy(widget.busy_indicator)
+    widget.close()
+
+
+def test_busy_indicator_sits_below_the_checkbox_row(qtbot: QtBot) -> None:
+    """Regression: the indicator used to live in a top bar above the view
+    and get setVisible(False)/(True) toggled, which shifted the view every
+    time it appeared/disappeared - it must now be a fixed, always-visible
+    row below the display-toggle checkboxes instead."""
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+
+    layout = widget.layout()
+    assert layout is not None
+    checkbox_index = layout.indexOf(widget.checkbox_container)
+    busy_index = layout.indexOf(widget.busy_indicator)
+    assert checkbox_index != -1
+    assert busy_index != -1
+    assert busy_index > checkbox_index
+    widget.close()
+
+
+def test_busy_indicator_is_a_quarter_of_its_default_height(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+
+    default_height = QtWidgets.QProgressBar().sizeHint().height()
+    assert widget.busy_indicator.height() == round(default_height / 4)
     widget.close()
 
 
@@ -905,7 +944,7 @@ def test_lasso_selection_adds_cells_and_hides_the_rest(qtbot: QtBot) -> None:
     widget.close()
 
 
-def test_lasso_selection_is_additive(qtbot: QtBot) -> None:
+def test_lasso_selection_grows_when_enclosing_only_new_cells(qtbot: QtBot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
     widget.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
@@ -914,11 +953,29 @@ def test_lasso_selection_is_additive(qtbot: QtBot) -> None:
     emitted: list[list[Any]] = []
     widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
 
-    widget.overlay_widget.neuron_lasso_selected.emit([1, 2])
+    widget.overlay_widget.neuron_lasso_selected.emit([2])
 
     assert widget._selected_cellpose_ids == {1, 2}
     assert widget._greyed_cellpose_ids == {0}
     assert emitted == [[2, False]]
+    widget.close()
+
+
+def test_lasso_selection_toggles_cells_already_selected(qtbot: QtBot) -> None:
+    """Regression: a lasso used to be purely additive - enclosing an
+    already-selected cell alongside new ones now deselects it instead,
+    same as re-clicking it directly would."""
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
+    widget.overlay_widget.neuron_lasso_selected.emit([1])
+    assert widget._selected_cellpose_ids == {1}
+
+    widget.overlay_widget.neuron_lasso_selected.emit([1, 2])
+
+    assert widget._selected_cellpose_ids == {2}
+    assert widget._greyed_cellpose_ids == {0, 1}
+    widget.close()
     widget.close()
 
 
@@ -1156,6 +1213,38 @@ def test_overlay_view_left_click_selects_right_click_does_not(
     overlay_view.close()
 
 
+def test_overlay_view_shift_left_click_without_a_drag_still_just_selects(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Shift only matters if the pointer actually moves past tolerance
+    (see test_overlay_view_shift_left_drag_lassos) - a plain Shift+left
+    click with no drag still selects normally, it doesn't need Shift held
+    to do nothing differently."""
+    overlay_view = OverlayView()
+    qtbot.addWidget(overlay_view)
+    overlay_view.enable_cell_selection = True
+    overlay_view.cell_click_button = 1
+    overlay_view.cell_lasso_button = 2
+    overlay_view.segmentation = np.array([[1]], dtype=np.int32)
+    monkeypatch.setattr(
+        overlay_view.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([0.0, 0.0, 0.0]),
+    )
+    emitted: list[int] = []
+    overlay_view.neuron_clicked.connect(emitted.append)
+
+    overlay_view._cell_selection_pointer_down(
+        SimpleNamespace(button=1, modifiers=("Shift",))
+    )
+    overlay_view._cell_selection_pointer_up(None)
+    qtbot.wait(10)
+
+    assert emitted == [1]
+    overlay_view.close()
+
+
 def test_overlay_view_left_drag_past_tolerance_abandons_the_gesture(
     qtbot: QtBot,
     monkeypatch: MonkeyPatch,
@@ -1192,6 +1281,40 @@ def test_overlay_view_left_drag_past_tolerance_abandons_the_gesture(
     overlay_view.close()
 
 
+def test_overlay_view_shift_left_drag_lassos(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Holding Shift turns a left drag into a lasso too, without needing
+    the dedicated right-button lasso gesture."""
+    overlay_view = OverlayView()
+    qtbot.addWidget(overlay_view)
+    overlay_view.enable_cell_selection = True
+    overlay_view.cell_click_button = 1
+    overlay_view.cell_lasso_button = 2
+    overlay_view.segmentation = np.array([[0, 1]], dtype=np.int32)
+    positions = iter(
+        [
+            np.array([0.0, 0.0, 0.0]),
+            np.array([overlay_view._world_tolerance() + 10.0, 0.0, 0.0]),
+        ]
+    )
+    monkeypatch.setattr(
+        overlay_view.subplot,
+        "map_screen_to_world",
+        lambda ev: next(positions),
+    )
+
+    overlay_view._cell_selection_pointer_down(
+        SimpleNamespace(button=1, modifiers=("Shift",))
+    )
+    overlay_view.pointer_move(None)  # crosses tolerance
+
+    assert overlay_view._lasso_points != []
+    assert not overlay_view.subplot.controller.enabled  # disabled for the lasso drag
+    overlay_view.close()
+
+
 def test_spatial_footprint_widget_click_and_lasso_use_different_buttons(
     qtbot: QtBot,
 ) -> None:
@@ -1201,6 +1324,35 @@ def test_spatial_footprint_widget_click_and_lasso_use_different_buttons(
     assert widget.overlay_widget.overlay_view.cell_click_button == 1
     assert widget.overlay_widget.overlay_view.cell_lasso_button == 2
     widget.close()
+
+
+def test_overlay_view_context_menu_event_does_not_bubble_to_parent(
+    qtbot: QtBot,
+) -> None:
+    """Regression: a right click on the actual cell-drawing canvas used to
+    still pop open an ancestor's "Detach panel..." context menu alongside
+    starting the lasso. Excluding the canvas from the CustomContextMenu
+    target list (gui.py's _install_detach_context_menus) wasn't enough on
+    its own - Qt's default policy (NoContextMenu) explicitly *defers an
+    unhandled QContextMenuEvent to the parent widget*, so the event still
+    reached the ancestor's CustomContextMenu handler. Only PreventContextMenu
+    blocks that deferral outright."""
+    parent = QtWidgets.QWidget()
+    parent.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+    requests: list[QtCore.QPoint] = []
+    parent.customContextMenuRequested.connect(requests.append)
+    layout = QtWidgets.QVBoxLayout(parent)
+    overlay_view = OverlayView(parent)
+    layout.addWidget(overlay_view)
+    qtbot.addWidget(parent)
+
+    for target in (overlay_view, overlay_view.widget):
+        event = QtGui.QContextMenuEvent(
+            QtGui.QContextMenuEvent.Reason.Mouse, QtCore.QPoint(1, 1)
+        )
+        QtWidgets.QApplication.sendEvent(target, event)
+
+    assert requests == []
 
 
 def test_overlay_view_background_click_emits_background_clicked(

@@ -185,13 +185,17 @@ class SpatialFootprintState(QtCore.QObject):
             new_selected.add(cellpose_id)
         self._set_selected(new_selected)
 
-    def add_selected(self, cellpose_ids: Iterable[int]) -> None:
-        """Add every id to the selection (additive - a lasso never
-        deselects an id that was already selected)."""
-        new_ids = set(cellpose_ids) - self.selected_cellpose_ids
-        if not new_ids:
+    def toggle_selected_many(self, cellpose_ids: Iterable[int]) -> None:
+        """Toggle every id's selection state - each one already selected is
+        deselected, each one not yet selected is added, exactly like
+        `toggle_selected` applied to each id at once. Lets a lasso be used
+        to both grow a selection (enclose new cells) and shrink it (enclose
+        already-selected ones to drop them), same as a plain click does for
+        one cell at a time."""
+        ids = set(cellpose_ids)
+        if not ids:
             return
-        self._set_selected(self.selected_cellpose_ids | new_ids)
+        self._set_selected(self.selected_cellpose_ids ^ ids)
 
     def clear_selection(self) -> None:
         if not self.selected_cellpose_ids:
