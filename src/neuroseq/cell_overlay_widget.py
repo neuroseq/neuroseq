@@ -150,6 +150,11 @@ class OverlayView(FullScreenFPLWidget):
         self._aoi_redo_stack: list[AreasOfInterestConfig] = []
         self.aoi_editable = True
         self.enable_cell_selection = False
+        # Which pygfx button (1=left, 2=right, 3=middle) triggers cell
+        # selection/lasso; 0 means "any button" (the historical default,
+        # kept for callers - the Cell Segmentation import dialog - that
+        # haven't opted into a specific one).
+        self.cell_selection_button = 0
         self._cell_click_down_world: tuple[float, float] | None = None
         # A cell-selection gesture starts as a plain click; if the pointer
         # moves past _world_tolerance() before release, it becomes a lasso
@@ -831,7 +836,14 @@ class OverlayView(FullScreenFPLWidget):
             self.on_geometry_changed(config)
 
     def _cell_selection_pointer_down(self, ev: pygfx.PointerEvent) -> None:
-        if not self.enable_cell_selection or self.segmentation is None:
+        if (
+            not self.enable_cell_selection
+            or self.segmentation is None
+            or (
+                self.cell_selection_button != 0
+                and ev.button != self.cell_selection_button
+            )
+        ):
             return
         mouse_pos = self.subplot.map_screen_to_world(ev)
         if mouse_pos is None:
@@ -1418,6 +1430,11 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
 
     def set_cell_selection_enabled(self, enabled: bool) -> None:
         self.overlay_view.enable_cell_selection = enabled
+
+    def set_cell_selection_button(self, button: int) -> None:
+        """Restrict click/lasso cell selection to one pygfx button (1=left,
+        2=right, 3=middle); 0 (the default) means any button."""
+        self.overlay_view.cell_selection_button = button
 
     def set_aoi_editable(self, editable: bool) -> None:
         """Whether the AOI square/circle (if shown) can be dragged to reshape

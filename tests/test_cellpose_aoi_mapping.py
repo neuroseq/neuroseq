@@ -217,6 +217,37 @@ def test_aoi_config_round_trips_through_io(tmp_path: Path) -> None:
     assert loaded_result.segmentation_path == result.segmentation_path
 
 
+def test_background_image_round_trips_through_io(tmp_path: Path) -> None:
+    background = np.arange(12, dtype=np.uint8).reshape(2, 2, 3)
+    result = CellposeImportResult(
+        image_path=tmp_path / "image.png",
+        segmentation_array=np.zeros((2, 2), dtype=np.int32),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        background_image=background,
+    )
+
+    reloaded = _save_and_reload_json({"cellpose": result}, tmp_path)
+    loaded_result = reloaded["cellpose"]
+
+    np.testing.assert_array_equal(loaded_result.background_image, background)
+
+
+def test_missing_background_image_round_trips_as_none(tmp_path: Path) -> None:
+    result = CellposeImportResult(
+        image_path=tmp_path / "image.png",
+        segmentation_array=np.zeros((2, 2), dtype=np.int32),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+    )
+
+    reloaded = _save_and_reload_json({"cellpose": result}, tmp_path)
+
+    assert reloaded["cellpose"].background_image is None
+
+
 def test_dialog_selects_aoi_strategy_shows_subgroup(
     tmp_path: Path, qtbot: QtBot
 ) -> None:

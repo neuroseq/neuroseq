@@ -43,6 +43,38 @@ def test_stim_editor_no_data(qtbot: QtBot) -> None:
     stim_editor.show()
     qtbot.waitUntil(lambda: stim_editor.isVisible())
     stim_editor.close()
+
+
+def test_trim_to_mapped_neurons_action_sits_right_after_clear_stim_array(
+    qtbot: QtBot,
+) -> None:
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+
+    actions = toolbar.actions()
+    clear_index = next(
+        i for i, action in enumerate(actions) if action.text() == "Clear stim array"
+    )
+
+    assert actions[clear_index + 1] is stim_editor.action_trim_to_mapped_neurons
+    assert not stim_editor.action_trim_to_mapped_neurons.isEnabled()
+    stim_editor.close()
+
+
+def test_trim_to_mapped_neurons_action_emits_its_own_signal(qtbot: QtBot) -> None:
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+    stim_editor.action_trim_to_mapped_neurons.setEnabled(True)
+
+    with qtbot.waitSignal(stim_editor.trim_to_mapped_neurons_requested):
+        stim_editor.action_trim_to_mapped_neurons.trigger()
+    stim_editor.close()
     qtbot.waitUntil(lambda: not stim_editor.isVisible())
 
 

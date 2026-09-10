@@ -338,6 +338,50 @@ def _make_gui_cellpose_result(
     )
 
 
+def test_trim_to_mapped_neurons_action_lives_in_the_stim_toolbar(
+    qtbot: QtBot,
+) -> None:
+    """The action moved out of the Spatial Footprints panel and into the
+    left-side stim editor toolbar, disabled until there's an actual
+    mapping to trim to."""
+    gui = Gui()
+    qtbot.addWidget(gui)
+    action = gui.stim_editor.action_trim_to_mapped_neurons
+    assert action in gui.toolbar_stim_editor.actions()
+    assert not action.isEnabled()
+
+    project = Project()
+    project.cellpose_data = _make_gui_cellpose_result(mapping=None)
+    gui.update_project(project)
+    assert not action.isEnabled()
+
+    project.cellpose_data = _make_gui_cellpose_result(mapping={0: 0})
+    gui.spatial_footprint_widget.set_data(project.cellpose_data)
+    assert action.isEnabled()
+
+    gui.spatial_footprint_widget.set_data(None)
+    assert not action.isEnabled()
+    gui.close()
+
+
+def test_trim_to_mapped_neurons_action_triggers_the_trim_handler(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project = Project()
+    project.cellpose_data = _make_gui_cellpose_result(mapping={0: 0})
+    gui.update_project(project)
+    assert gui.stim_editor.action_trim_to_mapped_neurons.isEnabled()
+    calls: list[int] = []
+    gui.stim_editor.trim_to_mapped_neurons_requested.connect(lambda: calls.append(1))
+
+    gui.stim_editor.action_trim_to_mapped_neurons.trigger()
+
+    assert calls == [1]
+    gui.close()
+
+
 def test_trim_to_mapped_neurons_reports_nothing_to_trim_without_mapping(
     qtbot: QtBot,
     qmessagebox_calls: list,

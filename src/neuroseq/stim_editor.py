@@ -63,6 +63,7 @@ class StimEditor(QtWidgets.QWidget):
     simulation_requested = QtCore.Signal(float)
     time_range_focus_requested = QtCore.Signal(float, float)
     current_stim_changed = QtCore.Signal(object)  # StimArray | None
+    trim_to_mapped_neurons_requested = QtCore.Signal()
 
     # Dynamic-input routines offered when the user opens the designer.
     TARGETED_STDP_ROUTINE = "Targeted STDP synaptic strength"
@@ -1291,6 +1292,20 @@ class StimEditor(QtWidgets.QWidget):
             toolbar,
             self,
             icon="mdi6.text-box-minus",
+        )
+        self.action_trim_to_mapped_neurons = add_action(
+            "Trim to Mapped Neurons…",
+            self.trim_to_mapped_neurons_requested.emit,
+            menu,
+            toolbar,
+            self,
+            icon="mdi6.content-cut",
+        )
+        self.action_trim_to_mapped_neurons.setEnabled(False)
+        self.action_trim_to_mapped_neurons.setToolTip(
+            "Permanently keep only the neurons with a Cellpose cell mapped to "
+            "them, removing the rest from every stim array and experiment in "
+            "this project."
         )
         add_action(
             "Pad stim array (Ctrl+Shift+Plus)",

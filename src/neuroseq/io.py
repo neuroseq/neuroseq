@@ -173,6 +173,11 @@ def _json_encoder_factory(zf: zipfile.ZipFile):
                         original_ids_path = _save_array(
                             zf, "cellpose_original_ids", obj.original_cellpose_ids
                         )
+                    background_image_path = None
+                    if obj.background_image is not None:
+                        background_image_path = _save_array(
+                            zf, "cellpose_background", obj.background_image
+                        )
                     return {
                         "!CellposeImportResult": True,
                         "image_path": str(obj.image_path),
@@ -190,6 +195,7 @@ def _json_encoder_factory(zf: zipfile.ZipFile):
                             if obj.segmentation_path is None
                             else str(obj.segmentation_path)
                         ),
+                        "background_image": background_image_path,
                     }
                 case b2.Quantity():
                     value, unit = quantity_to_value_unit_str(obj)
@@ -325,6 +331,11 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                     with _zf.open(original_cellpose_ids) as fp:
                         loaded_original_ids = np.load(fp)
                 segmentation_path = rest.get("segmentation_path")
+                background_image_path = rest.get("background_image")
+                loaded_background_image = None
+                if background_image_path is not None:
+                    with _zf.open(background_image_path) as fp:
+                        loaded_background_image = np.load(fp)
 
                 return CellposeImportResult(
                     image_path=Path(image_path),
@@ -349,6 +360,7 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                     segmentation_path=(
                         None if segmentation_path is None else Path(segmentation_path)
                     ),
+                    background_image=loaded_background_image,
                 )
             case {
                 "!CellposeImportResult": True,

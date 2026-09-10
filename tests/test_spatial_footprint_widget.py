@@ -30,6 +30,14 @@ from neuroseq.spatial_footprint_widget import UNSELECTED_CELL_BRIGHTNESS
 from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
 
 
+def _right_click_event() -> SimpleNamespace:
+    """A stand-in pointer event for _cell_selection_pointer_down - only
+    its .button is read (pygfx numbering: 1=left, 2=right, 3=middle);
+    map_screen_to_world (which would read x/y) is monkeypatched in these
+    tests to ignore the event object entirely."""
+    return SimpleNamespace(button=2)
+
+
 def _cellpose_result(
     mapping: dict[int, int] | None = None,
     aoi_config: AreasOfInterestConfig | None = None,
@@ -187,6 +195,45 @@ def test_show_segmentation_checkbox_toggles_the_segmentation_layer(
     widget.close()
 
 
+def test_show_segmentation_checkbox_reveals_the_stored_background_image(
+    qtbot: QtBot,
+) -> None:
+    """Regression: unchecking "Show segmentation" used to have no visible
+    effect, because the composed image (overlay_image) always has cell
+    colors baked in and there was nowhere else to fall back to - it must
+    now reveal the stored, uncolored background_image instead."""
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    segmentation = np.zeros((8, 8), dtype=np.int32)
+    segmentation[:, 4:] = 1
+    overlay_image = np.zeros((8, 8, 3), dtype=np.uint8)
+    overlay_image[:, :4] = (0, 0, 200)
+    overlay_image[:, 4:] = (200, 0, 0)
+    background_image = np.full((8, 8, 3), 128, dtype=np.uint8)
+    result = CellposeImportResult(
+        image_path=Path("cellpose.png"),
+        segmentation_array=segmentation,
+        overlay_image=overlay_image,
+        background_image=background_image,
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.array([0, 1], dtype=np.int32),
+        stimulus_to_cellpose_mapping={0: 0, 1: 1},
+    )
+    widget.set_data(result)
+    image_graphic = widget.overlay_widget.overlay_view._image_graphic
+    assert image_graphic is not None
+    before_image = np.asarray(image_graphic.data.value).copy()
+    np.testing.assert_array_equal(before_image, overlay_image)
+
+    widget.show_segmentation_checkbox.setChecked(False)
+
+    after_image = np.asarray(image_graphic.data.value)
+    np.testing.assert_array_equal(after_image, background_image)
+    assert not np.array_equal(after_image, before_image)
+    widget.close()
+
+
 def test_show_shapes_checkbox_toggles_aoi_overlay_live(qtbot: QtBot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
@@ -217,33 +264,6 @@ def test_import_button_emits_import_requested(qtbot: QtBot) -> None:
 
     with qtbot.waitSignal(widget.import_requested):
         widget.import_button.click()
-
-    widget.close()
-
-
-def test_trim_button_enabled_only_with_a_mapping(qtbot: QtBot) -> None:
-    widget = SpatialFootprintWidget()
-    qtbot.addWidget(widget)
-    assert not widget.trim_to_mapped_neurons_button.isEnabled()
-
-    widget.set_data(_cellpose_result(mapping=None))
-    assert not widget.trim_to_mapped_neurons_button.isEnabled()
-
-    widget.set_data(_cellpose_result(mapping={0: 0}))
-    assert widget.trim_to_mapped_neurons_button.isEnabled()
-
-    widget.set_data(None)
-    assert not widget.trim_to_mapped_neurons_button.isEnabled()
-    widget.close()
-
-
-def test_trim_button_emits_trim_to_mapped_neurons_requested(qtbot: QtBot) -> None:
-    widget = SpatialFootprintWidget()
-    qtbot.addWidget(widget)
-    widget.set_data(_cellpose_result(mapping={0: 0}))
-
-    with qtbot.waitSignal(widget.trim_to_mapped_neurons_requested):
-        widget.trim_to_mapped_neurons_button.click()
 
     widget.close()
 
@@ -398,28 +418,7 @@ def test_selecting_a_second_cell_only_shows_both_selected_cells(
     widget.close()
 
 
-def test_clear_selection_button_disabled_until_a_cell_is_selected(
-    qtbot: QtBot,
-) -> None:
-    widget = SpatialFootprintWidget()
-    qtbot.addWidget(widget)
-
-    assert not widget.clear_selection_button.isEnabled()
-
-    widget.set_data(_cellpose_result())
-    assert not widget.clear_selection_button.isEnabled()
-
-    widget.overlay_widget.neuron_clicked.emit(1)
-    assert widget.clear_selection_button.isEnabled()
-
-    widget.overlay_widget.neuron_clicked.emit(1)  # toggled back off
-    assert not widget.clear_selection_button.isEnabled()
-    widget.close()
-
-
-def test_clear_selection_button_shows_all_cells_and_disables_itself(
-    qtbot: QtBot,
-) -> None:
+def test_clear_selection_shows_all_cells_again(qtbot: QtBot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
     widget.set_data(_cellpose_result(mapping={0: 2, 1: 1, 2: 0}))
@@ -430,11 +429,10 @@ def test_clear_selection_button_shows_all_cells_and_disables_itself(
     emitted: list[list[Any]] = []
     widget.neuron_greyed_out_changed.connect(lambda *args: emitted.append(list(args)))
 
-    widget.clear_selection_button.click()
+    widget.clear_selection()
 
     assert widget._selected_cellpose_ids == set()
     assert widget._greyed_cellpose_ids == set()
-    assert not widget.clear_selection_button.isEnabled()
     assert emitted == [[2, False]]
     widget.close()
 
@@ -885,7 +883,7 @@ def test_overlay_view_lasso_selects_only_enclosed_cells(
     )
 
     with qtbot.waitSignal(overlay_view.neuron_lasso_selected) as blocker:
-        overlay_view._cell_selection_pointer_down(None)
+        overlay_view._cell_selection_pointer_down(_right_click_event())
         overlay_view.pointer_move(None)  # crosses tolerance -> becomes a lasso
         overlay_view.pointer_move(None)
         overlay_view.pointer_move(None)
@@ -922,7 +920,7 @@ def test_overlay_view_lasso_ignores_loop_enclosing_nothing(
     emitted: list[list[int]] = []
     overlay_view.neuron_lasso_selected.connect(emitted.append)
 
-    overlay_view._cell_selection_pointer_down(None)
+    overlay_view._cell_selection_pointer_down(_right_click_event())
     overlay_view.pointer_move(None)
     overlay_view.pointer_move(None)
     overlay_view.pointer_move(None)
@@ -953,7 +951,7 @@ def test_overlay_view_plain_click_does_not_start_a_lasso(
     overlay_view.neuron_lasso_selected.connect(lasso_emitted.append)
 
     with qtbot.waitSignal(overlay_view.neuron_clicked) as blocker:
-        overlay_view._cell_selection_pointer_down(None)
+        overlay_view._cell_selection_pointer_down(_right_click_event())
         overlay_view._cell_selection_pointer_up(None)
         qtbot.wait(10)
 
@@ -998,7 +996,7 @@ def test_overlay_view_emits_neuron_clicked_on_plain_click(
     )
 
     with qtbot.waitSignal(overlay_view.neuron_clicked) as blocker:
-        overlay_view._cell_selection_pointer_down(None)
+        overlay_view._cell_selection_pointer_down(_right_click_event())
         overlay_view._cell_selection_pointer_up(None)
 
     assert blocker.args == [1]
@@ -1031,7 +1029,7 @@ def test_overlay_view_ignores_drag_past_tolerance_with_no_move_event(
     emitted: list[int] = []
     overlay_view.neuron_clicked.connect(emitted.append)
 
-    overlay_view._cell_selection_pointer_down(None)
+    overlay_view._cell_selection_pointer_down(_right_click_event())
     overlay_view._cell_selection_pointer_up(None)
     qtbot.wait(10)
 
@@ -1054,12 +1052,54 @@ def test_overlay_view_ignores_click_when_selection_disabled(
     emitted: list[int] = []
     overlay_view.neuron_clicked.connect(emitted.append)
 
-    overlay_view._cell_selection_pointer_down(None)
+    overlay_view._cell_selection_pointer_down(_right_click_event())
     overlay_view._cell_selection_pointer_up(None)
     qtbot.wait(10)
 
     assert emitted == []
     overlay_view.close()
+
+
+def test_overlay_view_ignores_left_click_when_restricted_to_right_button(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """SpatialFootprintWidget restricts selection to the right button (left
+    is free for panning) via set_cell_selection_button - verify the
+    underlying OverlayView actually honors that restriction."""
+    overlay_view = OverlayView()
+    qtbot.addWidget(overlay_view)
+    overlay_view.enable_cell_selection = True
+    overlay_view.cell_selection_button = 2
+    overlay_view.segmentation = np.array([[1]], dtype=np.int32)
+    monkeypatch.setattr(
+        overlay_view.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([0.0, 0.0, 0.0]),
+    )
+    emitted: list[int] = []
+    overlay_view.neuron_clicked.connect(emitted.append)
+
+    overlay_view._cell_selection_pointer_down(SimpleNamespace(button=1))  # left
+    overlay_view._cell_selection_pointer_up(None)
+    qtbot.wait(10)
+    assert emitted == []
+
+    overlay_view._cell_selection_pointer_down(_right_click_event())
+    overlay_view._cell_selection_pointer_up(None)
+    qtbot.wait(10)
+    assert emitted == [1]
+    overlay_view.close()
+
+
+def test_spatial_footprint_widget_restricts_selection_to_right_button(
+    qtbot: QtBot,
+) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+
+    assert widget.overlay_widget.overlay_view.cell_selection_button == 2
+    widget.close()
 
 
 def test_overlay_view_background_click_emits_background_clicked(
@@ -1079,7 +1119,7 @@ def test_overlay_view_background_click_emits_background_clicked(
     overlay_view.neuron_clicked.connect(clicked.append)
 
     with qtbot.waitSignal(overlay_view.background_clicked):
-        overlay_view._cell_selection_pointer_down(None)
+        overlay_view._cell_selection_pointer_down(_right_click_event())
         overlay_view._cell_selection_pointer_up(None)
 
     assert clicked == []
@@ -1306,13 +1346,10 @@ def test_two_views_sharing_state_stay_in_sync_on_click(qtbot: QtBot) -> None:
 
     assert view_a._greyed_cellpose_ids == {0, 2}
     assert view_b._greyed_cellpose_ids == {0, 2}
-    assert view_a.clear_selection_button.isEnabled()
-    assert view_b.clear_selection_button.isEnabled()
 
-    view_b.clear_selection_button.click()
+    view_b.clear_selection()
 
     assert view_a._greyed_cellpose_ids == set()
-    assert not view_a.clear_selection_button.isEnabled()
     view_a.close()
     view_b.close()
 

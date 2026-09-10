@@ -368,9 +368,6 @@ class Gui(QtWidgets.QMainWindow):
         self.spatial_footprint_widget.import_requested.connect(
             self.btn_import_cellpose_data_clicked
         )
-        self.spatial_footprint_widget.trim_to_mapped_neurons_requested.connect(
-            self.btn_trim_to_mapped_neurons_clicked
-        )
         self.spatial_footprint_widget.neurons_greyed_out_changed.connect(
             self._on_neurons_greyed_out_changed
         )
@@ -422,6 +419,12 @@ class Gui(QtWidgets.QMainWindow):
             self.trace_controller.focus_time_range
         )
         self.stim_editor.current_stim_changed.connect(self._on_current_stim_changed)
+        self.stim_editor.trim_to_mapped_neurons_requested.connect(
+            self.btn_trim_to_mapped_neurons_clicked
+        )
+        self._spatial_footprint_state.data_changed.connect(
+            self._on_spatial_footprint_data_changed_for_trim_action
+        )
         self.stim_editor.stim_widget.neuron_hovered.connect(
             self._spatial_footprint_state.set_hovered_stim_id
         )
@@ -2218,6 +2221,18 @@ class Gui(QtWidgets.QMainWindow):
         if hasattr(self, "spatial_footprint_widget"):
             self.spatial_footprint_widget.set_data(None)
 
+    def _on_spatial_footprint_data_changed_for_trim_action(self) -> None:
+        """Keep the left toolbar's "Trim to Mapped Neurons…" action enabled
+        only once there's an actual mapping to trim to - it lives in
+        stim_editor.py's toolbar, not the Spatial Footprints panel itself,
+        so it can't gate its own enabled state off the panel's own data."""
+        cellpose_data = self._spatial_footprint_state.cellpose_data
+        self.stim_editor.action_trim_to_mapped_neurons.setEnabled(
+            bool(
+                cellpose_data is not None and cellpose_data.stimulus_to_cellpose_mapping
+            )
+        )
+
     def btn_trim_to_mapped_neurons_clicked(self) -> None:
         """Permanently keep only Cellpose-mapped neurons across the whole
         project, then require the result to be saved under a new file (never
@@ -3267,9 +3282,6 @@ class Gui(QtWidgets.QMainWindow):
             parent=None, state=self._spatial_footprint_state
         )
         widget.import_requested.connect(self.btn_import_cellpose_data_clicked)
-        widget.trim_to_mapped_neurons_requested.connect(
-            self.btn_trim_to_mapped_neurons_clicked
-        )
         return widget
 
     def _build_fresh_custom_analysis_widget(self) -> CustomAnalysisWidget | None:

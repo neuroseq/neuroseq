@@ -46,7 +46,6 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
     """
 
     import_requested = QtCore.Signal()
-    trim_to_mapped_neurons_requested = QtCore.Signal()
     neuron_greyed_out_changed = QtCore.Signal(int, bool)
     neurons_greyed_out_changed = QtCore.Signal(list, list)
 
@@ -61,19 +60,6 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         top_bar_layout = QtWidgets.QHBoxLayout()
-        self.trim_to_mapped_neurons_button = QtWidgets.QPushButton(
-            "Trim to Mapped Neurons…"
-        )
-        self.trim_to_mapped_neurons_button.setEnabled(False)
-        self.trim_to_mapped_neurons_button.setToolTip(
-            "Permanently keep only the neurons with a Cellpose cell mapped to "
-            "them, removing the rest from every stim array and experiment in "
-            "this project."
-        )
-        self.trim_to_mapped_neurons_button.clicked.connect(
-            self.trim_to_mapped_neurons_requested.emit
-        )
-        top_bar_layout.addWidget(self.trim_to_mapped_neurons_button)
         self.busy_indicator = QtWidgets.QProgressBar()
         self.busy_indicator.setRange(0, 0)  # indeterminate: no per-step progress
         self.busy_indicator.setTextVisible(False)
@@ -81,10 +67,6 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self.busy_indicator.setVisible(False)
         top_bar_layout.addWidget(self.busy_indicator)
         top_bar_layout.addStretch(1)
-        self.clear_selection_button = QtWidgets.QPushButton("Clear cell selection")
-        self.clear_selection_button.setEnabled(False)
-        self.clear_selection_button.clicked.connect(self.clear_selection)
-        top_bar_layout.addWidget(self.clear_selection_button)
         layout.addLayout(top_bar_layout)
 
         self.empty_state_widget = QtWidgets.QWidget(self)
@@ -102,12 +84,16 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         empty_layout.addStretch(1)
         layout.addWidget(self.empty_state_widget)
 
-        self.overlay_widget = CellOverlayWidget(title="Spatial Footprints")
+        self.overlay_widget = CellOverlayWidget("")
         self.overlay_widget.set_display_options(
             show_cellpose_ids=False,
             show_stimulus_ids=True,
         )
         self.overlay_widget.set_cell_selection_enabled(True)
+        # Right click (drag) only, so left click/drag is free to just pan
+        # the view like everywhere else - the Cell Segmentation import
+        # dialog is unaffected, and keeps selecting on any button.
+        self.overlay_widget.set_cell_selection_button(2)
         # AOI shapes are shown here purely as a reference of what produced the
         # current mapping - editing them happens in the Cell Segmentation
         # import dialog, not here.
@@ -184,12 +170,6 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
 
     def _on_state_data_changed(self) -> None:
         cellpose_data = self._state.cellpose_data
-        self._update_clear_selection_button()
-        self.trim_to_mapped_neurons_button.setEnabled(
-            bool(
-                cellpose_data is not None and cellpose_data.stimulus_to_cellpose_mapping
-            )
-        )
         if cellpose_data is None:
             self._base_legend = []
             self.overlay_widget.set_empty_message("No cell spatial footprints loaded.")
@@ -233,7 +213,6 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         )
 
     def _on_state_selection_changed(self) -> None:
-        self._update_clear_selection_button()
         self._refresh_overlay()
 
     def _on_state_hovered_changed(self) -> None:
@@ -261,6 +240,11 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             self._cellpose_data.original_cellpose_ids,
             self._cellpose_data.stimulus_to_cellpose_mapping,
             legend_data=self._base_legend,
+            # Without this, unchecking "Show segmentation" only hides an
+            # additional color graphic - the composed image itself already
+            # has cell colors baked in (CellPoseImporter.generate_overlay),
+            # so there'd be nothing visibly different to fall back to.
+            base_image=self._cellpose_data.background_image,
         )
 
     def _composed_overlay_image(self) -> np.ndarray:
@@ -388,9 +372,6 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         values = np.asarray(color, dtype=np.float32) * scale
         values = np.clip(values, 0.0, scale)
         return values.astype(image.dtype, copy=False)
-
-    def _update_clear_selection_button(self) -> None:
-        self.clear_selection_button.setEnabled(bool(self._selected_cellpose_ids))
 
     def clear_selection(self) -> None:
         self._with_busy_indicator(self._state.clear_selection)

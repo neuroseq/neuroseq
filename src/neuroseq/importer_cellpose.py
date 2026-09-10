@@ -60,6 +60,11 @@ class CellposeImportResult:
     linear_offset: int | None = None
     aoi_config: AreasOfInterestConfig | None = None
     segmentation_path: Path | None = None
+    # The raw, uncolored image `overlay_image` was generated from - kept so
+    # views can fall back to it (e.g. to make a "hide segmentation colors"
+    # toggle actually change anything) without depending on image_path
+    # still pointing at a reachable file.
+    background_image: np.ndarray | None = None
 
 
 def clone_aoi_config(
@@ -227,6 +232,11 @@ def clone_cellpose_result(
         linear_offset=result.linear_offset,
         aoi_config=clone_aoi_config(result.aoi_config),
         segmentation_path=getattr(result, "segmentation_path", None),
+        background_image=(
+            None
+            if result.background_image is None
+            else np.array(result.background_image, copy=True)
+        ),
     )
 
 
@@ -583,6 +593,11 @@ class CellPoseImporter:
             linear_offset=linear_offset,
             aoi_config=clone_aoi_config(aoi_config),
             segmentation_path=segmentation_path,
+            background_image=(
+                None
+                if self.image_data is None
+                else np.array(self.image_data, copy=True)
+            ),
         )
 
     def restore_from_result(self, result: CellposeImportResult) -> None:
@@ -602,7 +617,8 @@ class CellPoseImporter:
         )
         self._segmentation_flipped_for_image = self.segmentation_data is not None
 
-        # Attempt to reload the original image; fall back to stored overlay if unavailable.
+        # Attempt to reload the original image; fall back to the stored raw
+        # background, then the (colored) overlay, if unavailable.
         self.image_data = None
         if result.image_path.exists():
             try:
@@ -612,6 +628,8 @@ class CellPoseImporter:
                     "Could not reload original image at %s; using stored overlay instead",
                     result.image_path,
                 )
+        if self.image_data is None and result.background_image is not None:
+            self.image_data = np.array(result.background_image, copy=True)
         if self.image_data is None and self.overlay_image is not None:
             self.image_data = np.array(self.overlay_image, copy=True)
 

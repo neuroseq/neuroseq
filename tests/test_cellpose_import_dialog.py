@@ -173,6 +173,18 @@ def _original_ids(dialog: CellposeImportDialog) -> list[int]:
     return sorted(int(cellpose_id) for cellpose_id in ids)
 
 
+def test_dialog_cell_selection_is_not_restricted_to_a_single_button(
+    tmp_path, qtbot: QtBot
+) -> None:
+    """Regression: the Spatial Footprints panel restricts click/lasso cell
+    selection to the right mouse button (left is for panning there), but
+    that must not affect this dialog's own click-to-select (manual mapping
+    assignment) - it still responds to any button."""
+    dialog = _make_cellpose_dialog(tmp_path, qtbot)
+
+    assert dialog.overlay_widget.overlay_view.cell_selection_button == 0
+
+
 def test_manual_click_checkbox_only_visible_for_custom_strategy(
     tmp_path, qtbot: QtBot
 ) -> None:
