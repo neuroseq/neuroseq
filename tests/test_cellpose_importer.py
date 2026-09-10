@@ -8,6 +8,7 @@ from PIL import Image
 from neuroseq.importer_cellpose import CellPoseImporter
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_cellpose import generate_linear_stimulus_mapping
+from neuroseq.importer_cellpose import load_background_image
 from neuroseq.utils import neuron_indices_to_colors
 
 """
@@ -511,6 +512,24 @@ def test_restore_from_result_falls_back_to_stored_background_image(tmp_path):
     assert restored.image_data is not None
     np.testing.assert_array_equal(restored.image_data, result.background_image)
     assert not np.array_equal(restored.image_data, result.overlay_image)
+
+
+def test_load_background_image_reloads_from_disk(tmp_path):
+    base_image = np.full((16, 16, 3), 50, dtype=np.uint8)
+    image_path = tmp_path / "image.png"
+    Image.fromarray(base_image).save(image_path)
+
+    importer = CellPoseImporter()
+    importer.load_image_file(str(image_path))
+
+    reloaded = load_background_image(image_path)
+
+    assert reloaded is not None
+    np.testing.assert_array_equal(reloaded, importer.image_data)
+
+
+def test_load_background_image_returns_none_when_file_missing(tmp_path):
+    assert load_background_image(tmp_path / "missing.png") is None
 
 
 def test_restore_from_result_preserves_custom_mapping(tmp_path):

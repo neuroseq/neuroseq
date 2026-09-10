@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import brian2.numpy_ as np
+from PIL import Image
 from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 
@@ -231,6 +232,68 @@ def test_show_segmentation_checkbox_reveals_the_stored_background_image(
     after_image = np.asarray(image_graphic.data.value)
     np.testing.assert_array_equal(after_image, background_image)
     assert not np.array_equal(after_image, before_image)
+    widget.close()
+
+
+def test_show_segmentation_checkbox_reloads_background_from_disk_when_missing(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    """Regression: projects saved before `background_image` existed have
+    `None` there even though the original image file may still be reachable
+    on disk - the widget must reload it lazily (same fallback the Cell
+    Segmentation import dialog already has via
+    `CellPoseImporter.restore_from_result`), not just show the colored
+    overlay regardless of the checkbox."""
+    segmentation = np.zeros((8, 8), dtype=np.int32)
+    segmentation[:, 4:] = 1
+    overlay_image = np.zeros((8, 8, 3), dtype=np.uint8)
+    overlay_image[:, :4] = (0, 0, 200)
+    overlay_image[:, 4:] = (200, 0, 0)
+    background_image = np.full((8, 8, 3), 128, dtype=np.uint8)
+    image_path = tmp_path / "cellpose.png"
+    Image.fromarray(background_image).save(image_path)
+
+    result = CellposeImportResult(
+        image_path=image_path,
+        segmentation_array=segmentation,
+        overlay_image=overlay_image,
+        background_image=None,  # as an old, pre-existing project would load
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.array([0, 1], dtype=np.int32),
+        stimulus_to_cellpose_mapping={0: 0, 1: 1},
+    )
+
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(result)
+
+    assert result.background_image is not None
+
+    image_graphic = widget.overlay_widget.overlay_view._image_graphic
+    assert image_graphic is not None
+    np.testing.assert_array_equal(np.asarray(image_graphic.data.value), overlay_image)
+
+    widget.show_segmentation_checkbox.setChecked(False)
+
+    after_image = np.asarray(image_graphic.data.value)
+    np.testing.assert_array_equal(after_image, result.background_image)
+    assert not np.array_equal(after_image, overlay_image)
+    widget.close()
+
+
+def test_set_data_leaves_background_image_none_when_file_unreachable(
+    qtbot: QtBot,
+) -> None:
+    """No original file on disk (e.g. `_cellpose_result()`'s placeholder
+    path) - the lazy reload must fail silently, not raise."""
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+
+    result = _cellpose_result()
+    widget.set_data(result)
+
+    assert result.background_image is None
     widget.close()
 
 

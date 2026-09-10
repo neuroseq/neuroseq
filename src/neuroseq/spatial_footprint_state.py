@@ -6,6 +6,7 @@ import brian2.numpy_ as np
 from qtpy import QtCore
 
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importer_cellpose import load_background_image
 
 
 class SpatialFootprintState(QtCore.QObject):
@@ -133,6 +134,16 @@ class SpatialFootprintState(QtCore.QObject):
         self.active_stim_ids_changed.emit()
 
     def set_data(self, cellpose_data: CellposeImportResult | None) -> None:
+        if cellpose_data is not None and cellpose_data.background_image is None:
+            # Projects saved before `background_image` existed have none
+            # baked into the archive - best-effort reload it from the
+            # original file so "Show segmentation" has a raw background to
+            # fall back to here too, matching what the Cell Segmentation
+            # import dialog already does via
+            # `CellPoseImporter.restore_from_result`.
+            cellpose_data.background_image = load_background_image(
+                cellpose_data.image_path
+            )
         self.cellpose_data = cellpose_data
         self.selected_cellpose_ids = set()
         self.hovered_stim_id = None

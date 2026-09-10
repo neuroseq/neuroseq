@@ -67,6 +67,26 @@ class CellposeImportResult:
     background_image: np.ndarray | None = None
 
 
+def load_background_image(image_path: Path) -> np.ndarray | None:
+    """Best-effort reload of the raw (uncolored) image at `image_path`.
+
+    Used to backfill `CellposeImportResult.background_image` for projects
+    saved before that field existed, so a "Show segmentation" toggle has a
+    genuine raw background to fall back to instead of always showing the
+    colored overlay - the same fallback `CellPoseImporter.restore_from_result`
+    already relies on. Returns `None` if the file no longer exists or fails
+    to load, rather than raising.
+    """
+    if not image_path.exists():
+        return None
+    importer = CellPoseImporter()
+    try:
+        importer.load_image_file(image_path)
+    except ValueError:
+        return None
+    return importer.image_data
+
+
 def clone_aoi_config(
     config: AreasOfInterestConfig | None,
 ) -> AreasOfInterestConfig | None:
