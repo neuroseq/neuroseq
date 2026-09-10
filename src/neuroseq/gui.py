@@ -2711,23 +2711,6 @@ class Gui(QtWidgets.QMainWindow):
             icon="mdi6.file-code",
         )
 
-        export_graphics_menu = menu.addMenu("Export &graphics")
-        assert export_graphics_menu is not None
-
-        add_action(
-            "&Traces",
-            self.btn_export_traces_clicked,
-            export_graphics_menu,
-            None,
-            icon="mdi.waves",
-        )
-        add_action(
-            "&Spikes",
-            self.btn_export_spikes_clicked,
-            export_graphics_menu,
-            None,
-            icon="ph.barcode-light",
-        )
         add_action(
             "Export &simulation results",
             self.btn_export_simulation_results_clicked,

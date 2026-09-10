@@ -976,7 +976,7 @@ def test_gui_cellpose_import_action_moved_to_file_menu(qtbot: QtBot) -> None:
     gui.close()
 
 
-def test_gui_plot_exports_are_in_export_graphics_menu(qtbot: QtBot) -> None:
+def test_gui_has_no_export_graphics_menu(qtbot: QtBot) -> None:
     gui = Gui()
     gui.show()
     qtbot.addWidget(gui)
@@ -987,13 +987,7 @@ def test_gui_plot_exports_are_in_export_graphics_menu(qtbot: QtBot) -> None:
         for action in gui.menu_file.actions()
         if action.menu() is not None
     }
-    assert "Export graphics" in submenus
-    assert submenus["Export graphics"] is not None
-    graphics_actions = {
-        action.text().replace("&", "")
-        for action in submenus["Export graphics"].actions()
-    }
-    assert graphics_actions == {"Traces", "Spikes"}
+    assert "Export graphics" not in submenus
 
     assert "Export" in submenus
     assert submenus["Export"] is not None
