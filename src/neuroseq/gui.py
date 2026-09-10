@@ -458,6 +458,7 @@ class Gui(QtWidgets.QMainWindow):
         ]
         for widget in self.plot_widgets:
             self.time_slider.connect_widget(widget)
+        self.time_slider.time_changed.connect(self._on_time_changed)
         split_vertical.addWidget(self.time_slider)
         self.data_widget.setVisible(False)
         self.trace_widget.setVisible(False)
@@ -1419,6 +1420,25 @@ class Gui(QtWidgets.QMainWindow):
     def _on_current_stim_changed(self, stim_array: StimArray | None) -> None:
         if self.action_overlay_stim_on_traces.isChecked():
             self.trace_widget.set_stim_overlay_data(stim_array)
+        self._on_time_changed(self.time_slider.t_ms)
+
+    def _on_time_changed(self, time_ms: int) -> None:
+        """Highlight, with a red cross in the Spatial Footprints panel,
+        every neuron receiving nonzero stimulation at the current time
+        slider position - driven by the currently active stim array, not
+        by an interaction with the panel itself."""
+        self._spatial_footprint_state.set_active_stim_ids(
+            self._stim_ids_active_at(self._current_stim_array(), time_ms)
+        )
+
+    @staticmethod
+    def _stim_ids_active_at(stim_array: StimArray | None, time_ms: int) -> set[int]:
+        if stim_array is None or stim_array.dt <= 0:
+            return set()
+        time_index = int(time_ms / (stim_array.dt * 1000.0))
+        if not (0 <= time_index < stim_array.values.shape[0]):
+            return set()
+        return {int(i) for i in np.nonzero(stim_array.values[time_index])[0]}
 
     def _toggle_stim_trace_overlay(self) -> None:
         """Toggle between the separated Stimuli+Traces panels and a single

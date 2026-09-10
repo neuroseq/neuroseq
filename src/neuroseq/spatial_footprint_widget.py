@@ -19,6 +19,7 @@ SELECTION_OUTLINE_STRIPE_WIDTH = 2
 SELECTION_OUTLINE_THICKNESS = 2
 UNSELECTED_CELL_BRIGHTNESS = 0.35
 HOVERED_CELL_BRIGHTNESS_BOOST = 1.8
+ACTIVE_STIM_BRIGHTNESS_BOOST = 1.8
 
 
 class SpatialFootprintWidget(QtWidgets.QWidget):
@@ -32,7 +33,10 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
     every enclosed cell; clicking on empty space between cells clears the
     whole selection. Hovering a row in the Trace/Stim panels highlights that
     same neuron here, brighter than a normal selected cell, so its location
-    in the FOV is easy to spot.
+    in the FOV is easy to spot. Every cell currently receiving nonzero
+    stimulation at the time slider's position is brightened the same way,
+    driven by gui.py from the active stim array - not an interaction with
+    this panel.
 
     A view over a `SpatialFootprintState`. Multiple instances can share one
     state (pass the same object as `state` to each) and will stay in sync -
@@ -157,6 +161,9 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
                 self.neurons_greyed_out_changed.emit
             ),
             self._state.hovered_stim_id_changed.connect(self._on_state_hovered_changed),
+            self._state.active_stim_ids_changed.connect(
+                self._on_state_active_stim_ids_changed
+            ),
         ]
         self._on_state_data_changed()
 
@@ -238,6 +245,13 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             return
         self.overlay_widget.set_overlay_image(self._composed_overlay_image())
 
+    def _on_state_active_stim_ids_changed(self) -> None:
+        # Driven by the time slider, which can move once per playback tick
+        # (25fps) - same lightweight, image-only update as hovering.
+        if self._cellpose_data is None:
+            return
+        self.overlay_widget.set_overlay_image(self._composed_overlay_image())
+
     def _refresh_overlay(self) -> None:
         if self._cellpose_data is None:
             return
@@ -253,16 +267,33 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         cellpose_data = self._cellpose_data
         assert cellpose_data is not None
         hovered_cellpose_id = self._state.hovered_cellpose_id
-        if not self._selected_cellpose_ids and hovered_cellpose_id is None:
+        active_cellpose_ids = self._state.active_cellpose_ids
+        if (
+            not self._selected_cellpose_ids
+            and hovered_cellpose_id is None
+            and not active_cellpose_ids
+        ):
             return cellpose_data.overlay_image
 
         image = np.array(cellpose_data.overlay_image, copy=True)
         segmentation = cellpose_data.segmentation_array
         if self._selected_cellpose_ids:
             self._dim_unselected_cells(image, segmentation, self._selected_cellpose_ids)
+        for cellpose_id in active_cellpose_ids:
+            self._boost_cell_brightness(
+                image,
+                cellpose_data.overlay_image,
+                segmentation,
+                cellpose_id,
+                ACTIVE_STIM_BRIGHTNESS_BOOST,
+            )
         if hovered_cellpose_id is not None:
-            self._highlight_hovered_cell(
-                image, cellpose_data.overlay_image, segmentation, hovered_cellpose_id
+            self._boost_cell_brightness(
+                image,
+                cellpose_data.overlay_image,
+                segmentation,
+                hovered_cellpose_id,
+                HOVERED_CELL_BRIGHTNESS_BOOST,
             )
         if self._selected_cellpose_ids:
             self._paint_selection_ring(image, segmentation, self._selected_cellpose_ids)
@@ -287,18 +318,21 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         ).astype(image.dtype, copy=False)
 
     @staticmethod
-    def _highlight_hovered_cell(
+    def _boost_cell_brightness(
         image: np.ndarray,
         original_image: np.ndarray,
         segmentation: np.ndarray,
         cellpose_id: int,
+        boost: float,
     ) -> None:
-        """Boost the hovered cell's brightness beyond even a normal
-        selected cell's, so a neuron being inspected in the Trace/Stim
-        panels is unmistakable in the FOV - regardless of whether it's
+        """Boost one cell's brightness beyond even a normal selected cell's,
+        so it's unmistakable in the FOV - regardless of whether it's
         currently dimmed (unselected) or not, computed from the pristine
-        `original_image` rather than the already-dimmed `image` so hovering
-        a dimmed cell always restores it to full brightness and beyond."""
+        `original_image` rather than the already-dimmed `image` so boosting
+        a dimmed cell always restores it to full brightness and beyond.
+        Used both for the row currently hovered in the Trace/Stim panels
+        and for rows currently receiving nonzero stimulation at the time
+        slider's position."""
         mask = segmentation == cellpose_id
         if not np.any(mask):
             return
@@ -307,9 +341,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         else:
             max_value = float(np.nanmax(original_image)) if original_image.size else 1.0
             max_value = 255.0 if max_value > 1.0 else 1.0
-        boosted = (
-            original_image[mask].astype(np.float32) * HOVERED_CELL_BRIGHTNESS_BOOST
-        )
+        boosted = original_image[mask].astype(np.float32) * boost
         image[mask] = np.clip(boosted, 0.0, max_value).astype(image.dtype, copy=False)
 
     def _paint_selection_ring(

@@ -1043,6 +1043,45 @@ def test_stim_trace_overlay_updates_when_selected_stim_changes(qtbot: QtBot) -> 
     gui.close()
 
 
+def test_time_slider_highlights_stimulated_neurons_in_spatial_footprints(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project, _ = _stim_trace_overlay_project()
+    project.stim_arrays["stim"].values[5, 1] = 3.0  # neuron 1 stimulated at t=5ms
+    project.cellpose_data = _make_gui_cellpose_result()
+    gui.update_project(project)
+
+    gui.time_slider.set_current_time_ms(5)
+    assert gui._spatial_footprint_state.active_stim_ids == frozenset({1})
+
+    gui.time_slider.set_current_time_ms(0)
+    assert gui._spatial_footprint_state.active_stim_ids == frozenset()
+    gui.close()
+
+
+def test_switching_current_stim_array_refreshes_active_stim_highlight(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project, _ = _stim_trace_overlay_project()
+    other_values = np.zeros((10, 3), dtype=np.float32)
+    other_values[0, 2] = 1.0
+    project.add_stim_array(
+        StimArray("stim2", StimType.Excitation, other_values, "mV", 0.001)
+    )
+    project.cellpose_data = _make_gui_cellpose_result()
+    gui.update_project(project)
+    assert gui._spatial_footprint_state.active_stim_ids == frozenset()
+
+    gui.cmb_stim.setCurrentText("stim2")
+
+    assert gui._spatial_footprint_state.active_stim_ids == frozenset({2})
+    gui.close()
+
+
 def test_import_cellpose_data_populates_and_shows_spatial_footprint_panel(
     qtbot: QtBot,
     monkeypatch: MonkeyPatch,

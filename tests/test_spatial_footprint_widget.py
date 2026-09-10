@@ -22,6 +22,7 @@ from neuroseq.importer_cellpose import CircleAOI
 from neuroseq.importer_cellpose import SquareAOI
 from neuroseq.importer_cellpose import clone_aoi_config
 from neuroseq.spatial_footprint_state import SpatialFootprintState
+from neuroseq.spatial_footprint_widget import ACTIVE_STIM_BRIGHTNESS_BOOST
 from neuroseq.spatial_footprint_widget import HOVERED_CELL_BRIGHTNESS_BOOST
 from neuroseq.spatial_footprint_widget import SELECTION_OUTLINE_BLACK
 from neuroseq.spatial_footprint_widget import SELECTION_OUTLINE_RED
@@ -579,6 +580,36 @@ def test_set_hovered_stim_id_is_a_noop_when_unchanged() -> None:
     assert emitted == [1]
 
 
+def test_active_cellpose_ids_resolves_via_mapping() -> None:
+    state = SpatialFootprintState()
+    state.set_data(_cellpose_result(mapping={0: 2, 1: 1, 2: 0}))
+
+    state.set_active_stim_ids({0, 1})
+
+    assert state.active_cellpose_ids == {2, 1}
+
+
+def test_active_cellpose_ids_skips_stim_ids_with_no_mapping_entry() -> None:
+    state = SpatialFootprintState()
+    state.set_data(_cellpose_result_with_unmapped_cells())
+
+    state.set_active_stim_ids({0, 99})  # 99 has no mapping entry at all
+
+    assert state.active_cellpose_ids == {5}
+
+
+def test_set_active_stim_ids_is_a_noop_when_unchanged() -> None:
+    state = SpatialFootprintState()
+    state.set_data(_cellpose_result())
+    emitted = []
+    state.active_stim_ids_changed.connect(lambda: emitted.append(state.active_stim_ids))
+
+    state.set_active_stim_ids({1, 2})
+    state.set_active_stim_ids({2, 1})  # same set, different order
+
+    assert emitted == [frozenset({1, 2})]
+
+
 def test_selecting_a_cell_does_not_hide_it_when_unmapped_cells_collide_with_its_id(
     qtbot: QtBot,
 ) -> None:
@@ -713,6 +744,62 @@ def test_hovering_a_dimmed_unselected_cell_restores_full_brightness(
     assert not np.array_equal(
         hovered_image[segmentation == 1], dimmed_image[segmentation == 1]
     )
+    widget.close()
+
+
+def test_active_stim_id_boosts_the_cell_brightness(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    segmentation = np.zeros((8, 8), dtype=np.int32)
+    segmentation[:, 4:] = 1
+    overlay_image = np.zeros((8, 8, 3), dtype=np.uint8)
+    overlay_image[:, :4] = (0, 0, 100)
+    overlay_image[:, 4:] = (100, 0, 0)
+    result = CellposeImportResult(
+        image_path=Path("cellpose.png"),
+        segmentation_array=segmentation,
+        overlay_image=overlay_image,
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.array([0, 1], dtype=np.int32),
+        stimulus_to_cellpose_mapping={0: 0, 1: 1},
+    )
+    widget.set_data(result)
+    image_graphic = widget.overlay_widget.overlay_view._image_graphic
+    assert image_graphic is not None
+    before_image = np.asarray(image_graphic.data.value).copy()
+
+    widget._state.set_active_stim_ids({1})  # -> cellpose cell 1
+
+    after_image = np.asarray(image_graphic.data.value)
+    np.testing.assert_allclose(
+        after_image[segmentation == 1].astype(np.float32),
+        np.clip(
+            before_image[segmentation == 1].astype(np.float32)
+            * ACTIVE_STIM_BRIGHTNESS_BOOST,
+            0,
+            255,
+        ),
+        atol=1.0,
+    )
+    # the other, non-stimulated cell is untouched
+    np.testing.assert_array_equal(
+        after_image[segmentation == 0], before_image[segmentation == 0]
+    )
+    widget.close()
+    widget.close()
+
+
+def test_active_stim_ids_cleared_when_data_changes(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
+    widget._state.set_active_stim_ids({0})
+    assert widget._state.active_stim_ids == frozenset({0})
+
+    widget.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
+
+    assert widget._state.active_stim_ids == frozenset()
     widget.close()
 
 

@@ -36,6 +36,7 @@ class SpatialFootprintState(QtCore.QObject):
     # neuron_greyed_out_changed to do that rebuild once, not N times.
     neurons_greyed_out_changed = QtCore.Signal(list, list)
     hovered_stim_id_changed = QtCore.Signal()
+    active_stim_ids_changed = QtCore.Signal()
 
     def __init__(self, parent: QtCore.QObject | None = None) -> None:
         super().__init__(parent)
@@ -46,6 +47,10 @@ class SpatialFootprintState(QtCore.QObject):
         # neuron sits in the FOV. Not derived from a click, so it's tracked
         # separately from selection.
         self.hovered_stim_id: int | None = None
+        # Stim/neuron rows currently receiving nonzero stimulation at the
+        # time slider's current position - driven by gui.py from the active
+        # stim array, not by any interaction with this panel itself.
+        self.active_stim_ids: frozenset[int] = frozenset()
 
     def _all_cellpose_ids(self) -> set[int]:
         if self.cellpose_data is None:
@@ -113,10 +118,25 @@ class SpatialFootprintState(QtCore.QObject):
         self.hovered_stim_id = stim_id
         self.hovered_stim_id_changed.emit()
 
+    @property
+    def active_cellpose_ids(self) -> set[int]:
+        cellpose_ids = (
+            self._stim_id_to_cellpose_id(stim_id) for stim_id in self.active_stim_ids
+        )
+        return {cellpose_id for cellpose_id in cellpose_ids if cellpose_id is not None}
+
+    def set_active_stim_ids(self, stim_ids: Iterable[int]) -> None:
+        new_ids = frozenset(stim_ids)
+        if new_ids == self.active_stim_ids:
+            return
+        self.active_stim_ids = new_ids
+        self.active_stim_ids_changed.emit()
+
     def set_data(self, cellpose_data: CellposeImportResult | None) -> None:
         self.cellpose_data = cellpose_data
         self.selected_cellpose_ids = set()
         self.hovered_stim_id = None
+        self.active_stim_ids = frozenset()
         self.data_changed.emit()
 
     def _set_selected(self, new_selected: set[int]) -> None:

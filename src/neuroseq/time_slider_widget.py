@@ -43,6 +43,8 @@ class HandleTooltipSlider(QtWidgets.QSlider):
 class TimeSliderWidget(QtWidgets.QWidget):
     """A widget that provides a time slider to control playback of timeseries data."""
 
+    time_changed = QtCore.Signal(int)  # current time, in milliseconds
+
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
@@ -95,6 +97,7 @@ class TimeSliderWidget(QtWidgets.QWidget):
         self._set_time(time_ms)
         for widget in self.widgets:
             widget.set_time_ms(self.t_ms)
+        self.time_changed.emit(self.t_ms)
 
     def skip_to_end(self) -> None:
         self._set_time(self.t_max_ms)
@@ -133,6 +136,7 @@ class TimeSliderWidget(QtWidgets.QWidget):
         self.t_ms = value
         for widget in self.widgets:
             widget.set_time_ms(value)
+        self.time_changed.emit(value)
 
     def closeEvent(self, event) -> None:
         # Stop playback before child widgets begin shutting down so queued timer
