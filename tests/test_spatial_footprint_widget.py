@@ -1060,17 +1060,18 @@ def test_overlay_view_ignores_click_when_selection_disabled(
     overlay_view.close()
 
 
-def test_overlay_view_ignores_left_click_when_restricted_to_right_button(
+def test_overlay_view_left_click_selects_right_click_does_not(
     qtbot: QtBot,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """SpatialFootprintWidget restricts selection to the right button (left
-    is free for panning) via set_cell_selection_button - verify the
-    underlying OverlayView actually honors that restriction."""
+    """SpatialFootprintWidget restricts plain-click selection to the left
+    button and lasso to the right button - verify the underlying
+    OverlayView actually honors that split."""
     overlay_view = OverlayView()
     qtbot.addWidget(overlay_view)
     overlay_view.enable_cell_selection = True
-    overlay_view.cell_selection_button = 2
+    overlay_view.cell_click_button = 1
+    overlay_view.cell_lasso_button = 2
     overlay_view.segmentation = np.array([[1]], dtype=np.int32)
     monkeypatch.setattr(
         overlay_view.subplot,
@@ -1080,25 +1081,62 @@ def test_overlay_view_ignores_left_click_when_restricted_to_right_button(
     emitted: list[int] = []
     overlay_view.neuron_clicked.connect(emitted.append)
 
-    overlay_view._cell_selection_pointer_down(SimpleNamespace(button=1))  # left
+    overlay_view._cell_selection_pointer_down(_right_click_event())
     overlay_view._cell_selection_pointer_up(None)
     qtbot.wait(10)
-    assert emitted == []
+    assert emitted == []  # a plain right click does not select
 
-    overlay_view._cell_selection_pointer_down(_right_click_event())
+    overlay_view._cell_selection_pointer_down(SimpleNamespace(button=1))  # left
     overlay_view._cell_selection_pointer_up(None)
     qtbot.wait(10)
     assert emitted == [1]
     overlay_view.close()
 
 
-def test_spatial_footprint_widget_restricts_selection_to_right_button(
+def test_overlay_view_left_drag_past_tolerance_abandons_the_gesture(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A left drag never becomes a lasso and never selects either - it's
+    left entirely to the camera controller to pan, uninterrupted."""
+    overlay_view = OverlayView()
+    qtbot.addWidget(overlay_view)
+    overlay_view.enable_cell_selection = True
+    overlay_view.cell_click_button = 1
+    overlay_view.cell_lasso_button = 2
+    overlay_view.segmentation = np.array([[0, 1]], dtype=np.int32)
+    positions = iter(
+        [
+            np.array([0.0, 0.0, 0.0]),
+            np.array([overlay_view._world_tolerance() + 10.0, 0.0, 0.0]),
+        ]
+    )
+    monkeypatch.setattr(
+        overlay_view.subplot,
+        "map_screen_to_world",
+        lambda ev: next(positions),
+    )
+    lasso_emitted: list[list[int]] = []
+    overlay_view.neuron_lasso_selected.connect(lasso_emitted.append)
+
+    overlay_view._cell_selection_pointer_down(SimpleNamespace(button=1))  # left
+    overlay_view.pointer_move(None)  # crosses tolerance
+
+    assert overlay_view._cell_click_down_world is None
+    assert overlay_view._lasso_points == []
+    assert overlay_view.subplot.controller.enabled  # never touched
+    assert lasso_emitted == []
+    overlay_view.close()
+
+
+def test_spatial_footprint_widget_click_and_lasso_use_different_buttons(
     qtbot: QtBot,
 ) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
 
-    assert widget.overlay_widget.overlay_view.cell_selection_button == 2
+    assert widget.overlay_widget.overlay_view.cell_click_button == 1
+    assert widget.overlay_widget.overlay_view.cell_lasso_button == 2
     widget.close()
 
 

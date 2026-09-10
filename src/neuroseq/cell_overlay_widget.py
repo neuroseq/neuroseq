@@ -150,12 +150,20 @@ class OverlayView(FullScreenFPLWidget):
         self._aoi_redo_stack: list[AreasOfInterestConfig] = []
         self.aoi_editable = True
         self.enable_cell_selection = False
-        # Which pygfx button (1=left, 2=right, 3=middle) triggers cell
-        # selection/lasso; 0 means "any button" (the historical default,
-        # kept for callers - the Cell Segmentation import dialog - that
-        # haven't opted into a specific one).
-        self.cell_selection_button = 0
+        # Which pygfx button (1=left, 2=right, 3=middle) a plain click vs. a
+        # drag-lasso responds to; 0 means "any button" for that gesture (the
+        # historical default, kept for callers - the Cell Segmentation
+        # import dialog - that haven't opted into specific ones). The
+        # Spatial Footprints panel sets these to left-click-only and
+        # right-drag-only respectively, so left click/drag is free to just
+        # pan (see pointer_move: a drag on a button that doesn't allow lasso
+        # is abandoned rather than started, leaving the camera controller,
+        # never disabled, to handle it as a normal pan).
+        self.cell_click_button = 0
+        self.cell_lasso_button = 0
         self._cell_click_down_world: tuple[float, float] | None = None
+        self._cell_selection_gesture_allows_click = False
+        self._cell_selection_gesture_allows_lasso = False
         # A cell-selection gesture starts as a plain click; if the pointer
         # moves past _world_tolerance() before release, it becomes a lasso
         # (see pointer_move) - _lasso_points truthiness is that state, there
@@ -836,21 +844,21 @@ class OverlayView(FullScreenFPLWidget):
             self.on_geometry_changed(config)
 
     def _cell_selection_pointer_down(self, ev: pygfx.PointerEvent) -> None:
-        if (
-            not self.enable_cell_selection
-            or self.segmentation is None
-            or (
-                self.cell_selection_button != 0
-                and ev.button != self.cell_selection_button
-            )
-        ):
+        if not self.enable_cell_selection or self.segmentation is None:
+            return
+        allows_click = self.cell_click_button in (0, ev.button)
+        allows_lasso = self.cell_lasso_button in (0, ev.button)
+        if not (allows_click or allows_lasso):
             return
         mouse_pos = self.subplot.map_screen_to_world(ev)
         if mouse_pos is None:
             return
-        # Whether this becomes a plain click or a lasso is decided in
-        # pointer_move, based on how far the pointer travels before release.
+        # Whether this becomes a plain click or a lasso (if this button
+        # allows one) is decided in pointer_move, based on how far the
+        # pointer travels before release.
         self._cell_click_down_world = (float(mouse_pos[0]), float(mouse_pos[1]))
+        self._cell_selection_gesture_allows_click = allows_click
+        self._cell_selection_gesture_allows_lasso = allows_lasso
         self._lasso_points = []
 
     def _cell_selection_pointer_up(self, ev: pygfx.PointerEvent) -> None:
@@ -870,7 +878,10 @@ class OverlayView(FullScreenFPLWidget):
         if self._cell_click_down_world is None:
             return
         down_x, down_y = self._cell_click_down_world
+        allows_click = self._cell_selection_gesture_allows_click
         self._cell_click_down_world = None
+        if not allows_click:
+            return
         mouse_pos = self.subplot.map_screen_to_world(ev)
         if mouse_pos is None:
             return
@@ -1132,6 +1143,13 @@ class OverlayView(FullScreenFPLWidget):
                     float(mouse_pos[1]) - self._cell_click_down_world[1],
                 )
                 if dist <= self._world_tolerance():
+                    return
+                if not self._cell_selection_gesture_allows_lasso:
+                    # This button doesn't do lasso (e.g. left button is
+                    # click-only in the Spatial Footprints panel) - abandon
+                    # the gesture and let the camera controller (never
+                    # disabled here) handle the drag as a normal pan/zoom.
+                    self._cell_click_down_world = None
                     return
                 # Movement crossed the click/drag threshold: this gesture is
                 # a lasso, seeded with the original pointer_down position.
@@ -1431,10 +1449,16 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
     def set_cell_selection_enabled(self, enabled: bool) -> None:
         self.overlay_view.enable_cell_selection = enabled
 
-    def set_cell_selection_button(self, button: int) -> None:
-        """Restrict click/lasso cell selection to one pygfx button (1=left,
-        2=right, 3=middle); 0 (the default) means any button."""
-        self.overlay_view.cell_selection_button = button
+    def set_cell_selection_buttons(
+        self, *, click_button: int, lasso_button: int
+    ) -> None:
+        """Restrict plain-click and drag-lasso cell selection to one pygfx
+        button each (1=left, 2=right, 3=middle); 0 means any button for
+        that gesture. A drag on a button that isn't the lasso button is
+        left alone (not treated as a click either), so the camera
+        controller's own pan/zoom for that button isn't interrupted."""
+        self.overlay_view.cell_click_button = click_button
+        self.overlay_view.cell_lasso_button = lasso_button
 
     def set_aoi_editable(self, editable: bool) -> None:
         """Whether the AOI square/circle (if shown) can be dragged to reshape

@@ -3106,8 +3106,9 @@ class Gui(QtWidgets.QMainWindow):
                 self.spatial_footprint_widget,
                 self.spatial_footprint_widget.empty_state_widget,
                 self.spatial_footprint_widget.overlay_widget,
-                self.spatial_footprint_widget.overlay_widget.overlay_view,
-                self.spatial_footprint_widget.overlay_widget.overlay_view.widget,
+                # Deliberately excludes overlay_view/overlay_view.widget: a
+                # right click there is the panel's own lasso-select gesture
+                # (see SpatialFootprintWidget), not a request to detach.
             ),
             self.custom_analysis_widget: (
                 self.custom_analysis_widget,

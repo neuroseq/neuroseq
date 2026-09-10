@@ -824,7 +824,6 @@ def test_detach_context_menu_installed_on_panel_canvases(qtbot: QtBot) -> None:
         gui.data_widget,
         gui.data_widget.heatmap_widget.widget,
         gui.heatmap_widget.widget,
-        gui.spatial_footprint_widget.overlay_widget.overlay_view.widget,
         gui.custom_analysis_widget.canvas,
         gui.console_widget,
         gui.chat_widget.history_view,
@@ -832,6 +831,18 @@ def test_detach_context_menu_installed_on_panel_canvases(qtbot: QtBot) -> None:
         assert (
             widget.contextMenuPolicy() == QtCore.Qt.ContextMenuPolicy.CustomContextMenu
         )
+
+    # The Spatial Footprints panel's own rendering canvas is excluded - a
+    # right click there is its lasso-select gesture, not a detach request
+    # (see test_right_click_in_spatial_footprint_view_does_not_open_detach_menu).
+    assert (
+        gui.spatial_footprint_widget.overlay_widget.overlay_view.widget.contextMenuPolicy()
+        != QtCore.Qt.ContextMenuPolicy.CustomContextMenu
+    )
+    assert (
+        gui.spatial_footprint_widget.overlay_widget.contextMenuPolicy()
+        == QtCore.Qt.ContextMenuPolicy.CustomContextMenu
+    )
 
     assert (
         gui.stim_editor.stim_widget.contextMenuPolicy()

@@ -25,18 +25,19 @@ ACTIVE_STIM_BRIGHTNESS_BOOST = 1.8
 class SpatialFootprintWidget(QtWidgets.QWidget):
     """Show imported cell spatial footprints with click-to-select state.
 
-    Clicking a cell selects it (marked with a red/black ring); every cell
-    not currently selected is hidden from the trace/stim panels, live, with
-    no separate apply step, and is dimmed in this view so the selection
-    stands out. An empty selection means no filtering is in effect (nothing
-    dimmed). Dragging (rather than a plain click) draws a lasso that selects
-    every enclosed cell; clicking on empty space between cells clears the
-    whole selection. Hovering a row in the Trace/Stim panels highlights that
-    same neuron here, brighter than a normal selected cell, so its location
-    in the FOV is easy to spot. Every cell currently receiving nonzero
-    stimulation at the time slider's position is brightened the same way,
-    driven by gui.py from the active stim array - not an interaction with
-    this panel.
+    A plain left click on a cell selects it (marked with a red/black ring);
+    every cell not currently selected is hidden from the trace/stim panels,
+    live, with no separate apply step, and is dimmed in this view so the
+    selection stands out. An empty selection means no filtering is in
+    effect (nothing dimmed). Left click-and-hold never selects - it just
+    pans the view, like everywhere else; a right click-and-hold instead
+    draws a lasso that selects every enclosed cell. Clicking on empty space
+    (left) clears the whole selection. Hovering a row in the Trace/Stim
+    panels highlights that same neuron here, brighter than a normal
+    selected cell, so its location in the FOV is easy to spot. Every cell
+    currently receiving nonzero stimulation at the time slider's position
+    is brightened the same way, driven by gui.py from the active stim
+    array - not an interaction with this panel.
 
     A view over a `SpatialFootprintState`. Multiple instances can share one
     state (pass the same object as `state` to each) and will stay in sync -
@@ -90,10 +91,11 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             show_stimulus_ids=True,
         )
         self.overlay_widget.set_cell_selection_enabled(True)
-        # Right click (drag) only, so left click/drag is free to just pan
-        # the view like everywhere else - the Cell Segmentation import
-        # dialog is unaffected, and keeps selecting on any button.
-        self.overlay_widget.set_cell_selection_button(2)
+        # Left click selects a cell; left click-and-hold just pans the view
+        # like everywhere else (a left drag is never a lasso here). Right
+        # click-and-hold is the lasso instead. The Cell Segmentation import
+        # dialog is unaffected and keeps responding to any button for both.
+        self.overlay_widget.set_cell_selection_buttons(click_button=1, lasso_button=2)
         # AOI shapes are shown here purely as a reference of what produced the
         # current mapping - editing them happens in the Cell Segmentation
         # import dialog, not here.
