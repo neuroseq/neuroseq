@@ -791,6 +791,73 @@ def test_update_stim_array_properties_remaps_existing_stim_array() -> None:
     assert project.max_time_secs == pytest.approx(0.006)
 
 
+def test_update_stim_array_properties_decrease_trims_whole_project_consistently() -> (
+    None
+):
+    """Regression: decreasing a stim array's neuron count via "Edit stim
+    array" used to only truncate that one array's own columns, leaving
+    every other stim array and experiment's trace/spike data referencing
+    neurons that no longer existed anywhere else. It must trim the whole
+    project consistently - the same behavior as Trim to Mapped Neurons."""
+    project = Project()
+    project.cellpose_data = _cellpose_result_with_mapping({0: 10, 1: 11, 2: 12, 3: 13})
+    project.add_stim_array(
+        StimArray(
+            "edited",
+            StimType.Excitation,
+            np.array([[0, 1, 2, 3]], dtype=np.float32),
+            "mV",
+            dt=0.001,
+        )
+    )
+    project.add_stim_array(
+        StimArray(
+            "other",
+            StimType.Excitation,
+            np.array([[10, 11, 12, 13]], dtype=np.float32),
+            "mV",
+            dt=0.001,
+        )
+    )
+    trace = TraceData(
+        name="trace",
+        traces=np.array([[0], [1], [2], [3]], dtype=np.float32),
+        indices=np.array([0, 1, 2, 3], dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+    spikes = SpikeData(
+        name="spikes",
+        spike_indices=np.array([0, 1, 2, 3], dtype=np.uint32),
+        spike_times=np.array([0, 1, 2, 3], dtype=np.float32) * 0.001,
+    )
+    project.add_experiment(
+        Experiment(name="exp", duration=0.004, timepoints=[], data=[trace, spikes])
+    )
+
+    project.update_stim_array_properties(
+        "edited", n_neurons=2, stim_type=StimType.Excitation, units="mV", dt=0.001
+    )
+
+    # the edited array itself is trimmed (as before)
+    assert project.stim_arrays["edited"].values.shape == (1, 2)
+    assert np.allclose(project.stim_arrays["edited"].values, [[0, 1]])
+    # the OTHER stim array is now also trimmed to match, not left stale
+    assert project.stim_arrays["other"].values.shape == (1, 2)
+    assert np.allclose(project.stim_arrays["other"].values, [[10, 11]])
+    # experiment data is trimmed too
+    reloaded_trace = project.experiments["exp"].data[0]
+    assert isinstance(reloaded_trace, TraceData)
+    assert np.array_equal(reloaded_trace.indices, [0, 1])
+    assert np.allclose(reloaded_trace.traces, [[0], [1]])
+    reloaded_spikes = project.experiments["exp"].data[1]
+    assert isinstance(reloaded_spikes, SpikeData)
+    assert np.array_equal(reloaded_spikes.spike_indices, [0, 1])
+    # the cellpose mapping drops entries for the now-removed neurons (2, 3)
+    assert project.cellpose_data is not None
+    assert project.cellpose_data.stimulus_to_cellpose_mapping == {0: 10, 1: 11}
+
+
 def test_add_stim_array_coerces_1d_values_to_2d() -> None:
     project = Project()
     values = np.array([1.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
