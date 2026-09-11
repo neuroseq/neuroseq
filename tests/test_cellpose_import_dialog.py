@@ -36,6 +36,40 @@ def _select_mapping_strategy(dialog: CellposeImportDialog, strategy: str) -> Non
     raise AssertionError(f"Mapping strategy not found: {strategy}")
 
 
+def test_ctrl_z_and_ctrl_shift_z_shortcuts_drive_aoi_undo_redo(
+    qtbot: QtBot,
+    monkeypatch,
+) -> None:
+    """Regression for issue #531: an accidental shape move/resize should be
+    undoable with Ctrl+Z (Ctrl+Shift+Z to redo). The undo/redo logic itself is
+    covered at the OverlayView level in test_spatial_footprint_widget.py; this
+    just checks the dialog's shortcuts are wired to it."""
+    dialog = CellposeImportDialog()
+    qtbot.addWidget(dialog)
+    calls = {"undo": 0, "redo": 0}
+
+    def _record_undo() -> bool:
+        calls["undo"] += 1
+        return True
+
+    def _record_redo() -> bool:
+        calls["redo"] += 1
+        return True
+
+    monkeypatch.setattr(
+        dialog.overlay_widget.overlay_view, "undo_aoi_edit", _record_undo
+    )
+    monkeypatch.setattr(
+        dialog.overlay_widget.overlay_view, "redo_aoi_edit", _record_redo
+    )
+
+    dialog._undo_aoi_shortcut.activated.emit()
+    dialog._redo_aoi_shortcut.activated.emit()
+
+    assert calls == {"undo": 1, "redo": 1}
+    dialog.close()
+
+
 def test_custom_areas_of_interest_is_default_mapping_strategy(qtbot: QtBot) -> None:
     dialog = CellposeImportDialog()
     qtbot.addWidget(dialog)
@@ -131,6 +165,136 @@ def test_cellpose_dialog_custom_mapping_restores_on_reopen(tmp_path, qtbot: QtBo
     assert not reopened.isMaximized()
     assert reopened.width() <= min(1100, int(available.width() * 0.75))
     assert reopened.height() <= min(760, int(available.height() * 0.75))
+
+
+def _original_ids(dialog: CellposeImportDialog) -> list[int]:
+    ids = dialog.importer._original_cellpose_ids
+    assert ids is not None
+    return sorted(int(cellpose_id) for cellpose_id in ids)
+
+
+def test_dialog_cell_selection_is_not_restricted_to_a_single_button(
+    tmp_path, qtbot: QtBot
+) -> None:
+    """Regression: the Spatial Footprints panel splits click/lasso cell
+    selection across left (click) and right (lasso) buttons, but that must
+    not affect this dialog's own click-to-select (manual mapping
+    assignment) - it still responds to any button for either gesture."""
+    dialog = _make_cellpose_dialog(tmp_path, qtbot)
+
+    assert dialog.overlay_widget.overlay_view.cell_click_button == 0
+    assert dialog.overlay_widget.overlay_view.cell_lasso_button == 0
+
+
+def test_manual_click_checkbox_only_visible_for_custom_strategy(
+    tmp_path, qtbot: QtBot
+) -> None:
+    dialog = _make_cellpose_dialog(tmp_path, qtbot)
+
+    _select_mapping_strategy(dialog, "Linear")
+    assert dialog.manual_click_row_widget.isHidden()
+
+    _select_mapping_strategy(dialog, "Custom")
+    assert not dialog.manual_click_row_widget.isHidden()
+
+    _select_mapping_strategy(dialog, CUSTOM_AOI_STRATEGY)
+    assert dialog.manual_click_row_widget.isHidden()
+    dialog.close()
+
+
+def test_manual_click_assigns_by_order_and_fills_in_the_rest(
+    tmp_path, qtbot: QtBot
+) -> None:
+    """Regression for issue #532: clicking cells assigns stimulus ids in
+    click order, and every cell not clicked still ends up mapped, via the
+    remaining ids in ascending cellpose-id order."""
+    dialog = _make_cellpose_dialog(tmp_path, qtbot)
+    _select_mapping_strategy(dialog, "Custom")
+    original_ids = _original_ids(dialog)
+    assert len(original_ids) >= 2
+
+    dialog.manual_click_checkbox.setChecked(True)
+    assert dialog.overlay_widget.overlay_view.enable_cell_selection
+    assert dialog.custom_mapping_line.isReadOnly()
+
+    # click the highest id first, so it lands on stim 0 - distinct from
+    # where ascending-order auto-fill would have put it
+    clicked_id = original_ids[-1]
+    dialog.overlay_widget.neuron_clicked.emit(clicked_id)
+
+    remaining = [
+        cellpose_id for cellpose_id in original_ids if cellpose_id != clicked_id
+    ]
+    expected = {0: clicked_id}
+    expected.update(
+        {stim_id + 1: cellpose_id for stim_id, cellpose_id in enumerate(remaining)}
+    )
+    assert dialog.overlay_widget.stimulus_to_cellpose_mapping == expected
+    dialog.close()
+
+
+def test_manual_click_again_undoes_it(tmp_path, qtbot: QtBot) -> None:
+    dialog = _make_cellpose_dialog(tmp_path, qtbot)
+    _select_mapping_strategy(dialog, "Custom")
+    original_ids = _original_ids(dialog)
+    dialog.manual_click_checkbox.setChecked(True)
+    clicked_id = original_ids[-1]
+    dialog.overlay_widget.neuron_clicked.emit(clicked_id)
+    assert dialog._manual_click_order == [clicked_id]
+
+    dialog.overlay_widget.neuron_clicked.emit(clicked_id)  # click again to undo
+
+    assert dialog._manual_click_order == []
+    identity_mapping = {
+        stim_id: cellpose_id for stim_id, cellpose_id in enumerate(original_ids)
+    }
+    assert dialog.overlay_widget.stimulus_to_cellpose_mapping == identity_mapping
+    dialog.close()
+
+
+def test_manual_click_clear_button_resets_order(tmp_path, qtbot: QtBot) -> None:
+    dialog = _make_cellpose_dialog(tmp_path, qtbot)
+    _select_mapping_strategy(dialog, "Custom")
+    original_ids = _original_ids(dialog)
+    dialog.manual_click_checkbox.setChecked(True)
+    dialog.overlay_widget.neuron_clicked.emit(original_ids[-1])
+    assert dialog._manual_click_order == [original_ids[-1]]
+
+    dialog.manual_click_clear_button.click()
+
+    assert dialog._manual_click_order == []
+    identity_mapping = {
+        stim_id: cellpose_id for stim_id, cellpose_id in enumerate(original_ids)
+    }
+    assert dialog.overlay_widget.stimulus_to_cellpose_mapping == identity_mapping
+    dialog.close()
+
+
+def test_manual_click_ignored_while_checkbox_unchecked(tmp_path, qtbot: QtBot) -> None:
+    dialog = _make_cellpose_dialog(tmp_path, qtbot)
+    _select_mapping_strategy(dialog, "Custom")
+    original_ids = _original_ids(dialog)
+    assert not dialog.manual_click_checkbox.isChecked()
+
+    dialog.overlay_widget.neuron_clicked.emit(original_ids[-1])
+
+    assert dialog._manual_click_order == []
+    dialog.close()
+
+
+def test_manual_click_mode_turns_off_when_switching_strategy(
+    tmp_path, qtbot: QtBot
+) -> None:
+    dialog = _make_cellpose_dialog(tmp_path, qtbot)
+    _select_mapping_strategy(dialog, "Custom")
+    dialog.manual_click_checkbox.setChecked(True)
+    assert dialog.overlay_widget.overlay_view.enable_cell_selection
+
+    _select_mapping_strategy(dialog, "Linear")
+
+    assert not dialog.manual_click_checkbox.isChecked()
+    assert not dialog.overlay_widget.overlay_view.enable_cell_selection
+    dialog.close()
 
 
 def test_annotate_mean_tiff_populates_file_selection(tmp_path, qtbot: QtBot, mocker):

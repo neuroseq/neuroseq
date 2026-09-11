@@ -14,6 +14,11 @@ class TraceData:
         indices (np.ndarray): A 1D array of neuron indices corresponding to the first dimension of traces.
         units (str): The unit of the traces (e.g., 'mV', 'pA').
         dt (float): The time step in seconds between consecutive timestamps.
+        raw_cellpose_ids (np.ndarray | None): The raw, pre-mapping Cellpose ROI id for
+            each row of ``traces`` (row order == Cellpose ROI order), if this data was
+            imported via a Cellpose-aware Suite2p pipeline. Used to re-resolve
+            ``indices`` if the stimulus-to-Cellpose mapping changes later. ``None`` for
+            data with no such association (e.g. patch-clamp).
     """
 
     name: str
@@ -21,10 +26,13 @@ class TraceData:
     indices: NDArray[np.uint32]
     units: str
     dt: float
+    raw_cellpose_ids: NDArray[np.uint32] | None = None
 
     def __post_init__(self) -> None:
         self.traces = np.asarray(self.traces, dtype=np.float32)
         self.indices = np.asarray(self.indices, dtype=np.uint32)
+        if self.raw_cellpose_ids is not None:
+            self.raw_cellpose_ids = np.asarray(self.raw_cellpose_ids, dtype=np.uint32)
 
 
 @dataclass
@@ -35,15 +43,23 @@ class SpikeData:
         name (str): The name of the data set.
         spike_indices (np.ndarray): A 1D array of spiking neuron indices.
         spike_times (np.ndarray): A 1D array of spiking timestamps.
+        raw_cellpose_ids (np.ndarray | None): The raw, pre-mapping Cellpose ROI id for
+            each spike event in ``spike_indices``, if this data was imported via a
+            Cellpose-aware Suite2p pipeline. Used to re-resolve ``spike_indices`` if the
+            stimulus-to-Cellpose mapping changes later. ``None`` for data with no such
+            association (e.g. patch-clamp).
     """
 
     name: str
     spike_indices: NDArray[np.uint32]
     spike_times: NDArray[np.float32]
+    raw_cellpose_ids: NDArray[np.uint32] | None = None
 
     def __post_init__(self) -> None:
         self.spike_indices = np.asarray(self.spike_indices, dtype=np.uint32)
         self.spike_times = np.asarray(self.spike_times, dtype=np.float32)
+        if self.raw_cellpose_ids is not None:
+            self.raw_cellpose_ids = np.asarray(self.raw_cellpose_ids, dtype=np.uint32)
 
 
 @dataclass

@@ -8,6 +8,7 @@ from neuroseq.importer_suite2p import compute_normalized_suite2p_spikes
 from neuroseq.importer_suite2p import compute_normalized_suite2p_traces
 from neuroseq.importer_suite2p import prepare_suite2p_spikes
 from neuroseq.importer_suite2p import prepare_suite2p_traces
+from neuroseq.importer_suite2p import remap_raw_cellpose_ids
 
 
 def test_prepare_suite2p_traces_produces_widget_payload(suite2p_import_data_dir):
@@ -56,6 +57,9 @@ def test_prepare_suite2p_traces_remaps_indices_by_cellpose_order(
     )
 
     np.testing.assert_array_equal(data.indices, np.array([4, 7], dtype=np.uint32))
+    np.testing.assert_array_equal(
+        data.raw_cellpose_ids, np.array([0, 1], dtype=np.uint32)
+    )
 
 
 def test_prepare_suite2p_spikes_respects_threshold_and_limits_neurons(
@@ -141,3 +145,60 @@ def test_prepare_suite2p_spikes_remaps_indices_by_cellpose_order() -> None:
     np.testing.assert_array_equal(
         result.spike_indices, np.array([4, 7], dtype=np.uint32)
     )
+    np.testing.assert_array_equal(
+        result.raw_cellpose_ids, np.array([0, 1], dtype=np.uint32)
+    )
+
+
+def test_remap_raw_cellpose_ids_is_identity_without_mapping() -> None:
+    raw_ids = np.array([0, 2, 1], dtype=np.uint32)
+    np.testing.assert_array_equal(remap_raw_cellpose_ids(raw_ids, None), raw_ids)
+    np.testing.assert_array_equal(remap_raw_cellpose_ids(raw_ids, {}), raw_ids)
+
+
+def test_remap_raw_cellpose_ids_handles_empty_array() -> None:
+    raw_ids = np.array([], dtype=np.uint32)
+    result = remap_raw_cellpose_ids(raw_ids, {4: 0})
+    assert result.size == 0
+    assert result.dtype == np.uint32
+
+
+def test_remap_raw_cellpose_ids_applies_mapping() -> None:
+    raw_ids = np.array([0, 1, 0, 1], dtype=np.uint32)
+    result = remap_raw_cellpose_ids(raw_ids, {4: 0, 7: 1})
+    np.testing.assert_array_equal(result, np.array([4, 7, 4, 7], dtype=np.uint32))
+
+
+def test_remap_raw_cellpose_ids_rejects_colliding_mapping() -> None:
+    raw_ids = np.array([0, 1], dtype=np.uint32)
+    with pytest.raises(ValueError, match="Resolved stimulus IDs are not unique"):
+        remap_raw_cellpose_ids(raw_ids, {1: 0})
+
+
+def test_remap_raw_cellpose_ids_matches_a_fresh_import_under_new_mapping(
+    suite2p_import_data_dir,
+) -> None:
+    """Reproduces the real use case: rather than re-importing from disk under a
+    new mapping, remap_raw_cellpose_ids on the already-imported raw ids should
+    produce exactly what a fresh import under that new mapping would."""
+    f_data = np.load(suite2p_import_data_dir / "F.npy")
+    imported_under_mapping_a = prepare_suite2p_traces(
+        f_data,
+        None,
+        max_neurons=3,
+        stimulus_to_cellpose_mapping={4: 0, 7: 1},
+    )
+
+    new_mapping = {9: 0, 2: 1, 5: 2}
+    assert imported_under_mapping_a.raw_cellpose_ids is not None
+    remapped = remap_raw_cellpose_ids(
+        imported_under_mapping_a.raw_cellpose_ids, new_mapping
+    )
+
+    fresh_import_under_mapping_b = prepare_suite2p_traces(
+        f_data,
+        None,
+        max_neurons=3,
+        stimulus_to_cellpose_mapping=new_mapping,
+    )
+    np.testing.assert_array_equal(remapped, fresh_import_under_mapping_b.indices)

@@ -45,6 +45,13 @@ responsive while large projects serialize. A progress dialog appears for any
 operation that takes more than a fraction of a second and exposes a
 **Cancel** button — cancelling a save leaves the original file untouched.
 
+Once a project has been saved at least once, `Save project` (`Ctrl+S`) writes
+straight back to that same file — no dialogs, everything included. Use
+`Save project As...` to instead pick a new file (or different components to
+include, via the save-options dialog) without touching the original file. A
+brand-new, never-saved project always goes through `Save project As...`'s
+dialogs the first time, regardless of which of the two actions triggered it.
+
 The project may contrain not only one, but several stimulation arrays. The user can select which one to show in the widget one, using a drop down manu in the "Stim data:" section of the folloing toolbar:
 
 ![Data selection](../images/data_selection.png).

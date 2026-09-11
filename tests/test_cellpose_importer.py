@@ -8,6 +8,7 @@ from PIL import Image
 from neuroseq.importer_cellpose import CellPoseImporter
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_cellpose import generate_linear_stimulus_mapping
+from neuroseq.importer_cellpose import load_background_image
 from neuroseq.utils import neuron_indices_to_colors
 
 """
@@ -460,6 +461,77 @@ def test_restore_from_result_preserves_colors_without_custom_mapping(tmp_path):
         assert np.all(pixels == expected_rgb)
 
 
+def test_create_result_stores_the_raw_background_image(tmp_path):
+    base_image = np.full((16, 16, 3), 50, dtype=np.uint8)
+    segmentation = np.zeros((16, 16), dtype=np.int32)
+    segmentation[0:8, 0:8] = 1
+
+    image_path = tmp_path / "image.png"
+    seg_path = tmp_path / "seg.npy"
+    Image.fromarray(base_image).save(image_path)
+    np.save(seg_path, segmentation)
+
+    importer = CellPoseImporter()
+    importer.load_image_file(str(image_path))
+    importer.load_segmentation_file(seg_path)
+    importer.validate_dimensions()
+    importer.generate_overlay(opacity=1.0)
+
+    result = importer.create_result(image_path)
+
+    assert result.background_image is not None
+    np.testing.assert_array_equal(result.background_image, importer.image_data)
+    # the overlay has cell colors baked in - the background must not
+    assert not np.array_equal(result.background_image, result.overlay_image)
+
+
+def test_restore_from_result_falls_back_to_stored_background_image(tmp_path):
+    """If the original image file is gone, restore should prefer the
+    stored raw background over the (already colored) overlay image."""
+    base_image = np.full((16, 16, 3), 50, dtype=np.uint8)
+    segmentation = np.zeros((16, 16), dtype=np.int32)
+    segmentation[0:8, 0:8] = 1
+
+    image_path = tmp_path / "image.png"
+    seg_path = tmp_path / "seg.npy"
+    Image.fromarray(base_image).save(image_path)
+    np.save(seg_path, segmentation)
+
+    importer = CellPoseImporter()
+    importer.load_image_file(str(image_path))
+    importer.load_segmentation_file(seg_path)
+    importer.validate_dimensions()
+    importer.generate_overlay(opacity=1.0)
+    result = importer.create_result(image_path)
+
+    image_path.unlink()  # the original file is no longer reachable
+
+    restored = CellPoseImporter()
+    restored.restore_from_result(result)
+
+    assert restored.image_data is not None
+    np.testing.assert_array_equal(restored.image_data, result.background_image)
+    assert not np.array_equal(restored.image_data, result.overlay_image)
+
+
+def test_load_background_image_reloads_from_disk(tmp_path):
+    base_image = np.full((16, 16, 3), 50, dtype=np.uint8)
+    image_path = tmp_path / "image.png"
+    Image.fromarray(base_image).save(image_path)
+
+    importer = CellPoseImporter()
+    importer.load_image_file(str(image_path))
+
+    reloaded = load_background_image(image_path)
+
+    assert reloaded is not None
+    np.testing.assert_array_equal(reloaded, importer.image_data)
+
+
+def test_load_background_image_returns_none_when_file_missing(tmp_path):
+    assert load_background_image(tmp_path / "missing.png") is None
+
+
 def test_restore_from_result_preserves_custom_mapping(tmp_path):
     base_image = np.full((16, 16, 3), 80, dtype=np.uint8)
     segmentation = np.zeros((16, 16), dtype=np.int32)
@@ -492,3 +564,8 @@ def test_restore_from_result_preserves_custom_mapping(tmp_path):
     assert cloned_result.stimulus_to_cellpose_mapping == custom_mapping
     expected_segmentation = np.flipud(segmentation - 1)
     np.testing.assert_array_equal(restored.segmentation_data, expected_segmentation)
+    # background_image is a defensive copy, not the same array object
+    assert cloned_result.background_image is not original_result.background_image
+    np.testing.assert_array_equal(
+        cloned_result.background_image, original_result.background_image
+    )

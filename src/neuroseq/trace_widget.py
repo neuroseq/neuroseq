@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterable
+
 import brian2.numpy_ as np
+import fastplotlib as fpl
 import pygfx
 from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import TraceData
+from neuroseq.stim import StimArray
+from neuroseq.stim import StimType
+from neuroseq.stim_widget import apply_cmap_alpha
 from neuroseq.timeseries_widget import TimeseriesWidget
+from neuroseq.trace_widget_state import TraceWidgetState
+from neuroseq.utils import get_cmap
 from neuroseq.utils import neuron_indices_to_colors
 
 
@@ -97,12 +106,18 @@ class TraceWidget(TimeseriesWidget):
     _MIN_LINE_THICKNESS = 1.0
     _MAX_LINE_THICKNESS = 2.0
 
+    # Trace lines default to z=0; keep the stim overlay just behind them so
+    # the line is always visible on top, without affecting the grid (z=199).
+    STIM_OVERLAY_Z = -1.0
+    STIM_OVERLAY_ALPHA = 0.6
+
     def __init__(
         self,
         controller: pygfx.Controller,
         parent: QtWidgets.QWidget | None = None,
         default_controller: ConstrainedPanZoomController | None = None,
         show_axis_link_controls: bool = False,
+        state: TraceWidgetState | None = None,
     ) -> None:
         super().__init__(
             controller,
@@ -116,12 +131,45 @@ class TraceWidget(TimeseriesWidget):
         self.clip = True
         self._trace_norm_dialog: TraceNormDialog | None = None
         self.vector_export_requested.connect(self.preview_traces)
+        # Whether to overlay a stim array on top of these traces, and which
+        # one - a view-local display setting like trace normalization, not
+        # part of TraceWidgetState: each detached copy of this panel can
+        # independently show its own stim overlay.
+        self._stim_overlay_enabled = False
+        self._stim_overlay_array: StimArray | None = None
+        self._stim_overlay_graphic: fpl.ImageGraphic | None = None
         if isinstance(self.controller, ConstrainedPanZoomController):
             self.controller.add_state_change_listener(self._update_line_thickness)
+        self._state = state if state is not None else TraceWidgetState()
+        # Keep the connection handles (not just the callables): a
+        # signal-to-signal connection (`signal.connect(other_signal.emit)`,
+        # as used elsewhere for this same shared-state pattern) can't be
+        # disconnected by passing the callable again - only disconnecting
+        # the exact handle .connect() returned works. None of this widget's
+        # own connections are signal-to-signal today, but keep the same
+        # robust pattern used for SpatialFootprintWidget's equivalent state.
+        self._state_connections = [
+            self._state.data_changed.connect(self._on_state_data_changed),
+            self._state.greyed_changed.connect(self._on_state_greyed_changed),
+        ]
+        if self._state.data is not None:
+            self._on_state_data_changed()
 
     def closeEvent(self, event) -> None:
         if isinstance(self.controller, ConstrainedPanZoomController):
             self.controller.remove_state_change_listener(self._update_line_thickness)
+        # A detached view shares self._state with every other view (docked
+        # or detached) bound to it. Qt is supposed to auto-disconnect a
+        # destroyed receiver, but this widget's underlying render canvas can
+        # be torn down well before its Python/Qt object is actually deleted,
+        # leaving the connection live in between. A later mutation from
+        # another view would then synchronously invoke this (now
+        # GPU-resource-less) view's slot and segfault touching its dead
+        # canvas - disconnect explicitly instead of relying on that timing.
+        for connection in self._state_connections:
+            with contextlib.suppress(TypeError, RuntimeError):
+                self._state.disconnect(connection)  # type: ignore[call-arg]
+        self._state_connections = []
         super().closeEvent(event)
 
     def resizeEvent(self, event) -> None:
@@ -178,7 +226,16 @@ class TraceWidget(TimeseriesWidget):
         if self.offset_by_median:
             median_values = np.nanmedian(traces, axis=1)
             max_values = np.nanmax(traces, axis=1)
-            max_trace = np.max(np.abs(max_values - median_values))
+            min_values = np.nanmin(traces, axis=1)
+            # A trace's excursion below its median can exceed its excursion
+            # above it (e.g. a calcium baseline with an occasional deep dip
+            # but only modest transients) - considering only max_values
+            # here left the downward side completely unbounded, able to
+            # swing many rows past its own and get cut off by whatever
+            # camera edge it hit first (worst case: the only visible row).
+            max_trace = np.max(
+                np.maximum(max_values - median_values, median_values - min_values)
+            )
         else:
             max_trace = max(
                 abs(float(np.nanmin(traces))), abs(float(np.nanmax(traces)))
@@ -244,6 +301,8 @@ class TraceWidget(TimeseriesWidget):
         for index, graphic, color in zip(
             self.data.indices, self.graphic.graphics, colors, strict=True
         ):
+            if not graphic.visible:
+                continue
             # Copy normalized, clipped coordinates and preserve neuron spacing.
             points = np.asarray(graphic.data[:]).copy()
             (line,) = ax.plot(
@@ -262,10 +321,15 @@ class TraceWidget(TimeseriesWidget):
             if stop > start:
                 ax.set_xlim(start * self.dt_ms, stop * self.dt_ms)
         if self.selected_neuron_slice is not None:
-            start, stop, _ = self.selected_neuron_slice.indices(int(self.n_neurons))
-            if stop > start:
-                # Match the selection rectangle's edges around the neuron bands.
-                ax.set_ylim(start - 0.5, stop - 0.5)
+            selection = self.selected_neuron_slice
+            rows = [
+                row
+                for row, neuron_id in enumerate(self._visible_neuron_ids)
+                if (selection.start is None or neuron_id >= selection.start)
+                and (selection.stop is None or neuron_id < selection.stop)
+            ]
+            if rows:
+                ax.set_ylim(rows[0] - 0.5, rows[-1] + 0.5)
         ax.set_xlabel("Time (ms)")
         ax.set_ylabel("Neuron index (normalized traces)")
         ax.set_title(self.data.name)
@@ -276,6 +340,10 @@ class TraceWidget(TimeseriesWidget):
         self,
         data: TraceData | None = None,
     ) -> None:
+        self._state.set_data(data)
+
+    def _on_state_data_changed(self) -> None:
+        data = self._state.data
         self.clear_data()
         if data is None:
             self.subplot.title = "Traces"
@@ -289,7 +357,9 @@ class TraceWidget(TimeseriesWidget):
         self.data_values = data.traces.T
         self.data_values_scale = 1000.0
         self.units = data.units if data.units else "mV"
-        self.n_neurons = np.max(data.indices) + 1
+        self._all_neuron_ids = sorted({int(i) for i in data.indices})
+        self._greyed_neuron_ids = set(self._state.greyed_neuron_ids)
+        self._rebuild_visible_neuron_mapping()
         self.dt_ms = float(data.dt) * 1000.0  # convert to milliseconds
         self.n_timestamps = data.traces.shape[1]
         # convert timestamps to milliseconds and stack to produce a format suitable for line_stack
@@ -308,7 +378,108 @@ class TraceWidget(TimeseriesWidget):
             uniform_colors=True,
             thickness=2,
         )
-        for i, line in enumerate(self.graphic.graphics):
-            line.offset = (line.offset[0], self.data.indices[i], line.offset[2])
+        self._apply_visible_neuron_layout()
         self._update_line_thickness()
+        self._rebuild_stim_overlay()
         self.post_set_data()
+
+    def _on_state_greyed_changed(self) -> None:
+        self._greyed_neuron_ids = set(self._state.greyed_neuron_ids)
+        self._rebuild_visible_neuron_mapping()
+        self._apply_visible_neuron_layout()
+        self._rebuild_stim_overlay()
+        self._refit_view_to_visible_neurons()
+
+    def set_neuron_greyed(self, neuron_index: int, greyed: bool) -> None:
+        self._state.set_neuron_greyed(neuron_index, greyed)
+
+    def set_neurons_greyed(
+        self,
+        newly_hidden: Iterable[int],
+        newly_shown: Iterable[int],
+    ) -> None:
+        self._state.set_neurons_greyed(newly_hidden, newly_shown)
+
+    def clear_greyed_neurons(self) -> None:
+        self._state.clear_greyed_neurons()
+
+    def _apply_visible_neuron_layout(self) -> None:
+        if self.graphic is None or not isinstance(self.data, TraceData):
+            return
+        for i, line in enumerate(self.graphic.graphics):
+            real_id = int(self.data.indices[i])
+            display_row = self._neuron_id_to_display_row.get(real_id)
+            line.visible = display_row is not None
+            if display_row is not None:
+                line.offset = (line.offset[0], display_row, line.offset[2])
+
+    def clear_data(self) -> None:
+        # Must be nulled *before* calling super(): TimeseriesWidget.clear_data()
+        # wipes the whole subplot via FPLWidget.clear_data() and then, at its
+        # own tail end, calls clear_greyed_neurons() - which (via
+        # TraceWidgetState) can synchronously emit greyed_changed and
+        # re-enter _rebuild_stim_overlay() before this method gets a chance
+        # to run its own cleanup. If the stale reference were still set at
+        # that point, _rebuild_stim_overlay() would try to remove a graphic
+        # the subplot wipe already discarded (pygfx logs, but does not
+        # raise, "Attempting to remove object that was not a child" for
+        # this). _stim_overlay_enabled/_stim_overlay_array are left alone so
+        # the setting survives a data refresh.
+        self._stim_overlay_graphic = None
+        super().clear_data()
+
+    def set_stim_overlay_enabled(self, enabled: bool) -> None:
+        """Toggle showing a stim array's heatmap behind the trace lines
+        (issue #530). Call set_stim_overlay_data() to pick/update which
+        StimArray is shown."""
+        if enabled == self._stim_overlay_enabled:
+            return
+        self._stim_overlay_enabled = enabled
+        self._rebuild_stim_overlay()
+
+    def set_stim_overlay_data(self, stim_array: StimArray | None) -> None:
+        self._stim_overlay_array = stim_array
+        self._rebuild_stim_overlay()
+
+    def _rebuild_stim_overlay(self) -> None:
+        if self._stim_overlay_graphic is not None:
+            with contextlib.suppress(Exception):
+                self.subplot.remove_graphic(self._stim_overlay_graphic)
+            self._stim_overlay_graphic = None
+
+        stim_array = self._stim_overlay_array
+        if (
+            not self._stim_overlay_enabled
+            or stim_array is None
+            or not isinstance(self.data, TraceData)
+            or not self._visible_neuron_ids
+        ):
+            return
+
+        n_timesteps, n_stim_neurons = stim_array.values.shape
+        # Same-neuron overlay only (see issue #530): row i shows the stim
+        # column for the same real neuron id as trace display row i, or is
+        # left at zero if that id has no corresponding stim column.
+        visible_values = np.zeros(
+            (n_timesteps, len(self._visible_neuron_ids)),
+            dtype=stim_array.values.dtype,
+        )
+        for column, neuron_id in enumerate(self._visible_neuron_ids):
+            if 0 <= neuron_id < n_stim_neurons:
+                visible_values[:, column] = stim_array.values[:, neuron_id]
+
+        vmax = float(np.max(np.abs(stim_array.values)))
+        if vmax == 0:
+            vmax = 1.0
+        vmin = -vmax if stim_array.stim_type == StimType.External else 0.0
+        cmap = get_cmap(stim_array.stim_type, alpha=self.STIM_OVERLAY_ALPHA)
+        self._stim_overlay_graphic = self.subplot.add_image(
+            visible_values.T,
+            vmin=vmin,
+            vmax=vmax,
+            cmap=cmap,
+        )
+        apply_cmap_alpha(self._stim_overlay_graphic, cmap)
+        dt_ms = float(stim_array.dt) * 1000.0
+        self._stim_overlay_graphic.offset = (0.5 * dt_ms, 0.0, self.STIM_OVERLAY_Z)
+        self._stim_overlay_graphic.world_object.world.scale = (dt_ms, 1.0, 1.0)

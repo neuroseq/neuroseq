@@ -23,6 +23,7 @@ from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importer_suite2p import remap_raw_cellpose_ids
 from neuroseq.io import append_to_zip
 from neuroseq.io import load_from_zip
 from neuroseq.power_lut import PowerLut
@@ -423,9 +424,11 @@ class Project:
         current_n_neurons = int(stim_array.values.shape[1])
         if n_neurons < current_n_neurons:
             self.logger.info(
-                f"Decreasing neurons in StimArray {name} from {current_n_neurons} to {n_neurons}"
+                f"Decreasing neurons in StimArray {name} from {current_n_neurons} to "
+                f"{n_neurons} - trimming the rest of the project to match "
+                "(same behavior as Trim to Mapped Neurons)"
             )
-            stim_array.values = stim_array.values[:, :n_neurons]
+            self._trim_to_neuron_ids(list(range(n_neurons)))
         elif n_neurons > current_n_neurons:
             self.logger.info(
                 f"Increasing neurons in StimArray {name} from {current_n_neurons} to {n_neurons}"
@@ -689,6 +692,51 @@ class Project:
         )
         self.update_limits()
 
+    def remap_cellpose_indices(self) -> list[str]:
+        """
+        Re-resolve ``TraceData.indices``/``SpikeData.spike_indices`` for every
+        Suite2p-imported experiment against the current ``cellpose_data`` mapping.
+
+        Trace/spike data carries its raw, pre-mapping Cellpose ROI id
+        (``raw_cellpose_ids``) alongside the already-resolved ``indices``/
+        ``spike_indices``. Whenever ``cellpose_data``'s mapping changes, call this to
+        keep them in sync instead of leaving the old resolution in place.
+
+        Returns
+        -------
+        list[str]
+            Names of experiments whose data could not be remapped (e.g. the current
+            mapping collides for their raw ids) - those are left unchanged rather than
+            raising, so the caller can surface a warning.
+        """
+        mapping = (
+            self.cellpose_data.stimulus_to_cellpose_mapping
+            if self.cellpose_data is not None
+            else None
+        )
+        failed: list[str] = []
+        for name, experiment in self.experiments.items():
+            for datum in experiment.data:
+                if not isinstance(datum, TraceData | SpikeData):
+                    continue
+                if datum.raw_cellpose_ids is None:
+                    continue
+                try:
+                    new_ids = remap_raw_cellpose_ids(datum.raw_cellpose_ids, mapping)
+                except ValueError:
+                    self.logger.warning(
+                        f"Could not remap trace/spike indices for experiment "
+                        f"'{name}' under the current Cellpose mapping",
+                        exc_info=True,
+                    )
+                    failed.append(name)
+                    continue
+                if isinstance(datum, TraceData):
+                    datum.indices = new_ids
+                else:
+                    datum.spike_indices = new_ids
+        return failed
+
     def add_experiment(
         self,
         experiment: Experiment,
@@ -860,6 +908,135 @@ class Project:
                 )
             else:
                 stim_array.values = stim_array.values[:, :n_neurons]
+        self.update_limits()
+
+    def _trim_to_neuron_ids(self, kept_ids: list[int]) -> None:
+        """Keep only the given neuron/stim ids across every StimArray and
+        every experiment's TraceData/SpikeData/SynapseData in the project,
+        re-indexing the kept ones to a contiguous ``0..n_kept-1`` numbering
+        (in the order given). Also drops/renumbers any
+        ``cellpose_data.stimulus_to_cellpose_mapping`` entry the same way,
+        so a neuron dropped here can't leave a dangling mapping entry
+        behind. Does not call `update_limits()` - callers do that once
+        they're done (e.g. after also renaming/resizing the array that
+        triggered the trim).
+
+        Shared core behind `trim_to_mapped_neurons()` (kept_ids = the
+        Cellpose-mapped stim ids) and `update_stim_array_properties()`'s
+        neuron-count decrease (kept_ids = ``range(new_n_neurons)``) - both
+        need the same project-wide consistency, not just a resize of the
+        one array/dataset that triggered it.
+        """
+        old_to_new = {old_id: new_id for new_id, old_id in enumerate(kept_ids)}
+        kept_ids_set = set(kept_ids)
+
+        for name, stim_array in self.stim_arrays.items():
+            n_neurons = int(stim_array.values.shape[1])
+            valid_ids = [i for i in kept_ids if i < n_neurons]
+            if len(valid_ids) == n_neurons:
+                continue
+            self.logger.info(
+                f"Trimming StimArray {name} from {n_neurons} to "
+                f"{len(valid_ids)} neurons"
+            )
+            stim_array.values = stim_array.values[:, valid_ids]
+
+        for exp_name, experiment in self.experiments.items():
+            for datum in experiment.data:
+                if isinstance(datum, TraceData):
+                    keep_mask = np.isin(datum.indices, kept_ids)
+                    if keep_mask.all():
+                        continue
+                    self.logger.info(
+                        f"Trimming TraceData '{exp_name} :: {datum.name}' from "
+                        f"{datum.traces.shape[0]} to {int(keep_mask.sum())} neurons"
+                    )
+                    datum.traces = datum.traces[keep_mask]
+                    datum.indices = np.asarray(
+                        [old_to_new[int(i)] for i in datum.indices[keep_mask]],
+                        dtype=np.uint32,
+                    )
+                    if datum.raw_cellpose_ids is not None:
+                        datum.raw_cellpose_ids = datum.raw_cellpose_ids[keep_mask]
+                elif isinstance(datum, SpikeData):
+                    keep_mask = np.isin(datum.spike_indices, kept_ids)
+                    if keep_mask.all():
+                        continue
+                    self.logger.info(
+                        f"Trimming SpikeData '{exp_name} :: {datum.name}': dropping "
+                        f"{int((~keep_mask).sum())} spikes from removed neurons"
+                    )
+                    datum.spike_times = datum.spike_times[keep_mask]
+                    datum.spike_indices = np.asarray(
+                        [old_to_new[int(i)] for i in datum.spike_indices[keep_mask]],
+                        dtype=np.uint32,
+                    )
+                    if datum.raw_cellpose_ids is not None:
+                        datum.raw_cellpose_ids = datum.raw_cellpose_ids[keep_mask]
+                elif isinstance(datum, SynapseData):
+                    if datum.values.ndim < 2:
+                        continue
+                    n_pre, n_post = datum.values.shape[0], datum.values.shape[1]
+                    if n_pre != n_post:
+                        self.logger.warning(
+                            f"Skipping SynapseData '{exp_name} :: {datum.name}': "
+                            f"non-square neuron axes ({n_pre} x {n_post})"
+                        )
+                        continue
+                    valid_ids = [i for i in kept_ids if i < n_pre]
+                    if len(valid_ids) == n_pre:
+                        continue
+                    self.logger.info(
+                        f"Trimming SynapseData '{exp_name} :: {datum.name}' from "
+                        f"{n_pre} to {len(valid_ids)} neurons"
+                    )
+                    n_timesteps = datum.values.shape[2]
+                    valid_ids_arr = np.asarray(valid_ids, dtype=np.int64)
+                    datum.values = datum.values[
+                        np.ix_(valid_ids_arr, valid_ids_arr, np.arange(n_timesteps))
+                    ]
+
+        if (
+            self.cellpose_data is not None
+            and self.cellpose_data.stimulus_to_cellpose_mapping
+        ):
+            self.cellpose_data.stimulus_to_cellpose_mapping = {
+                old_to_new[old_stim_id]: cellpose_id
+                for old_stim_id, cellpose_id in (
+                    self.cellpose_data.stimulus_to_cellpose_mapping.items()
+                )
+                if old_stim_id in kept_ids_set
+            }
+
+    def trim_to_mapped_neurons(self) -> None:
+        """
+        Permanently keep only the neurons that have a Cellpose cell mapped to
+        them (per ``cellpose_data.stimulus_to_cellpose_mapping``), discarding
+        every other neuron from every StimArray and every experiment's
+        TraceData/SpikeData/SynapseData. The kept neurons are re-indexed to a
+        contiguous ``0..n_kept-1`` numbering (in mapping order), and
+        ``stimulus_to_cellpose_mapping`` is rewritten to match.
+
+        This is a one-way, in-memory change - the caller is responsible for
+        having the result saved under a new file name rather than silently
+        overwriting anything the trim discarded data from.
+
+        Raises
+        ------
+        ValueError
+            If there is no Cellpose data, or its stimulus mapping is empty
+            (nothing to trim to).
+        """
+        if (
+            self.cellpose_data is None
+            or not self.cellpose_data.stimulus_to_cellpose_mapping
+        ):
+            raise ValueError(
+                "No Cellpose stimulus mapping to trim to - import Cellpose "
+                "data with a mapping first."
+            )
+        kept_stim_ids = sorted(self.cellpose_data.stimulus_to_cellpose_mapping.keys())
+        self._trim_to_neuron_ids(kept_stim_ids)
         self.update_limits()
 
     def trim_stim_arrays(self, total_time_seconds: float):

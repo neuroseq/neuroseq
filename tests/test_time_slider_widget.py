@@ -97,3 +97,22 @@ def test_time_slider_widget(
     stim_widget.close()
     heatmap_widget.close()
     slider.close()
+
+
+def test_time_slider_emits_time_changed_on_drag_and_explicit_set(qtbot: QtBot) -> None:
+    slider = TimeSliderWidget()
+    qtbot.addWidget(slider)
+    slider.set_max_time_secs(2)
+    emitted: list[int] = []
+    slider.time_changed.connect(emitted.append)
+
+    slider.slider.setValue(500)
+    assert emitted == [500]
+
+    # set_current_time_ms propagates unconditionally (see its own docstring)
+    # in addition to the slider's own valueChanged - so a value that actually
+    # changes fires time_changed via both paths, same as it already does for
+    # each connected widget's set_time_ms()
+    slider.set_current_time_ms(1500)
+    assert emitted == [500, 1500, 1500]
+    slider.close()

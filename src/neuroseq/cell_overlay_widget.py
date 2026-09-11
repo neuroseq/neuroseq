@@ -11,6 +11,7 @@ from typing import TypedDict
 
 import brian2.numpy_ as np
 import pygfx
+from matplotlib.path import Path as MplPath
 from qtpy import QtCore
 from qtpy import QtWidgets
 
@@ -41,6 +42,7 @@ STRIPED_CELL_GREY = (0.55, 0.55, 0.55)
 STRIPED_CELL_WHITE = (1.0, 1.0, 1.0)
 STRIPED_CELL_ALPHA = 1.0
 STRIPED_CELL_STRIPE_WIDTH = 4
+LASSO_LINE_COLOR = (1.0, 1.0, 0.0, 0.9)
 
 
 class TextGraphic(Protocol):
@@ -114,6 +116,8 @@ def compute_segmentation_legend(
 
 class OverlayView(FullScreenFPLWidget):
     neuron_clicked = QtCore.Signal(int)
+    neuron_lasso_selected = QtCore.Signal(list)
+    background_clicked = QtCore.Signal()
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent=parent)
@@ -142,9 +146,43 @@ class OverlayView(FullScreenFPLWidget):
         self._circle_line: LineGraphic | None = None
         self._circle_handles: list[ScatterGraphic] = []
         self._drag_state: _AOIDragState | None = None
+        self._aoi_undo_stack: list[AreasOfInterestConfig] = []
+        self._aoi_redo_stack: list[AreasOfInterestConfig] = []
+        self.aoi_editable = True
         self.enable_cell_selection = False
+        # Which pygfx button (1=left, 2=right, 3=middle) a plain click vs. a
+        # drag-lasso responds to; 0 means "any button" for that gesture (the
+        # historical default, kept for callers - the Cell Segmentation
+        # import dialog - that haven't opted into specific ones). The
+        # Spatial Footprints panel sets these to left-click-only and
+        # right-drag-only respectively, so left click/drag is free to just
+        # pan (see pointer_move: a drag on a button that doesn't allow lasso
+        # is abandoned rather than started, leaving the camera controller,
+        # never disabled, to handle it as a normal pan).
+        self.cell_click_button = 0
+        self.cell_lasso_button = 0
         self._cell_click_down_world: tuple[float, float] | None = None
+        self._cell_selection_gesture_allows_click = False
+        self._cell_selection_gesture_allows_lasso = False
+        # A cell-selection gesture starts as a plain click; if the pointer
+        # moves past _world_tolerance() before release, it becomes a lasso
+        # (see pointer_move) - _lasso_points truthiness is that state, there
+        # is no separate mode toggle.
+        self._lasso_points: list[tuple[float, float]] = []
+        self._lasso_line: LineGraphic | None = None
         self.on_geometry_changed: Callable[[AreasOfInterestConfig], None] | None = None
+        # A right click inside the canvas is reserved for the lasso-select
+        # gesture above - Qt's default policy (NoContextMenu) explicitly
+        # *defers an unhandled context-menu event to the parent widget*, so
+        # without this a right click here would still pop open an
+        # ancestor's "Detach panel..." menu (see gui.py's
+        # _install_detach_context_menus) at the same time as starting the
+        # lasso. PreventContextMenu is the one policy that blocks that
+        # deferral; it must be set on both this widget and the actual
+        # rendering canvas (self.widget) since either can be the one that
+        # receives the event.
+        self.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.PreventContextMenu)
+        self.widget.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.PreventContextMenu)
         self._configure_subplot()
         self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
         self.figure.renderer.add_event_handler(self._aoi_pointer_down, "pointer_down")
@@ -212,6 +250,8 @@ class OverlayView(FullScreenFPLWidget):
             self._image_graphic = self.subplot.add_image(
                 overlay_image, interpolation="nearest"
             )
+            self._aoi_undo_stack = []
+            self._aoi_redo_stack = []
         else:
             self._image_graphic.data = overlay_image
 
@@ -264,6 +304,21 @@ class OverlayView(FullScreenFPLWidget):
             self._reset_camera()
         self.set_aoi_shapes(self._aoi_config, self._aoi_visible)
 
+    def set_overlay_image(self, overlay_image: np.ndarray) -> None:
+        """Swap in a new overlay image with the same shape as the current
+        one, without touching the segmentation color layer, labels, or
+        camera - a cheap alternative to `add_overlay_data` for updates that
+        only recolor pixels (e.g. a hover highlight), which can fire once
+        per pointer-move event and would otherwise pay for a full label/
+        legend rebuild every time.
+        """
+        if self._image_graphic is None or self.overlay_image is None:
+            return
+        if overlay_image.shape != self.overlay_image.shape:
+            return
+        self.overlay_image = overlay_image
+        self._image_graphic.data = overlay_image
+
     def _reset_graphics(self, *, clear_subplot: bool = False) -> None:
         if clear_subplot and getattr(self.subplot, "renderer", None) is not None:
             self.subplot.clear()
@@ -272,6 +327,11 @@ class OverlayView(FullScreenFPLWidget):
         self._segmentation_shape = None
         self.text = None
         self.base_camera_state = None
+        # subplot.clear() above already discarded any in-progress lasso line
+        # from the render tree; null the reference too, or a later lasso
+        # gesture's _update_lasso_line()/_clear_lasso_line() would try to
+        # remove a graphic that's already gone.
+        self._lasso_line = None
         self._clear_label_graphics()
         self._clear_aoi_graphics()
 
@@ -710,6 +770,7 @@ class OverlayView(FullScreenFPLWidget):
             self._aoi_config is None
             or not self._aoi_visible
             or self.overlay_image is None
+            or not self.aoi_editable
         ):
             return
 
@@ -719,6 +780,13 @@ class OverlayView(FullScreenFPLWidget):
 
         hit = self._aoi_hit_test(float(mouse_pos[0]), float(mouse_pos[1]))
         if hit is None:
+            return
+        # Moving a shape by its body competes with panning the FOV by
+        # click-and-drag, since the body covers a large, easy-to-hit area;
+        # require Shift to disambiguate (see issue #531). The small
+        # corner/handle resize targets stay always-active - their footprint
+        # is tiny enough that accidental hits while panning are rare.
+        if hit[1] == "body" and not self._event_has_shift(ev):
             return
 
         original_config = clone_aoi_config(self._aoi_config)
@@ -737,6 +805,12 @@ class OverlayView(FullScreenFPLWidget):
     def _aoi_pointer_up(self, ev: pygfx.PointerEvent) -> None:
         if self._drag_state is None:
             return
+        if (
+            self._aoi_config is not None
+            and self._aoi_config != self._drag_state.original_config
+        ):
+            self._aoi_undo_stack.append(self._drag_state.original_config)
+            self._aoi_redo_stack = []
         self._drag_state = None
         self.subplot.controller.enabled = True
         if self._aoi_config is not None and self.on_geometry_changed is not None:
@@ -745,19 +819,87 @@ class OverlayView(FullScreenFPLWidget):
             self.on_geometry_changed(config)
         ev.stop_propagation()
 
+    @staticmethod
+    def _event_has_shift(ev: pygfx.PointerEvent) -> bool:
+        modifiers = getattr(ev, "modifiers", None) or ()
+        return any(str(modifier).lower() == "shift" for modifier in modifiers)
+
+    def can_undo_aoi_edit(self) -> bool:
+        return bool(self._aoi_undo_stack)
+
+    def can_redo_aoi_edit(self) -> bool:
+        return bool(self._aoi_redo_stack)
+
+    def undo_aoi_edit(self) -> bool:
+        """Revert the most recent shape move/resize (see issue #531)."""
+        if not self._aoi_undo_stack or self._aoi_config is None:
+            return False
+        self._aoi_redo_stack.append(self._aoi_config)
+        previous = self._aoi_undo_stack.pop()
+        self.set_aoi_shapes(previous, self._aoi_visible)
+        self._notify_geometry_changed()
+        return True
+
+    def redo_aoi_edit(self) -> bool:
+        if not self._aoi_redo_stack or self._aoi_config is None:
+            return False
+        self._aoi_undo_stack.append(self._aoi_config)
+        next_config = self._aoi_redo_stack.pop()
+        self.set_aoi_shapes(next_config, self._aoi_visible)
+        self._notify_geometry_changed()
+        return True
+
+    def _notify_geometry_changed(self) -> None:
+        if self._aoi_config is not None and self.on_geometry_changed is not None:
+            config = clone_aoi_config(self._aoi_config)
+            assert config is not None
+            self.on_geometry_changed(config)
+
     def _cell_selection_pointer_down(self, ev: pygfx.PointerEvent) -> None:
         if not self.enable_cell_selection or self.segmentation is None:
+            return
+        allows_click = self.cell_click_button in (0, ev.button)
+        allows_lasso = self.cell_lasso_button in (0, ev.button) or (
+            # Shift turns a click-only button (the Spatial Footprints
+            # panel's left button) into a lasso too, without needing the
+            # dedicated lasso button (right) - same gesture, alternate way
+            # to reach it.
+            allows_click and self._event_has_shift(ev)
+        )
+        if not (allows_click or allows_lasso):
             return
         mouse_pos = self.subplot.map_screen_to_world(ev)
         if mouse_pos is None:
             return
+        # Whether this becomes a plain click or a lasso (if this button
+        # allows one) is decided in pointer_move, based on how far the
+        # pointer travels before release.
         self._cell_click_down_world = (float(mouse_pos[0]), float(mouse_pos[1]))
+        self._cell_selection_gesture_allows_click = allows_click
+        self._cell_selection_gesture_allows_lasso = allows_lasso
+        self._lasso_points = []
 
     def _cell_selection_pointer_up(self, ev: pygfx.PointerEvent) -> None:
-        if not self.enable_cell_selection or self._cell_click_down_world is None:
+        if not self.enable_cell_selection:
+            return
+        if self._lasso_points:
+            points = self._lasso_points
+            self._lasso_points = []
+            self._cell_click_down_world = None
+            self._clear_lasso_line()
+            self.subplot.controller.enabled = True
+            if len(points) >= 3:
+                cellpose_ids = self._cells_inside_polygon(points)
+                if cellpose_ids:
+                    self.neuron_lasso_selected.emit(cellpose_ids)
+            return
+        if self._cell_click_down_world is None:
             return
         down_x, down_y = self._cell_click_down_world
+        allows_click = self._cell_selection_gesture_allows_click
         self._cell_click_down_world = None
+        if not allows_click:
+            return
         mouse_pos = self.subplot.map_screen_to_world(ev)
         if mouse_pos is None:
             return
@@ -769,6 +911,48 @@ class OverlayView(FullScreenFPLWidget):
         cellpose_id = self._segmentation_id_at(float(mouse_pos[0]), float(mouse_pos[1]))
         if cellpose_id is not None:
             self.neuron_clicked.emit(cellpose_id)
+        else:
+            self.background_clicked.emit()
+
+    def _cells_inside_polygon(self, points: list[tuple[float, float]]) -> list[int]:
+        if not self._label_centers:
+            return []
+        polygon = MplPath(points)
+        cell_ids, centers = zip(*self._label_centers.items(), strict=False)
+        inside = polygon.contains_points(np.asarray(centers))
+        return [
+            cell_id
+            for cell_id, is_inside in zip(cell_ids, inside, strict=False)
+            if is_inside
+        ]
+
+    def _update_lasso_line(self) -> None:
+        if len(self._lasso_points) < 2:
+            return
+        closed_points = [*self._lasso_points, self._lasso_points[0]]
+        data = np.asarray([(x, y, 220.0) for x, y in closed_points], dtype=np.float32)
+        # The line grows by one point per pointer_move; fastplotlib's LineGraphic
+        # buffer is fixed-size at creation and can't be resized via `.data = ...`
+        # (unlike the AOI square/circle lines, which always keep a constant point
+        # count), so recreate the graphic each time instead of updating in place.
+        if self._lasso_line is not None:
+            with contextlib.suppress(Exception):
+                self.subplot.remove_graphic(self._lasso_line)
+        self._lasso_line = self.subplot.add_line(
+            data,
+            colors=LASSO_LINE_COLOR,
+            thickness=2.0,
+            size_space="model",
+        )
+        self._lasso_line.visible = True
+        self.figure.renderer.request_draw()
+
+    def _clear_lasso_line(self) -> None:
+        if self._lasso_line is not None:
+            with contextlib.suppress(Exception):
+                self.subplot.remove_graphic(self._lasso_line)
+            self._lasso_line = None
+        self.figure.renderer.request_draw()
 
     def _segmentation_id_at(self, world_x: float, world_y: float) -> int | None:
         if self.segmentation is None:
@@ -967,6 +1151,32 @@ class OverlayView(FullScreenFPLWidget):
             ev.stop_propagation()
             return
 
+        if self._cell_click_down_world is not None:
+            mouse_pos = self.subplot.map_screen_to_world(ev)
+            if mouse_pos is None:
+                return
+            if not self._lasso_points:
+                dist = math.hypot(
+                    float(mouse_pos[0]) - self._cell_click_down_world[0],
+                    float(mouse_pos[1]) - self._cell_click_down_world[1],
+                )
+                if dist <= self._world_tolerance():
+                    return
+                if not self._cell_selection_gesture_allows_lasso:
+                    # This button doesn't do lasso (e.g. left button is
+                    # click-only in the Spatial Footprints panel) - abandon
+                    # the gesture and let the camera controller (never
+                    # disabled here) handle the drag as a normal pan/zoom.
+                    self._cell_click_down_world = None
+                    return
+                # Movement crossed the click/drag threshold: this gesture is
+                # a lasso, seeded with the original pointer_down position.
+                self._lasso_points = [self._cell_click_down_world]
+                self.subplot.controller.enabled = False
+            self._lasso_points.append((float(mouse_pos[0]), float(mouse_pos[1])))
+            self._update_lasso_line()
+            return
+
         if self.text is None or self.segmentation is None:
             return
 
@@ -1033,6 +1243,8 @@ class OverlayView(FullScreenFPLWidget):
 class CellOverlayWidget(QtWidgets.QGroupBox):
     aoi_geometry_changed = QtCore.Signal(object)
     neuron_clicked = QtCore.Signal(int)
+    neuron_lasso_selected = QtCore.Signal(list)
+    background_clicked = QtCore.Signal()
 
     def __init__(self, title: str = "Color-coded Preview") -> None:
         super().__init__(title)
@@ -1065,6 +1277,8 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             self.aoi_geometry_changed.emit(config)
         )
         self.overlay_view.neuron_clicked.connect(self.neuron_clicked.emit)
+        self.overlay_view.neuron_lasso_selected.connect(self.neuron_lasso_selected.emit)
+        self.overlay_view.background_clicked.connect(self.background_clicked.emit)
         layout.addWidget(self.overlay_view)
         self.logger.info(
             "overlay ui: widget=%sx%s view=%sx%s",
@@ -1192,6 +1406,12 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
 
         self._update_overlay_display()
 
+    def set_overlay_image(self, overlay_image: np.ndarray) -> None:
+        """See `OverlayView.set_overlay_image` - a cheap recolor-only
+        update, safe to call at pointer-move frequency."""
+        self.overlay_image = overlay_image
+        self.overlay_view.set_overlay_image(overlay_image)
+
     def set_aoi_overlay(
         self,
         config: AreasOfInterestConfig | None,
@@ -1246,6 +1466,22 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
 
     def set_cell_selection_enabled(self, enabled: bool) -> None:
         self.overlay_view.enable_cell_selection = enabled
+
+    def set_cell_selection_buttons(
+        self, *, click_button: int, lasso_button: int
+    ) -> None:
+        """Restrict plain-click and drag-lasso cell selection to one pygfx
+        button each (1=left, 2=right, 3=middle); 0 means any button for
+        that gesture. A drag on a button that isn't the lasso button is
+        left alone (not treated as a click either), so the camera
+        controller's own pan/zoom for that button isn't interrupted."""
+        self.overlay_view.cell_click_button = click_button
+        self.overlay_view.cell_lasso_button = lasso_button
+
+    def set_aoi_editable(self, editable: bool) -> None:
+        """Whether the AOI square/circle (if shown) can be dragged to reshape
+        them, vs. displayed purely as a read-only reference."""
+        self.overlay_view.aoi_editable = editable
 
     def _compute_segementation_colors(
         self, segmentation: np.ndarray
