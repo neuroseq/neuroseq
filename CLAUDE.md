@@ -176,6 +176,19 @@ Projects are saved as `.nseq` archives: ZIP files containing a JSON metadata fil
   installed into the active venv. The source lives at
   `/mnt/live1/svintila/sequence-learning` (package `elise` v0.3.x, `src/` layout). Install it
   editable without deps — the imported modules need only `numba`+`numpy`, both already present:
-  `uv pip install --no-deps -e /mnt/live1/svintila/sequence-learning`. If you later hit
+
+  ```bash
+  VIRTUAL_ENV=$PWD/.venv uv pip install --no-deps -e /mnt/live1/svintila/sequence-learning
+  ```
+
+  The `VIRTUAL_ENV` prefix is required: a bare `uv pip` resolves to the conda env at
+  `~/conda-ws/envs/neuroseq`, not the project `.venv` that `uv run` uses, so it reports a
+  successful install while `uv run python -c "import elise"` keeps failing. `uv run` does
+  not prune the editable install once it is in the right venv. If you later hit
   `ModuleNotFoundError` for `mlflow`/`networkx`/`tomli_w`/`coolname`/`tqdm` (pulled in by
-  `elise.simulator`/`main`/`data`), do a full `uv pip install -e` of that path instead.
+  `elise.simulator`/`main`/`data`), do a full `uv pip install -e` of that path instead (same
+  `VIRTUAL_ENV` prefix).
+
+- When `elise` is missing, ~27 ELISE tests skip rather than fail, so `uv run pytest` still
+  reports a green suite. If a full-suite run shows ~29 skipped instead of ~2, that install has
+  gone missing — reinstall it before comparing pass counts against a baseline.
