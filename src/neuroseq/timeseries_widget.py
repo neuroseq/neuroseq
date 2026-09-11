@@ -128,6 +128,7 @@ class TimeseriesWidget(FPLWidget):
         self.figure.renderer.add_event_handler(self.pointer_down, "pointer_down")
         self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
         self.figure.renderer.add_event_handler(self.pointer_up, "pointer_up")
+        self.figure.renderer.add_event_handler(self.pointer_leave, "pointer_leave")
         self.figure.renderer.add_event_handler(self.key_down, "key_down")
 
     def apply_theme(self, theme: str) -> None:
@@ -738,13 +739,20 @@ class TimeseriesWidget(FPLWidget):
         self._last_hovered_neuron_id = neuron_id
         self.neuron_hovered.emit(neuron_id)
 
+    def _clear_hover(self) -> None:
+        self.mouse_pos = None
+        self.text.visible = False
+        if self.hover_slice_graphic is not None:
+            self.hover_slice_graphic.visible = False
+        self._set_hovered_neuron_id(None)
+
+    def pointer_leave(self, ev: pygfx.PointerEvent) -> None:
+        self._clear_hover()
+
     def pointer_move(self, ev: pygfx.PointerEvent) -> None:
         self.mouse_pos = self.subplot.map_screen_to_world(ev)
         if self.mouse_pos is None:
-            self.text.visible = False
-            if self.hover_slice_graphic is not None:
-                self.hover_slice_graphic.visible = False
-            self._set_hovered_neuron_id(None)
+            self._clear_hover()
             return
         self.logger.debug(f"pointer_move at {self.mouse_pos} in mode {self.mode}")
         self.text.visible = self.show_text

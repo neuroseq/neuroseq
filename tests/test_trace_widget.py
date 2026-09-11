@@ -405,6 +405,41 @@ def test_pointer_move_emits_neuron_hovered_only_on_change(
     trace_widget.close()
 
 
+def test_pointer_leave_clears_hover_state(
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    make_trace_data,
+) -> None:
+    """The canvas gets a pointer_leave event (not a pointer_move) when the
+
+    mouse leaves the widget bounds directly, e.g. by moving quickly onto a
+    neighboring panel. Highlighting driven by the last hover must not stick.
+    """
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+
+    emitted: list[int | None] = []
+    trace_widget.neuron_hovered.connect(emitted.append)
+
+    monkeypatch.setattr(
+        trace_widget.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([0.0, 1.0, 0.0]),  # row 1
+    )
+    trace_widget.pointer_move(None)
+    assert emitted == [1]
+    assert trace_widget.text.visible
+
+    trace_widget.pointer_leave(None)
+
+    assert emitted == [1, None]
+    assert trace_widget.mouse_pos is None
+    assert not trace_widget.text.visible
+    trace_widget.close()
+
+
 def test_trace_widget_clear_data_releases_plot_buffers(qtbot: QtBot) -> None:
     controller = ConstrainedPanZoomController()
     trace_widget = TraceWidget(controller)
