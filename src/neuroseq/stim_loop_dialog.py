@@ -3,7 +3,6 @@ from __future__ import annotations
 from qtpy import QtWidgets
 
 from neuroseq.project import Project
-from neuroseq.utils import detect_period
 
 
 class StimLoopDialog(QtWidgets.QDialog):
@@ -17,13 +16,6 @@ class StimLoopDialog(QtWidgets.QDialog):
         self.project = project
 
         self.status_label = QtWidgets.QLabel(self)
-        self.detect_button = QtWidgets.QPushButton("Detect period and trim", self)
-        self.detect_button.setToolTip(
-            "Find the smallest repeating block in the current stim and trim "
-            "the array to one period. Loop then composes that with the "
-            "multiplier."
-        )
-        self.detect_caption = QtWidgets.QLabel("", self)
         self.spinbox = QtWidgets.QSpinBox(self)
         self.spinbox.setRange(1, 1000)
         self.spinbox.setValue(2)
@@ -37,12 +29,6 @@ class StimLoopDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
         layout.addWidget(self.status_label)
 
-        detect_row = QtWidgets.QHBoxLayout()
-        detect_row.addWidget(self.detect_button)
-        detect_row.addWidget(self.detect_caption)
-        detect_row.addStretch(1)
-        layout.addLayout(detect_row)
-
         spin_row = QtWidgets.QHBoxLayout()
         spin_row.addWidget(QtWidgets.QLabel("Number of repetitions:", self))
         spin_row.addWidget(self.spinbox)
@@ -51,7 +37,6 @@ class StimLoopDialog(QtWidgets.QDialog):
 
         layout.addWidget(self.button_box)
 
-        self.detect_button.clicked.connect(self._on_detect_clicked)
         self.spinbox.valueChanged.connect(lambda _value: self._refresh_status_label())
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
@@ -79,22 +64,3 @@ class StimLoopDialog(QtWidgets.QDialog):
             f"Current stim length: {current_ms:.1f} ms ({n_timestamps} samples) "
             f"-> after x {self.loop_count} = {looped_ms:.1f} ms"
         )
-
-    def _on_detect_clicked(self) -> None:
-        reference_stim = self._reference_stim()
-        if reference_stim is None:
-            self.detect_caption.setText("(no stim arrays)")
-            return
-
-        period = detect_period(reference_stim.values)
-        if period is None or period <= 0 or period >= reference_stim.values.shape[0]:
-            self.detect_caption.setText("No periodic block detected; array unchanged.")
-            return
-
-        new_length_secs = period * reference_stim.dt
-        self.project.trim_stim_arrays(total_time_seconds=new_length_secs)
-        self.detect_caption.setText(
-            f"Trimmed to {new_length_secs * 1000.0:.1f} ms "
-            f"({period} samples) - 1 period"
-        )
-        self._refresh_status_label()

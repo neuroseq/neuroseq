@@ -127,9 +127,8 @@ decision algorithm, live plots, and current limitations.
 ## Looping a stim array
 
 **Loop stim array** (toolbar) repeats the entire current array end-to-end a
-chosen number of times. The dialog detects the array's "non-trivial" duration
-(its last non-zero sample) and lets you pick the number of repetitions. The
-loop runs in place — the array is extended to accommodate the repeats.
+chosen number of times. The dialog lets you pick the number of repetitions;
+the loop runs in place — the array is extended to accommodate the repeats.
 
 ## Settings that affect simulations
 
