@@ -19,6 +19,114 @@ from neuroseq.trace_widget_state import TraceWidgetState
 from neuroseq.utils import neuron_indices_to_colors
 
 
+@pytest.mark.parametrize("clip,center", [(True, True), (False, False)])
+def test_trace_preview_preserves_arrangement(qtbot, clip, center, tmp_path) -> None:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+    from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
+    from matplotlib.colors import to_rgba
+
+    controller = ConstrainedPanZoomController()
+    widget = TraceWidget(controller)
+    qtbot.addWidget(widget)
+    assert widget.preview_traces() is None
+    data = TraceData(
+        name="preview source",
+        traces=np.array([[1, 2, 5, 1], [-2, 0, 2, 0]], dtype=np.float32),
+        indices=np.array([3, 7], dtype=np.uint32),
+        dt=0.002,
+        units="mV",
+    )
+    widget.set_data(data)
+    widget.trace_norm_percent = 300
+    widget.clip = clip
+    widget.offset_by_median = center
+    widget.replot_traces()
+    controller.focus_neuron_range(2, 9)
+    controller.focus_time_range(0.001, 0.005)
+    state = controller._get_camera_state()
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    assert dialog.isVisible()
+    assert not dialog.isModal()
+    assert dialog.findChild(NavigationToolbar2QT) is not None
+    canvas = dialog.findChild(FigureCanvasQTAgg)
+    ax = canvas.figure.axes[0]
+    assert to_rgba(canvas.figure.get_facecolor())[3] == 0
+    assert to_rgba(ax.get_facecolor())[3] == 0
+    assert ax.get_title() == "preview source"
+    expected = (
+        widget.get_normalized_trace_data() + np.arange(len(data.indices))[:, None]
+    )
+    for i, line in enumerate(ax.lines):
+        np.testing.assert_allclose(line.get_xdata(), [0, 2, 4, 6])
+        np.testing.assert_allclose(line.get_ydata(), expected[i])
+        np.testing.assert_allclose(
+            line.get_color(), neuron_indices_to_colors(data.indices)[i]
+        )
+        assert line.get_gid() == f"trace_{data.indices[i]}"
+    assert ax.get_xlim() == pytest.approx((1, 5))
+    cy = state["position"][1]
+    assert ax.get_ylim() == pytest.approx(
+        (cy - state["height"] / 2, cy + state["height"] / 2)
+    )
+    widget.trace_norm_percent = 50
+    widget.replot_traces()
+    np.testing.assert_allclose(ax.lines[0].get_ydata(), expected[0])
+    output = tmp_path / "preview.svg"
+    canvas.figure.savefig(output)
+    assert 'id="trace_3"' in output.read_text(encoding="utf-8")
+    dialog.close()
+
+
+@pytest.mark.parametrize(
+    "neuron_range,time_range", [(slice(0, 2), slice(1, 3)), (slice(1, 2), slice(2, 3))]
+)
+def test_trace_preview_uses_selected_region(
+    qtbot, make_trace_data, neuron_range, time_range
+):
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+    controller = ConstrainedPanZoomController()
+    widget = TraceWidget(controller)
+    qtbot.addWidget(widget)
+    widget.set_data(
+        make_trace_data(
+            n_neurons=2,
+            n_timestamps=10,
+            indices=np.array([3, 7], dtype=np.uint32),
+            dt=0.002,
+        )
+    )
+    state = controller._get_camera_state()
+    widget.select_neurons(neuron_range, time_range)
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    assert ax.get_xlim() == pytest.approx((time_range.start * 2, time_range.stop * 2))
+    assert ax.get_ylim() == pytest.approx(
+        (neuron_range.start - 0.5, neuron_range.stop - 0.5)
+    )
+    for key in ("position", "width", "height"):
+        np.testing.assert_allclose(controller._get_camera_state()[key], state[key])
+    dialog.close()
+
+    widget.unselect_neurons()
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    cx, cy = state["position"][:2]
+    assert ax.get_xlim() == pytest.approx(
+        (cx - state["width"] / 2, cx + state["width"] / 2)
+    )
+    assert ax.get_ylim() == pytest.approx(
+        (cy - state["height"] / 2, cy + state["height"] / 2)
+    )
+    dialog.close()
+
+
 def test_trace_widget_context_menu_offers_vector_export(
     qtbot: QtBot, make_trace_data
 ) -> None:
@@ -30,7 +138,7 @@ def test_trace_widget_context_menu_offers_vector_export(
     export_action = next(
         action
         for action in trace_widget.context_menu.actions()
-        if action.text() == "Export as vector graphic…"
+        if action.text() == "Preview vector graphic…"
     )
     assert not export_action.isEnabled()
 
@@ -39,7 +147,7 @@ def test_trace_widget_context_menu_offers_vector_export(
     export_action = next(
         action
         for action in trace_widget.context_menu.actions()
-        if action.text() == "Export as vector graphic…"
+        if action.text() == "Preview vector graphic…"
     )
     assert export_action.isEnabled()
     with qtbot.waitSignal(trace_widget.vector_export_requested):

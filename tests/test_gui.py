@@ -1482,7 +1482,7 @@ def test_gui_cellpose_import_action_moved_to_file_menu(qtbot: QtBot) -> None:
     gui.close()
 
 
-def test_gui_plot_exports_are_in_export_graphics_menu(qtbot: QtBot) -> None:
+def test_gui_has_no_export_graphics_menu(qtbot: QtBot) -> None:
     gui = Gui()
     gui.show()
     qtbot.addWidget(gui)
@@ -1493,13 +1493,7 @@ def test_gui_plot_exports_are_in_export_graphics_menu(qtbot: QtBot) -> None:
         for action in gui.menu_file.actions()
         if action.menu() is not None
     }
-    assert "Export graphics" in submenus
-    assert submenus["Export graphics"] is not None
-    graphics_actions = {
-        action.text().replace("&", "")
-        for action in submenus["Export graphics"].actions()
-    }
-    assert graphics_actions == {"Traces", "Spikes"}
+    assert "Export graphics" not in submenus
 
     assert "Export" in submenus
     assert submenus["Export"] is not None
@@ -2655,73 +2649,6 @@ def test_gui_export_traces_returns_when_file_dialog_cancelled(
     Gui.btn_export_traces_clicked(fake_gui)
 
     assert qmessagebox_calls == []
-
-
-def test_gui_vector_export_uses_svg_default(
-    monkeypatch: MonkeyPatch,
-    qmessagebox_calls: list,
-) -> None:
-    trace_data = TraceData(
-        name="voltage",
-        traces=np.zeros((1, 10), dtype=np.float32),
-        indices=np.array([0], dtype=np.uint32),
-        units="mV",
-        dt=0.001,
-    )
-    fake_gui = _make_trace_export_gui("Simulation :: P / v", trace_data)
-    dialog_calls: list[tuple[Any, ...]] = []
-
-    def _cancel_dialog(*args: Any) -> tuple[str, str]:
-        dialog_calls.append(args)
-        return "", ""
-
-    monkeypatch.setattr(neuroseq.gui, "getsavefilename", _cancel_dialog)
-
-    Gui.btn_export_traces_vector_clicked(fake_gui)
-
-    assert dialog_calls[0][1] == "Export traces as vector graphic"
-    assert dialog_calls[0][2].endswith("_traces.svg")
-    assert dialog_calls[0][3] == "SVG vector (*.svg);;PDF document (*.pdf)"
-    assert qmessagebox_calls == []
-
-
-def test_gui_vector_export_saves_named_traces_on_transparent_background(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-    qmessagebox_calls: list,
-) -> None:
-    import matplotlib.pyplot as plt
-
-    trace_data = TraceData(
-        name="voltage",
-        traces=np.zeros((2, 10), dtype=np.float32),
-        indices=np.array([3, 7], dtype=np.uint32),
-        units="mV",
-        dt=0.001,
-    )
-    output_path = tmp_path / "traces.svg"
-    fig = _MockFigure()
-    ax = _MockAxes()
-    fake_gui = _make_trace_export_gui("Simulation :: P / v", trace_data)
-
-    monkeypatch.setattr(plt, "subplots", lambda *args, **kwargs: (fig, ax))
-    monkeypatch.setattr(plt, "close", lambda figure: None)
-    monkeypatch.setattr(
-        neuroseq.gui,
-        "getsavefilename",
-        lambda *args: (str(output_path), "SVG vector (*.svg)"),
-    )
-
-    Gui.btn_export_traces_vector_clicked(fake_gui)
-
-    assert [line.gid for line in ax.lines] == ["trace_3", "trace_7"]
-    assert fig.saved == [
-        (
-            str(output_path),
-            {"dpi": 300, "bbox_inches": "tight", "transparent": True},
-        ),
-    ]
-    assert any(call["name"] == "information" for call in qmessagebox_calls)
 
 
 def test_gui_export_traces_saves_figure(
