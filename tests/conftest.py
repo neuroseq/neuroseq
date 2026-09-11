@@ -82,6 +82,10 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "screenshot" not in item.keywords:
                 item.add_marker(pytest.mark.skip(reason="Updating screenshot"))
+    else:
+        for item in items:
+            if "screenshot" in item.keywords:
+                item.add_marker(pytest.mark.skip(reason="Screenshot tests are opt-in"))
 
 
 @pytest.fixture(autouse=True)

@@ -1,4 +1,4 @@
-retro_theme_depth — Deepen the "Retro light theme (beta)" Winamp skin: fix the unstyled QSS sub-controls, make the plot canvases fully themed, and remove the hardcoded colors that fight it
+retro_theme_depth — Deepen the "Retro light theme (beta)" Winamp skin: fix the unstyled QSS sub-controls, make the plot canvases fully themed, and remove the hardcoded colors that fight it  [IMPLEMENTED]
 =========================================================================================================================================================================================
 
 A first pass at a Winamp-style skin already landed on branch

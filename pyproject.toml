@@ -81,10 +81,6 @@ path = "src/neuroseq/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/neuroseq"]
-artifacts = [
-    "src/neuroseq/resources/*.qss",
-    "src/neuroseq/resources/retro_*.svg",
-]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -62,6 +62,15 @@ _ICON_COLORS = {
 # Plot overlays are independent pygfx objects and therefore need explicit
 # colors just like the plot canvas itself. The light values preserve the
 # original appearance.
+#
+# NOTE on "shading" alpha: pygfx/wgpu composites alpha-blended meshes in
+# LINEAR light space, not in sRGB space. For a *dark* background, blending a
+# bright overlay at a given alpha in linear space lifts the sRGB result far
+# more than the same alpha would in a naive sRGB-space blend (verified: DARK's
+# 0.06 rendered as if it were ~0.06 -> ~0.10 sRGB-equivalent; RETRO's 0.07
+# rendered as if ~0.07 -> ~0.19 sRGB-equivalent). The "shading" alphas below
+# for DARK and RETRO are therefore deliberately much smaller than LIGHT's, so
+# the rendered lift is comparable in magnitude across themes.
 _PLOT_OVERLAY_COLORS = {
     LIGHT: {
         "grid": (0.3, 0.3, 0.3, 0.4),
@@ -71,13 +80,13 @@ _PLOT_OVERLAY_COLORS = {
     },
     DARK: {
         "grid": (0.78, 0.78, 0.78, 0.38),
-        "shading": (1.0, 1.0, 1.0, 0.06),
+        "shading": (1.0, 1.0, 1.0, 0.012),
         "roi_fill": (0.19, 0.55, 0.78, 0.32),
         "roi_text": (0.86, 0.86, 0.86, 1.0),
     },
     RETRO: {
         "grid": (0.49, 0.94, 0.66, 0.38),
-        "shading": (0.49, 0.94, 0.66, 0.07),
+        "shading": (0.49, 0.94, 0.66, 0.02),
         "roi_fill": (0.17, 0.31, 0.49, 0.55),
         "roi_text": (0.49, 0.94, 0.66, 1.0),
     },

@@ -15,18 +15,27 @@ QMenuBar {
 QMenuBar::item {
     background: transparent;
     border: 1px solid transparent;
+    border-radius: 3px;
 }
 
 QMenuBar::item:selected, QMenuBar::item:pressed {
     background: %(accent)s;
     color: #ffffff;
     border: 1px solid %(border_dark)s;
+    border-radius: 3px;
 }
 
 QMenu {
     background: #dbe3ee;
     border: 1px solid %(border_dark)s;
+    border-radius: 6px;
     color: %(text)s;
+    padding: 2px;
+}
+
+QMenu::item {
+    border-radius: 3px;
+    padding: 3px 20px;
 }
 
 QMenu::item:selected {
@@ -45,6 +54,7 @@ QMenu::separator {
 
 QToolBar {
     border: 1px solid %(border)s;
+    border-radius: 5px;
     padding: 2px 1px;
     spacing: 1px;
 }
@@ -70,7 +80,7 @@ QPushButton, QToolButton, QSpinBox, QDoubleSpinBox {
     border: 1px solid %(border)s;
     border-top-color: %(bevel_light)s;
     border-left-color: %(bevel_light)s;
-    border-radius: 2px;
+    border-radius: 5px;
     color: %(text)s;
     padding: 2px 6px;
 }
@@ -91,7 +101,7 @@ QComboBox {
     border: 1px solid %(border)s;
     border-top-color: %(bevel_light)s;
     border-left-color: %(bevel_light)s;
-    border-radius: 2px;
+    border-radius: 5px;
     color: %(text)s;
     padding: 2px 18px 2px 6px;
 }
@@ -170,12 +180,14 @@ QSpinBox::up-button, QDoubleSpinBox::up-button {
     subcontrol-position: top right;
     border-bottom: 1px solid %(border)s;
     border-top: 1px solid %(bevel_light)s;
+    border-top-right-radius: 5px;
 }
 
 QSpinBox::down-button, QDoubleSpinBox::down-button {
     subcontrol-position: bottom right;
     border-top: 1px solid %(bevel_light)s;
     border-bottom: 1px solid %(border_dark)s;
+    border-bottom-right-radius: 5px;
 }
 
 QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
@@ -231,6 +243,8 @@ QComboBox::drop-down {
     subcontrol-position: top right;
     background: %(button_gradient)s;
     border-left: 1px solid %(border)s;
+    border-top-right-radius: 5px;
+    border-bottom-right-radius: 5px;
     width: 15px;
 }
 
@@ -267,6 +281,7 @@ QComboBox::down-arrow:disabled {
 QComboBox QAbstractItemView {
     background: #eef3f9;
     border: 1px solid %(border_dark)s;
+    border-radius: 4px;
     selection-background-color: %(accent)s;
     selection-color: #ffffff;
 }
@@ -276,6 +291,7 @@ QTableView {
     background: #eef3f9;
     border: 1px solid %(border_dark)s;
     border-top-color: %(border)s;
+    border-radius: 4px;
     color: %(text)s;
     selection-background-color: %(accent)s;
     selection-color: #ffffff;
@@ -339,13 +355,14 @@ QCheckBox:hover, QRadioButton:hover {
 
 QCheckBox:focus, QRadioButton:focus {
     border: 1px solid %(accent)s;
+    border-radius: 3px;
     padding: 1px;
 }
 
 QGroupBox {
     background: transparent;
     border: 1px solid %(border)s;
-    border-radius: 2px;
+    border-radius: 6px;
     margin-top: 9px;
     padding-top: 4px;
 }
@@ -357,6 +374,7 @@ QGroupBox::title {
     padding: 0px 4px;
     background: %(chrome_gradient)s;
     border: 1px solid %(border)s;
+    border-radius: 3px;
     color: %(text)s;
 }
 
@@ -365,6 +383,8 @@ QTabWidget::pane {
     border: 1px solid %(border_dark)s;
     border-top-color: %(bevel_light)s;
     border-left-color: %(bevel_light)s;
+    border-bottom-left-radius: 6px;
+    border-bottom-right-radius: 6px;
     top: -1px;
 }
 
@@ -377,6 +397,8 @@ QTabBar::tab {
         stop:0 #dfe7f1, stop:1 #b8c5d5);
     border: 1px solid %(border)s;
     border-bottom: 0px;
+    border-top-left-radius: 5px;
+    border-top-right-radius: 5px;
     color: %(text)s;
     padding: 2px 8px;
 }
@@ -404,33 +426,42 @@ QTabBar::tab:disabled {
 QTabBar::close-button {
     image: url("%(close_icon)s");
     subcontrol-position: right;
+    width: 10px;
+    height: 10px;
 }
 
 QTabBar::close-button:hover {
     background: #ffffff;
     border: 1px solid %(accent)s;
+    border-radius: 3px;
+    width: 10px;
+    height: 10px;
 }
 
 QTabBar QToolButton {
     background: %(button_gradient)s;
     border: 1px solid %(border)s;
+    border-radius: 3px;
     padding: 0px;
 }
 
 QSplitter::handle {
     background: %(chrome_gradient)s;
     border: 1px solid %(border)s;
+    border-radius: 2px;
 }
 
 QSlider::groove:horizontal {
     background: %(lcd_bg)s;
     border: 1px solid %(border_dark)s;
+    border-radius: 2px;
     height: 5px;
 }
 
 QSlider::groove:vertical {
     background: %(lcd_bg)s;
     border: 1px solid %(border_dark)s;
+    border-radius: 2px;
     width: 5px;
 }
 
@@ -439,6 +470,7 @@ QSlider::sub-page:horizontal, QSlider::add-page:vertical {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 %(lcd_fg)s, stop:1 %(lcd_dim)s);
     border: 1px solid %(border_dark)s;
+    border-radius: 2px;
 }
 
 QSlider::sub-page:disabled:horizontal, QSlider::add-page:disabled:vertical {
@@ -448,7 +480,7 @@ QSlider::sub-page:disabled:horizontal, QSlider::add-page:disabled:vertical {
 QSlider::handle {
     background: %(button_gradient)s;
     border: 1px solid %(border_dark)s;
-    border-radius: 1px;
+    border-radius: 4px;
 }
 
 QSlider::handle:horizontal {
@@ -464,6 +496,7 @@ QSlider::handle:vertical {
 QScrollBar:horizontal {
     background: #c3cedc;
     border: 1px solid %(border)s;
+    border-radius: 6px;
     height: 13px;
     margin: 0px;
 }
@@ -471,6 +504,7 @@ QScrollBar:horizontal {
 QScrollBar:vertical {
     background: #c3cedc;
     border: 1px solid %(border)s;
+    border-radius: 6px;
     width: 13px;
     margin: 0px;
 }
@@ -478,7 +512,7 @@ QScrollBar:vertical {
 QScrollBar::handle {
     background: %(button_gradient)s;
     border: 1px solid %(border_dark)s;
-    border-radius: 1px;
+    border-radius: 5px;
 }
 
 QScrollBar::handle:horizontal {
@@ -503,7 +537,7 @@ QScrollBar::add-page, QScrollBar::sub-page {
 QProgressBar {
     background: %(lcd_bg)s;
     border: 1px solid %(border_dark)s;
-    border-radius: 0px;
+    border-radius: 4px;
     color: %(lcd_fg)s;
     text-align: center;
 }
@@ -511,6 +545,7 @@ QProgressBar {
 QProgressBar::chunk {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #7ef0a8, stop:1 #2f9e63);
+    border-radius: 2px;
     margin: 1px;
     width: 6px;
 }
@@ -534,6 +569,7 @@ QStatusBar::item {
 ConsoleWidget QPlainTextEdit, ConsoleWidget QTextEdit, ConsoleWidget QLineEdit {
     background: %(lcd_bg)s;
     border: 1px solid %(border_dark)s;
+    border-radius: 4px;
     color: %(lcd_fg)s;
     font-family: "Monospace";
     selection-background-color: %(lcd_dim)s;
@@ -543,5 +579,6 @@ ConsoleWidget QPlainTextEdit, ConsoleWidget QTextEdit, ConsoleWidget QLineEdit {
 QToolTip {
     background: %(lcd_bg)s;
     border: 1px solid %(lcd_dim)s;
+    border-radius: 4px;
     color: %(lcd_fg)s;
 }

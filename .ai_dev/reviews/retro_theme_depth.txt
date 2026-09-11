@@ -121,3 +121,66 @@ NOT DONE, AND THAT IS FINE
    DEPTH WORK items (a)-(f) were out of scope for this pass, as intended.
    Item (a) (Qt-side panel headers) is now more relevant, not less, because of
    finding 1 above.
+
+
+RESOLUTION — all five findings addressed
+-----------------------------------------
+1. PANEL TITLES: the product owner explicitly requested the title band stay
+   removed (space reclaimed, no replacement dataset-name indicator wanted for
+   now). This resolves the actual complaint here, which was that the removal
+   was silent and unflagged, not that it was wrong. `_remove_subplot_title_band`
+   stays in `fpl_widget.py`; the `subplot.title = ...` call sites stay removed
+   from stim/trace/spike/heatmap widgets; the regression test
+   `test_fpl_widget_removes_subplot_title_band` stays in place. DEPTH WORK item
+   (a) (Qt-side panel headers, to surface the dataset name elsewhere) remains
+   open as a genuine follow-up if that information is missed in practice.
+
+2. SHADING ALPHA: root-caused, not just retuned blind. pygfx/wgpu composites
+   alpha-blended meshes in LINEAR light space, but `_PLOT_OVERLAY_COLORS`
+   values are sRGB-equivalent floats. Over a light background this barely
+   matters (confirmed: LIGHT's shading is unaffected); over the RETRO/DARK
+   dark backgrounds the linear blend lands far stronger than a naive sRGB
+   blend would predict. Verified numerically against the review's own
+   measurement: a linear blend of RETRO's original (0.49, 0.94, 0.66, 0.07)
+   over rgb(12,26,42) computes to rgb(36.1, 75.0, 62.6) -- matches the
+   reviewer's measured rgb(36,75,63) almost exactly, confirming the mechanism.
+   Retuned RETRO shading alpha 0.07 -> 0.02 and DARK shading alpha 0.06 -> 0.012
+   so each theme's linear-space blend lands close to its original sRGB-blend
+   *intent*; documented with the underlying math in a comment on
+   `_PLOT_OVERLAY_COLORS` in theme.py. Not verified with an actual GPU
+   pixel-readback in this pass (an offscreen pygfx/wgpu rig was attempted but
+   not completed) -- worth a follow-up spot-check with a real render.
+
+3. SCREENSHOT TESTS: restored the `else` branch in
+   `pytest_collection_modifyitems` (tests/conftest.py) so screenshot-marked
+   tests skip by default again, matching CLAUDE.md. Confirmed via
+   `uv run pytest tests/test_theme_retro.py -q` (skipped) and
+   `--update-screenshot` (regenerates only, as documented).
+
+4. PYPROJECT ARTIFACTS: removed the redundant `[tool.hatch.build.targets.wheel]
+   artifacts = [...]` entry. Re-verified by building the wheel
+   (`uv build --wheel`) and confirming all 16 retro resources (retro.qss + 15
+   SVGs) are still packaged via `packages = ["src/neuroseq"]` alone.
+
+5. TAB CLOSE INDICATOR: gave `QTabBar::close-button` (and its `:hover` state)
+   an explicit `width: 10px; height: 10px` matching the SVG's native size, so
+   Qt no longer scales it up to the style's default close-indicator size.
+
+Also, per a follow-up request from the product owner made while this fix pass
+was underway: rounded most QSS-styleable chrome (buttons, toolbars, menus,
+combo/spin boxes, group boxes, tabs, scrollbars, sliders, progress bar,
+line/text edits, tooltips) to match the reference Winamp skin's rounded-corner
+look. Deliberately did NOT attempt rounding the actual OS window corners
+(QMainWindow/QDialog) -- that needs a frameless window with a custom title bar
+and window-shape mask, a much larger and riskier change than "add
+border-radius", and out of scope here. `tests/sampledata/theme_controls_retro.png`
+regenerated to match; light/dark reference screenshots are untouched (retro.qss
+is retro-only).
+
+Verification: `uv run ruff check`/`ruff format --check`/`mypy --ignore-missing-imports`
+clean on all touched files (some pre-existing, unrelated mypy errors remain in
+heatmap_widget.py/trace_widget.py -- confirmed present on `main` too, not
+introduced here). Targeted suites (test_fpl_widget.py, test_trace_widget.py,
+test_spike_widget.py, test_stim_widget.py, test_heatmap_widget.py, test_gui.py,
+test_theme.py, test_theme_retro.py, test_gridlines.py) all pass. Full
+`uv run pytest` run separately to confirm no regressions.
