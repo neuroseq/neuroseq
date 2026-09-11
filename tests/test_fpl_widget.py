@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pygfx
+import pytest
 from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
@@ -17,6 +18,13 @@ def test_fpl_widget_apply_theme_updates_background(qtbot: QtBot) -> None:
     assert widget._theme == theme.DARK
     dark_bg, _ = theme.fpl_colors(theme.DARK)
     assert tuple(widget.subplot.background_color[0]) == tuple(pygfx.Color(dark_bg))
+    assert all(
+        tuple(dock.background_color[0]) == tuple(pygfx.Color(dark_bg))
+        for dock in widget.subplot.docks.values()
+    )
+    assert tuple(widget.subplot.frame.plane.material.color) == tuple(
+        pygfx.Color(dark_bg)
+    )
 
     widget.apply_theme(theme.LIGHT)
     light_bg, _ = theme.fpl_colors(theme.LIGHT)
@@ -25,6 +33,17 @@ def test_fpl_widget_apply_theme_updates_background(qtbot: QtBot) -> None:
     # Unknown theme falls back to light.
     widget.apply_theme("not-a-theme")
     assert widget._theme == theme.LIGHT
+
+
+def test_fpl_widget_removes_subplot_title_band(qtbot: QtBot) -> None:
+    widget = FPLWidget()
+    qtbot.addWidget(widget)
+
+    assert widget.subplot.title.text == ""
+    assert not widget.subplot.title.visible
+    _, frame_y, _, _ = widget.subplot.frame.rect
+    _, render_y, _, _ = widget.subplot.frame.get_render_rect()
+    assert render_y == pytest.approx(frame_y)
 
 
 def test_fpl_widget_skips_rendering_until_canvas_is_sized(qtbot: QtBot) -> None:

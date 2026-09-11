@@ -410,6 +410,13 @@ class Gui(QtWidgets.QMainWindow):
         split_vertical = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         split_vertical.setHandleWidth(0)
         split_vertical.setChildrenCollapsible(False)
+        # The timeseries panels and the time slider all share one column, so
+        # they are always exactly as wide as each other and their time axes
+        # line up: a sample at a given x in the stim editor sits at the same x
+        # in the traces, the spikes and under the slider handle.
+        split_timeseries = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        split_timeseries.setHandleWidth(0)
+        split_timeseries.setChildrenCollapsible(False)
         self.stim_editor = StimEditor(
             controller=self.controller,
             cmb_stim=self.cmb_stim,
@@ -432,16 +439,12 @@ class Gui(QtWidgets.QMainWindow):
         self.stim_editor.stim_widget.neuron_hovered.connect(
             self._spatial_footprint_state.set_hovered_stim_id
         )
-        split_stim_row = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
-        split_stim_row.addWidget(self.stim_editor)
-        split_stim_row.addWidget(split_stim_right)
-        split_stim_row.setSizes([3000, 1000])
-        split_vertical.addWidget(split_stim_row)
+        split_timeseries.addWidget(self.stim_editor)
         self.trace_widget.set_default_scroll_bars(
             self.stim_editor.x_scrollbar,
             self.stim_editor.y_scrollbar,
         )
-        split_vertical.addWidget(self.trace_widget)
+        split_timeseries.addWidget(self.trace_widget)
         self.spike_widget = SpikeWidget(
             self.spike_controller,
             parent=self,
@@ -452,13 +455,13 @@ class Gui(QtWidgets.QMainWindow):
             self.stim_editor.x_scrollbar,
             self.stim_editor.y_scrollbar,
         )
-        split_vertical.addWidget(self.spike_widget)
+        split_timeseries.addWidget(self.spike_widget)
         self.data_widget = DataWidget(self.controller, parent=self)
         self.data_widget.set_default_scroll_bars(
             self.stim_editor.x_scrollbar,
             self.stim_editor.y_scrollbar,
         )
-        split_vertical.addWidget(self.data_widget)
+        split_timeseries.addWidget(self.data_widget)
         self.time_slider = TimeSliderWidget(self)
         self.plot_widgets: list[TimeseriesWidget | HeatmapWidget | DataWidget] = [
             self.stim_editor.stim_widget,
@@ -470,7 +473,15 @@ class Gui(QtWidgets.QMainWindow):
         for widget in self.plot_widgets:
             self.time_slider.connect_widget(widget)
         self.time_slider.time_changed.connect(self._on_time_changed)
-        split_vertical.addWidget(self.time_slider)
+        split_timeseries.addWidget(self.time_slider)
+        # Synapses / cell segmentation sit beside the whole timeseries column,
+        # not just beside the stim editor, so narrowing them widens every
+        # timeseries panel together.
+        split_timeseries_row = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        split_timeseries_row.addWidget(split_timeseries)
+        split_timeseries_row.addWidget(split_stim_right)
+        split_timeseries_row.setSizes([3000, 1000])
+        split_vertical.addWidget(split_timeseries_row)
         self.data_widget.setVisible(False)
         self.trace_widget.setVisible(False)
         self.spike_widget.setVisible(False)
@@ -2668,7 +2679,7 @@ class Gui(QtWidgets.QMainWindow):
         )
 
     def apply_theme(self, theme: str) -> None:
-        """Apply a light/dark theme to the whole application and all plots."""
+        """Apply a light/dark/retro theme to the whole application and all plots."""
         theme = theme_module.normalize_theme(theme)
         self.logger.info(f"Applying {theme} theme")
         theme_module.apply_app_theme(QtWidgets.QApplication.instance(), theme)
@@ -2676,6 +2687,7 @@ class Gui(QtWidgets.QMainWindow):
         for widget in self.plot_widgets:
             widget.apply_theme(theme)
         self.custom_analysis_widget.apply_theme(theme)
+        self.spatial_footprint_widget.apply_theme(theme)
         self.stim_editor.apply_input_designer_theme(theme)
         action = getattr(self, "_theme_actions", {}).get(theme)
         if action is not None and not action.isChecked():
@@ -3342,6 +3354,7 @@ class Gui(QtWidgets.QMainWindow):
         for label, name in (
             ("&Light", theme_module.LIGHT),
             ("&Dark", theme_module.DARK),
+            ("&Retro light theme (beta)", theme_module.RETRO),
         ):
             action = add_action(
                 label,

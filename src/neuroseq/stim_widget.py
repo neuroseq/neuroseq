@@ -47,7 +47,6 @@ class StimWidget(TimeseriesWidget):
     ) -> None:
         super().__init__(controller, parent)
         self.context_menu = menu if menu is not None else QtWidgets.QMenu(self)
-        self.subplot.title = "Stimuli"
         self.hover_slice_graphic: fpl.Graphic | None = None
         self._hover_pos_cache: tuple[int, float, float] | None = None
         self.vmin = 0.0

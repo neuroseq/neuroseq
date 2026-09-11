@@ -11,6 +11,7 @@ from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
+from neuroseq import theme as theme_module
 from neuroseq.analysis_plugins import AnalysisPlugin
 from neuroseq.analysis_plugins import discover_analysis_plugins
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
@@ -84,7 +85,11 @@ class TimeseriesWidget(FPLWidget):
         self.background_graphics: list[fpl.Graphic] = []
         self.show_background_graphics = True
         self.mode = InteractMode.SELECT
-        self.roi = RegionOfInterest(fill_color=(0.5, 0.5, 0.5, 0.2))
+        overlay_colors = theme_module.plot_overlay_colors(self._theme)
+        self.roi = RegionOfInterest(
+            fill_color=overlay_colors["roi_fill"],
+            text_color=overlay_colors["roi_text"],
+        )
         self._greyed_neuron_ids: set[int] = set()
         self._all_neuron_ids: list[int] = []
         self._visible_neuron_ids: list[int] = []
@@ -124,6 +129,14 @@ class TimeseriesWidget(FPLWidget):
         self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
         self.figure.renderer.add_event_handler(self.pointer_up, "pointer_up")
         self.figure.renderer.add_event_handler(self.key_down, "key_down")
+
+    def apply_theme(self, theme: str) -> None:
+        """Recolor the canvas and independent plot overlays."""
+        super().apply_theme(theme)
+        colors = theme_module.plot_overlay_colors(self._theme)
+        self.roi.set_colors(colors["roi_fill"], colors["roi_text"])
+        if self.grid_lines is not None:
+            self.grid_lines.set_colors(colors["grid"], colors["shading"])
 
     def _setup_axis_link_controls(self) -> None:
         if not self._has_axis_link_controls:
@@ -550,7 +563,14 @@ class TimeseriesWidget(FPLWidget):
         if self.controller is not None:
             max_time_ms = max(max_time_ms, float(self.controller.max_width))
             max_neurons = max(max_neurons, int(self.controller.max_height))
-        self.grid_lines = GridLines(max_neurons, max_time_ms, dt_ms=self.dt_ms)
+        overlay_colors = theme_module.plot_overlay_colors(self._theme)
+        self.grid_lines = GridLines(
+            max_neurons,
+            max_time_ms,
+            dt_ms=self.dt_ms,
+            grid_color=overlay_colors["grid"],
+            shading_color=overlay_colors["shading"],
+        )
         self.subplot.add_graphic(self.grid_lines, center=False)
         self.grid_lines.visible = self.show_grid
         self.controller.add_grid_lines(self.grid_lines)

@@ -125,7 +125,6 @@ class TraceWidget(TimeseriesWidget):
             default_controller=default_controller,
             show_axis_link_controls=show_axis_link_controls,
         )
-        self.subplot.title = "Traces"
         self.trace_norm_percent = 100
         self.offset_by_median = True
         self.clip = True
@@ -282,13 +281,10 @@ class TraceWidget(TimeseriesWidget):
         data = self._state.data
         self.clear_data()
         if data is None:
-            self.subplot.title = "Traces"
             return
         self.logger.info(
             f"{data.traces.shape} traces with dt={data.dt}s and units={data.units}"
         )
-        # self.subplot.title = f"Traces: {data * V.name}"
-        self.subplot.title = f"Traces: {data.name}"
         self.data = data
         self.data_values = data.traces.T
         self.data_values_scale = 1000.0

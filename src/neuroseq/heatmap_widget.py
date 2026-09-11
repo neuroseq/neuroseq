@@ -86,7 +86,6 @@ class HeatmapWidget(FPLWidget):
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent=parent)
-        self.subplot.title = "Synapses"
         self.data: np.ndarray | None = None
         self.idx: int = 0
         self.subtract_idx: int | None = None
@@ -200,9 +199,7 @@ class HeatmapWidget(FPLWidget):
         """Set the data to be displayed in the heatmap."""
         self.clear_data()
         if data is None or data.values.shape[0] == 0:
-            self.subplot.title = "Synapses"
             return
-        self.subplot.title = f"Synapses: {data.name}"
         self.logger.info(
             f"{data.values.shape} values with {data.timestamps.shape} timestamps"
         )

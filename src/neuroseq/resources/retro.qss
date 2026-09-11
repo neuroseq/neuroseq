@@ -1,0 +1,547 @@
+QMainWindow, QDialog {
+    background: #cfd9e5;
+}
+
+QMenuBar, QToolBar, QStatusBar, QTabBar, QHeaderView::section {
+    background: %(chrome_gradient)s;
+    color: %(text)s;
+    border: 0px;
+}
+
+QMenuBar {
+    border-bottom: 1px solid %(border)s;
+}
+
+QMenuBar::item {
+    background: transparent;
+    border: 1px solid transparent;
+}
+
+QMenuBar::item:selected, QMenuBar::item:pressed {
+    background: %(accent)s;
+    color: #ffffff;
+    border: 1px solid %(border_dark)s;
+}
+
+QMenu {
+    background: #dbe3ee;
+    border: 1px solid %(border_dark)s;
+    color: %(text)s;
+}
+
+QMenu::item:selected {
+    background: %(accent)s;
+    color: #ffffff;
+}
+
+QMenu::separator, QToolBar::separator {
+    background: %(border)s;
+    margin: 2px 4px;
+}
+
+QMenu::separator {
+    height: 1px;
+}
+
+QToolBar {
+    border: 1px solid %(border)s;
+    padding: 2px 1px;
+    spacing: 1px;
+}
+
+QToolBar QToolButton {
+    min-height: 19px;
+}
+
+QToolBar::separator:horizontal {
+    width: 1px;
+}
+
+QToolBar::separator:vertical {
+    height: 1px;
+}
+
+QToolBar::handle {
+    background: %(border)s;
+}
+
+QPushButton, QToolButton, QSpinBox, QDoubleSpinBox {
+    background: %(button_gradient)s;
+    border: 1px solid %(border)s;
+    border-top-color: %(bevel_light)s;
+    border-left-color: %(bevel_light)s;
+    border-radius: 2px;
+    color: %(text)s;
+    padding: 2px 6px;
+}
+
+/* The closed combo is toned to sit in the surrounding metal rather than read
+   as a white field, and keeps the raised bevel.
+
+   It must stay a FLAT colour. Whatever background this rule sets is also what
+   Qt paints behind the popup row under the pointer, in place of the palette
+   highlight - so a qlineargradient here turns that row solid black with
+   near-unreadable text. Verified against a real screen grab, and neither a
+   `QComboBox QAbstractItemView::item:hover` rule nor a stylesheet set directly
+   on the popup view overrides it. A flat tone degrades gracefully instead: the
+   hovered row takes this colour, which still reads against the lighter rows.
+   The gradient lives on ::drop-down instead, where sub-controls are safe. */
+QComboBox {
+    background: #ccd7e4;
+    border: 1px solid %(border)s;
+    border-top-color: %(bevel_light)s;
+    border-left-color: %(bevel_light)s;
+    border-radius: 2px;
+    color: %(text)s;
+    padding: 2px 18px 2px 6px;
+}
+
+QToolButton {
+    padding: 2px 1px;
+}
+
+QComboBox:hover {
+    background: #dae3ef;
+}
+
+QSpinBox, QDoubleSpinBox {
+    padding-right: 17px;
+}
+
+QPushButton:hover, QToolButton:hover,
+QSpinBox:hover, QDoubleSpinBox:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #ffffff, stop:0.45 #dae3ef, stop:0.55 #c6d2e1, stop:1 #d6dfeb);
+}
+
+QPushButton:pressed, QToolButton:pressed, QPushButton:checked,
+QToolButton:checked, QToolButton:on {
+    background: %(button_gradient_sunken)s;
+    border: 1px solid %(border_dark)s;
+    border-bottom-color: %(bevel_light)s;
+    border-right-color: %(bevel_light)s;
+}
+
+QPushButton:disabled, QToolButton:disabled, QComboBox:disabled,
+QSpinBox:disabled, QDoubleSpinBox:disabled {
+    background: #d3d9e1;
+    color: %(disabled_text)s;
+    border: 1px solid #a9b4c1;
+}
+
+QPushButton:focus, QToolButton:focus,
+QSpinBox:focus, QDoubleSpinBox:focus {
+    background: %(button_gradient)s;
+    border: 2px solid %(accent)s;
+    border-top-color: %(bevel_light)s;
+    border-left-color: %(bevel_light)s;
+    border-bottom-color: %(border_dark)s;
+    border-right-color: %(border_dark)s;
+}
+
+QComboBox:focus {
+    border: 2px solid %(accent)s;
+    border-top-color: %(bevel_light)s;
+    border-left-color: %(bevel_light)s;
+    border-bottom-color: %(border_dark)s;
+    border-right-color: %(border_dark)s;
+}
+
+QPushButton:pressed:focus, QToolButton:pressed:focus,
+QPushButton:checked:focus, QToolButton:checked:focus, QToolButton:on:focus {
+    background: %(button_gradient_sunken)s;
+    border: 2px solid %(accent)s;
+    border-top-color: %(border_dark)s;
+    border-left-color: %(border_dark)s;
+    border-bottom-color: %(bevel_light)s;
+    border-right-color: %(bevel_light)s;
+}
+
+QSpinBox::up-button, QDoubleSpinBox::up-button,
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    subcontrol-origin: border;
+    background: %(button_gradient)s;
+    border-left: 1px solid %(border)s;
+    width: 14px;
+    height: 10px;
+}
+
+QSpinBox::up-button, QDoubleSpinBox::up-button {
+    subcontrol-position: top right;
+    border-bottom: 1px solid %(border)s;
+    border-top: 1px solid %(bevel_light)s;
+}
+
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    subcontrol-position: bottom right;
+    border-top: 1px solid %(bevel_light)s;
+    border-bottom: 1px solid %(border_dark)s;
+}
+
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
+    background: #e2e9f2;
+}
+
+QSpinBox::up-button:pressed, QDoubleSpinBox::up-button:pressed,
+QSpinBox::down-button:pressed, QDoubleSpinBox::down-button:pressed {
+    background: %(button_gradient_sunken)s;
+    border-left-color: %(border_dark)s;
+}
+
+QSpinBox::up-button:disabled, QDoubleSpinBox::up-button:disabled,
+QSpinBox::down-button:disabled, QDoubleSpinBox::down-button:disabled,
+QSpinBox::up-button:off, QDoubleSpinBox::up-button:off,
+QSpinBox::down-button:off, QDoubleSpinBox::down-button:off {
+    background: #c5ced9;
+    border-color: #8995a4;
+}
+
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
+    image: url("%(arrow_up_icon)s");
+    width: 7px;
+    height: 5px;
+}
+
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
+    image: url("%(arrow_down_icon)s");
+    width: 7px;
+    height: 5px;
+}
+
+QSpinBox::up-arrow:pressed, QDoubleSpinBox::up-arrow:pressed,
+QSpinBox::down-arrow:pressed, QDoubleSpinBox::down-arrow:pressed {
+    position: relative;
+    top: 1px;
+    left: 1px;
+}
+
+QSpinBox::up-arrow:disabled, QDoubleSpinBox::up-arrow:disabled,
+QSpinBox::up-arrow:off, QDoubleSpinBox::up-arrow:off {
+    image: url("%(arrow_up_icon_disabled)s");
+}
+
+QSpinBox::down-arrow:disabled, QDoubleSpinBox::down-arrow:disabled,
+QSpinBox::down-arrow:off, QDoubleSpinBox::down-arrow:off {
+    image: url("%(arrow_down_icon_disabled)s");
+}
+
+QComboBox::drop-down {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    background: %(button_gradient)s;
+    border-left: 1px solid %(border)s;
+    width: 15px;
+}
+
+QComboBox::drop-down:hover {
+    background: #e2e9f2;
+}
+
+QComboBox::drop-down:on {
+    background: %(button_gradient_sunken)s;
+    border-left-color: %(border_dark)s;
+}
+
+QComboBox::drop-down:disabled {
+    background: #c5ced9;
+    border-left-color: #8995a4;
+}
+
+QComboBox::down-arrow {
+    image: url("%(arrow_down_icon)s");
+    width: 7px;
+    height: 5px;
+}
+
+QComboBox::down-arrow:on {
+    position: relative;
+    top: 1px;
+    left: 1px;
+}
+
+QComboBox::down-arrow:disabled {
+    image: url("%(arrow_down_icon_disabled)s");
+}
+
+QComboBox QAbstractItemView {
+    background: #eef3f9;
+    border: 1px solid %(border_dark)s;
+    selection-background-color: %(accent)s;
+    selection-color: #ffffff;
+}
+
+QLineEdit, QPlainTextEdit, QTextEdit, QAbstractItemView, QListView, QTreeView,
+QTableView {
+    background: #eef3f9;
+    border: 1px solid %(border_dark)s;
+    border-top-color: %(border)s;
+    color: %(text)s;
+    selection-background-color: %(accent)s;
+    selection-color: #ffffff;
+}
+
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus,
+QAbstractItemView:focus, QListView:focus, QTreeView:focus, QTableView:focus {
+    border: 2px solid %(accent)s;
+    border-bottom-color: %(bevel_light)s;
+    border-right-color: %(bevel_light)s;
+}
+
+QCheckBox::indicator, QRadioButton::indicator {
+    width: 13px;
+    height: 13px;
+}
+
+QCheckBox::indicator:unchecked {
+    image: url("%(checkbox_icon)s");
+}
+
+QRadioButton::indicator:unchecked {
+    image: url("%(radio_off_icon)s");
+}
+
+QCheckBox::indicator:checked {
+    image: url("%(check_icon)s");
+}
+
+QCheckBox::indicator:indeterminate {
+    image: url("%(indeterminate_icon)s");
+}
+
+QRadioButton::indicator:checked {
+    image: url("%(radio_icon)s");
+}
+
+QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {
+    image: url("%(checkbox_icon_disabled)s");
+}
+
+QRadioButton::indicator:unchecked:disabled {
+    image: url("%(radio_off_icon_disabled)s");
+}
+
+QCheckBox::indicator:checked:disabled {
+    image: url("%(check_icon_disabled)s");
+}
+
+QCheckBox::indicator:indeterminate:disabled {
+    image: url("%(indeterminate_icon_disabled)s");
+}
+
+QRadioButton::indicator:checked:disabled {
+    image: url("%(radio_icon_disabled)s");
+}
+
+QCheckBox:hover, QRadioButton:hover {
+    color: %(accent)s;
+}
+
+QCheckBox:focus, QRadioButton:focus {
+    border: 1px solid %(accent)s;
+    padding: 1px;
+}
+
+QGroupBox {
+    background: transparent;
+    border: 1px solid %(border)s;
+    border-radius: 2px;
+    margin-top: 9px;
+    padding-top: 4px;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 6px;
+    padding: 0px 4px;
+    background: %(chrome_gradient)s;
+    border: 1px solid %(border)s;
+    color: %(text)s;
+}
+
+QTabWidget::pane {
+    background: #d5dee9;
+    border: 1px solid %(border_dark)s;
+    border-top-color: %(bevel_light)s;
+    border-left-color: %(bevel_light)s;
+    top: -1px;
+}
+
+QTabWidget::tab-bar {
+    left: 1px;
+}
+
+QTabBar::tab {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #dfe7f1, stop:1 #b8c5d5);
+    border: 1px solid %(border)s;
+    border-bottom: 0px;
+    color: %(text)s;
+    padding: 2px 8px;
+}
+
+QTabBar::tab:selected {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #ffffff, stop:1 #ccd7e4);
+    border-color: %(border_dark)s;
+    margin-bottom: -1px;
+}
+
+QTabBar::tab:!selected {
+    margin-top: 2px;
+}
+
+QTabBar::tab:hover {
+    background: #dce5f0;
+}
+
+QTabBar::tab:disabled {
+    color: %(disabled_text)s;
+    background: #c5ced9;
+}
+
+QTabBar::close-button {
+    image: url("%(close_icon)s");
+    subcontrol-position: right;
+}
+
+QTabBar::close-button:hover {
+    background: #ffffff;
+    border: 1px solid %(accent)s;
+}
+
+QTabBar QToolButton {
+    background: %(button_gradient)s;
+    border: 1px solid %(border)s;
+    padding: 0px;
+}
+
+QSplitter::handle {
+    background: %(chrome_gradient)s;
+    border: 1px solid %(border)s;
+}
+
+QSlider::groove:horizontal {
+    background: %(lcd_bg)s;
+    border: 1px solid %(border_dark)s;
+    height: 5px;
+}
+
+QSlider::groove:vertical {
+    background: %(lcd_bg)s;
+    border: 1px solid %(border_dark)s;
+    width: 5px;
+}
+
+/* Elapsed side of the groove reads as a lit LCD bar. */
+QSlider::sub-page:horizontal, QSlider::add-page:vertical {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 %(lcd_fg)s, stop:1 %(lcd_dim)s);
+    border: 1px solid %(border_dark)s;
+}
+
+QSlider::sub-page:disabled:horizontal, QSlider::add-page:disabled:vertical {
+    background: %(lcd_dim)s;
+}
+
+QSlider::handle {
+    background: %(button_gradient)s;
+    border: 1px solid %(border_dark)s;
+    border-radius: 1px;
+}
+
+QSlider::handle:horizontal {
+    width: 9px;
+    margin: -6px 0px;
+}
+
+QSlider::handle:vertical {
+    height: 9px;
+    margin: 0px -6px;
+}
+
+QScrollBar:horizontal {
+    background: #c3cedc;
+    border: 1px solid %(border)s;
+    height: 13px;
+    margin: 0px;
+}
+
+QScrollBar:vertical {
+    background: #c3cedc;
+    border: 1px solid %(border)s;
+    width: 13px;
+    margin: 0px;
+}
+
+QScrollBar::handle {
+    background: %(button_gradient)s;
+    border: 1px solid %(border_dark)s;
+    border-radius: 1px;
+}
+
+QScrollBar::handle:horizontal {
+    min-width: 18px;
+}
+
+QScrollBar::handle:vertical {
+    min-height: 18px;
+}
+
+QScrollBar::add-line, QScrollBar::sub-line {
+    background: transparent;
+    border: 0px;
+    height: 0px;
+    width: 0px;
+}
+
+QScrollBar::add-page, QScrollBar::sub-page {
+    background: transparent;
+}
+
+QProgressBar {
+    background: %(lcd_bg)s;
+    border: 1px solid %(border_dark)s;
+    border-radius: 0px;
+    color: %(lcd_fg)s;
+    text-align: center;
+}
+
+QProgressBar::chunk {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #7ef0a8, stop:1 #2f9e63);
+    margin: 1px;
+    width: 6px;
+}
+
+QStatusBar {
+    background: %(lcd_bg)s;
+    border-top: 1px solid %(border_dark)s;
+    color: %(lcd_fg)s;
+    font-family: "Monospace";
+}
+
+QStatusBar QLabel {
+    color: %(lcd_fg)s;
+    font-family: "Monospace";
+}
+
+QStatusBar::item {
+    border: 0px;
+}
+
+ConsoleWidget QPlainTextEdit, ConsoleWidget QTextEdit, ConsoleWidget QLineEdit {
+    background: %(lcd_bg)s;
+    border: 1px solid %(border_dark)s;
+    color: %(lcd_fg)s;
+    font-family: "Monospace";
+    selection-background-color: %(lcd_dim)s;
+    selection-color: #ffffff;
+}
+
+QToolTip {
+    background: %(lcd_bg)s;
+    border: 1px solid %(lcd_dim)s;
+    color: %(lcd_fg)s;
+}

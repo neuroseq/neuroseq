@@ -53,3 +53,23 @@ def test_gridlines_update_dt_ms_updates_sample_spacing() -> None:
     assert positions[1] - positions[0] == pytest.approx(0.5208125)
     positions = gridlines.gridline_10samples.geometry.positions.data[0::2, 0]
     assert positions[1] - positions[0] == pytest.approx(5.208125)
+
+
+def test_gridlines_colors_can_be_set_and_survive_stripe_recreation() -> None:
+    grid_color = (0.8, 0.9, 1.0, 0.4)
+    shading_color = (0.2, 0.4, 0.6, 0.25)
+    gridlines = GridLines(n_neurons=4, time_ms=1000.0)
+
+    gridlines.set_colors(grid_color, shading_color)
+
+    assert tuple(gridlines.gridline_10samples.material.color) == pytest.approx(
+        grid_color
+    )
+    assert gridlines._stripes is not None
+    assert tuple(gridlines._stripes.material.color) == pytest.approx(shading_color)
+
+    gridlines.update_neuron_extent(1)
+    assert gridlines._stripes is None
+    gridlines.update_neuron_extent(4)
+    assert gridlines._stripes is not None
+    assert tuple(gridlines._stripes.material.color) == pytest.approx(shading_color)

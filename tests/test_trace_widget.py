@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import brian2.numpy_ as np
+import pygfx
 import pytest
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+from neuroseq import theme
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import TraceData
 from neuroseq.region_of_interest import RegionOfInterest
@@ -17,6 +19,26 @@ from neuroseq.trace_widget import TraceNormDialog
 from neuroseq.trace_widget import TraceWidget
 from neuroseq.trace_widget_state import TraceWidgetState
 from neuroseq.utils import neuron_indices_to_colors
+
+
+def test_timeseries_overlays_follow_theme(qtbot: QtBot, make_trace_data) -> None:
+    trace_widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data())
+    assert trace_widget.grid_lines is not None
+
+    trace_widget.apply_theme(theme.RETRO)
+
+    colors = theme.plot_overlay_colors(theme.RETRO)
+    assert tuple(trace_widget.roi.fill.material.color) == pytest.approx(
+        tuple(pygfx.Color(colors["roi_fill"]))
+    )
+    assert tuple(trace_widget.roi.text.material.color) == pytest.approx(
+        tuple(pygfx.Color(colors["roi_text"]))
+    )
+    assert tuple(
+        trace_widget.grid_lines.gridline_10samples.material.color
+    ) == pytest.approx(tuple(pygfx.Color(colors["grid"])))
 
 
 def test_trace_widget_context_menu_offers_vector_export(

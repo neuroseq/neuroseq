@@ -152,6 +152,10 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         ]
         self._on_state_data_changed()
 
+    def apply_theme(self, theme: str) -> None:
+        """Forward the theme to the canvas the cells are drawn on."""
+        self.overlay_widget.apply_theme(theme)
+
     @property
     def _cellpose_data(self) -> CellposeImportResult | None:
         return self._state.cellpose_data

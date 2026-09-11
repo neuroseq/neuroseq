@@ -50,7 +50,7 @@ class GuiSettings:
     max_ram_trace_plot_matrix: int = 256
     brian2_backend: str = "numpy"
     stim_padding_secs: int = 0
-    theme: str = theme_module.LIGHT
+    theme: str = theme_module.DEFAULT
     llm_provider: str = "ollama"
     llm_model: str = "qwen2.5:7b"
     llm_ollama_base_url: str = "http://localhost:11434"
@@ -186,9 +186,9 @@ class GuiSettings:
             else:
                 self.logger.warning(
                     f"Invalid theme in config file {config_file}: {theme}. "
-                    f"Restoring default of {theme_module.LIGHT}"
+                    f"Restoring default of {theme_module.DEFAULT}"
                 )
-                self.__dict__["theme"] = theme_module.LIGHT
+                self.__dict__["theme"] = theme_module.DEFAULT
             valid_providers = {"ollama", "openai", "anthropic"}
             if llm_provider in valid_providers:
                 self.__dict__["llm_provider"] = llm_provider

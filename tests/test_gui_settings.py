@@ -90,14 +90,14 @@ def test_gui_load_config_settings(tmp_config_dir) -> None:
 
 def test_gui_theme_setting_roundtrip_and_validation(tmp_config_dir) -> None:
     settings = GuiSettings()
-    assert settings.theme == "light"
+    assert settings.theme == "retro"
 
     settings.theme = "dark"
     settings.__dict__["theme"] = "light"
     settings.load_config_settings()
     assert settings.theme == "dark"
 
-    # invalid theme should fall back to the default light theme
+    # invalid theme should fall back to the default retro theme
     settings.theme = "rainbow"
     settings.load_config_settings()
-    assert settings.theme == "light"
+    assert settings.theme == "retro"

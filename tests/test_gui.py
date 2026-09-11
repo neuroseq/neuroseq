@@ -1387,7 +1387,7 @@ def test_gui_theme_menu_toggles_theme_and_persists(
     )
     assert theme_menu is not None
     labels = {action.text().replace("&", ""): action for action in theme_menu.actions()}
-    assert set(labels) == {"Light", "Dark"}
+    assert set(labels) == {"Light", "Dark", "Retro light theme (beta)"}
 
     labels["Dark"].trigger()
     assert gui.settings.theme == theme_module.DARK
@@ -1395,7 +1395,18 @@ def test_gui_theme_menu_toggles_theme_and_persists(
     assert gui.data_widget.spike_widget._theme == theme_module.DARK
     assert labels["Dark"].isChecked()
 
+    app = QtWidgets.QApplication.instance()
+    labels["Retro light theme (beta)"].trigger()
+    assert gui.settings.theme == theme_module.RETRO
+    assert gui.trace_widget._theme == theme_module.RETRO
+    assert labels["Retro light theme (beta)"].isChecked()
+    # the retro skin is driven by an application-wide stylesheet
+    assert app is not None
+    assert app.styleSheet() == theme_module.app_stylesheet(theme_module.RETRO)
+
     labels["Light"].trigger()
+    # ... which is cleared again when leaving the retro skin
+    assert app.styleSheet() == ""
     assert gui.settings.theme == theme_module.LIGHT
     assert gui.trace_widget._theme == theme_module.LIGHT
     assert labels["Light"].isChecked()
@@ -1418,6 +1429,70 @@ def test_gui_applies_persisted_theme_on_startup(qtbot: QtBot, tmp_config_dir) ->
     assert gui.trace_widget._theme == theme_module.DARK
     assert gui._theme_actions[theme_module.DARK].isChecked()
     gui.close()
+
+
+def test_gui_starts_in_retro_theme_without_config(qtbot: QtBot, tmp_config_dir) -> None:
+    from neuroseq import theme as theme_module
+
+    # No config has been written, so the GUI must come up in the default theme.
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+
+    assert theme_module.DEFAULT == theme_module.RETRO
+    assert gui.settings.theme == theme_module.RETRO
+    assert gui.trace_widget._theme == theme_module.RETRO
+    assert gui._theme_actions[theme_module.RETRO].isChecked()
+    app = QtWidgets.QApplication.instance()
+    assert app is not None
+    assert app.styleSheet() == theme_module.app_stylesheet(theme_module.RETRO)
+    gui.close()
+    # leave the shared QApplication unskinned for the rest of the suite
+    theme_module.apply_app_theme(app, theme_module.LIGHT)
+
+
+def test_timeseries_panels_and_slider_share_one_width(qtbot: QtBot) -> None:
+    """Stim editor, traces, spikes and the time slider must line up exactly.
+
+    They share a time axis, so a sample at a given x in one panel has to sit
+    at the same x in the others and under the slider handle. They live in one
+    vertical splitter for that reason; the synapse / cell-segmentation column
+    sits beside the whole stack rather than beside the stim editor alone.
+    """
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    gui.trace_widget.setVisible(True)
+    gui.spike_widget.setVisible(True)
+    gui.data_widget.setVisible(True)
+    qtbot.waitUntil(lambda: gui.spike_widget.isVisible())
+
+    panels: list[QtWidgets.QWidget] = [
+        gui.stim_editor,
+        gui.trace_widget,
+        gui.spike_widget,
+        gui.data_widget,
+        gui.time_slider,
+    ]
+    widths = {panel.width() for panel in panels}
+    lefts = {panel.mapTo(gui, QtCore.QPoint(0, 0)).x() for panel in panels}
+    assert len(widths) == 1, f"panels have differing widths: {widths}"
+    assert len(lefts) == 1, f"panels have differing left edges: {lefts}"
+    # ...and they are genuinely narrower than the window, i.e. the right-hand
+    # column is beside them rather than below.
+    assert next(iter(widths)) < gui.width()
+    gui.close()
+
+
+def test_retro_time_slider_elapsed_side_is_green(qtbot: QtBot) -> None:
+    from neuroseq import theme as theme_module
+
+    stylesheet = theme_module.app_stylesheet(theme_module.RETRO)
+    sub_page = stylesheet.split("QSlider::sub-page:horizontal")[1].split("}")[0]
+    # The elapsed side of the groove is lit LCD green, not the dim groove color.
+    assert theme_module._RETRO_LCD_FG in sub_page
 
 
 def test_gui_open_example_project_menu_has_subsections(qtbot: QtBot) -> None:

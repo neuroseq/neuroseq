@@ -42,6 +42,7 @@ class FPLWidget(QtWidgets.QWidget):
         layout.addWidget(self.widget)
         self.setLayout(layout)
         self.subplot: Subplot = self.figure[0, 0]
+        self._remove_subplot_title_band()
         # initially replace renderer with a guarded one that checks the viewport size
         # and restores the fastplotlib renderer once the viewport size is positive
         self._fpl_figure_render = None
@@ -58,6 +59,26 @@ class FPLWidget(QtWidgets.QWidget):
         self._apply_fpl_theme()
         self.setMinimumSize(QtCore.QSize(100, 100))
         self.resize(800, 600)
+
+    def _remove_subplot_title_band(self) -> None:
+        """Hide fastplotlib's title and reclaim its reserved canvas height."""
+        frame = getattr(self.subplot, "frame", None)
+        title = getattr(self.subplot, "title", None)
+        if frame is None or title is None:
+            return
+        title_space = 8.0 + float(self.subplot.title.font_size)
+        get_render_rect = frame.get_render_rect
+
+        # fastplotlib always reserves title height, even for an empty title.
+        # Wrap the private frame calculation until it offers a public switch.
+        def get_titleless_render_rect() -> tuple[float, float, float, float]:
+            x, y, width, height = get_render_rect()
+            return x, y - title_space, width, height + title_space
+
+        self.subplot.title.text = ""
+        self.subplot.title.visible = False
+        frame.get_render_rect = get_titleless_render_rect  # type: ignore[method-assign]
+        frame.reset_viewport()
 
     def _fpl_canvas_ready(self) -> bool:
         """True once the render canvas is large enough to draw without producing a negative viewport."""
@@ -116,7 +137,8 @@ class FPLWidget(QtWidgets.QWidget):
         self._apply_fpl_theme()
 
     def _apply_fpl_theme(self) -> None:
-        # some of these currently require accessing private attributes: should refactor when fastplotlib allows setting these colors directly
+        # Some of these currently require accessing private attributes; refactor
+        # when fastplotlib exposes all canvas chrome through public properties.
         background, foreground = theme_module.fpl_colors(self._theme)
         # background_color setter splats its argument, so a multi-character hex
         # string must be wrapped in a tuple (a single corner color for all four).
@@ -135,6 +157,11 @@ class FPLWidget(QtWidgets.QWidget):
         self.subplot.axes._y._line.material.color = foreground
         self.subplot.axes._x._points.material.color = foreground
         self.subplot.axes._y._points.material.color = foreground
+        for dock in self.subplot.docks.values():
+            dock.background_color = (background,)
+        self.subplot.title.face_color = foreground
+        self.subplot.frame.plane.material.color = background
+        self.figure.canvas.request_draw()
 
     def clear_data(self) -> None:
         self.subplot.clear()

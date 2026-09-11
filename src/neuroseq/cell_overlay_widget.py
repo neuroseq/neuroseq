@@ -1288,6 +1288,10 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             self.overlay_view.height(),
         )
 
+    def apply_theme(self, theme: str) -> None:
+        """Recolor the canvas around the field of view to match the theme."""
+        self.overlay_view.apply_theme(theme)
+
     def _update_overlay_display(self) -> None:
         display_segmentation = self._get_display_segmentation()
         display_legend = (

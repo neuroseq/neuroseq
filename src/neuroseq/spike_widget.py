@@ -29,14 +29,11 @@ class SpikeWidget(TimeseriesWidget):
             default_controller=default_controller,
             show_axis_link_controls=show_axis_link_controls,
         )
-        self.subplot.title = "Spikes"
 
     def set_data(self, data: SpikeData | None) -> None:
         self.clear_data()
         if data is None or data.spike_times.shape[0] == 0:
-            self.subplot.title = "Spikes"
             return
-        self.subplot.title = f"Spikes: {data.name}"
         self.data = data
         self.n_neurons = max(data.spike_indices) + 1
         self.logger.info(

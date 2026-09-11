@@ -8,7 +8,11 @@ from neuroseq.stim_timing import format_milliseconds
 
 
 class RegionOfInterest(Graphic):
-    def __init__(self, fill_color: Sequence[float]):
+    def __init__(
+        self,
+        fill_color: Sequence[float],
+        text_color: Sequence[float] = (0.0, 0.0, 0.0, 1.0),
+    ):
         """Create a rectangle that can be used to highlight a selection in the plot."""
         super().__init__()
 
@@ -23,9 +27,16 @@ class RegionOfInterest(Graphic):
         group.add(self.fill)
         self.text = pygfx.Text(screen_space=True)
         self.text.world.position = (0, 0, 200)
-        self.text.material.color = pygfx.Color(0, 0, 0)
+        self.text.material.color = pygfx.Color(text_color)
         group.add(self.text)
         self._set_world_object(group)
+
+    def set_colors(
+        self, fill_color: Sequence[float], text_color: Sequence[float]
+    ) -> None:
+        """Recolor the selection fill and label in place."""
+        self.fill.material.color = pygfx.Color(fill_color)
+        self.text.material.color = pygfx.Color(text_color)
 
     def select(self, x0: float, x1: float, y0: float, y1: float):
         # update the rectangle's position based on the new selection
