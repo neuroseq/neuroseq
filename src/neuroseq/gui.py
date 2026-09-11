@@ -2749,9 +2749,6 @@ class Gui(QtWidgets.QMainWindow):
 
         self.menu_experiment = menu.addMenu("&Experiment")
         assert self.menu_experiment is not None
-        self.toolbar_experiment = QtWidgets.QToolBar("Experiment")
-        self._configure_toolbar_icon_style(self.toolbar_experiment)
-        self.addToolBar(self.toolbar_experiment)
         self.addToolBarBreak()
         self.addToolBar(self.toolbar_view)
 
@@ -2775,7 +2772,7 @@ class Gui(QtWidgets.QMainWindow):
         self._create_actions_view(self.menu_view, self.toolbar_view)
         self._create_actions_settings(menu=self.menu_settings, toolbar=None)
         self._create_actions_help(menu=self.menu_help, toolbar=None)
-        self._create_action_experiment(self.menu_experiment, self.toolbar_experiment)
+        self._create_action_experiment(self.menu_experiment, toolbar=None)
         self._create_actions_replay_analysis()
 
     def _create_actions_file(
@@ -3426,7 +3423,7 @@ class Gui(QtWidgets.QMainWindow):
         toolbar.addWidget(self.cmb_data)
 
     def _create_action_experiment(
-        self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
+        self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None
     ) -> None:
         add_action(
             "&Manage Experiments",
