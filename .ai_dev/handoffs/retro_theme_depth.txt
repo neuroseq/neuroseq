@@ -1,0 +1,387 @@
+retro_theme_depth — Deepen the "Retro light theme (beta)" Winamp skin: fix the unstyled QSS sub-controls, make the plot canvases fully themed, and remove the hardcoded colors that fight it
+=========================================================================================================================================================================================
+
+A first pass at a Winamp-style skin already landed on branch
+`issue-535-gui-space-optimization` (issue #535, "Visual design improvements to
+optimise space in gui"). It is a third theme, `theme.RETRO`, selectable from
+Settings → Theme as "Retro light theme (beta)", and it is now the DEFAULT for
+a fresh install (`theme.DEFAULT = RETRO`, `gui_settings.py`).
+
+The look is: brushed-metal light chrome (bevelled blue-grey gradients) for
+menu bar / toolbars / tab bar / buttons / sliders / scrollbars, plus dark navy
+"LCD" read-outs (`#0c1a2a` background, `#7ef0a8` green text) for the console,
+the status bar, tooltips and the fastplotlib/matplotlib plot canvases.
+
+That pass is deliberately shallow. This handoff is about taking it to depth.
+Everything listed under WEAK POINTS below has been VERIFIED by rendering the
+app and a control gallery under the skin — these are observed defects, not
+speculation. Screenshots to reproduce them are described in each item.
+
+Files to change:
+    src/neuroseq/theme.py          (the whole skin lives here; ~300 of its 441 lines are the QSS)
+    src/neuroseq/fpl_widget.py     (canvas theming — title strip, see WEAK POINT 5)
+    src/neuroseq/gridlines.py      (hardcoded grid color, WEAK POINT 6)
+    src/neuroseq/region_of_interest.py  (hardcoded black label text, WEAK POINT 6)
+    src/neuroseq/timeseries_widget.py   (hardcoded ROI fill, WEAK POINT 6)
+
+Files to create (suggested, see WEAK POINT 8):
+    src/neuroseq/resources/retro.qss   (or similar — move the QSS out of the f-string)
+    tests/test_theme_retro.py          (if test_theme.py gets crowded)
+
+Files to extend (tests):
+    tests/test_theme.py            (palette/stylesheet assertions)
+    tests/test_gui.py              (already has the retro menu + default-theme tests)
+    tests/test_fpl_widget.py       (canvas theming)
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+BACKGROUND — how theming works here; read before touching anything
+────────────────────────────────────────────────────────────────────────────────────────────
+
+`src/neuroseq/theme.py` is the single source of truth. Four lookup tables keyed
+by theme name, plus a palette builder and (new) an application-wide stylesheet:
+
+    THEMES = (LIGHT, DARK, RETRO)          theme.py:10
+    DEFAULT = RETRO                        theme.py:16   (fresh-install default)
+    normalize_theme(name) -> str           theme.py:56   (unknown -> LIGHT, NOT DEFAULT)
+    fpl_colors(theme)  -> (bg, fg)         theme.py:61   fastplotlib canvases
+    mpl_colors(theme)  -> (face, text)     theme.py:67   matplotlib figures
+    icon_color(theme)  -> str              theme.py:73   qtawesome glyph color
+    qt_palette(theme)  -> QPalette         theme.py:147
+    app_stylesheet(theme) -> str           theme.py:407  "" for light/dark, QSS for retro
+    apply_app_theme(app, theme)            theme.py:412
+
+Note the deliberate asymmetry: `normalize_theme` falls back to LIGHT while
+`DEFAULT` is RETRO. An unrecognized theme name means a bug or a hand-edited
+config, and plain light is the safer thing to show there than a skin. Do not
+"fix" this into consistency.
+
+`apply_app_theme` does four things in order, and the order matters:
+  1. `app.setPalette(palette)`
+  2. `app.setStyleSheet(app_stylesheet(theme))`  <- new; "" tears the skin down
+  3. loops `app.allWidgets()` re-setting the palette AND re-applying each
+     widget's own stylesheet (QStyleSheetStyle caches palette-derived brushes
+     and is not invalidated by a palette change alone — see the comment in the
+     function and `test_apply_app_theme_propagates_to_menu_bar`)
+  4. `app.setStyle("Fusion")` last, to repolish everything
+
+`Gui.apply_theme` (gui.py:2670) then fans out to `icons.apply_theme`, every
+`plot_widgets` entry, `custom_analysis_widget` and the input designer. Other
+`apply_theme` implementations that are NOT reached from there and are opened
+per-dialog: `routine_overview_dialog.py:298`, `input_designer_dialog.py:901`,
+`rheobase_dialog.py:1107`, `stdp_window_dialog.py:1103`, `data_widget.py:302`,
+`fpl_widget.py:113`, `icon_manager.py:73`.
+
+CRUCIAL Qt behaviour to internalise before editing the QSS: the moment ANY
+QSS property is set on a widget class, that widget is painted by
+QStyleSheetStyle instead of Fusion, and its SUB-CONTROLS stop being drawn by
+the native style. Styling `QSpinBox { background: ... }` without also styling
+`QSpinBox::up-button/::down-button/::up-arrow/::down-arrow` does not leave the
+Fusion arrows alone — it deletes them. This is the root cause of WEAK POINTS
+1 and 2 below, and it is the single most important thing to get right when
+extending the sheet.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+WEAK POINTS — all verified by rendering, ordered by how visible they are
+────────────────────────────────────────────────────────────────────────────────────────────
+
+To reproduce every one of items 1-4: build a QDialog containing a QSpinBox,
+QDoubleSpinBox, QComboBox, checked+unchecked QCheckBox, on+off QRadioButton,
+a QTabWidget with two tabs, a QTreeWidget with a header, a QGroupBox and a
+QDialogButtonBox; call `theme.apply_app_theme(app, theme.RETRO)`; `.grab()` it.
+
+
+1. SPIN BOX ARROWS ARE GONE.  [verified]
+   `QSpinBox`/`QDoubleSpinBox` are given a background+border at theme.py:226-234
+   but no sub-control rules. Rendered result: the field is bevelled correctly,
+   and the up/down buttons collapse into two tiny featureless grey rectangles
+   with NO arrow glyph at all. The control is unusable by mouse.
+   Fix: add `QSpinBox::up-button`, `::down-button` (metal bevel, ~14px wide,
+   split the field height), and `::up-arrow`/`::down-arrow`. Arrows have to be
+   supplied — QSS cannot draw a triangle. Options, in order of preference:
+     a) `border-left/right/bottom` triangle trick on a zero-size box (pure QSS,
+        no assets, works well at 5-7px);
+     b) a tiny inline `url(data:image/svg+xml;base64,...)`;
+     c) a qtawesome-rendered PNG written to a cache dir at theme-apply time.
+   Prefer (a) — no assets, no I/O, no resource system. Do the same for the
+   `:pressed`, `:hover` and `:disabled` states, and for `:off` (Qt's name for
+   "at the limit") so a spin box pinned at its maximum still reads correctly.
+
+2. COMBO BOX DROP-DOWN ARROW IS MISSING.  [verified]
+   theme.py:253-256 styles `QComboBox::drop-down` with a left border and a
+   14px width, but never styles `::down-arrow`. Rendered result: an empty
+   bevelled strip on the right of every combo box. There are combo boxes in
+   the main data toolbar (Stim data, Neuron data, Spike data, Synapse data,
+   All data), so this is on screen at all times.
+   Fix: same triangle approach as item 1, plus `QComboBox::down-arrow:on`
+   (shifted 1px down-right, the classic "pressed" nudge) and a `:disabled`
+   variant at reduced contrast.
+
+3. CHECK BOXES AND RADIO BUTTONS ARE UNSKINNED.  [verified]
+   Never styled at all, so they keep the flat Fusion indicator: a thin-bordered
+   white square / circle that reads as a different toolkit next to the bevelled
+   metal everywhere else. Very visible in the Spatial Footprints panel ("Show
+   segmentation", "Show shapes") and throughout the import dialogs.
+   Fix: `QCheckBox::indicator` and `QRadioButton::indicator` with the sunken
+   bevel (dark border top/left, light border bottom/right — the inverse of the
+   button bevel), an LCD-dark well, and a green check/dot for `:checked`.
+   Cover `:unchecked`, `:checked`, `:indeterminate`, `:hover`, `:disabled`.
+   Reuse `_RETRO_LCD_BG`/`_RETRO_LCD_FG` for the well and the mark so the
+   indicator reads as a tiny LCD — that is both period-correct and cheap.
+
+4. TAB PANES ARE UNSTYLED, SO THE SELECTED TAB DOESN'T MERGE WITH ITS PANE.  [verified]
+   `QTabBar::tab` is styled (theme.py:289-301) but `QTabWidget::pane` and
+   `QTabWidget::tab-bar` are not. Rendered result: the tab row floats above a
+   flat unbevelled pane with a visible seam, and the selected tab is not
+   joined to the content area the way the metal look requires.
+   Fix: `QTabWidget::pane` with the chrome border and `top: -1px`, and give
+   `QTabBar::tab:selected` a matching `margin-bottom: -1px` so it overlaps the
+   pane border. Also style `QTabBar::tab:!selected { margin-top: 2px }` for the
+   recessed-unselected look, `QTabBar::close-button`, and the scroller arrows
+   (`QTabBar QToolButton`) that appear when tabs overflow.
+   NOTE the main window's project tab bar (`gui.py`, `self.tab_bar`) is a bare
+   `QTabBar` with `setDocumentMode(True)`, NOT inside a QTabWidget — check both.
+
+5. THE FASTPLOTLIB CANVAS TITLE STRIP CLASHES WITH THE PLOT BACKGROUND.  [verified]
+   `_apply_fpl_theme` (fpl_widget.py:118-137) sets `subplot.background_color`
+   and every axis/grid/text color from `fpl_colors`, but the strip ABOVE the
+   subplot that carries the title ("Stimuli", "Neuron data", …) is not covered.
+   Measured on a rendered main window: the title strip is rgb(26,26,26) while
+   the subplot background right below it is rgb(11,25,41) — a hard, visibly
+   wrong seam across the full width of every plot panel.
+   Fix: find the right fastplotlib handle for the figure/dock background
+   (look at `subplot.docks`, the figure-level canvas clear color, and
+   `subplot.title` — the existing code already reaches into privates like
+   `subplot.axes._x._text.material.color` and has a comment acknowledging it,
+   so one more private is acceptable IF commented the same way). Set it to the
+   same `background`, and set the title text color to `foreground`. This is
+   also a latent bug for the DARK theme — check and fix it there too rather
+   than special-casing retro.
+
+6. HARDCODED PLOT-OVERLAY COLORS DO NOT FOLLOW ANY THEME.  [verified by reading]
+   Three call sites bake in colors chosen for a white canvas. They were already
+   questionable under the dark theme; on the navy LCD background they are worse.
+     - `gridlines.py:36`  grid color `pygfx.Color((0.3, 0.3, 0.3, 0.4))` —
+       dark grey at 40% alpha, near-invisible on `#0c1a2a`. This is the
+       View → Toggle Grid overlay.
+     - `gridlines.py:48`  shading mesh `pygfx.Color((0.0, 0.0, 0.0, 0.05))` —
+       black at 5% alpha, i.e. a no-op on a dark background.
+     - `region_of_interest.py:26`  `self.text.material.color = pygfx.Color(0, 0, 0)`
+       — the ROI label is pure black, unreadable on navy.
+     - `timeseries_widget.py:87`  `RegionOfInterest(fill_color=(0.5, 0.5, 0.5, 0.2))`
+       — mid-grey at 20%, very low contrast against navy.
+   Fix: add theme-derived accessors to theme.py (e.g. `plot_overlay_colors(theme)
+   -> {"grid", "shading", "roi_fill", "roi_text"}`) and thread the current theme
+   through to these call sites. `TimeseriesWidget` already knows `self._theme`
+   via `FPLWidget`; `gridlines.py` and `region_of_interest.py` are free
+   functions/plain classes and will need the color passed in as an argument.
+   Keep the current values as the LIGHT entries so nothing changes for light.
+
+7. NO FOCUS STATE ANYWHERE.  [verified by reading the QSS]
+   The sheet defines `:hover`, `:pressed`, `:checked` and `:disabled` but never
+   `:focus`. Because the widgets are now painted by QStyleSheetStyle, Fusion's
+   focus rectangle is gone too, so keyboard navigation through any dialog is
+   invisible. This is an accessibility regression relative to light/dark, and
+   it is the one item here that is a genuine usability bug rather than a
+   cosmetic gap.
+   Fix: a `:focus` rule on buttons, combos, spin boxes, line edits and the
+   indicator sub-controls. A 1px inner highlight ring in `#2b4f7e` (the
+   Highlight role) suits the skin; do not rely on color alone — also shift the
+   bevel, so it survives a monochrome or high-contrast display.
+
+8. THE SHEET IS ONE 230-LINE f-STRING CONSTANT.  [structural]
+   `_RETRO_STYLESHEET` (theme.py:175-405) is an f-string interpolating 11
+   module-level color constants, which forces `{{`/`}}` escaping on every QSS
+   block and makes the file hostile to edit — and it will roughly double in
+   size once items 1-4 and 7 are done.
+   Fix: move the QSS to `src/neuroseq/resources/retro.qss` as plain text with
+   `%(token)s`-style placeholders (or `string.Template`), load it once and
+   cache it, substitute the palette tokens at load time. Keep `app_stylesheet`
+   as the public entry point so nothing else changes. Guard the file read so a
+   missing resource degrades to "no skin" rather than crashing the app, and add
+   the resource to the package data in `pyproject.toml` — verify it survives a
+   real install (`uv pip install .` into a scratch venv, then import and call
+   `app_stylesheet(RETRO)`), not just an editable checkout.
+
+9. DISABLED-TEXT CONTRAST IS BELOW WCAG.  [measurable]
+   `_retro_palette` disabled foreground is `#8b97a6` on a `#cfd9e5` window —
+   roughly 2.3:1, under the 4.5:1 AA threshold (the light theme's `#a0a0a0` on
+   `#f0f0f0` is no better, so this is inherited, not introduced). While you are
+   in the palette, check the normal pairs too: `#17222e` on `#cfd9e5` is fine,
+   `#7ef0a8` on `#0c1a2a` is fine.
+   Fix: darken the disabled foreground until it clears 4.5:1 against BOTH the
+   window and the button gradient's darkest stop. A tiny contrast-ratio helper
+   in the test file (not in production code) makes this assertable.
+
+10. WIDGET-LEVEL STYLESHEETS PUNCH HOLES IN THE SKIN.  [audit needed]
+    A widget's own stylesheet outranks the application sheet for the properties
+    it sets. Two known cases set only geometry, so they are currently benign
+    but fragile:
+      - `gui.py:326` `_configure_toolbar_icon_style` → `QToolButton { margin, padding }`
+      - `data_widget.py:121` → `QToolButton { margin, padding, font-size }`
+    Of 75 `setStyleSheet` calls in `src/neuroseq/`, 66 set a literal text
+    color (`color: gray`, `color: black`, `color: blue`, `color: red`, `#888`,
+    `#2a7a2a`, `#3b7dd8` — see `import_dialog.py`, `cellpose_import_dialog.py`,
+    `patchclamp_import_dialog.py`, `igor_import_dialog.py`, `fiji.py`,
+    `model_editor.py`, `stimulation_generator_dialog.py`).
+    `color: black` on a light metal chrome happens to be fine; it is NOT fine
+    if any of those labels ever lands on an LCD-dark panel, and none of them
+    adapt to the dark theme either.
+    Fix: add semantic accessors to theme.py — `muted_color(theme)`,
+    `success_color(theme)`, `warning_color(theme)`, `error_color(theme)`,
+    `accent_color(theme)` — and migrate the call sites. This is a big mechanical
+    change; it is fine to land it as its own commit AFTER items 1-7, and fine to
+    migrate only the dialogs reachable from the main toolbars in a first cut.
+    Do NOT let this item block the rest.
+
+11. NO VISUAL REGRESSION COVERAGE.  [testing]
+    `pyproject.toml` registers a `screenshot` marker and `tests/conftest.py:73-88`
+    implements `--update-screenshot`, but no test currently uses the marker.
+    Fix: add a `@pytest.mark.screenshot` test that grabs a small control gallery
+    (the one described at the top of this section) under each of the three
+    themes and compares against a committed reference PNG with a tolerance.
+    Keep it to a synthetic gallery widget, NOT the full `Gui` — the main window
+    pulls in fastplotlib/GPU rendering and will not be reproducible across
+    machines. Store references under `tests/sampledata/` alongside the existing
+    fixtures.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+DEPTH WORK BEYOND FIXING THE WEAK POINTS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Once items 1-7 are done the skin is solid. These make it actually feel like
+Winamp rather than merely metallic:
+
+  a) TITLEBAR-STYLE PANEL HEADERS. The classic skin's signature is the small
+     centred caps title bar on each module (MAIN / EQUALIZER / PLAYLIST). The
+     panels here (stim editor, traces, spikes, synapses, cell segmentation,
+     console, custom analysis) have no Qt-side header to style — the plot
+     panels carry their title INSIDE the fastplotlib canvas (see WEAK POINT 5).
+     Adding a thin Qt header strip per panel would be the single biggest visual
+     win, and it dovetails with issue #535's space-optimisation goal because
+     the strip can host that panel's own controls. This is a real layout change
+     though — agree it with the issue owner before building it.
+
+  b) SUNKEN LCD PANEL FOR THE TIME SLIDER / playback row, with a monospace
+     elapsed/total readout in `_RETRO_LCD_FG`. `TimeSliderWidget` is already
+     the closest thing to Winamp's seek bar.
+
+  c) EMBOSSED TOOLBAR GLYPHS. `icon_color(RETRO)` is a single flat `#16232f`.
+     Winamp's buttons are engraved: a dark glyph with a 1px white shadow below.
+     `icon_manager.py` builds qtawesome icons centrally (`icon_manager.py:32`
+     sets the color option), so a two-tone/shadowed variant would be a
+     contained change there.
+
+  d) A "RETRO DARK" COMPANION. The name "Retro light theme" already implies it.
+     The token structure from item 8 makes this cheap: one more token table,
+     one more THEMES entry. Do NOT start this before item 8.
+
+  e) TOOLBAR OVERFLOW CHEVRON. When a toolbar is narrower than its contents Qt
+     adds a `QToolBarExtension` button. It inherits the `QToolButton` bevel, but
+     its `::menu-indicator` and the extension popup are unverified — check at a
+     narrow window width, which is easy to hit with the wide Data toolbar.
+
+  f) DROP THE BETA LABEL. The menu entry is `"&Retro light theme (beta)"`
+     (gui.py:3345) and `tests/test_gui.py` asserts that exact string. When
+     items 1-7 and 11 are done, propose removing "(beta)" — and update the
+     test and `docs/user_guide/gui_overview.md` in the same commit.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CONSTRAINTS AND GOTCHAS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1. QSS SUB-CONTROLS ARE ALL-OR-NOTHING. Restated because it is the whole point
+   of items 1-4: styling a widget class without styling its sub-controls
+   ERASES them. After every QSS edit, render the control gallery and LOOK at
+   it. Do not trust "the tests pass".
+
+2. NEVER STYLE BARE `QWidget`. The type selector matches subclasses, which
+   includes `QRenderCanvas`/`QRenderWidget` (the fastplotlib surfaces) and
+   `CellOverlayWidget`. A background on `QWidget` will paint over GPU canvases.
+   The sheet currently handles the container background via
+   `QMainWindow, QDialog { background: #cfd9e5 }` (theme.py:176-178) — that
+   rule exists precisely because without it, non-autofilling children showed
+   Qt's default `#f0f0f0` through. Extend that list explicitly if a new
+   top-level container turns up. A stand-in plain top-level `QWidget` was
+   checked and DOES pick up the palette correctly without a rule, so
+   `DetachedPanelWindow` (`detached_panel_window.py:10`, a plain `QWidget`) is
+   probably fine — but confirm it against the real class by detaching a panel
+   under the skin rather than trusting the stand-in.
+
+3. QSS TYPE SELECTORS MATCH CUSTOM CLASS NAMES. `ConsoleWidget QPlainTextEdit`
+   (theme.py:389) works because the QSS type selector resolves against the
+   widget's metaobject class name. Use this to scope LCD styling to specific
+   widgets instead of styling `QPlainTextEdit` globally — styling it globally
+   would turn every dialog's text area green-on-black.
+
+4. QT PRINTS NOTHING ON A QSS SYNTAX ERROR in many cases — it silently drops
+   the malformed rule. After editing, verify by asserting a rendered pixel
+   color, not by eyeballing the absence of warnings.
+
+5. THE SKIN IS APPLICATION-WIDE AND THE TEST SUITE SHARES ONE QApplication.
+   Any test that constructs `Gui()` now installs the retro sheet on the shared
+   app (retro is the default). `test_gui_starts_in_retro_theme_without_config`
+   in `tests/test_gui.py` resets to light at the end for this reason. Follow
+   that pattern in any new test that applies a theme, or tests will interfere
+   depending on ordering (`pytest-randomly` is active).
+
+6. `_configure_toolbar_icon_style` sets `TOOLBAR_ICON_SIZE` and
+   `ToolButtonIconOnly`. Do not add padding in the QSS that would push the
+   toolbars taller — issue #535 is a SPACE-OPTIMISATION issue, so the skin
+   must not cost vertical pixels. Measure `toolbar.sizeHint().height()` under
+   light vs retro and keep the delta at zero.
+
+7. `qtpy` ONLY — never import `PyQt6`/`PySide6` directly. `ruff` runs isort
+   with `force-single-line = true`. `mypy` must stay clean.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CURRENT TEST COVERAGE (what already exists, do not duplicate)
+────────────────────────────────────────────────────────────────────────────────────────────
+
+  tests/test_theme.py
+    test_normalize_theme_valid_passthrough            (includes RETRO)
+    test_normalize_theme_invalid_falls_back_to_light
+    test_retro_theme_colors_are_distinct              (fpl/mpl/icon/palette all differ)
+    test_app_stylesheet_only_set_for_retro
+    test_apply_app_theme_sets_and_clears_retro_stylesheet
+    test_apply_app_theme_propagates_to_menu_bar
+
+  tests/test_gui.py
+    test_gui_theme_menu_toggles_theme_and_persists    (asserts the 3 menu labels,
+                                                       and that the app sheet is
+                                                       set on retro / cleared on light)
+    test_gui_applies_persisted_theme_on_startup
+    test_gui_starts_in_retro_theme_without_config     (retro is the default)
+
+  tests/test_gui_settings.py
+    test_gui_theme_setting_roundtrip_and_validation   (default is "retro";
+                                                       invalid falls back to "retro")
+
+Baseline before this work: `uv run pytest` → 1450 passed, 2 skipped.
+
+
+DONE WHEN
+---------
+  uv run pytest                                   → no regressions (>= 1450 passing)
+  uv run mypy src/neuroseq/theme.py               → clean
+  uv run ruff check src/neuroseq/                 → clean
+  uv run pre-commit run --all-files               → clean
+  Rendered control gallery under RETRO shows, all verified by looking at a .grab():
+    - spin box up/down arrows visible, and visibly pressed on click
+    - combo box drop-down arrow visible, nudged when open
+    - check box / radio indicators bevelled and obviously distinguishable on/off
+    - tab pane bevelled, selected tab merged into it with no seam
+    - every control shows a clear focus ring under keyboard Tab navigation
+  Rendered main window under RETRO:
+    - no color seam between the plot title strip and the subplot background
+    - View → Toggle Grid produces clearly visible gridlines on the navy canvas
+    - dragging a selection in the trace widget shows a legible ROI fill + label
+    - toolbar heights identical to the light theme (measure, don't eyeball)
+  Switching Settings → Theme between Light / Dark / Retro repeatedly leaves no
+  stale styling in any of the three (the app stylesheet is set and cleared, and
+  widget-level sheets survive — this is what apply_app_theme's allWidgets loop
+  is for).

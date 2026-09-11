@@ -1,0 +1,123 @@
+retro_theme_depth — review of the implementation
+================================================
+
+Reviewed against `.ai_dev/handoffs/retro_theme_depth.txt`. Verified by reading
+the diff, rendering the control gallery and the real main window under the
+skin, and sampling pixels — not by trusting the test run.
+
+VERDICT: the eleven weak points are addressed and the core of the work is good.
+The QSS move to `src/neuroseq/resources/retro.qss` with `%(token)s`
+substitution, the SVG sub-control assets, the focus states, the
+`plot_overlay_colors`/semantic-color accessors and the threading of theme
+colors into `GridLines` and `RegionOfInterest` are all correct and well tested.
+
+Confirmed fixed, by looking at a rendered gallery:
+  - spin box up/down arrows present, combo drop-down arrow present
+  - check box / radio indicators are LCD wells with green marks, all states
+  - tab pane bevelled and merged with the selected tab
+  - focus ring visible, and `test_retro_button_focus_does_not_look_pressed`
+    correctly pins that focus must not read as pressed
+  - disabled-text contrast now passes 4.5:1 (`_RETRO_DISABLED_TEXT = #414d5b`)
+  - the plot title strip seam is gone (measured: the band is now the same
+    rgb(12,26,42) as the subplot background)
+
+Five things need attention. (1) and (2) are the ones that matter.
+
+
+1. PANEL TITLES WERE DELETED, NOT RETHEMED — functional regression
+   WEAK POINT 5 asked for the title strip to stop clashing with the subplot
+   background. The implementation instead removed the title band entirely
+   (`fpl_widget.py:_remove_subplot_title_band`) and then deleted every
+   `subplot.title` assignment:
+       stim_widget.py:47      "Stimuli"
+       trace_widget.py:125    "Traces"      and :281 f"Traces: {data.name}"
+       spike_widget.py:29     "Spikes"      and :33 f"Spikes: {data.name}"
+       heatmap_widget.py:86   "Synapses"    and :199 f"Synapses: {data.name}"
+   The static labels are arguably redundant, but the DYNAMIC ones are not:
+   users could previously read which dataset each panel was showing directly
+   off the plot, and there is now nowhere on the canvas that says so. No test
+   covered those titles, so this went through silently, and the docs were not
+   updated.
+   Reclaiming the vertical space is a genuine win for issue #535 — but it is a
+   product decision that was not asked for and was not flagged. Either restore
+   the titles (themed, per the original handoff), or keep the space saving and
+   surface the dataset name somewhere else (a Qt-side header strip is exactly
+   DEPTH WORK item (a) in the handoff) — and in either case update
+   `docs/user_guide/gui_overview.md`, which still describes the panels as they
+   were.
+
+2. RETRO ROW SHADING IS MASSIVELY TOO STRONG — visual regression
+   `_PLOT_OVERLAY_COLORS[RETRO]["shading"]` is `(0.49, 0.94, 0.66, 0.07)`, i.e.
+   green at 7% alpha. Measured on the rendered main window, the shaded rows
+   come out at rgb(36,75,63) against an rgb(12,26,42) background — an effective
+   alpha of about 0.20, roughly 3x what was specified. The result is broad
+   saturated green banding that dominates the stim plot and fights the data.
+   For comparison the light theme's shading moves the background by 6/255.
+   Two things to chase, in order:
+     a) why the specified alpha is not honoured on this material path
+        (`generate_stripes` -> `MeshBasicMaterial(color=...)`); the same
+        mechanism behaves as expected for the light value, so check whether an
+        InstancedMesh needs explicit transparency/blending for a non-opaque
+        colour, and whether instances overlap;
+     b) once alpha behaves, retune the retro (and dark) shading so the lift is
+        comparable in magnitude to the light theme's.
+   Reproduce: launch with the retro theme and look at the Stimuli panel, or
+   sample a pixel row through the plot.
+
+3. SCREENSHOT TESTS NOW RUN BY DEFAULT — contradicts a documented convention
+   `tests/conftest.py` lost the `else:` branch that skipped `screenshot`-marked
+   tests on a normal run. CLAUDE.md states "Screenshot tests are skipped by
+   default", so the project convention and the code now disagree, and neither
+   was updated to match the other.
+   The tests themselves are well built (tolerance-based, `--update-screenshot`
+   regenerates, and the gallery pins `QFont("DejaVu Sans", 10)` to reduce font
+   drift). But the three reference PNGs in `tests/sampledata/` were generated
+   on one machine, and the tolerance is tight (mean diff <= 3.0). A different
+   Qt version, freetype build or missing DejaVu Sans on CI will fail them.
+   Decide one way: either restore the skip-by-default branch and leave these as
+   an opt-in visual check, or keep them running and update CLAUDE.md — and in
+   that case confirm they actually pass in CI before relying on them.
+
+4. THE pyproject `artifacts` ENTRY IS REDUNDANT — verified by building
+   `[tool.hatch.build.targets.wheel] artifacts = [...]` was added for the new
+   resources. It is not needed: `artifacts` is for files that would otherwise
+   be excluded (e.g. gitignored), and these are tracked files under
+   `src/neuroseq`, already covered by `packages = ["src/neuroseq"]`.
+   Verified by building the wheel with the entry removed: all 16 retro
+   resources (retro.qss + 15 SVGs) are still packaged. Worth removing.
+
+
+SEPARATE ENVIRONMENT NOTE — not a defect in this work
+   The suite went from "1450 passed, 2 skipped" before this work to
+   "1443 passed, 29 skipped" after. All 29 skips are ELISE tests skipping on
+   "requires the private 'elise' package", so 27 tests went from passing to
+   skipped: the editable `elise` install had disappeared from `.venv`. Nothing
+   in this diff explains it — `uv run` was tested and does NOT prune the
+   editable install, even after `pyproject.toml` changes. Cause unknown.
+   Restored with:
+       VIRTUAL_ENV=$PWD/.venv uv pip install --no-deps -e /mnt/live1/svintila/sequence-learning
+   Note the plain `uv pip install` from CLAUDE.md is not enough on this
+   machine: bare `uv pip` resolves to the conda env at
+   ~/conda-ws/envs/neuroseq, not the project `.venv` that `uv run` uses, so
+   the VIRTUAL_ENV prefix is required. Re-run the full suite after restoring
+   before comparing pass counts against any baseline.
+
+5. TAB CLOSE INDICATOR IS OVERSIZED — cosmetic
+   `retro_close.svg` is a 10x10 glyph with stroke-width 1.5, and
+   `QTabBar::close-button` sets no width/height, so Qt scales it up to the
+   style's close-indicator size. Rendered, the X is noticeably heavier than
+   the tab label next to it. Give the sub-control an explicit width/height
+   (and a `:hover` size that matches) or thin the stroke.
+
+
+NOT DONE, AND THAT IS FINE
+   WEAK POINT 10's second half — migrating the ~66 hardcoded `color:` literals
+   in the dialogs onto the new `muted_color`/`success_color`/`warning_color`/
+   `error_color`/`accent_color` accessors — has not been started. The handoff
+   explicitly said this may land as a separate later commit and must not block
+   the rest. The accessors exist and are tested; the call sites still carry
+   their literals. Worth a follow-up handoff of its own.
+
+   DEPTH WORK items (a)-(f) were out of scope for this pass, as intended.
+   Item (a) (Qt-side panel headers) is now more relevant, not less, because of
+   finding 1 above.
