@@ -168,12 +168,14 @@ class TimeseriesWidget(FPLWidget):
 
         self.y_btn_zoom_in = QtWidgets.QPushButton("+", self.plot_container)
         self.y_btn_zoom_in.setFixedSize(14, 24)
+        self.y_btn_zoom_in.setStyleSheet("QPushButton { padding: 0px; }")
         self.y_btn_zoom_in.setToolTip("Zoom in (Shift + Mouse Wheel Up)")
         self.y_btn_zoom_in.clicked.connect(lambda: controller.zoom((0.0, 0.5), ()))
         container_layout.addWidget(self.y_btn_zoom_in, 1, 1)
 
         self.y_btn_zoom_out = QtWidgets.QPushButton("-", self.plot_container)
         self.y_btn_zoom_out.setFixedSize(14, 24)
+        self.y_btn_zoom_out.setStyleSheet("QPushButton { padding: 0px; }")
         self.y_btn_zoom_out.setToolTip("Zoom out (Shift + Mouse Wheel Down)")
         self.y_btn_zoom_out.clicked.connect(lambda: controller.zoom((0.0, -0.5), ()))
         container_layout.addWidget(self.y_btn_zoom_out, 2, 1)
@@ -195,12 +197,14 @@ class TimeseriesWidget(FPLWidget):
 
         self.x_btn_zoom_out = QtWidgets.QPushButton("-", self.plot_container)
         self.x_btn_zoom_out.setFixedSize(24, 14)
+        self.x_btn_zoom_out.setStyleSheet("QPushButton { padding: 0px; }")
         self.x_btn_zoom_out.setToolTip("Zoom out (Ctrl + Mouse Wheel Down)")
         self.x_btn_zoom_out.clicked.connect(lambda: controller.zoom((-0.5, 0.0), ()))
         self.x_controls_layout.addWidget(self.x_btn_zoom_out)
 
         self.x_btn_zoom_in = QtWidgets.QPushButton("+", self.plot_container)
         self.x_btn_zoom_in.setFixedSize(24, 14)
+        self.x_btn_zoom_in.setStyleSheet("QPushButton { padding: 0px; }")
         self.x_btn_zoom_in.setToolTip("Zoom in (Ctrl + Mouse Wheel Up)")
         self.x_btn_zoom_in.clicked.connect(lambda: controller.zoom((0.5, 0.0), ()))
         self.x_controls_layout.addWidget(self.x_btn_zoom_in)
