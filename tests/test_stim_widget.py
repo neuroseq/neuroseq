@@ -13,6 +13,91 @@ from neuroseq.stim_widget import StimWidget
 from neuroseq.utils import InteractMode
 
 
+def test_stim_preview_keeps_editor_menu(qtbot, monkeypatch):
+    from qtpy import QtWidgets
+
+    menu = QtWidgets.QMenu()
+    edit_action = menu.addAction("Edit stim array")
+    widget = StimWidget(ConstrainedPanZoomController(), menu=menu)
+    qtbot.addWidget(widget)
+    shown = []
+    monkeypatch.setattr(menu, "exec", lambda pos: shown.append(pos))
+    widget.mode = InteractMode.SELECT
+    event = QtGui.QContextMenuEvent(
+        QtGui.QContextMenuEvent.Reason.Mouse, QtCore.QPoint(5, 5)
+    )
+    widget.contextMenuEvent(event)
+    assert shown
+    assert edit_action in menu.actions()
+    assert widget.preview_action in menu.actions()
+
+
+@pytest.mark.parametrize("stim_type", list(StimType))
+@pytest.mark.parametrize("selected", [False, True])
+def test_stim_vector_preview(qtbot, tmp_path, stim_type, selected):
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+    from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
+
+    from neuroseq.utils import get_cmap
+
+    controller = ConstrainedPanZoomController()
+    widget = StimWidget(controller)
+    qtbot.addWidget(widget)
+    assert widget.preview_stimuli() is None
+    assert not widget.preview_action.isEnabled()
+    values = np.array([[0, 1], [2, 1], [2, 0], [0, 0]], dtype=np.float32)
+    if stim_type == StimType.External:
+        values[:, 1] *= -1
+    widget.set_data(StimArray("Pulses", stim_type, values, "1", 0.002))
+    widget.set_background_data(StimArray("Other", stim_type, values, "1", 0.001))
+    widget.set_background_data_visible(True)
+    controller.focus_time_range(0, 0.008)
+    controller.focus_neuron_range(0, 2)
+    state = controller._get_camera_state()
+    if selected:
+        widget.select_neurons(slice(1, 2), slice(1, 3))
+    assert widget.preview_action.isEnabled()
+    widget.preview_action.trigger()
+    from qtpy import QtWidgets
+
+    dialog = widget.findChild(QtWidgets.QDialog)
+    qtbot.addWidget(dialog)
+    assert dialog.isVisible() and not dialog.isModal()
+    assert dialog.findChild(NavigationToolbar2QT) is not None
+    canvas = dialog.findChild(FigureCanvasQTAgg)
+    ax = canvas.figure.axes[0]
+    assert ax.get_title() == "Pulses"
+    assert len(ax.collections) == 2
+    blocks = ax.collections[-1]
+    assert len(blocks.get_paths()) == 2
+    np.testing.assert_allclose(
+        blocks.get_paths()[0].vertices[:4],
+        [[2, -0.5], [6, -0.5], [6, 0.5], [2, 0.5]],
+    )
+    normalized = np.array([1, -0.5 if stim_type == StimType.External else 0.5])
+    if stim_type == StimType.External:
+        normalized = (normalized + 1) / 2
+    np.testing.assert_allclose(blocks.get_facecolors(), get_cmap(stim_type)(normalized))
+    cx, cy = state["position"][:2]
+    assert ax.get_xlim() == pytest.approx(
+        (2, 6) if selected else (cx - state["width"] / 2, cx + state["width"] / 2)
+    )
+    assert ax.get_ylim() == pytest.approx(
+        (0.5, 1.5) if selected else (cy - state["height"] / 2, cy + state["height"] / 2)
+    )
+    output = tmp_path / "stim.svg"
+    canvas.figure.savefig(output)
+    assert "<image" not in output.read_text(encoding="utf-8")
+    dialog.close()
+    widget.set_background_data_visible(False)
+    dialog = widget.preview_stimuli()
+    qtbot.addWidget(dialog)
+    assert len(dialog.findChild(FigureCanvasQTAgg).figure.axes[0].collections) == 1
+    dialog.close()
+    widget.clear_data()
+    assert not widget.preview_action.isEnabled()
+
+
 def get_event_target(widget):
     # return a windowHandle() for the widget if it exists, otherwise return the widget itself
     # note that rendercanvas Qt backend may wrap the real interactive widget inside `canvas._subwidget`
