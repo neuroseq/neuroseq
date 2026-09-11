@@ -389,10 +389,8 @@ class Gui(QtWidgets.QMainWindow):
         self.toolbar_stim_editor.setOrientation(QtCore.Qt.Orientation.Vertical)
         self._configure_toolbar_icon_style(self.toolbar_stim_editor)
         main_horizontal_layout.addWidget(self.toolbar_stim_editor)
-        # left/right splitters between heatmap and console
+        # left/right splitters between custom analysis and console
         split_left_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
-        split_left_right.addWidget(self.heatmap_widget)
-        split_left_right.addWidget(self.spatial_footprint_widget)
         self.custom_analysis_widget = CustomAnalysisWidget(parent=self)
         split_left_right.addWidget(self.custom_analysis_widget)
         self.console_widget = ConsoleWidget(parent=self)
@@ -401,7 +399,13 @@ class Gui(QtWidgets.QMainWindow):
         self.chat_widget.setVisible(False)
         self.chat_widget.request_settings_dialog.connect(self.open_llm_settings)
         split_left_right.addWidget(self.chat_widget)
-        split_left_right.setSizes([1000, 1000, 1000, 1000, 1000])
+        split_left_right.setSizes([1000, 1000, 1000])
+        # synapses (heatmap) and cell segmentation (spatial footprint) stacked
+        # to the right of the stim editor
+        split_stim_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        split_stim_right.addWidget(self.heatmap_widget)
+        split_stim_right.addWidget(self.spatial_footprint_widget)
+        split_stim_right.setSizes([1000, 1000])
         # main vertical splitter layout
         split_vertical = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         split_vertical.setHandleWidth(0)
@@ -428,7 +432,11 @@ class Gui(QtWidgets.QMainWindow):
         self.stim_editor.stim_widget.neuron_hovered.connect(
             self._spatial_footprint_state.set_hovered_stim_id
         )
-        split_vertical.addWidget(self.stim_editor)
+        split_stim_row = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        split_stim_row.addWidget(self.stim_editor)
+        split_stim_row.addWidget(split_stim_right)
+        split_stim_row.setSizes([3000, 1000])
+        split_vertical.addWidget(split_stim_row)
         self.trace_widget.set_default_scroll_bars(
             self.stim_editor.x_scrollbar,
             self.stim_editor.y_scrollbar,
