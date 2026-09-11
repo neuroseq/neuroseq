@@ -6,8 +6,10 @@ import brian2 as b2
 import brian2.numpy_ as np
 from pyqtgraph.console.repl_widget import ReplWidget
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 
+from neuroseq import console_art
 from neuroseq.project import Project
 
 SAMPLE_CODE = """\
@@ -114,6 +116,9 @@ class ConsoleWidget(ReplWidget):
         self.layout.addLayout(btn_layout)
 
     def _print_intro(self) -> None:
+        # A fresh brain is grown for every launch, so the splash is never
+        # quite the same twice.
+        self._insert_centered(console_art.console_splash())
         self.output.insertPlainText(
             "This is a Python console where you can interact directly with the Model using the 'project' object.\n"
         )
@@ -134,6 +139,25 @@ class ConsoleWidget(ReplWidget):
         self.output.insertPlainText(
             "\n\nClick 'Sample Python Code' for more information and examples.\n\n\n"
         )
+
+    def _insert_centered(self, text: str) -> None:
+        """Insert ``text`` as horizontally centered blocks, then go back to left.
+
+        Qt centers each line on its own, so this only preserves ASCII art when
+        every line is the same length - which ``console_splash`` guarantees.
+        Centering is done per block rather than by padding with spaces so it
+        stays correct when the console is resized.
+        """
+        cursor = self.output.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+        centered = QtGui.QTextBlockFormat()
+        centered.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
+        cursor.setBlockFormat(centered)
+        cursor.insertText(text)
+        left = QtGui.QTextBlockFormat()
+        left.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+        cursor.setBlockFormat(left)
+        self.output.setTextCursor(cursor)
 
     def _show_sample_code(self) -> None:
         dlg = QtWidgets.QDialog(self)
