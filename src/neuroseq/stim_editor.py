@@ -873,6 +873,44 @@ class StimEditor(QtWidgets.QWidget):
             self.logger.error(msg)
             QtWidgets.QMessageBox.critical(self, "Error", msg)
 
+    def set_selected_stim_amplitude(self) -> None:
+        """Set non-zero samples in the selection to an amplitude, with undo."""
+        modifier = self.current_stim_modifier
+        neuron_slice = self.stim_widget.selected_neuron_slice
+        time_slice = self.stim_widget.selected_time_slice
+        if modifier is None or neuron_slice is None or time_slice is None:
+            return
+        values = modifier.stim_array.values[time_slice, neuron_slice].copy()
+        nonzero = values != 0
+        if not np.any(nonzero):
+            return
+        units = modifier.stim_array.units
+        amplitude_text, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "Set amplitude",
+            f"Amplitude ({units}) for non-zero values in the selected region"
+            if units
+            else "Amplitude for non-zero values in the selected region",
+            QtWidgets.QLineEdit.EchoMode.Normal,
+            str(float(values[nonzero][0])),
+        )
+        if not ok:
+            return
+        try:
+            amplitude = float(amplitude_text)
+            if not math.isfinite(amplitude):
+                raise ValueError
+        except ValueError:
+            QtWidgets.QMessageBox.critical(
+                self, "Invalid amplitude", "Enter a finite number for the amplitude."
+            )
+            return
+        if np.all(values[nonzero] == amplitude):
+            return
+        values[nonzero] = amplitude
+        modifier.do(neuron_slice, time_slice, values)
+        self._stim_values_updated()
+
     def delete_selected_stim(self) -> None:
         if (
             self.current_stim_modifier is None
@@ -1435,6 +1473,15 @@ class StimEditor(QtWidgets.QWidget):
         for action in self.actions_draw:
             self.actions_draw_group.addAction(action)
         self.actions_edit = []
+        self.action_set_amplitude = add_action(
+            "Set amplitude",
+            self.set_selected_stim_amplitude,
+            menu,
+            toolbar,
+            self,
+            icon="mdi6.tune-vertical",
+        )
+        self.actions_edit.append(self.action_set_amplitude)
         self.actions_edit.append(
             add_action(
                 "Select all (Ctrl+A)",
