@@ -107,6 +107,29 @@ def test_left_toolbar_groups_array_ops_time_ops_and_design_ops(
     stim_editor.close()
 
 
+def test_drawing_actions_sit_directly_under_draw_mode_button(qtbot: QtBot) -> None:
+    """Draw stimulus / Erase stimulus / Design stimulus are specific to Draw
+
+    mode, so they sit right after the Draw mode toggle - between it and
+    Select mode - rather than far below near Undo/Redo (issue #535).
+    """
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+
+    texts = [a.text() for a in toolbar.actions()]
+    draw_mode_index = texts.index("Draw mode (1)")
+    select_mode_index = texts.index("Select mode (2)")
+    assert texts[draw_mode_index + 1 : select_mode_index] == [
+        "Draw stimulus",
+        "Erase stimulus",
+        "Design stimulus",
+    ]
+    stim_editor.close()
+
+
 def test_trim_to_mapped_neurons_action_sits_right_after_clear_stim_array(
     qtbot: QtBot,
 ) -> None:

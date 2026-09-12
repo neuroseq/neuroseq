@@ -1222,6 +1222,48 @@ class StimEditor(QtWidgets.QWidget):
             checkable=True,
             is_checked=True,
         )
+        # Drawing tools are specific to Draw mode, so they sit right under its
+        # toggle and are hidden (not just greyed out - see set_mode) whenever
+        # Select mode is active instead.
+        self.actions_draw = []
+        self.actions_draw.append(
+            add_action(
+                "Draw stimulus",
+                lambda: self.set_draw_mode(DrawMode.DRAW),
+                menu,
+                toolbar,
+                self,
+                icon="mdi6.pencil",
+                checkable=True,
+                is_checked=True,
+            )
+        )
+        self.actions_draw.append(
+            add_action(
+                "Erase stimulus",
+                lambda: self.set_draw_mode(DrawMode.ERASE),
+                menu,
+                toolbar,
+                self,
+                icon="mdi6.eraser",
+                checkable=True,
+                is_checked=False,
+            )
+        )
+        self.actions_draw.append(
+            add_action(
+                "Design stimulus",
+                self.choose_stim_intensity,
+                menu,
+                toolbar,
+                self,
+                icon="mdi6.network-strength-3",
+            )
+        )
+        self.actions_draw_group = QtWidgets.QActionGroup(self)
+        self.actions_draw_group.setExclusive(True)
+        for action in self.actions_draw:
+            self.actions_draw_group.addAction(action)
         self.action_select_mode = add_action(
             "Select mode (2)",
             lambda: self.set_mode(InteractMode.SELECT),
@@ -1359,46 +1401,6 @@ class StimEditor(QtWidgets.QWidget):
         )
         self.action_redo.setEnabled(False)
         self.toolbar.addSeparator()
-        self.actions_draw = []
-        self.actions_draw.append(
-            add_action(
-                "Draw stimulus",
-                lambda: self.set_draw_mode(DrawMode.DRAW),
-                menu,
-                toolbar,
-                self,
-                icon="mdi6.pencil",
-                checkable=True,
-                is_checked=True,
-            )
-        )
-        self.actions_draw.append(
-            add_action(
-                "Erase stimulus",
-                lambda: self.set_draw_mode(DrawMode.ERASE),
-                menu,
-                toolbar,
-                self,
-                icon="mdi6.eraser",
-                checkable=True,
-                is_checked=False,
-            )
-        )
-        self.actions_draw.append(
-            add_action(
-                "Design stimulus",
-                self.choose_stim_intensity,
-                menu,
-                toolbar,
-                self,
-                icon="mdi6.network-strength-3",
-            )
-        )
-        self.actions_draw_group = QtWidgets.QActionGroup(self)
-        self.actions_draw_group.setExclusive(True)
-        self.toolbar.addSeparator()
-        for action in self.actions_draw:
-            self.actions_draw_group.addAction(action)
         self.actions_edit = []
         self.actions_edit.append(
             add_action(
