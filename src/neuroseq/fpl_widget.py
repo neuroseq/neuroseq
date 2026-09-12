@@ -61,7 +61,18 @@ class FPLWidget(QtWidgets.QWidget):
         self.resize(800, 600)
 
     def _remove_subplot_title_band(self) -> None:
-        """Hide fastplotlib's title and reclaim its reserved canvas height."""
+        """Hide fastplotlib's title and reclaim its reserved canvas height.
+
+        Also reclaims the band `get_render_rect` reserves at the BOTTOM: room
+        for either the imgui toolbar, or - when it's hidden, as it always is
+        here (see `post_set_data`) - a multi-subplot resize handle. Neither is
+        relevant to a single-subplot figure, so this band never has any real
+        content drawn into it; it only ever shows the frame's flat background
+        plane, colored by `_apply_fpl_theme`. Directly above the Qt scrollbar
+        row, it reads as a plain seam under any theme, but if that recolor
+        ever lags behind the rest of the canvas on a theme switch, this is
+        exactly where it would show up as a stale-colored band.
+        """
         frame = getattr(self.subplot, "frame", None)
         title = getattr(self.subplot, "title", None)
         if frame is None or title is None:
@@ -73,7 +84,16 @@ class FPLWidget(QtWidgets.QWidget):
         # Wrap the private frame calculation until it offers a public switch.
         def get_titleless_render_rect() -> tuple[float, float, float, float]:
             x, y, width, height = get_render_rect()
-            return x, y - title_space, width, height + title_space
+            # Only reclaim the bottom band when it is otherwise unused: a
+            # visible toolbar needs its space, so leave get_render_rect's
+            # reservation alone in that case.
+            bottom_space = 0.0 if frame.toolbar_visible else 13.0
+            return (
+                x,
+                y - title_space,
+                width,
+                height + title_space + bottom_space,
+            )
 
         self.subplot.title.text = ""
         self.subplot.title.visible = False

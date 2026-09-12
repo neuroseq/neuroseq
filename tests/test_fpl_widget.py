@@ -41,9 +41,15 @@ def test_fpl_widget_removes_subplot_title_band(qtbot: QtBot) -> None:
 
     assert widget.subplot.title.text == ""
     assert not widget.subplot.title.visible
-    _, frame_y, _, _ = widget.subplot.frame.rect
-    _, render_y, _, _ = widget.subplot.frame.get_render_rect()
+    assert not widget.subplot.frame.toolbar_visible
+    _, frame_y, _, frame_height = widget.subplot.frame.rect
+    _, render_y, _, render_height = widget.subplot.frame.get_render_rect()
     assert render_y == pytest.approx(frame_y)
+    # The bottom band (an unused multi-subplot resize-handle reservation, since
+    # every widget here has one subplot and no toolbar) is reclaimed too, so
+    # the render rect's height matches the frame's in full - otherwise it's
+    # left as dead space, rendered only in the frame's flat background color.
+    assert render_height == pytest.approx(frame_height)
 
 
 def test_fpl_widget_skips_rendering_until_canvas_is_sized(qtbot: QtBot) -> None:
