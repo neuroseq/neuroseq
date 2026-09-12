@@ -45,6 +45,31 @@ def test_stim_editor_no_data(qtbot: QtBot) -> None:
     stim_editor.close()
 
 
+def test_switching_mode_shows_only_the_relevant_action_group(qtbot: QtBot) -> None:
+    """Draw-mode and select-mode actions take toolbar/menu space only in their
+
+    own mode, rather than merely greying out (issue #535 space optimization).
+    """
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+
+    # default mode is DRAW
+    assert all(action.isVisible() for action in stim_editor.actions_draw)
+    assert all(not action.isVisible() for action in stim_editor.actions_edit)
+
+    stim_editor.set_mode(InteractMode.SELECT)
+    assert all(not action.isVisible() for action in stim_editor.actions_draw)
+    assert all(action.isVisible() for action in stim_editor.actions_edit)
+
+    stim_editor.set_mode(InteractMode.DRAW)
+    assert all(action.isVisible() for action in stim_editor.actions_draw)
+    assert all(not action.isVisible() for action in stim_editor.actions_edit)
+    stim_editor.close()
+
+
 def test_trim_to_mapped_neurons_action_sits_right_after_clear_stim_array(
     qtbot: QtBot,
 ) -> None:

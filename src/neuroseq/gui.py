@@ -2947,6 +2947,14 @@ class Gui(QtWidgets.QMainWindow):
             if hasattr(qta, "icon")
             else None,
         )
+        add_action(
+            "&Manage Experiments",
+            self.btn_manage_experiments_clicked,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon="mdi6.beaker",
+        )
         menu.addSeparator()
         add_action(
             "E&xit",
@@ -3064,6 +3072,8 @@ class Gui(QtWidgets.QMainWindow):
                 checkable=True,
                 is_checked=is_checked,
             )
+        menu.addSeparator()
+        toolbar.addSeparator()
         add_action(
             "Toggle Selection Text",
             self.toggle_selection_text,
@@ -3373,17 +3383,6 @@ class Gui(QtWidgets.QMainWindow):
     ) -> None:
         if toolbar is None:
             return
-        self.btn_open_fiji = QtWidgets.QPushButton("Open Fiji")
-        self.btn_open_fiji.setToolTip("Launch Fiji/ImageJ")
-        icons.set_widget_icon(self.btn_open_fiji, "mdi6.microscope")
-        self.btn_open_fiji.clicked.connect(self.btn_open_fiji_clicked)
-        toolbar.addWidget(self.btn_open_fiji)
-        self.btn_open_cellpose = QtWidgets.QPushButton("Open Cellpose")
-        self.btn_open_cellpose.setToolTip("Launch the Cellpose GUI")
-        icons.set_widget_icon(self.btn_open_cellpose, "mdi6.dots-hexagon")
-        self.btn_open_cellpose.clicked.connect(self.btn_open_cellpose_clicked)
-        toolbar.addWidget(self.btn_open_cellpose)
-        toolbar.addSeparator()
         self.cmb_stim = QtWidgets.QComboBox()
         toolbar.addWidget(QtWidgets.QLabel("  Stim data: "))
         toolbar.addWidget(self.cmb_stim)
@@ -3421,19 +3420,21 @@ class Gui(QtWidgets.QMainWindow):
         )
         toolbar.addWidget(QtWidgets.QLabel("  All data: "))
         toolbar.addWidget(self.cmb_data)
+        toolbar.addSeparator()
+        self.btn_open_fiji = QtWidgets.QPushButton("Open Fiji")
+        self.btn_open_fiji.setToolTip("Launch Fiji/ImageJ")
+        icons.set_widget_icon(self.btn_open_fiji, "mdi6.microscope")
+        self.btn_open_fiji.clicked.connect(self.btn_open_fiji_clicked)
+        toolbar.addWidget(self.btn_open_fiji)
+        self.btn_open_cellpose = QtWidgets.QPushButton("Open Cellpose")
+        self.btn_open_cellpose.setToolTip("Launch the Cellpose GUI")
+        icons.set_widget_icon(self.btn_open_cellpose, "mdi6.dots-hexagon")
+        self.btn_open_cellpose.clicked.connect(self.btn_open_cellpose_clicked)
+        toolbar.addWidget(self.btn_open_cellpose)
 
     def _create_action_experiment(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None
     ) -> None:
-        add_action(
-            "&Manage Experiments",
-            self.btn_manage_experiments_clicked,
-            menu,
-            toolbar,
-            shortcut=None,
-            icon="mdi6.beaker",
-        )
-        menu.addSeparator()
         add_action(
             "&Connect External Stimulation Function",
             self.connect_external_simulation_function,

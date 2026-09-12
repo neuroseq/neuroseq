@@ -567,9 +567,9 @@ class StimEditor(QtWidgets.QWidget):
             self.action_select_mode.setChecked(True)
             self.stim_widget.set_hover_slice(None)
         for action in self.actions_draw:
-            action.setEnabled(self.mode == InteractMode.DRAW)
+            action.setVisible(self.mode == InteractMode.DRAW)
         for action in self.actions_edit:
-            action.setEnabled(self.mode == InteractMode.SELECT)
+            action.setVisible(self.mode == InteractMode.SELECT)
 
     def set_draw_mode(self, draw_mode: DrawMode) -> None:
         self.draw_mode = draw_mode
@@ -1522,4 +1522,4 @@ class StimEditor(QtWidgets.QWidget):
             )
         )
         for action in self.actions_edit:
-            action.setEnabled(False)
+            action.setVisible(False)

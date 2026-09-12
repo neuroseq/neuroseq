@@ -316,6 +316,60 @@ def test_gui_open_fiji_and_cellpose_buttons(
     gui.close()
 
 
+def test_open_fiji_and_cellpose_buttons_are_at_the_end_of_the_data_toolbar(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    actions = gui.toolbar_data.actions()
+    fiji_index = next(
+        i
+        for i, action in enumerate(actions)
+        if gui.toolbar_data.widgetForAction(action) is gui.btn_open_fiji
+    )
+    cellpose_index = next(
+        i
+        for i, action in enumerate(actions)
+        if gui.toolbar_data.widgetForAction(action) is gui.btn_open_cellpose
+    )
+    assert fiji_index == len(actions) - 2
+    assert cellpose_index == len(actions) - 1
+    gui.close()
+
+
+def test_view_toolbar_has_separator_before_toggle_selection_text(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    actions = gui.toolbar_view.actions()
+    index = next(
+        i
+        for i, action in enumerate(actions)
+        if action.text() == "Toggle Selection Text"
+    )
+    assert actions[index - 1].isSeparator()
+    gui.close()
+
+
+def test_manage_experiments_action_sits_next_to_generate_synthetic_data(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    actions = gui.menu_file.actions()
+    generate_index = next(
+        i
+        for i, action in enumerate(actions)
+        if action.text().replace("&", "") == "Generate Synthetic Data..."
+    )
+    assert actions[generate_index + 1].text().replace("&", "") == "Manage Experiments"
+    gui.close()
+
+
 def _make_gui_cellpose_result(
     mapping: dict[int, int] | None = None,
 ) -> CellposeImportResult:
