@@ -26,9 +26,24 @@ from neuroseq.utils import InteractMode
 
 class MockStimIntensityDialog:
     draw_stim = DrawStim(DrawStimType.Constant, 1.0, 1.0)
+    draw_stim_length = 1
+    # Set by __init__ each time the dialog is constructed, so a test can
+    # assert what choose_stim_intensity() passed in without keeping a
+    # reference to the (never-stored) dialog instance itself.
+    received_draw_stim_length: int | None = None
+    received_dt_seconds: float | None = None
 
-    def __init__(self, *args, **kwargs):
-        pass
+    def __init__(
+        self,
+        draw_stim,
+        stim_units,
+        stim_type,
+        draw_stim_length,
+        dt_seconds,
+        parent=None,
+    ):
+        MockStimIntensityDialog.received_draw_stim_length = draw_stim_length
+        MockStimIntensityDialog.received_dt_seconds = dt_seconds
 
     def exec(self) -> bool:
         return True
@@ -625,9 +640,19 @@ def test_edit_stim_array_dt_change_requires_confirmation(
     stim_editor.close()
 
 
-def test_choose_stim_length_snaps_to_selected_stim_dt(
+def test_choose_stim_intensity_passes_and_reads_back_draw_stim_length(
     monkeypatch: MonkeyPatch, qtbot: QtBot
 ) -> None:
+    """ "Draw designer stimuli" and "Modify stimulus length" were merged into
+
+    one "Design stimulus" dialog/action (issue #535); choose_stim_intensity
+    now carries the stim length through StimIntensityDialog too.
+    """
+    monkeypatch.setattr(
+        neuroseq.stim_editor,
+        "StimIntensityDialog",
+        MockStimIntensityDialog,
+    )
     project = Project()
     project.add_stim_array(
         StimArray(
@@ -646,45 +671,32 @@ def test_choose_stim_length_snaps_to_selected_stim_dt(
     stim_editor.show()
     qtbot.waitUntil(lambda: stim_editor.isVisible())
     stim_editor.set_project(project)
-    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("1.0", True))
+    stim_editor.draw_stim_length = 5
 
-    stim_editor.choose_stim_length()
+    MockStimIntensityDialog.draw_stim_length = 9
+    stim_editor.choose_stim_intensity()
 
-    assert stim_editor.draw_stim_length == 2
-    assert stim_editor._draw_stim_length_milliseconds() == approx(1.041625)
+    # the dialog is constructed with the editor's current length/dt...
+    assert MockStimIntensityDialog.received_draw_stim_length == 5
+    assert MockStimIntensityDialog.received_dt_seconds == approx(0.0005208125)
+    # ...and the editor adopts whatever the dialog reports back on accept.
+    assert stim_editor.draw_stim_length == 9
     stim_editor.close()
 
 
-def test_choose_stim_length_rejects_non_finite_input(
-    monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list[dict[str, str]]
+def test_stim_editor_left_toolbar_has_one_design_stimulus_action(
+    qtbot: QtBot,
 ) -> None:
-    project = Project()
-    project.add_stim_array(
-        StimArray(
-            "a",
-            neuroseq.stim.StimType.Excitation,
-            np.zeros((10, 2), dtype=np.float32),
-            "mV",
-            0.001,
-        )
-    )
     cmb_stim = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
     controller = ConstrainedPanZoomController()
     stim_editor = StimEditor(controller, cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
-    stim_editor.show()
-    qtbot.waitUntil(lambda: stim_editor.isVisible())
-    stim_editor.set_project(project)
-    stim_editor.draw_stim_length = 3
-    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("inf", True))
 
-    stim_editor.choose_stim_length()
-
-    assert stim_editor.draw_stim_length == 3
-    assert qmessagebox_calls[-1]["name"] == "critical"
-    assert qmessagebox_calls[-1]["title"] == "Invalid input"
-    assert "positive number of milliseconds" in qmessagebox_calls[-1]["text"]
+    texts = [a.text() for a in toolbar.actions()]
+    assert texts.count("Design stimulus") == 1
+    assert "Draw designer stimuli" not in texts
+    assert "Modify stimulus length" not in texts
     stim_editor.close()
 
 

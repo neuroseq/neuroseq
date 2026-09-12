@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import math
 from enum import Enum
 from typing import Literal
 from typing import overload
@@ -33,7 +32,6 @@ from neuroseq.stim_pattern_dialog import StimPatternContext
 from neuroseq.stim_pattern_dialog import StimPatternDialog
 from neuroseq.stim_timing import DEFAULT_STIM_DT_SECONDS
 from neuroseq.stim_timing import format_milliseconds
-from neuroseq.stim_timing import milliseconds_to_samples_nearest
 from neuroseq.stim_timing import samples_to_milliseconds
 from neuroseq.stim_timing import samples_to_seconds
 from neuroseq.stim_timing import seconds_to_samples_ceil
@@ -887,42 +885,6 @@ class StimEditor(QtWidgets.QWidget):
         )
         self._stim_values_updated()
 
-    def choose_stim_length(self) -> None:
-        dt_ms = format_milliseconds(self._current_stim_dt_seconds() * 1000.0)
-        new_stim_length, ok = QtWidgets.QInputDialog.getText(
-            self,
-            "Stimulus length",
-            "Length of stimulus in milliseconds "
-            f"(rounded to nearest multiple of selected stim dt = {dt_ms} ms)",
-            QtWidgets.QLineEdit.EchoMode.Normal,
-            format_milliseconds(self._draw_stim_length_milliseconds()),
-        )
-        if not ok:
-            return
-        try:
-            duration_ms = float(new_stim_length)
-            if not math.isfinite(duration_ms) or duration_ms <= 0.0:
-                raise ValueError
-            self.draw_stim_length = max(
-                1,
-                milliseconds_to_samples_nearest(
-                    duration_ms, self._current_stim_dt_seconds()
-                ),
-            )
-            self.set_mode(self.mode)  # Reset mode to update hover slice
-        except (OverflowError, ValueError):
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Invalid input",
-                f"Could not parse '{new_stim_length}' as a positive number of milliseconds.",
-            )
-            return
-        self.logger.debug(
-            "Setting draw stim length to %s samples (%sms)",
-            self.draw_stim_length,
-            format_milliseconds(self._draw_stim_length_milliseconds()),
-        )
-
     def toggle_show_all_stim_arrays(self) -> None:
         self.stim_widget.set_background_data_visible(
             not self.stim_widget.show_background_graphics
@@ -930,10 +892,21 @@ class StimEditor(QtWidgets.QWidget):
 
     def choose_stim_intensity(self) -> None:
         dialog = StimIntensityDialog(
-            self.draw_stim, self.stim_widget.units, self.stim_type, self
+            self.draw_stim,
+            self.stim_widget.units,
+            self.stim_type,
+            self.draw_stim_length,
+            self._current_stim_dt_seconds(),
+            self,
         )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self.draw_stim = dialog.draw_stim
+            self.draw_stim_length = dialog.draw_stim_length
+            self.logger.debug(
+                "Setting draw stim length to %s samples (%sms)",
+                self.draw_stim_length,
+                format_milliseconds(self._draw_stim_length_milliseconds()),
+            )
             self.set_mode(self.mode)  # Reset mode to update hover slice
 
     def _is_valid_slice(self, neuron_slice: slice, time_slice: slice) -> bool:
@@ -1413,22 +1386,12 @@ class StimEditor(QtWidgets.QWidget):
         )
         self.actions_draw.append(
             add_action(
-                "Draw designer stimuli",
+                "Design stimulus",
                 self.choose_stim_intensity,
                 menu,
                 toolbar,
                 self,
                 icon="mdi6.network-strength-3",
-            )
-        )
-        self.actions_draw.append(
-            add_action(
-                "Modify stimulus length",
-                self.choose_stim_length,
-                menu,
-                toolbar,
-                self,
-                icon="mdi6.arrow-expand-horizontal",
             )
         )
         self.actions_draw_group = QtWidgets.QActionGroup(self)
