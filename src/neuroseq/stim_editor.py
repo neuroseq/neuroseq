@@ -1449,15 +1449,17 @@ class StimEditor(QtWidgets.QWidget):
             self,
             icon="mdi6.repeat-variant",
         )
-        self.toolbar.addSeparator()
-        # Static and dynamic input design are a matched pair: the same
-        # pencil-box glyph, single vs stacked (a static block vs a dynamic
-        # sequence of inputs).
+        # Design static/dynamic input and Show all stim arrays also moved out
+        # of this toolbar (issue #535): the Design buttons become rectangular
+        # icon+text QPushButtons in the top View toolbar
+        # (Gui._add_stim_design_buttons_to_view_toolbar), and Show all stim
+        # arrays - a genuine toggle - joins the other view-toggle QActions
+        # there directly (Gui._create_actions_view).
         add_action(
             "Design static input",
             self.open_pattern_designer,
             menu,
-            toolbar,
+            None,
             self,
             icon="mdi6.pencil-box-outline",
         )
@@ -1465,15 +1467,15 @@ class StimEditor(QtWidgets.QWidget):
             "Design dynamic input",
             self.open_input_designer,
             menu,
-            toolbar,
+            None,
             self,
             icon="mdi6.pencil-box-multiple-outline",
         )
-        add_action(
+        self.action_show_all_stim_arrays = add_action(
             "Show all stim arrays",
             self.toggle_show_all_stim_arrays,
             menu,
-            toolbar,
+            None,
             self,
             icon="mdi6.view-list",
             checkable=True,

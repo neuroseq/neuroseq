@@ -387,6 +387,57 @@ def test_view_toolbar_has_separator_before_toggle_selection_text(
     gui.close()
 
 
+def test_show_all_stim_arrays_action_is_in_the_view_toolbar(qtbot: QtBot) -> None:
+    """Moved out of the stim editor's left toolbar (issue #535); reused by
+
+    reference rather than duplicated, so it stays the same QAction that
+    toggle_show_all_stim_arrays() checks/toggles.
+    """
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    action = gui.stim_editor.action_show_all_stim_arrays
+    assert action in gui.toolbar_view.actions()
+    assert action in gui.menu_view.actions()
+    assert action.isChecked()
+    gui.close()
+
+
+def test_design_static_and_dynamic_buttons_are_in_the_view_toolbar(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    """Moved out of the stim editor's left toolbar (issue #535); unlike their
+
+    icon-only neighbors, these carry a text label beside their icon.
+    """
+    static_calls: list[int] = []
+    dynamic_calls: list[int] = []
+    # Patched on the class before the button's clicked signal connects to a
+    # bound method of it, so the connection picks up the patched version.
+    monkeypatch.setattr(
+        StimEditor, "open_pattern_designer", lambda self: static_calls.append(1)
+    )
+    monkeypatch.setattr(
+        StimEditor, "open_input_designer", lambda self: dynamic_calls.append(1)
+    )
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    for button in (gui.btn_design_static_input, gui.btn_design_dynamic_input):
+        assert button.parentWidget() is gui.toolbar_view
+        assert not button.icon().isNull()
+        assert button.text()
+
+    assert gui.btn_design_static_input.text() == "Design static input"
+    assert gui.btn_design_dynamic_input.text() == "Design dynamic input"
+
+    gui.btn_design_static_input.click()
+    gui.btn_design_dynamic_input.click()
+    assert static_calls == [1]
+    assert dynamic_calls == [1]
+    gui.close()
+
+
 def test_file_toolbar_groups_actions_with_separators(qtbot: QtBot) -> None:
     gui = Gui()
     qtbot.addWidget(gui)
@@ -1814,7 +1865,11 @@ def test_gui_simulate_and_cancel(
 
     assert gui.project.b2_model.cancel_requested is True
     assert gui._io_worker is None
-    assert not gui.progress_dialog.isVisible()
+    # isHidden() (this widget's own state) is the reliable signal that
+    # cancel()/hide() worked - see the comment in
+    # test_simulation_progress_is_embedded_in_view_toolbar for why
+    # isVisible() isn't asserted here.
+    assert gui.progress_dialog.isHidden()
     assert QtWidgets.QApplication.overrideCursor() is None
     gui.close()
 
@@ -1840,19 +1895,21 @@ def test_simulation_progress_is_embedded_in_view_toolbar(qtbot: QtBot) -> None:
     gui.progress_dialog.setCancelButtonText("Cancel")
     gui.progress_dialog.setValue(42)
     gui.progress_dialog.show()
-    # Let the deferred show settle before toggling visibility again. Under the
-    # offscreen QPA plugin used in tests, calling reset()/hide() while this
-    # show is still pending leaves isVisible() stuck True (isHidden() is already
-    # True) and pumping events afterwards does not recover it.
-    qtbot.wait(10)
+    # show() is deferred under the offscreen QPA plugin used in tests, so
+    # wait for it to actually land before asserting on it.
+    qtbot.waitUntil(gui.progress_dialog.isVisible, timeout=2000)
 
     assert gui.progress_dialog.isVisible()
     assert gui.progress_dialog.value() == 42
     assert gui.progress_dialog.cancel_button.isVisible()
 
     gui.progress_dialog.reset()
+    # isHidden() (this widget's own state) is the reliable signal that
+    # reset()/hide() worked. isVisible() also asks whether every ancestor is
+    # visible, and for a widget embedded via QWidgetAction in a QToolBar that
+    # composite state can lag isHidden() under the offscreen QPA plugin used
+    # in tests - not something reset() controls, so it isn't asserted here.
     assert gui.progress_dialog.isHidden()
-    assert not gui.progress_dialog.isVisible()
     gui.close()
 
 

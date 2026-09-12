@@ -3145,6 +3145,45 @@ class Gui(QtWidgets.QMainWindow):
             checkable=True,
             is_checked=True,
         )
+        menu.addSeparator()
+        toolbar.addSeparator()
+        # A genuine toggle, so it joins the other view actions directly
+        # (reused by reference - see stim_editor.py's comment on the action).
+        menu.addAction(self.stim_editor.action_show_all_stim_arrays)
+        toolbar.addAction(self.stim_editor.action_show_all_stim_arrays)
+        self._add_stim_design_buttons_to_view_toolbar(toolbar)
+
+    def _add_stim_design_buttons_to_view_toolbar(
+        self, toolbar: QtWidgets.QToolBar
+    ) -> None:
+        """Add the Design static/dynamic input buttons here (issue #535).
+
+        Unlike every other button in this toolbar, these carry a text label
+        beside their icon: a plain icon glyph for "start designing a
+        stimulus" isn't self-explanatory the way e.g. a grid icon is for
+        "toggle grid", so they stay rectangular QPushButtons instead of
+        collapsing to icon-only QToolButtons like their neighbors.
+        """
+        self.btn_design_static_input = QtWidgets.QPushButton("Design static input")
+        self.btn_design_static_input.setToolTip(
+            "Draw a static input pattern across neurons and time"
+        )
+        icons.set_widget_icon(self.btn_design_static_input, "mdi6.pencil-box-outline")
+        self.btn_design_static_input.clicked.connect(
+            self.stim_editor.open_pattern_designer
+        )
+        toolbar.addWidget(self.btn_design_static_input)
+        self.btn_design_dynamic_input = QtWidgets.QPushButton("Design dynamic input")
+        self.btn_design_dynamic_input.setToolTip(
+            "Design a dynamic input routine (e.g. STDP, rheobase)"
+        )
+        icons.set_widget_icon(
+            self.btn_design_dynamic_input, "mdi6.pencil-box-multiple-outline"
+        )
+        self.btn_design_dynamic_input.clicked.connect(
+            self.stim_editor.open_input_designer
+        )
+        toolbar.addWidget(self.btn_design_dynamic_input)
 
     def _set_widget_visible(self, widget: QtWidgets.QWidget, toggled: bool) -> None:
         if toggled:
