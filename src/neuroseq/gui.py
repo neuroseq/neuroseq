@@ -3581,12 +3581,20 @@ class Gui(QtWidgets.QMainWindow):
         self._refresh_elise_replay_action()
 
     def _refresh_elise_replay_action(self) -> None:
-        """Enable the ELiSe toolbar actions when the project supports them."""
+        """Show the ELiSe toolbar actions only for ELiSe projects.
+
+        Neither button is relevant to any other project, so they're hidden
+        entirely rather than merely disabled (issue #535) - enabled only
+        once their specific inputs are actually ready.
+        """
+        is_elise_project = self.project.external_simulate_path == "neuroseq:elise"
         replay_action = getattr(self, "elise_replay_action", None)
         if replay_action is not None:
+            replay_action.setVisible(is_elise_project)
             replay_action.setEnabled(self._elise_replay_inputs() is not None)
         protocol_action = getattr(self, "elise_protocol_action", None)
         if protocol_action is not None:
+            protocol_action.setVisible(is_elise_project)
             protocol_action.setEnabled(
                 self._elise_protocol_inputs() is not None
                 and self._elise_protocol_worker is None
