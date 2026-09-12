@@ -2824,6 +2824,7 @@ class Gui(QtWidgets.QMainWindow):
             None,
             icon="mdi6.image-edit-outline",
         )
+        toolbar.addSeparator()
         add_action(
             "&Save Project",
             self.btn_save_clicked,
@@ -2928,6 +2929,7 @@ class Gui(QtWidgets.QMainWindow):
             icon="mdi6.content-save-move",
         )
 
+        toolbar.addSeparator()
         add_action(
             "&Edit Model",
             self.btn_edit_clicked,
@@ -2937,6 +2939,7 @@ class Gui(QtWidgets.QMainWindow):
             icon="ph.polygon-light",
         )
         menu.addSeparator()
+        toolbar.addSeparator()
         add_action(
             "Generate Synthetic &Data...",
             self.btn_generate_synthetic_data_clicked,
@@ -3004,6 +3007,8 @@ class Gui(QtWidgets.QMainWindow):
             shortcut=None,
             icon="mdi6.speedometer",
         )
+        menu.addSeparator()
+        toolbar.addSeparator()
         add_action(
             "&Skip to Start",
             self.time_slider.skip_to_start,
@@ -3406,6 +3411,7 @@ class Gui(QtWidgets.QMainWindow):
             checkable=True,
             is_checked=False,
         )
+        toolbar.addSeparator()
         toolbar.addWidget(QtWidgets.QLabel("  Spike data: "))
         toolbar.addWidget(self.cmb_spike)
         toolbar.addWidget(QtWidgets.QLabel("  Synapse data: "))
@@ -3418,6 +3424,7 @@ class Gui(QtWidgets.QMainWindow):
             shortcut=None,
             icon="mdi6.arrow-expand-vertical",
         )
+        toolbar.addSeparator()
         toolbar.addWidget(QtWidgets.QLabel("  All data: "))
         toolbar.addWidget(self.cmb_data)
         toolbar.addSeparator()

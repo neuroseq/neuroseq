@@ -354,6 +354,61 @@ def test_view_toolbar_has_separator_before_toggle_selection_text(
     gui.close()
 
 
+def test_file_toolbar_groups_actions_with_separators(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    actions = gui.toolbar_file.actions()
+    texts = [a.text().replace("&", "") for a in actions]
+
+    def index_of(text: str) -> int:
+        return texts.index(text)
+
+    # {New, Open Project, Import from Project} | {Save Project} |
+    # {Edit Model} | {Generate Synthetic Data, Manage Experiments}
+    assert actions[index_of("Save Project") - 1].isSeparator()
+    assert actions[index_of("Edit Model") - 1].isSeparator()
+    assert actions[index_of("Generate Synthetic Data...") - 1].isSeparator()
+    assert texts[index_of("Generate Synthetic Data...") + 1] == "Manage Experiments"
+    gui.close()
+
+
+def test_playback_toolbar_separates_speed_from_transport_controls(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    actions = gui.toolbar_playback.actions()
+    index = next(
+        i for i, a in enumerate(actions) if a.text().replace("&", "") == "Skip to Start"
+    )
+    assert actions[index - 1].isSeparator()
+    gui.close()
+
+
+def test_data_toolbar_groups_dataset_pairs_with_separators(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    toolbar = gui.toolbar_data
+    actions = toolbar.actions()
+
+    def label_indices(text: str) -> list[int]:
+        return [
+            i
+            for i, a in enumerate(actions)
+            if isinstance(toolbar.widgetForAction(a), QtWidgets.QLabel)
+            and toolbar.widgetForAction(a).text().strip() == text
+        ]
+
+    spike_index = label_indices("Spike data:")[0]
+    all_data_index = label_indices("All data:")[0]
+    assert actions[spike_index - 1].isSeparator()
+    assert actions[all_data_index - 1].isSeparator()
+    gui.close()
+
+
 def test_manage_experiments_action_sits_next_to_generate_synthetic_data(
     qtbot: QtBot,
 ) -> None:

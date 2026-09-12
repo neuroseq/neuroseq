@@ -1307,6 +1307,7 @@ class StimEditor(QtWidgets.QWidget):
             "them, removing the rest from every stim array and experiment in "
             "this project."
         )
+        self.toolbar.addSeparator()
         add_action(
             "Pad stim array (Ctrl+Shift+Plus)",
             self.pad_stim_array,
@@ -1333,6 +1334,7 @@ class StimEditor(QtWidgets.QWidget):
             self,
             icon="mdi6.repeat-variant",
         )
+        self.toolbar.addSeparator()
         # Static and dynamic input design are a matched pair: the same
         # pencil-box glyph, single vs stacked (a static block vs a dynamic
         # sequence of inputs).

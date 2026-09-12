@@ -70,6 +70,28 @@ def test_switching_mode_shows_only_the_relevant_action_group(qtbot: QtBot) -> No
     stim_editor.close()
 
 
+def test_left_toolbar_groups_array_ops_time_ops_and_design_ops(
+    qtbot: QtBot,
+) -> None:
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+
+    actions = toolbar.actions()
+    texts = [a.text() for a in actions]
+
+    def index_of(text: str) -> int:
+        return texts.index(text)
+
+    # {Create/Edit/Delete/Clear stim array, Trim to Mapped Neurons} |
+    # {Pad/Trim/Loop stim array} | {Design static/dynamic input, Show all}
+    assert actions[index_of("Pad stim array (Ctrl+Shift+Plus)") - 1].isSeparator()
+    assert actions[index_of("Design static input") - 1].isSeparator()
+    stim_editor.close()
+
+
 def test_trim_to_mapped_neurons_action_sits_right_after_clear_stim_array(
     qtbot: QtBot,
 ) -> None:
