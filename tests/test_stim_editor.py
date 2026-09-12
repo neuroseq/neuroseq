@@ -130,6 +130,39 @@ def test_drawing_actions_sit_directly_under_draw_mode_button(qtbot: QtBot) -> No
     stim_editor.close()
 
 
+def test_selection_actions_sit_directly_under_select_mode_button(
+    qtbot: QtBot,
+) -> None:
+    """Select all / Copy / Cut / Paste / etc. are specific to Select mode, so
+
+    they sit right after the Select mode toggle - the mirror image of the
+    drawing tools under Draw mode - rather than far below near Undo/Redo
+    (issue #535).
+    """
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+
+    actions = toolbar.actions()
+    texts = [a.text() for a in actions]
+    select_mode_index = texts.index("Select mode (2)")
+    create_stim_index = texts.index("Create stim array")
+    assert actions[create_stim_index - 1].isSeparator()
+    assert texts[select_mode_index + 1 : create_stim_index - 1] == [
+        "Select all (Ctrl+A)",
+        "Copy (Ctrl+C)",
+        "Cut (Ctrl+X)",
+        "Paste (Ctrl+V)",
+        "Paste inverted (Ctrl+Shift+V)",
+        "Save to file",
+        "Load from file",
+        "Delete selected stim region",
+    ]
+    stim_editor.close()
+
+
 def test_trim_to_mapped_neurons_action_sits_right_after_clear_stim_array(
     qtbot: QtBot,
 ) -> None:

@@ -1275,6 +1275,98 @@ class StimEditor(QtWidgets.QWidget):
             checkable=True,
             is_checked=False,
         )
+        # Selection editing is specific to Select mode, so it sits right
+        # under its toggle - the mirror image of the drawing tools above -
+        # and is hidden whenever Draw mode is active instead.
+        self.actions_edit = []
+        self.actions_edit.append(
+            add_action(
+                "Select all (Ctrl+A)",
+                lambda: self.stim_widget.select_neurons(None, None),
+                menu,
+                toolbar,
+                self,
+                shortcut="Ctrl+A",
+                icon="mdi6.select-all",
+            )
+        )
+        self.actions_edit.append(
+            add_action(
+                "Copy (Ctrl+C)",
+                self.copy_selected_stim,
+                menu,
+                toolbar,
+                self,
+                shortcut="Ctrl+C",
+                icon="mdi6.content-copy",
+            )
+        )
+        self.actions_edit.append(
+            add_action(
+                "Cut (Ctrl+X)",
+                self.cut_selected_stim,
+                menu,
+                toolbar,
+                self,
+                shortcut="Ctrl+X",
+                icon="mdi6.content-cut",
+            )
+        )
+        self.actions_edit.append(
+            add_action(
+                "Paste (Ctrl+V)",
+                self.init_paste_selected_stim,
+                menu,
+                toolbar,
+                self,
+                shortcut="Ctrl+V",
+                icon="mdi6.content-paste",
+            )
+        )
+        self.actions_edit.append(
+            add_action(
+                "Paste inverted (Ctrl+Shift+V)",
+                lambda: self.init_paste_selected_stim(invert=True),
+                menu,
+                toolbar,
+                self,
+                shortcut="Ctrl+Shift+V",
+                icon="fa5s.paste",
+            )
+        )
+        self.actions_edit.append(
+            add_action(
+                "Save to file",
+                self.save_selected_stim,
+                menu,
+                toolbar,
+                self,
+                icon="mdi6.application-export",
+            )
+        )
+        self.actions_edit.append(
+            add_action(
+                "Load from file",
+                self.load_selected_stim,
+                menu,
+                toolbar,
+                self,
+                icon="mdi6.application-import",
+            )
+        )
+        self.actions_edit.append(
+            add_action(
+                "Delete selected stim region",
+                self.delete_selected_stim,
+                menu,
+                toolbar,
+                self,
+                shortcut="Delete",
+                icon="mdi6.delete",
+            )
+        )
+        for action in self.actions_edit:
+            action.setVisible(False)
         self.toolbar.addSeparator()
         self.action_undo = add_action(
             "Create stim array",
@@ -1400,93 +1492,3 @@ class StimEditor(QtWidgets.QWidget):
             icon="mdi6.redo",
         )
         self.action_redo.setEnabled(False)
-        self.toolbar.addSeparator()
-        self.actions_edit = []
-        self.actions_edit.append(
-            add_action(
-                "Select all (Ctrl+A)",
-                lambda: self.stim_widget.select_neurons(None, None),
-                menu,
-                toolbar,
-                self,
-                shortcut="Ctrl+A",
-                icon="mdi6.select-all",
-            )
-        )
-        self.actions_edit.append(
-            add_action(
-                "Copy (Ctrl+C)",
-                self.copy_selected_stim,
-                menu,
-                toolbar,
-                self,
-                shortcut="Ctrl+C",
-                icon="mdi6.content-copy",
-            )
-        )
-        self.actions_edit.append(
-            add_action(
-                "Cut (Ctrl+X)",
-                self.cut_selected_stim,
-                menu,
-                toolbar,
-                self,
-                shortcut="Ctrl+X",
-                icon="mdi6.content-cut",
-            )
-        )
-        self.actions_edit.append(
-            add_action(
-                "Paste (Ctrl+V)",
-                self.init_paste_selected_stim,
-                menu,
-                toolbar,
-                self,
-                shortcut="Ctrl+V",
-                icon="mdi6.content-paste",
-            )
-        )
-        self.actions_edit.append(
-            add_action(
-                "Paste inverted (Ctrl+Shift+V)",
-                lambda: self.init_paste_selected_stim(invert=True),
-                menu,
-                toolbar,
-                self,
-                shortcut="Ctrl+Shift+V",
-                icon="fa5s.paste",
-            )
-        )
-        self.actions_edit.append(
-            add_action(
-                "Save to file",
-                self.save_selected_stim,
-                menu,
-                toolbar,
-                self,
-                icon="mdi6.application-export",
-            )
-        )
-        self.actions_edit.append(
-            add_action(
-                "Load from file",
-                self.load_selected_stim,
-                menu,
-                toolbar,
-                self,
-                icon="mdi6.application-import",
-            )
-        )
-        self.actions_edit.append(
-            add_action(
-                "Delete selected stim region",
-                self.delete_selected_stim,
-                menu,
-                toolbar,
-                self,
-                shortcut="Delete",
-                icon="mdi6.delete",
-            )
-        )
-        for action in self.actions_edit:
-            action.setVisible(False)
