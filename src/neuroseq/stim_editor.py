@@ -1420,30 +1420,32 @@ class StimEditor(QtWidgets.QWidget):
             "them, removing the rest from every stim array and experiment in "
             "this project."
         )
-        self.toolbar.addSeparator()
-        add_action(
+        # Pad/Trim/Loop stim array also moved to the stim array ops dropdown
+        # in the top Data toolbar (issue #535) - see
+        # Gui._add_stim_array_ops_button_to_data_toolbar().
+        self.action_pad_stim_array = add_action(
             "Pad stim array (Ctrl+Shift+Plus)",
             self.pad_stim_array,
             menu,
-            toolbar,
+            None,
             self,
             shortcut="Ctrl++",
             icon="mdi6.timeline-plus",
         )
-        add_action(
+        self.action_trim_stim_array = add_action(
             "Trim stim array (Ctrl+Shift+Minus)",
             self.trim_stim_array,
             menu,
-            toolbar,
+            None,
             self,
             shortcut="Ctrl+Shift+-",
             icon="mdi6.timeline-minus",
         )
-        add_action(
+        self.action_loop_stim_array = add_action(
             "Loop stim array",
             self.loop_stim_array,
             menu,
-            toolbar,
+            None,
             self,
             icon="mdi6.repeat-variant",
         )

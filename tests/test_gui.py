@@ -364,6 +364,10 @@ def test_stim_array_ops_button_sits_next_to_stim_data_combobox_with_full_menu(
     assert menu_actions[3] is gui.stim_editor.action_clear_stim_array
     assert menu_actions[4].isSeparator()
     assert menu_actions[5] is gui.stim_editor.action_trim_to_mapped_neurons
+    assert menu_actions[6].isSeparator()
+    assert menu_actions[7] is gui.stim_editor.action_pad_stim_array
+    assert menu_actions[8] is gui.stim_editor.action_trim_stim_array
+    assert menu_actions[9] is gui.stim_editor.action_loop_stim_array
     gui.close()
 
 

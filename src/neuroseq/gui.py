@@ -2716,13 +2716,13 @@ class Gui(QtWidgets.QMainWindow):
     def _add_stim_array_ops_button_to_data_toolbar(self) -> None:
         """Add a single dropdown button for the stim array lifecycle actions.
 
-        Create/Edit/Delete/Clear stim array and Trim to Mapped Neurons used
-        to be five separate buttons on the stim editor's left toolbar
-        (issue #535). They now live in one dropdown next to the stim array
-        combobox instead, reusing the StimEditor QActions directly rather
-        than duplicating them, so state like Trim to Mapped Neurons'
-        enabled/disabled status stays in sync automatically no matter which
-        menu shows it.
+        Create/Edit/Delete/Clear stim array, Trim to Mapped Neurons, and
+        Pad/Trim/Loop stim array used to be eight separate buttons on the
+        stim editor's left toolbar (issue #535). They now live in one
+        dropdown next to the stim array combobox instead, reusing the
+        StimEditor QActions directly rather than duplicating them, so state
+        like Trim to Mapped Neurons' enabled/disabled status stays in sync
+        automatically no matter which menu shows it.
         """
         self.btn_stim_array_ops = QtWidgets.QToolButton(self.toolbar_data)
         self.btn_stim_array_ops.setToolTip("Stim array operations")
@@ -2742,6 +2742,10 @@ class Gui(QtWidgets.QMainWindow):
         self.stim_array_ops_menu.addAction(
             self.stim_editor.action_trim_to_mapped_neurons
         )
+        self.stim_array_ops_menu.addSeparator()
+        self.stim_array_ops_menu.addAction(self.stim_editor.action_pad_stim_array)
+        self.stim_array_ops_menu.addAction(self.stim_editor.action_trim_stim_array)
+        self.stim_array_ops_menu.addAction(self.stim_editor.action_loop_stim_array)
         self.btn_stim_array_ops.setMenu(self.stim_array_ops_menu)
         self.toolbar_data.insertWidget(
             self._stim_array_ops_anchor_action, self.btn_stim_array_ops

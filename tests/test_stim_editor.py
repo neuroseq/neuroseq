@@ -85,9 +85,17 @@ def test_switching_mode_shows_only_the_relevant_action_group(qtbot: QtBot) -> No
     stim_editor.close()
 
 
-def test_left_toolbar_groups_array_ops_time_ops_and_design_ops(
+def test_left_toolbar_separates_selection_actions_from_design_ops(
     qtbot: QtBot,
 ) -> None:
+    """Array lifecycle ops (Create/Edit/Delete/Clear/Trim to Mapped Neurons)
+
+    and Pad/Trim/Loop stim array moved out of this toolbar entirely (issue
+    #535 - see test_stim_array_lifecycle_actions_are_not_in_the_left_toolbar
+    and test_pad_trim_loop_actions_are_not_in_the_left_toolbar), so a
+    separator now sits directly between the Select-mode actions and the
+    Design static/dynamic input, Show all group.
+    """
     cmb_stim = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
     controller = ConstrainedPanZoomController()
@@ -96,14 +104,7 @@ def test_left_toolbar_groups_array_ops_time_ops_and_design_ops(
 
     actions = toolbar.actions()
     texts = [a.text() for a in actions]
-
-    def index_of(text: str) -> int:
-        return texts.index(text)
-
-    # {Create/Edit/Delete/Clear stim array, Trim to Mapped Neurons} |
-    # {Pad/Trim/Loop stim array} | {Design static/dynamic input, Show all}
-    assert actions[index_of("Pad stim array (Ctrl+Shift+Plus)") - 1].isSeparator()
-    assert actions[index_of("Design static input") - 1].isSeparator()
+    assert actions[texts.index("Design static input") - 1].isSeparator()
     stim_editor.close()
 
 
@@ -148,12 +149,13 @@ def test_selection_actions_sit_directly_under_select_mode_button(
     actions = toolbar.actions()
     texts = [a.text() for a in actions]
     select_mode_index = texts.index("Select mode (2)")
-    # Create/Edit/Delete/Clear stim array and Trim to Mapped Neurons moved to
-    # a dropdown in the top Data toolbar (issue #535), so the next thing in
-    # this toolbar after the selection actions is Pad stim array.
-    pad_index = texts.index("Pad stim array (Ctrl+Shift+Plus)")
-    assert actions[pad_index - 1].isSeparator()
-    assert texts[select_mode_index + 1 : pad_index - 1] == [
+    # Create/Edit/Delete/Clear stim array, Trim to Mapped Neurons, and
+    # Pad/Trim/Loop stim array all moved to a dropdown in the top Data
+    # toolbar (issue #535), so the next thing in this toolbar after the
+    # selection actions is Design static input.
+    design_index = texts.index("Design static input")
+    assert actions[design_index - 1].isSeparator()
+    assert texts[select_mode_index + 1 : design_index - 1] == [
         "Select all (Ctrl+A)",
         "Copy (Ctrl+C)",
         "Cut (Ctrl+X)",
@@ -195,6 +197,32 @@ def test_stim_array_lifecycle_actions_are_not_in_the_left_toolbar(
     context_menu_texts = [a.text() for a in stim_editor.context_menu.actions()]
     assert [t for t in context_menu_texts if t in array_op_names] == array_op_names
     assert not stim_editor.action_trim_to_mapped_neurons.isEnabled()
+    stim_editor.close()
+
+
+def test_pad_trim_loop_actions_are_not_in_the_left_toolbar(qtbot: QtBot) -> None:
+    """Pad/Trim/Loop stim array moved to the stim array ops dropdown in the
+
+    top Data toolbar too (issue #535), alongside the array lifecycle
+    actions. They stay registered on the "Actions" context menu, in the
+    same order, but no longer duplicate onto this left toolbar.
+    """
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+
+    time_op_names = [
+        "Pad stim array (Ctrl+Shift+Plus)",
+        "Trim stim array (Ctrl+Shift+Minus)",
+        "Loop stim array",
+    ]
+    toolbar_texts = {a.text() for a in toolbar.actions()}
+    assert toolbar_texts.isdisjoint(time_op_names)
+
+    context_menu_texts = [a.text() for a in stim_editor.context_menu.actions()]
+    assert [t for t in context_menu_texts if t in time_op_names] == time_op_names
     stim_editor.close()
 
 
