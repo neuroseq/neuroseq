@@ -439,6 +439,7 @@ class Gui(QtWidgets.QMainWindow):
         self.stim_editor.stim_widget.neuron_hovered.connect(
             self._spatial_footprint_state.set_hovered_stim_id
         )
+        self._add_stim_array_ops_button_to_data_toolbar()
         split_timeseries.addWidget(self.stim_editor)
         self.trace_widget.set_default_scroll_bars(
             self.stim_editor.x_scrollbar,
@@ -2712,6 +2713,40 @@ class Gui(QtWidgets.QMainWindow):
             + "https://github.com/ssciwr/neuroseq",
         )
 
+    def _add_stim_array_ops_button_to_data_toolbar(self) -> None:
+        """Add a single dropdown button for the stim array lifecycle actions.
+
+        Create/Edit/Delete/Clear stim array and Trim to Mapped Neurons used
+        to be five separate buttons on the stim editor's left toolbar
+        (issue #535). They now live in one dropdown next to the stim array
+        combobox instead, reusing the StimEditor QActions directly rather
+        than duplicating them, so state like Trim to Mapped Neurons'
+        enabled/disabled status stays in sync automatically no matter which
+        menu shows it.
+        """
+        self.btn_stim_array_ops = QtWidgets.QToolButton(self.toolbar_data)
+        self.btn_stim_array_ops.setToolTip("Stim array operations")
+        icons.set_widget_icon(self.btn_stim_array_ops, "mdi6.text-box-multiple-outline")
+        self.btn_stim_array_ops.setToolButtonStyle(
+            QtCore.Qt.ToolButtonStyle.ToolButtonIconOnly
+        )
+        self.btn_stim_array_ops.setPopupMode(
+            QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup
+        )
+        self.stim_array_ops_menu = QtWidgets.QMenu(self.btn_stim_array_ops)
+        self.stim_array_ops_menu.addAction(self.stim_editor.action_create_stim_array)
+        self.stim_array_ops_menu.addAction(self.stim_editor.action_edit_stim_array)
+        self.stim_array_ops_menu.addAction(self.stim_editor.action_delete_stim_array)
+        self.stim_array_ops_menu.addAction(self.stim_editor.action_clear_stim_array)
+        self.stim_array_ops_menu.addSeparator()
+        self.stim_array_ops_menu.addAction(
+            self.stim_editor.action_trim_to_mapped_neurons
+        )
+        self.btn_stim_array_ops.setMenu(self.stim_array_ops_menu)
+        self.toolbar_data.insertWidget(
+            self._stim_array_ops_anchor_action, self.btn_stim_array_ops
+        )
+
     def _create_progressbar(self) -> None:
         self.progress_dialog = ToolbarProgressWidget(self.toolbar_view)
         self.toolbar_view.addSeparator()
@@ -3391,7 +3426,11 @@ class Gui(QtWidgets.QMainWindow):
         self.cmb_stim = QtWidgets.QComboBox()
         toolbar.addWidget(QtWidgets.QLabel("  Stim data: "))
         toolbar.addWidget(self.cmb_stim)
-        toolbar.addWidget(QtWidgets.QLabel("  Neuron data: "))
+        # The stim array ops button is inserted here once self.stim_editor
+        # exists - see _add_stim_array_ops_button_to_data_toolbar().
+        self._stim_array_ops_anchor_action = toolbar.addWidget(
+            QtWidgets.QLabel("  Neuron data: ")
+        )
         toolbar.addWidget(self.cmb_trace)
         add_action(
             "&Trace normalization",

@@ -1367,36 +1367,42 @@ class StimEditor(QtWidgets.QWidget):
         )
         for action in self.actions_edit:
             action.setVisible(False)
-        self.toolbar.addSeparator()
-        self.action_undo = add_action(
+        # Stim array lifecycle operations moved to a single dropdown button
+        # next to the stim array combobox in the top Data toolbar (issue
+        # #535) - see Gui._add_stim_array_ops_button_to_data_toolbar(), which
+        # adds these same actions into that button's menu. They stay
+        # registered on `menu` (the "Actions" context menu) and on `self`
+        # (for their keyboard shortcuts, where applicable) but not on the
+        # left toolbar.
+        self.action_create_stim_array = add_action(
             "Create stim array",
             self.create_stim_array,
             menu,
-            toolbar,
+            None,
             self,
             icon="mdi6.text-box-plus",
         )
-        self.action_undo = add_action(
+        self.action_edit_stim_array = add_action(
             "Edit stim array",
             self.edit_stim_array,
             menu,
-            toolbar,
+            None,
             self,
             icon="mdi6.text-box-edit",
         )
-        self.action_undo = add_action(
+        self.action_delete_stim_array = add_action(
             "Delete stim array",
             self.delete_stim_array,
             menu,
-            toolbar,
+            None,
             self,
             icon="mdi6.text-box-remove",
         )
-        add_action(
+        self.action_clear_stim_array = add_action(
             "Clear stim array",
             self.clear_stim_array,
             menu,
-            toolbar,
+            None,
             self,
             icon="mdi6.text-box-minus",
         )
@@ -1404,7 +1410,7 @@ class StimEditor(QtWidgets.QWidget):
             "Trim to Mapped Neurons…",
             self.trim_to_mapped_neurons_requested.emit,
             menu,
-            toolbar,
+            None,
             self,
             icon="mdi6.content-cut",
         )

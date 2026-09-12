@@ -148,9 +148,12 @@ def test_selection_actions_sit_directly_under_select_mode_button(
     actions = toolbar.actions()
     texts = [a.text() for a in actions]
     select_mode_index = texts.index("Select mode (2)")
-    create_stim_index = texts.index("Create stim array")
-    assert actions[create_stim_index - 1].isSeparator()
-    assert texts[select_mode_index + 1 : create_stim_index - 1] == [
+    # Create/Edit/Delete/Clear stim array and Trim to Mapped Neurons moved to
+    # a dropdown in the top Data toolbar (issue #535), so the next thing in
+    # this toolbar after the selection actions is Pad stim array.
+    pad_index = texts.index("Pad stim array (Ctrl+Shift+Plus)")
+    assert actions[pad_index - 1].isSeparator()
+    assert texts[select_mode_index + 1 : pad_index - 1] == [
         "Select all (Ctrl+A)",
         "Copy (Ctrl+C)",
         "Cut (Ctrl+X)",
@@ -163,21 +166,34 @@ def test_selection_actions_sit_directly_under_select_mode_button(
     stim_editor.close()
 
 
-def test_trim_to_mapped_neurons_action_sits_right_after_clear_stim_array(
+def test_stim_array_lifecycle_actions_are_not_in_the_left_toolbar(
     qtbot: QtBot,
 ) -> None:
+    """Create/Edit/Delete/Clear stim array and Trim to Mapped Neurons moved
+
+    to a dropdown in the top Data toolbar next to the stim data combobox
+    (issue #535) - Gui._add_stim_array_ops_button_to_data_toolbar() adds
+    them there. They stay registered on the "Actions" context menu, in the
+    same order, but no longer duplicate onto this left toolbar.
+    """
     cmb_stim = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
     controller = ConstrainedPanZoomController()
     stim_editor = StimEditor(controller, cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
 
-    actions = toolbar.actions()
-    clear_index = next(
-        i for i, action in enumerate(actions) if action.text() == "Clear stim array"
-    )
+    array_op_names = [
+        "Create stim array",
+        "Edit stim array",
+        "Delete stim array",
+        "Clear stim array",
+        "Trim to Mapped Neurons…",
+    ]
+    toolbar_texts = {a.text() for a in toolbar.actions()}
+    assert toolbar_texts.isdisjoint(array_op_names)
 
-    assert actions[clear_index + 1] is stim_editor.action_trim_to_mapped_neurons
+    context_menu_texts = [a.text() for a in stim_editor.context_menu.actions()]
+    assert [t for t in context_menu_texts if t in array_op_names] == array_op_names
     assert not stim_editor.action_trim_to_mapped_neurons.isEnabled()
     stim_editor.close()
 

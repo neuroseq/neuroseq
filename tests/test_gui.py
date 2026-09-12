@@ -338,6 +338,35 @@ def test_open_fiji_and_cellpose_buttons_are_at_the_end_of_the_data_toolbar(
     gui.close()
 
 
+def test_stim_array_ops_button_sits_next_to_stim_data_combobox_with_full_menu(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    actions = gui.toolbar_data.actions()
+    stim_combo_index = next(
+        i
+        for i, action in enumerate(actions)
+        if gui.toolbar_data.widgetForAction(action) is gui.cmb_stim
+    )
+    ops_button_index = next(
+        i
+        for i, action in enumerate(actions)
+        if gui.toolbar_data.widgetForAction(action) is gui.btn_stim_array_ops
+    )
+    assert ops_button_index == stim_combo_index + 1
+
+    menu_actions = gui.stim_array_ops_menu.actions()
+    assert menu_actions[0] is gui.stim_editor.action_create_stim_array
+    assert menu_actions[1] is gui.stim_editor.action_edit_stim_array
+    assert menu_actions[2] is gui.stim_editor.action_delete_stim_array
+    assert menu_actions[3] is gui.stim_editor.action_clear_stim_array
+    assert menu_actions[4].isSeparator()
+    assert menu_actions[5] is gui.stim_editor.action_trim_to_mapped_neurons
+    gui.close()
+
+
 def test_view_toolbar_has_separator_before_toggle_selection_text(
     qtbot: QtBot,
 ) -> None:
@@ -447,16 +476,17 @@ def _make_gui_cellpose_result(
     )
 
 
-def test_trim_to_mapped_neurons_action_lives_in_the_stim_toolbar(
+def test_trim_to_mapped_neurons_action_lives_in_the_stim_array_ops_menu(
     qtbot: QtBot,
 ) -> None:
     """The action moved out of the Spatial Footprints panel and into the
-    left-side stim editor toolbar, disabled until there's an actual
-    mapping to trim to."""
+
+    stim array ops dropdown next to the stim data combobox (issue #535),
+    disabled until there's an actual mapping to trim to."""
     gui = Gui()
     qtbot.addWidget(gui)
     action = gui.stim_editor.action_trim_to_mapped_neurons
-    assert action in gui.toolbar_stim_editor.actions()
+    assert action in gui.stim_array_ops_menu.actions()
     assert not action.isEnabled()
 
     project = Project()
