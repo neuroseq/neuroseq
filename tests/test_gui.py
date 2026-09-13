@@ -271,8 +271,8 @@ def test_patchclamp_pre_dialogs_include_cc_vc_convention(
     stim_label, trace_label = captured_labels
     assert "Current Clamp (CC)" in stim_label
     assert "Voltage Clamp (VC)" in stim_label
-    assert "CURRENT is the stimulus" in stim_label
-    assert "VOLTAGE is the stimulus" in stim_label
+    assert "CURRENT is the input" in stim_label
+    assert "VOLTAGE is the input" in stim_label
     assert "Current Clamp (CC)" in trace_label
     assert "Voltage Clamp (VC)" in trace_label
     assert "VOLTAGE is the trace" in trace_label
@@ -2689,7 +2689,7 @@ def test_gui_export_igor2_single_wave_requires_stim_data(
 
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "information"
-    assert "no stimulation entities" in qmessagebox_calls[0]["title"].lower()
+    assert "no input entities" in qmessagebox_calls[0]["title"].lower()
 
 
 def test_gui_export_igor2_pxp_stim(

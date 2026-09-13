@@ -969,8 +969,8 @@ class Gui(QtWidgets.QMainWindow):
         if not self.project.stim_arrays:
             QtWidgets.QMessageBox.information(
                 self,
-                "No stimulation entities",
-                "No stimulation data entities available. Create one before exporting.",
+                "No input entities",
+                "No input data entities available. Create one before exporting.",
             )
             return
 
@@ -979,7 +979,7 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(
                 self,
                 "Export error",
-                "No stimulation array is currently selected for export.",
+                "No input array is currently selected for export.",
             )
             return
 
@@ -988,7 +988,7 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(
                 self,
                 "Export error",
-                "The selected stimulation array has no neurons to export.",
+                "The selected input array has no neurons to export.",
             )
             return
 
@@ -1069,7 +1069,7 @@ class Gui(QtWidgets.QMainWindow):
             self,
             "Export Successful",
             f"Exported {fmt_label} for "
-            f"stimulus '{stim_name}', neuron {export_report.neuron_index}, "
+            f"input '{stim_name}', neuron {export_report.neuron_index}, "
             f"{export_report.sample_count} samples.{sweep_note}",
         )
 
@@ -1077,8 +1077,8 @@ class Gui(QtWidgets.QMainWindow):
         if not self.project.stim_arrays:
             QtWidgets.QMessageBox.information(
                 self,
-                "No stimulation entities",
-                "No stimulation data entities available. Create one before exporting.",
+                "No input entities",
+                "No input data entities available. Create one before exporting.",
             )
             return
 
@@ -1091,7 +1091,7 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(
                 self,
                 "Nothing selected",
-                "No stim arrays were selected for export.",
+                "No input arrays were selected for export.",
             )
             return
 
@@ -1299,7 +1299,7 @@ class Gui(QtWidgets.QMainWindow):
                 f"The model has {model_count} neuron(s) but the Cellpose "
                 f"segmentation has {cellpose_count} cell(s).\n\n"
                 "These counts should match so that model neurons map one-to-one "
-                "onto segmented cells (e.g. for holographic stimulation export).",
+                "onto segmented cells (e.g. for holographic input export).",
             )
 
     def _expand_stim_arrays_to_neuron_count(
@@ -1355,11 +1355,11 @@ class Gui(QtWidgets.QMainWindow):
             if detected_neurons > current_max_neurons:
                 resize_reply = QtWidgets.QMessageBox.question(
                     self,
-                    "Resize Stim Arrays",
+                    "Resize Input Arrays",
                     "The imported Cellpose segmentation contains "
-                    f"{detected_neurons} cells, but the largest existing stimulation "
+                    f"{detected_neurons} cells, but the largest existing input "
                     f"array has {current_max_neurons} neurons.\n\n"
-                    "Expand all existing stimulation arrays to match the Cellpose "
+                    "Expand all existing input arrays to match the Cellpose "
                     "cell count?",
                     QtWidgets.QMessageBox.StandardButton.Yes
                     | QtWidgets.QMessageBox.StandardButton.No,
@@ -1609,7 +1609,7 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(
                 self,
                 "Data import error",
-                f"Could not import data to Stim IDs: {e}",
+                f"Could not import data to Input IDs: {e}",
             )
             self.logger.exception(e)
             return
@@ -2201,7 +2201,7 @@ class Gui(QtWidgets.QMainWindow):
                 )
                 message += (
                     "\n\nExpanded "
-                    f"{len(resized_names)} stimulation array(s) to {detected_neurons} neurons."
+                    f"{len(resized_names)} input array(s) to {detected_neurons} neurons."
                 )
             QtWidgets.QMessageBox.information(
                 self,
@@ -2214,8 +2214,8 @@ class Gui(QtWidgets.QMainWindow):
         if not self.project.stim_arrays:
             QtWidgets.QMessageBox.information(
                 self,
-                "No stimulation entities",
-                "No stimulation data entities available. Create one before importing a SysCon2 sequence.",
+                "No input entities",
+                "No input data entities available. Create one before importing a SysCon2 sequence.",
             )
             return
 
@@ -2282,7 +2282,7 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(
                 self,
                 "Nothing to trim",
-                "No Cellpose stimulus mapping is set, so there is nothing to trim to.",
+                "No Cellpose input mapping is set, so there is nothing to trim to.",
             )
             return
         n_kept = len(mapping)
@@ -2300,7 +2300,7 @@ class Gui(QtWidgets.QMainWindow):
             "Trim to Cellpose-mapped neurons",
             f"This will permanently remove {n_removed} neuron(s) with no "
             f"Cellpose cell mapped to them, keeping the {n_kept} that do, "
-            "from every stim array and every experiment's trace/spike/synapse "
+            "from every input array and every experiment's trace/spike/synapse "
             "data in this project.\n\n"
             "This cannot be undone. You will be asked to save the result "
             "under a new file name.\n\n"
@@ -2399,7 +2399,7 @@ class Gui(QtWidgets.QMainWindow):
         """Pre-dialog: choose software, then import a light stimulus waveform."""
         software, ok = QtWidgets.QInputDialog.getItem(
             self,
-            "Import light stimulus",
+            "Import light input",
             "Import from:",
             ["SysCon2"],
             0,
@@ -2414,11 +2414,11 @@ class Gui(QtWidgets.QMainWindow):
         """Pre-dialog: choose software, then import a patch-clamp stimulus waveform."""
         software, ok = QtWidgets.QInputDialog.getItem(
             self,
-            "Import patch clamp stimulus",
+            "Import patch clamp input",
             (
                 "Patch-clamp convention:\n"
-                "  • Current Clamp (CC): the injected CURRENT is the stimulus\n"
-                "  • Voltage Clamp (VC): the commanded VOLTAGE is the stimulus\n"
+                "  • Current Clamp (CC): the injected CURRENT is the input\n"
+                "  • Voltage Clamp (VC): the commanded VOLTAGE is the input\n"
                 "\n"
                 "Import from:"
             ),
@@ -2467,7 +2467,7 @@ class Gui(QtWidgets.QMainWindow):
         """Pre-dialog: choose software, then export patch-clamp stimulus CSV."""
         software, ok = QtWidgets.QInputDialog.getItem(
             self,
-            "Export patch clamp stimulus",
+            "Export patch clamp input",
             "Export for:",
             ["Igor2 - single array (.ibw / .csv)", "Igor2 - all arrays (.pxp)"],
             0,
@@ -2484,7 +2484,7 @@ class Gui(QtWidgets.QMainWindow):
         """Pre-dialog: choose software, then open the corresponding export flow."""
         software, ok = QtWidgets.QInputDialog.getItem(
             self,
-            "Export light stimulus",
+            "Export light input",
             "Export for:",
             [
                 "SysCon2",
@@ -2677,8 +2677,8 @@ class Gui(QtWidgets.QMainWindow):
     def choose_stim_padding_secs(self) -> None:
         new_padding_secs, ok = QtWidgets.QInputDialog.getText(
             self,
-            "Stimulus padding",
-            "Number of seconds of padding for stimuli beyond simulation time",
+            "Input padding",
+            "Number of seconds of padding for inputs beyond simulation time",
             QtWidgets.QLineEdit.EchoMode.Normal,
             f"{self.settings.stim_padding_secs}",
         )
@@ -2743,7 +2743,7 @@ class Gui(QtWidgets.QMainWindow):
         automatically no matter which menu shows it.
         """
         self.btn_stim_array_ops = QtWidgets.QToolButton(self.toolbar_data)
-        self.btn_stim_array_ops.setToolTip("Stim array operations")
+        self.btn_stim_array_ops.setToolTip("Input array operations")
         icons.set_widget_icon(self.btn_stim_array_ops, "mdi6.text-box-multiple-outline")
         self.btn_stim_array_ops.setToolButtonStyle(
             QtCore.Qt.ToolButtonStyle.ToolButtonIconOnly
@@ -2905,7 +2905,7 @@ class Gui(QtWidgets.QMainWindow):
         import_data_menu = menu.addMenu("&Import data")
         assert import_data_menu is not None
 
-        import_stimulus_menu = import_data_menu.addMenu("&Stimulus")
+        import_stimulus_menu = import_data_menu.addMenu("&Input")
         assert import_stimulus_menu is not None
         add_action(
             "&Optogenetics",
@@ -2950,14 +2950,14 @@ class Gui(QtWidgets.QMainWindow):
         assert export_data_menu is not None
 
         add_action(
-            "&Patch Clamp sStimulus",
+            "&Patch Clamp Input",
             self.btn_export_patch_clamp_stim_clicked,
             export_data_menu,
             None,
             icon="mdi6.waveform",
         )
         add_action(
-            "&Optogenetic Stimulus",
+            "&Optogenetic Input",
             self.btn_export_light_stimulus_clicked,
             export_data_menu,
             None,
@@ -3108,7 +3108,7 @@ class Gui(QtWidgets.QMainWindow):
     ) -> None:
         self._view_actions: dict[QtWidgets.QWidget, QtWidgets.QAction] = {}
         for name, widget, icon, is_checked in [
-            ("&Stimuli", self.stim_editor, "mdi6.chart-timeline", True),
+            ("&Input", self.stim_editor, "mdi6.chart-timeline", True),
             ("&Traces", self.trace_widget, "mdi.waves", False),
             ("&Spikes", self.spike_widget, "ph.barcode-light", False),
             ("&Data", self.data_widget, "mdi6.chart-donut", False),
@@ -3159,7 +3159,7 @@ class Gui(QtWidgets.QMainWindow):
             is_checked=True,
         )
         add_action(
-            "Keep Short Stimuli Visible (4 px)",
+            "Keep Short Inputs Visible (4 px)",
             self.toggle_minimum_stimulus_size,
             menu,
             toolbar,
@@ -3447,7 +3447,7 @@ class Gui(QtWidgets.QMainWindow):
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None
     ) -> None:
         add_action("&Brian2 Simulation Backend", self.choose_brian2_backend, menu)
-        add_action("&Stimulus Automatic Padding", self.choose_stim_padding_secs, menu)
+        add_action("&Input Automatic Padding", self.choose_stim_padding_secs, menu)
         add_action("&LLM Assistant", self.open_llm_settings, menu)
         add_action(
             "&Synapse Matrix RAM Limit", self.choose_max_ram_synapse_plot_matrix, menu
@@ -3504,7 +3504,7 @@ class Gui(QtWidgets.QMainWindow):
         if toolbar is None:
             return
         self.cmb_stim = QtWidgets.QComboBox()
-        toolbar.addWidget(QtWidgets.QLabel("  Stim data: "))
+        toolbar.addWidget(QtWidgets.QLabel("  Input data: "))
         toolbar.addWidget(self.cmb_stim)
         # The stim array ops button is inserted here once self.stim_editor
         # exists - see _add_stim_array_ops_button_to_data_toolbar().
@@ -3513,7 +3513,7 @@ class Gui(QtWidgets.QMainWindow):
         )
         toolbar.addWidget(self.cmb_trace)
         self.action_overlay_stim_on_traces = add_action(
-            "Overlay stim on traces",
+            "Overlay input on traces",
             self._toggle_stim_trace_overlay,
             menu,
             toolbar,
@@ -3535,7 +3535,7 @@ class Gui(QtWidgets.QMainWindow):
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None
     ) -> None:
         add_action(
-            "&Connect External Stimulation Function",
+            "&Connect External Input Function",
             self.connect_external_simulation_function,
             menu,
             toolbar,
@@ -3543,7 +3543,7 @@ class Gui(QtWidgets.QMainWindow):
             icon="mdi6.code-braces",
         )
         add_action(
-            "&Connect Brian2 External Stimulation Function",
+            "&Connect Brian2 External Input Function",
             self.connect_external_simulation_function_with_brian2,
             menu,
             toolbar,
@@ -3551,7 +3551,7 @@ class Gui(QtWidgets.QMainWindow):
             icon="mdi6.function",
         )
         self._do_external_simulation_action = add_action(
-            "&Run External Stimulation Function",
+            "&Run External Input Function",
             self.btn_do_external_simulation_clicked,
             menu,
             toolbar,
@@ -3586,7 +3586,7 @@ class Gui(QtWidgets.QMainWindow):
             "Train the ELiSe network on the teaching pattern and measure the "
             "paper's train + replay learning curves (Kriener et al. 2024, "
             "Fig. 2b/c). Requires an ELiSe project with 'opsin_exc' and "
-            "'opsin_inh' stims."
+            "'opsin_inh' inputs."
         )
         self._refresh_elise_replay_action()
 
@@ -3641,7 +3641,7 @@ class Gui(QtWidgets.QMainWindow):
                 "ELiSe replay analysis",
                 "This action requires an ELiSe project with a completed "
                 "simulation (needs the 'firing_rate_r' trace and an "
-                "'opsin_exc' stim).",
+                "'opsin_exc' input).",
             )
             return
         trace, opsin_exc, stim_dt_s = inputs
@@ -3676,7 +3676,7 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(
                 self,
                 "ELiSe replay analysis",
-                f"Stim dt ({stim_dt_s * 1000:.4g} ms) is not an integer "
+                f"Input dt ({stim_dt_s * 1000:.4g} ms) is not an integer "
                 f"multiple of trace dt ({trace_dt_s * 1000:.4g} ms); "
                 "cannot align target.",
             )
@@ -3689,7 +3689,7 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(
                 self,
                 "ELiSe replay analysis",
-                f"Opsin stim has {num_vis} pitches but the trace only "
+                f"Opsin input has {num_vis} pitches but the trace only "
                 f"covers {n_total_neurons} neurons.",
             )
             return
@@ -3797,7 +3797,7 @@ class Gui(QtWidgets.QMainWindow):
                 self,
                 "Run ELiSe protocol",
                 "This action requires an ELiSe project with 'opsin_exc' and "
-                "'opsin_inh' stim arrays.",
+                "'opsin_inh' input arrays.",
             )
             return
         if self._elise_protocol_worker is not None:
