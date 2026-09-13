@@ -60,6 +60,7 @@ from neuroseq.save_load_options import SaveLoadOptionsDialog
 from neuroseq.spatial_footprint_state import SpatialFootprintState
 from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
 from neuroseq.spike_widget import SpikeWidget
+from neuroseq.startup_dialog import StartupDialog
 from neuroseq.stim import StimArray
 from neuroseq.stim_editor import StimEditor
 from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
@@ -325,7 +326,11 @@ class Gui(QtWidgets.QMainWindow):
         toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonIconOnly)
         toolbar.setStyleSheet("QToolButton { margin: 0px; padding: 2px 1px; }")
 
-    def __init__(self, filename: pathlib.Path | str | None = None) -> None:
+    def __init__(
+        self,
+        filename: pathlib.Path | str | None = None,
+        show_startup_dialog: bool = False,
+    ) -> None:
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.logger.info("starting Gui")
@@ -569,9 +574,22 @@ class Gui(QtWidgets.QMainWindow):
         self._close_confirmed = False
         if filename is not None:
             self.load_project(filename, new_tab=False)
+        elif show_startup_dialog:
+            self.load_project(self._run_startup_dialog(), new_tab=False)
         else:
             self.load_project(default_project(), new_tab=False)
         self.apply_theme(self.settings.theme)
+
+    def _run_startup_dialog(self) -> Project | str:
+        """Show the "New/Load/Example/Recent" picker at app launch, falling
+        back to the default project if it's dismissed without a choice."""
+        dialog = StartupDialog(self.settings, parent=self)
+        dialog.exec()
+        if dialog.chosen_filename is not None:
+            return dialog.chosen_filename
+        if dialog.chosen_project is not None:
+            return dialog.chosen_project
+        return default_project()
 
     @property
     def project(self) -> Project:
@@ -938,6 +956,7 @@ class Gui(QtWidgets.QMainWindow):
 
         def _on_saved(result: object) -> None:
             self.logger.info(f"Project saved to '{result}'.")
+            self.settings.add_recent_project(str(result))
             self._update_window_title()
             if on_success is not None:
                 on_success(result)
@@ -1202,6 +1221,7 @@ class Gui(QtWidgets.QMainWindow):
             if not isinstance(result, Project):
                 return
             self.logger.info(f"Project loaded from {filename}")
+            self.settings.add_recent_project(str(filename))
             self.last_cellpose_import = clone_cellpose_result(result.cellpose_data)
             result.cellpose_data = self.last_cellpose_import
             _place(result)

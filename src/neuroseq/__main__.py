@@ -223,7 +223,7 @@ def main(
 
     app = QtWidgets.QApplication(sys.argv)
     app._interrupt_timer = _install_interrupt_handlers(app)
-    gui = Gui(filename=filename)
+    gui = Gui(filename=filename, show_startup_dialog=True)
     gui.show()
     logging.getLogger(__name__).info("GUI initialized, entering Qt event loop")
     app.exec()
