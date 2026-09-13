@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import math
 from collections.abc import Iterable
 
 import brian2.numpy_ as np
@@ -64,6 +65,17 @@ class TraceNormDialog(QtWidgets.QDialog):
         self.chk_clip.clicked.connect(self.chk_clip_clicked)
         self.layout.addWidget(self.chk_clip)
 
+        self.auto_extend_vertical_space = self.trace_widget.auto_extend_vertical_space
+        self.chk_auto_extend = QtWidgets.QCheckBox("Auto-extend vertical space")
+        self.chk_auto_extend.setToolTip(
+            "When a trace's normalized amplitude would otherwise get clipped, "
+            "grow that neuron's row just enough to fit it instead - without "
+            "encroaching on the neighboring rows."
+        )
+        self.chk_auto_extend.setChecked(self.auto_extend_vertical_space)
+        self.chk_auto_extend.clicked.connect(self.chk_auto_extend_clicked)
+        self.layout.addWidget(self.chk_auto_extend)
+
         self.btn_reset_defaults = QtWidgets.QPushButton("Reset to defaults", self)
         self.btn_reset_defaults.clicked.connect(self.reset_defaults)
         self.layout.addWidget(self.btn_reset_defaults)
@@ -77,8 +89,10 @@ class TraceNormDialog(QtWidgets.QDialog):
         self.spin_norm.setValue(100)
         self.offset_by_median = True
         self.clip = True
+        self.auto_extend_vertical_space = False
         self.chk_offset.setChecked(self.offset_by_median)
         self.chk_offset.setChecked(self.clip)
+        self.chk_auto_extend.setChecked(self.auto_extend_vertical_space)
         self.update_norm_input(self.slider_norm.value())
 
     def chk_offset_clicked(self, checked: bool) -> None:
@@ -87,6 +101,10 @@ class TraceNormDialog(QtWidgets.QDialog):
 
     def chk_clip_clicked(self, checked: bool) -> None:
         self.clip = checked
+        self.update_trace_widget()
+
+    def chk_auto_extend_clicked(self, checked: bool) -> None:
+        self.auto_extend_vertical_space = checked
         self.update_trace_widget()
 
     def update_norm_input(self, value: int) -> None:
@@ -100,6 +118,7 @@ class TraceNormDialog(QtWidgets.QDialog):
         self.trace_widget.trace_norm_percent = self.trace_norm_percent
         self.trace_widget.offset_by_median = self.offset_by_median
         self.trace_widget.clip = self.clip
+        self.trace_widget.auto_extend_vertical_space = self.auto_extend_vertical_space
         self.trace_widget.replot_traces()
 
 
@@ -139,6 +158,18 @@ class TraceWidget(TimeseriesWidget):
         self.trace_norm_percent = 100
         self.offset_by_median = True
         self.clip = True
+        self.auto_extend_vertical_space = False
+        # Per-display-row half-height (>= 0.5) and center position, only
+        # populated (and only non-uniform) while auto_extend_vertical_space
+        # is on - see _compute_row_layout(). Empty/unused otherwise, in
+        # which case every row keeps the default one-unit spacing.
+        self._row_half_heights: list[float] = []
+        self._row_centers: list[float] = []
+        self._row_boundaries: list[float] = []
+        # The controller's neuron-count-driven height limit before auto-extend
+        # inflated it to fit an over-scaled row - restored once auto-extend is
+        # turned back off. None means auto-extend hasn't touched it (yet).
+        self._base_max_height: float | None = None
         self._trace_norm_dialog: TraceNormDialog | None = None
         # Whether to overlay a stim array on top of these traces, and which
         # one - a view-local display setting like trace normalization, not
@@ -259,7 +290,11 @@ class TraceWidget(TimeseriesWidget):
             out = np.empty_like(traces)
         np.multiply(traces, norm, out=out)
         out += offset[:, np.newaxis]
-        if self.clip:
+        # When auto-extending, a row that would otherwise clip instead grows
+        # to fit its own unclipped excursion (see _compute_row_layout()), so
+        # clipping would only throw away the data auto-extend just made room
+        # for.
+        if self.clip and not self.auto_extend_vertical_space:
             np.clip(out, -0.5, 0.5, out=out)
         return out
 
@@ -273,6 +308,88 @@ class TraceWidget(TimeseriesWidget):
             normalized_traces = self.get_normalized_trace_data()
             for line_index, line_graphic in enumerate(self.graphic):
                 line_graphic.data[:, 1] = normalized_traces[line_index, :]
+            if self.auto_extend_vertical_space:
+                # Row heights depend on the normalization settings just
+                # applied above (e.g. dragging the percent slider can grow or
+                # shrink which rows need extra room) - recompute and refit.
+                self._apply_visible_neuron_layout()
+                self._refit_view_to_visible_neurons()
+            elif self._base_max_height is not None:
+                # auto-extend was just turned back off: restore the plain,
+                # evenly-spaced layout and the controller height it displaced.
+                if self.controller is not None:
+                    self.controller.max_height = self._base_max_height
+                self._base_max_height = None
+                self._apply_visible_neuron_layout()
+                self._refit_view_to_visible_neurons()
+
+    def _compute_row_layout(self) -> None:
+        """Recompute per-row half-heights/centers/boundaries so that every
+        visible row is exactly tall enough to fit its own trace's current
+        (unclipped) excursion, never encroaching on its neighbors.
+
+        A row that doesn't need extra room keeps the default 0.5 half-height
+        (i.e. the usual one-unit row), so this is a no-op change for any
+        panel that never asked for auto-extend.
+        """
+        self._row_half_heights = []
+        self._row_centers = []
+        self._row_boundaries = []
+        if not isinstance(self.data, TraceData) or not self._visible_neuron_ids:
+            return
+        normalized = self.get_normalized_trace_data()
+        data_row_by_id = {int(idx): i for i, idx in enumerate(self.data.indices)}
+        cumulative = -0.5
+        for neuron_id in self._visible_neuron_ids:
+            data_row = data_row_by_id.get(neuron_id)
+            half_height = 0.5
+            if data_row is not None and normalized.size:
+                peak = float(np.nanmax(np.abs(normalized[data_row])))
+                half_height = max(0.5, peak)
+            upper = cumulative + 2.0 * half_height
+            self._row_half_heights.append(half_height)
+            self._row_centers.append(0.5 * (cumulative + upper))
+            self._row_boundaries.append(upper)
+            cumulative = upper
+
+    def _display_row_for_tick_y(self, y: float) -> int:
+        if not self.auto_extend_vertical_space or not self._row_boundaries:
+            return super()._display_row_for_tick_y(y)
+        # Unlike hover (which always resolves to the nearest row), a tick
+        # candidate outside the actual row extent must map to an invalid row
+        # so the formatter blanks it - see _create_y_tick_formatter()'s
+        # "ghost tick" comment.
+        if y < -0.5 or y >= self._row_boundaries[-1]:
+            return -1
+        return int(np.searchsorted(self._row_boundaries, y, side="right"))
+
+    def _display_row_for_mouse_y(self, y: float) -> int:
+        if not self.auto_extend_vertical_space or not self._row_boundaries:
+            return super()._display_row_for_mouse_y(y)
+        idx = int(np.searchsorted(self._row_boundaries, y, side="right"))
+        return int(np.clip(idx, 0, len(self._row_boundaries) - 1))
+
+    def _neuron_slice_from_y_range(self, y_a: float, y_b: float) -> slice:
+        if not self.auto_extend_vertical_space or not self._row_boundaries:
+            return super()._neuron_slice_from_y_range(y_a, y_b)
+        boundaries = self._row_boundaries
+        start = int(np.searchsorted(boundaries, min(y_a, y_b), side="right"))
+        stop = int(np.searchsorted(boundaries, max(y_a, y_b), side="right")) + 1
+        return slice(start, stop)
+
+    def _refit_view_to_visible_neurons(self) -> None:
+        if not self.auto_extend_vertical_space or not self._row_half_heights:
+            super()._refit_view_to_visible_neurons()
+            return
+        total_height = sum(2.0 * h for h in self._row_half_heights)
+        if self.controller is not None:
+            if self._base_max_height is None:
+                self._base_max_height = self.controller.max_height
+            self.controller.max_height = max(self._base_max_height, total_height)
+        if self.grid_lines is not None:
+            self.grid_lines.update_neuron_extent(max(1, math.ceil(total_height)))
+        if self.controller is not None and total_height > 0:
+            self.controller.focus_neuron_range(0, math.ceil(total_height))
 
     def _rebuild_custom_analysis_menu(self) -> None:
         super()._rebuild_custom_analysis_menu()
@@ -352,12 +469,23 @@ class TraceWidget(TimeseriesWidget):
     def _apply_visible_neuron_layout(self) -> None:
         if self.graphic is None or not isinstance(self.data, TraceData):
             return
+        if self.auto_extend_vertical_space:
+            self._compute_row_layout()
+        else:
+            self._row_half_heights = []
+            self._row_centers = []
+            self._row_boundaries = []
         for i, line in enumerate(self.graphic.graphics):
             real_id = int(self.data.indices[i])
             display_row = self._neuron_id_to_display_row.get(real_id)
             line.visible = display_row is not None
             if display_row is not None:
-                line.offset = (line.offset[0], display_row, line.offset[2])
+                y = (
+                    self._row_centers[display_row]
+                    if self.auto_extend_vertical_space and self._row_centers
+                    else float(display_row)
+                )
+                line.offset = (line.offset[0], y, line.offset[2])
 
     def clear_data(self) -> None:
         # Must be nulled *before* calling super(): TimeseriesWidget.clear_data()
@@ -372,6 +500,12 @@ class TraceWidget(TimeseriesWidget):
         # this). _stim_overlay_enabled/_stim_overlay_array are left alone so
         # the setting survives a data refresh.
         self._stim_overlay_graphic = None
+        if self._base_max_height is not None and self.controller is not None:
+            self.controller.max_height = self._base_max_height
+        self._base_max_height = None
+        self._row_half_heights = []
+        self._row_centers = []
+        self._row_boundaries = []
         super().clear_data()
 
     def set_stim_overlay_enabled(self, enabled: bool) -> None:

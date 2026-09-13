@@ -283,6 +283,148 @@ def test_median_offset_normalization_bounds_negative_excursions_too(
     trace_widget.close()
 
 
+def _make_scaled_trace_data(n_neurons: int, n_timesteps: int = 50) -> TraceData:
+    """neuron i's amplitude is (i + 1)x neuron 0's, so at normalization
+    percentages above 100% only the low-index neurons would clip."""
+    t = np.linspace(0, 2 * np.pi, n_timesteps, dtype=np.float32)
+    traces = np.stack([np.sin(t) * (i + 1) for i in range(n_neurons)], axis=0).astype(
+        np.float32
+    )
+    return TraceData(
+        name="traces",
+        traces=traces,
+        indices=np.arange(n_neurons, dtype=np.uint32),
+        dt=0.001,
+        units="mV",
+    )
+
+
+def test_auto_extend_vertical_space_grows_rows_without_clipping(
+    qtbot: QtBot,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    controller.set_limits(1.0, 5)
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    data = _make_scaled_trace_data(5)
+    trace_widget.set_data(data)
+
+    trace_widget.trace_norm_percent = 500
+    trace_widget.auto_extend_vertical_space = True
+    trace_widget.replot_traces()
+
+    # every row's *unclipped* excursion actually reaches +/-(i+1)*0.5 at 500%
+    # (neuron 0 fits its default 0.5 half-row; neurons 1-4 need more)
+    assert trace_widget._row_half_heights == pytest.approx([0.5, 1.0, 1.5, 2.0, 2.5])
+    normalized = trace_widget.get_normalized_trace_data()
+    for i in range(5):
+        assert np.max(np.abs(normalized[i])) == pytest.approx(0.5 * (i + 1), rel=0.05)
+
+    # rows must not overlap: each row's own band stays within its boundaries
+    centers = trace_widget._row_centers
+    half_heights = trace_widget._row_half_heights
+    for i in range(len(centers) - 1):
+        this_row_top = centers[i] + half_heights[i]
+        next_row_bottom = centers[i + 1] - half_heights[i + 1]
+        assert this_row_top == pytest.approx(next_row_bottom)
+
+    # the controller's height limit grows to fit the new total, and the
+    # camera actually gets refocused onto the larger extent
+    total_height = sum(2 * h for h in half_heights)
+    assert controller.max_height == pytest.approx(total_height)
+    trace_widget.close()
+
+
+def test_auto_extend_vertical_space_leaves_uniform_rows_alone_when_off(
+    qtbot: QtBot,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    controller.set_limits(1.0, 5)
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    data = _make_scaled_trace_data(5)
+    trace_widget.set_data(data)
+
+    trace_widget.trace_norm_percent = 500
+    trace_widget.replot_traces()
+
+    assert trace_widget._row_half_heights == []
+    assert trace_widget._row_centers == []
+    assert controller.max_height == pytest.approx(5.0)
+    # clipping (the default) still applies when auto-extend is off
+    normalized = trace_widget.get_normalized_trace_data()
+    assert np.max(np.abs(normalized)) == pytest.approx(0.5)
+    trace_widget.close()
+
+
+def test_auto_extend_vertical_space_restores_controller_height_when_turned_off(
+    qtbot: QtBot,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    controller.set_limits(1.0, 5)
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    data = _make_scaled_trace_data(5)
+    trace_widget.set_data(data)
+
+    trace_widget.trace_norm_percent = 500
+    trace_widget.auto_extend_vertical_space = True
+    trace_widget.replot_traces()
+    assert controller.max_height > 5.0
+
+    trace_widget.auto_extend_vertical_space = False
+    trace_widget.replot_traces()
+    assert controller.max_height == pytest.approx(5.0)
+    assert trace_widget._row_half_heights == []
+    trace_widget.close()
+
+
+def test_auto_extend_vertical_space_hover_and_tick_labels_track_warped_rows(
+    qtbot: QtBot,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    controller.set_limits(1.0, 5)
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    data = _make_scaled_trace_data(5)
+    trace_widget.set_data(data)
+    trace_widget.trace_norm_percent = 500
+    trace_widget.auto_extend_vertical_space = True
+    trace_widget.replot_traces()
+
+    centers = trace_widget._row_centers
+    formatter = trace_widget._create_y_tick_formatter()
+    for neuron_id, center in enumerate(centers):
+        assert formatter(center, 0, 0) == str(neuron_id)
+    # a position past the last row's extent has no real row behind it
+    assert formatter(centers[-1] + 100, 0, 0) == ""
+
+    for neuron_id, center in enumerate(centers):
+        assert trace_widget._display_row_for_mouse_y(center) == neuron_id
+    # hovering past the last row clamps to it rather than raising/wrapping
+    assert trace_widget._display_row_for_mouse_y(centers[-1] + 100) == len(centers) - 1
+    trace_widget.close()
+
+
+def test_trace_norm_dialog_auto_extend_checkbox_updates_trace_widget(
+    qtbot: QtBot,
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    trace_norm_dialog = TraceNormDialog(trace_widget)
+    qtbot.addWidget(trace_widget)
+    qtbot.addWidget(trace_norm_dialog)
+
+    assert trace_widget.auto_extend_vertical_space is False
+    trace_norm_dialog.chk_auto_extend_clicked(True)
+    assert trace_widget.auto_extend_vertical_space is True
+
+    trace_norm_dialog.reset_defaults()
+    assert trace_widget.auto_extend_vertical_space is False
+    assert trace_norm_dialog.chk_auto_extend.isChecked() is False
+    trace_widget.close()
+
+
 def test_trace_widget_indices(qtbot: QtBot) -> None:
     controller = ConstrainedPanZoomController()
     trace_widget = TraceWidget(controller)

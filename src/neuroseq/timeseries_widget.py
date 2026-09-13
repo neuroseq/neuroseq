@@ -434,6 +434,16 @@ class TimeseriesWidget(FPLWidget):
         if self.grid_lines is not None:
             self.grid_lines.visible = is_visible
 
+    def _display_row_for_tick_y(self, y: float) -> int:
+        """Map a y-axis tick candidate position to a display row.
+
+        The base implementation assumes the default one-unit-per-row
+        spacing; subclasses with non-uniform row spacing (e.g. TraceWidget's
+        auto-extend-vertical-space mode) override this to look up the row
+        that actually occupies that position instead.
+        """
+        return int(round(y))
+
     def _create_y_tick_formatter(self):
         # """Create a y-axis tick formatter that prevents label repetition."""
         state = {"last_label": None}
@@ -451,7 +461,7 @@ class TimeseriesWidget(FPLWidget):
             # position has no real neuron behind it at all: fabricating a
             # label from the raw row index there would draw a "ghost" tick
             # number with no corresponding grid line or data underneath it.
-            display_row = int(round(y))
+            display_row = self._display_row_for_tick_y(y)
             if not (0 <= display_row < len(self._visible_neuron_ids)):
                 return ""
             neuron_id = self._visible_neuron_ids[display_row]
@@ -636,6 +646,18 @@ class TimeseriesWidget(FPLWidget):
         if self.controller is not None and self.n_neurons > 0:
             self.controller.focus_neuron_range(0, self.n_neurons)
 
+    def _display_row_for_mouse_y(self, y: float) -> int:
+        """Map a pointer's world y position to a display row, clamped to the
+        currently visible row range. See _display_row_for_tick_y()."""
+        return int(np.clip(math.floor(y + 0.5), 0, self.n_neurons - 1))
+
+    def _neuron_slice_from_y_range(self, y_a: float, y_b: float) -> slice:
+        """Map an ROI drag's two endpoint y positions to a display-row slice.
+        See _display_row_for_tick_y()."""
+        y_min = min(y_a, y_b) + 0.5
+        y_max = max(y_a, y_b) + 0.5
+        return slice(math.floor(y_min), math.ceil(y_max))
+
     def set_neuron_greyed(self, neuron_index: int, greyed: bool) -> None:
         """Hide (or restore) one neuron's row, compacting the remaining visible
         rows to fill the gap. The underlying data is never touched."""
@@ -768,10 +790,8 @@ class TimeseriesWidget(FPLWidget):
                 0,
                 self.data_values.shape[0] - 1,
             )
-            display_row = np.clip(
-                math.floor(self.mouse_pos[1] + 0.5), 0, self.n_neurons - 1
-            )
-            neuron_id = self._visible_neuron_ids[int(display_row)]
+            display_row = self._display_row_for_mouse_y(self.mouse_pos[1])
+            neuron_id = self._visible_neuron_ids[display_row]
             hovered_neuron_id = neuron_id
             hover_value = (
                 self.data_values[time_index, neuron_id] * self.data_values_scale
@@ -787,12 +807,12 @@ class TimeseriesWidget(FPLWidget):
         if self.mode == InteractMode.SELECT and self.selection_in_progress:
             x0 = min(self.mouse_pos[0], self.mouse_press_pos[0])
             x1 = max(self.mouse_pos[0], self.mouse_press_pos[0])
-            y0 = min(self.mouse_pos[1] + 0.5, self.mouse_press_pos[1] + 0.5)
-            y1 = max(self.mouse_pos[1] + 0.5, self.mouse_press_pos[1] + 0.5)
             time_slice = slice(
                 max(0, math.floor(x0 / self.dt_ms)), math.ceil(x1 / self.dt_ms)
             )
-            neuron_slice = slice(math.floor(y0), math.ceil(y1))
+            neuron_slice = self._neuron_slice_from_y_range(
+                self.mouse_pos[1], self.mouse_press_pos[1]
+            )
             self.select_neurons(neuron_slice, time_slice)
             return
         elif self.mode == InteractMode.DRAW:
