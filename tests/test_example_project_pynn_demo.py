@@ -188,10 +188,10 @@ def test_make_backend_success_paths(monkeypatch: pytest.MonkeyPatch) -> None:
             self.cells = FakeBss2Cells()
 
     fake_bss2_sim = FakeBss2Sim()
-    monkeypatch.setitem(sys.modules, "pynn_brainscales", types.ModuleType("pynn_brainscales"))
     monkeypatch.setitem(
-        sys.modules, "pynn_brainscales.brainscales2", fake_bss2_sim
+        sys.modules, "pynn_brainscales", types.ModuleType("pynn_brainscales")
     )
+    monkeypatch.setitem(sys.modules, "pynn_brainscales.brainscales2", fake_bss2_sim)
 
     sim, make_cells, weights_are_int = pynn_demo._make_backend("brainscales2")
     assert sim is fake_bss2_sim
@@ -241,8 +241,12 @@ def test_segment_to_neuroseq_converts_spikes_and_optional_traces() -> None:
         backend="brian2",
     )
     assert isinstance(with_trace[0], SpikeData)
-    assert np.array_equal(with_trace[0].spike_indices, np.array([0, 0, 1], dtype=np.uint32))
-    assert np.allclose(with_trace[0].spike_times, np.array([0.1, 0.2, 0.3], dtype=np.float32))
+    assert np.array_equal(
+        with_trace[0].spike_indices, np.array([0, 0, 1], dtype=np.uint32)
+    )
+    assert np.allclose(
+        with_trace[0].spike_times, np.array([0.1, 0.2, 0.3], dtype=np.float32)
+    )
     assert isinstance(with_trace[1], TraceData)
     assert with_trace[1].units == "mV"
     assert with_trace[1].dt == pytest.approx(0.002)
@@ -259,7 +263,7 @@ def test_segment_to_neuroseq_converts_spikes_and_optional_traces() -> None:
 
 def test_pynn_demo_simulate_and_module_wrapper(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_parameters = types.ModuleType("pyNN.parameters")
-    fake_parameters.Sequence = lambda values: ("sequence", tuple(values))
+    setattr(fake_parameters, "Sequence", lambda values: ("sequence", tuple(values)))
     monkeypatch.setitem(sys.modules, "pyNN", types.ModuleType("pyNN"))
     monkeypatch.setitem(sys.modules, "pyNN.parameters", fake_parameters)
 
