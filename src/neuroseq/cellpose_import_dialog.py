@@ -241,16 +241,14 @@ class CellposeImportDialog(QtWidgets.QDialog):
             36
         )  # make it larger, ideally we'd make font larger too.
         self.custom_mapping_line.setPlaceholderText(
-            "e.g., 1:12,2:3 (stimkey:cellposeId)"
+            "e.g., 1:12,2:3 (inputkey:cellposeId)"
         )
         self.custom_mapping_line.textChanged.connect(
             self._on_custom_mapping_text_changed
         )
         self.custom_mapping_line.setVisible(False)
         self.custom_mapping_row_index = mapping_layout.rowCount()
-        self.custom_mapping_label = QtWidgets.QLabel(
-            "Custom mapping (stimulus:cellpose):"
-        )
+        self.custom_mapping_label = QtWidgets.QLabel("Custom mapping (input:cellpose):")
         self.custom_mapping_label.setStyleSheet("QLabel { color: #3b7dd8; }")
         self.custom_mapping_label.setVisible(False)
         mapping_layout.addRow(self.custom_mapping_label, self.custom_mapping_line)
@@ -264,7 +262,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         manual_click_layout = QtWidgets.QHBoxLayout()
         self.manual_click_checkbox = QtWidgets.QCheckBox("Assign by clicking cells")
         self.manual_click_checkbox.setToolTip(
-            "Click cells in the viewer to assign stimulus ids in click order "
+            "Click cells in the viewer to assign input ids in click order "
             "(click again to undo). Unclicked cells get the remaining ids "
             "automatically, in ascending cellpose-id order."
         )
@@ -1069,7 +1067,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 mapping[stim_key] = cellpose_id
             ensure_unique_ids(
                 stim_keys,
-                "Custom mapping would assign stimulus ID {value} more than once.",
+                "Custom mapping would assign input ID {value} more than once.",
             )
         except (ValueError, IndexError) as exc:
             raise ValueError(f"Invalid custom mapping format: {exc}") from exc
@@ -1097,7 +1095,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             cellpose_ids = "none"
         return (
             f"<p><b>{shape_name}</b> {self._role_html(role)}{status}<br>"
-            f"Stim IDs: {stim_ids}<br>"
+            f"Input IDs: {stim_ids}<br>"
             f"Cellpose IDs: {cellpose_ids}</p>"
         )
 
@@ -1143,7 +1141,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             "<p><b>Areas of interest summary</b></p>"
             f"{self._format_aoi_indices(shape_name='Square', enabled=config.square.enabled, role=config.square.role, members=square_members)}"
             f"{self._format_aoi_indices(shape_name='Circle', enabled=config.circle.enabled, role=config.circle.role, members=circle_members)}"
-            "<p style='color:#666'>If shapes overlap, exclusion cells still receive the highest stimulus IDs.</p>"
+            "<p style='color:#666'>If shapes overlap, exclusion cells still receive the highest input IDs.</p>"
             "</div>"
         )
         self.aoi_summary_browser.setHtml(html)
@@ -1580,7 +1578,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 success_msg += f" (offset {linear_offset})"
 
             if mapping_strategy in ("Custom", CUSTOM_AOI_STRATEGY) and stimulus_mapping:
-                success_msg += f"\nStimulus mapping: {dict(list(stimulus_mapping.items())[:5])}{'...' if len(stimulus_mapping) > 5 else ''}"
+                success_msg += f"\nInput mapping: {dict(list(stimulus_mapping.items())[:5])}{'...' if len(stimulus_mapping) > 5 else ''}"
 
             QtWidgets.QMessageBox.information(self, "Import Successful", success_msg)
             self.accept()

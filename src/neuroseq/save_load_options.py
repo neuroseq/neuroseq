@@ -35,7 +35,7 @@ class SaveLoadOptionsDialog(QDialog):
 
         self.layout.addWidget(QLabel("Please select which data you want to include:"))
 
-        self.checkbox_stim_arrays = QCheckBox("Stimulus Arrays")
+        self.checkbox_stim_arrays = QCheckBox("Input Arrays")
         self.checkbox_stim_arrays.setChecked(True)
         self.checkbox_stim_arrays.checkStateChanged.connect(
             self.checkbox_stim_arrays_changed

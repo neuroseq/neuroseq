@@ -50,7 +50,7 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
 
         intro = QtWidgets.QLabel(
             "Select a SysCon2 .seq file, preview parsed content, and import timing/intensity "
-            "information into a selected stimulation data entity."
+            "information into a selected input data entity."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -80,7 +80,7 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
 
         self.target_combo = QtWidgets.QComboBox()
         self.target_combo.currentTextChanged.connect(self._on_target_changed)
-        options_layout.addRow("Target stim data entity:", self.target_combo)
+        options_layout.addRow("Target input data entity:", self.target_combo)
 
         self.neuron_offset_spin = QtWidgets.QSpinBox()
         self.neuron_offset_spin.setRange(0, 0)
@@ -98,13 +98,13 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
         options_layout.addRow("System tick resolution:", self.tick_resolution_spin)
 
         self.extend_checkbox = QtWidgets.QCheckBox(
-            "Extend target stim array to fit imported duration"
+            "Extend target input array to fit imported duration"
         )
         self.extend_checkbox.setChecked(True)
         options_layout.addRow(self.extend_checkbox)
 
         self.replace_checkbox = QtWidgets.QCheckBox(
-            "Replace existing target stim values (instead of merging)"
+            "Replace existing target input values (instead of merging)"
         )
         self.replace_checkbox.setChecked(True)
         options_layout.addRow(self.replace_checkbox)
@@ -133,10 +133,10 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
         self.target_combo.clear()
         stim_names = list(self.project.stim_arrays.keys())
         if not stim_names:
-            self.target_combo.addItem("(No stim arrays available)")
+            self.target_combo.addItem("(No input arrays available)")
             self.target_combo.setEnabled(False)
             self.info_label.setText(
-                "No stimulation data entities available. Create one before importing."
+                "No input data entities available. Create one before importing."
             )
             return
 

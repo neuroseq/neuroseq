@@ -1295,7 +1295,7 @@ def test_remappable_data_description_counts_correctly() -> None:
     project.add_experiment(Experiment("exp1", 0.004, [], [trace]))
 
     desc = project.remappable_data_description(0.0005)
-    assert "2 stim array(s)" in desc
+    assert "2 input array(s)" in desc
     assert "1 trace dataset(s)" in desc
 
     assert project.remappable_data_description(0.001) == ""

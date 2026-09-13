@@ -508,11 +508,11 @@ class TifImportDialog(QtWidgets.QDialog):
         params_layout.addRow("Spike threshold:", self._spike_threshold_spin)
 
         self._suppress_stimulation_artefact_checkbox = QtWidgets.QCheckBox(
-            "Stimulation artefact suppression"
+            "Input artefact suppression"
         )
         self._suppress_stimulation_artefact_checkbox.setChecked(True)
         self._suppress_stimulation_artefact_checkbox.setToolTip(
-            "Replace fluorescence in frames overlapping active stimulation with "
+            "Replace fluorescence in frames overlapping active input with "
             "the mean of the nearest clean values before and after the artefact."
         )
         params_layout.addRow(self._suppress_stimulation_artefact_checkbox)
@@ -520,12 +520,12 @@ class TifImportDialog(QtWidgets.QDialog):
         self._stim_array_combo = QtWidgets.QComboBox()
         for name, stim_array in self._stim_arrays.items():
             self._stim_array_combo.addItem(name, stim_array)
-        params_layout.addRow("Stim array:", self._stim_array_combo)
+        params_layout.addRow("Input array:", self._stim_array_combo)
         has_stim_arrays = bool(self._stim_arrays)
         self._suppress_stimulation_artefact_checkbox.setEnabled(has_stim_arrays)
         if not has_stim_arrays:
             self._suppress_stimulation_artefact_checkbox.setToolTip(
-                "No stimulation arrays are available in the current project."
+                "No input arrays are available in the current project."
             )
         self._suppress_stimulation_artefact_checkbox.toggled.connect(
             self._update_pipeline_fields

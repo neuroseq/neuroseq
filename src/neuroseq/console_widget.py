@@ -19,21 +19,21 @@ project.stim_arrays                  # dict of StimArray objects
 project.experiments                  # dict of Experiment objects
 project.dt                           # canonical sample interval (s)
 
-# ── Stimulus arrays ───────────────────────────────────────────
-list(project.stim_arrays.keys())     # names of all stim arrays
-sa = project.stim_arrays['MyStim']   # get one stim array
+# ── Input arrays ───────────────────────────────────────────────
+list(project.stim_arrays.keys())     # names of all input arrays
+sa = project.stim_arrays['MyStim']   # get one input array
 sa.values                            # numpy array, shape (time, neuron)
 sa.dt                                # sample interval (s)
 sa.units                             # e.g. 'pA'
 
-# ── Edit stimulus values (no undo) ───────────────────────────
+# ── Edit input values (no undo) ───────────────────────────────
 sa.values[:] = 0                     # zero out entire array
 sa.values[100:200, 0] = 500          # set samples 100-199, neuron 0 to 500 pA
 sa.values[:, 1] = np.sin(           \\
     np.linspace(0, 2*np.pi, sa.values.shape[0])\\
 ) * 200                              # sinusoidal pattern on neuron 1
 
-# ── Ramp stimulus patterns ────────────────────────────────────
+# ── Ramp input patterns ────────────────────────────────────────
 # Single ramp: linearly increase from 0 to 500 pA over 200 samples on neuron 0
 sa.values[100:300, 0] = np.linspace(0, 500, 200)
 

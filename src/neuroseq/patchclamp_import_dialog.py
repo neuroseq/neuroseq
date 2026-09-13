@@ -228,7 +228,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
         self.custom_mapping_line = QtWidgets.QLineEdit()
         self.custom_mapping_line.setPlaceholderText(
-            "Comma-separated stim IDs (e.g., 2,3)"
+            "Comma-separated input IDs (e.g., 2,3)"
         )
         self.custom_mapping_line.setVisible(True)  # not needed?
 
@@ -242,7 +242,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         self.custom_widget = QtWidgets.QWidget()
         self.custom_widget.setLayout(custom_layout)
 
-        self.custom_mapping_label = QtWidgets.QLabel("Specify stim IDs to import:")
+        self.custom_mapping_label = QtWidgets.QLabel("Specify input IDs to import:")
         self.custom_mapping_label.setVisible(True)  # not needed?
         self.custom_widget.setVisible(True)  # not needed?
         self.custom_mapping_hint = QtWidgets.QLabel("")
@@ -250,9 +250,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
         options_layout.addRow(self.custom_mapping_label, self.custom_widget)
         options_layout.addRow("", self.custom_mapping_hint)
 
-        self.show_stimulus_checkbox = QtWidgets.QCheckBox(
-            "Show Stimulus IDs in preview"
-        )
+        self.show_stimulus_checkbox = QtWidgets.QCheckBox("Show Input IDs in preview")
         self.show_stimulus_checkbox.setChecked(True)
         self.show_stimulus_checkbox.toggled.connect(self._on_show_stimulus_toggled)
         options_layout.addRow(self.show_stimulus_checkbox)
@@ -818,7 +816,7 @@ class PatchClampImportDialog(QtWidgets.QDialog):
 
             neuron_ids = ensure_unique_ids(
                 self._safe_parse_stimulus_ids(),
-                "Custom mapping would assign stimulus ID {value} to multiple patchclamp rows.",
+                "Custom mapping would assign input ID {value} to multiple patchclamp rows.",
             )
             self.neurons_to_replace = list(neuron_ids)
             append_warning = validate_append_import(

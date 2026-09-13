@@ -577,7 +577,7 @@ class Project:
         )
         parts: list[str] = []
         if stim_count:
-            parts.append(f"{stim_count} stim array(s)")
+            parts.append(f"{stim_count} input array(s)")
         if trace_count:
             parts.append(f"{trace_count} trace dataset(s)")
         return " and ".join(parts)
