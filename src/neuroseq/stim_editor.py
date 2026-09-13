@@ -249,8 +249,8 @@ class StimEditor(QtWidgets.QWidget):
             return
         padding_seconds, ok = QtWidgets.QInputDialog.getText(
             self,
-            "Pad stim arrays",
-            "Padding to add to stim arrays in seconds",
+            "Pad input arrays",
+            "Padding to add to input arrays in seconds",
             QtWidgets.QLineEdit.EchoMode.Normal,
             f"{self.pad_stim_array_secs}",
         )
@@ -281,7 +281,7 @@ class StimEditor(QtWidgets.QWidget):
             QtWidgets.QMessageBox.critical(
                 self,
                 "Error",
-                f"Error padding stim arrays: '{e}'",
+                f"Error padding input arrays: '{e}'",
             )
             return
 
@@ -308,8 +308,8 @@ class StimEditor(QtWidgets.QWidget):
             return
         trim_seconds, ok = QtWidgets.QInputDialog.getText(
             self,
-            "Trim stimulation arrays",
-            "Seconds to trim from the stim arrays",
+            "Trim input arrays",
+            "Seconds to trim from the input arrays",
             QtWidgets.QLineEdit.EchoMode.Normal,
             "5.0",
         )
@@ -338,12 +338,12 @@ class StimEditor(QtWidgets.QWidget):
             QtWidgets.QMessageBox.critical(
                 self,
                 "Invalid input",
-                f"Trim seconds {trim_seconds_as_float} is greater than or equal to current stim length {current_length_secs}.",
+                f"Trim seconds {trim_seconds_as_float} is greater than or equal to current input length {current_length_secs}.",
             )
             return
         caveats: list[str] = []
         if self.project.trim_stim_array_would_delete_data(new_length_secs):
-            caveats.append("• Trimming would delete non-zero stimulus data.")
+            caveats.append("• Trimming would delete non-zero input data.")
         if self.project.b2_model.get_sim_time_secs() > new_length_secs:
             # The trim cuts into the recorded simulation. Trimming only windows
             # the traces (see Project.get_data); it does not shorten the run,
@@ -353,12 +353,12 @@ class StimEditor(QtWidgets.QWidget):
                 "hides the simulated data beyond it (undo restores it) — it does "
                 "not shorten the simulation. Continuing the simulation resumes "
                 "from the full, untrimmed end of the last run, not the trimmed "
-                "point, and re-extends the stim so the hidden data reappears."
+                "point, and re-extends the input so the hidden data reappears."
             )
         if caveats:
             continue_with_trim = QtWidgets.QMessageBox.question(
                 self,
-                "Trim stim arrays",
+                "Trim input arrays",
                 "Trim anyway?\n\n" + "\n\n".join(caveats),
                 QtWidgets.QMessageBox.StandardButton.Yes
                 | QtWidgets.QMessageBox.StandardButton.No,
@@ -454,7 +454,7 @@ class StimEditor(QtWidgets.QWidget):
                 QtWidgets.QMessageBox.critical(
                     self,
                     "Error",
-                    f"Error looping stim arrays: '{e}'",
+                    f"Error looping input arrays: '{e}'",
                 )
                 return
         self.set_project(self.project, keep_undo_history=False)
@@ -834,7 +834,7 @@ class StimEditor(QtWidgets.QWidget):
             return
         filename, _ = getsavefilename(
             self,
-            "Save stim selection",
+            "Save input selection",
             "stim.npy",
             "NumPy npy file (*.npy)",
         )
@@ -856,7 +856,7 @@ class StimEditor(QtWidgets.QWidget):
             return
         filename, _ = getopenfilename(
             self,
-            "Load stim selection",
+            "Load input selection",
             "stim.npy",
             "NumPy npy file (*.npy)",
         )
@@ -1001,7 +1001,7 @@ class StimEditor(QtWidgets.QWidget):
                 continue_with_remap = QtWidgets.QMessageBox.question(
                     self,
                     "Change project sample interval",
-                    f"Changing the stimulation timestep will remap stimulus array "
+                    f"Changing the input timestep will remap input array "
                     f"'{old_name}' from "
                     f"{format_milliseconds(self.current_stim_modifier.stim_array.dt * 1000.0)} ms "
                     f"to {format_milliseconds(dialog.dt * 1000.0)} ms."
@@ -1034,8 +1034,8 @@ class StimEditor(QtWidgets.QWidget):
         if (
             QtWidgets.QMessageBox.question(
                 self,
-                "Delete stim array",
-                f"Are you sure you want to delete stim array '{self.current_stim_modifier.stim_array.name}'? (This action cannot be undone.)",
+                "Delete input array",
+                f"Are you sure you want to delete input array '{self.current_stim_modifier.stim_array.name}'? (This action cannot be undone.)",
                 QtWidgets.QMessageBox.StandardButton.Yes
                 | QtWidgets.QMessageBox.StandardButton.No,
             )
@@ -1051,7 +1051,7 @@ class StimEditor(QtWidgets.QWidget):
         if (
             QtWidgets.QMessageBox.question(
                 self,
-                "Clear stim array",
+                "Clear input array",
                 f"Set all values in '{name}' to zero?",
                 QtWidgets.QMessageBox.StandardButton.Yes
                 | QtWidgets.QMessageBox.StandardButton.No,
@@ -1239,7 +1239,7 @@ class StimEditor(QtWidgets.QWidget):
         self.actions_draw = []
         self.actions_draw.append(
             add_action(
-                "Draw stimulus",
+                "Draw input",
                 lambda: self.set_draw_mode(DrawMode.DRAW),
                 menu,
                 toolbar,
@@ -1251,7 +1251,7 @@ class StimEditor(QtWidgets.QWidget):
         )
         self.actions_draw.append(
             add_action(
-                "Erase stimulus",
+                "Erase input",
                 lambda: self.set_draw_mode(DrawMode.ERASE),
                 menu,
                 toolbar,
@@ -1263,7 +1263,7 @@ class StimEditor(QtWidgets.QWidget):
         )
         self.actions_draw.append(
             add_action(
-                "Design stimulus",
+                "Set input value/length…",
                 self.choose_stim_intensity,
                 menu,
                 toolbar,
@@ -1367,7 +1367,7 @@ class StimEditor(QtWidgets.QWidget):
         )
         self.actions_edit.append(
             add_action(
-                "Delete selected stim region",
+                "Delete selected input region",
                 self.delete_selected_stim,
                 menu,
                 toolbar,
@@ -1386,7 +1386,7 @@ class StimEditor(QtWidgets.QWidget):
         # (for their keyboard shortcuts, where applicable) but not on the
         # left toolbar.
         self.action_create_stim_array = add_action(
-            "Create stim array",
+            "Create input array",
             self.create_stim_array,
             menu,
             None,
@@ -1394,7 +1394,7 @@ class StimEditor(QtWidgets.QWidget):
             icon="mdi6.text-box-plus",
         )
         self.action_edit_stim_array = add_action(
-            "Edit stim array",
+            "Edit input array",
             self.edit_stim_array,
             menu,
             None,
@@ -1402,7 +1402,7 @@ class StimEditor(QtWidgets.QWidget):
             icon="mdi6.text-box-edit",
         )
         self.action_delete_stim_array = add_action(
-            "Delete stim array",
+            "Delete input array",
             self.delete_stim_array,
             menu,
             None,
@@ -1410,7 +1410,7 @@ class StimEditor(QtWidgets.QWidget):
             icon="mdi6.text-box-remove",
         )
         self.action_clear_stim_array = add_action(
-            "Clear stim array",
+            "Clear input array",
             self.clear_stim_array,
             menu,
             None,
@@ -1428,14 +1428,14 @@ class StimEditor(QtWidgets.QWidget):
         self.action_trim_to_mapped_neurons.setEnabled(False)
         self.action_trim_to_mapped_neurons.setToolTip(
             "Permanently keep only the neurons with a Cellpose cell mapped to "
-            "them, removing the rest from every stim array and experiment in "
+            "them, removing the rest from every input array and experiment in "
             "this project."
         )
         # Pad/Trim/Loop stim array also moved to the stim array ops dropdown
         # in the top Data toolbar (issue #535) - see
         # Gui._add_stim_array_ops_button_to_data_toolbar().
         self.action_pad_stim_array = add_action(
-            "Pad stim array (Ctrl+Shift+Plus)",
+            "Pad input array (Ctrl+Shift+Plus)",
             self.pad_stim_array,
             menu,
             None,
@@ -1444,7 +1444,7 @@ class StimEditor(QtWidgets.QWidget):
             icon="mdi6.timeline-plus",
         )
         self.action_trim_stim_array = add_action(
-            "Trim stim array (Ctrl+Shift+Minus)",
+            "Trim input array (Ctrl+Shift+Minus)",
             self.trim_stim_array,
             menu,
             None,
@@ -1453,7 +1453,7 @@ class StimEditor(QtWidgets.QWidget):
             icon="mdi6.timeline-minus",
         )
         self.action_loop_stim_array = add_action(
-            "Loop stim array",
+            "Loop input array",
             self.loop_stim_array,
             menu,
             None,
@@ -1483,7 +1483,7 @@ class StimEditor(QtWidgets.QWidget):
             icon="mdi6.pencil-box-multiple-outline",
         )
         self.action_show_all_stim_arrays = add_action(
-            "Show all stim arrays",
+            "Show all input arrays",
             self.toggle_show_all_stim_arrays,
             menu,
             None,

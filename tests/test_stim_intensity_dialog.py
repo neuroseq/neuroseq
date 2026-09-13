@@ -19,7 +19,7 @@ def test_stim_intensity_dialog(qtbot: QtBot):
     dialog.show()
     qtbot.waitUntil(lambda: dialog.isVisible())
 
-    assert dialog.windowTitle() == "Design stimulus"
+    assert dialog.windowTitle() == "Design input"
     assert dialog.rad_intensity_linear.text() == "Ramp"
     assert not hasattr(dialog, "rad_intensity_log")
     assert not hasattr(dialog, "rad_intensity_random")

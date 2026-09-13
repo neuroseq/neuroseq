@@ -21,7 +21,7 @@ class StimIntensityDialog(QtWidgets.QDialog):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Design stimulus")
+        self.setWindowTitle("Design input")
         self.draw_stim = draw_stim
         self.stim_units = stim_units
         self.stim_type = stim_type
@@ -79,7 +79,7 @@ class StimIntensityDialog(QtWidgets.QDialog):
         dt_ms = format_milliseconds(self.dt_seconds * 1000.0)
         self.label_length = QtWidgets.QLabel(
             "Length in milliseconds (rounded to nearest multiple of selected "
-            f"stim dt = {dt_ms} ms):",
+            f"input dt = {dt_ms} ms):",
             self,
         )
         self.layout.addWidget(self.label_length)

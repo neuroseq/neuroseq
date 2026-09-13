@@ -86,7 +86,7 @@ def test_switching_mode_shows_only_the_relevant_action_group(qtbot: QtBot) -> No
 
 
 def test_drawing_actions_sit_directly_under_draw_mode_button(qtbot: QtBot) -> None:
-    """Draw stimulus / Erase stimulus / Design stimulus are specific to Draw
+    """Draw input / Erase input / Set input value/length… are specific to Draw
 
     mode, so they sit right after the Draw mode toggle - between it and
     Select mode - rather than far below near Undo/Redo (issue #535).
@@ -101,9 +101,9 @@ def test_drawing_actions_sit_directly_under_draw_mode_button(qtbot: QtBot) -> No
     draw_mode_index = texts.index("Draw mode (1)")
     select_mode_index = texts.index("Select mode (2)")
     assert texts[draw_mode_index + 1 : select_mode_index] == [
-        "Draw stimulus",
-        "Erase stimulus",
-        "Design stimulus",
+        "Draw input",
+        "Erase input",
+        "Set input value/length…",
     ]
     stim_editor.close()
 
@@ -140,7 +140,7 @@ def test_selection_actions_sit_directly_under_select_mode_button(
         "Paste inverted (Ctrl+Shift+V)",
         "Save to file",
         "Load from file",
-        "Delete selected stim region",
+        "Delete selected input region",
     ]
     stim_editor.close()
 
@@ -148,7 +148,7 @@ def test_selection_actions_sit_directly_under_select_mode_button(
 def test_stim_array_lifecycle_actions_are_not_in_the_left_toolbar(
     qtbot: QtBot,
 ) -> None:
-    """Create/Edit/Delete/Clear stim array and Trim to Mapped Neurons moved
+    """Create/Edit/Delete/Clear input array and Trim to Mapped Neurons moved
 
     to a dropdown in the top Data toolbar next to the stim data combobox
     (issue #535) - Gui._add_stim_array_ops_button_to_data_toolbar() adds
@@ -162,10 +162,10 @@ def test_stim_array_lifecycle_actions_are_not_in_the_left_toolbar(
     qtbot.addWidget(stim_editor)
 
     array_op_names = [
-        "Create stim array",
-        "Edit stim array",
-        "Delete stim array",
-        "Clear stim array",
+        "Create input array",
+        "Edit input array",
+        "Delete input array",
+        "Clear input array",
         "Trim to Mapped Neurons…",
     ]
     toolbar_texts = {a.text() for a in toolbar.actions()}
@@ -191,9 +191,9 @@ def test_pad_trim_loop_actions_are_not_in_the_left_toolbar(qtbot: QtBot) -> None
     qtbot.addWidget(stim_editor)
 
     time_op_names = [
-        "Pad stim array (Ctrl+Shift+Plus)",
-        "Trim stim array (Ctrl+Shift+Minus)",
-        "Loop stim array",
+        "Pad input array (Ctrl+Shift+Plus)",
+        "Trim input array (Ctrl+Shift+Minus)",
+        "Loop input array",
     ]
     toolbar_texts = {a.text() for a in toolbar.actions()}
     assert toolbar_texts.isdisjoint(time_op_names)
@@ -206,7 +206,7 @@ def test_pad_trim_loop_actions_are_not_in_the_left_toolbar(qtbot: QtBot) -> None
 def test_design_and_show_all_actions_are_not_in_the_left_toolbar(
     qtbot: QtBot,
 ) -> None:
-    """Design static input / Design dynamic input / Show all stim arrays
+    """Design static input / Design dynamic input / Show all input arrays
 
     moved to the top View toolbar (issue #535) -
     Gui._add_stim_design_buttons_to_view_toolbar and the Show all stim
@@ -223,7 +223,7 @@ def test_design_and_show_all_actions_are_not_in_the_left_toolbar(
     design_op_names = [
         "Design static input",
         "Design dynamic input",
-        "Show all stim arrays",
+        "Show all input arrays",
     ]
     toolbar_texts = {a.text() for a in toolbar.actions()}
     assert toolbar_texts.isdisjoint(design_op_names)
@@ -559,7 +559,7 @@ def test_routine_dialogs_have_reset_stim_array_button(qtbot: QtBot) -> None:
         qtbot.waitUntil(lambda s=selector: not s.isVisible())
         dialog = getattr(stim_editor, attr)
         assert dialog is not None
-        assert dialog.btn_reset.text() == "Reset stim array"
+        assert dialog.btn_reset.text() == "Reset input array"
         dialog.close()
         qtbot.waitUntil(lambda d=dialog: not d.isVisible())
     stim_editor.close()
@@ -753,7 +753,7 @@ def test_choose_stim_intensity_passes_and_reads_back_draw_stim_length(
 ) -> None:
     """ "Draw designer stimuli" and "Modify stimulus length" were merged into
 
-    one "Design stimulus" dialog/action (issue #535); choose_stim_intensity
+    one "Set input value/length…" dialog/action (issue #535); choose_stim_intensity
     now carries the stim length through StimIntensityDialog too.
     """
     monkeypatch.setattr(
@@ -802,7 +802,7 @@ def test_stim_editor_left_toolbar_has_one_design_stimulus_action(
     qtbot.addWidget(stim_editor)
 
     texts = [a.text() for a in toolbar.actions()]
-    assert texts.count("Design stimulus") == 1
+    assert texts.count("Set input value/length…") == 1
     assert "Draw designer stimuli" not in texts
     assert "Modify stimulus length" not in texts
     stim_editor.close()

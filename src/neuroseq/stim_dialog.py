@@ -32,7 +32,7 @@ class EditStimDialog(QDialog):
         self._name_error = ""
         self._dt_error = ""
 
-        self.setWindowTitle("Edit StimArray")
+        self.setWindowTitle("Edit Input Array")
         self.setModal(True)
 
         self.layout = QGridLayout()
@@ -104,7 +104,7 @@ class EditStimDialog(QDialog):
     def txt_name_text_changed(self, text: str) -> None:
         self.name = text
         if text in self.existing_names:
-            self._name_error = f"A stimulus array with name '{text}' already exists."
+            self._name_error = f"An input array with name '{text}' already exists."
         else:
             self._name_error = ""
         self._update_validation_state()
@@ -127,5 +127,5 @@ class EditStimDialog(QDialog):
             self.dt = validate_stim_dt_seconds(float(text))
             self._dt_error = ""
         except (TypeError, ValueError):
-            self._dt_error = "Stimulus timestep must be a positive finite number."
+            self._dt_error = "Input timestep must be a positive finite number."
         self._update_validation_state()

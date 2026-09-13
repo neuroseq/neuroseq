@@ -12,7 +12,7 @@ class StimLoopDialog(QtWidgets.QDialog):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Loop stim array")
+        self.setWindowTitle("Loop input array")
         self.project = project
 
         self.status_label = QtWidgets.QLabel(self)
@@ -55,12 +55,12 @@ class StimLoopDialog(QtWidgets.QDialog):
     def _refresh_status_label(self) -> None:
         reference_stim = self._reference_stim()
         if reference_stim is None:
-            self.status_label.setText("(no stim arrays)")
+            self.status_label.setText("(no input arrays)")
             return
         n_timestamps = int(reference_stim.values.shape[0])
         current_ms = n_timestamps * reference_stim.dt * 1000.0
         looped_ms = current_ms * self.loop_count
         self.status_label.setText(
-            f"Current stim length: {current_ms:.1f} ms ({n_timestamps} samples) "
+            f"Current input length: {current_ms:.1f} ms ({n_timestamps} samples) "
             f"-> after x {self.loop_count} = {looped_ms:.1f} ms"
         )
