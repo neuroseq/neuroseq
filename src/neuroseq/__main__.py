@@ -236,7 +236,7 @@ def main(
         # persisted theme, instead of appearing unthemed until a project
         # is chosen.
         apply_app_theme(app, settings.theme)
-        startup_dialog = StartupDialog()
+        startup_dialog = StartupDialog(settings)
         if not startup_dialog.exec():
             logging.getLogger(__name__).info(
                 "Startup dialog dismissed without a choice, exiting"

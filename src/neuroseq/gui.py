@@ -941,6 +941,7 @@ class Gui(QtWidgets.QMainWindow):
 
         def _on_saved(result: object) -> None:
             self.logger.info(f"Project saved to '{result}'.")
+            self.settings.add_recent_project(str(result))
             self._update_window_title()
             if on_success is not None:
                 on_success(result)
@@ -1205,6 +1206,7 @@ class Gui(QtWidgets.QMainWindow):
             if not isinstance(result, Project):
                 return
             self.logger.info(f"Project loaded from {filename}")
+            self.settings.add_recent_project(str(filename))
             self.last_cellpose_import = clone_cellpose_result(result.cellpose_data)
             result.cellpose_data = self.last_cellpose_import
             _place(result)
