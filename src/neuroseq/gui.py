@@ -2793,6 +2793,8 @@ class Gui(QtWidgets.QMainWindow):
 
         self.menu_settings = menu.addMenu("Se&ttings")
         assert self.menu_settings is not None
+        self.menu_tools = menu.addMenu("&Tools")
+        assert self.menu_tools is not None
         self.menu_help = menu.addMenu("&Help")
         assert self.menu_help is not None
         self._create_actions_data(toolbar=self.toolbar_data, menu=None)
@@ -2803,6 +2805,7 @@ class Gui(QtWidgets.QMainWindow):
         assert self.menu_playback is not None
         assert self.menu_view is not None
         assert self.menu_settings is not None
+        assert self.menu_tools is not None
         assert self.menu_help is not None
         assert self.menu_experiment is not None
         self._create_actions_file(self.menu_file, self.toolbar_file)
@@ -2810,6 +2813,7 @@ class Gui(QtWidgets.QMainWindow):
         self._create_actions_playback(self.menu_playback, self.toolbar_playback)
         self._create_actions_view(self.menu_view, self.toolbar_view)
         self._create_actions_settings(menu=self.menu_settings, toolbar=None)
+        self._create_actions_tools(menu=self.menu_tools)
         self._create_actions_help(menu=self.menu_help, toolbar=None)
         self._create_action_experiment(self.menu_experiment, toolbar=None)
         self._create_actions_replay_analysis()
@@ -3431,7 +3435,6 @@ class Gui(QtWidgets.QMainWindow):
             "&Synapse Matrix RAM Limit", self.choose_max_ram_synapse_plot_matrix, menu
         )
         add_action("&Trace Plot RAM Limit", self.choose_max_ram_trace_plot_matrix, menu)
-        add_action("&Change Fiji Path…", self.choose_fiji_path, menu)
         self._create_theme_menu(menu)
 
     def _create_theme_menu(self, menu: QtWidgets.QMenu) -> None:
@@ -3455,6 +3458,22 @@ class Gui(QtWidgets.QMainWindow):
             )
             self._theme_action_group.addAction(action)
             self._theme_actions[name] = action
+
+    def _create_actions_tools(self, menu: QtWidgets.QMenu) -> None:
+        add_action(
+            "&Open Fiji",
+            self.btn_open_fiji_clicked,
+            menu,
+            icon="mdi6.microscope",
+        )
+        add_action(
+            "Open &Cellpose",
+            self.btn_open_cellpose_clicked,
+            menu,
+            icon="mdi6.dots-hexagon",
+        )
+        menu.addSeparator()
+        add_action("&Change Fiji Path…", self.choose_fiji_path, menu)
 
     def _create_actions_help(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None
@@ -3509,17 +3528,6 @@ class Gui(QtWidgets.QMainWindow):
         toolbar.addSeparator()
         toolbar.addWidget(QtWidgets.QLabel("  All data: "))
         toolbar.addWidget(self.cmb_data)
-        toolbar.addSeparator()
-        self.btn_open_fiji = QtWidgets.QPushButton("Open Fiji")
-        self.btn_open_fiji.setToolTip("Launch Fiji/ImageJ")
-        icons.set_widget_icon(self.btn_open_fiji, "mdi6.microscope")
-        self.btn_open_fiji.clicked.connect(self.btn_open_fiji_clicked)
-        toolbar.addWidget(self.btn_open_fiji)
-        self.btn_open_cellpose = QtWidgets.QPushButton("Open Cellpose")
-        self.btn_open_cellpose.setToolTip("Launch the Cellpose GUI")
-        icons.set_widget_icon(self.btn_open_cellpose, "mdi6.dots-hexagon")
-        self.btn_open_cellpose.clicked.connect(self.btn_open_cellpose_clicked)
-        toolbar.addWidget(self.btn_open_cellpose)
 
     def _create_action_experiment(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None

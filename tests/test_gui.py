@@ -289,6 +289,10 @@ def test_gui_click_exit(qtbot: QtBot) -> None:
     gui.close()
 
 
+def _find_action(menu: QtWidgets.QMenu, text: str) -> QtWidgets.QAction:
+    return next(a for a in menu.actions() if a.text().replace("&", "") == text)
+
+
 def test_gui_open_fiji_and_cellpose_buttons(
     qtbot: QtBot, monkeypatch: MonkeyPatch
 ) -> None:
@@ -297,8 +301,8 @@ def test_gui_open_fiji_and_cellpose_buttons(
     gui = Gui()
     qtbot.addWidget(gui)
 
-    assert gui.btn_open_fiji.text() == "Open Fiji"
-    assert gui.btn_open_cellpose.text() == "Open Cellpose"
+    fiji_action = _find_action(gui.menu_tools, "Open Fiji")
+    cellpose_action = _find_action(gui.menu_tools, "Open Cellpose")
 
     fiji_calls: list[object] = []
     cellpose_calls: list[object] = []
@@ -309,32 +313,40 @@ def test_gui_open_fiji_and_cellpose_buttons(
         external_tools, "launch_cellpose", lambda parent: cellpose_calls.append(parent)
     )
 
-    gui.btn_open_fiji.click()
-    gui.btn_open_cellpose.click()
+    fiji_action.trigger()
+    cellpose_action.trigger()
     assert fiji_calls == [gui]
     assert cellpose_calls == [gui]
     gui.close()
 
 
-def test_open_fiji_and_cellpose_buttons_are_at_the_end_of_the_data_toolbar(
+def test_tools_menu_holds_fiji_cellpose_and_change_fiji_path(
     qtbot: QtBot,
 ) -> None:
+    """Open Fiji / Open Cellpose / Change Fiji Path moved out of the Data
+
+    toolbar and Settings menu into their own Tools menu, between Settings
+    and Help (issue #535).
+    """
     gui = Gui()
     qtbot.addWidget(gui)
 
-    actions = gui.toolbar_data.actions()
-    fiji_index = next(
-        i
-        for i, action in enumerate(actions)
-        if gui.toolbar_data.widgetForAction(action) is gui.btn_open_fiji
-    )
-    cellpose_index = next(
-        i
-        for i, action in enumerate(actions)
-        if gui.toolbar_data.widgetForAction(action) is gui.btn_open_cellpose
-    )
-    assert fiji_index == len(actions) - 2
-    assert cellpose_index == len(actions) - 1
+    menu_bar = gui.menuBar()
+    assert menu_bar is not None
+    top_level_menus = [a.menu() for a in menu_bar.actions()]
+    settings_index = top_level_menus.index(gui.menu_settings)
+    tools_index = top_level_menus.index(gui.menu_tools)
+    help_index = top_level_menus.index(gui.menu_help)
+    assert settings_index < tools_index < help_index
+
+    texts = [a.text().replace("&", "") for a in gui.menu_tools.actions()]
+    assert texts[0] == "Open Fiji"
+    assert texts[1] == "Open Cellpose"
+    assert gui.menu_tools.actions()[2].isSeparator()
+    assert texts[3] == "Change Fiji Path…"
+
+    settings_texts = [a.text().replace("&", "") for a in gui.menu_settings.actions()]
+    assert "Change Fiji Path…" not in settings_texts
     gui.close()
 
 
