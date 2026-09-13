@@ -1332,7 +1332,7 @@ def test_open_input_designer_shows_selector_with_preview(qtbot: QtBot) -> None:
     assert selector.windowTitle() == "Design dynamic input"
     assert _routine_combo_items(selector) == [
         "Targeted STDP synaptic strength",
-        "Minimal stimulus for spiking (rheobase)",
+        "Minimal input for spiking (rheobase)",
         "STDP timing window (LTP/LTD vs Δt)",
     ]
     # The preview is always on: the initial selection already shows goal text

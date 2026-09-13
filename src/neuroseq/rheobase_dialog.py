@@ -69,7 +69,7 @@ class RheobaseDialog(QtWidgets.QDialog):
         self._compact_height: int | None = None
         self._logged_recovery_note = False
         self._resolution_warning_logged = False
-        self.setWindowTitle("Minimal stimulus for spiking (rheobase)")
+        self.setWindowTitle("Minimal input for spiking (rheobase)")
         self.resize(640, 620)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -244,9 +244,7 @@ class RheobaseDialog(QtWidgets.QDialog):
         )
 
         self.plot_window = QtWidgets.QDialog(self)
-        self.plot_window.setWindowTitle(
-            "Minimal stimulus for spiking (rheobase) — plots"
-        )
+        self.plot_window.setWindowTitle("Minimal input for spiking (rheobase) — plots")
         self.plot_window.setWindowFlag(
             QtCore.Qt.WindowType.WindowMinimizeButtonHint, True
         )

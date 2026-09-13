@@ -65,7 +65,7 @@ class StimEditor(QtWidgets.QWidget):
 
     # Dynamic-input routines offered when the user opens the designer.
     TARGETED_STDP_ROUTINE = "Targeted STDP synaptic strength"
-    RHEOBASE_ROUTINE = "Minimal stimulus for spiking (rheobase)"
+    RHEOBASE_ROUTINE = "Minimal input for spiking (rheobase)"
     STDP_WINDOW_ROUTINE = "STDP timing window (LTP/LTD vs Δt)"
     DYNAMIC_INPUT_ROUTINES = (
         TARGETED_STDP_ROUTINE,

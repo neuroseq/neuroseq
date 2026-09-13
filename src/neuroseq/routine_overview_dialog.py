@@ -90,10 +90,10 @@ ROUTINE_OVERVIEWS: dict[str, RoutineOverview] = {
         plot_title="Drive the EPSP to a target",
         plot=_plot_targeted_stdp,
     ),
-    "Minimal stimulus for spiking (rheobase)": RoutineOverview(
-        title="Minimal stimulus for spiking (rheobase)",
+    "Minimal input for spiking (rheobase)": RoutineOverview(
+        title="Minimal input for spiking (rheobase)",
         goal=(
-            "Find the smallest stimulus that makes a neuron fire — its rheobase. "
+            "Find the smallest input that makes a neuron fire — its rheobase. "
             "The routine sweeps the pulse amplitude (or duration) with a bisection "
             "search, checking after each probe whether the neuron crossed the "
             "spike threshold, and reports the minimal value that elicits a spike."
