@@ -263,7 +263,12 @@ def test_segment_to_neuroseq_converts_spikes_and_optional_traces() -> None:
 
 def test_pynn_demo_simulate_and_module_wrapper(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_parameters = types.ModuleType("pyNN.parameters")
-    setattr(fake_parameters, "Sequence", lambda values: ("sequence", tuple(values)))
+    monkeypatch.setattr(
+        fake_parameters,
+        "Sequence",
+        lambda values: ("sequence", tuple(values)),
+        raising=False,
+    )
     monkeypatch.setitem(sys.modules, "pyNN", types.ModuleType("pyNN"))
     monkeypatch.setitem(sys.modules, "pyNN.parameters", fake_parameters)
 
