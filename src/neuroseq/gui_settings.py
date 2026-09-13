@@ -5,7 +5,6 @@ import logging
 import pathlib
 import shutil
 from dataclasses import dataclass
-from dataclasses import field
 
 import brian2 as b2
 from platformdirs import user_config_dir
@@ -30,8 +29,6 @@ _FIJI_HOME_CANDIDATES = (
     pathlib.Path("Fiji") / "fiji",
     pathlib.Path("Fiji.app") / "ImageJ-linux64",
 )
-
-MAX_RECENT_PROJECTS = 8
 
 
 def _autodetect_fiji() -> str:
@@ -59,23 +56,14 @@ class GuiSettings:
     llm_ollama_base_url: str = "http://localhost:11434"
     llm_openai_base_url: str = ""
     fiji_executable_path: str = ""
-    recent_projects: list[str] = field(default_factory=list)
 
     def __init__(self) -> None:
         self.logger: logging.Logger
         self.__dict__["logger"] = logging.getLogger(__name__)
         self.logger.info("loading GUI settings")
         self.__dict__["fiji_executable_path"] = _autodetect_fiji()
-        self.__dict__["recent_projects"] = []
         self.load_config_settings()
         b2.prefs.codegen.target = self.brian2_backend
-
-    def add_recent_project(self, path: str) -> None:
-        """Record ``path`` as the most recently opened/saved project file,
-        for the startup screen's Recent Projects list."""
-        normalized = str(pathlib.Path(path).resolve())
-        updated = [normalized] + [p for p in self.recent_projects if p != normalized]
-        self.recent_projects = updated[:MAX_RECENT_PROJECTS]
 
     def __setattr__(self, prop, val):
         super().__setattr__(prop, val)
@@ -100,7 +88,6 @@ class GuiSettings:
                         "llm_ollama_base_url": self.llm_ollama_base_url,
                         "llm_openai_base_url": self.llm_openai_base_url,
                         "fiji_executable_path": self.fiji_executable_path,
-                        "recent_projects": self.recent_projects,
                     },
                     f,
                 )
@@ -145,7 +132,6 @@ class GuiSettings:
                 "llm_openai_base_url", self.llm_openai_base_url
             )
             fiji_executable_path = config.get("fiji_executable_path", None)
-            recent_projects = config.get("recent_projects", [])
 
             # setting values
             if brian2_backend in ["cython", "numpy"]:
@@ -224,16 +210,6 @@ class GuiSettings:
                 self.__dict__["fiji_executable_path"] = _autodetect_fiji()
             else:
                 self.__dict__["fiji_executable_path"] = str(fiji_executable_path)
-            if isinstance(recent_projects, list) and all(
-                isinstance(p, str) for p in recent_projects
-            ):
-                self.__dict__["recent_projects"] = recent_projects[:MAX_RECENT_PROJECTS]
-            else:
-                self.logger.warning(
-                    f"Invalid recent_projects in config file {config_file}: "
-                    f"{recent_projects!r}. Restoring empty list"
-                )
-                self.__dict__["recent_projects"] = []
         except Exception as e:
             self.logger.warning(f"Could not load config file: {e}")
             self.logger.exception(e)

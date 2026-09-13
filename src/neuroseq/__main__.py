@@ -205,6 +205,10 @@ def main(
     from qtpy import QtWidgets
 
     from neuroseq.gui import Gui
+    from neuroseq.gui_settings import GuiSettings
+    from neuroseq.project import Project
+    from neuroseq.startup_dialog import StartupDialog
+    from neuroseq.theme import apply_app_theme
 
     msg = f"Launching {API_NAME} GUI with {log_level} logging to {log_file if log_file else 'console'}"
     click.echo(msg)
@@ -223,7 +227,26 @@ def main(
 
     app = QtWidgets.QApplication(sys.argv)
     app._interrupt_timer = _install_interrupt_handlers(app)
-    gui = Gui(filename=filename, show_startup_dialog=True)
+
+    initial_project: str | pathlib.Path | Project | None = filename
+    if initial_project is None:
+        settings = GuiSettings()
+        # Applied to the whole application (not just the eventual main
+        # window) so the startup dialog itself already matches the user's
+        # persisted theme, instead of appearing unthemed until a project
+        # is chosen.
+        apply_app_theme(app, settings.theme)
+        startup_dialog = StartupDialog()
+        if not startup_dialog.exec():
+            logging.getLogger(__name__).info(
+                "Startup dialog dismissed without a choice, exiting"
+            )
+            return
+        initial_project = (
+            startup_dialog.chosen_filename or startup_dialog.chosen_project
+        )
+
+    gui = Gui(filename=initial_project)
     gui.show()
     logging.getLogger(__name__).info("GUI initialized, entering Qt event loop")
     app.exec()

@@ -12,28 +12,61 @@ from neuroseq.__main__ import main
 
 
 class FakeGui:
+    last_instance: FakeGui | None = None
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        pass
+        self.filename = kwargs.get("filename", args[0] if args else None)
+        self.shown = False
+        FakeGui.last_instance = self
 
     def show(self) -> None:
-        pass
+        self.shown = True
 
 
 class FakeQApplication:
     def __init__(self, *args: Any) -> None:
         self.quit_called = False
+        self.exec_called = False
 
     def exec(self) -> None:
-        pass
+        self.exec_called = True
 
     def quit(self) -> None:
         self.quit_called = True
 
 
+class FakeGuiSettings:
+    def __init__(self) -> None:
+        self.theme = "retro"
+
+
+class FakeStartupDialog:
+    """Stands in for the real StartupDialog: accepts immediately with a
+    fixed filename chosen, unless a test overrides its class attributes."""
+
+    accepts: bool = True
+    chosen_filename: str | None = "/fake/chosen_project.nseq"
+    chosen_project: Any | None = None
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.chosen_filename = type(self).chosen_filename
+        self.chosen_project = type(self).chosen_project
+
+    def exec(self) -> bool:
+        return type(self).accepts
+
+
 @pytest.fixture()
 def cli_runner_fake_gui(monkeypatch: pytest.MonkeyPatch) -> CliRunner:
+    FakeGui.last_instance = None
+    FakeStartupDialog.accepts = True
+    FakeStartupDialog.chosen_filename = "/fake/chosen_project.nseq"
+    FakeStartupDialog.chosen_project = None
     monkeypatch.setattr("neuroseq.gui.Gui", FakeGui)
     monkeypatch.setattr("qtpy.QtWidgets.QApplication", FakeQApplication)
+    monkeypatch.setattr("neuroseq.gui_settings.GuiSettings", FakeGuiSettings)
+    monkeypatch.setattr("neuroseq.startup_dialog.StartupDialog", FakeStartupDialog)
+    monkeypatch.setattr("neuroseq.theme.apply_app_theme", lambda *a, **k: None)
     monkeypatch.setattr(
         "neuroseq.__main__._install_interrupt_handlers", lambda app: None
     )
@@ -84,6 +117,35 @@ def test_main_logging_valid(
     assert log_level.upper() in result.output
     assert log_file in result.output
     assert result.exit_code == 0
+
+
+def test_main_shows_startup_dialog_and_opens_its_choice_when_no_filename_given(
+    cli_runner_fake_gui: CliRunner,
+) -> None:
+    FakeStartupDialog.chosen_filename = "/fake/chosen_project.nseq"
+    result = cli_runner_fake_gui.invoke(main)
+    assert result.exit_code == 0
+    assert FakeGui.last_instance is not None
+    assert FakeGui.last_instance.filename == "/fake/chosen_project.nseq"
+    assert FakeGui.last_instance.shown is True
+
+
+def test_main_skips_startup_dialog_when_a_filename_is_given(
+    cli_runner_fake_gui: CliRunner,
+) -> None:
+    result = cli_runner_fake_gui.invoke(main, ["/some/explicit/project.nseq"])
+    assert result.exit_code == 0
+    assert FakeGui.last_instance is not None
+    assert FakeGui.last_instance.filename == "/some/explicit/project.nseq"
+
+
+def test_main_exits_without_launching_gui_when_startup_dialog_is_dismissed(
+    cli_runner_fake_gui: CliRunner,
+) -> None:
+    FakeStartupDialog.accepts = False
+    result = cli_runner_fake_gui.invoke(main)
+    assert result.exit_code == 0
+    assert FakeGui.last_instance is None
 
 
 @pytest.mark.parametrize("log_level", ["INVALIDLEVEL", "Warn"])

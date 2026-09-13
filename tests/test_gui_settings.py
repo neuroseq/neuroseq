@@ -88,55 +88,6 @@ def test_gui_load_config_settings(tmp_config_dir) -> None:
     assert settings.stim_padding_secs == 0
 
 
-def test_add_recent_project_dedupes_and_orders_most_recent_first(
-    tmp_config_dir,
-) -> None:
-    settings = GuiSettings()
-    settings.add_recent_project("/tmp/a.nseq")
-    settings.add_recent_project("/tmp/b.nseq")
-    assert settings.recent_projects == ["/tmp/b.nseq", "/tmp/a.nseq"]
-
-    # re-adding an existing path moves it to the front instead of duplicating
-    settings.add_recent_project("/tmp/a.nseq")
-    assert settings.recent_projects == ["/tmp/a.nseq", "/tmp/b.nseq"]
-
-
-def test_add_recent_project_caps_list_length(tmp_config_dir) -> None:
-    settings = GuiSettings()
-    for i in range(10):
-        settings.add_recent_project(f"/tmp/project_{i}.nseq")
-    assert len(settings.recent_projects) == 8
-    assert settings.recent_projects[0] == "/tmp/project_9.nseq"
-
-
-def test_recent_projects_persists_and_reloads(tmp_config_dir) -> None:
-    settings = GuiSettings()
-    settings.add_recent_project("/tmp/a.nseq")
-    settings.add_recent_project("/tmp/b.nseq")
-
-    settings.__dict__["recent_projects"] = []
-    settings.load_config_settings()
-    assert settings.recent_projects == ["/tmp/b.nseq", "/tmp/a.nseq"]
-
-
-def test_recent_projects_falls_back_to_empty_list_for_invalid_config(
-    tmp_config_dir,
-) -> None:
-    settings = GuiSettings()
-    settings.add_recent_project("/tmp/a.nseq")
-
-    config_dir = Path(tmp_config_dir)
-    config_file = config_dir / "config.json"
-    with open(config_file) as f:
-        config = json.load(f)
-    config["recent_projects"] = "not-a-list"
-    with open(config_file, "w") as f:
-        json.dump(config, f)
-
-    settings.load_config_settings()
-    assert settings.recent_projects == []
-
-
 def test_gui_theme_setting_roundtrip_and_validation(tmp_config_dir) -> None:
     settings = GuiSettings()
     assert settings.theme == "retro"

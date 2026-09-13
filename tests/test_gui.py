@@ -289,45 +289,6 @@ def test_gui_click_exit(qtbot: QtBot) -> None:
     gui.close()
 
 
-def test_gui_startup_dialog_falls_back_to_default_project_when_dismissed(
-    qtbot: QtBot,
-) -> None:
-    """The autouse patch_b2w_exec_show fixture turns StartupDialog.exec()
-    into a non-blocking .show(), so no choice is ever made here - this
-    exercises the "dismissed without a choice" fallback."""
-    gui = Gui(show_startup_dialog=True)
-    qtbot.addWidget(gui)
-    assert gui.project.project_name == "Getting Started Project"
-    gui.close()
-
-
-def test_gui_startup_dialog_is_skipped_when_a_filename_is_given(
-    monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_path: Path, test_project: Project
-) -> None:
-    project_path = tmp_path / "model.nseq"
-    test_project.save(
-        project_path,
-        SaveLoadOptions(
-            include_stim_arrays=True,
-            include_model=True,
-            include_simulation_data=False,
-            include_experimental_data=False,
-        ),
-    )
-
-    def _fail_if_shown(*args, **kwargs):
-        raise AssertionError(
-            "StartupDialog should not be shown when a filename is given"
-        )
-
-    monkeypatch.setattr(neuroseq.gui, "StartupDialog", _fail_if_shown)
-    gui = Gui(filename=project_path, show_startup_dialog=True)
-    qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
-    assert gui.project.filepath == project_path
-    gui.close()
-
-
 def _find_action(menu: QtWidgets.QMenu, text: str) -> QtWidgets.QAction:
     return next(a for a in menu.actions() if a.text().replace("&", "") == text)
 
@@ -2224,57 +2185,6 @@ def test_gui_open(
     assert list(gui.project.b2_model.monitors.keys()) == list(
         project.b2_model.monitors.keys()
     )
-    gui.close()
-
-
-def test_gui_open_adds_to_recent_projects(
-    monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_path: Path, test_project: Project
-) -> None:
-    gui = Gui()
-    gui.show()
-    qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible())
-    project_path = tmp_path / "model.nseq"
-    test_project.save(
-        project_path,
-        SaveLoadOptions(
-            include_stim_arrays=True,
-            include_model=True,
-            include_simulation_data=False,
-            include_experimental_data=False,
-        ),
-    )
-    monkeypatch.setattr(
-        QtWidgets.QFileDialog,
-        "getOpenFileName",
-        lambda *args: (f"{project_path}", True),
-    )
-    gui.btn_open_clicked()
-    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
-
-    assert gui.settings.recent_projects[0] == str(project_path.resolve())
-    gui.close()
-
-
-def test_gui_save_adds_to_recent_projects(
-    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, project_ornstein: Project
-) -> None:
-    gui = Gui()
-    gui.show()
-    qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible())
-    gui.update_project(project_ornstein)
-    filename_without_extension = tmp_path / "saved"
-    filename = filename_without_extension.with_suffix(".nseq")
-    monkeypatch.setattr(
-        QtWidgets.QFileDialog,
-        "getSaveFileName",
-        lambda *args: (f"{filename_without_extension}", True),
-    )
-    gui.btn_save_clicked()
-    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
-
-    assert gui.settings.recent_projects[0] == str(filename.resolve())
     gui.close()
 
 
