@@ -25,6 +25,10 @@ stimulus-to-drive mapping and the output conversion are shared.
 ``pyNN`` is intentionally *not* a declared NeuroSeq dependency. Importing this
 module is cheap; the backend is only imported when :meth:`PynnDemo.simulate`
 runs, and a missing backend raises a clear :class:`ImportError`.
+
+pip install "PyNN==0.12.3"
+uv run --with "PyNN==0.13" neuroseq
+
 """
 
 from __future__ import annotations
