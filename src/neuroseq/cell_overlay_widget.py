@@ -170,6 +170,14 @@ class OverlayView(FullScreenFPLWidget):
         # is no separate mode toggle.
         self._lasso_points: list[tuple[float, float]] = []
         self._lasso_line: LineGraphic | None = None
+        # background_clicked fires on a double-click, not a single one - a
+        # single click on empty space is easy to hit by accident while
+        # aiming for a cell, and would otherwise silently wipe the
+        # selection. Tracked the same way pygfx's own click/double_click
+        # dispatch does: same world position (within tolerance) and within
+        # the platform's configured double-click interval.
+        self._last_background_click_time: float | None = None
+        self._last_background_click_world: tuple[float, float] | None = None
         self.on_geometry_changed: Callable[[AreasOfInterestConfig], None] | None = None
         # A right click inside the canvas is reserved for the lasso-select
         # gesture above - Qt's default policy (NoContextMenu) explicitly
@@ -910,9 +918,39 @@ class OverlayView(FullScreenFPLWidget):
             return
         cellpose_id = self._segmentation_id_at(float(mouse_pos[0]), float(mouse_pos[1]))
         if cellpose_id is not None:
+            self._last_background_click_time = None
+            self._last_background_click_world = None
             self.neuron_clicked.emit(cellpose_id)
         else:
+            self._handle_background_click(
+                ev.time_stamp, float(mouse_pos[0]), float(mouse_pos[1])
+            )
+
+    def _handle_background_click(self, time_stamp: float, x: float, y: float) -> None:
+        """Emit background_clicked only on the second click of a double-click.
+
+        A single click on empty space is an easy accidental miss while
+        aiming for a cell, and would otherwise silently clear the
+        selection - see the comment on the tracking state in __init__.
+        """
+        interval_s = QtWidgets.QApplication.doubleClickInterval() / 1000.0
+        is_double_click = (
+            self._last_background_click_time is not None
+            and time_stamp - self._last_background_click_time <= interval_s
+            and self._last_background_click_world is not None
+            and math.hypot(
+                x - self._last_background_click_world[0],
+                y - self._last_background_click_world[1],
+            )
+            <= self._world_tolerance()
+        )
+        if is_double_click:
+            self._last_background_click_time = None
+            self._last_background_click_world = None
             self.background_clicked.emit()
+        else:
+            self._last_background_click_time = time_stamp
+            self._last_background_click_world = (x, y)
 
     def _cells_inside_polygon(self, points: list[tuple[float, float]]) -> list[int]:
         if not self._label_centers:
