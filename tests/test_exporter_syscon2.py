@@ -1053,8 +1053,7 @@ def test_check_syscon2_input_sanity_fails_without_active_samples() -> None:
     assert not sanity.is_valid
     assert sanity.export_report is None
     assert any(
-        "no active stimulation samples found" in error.lower()
-        for error in sanity.errors
+        "no active input samples found" in error.lower() for error in sanity.errors
     )
 
 
@@ -1690,7 +1689,7 @@ def test_generate_syscon2_sequence_text_raises_when_no_active_stimulation() -> N
         units="1",
         dt=_DT_S,
     )
-    with pytest.raises(ValueError, match="No active stimulation"):
+    with pytest.raises(ValueError, match="No active input"):
         generate_syscon2_sequence_text(
             stim,
             _cellpose_result(mapping={0: 0}),

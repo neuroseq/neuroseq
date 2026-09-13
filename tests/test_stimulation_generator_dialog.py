@@ -415,7 +415,7 @@ def test_stimulation_generator_dialog_sanity_check_fails_for_inactive_input(
     qmessagebox_calls: list[dict[str, str]],
 ) -> None:
     # dt must match the SysCon2 tick quantum so the dt check passes and we reach
-    # the "no active stimulation" error.
+    # the "no active input" error.
     _DT_S = 0.0005208125
     values = np.zeros((64, 2), dtype=np.float32)
     project = Project()
@@ -434,7 +434,7 @@ def test_stimulation_generator_dialog_sanity_check_fails_for_inactive_input(
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "critical"
     assert "sanity check failed" in qmessagebox_calls[0]["title"].lower()
-    assert "no active stimulation samples" in qmessagebox_calls[0]["text"].lower()
+    assert "no active input samples" in qmessagebox_calls[0]["text"].lower()
 
 
 def test_stimulation_generator_dialog_applies_sanitized_values_after_confirmation(
