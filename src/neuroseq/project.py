@@ -121,6 +121,13 @@ class Project:
         filepath: str | pathlib.Path | None = None,
         report: Callable[[int], None] | None = None,
     ) -> None:
+        # Whether this project has changes not yet written to filepath - used
+        # to skip the "save before closing/discarding" prompts when there is
+        # nothing to lose. Set by the mutating methods below and by callers
+        # that change project state directly instead of through one of them
+        # (see mark_dirty()'s docstring); cleared by save() and, defensively,
+        # at the very end of this constructor regardless of how it got here.
+        self.dirty = False
         self.filepath = None
         self.b2_model: B2Model = B2Model()
         self.project_name: str | None = None
@@ -211,6 +218,20 @@ class Project:
                 )
 
         self.update_limits()
+        # Constructing a Project (fresh or loaded from filepath) always
+        # yields a clean baseline, regardless of anything above that
+        # happened to route through a mutating method.
+        self.dirty = False
+
+    def mark_dirty(self) -> None:
+        """Flag this project as having changes not yet saved to filepath.
+
+        Call this directly wherever project state is changed without going
+        through one of the mutating methods below (e.g. gui.py assigning
+        ``project.b2_model`` or ``project.cellpose_data`` after a dialog
+        accepts new state).
+        """
+        self.dirty = True
 
     def import_project(
         self,
@@ -245,6 +266,7 @@ class Project:
                 self.logger.info("  - importing stim arrays")
                 self.stim_arrays = load_from_zip("stim_arrays", zf)
         self.update_limits()
+        self.mark_dirty()
 
     def get_data_names(
         self, data_type: type[TraceData | SpikeData | SynapseData]
@@ -399,11 +421,13 @@ class Project:
         stim_array.dt = stim_dt
         self.stim_arrays[stim_array.name] = stim_array
         self.update_limits()
+        self.mark_dirty()
 
     def delete_stim_array(self, name: str):
         if name in self.stim_arrays:
             del self.stim_arrays[name]
         self.update_limits()
+        self.mark_dirty()
 
     def update_stim_array_properties(
         self, name: str, n_neurons: int, stim_type: StimType, units: str, dt: float
@@ -440,11 +464,13 @@ class Project:
                 constant_values=0,
             )
         self.update_limits()
+        self.mark_dirty()
 
     def rename_stim_array(self, name: str, new_name: str):
         stim_array = self.stim_arrays.pop(name)
         stim_array.name = new_name
         self.stim_arrays[stim_array.name] = stim_array
+        self.mark_dirty()
 
     def update_limits(self):
         self.max_time_secs = _to_seconds(self.b2_model.get_sim_time_secs())
@@ -533,6 +559,7 @@ class Project:
 
         self.dt = new_dt
         self.update_limits()
+        self.mark_dirty()
 
     def remappable_data_description(self, new_dt: float) -> str:
         """Human-readable summary of stims/traces that would be remapped to new_dt."""
@@ -691,6 +718,7 @@ class Project:
             existing_experiment.duration, time_offset_seconds + duration_seconds
         )
         self.update_limits()
+        self.mark_dirty()
 
     def remap_cellpose_indices(self) -> list[str]:
         """
@@ -735,6 +763,7 @@ class Project:
                     datum.indices = new_ids
                 else:
                     datum.spike_indices = new_ids
+        self.mark_dirty()
         return failed
 
     def add_experiment(
@@ -766,6 +795,7 @@ class Project:
                 experiment.timepoints.append(t)
         self.experiments[experiment.name] = experiment
         self.update_limits()
+        self.mark_dirty()
 
     def add_experimental_data(
         self,
@@ -828,6 +858,7 @@ class Project:
                     experiment.timepoints.append(new_duration)
                 experiment.timepoints.sort()
         self.update_limits()
+        self.mark_dirty()
 
     def pad_stim_arrays(self, total_time_seconds: float):
         """
@@ -846,6 +877,7 @@ class Project:
                     stim_array.values, pad_width=((0, n_pad), (0, 0))
                 )
         self.update_limits()
+        self.mark_dirty()
 
     def pad_stim_arrays_to_neuron_count(self, n_neurons: int) -> None:
         """
@@ -876,6 +908,7 @@ class Project:
                 constant_values=0,
             )
         self.update_limits()
+        self.mark_dirty()
 
     def resize_stim_arrays_to_neuron_count(self, n_neurons: int) -> None:
         """
@@ -909,6 +942,7 @@ class Project:
             else:
                 stim_array.values = stim_array.values[:, :n_neurons]
         self.update_limits()
+        self.mark_dirty()
 
     def _trim_to_neuron_ids(self, kept_ids: list[int]) -> None:
         """Keep only the given neuron/stim ids across every StimArray and
@@ -1038,6 +1072,7 @@ class Project:
         kept_stim_ids = sorted(self.cellpose_data.stimulus_to_cellpose_mapping.keys())
         self._trim_to_neuron_ids(kept_stim_ids)
         self.update_limits()
+        self.mark_dirty()
 
     def trim_stim_arrays(self, total_time_seconds: float):
         """
@@ -1054,6 +1089,7 @@ class Project:
                 )
                 self.stim_arrays[name].values = stim_array.values[:new_n_timestamps, :]
         self.update_limits()
+        self.mark_dirty()
 
     def loop_stim_arrays(self, n_loops: int) -> None:
         """Tile every stim array's values along the time axis."""
@@ -1064,6 +1100,7 @@ class Project:
         for stim_array in self.stim_arrays.values():
             stim_array.values = np.tile(stim_array.values, (n_loops, 1))
         self.update_limits()
+        self.mark_dirty()
 
     def suggested_simulation_time_seconds(self) -> float:
         """Return the longest stim-array duration across the project.
@@ -1103,6 +1140,7 @@ class Project:
             tiled = np.tile(stim_array.values, (full_tiles, 1))
             stim_array.values = tiled[:n_target]
         self.update_limits()
+        self.mark_dirty()
 
     def trim_stim_array_would_delete_data(self, total_time_seconds: float) -> bool:
         """
@@ -1302,6 +1340,7 @@ class Project:
         self.pad_stim_arrays_to_neuron_count(self.b2_model.get_defined_neuron_count())
         self.b2_model.run_simulation(time_seconds, self.stim_arrays, report)
         self.update_limits()
+        self.mark_dirty()
 
     def request_cancel_simulation(self) -> None:
         """Request that an in-progress simulation stop early."""
@@ -1366,3 +1405,4 @@ class Project:
                         {"cellpose_import": self.cellpose_data}, "cellpose_data", zf
                     )
         self.filepath = pathlib.Path(filepath)
+        self.dirty = False

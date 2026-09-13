@@ -1040,12 +1040,17 @@ def test_stim_editor_draw_region_extends_short_stim_for_follow_up_input() -> Non
             time_slice,
         )
     )
+    fake_editor._stim_data_modified = lambda: StimEditor._stim_data_modified(
+        fake_editor
+    )
 
+    project.dirty = False  # reset after the add_stim_array() setup above
     StimEditor.draw_stim_region(fake_editor, slice(0, 1), slice(1, 2))
 
     assert project.stim_arrays["igor_wave"].values.shape == (2, 1)
     assert project.stim_arrays["igor_wave"].values[1, 0] == approx(2.5)
     assert draw_calls == [(slice(0, 1), slice(1, 2), 2.5)]
+    assert project.dirty is True
 
 
 def test_create_stim_array_defaults_to_one_millisecond_without_selection(

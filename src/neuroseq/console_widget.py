@@ -220,5 +220,11 @@ class ConsoleWidget(ReplWidget):
 
     def runCmd(self, cmd: str) -> None:
         super().runCmd(cmd)
+        # A console command may mutate project state directly (e.g.
+        # ``project.stim_arrays['x'].values = ...``) rather than through one
+        # of Project's own mutating methods, which this can't tell apart
+        # from a read-only command - mark dirty unconditionally rather than
+        # risk silently missing a real edit.
         self.namespace()["project"].update_limits()
+        self.namespace()["project"].mark_dirty()
         self.console_command_entered.emit()

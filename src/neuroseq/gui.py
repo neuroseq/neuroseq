@@ -731,7 +731,13 @@ class Gui(QtWidgets.QMainWindow):
         runs ``proceed`` only after the save completes; if the user backs out
         of the save dialog, ``proceed`` never runs and the current project is
         left untouched.
+
+        Skipped entirely (``proceed`` runs right away) when the active
+        project has no unsaved changes - see ``Project.dirty``.
         """
+        if not self.project.dirty:
+            proceed()
+            return
         answer = QtWidgets.QMessageBox.warning(
             self,
             title,
@@ -754,7 +760,14 @@ class Gui(QtWidgets.QMainWindow):
         self._create_new_project()
 
     def _prompt_save_before_close(self) -> bool:
-        """Return True when the current close event may continue immediately."""
+        """Return True when the current close event may continue immediately.
+
+        Skipped (returns True right away) when none of the open tabs have
+        unsaved changes - see ``Project.dirty``.
+        """
+        if not any(project.dirty for project in self.tabs):
+            self._close_confirmed = True
+            return True
         message = (
             "Closing NeuroSeq will discard any unsaved changes to the "
             "current project.\n\nSave the current project first?"
@@ -1123,6 +1136,7 @@ class Gui(QtWidgets.QMainWindow):
             self.project.b2_model, parent=self, project=self.project
         )
         if mdiag.exec():
+            self.project.mark_dirty()
             if mdiag.external_simulate_params is not None:
                 self.project.external_simulate_params = mdiag.external_simulate_params
             else:
@@ -2206,6 +2220,7 @@ class Gui(QtWidgets.QMainWindow):
 
         dialog = Syscon2ImportDialog(self.project, parent=self)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            self.project.mark_dirty()
             self.update_project(self.project)
             if dialog.selected_stim_name:
                 self.cmb_stim.setCurrentText(dialog.selected_stim_name)
@@ -2213,6 +2228,7 @@ class Gui(QtWidgets.QMainWindow):
     def btn_import_igor2_wave_clicked(self) -> None:
         dialog = IgorImportDialog(self.project, parent=self)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            self.project.mark_dirty()
             self.update_project(self.project)
             if dialog.selected_stim_name:
                 self.cmb_stim.setCurrentText(dialog.selected_stim_name)
@@ -2222,6 +2238,7 @@ class Gui(QtWidgets.QMainWindow):
 
         dialog = IgorTraceImportDialog(self.project, parent=self)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            self.project.mark_dirty()
             self.update_project(self.project)
             if dialog.selected_trace_name:
                 combo_label = (

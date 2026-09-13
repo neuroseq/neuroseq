@@ -235,7 +235,7 @@ class StimEditor(QtWidgets.QWidget):
             slice(0, n_timepoints),
             np.array(new_values, copy=True),
         )
-        self._stim_values_updated()
+        self._stim_data_modified()
 
         if (
             previous_selected_stim
@@ -438,7 +438,7 @@ class StimEditor(QtWidgets.QWidget):
             max(1, int(self.project.max_neurons)),
         )
         self.limits_modified.emit()
-        self._stim_values_updated()
+        self._stim_data_modified()
 
     def loop_stim_array(self) -> None:
         if self.current_stim_modifier is None or self.project is None:
@@ -466,6 +466,17 @@ class StimEditor(QtWidgets.QWidget):
             return
         self.action_undo.setEnabled(self.current_stim_modifier.can_undo())
         self.action_redo.setEnabled(self.current_stim_modifier.can_redo())
+
+    def _stim_data_modified(self) -> None:
+        """Call after any real edit to the current stim array's values -
+
+        draw/erase/paste/delete/pad/trim/loop/undo/redo - as opposed to
+        _stim_values_updated() alone, which also runs on a plain stim
+        *selection* change and must not mark the project dirty.
+        """
+        if self.project is not None:
+            self.project.mark_dirty()
+        self._stim_values_updated()
 
     def select_stim(self, stim_name: str) -> None:
         self.logger.debug(f"Selected stim: {stim_name}")
@@ -614,7 +625,7 @@ class StimEditor(QtWidgets.QWidget):
             erase=erase, length=slice_length, reverse=reverse
         )
         self.current_stim_modifier.do(neuron_slice, time_slice, values)
-        self._stim_values_updated()
+        self._stim_data_modified()
 
     def stim_widget_mouse_clicked(
         self, neuron_index: int, time_index: int, button_index: int
@@ -788,7 +799,7 @@ class StimEditor(QtWidgets.QWidget):
         self.stim_widget.set_hover_slice(None)
         self.stim_widget.set_mode(InteractMode.SELECT)
         self.select_mode = SelectMode.SELECT
-        self._stim_values_updated()
+        self._stim_data_modified()
 
     def undo(self) -> None:
         if self.current_stim_modifier is None:
@@ -800,7 +811,7 @@ class StimEditor(QtWidgets.QWidget):
                 max(1, int(self.project.max_neurons)),
             )
             self.limits_modified.emit()
-        self._stim_values_updated()
+        self._stim_data_modified()
 
     def redo(self) -> None:
         if self.current_stim_modifier is None:
@@ -812,7 +823,7 @@ class StimEditor(QtWidgets.QWidget):
                 max(1, int(self.project.max_neurons)),
             )
             self.limits_modified.emit()
-        self._stim_values_updated()
+        self._stim_data_modified()
 
     def save_selected_stim(self) -> None:
         if (
@@ -883,7 +894,7 @@ class StimEditor(QtWidgets.QWidget):
             self.stim_widget.selected_time_slice,
             0,
         )
-        self._stim_values_updated()
+        self._stim_data_modified()
 
     def toggle_show_all_stim_arrays(self) -> None:
         self.stim_widget.set_background_data_visible(
@@ -1208,7 +1219,7 @@ class StimEditor(QtWidgets.QWidget):
             max(1, int(self.project.max_neurons)),
         )
         self.limits_modified.emit()
-        self._stim_values_updated()
+        self._stim_data_modified()
 
     def _add_actions(self, toolbar: QtWidgets.QToolBar, menu: QtWidgets.QMenu) -> None:
         self.action_draw_mode = add_action(

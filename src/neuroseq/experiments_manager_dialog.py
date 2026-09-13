@@ -173,6 +173,7 @@ class ExperimentsManagerDialog(QtWidgets.QDialog):
             # Delete experiments (in reverse row order to maintain indices)
             for _, exp_key, _ in reversed(experiments_to_delete):
                 del self.project.experiments[exp_key]
+            self.project.mark_dirty()
 
             # Refresh the table
             self._populate_table()

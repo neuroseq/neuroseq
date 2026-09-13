@@ -1985,7 +1985,9 @@ def test_prompt_save_before_action_branches(monkeypatch: MonkeyPatch) -> None:
                 on_success(None)
             return True
 
-        return SimpleNamespace(_save_project=fake_save)
+        project = Project()
+        project.dirty = True
+        return SimpleNamespace(_save_project=fake_save, project=project)
 
     def proceed() -> None:
         proceeded[0] += 1
@@ -2008,6 +2010,30 @@ def test_prompt_save_before_action_branches(monkeypatch: MonkeyPatch) -> None:
     assert proceeded[0] == 2
 
 
+def test_prompt_save_before_action_skips_prompt_when_not_dirty(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """No unsaved changes -> proceed right away, no Save/Discard/Cancel
+
+    prompt at all (issue #535)."""
+    warning_calls: list[object] = []
+
+    def _fake_warning(*a: object, **k: object) -> QtWidgets.QMessageBox.StandardButton:
+        warning_calls.append(a)
+        return QtWidgets.QMessageBox.StandardButton.Cancel
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "warning", _fake_warning)
+    fake_gui: Any = SimpleNamespace(project=Project())  # dirty=False by default
+    proceeded = [0]
+
+    Gui._prompt_save_before_action(
+        fake_gui, "T", "M", lambda: proceeded.__setitem__(0, 1)
+    )
+
+    assert warning_calls == []
+    assert proceeded == [1]
+
+
 def test_prompt_save_before_close_branches(monkeypatch: MonkeyPatch) -> None:
     save_callbacks: list[Any] = []
     closed = [0]
@@ -2021,11 +2047,13 @@ def test_prompt_save_before_close_branches(monkeypatch: MonkeyPatch) -> None:
         save_callbacks.append(on_success)
         return True
 
+    dirty_project = Project()
+    dirty_project.dirty = True
     fake_gui: Any = SimpleNamespace(
         _close_confirmed=False,
         _save_project=fake_save,
         close=lambda: closed.__setitem__(0, closed[0] + 1),
-        tabs=[Project()],
+        tabs=[dirty_project],
     )
 
     # Cancel: keep the app open.
@@ -2052,6 +2080,31 @@ def test_prompt_save_before_close_branches(monkeypatch: MonkeyPatch) -> None:
     save_callbacks[0](None)
     assert fake_gui._close_confirmed
     assert closed == [1]
+
+
+def test_prompt_save_before_close_skips_prompt_when_no_tab_is_dirty(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """No open tab has unsaved changes -> close proceeds right away, no
+
+    Save/Discard/Cancel prompt at all (issue #535)."""
+    warning_calls: list[object] = []
+
+    def _fake_warning(*a: object, **k: object) -> QtWidgets.QMessageBox.StandardButton:
+        warning_calls.append(a)
+        return QtWidgets.QMessageBox.StandardButton.Cancel
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "warning", _fake_warning)
+    # Two clean tabs; neither is dirty.
+    fake_gui: Any = SimpleNamespace(
+        _close_confirmed=False,
+        tabs=[Project(), Project()],
+    )
+
+    assert Gui._prompt_save_before_close(fake_gui)
+
+    assert warning_calls == []
+    assert fake_gui._close_confirmed
 
 
 def test_load_example_project_calls_gc_collect(monkeypatch: MonkeyPatch) -> None:
