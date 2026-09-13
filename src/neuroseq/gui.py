@@ -3512,14 +3512,6 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QLabel("  Neuron data: ")
         )
         toolbar.addWidget(self.cmb_trace)
-        add_action(
-            "&Trace normalization",
-            self.trace_widget.trace_norm_dialog,
-            menu,
-            toolbar,
-            shortcut=None,
-            icon="mdi6.arrow-expand-vertical",
-        )
         self.action_overlay_stim_on_traces = add_action(
             "Overlay stim on traces",
             self._toggle_stim_trace_overlay,
@@ -3535,14 +3527,6 @@ class Gui(QtWidgets.QMainWindow):
         toolbar.addWidget(self.cmb_spike)
         toolbar.addWidget(QtWidgets.QLabel("  Synapse data: "))
         toolbar.addWidget(self.cmb_synapse)
-        add_action(
-            "&Synapse normalization",
-            self.heatmap_widget.heatmap_norm_dialog,
-            menu,
-            toolbar,
-            shortcut=None,
-            icon="mdi6.arrow-expand-vertical",
-        )
         toolbar.addSeparator()
         toolbar.addWidget(QtWidgets.QLabel("  All data: "))
         toolbar.addWidget(self.cmb_data)

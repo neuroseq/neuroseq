@@ -103,9 +103,19 @@ class HeatmapWidget(FPLWidget):
         self._axis_update_timer.start()
         self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
         self.logger = logging.getLogger(__name__)
+        self.context_menu = QtWidgets.QMenu("Synapses", self)
 
     def heatmap_norm_dialog(self):
         HeatmapNormDialog(self).exec()
+
+    def _rebuild_context_menu(self) -> None:
+        self.context_menu.clear()
+        norm_action = self.context_menu.addAction("Normalization…")
+        norm_action.triggered.connect(self.heatmap_norm_dialog)
+
+    def contextMenuEvent(self, event):
+        self._rebuild_context_menu()
+        self.context_menu.exec(event.globalPos())
 
     def clear_data(self) -> None:
         super().clear_data()

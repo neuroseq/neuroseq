@@ -68,6 +68,23 @@ def test_trace_widget_context_menu_offers_vector_export(
         export_action.trigger()
 
 
+def test_trace_widget_context_menu_offers_normalization(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+
+    trace_widget._rebuild_custom_analysis_menu()
+    norm_action = next(
+        action
+        for action in trace_widget.context_menu.actions()
+        if action.text() == "Normalization…"
+    )
+    norm_action.trigger()
+    assert trace_widget._trace_norm_dialog is not None
+    assert trace_widget._trace_norm_dialog.isVisible()
+    trace_widget._trace_norm_dialog.close()
+
+
 @pytest.mark.parametrize("widget_cls", [TraceWidget, SpikeWidget])
 def test_timeseries_context_menu_offers_detach_actions(
     qtbot: QtBot, widget_cls
@@ -103,6 +120,23 @@ def test_trace_norm_dialog_minimum_is_50_percent(qtbot: QtBot) -> None:
     qtbot.addWidget(trace_norm_dialog)
 
     assert trace_norm_dialog.slider_norm.minimum() == 50
+
+
+def test_trace_norm_dialog_slider_and_spinbox_stay_in_sync(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    trace_norm_dialog = TraceNormDialog(trace_widget)
+    qtbot.addWidget(trace_widget)
+    qtbot.addWidget(trace_norm_dialog)
+
+    trace_norm_dialog.slider_norm.setValue(250)
+    assert trace_norm_dialog.spin_norm.value() == 250
+    assert trace_widget.trace_norm_percent == 250
+
+    # typing a value into the spin box should drive the slider too
+    trace_norm_dialog.spin_norm.setValue(400)
+    assert trace_norm_dialog.slider_norm.value() == 400
+    assert trace_widget.trace_norm_percent == 400
 
 
 def test_trace_norm_dialog_is_modeless_and_reused(qtbot: QtBot) -> None:

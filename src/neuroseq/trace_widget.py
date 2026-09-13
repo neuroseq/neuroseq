@@ -40,11 +40,19 @@ class TraceNormDialog(QtWidgets.QDialog):
             f"Normalization: {self.trace_norm_percent}%", self
         )
         self.layout.addWidget(self.label_norm)
+        norm_input_layout = QtWidgets.QHBoxLayout()
         self.slider_norm = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal, self)
         self.slider_norm.setRange(50, 1000)
         self.slider_norm.setValue(self.trace_norm_percent)
         self.slider_norm.valueChanged.connect(self.update_norm_input)
-        self.layout.addWidget(self.slider_norm)
+        norm_input_layout.addWidget(self.slider_norm)
+        self.spin_norm = QtWidgets.QSpinBox(self)
+        self.spin_norm.setRange(50, 1000)
+        self.spin_norm.setSuffix("%")
+        self.spin_norm.setValue(self.trace_norm_percent)
+        self.spin_norm.valueChanged.connect(self.update_norm_input)
+        norm_input_layout.addWidget(self.spin_norm)
+        self.layout.addLayout(norm_input_layout)
 
         self.chk_offset = QtWidgets.QCheckBox("Center median")
         self.chk_offset.setChecked(self.clip)
@@ -66,6 +74,7 @@ class TraceNormDialog(QtWidgets.QDialog):
 
     def reset_defaults(self) -> None:
         self.slider_norm.setValue(100)
+        self.spin_norm.setValue(100)
         self.offset_by_median = True
         self.clip = True
         self.chk_offset.setChecked(self.offset_by_median)
@@ -83,6 +92,8 @@ class TraceNormDialog(QtWidgets.QDialog):
     def update_norm_input(self, value: int) -> None:
         self.trace_norm_percent = value
         self.label_norm.setText(f"Normalization: {value}%")
+        self.slider_norm.setValue(value)
+        self.spin_norm.setValue(value)
         self.update_trace_widget()
 
     def update_trace_widget(self) -> None:
@@ -270,6 +281,9 @@ class TraceWidget(TimeseriesWidget):
         export_action.setEnabled(isinstance(self.data, TraceData))
         export_action.triggered.connect(self.vector_export_requested.emit)
         self.context_menu.insertAction(self.context_menu.actions()[0], export_action)
+        norm_action = QtWidgets.QAction("Normalization…", self)
+        norm_action.triggered.connect(self.trace_norm_dialog)
+        self.context_menu.insertAction(self.context_menu.actions()[0], norm_action)
 
     def set_data(
         self,
