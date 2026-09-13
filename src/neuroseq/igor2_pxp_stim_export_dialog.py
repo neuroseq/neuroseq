@@ -15,7 +15,7 @@ class Igor2PxpStimExportDialog(QtWidgets.QDialog):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Export stim arrays to Igor2 PXP")
+        self.setWindowTitle("Export input arrays to Igor2 PXP")
         self._project = project
         self._setup_ui()
 
@@ -23,7 +23,7 @@ class Igor2PxpStimExportDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
         layout.addWidget(
             QtWidgets.QLabel(
-                "Select stim arrays to export.\n"
+                "Select input arrays to export.\n"
                 "Inhibitory arrays will be negated (values x -1)."
             )
         )

@@ -70,7 +70,7 @@ class IgorImportDialog(QtWidgets.QDialog):
         root_layout.addWidget(self.scroll_area)
 
         intro = QtWidgets.QLabel(
-            "Import Igor2/Sutter stimulation waves from .ibw, .pxp, or the simple "
+            "Import Igor2/Sutter input waves from .ibw, .pxp, or the simple "
             "NeuroSeq-compatible .csv format. Packed experiments can contain many "
             "waves; import as many as you need from the same file, then click Close "
             "when done. Imported waves are placed on NeuroSeq's 1 ms timeline using "
@@ -152,7 +152,7 @@ class IgorImportDialog(QtWidgets.QDialog):
         self.source_dt_spin.valueChanged.connect(self._on_timing_settings_changed)
         source_layout.addRow("Source sample interval:", self.source_dt_spin)
         self.match_source_grid_checkbox = QtWidgets.QCheckBox(
-            "Adjust NeuroSeq stim grid to source/file grid"
+            "Adjust NeuroSeq input grid to source/file grid"
         )
         self.match_source_grid_checkbox.toggled.connect(
             self._on_timing_settings_changed
@@ -167,9 +167,9 @@ class IgorImportDialog(QtWidgets.QDialog):
         target_group = QtWidgets.QGroupBox("Import Target")
         target_layout = QtWidgets.QVBoxLayout(target_group)
 
-        self.create_new_radio = QtWidgets.QRadioButton("Create new stim array")
+        self.create_new_radio = QtWidgets.QRadioButton("Create new input array")
         self.import_existing_radio = QtWidgets.QRadioButton(
-            "Import into existing stim array"
+            "Import into existing input array"
         )
         self.create_new_radio.setChecked(True)
         self.create_new_radio.toggled.connect(self._update_mode_state)
@@ -177,31 +177,31 @@ class IgorImportDialog(QtWidgets.QDialog):
         target_layout.addWidget(self.create_new_radio)
         target_layout.addWidget(self.import_existing_radio)
 
-        self.new_target_group = QtWidgets.QGroupBox("New Stim Array")
+        self.new_target_group = QtWidgets.QGroupBox("New Input Array")
         new_target_layout = QtWidgets.QFormLayout(self.new_target_group)
         self.new_name_edit = QtWidgets.QLineEdit()
         self.new_name_edit.textChanged.connect(self._update_import_button_state)
-        new_target_layout.addRow("Stim name:", self.new_name_edit)
+        new_target_layout.addRow("Input name:", self.new_name_edit)
         self.new_type_combo = QtWidgets.QComboBox()
         self.new_type_combo.addItem("Excitatory", StimType.Excitation)
         self.new_type_combo.addItem("Inhibitory", StimType.Inhibition)
         self.new_type_combo.addItem("External", StimType.External)
         self.new_type_combo.setCurrentIndex(2)
-        new_target_layout.addRow("Stim type:", self.new_type_combo)
+        new_target_layout.addRow("Input type:", self.new_type_combo)
         self.new_units_edit = QtWidgets.QLineEdit()
         new_target_layout.addRow("Units:", self.new_units_edit)
         target_layout.addWidget(self.new_target_group)
 
-        self.existing_target_group = QtWidgets.QGroupBox("Existing Stim Array")
+        self.existing_target_group = QtWidgets.QGroupBox("Existing Input Array")
         existing_target_layout = QtWidgets.QFormLayout(self.existing_target_group)
         self.target_combo = QtWidgets.QComboBox()
         self.target_combo.currentTextChanged.connect(self._on_target_changed)
-        existing_target_layout.addRow("Target stim array:", self.target_combo)
+        existing_target_layout.addRow("Target input array:", self.target_combo)
         self.neuron_index_spin = QtWidgets.QSpinBox()
         self.neuron_index_spin.setRange(0, 0)
         existing_target_layout.addRow("Target neuron index:", self.neuron_index_spin)
         self.extend_checkbox = QtWidgets.QCheckBox(
-            "Extend target stim array to fit imported duration"
+            "Extend target input array to fit imported duration"
         )
         self.extend_checkbox.setChecked(True)
         existing_target_layout.addRow(self.extend_checkbox)
@@ -259,7 +259,7 @@ class IgorImportDialog(QtWidgets.QDialog):
         self.target_combo.clear()
         stim_names = list(self.project.stim_arrays.keys())
         if not stim_names:
-            self.target_combo.addItem("(No stim arrays available)")
+            self.target_combo.addItem("(No input arrays available)")
             self.target_combo.setEnabled(False)
             self.import_existing_radio.setEnabled(False)
             self.create_new_radio.setChecked(True)
@@ -528,8 +528,8 @@ class IgorImportDialog(QtWidgets.QDialog):
             self.preview_text.setPlainText("")
             if not self.project.stim_arrays:
                 self.info_label.setText(
-                    "Select an Igor wave to preview it. Only the new-stim import mode is "
-                    "currently available because the project has no stim arrays yet."
+                    "Select an Igor wave to preview it. Only the new-input import mode is "
+                    "currently available because the project has no input arrays yet."
                 )
             else:
                 self.info_label.setText("Select an Igor wave to preview it.")
@@ -541,12 +541,12 @@ class IgorImportDialog(QtWidgets.QDialog):
         info_lines: list[str] = []
         if abs(source_dt - target_dt) > 1e-9:
             info_lines.append(
-                "This wave will be resampled to the selected NeuroSeq stim grid using zero-order hold. "
+                "This wave will be resampled to the selected NeuroSeq input grid using zero-order hold. "
                 "Fast sub-ms changes may be lost."
             )
         elif self.match_source_grid_checkbox.isChecked():
             info_lines.append(
-                "This import will preserve the source/file timestep by adjusting the NeuroSeq stim grid."
+                "This import will preserve the source/file timestep by adjusting the NeuroSeq input grid."
             )
         else:
             info_lines.append("This wave already matches NeuroSeq's 1 ms timeline.")
@@ -561,7 +561,7 @@ class IgorImportDialog(QtWidgets.QDialog):
             and not stim_dt_matches(float(selected_stim.dt), target_dt)
         ):
             info_lines.append(
-                "The selected target stim array will be remapped from "
+                "The selected target input array will be remapped from "
                 f"{format_milliseconds(float(selected_stim.dt) * 1000.0)} ms to "
                 f"{format_milliseconds(target_dt * 1000.0)} ms before import."
             )
@@ -631,10 +631,10 @@ class IgorImportDialog(QtWidgets.QDialog):
             if self.create_new_radio.isChecked():
                 stim_name = self.new_name_edit.text().strip()
                 if not stim_name:
-                    raise ValueError("Stim name cannot be empty")
+                    raise ValueError("Input name cannot be empty")
                 if stim_name in self.project.stim_arrays:
                     raise ValueError(
-                        f"A stimulation data entity named '{stim_name}' already exists"
+                        f"An input data entity named '{stim_name}' already exists"
                     )
                 stim_array = create_stim_array_from_igor_wave(
                     prepared_wave,
@@ -645,7 +645,7 @@ class IgorImportDialog(QtWidgets.QDialog):
                 self.project.add_stim_array(stim_array)
                 self.selected_stim_name = stim_name
                 info_lines = [
-                    f"Imported '{prepared_wave.name}' into new stim array '{stim_name}'.",
+                    f"Imported '{prepared_wave.name}' into new input array '{stim_name}'.",
                     f"Source samples: {prepared_wave.original_sample_count}",
                     f"Imported samples: {prepared_wave.values.shape[0]}",
                     "Target neuron count: 1",
@@ -665,17 +665,17 @@ class IgorImportDialog(QtWidgets.QDialog):
             else:
                 target_stim = self._selected_stim_array()
                 if target_stim is None:
-                    raise ValueError("No target stimulation data entity selected")
+                    raise ValueError("No target input data entity selected")
                 remapped_target_dt = _dt_changed
                 if not stim_dt_matches(float(target_stim.dt), prepared_wave.target_dt):
                     continue_with_remap = QtWidgets.QMessageBox.question(
                         self,
-                        "Change stim array timestep",
-                        "Changing the stimulation timestep will remap stimulus array "
+                        "Change input array timestep",
+                        "Changing the input timestep will remap input array "
                         f"'{target_stim.name}' from "
                         f"{format_milliseconds(float(target_stim.dt) * 1000.0)} ms "
                         f"to {format_milliseconds(prepared_wave.target_dt * 1000.0)} ms. "
-                        "Stimulus timing may shift by up to one sample. Continue?",
+                        "Input timing may shift by up to one sample. Continue?",
                         QtWidgets.QMessageBox.StandardButton.Yes
                         | QtWidgets.QMessageBox.StandardButton.No,
                     )
@@ -714,7 +714,7 @@ class IgorImportDialog(QtWidgets.QDialog):
                     )
                 if remapped_target_dt:
                     info_lines.append(
-                        f"Adjusted target stim grid to {report.target_dt:.9f} s before import."
+                        f"Adjusted target input grid to {report.target_dt:.9f} s before import."
                     )
                 if report.resampled:
                     info_lines.append(

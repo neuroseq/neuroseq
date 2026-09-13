@@ -229,12 +229,12 @@ def generate_igor2_csv_text(
 
     if stim_array.values.ndim != 2:
         raise ValueError(
-            "Stimulus export expects a 2D stim array with shape (time, neuron)."
+            "Input export expects a 2D input array with shape (time, neuron)."
         )
 
     n_neurons = int(stim_array.values.shape[1])
     if n_neurons <= 0:
-        raise ValueError("Stimulus export requires at least one neuron.")
+        raise ValueError("Input export requires at least one neuron.")
     if neuron_index < 0 or neuron_index >= n_neurons:
         raise ValueError(
             f"Neuron index {neuron_index} is out of range for {n_neurons} neurons."
@@ -300,11 +300,11 @@ def export_igor2_ibw(
     """
     if stim_array.values.ndim != 2:
         raise ValueError(
-            "Stimulus export expects a 2D stim array with shape (time, neuron)."
+            "Input export expects a 2D input array with shape (time, neuron)."
         )
     n_neurons = int(stim_array.values.shape[1])
     if n_neurons <= 0:
-        raise ValueError("Stimulus export requires at least one neuron.")
+        raise ValueError("Input export requires at least one neuron.")
     if neuron_index < 0 or neuron_index >= n_neurons:
         raise ValueError(
             f"Neuron index {neuron_index} is out of range for {n_neurons} neurons."
@@ -375,7 +375,7 @@ def export_igor2_pxp(
         stim_array = stim_arrays[name]
         if stim_array.values.ndim != 2:
             raise ValueError(
-                "Stimulus export expects a 2D stim array with shape (time, neuron)."
+                "Input export expects a 2D input array with shape (time, neuron)."
             )
 
         values = stim_array.values

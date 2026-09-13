@@ -219,7 +219,7 @@ def test_igor_import_dialog_imports_into_existing_stim_array_on_source_grid(
     )
     assert dialog.selected_stim_name == "stimulus"
     assert qmessagebox_calls[-1]["name"] == "information"
-    assert "adjusted target stim grid" in qmessagebox_calls[-1]["text"].lower()
+    assert "adjusted target input grid" in qmessagebox_calls[-1]["text"].lower()
 
 
 def test_igor_import_dialog_loads_pxp_and_shows_wave_picker(
@@ -523,7 +523,7 @@ def test_igor_import_dialog_single_wave_pxp_import_stays_open_until_close(
     assert "WaveA" in project.stim_arrays
     assert (
         dialog.last_import_label.text()
-        == "Imported 'WaveA' into new stim array 'WaveA'."
+        == "Imported 'WaveA' into new input array 'WaveA'."
     )
     assert not any(call["name"] == "information" for call in qmessagebox_calls)
 
