@@ -36,6 +36,17 @@ def test_console(qtbot: QtBot, test_project: Project) -> None:
     assert len(signals) == 2
 
 
+def test_console_scrolls_back_to_welcome_splash_on_startup(qtbot: QtBot) -> None:
+    console = ConsoleWidget()
+    qtbot.addWidget(console)
+    console.show()
+    qtbot.waitUntil(lambda: console.isVisible())
+    # the intro text is long enough to auto-scroll the view to the bottom as
+    # it's inserted - it must land back at the top so the "Welcome to
+    # NeuroSeq" splash (the very first line) is what's actually visible.
+    qtbot.waitUntil(lambda: console.output.verticalScrollBar().value() == 0)
+
+
 def test_sample_code_mentions_sequential_pulse_snippet() -> None:
     """The console help dialog must surface the 100 ms / 18 ms snippet."""
     assert "Sequential 100 ms pulses" in SAMPLE_CODE

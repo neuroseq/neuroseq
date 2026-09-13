@@ -139,6 +139,10 @@ class ConsoleWidget(ReplWidget):
         self.output.insertPlainText(
             "\n\nClick 'Sample Python Code' for more information and examples.\n\n\n"
         )
+        # Inserting all this text auto-scrolls the view to the bottom, hiding
+        # the "Welcome to NeuroSeq" splash at the top on startup - scroll
+        # back up once Qt has finished laying out the freshly inserted text.
+        QtCore.QTimer.singleShot(0, lambda: self.output.verticalScrollBar().setValue(0))
 
     def _insert_centered(self, text: str) -> None:
         """Insert ``text`` as horizontally centered blocks, then go back to left.
