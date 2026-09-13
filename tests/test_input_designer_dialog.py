@@ -693,8 +693,8 @@ def test_input_designer_shows_stim_array_info_and_clear_button(qtbot) -> None:
     assert dialog.lbl_stim_dt.text() == "1 ms"  # dt = 0.001 s
     assert dialog.lbl_stim_neurons.text() == "2"
 
-    # The Clear stim array button delegates to the editor.
-    assert dialog.btn_clear.text() == "Clear stim array"
+    # The Clear input array button delegates to the editor.
+    assert dialog.btn_clear.text() == "Clear input array"
     dialog.btn_clear.click()
     assert editor.cleared == 1
 

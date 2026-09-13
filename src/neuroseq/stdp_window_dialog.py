@@ -102,7 +102,7 @@ class StdpWindowDialog(QtWidgets.QDialog):
         self.lbl_stim_units = QtWidgets.QLabel("-", self)
         self.lbl_stim_dt = QtWidgets.QLabel("-", self)
         self.lbl_stim_neurons = QtWidgets.QLabel("-", self)
-        info_form.addRow("Stim array:", self.lbl_stim_name)
+        info_form.addRow("Input array:", self.lbl_stim_name)
         info_form.addRow("Units:", self.lbl_stim_units)
         info_form.addRow("dt:", self.lbl_stim_dt)
         info_form.addRow("Neurons:", self.lbl_stim_neurons)
@@ -297,17 +297,17 @@ class StdpWindowDialog(QtWidgets.QDialog):
         self.btn_clear = cast(
             QtWidgets.QPushButton,
             buttons.addButton(
-                "Clear stim array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
+                "Clear input array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
             ),
         )
         self.btn_reset = cast(
             QtWidgets.QPushButton,
             buttons.addButton(
-                "Reset stim array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
+                "Reset input array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
             ),
         )
         self.btn_reset.setToolTip(
-            "Trim the stim array back to the simulation head so the routine does "
+            "Trim the input array back to the simulation head so the routine does "
             "not run a long empty tail."
         )
         self.btn_stop.setEnabled(False)
@@ -492,10 +492,10 @@ class StdpWindowDialog(QtWidgets.QDialog):
     def start(self) -> None:
         self.refresh()
         if self.project is None or self.editor.current_stim_modifier is None:
-            self._append_log("No stimulation array is selected.")
+            self._append_log("No input array is selected.")
             return
         if not self._confirm_start_over_existing_input():
-            self._append_log("Routine cancelled; existing stimulation input kept.")
+            self._append_log("Routine cancelled; existing input kept.")
             return
         # Start from the simulation head so a long left-over stim array does not
         # make the routine simulate a huge empty tail.
@@ -595,7 +595,7 @@ class StdpWindowDialog(QtWidgets.QDialog):
     def _require_stim(self) -> StimArray:
         modifier = self.editor.current_stim_modifier
         if modifier is None:
-            raise RuntimeError("No stimulation array is selected.")
+            raise RuntimeError("No input array is selected.")
         return modifier.stim_array
 
     def _require_project(self) -> Project:
@@ -984,7 +984,7 @@ class StdpWindowDialog(QtWidgets.QDialog):
             return
         self._resolution_warning_logged = True
         self._append_log(
-            f"Stim dt is {one_sample_ms:.6g} ms; Δt values are snapped to that "
+            f"Input dt is {one_sample_ms:.6g} ms; Δt values are snapped to that "
             "grid, so finer spacing cannot be resolved."
         )
 
@@ -1133,19 +1133,18 @@ class StdpWindowDialog(QtWidgets.QDialog):
     def _prompt_existing_input_choice(self, names: list[str]) -> str:
         box = QtWidgets.QMessageBox(self)
         box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
-        box.setWindowTitle("Existing stimulation input")
+        box.setWindowTitle("Existing input")
         listed = "\n".join(f"  • {name}" for name in names)
         box.setText(
             "The routine appends its pairing and probe pulses after any existing "
-            "input, which lengthens every simulation. These stimulation arrays "
+            "input, which lengthens every simulation. These input arrays "
             f"already contain input:\n\n{listed}"
         )
         box.setInformativeText(
-            "Clear all stimulation arrays first, append after the existing input, "
-            "or cancel."
+            "Clear all input arrays first, append after the existing input, or cancel."
         )
         clear_button = box.addButton(
-            "Clear all stim arrays", QtWidgets.QMessageBox.ButtonRole.DestructiveRole
+            "Clear all input arrays", QtWidgets.QMessageBox.ButtonRole.DestructiveRole
         )
         box.addButton("Append anyway", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
         cancel_button = box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
@@ -1168,5 +1167,5 @@ class StdpWindowDialog(QtWidgets.QDialog):
         if choice == "clear":
             self.editor.clear_all_stim_arrays()
             self.refresh()
-            self._append_log("Cleared all stimulation arrays before starting.")
+            self._append_log("Cleared all input arrays before starting.")
         return True

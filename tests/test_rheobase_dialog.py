@@ -271,8 +271,8 @@ def test_rheobase_plot_marks_converged_rheobase(qtbot, monkeypatch) -> None:
         np.allclose(line.get_ydata(), 2.0 * dialog._rheobase) for line in guide_lines
     )
     assert dialog.rheobase_axes.lines[0].get_color() == "#000000"
-    assert dialog.rheobase_axes.get_xlabel() == "Stimulus duration (ms)"
-    assert dialog.rheobase_axes.get_ylabel() == "Stimulus strength\n(mwatt / um2)"
+    assert dialog.rheobase_axes.get_xlabel() == "Input duration (ms)"
+    assert dialog.rheobase_axes.get_ylabel() == "Input strength\n(mwatt / um2)"
     assert dialog.rheobase_axes.get_title() == ""
     assert dialog.search_axes.get_title() == ""
     assert "Rheobase ~=" in dialog.lbl_status.text()
@@ -477,7 +477,7 @@ def test_rheobase_cancel_keeps_existing_input(qtbot, monkeypatch) -> None:
     assert not dialog._running
     assert editor.calls == []
     assert editor.cleared_all == 0
-    assert "existing stimulation input kept" in dialog.log.toPlainText()
+    assert "existing input kept" in dialog.log.toPlainText()
 
 
 def test_rheobase_clear_all_before_start(qtbot, monkeypatch) -> None:

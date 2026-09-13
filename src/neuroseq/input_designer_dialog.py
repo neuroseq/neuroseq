@@ -134,7 +134,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.lbl_stim_units = QtWidgets.QLabel("-", self)
         self.lbl_stim_dt = QtWidgets.QLabel("-", self)
         self.lbl_stim_neurons = QtWidgets.QLabel("-", self)
-        info_form.addRow("Stim array:", self.lbl_stim_name)
+        info_form.addRow("Input array:", self.lbl_stim_name)
         info_form.addRow("Units:", self.lbl_stim_units)
         info_form.addRow("dt:", self.lbl_stim_dt)
         info_form.addRow("Neurons:", self.lbl_stim_neurons)
@@ -333,17 +333,17 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.btn_clear = cast(
             QtWidgets.QPushButton,
             buttons.addButton(
-                "Clear stim array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
+                "Clear input array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
             ),
         )
         self.btn_reset = cast(
             QtWidgets.QPushButton,
             buttons.addButton(
-                "Reset stim array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
+                "Reset input array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
             ),
         )
         self.btn_reset.setToolTip(
-            "Trim the stim array back to the simulation head so the routine does "
+            "Trim the input array back to the simulation head so the routine does "
             "not run a long empty tail."
         )
         self.btn_stop.setEnabled(False)
@@ -498,7 +498,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
     def start(self) -> None:
         self.refresh()
         if self.project is None or self.editor.current_stim_modifier is None:
-            self._append_log("No stimulation array is selected.")
+            self._append_log("No input array is selected.")
             return
         # Start from the simulation head so a long left-over stim array does not
         # make the routine simulate a huge empty tail.
@@ -542,7 +542,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
     def _require_stim(self) -> StimArray:
         modifier = self.editor.current_stim_modifier
         if modifier is None:
-            raise RuntimeError("No stimulation array is selected.")
+            raise RuntimeError("No input array is selected.")
         return modifier.stim_array
 
     def _require_project(self) -> Project:
@@ -655,7 +655,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
             return
         self._resolution_warning_logged = True
         self._append_log(
-            f"Stim dt is {one_sample_ms:.6g} ms; pairing times are snapped to "
+            f"Input dt is {one_sample_ms:.6g} ms; pairing times are snapped to "
             "that grid, so finer adaptive increments cannot be resolved."
         )
 
