@@ -211,15 +211,15 @@ class StimEditor(QtWidgets.QWidget):
     ) -> None:
         """Replace one stim array content via the undoable modifier pathway."""
         if stim_name not in self.stims_dict:
-            raise ValueError(f"Stimulus '{stim_name}' not found in stim editor.")
+            raise ValueError(f"Input '{stim_name}' not found in stim editor.")
         if self.project is None or stim_name not in self.project.stim_arrays:
-            raise ValueError(f"Stimulus '{stim_name}' not found in project.")
+            raise ValueError(f"Input '{stim_name}' not found in project.")
 
         modifier = self.stims_dict[stim_name]
         target_values = modifier.stim_array.values
         if target_values.shape != new_values.shape:
             raise ValueError(
-                "Stimulus replacement requires matching shape for undo support: "
+                "Input replacement requires matching shape for undo support: "
                 f"current={target_values.shape}, new={new_values.shape}"
             )
 
@@ -227,7 +227,7 @@ class StimEditor(QtWidgets.QWidget):
         if self.current_stim_modifier is not modifier:
             self.cmb_stim.setCurrentText(stim_name)
         if self.current_stim_modifier is None:
-            raise ValueError("No selected stimulus is available for modification.")
+            raise ValueError("No selected input is available for modification.")
 
         n_timepoints, n_neurons = target_values.shape
         self.current_stim_modifier.do(
