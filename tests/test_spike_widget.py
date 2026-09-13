@@ -1,13 +1,91 @@
 from __future__ import annotations
 
+import numpy as np
 import pytest
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.data import SpikeData
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.trace_widget import TraceWidget
+from neuroseq.utils import neuron_indices_to_colors
+
+
+@pytest.mark.parametrize("selected", [False, True])
+def test_spike_vector_preview(qtbot: QtBot, tmp_path, selected) -> None:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+    from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
+
+    controller = ConstrainedPanZoomController()
+    widget = SpikeWidget(controller)
+    qtbot.addWidget(widget)
+    assert widget.preview_spikes() is None
+    widget._rebuild_custom_analysis_menu()
+    assert not widget.context_menu.actions()[0].isEnabled()
+    data = SpikeData(
+        name="preview source",
+        spike_indices=np.array([3, 7, 3]),
+        spike_times=np.array([0.001, 0.004, 0.008]),
+    )
+    widget.set_data(data)
+    controller.focus_time_range(0.002, 0.006)
+    controller.focus_neuron_range(2, 9)
+    state = controller._get_camera_state().copy()
+    if selected:
+        widget.select_neurons(slice(3, 4), slice(1, 5))
+    widget._rebuild_custom_analysis_menu()
+    action = widget.context_menu.actions()[0]
+    assert action.text() == "Preview vector graphic…"
+    assert action.isEnabled()
+    assert "Detach panel" in [a.text() for a in widget.context_menu.actions()]
+    action.trigger()
+    dialog = widget.findChild(QtWidgets.QDialog)
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    assert dialog.isVisible()
+    assert not dialog.isModal()
+    assert dialog.findChild(NavigationToolbar2QT) is not None
+    canvas = dialog.findChild(FigureCanvasQTAgg)
+    ax = canvas.figure.axes[0]
+    assert canvas.figure.get_facecolor()[3] == 0
+    assert ax.get_facecolor()[3] == 0
+    assert ax.get_title() == data.name
+    assert ax.get_xlabel() == "Time (ms)"
+    assert ax.get_ylabel() == "Neuron index"
+    points = ax.collections[0]
+    np.testing.assert_allclose(points.get_offsets(), [[1, 3], [4, 7], [8, 3]])
+    np.testing.assert_allclose(
+        points.get_facecolors(), neuron_indices_to_colors(data.spike_indices)
+    )
+    cx, cy = state["position"][:2]
+    assert ax.get_xlim() == pytest.approx(
+        (1, 5) if selected else (cx - state["width"] / 2, cx + state["width"] / 2)
+    )
+    assert ax.get_ylim() == pytest.approx(
+        (2.5, 3.5) if selected else (cy - state["height"] / 2, cy + state["height"] / 2)
+    )
+    for key in ("position", "width", "height"):
+        np.testing.assert_allclose(controller._get_camera_state()[key], state[key])
+    widget.set_data(None)
+    np.testing.assert_allclose(points.get_offsets(), [[1, 3], [4, 7], [8, 3]])
+    output = tmp_path / "spikes.svg"
+    canvas.figure.savefig(output)
+    svg = output.read_text(encoding="utf-8")
+    assert 'id="spikes"' in svg
+    assert "<image" not in svg
+    dialog.close()
+    widget._rebuild_custom_analysis_menu()
+    assert not widget.context_menu.actions()[0].isEnabled()
+    widget.set_data(
+        SpikeData(
+            name="empty",
+            spike_indices=np.array([], dtype=np.uint32),
+            spike_times=np.array([], dtype=np.float32),
+        )
+    )
+    assert widget.preview_spikes() is None
 
 
 def test_spike_widget(qtbot: QtBot, make_spike_data) -> None:
