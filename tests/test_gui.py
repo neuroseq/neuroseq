@@ -1217,18 +1217,24 @@ def test_clicking_neuron_in_spatial_footprint_greys_trace_and_stim_rows(
         units="mV",
         dt=0.001,
     )
+    spike_data = SpikeData(
+        name="spikes",
+        spike_indices=np.array([0, 1, 2], dtype=np.uint32),
+        spike_times=np.array([0.001, 0.002, 0.003], dtype=np.float32),
+    )
     project.add_experiment(
         Experiment(
             name="Experiment",
             duration=0.01,
             timepoints=[0.01],
-            data=[trace_data],
+            data=[trace_data, spike_data],
         )
     )
     project.cellpose_data = _make_gui_cellpose_result(mapping={0: 2, 1: 1, 2: 0})
 
     gui.update_project(project)
     gui._apply_trace_selection("Experiment :: traces")
+    gui._apply_spike_selection("Experiment :: spikes")
     original_traces = trace_data.traces.copy()
     original_stim_values = project.stim_arrays["stim"].values.copy()
 
@@ -1240,9 +1246,14 @@ def test_clicking_neuron_in_spatial_footprint_greys_trace_and_stim_rows(
     assert gui.trace_widget.is_neuron_greyed(2)
     assert gui.stim_editor.stim_widget.is_neuron_greyed(1)
     assert gui.stim_editor.stim_widget.is_neuron_greyed(2)
-    # the greyed rows are actually hidden, and the remaining row compacts
+    assert gui.spike_widget.is_neuron_greyed(1)
+    assert gui.spike_widget.is_neuron_greyed(2)
+    # the greyed rows are actually hidden, and the remaining row compacts -
+    # the same way, and on the same rows, in every panel that stacks neurons
+    # on its y-axis, so a given row still means the same neuron everywhere
     assert gui.trace_widget.n_neurons == 1
     assert gui.stim_editor.stim_widget.n_neurons == 1
+    assert gui.spike_widget.n_neurons == 1
     assert gui.trace_widget.graphic is not None
     assert gui.trace_widget.graphic.graphics[0].visible
     # underlying project data is never touched by hiding
@@ -1258,8 +1269,11 @@ def test_clicking_neuron_in_spatial_footprint_greys_trace_and_stim_rows(
     assert not gui.trace_widget.is_neuron_greyed(2)
     assert not gui.stim_editor.stim_widget.is_neuron_greyed(1)
     assert not gui.stim_editor.stim_widget.is_neuron_greyed(2)
+    assert not gui.spike_widget.is_neuron_greyed(1)
+    assert not gui.spike_widget.is_neuron_greyed(2)
     assert gui.trace_widget.n_neurons == 3
     assert gui.stim_editor.stim_widget.n_neurons == 3
+    assert gui.spike_widget.n_neurons == 3
     gui.close()
 
 

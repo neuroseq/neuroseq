@@ -1455,6 +1455,7 @@ class Gui(QtWidgets.QMainWindow):
     ) -> None:
         self._trace_state.set_neurons_greyed(newly_hidden, newly_shown)
         self.stim_editor.stim_widget.set_neurons_greyed(newly_hidden, newly_shown)
+        self.spike_widget.set_neurons_greyed(newly_hidden, newly_shown)
 
     def _current_stim_array(self) -> StimArray | None:
         modifier = self.stim_editor.current_stim_modifier
