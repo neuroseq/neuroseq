@@ -63,7 +63,6 @@ _LIGHTSOURCE_ID_BY_WAVELENGTH_NM = {
     1030: "dummy_0_0",
     1100: "dummy_2_0",
 }
-_SHAPE_LIGHTSOURCE_ID = "dummy_2_0"
 
 _SYSCON2_WINDOW_TICKS = 32
 _SYSCON2_WINDOW_US = _SYSCON2_WINDOW_TICKS * _SYSCON2_TTL_PULSE_QUANTUM_US
@@ -561,6 +560,14 @@ def generate_syscon2_sequence_text(
         if lightsource_id in template_lightsource_port
         else f"{lightsource_id} RMI In"
     )
+    # The template's own inverted0/invertedportcnt (or the hardcoded fallback
+    # in _build_header_lines) has no way to know which laser this particular
+    # export actually uses - it's whatever was last baked into the template
+    # text. Point inversion at the laser port actually selected here instead,
+    # so the exported file never asks SysCon2 to invert a port this sequence
+    # doesn't even use (issue reported by RAPP: pulses had to be manually
+    # re-inverted after every import because of this mismatch).
+    header_lines = _apply_inversion_header(header_lines, lightsource_port)
 
     sanitized = _sanitize_stim_array_for_export(
         stim_array,
@@ -659,7 +666,7 @@ def generate_syscon2_sequence_text(
                         str(_shape_repeats_from_duration_quanta(duration_shape_quanta)),
                     ),
                     ("TimelineInfo0_LightsourceCount", "1"),
-                    ("TimelineInfo0_LightsourceID_0", _SHAPE_LIGHTSOURCE_ID),
+                    ("TimelineInfo0_LightsourceID_0", lightsource_id),
                     (
                         "TimelineInfo0_Intensity_0",
                         _shape_intensity_for_window(
@@ -1642,7 +1649,7 @@ def _build_debug_csv_text(
                 ),
                 timeline_index=_shape_lane_to_timeline_index(window.lane),
                 lane_index=window.lane,
-                lightsource_id=_SHAPE_LIGHTSOURCE_ID,
+                lightsource_id=lightsource_id,
                 laser_nm=active_laser_wavelength_nm,
                 start_sys_tick=window.start_tick,
                 duration_sys_tick=window.end_tick - window.start_tick,
@@ -3438,6 +3445,28 @@ def _build_header_lines(template_text: str) -> list[str]:
     lines = [first_line]
     lines.extend([f"{key}={value}" for key, value in ordered_header.items()])
     return lines
+
+
+def _apply_inversion_header(
+    header_lines: list[str], lightsource_port: str
+) -> list[str]:
+    """Overwrite invertedportcnt/inverted0 to invert exactly the laser port
+    this export actually uses, replacing whatever _build_header_lines set
+    from the template (which has no way to know that port)."""
+    updated: list[str] = []
+    replaced_inverted0 = False
+    for line in header_lines:
+        key = line.split("=", 1)[0] if "=" in line else line
+        if key == "invertedportcnt":
+            updated.append("invertedportcnt=1")
+        elif key == "inverted0":
+            updated.append(f"inverted0={lightsource_port}")
+            replaced_inverted0 = True
+        else:
+            updated.append(line)
+    if not replaced_inverted0:
+        updated.append(f"inverted0={lightsource_port}")
+    return updated
 
 
 def _detect_port_info(

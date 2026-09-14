@@ -675,8 +675,17 @@ def test_export_seq_lightsource_id_matches_syscon_v3_template(
     shape_objs = [obj for obj in sequence.objects if obj.object_type == "Shape"]
     assert len(shape_objs) >= 1
     for shape in shape_objs:
-        assert shape.properties["TimelineInfo0_LightsourceID_0"] == "dummy_2_0"
+        # A spot's Shape block must claim the same laser as its TTLPulse
+        # block - RAPP reported SysCon2 needing the laser picked manually
+        # after import whenever these two disagreed (issue #535 follow-up).
+        assert (
+            shape.properties["TimelineInfo0_LightsourceID_0"] == expected_lightsource_id
+        )
         assert shape.properties["TimelineInfo0_Intensity_0"] == "0"
+
+    header_lines = seq_text.splitlines()
+    inverted_line = next(line for line in header_lines if line.startswith("inverted0="))
+    assert inverted_line == f"inverted0={expected_lightsource_id} RMI In"
 
 
 def test_export_seq_roundtrip_preserves_burst_timing_at_exact_tick_positions() -> None:

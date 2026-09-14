@@ -242,7 +242,12 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
 
         self.config_data_edit = QtWidgets.QPlainTextEdit()
         self.config_data_edit.setMaximumHeight(150)
-        self.config_data_edit.setToolTip("HOLO4D sequence configuration data")
+        self.config_data_edit.setToolTip(
+            "HOLO4D sequence configuration data. Note: the laser/lightsource "
+            "ID and the invertedportcnt/inverted0 fields are always "
+            "recomputed from the laser selected above, overriding whatever "
+            "is typed here for those specific fields."
+        )
         default_config = self._default_syscon2_config_text()
         self.config_data_edit.setPlainText(default_config)
         config_layout.addWidget(self.config_data_edit)
