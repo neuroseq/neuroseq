@@ -31,6 +31,21 @@ The dialog has two groups:
 
 ### Imaging
 
+Choose **Indicator response** to control the fluorescence response to each spike:
+
+- **Exponential decay** (default) preserves the instantaneous rise followed by
+  exponential decay.
+- **Rise and decay** uses a difference of exponentials with a gradual rise.
+  **Rise time constant (s)** defaults to 0.010 s and must be shorter than
+  **Decay time (s)**, which defaults to 0.050 s. These settings give a peak
+  about 20.1 ms after an isolated spike. The rise constant is not the time to peak.
+
+For both models, **dF/F** sets the mean peak fluorescence change of an isolated
+spike before sampling and noise. Overlapping spike responses add together.
+The response is calculated at 0.1 ms resolution before sampling at the selected
+imaging rate, so a sampled trace may miss the exact peak. Both **Export as a
+file** and **Add to the project** use the selected response model.
+
 - **Select spikes** — source spike pattern that drives the synthetic
   fluorescence.
 - **Recording duration / Number of neurons** — output shape.
