@@ -179,6 +179,34 @@ def test_stim_heatmap_window_plots_only_targeted_neuron_traces(qtbot) -> None:
     assert window.trace_axes.legend_ is not None
 
 
+def test_stim_heatmap_window_aligns_trace_window_to_stim_duration(qtbot) -> None:
+    """The trace panel must show the same *relative* time window as the
+    heatmap - both ending at "now" - rather than the trace's own full
+    absolute history, which can be far longer (e.g. a StateMonitor that has
+    been recording since long before this routine's stim array was last
+    reset to a fresh, much shorter start). Otherwise the routine's own
+    pulses get squeezed into a sliver of a shared x-axis dominated by
+    unrelated earlier history."""
+    window = StimHeatmapWindow("Test — stimulation pattern")
+    qtbot.addWidget(window)
+
+    # stim covers only 5 ms (5 samples at dt=1ms); the trace covers 20 ms -
+    # only its last 5 ms should end up shown, rebased to start at t=0.
+    stim = _make_stim(5, 1)
+    stim.values[2, 0] = 1.0
+    trace = _make_trace(1, 20, indices=np.array([0], dtype=np.uint32))
+    trace.traces[0, 15:] = np.arange(5, dtype=np.float32)
+
+    window.update_view(stim, [0], trace, [0])
+
+    line = window.trace_axes.lines[0]
+    assert list(line.get_xdata()) == pytest.approx([0.0, 1.0, 2.0, 3.0, 4.0])
+    assert list(line.get_ydata()) == pytest.approx([0.0, 1.0, 2.0, 3.0, 4.0])
+    # the shared x-view spans just the stim's own duration, not the trace's
+    # much longer absolute history
+    assert window.axes.get_xlim() == pytest.approx((0.0, 5.0))
+
+
 def test_stim_heatmap_window_skips_traces_absent_from_the_recording(qtbot) -> None:
     window = StimHeatmapWindow("Test — stimulation pattern")
     qtbot.addWidget(window)

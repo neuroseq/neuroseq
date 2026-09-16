@@ -193,21 +193,23 @@ class StimHeatmapWindow(_SelfRaisingDialog):
         trace_neuron_ids: Iterable[int] | None = None,
     ) -> None:
         stim_ids = list(stim_neuron_ids)
-        self._update_heatmap(stim, stim_ids)
+        duration_ms = self._update_heatmap(stim, stim_ids)
         self._update_traces(
-            trace, stim_ids if trace_neuron_ids is None else list(trace_neuron_ids)
+            trace,
+            stim_ids if trace_neuron_ids is None else list(trace_neuron_ids),
+            duration_ms,
         )
         self.plot.draw()
 
-    def _update_heatmap(self, stim: StimArray | None, neuron_ids: list[int]) -> None:
+    def _update_heatmap(self, stim: StimArray | None, neuron_ids: list[int]) -> float:
         axes = self.axes
         ids = sorted({int(i) for i in neuron_ids})
         if stim is None or not ids:
-            return
+            return 0.0
         values = stim.values  # (n_time, n_neurons)
         ids = [i for i in ids if 0 <= i < values.shape[1]]
         if values.shape[0] == 0 or not ids:
-            return
+            return 0.0
         selected = values[:, ids]
         dt_ms = float(stim.dt) * 1000.0
         duration_ms = values.shape[0] * dt_ms
@@ -234,21 +236,34 @@ class StimHeatmapWindow(_SelfRaisingDialog):
         image.set_extent(extent)
         axes.set_xlim(0.0, duration_ms)
         axes.set_ylim(-0.5, n_rows - 0.5)
+        return duration_ms
 
-    def _update_traces(self, trace: TraceData | None, neuron_ids: list[int]) -> None:
+    def _update_traces(
+        self, trace: TraceData | None, neuron_ids: list[int], window_ms: float
+    ) -> None:
         axes = self.trace_axes
         axes.clear()
         ids = sorted({int(i) for i in neuron_ids})
-        if trace is not None and ids:
+        if trace is not None and ids and window_ms > 0.0:
             dt_ms = float(trace.dt) * 1000.0
-            time_ms = np.arange(trace.traces.shape[1], dtype=np.float64) * dt_ms
+            n_samples = trace.traces.shape[1]
+            window_samples = min(n_samples, max(1, round(window_ms / dt_ms)))
+            start = n_samples - window_samples
+            # Align to the same relative timeline as the heatmap (both end
+            # at "now"), rather than plotting the trace's own full absolute
+            # history: a StateMonitor keeps recording from whenever it was
+            # created, which can be far longer than this routine's own
+            # stim array (reset_stim_array() trims that back to a fresh,
+            # much shorter start) - showing the full trace then squeezed
+            # the routine's own pulses into a sliver of the shared x-axis.
+            time_ms = (np.arange(start, n_samples, dtype=np.float64) - start) * dt_ms
             for neuron_id in ids:
                 matches = np.flatnonzero(trace.indices == neuron_id)
                 if matches.size == 0:
                     continue
                 axes.plot(
                     time_ms,
-                    trace.traces[int(matches[0])],
+                    trace.traces[int(matches[0]), start:],
                     label=f"Neuron {neuron_id}",
                     linewidth=1.2,
                 )
