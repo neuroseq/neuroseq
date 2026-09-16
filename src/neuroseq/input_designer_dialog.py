@@ -89,7 +89,32 @@ class _WheelToScrollFilter(QtCore.QObject):
         return super().eventFilter(obj, event)
 
 
-class StimHeatmapWindow(QtWidgets.QDialog):
+class _SelfRaisingDialog(QtWidgets.QDialog):
+    """A non-modal QDialog that raises itself above its siblings whenever it
+    is activated (clicked into focus).
+
+    Several window managers raise an entire transient-dialog chain as one
+    unit on click, rather than reordering siblings within it - so clicking
+    one of several sibling popups (all transient for the same parent
+    routine dialog: the parameters dialog, its plots window, and its
+    stim-pattern heatmap window) does not bring it in front of the others;
+    the whole group just moves together, at whatever relative order the
+    window manager already had. Explicitly re-raising on ActivationChange
+    bypasses that window-manager heuristic and enforces the expected
+    last-clicked-is-on-top order.
+    """
+
+    def changeEvent(self, event: QtCore.QEvent | None) -> None:
+        super().changeEvent(event)
+        if (
+            event is not None
+            and event.type() == QtCore.QEvent.Type.ActivationChange
+            and self.isActiveWindow()
+        ):
+            self.raise_()
+
+
+class StimHeatmapWindow(_SelfRaisingDialog):
     """A live, whole-history heatmap (neuron ID x time) of a growing input
     array, shared by every closed-loop routine dialog (Input Designer,
     Rheobase, STDP timing window).
@@ -189,7 +214,7 @@ class StimHeatmapWindow(QtWidgets.QDialog):
         figure.subplots_adjust(left=0.09, right=0.98, bottom=0.16, top=0.96)
 
 
-class InputDesignerDialog(QtWidgets.QDialog):
+class InputDesignerDialog(_SelfRaisingDialog):
     """Closed-loop EPSP targeting with an STDP induction protocol."""
 
     simulation_requested = QtCore.Signal(float)
@@ -391,7 +416,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
 
         # The plots live in their own window so the controls and the plots each
         # get room, and the controls stay compact on small screens.
-        self.plot_window = QtWidgets.QDialog(self)
+        self.plot_window = _SelfRaisingDialog(self)
         self.plot_window.setWindowTitle("Design dynamic input — plots")
         self.plot_window.setWindowFlag(
             QtCore.Qt.WindowType.WindowMinimizeButtonHint, True

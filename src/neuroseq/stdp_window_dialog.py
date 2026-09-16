@@ -16,6 +16,7 @@ from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.input_designer_dialog import EPSPMeasurement
 from neuroseq.input_designer_dialog import StimHeatmapWindow
+from neuroseq.input_designer_dialog import _SelfRaisingDialog
 from neuroseq.input_designer_dialog import _set_native_minimized_position
 from neuroseq.input_designer_dialog import _WheelToScrollFilter
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
@@ -42,7 +43,7 @@ class _NoEpspDetected(ValueError):
     """
 
 
-class StdpWindowDialog(QtWidgets.QDialog):
+class StdpWindowDialog(_SelfRaisingDialog):
     """Sweep spike timing to measure the functional STDP timing window."""
 
     simulation_requested = QtCore.Signal(float)
@@ -257,7 +258,7 @@ class StdpWindowDialog(QtWidgets.QDialog):
             lambda _index: self._update_estimate()
         )
 
-        self.plot_window = QtWidgets.QDialog(self)
+        self.plot_window = _SelfRaisingDialog(self)
         self.plot_window.setWindowTitle("STDP timing window (LTP/LTD vs Δt) — plots")
         self.plot_window.setWindowFlag(
             QtCore.Qt.WindowType.WindowMinimizeButtonHint, True

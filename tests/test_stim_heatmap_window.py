@@ -1,10 +1,12 @@
 import numpy as np
 import pytest
 from matplotlib.colors import to_hex
+from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq import theme
 from neuroseq.input_designer_dialog import StimHeatmapWindow
+from neuroseq.input_designer_dialog import _SelfRaisingDialog
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
@@ -107,3 +109,27 @@ def test_stim_heatmap_window_position_below_clamped_to_screen(qtbot) -> None:
     assert pos.y() >= available.top()
     assert pos.x() + size.width() <= available.right() + 1
     assert pos.y() + size.height() <= available.bottom() + 1
+
+
+def test_self_raising_dialog_raises_itself_when_activated(qtbot) -> None:
+    """Some window managers raise a whole transient-dialog chain as one unit
+    on click rather than reordering siblings within it, so a sibling popup
+    activated by the user doesn't otherwise come to the front of the others.
+    _SelfRaisingDialog (the base every popup here uses) forces that itself
+    via ActivationChange rather than relying on the window manager."""
+    dialog = _SelfRaisingDialog()
+    qtbot.addWidget(dialog)
+    raised = []
+    dialog.raise_ = lambda: raised.append(True)  # type: ignore[method-assign]
+
+    event = QtCore.QEvent(QtCore.QEvent.Type.ActivationChange)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(type(dialog), "isActiveWindow", lambda self: True)
+        dialog.changeEvent(event)
+    assert raised == [True]
+
+    raised.clear()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(type(dialog), "isActiveWindow", lambda self: False)
+        dialog.changeEvent(QtCore.QEvent(QtCore.QEvent.Type.ActivationChange))
+    assert raised == []

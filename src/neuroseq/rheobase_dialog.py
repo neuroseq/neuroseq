@@ -13,6 +13,7 @@ from qtpy import QtWidgets
 from neuroseq import theme as theme_module
 from neuroseq.data import TraceData
 from neuroseq.input_designer_dialog import StimHeatmapWindow
+from neuroseq.input_designer_dialog import _SelfRaisingDialog
 from neuroseq.input_designer_dialog import _set_native_minimized_position
 from neuroseq.input_designer_dialog import _WheelToScrollFilter
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
     from neuroseq.stim_editor import StimEditor
 
 
-class RheobaseDialog(QtWidgets.QDialog):
+class RheobaseDialog(_SelfRaisingDialog):
     """Closed-loop search for the smallest direct stimulus that evokes a spike."""
 
     simulation_requested = QtCore.Signal(float)
@@ -244,7 +245,7 @@ class RheobaseDialog(QtWidgets.QDialog):
             self._update_sweeping_strategy_controls
         )
 
-        self.plot_window = QtWidgets.QDialog(self)
+        self.plot_window = _SelfRaisingDialog(self)
         self.plot_window.setWindowTitle("Minimal input for spiking (rheobase) — plots")
         self.plot_window.setWindowFlag(
             QtCore.Qt.WindowType.WindowMinimizeButtonHint, True
