@@ -258,7 +258,11 @@ class StdpWindowDialog(_SelfRaisingDialog):
             lambda _index: self._update_estimate()
         )
 
-        self.plot_window = _SelfRaisingDialog(self)
+        # No Qt parent for the popups - see StimHeatmapWindow's construction
+        # in input_designer_dialog.py for why (KWin/X11 groups a whole chain
+        # of transient windows sharing one owner, so clicking one never
+        # brings it above a sibling in the same chain).
+        self.plot_window = _SelfRaisingDialog()
         self.plot_window.setWindowTitle("STDP timing window (LTP/LTD vs Δt) — plots")
         self.plot_window.setWindowFlag(
             QtCore.Qt.WindowType.WindowMinimizeButtonHint, True
@@ -277,7 +281,7 @@ class StdpWindowDialog(_SelfRaisingDialog):
         # A third popup: a live, whole-history heatmap of the input pattern
         # (neuron ID x time) - see StimHeatmapWindow's docstring for why.
         self.stim_heatmap_window = StimHeatmapWindow(
-            "STDP timing window (LTP/LTD vs Δt) — stimulation pattern", self
+            "STDP timing window (LTP/LTD vs Δt) — stimulation pattern"
         )
         self._stim_heatmap_window_positioned = False
 

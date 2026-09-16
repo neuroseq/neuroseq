@@ -489,7 +489,16 @@ class InputDesignerDialog(_SelfRaisingDialog):
 
         # The plots live in their own window so the controls and the plots each
         # get room, and the controls stay compact on small screens.
-        self.plot_window = _SelfRaisingDialog(self)
+        # No Qt parent for the popups (this differs from most of the app's
+        # other detached windows): a parent sets WM_TRANSIENT_FOR, and some
+        # window managers (observed on KWin/X11) then treat the whole chain
+        # of transient windows sharing one owner as a single "raise group" -
+        # clicking any one of them just re-asserts the group's foreground
+        # status without ever reordering members relative to each other, so
+        # a popup can stay stuck behind its sibling no matter which is
+        # clicked. Each is still closed explicitly in closeEvent() below, so
+        # nothing leaks by skipping Qt's parent-child ownership here.
+        self.plot_window = _SelfRaisingDialog()
         self.plot_window.setWindowTitle("Design dynamic input — plots")
         self.plot_window.setWindowFlag(
             QtCore.Qt.WindowType.WindowMinimizeButtonHint, True
@@ -514,7 +523,7 @@ class InputDesignerDialog(_SelfRaisingDialog):
         # A third popup: a live, whole-history heatmap of the input pattern
         # (neuron ID x time) - see StimHeatmapWindow's docstring for why.
         self.stim_heatmap_window = StimHeatmapWindow(
-            "Design dynamic input — stimulation pattern", self
+            "Design dynamic input — stimulation pattern"
         )
         self._stim_heatmap_window_positioned = False
 
