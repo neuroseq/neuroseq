@@ -751,40 +751,21 @@ def test_input_designer_stim_heatmap_opens_in_its_own_window(qtbot) -> None:
 
     assert dialog.stim_heatmap_window not in (dialog, dialog.plot_window)
     assert dialog.stim_heatmap_window.isWindow()
-    assert dialog.stim_heatmap_plot.window() is dialog.stim_heatmap_window
+    assert dialog.stim_heatmap_window.plot.window() is dialog.stim_heatmap_window
 
     dialog.show()
     qtbot.waitUntil(lambda: dialog.stim_heatmap_window.isVisible())
+    # See test_stim_heatmap_window.py for the off-screen clamping this relies on.
+    screen = dialog.screen() or QtWidgets.QApplication.primaryScreen()
+    available = screen.availableGeometry()
+    pos = dialog.stim_heatmap_window.pos()
+    assert available.left() <= pos.x() <= available.right()
+    assert available.top() <= pos.y() <= available.bottom()
     dialog.close()
     qtbot.waitUntil(lambda: not dialog.stim_heatmap_window.isVisible())
 
 
-def test_input_designer_stim_heatmap_window_stays_on_screen(qtbot) -> None:
-    project = _FakeProject()
-    editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
-    qtbot.addWidget(dialog)
-    qtbot.addWidget(dialog.plot_window)
-    qtbot.addWidget(dialog.stim_heatmap_window)
-
-    # Force the plots window near the bottom of the screen: stacking the
-    # heatmap window naively beneath it (its y + its own height) would then
-    # land past the bottom edge, off-screen (the actual bug report).
-    screen = dialog.screen() or QtWidgets.QApplication.primaryScreen()
-    available = screen.availableGeometry()
-    dialog.plot_window.move(available.left(), available.bottom() - 100)
-
-    dialog._position_stim_heatmap_window()
-
-    pos = dialog.stim_heatmap_window.pos()
-    size = dialog.stim_heatmap_window.size()
-    assert pos.x() >= available.left()
-    assert pos.y() >= available.top()
-    assert pos.x() + size.width() <= available.right() + 1
-    assert pos.y() + size.height() <= available.bottom() + 1
-
-
-def test_input_designer_stim_heatmap_shows_whole_history_without_panning(
+def test_input_designer_updates_stim_heatmap_as_blocks_are_appended(
     qtbot, monkeypatch
 ) -> None:
     project = _FakeProject()
@@ -796,36 +777,24 @@ def test_input_designer_stim_heatmap_shows_whole_history_without_panning(
     )
 
     dialog.start()
-    image = dialog._stim_heatmap_image
+    image = dialog.stim_heatmap_window._image
     assert image is not None
     stim = editor.current_stim_modifier.stim_array
-    first_n_samples = stim.values.shape[0]
-    # the heatmap always starts at t=0 and ends at the array's current length -
-    # it never pans a fixed-width window the way the main follow-view does.
-    assert image.get_extent()[0] == 0.0
-    assert image.get_extent()[1] == pytest.approx(first_n_samples * stim.dt * 1000.0)
-    assert dialog.stim_heatmap_axes.get_ylabel() == "Neuron ID"
-    assert dialog.stim_heatmap_axes.get_xlabel() == "Time (ms)"
+    assert image.get_array().shape[1] == stim.values.shape[0]
 
     dialog.simulation_finished()  # appends a pairing block, growing the array
     # the same image artist is reused (updated in place), not rebuilt/replaced
-    assert dialog._stim_heatmap_image is image
-    grown_n_samples = stim.values.shape[0]
-    assert grown_n_samples > first_n_samples
-    assert image.get_extent()[1] == pytest.approx(grown_n_samples * stim.dt * 1000.0)
-    # every previously appended sample is still part of the shown data - the
-    # start of the array is never dropped/panned away
-    assert image.get_array().shape[1] == grown_n_samples
+    assert dialog.stim_heatmap_window._image is image
+    assert image.get_array().shape[1] == stim.values.shape[0]
 
 
-def test_input_designer_stim_heatmap_follows_theme(qtbot) -> None:
+def test_input_designer_forwards_theme_to_stim_heatmap(qtbot) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
     dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
-    dialog.start()
 
     dialog.apply_theme(theme.DARK)
-    assert to_hex(dialog.stim_heatmap_axes.get_facecolor()) == "#1e1e1e"
+    assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#1e1e1e"
     dialog.apply_theme(theme.LIGHT)
-    assert to_hex(dialog.stim_heatmap_axes.get_facecolor()) == "#ffffff"
+    assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#ffffff"

@@ -400,6 +400,44 @@ def test_rheobase_plots_open_in_separate_window(qtbot) -> None:
     assert dialog.rheobase_plot.parent() is dialog.plot_window
 
 
+def test_rheobase_stim_heatmap_opens_in_its_own_window(qtbot) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    qtbot.addWidget(dialog.stim_heatmap_window)
+
+    assert dialog.stim_heatmap_window not in (dialog, dialog.plot_window)
+    assert dialog.stim_heatmap_window.isWindow()
+
+    dialog.show()
+    qtbot.waitUntil(lambda: dialog.stim_heatmap_window.isVisible())
+    dialog.close()
+    qtbot.waitUntil(lambda: not dialog.stim_heatmap_window.isVisible())
+
+
+def test_rheobase_updates_stim_heatmap_as_blocks_are_appended(qtbot) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+
+    dialog.start()
+    image = dialog.stim_heatmap_window._image
+    assert image is not None
+    stim = editor.current_stim_modifier.stim_array
+    assert image.get_array().shape[1] == stim.values.shape[0]
+
+    _finish_search(dialog)
+    # the same image artist is reused (updated in place), not rebuilt, and
+    # reflects the array's final, grown length
+    assert dialog.stim_heatmap_window._image is image
+    assert image.get_array().shape[1] == stim.values.shape[0]
+
+
+def test_rheobase_forwards_theme_to_stim_heatmap(qtbot) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+
+    dialog.apply_theme(theme.DARK)
+    assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#1e1e1e"
+    dialog.apply_theme(theme.LIGHT)
+    assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#ffffff"
+
+
 def test_rheobase_initializes_missing_trace_then_starts_search(
     qtbot, monkeypatch
 ) -> None:

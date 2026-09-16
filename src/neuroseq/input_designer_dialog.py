@@ -89,6 +89,106 @@ class _WheelToScrollFilter(QtCore.QObject):
         return super().eventFilter(obj, event)
 
 
+class StimHeatmapWindow(QtWidgets.QDialog):
+    """A live, whole-history heatmap (neuron ID x time) of a growing input
+    array, shared by every closed-loop routine dialog (Input Designer,
+    Rheobase, STDP timing window).
+
+    Each of those dialogs already has its own live-follow view that pans a
+    fixed-width window and fully rebuilds its GPU image graphic on every
+    appended block - which makes it hard to visually track how the pattern
+    evolves, since it jumps and re-flashes each iteration. This window never
+    pans or rebuilds: update_from_stim() only calls set_data/set_extent/
+    set_clim on the same Matplotlib image artist, so old blocks stay exactly
+    where they were and only the timeline extends.
+    """
+
+    def __init__(self, title: str, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setWindowFlag(QtCore.Qt.WindowType.WindowMinimizeButtonHint, True)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(2, 2, 2, 2)
+        self.plot = MatplotlibWidget(self)
+        self.plot.setMinimumHeight(220)
+        self.axes = self.plot.getFigure().add_subplot(111)
+        self._image: AxesImage | None = None
+        self._stim_type: StimType | None = None
+        layout.addWidget(self.plot)
+        self.resize(720, 320)
+        self._theme = theme_module.LIGHT
+        self._style_axes()
+
+    def update_from_stim(self, stim: StimArray | None) -> None:
+        if stim is None:
+            return
+        values = stim.values  # (n_time, n_neurons)
+        if values.shape[0] == 0 or values.shape[1] == 0:
+            return
+        dt_ms = float(stim.dt) * 1000.0
+        duration_ms = values.shape[0] * dt_ms
+        n_neurons = values.shape[1]
+        vmax = float(np.max(np.abs(values)))
+        if vmax == 0.0:
+            vmax = 1.0
+        vmin = -vmax if stim.stim_type == StimType.External else 0.0
+        extent = (0.0, duration_ms, -0.5, n_neurons - 0.5)
+        if self._image is None:
+            self._image = self.axes.imshow(
+                values.T,
+                aspect="auto",
+                origin="lower",
+                extent=extent,
+                interpolation="nearest",
+            )
+            self._style_axes()
+        image = self._image
+        assert image is not None
+        if self._stim_type != stim.stim_type:
+            self._stim_type = stim.stim_type
+            # Match the same excitatory/inhibitory/external coloring (and
+            # transparent-at-zero alpha) the main GPU stim view uses.
+            image.set_cmap(get_cmap(stim.stim_type).to_mpl())
+        image.set_data(values.T)
+        image.set_extent(extent)
+        image.set_clim(vmin, vmax)
+        self.axes.set_xlim(0.0, duration_ms)
+        self.axes.set_ylim(-0.5, n_neurons - 0.5)
+        self.plot.draw()
+
+    def position_below(self, reference: QtWidgets.QWidget) -> None:
+        """Place this window just under `reference`, clamped to the
+        available screen so stacking windows vertically can't push this one
+        off-screen (it was originally placed unconditionally below the
+        plots window, which landed past the bottom edge on shorter
+        displays)."""
+        x = reference.x()
+        y = reference.y() + reference.height() + 20
+        screen = reference.screen() or QtWidgets.QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            x = min(max(x, available.left()), available.right() - self.width())
+            y = min(max(y, available.top()), available.bottom() - self.height())
+        self.move(x, y)
+
+    def apply_theme(self, theme: str) -> None:
+        self._theme = theme_module.normalize_theme(theme)
+        self._style_axes()
+        self.plot.draw()
+
+    def _style_axes(self) -> None:
+        face, text = theme_module.mpl_colors(self._theme)
+        self.axes.set_facecolor(face)
+        self.axes.set_xlabel("Time (ms)", color=text)
+        self.axes.set_ylabel("Neuron ID", color=text)
+        self.axes.tick_params(colors=text)
+        for spine in self.axes.spines.values():
+            spine.set_color(text)
+        figure = self.plot.getFigure()
+        figure.set_facecolor(face)
+        figure.subplots_adjust(left=0.09, right=0.98, bottom=0.16, top=0.96)
+
+
 class InputDesignerDialog(QtWidgets.QDialog):
     """Closed-loop EPSP targeting with an STDP induction protocol."""
 
@@ -314,29 +414,11 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.plot_window.resize(720, 640)
 
         # A third popup: a live, whole-history heatmap of the input pattern
-        # (neuron ID x time). The main input editor's own live-follow view
-        # jumps and rebuilds its graphic on every appended block (it pans a
-        # fixed-width window and recreates the image each time), which makes
-        # it hard to visually track how the pattern evolves. This one never
-        # pans or rebuilds - it always shows everything appended so far, so
-        # old blocks stay put and only the timeline extends.
-        self.stim_heatmap_window = QtWidgets.QDialog(self)
-        self.stim_heatmap_window.setWindowTitle(
-            "Design dynamic input — stimulation pattern"
-        )
-        self.stim_heatmap_window.setWindowFlag(
-            QtCore.Qt.WindowType.WindowMinimizeButtonHint, True
+        # (neuron ID x time) - see StimHeatmapWindow's docstring for why.
+        self.stim_heatmap_window = StimHeatmapWindow(
+            "Design dynamic input — stimulation pattern", self
         )
         self._stim_heatmap_window_positioned = False
-        heatmap_layout = QtWidgets.QVBoxLayout(self.stim_heatmap_window)
-        heatmap_layout.setContentsMargins(2, 2, 2, 2)
-        self.stim_heatmap_plot = MatplotlibWidget(self.stim_heatmap_window)
-        self.stim_heatmap_plot.setMinimumHeight(220)
-        self.stim_heatmap_axes = self.stim_heatmap_plot.getFigure().add_subplot(111)
-        self._stim_heatmap_image: AxesImage | None = None
-        self._stim_heatmap_stim_type: StimType | None = None
-        heatmap_layout.addWidget(self.stim_heatmap_plot)
-        self.stim_heatmap_window.resize(720, 320)
 
         self.lbl_relative_difference = QtWidgets.QLabel(
             "Relative difference from target: waiting for baseline", self
@@ -439,28 +521,9 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.stim_heatmap_window.show()
         if not self._stim_heatmap_window_positioned:
             self._stim_heatmap_window_positioned = True
-            self._position_stim_heatmap_window()
+            self.stim_heatmap_window.position_below(self.plot_window)
         self.stim_heatmap_window.raise_()
         self._update_stim_heatmap()
-
-    def _position_stim_heatmap_window(self) -> None:
-        """Place the heatmap window below the plots window, clamped to the
-        available screen so stacking three windows vertically can't push it
-        off-screen (issue: window not appearing on shorter/smaller displays)."""
-        x = self.plot_window.x()
-        y = self.plot_window.y() + self.plot_window.height() + 20
-        screen = self.plot_window.screen() or QtWidgets.QApplication.primaryScreen()
-        if screen is not None:
-            available = screen.availableGeometry()
-            x = min(
-                max(x, available.left()),
-                available.right() - self.stim_heatmap_window.width(),
-            )
-            y = min(
-                max(y, available.top()),
-                available.bottom() - self.stim_heatmap_window.height(),
-            )
-        self.stim_heatmap_window.move(x, y)
 
     def closeEvent(self, event: QtGui.QCloseEvent | None) -> None:
         # The dialog is cached and reused, so closing only hides it. Stop any
@@ -956,73 +1019,16 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.pairing_time_axes.set_xlabel("Measurement / iteration", color=text)
 
     def _update_stim_heatmap(self) -> None:
-        """Redraw the whole-history input pattern heatmap (neuron ID x time).
-
-        Unlike the main input editor's live-follow view, this never pans a
-        window or rebuilds its graphic - it always shows every sample
-        appended so far, updating the same image artist in place
-        (set_data/set_extent/set_clim) rather than recreating it, so nothing
-        jumps or flashes as the routine runs.
-        """
         modifier = self.editor.current_stim_modifier
-        if modifier is None:
-            return
-        stim = modifier.stim_array
-        values = stim.values  # (n_time, n_neurons)
-        if values.shape[0] == 0 or values.shape[1] == 0:
-            return
-        dt_ms = float(stim.dt) * 1000.0
-        duration_ms = values.shape[0] * dt_ms
-        n_neurons = values.shape[1]
-        vmax = float(np.max(np.abs(values)))
-        if vmax == 0.0:
-            vmax = 1.0
-        vmin = -vmax if stim.stim_type == StimType.External else 0.0
-        extent = (0.0, duration_ms, -0.5, n_neurons - 0.5)
-        axes = self.stim_heatmap_axes
-        if self._stim_heatmap_image is None:
-            self._stim_heatmap_image = axes.imshow(
-                values.T,
-                aspect="auto",
-                origin="lower",
-                extent=extent,
-                interpolation="nearest",
-            )
-            self._style_stim_heatmap_axes()
-        image = self._stim_heatmap_image
-        assert image is not None
-        if self._stim_heatmap_stim_type != stim.stim_type:
-            self._stim_heatmap_stim_type = stim.stim_type
-            # Match the same excitatory/inhibitory/external coloring (and
-            # transparent-at-zero alpha) the main GPU stim view uses.
-            image.set_cmap(get_cmap(stim.stim_type).to_mpl())
-        image.set_data(values.T)
-        image.set_extent(extent)
-        image.set_clim(vmin, vmax)
-        axes.set_xlim(0.0, duration_ms)
-        axes.set_ylim(-0.5, n_neurons - 0.5)
-        self.stim_heatmap_plot.draw()
-
-    def _style_stim_heatmap_axes(self) -> None:
-        face, text = theme_module.mpl_colors(self._theme)
-        axes = self.stim_heatmap_axes
-        axes.set_facecolor(face)
-        axes.set_xlabel("Time (ms)", color=text)
-        axes.set_ylabel("Neuron ID", color=text)
-        axes.tick_params(colors=text)
-        for spine in axes.spines.values():
-            spine.set_color(text)
-        figure = self.stim_heatmap_plot.getFigure()
-        figure.set_facecolor(face)
-        figure.subplots_adjust(left=0.09, right=0.98, bottom=0.16, top=0.96)
+        stim = modifier.stim_array if modifier is not None else None
+        self.stim_heatmap_window.update_from_stim(stim)
 
     def apply_theme(self, theme: str) -> None:
-        """Recolor both Matplotlib canvases for the application theme."""
+        """Recolor every Matplotlib canvas for the application theme."""
         self._theme = theme_module.normalize_theme(theme)
         self._style_plot_axes()
         self.epsp_plot.draw()
-        self._style_stim_heatmap_axes()
-        self.stim_heatmap_plot.draw()
+        self.stim_heatmap_window.apply_theme(theme)
 
     def simulation_failed(self, message: str) -> None:
         if self._running and self._awaiting_simulation:

@@ -15,6 +15,7 @@ from neuroseq import theme as theme_module
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.input_designer_dialog import EPSPMeasurement
+from neuroseq.input_designer_dialog import StimHeatmapWindow
 from neuroseq.input_designer_dialog import _set_native_minimized_position
 from neuroseq.input_designer_dialog import _WheelToScrollFilter
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
@@ -272,6 +273,13 @@ class StdpWindowDialog(QtWidgets.QDialog):
         plot_layout.addWidget(self.window_plot)
         self.plot_window.resize(720, 560)
 
+        # A third popup: a live, whole-history heatmap of the input pattern
+        # (neuron ID x time) - see StimHeatmapWindow's docstring for why.
+        self.stim_heatmap_window = StimHeatmapWindow(
+            "STDP timing window (LTP/LTD vs Δt) — stimulation pattern", self
+        )
+        self._stim_heatmap_window_positioned = False
+
         self.lbl_status = QtWidgets.QLabel("STDP window: waiting for baseline", self)
         layout.addWidget(self.lbl_status)
         self.lbl_estimate = QtWidgets.QLabel("", self)
@@ -355,12 +363,24 @@ class StdpWindowDialog(QtWidgets.QDialog):
             self._plot_window_positioned = True
             self.plot_window.move(self.x() + self.width() + 20, self.y())
         self.plot_window.raise_()
+        self.stim_heatmap_window.show()
+        if not self._stim_heatmap_window_positioned:
+            self._stim_heatmap_window_positioned = True
+            self.stim_heatmap_window.position_below(self.plot_window)
+        self.stim_heatmap_window.raise_()
+        self._update_stim_heatmap()
 
     def closeEvent(self, event: QtGui.QCloseEvent | None) -> None:
         if self._running:
             self._finish("Routine stopped (dialog closed).")
         self.plot_window.close()
+        self.stim_heatmap_window.close()
         super().closeEvent(event)
+
+    def _update_stim_heatmap(self) -> None:
+        modifier = self.editor.current_stim_modifier
+        stim = modifier.stim_array if modifier is not None else None
+        self.stim_heatmap_window.update_from_stim(stim)
 
     def changeEvent(self, event: QtCore.QEvent | None) -> None:
         super().changeEvent(event)
@@ -696,6 +716,7 @@ class StdpWindowDialog(QtWidgets.QDialog):
             self.editor.focus_time_range(
                 history_start * stim.dt, history_stop * stim.dt
             )
+        self._update_stim_heatmap()
         return start
 
     def _run_to_sample(self, stop_sample: int) -> None:
@@ -1104,6 +1125,7 @@ class StdpWindowDialog(QtWidgets.QDialog):
         self._theme = theme_module.normalize_theme(theme)
         self._style_plot_axes()
         self.window_plot.draw()
+        self.stim_heatmap_window.apply_theme(theme)
 
     def simulation_failed(self, message: str) -> None:
         if self._running and self._awaiting_simulation:
