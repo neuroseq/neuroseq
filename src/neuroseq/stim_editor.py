@@ -1129,7 +1129,15 @@ class StimEditor(QtWidgets.QWidget):
     ) -> None:
         dialog = getattr(self, attr_name)
         if dialog is None:
-            dialog = cls(self, self)
+            # No Qt parent: a parent sets WM_TRANSIENT_FOR to the main
+            # window, and on X11/KWin the routine dialog and its own two
+            # popups (also parentless - see StimHeatmapWindow's
+            # construction in input_designer_dialog.py) would then all
+            # share one owner. KWin can treat that whole chain as a single
+            # "raise group" tied to the app's own foreground status, so
+            # none of them can be individually brought to the front of the
+            # others by clicking - not even this one.
+            dialog = cls(self, None)
             dialog.simulation_requested.connect(self.simulation_requested)
             setattr(self, attr_name, dialog)
         dialog.apply_theme(self._input_designer_theme)

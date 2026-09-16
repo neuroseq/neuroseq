@@ -1378,6 +1378,24 @@ def test_open_input_designer_opens_rheobase_when_selected(qtbot: QtBot) -> None:
     stim_editor.close()
 
 
+def test_routine_dialogs_have_no_qt_parent(qtbot: QtBot) -> None:
+    """A parent sets WM_TRANSIENT_FOR on X11; on KWin the routine dialog and
+    its own two popups (also parentless) would then all share one owner and
+    get treated as a single "raise group" that can't be reordered by
+    clicking any individual member - not even this dialog itself."""
+    stim_editor, _ = _make_ramp_editor(qtbot)
+    stim_editor.open_input_designer()
+    selector = stim_editor._routine_selector_dialog
+    assert selector is not None
+
+    selector.cmb_routine.setCurrentText(StimEditor.RHEOBASE_ROUTINE)
+    selector._on_continue()
+
+    assert stim_editor._rheobase_dialog is not None
+    assert stim_editor._rheobase_dialog.parent() is None
+    stim_editor.close()
+
+
 def test_open_input_designer_opens_stdp_window_when_selected(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
     stim_editor.open_input_designer()
