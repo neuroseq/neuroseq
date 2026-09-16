@@ -740,3 +740,67 @@ def test_input_designer_pairing_time_recorded_as_effective_grid_value(
 
     assert dialog._pairing_times_ms == [10.0, -10.0]
     assert "pairing times are snapped" in dialog.log.toPlainText()
+
+
+def test_input_designer_stim_heatmap_opens_in_its_own_window(qtbot) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    qtbot.addWidget(dialog.stim_heatmap_window)
+
+    assert dialog.stim_heatmap_window not in (dialog, dialog.plot_window)
+    assert dialog.stim_heatmap_window.isWindow()
+    assert dialog.stim_heatmap_plot.window() is dialog.stim_heatmap_window
+
+    dialog.show()
+    qtbot.waitUntil(lambda: dialog.stim_heatmap_window.isVisible())
+    dialog.close()
+    qtbot.waitUntil(lambda: not dialog.stim_heatmap_window.isVisible())
+
+
+def test_input_designer_stim_heatmap_shows_whole_history_without_panning(
+    qtbot, monkeypatch
+) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    monkeypatch.setattr(
+        dialog, "_measure_epsps", lambda trace: EPSPMeasurement(2.0, (2.0,) * 5)
+    )
+
+    dialog.start()
+    image = dialog._stim_heatmap_image
+    assert image is not None
+    stim = editor.current_stim_modifier.stim_array
+    first_n_samples = stim.values.shape[0]
+    # the heatmap always starts at t=0 and ends at the array's current length -
+    # it never pans a fixed-width window the way the main follow-view does.
+    assert image.get_extent()[0] == 0.0
+    assert image.get_extent()[1] == pytest.approx(first_n_samples * stim.dt * 1000.0)
+    assert dialog.stim_heatmap_axes.get_ylabel() == "Neuron ID"
+    assert dialog.stim_heatmap_axes.get_xlabel() == "Time (ms)"
+
+    dialog.simulation_finished()  # appends a pairing block, growing the array
+    # the same image artist is reused (updated in place), not rebuilt/replaced
+    assert dialog._stim_heatmap_image is image
+    grown_n_samples = stim.values.shape[0]
+    assert grown_n_samples > first_n_samples
+    assert image.get_extent()[1] == pytest.approx(grown_n_samples * stim.dt * 1000.0)
+    # every previously appended sample is still part of the shown data - the
+    # start of the array is never dropped/panned away
+    assert image.get_array().shape[1] == grown_n_samples
+
+
+def test_input_designer_stim_heatmap_follows_theme(qtbot) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    dialog.start()
+
+    dialog.apply_theme(theme.DARK)
+    assert to_hex(dialog.stim_heatmap_axes.get_facecolor()) == "#1e1e1e"
+    dialog.apply_theme(theme.LIGHT)
+    assert to_hex(dialog.stim_heatmap_axes.get_facecolor()) == "#ffffff"
