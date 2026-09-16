@@ -406,6 +406,52 @@ def test_auto_extend_vertical_space_hover_and_tick_labels_track_warped_rows(
     trace_widget.close()
 
 
+def test_auto_extend_vertical_space_does_not_move_camera_on_replot(
+    qtbot: QtBot,
+) -> None:
+    """Normalization tweaks while auto-extend is on must only grow the view's
+    extent (so the user *can* zoom out to see a taller row) - not snap the
+    camera to it. Forcing a camera refocus on every replot made unrelated
+    traces look visually rescaled/recentered even though their data never
+    changed (issue #551 review)."""
+    controller = ConstrainedPanZoomController()
+    controller.set_limits(1.0, 5)
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    data = _make_scaled_trace_data(5)
+    trace_widget.set_data(data)
+
+    trace_widget.trace_norm_percent = 500
+    trace_widget.auto_extend_vertical_space = True
+    trace_widget.replot_traces()
+
+    # simulate the user manually zooming/panning to their own view
+    controller.focus_neuron_range(1, 3)
+    camera_state_before = dict(controller._get_camera_state())
+
+    # a no-op toggle under auto-extend (clip is bypassed whenever
+    # auto-extend is on) must not disturb that camera state at all
+    trace_widget.clip = not trace_widget.clip
+    trace_widget.replot_traces()
+    camera_state_after = dict(controller._get_camera_state())
+    assert camera_state_after["height"] == pytest.approx(camera_state_before["height"])
+    assert camera_state_after["position"] == pytest.approx(
+        camera_state_before["position"]
+    )
+
+    # a genuine normalization change (growing a row further) still must not
+    # move the camera - only the extent it's allowed to grow into
+    trace_widget.trace_norm_percent = 900
+    trace_widget.replot_traces()
+    camera_state_after = dict(controller._get_camera_state())
+    assert camera_state_after["height"] == pytest.approx(camera_state_before["height"])
+    assert camera_state_after["position"] == pytest.approx(
+        camera_state_before["position"]
+    )
+    assert controller.max_height >= sum(2 * h for h in trace_widget._row_half_heights)
+    trace_widget.close()
+
+
 def test_trace_norm_dialog_auto_extend_checkbox_updates_trace_widget(
     qtbot: QtBot,
 ) -> None:

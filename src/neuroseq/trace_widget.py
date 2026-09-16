@@ -311,17 +311,28 @@ class TraceWidget(TimeseriesWidget):
             if self.auto_extend_vertical_space:
                 # Row heights depend on the normalization settings just
                 # applied above (e.g. dragging the percent slider can grow or
-                # shrink which rows need extra room) - recompute and refit.
+                # shrink which rows need extra room) - recompute the layout
+                # and make sure the view's extent can fit it. Deliberately
+                # *not* a full _refit_view_to_visible_neurons(): that also
+                # snaps the camera to exactly the new total height, which
+                # would rescale/recenter every row on screen just because a
+                # normalization tweak changed one row's height - reading as
+                # the trace itself changing even though its values didn't
+                # (issue #551 review). Camera movement stays reserved for
+                # actual visible-row changes (see _on_state_greyed_changed).
                 self._apply_visible_neuron_layout()
-                self._refit_view_to_visible_neurons()
+                self._grow_view_extent_for_visible_neurons()
             elif self._base_max_height is not None:
                 # auto-extend was just turned back off: restore the plain,
                 # evenly-spaced layout and the controller height it displaced.
+                # Same reasoning as above - update the extent, don't move
+                # the camera out from under the user.
                 if self.controller is not None:
                     self.controller.max_height = self._base_max_height
                 self._base_max_height = None
                 self._apply_visible_neuron_layout()
-                self._refit_view_to_visible_neurons()
+                if self.grid_lines is not None:
+                    self.grid_lines.update_neuron_extent(self.n_neurons)
 
     def _compute_row_layout(self) -> None:
         """Recompute per-row half-heights/centers/boundaries so that every
@@ -381,6 +392,19 @@ class TraceWidget(TimeseriesWidget):
         if not self.auto_extend_vertical_space or not self._row_half_heights:
             super()._refit_view_to_visible_neurons()
             return
+        self._grow_view_extent_for_visible_neurons()
+        total_height = sum(2.0 * h for h in self._row_half_heights)
+        if self.controller is not None and total_height > 0:
+            self.controller.focus_neuron_range(0, math.ceil(total_height))
+
+    def _grow_view_extent_for_visible_neurons(self) -> None:
+        """Make sure the grid lines and the controller's zoom-out limit can
+        fit the current (possibly grown) per-row layout, without moving the
+        camera - see the auto-extend branch of replot_traces() for why that
+        matters. _refit_view_to_visible_neurons() calls this too, then goes
+        on to actually move the camera for genuine visible-row changes."""
+        if not self._row_half_heights:
+            return
         total_height = sum(2.0 * h for h in self._row_half_heights)
         if self.controller is not None:
             if self._base_max_height is None:
@@ -388,8 +412,6 @@ class TraceWidget(TimeseriesWidget):
             self.controller.max_height = max(self._base_max_height, total_height)
         if self.grid_lines is not None:
             self.grid_lines.update_neuron_extent(max(1, math.ceil(total_height)))
-        if self.controller is not None and total_height > 0:
-            self.controller.focus_neuron_range(0, math.ceil(total_height))
 
     def _rebuild_custom_analysis_menu(self) -> None:
         super()._rebuild_custom_analysis_menu()
