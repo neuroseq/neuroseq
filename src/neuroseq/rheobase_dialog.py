@@ -16,6 +16,7 @@ from neuroseq.input_designer_dialog import StimHeatmapWindow
 from neuroseq.input_designer_dialog import _SelfRaisingDialog
 from neuroseq.input_designer_dialog import _set_native_minimized_position
 from neuroseq.input_designer_dialog import _WheelToScrollFilter
+from neuroseq.input_designer_dialog import _wrap_in_scroll_area
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
 from neuroseq.rheobase import bisection_converged
 from neuroseq.rheobase import count_spikes
@@ -258,12 +259,14 @@ class RheobaseDialog(_SelfRaisingDialog):
         plot_layout = QtWidgets.QVBoxLayout(self.plot_window)
         plot_layout.setContentsMargins(2, 2, 2, 2)
         self.rheobase_plot = MatplotlibWidget(self.plot_window)
-        self.rheobase_plot.setMinimumHeight(500)
+        self.rheobase_plot.setMinimumSize(680, 500)
         figure = self.rheobase_plot.getFigure()
         grid = figure.add_gridspec(2, 1, height_ratios=(3, 2), hspace=0.18)
         self.rheobase_axes = figure.add_subplot(grid[0, 0])
         self.search_axes = figure.add_subplot(grid[1, 0])
-        plot_layout.addWidget(self.rheobase_plot)
+        plot_layout.addWidget(
+            _wrap_in_scroll_area(self.rheobase_plot, self.plot_window)
+        )
         self.plot_window.resize(720, 560)
 
         # A third popup: a live, whole-history heatmap of the input pattern

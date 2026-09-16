@@ -397,7 +397,7 @@ def test_rheobase_plots_open_in_separate_window(qtbot) -> None:
 
     assert dialog.plot_window is not dialog
     assert dialog.plot_window.isWindow()
-    assert dialog.rheobase_plot.parent() is dialog.plot_window
+    assert dialog.rheobase_plot.window() is dialog.plot_window
 
 
 def test_rheobase_stim_heatmap_opens_in_its_own_window(qtbot) -> None:

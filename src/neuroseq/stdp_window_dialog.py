@@ -19,6 +19,7 @@ from neuroseq.input_designer_dialog import StimHeatmapWindow
 from neuroseq.input_designer_dialog import _SelfRaisingDialog
 from neuroseq.input_designer_dialog import _set_native_minimized_position
 from neuroseq.input_designer_dialog import _WheelToScrollFilter
+from neuroseq.input_designer_dialog import _wrap_in_scroll_area
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import detect_epsps
 from neuroseq.stdp_window import classify_window
@@ -270,12 +271,12 @@ class StdpWindowDialog(_SelfRaisingDialog):
         plot_layout = QtWidgets.QVBoxLayout(self.plot_window)
         plot_layout.setContentsMargins(2, 2, 2, 2)
         self.window_plot = MatplotlibWidget(self.plot_window)
-        self.window_plot.setMinimumHeight(500)
+        self.window_plot.setMinimumSize(680, 500)
         figure = self.window_plot.getFigure()
         grid = figure.add_gridspec(2, 1, height_ratios=(3, 2), hspace=0.18)
         self.window_axes = figure.add_subplot(grid[0, 0])
         self.trajectory_axes = figure.add_subplot(grid[1, 0])
-        plot_layout.addWidget(self.window_plot)
+        plot_layout.addWidget(_wrap_in_scroll_area(self.window_plot, self.plot_window))
         self.plot_window.resize(720, 560)
 
         # A third popup: a live, whole-history heatmap of the input pattern

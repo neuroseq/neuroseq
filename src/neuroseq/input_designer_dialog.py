@@ -116,6 +116,26 @@ class _SelfRaisingDialog(QtWidgets.QDialog):
             self.raise_()
 
 
+def _wrap_in_scroll_area(
+    widget: QtWidgets.QWidget, parent: QtWidgets.QWidget | None = None
+) -> QtWidgets.QScrollArea:
+    """Wrap a plot widget (already given its own minimum size) in a
+    QScrollArea, shared by every routine dialog's plots window and by
+    StimHeatmapWindow.
+
+    setWidgetResizable(True) still lets the widget fill extra space when
+    the window is larger than its minimum - but Qt never shrinks it below
+    that minimum, so a window made smaller than the plot needs (e.g. a
+    short screen) scrolls the content instead of squeezing the figure
+    until axis labels overlap or get clipped off, which is what putting
+    the widget directly in a layout does.
+    """
+    scroll = QtWidgets.QScrollArea(parent)
+    scroll.setWidget(widget)
+    scroll.setWidgetResizable(True)
+    return scroll
+
+
 def _stim_pulse_rgba(values: np.ndarray, stim_type: StimType) -> np.ndarray:
     """Render `values` (rows x time) as RGBA colors matching the main GPU
     stim view's excitatory/inhibitory/external hues, but with alpha
@@ -173,14 +193,14 @@ class StimHeatmapWindow(_SelfRaisingDialog):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
         self.plot = MatplotlibWidget(self)
-        self.plot.setMinimumHeight(320)
+        self.plot.setMinimumSize(680, 320)
         figure = self.plot.getFigure()
         grid = figure.add_gridspec(2, 1, height_ratios=(3, 2), hspace=0.12)
         self.axes = figure.add_subplot(grid[0, 0])
         self.trace_axes = figure.add_subplot(grid[1, 0], sharex=self.axes)
         self._image: AxesImage | None = None
         self._image_row_ids: list[int] = []
-        layout.addWidget(self.plot)
+        layout.addWidget(_wrap_in_scroll_area(self.plot, self))
         self.resize(720, 480)
         self._theme = theme_module.LIGHT
         self._style_axes()
@@ -541,7 +561,7 @@ class InputDesignerDialog(_SelfRaisingDialog):
         plot_layout = QtWidgets.QVBoxLayout(self.plot_window)
         plot_layout.setContentsMargins(2, 2, 2, 2)
         self.epsp_plot = MatplotlibWidget(self.plot_window)
-        self.epsp_plot.setMinimumHeight(500)
+        self.epsp_plot.setMinimumSize(680, 500)
         figure = self.epsp_plot.getFigure()
         grid = figure.add_gridspec(3, 1, height_ratios=(3, 2, 2), hspace=0.14)
         self.epsp_axes = figure.add_subplot(grid[0, 0])
@@ -551,7 +571,7 @@ class InputDesignerDialog(_SelfRaisingDialog):
         self.spn_tolerance.valueChanged.connect(lambda _value: self._update_plots())
         # Compatibility alias: both axes now share one tightly packed canvas.
         self.difference_plot = self.epsp_plot
-        plot_layout.addWidget(self.epsp_plot)
+        plot_layout.addWidget(_wrap_in_scroll_area(self.epsp_plot, self.plot_window))
         self.plot_window.resize(720, 640)
 
         # A third popup: a live, whole-history heatmap of the input pattern
