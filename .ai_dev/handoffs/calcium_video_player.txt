@@ -1,0 +1,908 @@
+calcium_video_player — Raw calcium-TIFF video player panel with stim-triggered red-cross cell labeling and labeled-video export
+================================================================================================================================
+
+Add a new panel, `CalciumVideoWidget`, placed in the same right-hand splitter
+as the existing "Heatmap" (Synapses) and "Spatial Footprints" panels, toggled
+from the View menu/toolbar the same way. It plays back the RAW multi-frame
+calcium-imaging TIFF (the same movie a Suite2p/Cellpose TIFF import already
+processes into traces/segmentation) frame-by-frame, synced to the app's
+shared playback timeline (the same time cursor that scrubs
+trace/stim/spike/heatmap panels together). A dropdown picks which StimArray
+(or "All arrays combined") determines "this cell was stimulated in this
+frame"; stimulated cells get a red cross drawn at their Cellpose-segmentation
+centroid, for every frame whose time window overlaps a nonzero stim sample
+for that cell. A "Save labeled video…" button exports a new multi-frame TIFF
+with the crosses burned into the pixel data.
+
+If the project already has a raw video associated (see below — it does NOT
+today; that's part of this handoff), the panel plays it immediately. If not,
+it shows an "Import Video" button (mirroring `SpatialFootprintWidget`'s own
+`import_requested` signal pattern) that lets the user pick TIFF file(s)
+purely for playback, with no Suite2p/Cellpose processing involved.
+
+IMPORTANT — verified by reading the code, not assumed: **the raw movie's
+pixel data is never retained anywhere today.** `run_suite2p_pipeline`/
+`run_roi_average_pipeline` (`importer_tif.py`) take `tif_paths: list[Path]`
+as a plain function parameter and return only derived arrays (traces,
+spikes, a single `mean_image` projection) — the paths are never stored on
+`Project` or any result object, and the pipeline's temp Suite2p cache is
+explicitly deleted in a `finally` block (`importer_tif.py:553-559`,
+`shutil.rmtree(tmp_root, ...)`). `CellposeImportResult.image_path` is NOT
+the raw movie — it's the single 2D projection image the user segmented
+(`cellpose_import_dialog.py`'s `_browse_image_file`, filter
+`"Image files (*.png *.tif *.tiff)"`, one image). So "reuse the project's
+TIFF if available" requires adding a new small piece of persisted state to
+`Project` (a path list + fps), populated at the end of a successful TIFF
+import. That's the first thing to build below — everything else depends on
+it existing.
+
+Files to change:
+    src/neuroseq/project.py            (new calcium_video_paths/calcium_video_fps fields + persistence)
+    src/neuroseq/tif_import_dialog.py  (expose the paths/fps the pipeline just ran on)
+    src/neuroseq/cell_overlay_widget.py (extract shared cellpose<->stim id mapping; add centroid helper)
+    src/neuroseq/spatial_footprint_state.py (use the newly-extracted mapping helpers instead of its own copies)
+    src/neuroseq/gui.py                (construct widget, splitter placement, toolbar toggle, plot_widgets wiring, refresh call sites)
+
+Files to create:
+    src/neuroseq/calcium_video_widget.py   (new CalciumVideoWidget)
+    tests/test_calcium_video_widget.py     (new widget's logic + Qt tests)
+
+Files to extend (tests):
+    tests/test_project.py           (save/load round-trip for the new fields)
+    tests/test_tif_import_dialog.py (new public attributes after a successful import)
+    tests/test_gui.py               (panel toggle + import wiring + timeline sync)
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+BACKGROUND — read before touching anything
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1. Frame rate. `importer_tif.py:33`: `DEFAULT_FS: float = 30.0` (Hz). The TIFF
+   import dialog's `_finalize_import` (`tif_import_dialog.py:~878-882`)
+   already does `fs = self._fs_spin.value(); dt = 1.0 / fs`. Use the SAME
+   `fs` (not a hardcoded 30.0) when the video comes from a pipeline import;
+   when the user imports a video directly through the new widget's own
+   lightweight "Import Video" button (no pipeline, no `_fs_spin`), prompt for
+   it — the raw TIFF format used here doesn't reliably embed frame rate
+   metadata. Use `QtWidgets.QInputDialog.getDouble(self, "Frame rate",
+   "Frames per second:", DEFAULT_FS, 0.001, 10_000.0, 3)` (the same
+   `QInputDialog.getDouble` pattern already used elsewhere in the app for a
+   single numeric prompt — grep `input_designer_dialog.py`/`rheobase_dialog.py`
+   tests for `"getDouble"` to see the existing calling convention/test style).
+
+2. `Project` is a plain class (not `@dataclass`), fields set directly in
+   `__init__` (`project.py:130-164`). Lightweight, JSON-serializable
+   project-level scalars (as opposed to big arrays, which go through
+   `io.py`'s zip+npy machinery) are stored in `project_metadata.json`
+   alongside `dt`/`external_simulate_path`/`power_luts` — see the exact
+   save site (`project.py:1370-1381`):
+
+        with zipfile.ZipFile(filepath, "w", zipfile.ZIP_DEFLATED) as zf:
+            metadata: dict = {"dt": self.dt, "schema_version": 2}
+            if self.external_simulate_path is not None:
+                metadata["external_simulate_path"] = self.external_simulate_path
+            ...
+            zf.writestr("project_metadata.json", json.dumps(metadata))
+
+   and the matching load site (`project.py:185-199`):
+
+        if "project_metadata.json" in zf.namelist():
+            _meta = json.loads(zf.read("project_metadata.json"))
+            self.dt = float(_meta.get("dt", 0.001))
+            ...
+
+   This is the right place for `calcium_video_paths`/`calcium_video_fps` —
+   they're a handful of strings/a float, not arrays; storing an actual
+   video's pixel data in the `.nseq` archive is explicitly out of scope (see
+   NON-GOALS) given a calcium movie can be many GB (27000 frames at 512×512,
+   per this project's own CLAUDE.md). `io.py` is NOT involved for this field.
+
+3. TIFF import dialog's paths. `TifImportDialog._tif_paths: list[Path]`
+   (`tif_import_dialog.py:312`, populated interactively as the user adds/
+   removes files at lines 656-664) is PRIVATE. `_finalize_import`
+   (`tif_import_dialog.py:~875-887`) already has both `fs` and
+   `self._tif_paths` in scope at the point it sets
+   `self.experiment_duration = n_timepoints * dt` (line 882) and calls
+   `_build_cellpose_result_from_pipeline(result, self._tif_paths[0], ...)`
+   (line 887, using only the FIRST path — that call is for the single
+   projection image, unrelated to this change). Add two new PUBLIC
+   attributes right there, so `gui.py` can read them after `dialog.exec()`
+   returns Accepted, the same way it already reads `dialog.experiment_duration`
+   and `dialog.new_cellpose_result`:
+
+        self.imported_tif_paths: list[Path] = list(self._tif_paths)
+        self.imported_fps: float = fs
+
+   Initialize both to safe defaults (`[]` / `DEFAULT_FS`) in `__init__`
+   near the existing `self.new_cellpose_result = None` (line 765), in case
+   `_finalize_import` never runs (pipeline failed/cancelled).
+
+4. Where the dialog's results get applied to the live project:
+   `gui.py:btn_import_tif_clicked` (`gui.py:2150-2171`):
+
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            self._append_experimental_data(Experiment(...))
+            if dialog.new_cellpose_result is not None:
+                self._apply_cellpose_import_result(dialog.new_cellpose_result)
+                if hasattr(self, "_auto_show_widget"):
+                    self._auto_show_widget(self.spatial_footprint_widget)
+
+   Add, inside the same `if dialog.exec() == ... Accepted:` block:
+
+        if dialog.imported_tif_paths:
+            self.project.calcium_video_paths = dialog.imported_tif_paths
+            self.project.calcium_video_fps = dialog.imported_fps
+            self.calcium_video_widget.set_video_paths(
+                self.project.calcium_video_paths, self.project.calcium_video_fps
+            )
+            if hasattr(self, "_auto_show_widget"):
+                self._auto_show_widget(self.calcium_video_widget)
+
+5. Cellpose id <-> stim id mapping. Already solved, in
+   `spatial_footprint_state.py:73-110`:
+
+        def _cellpose_to_stim_id(self, cellpose_id: int) -> int | None:
+            mapping = (
+                self.cellpose_data.stimulus_to_cellpose_mapping
+                if self.cellpose_data is not None else None
+            )
+            if not mapping:
+                return cellpose_id
+            cellpose_to_stim = {v: k for k, v in mapping.items()}
+            return cellpose_to_stim.get(cellpose_id)
+
+        def _stim_id_to_cellpose_id(self, stim_id: int | None) -> int | None:
+            if stim_id is None:
+                return None
+            mapping = (
+                self.cellpose_data.stimulus_to_cellpose_mapping
+                if self.cellpose_data is not None else None
+            )
+            if not mapping:
+                return stim_id
+            return mapping.get(stim_id)
+
+   `stimulus_to_cellpose_mapping: dict[int, int]` maps `stim_id -> cellpose_id`,
+   identity fallback when unmapped/absent. The new widget needs the SAME
+   logic (to go from a StimArray column index to a Cellpose cell id, to look
+   up that cell's centroid) — extract these two into module-level pure
+   functions (taking `cellpose_data` explicitly) in `cell_overlay_widget.py`,
+   next to the existing `compute_segmentation_legend` extraction (that
+   function was pulled out of `CellOverlayWidget` for exactly this kind of
+   reuse — same precedent, same file):
+
+        def cellpose_to_stim_id(
+            cellpose_id: int, cellpose_data: CellposeImportResult | None
+        ) -> int | None: ...
+
+        def stim_id_to_cellpose_id(
+            stim_id: int, cellpose_data: CellposeImportResult | None
+        ) -> int | None: ...
+
+   Then change `SpatialFootprintState._cellpose_to_stim_id`/
+   `_stim_id_to_cellpose_id` to thin wrappers calling these
+   (`cellpose_to_stim_id(cellpose_id, self.cellpose_data)`), so the mapping
+   logic exists in exactly one place. Do not leave both the old inline logic
+   and the new functions doing the same thing without one delegating to the
+   other (same rule the spatial_footprint_viewer handoff already applied to
+   `compute_segmentation_legend`).
+
+   `cell_overlay_widget.py` will need `from neuroseq.importer_cellpose import
+   CellposeImportResult` for the type hint if it isn't already importing it
+   (check first — `CellposeImportResult` is very likely already referenced
+   there given `set_overlay`'s signature).
+
+6. Cell centroids. Nothing generic exists yet — `exporter_syscon2.py:2858-2884`
+   has `_compute_cell_centroids(segmentation) -> dict[int, tuple[float, float]]`,
+   but its docstring explains it deliberately UN-DOES a `np.flipud` the
+   Cellpose importer applies on load, because it's producing coordinates for
+   SysCon hardware export. The new widget draws directly on the SAME
+   in-app image the segmentation array already represents (already flipped,
+   same convention `OverlayView` uses for its own pixel lookups — see the
+   `spatial_footprint_viewer.txt` precedent: `cell_id =
+   self.segmentation[y, x]` with NO un-flip applied for on-screen use). So:
+   do NOT reuse `_compute_cell_centroids` as-is. Add a new, simpler function
+   instead — in `cell_overlay_widget.py`, next to the mapping functions
+   above:
+
+        from scipy import ndimage
+
+        def compute_cell_centroids(
+            segmentation: np.ndarray,
+        ) -> dict[int, tuple[float, float]]:
+            """Each cell id's centroid in the SAME (world x, world y) = (col, row)
+            convention OverlayView's own pixel lookups use (no y-flip) - i.e. the
+            centroid is directly usable as a graphic's world position on top of
+            the same image/segmentation this app already renders."""
+            unique_ids = [int(i) for i in np.unique(segmentation) if i >= 0]
+            centroids: dict[int, tuple[float, float]] = {}
+            for cell_id in unique_ids:
+                row, col = ndimage.center_of_mass(segmentation == cell_id)
+                centroids[cell_id] = (float(col), float(row))
+            return centroids
+
+   `scipy` is already a declared dependency (`pyproject.toml`) and
+   `scipy.ndimage` is already imported elsewhere in this codebase
+   (`spatial_footprint_widget.py:8` uses `binary_erosion`,
+   `exporter_syscon2.py:13` uses `distance_transform_edt`) — no new
+   dependency. `scikit-image`/`regionprops` is NOT a dependency anywhere;
+   don't reach for it.
+
+7. `TimeSliderWidget` sync contract. `time_slider_widget.py`,
+   `class TimeSliderWidget` (line 43). A widget it drives must implement:
+
+        def set_time_ms(self, time_ms: int) -> None: ...
+
+   called from both `_tick` (the shared `QTimer`, 40ms/25fps,
+   `time_slider_widget.py:64-67`, started/stopped by `toggle_pause`,
+   lines 105-111) and `set_current_time_ms` (scrubbing). Registration:
+   `TimeSliderWidget.connect_widget(self, widget) -> None` just does
+   `self.widgets.append(widget)` (lines 70-73). There is NO separate
+   per-widget timer anywhere in the app and there should not be a second one
+   for this widget either — playback is entirely driven by the ONE shared
+   timer; `CalciumVideoWidget` only needs to react to `set_time_ms`, it must
+   NOT add its own play/pause buttons (the existing global skip/pause/skip
+   toolbar actions, `gui.py:3080/3088/3096/3104`, already do that for every
+   panel).
+
+   `gui.py:470-476`:
+
+        self.plot_widgets: list[TimeseriesWidget | HeatmapWidget | DataWidget] = [
+            self.stim_editor.stim_widget,
+            self.trace_widget,
+            self.spike_widget,
+            self.data_widget,
+            self.heatmap_widget,
+        ]
+        for widget in self.plot_widgets:
+            self.time_slider.connect_widget(widget)
+
+   `spatial_footprint_widget` is DELIBERATELY excluded from `plot_widgets`
+   (it's a static picture + click-state, not a per-sample timeline). The new
+   video widget IS time-driven, so it belongs IN `plot_widgets` (add it to
+   the list above) — that gets it `connect_widget` for free AND folds it
+   into the existing `plot_widgets` iteration used for theme refresh
+   (`gui.py:1256`, `gui.py:2711`) and, importantly, `closeEvent` cleanup
+   (`gui.py:4044-4045`, `for widget in self.plot_widgets: widget.close()`) —
+   unlike `spatial_footprint_widget`, which needs its own explicit
+   `self.spatial_footprint_widget.close()` (`gui.py:4046`) specifically
+   BECAUSE it's excluded from that list. Adding the video widget to
+   `plot_widgets` means you do NOT need a matching explicit close() call.
+
+8. Panel layout (verified against the CURRENT file — the old
+   spatial_footprint_viewer.txt handoff's line numbers for this are stale).
+   Construction: `gui.py:367` (`heatmap_widget`), `gui.py:368-370`
+   (`spatial_footprint_widget`, wired to `import_requested`/
+   `neurons_greyed_out_changed`, `gui.py:371-376`). Splitter, `gui.py:408-411`:
+
+        split_stim_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        split_stim_right.addWidget(self.heatmap_widget)
+        split_stim_right.addWidget(self.spatial_footprint_widget)
+        split_stim_right.setSizes([1000, 1000])
+
+   Add a third `addWidget(self.calcium_video_widget)` here, and extend
+   `setSizes` to three entries (e.g. `[1000, 1000, 1000]`).
+
+   Default visibility (`gui.py:492-493`, `heatmap_widget.setVisible(False)`,
+   `spatial_footprint_widget.setVisible(True)`): start the video widget
+   HIDDEN (`self.calcium_video_widget.setVisible(False)`) — it has nothing
+   to show until either a project with `calcium_video_paths` loads or the
+   user imports one, same posture as the heatmap panel.
+
+   Toggle action list, `_create_actions_view` (`gui.py:3111`, entries at
+   3120-3126):
+
+        ("&Heatmap", self.heatmap_widget, "mdi6.data-matrix", False),
+        ("&Spatial Footprints", self.spatial_footprint_widget, "mdi6.map-marker-radius", True),
+
+   Add a fourth tuple, e.g. `("&Calcium Video", self.calcium_video_widget,
+   "mdi6.movie-open", False)` (pick any other reasonable `mdi6.*` name if
+   that one isn't in the installed icon set — cosmetic, not load-bearing).
+
+   Detach-copy dispatch (`_build_fresh_spatial_footprint_widget`,
+   `gui.py:3418-3422`, dispatched at `gui.py:3328-3329`): do NOT add an
+   equivalent for this widget — see NON-GOALS (no detach support for v1).
+
+   Import wiring (mirrors `spatial_footprint_widget.import_requested`,
+   `gui.py:371` / `gui.py:3422`):
+
+        self.calcium_video_widget = CalciumVideoWidget(parent=self)
+        self.calcium_video_widget.import_requested.connect(
+            self._on_calcium_video_import_requested
+        )
+
+   `_on_calcium_video_import_requested` is a NEW small method (see CHANGES
+   below) — it must NOT reuse `btn_import_tif_clicked`/`TifImportDialog`
+   (that dialog additionally requires Suite2p params/masks/segmentation
+   config for the FULL processing pipeline — overkill for "just play this
+   TIFF"). It opens a plain file picker instead.
+
+9. Refresh call sites. `spatial_footprint_widget.set_data(...)` is called
+   from `update_project()` and three other project-mutation sites (project
+   load, `_apply_cellpose_import_result`, `_delete_cellpose_data`) — grep
+   `gui.py` for `spatial_footprint_widget.set_data` to find the CURRENT
+   exact line numbers (they will have shifted from whatever an old handoff
+   might say) and add a matching
+   `self.calcium_video_widget.set_video_paths(self.project.calcium_video_paths,
+   self.project.calcium_video_fps)` at:
+     - the end of `update_project()` (covers project load and every import
+       dialog that calls it afterward),
+     - `btn_import_tif_clicked` (already specified in point 4 above — do
+       NOT also duplicate it via `update_project()` if that method doesn't
+       already run after this specific dialog; check whether
+       `btn_import_tif_clicked` calls `update_project()` itself before
+       adding a second call),
+     - project close/new-project reset (wherever `self.project =
+       Project()`/similar happens) — call
+       `self.calcium_video_widget.set_video_paths([], None)` there.
+   Also call `self.calcium_video_widget.set_cellpose_data(self.project.cellpose_data)`
+   at every existing `spatial_footprint_widget.set_data(self.project.cellpose_data)`
+   call site (centroids depend on the SAME segmentation) — grep for that
+   exact call to find all of them; do not guess a count.
+
+10. StimArray access. `StimArray` (`stim.py:17-36`): `values: NDArray[np.float32]`
+    shape `(time_index, neuron_index)`, `dt: float` (seconds/sample),
+    `stim_type: StimType`. `Project.stim_arrays: dict[str, StimArray]`
+    (`project.py:136`) — there is NO `get_data_names(StimArray)`/
+    `get_data(name, StimArray)` overload (that pair only covers
+    `TraceData | SpikeData | SynapseData`, `project.py:271-320`); the
+    existing precedent for a StimArray-name dropdown is direct dict access,
+    e.g. `stimulation_generator_dialog.py:86`:
+    `stim_names = list(self.project.stim_arrays.keys())`. Use the same
+    pattern for the new widget's dropdown.
+
+    IMPORTANT: different `StimArray`s in the same project can have
+    DIFFERENT `dt` — `Project.remap_all_data_to_dt(new_dt)`
+    (`project.py:511-...`) exists specifically because arrays aren't
+    guaranteed to share one `dt`. The "All arrays combined" dropdown option
+    must therefore resolve each array's own `dt` independently when
+    converting a video frame's time window to that array's row range —
+    never assume a shared `dt` across arrays.
+
+11. No video-writing library exists in this codebase today.
+    `grep -rn "tifffile.imwrite\|TiffWriter\|imwrite(" src/neuroseq/` and
+    `grep -rln "cv2\|VideoWriter\|imageio\|matplotlib.animation" src/neuroseq/`
+    both return nothing — only `tifffile.imread` is used
+    (`importer_tif.py:114`). `pyproject.toml` declares `pillow`, `scipy`,
+    `tifffile` — no `opencv-python`/`imageio`/`scikit-image`. DECISION for
+    this handoff: "Save labeled video…" exports a multi-frame TIFF via
+    `tifffile.imwrite`/`tifffile.TiffWriter` (already a dependency), NOT an
+    `.mp4`/`.avi` — adding a video-codec dependency for this is out of scope
+    (see NON-GOALS). Converting to RGB is required regardless: raw calcium
+    TIFFs are single-channel; a genuinely red cross needs 3 channels. Build
+    each output frame as `uint8` RGB (normalize the raw frame to 0-255,
+    replicate across R/G/B for the background, then set the cross pixels to
+    pure `(255, 0, 0)`), and write with
+    `tifffile.imwrite(path, iter_of_rgb_frames, photometric="rgb")` — use
+    `TiffWriter` in "append" mode (`tifffile.TiffWriter(path)` then
+    `.write(frame, photometric="rgb")` per frame in a loop) so the whole
+    output stack is never held in memory at once, matching the raw input's
+    own frame-at-a-time reading (see point 12).
+
+12. Lazy frame access. Given a raw movie can be tens of thousands of frames
+    at 512×512 (see this project's CLAUDE.md: 27000 frames, 15 min at
+    30 Hz), do NOT load the whole stack into memory. `tifffile` supports
+    per-page reads: `tifffile.TiffFile(path)` then `.pages[frame_index].asarray()`
+    for one frame, or `tifffile.memmap(path)` for a memory-mapped array
+    (no verified precedent for either specific call in this codebase today —
+    VERIFY the exact API against the installed `tifffile` version's docs
+    before committing to one; both are standard `tifffile` features). When
+    `calcium_video_paths` has more than one file (the Suite2p pipeline
+    already supports multi-file TIFF stacks as one combined movie via
+    `tif_paths: list[Path]`), treat them as one continuous sequence
+    concatenated in the given list order — VERIFY this is exactly how
+    `run_suite2p_pipeline`/`run_roi_average_pipeline` interpret multiple
+    paths today (read `importer_tif.py` before assuming simple
+    concatenation is correct) so frame-index-to-file-and-page math in the
+    new widget matches what Suite2p itself already did with the same files.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/project.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1. In `Project.__init__`, near `self.cellpose_data: CellposeImportResult | None = None`
+   (`project.py:137`), ADD:
+
+        self.calcium_video_paths: list[pathlib.Path] = []
+        self.calcium_video_fps: float | None = None
+
+   (`pathlib` is already imported in this module, used for `self.filepath`.)
+
+2. In the load branch (`project.py:185-199`, inside
+   `if "project_metadata.json" in zf.namelist():`), ADD:
+
+        self.calcium_video_paths = [
+            pathlib.Path(p) for p in _meta.get("calcium_video_paths", [])
+        ]
+        self.calcium_video_fps = _meta.get("calcium_video_fps")
+
+3. In `save()` (`project.py:1371-1381`), ADD, alongside the other
+   conditional metadata entries:
+
+        if self.calcium_video_paths:
+            metadata["calcium_video_paths"] = [
+                str(p) for p in self.calcium_video_paths
+            ]
+        if self.calcium_video_fps is not None:
+            metadata["calcium_video_fps"] = self.calcium_video_fps
+
+4. This is a PATH REFERENCE, exactly like `CellposeImportResult.image_path` —
+   it does not embed pixel data and can go stale if the file moves. The new
+   widget must handle a missing/unreadable path gracefully (show the
+   "Import Video" empty-state instead of crashing) — see CHANGES below.
+
+5. Mutating `calcium_video_paths`/`calcium_video_fps` should go through
+   `mark_dirty()` like other project mutations (check `project.py:226` and
+   how other setters call it) so the "unsaved changes" indicator reacts
+   correctly — set them via a small setter method on `Project` rather than
+   raw attribute assignment from `gui.py`, e.g.:
+
+        def set_calcium_video(
+            self, paths: list[pathlib.Path], fps: float | None
+        ) -> None:
+            self.calcium_video_paths = list(paths)
+            self.calcium_video_fps = fps
+            self.mark_dirty()
+
+   and have `gui.py` call `self.project.set_calcium_video(...)` instead of
+   assigning the two attributes directly (revise point 4 in BACKGROUND
+   accordingly).
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/tif_import_dialog.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1. Near `self.new_cellpose_result = None` (`tif_import_dialog.py:765`), ADD:
+
+        self.imported_tif_paths: list[Path] = []
+        self.imported_fps: float = DEFAULT_FS
+
+   (`DEFAULT_FS` needs importing from `neuroseq.importer_tif` if not already
+   imported in this module — check first.)
+
+2. In `_finalize_import` (`tif_import_dialog.py:~875-887`), right after
+   `self.experiment_duration = n_timepoints * dt`, ADD:
+
+        self.imported_tif_paths = list(self._tif_paths)
+        self.imported_fps = fs
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/cell_overlay_widget.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Add the three module-level functions from BACKGROUND points 5-6
+(`cellpose_to_stim_id`, `stim_id_to_cellpose_id`, `compute_cell_centroids`),
+placed near the existing `compute_segmentation_legend` (same section of the
+module — these are all "pure functions over a segmentation array/mapping",
+keep them together). Import `scipy.ndimage` at the top of the module if not
+already imported.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/spatial_footprint_state.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Replace the bodies of `_cellpose_to_stim_id`/`_stim_id_to_cellpose_id`
+(`spatial_footprint_state.py:73-110`) with calls to the newly-extracted
+`cell_overlay_widget.cellpose_to_stim_id`/`stim_id_to_cellpose_id`, passing
+`self.cellpose_data`. Do not leave the old inline mapping logic duplicated
+alongside the new functions.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NEW FILE — src/neuroseq/calcium_video_widget.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+A self-contained widget: owns its own fastplotlib-rendered frame image (this
+app renders everything through fastplotlib — `TimeseriesWidget`/`StimWidget`/
+`CellOverlayWidget`'s `OverlayView` all do; follow the same
+`fpl.Figure`/subplot + `add_image` pattern `OverlayView` already uses for a
+static image, and the `ScatterGraphic` pattern `stim_widget.py`'s
+`_add_minimum_size_graphic` already uses for point markers over an image —
+that's the closest existing precedent for drawing the red crosses; VERIFY its
+exact call signature before copying it, this handoff does not reproduce it
+verbatim).
+
+Sketch (fill in the fastplotlib specifics by reading `OverlayView.__init__`
+and `stim_widget.py::_add_minimum_size_graphic` first):
+
+    from __future__ import annotations
+
+    from pathlib import Path
+
+    import fastplotlib as fpl
+    import numpy as np
+    import tifffile
+    from qtpy import QtCore
+    from qtpy import QtWidgets
+
+    from neuroseq.cell_overlay_widget import cellpose_to_stim_id
+    from neuroseq.cell_overlay_widget import compute_cell_centroids
+    from neuroseq.importer_cellpose import CellposeImportResult
+    from neuroseq.stim import StimArray
+
+    ALL_STIM_ARRAYS_COMBINED = "All arrays combined"
+
+
+    class CalciumVideoWidget(QtWidgets.QWidget):
+        """Plays back the project's raw calcium-imaging TIFF, synced to the
+        shared playback timeline, with red crosses on cells a chosen
+        StimArray (or all of them combined) marks as stimulated in the
+        current frame."""
+
+        import_requested = QtCore.Signal()
+
+        def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+            super().__init__(parent)
+            # ... empty-state "Import Video" button + import_requested wiring
+            #     (mirror SpatialFootprintWidget's own button/signal, see
+            #     spatial_footprint_widget.py), a QComboBox for stim-array
+            #     selection (ALL_STIM_ARRAYS_COMBINED first, then
+            #     project.stim_arrays.keys()), the fastplotlib frame view,
+            #     and a "Save labeled video…" QPushButton.
+            self._paths: list[Path] = []
+            self._fps: float | None = None
+            self._cellpose_data: CellposeImportResult | None = None
+            self._centroids: dict[int, tuple[float, float]] = {}
+            self._stim_arrays: dict[str, StimArray] = {}
+            self._current_frame_index: int | None = None
+
+        def set_video_paths(self, paths: list[Path], fps: float | None) -> None:
+            """paths=[] or an unreadable path -> show the empty/import state."""
+            ...
+
+        def set_cellpose_data(self, cellpose_data: CellposeImportResult | None) -> None:
+            self._cellpose_data = cellpose_data
+            self._centroids = (
+                compute_cell_centroids(cellpose_data.segmentation_array)
+                if cellpose_data is not None else {}
+            )
+
+        def set_stim_arrays(self, stim_arrays: dict[str, StimArray]) -> None:
+            """Called whenever Project.stim_arrays changes, to refresh the
+            dropdown - mirror stimulation_generator_dialog.py's own
+            refresh-on-change pattern for its stim-array combo box."""
+            ...
+
+        def set_time_ms(self, time_ms: int) -> None:
+            """TimeSliderWidget's per-tick contract. Compute this video's
+            frame index from time_ms and self._fps, read/display that one
+            frame lazily (do not load the whole stack), and overlay red
+            crosses for whichever cells the selected stim source(s) mark as
+            stimulated in that frame's time window."""
+            ...
+
+        def _stimulated_cellpose_ids_at(self, time_ms: int) -> set[int]:
+            """Resolve the combo box selection to one or more StimArrays,
+            convert time_ms to each array's own row index via its own dt
+            (arrays are not guaranteed to share one dt - see BACKGROUND
+            point 10), collect nonzero stim_ids, and map each to a
+            cellpose id via cellpose_to_stim_id()'s inverse direction
+            (stim_id -> cellpose_id is stim_id_to_cellpose_id, not
+            cellpose_to_stim_id - double check which direction is needed
+            here before wiring it up)."""
+            ...
+
+        def _on_save_labeled_video_clicked(self) -> None:
+            """QFileDialog.getSaveFileName (TIFF filter) -> stream frames
+            through tifffile.TiffWriter, computing the same red-cross
+            overlay per frame as set_time_ms does, on a background QThread
+            (mirror tif_import_dialog.py's _PipelineWorker/QThread/progress
+            pattern structurally, but far simpler - no Suite2p, just
+            read-frame -> draw-crosses -> write-frame per iteration)."""
+            ...
+
+Notes on the sketch:
+  - `_stimulated_cellpose_ids_at` needs `stim_id_to_cellpose_id` (from
+    `cell_overlay_widget.py`), not `cellpose_to_stim_id` — a StimArray
+    column index IS a stim_id; converting it to a cell to look up its
+    centroid needs stim_id -> cellpose_id.
+  - The widget's OWN "Import Video" flow (triggered via `import_requested`,
+    handled in `gui.py`) is a LIGHTWEIGHT file pick + fps prompt, calling
+    `self.project.set_calcium_video(paths, fps)` then
+    `self.calcium_video_widget.set_video_paths(paths, fps)` — it must NOT
+    go through `TifImportDialog`/`run_suite2p_pipeline` (see BACKGROUND
+    point 8's note on `_on_calcium_video_import_requested`).
+  - The empty/import-state UI (shown when `self._paths` is empty or the
+    first path doesn't resolve on disk) should look like
+    `SpatialFootprintWidget`'s own empty state — check
+    `set_empty_message`/whatever `CellOverlayWidget` exposes for "no data
+    yet" and reuse the same visual language if this widget also embeds a
+    `CellOverlayWidget`-style frame (it doesn't have to — a plain
+    fastplotlib image is enough — but keep the EMPTY STATE MESSAGE STYLING
+    consistent, e.g. same font/QLabel treatment).
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — src/neuroseq/gui.py
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1. IMPORT the new widget:
+
+        from neuroseq.calcium_video_widget import CalciumVideoWidget
+
+2. Construct it next to `spatial_footprint_widget` (`gui.py:368-370`):
+
+        self.calcium_video_widget = CalciumVideoWidget(parent=self)
+        self.calcium_video_widget.import_requested.connect(
+            self._on_calcium_video_import_requested
+        )
+
+3. Add to the splitter (`gui.py:408-411`) and extend `setSizes` to three
+   entries — see BACKGROUND point 8.
+
+4. Add to `self.plot_widgets` (`gui.py:470-476`) — see BACKGROUND point 7.
+   Do NOT also add a separate explicit `.close()` call for it in
+   `closeEvent` (`gui.py:4044-4046`) — being in `plot_widgets` already
+   covers that.
+
+5. Default hidden (`gui.py:492-493` area):
+
+        self.calcium_video_widget.setVisible(False)
+
+6. Add the toggle action tuple in `_create_actions_view` (`gui.py:3111`,
+   list at 3120-3126) — see BACKGROUND point 8.
+
+7. ADD the lightweight import handler (does NOT touch `TifImportDialog`):
+
+        def _on_calcium_video_import_requested(self) -> None:
+            paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
+                self, "Select raw calcium TIFF(s)", "",
+                "TIFF files (*.tif *.tiff);;All files (*)",
+            )
+            if not paths:
+                return
+            fps, ok = QtWidgets.QInputDialog.getDouble(
+                self, "Frame rate", "Frames per second:",
+                DEFAULT_FS, 0.001, 10_000.0, 3,
+            )
+            if not ok:
+                return
+            tif_paths = [Path(p) for p in paths]
+            self.project.set_calcium_video(tif_paths, fps)
+            self.calcium_video_widget.set_video_paths(tif_paths, fps)
+
+   (Import `DEFAULT_FS` from `neuroseq.importer_tif`, and `Path` from
+   `pathlib`, at the top of `gui.py` if not already imported — `gui.py` is
+   large, check first rather than assuming either is missing.)
+
+8. Extend `btn_import_tif_clicked` (`gui.py:2150-2171`) as specified in
+   BACKGROUND point 4 (use `self.project.set_calcium_video(...)`, the
+   setter from the `project.py` changes, not raw attribute assignment).
+
+9. Add `self.calcium_video_widget.set_cellpose_data(self.project.cellpose_data)`
+   at every existing call site of `self.spatial_footprint_widget.set_data(...)`
+   — grep `gui.py` for that exact call to find them all (see BACKGROUND
+   point 9; do not guess how many there are or where).
+
+10. Add `self.calcium_video_widget.set_stim_arrays(self.project.stim_arrays)`
+    wherever `Project.stim_arrays` changes and other stim-array-dependent UI
+    already refreshes (grep for existing refresh call sites tied to stim
+    array add/remove/rename, e.g. in `stim_editor.py`'s own signals the main
+    window already listens to) — VERIFY the exact existing refresh
+    mechanism for stim-array-name lists elsewhere in `gui.py` before adding
+    a new one; there is likely already a signal this can piggyback on.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NOTES
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- Frame-time-to-stim-row alignment: for a video frame `i` (0-indexed) at
+  frame rate `fps`, its time window is `[i/fps, (i+1)/fps)` seconds. For a
+  given StimArray with its own `dt`, the overlapping row range is
+  `[floor(i/fps/dt), ceil((i+1)/fps/dt))` — a cell counts as stimulated in
+  that frame if `np.any(stim_array.values[row_start:row_stop, column] != 0)`
+  for that cell's stim_id column. Do this per selected array independently
+  (BACKGROUND point 10) and union the resulting stimulated stim_ids across
+  arrays for "All arrays combined".
+- Colour consistency: crosses don't need to match `neuron_indices_to_colors`
+  (they're a fixed red, per the user's explicit request), so no colour-
+  matching work is needed here, unlike the Spatial Footprints panel.
+- Keep the widget resilient to `Project.calcium_video_paths` pointing at a
+  file that no longer exists (moved/deleted since the project was saved) —
+  same "path can go stale" caveat `CellposeImportResult.image_path` already
+  lives with. Catch the file-open failure in `set_video_paths` and fall back
+  to the empty/import state rather than raising.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NON-GOALS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- Embedding the raw video's pixel data into the `.nseq` archive. Only the
+  file path(s) + fps are persisted; the widget must tolerate a stale path.
+- `.mp4`/`.avi`/any codec-based video export. Output is a multi-frame TIFF
+  (see BACKGROUND point 11) — adding `opencv-python`/`imageio` as a new
+  dependency for this is out of scope; ask before adding one if this
+  constraint turns out to be unacceptable in review.
+- Manual/click-to-place cross positions. Crosses are always derived from
+  Cellpose segmentation centroids (per the confirmed design decision) — no
+  manual labeling UI.
+- Detach-to-separate-window support for this panel (unlike `TraceWidget`/
+  `StimWidget`, which support it via `SUPPORTS_DETACH`/a shared `*State`
+  class). Treat this the same as `HeatmapWidget`/`SpatialFootprintWidget`,
+  neither of which is detachable today.
+- Any change to how Suite2p/Cellpose TIFF import itself works. This handoff
+  only adds a side-channel path/fps record alongside the existing pipeline
+  result — the pipeline's own inputs/outputs/temp-file handling are
+  untouched.
+- Playing back MULTIPLE videos at once, or per-project video history (only
+  the single, most-recently-associated video is kept, exactly like
+  `CellposeImportResult` is a single optional slot rather than a named
+  collection).
+- Any new play/pause/scrub UI on this widget. It reacts to the existing
+  shared timeline only (BACKGROUND point 7).
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+tests/test_project.py — ADD
+
+    test_calcium_video_paths_round_trip_through_save_and_load
+        project = Project()
+        project.set_calcium_video([Path("/tmp/a.tif"), Path("/tmp/b.tif")], 30.0)
+        project.save(tmp_path / "p.nseq")
+        loaded = Project(filepath=tmp_path / "p.nseq")
+        assert loaded.calcium_video_paths == [Path("/tmp/a.tif"), Path("/tmp/b.tif")]
+        assert loaded.calcium_video_fps == 30.0
+
+    test_calcium_video_defaults_to_empty
+        project = Project()
+        assert project.calcium_video_paths == []
+        assert project.calcium_video_fps is None
+
+    test_set_calcium_video_marks_project_dirty
+        project = Project()
+        project.dirty = False
+        project.set_calcium_video([Path("/tmp/a.tif")], 30.0)
+        assert project.dirty
+
+tests/test_tif_import_dialog.py — ADD
+
+    test_finalize_import_exposes_tif_paths_and_fps
+        # Build/monkeypatch a dialog the same way existing tests in this
+        # file already drive _finalize_import (grep for that name), assert
+        # dialog.imported_tif_paths == the file(s) used and
+        # dialog.imported_fps == the configured fs.
+
+tests/test_calcium_video_widget.py (new)
+
+    Build small synthetic fixtures: a temp multi-frame TIFF (use
+    `tifffile.imwrite` directly in the test, a handful of small frames), a
+    small `CellposeImportResult` the same way
+    `test_cellpose_aoi_mapping.py`/`test_cellpose_importer.py` already do
+    (reuse their existing helper rather than hand-building a segmentation
+    array), and a small `StimArray`.
+
+    test_set_video_paths_loads_and_shows_first_frame
+        widget = CalciumVideoWidget()
+        widget.set_video_paths([tmp_tiff_path], fps=30.0)
+        widget.set_time_ms(0)
+        # assert whatever observable state confirms frame 0 is displayed
+        # (the fastplotlib image graphic's .data, once the sketch above is
+        # fleshed out with real attribute names)
+
+    test_set_video_paths_empty_shows_import_button
+        widget.set_video_paths([], None)
+        # assert the import button/empty-state is visible
+
+    test_set_video_paths_missing_file_falls_back_to_import_state
+        widget.set_video_paths([Path("/nonexistent/x.tif")], 30.0)
+        # assert it doesn't raise and falls back to the empty/import state
+
+    test_import_button_emits_import_requested
+        with qtbot.waitSignal(widget.import_requested):
+            widget.import_button.click()  # or whatever the actual attribute is named
+
+    test_frame_index_matches_time_ms_and_fps
+        # at fps=30, time_ms=100 -> frame index 3 (100/1000*30 = 3.0) -
+        # assert whatever internal state exposes the currently-displayed
+        # frame index after set_time_ms(100).
+
+    test_stimulated_cell_gets_a_cross_from_single_array
+        # stim_array with a nonzero pulse for stim_id 1 within frame 5's
+        # time window; cellpose_data mapping stim_id 1 -> cellpose_id 2.
+        # widget.set_cellpose_data(...); widget.set_stim_arrays({"a": stim_array})
+        # select "a" in the combo box; widget.set_time_ms(<frame 5's time>)
+        # assert a cross graphic exists at compute_cell_centroids(...)[2]
+
+    test_no_cross_when_frame_has_no_stim
+        # same setup, a frame index far from any nonzero stim sample ->
+        # assert no cross graphics.
+
+    test_all_arrays_combined_unions_stimulated_cells
+        # two StimArrays, each with a DIFFERENT dt, each stimulating a
+        # different cell within the same frame's time window - select
+        # ALL_STIM_ARRAYS_COMBINED, assert BOTH cells get crosses.
+
+    test_save_labeled_video_writes_expected_frame_count
+        # drive _on_save_labeled_video_clicked's underlying export function
+        # directly (factor the export loop out of the click handler into a
+        # plain function/method so it's testable without QFileDialog), then
+        # tifffile.imread the output and assert its frame count/shape and
+        # that a pixel at the expected cross location on a stimulated frame
+        # is (255, 0, 0) while the same pixel on a non-stimulated frame
+        # isn't.
+
+tests/test_cell_overlay_widget.py — ADD
+
+    test_compute_cell_centroids_matches_known_segmentation
+        segmentation = np.array([[0, 0, 1], [0, 0, 1], [-1, -1, -1]])
+        centroids = compute_cell_centroids(segmentation)
+        assert centroids[0] == pytest.approx((0.5, 0.5))  # (col, row)
+        assert centroids[1] == pytest.approx((2.0, 0.5))
+
+    test_cellpose_to_stim_id_and_back_are_inverses_with_a_mapping
+        mapping_result = a_cellpose_result_with(stimulus_to_cellpose_mapping={0: 2, 1: 1, 2: 0})
+        assert cellpose_to_stim_id(2, mapping_result) == 0
+        assert stim_id_to_cellpose_id(0, mapping_result) == 2
+
+    test_identity_mapping_when_none_present
+        assert cellpose_to_stim_id(3, a_result_with_mapping=None) == 3
+        assert stim_id_to_cellpose_id(3, a_result_with_mapping=None) == 3
+
+tests/test_spatial_footprint_state.py — verify existing tests for
+`_cellpose_to_stim_id`/`_stim_id_to_cellpose_id` (grep this file for those
+names) still pass unmodified after they're rewritten to delegate to the
+extracted functions — this is a refactor, behavior must not change.
+
+tests/test_gui.py — ADD
+
+    test_calcium_video_panel_toggle_shows_and_hides
+        # find the "Show &Calcium Video" action the same way existing tests
+        # find "Show &Spatial Footprints" (grep test_gui.py for that
+        # pattern), trigger it, assert
+        # main_window.calcium_video_widget.isVisible().
+
+    test_calcium_video_widget_receives_shared_timeline_ticks
+        # advance main_window.time_slider (however existing tests in this
+        # file already drive playback/scrubbing - grep for
+        # "set_current_time_ms" or the pause/skip actions), assert
+        # main_window.calcium_video_widget's displayed frame index tracks
+        # the new time.
+
+    test_import_tif_populates_calcium_video_widget
+        # drive btn_import_tif_clicked the way existing TIFF-import gui.py
+        # tests already do (grep for "btn_import_tif_clicked"), assert
+        # main_window.project.calcium_video_paths is populated and
+        # main_window.calcium_video_widget shows the imported video
+        # afterward.
+
+    test_calcium_video_import_button_opens_lightweight_file_picker
+        # monkeypatch QtWidgets.QFileDialog.getOpenFileNames and
+        # QtWidgets.QInputDialog.getDouble, trigger
+        # main_window.calcium_video_widget.import_requested, assert
+        # main_window.project.calcium_video_paths gets set WITHOUT
+        # TifImportDialog ever being constructed (e.g. monkeypatch
+        # TifImportDialog.__init__ to raise, confirm it's never hit).
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    ruff check src/neuroseq/project.py src/neuroseq/tif_import_dialog.py \
+               src/neuroseq/cell_overlay_widget.py src/neuroseq/spatial_footprint_state.py \
+               src/neuroseq/calcium_video_widget.py src/neuroseq/gui.py \
+               tests/test_calcium_video_widget.py tests/test_project.py \
+               tests/test_tif_import_dialog.py tests/test_cell_overlay_widget.py \
+               tests/test_spatial_footprint_state.py tests/test_gui.py
+    ruff format --check <same file list>
+    mypy --ignore-missing-imports <same src/ file list>
+    uv run pytest tests/test_calcium_video_widget.py -v
+    uv run pytest tests/test_project.py tests/test_tif_import_dialog.py \
+               tests/test_cell_overlay_widget.py tests/test_spatial_footprint_state.py \
+               tests/test_cellpose_aoi_mapping.py -v
+    uv run pytest tests/test_gui.py -v
+    uv run pytest
+
+The full suite is required at the end: `cell_overlay_widget.py` changes
+touch code shared with the Cellpose import dialog and `spatial_footprint_widget`,
+and `project.py`/`gui.py` are both large shared modules — regressions from
+this change could show up well outside the files listed above.
