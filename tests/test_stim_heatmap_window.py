@@ -10,6 +10,7 @@ from neuroseq.input_designer_dialog import StimHeatmapWindow
 from neuroseq.input_designer_dialog import _SelfRaisingDialog
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
+from neuroseq.utils import get_cmap
 
 
 def _make_stim(
@@ -103,22 +104,62 @@ def test_stim_heatmap_window_shows_only_targeted_neurons(qtbot) -> None:
     assert array.shape[0] == 2
     assert window.axes.get_yticklabels()[0].get_text() == "1"
     assert window.axes.get_yticklabels()[1].get_text() == "3"
-    # the color scale is normalized to the targeted neurons' own peak, not
-    # drowned out by the unrelated neuron's much larger pulse
-    assert image.get_clim() == pytest.approx((0.0, 1.0))
+    # the color scale is normalized to the targeted neurons' own peak (1.0),
+    # not drowned out by the unrelated neuron's much larger pulse - so
+    # neuron 1's pulse renders at full saturation, not a faint fraction of it
+    expected_color = get_cmap(StimType.Excitation).to_mpl()(1.0)
+    assert tuple(array[0, 0]) == pytest.approx(expected_color, abs=1e-6)
 
 
 def test_stim_heatmap_window_recolors_when_stim_type_changes(qtbot) -> None:
     window = StimHeatmapWindow("Test — stimulation pattern")
     qtbot.addWidget(window)
 
-    window.update_view(_make_stim(5, 2, stim_type=StimType.Excitation), [0, 1])
-    assert window._image is not None
-    excitatory_cmap = window._image.get_cmap()
+    excitatory = _make_stim(5, 2, stim_type=StimType.Excitation)
+    excitatory.values[0, 0] = 1.0
+    window.update_view(excitatory, [0, 1])
+    image = window._image
+    assert image is not None
+    array = image.get_array()
+    assert array is not None
+    excitatory_pixel = tuple(array[0, 0])
 
-    window.update_view(_make_stim(5, 2, stim_type=StimType.Inhibition), [0, 1])
-    assert window._image is not None
-    assert window._image.get_cmap() is not excitatory_cmap
+    inhibitory = _make_stim(5, 2, stim_type=StimType.Inhibition)
+    inhibitory.values[0, 0] = 1.0
+    window.update_view(inhibitory, [0, 1])
+    image = window._image
+    assert image is not None
+    array = image.get_array()
+    assert array is not None
+    inhibitory_pixel = tuple(array[0, 0])
+
+    assert excitatory_pixel != inhibitory_pixel
+
+
+def test_stim_heatmap_window_keeps_small_pulses_fully_opaque(qtbot) -> None:
+    """A pulse much smaller than the neuron's own peak (e.g. an early,
+    low-amplitude rheobase probe next to a much larger later one) must
+    still render fully opaque - only an exact-zero sample is transparent.
+    get_cmap()'s own alpha ramps with magnitude, which faded smaller (but
+    real) pulses toward invisible here as the peak grows (issue: "as the
+    amplitude decreases they become invisible almost")."""
+    window = StimHeatmapWindow("Test — stimulation pattern")
+    qtbot.addWidget(window)
+
+    stim = _make_stim(3, 1)
+    stim.values[0, 0] = 0.01  # a tiny pulse...
+    stim.values[1, 0] = 100.0  # ...next to a much bigger one
+    # index 2 stays exactly zero (no stimulus)
+
+    window.update_view(stim, [0])
+
+    image = window._image
+    assert image is not None
+    array = image.get_array()
+    assert array is not None
+    assert array[0, 0, 3] == pytest.approx(1.0)
+    assert array[0, 1, 3] == pytest.approx(1.0)
+    assert array[0, 2, 3] == pytest.approx(0.0)
 
 
 def test_stim_heatmap_window_plots_only_targeted_neuron_traces(qtbot) -> None:

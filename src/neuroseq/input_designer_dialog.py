@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from typing import cast
 
 import brian2.numpy_ as np
+from matplotlib.colors import Normalize
 from matplotlib.image import AxesImage
 from matplotlib.ticker import MultipleLocator
 from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
@@ -115,6 +116,34 @@ class _SelfRaisingDialog(QtWidgets.QDialog):
             self.raise_()
 
 
+def _stim_pulse_rgba(values: np.ndarray, stim_type: StimType) -> np.ndarray:
+    """Render `values` (rows x time) as RGBA colors matching the main GPU
+    stim view's excitatory/inhibitory/external hues, but with alpha
+    decoupled from magnitude: any nonzero sample renders fully opaque, and
+    only an exact zero (no stimulus at all) is transparent.
+
+    get_cmap()'s own alpha ramps from 0 at zero up to 1 at the peak value,
+    which is the right look for the layered, semi-transparent GPU stim
+    view - but in this popup it fades a smaller (still real) pulse toward
+    invisible as the peak grows, e.g. a rheobase search's early, small
+    probes next to its largest one can span more than an order of
+    magnitude ("as the amplitude decreases they become invisible almost").
+    Hue still ramps from a light tint to fully saturated with magnitude;
+    only the opacity is pinned to "is there a pulse here at all".
+    """
+    vmax = float(np.max(np.abs(values)))
+    if vmax == 0.0:
+        vmax = 1.0
+    norm = (
+        Normalize(vmin=-vmax, vmax=vmax)
+        if stim_type == StimType.External
+        else Normalize(vmin=0.0, vmax=vmax)
+    )
+    rgba = get_cmap(stim_type).to_mpl()(norm(values))
+    rgba[..., 3] = np.where(values != 0, 1.0, 0.0)
+    return rgba
+
+
 class StimHeatmapWindow(_SelfRaisingDialog):
     """A live, whole-history view (neuron ID x time) of the input pattern,
     and below it the recorded trace(s) of the neuron(s) it targets - shared
@@ -125,7 +154,8 @@ class StimHeatmapWindow(_SelfRaisingDialog):
     every neuron in the input array: an unrelated neuron elsewhere in the
     array could otherwise dominate the heatmap's shared color scale,
     fading the routine's own pulses to near-invisible even though their
-    values never changed.
+    values never changed. See _stim_pulse_rgba() for the other half of
+    that fix - decoupling color opacity from magnitude altogether.
 
     Each of those dialogs already has its own live-follow view that pans a
     fixed-width window and fully rebuilds its GPU image graphic on every
@@ -150,7 +180,6 @@ class StimHeatmapWindow(_SelfRaisingDialog):
         self.trace_axes = figure.add_subplot(grid[1, 0], sharex=self.axes)
         self._image: AxesImage | None = None
         self._image_row_ids: list[int] = []
-        self._stim_type: StimType | None = None
         layout.addWidget(self.plot)
         self.resize(720, 480)
         self._theme = theme_module.LIGHT
@@ -183,16 +212,13 @@ class StimHeatmapWindow(_SelfRaisingDialog):
         dt_ms = float(stim.dt) * 1000.0
         duration_ms = values.shape[0] * dt_ms
         n_rows = len(ids)
-        vmax = float(np.max(np.abs(selected)))
-        if vmax == 0.0:
-            vmax = 1.0
-        vmin = -vmax if stim.stim_type == StimType.External else 0.0
+        rgba = _stim_pulse_rgba(selected.T, stim.stim_type)
         extent = (0.0, duration_ms, -0.5, n_rows - 0.5)
         if self._image is None or self._image_row_ids != ids:
             if self._image is not None:
                 self._image.remove()
             self._image = axes.imshow(
-                selected.T,
+                rgba,
                 aspect="auto",
                 origin="lower",
                 extent=extent,
@@ -201,18 +227,11 @@ class StimHeatmapWindow(_SelfRaisingDialog):
             self._image_row_ids = ids
             axes.set_yticks(range(n_rows))
             axes.set_yticklabels([str(i) for i in ids])
-            self._stim_type = None  # force the cmap to be reapplied below
             self._style_heatmap_axes()
         image = self._image
         assert image is not None
-        if self._stim_type != stim.stim_type:
-            self._stim_type = stim.stim_type
-            # Match the same excitatory/inhibitory/external coloring (and
-            # transparent-at-zero alpha) the main GPU stim view uses.
-            image.set_cmap(get_cmap(stim.stim_type).to_mpl())
-        image.set_data(selected.T)
+        image.set_data(rgba)
         image.set_extent(extent)
-        image.set_clim(vmin, vmax)
         axes.set_xlim(0.0, duration_ms)
         axes.set_ylim(-0.5, n_rows - 0.5)
 

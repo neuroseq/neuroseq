@@ -449,7 +449,11 @@ def test_rheobase_stim_heatmap_shows_only_targeted_neuron_and_its_trace(
     assert array is not None
     assert array.shape[0] == 1  # only the targeted neuron's row
     assert dialog.stim_heatmap_window.axes.get_yticklabels()[0].get_text() == "0"
-    assert image.get_clim()[1] < 1000.0
+    # every one of neuron 0's own nonzero samples is fully opaque, regardless
+    # of the much bigger unrelated pulse on neuron 1 (alpha is no longer
+    # proportional to magnitude at all - see _stim_pulse_rgba())
+    own_values = stim.values[:, [0]].T
+    assert np.array_equal(array[..., 3] > 0, own_values != 0)
 
     trace_lines = dialog.stim_heatmap_window.trace_axes.lines
     assert len(trace_lines) == 1

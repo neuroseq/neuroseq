@@ -422,7 +422,11 @@ def test_stim_heatmap_shows_only_targeted_neurons_and_traces(
     assert array.shape[0] == 2  # only presynaptic (0) and postsynaptic (1)
     labels = [t.get_text() for t in dialog.stim_heatmap_window.axes.get_yticklabels()]
     assert labels == ["0", "1"]
-    assert image.get_clim()[1] < 1000.0
+    # every one of the targeted neurons' own nonzero samples is fully
+    # opaque, regardless of the much bigger unrelated pulse on neuron 2
+    # (alpha is no longer proportional to magnitude at all)
+    own_values = stim.values[:, [0, 1]].T
+    assert np.array_equal(array[..., 3] > 0, own_values != 0)
 
     trace_lines = dialog.stim_heatmap_window.trace_axes.lines
     assert len(trace_lines) == 2
