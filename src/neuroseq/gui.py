@@ -2801,7 +2801,7 @@ class Gui(QtWidgets.QMainWindow):
 
     def open_llm_settings(self) -> None:
         if self._llm_settings_dialog is None:
-            self._llm_settings_dialog = LLMSettingsDialog(self)
+            self._llm_settings_dialog = LLMSettingsDialog()
             self._llm_settings_dialog.settings_changed.connect(
                 self.chat_widget.reload_backend
             )

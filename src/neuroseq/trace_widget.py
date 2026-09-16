@@ -12,6 +12,7 @@ from qtpy import QtWidgets
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import TraceData
+from neuroseq.input_designer_dialog import _SelfRaisingDialog
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.stim_widget import apply_cmap_alpha
@@ -21,14 +22,20 @@ from neuroseq.utils import get_cmap
 from neuroseq.utils import neuron_indices_to_colors
 
 
-class TraceNormDialog(QtWidgets.QDialog):
-    """A dialog to set the normalization factor for the traces."""
+class TraceNormDialog(_SelfRaisingDialog):
+    """A dialog to set the normalization factor for the traces.
+
+    No Qt parent (see _SelfRaisingDialog's docstring): a parent sets
+    WM_TRANSIENT_FOR, and on X11/KWin a transient dialog can end up sharing
+    its owner's "raise group" so clicking it never brings it above another
+    sibling popup.
+    """
 
     def __init__(
         self,
         trace_widget: TraceWidget,
     ) -> None:
-        super().__init__(trace_widget)
+        super().__init__()
         self.setWindowTitle("Set Trace Normalization")
         self.trace_widget = trace_widget
         self.trace_norm_percent = self.trace_widget.trace_norm_percent

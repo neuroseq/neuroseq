@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from qtpy import QtWidgets
 
+from neuroseq.input_designer_dialog import _SelfRaisingDialog
 from neuroseq.stim import DrawStimType
 from neuroseq.stim_patterns import generate_fuer_elise
 from neuroseq.stim_patterns import generate_per_neuron
@@ -26,13 +27,14 @@ class StimPatternContext:
     n_neurons: int
 
 
-class StimPatternDialog(QtWidgets.QDialog):
-    def __init__(
-        self,
-        editor: StimEditor,
-        parent: QtWidgets.QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
+class StimPatternDialog(_SelfRaisingDialog):
+    """Non-modal dialog, so no Qt parent (see _SelfRaisingDialog's
+    docstring): a parent sets WM_TRANSIENT_FOR, and on X11/KWin a transient
+    dialog can end up sharing its owner's "raise group" so clicking it
+    never brings it above another sibling popup."""
+
+    def __init__(self, editor: StimEditor) -> None:
+        super().__init__()
         self.editor = editor
         self._context: StimPatternContext | None = None
         self.setModal(False)

@@ -150,6 +150,9 @@ def test_trace_norm_dialog_is_modeless_and_reused(qtbot: QtBot) -> None:
     assert dialog is not None
     assert dialog.isVisible()
     assert not dialog.isModal()
+    # No Qt parent - see _SelfRaisingDialog's docstring for why a shared
+    # WM_TRANSIENT_FOR chain with a sibling popup breaks click-to-front.
+    assert dialog.parent() is None
 
     trace_widget.trace_norm_dialog()
     assert trace_widget._trace_norm_dialog is dialog

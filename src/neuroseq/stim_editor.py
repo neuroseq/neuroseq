@@ -1090,7 +1090,7 @@ class StimEditor(QtWidgets.QWidget):
         if self.current_stim_modifier is None or self.project is None:
             return
         if self._pattern_dialog is None:
-            self._pattern_dialog = StimPatternDialog(self, self)
+            self._pattern_dialog = StimPatternDialog(self)
         self._pattern_dialog.set_context(self._current_pattern_context())
         self._pattern_dialog.show()
         self._pattern_dialog.raise_()
@@ -1103,7 +1103,7 @@ class StimEditor(QtWidgets.QWidget):
         # preview (goal, parameters, sample plot) beneath it; the real routine
         # dialog opens only when the user clicks Continue.
         dialog = RoutineSelectorDialog(
-            list(self.DYNAMIC_INPUT_ROUTINES), self._input_designer_theme, self
+            list(self.DYNAMIC_INPUT_ROUTINES), self._input_designer_theme
         )
         dialog.routine_chosen.connect(self._open_routine_dialog_for)
         dialog.finished.connect(dialog.deleteLater)
