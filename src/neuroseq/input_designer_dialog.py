@@ -439,12 +439,28 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.stim_heatmap_window.show()
         if not self._stim_heatmap_window_positioned:
             self._stim_heatmap_window_positioned = True
-            self.stim_heatmap_window.move(
-                self.plot_window.x(),
-                self.plot_window.y() + self.plot_window.height() + 20,
-            )
+            self._position_stim_heatmap_window()
         self.stim_heatmap_window.raise_()
         self._update_stim_heatmap()
+
+    def _position_stim_heatmap_window(self) -> None:
+        """Place the heatmap window below the plots window, clamped to the
+        available screen so stacking three windows vertically can't push it
+        off-screen (issue: window not appearing on shorter/smaller displays)."""
+        x = self.plot_window.x()
+        y = self.plot_window.y() + self.plot_window.height() + 20
+        screen = self.plot_window.screen() or QtWidgets.QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            x = min(
+                max(x, available.left()),
+                available.right() - self.stim_heatmap_window.width(),
+            )
+            y = min(
+                max(y, available.top()),
+                available.bottom() - self.stim_heatmap_window.height(),
+            )
+        self.stim_heatmap_window.move(x, y)
 
     def closeEvent(self, event: QtGui.QCloseEvent | None) -> None:
         # The dialog is cached and reused, so closing only hides it. Stop any

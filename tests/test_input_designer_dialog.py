@@ -759,6 +759,31 @@ def test_input_designer_stim_heatmap_opens_in_its_own_window(qtbot) -> None:
     qtbot.waitUntil(lambda: not dialog.stim_heatmap_window.isVisible())
 
 
+def test_input_designer_stim_heatmap_window_stays_on_screen(qtbot) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    qtbot.addWidget(dialog.plot_window)
+    qtbot.addWidget(dialog.stim_heatmap_window)
+
+    # Force the plots window near the bottom of the screen: stacking the
+    # heatmap window naively beneath it (its y + its own height) would then
+    # land past the bottom edge, off-screen (the actual bug report).
+    screen = dialog.screen() or QtWidgets.QApplication.primaryScreen()
+    available = screen.availableGeometry()
+    dialog.plot_window.move(available.left(), available.bottom() - 100)
+
+    dialog._position_stim_heatmap_window()
+
+    pos = dialog.stim_heatmap_window.pos()
+    size = dialog.stim_heatmap_window.size()
+    assert pos.x() >= available.left()
+    assert pos.y() >= available.top()
+    assert pos.x() + size.width() <= available.right() + 1
+    assert pos.y() + size.height() <= available.bottom() + 1
+
+
 def test_input_designer_stim_heatmap_shows_whole_history_without_panning(
     qtbot, monkeypatch
 ) -> None:
