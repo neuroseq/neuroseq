@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from math import copysign
 from typing import TYPE_CHECKING
@@ -115,17 +116,24 @@ class _SelfRaisingDialog(QtWidgets.QDialog):
 
 
 class StimHeatmapWindow(_SelfRaisingDialog):
-    """A live, whole-history heatmap (neuron ID x time) of a growing input
-    array, shared by every closed-loop routine dialog (Input Designer,
-    Rheobase, STDP timing window).
+    """A live, whole-history view (neuron ID x time) of the input pattern,
+    and below it the recorded trace(s) of the neuron(s) it targets - shared
+    by every closed-loop routine dialog (Input Designer, Rheobase, STDP
+    timing window).
+
+    Only the neuron(s) the running routine actually targets are shown, not
+    every neuron in the input array: an unrelated neuron elsewhere in the
+    array could otherwise dominate the heatmap's shared color scale,
+    fading the routine's own pulses to near-invisible even though their
+    values never changed.
 
     Each of those dialogs already has its own live-follow view that pans a
     fixed-width window and fully rebuilds its GPU image graphic on every
     appended block - which makes it hard to visually track how the pattern
     evolves, since it jumps and re-flashes each iteration. This window never
-    pans or rebuilds: update_from_stim() only calls set_data/set_extent/
-    set_clim on the same Matplotlib image artist, so old blocks stay exactly
-    where they were and only the timeline extends.
+    pans or rebuilds: update_view() only calls set_data/set_extent/set_clim
+    on the same Matplotlib image artist, so old blocks stay exactly where
+    they were and only the timeline extends.
     """
 
     def __init__(self, title: str, parent: QtWidgets.QWidget | None = None) -> None:
@@ -135,38 +143,66 @@ class StimHeatmapWindow(_SelfRaisingDialog):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
         self.plot = MatplotlibWidget(self)
-        self.plot.setMinimumHeight(220)
-        self.axes = self.plot.getFigure().add_subplot(111)
+        self.plot.setMinimumHeight(320)
+        figure = self.plot.getFigure()
+        grid = figure.add_gridspec(2, 1, height_ratios=(3, 2), hspace=0.12)
+        self.axes = figure.add_subplot(grid[0, 0])
+        self.trace_axes = figure.add_subplot(grid[1, 0], sharex=self.axes)
         self._image: AxesImage | None = None
+        self._image_row_ids: list[int] = []
         self._stim_type: StimType | None = None
         layout.addWidget(self.plot)
-        self.resize(720, 320)
+        self.resize(720, 480)
         self._theme = theme_module.LIGHT
         self._style_axes()
 
-    def update_from_stim(self, stim: StimArray | None) -> None:
-        if stim is None:
+    def update_view(
+        self,
+        stim: StimArray | None,
+        stim_neuron_ids: Iterable[int],
+        trace: TraceData | None = None,
+        trace_neuron_ids: Iterable[int] | None = None,
+    ) -> None:
+        stim_ids = list(stim_neuron_ids)
+        self._update_heatmap(stim, stim_ids)
+        self._update_traces(
+            trace, stim_ids if trace_neuron_ids is None else list(trace_neuron_ids)
+        )
+        self.plot.draw()
+
+    def _update_heatmap(self, stim: StimArray | None, neuron_ids: list[int]) -> None:
+        axes = self.axes
+        ids = sorted({int(i) for i in neuron_ids})
+        if stim is None or not ids:
             return
         values = stim.values  # (n_time, n_neurons)
-        if values.shape[0] == 0 or values.shape[1] == 0:
+        ids = [i for i in ids if 0 <= i < values.shape[1]]
+        if values.shape[0] == 0 or not ids:
             return
+        selected = values[:, ids]
         dt_ms = float(stim.dt) * 1000.0
         duration_ms = values.shape[0] * dt_ms
-        n_neurons = values.shape[1]
-        vmax = float(np.max(np.abs(values)))
+        n_rows = len(ids)
+        vmax = float(np.max(np.abs(selected)))
         if vmax == 0.0:
             vmax = 1.0
         vmin = -vmax if stim.stim_type == StimType.External else 0.0
-        extent = (0.0, duration_ms, -0.5, n_neurons - 0.5)
-        if self._image is None:
-            self._image = self.axes.imshow(
-                values.T,
+        extent = (0.0, duration_ms, -0.5, n_rows - 0.5)
+        if self._image is None or self._image_row_ids != ids:
+            if self._image is not None:
+                self._image.remove()
+            self._image = axes.imshow(
+                selected.T,
                 aspect="auto",
                 origin="lower",
                 extent=extent,
                 interpolation="nearest",
             )
-            self._style_axes()
+            self._image_row_ids = ids
+            axes.set_yticks(range(n_rows))
+            axes.set_yticklabels([str(i) for i in ids])
+            self._stim_type = None  # force the cmap to be reapplied below
+            self._style_heatmap_axes()
         image = self._image
         assert image is not None
         if self._stim_type != stim.stim_type:
@@ -174,12 +210,32 @@ class StimHeatmapWindow(_SelfRaisingDialog):
             # Match the same excitatory/inhibitory/external coloring (and
             # transparent-at-zero alpha) the main GPU stim view uses.
             image.set_cmap(get_cmap(stim.stim_type).to_mpl())
-        image.set_data(values.T)
+        image.set_data(selected.T)
         image.set_extent(extent)
         image.set_clim(vmin, vmax)
-        self.axes.set_xlim(0.0, duration_ms)
-        self.axes.set_ylim(-0.5, n_neurons - 0.5)
-        self.plot.draw()
+        axes.set_xlim(0.0, duration_ms)
+        axes.set_ylim(-0.5, n_rows - 0.5)
+
+    def _update_traces(self, trace: TraceData | None, neuron_ids: list[int]) -> None:
+        axes = self.trace_axes
+        axes.clear()
+        ids = sorted({int(i) for i in neuron_ids})
+        if trace is not None and ids:
+            dt_ms = float(trace.dt) * 1000.0
+            time_ms = np.arange(trace.traces.shape[1], dtype=np.float64) * dt_ms
+            for neuron_id in ids:
+                matches = np.flatnonzero(trace.indices == neuron_id)
+                if matches.size == 0:
+                    continue
+                axes.plot(
+                    time_ms,
+                    trace.traces[int(matches[0])],
+                    label=f"Neuron {neuron_id}",
+                    linewidth=1.2,
+                )
+            if axes.lines:
+                axes.legend(loc="upper right", fontsize=8, frameon=False)
+        self._style_trace_axes(units=trace.units if trace is not None else "")
 
     def position_below(self, reference: QtWidgets.QWidget) -> None:
         """Place this window just under `reference`, clamped to the
@@ -202,16 +258,33 @@ class StimHeatmapWindow(_SelfRaisingDialog):
         self.plot.draw()
 
     def _style_axes(self) -> None:
-        face, text = theme_module.mpl_colors(self._theme)
-        self.axes.set_facecolor(face)
-        self.axes.set_xlabel("Time (ms)", color=text)
-        self.axes.set_ylabel("Neuron ID", color=text)
-        self.axes.tick_params(colors=text)
-        for spine in self.axes.spines.values():
-            spine.set_color(text)
+        self._style_heatmap_axes()
+        self._style_trace_axes()
+        face, _text = theme_module.mpl_colors(self._theme)
         figure = self.plot.getFigure()
         figure.set_facecolor(face)
-        figure.subplots_adjust(left=0.09, right=0.98, bottom=0.16, top=0.96)
+        figure.subplots_adjust(
+            left=0.09, right=0.98, bottom=0.11, top=0.97, hspace=0.12
+        )
+
+    def _style_heatmap_axes(self) -> None:
+        face, text = theme_module.mpl_colors(self._theme)
+        axes = self.axes
+        axes.set_facecolor(face)
+        axes.set_ylabel("Neuron ID", color=text)
+        axes.tick_params(colors=text, labelbottom=False)
+        for spine in axes.spines.values():
+            spine.set_color(text)
+
+    def _style_trace_axes(self, units: str = "") -> None:
+        face, text = theme_module.mpl_colors(self._theme)
+        axes = self.trace_axes
+        axes.set_facecolor(face)
+        axes.set_xlabel("Time (ms)", color=text)
+        axes.set_ylabel(units or "Trace", color=text)
+        axes.tick_params(colors=text)
+        for spine in axes.spines.values():
+            spine.set_color(text)
 
 
 class InputDesignerDialog(_SelfRaisingDialog):
@@ -1046,7 +1119,16 @@ class InputDesignerDialog(_SelfRaisingDialog):
     def _update_stim_heatmap(self) -> None:
         modifier = self.editor.current_stim_modifier
         stim = modifier.stim_array if modifier is not None else None
-        self.stim_heatmap_window.update_from_stim(stim)
+        target_ids = (self.spn_presynaptic.value(), self.spn_postsynaptic.value())
+        self.stim_heatmap_window.update_view(stim, target_ids, self._heatmap_trace())
+
+    def _heatmap_trace(self) -> TraceData | None:
+        if self.project is None:
+            return None
+        trace_name = self.cmb_trace.currentText()
+        if not trace_name or not self._is_simulation_voltage_trace(trace_name):
+            return None
+        return self.project.get_data(trace_name, TraceData)
 
     def apply_theme(self, theme: str) -> None:
         """Recolor every Matplotlib canvas for the application theme."""

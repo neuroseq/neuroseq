@@ -372,7 +372,16 @@ class RheobaseDialog(_SelfRaisingDialog):
     def _update_stim_heatmap(self) -> None:
         modifier = self.editor.current_stim_modifier
         stim = modifier.stim_array if modifier is not None else None
-        self.stim_heatmap_window.update_from_stim(stim)
+        target_ids = (self.spn_neuron.value(),)
+        self.stim_heatmap_window.update_view(stim, target_ids, self._heatmap_trace())
+
+    def _heatmap_trace(self) -> TraceData | None:
+        if self.project is None:
+            return None
+        trace_name = self.cmb_trace.currentText()
+        if not trace_name:
+            return None
+        return self.project.get_data(trace_name, TraceData)
 
     def changeEvent(self, event: QtCore.QEvent | None) -> None:
         super().changeEvent(event)

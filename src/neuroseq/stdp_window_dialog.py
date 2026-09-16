@@ -381,7 +381,19 @@ class StdpWindowDialog(_SelfRaisingDialog):
     def _update_stim_heatmap(self) -> None:
         modifier = self.editor.current_stim_modifier
         stim = modifier.stim_array if modifier is not None else None
-        self.stim_heatmap_window.update_from_stim(stim)
+        target_ids = (self.spn_presynaptic.value(), self.spn_postsynaptic.value())
+        self.stim_heatmap_window.update_view(stim, target_ids, self._heatmap_trace())
+
+    def _heatmap_trace(self) -> TraceData | None:
+        # In weight-readout mode there's no voltage trace selected (cmb_trace
+        # is hidden) - the relevant readout is synaptic weight, not a
+        # per-neuron voltage trace, so leave the popup's trace panel empty.
+        if self.project is None or self._weight_mode():
+            return None
+        trace_name = self.cmb_trace.currentText()
+        if not trace_name or not self._is_simulation_voltage_trace(trace_name):
+            return None
+        return self.project.get_data(trace_name, TraceData)
 
     def changeEvent(self, event: QtCore.QEvent | None) -> None:
         super().changeEvent(event)

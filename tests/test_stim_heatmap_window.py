@@ -5,6 +5,7 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq import theme
+from neuroseq.data import TraceData
 from neuroseq.input_designer_dialog import StimHeatmapWindow
 from neuroseq.input_designer_dialog import _SelfRaisingDialog
 from neuroseq.stim import StimArray
@@ -26,26 +27,38 @@ def _make_stim(
     )
 
 
+def _make_trace(
+    n_neurons: int, n_time: int, indices: np.ndarray | None = None, dt: float = 0.001
+) -> TraceData:
+    return TraceData(
+        "Simulation :: P / v",
+        np.zeros((n_neurons, n_time), dtype=np.float32),
+        indices if indices is not None else np.arange(n_neurons, dtype=np.uint32),
+        "mV",
+        dt,
+    )
+
+
 def test_stim_heatmap_window_shows_whole_history_without_panning(qtbot) -> None:
     window = StimHeatmapWindow("Test — stimulation pattern")
     qtbot.addWidget(window)
 
     stim = _make_stim(10, 3)
-    window.update_from_stim(stim)
+    window.update_view(stim, [0, 1, 2])
     image = window._image
     assert image is not None
     # always starts at t=0 and ends at the array's current length - never a
     # fixed-width window that pans as more samples are appended.
     assert image.get_extent()[0] == 0.0
     assert image.get_extent()[1] == pytest.approx(10 * stim.dt * 1000.0)
-    assert window.axes.get_xlabel() == "Time (ms)"
+    assert window.trace_axes.get_xlabel() == "Time (ms)"
     assert window.axes.get_ylabel() == "Neuron ID"
 
     # growing the array in place (as a routine appending blocks would) keeps
     # the same image artist, updated rather than rebuilt, and shows every
     # sample - old ones are never dropped/panned away.
     stim.values = np.vstack([stim.values, np.zeros((5, 3), dtype=np.float32)])
-    window.update_from_stim(stim)
+    window.update_view(stim, [0, 1, 2])
     assert window._image is image
     assert image.get_extent()[1] == pytest.approx(15 * stim.dt * 1000.0)
     array = image.get_array()
@@ -57,24 +70,98 @@ def test_stim_heatmap_window_ignores_absent_or_empty_stim(qtbot) -> None:
     window = StimHeatmapWindow("Test — stimulation pattern")
     qtbot.addWidget(window)
 
-    window.update_from_stim(None)
+    window.update_view(None, [0])
     assert window._image is None
 
-    window.update_from_stim(_make_stim(0, 3))
+    window.update_view(_make_stim(0, 3), [0, 1, 2])
     assert window._image is None
+
+    window.update_view(_make_stim(5, 3), [])
+    assert window._image is None
+
+
+def test_stim_heatmap_window_shows_only_targeted_neurons(qtbot) -> None:
+    """Only the routine's own target neurons should be shown - and their
+    color scale must come from just those columns. A much bigger pulse on
+    some unrelated neuron elsewhere in the array must not wash out the
+    targeted neurons' own (smaller) pulses (the reported "too faint,
+    becomes invisible" bug)."""
+    window = StimHeatmapWindow("Test — stimulation pattern")
+    qtbot.addWidget(window)
+
+    stim = _make_stim(4, 5)
+    stim.values[0, 1] = 1.0  # targeted neuron 1's own pulse
+    stim.values[1, 4] = 1000.0  # unrelated neuron 4, much larger amplitude
+
+    window.update_view(stim, [1, 3])
+
+    image = window._image
+    assert image is not None
+    array = image.get_array()
+    assert array is not None
+    # only neurons 1 and 3 are shown, in ascending order
+    assert array.shape[0] == 2
+    assert window.axes.get_yticklabels()[0].get_text() == "1"
+    assert window.axes.get_yticklabels()[1].get_text() == "3"
+    # the color scale is normalized to the targeted neurons' own peak, not
+    # drowned out by the unrelated neuron's much larger pulse
+    assert image.get_clim() == pytest.approx((0.0, 1.0))
 
 
 def test_stim_heatmap_window_recolors_when_stim_type_changes(qtbot) -> None:
     window = StimHeatmapWindow("Test — stimulation pattern")
     qtbot.addWidget(window)
 
-    window.update_from_stim(_make_stim(5, 2, stim_type=StimType.Excitation))
+    window.update_view(_make_stim(5, 2, stim_type=StimType.Excitation), [0, 1])
     assert window._image is not None
     excitatory_cmap = window._image.get_cmap()
 
-    window.update_from_stim(_make_stim(5, 2, stim_type=StimType.Inhibition))
+    window.update_view(_make_stim(5, 2, stim_type=StimType.Inhibition), [0, 1])
     assert window._image is not None
     assert window._image.get_cmap() is not excitatory_cmap
+
+
+def test_stim_heatmap_window_plots_only_targeted_neuron_traces(qtbot) -> None:
+    window = StimHeatmapWindow("Test — stimulation pattern")
+    qtbot.addWidget(window)
+
+    trace = _make_trace(4, 20, indices=np.array([0, 1, 2, 3], dtype=np.uint32))
+    trace.traces[1, :] = 5.0
+    trace.traces[3, :] = 7.0
+
+    window.update_view(_make_stim(20, 4), [1, 3], trace, [1, 3])
+
+    assert len(window.trace_axes.lines) == 2
+    plotted_y = {tuple(line.get_ydata()) for line in window.trace_axes.lines}
+    assert plotted_y == {(5.0,) * 20, (7.0,) * 20}
+    assert window.trace_axes.get_ylabel() == "mV"
+    assert window.trace_axes.legend_ is not None
+
+
+def test_stim_heatmap_window_skips_traces_absent_from_the_recording(qtbot) -> None:
+    window = StimHeatmapWindow("Test — stimulation pattern")
+    qtbot.addWidget(window)
+
+    # only neuron 1 was actually recorded (e.g. presynaptic voltage isn't
+    # monitored, only postsynaptic) - the other target id must be skipped,
+    # not raise.
+    trace = _make_trace(1, 10, indices=np.array([1], dtype=np.uint32))
+
+    window.update_view(_make_stim(10, 4), [0, 1], trace, [0, 1])
+
+    assert len(window.trace_axes.lines) == 1
+
+
+def test_stim_heatmap_window_clears_traces_when_none_available(qtbot) -> None:
+    window = StimHeatmapWindow("Test — stimulation pattern")
+    qtbot.addWidget(window)
+
+    trace = _make_trace(2, 10)
+    window.update_view(_make_stim(10, 2), [0, 1], trace, [0, 1])
+    assert len(window.trace_axes.lines) == 2
+
+    window.update_view(_make_stim(10, 2), [0, 1], None)
+    assert len(window.trace_axes.lines) == 0
 
 
 def test_stim_heatmap_window_follows_theme(qtbot) -> None:
@@ -83,8 +170,10 @@ def test_stim_heatmap_window_follows_theme(qtbot) -> None:
 
     window.apply_theme(theme.DARK)
     assert to_hex(window.axes.get_facecolor()) == "#1e1e1e"
+    assert to_hex(window.trace_axes.get_facecolor()) == "#1e1e1e"
     window.apply_theme(theme.LIGHT)
     assert to_hex(window.axes.get_facecolor()) == "#ffffff"
+    assert to_hex(window.trace_axes.get_facecolor()) == "#ffffff"
 
 
 def test_stim_heatmap_window_position_below_clamped_to_screen(qtbot) -> None:

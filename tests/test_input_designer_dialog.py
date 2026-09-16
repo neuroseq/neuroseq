@@ -788,6 +788,47 @@ def test_input_designer_updates_stim_heatmap_as_blocks_are_appended(
     assert image.get_array().shape[1] == stim.values.shape[0]
 
 
+def test_input_designer_stim_heatmap_shows_only_targeted_neurons_and_traces(
+    qtbot, monkeypatch
+) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    monkeypatch.setattr(
+        dialog, "_measure_epsps", lambda trace: EPSPMeasurement(2.0, (2.0,) * 5)
+    )
+    # Widen the input array to 3 neurons and seed a much bigger, unrelated
+    # pulse on neuron 2 (not targeted by this routine, which targets the
+    # default presynaptic=0/postsynaptic=1) - it must not wash out the
+    # targeted neurons' own pulses in the heatmap's color scale.
+    stim = editor.current_stim_modifier.stim_array
+    stim.values = np.zeros((stim.values.shape[0], 3), dtype=np.float32)
+    stim.values[0, 2] = 1000.0
+    project.trace.traces = np.zeros(
+        (3, project.trace.traces.shape[1]), dtype=np.float32
+    )
+    project.trace.traces[1, :] = -55.0
+    project.trace.indices = np.array([0, 1, 2])
+    dialog.refresh()
+
+    dialog.start()
+
+    image = dialog.stim_heatmap_window._image
+    assert image is not None
+    array = image.get_array()
+    assert array is not None
+    assert array.shape[0] == 2  # only presynaptic (0) and postsynaptic (1)
+    labels = [t.get_text() for t in dialog.stim_heatmap_window.axes.get_yticklabels()]
+    assert labels == ["0", "1"]
+    assert image.get_clim()[1] < 1000.0
+
+    trace_lines = dialog.stim_heatmap_window.trace_axes.lines
+    assert len(trace_lines) == 2
+    plotted = {tuple(np.unique(line.get_ydata())) for line in trace_lines}
+    assert plotted == {(0.0,), (-55.0,)}
+
+
 def test_input_designer_forwards_theme_to_stim_heatmap(qtbot) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)

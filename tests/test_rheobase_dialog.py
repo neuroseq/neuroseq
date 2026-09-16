@@ -429,6 +429,33 @@ def test_rheobase_updates_stim_heatmap_as_blocks_are_appended(qtbot) -> None:
     assert image.get_array().shape[1] == stim.values.shape[0]
 
 
+def test_rheobase_stim_heatmap_shows_only_targeted_neuron_and_its_trace(
+    qtbot, monkeypatch
+) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    stim = editor.current_stim_modifier.stim_array
+    # a much bigger, unrelated pulse on neuron 1 (not targeted by this
+    # search, which targets neuron 0) must not wash out neuron 0's own,
+    # much smaller pulses in the heatmap's color scale.
+    stim.values[0, 1] = 1000.0
+    monkeypatch.setattr(dialog, "_prompt_existing_input_choice", lambda names: "append")
+    assert dialog.spn_neuron.value() == 0
+
+    dialog.start()
+
+    image = dialog.stim_heatmap_window._image
+    assert image is not None
+    array = image.get_array()
+    assert array is not None
+    assert array.shape[0] == 1  # only the targeted neuron's row
+    assert dialog.stim_heatmap_window.axes.get_yticklabels()[0].get_text() == "0"
+    assert image.get_clim()[1] < 1000.0
+
+    trace_lines = dialog.stim_heatmap_window.trace_axes.lines
+    assert len(trace_lines) == 1
+    assert np.all(np.asarray(trace_lines[0].get_ydata()) == -70.0)
+
+
 def test_rheobase_forwards_theme_to_stim_heatmap(qtbot) -> None:
     _project, _editor, dialog = _make_dialog(qtbot)
 

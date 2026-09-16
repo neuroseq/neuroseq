@@ -400,6 +400,34 @@ def test_updates_stim_heatmap_as_blocks_are_appended(qtbot, monkeypatch) -> None
     assert image.get_array().shape[1] == stim.values.shape[0]
 
 
+def test_stim_heatmap_shows_only_targeted_neurons_and_traces(
+    qtbot, monkeypatch
+) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    _patch_directional_measurement(monkeypatch, dialog)
+    stim = editor.current_stim_modifier.stim_array
+    # a much bigger, unrelated pulse on neuron 2 (not targeted by this
+    # sweep, which targets the default presynaptic=0/postsynaptic=1) must
+    # not wash out the targeted neurons' own pulses in the heatmap's color
+    # scale.
+    stim.values[0, 2] = 1000.0
+    monkeypatch.setattr(dialog, "_prompt_existing_input_choice", lambda names: "append")
+
+    dialog.start()
+
+    image = dialog.stim_heatmap_window._image
+    assert image is not None
+    array = image.get_array()
+    assert array is not None
+    assert array.shape[0] == 2  # only presynaptic (0) and postsynaptic (1)
+    labels = [t.get_text() for t in dialog.stim_heatmap_window.axes.get_yticklabels()]
+    assert labels == ["0", "1"]
+    assert image.get_clim()[1] < 1000.0
+
+    trace_lines = dialog.stim_heatmap_window.trace_axes.lines
+    assert len(trace_lines) == 2
+
+
 def test_forwards_theme_to_stim_heatmap(qtbot) -> None:
     _project, _editor, dialog = _make_dialog(qtbot)
 
@@ -407,6 +435,22 @@ def test_forwards_theme_to_stim_heatmap(qtbot) -> None:
     assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#1e1e1e"
     dialog.apply_theme(theme.LIGHT)
     assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#ffffff"
+
+
+def test_weight_readout_mode_leaves_stim_heatmap_traces_empty(qtbot) -> None:
+    """In weight-readout mode there's no voltage trace selected (cmb_trace
+    is hidden) - the relevant readout is synaptic weight, not a per-neuron
+    voltage trace, so the popup's trace panel should stay empty rather than
+    plot a stale/irrelevant trace."""
+    project, editor, dialog = _make_dialog(qtbot)
+    editor.current_stim_modifier.stim_array.values[0, 0] = 1.0
+    _use_weight_readout(project, dialog)
+
+    dialog._update_stim_heatmap()
+
+    assert len(dialog.stim_heatmap_window.trace_axes.lines) == 0
+    # the heatmap itself still shows the targeted neurons' input pattern
+    assert dialog.stim_heatmap_window._image is not None
 
 
 def test_matplotlib_plots_follow_theme(qtbot) -> None:
