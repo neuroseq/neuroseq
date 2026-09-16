@@ -1,0 +1,150 @@
+calcium_video_player — review of the Codex implementation against .ai_dev/handoffs/calcium_video_player.txt
+================================================================================================================
+
+Overall: the core architecture is right and closely follows the handoff -
+Project.calcium_video_paths/fps persistence, the cellpose<->stim id mapping
+extraction, compute_cell_centroids, TimeSliderWidget wiring, panel/splitter
+placement, and the toolbar toggle are all correctly implemented and match
+the spec's exact file/line guidance. Two real regressions in the existing
+test suite and two new mypy errors were found and have already been fixed
+in this pass (see FIXED IN THIS REVIEW below) so the branch is green again.
+What's left, listed by priority:
+
+1. NO NEW TESTS AT ALL (blocking)
+
+   The handoff's TESTS section asked for new/extended tests in
+   tests/test_calcium_video_widget.py (new), tests/test_project.py,
+   tests/test_tif_import_dialog.py, tests/test_cell_overlay_widget.py,
+   tests/test_spatial_footprint_state.py, and tests/test_gui.py. None of
+   these were added - `git status` shows zero test files touched. This
+   project's own CLAUDE.md requires 75% coverage (full suite and diff);
+   a feature this size with zero new tests will not meet that bar and is
+   not reviewable for correctness beyond static reading. At minimum, add:
+     - tests/test_project.py: save/load round-trip for calcium_video_paths/
+       fps, defaults-to-empty, set_calcium_video marks dirty.
+     - tests/test_cell_overlay_widget.py: compute_cell_centroids on a known
+       segmentation array; cellpose_to_stim_id/stim_id_to_cellpose_id with
+       and without a mapping.
+     - tests/test_calcium_video_widget.py: set_video_paths loads/shows a
+       frame, empty/missing-path falls back to the import state without
+       raising, import_requested fires, frame index tracks set_time_ms,
+       a stimulated cell gets a cross (single array and "all combined"
+       with differing dt per array), no cross when nothing overlaps that
+       frame, export_labeled_video produces the expected frame count and a
+       red pixel at a known stimulated cell/frame.
+     - tests/test_gui.py: panel toggle, shared-timeline sync
+       (main_window.calcium_video_widget's frame tracks the slider),
+       import wiring exercises the lightweight file+fps picker and never
+       constructs TifImportDialog.
+
+2. Undeclared dependency + scope creep beyond the handoff (needs a decision)
+
+   calcium_video_widget.py imports `cv2` (inside set_video_paths/
+   _read_frame) to support .mp4/.avi/.mov/.mkv/.webm, and uses `PIL.Image`
+   for .gif playback/export. The handoff's NON-GOALS explicitly says:
+   "adding opencv-python/imageio as a new dependency is out of scope; ask
+   before adding one" - the raw calcium data this widget is for is a TIFF
+   stack; video/GIF playback was not requested. `opencv-python` is NOT in
+   pyproject.toml/uv.lock (verified: no diff to either file) - it currently
+   imports successfully only because something else pulls it in
+   transitively. On any environment where that transitive chain doesn't
+   include opencv, importing an .mp4 will raise ModuleNotFoundError deep
+   inside set_video_paths's try/except, which currently swallows it
+   silently (see #3) - i.e. this isn't just an undeclared dependency, it's
+   one whose absence fails silently rather than with a clear error.
+
+   Ask the user before keeping this: either (a) declare `opencv-python` as
+   a real dependency in pyproject.toml and keep video/GIF support (in which
+   case it deserves its own test coverage, not folded silently into the
+   TIFF-focused feature), or (b) trim scope back to TIFF-only per the
+   handoff and remove the cv2/GIF branches. Pillow is already a declared
+   dependency, so the GIF path alone doesn't add a new one - only the video
+   branch does.
+
+3. Silent failure on video load error (should fix)
+
+   `set_video_paths`'s `except Exception:` (calcium_video_widget.py:203-210)
+   cleans up and falls back to the empty/import state with NO message to
+   the user - a corrupt file, a missing codec, or (per #2) a missing cv2
+   all look identical to "no video imported yet." Log the exception
+   (`self.logger`, if FPLWidget provides one - it does, see fpl_widget.py)
+   and/or show a QMessageBox so the user knows why nothing loaded, at least
+   in the case triggered directly from the widget's own "Import Video"
+   button (as opposed to a silent stale-path fallback on project load,
+   which should stay quiet per the handoff's "tolerate a stale path"
+   guidance).
+
+4. `add_text(..., center=False)` is a no-op (minor, cosmetic)
+
+   calcium_video_widget.py:401 passes `center=False` to
+   `self.subplot.add_text(...)`. `fastplotlib.graphics.TextGraphic.__init__`
+   has no `center` parameter (confirmed via `inspect.signature` against the
+   installed version: `text, font_size, face_color, outline_color,
+   outline_thickness, screen_space, offset, anchor, **kwargs`) - it's
+   silently absorbed by `**kwargs` and does nothing. If the intent was to
+   left/top-anchor the label instead of the default `anchor='middle-center'`,
+   pass `anchor=` with one of the graphic's actual accepted values instead;
+   otherwise just delete the dead `center=False` argument.
+
+5. Handoff correction, not a Codex issue
+
+   The handoff's NON-GOALS section said to skip detach support "the same as
+   HeatmapWidget/SpatialFootprintWidget, neither of which is detachable
+   today" - that was wrong; the handoff's own BACKGROUND section (correctly)
+   documents `_build_fresh_spatial_footprint_widget`/its detach dispatch
+   entry, which does exist. Codex added `_build_fresh_calcium_video_widget`
+   and detach-context-menu wiring consistent with that existing sibling
+   panel, including correctly connecting/disconnecting the detached copy
+   from the shared timeline (`detach_panel`'s `isinstance(widget,
+   CalciumVideoWidget)` branch and `_forget_window`'s cleanup). This is the
+   right call given the actual codebase, not a deviation to flag against
+   Codex - noting it here only so the NON-GOALS line isn't mistaken for
+   still-current guidance in a future round.
+
+6. Extra features beyond the handoff (not wrong, just note them)
+
+   - Hover-to-brighten a cell under the pointer
+     (`HOVERED_CELL_BRIGHTNESS_BOOST`, `_on_pointer_move`).
+   - A "Show stimulation labels" checkbox drawing each stimulated cell's
+     stim_id as text next to its cross.
+   - A "Remove video" button/`remove_requested` signal, wired through to
+     `project.set_calcium_video([], None)`.
+   None of these were requested, but none conflict with the spec either,
+   and they're implemented consistently with the rest of the widget. Worth
+   surfacing to the user as scope they didn't explicitly ask for, in case
+   they'd rather simplify the UI - not something that needs to change
+   unprompted.
+
+7. Exported cross shape doesn't match the on-screen one (trivial, optional)
+
+   Live display draws an "x" marker (`_set_crosses`, `markers="x"`);
+   `_labeled_frame`'s export instead burns in a 5-pixel "+" shape. Both
+   satisfy "a red cross," but if visual consistency between preview and
+   export matters, make them match.
+
+
+FIXED IN THIS REVIEW (already committed, not left for a follow-up)
+--------------------------------------------------------------------
+
+- gui.py: `detach_panel`'s calcium-video branch called
+  `widget.set_time_ms(...)` on a value typed as plain `QtWidgets.QWidget`
+  (mypy: "QWidget has no attribute set_time_ms", plus the connect_widget
+  call's argument-type error). Changed the `source is self.calcium_video_widget`
+  check to `isinstance(widget, CalciumVideoWidget)` so mypy narrows the type
+  instead of needing a cast - `mypy` on gui.py is clean again.
+- tests/test_gui.py: `test_import_tif_with_new_segmentation_populates_spatial_footprint_panel`
+  and `test_import_tif_reusing_loaded_segmentation_does_not_reset_spatial_footprint_panel`
+  both broke (`AttributeError: '_FakeDialog' object has no attribute
+  'imported_tif_paths'`) because their `_FakeDialog` test doubles for
+  `TifImportDialog` were never updated for the new
+  `imported_tif_paths`/`imported_fps` public attributes `btn_import_tif_clicked`
+  now reads unconditionally. Added both attributes (empty list / 30.0) to
+  both fixtures so the calcium-video branch is a no-op for these two
+  pre-existing, unrelated tests. Both pass again.
+
+Full suite otherwise green aside from the three pre-existing/flaky failures
+already tracked outside this feature (test_gui_simulate_and_playback,
+test_stim_widget_select_mode, test_dialog_aoi_import_updates_region_summary).
+
+NEXT STEP: address #1 (tests) before this can be marked implemented; #2 and
+#3 should be resolved or explicitly accepted by the user first.

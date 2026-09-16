@@ -14,6 +14,7 @@ import pygfx
 from matplotlib.path import Path as MplPath
 from qtpy import QtCore
 from qtpy import QtWidgets
+from scipy import ndimage
 
 from neuroseq.aoi_shapes import circle_world_handles
 from neuroseq.aoi_shapes import circle_world_polyline
@@ -24,6 +25,7 @@ from neuroseq.aoi_shapes import world_to_user_point
 from neuroseq.fpl_widget import FullScreenFPLWidget
 from neuroseq.importer_cellpose import AOIRole
 from neuroseq.importer_cellpose import AreasOfInterestConfig
+from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import CircleAOI
 from neuroseq.importer_cellpose import SquareAOI
 from neuroseq.importer_cellpose import clone_aoi_config
@@ -112,6 +114,47 @@ def compute_segmentation_legend(
         )
         for cell_id, c in zip(neuron_ids, id_colors, strict=False)
     ]
+
+
+def cellpose_to_stim_id(
+    cellpose_id: int, cellpose_data: CellposeImportResult | None
+) -> int | None:
+    mapping = (
+        cellpose_data.stimulus_to_cellpose_mapping
+        if cellpose_data is not None
+        else None
+    )
+    if not mapping:
+        return cellpose_id
+    return {value: key for key, value in mapping.items()}.get(cellpose_id)
+
+
+def stim_id_to_cellpose_id(
+    stim_id: int | None, cellpose_data: CellposeImportResult | None
+) -> int | None:
+    if stim_id is None:
+        return None
+    mapping = (
+        cellpose_data.stimulus_to_cellpose_mapping
+        if cellpose_data is not None
+        else None
+    )
+    if not mapping:
+        return stim_id
+    return mapping.get(stim_id)
+
+
+def compute_cell_centroids(
+    segmentation: np.ndarray,
+) -> dict[int, tuple[float, float]]:
+    """Return cell centroids as (column, row) image/world coordinates."""
+    centroids: dict[int, tuple[float, float]] = {}
+    for cell_id in np.unique(segmentation):
+        if cell_id < 0:
+            continue
+        row, col = ndimage.center_of_mass(segmentation == cell_id)
+        centroids[int(cell_id)] = (float(col), float(row))
+    return centroids
 
 
 class OverlayView(FullScreenFPLWidget):

@@ -29,6 +29,7 @@ from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_suite2p import _resolve_suite2p_indices
 from neuroseq.importer_suite2p import prepare_suite2p_spikes
 from neuroseq.importer_suite2p import prepare_suite2p_traces
+from neuroseq.importer_tif import DEFAULT_FS
 from neuroseq.importer_tif import TifPipelineParams
 from neuroseq.importer_tif import TifPipelineResult
 from neuroseq.stim import StimArray
@@ -316,6 +317,8 @@ class TifImportDialog(QtWidgets.QDialog):
         self._stim_arrays = dict(stim_arrays or {})
         self._pipeline_result: TifPipelineResult | None = None
         self.new_cellpose_result: CellposeImportResult | None = None
+        self.imported_tif_paths: list[Path] = []
+        self.imported_fps: float = DEFAULT_FS
         self._propagate_new_segmentation: bool = False
         self._new_segmentation_path: Path | None = None
 
@@ -880,6 +883,8 @@ class TifImportDialog(QtWidgets.QDialog):
         dt = 1.0 / fs
         n_neurons, n_timepoints = result.F.shape
         self.experiment_duration = n_timepoints * dt
+        self.imported_tif_paths = list(self._tif_paths)
+        self.imported_fps = fs
 
         if self._propagate_new_segmentation:
             self.new_cellpose_result = _build_cellpose_result_from_pipeline(

@@ -5,6 +5,8 @@ from collections.abc import Iterable
 import brian2.numpy_ as np
 from qtpy import QtCore
 
+from neuroseq.cell_overlay_widget import cellpose_to_stim_id
+from neuroseq.cell_overlay_widget import stim_id_to_cellpose_id
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import load_background_image
 
@@ -84,30 +86,13 @@ class SpatialFootprintState(QtCore.QObject):
         spaces are small ints starting at 0). Such an id must resolve to
         `None` (and callers must skip emitting for it), not to itself.
         """
-        mapping = (
-            self.cellpose_data.stimulus_to_cellpose_mapping
-            if self.cellpose_data is not None
-            else None
-        )
-        if not mapping:
-            return cellpose_id
-        cellpose_to_stim = {v: k for k, v in mapping.items()}
-        return cellpose_to_stim.get(cellpose_id)
+        return cellpose_to_stim_id(cellpose_id, self.cellpose_data)
 
     def _stim_id_to_cellpose_id(self, stim_id: int | None) -> int | None:
         """The reverse of `_cellpose_to_stim_id`: resolve a trace/stim row
         to the segmented cell that drives it, or `None` if `stim_id` is
         `None` or there is no mapping entry for it."""
-        if stim_id is None:
-            return None
-        mapping = (
-            self.cellpose_data.stimulus_to_cellpose_mapping
-            if self.cellpose_data is not None
-            else None
-        )
-        if not mapping:
-            return stim_id
-        return mapping.get(stim_id)
+        return stim_id_to_cellpose_id(stim_id, self.cellpose_data)
 
     @property
     def hovered_cellpose_id(self) -> int | None:

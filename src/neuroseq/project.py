@@ -135,6 +135,8 @@ class Project:
         self.experiments: dict[str, Experiment] = {}
         self.stim_arrays: dict[str, StimArray] = {}
         self.cellpose_data: CellposeImportResult | None = None
+        self.calcium_video_paths: list[pathlib.Path] = []
+        self.calcium_video_fps: float | None = None
         self.syscon2_export_template_text: str | None = None
         self.power_luts: dict[int, PowerLut] = {}
 
@@ -196,6 +198,11 @@ class Project:
                             "power_luts", {}
                         ).items()
                     }
+                    self.calcium_video_paths = [
+                        pathlib.Path(p) for p in _meta.get("calcium_video_paths", [])
+                    ]
+                    fps = _meta.get("calcium_video_fps")
+                    self.calcium_video_fps = float(fps) if fps is not None else None
                     self._loaded_schema_version = int(_meta.get("schema_version", 1))
             if not _dt_from_metadata:
                 self.dt = self._derive_dt_from_data()
@@ -232,6 +239,11 @@ class Project:
         accepts new state).
         """
         self.dirty = True
+
+    def set_calcium_video(self, paths: list[pathlib.Path], fps: float | None) -> None:
+        self.calcium_video_paths = [pathlib.Path(path) for path in paths]
+        self.calcium_video_fps = float(fps) if fps is not None else None
+        self.mark_dirty()
 
     def import_project(
         self,
@@ -1378,6 +1390,12 @@ class Project:
                     str(wavelength_nm): lut.to_serializable()
                     for wavelength_nm, lut in self.power_luts.items()
                 }
+            if self.calcium_video_paths:
+                metadata["calcium_video_paths"] = [
+                    str(path) for path in self.calcium_video_paths
+                ]
+            if self.calcium_video_fps is not None:
+                metadata["calcium_video_fps"] = self.calcium_video_fps
             zf.writestr("project_metadata.json", json.dumps(metadata))
             include_simulation_data = (
                 options.include_simulation_data and self.b2_model.has_simulation_data()

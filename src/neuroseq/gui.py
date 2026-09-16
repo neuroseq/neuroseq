@@ -21,6 +21,7 @@ from neuroseq import __version__
 from neuroseq import theme as theme_module
 from neuroseq.analysis_plugins import AnalysisPlugin
 from neuroseq.analysis_plugins import discover_analysis_plugins
+from neuroseq.calcium_video_widget import CalciumVideoWidget
 from neuroseq.cellpose_import_dialog import CellposeImportDialog
 from neuroseq.chat_widget import ChatWidget
 from neuroseq.console_widget import ConsoleWidget
@@ -50,6 +51,7 @@ from neuroseq.import_dialog import Suite2pImportDialog
 from neuroseq.import_experiment_dialog import ImportExperimentDialog
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
+from neuroseq.importer_tif import DEFAULT_FS
 from neuroseq.llm_settings_dialog import LLMSettingsDialog
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
@@ -374,6 +376,13 @@ class Gui(QtWidgets.QMainWindow):
         self.spatial_footprint_widget.neurons_greyed_out_changed.connect(
             self._on_neurons_greyed_out_changed
         )
+        self.calcium_video_widget = CalciumVideoWidget(parent=self)
+        self.calcium_video_widget.import_requested.connect(
+            self._on_calcium_video_import_requested
+        )
+        self.calcium_video_widget.remove_requested.connect(
+            self._on_calcium_video_remove_requested
+        )
         self._create_menus_and_toolbars()
         self.setWindowIcon(qta.icon("fa6s.brain"))
         self.tab_bar = QtWidgets.QTabBar()
@@ -405,10 +414,13 @@ class Gui(QtWidgets.QMainWindow):
         split_left_right.setSizes([1000, 1000, 1000])
         # synapses (heatmap) and cell segmentation (spatial footprint) stacked
         # to the right of the stim editor
-        split_stim_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
-        split_stim_right.addWidget(self.heatmap_widget)
-        split_stim_right.addWidget(self.spatial_footprint_widget)
-        split_stim_right.setSizes([1000, 1000])
+        self.split_stim_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        self.split_stim_right.addWidget(self.heatmap_widget)
+        self.split_stim_right.addWidget(self.spatial_footprint_widget)
+        self.split_stim_right.addWidget(self.calcium_video_widget)
+        self.split_stim_right.setSizes([1000, 1000, 1000])
+        self.split_stim_right.setHandleWidth(3)
+        self._apply_right_splitter_style(self.settings.theme)
         # main vertical splitter layout
         split_vertical = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         split_vertical.setHandleWidth(0)
@@ -467,12 +479,15 @@ class Gui(QtWidgets.QMainWindow):
         )
         split_timeseries.addWidget(self.data_widget)
         self.time_slider = TimeSliderWidget(self)
-        self.plot_widgets: list[TimeseriesWidget | HeatmapWidget | DataWidget] = [
+        self.plot_widgets: list[
+            TimeseriesWidget | HeatmapWidget | DataWidget | CalciumVideoWidget
+        ] = [
             self.stim_editor.stim_widget,
             self.trace_widget,
             self.spike_widget,
             self.data_widget,
             self.heatmap_widget,
+            self.calcium_video_widget,
         ]
         for widget in self.plot_widgets:
             self.time_slider.connect_widget(widget)
@@ -483,7 +498,7 @@ class Gui(QtWidgets.QMainWindow):
         # timeseries panel together.
         split_timeseries_row = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         split_timeseries_row.addWidget(split_timeseries)
-        split_timeseries_row.addWidget(split_stim_right)
+        split_timeseries_row.addWidget(self.split_stim_right)
         split_timeseries_row.setSizes([3000, 1000])
         split_vertical.addWidget(split_timeseries_row)
         self.data_widget.setVisible(False)
@@ -491,6 +506,7 @@ class Gui(QtWidgets.QMainWindow):
         self.spike_widget.setVisible(False)
         self.heatmap_widget.setVisible(False)
         self.spatial_footprint_widget.setVisible(True)
+        self.calcium_video_widget.setVisible(False)
         self.custom_analysis_widget.setVisible(False)
         # heatmap / custom analysis widget / console
         split_vertical.addWidget(split_left_right)
@@ -689,6 +705,11 @@ class Gui(QtWidgets.QMainWindow):
         self._refresh_elise_replay_action()
         if hasattr(self, "spatial_footprint_widget"):
             self.spatial_footprint_widget.set_data(self.project.cellpose_data)
+            self.calcium_video_widget.set_cellpose_data(self.project.cellpose_data)
+            self.calcium_video_widget.set_stim_arrays(self.project.stim_arrays)
+            self.calcium_video_widget.set_video_paths(
+                self.project.calcium_video_paths, self.project.calcium_video_fps
+            )
 
     def _update_combo_box(
         self,
@@ -1274,6 +1295,11 @@ class Gui(QtWidgets.QMainWindow):
         self._refresh_elise_replay_action()
         if hasattr(self, "spatial_footprint_widget"):
             self.spatial_footprint_widget.set_data(self.project.cellpose_data)
+            self.calcium_video_widget.set_cellpose_data(self.project.cellpose_data)
+            self.calcium_video_widget.set_stim_arrays(self.project.stim_arrays)
+            self.calcium_video_widget.set_video_paths(
+                self.project.calcium_video_paths, self.project.calcium_video_fps
+            )
         # Restore this project's own remembered playback position now that
         # its data is loaded (rather than leaving whatever the previously
         # active project's position happened to be).
@@ -2169,6 +2195,47 @@ class Gui(QtWidgets.QMainWindow):
                 self._apply_cellpose_import_result(dialog.new_cellpose_result)
                 if hasattr(self, "_auto_show_widget"):
                     self._auto_show_widget(self.spatial_footprint_widget)
+            if dialog.imported_tif_paths:
+                self.project.set_calcium_video(
+                    dialog.imported_tif_paths, dialog.imported_fps
+                )
+                self.calcium_video_widget.set_video_paths(
+                    dialog.imported_tif_paths, dialog.imported_fps
+                )
+                if hasattr(self, "_auto_show_widget"):
+                    self._auto_show_widget(self.calcium_video_widget)
+
+    def _on_calcium_video_import_requested(self) -> None:
+        paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self,
+            "Select raw calcium video file(s)",
+            "",
+            "Video files (*.tif *.tiff *.gif *.mp4 *.avi *.mov *.mkv *.webm);;"
+            "TIFF files (*.tif *.tiff);;GIF files (*.gif);;"
+            "Movie files (*.mp4 *.avi *.mov *.mkv *.webm);;All files (*)",
+        )
+        if not paths:
+            return
+        fps, ok = QtWidgets.QInputDialog.getDouble(
+            self, "Frame rate", "Frames per second:", DEFAULT_FS, 0.001, 10000.0, 3
+        )
+        if not ok:
+            return
+        tif_paths = [pathlib.Path(path) for path in paths]
+        self.project.set_calcium_video(tif_paths, fps)
+        self._refresh_calcium_video_widgets()
+
+    def _on_calcium_video_remove_requested(self) -> None:
+        self.project.set_calcium_video([], None)
+        self._refresh_calcium_video_widgets()
+
+    def _refresh_calcium_video_widgets(self) -> None:
+        for widget in self.findChildren(CalciumVideoWidget):
+            widget.set_cellpose_data(self.project.cellpose_data)
+            widget.set_stim_arrays(self.project.stim_arrays)
+            widget.set_video_paths(
+                self.project.calcium_video_paths, self.project.calcium_video_fps
+            )
 
     def btn_open_fiji_clicked(self) -> None:
         from neuroseq.external_tools import launch_fiji
@@ -2263,6 +2330,7 @@ class Gui(QtWidgets.QMainWindow):
             self.project.cellpose_data = None
         if hasattr(self, "spatial_footprint_widget"):
             self.spatial_footprint_widget.set_data(None)
+            self.calcium_video_widget.set_cellpose_data(None)
 
     def _on_spatial_footprint_data_changed_for_trim_action(self) -> None:
         """Keep the left toolbar's "Trim to Mapped Neurons…" action enabled
@@ -2707,6 +2775,7 @@ class Gui(QtWidgets.QMainWindow):
         theme = theme_module.normalize_theme(theme)
         self.logger.info(f"Applying {theme} theme")
         theme_module.apply_app_theme(QtWidgets.QApplication.instance(), theme)
+        self._apply_right_splitter_style(theme)
         icons.apply_theme(theme)
         for widget in self.plot_widgets:
             widget.apply_theme(theme)
@@ -2717,6 +2786,18 @@ class Gui(QtWidgets.QMainWindow):
         if action is not None and not action.isChecked():
             action.setChecked(True)
         self.settings.theme = theme
+
+    def _apply_right_splitter_style(self, theme: str) -> None:
+        colors = {
+            theme_module.LIGHT: "#b8b8b8",
+            theme_module.DARK: "#555555",
+            theme_module.RETRO: "#7d8b9d",
+        }
+        if hasattr(self, "split_stim_right"):
+            color = colors.get(theme_module.normalize_theme(theme), "#b8b8b8")
+            self.split_stim_right.setStyleSheet(
+                f"QSplitter::handle {{ background-color: {color}; }}"
+            )
 
     def open_llm_settings(self) -> None:
         if self._llm_settings_dialog is None:
@@ -3124,6 +3205,7 @@ class Gui(QtWidgets.QMainWindow):
                 "mdi6.map-marker-radius",
                 True,
             ),
+            ("&Calcium Video", self.calcium_video_widget, "mdi6.movie-open", False),
             (
                 "&Custom Analysis",
                 self.custom_analysis_widget,
@@ -3247,6 +3329,11 @@ class Gui(QtWidgets.QMainWindow):
                 # right click there is the panel's own lasso-select gesture
                 # (see SpatialFootprintWidget), not a request to detach.
             ),
+            self.calcium_video_widget: (
+                self.calcium_video_widget,
+                self.calcium_video_widget.widget,
+                self.calcium_video_widget.empty_state_widget,
+            ),
             self.custom_analysis_widget: (
                 self.custom_analysis_widget,
                 self.custom_analysis_widget.canvas,
@@ -3327,6 +3414,8 @@ class Gui(QtWidgets.QMainWindow):
             return self._build_fresh_heatmap_widget()
         if source is self.spatial_footprint_widget:
             return self._build_fresh_spatial_footprint_widget()
+        if source is self.calcium_video_widget:
+            return self._build_fresh_calcium_video_widget()
         if source is self.custom_analysis_widget:
             return self._build_fresh_custom_analysis_widget()
         if source is self.console_widget:
@@ -3353,6 +3442,11 @@ class Gui(QtWidgets.QMainWindow):
                 self._detached_panel_windows.remove(window)
             if self._plain_detached_windows.get(source) is window:
                 del self._plain_detached_windows[source]
+            if (
+                source is self.calcium_video_widget
+                and widget in self.time_slider.widgets
+            ):
+                self.time_slider.widgets.remove(widget)
 
         window = DetachedPanelWindow(
             widget,
@@ -3360,6 +3454,9 @@ class Gui(QtWidgets.QMainWindow):
             on_close=_forget_window,
             parent=self,
         )
+        if isinstance(widget, CalciumVideoWidget):
+            self.time_slider.connect_widget(widget)
+            widget.set_time_ms(self.time_slider.t_ms)
         # A widget's own embedded "close" control (e.g. ConsoleWidget's
         # close_requested) should close the detached window it's actually
         # in, not reach back and toggle the original docked panel.
@@ -3420,6 +3517,19 @@ class Gui(QtWidgets.QMainWindow):
             parent=None, state=self._spatial_footprint_state
         )
         widget.import_requested.connect(self.btn_import_cellpose_data_clicked)
+        return widget
+
+    def _build_fresh_calcium_video_widget(self) -> CalciumVideoWidget:
+        widget = CalciumVideoWidget(parent=None)
+        widget.set_cellpose_data(self.project.cellpose_data)
+        widget.set_stim_arrays(self.project.stim_arrays)
+        widget.set_video_paths(
+            self.project.calcium_video_paths,
+            self.project.calcium_video_fps,
+            warn_if_missing_cellpose=False,
+        )
+        widget.import_requested.connect(self._on_calcium_video_import_requested)
+        widget.remove_requested.connect(self._on_calcium_video_remove_requested)
         return widget
 
     def _build_fresh_custom_analysis_widget(self) -> CustomAnalysisWidget | None:

@@ -1447,6 +1447,8 @@ def test_import_tif_with_new_segmentation_populates_spatial_footprint_panel(
         experiment_duration = 1.0
         imported_data: list[Any] = []
         new_cellpose_result = imported
+        imported_tif_paths: list[Any] = []
+        imported_fps = 30.0
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             return
@@ -1480,6 +1482,8 @@ def test_import_tif_reusing_loaded_segmentation_does_not_reset_spatial_footprint
         experiment_duration = 1.0
         imported_data: list[Any] = []
         new_cellpose_result = None
+        imported_tif_paths: list[Any] = []
+        imported_fps = 30.0
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             return
