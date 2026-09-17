@@ -406,7 +406,7 @@ def test_dialog_aoi_import_updates_region_summary(
 
     assert dialog.get_imported_data() is not None
     summary = dialog.aoi_summary_browser.toPlainText()
-    assert "Stim IDs:" in summary
+    assert "Input IDs:" in summary
     assert "Cellpose IDs:" in summary
     assert any(call["name"] == "information" for call in qmessagebox_calls)
     dialog.close()
