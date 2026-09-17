@@ -73,6 +73,8 @@ class StdpWindowDialog(_SelfRaisingDialog):
         self.project = editor.project
         self._running = False
         self._awaiting_simulation = False
+        self._paused = False
+        self._pending_simulation_seconds: float | None = None
         self._phase = "idle"
         self._delta_ts: list[float] = []
         self._index = 0
@@ -308,6 +310,12 @@ class StdpWindowDialog(_SelfRaisingDialog):
             QtWidgets.QPushButton,
             buttons.addButton("Stop", QtWidgets.QDialogButtonBox.ButtonRole.ActionRole),
         )
+        self.btn_pause = cast(
+            QtWidgets.QPushButton,
+            buttons.addButton(
+                "Pause", QtWidgets.QDialogButtonBox.ButtonRole.ActionRole
+            ),
+        )
         self.btn_clear = cast(
             QtWidgets.QPushButton,
             buttons.addButton(
@@ -325,8 +333,10 @@ class StdpWindowDialog(_SelfRaisingDialog):
             "not run a long empty tail."
         )
         self.btn_stop.setEnabled(False)
+        self.btn_pause.setEnabled(False)
         self.btn_start.clicked.connect(self.start)
         self.btn_stop.clicked.connect(self.stop)
+        self.btn_pause.clicked.connect(self.toggle_pause)
         self.btn_clear.clicked.connect(self.editor.clear_stim_array)
         self.btn_reset.clicked.connect(self.editor.reset_stim_array)
         buttons.rejected.connect(self.close)
@@ -560,6 +570,7 @@ class StdpWindowDialog(_SelfRaisingDialog):
             )
             self.btn_start.setEnabled(False)
             self.btn_stop.setEnabled(True)
+            self.btn_pause.setEnabled(True)
             self._append_log(
                 "Running an initial 0.001 s simulation to create monitors."
             )
@@ -591,6 +602,7 @@ class StdpWindowDialog(_SelfRaisingDialog):
         self._checkpoint = None
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
+        self.btn_pause.setEnabled(True)
         if clear_log:
             self.log.clear()
         self._append_log(
@@ -629,6 +641,19 @@ class StdpWindowDialog(_SelfRaisingDialog):
 
     def stop(self) -> None:
         self._finish("Routine stopped.")
+
+    def toggle_pause(self) -> None:
+        self._paused = not self._paused
+        self.btn_pause.setText("Resume" if self._paused else "Pause")
+        if self._paused:
+            self._append_log("Paused - the routine will hold after its current step.")
+            return
+        self._append_log("Resumed.")
+        if self._pending_simulation_seconds is not None:
+            seconds = self._pending_simulation_seconds
+            self._pending_simulation_seconds = None
+            self._awaiting_simulation = True
+            self.simulation_requested.emit(seconds)
 
     def _require_stim(self) -> StimArray:
         modifier = self.editor.current_stim_modifier
@@ -744,6 +769,12 @@ class StdpWindowDialog(_SelfRaisingDialog):
         self._request_simulation(run_seconds)
 
     def _request_simulation(self, seconds: float) -> None:
+        if self._paused:
+            self._pending_simulation_seconds = seconds
+            self._append_log(
+                "Paused - next iteration queued; click Resume to continue."
+            )
+            return
         self._awaiting_simulation = True
         self.simulation_requested.emit(seconds)
 
@@ -1152,9 +1183,13 @@ class StdpWindowDialog(_SelfRaisingDialog):
     def _finish(self, message: str) -> None:
         self._running = False
         self._awaiting_simulation = False
+        self._paused = False
+        self._pending_simulation_seconds = None
         self._phase = "idle"
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
+        self.btn_pause.setEnabled(False)
+        self.btn_pause.setText("Pause")
         self._append_log(message)
 
     def _append_log(self, message: str) -> None:

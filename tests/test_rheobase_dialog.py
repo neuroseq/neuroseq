@@ -655,3 +655,27 @@ def test_duration_bisection_stops_at_one_sample(qtbot, monkeypatch) -> None:
     threshold_durations = {duration for duration, _threshold in dialog._thresholds}
     assert threshold_durations <= {10.0, 11.0, 12.0}
     assert "durations are snapped" in dialog.log.toPlainText()
+
+
+def test_rheobase_pause_defers_next_simulation_and_resets_on_finish(qtbot) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    requested: list[float] = []
+    dialog.simulation_requested.connect(requested.append)
+    dialog._running = True
+    dialog.btn_pause.setEnabled(True)
+
+    dialog.toggle_pause()
+    dialog._request_simulation(0.5)
+    assert dialog._paused
+    assert dialog._pending_simulation_seconds == 0.5
+    assert not dialog._awaiting_simulation
+    assert requested == []
+
+    dialog.toggle_pause()
+    assert requested == [0.5]
+    assert dialog._awaiting_simulation
+    dialog._finish("done")
+    assert not dialog._paused
+    assert dialog._pending_simulation_seconds is None
+    assert not dialog.btn_pause.isEnabled()
+    assert dialog.btn_pause.text() == "Pause"

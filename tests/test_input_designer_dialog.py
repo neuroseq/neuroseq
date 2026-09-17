@@ -843,3 +843,32 @@ def test_input_designer_forwards_theme_to_stim_heatmap(qtbot) -> None:
     assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#1e1e1e"
     dialog.apply_theme(theme.LIGHT)
     assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#ffffff"
+
+
+def test_input_designer_pause_defers_next_simulation_and_resets_on_finish(
+    qtbot,
+) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    requested: list[float] = []
+    dialog.simulation_requested.connect(requested.append)
+    dialog._running = True
+    dialog.btn_pause.setEnabled(True)
+
+    dialog.toggle_pause()
+    dialog._request_simulation(0.25)
+    assert dialog._paused
+    assert dialog._pending_simulation_seconds == 0.25
+    assert not dialog._awaiting_simulation
+    assert requested == []
+
+    dialog.toggle_pause()
+    assert requested == [0.25]
+    assert dialog._awaiting_simulation
+    dialog._finish("done")
+    assert not dialog._paused
+    assert dialog._pending_simulation_seconds is None
+    assert not dialog.btn_pause.isEnabled()
+    assert dialog.btn_pause.text() == "Pause"

@@ -619,3 +619,27 @@ def test_wheel_over_field_does_not_change_value(qtbot) -> None:
     assert dialog._wheel_filter.eventFilter(spin, wheel) is True
     QtWidgets.QApplication.sendEvent(spin, wheel)
     assert spin.value() == before
+
+
+def test_stdp_pause_defers_next_simulation_and_resets_on_finish(qtbot) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    requested: list[float] = []
+    dialog.simulation_requested.connect(requested.append)
+    dialog._running = True
+    dialog.btn_pause.setEnabled(True)
+
+    dialog.toggle_pause()
+    dialog._request_simulation(0.75)
+    assert dialog._paused
+    assert dialog._pending_simulation_seconds == 0.75
+    assert not dialog._awaiting_simulation
+    assert requested == []
+
+    dialog.toggle_pause()
+    assert requested == [0.75]
+    assert dialog._awaiting_simulation
+    dialog._finish("done")
+    assert not dialog._paused
+    assert dialog._pending_simulation_seconds is None
+    assert not dialog.btn_pause.isEnabled()
+    assert dialog.btn_pause.text() == "Pause"
