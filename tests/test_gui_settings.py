@@ -88,17 +88,30 @@ def test_gui_load_config_settings(tmp_config_dir) -> None:
     assert settings.stim_padding_secs == 0
 
 
+def _resolved(path: str) -> str:
+    """Match GuiSettings.add_recent_project's own Path(...).resolve() call,
+    so these assertions hold on platforms where /tmp is itself a symlink
+    (e.g. macOS, where it resolves to /private/tmp)."""
+    return str(Path(path).resolve())
+
+
 def test_add_recent_project_dedupes_and_orders_most_recent_first(
     tmp_config_dir,
 ) -> None:
     settings = GuiSettings()
     settings.add_recent_project("/tmp/a.nseq")
     settings.add_recent_project("/tmp/b.nseq")
-    assert settings.recent_projects == ["/tmp/b.nseq", "/tmp/a.nseq"]
+    assert settings.recent_projects == [
+        _resolved("/tmp/b.nseq"),
+        _resolved("/tmp/a.nseq"),
+    ]
 
     # re-adding an existing path moves it to the front instead of duplicating
     settings.add_recent_project("/tmp/a.nseq")
-    assert settings.recent_projects == ["/tmp/a.nseq", "/tmp/b.nseq"]
+    assert settings.recent_projects == [
+        _resolved("/tmp/a.nseq"),
+        _resolved("/tmp/b.nseq"),
+    ]
 
 
 def test_add_recent_project_caps_list_length(tmp_config_dir) -> None:
@@ -106,7 +119,7 @@ def test_add_recent_project_caps_list_length(tmp_config_dir) -> None:
     for i in range(10):
         settings.add_recent_project(f"/tmp/project_{i}.nseq")
     assert len(settings.recent_projects) == 8
-    assert settings.recent_projects[0] == "/tmp/project_9.nseq"
+    assert settings.recent_projects[0] == _resolved("/tmp/project_9.nseq")
 
 
 def test_recent_projects_persists_and_reloads(tmp_config_dir) -> None:
@@ -116,7 +129,10 @@ def test_recent_projects_persists_and_reloads(tmp_config_dir) -> None:
 
     settings.__dict__["recent_projects"] = []
     settings.load_config_settings()
-    assert settings.recent_projects == ["/tmp/b.nseq", "/tmp/a.nseq"]
+    assert settings.recent_projects == [
+        _resolved("/tmp/b.nseq"),
+        _resolved("/tmp/a.nseq"),
+    ]
 
 
 def test_recent_projects_falls_back_to_empty_list_for_invalid_config(

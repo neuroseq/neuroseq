@@ -1,0 +1,332 @@
+dynamic_input_pause_button — Pause/Resume for all three closed-loop routine dialogs (Input Designer, Rheobase, STDP window)
+=========================================================================================================================
+
+Add a "Pause"/"Resume" toggle button to InputDesignerDialog, RheobaseDialog,
+and StdpWindowDialog, next to their existing Start/Stop buttons. Pausing
+holds the routine after its CURRENT iteration finishes (so the user still
+sees that iteration's measurement/plot update) without starting the next
+simulation; Resuming immediately fires the deferred simulation and the
+closed loop continues exactly where it left off. This is a soft pause -
+it never cancels an in-flight Brian2 run - so it needs no interaction with
+the existing "Cancel" button on the Brian2 progress dialog (that already
+handles hard-aborting a single in-flight run; leave it untouched).
+
+Files to change (identical shape in all three - see CHANGES below for the
+one shared diff, applied at each file's own line numbers):
+    src/neuroseq/input_designer_dialog.py
+    src/neuroseq/rheobase_dialog.py
+    src/neuroseq/stdp_window_dialog.py
+
+Files to extend (tests):
+    tests/test_input_designer_dialog.py
+    tests/test_rheobase_dialog.py
+    tests/test_stdp_window_dialog.py
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+BACKGROUND — read before touching anything
+────────────────────────────────────────────────────────────────────────────────────────────
+
+All three dialogs share the exact same closed-loop shape, confirmed by
+reading all three files (not assumed from one and copied): each iteration
+does some bookkeeping (append a stim block, measure a trace, decide what
+comes next), then asks the host app to run a Brian2 simulation, then reacts
+to the result in `simulation_finished()`, which either finishes the routine
+or does the bookkeeping for the NEXT iteration and asks for another run -
+and so on. Every single one of those "ask for another run" calls, in every
+phase of every routine (including each dialog's own one-off "run 0.001s to
+create trace monitors" warm-up step in `start()`), goes through exactly one
+shared method:
+
+    def _request_simulation(self, seconds: float) -> None:
+        """Ask the host to run a simulation, recording that the designer is
+        now waiting for its result so it reacts only to its own run."""
+        self._awaiting_simulation = True
+        self.simulation_requested.emit(seconds)
+
+Confirmed identical (same name, same two-line body, same docstring wording
+in InputDesignerDialog) at:
+    input_designer_dialog.py:974-978
+    rheobase_dialog.py:695-698  (body only - re-check the exact line for the
+        docstring/comment when editing, it may differ slightly in wording)
+    stdp_window_dialog.py:746-749
+
+This is the ONE choke point to intercept - do NOT try to pause by hooking
+into each dialog's own phase-transition logic (`_append_probe`/
+`_append_pairing`/`_place_block`/`_begin_search`/etc.), which differs in
+detail between the three routines (STDP has reset-vs-continuous sweep
+modes, Rheobase has duration-sweep staging, Input Designer alternates
+baseline/pairing probes). All of that logic already funnels into
+`_request_simulation` as its very last step in every path, so intercepting
+there is the only change needed to pause ANY of them, regardless of which
+phase they're in.
+
+Also confirmed identical across all three files:
+
+    def _finish(self, message: str) -> None:
+        self._running = False
+        self._awaiting_simulation = False
+        self._phase = "idle"
+        self.btn_start.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        self._append_log(message)
+
+    input_designer_dialog.py:1207-1213
+    rheobase_dialog.py:1153-1159
+    stdp_window_dialog.py:1152-1158
+
+and the `QDialogButtonBox` construction (`Start`/`Start routine` + `Stop` +
+`Clear input array` + `Reset input array`, ActionRole/ResetRole as shown)
+at:
+    input_designer_dialog.py:592-627 (label "Start routine")
+    rheobase_dialog.py:287-320       (label "Start")
+    stdp_window_dialog.py:298-330    (label "Start")
+
+`_append_log(self, message: str) -> None` (writes to `self.log`, a
+`QPlainTextEdit`) is also present and identical in all three, near the
+bottom of each file next to `_finish`.
+
+Design decision: pausing does NOT need to know which phase the routine is
+in, does NOT need a resume-from-checkpoint mechanism, and does NOT persist
+across the dialog being closed (Stop/close already tear the routine down
+completely via `_finish`, which now also clears the two new pause fields -
+see CHANGES). The only state a pause needs to preserve is "how many more
+seconds of simulated time was the routine about to ask for" - a single
+float, captured at the exact point `_request_simulation` would otherwise
+have fired.
+
+Race to be aware of, not to guard against: if the user clicks Pause at the
+exact moment the routine was about to call `_finish(...)` instead of
+`_request_simulation(...)` (e.g. it just converged or hit its iteration
+cap), the routine simply finishes normally and Pause becomes a no-op for
+that run - there is nothing left to defer. That's an acceptable, harmless
+outcome; do not add special-casing for it.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+CHANGES — apply this same shape to all three files
+────────────────────────────────────────────────────────────────────────────────────────────
+
+1. In each dialog's `__init__`, alongside the existing
+   `self._running = False` / `self._awaiting_simulation = False` (see
+   BACKGROUND for the exact line - same statement, same nearby lines, in
+   all three files), ADD:
+
+        self._paused = False
+        self._pending_simulation_seconds: float | None = None
+
+2. In each dialog's `QDialogButtonBox` construction (see BACKGROUND for the
+   exact block), ADD a new button right after `self.btn_stop` is created
+   and BEFORE `self.btn_clear`:
+
+        self.btn_pause = cast(
+            QtWidgets.QPushButton,
+            buttons.addButton("Pause", QtWidgets.QDialogButtonBox.ButtonRole.ActionRole),
+        )
+        self.btn_pause.setEnabled(False)
+        self.btn_pause.clicked.connect(self.toggle_pause)
+
+   Button order ends up: Start[/Start routine], Stop, Pause, Clear input
+   array, Reset input array, Close. `cast` is already imported in every one
+   of these three files (used for the existing `btn_start`/`btn_stop`
+   casts) - no new import needed.
+
+3. ADD a new method `toggle_pause`, near `stop()`/`_finish()`:
+
+        def toggle_pause(self) -> None:
+            self._paused = not self._paused
+            self.btn_pause.setText("Resume" if self._paused else "Pause")
+            if self._paused:
+                self._append_log(
+                    "Paused - the routine will hold after its current step."
+                )
+                return
+            self._append_log("Resumed.")
+            if self._pending_simulation_seconds is not None:
+                seconds = self._pending_simulation_seconds
+                self._pending_simulation_seconds = None
+                self._awaiting_simulation = True
+                self.simulation_requested.emit(seconds)
+
+4. CHANGE `_request_simulation` (the shared choke point - see BACKGROUND
+   for its exact current body/location in each file) to check the pause
+   flag first:
+
+        def _request_simulation(self, seconds: float) -> None:
+            """Ask the host to run a simulation, recording that the designer
+            is now waiting for its result so it reacts only to its own run.
+            If paused, defer the request instead: simulation_finished()
+            already applied this step's measurement/plot update before
+            calling here for the next one, so only the NEXT network run
+            holds off until the user clicks Resume."""
+            if self._paused:
+                self._pending_simulation_seconds = seconds
+                self._append_log(
+                    "Paused - next iteration queued; click Resume to continue."
+                )
+                return
+            self._awaiting_simulation = True
+            self.simulation_requested.emit(seconds)
+
+   Keep whatever docstring wording already exists in each file if it
+   differs slightly - the added `if self._paused:` block is what matters,
+   not the exact comment text (though the added paused-branch comment
+   above should carry over verbatim, it's new content, not a match against
+   existing text).
+
+5. In `start()`, wherever `self.btn_stop.setEnabled(True)` is called (there
+   are two call sites in each file - one in the "no suitable trace, run a
+   0.001s warm-up first" branch, one right after `_begin_*`/`_begin_protocol`
+   starts the real routine; see BACKGROUND's `start()` reference for exact
+   lines, they're the same two `self.btn_stop.setEnabled(True)` lines
+   already grepped), ADD immediately after each:
+
+        self.btn_pause.setEnabled(True)
+
+6. In `_finish` (see BACKGROUND for its exact current body), ADD the pause
+   resets alongside the existing `_running`/`_awaiting_simulation` resets:
+
+        def _finish(self, message: str) -> None:
+            self._running = False
+            self._awaiting_simulation = False
+            self._paused = False
+            self._pending_simulation_seconds = None
+            self._phase = "idle"
+            self.btn_start.setEnabled(True)
+            self.btn_stop.setEnabled(False)
+            self.btn_pause.setEnabled(False)
+            self.btn_pause.setText("Pause")
+            self._append_log(message)
+
+   This covers Stop, natural completion (converged/max-iterations/error),
+   and closing the dialog while running (`closeEvent` already calls
+   `_finish("Routine stopped (dialog closed).")` when `self._running` is
+   true - untouched, it already gets the new resets for free through
+   `_finish`).
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NOTES
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- Do not add a keyboard shortcut, tooltip beyond what's above, or icon to
+  the Pause button unless matching an existing convention you find while
+  editing - none of Start/Stop/Clear/Reset have one today in any of these
+  three files, so plain text buttons are the consistent choice.
+- Do not touch the Brian2 progress dialog's own "Cancel" button/callback
+  (`_request_brian2_cancel`/`project.request_cancel_simulation()` in
+  gui.py) - that cancels the CURRENTLY RUNNING simulation outright and is
+  orthogonal to this feature. A user could in principle use both together
+  (cancel the current run, then the routine's own failure path calls
+  `_finish` via `simulation_failed`, which now also resets pause state) -
+  no special handling needed for that combination, `_finish` already
+  covers it.
+- `self.btn_pause` must exist before `apply_theme(self._theme)` /
+  `refresh()` are called at the end of each `__init__` (same as
+  `btn_start`/`btn_stop` already do) - just place the new button block
+  before those calls, matching where the existing button block already
+  sits relative to them.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+NON-GOALS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+- Persisting pause state across closing/reopening the dialog, or across a
+  project save/load. Pausing is transient UI/run state, exactly like
+  `_running`/`_awaiting_simulation` already are.
+- Any change to what happens to the ALREADY-APPENDED stim block while
+  paused (it stays in the array, unsimulated, exactly like it already does
+  between any two `_request_simulation` calls today - `reset_stim_array()`
+  already exists precisely to trim an unsimulated trailing block if the
+  user wants to discard it before resuming or starting over).
+- Pausing/resuming the Brian2 simulation itself mid-run. This only defers
+  the NEXT request; the current one (if any) always runs to completion.
+- A single merged Start/Pause button, or removing Stop. Pause is
+  additive - Start, Stop, and Pause all remain distinct, mirroring how
+  Start and Stop already are today.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+TESTS
+────────────────────────────────────────────────────────────────────────────────────────────
+
+Add the same five tests to each of tests/test_input_designer_dialog.py,
+tests/test_rheobase_dialog.py, tests/test_stdp_window_dialog.py, using
+each file's own existing fixtures/helpers for building a dialog and
+driving `start()`/`simulation_finished()` (grep each test file for its
+existing Start/Stop tests - e.g. `test_input_designer_stops_routine_when_closed`,
+`test_rheobase_stops_when_dialog_closed`, `test_stops_when_dialog_closed` -
+and copy their fixture-setup pattern rather than inventing a new one).
+
+    test_pause_button_disabled_until_running
+        dialog = _make_dialog(...)
+        assert not dialog.btn_pause.isEnabled()
+        dialog.start()
+        assert dialog.btn_pause.isEnabled()
+
+    test_pause_defers_next_iteration_without_losing_current_result
+        # Drive the routine through at least one full iteration (start(),
+        # then simulation_finished() once) the same way an existing
+        # Start/Stop test already does, so the first measurement/plot
+        # update has already happened. Then:
+        dialog.toggle_pause()
+        assert dialog.btn_pause.text() == "Resume"
+        calls_before = len(editor.calls)  # or whatever the fake editor's
+                                           # already-established call-count
+                                           # fixture is named in this file
+        dialog.simulation_finished()
+        # the routine's bookkeeping (measurement, plot update) still ran,
+        # but no new block was appended / no new simulation was requested
+        assert len(editor.calls) == calls_before
+        assert dialog._pending_simulation_seconds is not None
+        assert not dialog._awaiting_simulation
+
+    test_resume_continues_the_deferred_iteration
+        # continuing directly from the paused state above:
+        dialog.toggle_pause()
+        assert dialog.btn_pause.text() == "Pause"
+        assert dialog._pending_simulation_seconds is None
+        assert dialog._awaiting_simulation
+        assert len(editor.calls) == calls_before + 1  # the deferred block
+                                                        # was appended once
+                                                        # resumed
+
+    test_stop_while_paused_resets_pause_state
+        dialog.start()
+        dialog.toggle_pause()
+        dialog.stop()
+        assert not dialog._paused
+        assert dialog._pending_simulation_seconds is None
+        assert dialog.btn_pause.text() == "Pause"
+        assert not dialog.btn_pause.isEnabled()
+
+    test_pausing_after_routine_already_finished_is_a_harmless_no_op
+        # Run the routine to natural completion the same way an existing
+        # "reaches target"/"converges" test already does, THEN call
+        # toggle_pause() - assert it doesn't raise and the dialog's state
+        # is unaffected (still finished, btn_pause still disabled from
+        # _finish already having run).
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+────────────────────────────────────────────────────────────────────────────────────────────
+
+    ruff check src/neuroseq/input_designer_dialog.py src/neuroseq/rheobase_dialog.py \
+               src/neuroseq/stdp_window_dialog.py tests/test_input_designer_dialog.py \
+               tests/test_rheobase_dialog.py tests/test_stdp_window_dialog.py
+    ruff format --check <same file list>
+    mypy --ignore-missing-imports src/neuroseq/input_designer_dialog.py \
+               src/neuroseq/rheobase_dialog.py src/neuroseq/stdp_window_dialog.py
+    uv run pytest tests/test_input_designer_dialog.py tests/test_rheobase_dialog.py \
+               tests/test_stdp_window_dialog.py -v
+    uv run pytest tests/test_stim_editor.py -v
+    uv run pytest
+
+The full suite is required at the end even though this change is narrowly
+scoped to three files - all three are exercised indirectly through
+tests/test_stim_editor.py's routine-dialog dispatch tests, and a mistake in
+the shared `_request_simulation`/`_finish` shape would show up as a hang or
+an assertion failure in any test that drives a routine through more than
+one iteration.
