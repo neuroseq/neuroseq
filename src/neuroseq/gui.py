@@ -3524,19 +3524,6 @@ class Gui(QtWidgets.QMainWindow):
         )
         return widget
 
-    def _build_fresh_calcium_video_widget(self) -> CalciumVideoWidget:
-        widget = CalciumVideoWidget(parent=None)
-        widget.set_cellpose_data(self.project.cellpose_data)
-        widget.set_stim_arrays(self.project.stim_arrays)
-        widget.set_video_paths(
-            self.project.calcium_video_paths,
-            self.project.calcium_video_fps,
-            warn_if_missing_cellpose=False,
-        )
-        widget.import_requested.connect(self._on_calcium_video_import_requested)
-        widget.remove_requested.connect(self._on_calcium_video_remove_requested)
-        return widget
-
     def _build_fresh_custom_analysis_widget(self) -> CustomAnalysisWidget | None:
         if self._last_custom_analysis is None:
             return None
