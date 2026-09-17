@@ -153,6 +153,13 @@ class StimEditor(QtWidgets.QWidget):
         self.stim_widget.escape_pressed.connect(self.cancel_paste_selected_stim)
         self.resize(800, 600)
 
+    def closeEvent(self, event):
+        # explicitly close the fastplotlib figure to avoid the renderer trying
+        # to access it after Qt has destroyed this container (same pattern as
+        # Gui.closeEvent, DataWidget.closeEvent, CellOverlayWidget.closeEvent).
+        self.stim_widget.close()
+        super().closeEvent(event)
+
     def set_project(
         self, project: Project, keep_undo_history=False, stim_to_select=""
     ) -> None:
