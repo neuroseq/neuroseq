@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 from typing import cast
 
 import brian2.numpy_ as np
-from matplotlib.colors import Normalize
 from matplotlib.image import AxesImage
 from matplotlib.ticker import MultipleLocator
 from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
@@ -137,30 +136,20 @@ def _wrap_in_scroll_area(
 
 
 def _stim_pulse_rgba(values: np.ndarray, stim_type: StimType) -> np.ndarray:
-    """Render `values` (rows x time) as RGBA colors matching the main GPU
-    stim view's excitatory/inhibitory/external hues, but with alpha
-    decoupled from magnitude: any nonzero sample renders fully opaque, and
-    only an exact zero (no stimulus at all) is transparent.
+    """Render nonzero samples as stable, saturated RGBA stimulus colors.
 
-    get_cmap()'s own alpha ramps from 0 at zero up to 1 at the peak value,
-    which is the right look for the layered, semi-transparent GPU stim
-    view - but in this popup it fades a smaller (still real) pulse toward
-    invisible as the peak grows, e.g. a rheobase search's early, small
-    probes next to its largest one can span more than an order of
-    magnitude ("as the amplitude decreases they become invisible almost").
-    Hue still ramps from a light tint to fully saturated with magnitude;
-    only the opacity is pinned to "is there a pulse here at all".
+    Magnitude must not make a real pulse fade toward white or transparency:
+    the heatmap is for locating input events, not comparing amplitudes. Zero
+    samples remain transparent. External inputs retain separate colors for
+    positive and negative values.
     """
-    vmax = float(np.max(np.abs(values)))
-    if vmax == 0.0:
-        vmax = 1.0
-    norm = (
-        Normalize(vmin=-vmax, vmax=vmax)
-        if stim_type == StimType.External
-        else Normalize(vmin=0.0, vmax=vmax)
-    )
-    rgba = get_cmap(stim_type).to_mpl()(norm(values))
-    rgba[..., 3] = np.where(values != 0, 1.0, 0.0)
+    cmap = get_cmap(stim_type).to_mpl()
+    rgba = np.zeros((*values.shape, 4), dtype=np.float32)
+    if stim_type == StimType.External:
+        rgba[values > 0] = cmap(1.0)
+        rgba[values < 0] = cmap(0.0)
+    else:
+        rgba[values != 0] = cmap(1.0)
     return rgba
 
 

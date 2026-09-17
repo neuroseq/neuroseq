@@ -11,6 +11,7 @@ from neuroseq import theme
 from neuroseq.data import TraceData
 from neuroseq.input_designer_dialog import EPSPMeasurement
 from neuroseq.input_designer_dialog import InputDesignerDialog
+from neuroseq.input_designer_dialog import _stim_pulse_rgba
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
@@ -843,6 +844,17 @@ def test_input_designer_forwards_theme_to_stim_heatmap(qtbot) -> None:
     assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#1e1e1e"
     dialog.apply_theme(theme.LIGHT)
     assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#ffffff"
+
+
+def test_stim_heatmap_colors_do_not_fade_with_pulse_magnitude() -> None:
+    values = np.array([[0.0, 0.01, 1.0, -2.0]])
+
+    rgba = _stim_pulse_rgba(values, StimType.Excitation)
+
+    assert np.array_equal(rgba[0, 0], [0.0, 0.0, 0.0, 0.0])
+    assert np.array_equal(rgba[0, 1], rgba[0, 2])
+    assert rgba[0, 1, 3] == 1.0
+    assert rgba[0, 3, 3] == 1.0
 
 
 def test_input_designer_pause_defers_next_simulation_and_resets_on_finish(
