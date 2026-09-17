@@ -501,30 +501,52 @@ class CalciumVideoWidget(FPLWidget):
             "TIFF files (*.tif *.tiff);;GIF files (*.gif)",
         )
         if path:
-            self.export_labeled_video(Path(path))
+            try:
+                self.export_labeled_video(Path(path))
+            except Exception as exc:
+                self.logger.exception("Could not save labeled video")
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Could not save labeled video",
+                    f"The labeled video could not be saved:\n{exc}",
+                )
 
     def export_labeled_video(self, path: Path) -> None:
         if not self._frame_refs or self._fps is None:
             return
         if path.suffix.lower() == ".gif":
-            from PIL import Image
-
-            frames = [
-                Image.fromarray(self._labeled_frame(index))
-                for index in range(len(self._frame_refs))
-            ]
-            if frames:
-                frames[0].save(
-                    path,
-                    save_all=True,
-                    append_images=frames[1:],
-                    duration=max(1, round(1000.0 / self._fps)),
-                    loop=0,
-                )
+            self._export_gif_streaming(path)
             return
         with tifffile.TiffWriter(path) as writer:
             for index in range(len(self._frame_refs)):
                 writer.write(self._labeled_frame(index), photometric="rgb")
+
+    def _export_gif_streaming(self, path: Path) -> None:
+        """Write a GIF one frame at a time to avoid buffering the movie."""
+        from PIL import GifImagePlugin
+
+        duration_ms = max(1, round(1000.0 / self._fps)) if self._fps else 1
+        with path.open("wb") as file:
+            for index in range(len(self._frame_refs)):
+                frame = GifImagePlugin._normalize_mode(  # type: ignore[attr-defined]
+                    Image.fromarray(self._labeled_frame(index), mode="RGB")
+                )
+                params = {
+                    "duration": duration_ms,
+                    "disposal": 2,
+                    # Keep a local palette per frame; this avoids collecting
+                    # all frames just to calculate one global palette.
+                    "include_color_table": index > 0,
+                }
+                if index == 0:
+                    for header in GifImagePlugin._get_global_header(  # type: ignore[attr-defined]
+                        frame, {"duration": duration_ms, "loop": 0}
+                    ):
+                        file.write(header)
+                GifImagePlugin._write_frame_data(  # type: ignore[attr-defined]
+                    file, frame, (0, 0), params
+                )
+            file.write(b";")
 
     def _labeled_frame(self, index: int) -> np.ndarray:
         assert self._fps is not None
