@@ -1,4 +1,8 @@
-dynamic_input_pause_button — Pause/Resume for all three closed-loop routine dialogs (Input Designer, Rheobase, STDP window)
+[IMPLEMENTED] dynamic_input_pause_button — Pause/Resume for all three closed-loop routine dialogs (Input Designer, Rheobase, STDP window)
+=========================================================================================================================
+Implemented directly (not by Codex) in commit 4d6f76c, matching this
+design exactly. See .ai_dev/specs/dynamic_input_pause_button.md for the
+as-built documentation. Kept here for the original design rationale.
 =========================================================================================================================
 
 Add a "Pause"/"Resume" toggle button to InputDesignerDialog, RheobaseDialog,
