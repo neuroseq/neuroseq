@@ -376,7 +376,10 @@ class Gui(QtWidgets.QMainWindow):
         self.spatial_footprint_widget.neurons_greyed_out_changed.connect(
             self._on_neurons_greyed_out_changed
         )
-        self.calcium_video_widget = CalciumVideoWidget(parent=self)
+        # The calcium video now lives in the second tab of the imaging panel;
+        # keep this attribute as a compatibility handle for timeline and
+        # project synchronization code.
+        self.calcium_video_widget = self.spatial_footprint_widget.calcium_video_widget
         self.calcium_video_widget.import_requested.connect(
             self._on_calcium_video_import_requested
         )
@@ -417,8 +420,7 @@ class Gui(QtWidgets.QMainWindow):
         self.split_stim_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.split_stim_right.addWidget(self.heatmap_widget)
         self.split_stim_right.addWidget(self.spatial_footprint_widget)
-        self.split_stim_right.addWidget(self.calcium_video_widget)
-        self.split_stim_right.setSizes([1000, 1000, 1000])
+        self.split_stim_right.setSizes([1000, 1400])
         self.split_stim_right.setHandleWidth(3)
         self._apply_right_splitter_style(self.settings.theme)
         # main vertical splitter layout
@@ -506,7 +508,6 @@ class Gui(QtWidgets.QMainWindow):
         self.spike_widget.setVisible(False)
         self.heatmap_widget.setVisible(False)
         self.spatial_footprint_widget.setVisible(True)
-        self.calcium_video_widget.setVisible(False)
         self.custom_analysis_widget.setVisible(False)
         # heatmap / custom analysis widget / console
         split_vertical.addWidget(split_left_right)
@@ -2221,6 +2222,7 @@ class Gui(QtWidgets.QMainWindow):
         tif_paths = [pathlib.Path(path) for path in paths]
         self.project.set_calcium_video(tif_paths, fps)
         self._refresh_calcium_video_widgets()
+        self._auto_show_widget(self.calcium_video_widget)
 
     def _on_calcium_video_remove_requested(self) -> None:
         self.project.set_calcium_video([], None)
@@ -3182,10 +3184,9 @@ class Gui(QtWidgets.QMainWindow):
             (
                 "&Spatial Footprints",
                 self.spatial_footprint_widget,
-                "mdi6.map-marker-radius",
+                "mdi6.movie-open",
                 True,
             ),
-            ("&Calcium Video", self.calcium_video_widget, "mdi6.movie-open", False),
             (
                 "&Custom Analysis",
                 self.custom_analysis_widget,
@@ -3205,6 +3206,11 @@ class Gui(QtWidgets.QMainWindow):
                 checkable=True,
                 is_checked=is_checked,
             )
+        # Keep the child handle addressable for existing integrations and
+        # detach requests; both imaging tabs belong to the same panel action.
+        self._view_actions[self.calcium_video_widget] = self._view_actions[
+            self.spatial_footprint_widget
+        ]
         menu.addSeparator()
         toolbar.addSeparator()
         add_action(
@@ -3288,6 +3294,10 @@ class Gui(QtWidgets.QMainWindow):
             self.set_data(self.cmb_data.currentText())
 
     def _auto_show_widget(self, widget: QtWidgets.QWidget) -> None:
+        if widget is self.calcium_video_widget:
+            self.spatial_footprint_widget.tabs.setCurrentWidget(widget)
+        elif widget is self.spatial_footprint_widget:
+            self.spatial_footprint_widget.tabs.setCurrentIndex(0)
         action = getattr(self, "_view_actions", {}).get(widget)
         if action is not None and not action.isChecked():
             action.trigger()
@@ -3305,14 +3315,12 @@ class Gui(QtWidgets.QMainWindow):
                 self.spatial_footprint_widget,
                 self.spatial_footprint_widget.empty_state_widget,
                 self.spatial_footprint_widget.overlay_widget,
-                # Deliberately excludes overlay_view/overlay_view.widget: a
-                # right click there is the panel's own lasso-select gesture
-                # (see SpatialFootprintWidget), not a request to detach.
-            ),
-            self.calcium_video_widget: (
                 self.calcium_video_widget,
                 self.calcium_video_widget.widget,
                 self.calcium_video_widget.empty_state_widget,
+                # Deliberately excludes overlay_view/overlay_view.widget: a
+                # right click there is the panel's own lasso-select gesture
+                # (see SpatialFootprintWidget), not a request to detach.
             ),
             self.custom_analysis_widget: (
                 self.custom_analysis_widget,
@@ -3367,6 +3375,12 @@ class Gui(QtWidgets.QMainWindow):
             self.data_widget.heatmap_widget,
         ):
             return self.data_widget
+        if widget in (
+            self.calcium_video_widget,
+            self.calcium_video_widget.widget,
+            self.calcium_video_widget.empty_state_widget,
+        ):
+            return self.spatial_footprint_widget
         return widget
 
     def _current_data_selection(self) -> TraceData | SpikeData | SynapseData | None:
@@ -3394,8 +3408,6 @@ class Gui(QtWidgets.QMainWindow):
             return self._build_fresh_heatmap_widget()
         if source is self.spatial_footprint_widget:
             return self._build_fresh_spatial_footprint_widget()
-        if source is self.calcium_video_widget:
-            return self._build_fresh_calcium_video_widget()
         if source is self.custom_analysis_widget:
             return self._build_fresh_custom_analysis_widget()
         if source is self.console_widget:
@@ -3423,10 +3435,11 @@ class Gui(QtWidgets.QMainWindow):
             if self._plain_detached_windows.get(source) is window:
                 del self._plain_detached_windows[source]
             if (
-                source is self.calcium_video_widget
-                and widget in self.time_slider.widgets
+                source is self.spatial_footprint_widget
+                and isinstance(widget, SpatialFootprintWidget)
+                and widget.calcium_video_widget in self.time_slider.widgets
             ):
-                self.time_slider.widgets.remove(widget)
+                self.time_slider.widgets.remove(widget.calcium_video_widget)
 
         window = DetachedPanelWindow(
             widget,
@@ -3434,9 +3447,9 @@ class Gui(QtWidgets.QMainWindow):
             on_close=_forget_window,
             parent=self,
         )
-        if isinstance(widget, CalciumVideoWidget):
-            self.time_slider.connect_widget(widget)
-            widget.set_time_ms(self.time_slider.t_ms)
+        if isinstance(widget, SpatialFootprintWidget):
+            self.time_slider.connect_widget(widget.calcium_video_widget)
+            widget.calcium_video_widget.set_time_ms(self.time_slider.t_ms)
         # A widget's own embedded "close" control (e.g. ConsoleWidget's
         # close_requested) should close the detached window it's actually
         # in, not reach back and toggle the original docked panel.
@@ -3496,6 +3509,19 @@ class Gui(QtWidgets.QMainWindow):
             parent=None, state=self._spatial_footprint_state
         )
         widget.import_requested.connect(self.btn_import_cellpose_data_clicked)
+        widget.calcium_video_widget.import_requested.connect(
+            self._on_calcium_video_import_requested
+        )
+        widget.calcium_video_widget.remove_requested.connect(
+            self._on_calcium_video_remove_requested
+        )
+        widget.calcium_video_widget.set_cellpose_data(self.project.cellpose_data)
+        widget.calcium_video_widget.set_stim_arrays(self.project.stim_arrays)
+        widget.calcium_video_widget.set_video_paths(
+            self.project.calcium_video_paths,
+            self.project.calcium_video_fps,
+            warn_if_missing_cellpose=False,
+        )
         return widget
 
     def _build_fresh_calcium_video_widget(self) -> CalciumVideoWidget:

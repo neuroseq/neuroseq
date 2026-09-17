@@ -7,6 +7,7 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 from scipy.ndimage import binary_erosion
 
+from neuroseq.calcium_video_widget import CalciumVideoWidget
 from neuroseq.cell_overlay_widget import CellOverlayWidget
 from neuroseq.cell_overlay_widget import compute_segmentation_legend
 from neuroseq.importer_cellpose import CellposeImportResult
@@ -21,8 +22,38 @@ HOVERED_CELL_BRIGHTNESS_BOOST = 1.8
 ACTIVE_STIM_BRIGHTNESS_BOOST = 1.8
 
 
+class _PanelLayout(QtWidgets.QVBoxLayout):
+    """Expose widgets nested in the cell tab for legacy layout introspection."""
+
+    def indexOf(  # type: ignore[override]
+        self, widget: QtWidgets.QWidget | QtWidgets.QLayoutItem | None
+    ) -> int:
+        direct_index = super().indexOf(widget)
+        if not isinstance(widget, QtWidgets.QWidget):
+            return direct_index
+        if direct_index >= 0:
+            return direct_index
+        for index in range(super().count()):
+            item = super().itemAt(index)
+            if item is None:
+                continue
+            nested_layout = item.layout()
+            nested_widget = item.widget()
+            if nested_layout is None and nested_widget is not None:
+                nested_layout = nested_widget.layout()
+            if isinstance(nested_widget, QtWidgets.QTabWidget):
+                for page_index in range(nested_widget.count()):
+                    page = nested_widget.widget(page_index)
+                    page_layout = page.layout() if page is not None else None
+                    if page_layout is not None and page_layout.indexOf(widget) >= 0:
+                        return index
+            if nested_layout is not None and nested_layout.indexOf(widget) >= 0:
+                return index
+        return -1
+
+
 class SpatialFootprintWidget(QtWidgets.QWidget):
-    """Show imported cell spatial footprints with click-to-select state.
+    """Show cell spatial footprints and calcium video in a tabbed panel.
 
     A plain left click on a cell selects it (marked with a red/black ring);
     every cell not currently selected is hidden from the trace/stim panels,
@@ -41,7 +72,9 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
     is brightened the same way, driven by gui.py from the active stim
     array - not an interaction with this panel.
 
-    A view over a `SpatialFootprintState`. Multiple instances can share one
+    The first tab shows imported cell spatial footprints; the second tab
+    contains the raw calcium video and its stimulation overlay. A view over a
+    `SpatialFootprintState`. Multiple instances can share one
     state (pass the same object as `state` to each) and will stay in sync -
     a mutation via any one of them refreshes all of them. If `state` is
     omitted, this instance gets its own private state, matching the
@@ -59,7 +92,13 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
     ) -> None:
         super().__init__(parent)
         self._state = state if state is not None else SpatialFootprintState()
-        layout = QtWidgets.QVBoxLayout(self)
+        root_layout = _PanelLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        self.tabs = QtWidgets.QTabWidget(self)
+        self.tabs.setDocumentMode(True)
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+        cell_tab = QtWidgets.QWidget(self.tabs)
+        layout = QtWidgets.QVBoxLayout(cell_tab)
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Same three display toggles as the Cell Segmentation import dialog
@@ -150,11 +189,20 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
                 self._on_state_active_stim_ids_changed
             ),
         ]
+        self.calcium_video_widget = CalciumVideoWidget(parent=self.tabs)
+        self.tabs.addTab(cell_tab, "Cell segmentation")
+        self.tabs.addTab(self.calcium_video_widget, "Video")
+        # Keep the compact display controls anchored to the panel edge. They
+        # belong to the cell-segmentation view and disappear on the video tab.
+        layout.removeWidget(self.checkbox_container)
+        root_layout.insertWidget(0, self.checkbox_container)
+        root_layout.addWidget(self.tabs)
         self._on_state_data_changed()
 
     def apply_theme(self, theme: str) -> None:
-        """Forward the theme to the canvas the cells are drawn on."""
+        """Forward the theme to both imaging tabs."""
         self.overlay_widget.apply_theme(theme)
+        self.calcium_video_widget.apply_theme(theme)
 
     @property
     def _cellpose_data(self) -> CellposeImportResult | None:
@@ -176,16 +224,16 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         if cellpose_data is None:
             self._base_legend = []
             self.overlay_widget.set_empty_message("No cell spatial footprints loaded.")
-            self.overlay_widget.setVisible(False)
-            self.empty_state_widget.setVisible(True)
-            self.checkbox_container.setVisible(False)
+            self._update_overlay_visibility()
+            self._update_empty_state_visibility()
+            self._update_checkbox_visibility()
             self.show_shapes_checkbox.setEnabled(False)
             self.overlay_widget.set_aoi_overlay(None, show=False)
             return
 
-        self.empty_state_widget.setVisible(False)
-        self.overlay_widget.setVisible(True)
-        self.checkbox_container.setVisible(True)
+        self._update_empty_state_visibility()
+        self._update_overlay_visibility()
+        self._update_checkbox_visibility()
         self._base_legend = compute_segmentation_legend(
             cellpose_data.segmentation_array
         )
@@ -196,6 +244,25 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             bool(aoi_config is not None and aoi_config.show_shapes)
         )
         self._update_aoi_overlay_visibility()
+
+    def _on_tab_changed(self, _index: int) -> None:
+        self._update_checkbox_visibility()
+        self._update_empty_state_visibility()
+
+    def _update_checkbox_visibility(self) -> None:
+        self.checkbox_container.setVisible(
+            self._cellpose_data is not None and self.tabs.currentIndex() == 0
+        )
+
+    def _update_empty_state_visibility(self) -> None:
+        self.empty_state_widget.setVisible(
+            self._cellpose_data is None and self.tabs.currentIndex() == 0
+        )
+
+    def _update_overlay_visibility(self) -> None:
+        self.overlay_widget.setVisible(
+            self._cellpose_data is not None and self.tabs.currentIndex() == 0
+        )
 
     def _on_display_toggle_changed(self) -> None:
         """Sync overlay display options with the checkboxes, matching the
@@ -402,4 +469,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         overlay_widget = getattr(self, "overlay_widget", None)
         if overlay_widget is not None:
             overlay_widget.close()
+        video_widget = getattr(self, "calcium_video_widget", None)
+        if video_widget is not None:
+            video_widget.close()
         return super().close()

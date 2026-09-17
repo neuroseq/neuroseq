@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 from pathlib import Path
 from typing import Any
-from typing import Protocol
 
 import fastplotlib as fpl
 import numpy as np
@@ -14,7 +13,6 @@ from PIL import Image
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from neuroseq.cell_overlay_widget import cellpose_to_stim_id
 from neuroseq.cell_overlay_widget import compute_cell_centroids
 from neuroseq.cell_overlay_widget import stim_id_to_cellpose_id
 from neuroseq.fpl_widget import FPLWidget
@@ -22,13 +20,8 @@ from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.stim import StimArray
 
 ALL_STIM_ARRAYS_COMBINED = "All arrays combined"
+NO_STIM_ARRAY = "None"
 HOVERED_CELL_BRIGHTNESS_BOOST = 1.8
-
-
-class _LabelGraphic(Protocol):
-    text: str
-    offset: tuple[float, float, float]
-    visible: bool
 
 
 class CalciumVideoWidget(FPLWidget):
@@ -58,9 +51,8 @@ class CalciumVideoWidget(FPLWidget):
         self._cross_graphic: fpl.ScatterGraphic | None = None
         self.image_graphic = None
         self.cross_graphic = None
-        self._label_graphics: dict[int, _LabelGraphic] = {}
-        self._label_warning_shown = False
         self._video_warning_shown = False
+        self._stim_warning_shown = False
         self._hovered_cellpose_id: int | None = None
 
         controls = QtWidgets.QHBoxLayout()
@@ -68,30 +60,24 @@ class CalciumVideoWidget(FPLWidget):
         controls.addWidget(QtWidgets.QLabel("Stim source:"))
         self.stim_combo = QtWidgets.QComboBox(self)
         self.stim_combo.setMinimumWidth(180)
-        self.stim_combo.currentIndexChanged.connect(self._refresh_current_frame)
+        self.stim_combo.currentIndexChanged.connect(self._on_stim_source_changed)
         controls.addWidget(self.stim_combo)
-        self.show_stimulation_labels_checkbox = QtWidgets.QCheckBox(
-            "Show stimulation labels", self
-        )
-        self.show_stimulation_labels_checkbox.setEnabled(False)
-        self.show_stimulation_labels_checkbox.toggled.connect(self._on_labels_toggled)
         controls.addStretch(1)
-        self.save_button = QtWidgets.QPushButton("Save labeled video…", self)
+        self.save_button = QtWidgets.QPushButton("Save video…", self)
         self.save_button.clicked.connect(self._on_save_labeled_video_clicked)
-        self.remove_button = QtWidgets.QPushButton("Remove video", self)
+        self.remove_button = QtWidgets.QPushButton("Remove imaging data", self)
         self.remove_button.clicked.connect(self.remove_requested.emit)
         self.video_actions_widget = QtWidgets.QWidget(self)
-        actions = QtWidgets.QVBoxLayout(self.video_actions_widget)
+        actions = QtWidgets.QHBoxLayout(self.video_actions_widget)
         actions.setContentsMargins(4, 4, 4, 4)
-        button_row = QtWidgets.QHBoxLayout()
-        button_row.addStretch(1)
-        button_row.addWidget(self.save_button)
-        button_row.addWidget(self.remove_button)
-        button_row.addStretch(1)
-        actions.addLayout(button_row)
-        actions.addWidget(
-            self.show_stimulation_labels_checkbox,
-            alignment=QtCore.Qt.AlignmentFlag.AlignCenter,
+        actions.addStretch(1)
+        actions.addWidget(self.save_button)
+        actions.addWidget(self.remove_button)
+        actions.addStretch(1)
+        self.video_actions_widget.setFixedHeight(44)
+        self.video_actions_widget.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Fixed,
         )
         self.import_button = QtWidgets.QPushButton("Import Video", self)
         self.import_button.clicked.connect(self.import_requested.emit)
@@ -222,8 +208,8 @@ class CalciumVideoWidget(FPLWidget):
             QtWidgets.QMessageBox.warning(
                 self,
                 "Cell segmentation unavailable",
-                "The video will play normally, but stimulation labels and "
-                "crosses require uploaded Cellpose segmentation masks.",
+                "The video will play normally, but stimulation crosses require "
+                "uploaded Cellpose segmentation masks.",
             )
             self._video_warning_shown = True
         self.set_time_ms(0)
@@ -231,10 +217,6 @@ class CalciumVideoWidget(FPLWidget):
     def set_cellpose_data(self, cellpose_data: CellposeImportResult | None) -> None:
         self._cellpose_data = cellpose_data
         self._hovered_cellpose_id = None
-        self.show_stimulation_labels_checkbox.setEnabled(cellpose_data is not None)
-        if cellpose_data is None:
-            self.show_stimulation_labels_checkbox.setChecked(False)
-            self._label_warning_shown = False
         self._centroids = (
             compute_cell_centroids(cellpose_data.segmentation_array)
             if cellpose_data is not None
@@ -247,13 +229,44 @@ class CalciumVideoWidget(FPLWidget):
         self._stim_arrays = dict(stim_arrays)
         self.stim_combo.blockSignals(True)
         self.stim_combo.clear()
+        self.stim_combo.addItem(NO_STIM_ARRAY)
         self.stim_combo.addItem(ALL_STIM_ARRAYS_COMBINED)
         self.stim_combo.addItems(list(self._stim_arrays))
-        self.stim_combo.setCurrentText(
-            current if current in self._stim_arrays else ALL_STIM_ARRAYS_COMBINED
+        selected = (
+            NO_STIM_ARRAY
+            if current == NO_STIM_ARRAY
+            else current
+            if current in self._stim_arrays
+            else ALL_STIM_ARRAYS_COMBINED
         )
+        self.stim_combo.setCurrentText(selected)
         self.stim_combo.blockSignals(False)
         self._refresh_current_frame()
+
+    def _on_stim_source_changed(self) -> None:
+        selected = self.stim_combo.currentText()
+        if selected != NO_STIM_ARRAY and not self._has_nonzero_stimulation(selected):
+            if not self._stim_warning_shown:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Stimulation data unavailable",
+                    "The selected stimulation source is empty. The video will "
+                    "continue to play without stimulation crosses.",
+                )
+                self._stim_warning_shown = True
+        else:
+            self._stim_warning_shown = False
+        self._refresh_current_frame()
+
+    def _has_nonzero_stimulation(self, selected: str) -> bool:
+        arrays = (
+            self._stim_arrays.values()
+            if selected == ALL_STIM_ARRAYS_COMBINED
+            else [self._stim_arrays[selected]]
+            if selected in self._stim_arrays
+            else []
+        )
+        return any(np.any(array.values != 0) for array in arrays)
 
     def _read_frame(self, index: int) -> np.ndarray:
         source, source_index, sub_index = self._frame_refs[index]
@@ -310,6 +323,8 @@ class CalciumVideoWidget(FPLWidget):
             else []
         )
         result: set[int] = set()
+        if selected == NO_STIM_ARRAY:
+            return result
         for array in arrays:
             dt = float(array.dt)
             if dt <= 0 or array.values.ndim != 2:
@@ -371,42 +386,6 @@ class CalciumVideoWidget(FPLWidget):
             self._cross_graphic.data = data
             self._cross_graphic.visible = True
 
-    def _set_labels(self, cellpose_ids: set[int]) -> None:
-        """Show stimulation IDs beside stimulated cells when enabled."""
-        if not self.show_stimulation_labels_checkbox.isChecked() or not cellpose_ids:
-            for label_graphic in self._label_graphics.values():
-                label_graphic.visible = False
-                with contextlib.suppress(Exception):
-                    self.subplot.remove_graphic(label_graphic)
-            self._label_graphics = {}
-            return
-        for label_graphic in self._label_graphics.values():
-            label_graphic.visible = False
-        for cellpose_id in cellpose_ids:
-            point = self._centroids.get(cellpose_id)
-            if point is None:
-                continue
-            stim_id = cellpose_to_stim_id(cellpose_id, self._cellpose_data)
-            if stim_id is None:
-                continue
-            graphic: _LabelGraphic | None = self._label_graphics.get(cellpose_id)
-            if graphic is None:
-                graphic = self.subplot.add_text(
-                    str(stim_id),
-                    font_size=12,
-                    offset=(point[0] + 4.0, point[1] - 4.0, 100.0),
-                    face_color=(1.0, 0.0, 0.0),
-                    outline_color=(1.0, 1.0, 1.0),
-                    outline_thickness=2.0,
-                    center=False,
-                    screen_space=False,
-                )
-                self._label_graphics[cellpose_id] = graphic
-            else:
-                graphic.text = str(stim_id)
-                graphic.offset = (point[0] + 4.0, point[1] - 4.0, 100.0)
-            graphic.visible = True
-
     def _on_pointer_move(self, event: object) -> None:
         if self._cellpose_data is None or self.current_frame is None:
             return
@@ -443,26 +422,6 @@ class CalciumVideoWidget(FPLWidget):
                 ).astype(np.uint8)
         self._frame_graphic.data = frame
 
-    def _on_labels_toggled(self, enabled: bool) -> None:
-        if not enabled:
-            self._label_warning_shown = False
-        elif not self._label_warning_shown:
-            problems: list[str] = []
-            if self._cellpose_data is None:
-                problems.append("Cell segmentation data is missing.")
-            if not self._stim_arrays or not any(
-                np.any(array.values != 0) for array in self._stim_arrays.values()
-            ):
-                problems.append("No nonzero stimulation samples are available.")
-            if problems:
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "Stimulation labels unavailable",
-                    "Stimulation labels require:\n\n" + "\n".join(problems),
-                )
-                self._label_warning_shown = True
-        self._refresh_current_frame()
-
     def set_time_ms(self, time_ms: int) -> None:
         if not self._frame_refs or self._fps is None:
             return
@@ -485,7 +444,6 @@ class CalciumVideoWidget(FPLWidget):
         self._update_frame_graphic()
         stimulated_ids = self._stimulated_cellpose_ids_at(int(time_ms))
         self._set_crosses(stimulated_ids)
-        self._set_labels(stimulated_ids)
         self.figure.renderer.request_draw()
 
     def _refresh_current_frame(self) -> None:
@@ -496,8 +454,8 @@ class CalciumVideoWidget(FPLWidget):
     def _on_save_labeled_video_clicked(self) -> None:
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self,
-            "Save labeled video",
-            "labeled_video.tif",
+            "Save video",
+            "video.tif",
             "TIFF files (*.tif *.tiff);;GIF files (*.gif)",
         )
         if path:
@@ -507,8 +465,8 @@ class CalciumVideoWidget(FPLWidget):
                 self.logger.exception("Could not save labeled video")
                 QtWidgets.QMessageBox.critical(
                     self,
-                    "Could not save labeled video",
-                    f"The labeled video could not be saved:\n{exc}",
+                    "Could not save video",
+                    f"The video could not be saved:\n{exc}",
                 )
 
     def export_labeled_video(self, path: Path) -> None:
@@ -571,7 +529,7 @@ class CalciumVideoWidget(FPLWidget):
         self._cross_graphic = None
         self.image_graphic = None
         self.cross_graphic = None
-        self._label_graphics = {}
+        self._stim_warning_shown = False
         self._hovered_cellpose_id = None
 
     def closeEvent(self, event) -> None:

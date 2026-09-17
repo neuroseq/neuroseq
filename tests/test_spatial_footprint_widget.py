@@ -32,6 +32,8 @@ from neuroseq.spatial_footprint_widget import SELECTION_OUTLINE_BLACK
 from neuroseq.spatial_footprint_widget import SELECTION_OUTLINE_RED
 from neuroseq.spatial_footprint_widget import UNSELECTED_CELL_BRIGHTNESS
 from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
+from neuroseq.stim import StimArray
+from neuroseq.stim import StimType
 
 
 def _right_click_event() -> SimpleNamespace:
@@ -1723,3 +1725,37 @@ def test_close_fully_disconnects_from_shared_state(qtbot: QtBot) -> None:
     assert state.receivers(state.selection_changed) == baseline_selection
     assert state.receivers(state.neuron_greyed_out_changed) == baseline_greyed
     view_a.close()
+
+
+def test_imaging_panel_has_cell_and_video_tabs(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+
+    assert [widget.tabs.tabText(i) for i in range(widget.tabs.count())] == [
+        "Cell segmentation",
+        "Video",
+    ]
+    assert widget.calcium_video_widget.video_actions_widget.height() == 44
+    assert widget.calcium_video_widget.remove_button.text() == "Remove imaging data"
+
+
+def test_video_none_stim_source_disables_stimulation_crosses(qtbot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    video = widget.calcium_video_widget
+    video._fps = 10.0
+    video.set_stim_arrays(
+        {
+            "stim": StimArray(
+                "stim",
+                StimType.Excitation,
+                np.ones((3, 1)),
+                "mV",
+                0.1,
+            )
+        }
+    )
+
+    video.stim_combo.setCurrentText("None")
+
+    assert video._stimulated_cellpose_ids_at(0) == set()
