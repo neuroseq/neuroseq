@@ -532,9 +532,6 @@ class Gui(QtWidgets.QMainWindow):
             )
         )
         self.trace_widget.custom_analysis_requested.connect(self._custom_analysis)
-        self.trace_widget.vector_export_requested.connect(
-            self.btn_export_traces_vector_clicked
-        )
         self.data_widget.trace_widget.custom_analysis_requested.connect(
             self._custom_analysis
         )
@@ -2586,8 +2583,8 @@ class Gui(QtWidgets.QMainWindow):
         Gui._export_traces(self, vector_only=False)
 
     def btn_export_traces_vector_clicked(self) -> None:
-        """Export the selected traces to an SVG or PDF vector graphic."""
-        Gui._export_traces(self, vector_only=True)
+        """Preview the main trace panel's current arrangement and scaling."""
+        self.trace_widget.preview_traces()
 
     def _export_traces(self, *, vector_only: bool) -> None:
         import matplotlib.pyplot as plt
@@ -3050,23 +3047,6 @@ class Gui(QtWidgets.QMainWindow):
             icon="mdi6.file-code",
         )
 
-        export_graphics_menu = menu.addMenu("Export &graphics")
-        assert export_graphics_menu is not None
-
-        add_action(
-            "&Traces",
-            self.btn_export_traces_clicked,
-            export_graphics_menu,
-            None,
-            icon="mdi.waves",
-        )
-        add_action(
-            "&Spikes",
-            self.btn_export_spikes_clicked,
-            export_graphics_menu,
-            None,
-            icon="ph.barcode-light",
-        )
         add_action(
             "Export &simulation results",
             self.btn_export_simulation_results_clicked,
@@ -3483,7 +3463,6 @@ class Gui(QtWidgets.QMainWindow):
             state=self._trace_state,
         )
         widget.custom_analysis_requested.connect(self._custom_analysis)
-        widget.vector_export_requested.connect(self.btn_export_traces_vector_clicked)
         widget.neuron_hovered.connect(self._spatial_footprint_state.set_hovered_stim_id)
         return widget
 

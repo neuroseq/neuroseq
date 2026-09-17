@@ -6,6 +6,7 @@ import fastplotlib as fpl
 import numpy as np
 import pygfx
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 
 from neuroseq.stim import StimArray
@@ -47,6 +48,12 @@ class StimWidget(TimeseriesWidget):
     ) -> None:
         super().__init__(controller, parent)
         self.context_menu = menu if menu is not None else QtWidgets.QMenu(self)
+        self.preview_action = QtGui.QAction("Preview vector graphic…", self)
+        self.context_menu.addAction(self.preview_action)
+        self.preview_action.setEnabled(False)
+        self.preview_action.triggered.connect(self.preview_stimuli)
+        self._stim_name = ""
+        self.subplot.title = "Stimuli"
         self.hover_slice_graphic: fpl.Graphic | None = None
         self._hover_pos_cache: tuple[int, float, float] | None = None
         self.vmin = 0.0
@@ -57,6 +64,9 @@ class StimWidget(TimeseriesWidget):
         self.minimum_stimulus_pixels = 4.0
         self.minimum_size_graphic: fpl.ScatterGraphic | None = None
         self._background_minimum_size_graphics: list[fpl.ScatterGraphic] = []
+
+    def contextMenuEvent(self, event) -> None:
+        self.context_menu.exec(event.globalPos())
 
     def _configure_time_scaled_image(
         self,
@@ -109,6 +119,8 @@ class StimWidget(TimeseriesWidget):
         self.clear_data()
         if stim_array is None:
             return
+        self._stim_name = stim_array.name
+        self.preview_action.setEnabled(True)
         self.data_values = stim_array.values
         self.stim_type = stim_array.stim_type
         self.vmin = 0.0
@@ -186,10 +198,95 @@ class StimWidget(TimeseriesWidget):
             self.grid_lines.update_dt_ms(self.dt_ms)
 
     def clear_data(self) -> None:
+        self.preview_action.setEnabled(False)
+        self._stim_name = ""
         self._background_stim_arrays = []
         self.minimum_size_graphic = None
         self._background_minimum_size_graphics = []
         super().clear_data()
+
+    def preview_stimuli(self) -> QtWidgets.QDialog | None:
+        """Preview stimulus blocks as vectors, using the selection or current view."""
+        if self.data_values is None or self.graphic is None or self.controller is None:
+            return None
+
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+        from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
+        from matplotlib.collections import PolyCollection
+        from matplotlib.figure import Figure
+
+        dialog = QtWidgets.QDialog(self)
+        dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setWindowTitle(f"Stimulus preview: {self._stim_name}")
+        dialog.resize(1000, 650)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        figure = Figure(layout="tight", facecolor="none")
+        canvas = FigureCanvasQTAgg(figure)
+        layout.addWidget(NavigationToolbar2QT(canvas, dialog))
+        layout.addWidget(canvas)
+        ax = figure.add_subplot(111, facecolor="none")
+
+        arrays: list[tuple[np.ndarray, float, StimType, float]] = []
+        if self.show_background_graphics:
+            arrays.extend(
+                (values, dt_ms, stim_type, 0.25)
+                for values, _, dt_ms, stim_type in self._background_stim_arrays
+            )
+        arrays.append((self.data_values, self.dt_ms, self.stim_type, 1.0))
+        for values, dt_ms, stim_type, alpha in arrays:
+            vertices = []
+            amplitudes = []
+            # Merge adjacent equal samples into one vector rectangle per pulse.
+            for neuron, row in enumerate(values.T):
+                edges = np.r_[0, np.flatnonzero(row[1:] != row[:-1]) + 1, len(row)]
+                for start, stop in zip(edges[:-1], edges[1:], strict=True):
+                    if row[start] == 0:
+                        continue
+                    left, right = start * dt_ms, stop * dt_ms
+                    vertices.append(
+                        [
+                            (left, neuron - 0.5),
+                            (right, neuron - 0.5),
+                            (right, neuron + 0.5),
+                            (left, neuron + 0.5),
+                        ]
+                    )
+                    amplitudes.append(row[start])
+            vmax = float(np.max(np.abs(values))) or 1.0
+            normalized = np.asarray(amplitudes) / vmax
+            if stim_type == StimType.External:
+                normalized = (normalized + 1.0) / 2.0
+            collection = PolyCollection(
+                vertices,
+                facecolors=get_cmap(stim_type, alpha=alpha)(normalized),
+                edgecolors="none",
+                rasterized=False,
+            )
+            ax.add_collection(collection)
+
+        state = self.controller._get_camera_state()
+        cx, cy = state["position"][:2]
+        ax.set_xlim(cx - state["width"] / 2, cx + state["width"] / 2)
+        ax.set_ylim(cy - state["height"] / 2, cy + state["height"] / 2)
+        if self.selected_time_slice is not None:
+            start, stop, _ = self.selected_time_slice.indices(self.n_timestamps)
+            if stop > start:
+                ax.set_xlim(start * self.dt_ms, stop * self.dt_ms)
+        if self.selected_neuron_slice is not None:
+            selection = self.selected_neuron_slice
+            rows = [
+                row
+                for row, neuron_id in enumerate(self._visible_neuron_ids)
+                if (selection.start is None or neuron_id >= selection.start)
+                and (selection.stop is None or neuron_id < selection.stop)
+            ]
+            if rows:
+                ax.set_ylim(rows[0] - 0.5, rows[-1] + 0.5)
+        ax.set_xlabel("Time (ms)")
+        ax.set_ylabel("Neuron index")
+        ax.set_title(self._stim_name)
+        dialog.show()
+        return dialog
 
     def _add_minimum_size_graphic(
         self,

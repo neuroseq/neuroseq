@@ -272,6 +272,77 @@ def _make_ramp_editor(qtbot: QtBot) -> tuple[StimEditor, Project]:
     return stim_editor, project
 
 
+@pytest.mark.parametrize("amplitude", [2.5, -3.25, 0.0])
+def test_set_selected_stim_amplitude(qtbot, monkeypatch, amplitude):
+    editor, project = _make_ramp_editor(qtbot)
+    original = np.ones((200, 4))
+    original[2:5, 1:3] = [[0, 2], [-1, 0], [3, -4]]
+    editor.replace_stim_values_with_undo("a", original)
+    action = editor.action_set_amplitude
+    assert action in editor.context_menu.actions()
+    assert action in editor.toolbar.actions()
+    assert not action.isEnabled()
+    editor.set_mode(InteractMode.SELECT)
+    assert action.isEnabled()
+    editor.stim_widget.select_neurons(slice(1, 3), slice(2, 5))
+
+    def get_amplitude(*args):
+        assert "mV" in args[2]
+        return str(amplitude), True
+
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", get_amplitude)
+    action.trigger()
+    expected = original.copy()
+    region = expected[2:5, 1:3]
+    region[region != 0] = amplitude
+    assert_allclose(project.stim_arrays["a"].values, expected)
+    editor.undo()
+    assert_allclose(project.stim_arrays["a"].values, original)
+    editor.redo()
+    assert_allclose(project.stim_arrays["a"].values, expected)
+
+
+@pytest.mark.parametrize(
+    "response", [("7", False), ("invalid", True), ("nan", True), ("inf", True)]
+)
+def test_set_selected_stim_amplitude_rejects_invalid_or_cancelled_input(
+    qtbot, monkeypatch, response
+):
+    editor, project = _make_ramp_editor(qtbot)
+    original = np.ones((200, 4))
+    editor.replace_stim_values_with_undo("a", original)
+    editor.stim_widget.select_neurons(slice(1, 3), slice(2, 5))
+    modifier = editor.current_stim_modifier
+    index = modifier.current_index
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: response)
+    errors = []
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox, "critical", lambda *args: errors.append(args)
+    )
+    editor.set_selected_stim_amplitude()
+    assert_allclose(project.stim_arrays["a"].values, original)
+    assert modifier.current_index == index
+    assert bool(errors) == response[1]
+
+
+def test_set_selected_stim_amplitude_without_selection_or_nonzero_values(
+    qtbot, monkeypatch
+):
+    editor, project = _make_ramp_editor(qtbot)
+
+    def unexpected_dialog(*args):
+        pytest.fail("No amplitude dialog should open for an empty selection")
+
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", unexpected_dialog)
+    editor.set_selected_stim_amplitude()
+    editor.stim_widget.select_neurons(slice(1, 3), slice(2, 5))
+    editor.set_selected_stim_amplitude()
+    assert not editor.action_undo.isEnabled()
+    assert not np.any(project.stim_arrays["a"].values)
+    editor.current_stim_modifier = None
+    editor.set_selected_stim_amplitude()
+
+
 def test_ramp_drag_paints_single_monotonic_ramp_anchored_at_click(
     qtbot: QtBot,
 ) -> None:
