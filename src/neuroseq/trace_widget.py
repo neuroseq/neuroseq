@@ -42,13 +42,14 @@ class TraceNormDialog(_SelfRaisingDialog):
         self.offset_by_median = self.trace_widget.offset_by_median
         self.clip = self.trace_widget.clip
 
-        self.layout = QtWidgets.QVBoxLayout(self)
+        self.content_layout = QtWidgets.QVBoxLayout(self)
 
         self.label_norm = QtWidgets.QLabel(
             f"Normalization: {self.trace_norm_percent}%", self
         )
         self.layout.addWidget(self.label_norm)
         norm_input_layout = QtWidgets.QHBoxLayout()
+        self.content_layout.addWidget(self.label_norm)
         self.slider_norm = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal, self)
         self.slider_norm.setRange(50, 1000)
         self.slider_norm.setValue(self.trace_norm_percent)
@@ -61,16 +62,17 @@ class TraceNormDialog(_SelfRaisingDialog):
         self.spin_norm.valueChanged.connect(self.update_norm_input)
         norm_input_layout.addWidget(self.spin_norm)
         self.layout.addLayout(norm_input_layout)
+        self.content_layout.addWidget(self.slider_norm)
 
         self.chk_offset = QtWidgets.QCheckBox("Center median")
         self.chk_offset.setChecked(self.clip)
         self.chk_offset.clicked.connect(self.chk_offset_clicked)
-        self.layout.addWidget(self.chk_offset)
+        self.content_layout.addWidget(self.chk_offset)
 
         self.chk_clip = QtWidgets.QCheckBox("Clip values")
         self.chk_clip.setChecked(self.clip)
         self.chk_clip.clicked.connect(self.chk_clip_clicked)
-        self.layout.addWidget(self.chk_clip)
+        self.content_layout.addWidget(self.chk_clip)
 
         self.auto_extend_vertical_space = self.trace_widget.auto_extend_vertical_space
         self.chk_auto_extend = QtWidgets.QCheckBox("Auto-extend vertical space")
@@ -85,11 +87,11 @@ class TraceNormDialog(_SelfRaisingDialog):
 
         self.btn_reset_defaults = QtWidgets.QPushButton("Reset to defaults", self)
         self.btn_reset_defaults.clicked.connect(self.reset_defaults)
-        self.layout.addWidget(self.btn_reset_defaults)
+        self.content_layout.addWidget(self.btn_reset_defaults)
 
         self.btn_close = QtWidgets.QPushButton("Close", self)
         self.btn_close.clicked.connect(self.close)
-        self.layout.addWidget(self.btn_close)
+        self.content_layout.addWidget(self.btn_close)
 
     def reset_defaults(self) -> None:
         self.slider_norm.setValue(100)
@@ -178,6 +180,7 @@ class TraceWidget(TimeseriesWidget):
         # turned back off. None means auto-extend hasn't touched it (yet).
         self._base_max_height: float | None = None
         self._trace_norm_dialog: TraceNormDialog | None = None
+        self.vector_export_requested.connect(self.preview_traces)
         # Whether to overlay a stim array on top of these traces, and which
         # one - a view-local display setting like trace normalization, not
         # part of TraceWidgetState: each detached copy of this panel can
@@ -423,13 +426,76 @@ class TraceWidget(TimeseriesWidget):
     def _rebuild_custom_analysis_menu(self) -> None:
         super()._rebuild_custom_analysis_menu()
         self.context_menu.insertSeparator(self.context_menu.actions()[0])
-        export_action = QtWidgets.QAction("Export as vector graphic…", self)
+        export_action = QtWidgets.QAction("Preview vector graphic…", self)
         export_action.setEnabled(isinstance(self.data, TraceData))
         export_action.triggered.connect(self.vector_export_requested.emit)
         self.context_menu.insertAction(self.context_menu.actions()[0], export_action)
         norm_action = QtWidgets.QAction("Normalization…", self)
         norm_action.triggered.connect(self.trace_norm_dialog)
         self.context_menu.insertAction(self.context_menu.actions()[0], norm_action)
+
+    def preview_traces(self) -> QtWidgets.QDialog | None:
+        """Preview the selected region, or the current view when nothing is selected."""
+        controller = self.controller
+        if (
+            not isinstance(self.data, TraceData)
+            or self.graphic is None
+            or controller is None
+        ):
+            return None
+
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+        from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
+        from matplotlib.figure import Figure
+
+        dialog = QtWidgets.QDialog(self)
+        dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setWindowTitle(f"Trace preview: {self.data.name}")
+        dialog.resize(1000, 650)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        figure = Figure(layout="tight", facecolor="none")
+        canvas = FigureCanvasQTAgg(figure)
+        layout.addWidget(NavigationToolbar2QT(canvas, dialog))
+        layout.addWidget(canvas)
+        ax = figure.add_subplot(111, facecolor="none")
+        colors = neuron_indices_to_colors(self.data.indices)
+        for index, graphic, color in zip(
+            self.data.indices, self.graphic.graphics, colors, strict=True
+        ):
+            if not graphic.visible:
+                continue
+            # Copy normalized, clipped coordinates and preserve neuron spacing.
+            points = np.asarray(graphic.data[:]).copy()
+            (line,) = ax.plot(
+                points[:, 0] + graphic.offset[0],
+                points[:, 1] + graphic.offset[1],
+                color=color,
+                linewidth=float(graphic.thickness) * 72 / figure.dpi,
+            )
+            line.set_gid(f"trace_{int(index)}")
+        state = controller._get_camera_state()
+        center_x, center_y = state["position"][:2]
+        ax.set_xlim(center_x - state["width"] / 2, center_x + state["width"] / 2)
+        ax.set_ylim(center_y - state["height"] / 2, center_y + state["height"] / 2)
+        if self.selected_time_slice is not None:
+            start, stop, _ = self.selected_time_slice.indices(self.n_timestamps)
+            if stop > start:
+                ax.set_xlim(start * self.dt_ms, stop * self.dt_ms)
+        if self.selected_neuron_slice is not None:
+            selection = self.selected_neuron_slice
+            rows = [
+                row
+                for row, neuron_id in enumerate(self._visible_neuron_ids)
+                if (selection.start is None or neuron_id >= selection.start)
+                and (selection.stop is None or neuron_id < selection.stop)
+            ]
+            if rows:
+                ax.set_ylim(rows[0] - 0.5, rows[-1] + 0.5)
+        ax.set_xlabel("Time (ms)")
+        ax.set_ylabel("Neuron index (normalized traces)")
+        ax.set_title(self.data.name)
+        dialog.show()
+        return dialog
 
     def set_data(
         self,
