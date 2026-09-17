@@ -133,6 +133,7 @@ def test_selection_actions_sit_directly_under_select_mode_button(
     undo_index = texts.index("Undo (Ctrl+Z)")
     assert actions[undo_index - 1].isSeparator()
     assert texts[select_mode_index + 1 : undo_index - 1] == [
+        "Set amplitude",
         "Select all (Ctrl+A)",
         "Copy (Ctrl+C)",
         "Cut (Ctrl+X)",

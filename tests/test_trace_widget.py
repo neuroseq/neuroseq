@@ -39,6 +39,8 @@ def test_timeseries_overlays_follow_theme(qtbot: QtBot, make_trace_data) -> None
     assert tuple(
         trace_widget.grid_lines.gridline_10samples.material.color
     ) == pytest.approx(tuple(pygfx.Color(colors["grid"])))
+
+
 @pytest.mark.parametrize("clip,center", [(True, True), (False, False)])
 def test_trace_preview_preserves_arrangement(qtbot, clip, center, tmp_path) -> None:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg

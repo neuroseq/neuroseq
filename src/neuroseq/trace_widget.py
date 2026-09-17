@@ -47,9 +47,8 @@ class TraceNormDialog(_SelfRaisingDialog):
         self.label_norm = QtWidgets.QLabel(
             f"Normalization: {self.trace_norm_percent}%", self
         )
-        self.layout.addWidget(self.label_norm)
-        norm_input_layout = QtWidgets.QHBoxLayout()
         self.content_layout.addWidget(self.label_norm)
+        norm_input_layout = QtWidgets.QHBoxLayout()
         self.slider_norm = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal, self)
         self.slider_norm.setRange(50, 1000)
         self.slider_norm.setValue(self.trace_norm_percent)
@@ -61,8 +60,7 @@ class TraceNormDialog(_SelfRaisingDialog):
         self.spin_norm.setValue(self.trace_norm_percent)
         self.spin_norm.valueChanged.connect(self.update_norm_input)
         norm_input_layout.addWidget(self.spin_norm)
-        self.layout.addLayout(norm_input_layout)
-        self.content_layout.addWidget(self.slider_norm)
+        self.content_layout.addLayout(norm_input_layout)
 
         self.chk_offset = QtWidgets.QCheckBox("Center median")
         self.chk_offset.setChecked(self.clip)
@@ -83,7 +81,7 @@ class TraceNormDialog(_SelfRaisingDialog):
         )
         self.chk_auto_extend.setChecked(self.auto_extend_vertical_space)
         self.chk_auto_extend.clicked.connect(self.chk_auto_extend_clicked)
-        self.layout.addWidget(self.chk_auto_extend)
+        self.content_layout.addWidget(self.chk_auto_extend)
 
         self.btn_reset_defaults = QtWidgets.QPushButton("Reset to defaults", self)
         self.btn_reset_defaults.clicked.connect(self.reset_defaults)

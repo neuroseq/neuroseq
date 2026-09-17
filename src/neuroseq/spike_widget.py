@@ -113,9 +113,8 @@ class SpikeWidget(TimeseriesWidget):
         # alignment with the Traces/Stimuli panels - correct even when some
         # neurons never spike.
         total_neurons = max(n_neurons_with_spikes, controller_neuron_count)
+        self.n_neurons = total_neurons
         self._all_neuron_ids = list(range(total_neurons))
-        self.n_neurons = max(data.spike_indices) + 1
-        self._all_neuron_ids = list(range(self.n_neurons))
         self._rebuild_visible_neuron_mapping()
         self.logger.info(
             f"{data.spike_indices.shape} spikes with {self.n_neurons} neurons"
